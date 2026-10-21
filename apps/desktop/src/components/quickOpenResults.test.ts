@@ -18,8 +18,8 @@ import {
 
 function hit(kind: string, refId: string): SearchHit {
   return {
-    kind: `oxplow/${kind}`,
-    ref: keyedUri(`oxplow/${kind}`, refId),
+    resource: `oxplow/${kind}`,
+    uri: keyedUri(`oxplow/${kind}`, refId),
     stream_id: null,
     title: refId,
     snippet: "…",
@@ -45,7 +45,7 @@ describe("dedupeSiteHits", () => {
       [hit("wiki", "architecture-overview"), hit("file", "src/other.rs"), hit("work_item", "12")],
       new Set(["src/main.rs"]),
     );
-    expect(out.map((h) => keyOf(h.ref))).toEqual(["architecture-overview", "src/other.rs", "12"]);
+    expect(out.map((h) => keyOf(h.uri))).toEqual(["architecture-overview", "src/other.rs", "12"]);
   });
 
   test("drops file hits whose path already matched by filename", () => {
@@ -53,7 +53,7 @@ describe("dedupeSiteHits", () => {
       [hit("file", "src/main.rs"), hit("wiki", "w")],
       new Set(["src/main.rs"]),
     );
-    expect(out.map((h) => keyOf(h.ref))).toEqual(["w"]);
+    expect(out.map((h) => keyOf(h.uri))).toEqual(["w"]);
   });
 
   test("non-file kinds are never deduped against paths", () => {
@@ -118,7 +118,7 @@ describe("buildQuickOpenResults", () => {
       files,
       siteHits: [hit("wiki", "w"), hit("work_item", "tsk30")],
     });
-    expect(out.results[0]).toMatchObject({ kind: "hit", hit: { kind: "oxplow/work_item", ref: keyedUri("oxplow/work_item", "tsk30") } });
+    expect(out.results[0]).toMatchObject({ kind: "hit", hit: { resource: "oxplow/work_item", uri: keyedUri("oxplow/work_item", "tsk30") } });
   });
 
   test("an exact content match floats above a fuzzy page/file match", () => {
@@ -131,7 +131,7 @@ describe("buildQuickOpenResults", () => {
       files,
       siteHits: [hit("wiki", "gt")],
     });
-    expect(out.results[0]).toMatchObject({ kind: "hit", hit: { ref: wikiUri("gt") } });
+    expect(out.results[0]).toMatchObject({ kind: "hit", hit: { uri: wikiUri("gt") } });
     expect(out.results.some((r) => r.kind === "page")).toBe(true);
   });
 
@@ -145,7 +145,7 @@ describe("buildQuickOpenResults", () => {
       siteHits: [fileHit("a.rs", "str1"), fileHit("b.rs", "str2"), fileHit("c.rs", null)],
       currentStreamId: "str1",
     });
-    const hitIds = out.results.flatMap((r) => (r.kind === "hit" ? [keyOf(r.hit.ref)] : []));
+    const hitIds = out.results.flatMap((r) => (r.kind === "hit" ? [keyOf(r.hit.uri)] : []));
     expect(hitIds).toEqual(["a.rs", "c.rs"]); // b.rs (str2) dropped, global c.rs kept
   });
 
@@ -168,7 +168,7 @@ describe("buildQuickOpenResults", () => {
     const hits = Array.from({ length: 35 }, (_, i) => hit("wiki", i === 33 ? "meeting" : `w${i}`));
     const out = buildQuickOpenResults({ query: "meeting", pages, commands, files, siteHits: hits });
     // Pre-fix this exact hit was sliced away before the float ran.
-    expect(out.results[0]).toMatchObject({ kind: "hit", hit: { ref: wikiUri("meeting") } });
+    expect(out.results[0]).toMatchObject({ kind: "hit", hit: { uri: wikiUri("meeting") } });
   });
 
   // tsk1031: "todo" ranked Planning, Recent Decisions and Unbacked Claims

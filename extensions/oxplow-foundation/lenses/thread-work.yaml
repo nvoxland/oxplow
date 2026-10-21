@@ -1,7 +1,7 @@
 title: Thread work
 description: The thread's work items, in progress first, then to do and blocked, then the finished ones newest first, with the efforts that worked on each.
 params:
-  - { name: thread, label: Thread (`thread:thr3`) }
+  - { name: thread, label: Thread (`oxplow:oxplow/thread?id=thr3`) }
 query: |
   SELECT w.ref, w.title, w.state,
          coalesce((SELECT group_concat(e.ref, ' ') FROM v_effort e WHERE e.work_item = w.ref), '') AS efforts

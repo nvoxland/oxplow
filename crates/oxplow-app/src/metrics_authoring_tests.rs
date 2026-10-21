@@ -76,7 +76,11 @@ async fn project(edit: impl FnOnce(&mut Vec<ScaffoldFile>)) -> (Project, Lines) 
     let dir = tempfile::tempdir().unwrap();
     crate::test_fixtures::init_git_repo(dir.path());
     let lines = corpus(dir.path());
-    let mut files = extension_files(NAME, Some("effort:eff1"), &MetricStarter::default());
+    let mut files = extension_files(
+        NAME,
+        Some("oxplow:oxplow/effort?id=eff1"),
+        &MetricStarter::default(),
+    );
     edit(&mut files);
     for f in &files {
         write(dir.path(), &f.path, &f.content);
@@ -364,8 +368,12 @@ async fn the_lens_rows_carry_file_refs_to_the_path_and_line() {
         .rows
         .iter()
         .map(|r| {
-            let r#ref = format!("file:{}#L{}", text(&r[path_col]), int(&r[line_col]));
-            oxplow_domain::uri::grammar::Uri::parse(&r#ref)
+            let r#ref = oxplow_domain::uri::build::file_uri_at(
+                &text(&r[path_col]),
+                None,
+                Some(&int(&r[line_col]).to_string()),
+            );
+            oxplow_domain::uri::OxplowUri::parse(&r#ref)
                 .unwrap_or_else(|e| panic!("{}: {}", r#ref, e.reason()));
             r#ref
         })
@@ -374,9 +382,17 @@ async fn the_lens_rows_carry_file_refs_to_the_path_and_line() {
     assert_eq!(
         refs,
         [
-            format!("file:engine/plan.rs#L{}", at.plan),
-            format!("file:engine/run.rs#L{}", at.run),
-            format!("file:ui/view.rs#L{}", at.view),
+            oxplow_domain::uri::build::file_uri_at(
+                "engine/plan.rs",
+                None,
+                Some(&at.plan.to_string())
+            ),
+            oxplow_domain::uri::build::file_uri_at(
+                "engine/run.rs",
+                None,
+                Some(&at.run.to_string())
+            ),
+            oxplow_domain::uri::build::file_uri_at("ui/view.rs", None, Some(&at.view.to_string())),
         ]
     );
 }

@@ -39,7 +39,7 @@ mock.module("../api.js", () => ({
       ui: {
         slots: [],
         decorators: [
-          { id: "tracker/0", extension: "tracker", view: "v_tracker_flags", kind: "oxplow/work_item", placement: "row-badge", label: "label", color: null },
+          { id: "tracker/0", extension: "tracker", view: "v_tracker_flags", resource: "oxplow/work_item", placement: "row-badge", label: "label", color: null },
         ],
       },
     },

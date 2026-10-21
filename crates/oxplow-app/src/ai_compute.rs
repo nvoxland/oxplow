@@ -121,8 +121,8 @@ pub struct AiCompute {
     results: SqliteAiResultStore,
 }
 
-/// Who asks for a computation: what (`collector:<owner>/<id>`,
-/// `thread:<id>`, …) and, for an extension's, its run.
+/// Who asks for a computation: what (`oxplow:oxplow/collector?collector=<owner>/<id>`,
+/// `oxplow:oxplow/thread?id=<id>`, …) and, for an extension's, its run.
 #[derive(Debug, Clone, Copy)]
 pub struct Caller<'a> {
     pub name: &'a str,
@@ -568,7 +568,7 @@ impl AiCompute {
 }
 
 /// [`AiCompute`] as a collector's `ai_*` oracle (`oxplow_script`),
-/// recording as `caller` (`collector:<owner>/<id>`). The script runs on a
+/// recording as `caller` (`oxplow:oxplow/collector?collector=<owner>/<id>`). The script runs on a
 /// worker thread outside the runtime; each call blocks it on the runtime
 /// the oracle was made on.
 pub struct CollectorOracle {
@@ -890,7 +890,12 @@ mod tests {
             let out = fx
                 .svc
                 .ai_compute
-                .decide("thread:thr1", &Role::DECIDE, "a diff", &questions)
+                .decide(
+                    "oxplow:oxplow/thread?id=thr1",
+                    &Role::DECIDE,
+                    "a diff",
+                    &questions,
+                )
                 .await
                 .unwrap();
             assert_eq!(out.cached, cached);
@@ -898,7 +903,7 @@ mod tests {
         }
         let recorded = calls(&fx.svc).await;
         assert_eq!(recorded.len(), 1, "{recorded:?}");
-        assert_eq!(recorded[0].0, "thread:thr1");
+        assert_eq!(recorded[0].0, "oxplow:oxplow/thread?id=thr1");
 
         let more = BTreeMap::from([
             ("risky".to_string(), questions["risky"].clone()),
@@ -912,7 +917,12 @@ mod tests {
         let err = fx
             .svc
             .ai_compute
-            .decide("thread:thr1", &Role::DECIDE, "a diff", &more)
+            .decide(
+                "oxplow:oxplow/thread?id=thr1",
+                &Role::DECIDE,
+                "a diff",
+                &more,
+            )
             .await
             .unwrap_err();
         assert!(err.to_string().contains("`big`"), "{err}");

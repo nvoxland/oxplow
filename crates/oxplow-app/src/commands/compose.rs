@@ -93,7 +93,7 @@ pub struct SequenceCall {
 fn sequence_schema() -> Value {
     let mut schema =
         serde_json::to_value(schemars::schema_for!(SequenceInput)).expect("schema serializes");
-    let item = oxplow_domain::uri::build::of(oxplow_domain::uri::types::WORK_ITEM, "oxplow:tsk12");
+    let item = oxplow_domain::uri::build::work_item_uri("oxplow", "tsk12");
     if let Some(object) = schema.as_object_mut() {
         object.insert(
             "examples".into(),

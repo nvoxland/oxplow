@@ -1,5 +1,5 @@
 SELECT h.id,
-       CAST('handoff:hnd' || h.id AS TEXT) AS ref,
+       CAST(uri('oxplow/handoff', 'id', 'hnd' || h.id) AS TEXT) AS ref,
        h.from_thread_id,
        (SELECT t.ref FROM ref('thread') t WHERE t.id = h.from_thread_id) AS from_thread_ref,
        h.from_session_id,

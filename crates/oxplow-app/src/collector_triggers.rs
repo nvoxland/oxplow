@@ -398,7 +398,7 @@ mod tests {
         let env = Envelope::typed::<oxplow_domain::events::schema::EffortClaimVerified>(
             "human",
             &oxplow_domain::events::schema::EffortClaimVerifiedV1 {
-                claim: "claim:1".into(),
+                claim: "oxplow:oxplow/claim?id=1".into(),
                 effort: None,
                 evidence: Some(evidence.into()),
             },
@@ -582,7 +582,7 @@ mod tests {
         )
         .await;
         let consumer = CollectorTriggers::new(Arc::downgrade(&fx.svc));
-        let other = log(&fx.svc, fx.effort, "run:3").await;
+        let other = log(&fx.svc, fx.effort, "oxplow:oxplow/run?id=3").await;
         consumer.handle(&other).await.unwrap();
         assert_eq!(
             rows(&fx.svc, "SELECT count(*) FROM v_collector_run").await,
@@ -693,10 +693,10 @@ mod tests {
         assert_eq!(
             rows(
                 &fx.svc,
-                "SELECT json_extract(payload, '$.collector') FROM v_event WHERE type = 'collector.synced' AND json_extract(payload, '$.collector') LIKE 'collector:work/%' ORDER BY seq",
+                "SELECT json_extract(payload, '$.collector') FROM v_event WHERE type = 'collector.synced' AND uri_param(json_extract(payload, '$.collector'), 'collector') LIKE 'work/%' ORDER BY seq",
             )
             .await,
-            json!([["collector:work/sooner"], ["collector:work/later"]])
+            json!([["oxplow:oxplow/collector?collector=work/sooner"], ["oxplow:oxplow/collector?collector=work/later"]])
         );
     }
 
@@ -787,7 +787,7 @@ mod tests {
     /// P9.D2: a collector's script may return `events` of its extension's
     /// own declared types. They land with the run — its rows, its
     /// `collector_run`, its `collector.synced` — in one transaction, from
-    /// `collector:<owner>/<id>`, caused by that `collector.synced`.
+    /// `oxplow:oxplow/collector?collector=<owner>/<id>`, caused by that `collector.synced`.
     #[tokio::test]
     async fn a_collector_emits_its_extensions_events_with_its_run() {
         let fx = crate::test_fixtures::services_with_effort().await;
@@ -796,7 +796,7 @@ mod tests {
             &prs(""),
             &[(
                 "prs.star",
-                &prs_script("[{\"type\": \"acme_pr.merged\", \"payload\": {\"number\": 12}, \"subject\": [\"collector:acme-pr/prs\"]}]"),
+                &prs_script("[{\"type\": \"acme_pr.merged\", \"payload\": {\"number\": 12}, \"subject\": [\"oxplow:oxplow/collector?collector=acme-pr/prs\"]}]"),
             )],
         ).await;
         crate::test_fixtures::activate_with_problems(svc).await;
@@ -813,7 +813,7 @@ mod tests {
                 "SELECT source, cause, json_extract(payload, '$.number'), v FROM v_event WHERE type = 'acme_pr.merged'"
             )
             .await,
-            json!([["collector:acme-pr/prs", synced[0][0], 12, 1]])
+            json!([["oxplow:oxplow/collector?collector=acme-pr/prs", synced[0][0], 12, 1]])
         );
         // What a preview (and `oxplow extension test`) shows: the events it
         // would emit, stored nowhere.
@@ -829,7 +829,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             serde_json::to_value(&preview.events).unwrap(),
-            json!([{ "type": "acme_pr.merged", "v": 1, "payload": { "number": 12 }, "subject": ["collector:acme-pr/prs"] }])
+            json!([{ "type": "acme_pr.merged", "v": 1, "payload": { "number": 12 }, "subject": ["oxplow:oxplow/collector?collector=acme-pr/prs"] }])
         );
         assert_eq!(
             rows(
@@ -989,7 +989,10 @@ mod tests {
             let mut synced = Envelope::typed::<oxplow_domain::events::schema::CollectorSynced>(
                 "system",
                 &oxplow_domain::events::schema::CollectorSyncedV1 {
-                    collector: format!("collector:other/c{i}"),
+                    collector: oxplow_domain::uri::build::keyed(
+                        oxplow_domain::uri::resources::COLLECTOR,
+                        &format!("other/c{i}"),
+                    ),
                     trigger: "on".into(),
                     status: "ok".into(),
                     entities: Default::default(),
@@ -1005,7 +1008,7 @@ mod tests {
         let mut chained = Envelope::new(
             "acme_pr.pong",
             1,
-            "collector:other/c3",
+            "oxplow:oxplow/collector?collector=other/c3",
             json!({ "number": 40 }),
         )
         .unwrap();

@@ -10,7 +10,7 @@ use crate::database::{map_sql_err, ts_to_string};
 use crate::Database;
 
 /// One definition, 1-based positions. `id` is its symbol id within the
-/// file (`Parser::parse`, `main~2`) — its ref is `symbol:<path>/<id>`;
+/// file (`Parser::parse`, `main~2`) — its ref is `oxplow:oxplow/symbol?path=<path>&symbol=<id>`;
 /// `name` its own name, `container` what it's inside (`::`-joined);
 /// `line`/`col` is where its name is, `start_*`..`end_*` its whole extent.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -216,9 +216,21 @@ mod tests {
         assert_eq!(
             refs,
             vec![
-                (1, "symbol:README.md/w.py/Widget::spin".into(), 9),
-                (2, "symbol:README.md/w.py/Widget::value".into(), 8),
-                (2, "symbol:README.md/w.py/Widget::value~2".into(), 8),
+                (
+                    1,
+                    "oxplow:oxplow/symbol?path=README.md/w.py&symbol=Widget::spin".into(),
+                    9
+                ),
+                (
+                    2,
+                    "oxplow:oxplow/symbol?path=README.md/w.py&symbol=Widget::value".into(),
+                    8
+                ),
+                (
+                    2,
+                    "oxplow:oxplow/symbol?path=README.md/w.py&symbol=Widget::value~2".into(),
+                    8
+                ),
             ]
         );
         assert!(!store.is_empty().await.unwrap());

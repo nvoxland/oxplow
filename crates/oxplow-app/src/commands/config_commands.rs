@@ -702,7 +702,10 @@ mod tests {
         assert_eq!(changed.envelope.payload["key"], "zones");
         assert_eq!(changed.envelope.payload["before"], Value::Null);
         assert_eq!(changed.envelope.source, "agent:thr1");
-        assert_eq!(changed.envelope.subject, vec!["config:zones"]);
+        assert_eq!(
+            changed.envelope.subject,
+            vec!["oxplow:oxplow/config?key=zones"]
+        );
         assert!(changed.envelope.cause.is_some());
         // Undo: the inverse of a first set is an unset.
         assert_eq!(out.inverse.as_ref().unwrap().name, UNSET);
@@ -746,7 +749,7 @@ mod tests {
         );
         assert!(target.config.read().unwrap().ai_roles.is_empty());
         let proposal = bus.proposal_store().list_pending().await.unwrap().remove(0);
-        assert_eq!(proposal.key, "config:ai");
+        assert_eq!(proposal.key, "oxplow:oxplow/config?key=ai");
         let dry_run = proposal.dry_run.unwrap();
         assert_eq!(dry_run["before"], Value::Null);
         assert_eq!(dry_run["after"]["roles"]["main"]["model"], "claude");

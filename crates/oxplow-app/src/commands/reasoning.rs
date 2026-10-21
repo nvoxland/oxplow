@@ -38,10 +38,10 @@ pub const REPLACE_INFERRED_DECISIONS: &str = "oxplow.effort.replace_inferred_dec
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct DecisionInput {
-    /// The thread (`thread:thr3`); an agent's is always its own.
+    /// The thread (`oxplow:oxplow/thread?id=thr3`); an agent's is always its own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thread: Option<String>,
-    /// The work item it was made on (`work_item:oxplow:tsk42`); absent,
+    /// The work item it was made on (`oxplow:oxplow/work_item?id=tsk42&provider=oxplow`); absent,
     /// the thread's open effort's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub work_item: Option<String>,
@@ -64,7 +64,7 @@ pub struct DecisionInput {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct InferredClaimsInput {
-    /// The effort (`effort:eff12`).
+    /// The effort (`oxplow:oxplow/effort?id=eff12`).
     pub effort: String,
     /// What it holds after: every claim no reviewer acted on is replaced.
     #[schemars(length(max = 8))]
@@ -80,7 +80,7 @@ pub struct ClaimInput {
     #[schemars(length(min = 1, max = 1000))]
     pub statement: String,
     pub kind: ClaimKind,
-    /// What the agent cited for it (`run:<id>`, a test name, a file), if
+    /// What the agent cited for it (`oxplow:oxplow/run?id=<id>`, a test name, a file), if
     /// anything.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(length(min = 1, max = 400))]
@@ -116,7 +116,7 @@ impl ClaimKind {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct InferredDecisionsInput {
-    /// The effort (`effort:eff12`).
+    /// The effort (`oxplow:oxplow/effort?id=eff12`).
     pub effort: String,
     /// What it holds after: every inferred decision it had is replaced.
     #[schemars(length(max = 8))]
@@ -278,7 +278,11 @@ pub fn replace_inferred_decisions_op() -> Op {
         false,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: InferredDecisionsInput = parse(input)?;
-            let effort: oxplow_domain::EffortId = ref_id(&input.effort, "effort", "/effort")?;
+            let effort: oxplow_domain::EffortId = ref_id(
+                &input.effort,
+                oxplow_domain::uri::resources::EFFORT,
+                "/effort",
+            )?;
             let (thread_id, work_item) = effort_place(ctx, effort, &input.effort)?;
             let decisions: Vec<NewDecision> = input
                 .decisions
@@ -329,7 +333,11 @@ pub fn replace_inferred_claims_op() -> Op {
         false,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: InferredClaimsInput = parse(input)?;
-            let effort: oxplow_domain::EffortId = ref_id(&input.effort, "effort", "/effort")?;
+            let effort: oxplow_domain::EffortId = ref_id(
+                &input.effort,
+                oxplow_domain::uri::resources::EFFORT,
+                "/effort",
+            )?;
             let (thread_id, work_item) = effort_place(ctx, effort, &input.effort)?;
             let claims: Vec<NewClaim> = input
                 .claims
@@ -723,7 +731,7 @@ mod tests {
         let one = json!({ "question": "q", "choice": "c" });
         let effort = oxplow_domain::uri::build::effort_uri(fx.effort);
         for input in [
-            json!({ "effort": "effort:eff999", "decisions": [one] }),
+            json!({ "effort": "oxplow:oxplow/effort?id=eff999", "decisions": [one] }),
             json!({ "effort": effort, "decisions": vec![one.clone(); 9] }),
             json!({ "effort": effort, "decisions": [{ "question": "q", "choice": "c", "confidence": "sure" }] }),
         ] {

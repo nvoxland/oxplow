@@ -3322,7 +3322,7 @@ mod tests {
             contributions: vec![ContributionImpact {
                 kind: oxplow_domain::contribution::ContributionKind::Metric,
                 title: "Metric".into(),
-                id: "metric:acme.todos".into(),
+                id: "oxplow:oxplow/metric?metric=acme.todos".into(),
                 local: "acme.todos".into(),
                 change: Change::Changed,
                 differs: vec!["global".into(), "needs".into()],
@@ -3466,7 +3466,7 @@ mod tests {
             seen,
             vec![
                 (
-                    "event_type:acme.opened".to_string(),
+                    "oxplow:oxplow/event_type?event_type=acme.opened".to_string(),
                     Change::Changed,
                     vec![
                         "version".to_string(),
@@ -3475,8 +3475,16 @@ mod tests {
                         "global".into()
                     ]
                 ),
-                ("page:shared/gone".into(), Change::Removed, vec![]),
-                ("panel:shared/new".into(), Change::Added, vec![]),
+                (
+                    "oxplow:oxplow/page?page=shared/gone".into(),
+                    Change::Removed,
+                    vec![]
+                ),
+                (
+                    "oxplow:oxplow/panel?panel=shared/new".into(),
+                    Change::Added,
+                    vec![]
+                ),
             ]
         );
         assert_eq!(rows[1].title, "Page");

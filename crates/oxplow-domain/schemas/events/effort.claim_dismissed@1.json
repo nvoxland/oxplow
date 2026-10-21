@@ -4,7 +4,7 @@
   "description": "`effort.claim_dismissed@1`: a reviewer dismissed one of an effort's\nclaims (`oxplow.effort.dismiss_claim`: the agent didn't claim it, or\ndidn't mean it) — or took that back (`oxplow.effort.reopen_claim`,\n`dismissed: false`).",
   "properties": {
     "claim": {
-      "description": "`claim:<id>`.",
+      "description": "`oxplow:oxplow/claim?id=<id>`.",
       "type": "string"
     },
     "dismissed": {
@@ -12,7 +12,7 @@
       "type": "boolean"
     },
     "effort": {
-      "description": "`effort:<id>`, when the claim was made in one.",
+      "description": "`oxplow:oxplow/effort?id=<id>`, when the claim was made in one.",
       "type": [
         "string",
         "null"

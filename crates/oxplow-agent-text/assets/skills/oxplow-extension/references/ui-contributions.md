@@ -20,15 +20,15 @@
   The old names (`task-detail`, `commit`, …) are errors naming the new
   one.
 
-- **`ui.decorators`** add a label to refs:
-  `{ model, kind, placement: ref-chip | row-badge, label, color? }` — the
+- **`ui.decorators`** add a label to the URIs of one resource:
+  `{ model, resource: oxplow/work_item, placement: ref-chip | row-badge, label, color? }` — the
   model (this extension's) needs a `ref` column plus the `label` (and
-  `color`) columns; a chip shows on that ref's page, a badge after a
+  `color`) columns; a chip shows on that URI's page, a badge after a
   linked cell in lens rows.
 
 - **Pages** give a lens a place of its own: `pages: [{ id, title, icon?,
   category?, keywords?, params?, count?, lens }]` opens it full-page at
-  `page:<extension>/<id>[?params]` and lists it in the launcher under
+  `oxplow:oxplow/page?page=<extension>/<id>` (plus its params) and lists it in the launcher under
   `category` (Work, Code, Git, Activity, Knowledge, Data, Lenses,
   System; leave it out for a page only opened from elsewhere).
   `params` are what its id carries, handed to the lens; `count` names a

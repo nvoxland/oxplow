@@ -70,7 +70,7 @@
       "type": "string"
     },
     "event": {
-      "description": "The event it reacted to (`event:<id>`); absent on a v1 result.",
+      "description": "The event it reacted to (`oxplow:oxplow/event?id=<id>`); absent on a v1 result.",
       "type": [
         "string",
         "null"
@@ -83,7 +83,7 @@
       "$ref": "#/$defs/EffectOutcome"
     },
     "proposal": {
-      "description": "The proposal it left for a person (`proposal:<id>`).",
+      "description": "The proposal it left for a person (`oxplow:oxplow/proposal?id=<id>`).",
       "type": [
         "string",
         "null"

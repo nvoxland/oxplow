@@ -984,7 +984,7 @@ mod tests {
             .await
             .unwrap()
             .expect("a baseline snapshot");
-        let item = "work_item:test:1".to_string();
+        let item = "oxplow:oxplow/work_item?id=1&provider=test".to_string();
         let opened = effort_store.start(&item.clone(), &tid, None).await.unwrap();
         effort_store.finish(&opened.id, None, None).await.unwrap();
         svc.event_pump.clone().unwrap().run_once().await.unwrap();
@@ -1002,7 +1002,7 @@ mod tests {
     #[tokio::test]
     async fn a_committed_open_is_pinned_by_the_next_pump_run_after_a_crash() {
         let (svc, tid, effort_store, project, captures) = fixture_with_lifecycle().await;
-        let item = "work_item:test:2".to_string();
+        let item = "oxplow:oxplow/work_item?id=2&provider=test".to_string();
         let primary = captures.primary().unwrap();
         std::fs::write(project.path().join("a.txt"), "v").unwrap();
         primary.mark_dirty(
@@ -1027,7 +1027,7 @@ mod tests {
     #[tokio::test]
     async fn an_effort_is_pinned_at_its_open_and_its_close() {
         let (svc, tid, effort_store, _project, captures) = fixture_with_lifecycle().await;
-        let item = "work_item:test:3".to_string();
+        let item = "oxplow:oxplow/work_item?id=3&provider=test".to_string();
 
         // Nothing is dirty yet, so the open pins no start snapshot: the
         // "nothing to pin" case.
@@ -1071,7 +1071,7 @@ mod tests {
     #[tokio::test]
     async fn a_redelivered_close_records_its_lifecycle_once() {
         let (svc, tid, effort_store, project, captures) = fixture_with_lifecycle().await;
-        let item = "work_item:test:4".to_string();
+        let item = "oxplow:oxplow/work_item?id=4&provider=test".to_string();
         let effort = open_effort(&svc, &effort_store, &item, tid).await;
         let primary = captures.primary().unwrap();
         std::fs::write(project.path().join("work.txt"), "w").unwrap();
@@ -1113,7 +1113,7 @@ mod tests {
         // Closing an effort projects `effort.cycle_time_ms` + `work_item.efforts`
         // into the metric substrate, reading `effort` as the source of truth.
         let (svc, tid, effort_store, _project, _captures) = fixture_with_lifecycle().await;
-        let item = "work_item:test:5".to_string();
+        let item = "oxplow:oxplow/work_item?id=5&provider=test".to_string();
         let effort = open_effort(&svc, &effort_store, &item, tid).await;
 
         // No facts while the effort is still open.
@@ -1140,7 +1140,10 @@ mod tests {
             .expect("cycle_time measure seeded by V43");
         let cycle_facts = facts.facts_for_measure(cycle_measure.id).await.unwrap();
         assert_eq!(cycle_facts.len(), 1, "one cycle-time fact per close");
-        assert_eq!(cycle_facts[0].subject_kind.as_deref(), Some("effort"));
+        assert_eq!(
+            cycle_facts[0].subject_kind.as_deref(),
+            Some("oxplow/effort")
+        );
         assert!(cycle_facts[0].value >= 0.0, "cycle time is non-negative");
         // Ratio components (tsk42): the measure is non-additive with den=1, so
         // the cross-time collapse Σn/Σd is the MEAN cycle time across closed
@@ -1172,7 +1175,10 @@ mod tests {
         let effort_facts = facts.facts_for_measure(effort_measure.id).await.unwrap();
         assert_eq!(effort_facts.len(), 1, "one effort fact per close");
         assert_eq!(effort_facts[0].value, 1.0, "first effort for the work item");
-        assert_eq!(effort_facts[0].subject_kind.as_deref(), Some("work_item"));
+        assert_eq!(
+            effort_facts[0].subject_kind.as_deref(),
+            Some("oxplow/work_item")
+        );
         assert_eq!(effort_facts[0].subject.as_deref(), Some(item.as_str()));
         // Ratio components: `work_item.efforts` collapses Σn/Σd across closes
         // — the mean efforts per work item, not the last-closed one's count.
@@ -1186,7 +1192,7 @@ mod tests {
         // effort-stamped otel captures) lands as one `oxplow.effort_tokens`
         // fact — token-denominated, never dollars. `task.tokens` averages it.
         let (svc, tid, effort_store, _project, _captures) = fixture_with_lifecycle().await;
-        let item = "work_item:test:6".to_string();
+        let item = "oxplow:oxplow/work_item?id=6&provider=test".to_string();
         let effort = open_effort(&svc, &effort_store, &item, tid).await;
 
         // Simulate the OTLP ingest: an effort-stamped otel-tokens capture with
@@ -1224,7 +1230,7 @@ mod tests {
         let spend = facts.facts_for_measure(effort_tokens.id).await.unwrap();
         assert_eq!(spend.len(), 1, "one token-spend fact per close");
         assert_eq!(spend[0].value, 820.0, "input + output + cache summed");
-        assert_eq!(spend[0].subject_kind.as_deref(), Some("effort"));
+        assert_eq!(spend[0].subject_kind.as_deref(), Some("oxplow/effort"));
         // Non-additive den=1: `task.tokens` collapses to MEAN per close.
         assert_eq!(spend[0].numerator, Some(820.0));
         assert_eq!(spend[0].denominator, Some(1.0));
@@ -1243,7 +1249,7 @@ mod tests {
         assert_eq!(waste_rows[0].value, 0.0);
         assert_eq!(waste_rows[0].numerator, Some(0.0));
         assert_eq!(waste_rows[0].denominator, Some(820.0));
-        assert_eq!(waste_rows[0].subject_kind.as_deref(), Some("effort"));
+        assert_eq!(waste_rows[0].subject_kind.as_deref(), Some("oxplow/effort"));
     }
 
     #[tokio::test]
@@ -1254,7 +1260,7 @@ mod tests {
         // as ONE `oxplow.effort_steering` fact. `task.steering` averages it.
         use oxplow_domain::stores::AgentTurnStore;
         let (svc, tid, effort_store, _project, _captures) = fixture_with_lifecycle().await;
-        let item = "work_item:test:7".to_string();
+        let item = "oxplow:oxplow/work_item?id=7&provider=test".to_string();
         let effort = open_effort(&svc, &effort_store, &item, tid).await;
 
         // Two prompts inside the window + one ancient one outside it. At the
@@ -1297,14 +1303,11 @@ mod tests {
             let new = oxplow_db::comment_store::NewComment {
                 stream: StreamId::new(1),
                 thread: Some(tid),
-                target: oxplow_domain::CommentTarget {
-                    kind: "work_item".into(),
-                    id: item.trim_start_matches("work_item:").to_string(),
-                },
+                target: item.clone(),
                 quote: String::new(),
                 selectors_json: "[]".into(),
                 context_chain: Vec::new(),
-                referenced_refs: Vec::new(),
+                referenced: Vec::new(),
                 intent: oxplow_domain::CommentIntent::Followup,
                 author: author.into(),
                 body: "please adjust".into(),
@@ -1314,7 +1317,7 @@ mod tests {
                 .transaction(move |tx| {
                     oxplow_db::comment_store::create_tx(
                         tx,
-                        &oxplow_domain::uri::types::core_types(),
+                        &oxplow_domain::uri::resources::foundation().clone(),
                         &new,
                     )
                     .map(|_| ())
@@ -1336,7 +1339,7 @@ mod tests {
             got[0].value, 4.0,
             "2 in-window prompts + 1 nudge + 1 user comment; ancient prompt and agent comment excluded"
         );
-        assert_eq!(got[0].subject_kind.as_deref(), Some("effort"));
+        assert_eq!(got[0].subject_kind.as_deref(), Some("oxplow/effort"));
         assert_eq!(got[0].numerator, Some(4.0));
         assert_eq!(got[0].denominator, Some(1.0));
     }
@@ -1350,7 +1353,7 @@ mod tests {
         captures.set_workspace_filter(oxplow_fs_watch::WorkspaceFilter::with_user_entries([
             "generated",
         ]));
-        let item = "work_item:test:10".to_string();
+        let item = "oxplow:oxplow/work_item?id=10&provider=test".to_string();
         open_effort(&svc, &effort_store, &item, tid).await;
         let claimed = svc
             .claim_open_effort_file(&tid, "apps/desktop/src/generated/bindings.ts", None)
@@ -1377,7 +1380,7 @@ mod tests {
     #[tokio::test]
     async fn an_edit_in_a_native_worktree_follows_git_s_exclude() {
         let (svc, tid, effort_store, project, captures) = fixture_with_lifecycle().await;
-        let item = "work_item:test:12".to_string();
+        let item = "oxplow:oxplow/work_item?id=12&provider=test".to_string();
         let open = open_effort(&svc, &effort_store, &item, tid).await;
         let edited = ".claude/worktrees/x/src/a.rs";
         let none = Vec::<String>::new;
@@ -1416,7 +1419,7 @@ mod tests {
         // thread's open effort, and a repeat claim of the same path is
         // idempotent (INSERT OR REPLACE → still one row).
         let (svc, tid, effort_store, _project, _captures) = fixture_with_lifecycle().await;
-        let item = "work_item:test:11".to_string();
+        let item = "oxplow:oxplow/work_item?id=11&provider=test".to_string();
         let open = open_effort(&svc, &effort_store, &item, tid).await;
 
         let claimed = svc
@@ -1587,7 +1590,7 @@ mod tests {
             .unwrap();
 
         // Its effort opens, capturing start_snapshot_id.
-        let item = "work_item:test:12".to_string();
+        let item = "oxplow:oxplow/work_item?id=12&provider=test".to_string();
         let effort = open_effort(&svc, &effort_store, &item, thread.id).await;
 
         // Edit a file in the WORKTREE stream's directory and mark it
@@ -1663,7 +1666,13 @@ mod tests {
         let events = f.svc.event_log_store.read_after(0, 100).await.unwrap();
         let done = finished(&events);
         assert_eq!(done.len(), 1, "{done:#?}");
-        assert_eq!(done[0].payload["effort"], format!("effort:{}", f.effort));
+        assert_eq!(
+            done[0].payload["effort"],
+            oxplow_domain::uri::build::keyed(
+                oxplow_domain::uri::resources::EFFORT,
+                &format!("{}", f.effort)
+            )
+        );
         assert_eq!(done[0].anchors.effort_id, Some(f.effort));
         let closed = events
             .iter()

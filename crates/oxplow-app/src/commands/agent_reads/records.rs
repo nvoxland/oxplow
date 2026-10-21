@@ -20,13 +20,13 @@ pub const RECORDS_READ: &str = "oxplow.records.read";
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ReadInput {
-    /// What to read, by its ref: `file:src/a.rs@git:HEAD#L10-40`,
-    /// `work_item:oxplow:tsk12`, `commit:<sha>`, `event:<id>#output`,
-    /// `lens:<ext>/<slug>`.
+    /// What to read, by its ref: `oxplow:oxplow/file?path=src/a.rs&rev=git:HEAD#lines=10-40`,
+    /// `oxplow:oxplow/work_item?id=tsk12&provider=oxplow`, `oxplow:oxplow/commit?sha=<sha>`, `oxplow:oxplow/event?id=<id>#part=output`,
+    /// `oxplow:oxplow/lens?lens=<ext>/<slug>`.
     #[serde(rename = "ref")]
     pub reference: String,
     /// The stream whose worktree a `file:` or `lens:` ref is read in
-    /// (`stream:str2`); absent, your own.
+    /// (`oxplow:oxplow/stream?id=str2`); absent, your own.
     #[serde(default)]
     pub stream: Option<String>,
 }
@@ -52,17 +52,20 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
                 };
                 let at = match stream.as_deref() {
                     Some(stream) => Some(
-                        oxplow_domain::uri::build::id_of(stream, oxplow_domain::uri::types::STREAM)
-                            .ok()
-                            .and_then(|id| oxplow_domain::StreamId::try_from_str(&id))
-                            .ok_or_else(|| {
-                                invalid(
-                                    "/stream",
-                                    format!(
-                                    "`stream` is a stream's ref (`stream:str2`), not `{stream}`"
+                        oxplow_domain::uri::build::id_of(
+                            stream,
+                            oxplow_domain::uri::resources::STREAM,
+                        )
+                        .ok()
+                        .and_then(|id| oxplow_domain::StreamId::try_from_str(&id))
+                        .ok_or_else(|| {
+                            invalid(
+                                "/stream",
+                                format!(
+                                    "`stream` is a stream's ref (`oxplow:oxplow/stream?id=str2`), not `{stream}`"
                                 ),
-                                )
-                            })?,
+                            )
+                        })?,
                     ),
                     None => None,
                 };
@@ -109,7 +112,7 @@ mod tests {
             .run(
                 &actor,
                 RECORDS_READ,
-                json!({ "ref": "file:who.txt" }),
+                json!({ "ref": "oxplow:oxplow/file?path=who.txt" }),
                 false,
             )
             .await
@@ -123,7 +126,7 @@ mod tests {
             .run(
                 &actor,
                 RECORDS_READ,
-                json!({ "ref": "file:who.txt", "stream": "str2" }),
+                json!({ "ref": "oxplow:oxplow/file?path=who.txt", "stream": "str2" }),
                 false,
             )
             .await

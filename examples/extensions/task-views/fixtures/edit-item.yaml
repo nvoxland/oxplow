@@ -1,8 +1,8 @@
 # The editor's form: the item's title and body, its ref fixed.
 input:
   form: edit-item
-  params: { ref: "work_item:oxplow:1" }
+  params: { ref: "oxplow:oxplow/work_item?id=1&provider=oxplow" }
 expect:
-  values: { ref: "work_item:oxplow:1" }
+  values: { ref: "oxplow:oxplow/work_item?id=1&provider=oxplow" }
   fixed: [ref]
   fields: [title, body]

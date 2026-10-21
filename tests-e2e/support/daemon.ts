@@ -288,9 +288,12 @@ type SearchHit = { kind: string; title: string };
 
 /** Wait until site search finds `query` among `kind` hits (`task`,
  *  `wiki`): the index is built in the background after a write. */
-export async function searchable(daemon: Daemon, query: string, kind: string): Promise<void> {
-  await until(`search to index "${query}" (${kind})`, 30_000, async () => {
-    const hits = await ipc<SearchHit[]>(daemon, "search", { query, streamId: null, kinds: [kind], limit: 10 });
+/** Wait until site search finds `query` under `resource` (`wiki` is
+ *  `oxplow/wiki`; a name with a `/` is taken as it is). */
+export async function searchable(daemon: Daemon, query: string, resource: string): Promise<void> {
+  const name = resource.includes("/") ? resource : `oxplow/${resource}`;
+  await until(`search to index "${query}" (${name})`, 30_000, async () => {
+    const hits = await ipc<SearchHit[]>(daemon, "search", { query, streamId: null, resources: [name], limit: 10 });
     return hits.length > 0;
   });
 }

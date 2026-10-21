@@ -4,7 +4,7 @@
   "description": "`effort.linked@1`: an effort's work item was set, changed or cleared\n(`oxplow.effort.link`).",
   "properties": {
     "effort": {
-      "description": "`effort:eff12`.",
+      "description": "`oxplow:oxplow/effort?id=eff12`.",
       "type": "string"
     },
     "work_item": {

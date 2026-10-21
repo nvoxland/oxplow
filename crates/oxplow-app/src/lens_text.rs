@@ -994,7 +994,11 @@ mod tests {
                 None,
                 &["at", "what", "ref"],
                 vec![
-                    vec![t("2026-09-30T10:00"), t("shipped"), t("commit:abc")],
+                    vec![
+                        t("2026-09-30T10:00"),
+                        t("shipped"),
+                        t("oxplow:oxplow/commit?sha=abc"),
+                    ],
                     vec![t("2026-09-29T09:00"), t("started"), SqlCell::Null(())],
                 ],
             ),
@@ -1008,7 +1012,7 @@ mod tests {
         );
         assert_eq!(
             render(&r, &Resolved::default()),
-            "- 2026-09-29T09:00 — started\n- 2026-09-30T10:00 — shipped (commit:abc)"
+            "- 2026-09-29T09:00 — started\n- 2026-09-30T10:00 — shipped (oxplow:oxplow/commit?sha=abc)"
         );
     }
 
@@ -1171,13 +1175,14 @@ mod tests {
             .await
             .unwrap();
         assert!(
-            all.contains("waiting for a person's decision") && all.contains("proposal:"),
+            all.contains("waiting for a person's decision")
+                && all.contains("oxplow:oxplow/proposal?id="),
             "{all}"
         );
         let other = text_of(
             &fx.svc,
             &root,
-            &approvals(&[("thread", t("thread:thr999"))]),
+            &approvals(&[("thread", t("oxplow:oxplow/thread?id=thr999"))]),
             &ctx,
         )
         .await

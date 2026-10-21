@@ -125,7 +125,11 @@ pub fn restart_op(services: ServicesSlot) -> Op {
             let services = services.clone();
             Box::pin(async move {
                 let input = parse::<RestartInput>(input)?;
-                let stream: oxplow_domain::StreamId = ref_id(&input.stream, "stream", "/stream")?;
+                let stream: oxplow_domain::StreamId = ref_id(
+                    &input.stream,
+                    oxplow_domain::uri::resources::STREAM,
+                    "/stream",
+                )?;
                 let svc = services.get()?;
                 svc.code_intel
                     .restart(stream, &input.language)
@@ -148,7 +152,7 @@ pub fn restart_op(services: ServicesSlot) -> Op {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RestartInput {
-    /// The stream whose server it is (`stream:str2`).
+    /// The stream whose server it is (`oxplow:oxplow/stream?id=str2`).
     pub stream: String,
     /// The language (`rust`, `typescript`).
     pub language: String,

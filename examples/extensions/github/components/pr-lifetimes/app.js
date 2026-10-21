@@ -39,7 +39,7 @@
     }
     document.getElementById("sync").addEventListener("click", () => {
       status.textContent = "Syncing…";
-      component.invoke("oxplow.collector.sync", { collector: "collector:github/prs" }).then(() => {
+      component.invoke("oxplow.collector.sync", { collector: "oxplow:oxplow/collector?collector=github/prs" }).then(() => {
         status.textContent = "Synced.";
         refresh();
       }, say);
@@ -82,7 +82,7 @@
     svg.setAttribute("height", String(prs.length * ROW + 4));
     svg.setAttribute("viewBox", `0 0 ${width} ${prs.length * ROW + 4}`);
     prs.forEach((pr, i) => {
-      const ref = `github_pr:${pr.number}`;
+      const ref = `oxplow:github/pr?id=${pr.number}`;
       const bar = el("g", { class: "bar", role: "listitem", tabindex: "0", "data-ref": ref });
       const days = Math.max(1, Math.round((pr.end - pr.opened) / DAY));
       const title = el("title");

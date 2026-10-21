@@ -29,7 +29,7 @@ ordinary project files, so they go through the normal task/effort flow
 - `v_lens` (`ref`, `extension`, `title`, `description`, `viz`, `hidden`) lists
   what already exists, `v_extension` the extensions that loaded (`enabled`,
   `errors`, `warnings`) and `v_contribution` what each contributes (count it
-  by `extension` and `kind`); `oxplow_read { ref: "lens:<ext>/<slug>" }` gives one
+  by `extension` and `kind`); `oxplow_read { ref: "oxplow:oxplow/lens?lens=<ext>/<slug>" }` gives one
   lens's definition. Prefer improving an existing lens over adding a
   near-duplicate. An extension that fails to load isn't in `v_extension`:
   `oxplow_validate_extension` says why.
@@ -38,6 +38,6 @@ ordinary project files, so they go through the normal task/effort flow
   1. Call `oxplow_get_open_page(thread_id)`. Its `lens` is what is on their
      screen as text, with their current params (`oxplow_run_lens` with
      `format: "json"` gives you the raw rows if you need them).
-  2. Read the definition with `oxplow_read { ref: "lens:<ext>/<slug>" }`.
+  2. Read the definition with `oxplow_read { ref: "oxplow:oxplow/lens?lens=<ext>/<slug>" }`.
   3. Change the file.
   4. Validate and run it again.

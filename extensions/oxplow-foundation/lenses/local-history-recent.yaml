@@ -31,10 +31,10 @@ query: |
            (SELECT group_concat(label, ', ') FROM (
               SELECT b.name AS label FROM v_branch b WHERE b.head_sha = n.sha AND b.kind = 'local'
               UNION ALL SELECT t.name FROM v_tag t WHERE t.sha = n.sha)) AS names,
-           (SELECT group_concat(coalesce(w.title, replace(e.work_item, 'work_item:oxplow:', ''), e.title, 'Unlinked work'), ', ')
+           (SELECT group_concat(coalesce(w.title, uri_param(e.work_item, 'id'), e.title, 'Unlinked work'), ', ')
               FROM v_effort e LEFT JOIN v_work_item w ON w.ref = e.work_item
              WHERE e.start_snapshot_id <= n.id AND e.end_snapshot_id = n.id) AS completed,
-           (SELECT group_concat(coalesce(w.title, replace(e.work_item, 'work_item:oxplow:', ''), e.title, 'Unlinked work'), ', ')
+           (SELECT group_concat(coalesce(w.title, uri_param(e.work_item, 'id'), e.title, 'Unlinked work'), ', ')
               FROM v_effort e LEFT JOIN v_work_item w ON w.ref = e.work_item
              WHERE e.start_snapshot_id <= n.id AND (e.end_snapshot_id IS NULL OR e.end_snapshot_id > n.id)) AS in_flight,
            n.id = (SELECT min(id) FROM v_snapshot WHERE stream_id = :stream_id)

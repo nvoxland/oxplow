@@ -2,7 +2,7 @@ title: Effort Reviews
 description: Each finished effort a model reviewed — its work item, its review's state and what it wrote. Open the output to follow a running one; Cancel stops it.
 query: |
   SELECT job_run,
-         lens_ref('oxplow-bundled/job-run-output', 'job_run', job_run) AS output_ref,
+         uri('oxplow/lens', 'lens', 'oxplow-bundled/job-run-output', 'job_run', job_run) AS output_ref,
          effort,
          work_item,
          state,

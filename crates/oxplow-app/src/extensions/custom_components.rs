@@ -500,7 +500,7 @@ pub fn parse_custom_components(
             vec![at(file, block, "`custom_components` must be a list")],
         );
     };
-    let kinds = oxplow_domain::uri::types::core_types();
+    let resources = oxplow_domain::uri::resources::foundation();
     let mut out: Vec<CustomComponent> = Vec::new();
     let mut errors = Vec::new();
     let lines = item_lines(manifest, "custom_components");
@@ -545,10 +545,8 @@ pub fn parse_custom_components(
             // A lens id alone: params, a revision or a fragment would make
             // it a different ref than the one `query(asset)` names.
             a.contains(['?', '@', '#'])
-                || oxplow_domain::uri::grammar::Uri::parse(&oxplow_domain::uri::build::of(
-                    "lens", a,
-                ))
-                .map_or(true, |r| kinds.validate(&r).is_err())
+                || oxplow_domain::uri::OxplowUri::parse(&oxplow_domain::uri::build::lens_uri(a))
+                    .map_or(true, |r| resources.validate(&r).is_err())
         }) {
             Some(format!(
                 "custom component `{}`: asset `{bad}` isn't a lens id (`<slug>` or `<extension>/<slug>`)",

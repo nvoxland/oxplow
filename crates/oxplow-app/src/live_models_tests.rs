@@ -147,16 +147,20 @@ async fn collector_state_and_credentials_are_read_live() {
     assert_eq!(
         rows(&fx, state).await,
         vec![vec![
-            json!("collector:acme/pull"),
+            json!("oxplow:oxplow/collector?collector=acme/pull"),
             json!("acme"),
             json!("pull"),
             json!(if crate::net_sandbox::enforced() { 1 } else { 0 })
         ]]
     );
-    let credentials = "SELECT collector, name, is_set FROM v_collector_credential WHERE collector = 'collector:acme/pull'";
+    let credentials = "SELECT collector, name, is_set FROM v_collector_credential WHERE collector = 'oxplow:oxplow/collector?collector=acme/pull'";
     assert_eq!(
         rows(&fx, credentials).await,
-        vec![vec![json!("collector:acme/pull"), json!("TOKEN"), json!(0)]]
+        vec![vec![
+            json!("oxplow:oxplow/collector?collector=acme/pull"),
+            json!("TOKEN"),
+            json!(0)
+        ]]
     );
 
     let root = fx.svc.layout.project_dir.clone();
@@ -169,7 +173,11 @@ async fn collector_state_and_credentials_are_read_live() {
     .unwrap();
     assert_eq!(
         rows(&fx, credentials).await,
-        vec![vec![json!("collector:acme/pull"), json!("TOKEN"), json!(1)]]
+        vec![vec![
+            json!("oxplow:oxplow/collector?collector=acme/pull"),
+            json!("TOKEN"),
+            json!(1)
+        ]]
     );
     let everything = format!(
         "{:?}",

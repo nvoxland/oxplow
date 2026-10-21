@@ -1,9 +1,10 @@
 # Commands, custom components and forms
 
-- **A command on a ref's menus** (its page's Commands, a row's
+- **A command on a URI's menus** (its page's Commands, a row's
   right-click) says so in its own `ui`: `ui: { label, group?, about:
-  work_item, input?: { ref: "{{ref}}" } }` (`about` is a ref kind;
-  `"{{ref.id}}"` binds the id alone). To offer another command there with
+  oxplow/work_item, input?: { ref: "{{ref}}" } }` (`about` is a resource
+  name, `<extension>/<name>`; `"{{ref.id}}"` binds the URI's key param, such as
+  the id, alone). To offer another command there with
   a fixed input, declare your own over the same operation.
 - **A provider's own operations** are your commands too: `commands: [{
   name: item.estimate, summary, provider: <your provider id>, op:
@@ -35,7 +36,7 @@
   <part of the reason>`. An agent is shown an `example:` input beside the
   schema (a script's first example that runs, unless it declares one;
   give one to a command over a `scope:` op). `access: read` makes a command that only reads
-  and returns a `result` (it composes nothing). A command on a ref's menu (`ui.about`) gets `{ ref }` unless its
+  and returns a `result` (it composes nothing). A command on a URI's menu (`ui.about`) gets `{ ref }` unless its
   `ui.input` says otherwise, so name its input field `ref`. `extensions/oxplow-bundled/` (bundled) is a
   working example.
 - **`custom_components:`** (stable; not in a bundled extension) are web bundles a

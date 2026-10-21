@@ -12,7 +12,7 @@ def transform(x):
     run = scope("jobs.read", {"job_run": payload["job_run"]})
     key = run.get("intentKey") or ""
     effort = key[len(PREFIX):] if key.startswith(PREFIX) else ""
-    if not uri.is_uri(effort) or uri.type(effort) != "effort":
+    if not uri.is_uri(effort) or uri.resource(effort) != "oxplow/effort":
         return {"skip": "not an effort review: " + key}
     efforts = scope("sql.read", {
         "sql": "SELECT work_item FROM v_effort WHERE ref = :effort",

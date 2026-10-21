@@ -16,7 +16,7 @@ def transform(input):
             facts.append({
                 "measure": "triage.todos",
                 "value": 1,
-                "subject": uri.build("file", f["path"]),
+                "subject": uri.build("oxplow/file", path = f["path"]),
                 "path": f["path"],
                 "line": m["line"],
                 "rule": kind,

@@ -489,7 +489,7 @@ IPC methods (all go through `ipc-contract.ts` → `main.ts` →
   `get_snapshot_pair_diff` RPCs had no caller and are gone; diffs go
   through the `diff` RPC (`Trees`, `.context/vcs.md`).
 - `readTaskEfforts(taskId)` (`workItems.ts`) — a task's efforts from
-  `v_effort` (`work_item = work_item:oxplow:<id>`), newest first, each
+  `v_effort` (`work_item = oxplow:oxplow/work_item?id=<id>&provider=oxplow`), newest first, each
   with its changed files (`get_effort_files`). Used by the task page's
   Activity timeline and the "Show in history" jump.
 
@@ -741,7 +741,7 @@ schema in [data-model.md](./data-model.md), migration `V33`).
 Most stores have a single writer per row. The unified
 cross-page-reference graph (`page_ref` table; see
 [data-model.md](./data-model.md)) is the exception: a single
-`(source_kind, source_id)` like `(work_item, oxplow:tsk42)` accumulates
+one `source_uri` like a work item's accumulates
 rows from different owners (the item's body, link and comment slices,
 restated from the work-item interface, and the effort store's edges),
 each owning a slice keyed by `ref_type`.
@@ -756,7 +756,7 @@ each other:
    the `work_item_link:` prefix, `effort_ref_types()`).
 2. **Slice-replace** at the store
    (`SqlitePageRefStore::replace_source_for_ref_types`) takes
-   `(source_kind, source_id, ref_types, edges)` and atomically
+   `(source, ref_types, edges)` and atomically
    `DELETE`s only rows matching the source AND one of the
    ref_types, then inserts the new edges. Other slices for the
    same source survive untouched.
@@ -848,7 +848,7 @@ pause.
 The `search` command/tool is a read over `SqliteSearchStore`
 (`crates/oxplow-db/src/search_store.rs`) — a unified FTS5/BM25 index, not a
 per-domain store. It is **fed**, not written by its callers. Tasks,
-comments, thread notes and wiki pages are search kinds derived from a model
+comments, thread notes and wiki pages are searchable resources derived from a model
 (`v_search_<kind>`): an asset per kind (`kind_search.rs`, tsk864)
 restates the kind whole when a table behind its model commits — a move, a
 soft delete, a thread delete included — writing nothing when the rows are
@@ -856,7 +856,7 @@ unchanged. File contents come from snapshot blobs, so the `search.index`
 pump consumer indexes them on `snapshot.taken` (durable, redelivered after
 a crash). Nothing reaches the index on the in-memory bus. Archiving a
 stream purges its file rows (`purge_stream_files`). See
-[resources.md](./resources.md) "Searchable kinds". Exposed identically on IPC
+[resources.md](./resources.md) "Where URIs are stored" (the search index). Exposed identically on IPC
 (`search`) and MCP (`oxplow_search`) — see the parity manifest
 (`crates/oxplow-surface-parity`).
 

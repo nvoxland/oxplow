@@ -544,12 +544,12 @@ pub const CORE_SOURCE: &str = "core";
 /// the extensions that ship with oxplow — nothing else.
 fn ships_with_oxplow(source: &str) -> bool {
     source == CORE_SOURCE
-        || oxplow_domain::uri::build::id_of(source, oxplow_domain::uri::types::EXTENSION)
+        || oxplow_domain::uri::build::id_of(source, oxplow_domain::uri::resources::EXTENSION)
             .is_ok_and(|name| crate::bundled_extensions::find(&name).is_some())
 }
 
 /// The registered commands by id, who registered each (its source:
-/// `core`, `extension:<name>`, `provider:<name>`), and who holds each
+/// `core`, `oxplow:oxplow/extension?name=<name>`, `provider:<name>`), and who holds each
 /// namespace: `oxplow` for the reserved one — shared by core and oxplow's
 /// own extensions, collisions checked per id — else the one source that
 /// registered it.
@@ -899,7 +899,7 @@ impl CommandBus {
             .add(&namespace, CORE_SOURCE, vec![command])
     }
 
-    /// Register `commands` from `source` (`extension:<name>`,
+    /// Register `commands` from `source` (`oxplow:oxplow/extension?name=<name>`,
     /// `provider:<name>`) under `namespace` — all of them or none, under
     /// one lock. Refused when the namespace is another source's, when it is
     /// the reserved `oxplow` and `source` doesn't ship with oxplow, or when
@@ -1032,7 +1032,7 @@ impl CommandBus {
         self.commands.write().remove_source(source)
     }
 
-    /// Who registered command `id`: `core`, `extension:<name>`,
+    /// Who registered command `id`: `core`, `oxplow:oxplow/extension?name=<name>`,
     /// `provider:<name>`.
     pub fn source_of(&self, id: &str) -> Option<String> {
         self.commands.read().sources.get(id).cloned()

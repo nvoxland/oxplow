@@ -82,7 +82,7 @@ async fn run(
         .run(
             &Actor::Human,
             crate::commands::work_item::CREATE,
-            json!({ "title": "conformance: an item to start", "thread": thread.to_string() }),
+            json!({ "title": "conformance: an item to start", "thread": oxplow_domain::uri::build::thread_uri(thread) }),
             false,
         )
         .await

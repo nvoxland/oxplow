@@ -1722,7 +1722,7 @@ export function App() {
 
   /** Navigate to a unified-search hit: wherever its ref opens. */
   const openSearchHit = useCallback((hit: import("./api.js").SearchHit) => {
-    openRefRef.current(hit.ref, { newTab: true }, (tab) => handleOpenPage(tab));
+    openRefRef.current(hit.uri, { newTab: true }, (tab) => handleOpenPage(tab));
   }, [handleOpenPage]);
 
   /** Close the shown thread's tab showing `id`: its file buffer, title

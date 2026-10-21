@@ -234,9 +234,10 @@ impl crate::event_pump::AsyncEventConsumer for KnowledgeRecords {
         }
         let KnowledgePageRecordedV1 { page } = serde_json::from_value(env.payload.clone())
             .map_err(|e| DomainError::Invalid(format!("knowledge.page.recorded payload: {e}")))?;
-        let Some(slug) = oxplow_domain::uri::build::id_of(&page.page_ref, "wiki")
-            .ok()
-            .filter(|s| crate::knowledge::valid_slug(s))
+        let Some(slug) =
+            oxplow_domain::uri::build::id_of(&page.page_ref, oxplow_domain::uri::resources::WIKI)
+                .ok()
+                .filter(|s| crate::knowledge::valid_slug(s))
         else {
             return Ok(());
         };

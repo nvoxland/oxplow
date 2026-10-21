@@ -138,11 +138,16 @@ async fn context(svc: &Services, stream_id: Option<&str>) -> extensions::LensCon
     extensions::lens_context(svc, stream, None).await
 }
 
-/// Run an answer shown in a thread (`answer:<id>`) as the person sees it.
+/// Run an answer shown in a thread (`oxplow:oxplow/answer?id=<id>`) as the person sees it.
 pub async fn run_answer(svc: &Services, answer: String) -> Result<LensRun, IpcError> {
-    let id: i64 = oxplow_domain::uri::build::parse_as(&answer, oxplow_domain::uri::types::ANSWER)
-        .or_else(|_| answer.parse())
-        .map_err(|_| IpcError::invalid(format!("`{answer}` isn't an answer (`answer:<id>`)")))?;
+    let id: i64 =
+        oxplow_domain::uri::build::parse_as(&answer, oxplow_domain::uri::resources::ANSWER)
+            .or_else(|_| answer.parse())
+            .map_err(|_| {
+                IpcError::invalid(format!(
+                    "`{answer}` isn't an answer (`oxplow:oxplow/answer?id=<id>`)"
+                ))
+            })?;
     Ok(oxplow_app::commands::lens::run_answer(svc, id).await?)
 }
 

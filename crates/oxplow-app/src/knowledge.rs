@@ -14,9 +14,7 @@ use crate::commands::ops::Op;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use oxplow_db::page_ref_projections::{
-    stamp_file_versions, wiki_edges, KIND_FILE, KIND_WIKI, RT_WIKI_FILE,
-};
+use oxplow_db::page_ref_projections::{stamp_file_versions, wiki_edges, RT_WIKI_FILE};
 use oxplow_db::page_ref_store::{merge_source_tx, replace_source_tx, upsert_edge_tx};
 use oxplow_db::{EventCtx, FileRefVersion, PageRefEdge, WikiPage};
 use oxplow_domain::events::schema::{
@@ -24,6 +22,7 @@ use oxplow_domain::events::schema::{
 };
 use oxplow_domain::events::Envelope;
 use oxplow_domain::knowledge::{Kept, KnowledgeProvider, PageCall, PageDraft, RefFreshness};
+use oxplow_domain::uri::build::{file_of_uri, file_uri, wiki_uri};
 use oxplow_domain::vcs::{Revision, Vcs};
 use oxplow_domain::{Anchors, CommandError, Confirm, DomainError, Timestamp};
 use rusqlite::{params, OptionalExtension};
@@ -50,7 +49,7 @@ pub const LINK: &str = "oxplow.knowledge.link";
 pub const RESYNC: &str = "oxplow.knowledge.resync";
 pub const VERIFY_REFS: &str = "oxplow.knowledge.verify_refs";
 
-/// A page's ref: `wiki:<slug>`.
+/// A page's ref: `oxplow:oxplow/wiki?slug=<slug>`.
 pub fn page_ref(slug: &str) -> String {
     oxplow_domain::uri::build::wiki_uri(slug)
 }
@@ -225,7 +224,7 @@ pub fn write_page_tx(
     let pin = pin_tx(conn)?;
     let mut edges = match stated {
         Some(stated) => oxplow_db::page_ref_projections::stated_edges(slug, stated),
-        None => wiki_edges(&ev.vocabulary.kinds, slug, body),
+        None => wiki_edges(&ev.vocabulary.resources, slug, body),
     };
     if let Some(id) = pin.snapshot_id {
         stamp_file_versions(
@@ -239,23 +238,23 @@ pub fn write_page_tx(
     }
     // Verification edges under a still-cited directory stay (with their
     // pins); merge_source prunes the rest.
-    for kept in file_edges_tx(conn, slug)? {
-        let cited = edges
-            .iter()
-            .any(|e| e.target_kind == KIND_FILE && e.target_id == kept.target_id);
-        if !cited && path_under_any_dir(&kept.target_id, &page.dir_refs) {
+    let source = wiki_uri(slug);
+    for kept in file_edges_tx(conn, &source)? {
+        let cited = edges.iter().any(|e| e.target == kept.target);
+        let under = file_of_uri(&kept.target)
+            .is_ok_and(|(path, _, _)| path_under_any_dir(&path, &page.dir_refs));
+        if !cited && under {
             edges.push(kept);
         }
     }
-    merge_source_tx(conn, KIND_WIKI, slug, edges.clone())?;
+    merge_source_tx(conn, &source, edges.clone())?;
     for path in verified {
+        let target = file_uri(path);
         let edge = edges
             .iter()
-            .find(|e| {
-                e.target_kind == KIND_FILE && e.target_id == *path && e.ref_type == RT_WIKI_FILE
-            })
+            .find(|e| e.target == target && e.ref_type == RT_WIKI_FILE)
             .cloned()
-            .unwrap_or_else(|| PageRefEdge::new(KIND_WIKI, slug, KIND_FILE, path, RT_WIKI_FILE));
+            .unwrap_or_else(|| PageRefEdge::new(&source, &target, RT_WIKI_FILE));
         upsert_edge_tx(conn, &pin.stamp(edge))?;
     }
 
@@ -288,7 +287,7 @@ pub fn delete_page_tx(
     slug: &str,
 ) -> Result<Option<Envelope>, DomainError> {
     let existed = oxplow_db::wiki_page_store::delete_tx(conn, slug)?;
-    replace_source_tx(conn, KIND_WIKI, slug, Vec::new())?;
+    replace_source_tx(conn, &wiki_uri(slug), Vec::new())?;
     Ok(existed.then(|| {
         let page = page_ref(slug);
         ev.typed::<KnowledgePageDeleted>(&KnowledgePageDeletedV1 { page: page.clone() })
@@ -302,23 +301,21 @@ pub fn body_hash(body: &str) -> String {
     crate::blob_store::BlobStore::hash(body.as_bytes())
 }
 
-fn file_edges_tx(conn: &rusqlite::Connection, slug: &str) -> Result<Vec<PageRefEdge>, DomainError> {
+/// The file edges a page (`source`, its URI) holds.
+fn file_edges_tx(
+    conn: &rusqlite::Connection,
+    source: &str,
+) -> Result<Vec<PageRefEdge>, DomainError> {
     let mut stmt = conn
         .prepare(
-            "SELECT target_id, ref_type, source_extra, local_snapshot_id, closest_vcs_rev,
+            "SELECT target_uri, ref_type, source_extra, local_snapshot_id, closest_vcs_rev,
                     vcs_rev_exact
-             FROM page_ref WHERE source_kind = ?1 AND source_id = ?2 AND target_kind = ?3",
+             FROM page_ref WHERE source_uri = ?1 AND target_resource = ?2",
         )
         .map_err(sql)?;
     let rows = stmt
-        .query_map(params![KIND_WIKI, slug, KIND_FILE], |r| {
-            let mut edge = PageRefEdge::new(
-                KIND_WIKI,
-                slug,
-                KIND_FILE,
-                r.get::<_, String>(0)?,
-                r.get::<_, String>(1)?,
-            );
+        .query_map(params![source, oxplow_domain::uri::resources::FILE], |r| {
+            let mut edge = PageRefEdge::new(source, r.get::<_, String>(0)?, r.get::<_, String>(1)?);
             edge.source_extra = r.get(2)?;
             edge.local_snapshot_id = r.get(3)?;
             edge.closest_vcs_rev = r.get(4)?;
@@ -332,13 +329,10 @@ fn file_edges_tx(conn: &rusqlite::Connection, slug: &str) -> Result<Vec<PageRefE
 
 fn outbound_tx(conn: &rusqlite::Connection, slug: &str) -> Result<Vec<String>, DomainError> {
     let mut stmt = conn
-        .prepare(
-            "SELECT DISTINCT target_kind || ':' || target_id FROM page_ref
-             WHERE source_kind = ?1 AND source_id = ?2 ORDER BY 1",
-        )
+        .prepare("SELECT DISTINCT target_uri FROM page_ref WHERE source_uri = ?1 ORDER BY 1")
         .map_err(sql)?;
     let rows = stmt
-        .query_map(params![KIND_WIKI, slug], |r| r.get::<_, String>(0))
+        .query_map(params![wiki_uri(slug)], |r| r.get::<_, String>(0))
         .and_then(|rows| rows.collect::<rusqlite::Result<Vec<_>>>())
         .map_err(sql)?;
     Ok(rows)
@@ -509,7 +503,7 @@ impl WikiFollow {
 pub async fn clear_record(db: &oxplow_db::Database) -> Result<(), DomainError> {
     db.transaction(|tx| {
         tx.execute_batch(
-            "DELETE FROM page_ref WHERE source_kind = 'wiki';
+            "DELETE FROM page_ref WHERE source_resource = 'oxplow/wiki';
              DELETE FROM wiki_page_thread_update;
              DELETE FROM wiki_page;",
         )
@@ -696,7 +690,7 @@ impl crate::event_pump::EventConsumer for WikiAttribution {
                 DomainError::Invalid(format!("knowledge.page.written payload: {e}"))
             })?;
         let Ok(slug) =
-            oxplow_domain::uri::build::id_of(&written.page, oxplow_domain::uri::types::WIKI)
+            oxplow_domain::uri::build::id_of(&written.page, oxplow_domain::uri::resources::WIKI)
         else {
             return Ok(());
         };
@@ -749,7 +743,7 @@ fn domain(e: DomainError) -> CommandError {
 fn links_resolve(
     target: &KnowledgeTarget,
     conn: &rusqlite::Connection,
-    kinds: &oxplow_domain::uri::types::TypeRegistry,
+    kinds: &oxplow_domain::uri::resources::ResourceRegistry,
     slug: &str,
     body: &str,
 ) -> Result<(), CommandError> {
@@ -765,7 +759,7 @@ fn links_resolve(
     let mut warnings = check_links_in(
         &LinkWorld {
             conn,
-            kinds,
+            resources: kinds,
             project_dir: &target.project_dir,
             graph: &*graph,
             this_page: Some(slug),
@@ -903,7 +897,7 @@ pub struct LinkInput {
     /// The page (its slug).
     pub page: String,
     /// What to link to, as a wikilink's inside: `other-page`,
-    /// `src/lib.rs`, `dir:src/vcs`, `tsk42`, `git:<sha>`.
+    /// `src/lib.rs`, `oxplow:oxplow/dir?path=src/vcs`, `tsk42`, `git:<sha>`.
     pub target: String,
 }
 
@@ -1028,7 +1022,7 @@ async fn write_page(
         let (t2, slug, body) = (t.clone(), slug.clone(), body.clone());
         let (verified, removed) = (input.verified_refs.clone(), input.removed_refs.clone());
         check(t, move |conn, vocabulary| {
-            links_resolve(&t2, conn, &vocabulary.kinds, &slug, &body)?;
+            links_resolve(&t2, conn, &vocabulary.resources, &slug, &body)?;
             refs_borne_out(&parse_refs(&body), &verified, &removed)
         })
         .await?;
@@ -1186,7 +1180,7 @@ pub fn ops(target: KnowledgeTarget) -> Vec<Op> {
                     if current.lines().any(|l| l.trim() == line) {
                         return Err(invalid("/target", format!("`{slug}` already links to it")));
                     }
-                    links_resolve(&t2, conn, &vocabulary.kinds, &slug, &line)
+                    links_resolve(&t2, conn, &vocabulary.resources, &slug, &line)
                 })
                 .await?;
             }
@@ -1334,14 +1328,17 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(out.result["page"], "wiki:vcs-notes");
+        assert_eq!(out.result["page"], "oxplow:oxplow/wiki?slug=vcs-notes");
         let outbound: Vec<&str> = out.result["outbound"]
             .as_array()
             .unwrap()
             .iter()
             .map(|v| v.as_str().unwrap())
             .collect();
-        assert!(outbound.contains(&"file:src/lib.rs"), "{outbound:?}");
+        assert!(
+            outbound.contains(&"oxplow:oxplow/file?path=src/lib.rs"),
+            "{outbound:?}"
+        );
         let page = fx
             .svc
             .wiki_page_store
@@ -1359,7 +1356,7 @@ mod tests {
         assert_eq!(written[0].envelope.cause, out.event_id);
         assert_eq!(
             written[0].envelope.subject,
-            vec!["wiki:vcs-notes".to_string()]
+            vec!["oxplow:oxplow/wiki?slug=vcs-notes".to_string()]
         );
 
         // The file the command wrote syncs to a no-op, not a second write.
@@ -1571,11 +1568,16 @@ mod tests {
         let backlinks = fx
             .svc
             .page_ref_store
-            .list_backlinks("file", "crates/cp/src/lib.rs", None)
+            .list_backlinks(
+                &oxplow_domain::uri::build::file_uri("crates/cp/src/lib.rs"),
+                None,
+            )
             .await
             .unwrap();
         assert!(
-            backlinks.iter().any(|e| e.source_id == "intro"),
+            backlinks
+                .iter()
+                .any(|e| e.source == oxplow_domain::uri::build::wiki_uri("intro")),
             "{backlinks:?}"
         );
         // Rewriting the page (the directory still cited) keeps it.
@@ -1589,11 +1591,16 @@ mod tests {
         let backlinks = fx
             .svc
             .page_ref_store
-            .list_backlinks("file", "crates/cp/src/lib.rs", None)
+            .list_backlinks(
+                &oxplow_domain::uri::build::file_uri("crates/cp/src/lib.rs"),
+                None,
+            )
             .await
             .unwrap();
         assert!(
-            backlinks.iter().any(|e| e.source_id == "intro"),
+            backlinks
+                .iter()
+                .any(|e| e.source == oxplow_domain::uri::build::wiki_uri("intro")),
             "{backlinks:?}"
         );
     }
@@ -1664,7 +1671,9 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(
-            body_of(&fx, "wiki:notes").await.as_deref(),
+            body_of(&fx, "oxplow:oxplow/wiki?slug=notes")
+                .await
+                .as_deref(),
             Some("# Notes\n\nFirst.\n")
         );
 
@@ -1679,7 +1688,9 @@ mod tests {
                 .unwrap()
         );
         assert_eq!(
-            body_of(&fx, "wiki:notes").await.as_deref(),
+            body_of(&fx, "oxplow:oxplow/wiki?slug=notes")
+                .await
+                .as_deref(),
             Some("# Notes\n\nEdited by hand.\n")
         );
     }
@@ -1761,8 +1772,10 @@ mod tests {
             })
             .await
             .unwrap();
-        assert_eq!(stale_ref_count(&fx, "wiki:lib").await, 0);
-        let fresh = freshness(&fx.svc.db, "wiki:lib").await.unwrap();
+        assert_eq!(stale_ref_count(&fx, "oxplow:oxplow/wiki?slug=lib").await, 0);
+        let fresh = freshness(&fx.svc.db, "oxplow:oxplow/wiki?slug=lib")
+            .await
+            .unwrap();
         assert_eq!(fresh.len(), 1);
         assert!(!fresh[0].stale, "{fresh:?}");
         assert_ne!(fresh[0].latest_snapshot, Some(9999));
@@ -1783,10 +1796,10 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(stale_ref_count(&fx, "wiki:lib").await, 0);
+        assert_eq!(stale_ref_count(&fx, "oxplow:oxplow/wiki?slug=lib").await, 0);
 
         snapshot_with(&fx, "src/lib.rs").await;
-        assert_eq!(stale_ref_count(&fx, "wiki:lib").await, 1);
+        assert_eq!(stale_ref_count(&fx, "oxplow:oxplow/wiki?slug=lib").await, 1);
 
         run(
             &fx,
@@ -1795,13 +1808,13 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(stale_ref_count(&fx, "wiki:lib").await, 0);
+        assert_eq!(stale_ref_count(&fx, "oxplow:oxplow/wiki?slug=lib").await, 0);
         let outbound: String = fx
             .svc
             .db
             .read(|c| {
                 c.query_row(
-                    "SELECT outbound_refs FROM v_knowledge_page WHERE ref = 'wiki:lib'",
+                    "SELECT outbound_refs FROM v_knowledge_page WHERE ref = 'oxplow:oxplow/wiki?slug=lib'",
                     [],
                     |r| r.get(0),
                 )
@@ -1809,13 +1822,13 @@ mod tests {
             })
             .await
             .unwrap();
-        assert_eq!(outbound, r#"["file:src/lib.rs"]"#);
+        assert_eq!(outbound, r#"["oxplow:oxplow/file?path=src/lib.rs"]"#);
         let refs: (String, i64) = fx
             .svc
             .db
             .read(|c| {
                 c.query_row(
-                    "SELECT path, stale FROM v_knowledge_ref WHERE page = 'wiki:lib'",
+                    "SELECT path, stale FROM v_knowledge_ref WHERE page = 'oxplow:oxplow/wiki?slug=lib'",
                     [],
                     |r| Ok((r.get(0)?, r.get(1)?)),
                 )
@@ -1846,7 +1859,7 @@ mod tests {
         .unwrap();
         snapshot_with(&fx, "src/a.rs").await;
         snapshot_with(&fx, "src/b.rs").await;
-        assert_eq!(stale_ref_count(&fx, "wiki:lib").await, 2);
+        assert_eq!(stale_ref_count(&fx, "oxplow:oxplow/wiki?slug=lib").await, 2);
 
         run(
             &fx,
@@ -1855,12 +1868,12 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(stale_ref_count(&fx, "wiki:lib").await, 1);
+        assert_eq!(stale_ref_count(&fx, "oxplow:oxplow/wiki?slug=lib").await, 1);
 
         run(&fx, VERIFY_REFS, json!({ "slug": "lib" }))
             .await
             .unwrap();
-        assert_eq!(stale_ref_count(&fx, "wiki:lib").await, 0);
+        assert_eq!(stale_ref_count(&fx, "oxplow:oxplow/wiki?slug=lib").await, 0);
 
         let err = run(
             &fx,
@@ -1898,7 +1911,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             spec.ui.unwrap().open_after_for(&out.result),
-            Ok(Some("wiki:fresh".to_string()))
+            Ok(Some("oxplow:oxplow/wiki?slug=fresh".to_string()))
         );
     }
 
@@ -2069,7 +2082,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             out.result,
-            json!({ "page": "wiki:kept-nowhere", "tracked": false })
+            json!({ "page": "oxplow:oxplow/wiki?slug=kept-nowhere", "tracked": false })
         );
         assert!(fx
             .svc
@@ -2113,7 +2126,7 @@ mod tests {
             .as_array()
             .unwrap()
             .iter()
-            .any(|v| v == "wiki:b"));
+            .any(|v| v == "oxplow:oxplow/wiki?slug=b"));
         assert_eq!(
             std::fs::read_to_string(page_path(&dir(&fx), "a")).unwrap(),
             "# A\n\n## Related\n\n- [[b]]\n"

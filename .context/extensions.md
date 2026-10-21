@@ -37,19 +37,27 @@ takes in a space extensions share (a metric key, a fact collector's id).
 The kinds' table (`contribution::KINDS`: manifest key, title, whether two
 extensions may share a name) is the one place those facts live.
 
-**A contribution's only public name is its ref** (`ContributionId::reference`,
-its `Display`; [resources.md](./resources.md) "Using refs"): `<kind>:<extension>/<id>`
-— `job:effort-review/review`, `collector:triage/todos`,
-`lens:acme/blocked`, `page:github/pr`, `model:effort-review/reviews` — or,
+**A contribution's only public name is its URI** (`ContributionId::reference`,
+its `Display`; [resources.md](./resources.md) "Using URIs"): the resource
+`oxplow/<kind>` with the kind's own name as the key param,
+`oxplow:oxplow/<kind>?<kind>=<extension>/<id>`
+— `oxplow:oxplow/job?job=effort-review/review`,
+`oxplow:oxplow/collector?collector=triage/todos`,
+`oxplow:oxplow/lens?lens=acme/blocked`,
+`oxplow:oxplow/page?page=github/pr`,
+`oxplow:oxplow/model?model=effort-review/reviews` — or,
 for a kind whose names are already global (`ContributionKind::global_name`:
-command, measure, metric, dimension, event type, ref kind),
-`<kind>:<name>` — `command:oxplow.review.accept`, `metric:acme.todos`.
+command, measure, metric, dimension, event type, resource),
+`oxplow:oxplow/<kind>?<kind>=<name>` —
+`oxplow:oxplow/command?command=oxplow.review.accept`,
+`oxplow:oxplow/metric?metric=acme.todos`.
 Storage (`v_contribution.ref`, `v_extension_run.contribution`,
 `v_job_run.job`), events, manifests (imports, exports, `where:`), grant
-keys and the desktop carry that string; every contribution kind registers
-its ref kind from `KINDS` (`uri::types::core_types`), so a new kind is
+keys and the desktop carry that string; every contribution kind in
+`KINDS` is a resource of oxplow (`oxplow/lens`, `oxplow/command`, …) whose
+key param is its own name (`build::key_param`), so a new kind is
 linkable with no other change. Text names a contribution as a
-`ContributionRef` (`FromStr`); a local ref says its owner, a global one is
+`ContributionRef` (`FromStr`); a local URI says its owner, a global one is
 resolved by the catalog (who declares that name). Starlark reads one with
 `uri.contribution(r)` → `{ kind, extension, id }`.
 
@@ -70,9 +78,8 @@ advisories, skills (global: the name), implementations (global:
 instance's id, its refs' segment and its commands' namespace), measures,
 metrics and dimensions (global: the key), models (global: the
 `v_<ext>_<name>` view), event types (global: the type string; one
-descriptor per type, its highest `v` the contract version), ref kinds
-(global: the kind; registered first, most specific namespace first, so
-`acme-pr`'s `acme_pr_` wins inside `acme`'s `acme_`), lenses, pages,
+descriptor per type, its highest `v` the contract version), resources
+(global: `<extension>/<name>`), lenses, pages,
 panels, slot mounts (`<slot>-<n>`), decorators (`decorator-<n>`),
 replacements and custom components (all mounted, no global name).
 
@@ -121,8 +128,8 @@ model references and withholds contributions before catalog publication.
 Exports are explicit opt-in. A stable contribution kind or a legacy alias
 does not make a contribution public.
 
-- Targets are contribution refs (`model:effort-review/reviews`). An
-  import of a globally named kind (`command:acme.pr.merge`) is of
+- Targets are contribution URIs (`oxplow:oxplow/model?model=effort-review/reviews`). An
+  import of a globally named kind (`oxplow:oxplow/command?command=acme.pr.merge`) is of
   whichever extension declares that name.
   An import has a consumer-local binding name, a positive integer contract
   version and required/optional status. Binding names are lowercase letters,
@@ -141,7 +148,7 @@ does not make a contribution public.
   warnings. Malformed declarations, zero versions, duplicate local bindings,
   self-imports and ambiguous exports are errors even when optional. There is
   no catalog-order winner for duplicate identities.
-  An optional import of a global name (`command:`, `event_type:`) that no
+  An optional import of a global name (a `command`, an `event_type`) that no
   extension declares is just a missing target: it degrades with the
   rest, and a report names the global name as its producer.
 - A blocked producer cannot supply a binding. Required failure propagates
@@ -543,7 +550,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   doesn't return.
 - **Surfaces.**
   - IPC and MCP: `run_lens`, `validate_extension`; `get_lens` is IPC
-    only, an agent reads a definition with `oxplow_read` (`lens:<ext>/<slug>`).
+    only, an agent reads a definition with `oxplow_read` (`oxplow:oxplow/lens?lens=<ext>/<slug>`).
   - An agent lists lenses, extensions and what each contributes with
     models, not tools: `v_lens`, `v_extension` and `v_contribution`
     (restated with each extension generation from the active catalog, the
@@ -572,7 +579,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     Agents write lens files with their normal Edit tool, under the filing
     guard, taught by the `oxplow-extension` skill.
 - **UI.**
-  - `lens:<extension>/<slug>` pages (`LensPage.tsx`) render `table`,
+  - `oxplow/lens` pages (`LensPage.tsx`; the URI `oxplow:oxplow/lens?lens=<extension>/<slug>`) render `table`,
     `list`, `number` (through `formatMetricValue`) and `markdown`.
     Linked cells go through `RouteLink`, so plain-click navigates in the
     tab.
@@ -586,8 +593,8 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     parts when the page holds the param). Copy, Add to Agent Context
     and the whole-lens actions are handed to the nav bar
     (`toolbarTo`). **A lens page is a function of its tab entry**
-    (`tabs/session.ts`): its params are its ref's
-    (`lens:<ext>/<slug>?k=v`, a declared page's `page:…?k=v`), and a
+    (`tabs/session.ts`): its params are its URI's
+    (`oxplow:oxplow/lens?lens=<ext>/<slug>&k=v`, a declared page's `oxplow:oxplow/page?page=…&k=v`), and a
     change goes back through `PageNavigation.setViewParams` with the values
     that differ from the defaults (`changedParams`, by type) — a filter
     replaces the entry, a selection pushes one. So a reopened tab, a
@@ -620,7 +627,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     (`Extension.pages`, `ExtensionPage`; checked at load in
     `parse_pages`: a kebab-case, unique id; a lens that exists;
     lowercase `params`; a `count` lens that exists). Its tab id is
-    `page:<extension>/<id>[?params]`, or `page:<id>` for the extension
+    the URI `oxplow:oxplow/page?page=<extension>/<id>[&params]`, or `page=<id>` for the extension
     whose `namespace:` is `oxplow` (oxplow-foundation: its pages are
     core-named as its commands are, `CORE_NAMESPACE`); `pageRef` carries
     it. `category` lists it in the launcher (none: a page only opened
@@ -640,7 +647,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     `init.page`, setting its title and actions as data core draws, and
     its view params and history state kept in its tab entry
     ("Custom components", protocol 7). A
-    page's `icon` is one of the ref-kind icons (`REF_KIND_ICONS`; an
+    page's `icon` is one of the resource icons (`RESOURCE_ICONS`; an
     unknown one is a load error); the tab strip, launcher, Go To lists
     and backlinks draw it (`PageKindIcon` by the page's id), the lens
     icon when it declares none. A page whose lens or count lens is
@@ -649,7 +656,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   - **Panels** (P6.G1, target §11.3): `panels: [{ id, title, icon?,
     scope: project | stream | thread, body, badge?, open?, collapsed?,
     count? }]` put a lens in the
-    left nav (`open`, a `page:<kind>` ref, is the page its header opens —
+    left nav (`open`, a `page` URI, is the page its header opens —
     a core page it summarizes, as Comments opens the inbox; absent, the
     body lens). `collapsed` is a lens shown compact while the
     panel is collapsed, as its summary (absent, a collapsed panel is just
@@ -700,7 +707,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       MCP `oxplow_run_lens_action` (which never confirms). The bus applies the
       command's `invokers.lens`, and the agent policy through
       `on_behalf_of`, so an agent can't reach a human-only command or
-      confirm one through a lens. The audit records `lens:<id>`.
+      confirm one through a lens. The audit records the lens's URI.
     - **The command runs after the read.** An action, a form submit and
       a component's invoke are resolved under one pinned catalog
       generation (`lens_actions::Prepared`: the lens, its `when`, the
@@ -815,7 +822,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     `oxplow-db/src/thread_answer_store.rs`). An agent answers with a lens
     rather than pasting rows: MCP **`oxplow_show_lens { lens | spec, params? }`**
     runs `oxplow.lens.show`, which stores a `thread_answer` (V124, model
-    `v_thread_answer`, ref `answer:<id>`) and returns the text rendering.
+    `v_thread_answer`, URI `oxplow:oxplow/answer?id=<id>`) and returns the text rendering.
     - **One lens shape, `LensSpec`**: what a lens file holds, what an
       answer stores and what `oxplow.lens.keep` writes (`Lens::from_spec`,
       `Lens::spec`). `extensions::save_lens(root, ext, slug, &spec,
@@ -1050,7 +1057,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   effect"). An agent's run that needs a person waits as a proposal
   ([commands.md](./commands.md), "Proposals").
 - **P8 (2026-10-02).** The experimental kinds run, in a private
-  extension: `event_types:` ("Event types"), `ref_kinds:` ("Ref kinds")
+  extension: `event_types:` ("Event types"), `ref_kinds:` (now `resources:`, "Resources")
   and `effects:` ("Effects"), through one swappable vocabulary. A change
   is reviewed by its impact — rows, collector outputs, effects'
   reactions — at any revision, on the CLI (`extension check --impact`)
@@ -1414,7 +1421,7 @@ requires: [tracker]      # optional: other extensions it needs on ("Sources and 
 build: { run: bun run build, output: dist, exclude: [node_modules] } # optional: built at deploy ("Builds")
 intent:                  # required
   purpose: What question it answers, or what job it does
-  origin: effort:eff42   # the thread/effort ref that created it, or null
+  origin: oxplow:oxplow/effort?id=eff42   # the thread/effort URI that created it, or null
   examples:              # inputs → expected outputs; fixtures for `extension test`
     - { name: …, input: {…}, expect: … }
 # kinds
@@ -1433,7 +1440,7 @@ advisories:  [...]   # see "Advisories"
 models:     [...]   # SQL models: ModelDecl entries + models/<name>.sql → v_<ext>_<name>; `key: [cols]`; `materialize: on_change | { every: 1h } | { incremental: <col> }` stores one (semantic-layer.md "Extension models", "Materialized models")
 pages: …  panels: …  # see "Panels" and "Pages"
 commands:  [...]   # Starlark scripts composing core commands, a scope's or its provider's operations (see "Commands")
-ref_kinds: …        # kinds of thing a ref can name (stable since P10; see "Ref kinds")
+resources: …        # kinds of thing a URI can name (see "Resources")
 event_types: …      # its own namespace's event types (stable; see "Event types", P8)
 implementations: …  # capability implementations it declares (oxplow-bundled declares the defaults)
 skills: …           # skills and slash commands for the coding agent
@@ -1448,20 +1455,20 @@ loaded. A lens gets into the launcher through its own `launcher.category`
 
 **What the loader checks** (`Extension.errors` / `Extension.warnings`):
 - shape: unknown keys, `manifest` version, `intent` present and
-  `intent.origin` a canonical ref; an empty `intent.examples` is a
+  `intent.origin` a canonical URI; an empty `intent.examples` is a
   warning;
 - lifecycle: `engine`, when given, is `>=MAJOR.MINOR[.PATCH]`;
 - cross-references: a `ui.slots` lens exists (and declares a param
   the slot binds); a composite's part lenses exist — in this extension or,
   once everything is loaded, in another; a `launcher` target is a
-  canonical ref. A metric's `sourceMeasure` or a fact collector's `facts` that
+  canonical URI. A metric's `sourceMeasure` or a fact collector's `facts` that
   is neither declared in the extension nor an `oxplow.*` built-in is a
   **warning** (it may come from the project's or another extension's
   `measures:`, which resolves when the catalog is assembled).
 
 **Each entry's error is at its own line.** Every list block — `commands`,
 `effects`, `collectors`, `pages`, `panels`, `implementations`, `skills`,
-`ref_kinds`, `custom_components`, `event_types.types`,
+`resources`, `custom_components`, `event_types.types`,
 `ui.decorators`, `ui.replacements` — and the manifest's own nested lists
 (`intent.examples`, `intent.prompts`, `ui.slots`) type their entries one
 at a time: a broken entry is left out with an error at its own line
@@ -1507,7 +1514,7 @@ door gives an author the same report, so an agent editing from a terminal
 and one calling MCP read identical `file:line: what — fix` lines.
 
 - **`scaffold(root, kind, name, origin)`** (`extension new <kind> <name>`)
-  writes `.oxplow/extensions/<name>/extension.yaml` (v2, an `intent` whose `origin` is the ref passed with `--origin`,
+  writes `.oxplow/extensions/<name>/extension.yaml` (v2, an `intent` whose `origin` is the URI passed with `--origin`,
   one example) and, but for a bare extension, that example's fixture
   `fixtures/basic.yaml` — then the kind's starter (P7.C6):
   - `lens` — `lenses/<name>.yaml`, open tasks in the viewer's stream, with
@@ -1544,7 +1551,7 @@ and one calling MCP read identical `file:line: what — fix` lines.
     ends; its example is a checkpoint expecting `{ skip: $any }`, and it
     passes the effort-policy suite as written;
   - `provider` — below; `extension` — the manifest only.
-  It refuses an existing folder, a bad name and a non-ref origin. **What
+  It refuses an existing folder, a bad name and an origin that isn't a URI. **What
   it writes passes `check` with no warnings and `extension test` clean**
   (a provider once a program replaces its stub) —
   `crates/oxplow-sdk/tests/just_works.rs` holds each kind to it, through
@@ -1793,7 +1800,7 @@ fixtures to it.
   upcast?: <payload> }` — the payload against the extension's declared
   schema (the newest version without `v`), and its upcast;
 - `input: { wikilink }`, `expect: { ref: <canonical ref> | null }` — what
-  `[[…]]` names with the extension's ref kinds beside core's;
+  `[[…]]` names with the extension's resources beside core's;
 - no fixture is a warning; an `input` naming none of these is an error.
 
 Then `questions.yaml`, each provider's conformance kit, and (P8.B5) each
@@ -1969,8 +1976,8 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   `ready` / `todo` ☐, `in_progress` ◐, `blocked` ⚠, `done` ✓,
   `canceled` ✗, `archived` ▣ (each with its own tone); the kinds `epic`,
   `task`, `wiki`, `file`, `folder`, `commit`, `diff`, `lens`, `metric`,
-  `dashboard`, `comment` (their pages' icons); and the ref-kind icon
-  names (`bug`, `git-pull-request`, … — `REF_KIND_ICONS`); past those,
+  `dashboard`, `comment` (their pages' icons); and the resource icon
+  names (`bug`, `git-pull-request`, … — `RESOURCE_ICONS`); past those,
   any page kind (`git-dashboard`, `alerts`, `work_item`, …) draws its
   page's icon, so a row of pages — a bookmark, a visit — can
   pass its `page_kind`. `tone`'s value
@@ -2002,7 +2009,7 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
 - **Rows drag into the agent's context**: a `list`, `table` or
   `tree` row whose first linked column resolves (`rowRef`) is draggable
   with the agent-context drag (`CONTEXT_REF_MIME`, `setContextRefDrag`) —
-  a working-tree file or wiki page as its `@` mention, any other ref as
+  a working-tree file or wiki page as its `@` mention, any other URI as
   `[oxplow ref …]` (`rowContextRef`). The agent terminal highlights and
   accepts it as for the core rows; the keyboard path is the row menu's
   Ask About This. A `tree`'s labels draw through their declared column
@@ -2040,7 +2047,7 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   and the lens's page leaves history (`NavigateOptions.replace`, so Back
   never returns to a submitted form; a target that can't live in a tab —
   an agent session, a stream or a thread — closes this one and is shown or
-  focused: New Stream's `oxplow.stream.create` opens `stream:<id>`); `stay` — nothing
+  focused: New Stream's `oxplow.stream.create` opens the stream's URI); `stay` — nothing
   opens (a form for the next entry). Outside a page (a panel) a page
   opens in a new tab whatever `then` says.
 - `alert`: a row-count or threshold condition that shows a panel badge
@@ -2090,7 +2097,7 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
 > `copy` on the Review Prompt lens.)
 
 Lenses render through one core `LensPage` / `LensSlots` in oxplow's design
-system, as a `lens:<ext>/<slug>` page kind. Bookmarks, backlinks, the
+system, as an `oxplow/lens` page kind. Bookmarks, backlinks, the
 launcher and sibling navigation work unchanged. Every lens has an "Improve
 with Agent" action that pastes `[oxplow lens <ext>/<slug>]` and its params
 into the agent's context through the existing add-to-context path; oxplow
@@ -2296,7 +2303,7 @@ change writes them (`setViewParams`; an echo of its own write is
 ignored, so typing isn't undone by a late one) and Back sets them again
 (`onViewParams`). With no view (a tile) they are its own. The host
 re-runs the lens when a commit lands
-or a ref moves (its reads). A row opens `commit:<sha>`; a Cmd/Ctrl-click
+or a ref moves (its reads). A row opens the commit's URI (`oxplow:oxplow/commit?sha=<sha>`); a Cmd/Ctrl-click
 opens it in a new tab (`navigate(ref, { newTab: true })`, bridge protocol
 3). The commit page's prev/next siblings, which oxplow's list passes, a
 component can't pass. It declares no commands, so it isn't a program to
@@ -2492,8 +2499,8 @@ not review acme: <why>" — never a spinner that doesn't end.
 
 A command an extension declares meets a person through its own `ui`
 ([commands.md](./commands.md) "Offering a command to a person"). One
-**about a ref's kind** (`ui: { label, group, about: work_item, input: {
-ref: "{{ref}}" } }`) is offered on that ref: its page's nav-bar
+**about a resource** (`ui: { label, group, about: oxplow/work_item, input: {
+ref: "{{ref}}" } }`) is offered on a URI of it: its page's nav-bar
 **Commands** menu (`RefCommandsMenu`, beside Ask) and a row's right-click
 menu for the row's ref (lens rows, by the first ref the row links to —
 `rowRef` — and Board cards), grouped by `ui.group`. Its input's strings
@@ -2767,7 +2774,7 @@ a shared extension's component acts with it. The github example's **PR
 Lifetimes** (`lenses/pr-lifetimes.yaml`, `components/pr-lifetimes/`)
 draws each pull request as a bar from opened to merged — a range the
 kit's charts don't draw; its filters re-run its own lens (`query`), a
-bar opens `github_pr:<n>` (`navigate`), and Sync runs `oxplow.collector.sync`
+bar opens `oxplow:github/pr?id=<n>` (`navigate`), and Sync runs `oxplow.collector.sync`
 (`invoke`) — a command outside the extension's namespace, so the
 manifest declares `permissions.commands` for it. The host's own re-run (`onUpdate`, at the lens's params) is
 asked again with a selected filter rather than drawn over it; a pull
@@ -2826,12 +2833,12 @@ parser.
 ## Decorators
 
 `ui.decorators` (P6b.C5; **stable since P10**; `extensions/decorators.rs`)
-put labels from one of the extension's **models** on core refs:
+put labels from one of the extension's **models** on URIs of a resource:
 
 ```yaml
 ui:
   decorators:
-    - { model: flags, kind: work_item, placement: ref-chip, label: label, color: color }
+    - { model: flags, resource: oxplow/work_item, placement: ref-chip, label: label, color: color }
 ```
 
 The model (`v_<extension>_<model>`) must declare a `ref` column and the
@@ -3187,7 +3194,7 @@ An extension sees an event as one shape, `EventView`
 | `seq` | its place in the log, the delivery order |
 | `at` | when it happened (RFC 3339) |
 | `source` | what emitted it: `human`, `agent:thr3`, `system:<c>`, `collector:<ext>/<id>`, `effect:<ext>/<id>`, `provider:<id>` |
-| `subject` | the canonical refs it's about |
+| `subject` | the URIs it's about |
 | `anchors` | `stream_id`, `thread_id`, `effort_id`, `turn_id`, `agent_session_id`, `snapshot_id` |
 | `payload` | its payload, carried to `v` |
 | `cause` | the id of the event that caused it |
@@ -3274,7 +3281,7 @@ promise is already built: a published `type@v` is a contract
 model's drift warning), a new shape is a new version with an upcast, and
 a removed type's rows stay readable. It was promoted to a stable kind
 on that evidence; every kind is stable now (`ui.decorators` and
-`ref_kinds` in P10, "Decorators" and "Ref kinds"; `effects` and
+`ref_kinds` (now `resources`) in P10, "Decorators" and "Resources"; `effects` and
 `custom_components` in P11, below and "Custom components";
 `ui.replacements` with oxplow-bundled's history graph; `providers` once
 the provider host was), so a kind carries no stability.
@@ -3429,150 +3436,109 @@ failing run that counts toward a disable.
 
 `resources:` declares what the extension's URIs name
 (`oxplow:<extension>/<resource>?<params>`): its params, the model that
-titles one, search, an icon and `[[prefix:…]]` sugar.
-oxplow-foundation declares oxplow's own the same way. The format, the
-checks and the registry are in `.context/resources.md` "oxplow URIs and
-declared resources"; `ref_kinds:` below is what it replaces.
-
-## Ref kinds
-
-`ref_kinds:` (P8.D6; **stable since P10**; `extension_ref_kinds.rs`,
-`vocabulary_reactor.rs`) adds kinds of thing a ref can name. It was
-promoted on the github example's pull requests (an example counts as a
-first-party use): kind `github_pr` over model `pull_request`, page `pr`,
-`[[pr:12]]`. What is promised: the manifest keys below, the portable id
-pattern subset, the page's `?ref=`, and `v_ref_kind`'s columns.
+titles one, search, an icon and `[[prefix:…]]` sugar. oxplow-foundation
+declares oxplow's own the same way. The grammar, the registry, the
+vocabulary and the stored forms are in `.context/resources.md`
+"Resources are declared"; this section is the manifest's side.
+`ref_kinds:` is gone: it is an unknown field now.
 
 ```yaml
-ref_kinds:
-  - kind: acme_pr             # <namespace>_<name>
+resources:
+  - name: pr                  # oxplow:acme/pr?id=12 (resource `acme/pr`)
     label: Pull request
-    id: '^\d+$'               # anchored
+    params: { id: { required: true, pattern: '^\d+$' } }
+    additional: false         # true: takes params beyond its own (page, lens)
     resolve: prs              # one of its models, with `ref` and `title` columns
-    page: pr                  # one of its pages, opened with `?ref=<ref>`
-    wikilink: pr              # optional `[[pr:12]]` sugar
+    title: title              # the column of `resolve` that titles one
     searchable: found         # optional: one of its models, with `ref`, `title` and `body`
-    icon: git-pull-request    # one of REF_KIND_ICONS
+    page: pr                  # optional: one of its pages, opened with `ref=<uri>`
+    icon: git-pull-request    # one of RESOURCE_ICONS
+    wikilink: { prefix: pr, param: id }   # optional `[[pr:12]]` sugar
 ```
 
-**Loading** (after models and pages) refuses, at `extension.yaml:<line>`:
-a kind outside the extension's namespace, an unanchored, broken or
-non-portable id regex (the desktop runs it in JS's backtracking engine,
-so it's held to a subset both engines read alike and JS can't be made
-to hang on — tsk797, tsk917 — parsed by `id_pattern`: printable ASCII,
-at most 256 characters, anchored `^…$` (an escaped `\$` isn't the
-anchor); characters, classes (not negated, no `[` inside, no `&&` `--`
-`~~` set operations), `\d`, `\w` and escaped punctuation (not `\<`
-`\>`, word boundaries in Rust), each with at most one quantifier (`? *
-+ {n} {n,} {n,m}`, at most 256; no lazy `?`, no `{,m}`); no groups,
+**Loading** (`extension_resources.rs`, after models and pages) refuses, at
+`extension.yaml:<line>`: a resource declared twice, a param key that
+breaks the grammar, a broken or non-portable `pattern` (the desktop runs
+it in JS's backtracking engine, so it is held to a subset both engines
+read alike and JS can't be made to hang on; parsed by `param_pattern`:
+printable ASCII, at most 256 characters, anchored `^…$` (an escaped `\$`
+isn't the anchor); characters, classes (not negated, no `[` inside, no
+`&&` `--` `~~` set operations), `\d`, `\w` and escaped punctuation (not
+`\<` `\>`, word boundaries in Rust), each with at most one quantifier
+(`? * + {n} {n,} {n,m}`, at most 256; no lazy `?`, no `{,m}`); no groups,
 alternation, `.` or other escapes. Two repeats of varying length must be
 fenced by a character the first can't match — `^[A-Z]+-\d+$` loads,
 `^\w+_\w+$` doesn't — so a failing match gives each back at most once,
-and no id length needs capping. What is kept, and what both the registry
-and `v_ref_kind.id_pattern` carry, spells every set out — `\d` is
+and no length needs capping. What is kept spells every set out — `\d` is
 `[0-9]`, never Rust's Unicode digits — escaping exactly what either
-engine reads as syntax), a `resolve` that isn't one of its models with `ref` and `title`, a
-`page` that isn't one of its pages, a `wikilink` core already reads
-(a core kind, `git`, `dir`, `finding`, `tsk`), an icon not in
-`REF_KIND_ICONS` (lucide names the desktop maps), a duplicate.
+engine reads as syntax), a `resolve` or `searchable` that isn't one of
+its models with the columns it needs, a `wikilink.param` that isn't one
+of its params, a `wikilink.prefix` that isn't lowercase letters, digits
+and `_`, a `page` that isn't one of its pages, and an icon not in
+`RESOURCE_ICONS` (lucide names the desktop maps).
 
-**Registering** is the vocabulary reactor's: core kinds plus each
-extension's, built by one constructor (`extension_ref_kinds::kind_spec`,
-which `extension test` uses too), so `validate_ref`, `[[acme_pr:12]]` and
-`[[pr:12]]` know them while the extension is installed and not after. A
-kind's namespace is a string prefix, so one may hold another's (`acme`'s
-`acme_` holds `acme-pr`'s `acme_pr_`): a kind in both is **the more
-specific namespace's** (tsk933) — `acme-pr` keeps `acme_pr_x`, and
-`acme`'s declaration of it is an error naming whose namespace it is.
-That, and any other kind two extensions both declare (the first keeps
-it), is settled at load by the descriptor registry
-(`descriptors::check_catalog`, which registers ref kinds most specific
-namespace first); the second's declaration is a load error naming both. A `wikilink:` that is one of the extension's own
-kinds is refused at load and costs only the sugar (both kinds load), so no name is both a
-kind and a sugar, and both resolvers read a sugar before a kind's own
-name (`canonical_wikilink`, `extensionWikilinkRef`). A **`wikilink:` prefix** another extension also uses (as
-its prefix, or as its kind) is an error on each and **costs only the
-sugar** (P10): `[[pr:…]]` links neither, but each namespaced kind still
-registers and links as `[[acme_pr:…]]`, so installing one extension never
-unlinks another's refs. A kind or prefix core holds is that extension's
-error. The pass
-restates `ref_kind` (V146) whole, read as `v_ref_kind` (kind, extension,
-label, id pattern, revisioned, wikilinks, resolve, page, icon); unlike
-event types, a removed extension's kinds leave, and refs to them are
-unrecognized again.
+**Registering** is the vocabulary reactor's: oxplow-foundation's
+resources plus each enabled extension's go into one `ResourceRegistry`,
+which refuses a second resource of a name and a second wikilink prefix
+(the later one's load error names both). `validate_ref` and `[[pr:12]]`
+know a resource while its extension is installed and not after. The pass
+restates the `resource` table, read as `v_resource` (resource, extension,
+label, params, additional, resolve, title, searchable, icon, wikilink,
+page); unlike event types, a removed extension's resources leave, and
+URIs to them dangle (they show as raw text).
 
-**The desktop** (P8.D7, `apps/desktop/src/refKinds.ts`) reads
-`v_ref_kind`'s rows (core's too) once (`useRefKindsLoader`, in `App`,
-re-read on `ModelsChanged`) into one process-wide list that the pure
-helpers consult and `useRefKinds` subscribes to:
-- `pageKindIconComponent` / `pageKindLabel` fall back to a kind's icon
-  (`REF_KIND_ICONS`, a lucide component per allowed name — a Rust test
+**The desktop** (`apps/desktop/src/resources.ts`) reads `v_resource`'s
+rows (core's too) once (`useResourcesLoader`, in `App`, re-read on
+`ModelsChanged`) into one process-wide list that the pure helpers consult
+and `useResources` subscribes to:
+- `resourceIcon` / the page-kind helpers fall back to a resource's icon
+  (`RESOURCE_ICONS`, a lucide component per allowed name — a Rust test
   keeps the two lists equal) and label;
-- `openRef("acme_pr:12", …)` (a link to the ref) opens
-  `page:acme/pr?ref=acme_pr:12` through the kind's page template, `page:acme/pr?ref={ref}` (resources.md
-  "Where a ref opens"; `extPageRef` carries params; `DeclaredPageView`
-  hands them to the lens as `initialParams`);
-- `preprocessWikilinks` turns `[[acme_pr:12]]` / `[[pr:12]]` into a link
-  when the id matches the kind's pattern (`extensionWikilinkRef`, as the
-  backend's `canonical_wikilink` does), `urlTransform` lets the kind's
-  scheme through, and the link's text becomes its title from the
-  `resolve` model (`useExtensionRefTitle`) unless the author labelled it.
+- opening a URI of the resource (`openRef`, resources.md "The desktop")
+  opens the resource's `page` with `ref=<uri>` (`resourcePageTabId`);
+  `DeclaredPageView` hands the params to the lens as `initialParams`;
+- `preprocessWikilinks` turns `[[pr:12]]` into a link when the value
+  matches the param's pattern (`extensionWikilinkRef`, as the backend's
+  `canonical_wikilink` does), and the link's text becomes its title from
+  the `resolve` model (`useExtensionRefTitle`) unless the author
+  labelled it.
 
-**Searchable kinds** (P9.D3, `kind_search.rs`). `searchable: <model>`
+**Searchable resources** (P9.D3, `kind_search.rs`). `searchable: <model>`
 names one of the extension's models with `ref`, `title` and `body`
-(checked at load, like `resolve`); `v_ref_kind.searchable` is its view
-(V155). Its rows are in the site-wide search index (`search_fts`) under
-the kind, so the launcher finds a pull request by its title or text and
-the hit opens the kind's page as any ref of it does (the desktop's
-opener, resources.md "Where a ref opens"; the row shows the kind's icon and
-label). A feed may add a `version` column (a row's `updated_at`): a
-recompute then reads every row's version and the title and body of the
-changed rows only.
+(checked at load, like `resolve`); `v_resource.searchable` is its view.
+Its rows are in the site-wide search index (`search_fts`) under the
+resource, so the launcher finds a pull request by its title or text and
+the hit opens the resource's page as any URI of it does (the row shows the
+resource's icon and label). A feed may add a `version` column (a row's
+`updated_at`): a recompute then reads every row's version and the title
+and body of the changed rows only.
 
 - It is **index-time ingestion, as an asset** — not a query-time UNION:
   `search_fts` owns the text it ranks (BM25 and `snippet()` need it in
   the index), and a UNION would run every extension's SQL per keystroke,
-  unranked. One `Materializer` per searchable kind (`search:<kind>`), its
-  inputs the tables behind the model's view (the registry's lineage; a
-  materialized model's own table): a commit touching one re-reads the
-  view after the assets' quiet window and restates the kind's entries in
-  its own transaction — never the writer's.
-- `Assets::sync_search_kinds` keeps them in step with `ref_kind` and the
-  model registry (the change loop runs it at start and when `ref_kind`,
-  `model` or `model_input` change). A kind that stops being searchable —
-  its extension removed, the key dropped — leaves the index with its
-  entries; so does one that went while oxplow wasn't running (an
-  `asset_state` row `search:<kind>` with no kind behind it).
-- Bounded: 20,000 rows a kind, 16 KiB of body a row. A row whose `ref`
-  isn't `<kind>:<id>` with an id matching the kind's pattern is skipped
-  (a hit must be something that opens), with a warning in the log.
+  unranked. One `Materializer` per searchable resource
+  (`search:<resource>`), its inputs the tables behind the model's view
+  (the registry's lineage; a materialized model's own table): a commit
+  touching one re-reads the view after the assets' quiet window and
+  restates the resource's entries in its own transaction — never the
+  writer's.
+- `Assets::sync_search_kinds` keeps them in step with `resource` and the
+  model registry (the change loop runs it at start and when `resource`,
+  `model` or `model_input` change). A resource that stops being
+  searchable — its extension removed, the key dropped — leaves the index
+  with its entries; so does one that went while oxplow wasn't running (an
+  `asset_state` row `search:<resource>` with no resource behind it).
+- Bounded: 20,000 rows a resource, 16 KiB of body a row. A row whose `ref`
+  isn't a URI of the resource is skipped (a hit must be something that
+  opens), with a warning in the log. oxplow-foundation's resources aren't
+  bounded.
 - Entries are project-global (`stream_id` NULL): a model is.
 
-**Revisioned extension kinds: designed, not built** (deferred in P10 by
-decision — nothing first-party has revisions to read). Today an extension's
-kind's ref takes no `@rev`: a revision is read by its reader (`git:`,
-`snap:` — the VCS and snapshot stores), and no extension's kind has one. The
-design, so building it is filling in, not deciding:
-
-- **The declaration:** `revisioned: true` on the kind. The loader then
-  requires its `resolve` model to declare a **`rev`** column: one row per
-  revision of a thing, `rev` NULL for the current one (so an unrevisioned
-  ref keeps resolving as now: `WHERE ref = :ref AND rev IS NULL`).
-  `KindSpec::revisioned` follows from it.
-- **The page:** its lens declares a `rev` param, and the page opens as
-  `page:<ext>/<page>?ref=<ref>&rev=<rev>` (`rev` omitted: current).
-- **Refs:** `[[pr:12@git:abc1234]]` and `github_pr:12@git:abc1234` parse
-  through the one ref grammar (resources.md); the registry's `validate`
-  accepts `@rev` only for a revisioned kind, as for core ones. A rev is
-  opaque to the kind — the kind's model decides what it matches.
-- **Search** entries stay rev-less: a hit is the thing, at its current
-  revision (`searchable:` reads the `rev IS NULL` rows).
-- **What would make it real:** the github collector keeping one row per
-  pull request **head commit** (`rev` = `git:<head sha>`, the latest
-  also stored with `rev` NULL), and a consumer that wants a pull request
-  as it stood — a review or an effort linking the PR at the commit it
-  reviewed. Until something reads it, building it would be an unproven
-  contract.
+**Revisions.** A revision is a URI param (`rev=git:abc1234`), and only
+files, directories and symbols take one; no extension's resource has one.
+A resource with revisions (a pull request as it stood at a head commit)
+is designed, not built: nothing first-party reads one yet, so building it
+would be an unproven contract.
 
 ## Ordering
 
@@ -3580,13 +3546,14 @@ When one event reaches several effects or collectors, their `after:`
 says which run first (`oxplow_domain::ordering`, compiled by
 `extensions::descriptors::check_catalog`).
 
-- **Targets are refs.** `effect:<ext>/<id>`, `collector:<ext>/<id>` (any
-  enabled extension's) or `consumer:<name>`, one of core's event consumers
+- **Targets are URIs.** `effect:<ext>/<id>`, `collector:<ext>/<id>` (any
+  enabled extension's) or `consumer:<name>` — short forms of
+  `oxplow:oxplow/effect?effect=<ext>/<id>` and so on — one of core's event consumers
   (`event_pump::CORE_CONSUMERS`, kept equal to what a booted app registers
   by `the_core_consumer_list_is_what_a_booted_app_registers`; the two
   that run extensions' contributions aren't targets). A bare name is this
   extension's own effect or collector, else a core consumer.
-  `Descriptor.after` and `v_contribution.after` hold the resolved refs.
+  `Descriptor.after` and `v_contribution.after` hold the resolved URIs.
 - **Mistakes are load errors.** A target nothing declares, a cycle (each
   member's extension gets the error once), or effects and collectors that
   wait on each other both ways (the two consumers would each wait on the
@@ -3880,12 +3847,12 @@ commands:
     ui:                                # how a person meets it (`.context/commands.md` "Offering a command")
       label: Finish Review
       group: Review
-      about: work_item                 # ref-bound; absent: search offers it
+      about: oxplow/work_item          # resource-bound; absent: search offers it
       input: { ref: "{{ref}}" }
     examples:
-      - { name: happy, input: { ref: "work_item:oxplow:tsk1" }, expect_commands: [oxplow.work_item.transition] }
-      - { name: gone, input: { ref: "work_item:oxplow:tsk9" }, answers: { sql.read: [[]] }, refuses: no such }
-    example: { ref: "work_item:oxplow:tsk1" }   # the input an agent is shown; a script's defaults to its first example that runs
+      - { name: happy, input: { ref: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" }, expect_commands: [oxplow.work_item.transition] }
+      - { name: gone, input: { ref: "oxplow:oxplow/work_item?id=tsk9&provider=oxplow" }, answers: { sql.read: [[]] }, refuses: no such }
+    example: { ref: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" }   # the input an agent is shown; a script's defaults to its first example that runs
 ```
 
 `example:` is the command's example input, for any handler (script,
@@ -4427,8 +4394,8 @@ tool: open_work              # offered as <namespace>_open_work
   `file_history { path, limit }` and `recent_commits { limit }` (the indexed
   log; `oxplow_vcs_log` goes past it), `snapshots { stream?, limit }` (with
   parent, trigger and whether it ran over budget) and `thread_notes
-  { thread }`. Params take refs (`thread:thr3`, `effort:eff9`,
-  `stream:str1`). Each reads published `v_*` models only, so it works with
+  { thread }`. Params take URIs (`oxplow:oxplow/thread?id=thr3`,
+  `oxplow:oxplow/effort?id=eff9`, `oxplow:oxplow/stream?id=str1`). Each reads published `v_*` models only, so it works with
   the bundled extension off.
 - Every agent-invokable command stays reachable through `run_command`
   whether or not it's a tool: a tool is a named entry for the ones an
@@ -4454,7 +4421,7 @@ tool: open_work              # offered as <namespace>_open_work
 - `v_lens`: every lens (`ref`, `extension`, `title`, `description`, `viz`,
   `params`, `hidden`); `v_extension` and `v_contribution` for the
   extensions and what they contribute.
-- `oxplow_read { ref: "lens:<id>" }`: the lens definition (in `content`): query, params with defaults, viz,
+- `oxplow_read { ref: "oxplow:oxplow/lens?lens=<id>" }`: the lens definition (in `content`): query, params with defaults, viz,
   columns/links and the file it lives in.
 - `oxplow_run_lens(id, params?, format?)`: **what the UI shows** for those
   params, as its text rendering by default — `LensText { lens, title,
@@ -4478,7 +4445,7 @@ tool: open_work              # offered as <namespace>_open_work
   lens's `empty` text. It's what `oxplow_run_lens`, `oxplow_get_open_page` and `copy`
   return, so an agent reads a lens the way the person sees it.
 - `oxplow_get_open_page(thread_id)` **(current)**: what the human has open in
-  that thread, for any page kind (`task:42`, `file:…`, `lens:…`). For a
+  that thread, for any page kind (a work item's, file's or lens's URI). For a
   lens it adds `lens`, the lens re-run with the human's *current*
   params as its text rendering, so "look at what I'm looking at" works.
   - The UI reports the active page (`report_open_page`, UI-only) together
@@ -4498,11 +4465,11 @@ tool: open_work              # offered as <namespace>_open_work
     area, prompt, about }`; `PromptSource::Area` in the catalog); a question with `about: <ref
     kind>` is phrased with "this" and is offered on pages for that kind
     (its `reaches` keeps concrete fixture values for the answerability
-    check, which also checks `about` names a registered kind).
+    check, which also checks `about` names a declared resource).
   - An extension's are `intent.prompts: [{ prompt, about? }]` in its
     manifest (checked: non-empty, **one line** — a pasted line break is
     Enter in the terminal, so a multi-line prompt would send itself —
-    and `about` a registered ref kind).
+    and `about` a declared resource, `oxplow/work_item`).
   - `prompt_catalog::prompt_catalog(extensions)` merges them (core first,
     then enabled extensions by name), and each extension generation
     restates them as the model **`v_prompt`** (`catalog_prompt`, V85:
@@ -4511,12 +4478,12 @@ tool: open_work              # offered as <namespace>_open_work
     with their doc, `human_only` and value schema). An agent reads both
     with `oxplow_query_sql`; there is no catalog RPC.
   - The UI: the **Catalog** page, a foundation document lens
-    (`page:catalog`, `catalog-overview`: sections
+    (the `catalog` page, `catalog-overview`: sections
     `catalog-prompts` — grouped by who offers each, with an Ask row action
     on `oxplow.agent.draft` — `catalog` over `v_model`, and
     `catalog-config-keys`, with Open Settings as a page action on
     `oxplow.window.navigate`); the nav bar's Ask menu (suggested prompts for
-    the page's ref kind, `usePromptCatalog` over `v_prompt`); and
+    the page's resource, `usePromptCatalog` over `v_prompt`); and
     `EmptyState`'s prompts (usability.md → "Empty states").
 - **No launcher entries.** The manifest's old `launcher:` list (a ref,
   a command or a prompt) is gone: a page is a `pages:` entry or a lens; a
@@ -4584,9 +4551,9 @@ Each loads clean (`documented_examples_load_without_errors`):
 
 - **`github`** — an `exec` collector bringing pull requests in as the
   entity `v_github_pr`, with a lens joining them to streams and tasks;
-  and (P10) a pull request as a **ref kind**, `github_pr` — model
+  and (P10) a pull request as a **resource**, `github/pr` — model
   `pull_request` (`ref`, `title`, `body`; it resolves and is searchable),
-  page `pr` (the `pr` lens, given `?ref=`), `[[pr:12]]`. `crates/oxplow-
+  page `pr` (the `pr` lens, given `ref=<uri>`), `[[pr:12]]`. `crates/oxplow-
   sdk/tests/examples.rs` checks and tests it and opens a pull request.
 - **`schema-review`** — a review policy of its own: a fact collector
   counting DDL per migration file (its own measure and dimension), a
@@ -4691,7 +4658,7 @@ available to every extension:
 - Lens `actions:` as commands (P6.B1; the tsk329 registry retired).
 - Disabling extensions per project.
 - Advisories: the generic nudge primitive (see "Advisories").
-- Lens tabs carry params: `lens:<ext>/<slug>?k=v` (`lensRef(id, params)`),
+- Lens tabs carry params: `oxplow:oxplow/lens?lens=<ext>/<slug>&k=v` (`lensUri(id, params)`),
   so a slot lens's heading opens its page with the slot's values, and
   history and bookmarks keep them.
 - Panel `collapsed:` — a lens shown as a collapsed panel's summary
@@ -4746,7 +4713,7 @@ namespace and revision checks.
 host work item recognizer from a CatalogSnapshot without writing or swapping.
 Enabled load errors reject preparation. `PreparedVocabulary::replace_tx` uses
 a savepoint and rejects the complete set on any event/ref/subscription or
-recognizer diagnostic, restoring event contracts, retention and ref-kind rows.
+recognizer diagnostic, restoring event contracts, retention and resource rows.
 A changed recorded event schema and a shared wikilink prefix are candidate
 errors; a candidate never publishes a partial result.
 

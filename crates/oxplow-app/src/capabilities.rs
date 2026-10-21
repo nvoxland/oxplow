@@ -194,7 +194,7 @@ const fn harness(
 pub struct BuiltIn {
     pub entry: &'static str,
     pub capability: &'static str,
-    /// The provider id its items' refs carry (`work_item:oxplow:…`), which
+    /// The provider id its items' refs carry (`oxplow:oxplow/work_item?id=…&provider=oxplow`), which
     /// a declaration of it must use; `None` for a built-in whose
     /// implementation has no id of its own.
     pub provider: Option<&'static str>,
@@ -1951,12 +1951,18 @@ mod tests {
         let fx = crate::test_fixtures::services_with_effort().await;
         let svc = &fx.svc;
         let found = || {
-            oxplow_domain::uri::extract(&svc.vocabulary.current().kinds, "see tsk42 and [[tsk7]]")
-                .work_items
+            oxplow_domain::uri::extract(
+                &svc.vocabulary.current().resources,
+                "see tsk42 and [[tsk7]]",
+            )
+            .work_items
         };
         assert_eq!(
             found(),
-            vec!["oxplow:tsk42".to_string(), "oxplow:tsk7".to_string()]
+            vec![
+                oxplow_domain::uri::build::work_item_uri("oxplow", "tsk42"),
+                oxplow_domain::uri::build::work_item_uri("oxplow", "tsk7"),
+            ]
         );
         svc.config
             .write()
@@ -2005,7 +2011,7 @@ mod contribution_tests {
         assert_eq!(
             rows,
             vec![vec![
-                Text("skill:acme/deploy".into()),
+                Text("oxplow:oxplow/skill?skill=acme/deploy".into()),
                 Text("skill".into()),
                 Text("1.2.0".into()),
                 Text("deploy".into()),

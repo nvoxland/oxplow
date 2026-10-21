@@ -342,7 +342,7 @@ pub struct ResolvedSpec {
     pub target: Option<f64>,
     pub warn_at: Option<f64>,
     pub fail_at: Option<f64>,
-    /// `built-in` | `global` | `project` | `extension:<name>`.
+    /// `built-in` | `global` | `project` | `oxplow:oxplow/extension?name=<name>`.
     pub scope: String,
     /// The collector, in the defining extension, that computes its facts
     /// ([`MetricEntry::collector`]).
@@ -3066,9 +3066,9 @@ pub fn extension_scope(name: &str) -> String {
     oxplow_domain::uri::build::extension_uri(name)
 }
 
-/// The extension name in an `extension:<name>` scope.
+/// The extension name in an `oxplow:oxplow/extension?name=<name>` scope.
 pub fn scope_extension(scope: &str) -> Option<String> {
-    oxplow_domain::uri::build::id_of(scope, oxplow_domain::uri::types::EXTENSION).ok()
+    oxplow_domain::uri::build::id_of(scope, oxplow_domain::uri::resources::EXTENSION).ok()
 }
 
 /// Scopes in precedence order (later wins): built-in, global, each
@@ -5433,7 +5433,7 @@ metrics:
         let extensions = vec![("acme".to_string(), vec![define("acme.loc", None)])];
         let resolved = resolve_metrics(&[], &[], &extensions, &[]);
         assert_eq!(resolved.len(), 1);
-        assert_eq!(resolved[0].scope, "extension:acme");
+        assert_eq!(resolved[0].scope, "oxplow:oxplow/extension?name=acme");
         assert_eq!(resolved[0].display_kind, "gauge");
         assert_eq!(resolved[0].aggregation, "count");
     }
@@ -5534,7 +5534,7 @@ metrics:
         let resolved = resolve_metrics(&[], &[], &extensions, &used);
         assert_eq!(resolved.len(), 1);
         assert!(resolved[0].enabled);
-        assert_eq!(resolved[0].scope, "extension:acme");
+        assert_eq!(resolved[0].scope, "oxplow:oxplow/extension?name=acme");
     }
 
     #[test]
@@ -5812,7 +5812,7 @@ metrics:
         assert_eq!(resolved.len(), 2, "same key merges, distinct key adds");
         let loc = resolved.iter().find(|m| m.key == "acme.loc").unwrap();
         assert_eq!(loc.title, "Extension LOC", "extension wins over global");
-        assert_eq!(loc.scope, "extension:acme");
+        assert_eq!(loc.scope, "oxplow:oxplow/extension?name=acme");
         assert_eq!(loc.temporal_semantics, "additive");
         let churn = resolved.iter().find(|m| m.key == "acme.churn").unwrap();
         // Defaults applied.
@@ -5840,7 +5840,7 @@ metrics:
         let resolved = resolve_dimensions(&global, &extensions);
         assert_eq!(resolved.len(), 1);
         assert_eq!(resolved[0].label, "License", "extension wins");
-        assert_eq!(resolved[0].scope, "extension:acme");
+        assert_eq!(resolved[0].scope, "oxplow:oxplow/extension?name=acme");
         assert_eq!(resolved[0].value_type, "categorical", "default valueType");
         assert!(resolved[0].promote);
     }

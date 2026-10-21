@@ -4,7 +4,7 @@
   "description": "`vcs.head.moved@1`: HEAD moved while the worktree was clean, so the\nlatest snapshot now also is that commit.",
   "properties": {
     "from": {
-      "description": "`commit:<sha>` the snapshot pointed at before, if any.",
+      "description": "`oxplow:oxplow/commit?sha=<sha>` the snapshot pointed at before, if any.",
       "type": [
         "string",
         "null"
@@ -18,7 +18,7 @@
       "type": "string"
     },
     "to": {
-      "description": "`commit:<sha>` HEAD points at now.",
+      "description": "`oxplow:oxplow/commit?sha=<sha>` HEAD points at now.",
       "type": "string"
     }
   },

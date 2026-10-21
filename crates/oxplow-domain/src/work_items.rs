@@ -3,7 +3,7 @@
 //! interface. oxplow's own tasks are one provider (`oxplow`); an issue
 //! tracker is another. Reads are SQL over `v_work_item`; writes are the
 //! `work_item.*` commands, which the bus dispatches by the ref's provider
-//! segment (`work_item:<provider>:<id>`) to that provider's
+//! segment (`oxplow:oxplow/work_item?id=<id>&provider=<provider>`) to that provider's
 //! [`WorkItemVerbs`] — the same way for every list, oxplow's own included.
 
 use std::collections::BTreeMap;
@@ -133,8 +133,8 @@ pub struct WorkItemsFeatures {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct LinkRecord {
-    /// What it points at: another item (`work_item:<provider>:<id>`), or
-    /// any ref the item is about (`collector:triage/hot`, `effort:eff12`).
+    /// What it points at: another item (`oxplow:oxplow/work_item?id=<id>&provider=<provider>`), or
+    /// any ref the item is about (`oxplow:oxplow/collector?collector=triage/hot`, `oxplow:oxplow/effort?id=eff12`).
     pub target: String,
     /// The list's own type (oxplow: `blocks`, `discovered_from`,
     /// `relates_to`, `duplicates`, `supersedes`, `replies_to`, `about`).
@@ -162,7 +162,7 @@ pub struct CommentRecord {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WorkItemRecord {
-    /// `work_item:<provider>:<id>`.
+    /// `oxplow:oxplow/work_item?id=<id>&provider=<provider>`.
     #[serde(rename = "ref")]
     pub item_ref: String,
     pub title: String,
@@ -207,10 +207,9 @@ pub enum WorkItemsError {
     Unsupported { provider: String, feature: String },
 }
 
-/// The provider segment of `work_item:<provider>:<id>`.
-pub fn provider_of(item_ref: &str) -> Result<&str, WorkItemsError> {
-    crate::uri::build::work_item_id_of_uri(item_ref)
-        .and_then(|rest| rest.split_once(':'))
+/// The provider a work item's URI names.
+pub fn provider_of(item_ref: &str) -> Result<String, WorkItemsError> {
+    crate::uri::build::work_item_of_uri(item_ref)
         .filter(|(p, id)| !p.is_empty() && !id.is_empty())
         .map(|(p, _)| p)
         .ok_or_else(|| WorkItemsError::NotARef(item_ref.to_string()))
@@ -303,7 +302,7 @@ impl std::fmt::Debug for WorkItemsProvider {
     }
 }
 
-/// oxplow's own provider name: `work_item:oxplow:tsk<n>`.
+/// oxplow's own provider name: `oxplow:oxplow/work_item?id=tsk<n>&provider=oxplow`.
 pub const OXPLOW: &str = "oxplow";
 
 #[derive(Default)]
@@ -380,19 +379,20 @@ impl WorkItemsRegistry {
 
     /// The provider `item_ref` belongs to.
     pub fn for_ref(&self, item_ref: &str) -> Result<WorkItemsProvider, WorkItemsError> {
-        self.get(provider_of(item_ref)?)
+        self.get(&provider_of(item_ref)?)
     }
 
     /// The provider a `create` with no `provider` files on. Whether it is
     /// running is the caller's to check (`get`): an active provider that
     /// isn't is a failure naming it, never a silent fallback.
-    /// The canonical ref of `raw`, a loose id of the active work list's
-    /// (`tsk42` → `work_item:oxplow:tsk42`), or why it isn't one.
+    /// The URI of `raw`, a loose id of the active work list's (`tsk42` →
+    /// `oxplow:oxplow/work_item?id=tsk42&provider=oxplow`), or why it isn't
+    /// one.
     pub fn loose_ref(&self, raw: &str) -> Result<String, String> {
         let active = self.active();
         let Some(pattern) = self.get(&active).ok().and_then(|p| p.id_pattern) else {
             return Err(format!(
-                "`{raw}` isn't a work item ref (work_item:<provider>:<id>), and the active work \
+                "`{raw}` isn't a work item's URI, and the active work \
                  list declares no id of its own"
             ));
         };
@@ -414,13 +414,10 @@ impl WorkItemsRegistry {
             }
         };
         if matched {
-            Ok(crate::uri::build::of(
-                crate::uri::types::WORK_ITEM,
-                &format!("{active}:{raw}"),
-            ))
+            Ok(crate::uri::build::work_item_uri(&active, raw))
         } else {
             Err(format!(
-                "`{raw}` isn't a work item ref (work_item:<provider>:<id>) or an id of the active \
+                "`{raw}` isn't a work item's URI (oxplow:oxplow/work_item?id=<id>&provider=<provider>) or an id of the active \
                  work list (`{pattern}`)"
             ))
         }
@@ -491,10 +488,16 @@ mod tests {
         registry.register(named("oxplow"));
         registry.register(named("fake"));
         assert_eq!(
-            registry.for_ref("work_item:oxplow:tsk1").unwrap().id,
+            registry
+                .for_ref("oxplow:oxplow/work_item?id=tsk1&provider=oxplow")
+                .unwrap()
+                .id,
             "oxplow"
         );
-        let err = registry.for_ref("work_item:issues:ENG-12").err().unwrap();
+        let err = registry
+            .for_ref("oxplow:oxplow/work_item?id=ENG-12&provider=issues")
+            .err()
+            .unwrap();
         assert_eq!(
             err.to_string(),
             "no work-items provider `issues`; registered: fake, oxplow"
@@ -504,7 +507,7 @@ mod tests {
             WorkItemsError::NotARef(_)
         ));
         assert!(matches!(
-            provider_of("work_item::x"),
+            provider_of("oxplow:oxplow/work_item?id=x&provider="),
             Err(WorkItemsError::NotARef(_))
         ));
     }
@@ -527,7 +530,7 @@ mod tests {
     #[test]
     fn a_record_round_trips_under_its_wire_names() {
         let record = WorkItemRecord {
-            item_ref: "work_item:fake:W-1".into(),
+            item_ref: "oxplow:oxplow/work_item?id=W-1&provider=fake".into(),
             title: "t".into(),
             body: String::new(),
             state: CanonicalState::InProgress,
@@ -541,7 +544,7 @@ mod tests {
             list: Some(List::Thread("thr3".into())),
         };
         let json = serde_json::to_value(&record).unwrap();
-        assert_eq!(json["ref"], "work_item:fake:W-1");
+        assert_eq!(json["ref"], "oxplow:oxplow/work_item?id=W-1&provider=fake");
         assert_eq!(json["list"], serde_json::json!({ "thread": "thr3" }));
         assert_eq!(json["state"], "in_progress");
         assert_eq!(
@@ -574,7 +577,7 @@ mod tests {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WorkItemTransitionInput {
-    /// The item's ref (`work_item:oxplow:tsk42`, `work_item:issues:ENG-12`).
+    /// The item's ref (`oxplow:oxplow/work_item?id=tsk42&provider=oxplow`, `oxplow:oxplow/work_item?id=ENG-12&provider=issues`).
     #[serde(rename = "ref")]
     pub item_ref: String,
     /// The canonical state: `todo`, `in_progress`, `blocked`, `done` or
@@ -689,7 +692,7 @@ pub struct WorkItemDeleteInput {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WorkItemReorderInput {
-    /// The task's ref (`work_item:oxplow:tsk42`).
+    /// The task's ref (`oxplow:oxplow/work_item?id=tsk42&provider=oxplow`).
     #[serde(rename = "ref")]
     pub item_ref: String,
     /// Put it just before this item of the same list.

@@ -53,11 +53,15 @@ impl AsyncEventConsumer for SymbolCollector {
             return Ok(());
         }
         let stream = payload["stream"].as_str().and_then(|r| {
-            oxplow_domain::uri::build::parse_as::<StreamId>(r, oxplow_domain::uri::types::STREAM)
-                .ok()
+            oxplow_domain::uri::build::parse_as::<StreamId>(
+                r,
+                oxplow_domain::uri::resources::STREAM,
+            )
+            .ok()
         });
         let snapshot = payload["snapshot"].as_str().and_then(|r| {
-            oxplow_domain::uri::build::parse_as::<i64>(r, oxplow_domain::uri::types::SNAPSHOT).ok()
+            oxplow_domain::uri::build::parse_as::<i64>(r, oxplow_domain::uri::resources::SNAPSHOT)
+                .ok()
         });
         let (Some(stream), Some(snapshot)) = (stream, snapshot) else {
             return Ok(());
@@ -239,8 +243,14 @@ mod tests {
             .append(oxplow_domain::Envelope::typed::<SnapshotTaken>(
                 "system:test",
                 &SnapshotTakenV2 {
-                    stream: format!("stream:{stream}"),
-                    snapshot: format!("snapshot:{snap}"),
+                    stream: oxplow_domain::uri::build::keyed(
+                        oxplow_domain::uri::resources::STREAM,
+                        &stream.to_string(),
+                    ),
+                    snapshot: oxplow_domain::uri::build::keyed(
+                        oxplow_domain::uri::resources::SNAPSHOT,
+                        &snap.to_string(),
+                    ),
                     parent: None,
                     trigger: oxplow_domain::snapshot::SnapshotTrigger::TurnEnd,
                     unchanged: false,
@@ -289,10 +299,30 @@ mod tests {
             )
             .await,
             serde_json::json!([
-                ["symbol:Lib/b.py/Widget", "class", null, snap],
-                ["symbol:Lib/b.py/Widget::spin", "method", "Widget", snap],
-                ["symbol:a.py/Widget", "class", null, snap],
-                ["symbol:a.py/Widget::spin", "method", "Widget", snap],
+                [
+                    "oxplow:oxplow/symbol?path=Lib/b.py&symbol=Widget",
+                    "class",
+                    null,
+                    snap
+                ],
+                [
+                    "oxplow:oxplow/symbol?path=Lib/b.py&symbol=Widget::spin",
+                    "method",
+                    "Widget",
+                    snap
+                ],
+                [
+                    "oxplow:oxplow/symbol?path=a.py&symbol=Widget",
+                    "class",
+                    null,
+                    snap
+                ],
+                [
+                    "oxplow:oxplow/symbol?path=a.py&symbol=Widget::spin",
+                    "method",
+                    "Widget",
+                    snap
+                ],
             ])
         );
         assert_eq!(
@@ -312,7 +342,7 @@ mod tests {
         .await;
         assert_eq!(
             rows(&svc, "SELECT ref, snapshot_id FROM v_symbol ORDER BY ref").await,
-            serde_json::json!([["symbol:Lib/b.py/go", later]])
+            serde_json::json!([["oxplow:oxplow/symbol?path=Lib/b.py&symbol=go", later]])
         );
     }
 
@@ -333,8 +363,8 @@ mod tests {
         assert_eq!(
             rows(&svc, "SELECT ref, snapshot_id FROM v_symbol ORDER BY ref").await,
             serde_json::json!([
-                ["symbol:a.py/Widget", snap],
-                ["symbol:a.py/Widget::spin", snap]
+                ["oxplow:oxplow/symbol?path=a.py&symbol=Widget", snap],
+                ["oxplow:oxplow/symbol?path=a.py&symbol=Widget::spin", snap]
             ])
         );
         assert_eq!(backfill(&svc).await.unwrap(), 0);

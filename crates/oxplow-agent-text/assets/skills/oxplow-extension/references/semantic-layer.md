@@ -33,23 +33,25 @@
 
 ## Refs in scripts and SQL
 
-Everything in oxplow has one identity, its ref (`effort:eff12`,
-`work_item:oxplow:<id>`, `file:src/a.rs`, `collector:triage/todos`).
+Everything in oxplow has one identity, its ref (`oxplow:oxplow/effort?id=eff12`,
+`oxplow:oxplow/work_item?id=<id>&provider=oxplow`, `oxplow:oxplow/file?path=src/a.rs`, `oxplow:oxplow/collector?collector=triage/todos`).
 Carry refs; never assemble or dissect them:
 
 - **In SQL**, select the model's `ref` column (`v_effort.ref`,
-  `v_decision.ref`, `v_thread.ref`, `v_work_item.ref`, …) and compare
-  refs to refs: `WHERE ref = :ref`. Never `'effort:eff' || id` or
-  `substr(ref, …)`.
-- **To link one lens to another from SQL**, use `lens_ref(id, key1,
-  value1, …)`: `lens_ref('oxplow-bundled/thread-activity', 'thread_id',
-  thread_id)` gives `lens:oxplow-bundled/thread-activity?thread_id=7`
-  (params escaped, a NULL value left out; an odd argument count is an
-  error). Never `'lens:…?x=' || value`.
-- **In a script**, build with `uri.build("file", f["path"])` and read
-  with `uri.parse(r)` / `uri.id(r, kind = "effort")` (which refuses a ref
-  of another kind) / `uri.type(r)` / `uri.is_uri(v)`. Never
-  `"effort:eff" + str(id)` or `r[len("effort:eff"):]`.
+  `v_decision.ref`, `v_thread.ref`, `v_work_item.ref`, …) — each an
+  oxplow URI (`oxplow:oxplow/effort?id=eff12`) — and compare URIs to URIs:
+  `WHERE ref = :ref`. To build one, `uri(resource, key1, value1, …)`:
+  `uri('oxplow/effort', 'id', 'eff' || id)`; to read a param back,
+  `uri_param(ref, 'id')`. Never `'oxplow:…' || id` or `substr(ref, …)`.
+- **To link one lens to another from SQL**, `uri('oxplow/lens', 'lens',
+  'oxplow-bundled/thread-activity', 'thread_id', thread_id)` gives
+  `oxplow:oxplow/lens?lens=oxplow-bundled/thread-activity&thread_id=7`
+  (params escaped and sorted, a NULL value left out).
+- **In a script**, build with `uri.build("oxplow/file", path = f["path"])`
+  and read with `uri.parse(r)` (`{ resource, params, view }`) /
+  `uri.param(r, "path")` / `uri.id(r, resource = "oxplow/effort")` (which
+  refuses a URI of another resource) / `uri.resource(r)` / `uri.is_uri(v)`.
+  Never `"oxplow:oxplow/effort?id=" + id` or slicing a URI.
 - **In a lens action's input**, pass a row's ref column
   (`{ ref: "{{row.ref}}" }`), not a ref rebuilt from an id.
 - **A ref may dangle.** The thing it names can be deleted, or its
@@ -97,8 +99,8 @@ SELECT ref, title FROM ref('work_item') WHERE state = 'blocked'
   the files change. A failing declared test shows in the extension's
   errors and `v_model_test`, and the view stays up.
 - **Let other extensions build on it** by exporting it:
-  `exports: [{ contribution: <ext>/model/<name>, version: 1, visibility:
-  stable }]` (the version is the model's). Unexported, it's yours alone.
+  `exports: [{ contribution: "oxplow:oxplow/model?model=<ext>/<name>", version: 1,
+  visibility: stable }]` (the version is the model's). Unexported, it's yours alone.
 
 ### Importing another extension's model
 
@@ -107,7 +109,7 @@ the binding:
 
 ```yaml
 imports:
-  - { id: reviews, contribution: model:effort-review/reviews, version: 1, optional: true }
+  - { id: reviews, contribution: "oxplow:oxplow/model?model=effort-review/reviews", version: 1, optional: true }
 ```
 
 ```sql

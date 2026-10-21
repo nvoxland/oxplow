@@ -267,7 +267,7 @@ async fn examples(host: &Host, ext: &Extension, report: &mut TestReport) {
             event_type_example(ext, &ex, t, report);
         } else if let Some(link) = ex.input.get("wikilink").and_then(Value::as_str) {
             report.ran.push(format!("example {}", ex.name));
-            ref_kind_example(ext, &ex, link, report);
+            wikilink_example(ext, &ex, link, report);
         } else if let Some(id) = ex.input.get("collector").and_then(Value::as_str) {
             collector_example(host, ext, &ex, id, report).await;
         } else if let Some(cmd) = ex
@@ -618,11 +618,9 @@ async fn job_example(
             return;
         }
     };
-    let Some(job) = queued
-        .get("jobRun")
-        .and_then(Value::as_str)
-        .and_then(|r| oxplow_domain::uri::build::id_of(r, oxplow_domain::uri::types::JOB_RUN).ok())
-    else {
+    let Some(job) = queued.get("jobRun").and_then(Value::as_str).and_then(|r| {
+        oxplow_domain::uri::build::id_of(r, oxplow_domain::uri::resources::JOB_RUN).ok()
+    }) else {
         report
             .errors
             .push(format!("{shown}:1: job `{id}`: {queued} names no job"));
@@ -823,7 +821,7 @@ async fn seed_rows(
 /// The example's `setup: [{ command, input?, as? }]`: oxplow's own
 /// commands, run in order before the example, to make the data its
 /// contribution reads (a work item, an effort, a test run). Each runs as a
-/// person, or with `as: agent` as the agent of `thread:thr1`. `false`,
+/// person, or with `as: agent` as the agent of `oxplow:oxplow/thread?id=thr1`. `false`,
 /// with the error reported, when one fails.
 async fn run_setup(host: &Host, ex: &Example<'_>, report: &mut TestReport) -> bool {
     let shown = ex.shown;
@@ -878,7 +876,7 @@ async fn run_setup(host: &Host, ex: &Example<'_>, report: &mut TestReport) -> bo
 /// Load component `id` as its frame would, then ask what the fixture asks
 /// (`input: { component, lens?, items?: [title], queries?: [{ asset,
 /// params? }], invokes?: [{ command, input? }] }`): `items` are
-/// work items filed first (`work_item:oxplow:tsk1`, …); each query's rows and each
+/// work items filed first (`oxplow:oxplow/work_item?id=tsk1&provider=oxplow`, …); each query's rows and each
 /// invoke's outcome — what the command answers when the component calls it —
 /// against `expect: { queries?: [{ rows }], invokes?: [{ ok?,
 /// refused? }] }`. The frame itself isn't drawn here.
@@ -1449,20 +1447,19 @@ fn event_type_example(
     }
 }
 
-/// What a `[[…]]` names with the extension's ref kinds beside core's
-/// (`input: { wikilink: "pr:12" }`): `expect: { ref: "acme_pr:12" | null }`.
-fn ref_kind_example(ext: &Extension, ex: &Example<'_>, link: &str, report: &mut TestReport) {
-    let mut kinds = oxplow_domain::uri::types::core_types();
-    for k in &ext.ref_kinds {
-        if let Ok(spec) = oxplow_app::extension_ref_kinds::kind_spec(k) {
-            let _ = kinds.register(spec);
-        }
+/// What a `[[…]]` names with the extension's resources beside
+/// oxplow-foundation's (`input: { wikilink: "pr:12" }`):
+/// `expect: { uri: "oxplow:acme/pr?id=12" | null }`.
+fn wikilink_example(ext: &Extension, ex: &Example<'_>, link: &str, report: &mut TestReport) {
+    let mut resources = oxplow_domain::uri::resources::foundation().clone();
+    for r in &ext.resources {
+        let _ = resources.register(r.decl.clone());
     }
-    let got = oxplow_domain::uri::canonical_wikilink(&kinds, link).map(|r| r.to_string());
-    if let Some((path, want, got)) = first_mismatch(&ex.expect, &json!({ "ref": got })) {
+    let got = oxplow_domain::uri::canonical_wikilink(&resources, link).map(|u| u.to_string());
+    if let Some((path, want, got)) = first_mismatch(&ex.expect, &json!({ "uri": got })) {
         report.errors.push(format!(
             "{}:1: `[[{link}]]` names {got} at `{path}`, the example expects {want} — fix: the \
-             ref kind's `id`/`wikilink`, or the example's `expect`",
+             resource's `params`/`wikilink`, or the example's `expect`",
             ex.shown
         ));
     }
@@ -2060,14 +2057,12 @@ async fn session(
             Ok(out) => {
                 // A ref of its own kind it answers with (an item it filed)
                 // is left in the provider's system.
-                let kind =
-                    oxplow_domain::capability::contract(&spec.capability).and_then(|c| c.ref_kind);
-                if let Some(made) = out
-                    .result
-                    .get("ref")
-                    .and_then(Value::as_str)
-                    .filter(|r| kind.is_some_and(|k| r.starts_with(&format!("{k}:"))))
-                {
+                let resource =
+                    oxplow_domain::capability::contract(&spec.capability).and_then(|c| c.resource);
+                if let Some(made) = out.result.get("ref").and_then(Value::as_str).filter(|u| {
+                    resource
+                        .is_some_and(|r| oxplow_domain::uri::build::parse_resource(u, r).is_ok())
+                }) {
                     if !report.left.iter().any(|l| l == made) {
                         report.left.push(made.to_string());
                     }
@@ -2808,7 +2803,7 @@ commands:
             root,
             ".oxplow/extensions/maker/extension.yaml",
             &format!(
-                "manifest: 2\nname: maker\nintent:\n  purpose: Make items.\nmodels:\n  - name: items\n    version: {version}\n    description: Items.\n    columns:\n      - {{ name: ref, type: TEXT, doc: A work item. }}\nexports:\n  - {{ contribution: model:maker/items, version: {version}, visibility: stable }}\n"
+                "manifest: 2\nname: maker\nintent:\n  purpose: Make items.\nmodels:\n  - name: items\n    version: {version}\n    description: Items.\n    columns:\n      - {{ name: ref, type: TEXT, doc: A work item. }}\nexports:\n  - {{ contribution: oxplow:oxplow/model?model=maker/items, version: {version}, visibility: stable }}\n"
             ),
         );
         write(
@@ -2819,7 +2814,7 @@ commands:
         write(
             root,
             ".oxplow/extensions/reader/extension.yaml",
-            "manifest: 2\nname: reader\nintent:\n  purpose: Read the maker's items.\nimports:\n  - { id: items, contribution: model:maker/items, version: 1, optional: true }\n",
+            "manifest: 2\nname: reader\nintent:\n  purpose: Read the maker's items.\nimports:\n  - { id: items, contribution: oxplow:oxplow/model?model=maker/items, version: 1, optional: true }\n",
         );
         write(
             root,
@@ -2838,10 +2833,10 @@ commands:
         assert_eq!(report.errors, Vec::<String>::new());
         assert_eq!(
             report.imports,
-            ["`items` → model:maker/items v1: available"]
+            ["`items` → oxplow:oxplow/model?model=maker/items v1: available"]
         );
         assert!(render(&report, crate::Format::Text)
-            .contains("import `items` → model:maker/items v1: available\n"));
+            .contains("import `items` → oxplow:oxplow/model?model=maker/items v1: available\n"));
         let checked = crate::check(
             dir.path(),
             "reader",
@@ -2853,14 +2848,14 @@ commands:
         .await
         .unwrap();
         assert!(crate::render_findings(&checked, crate::Format::Text)
-            .contains("import `items` → model:maker/items v1: available\n"));
+            .contains("import `items` → oxplow:oxplow/model?model=maker/items v1: available\n"));
 
         let dir = tempfile::tempdir().unwrap();
         producer_and_consumer(dir.path(), 2);
         let report = test_extension(dir.path(), "reader", false).await.unwrap();
         assert_eq!(
             report.imports,
-            ["`items` → model:maker/items v1: unavailable (maker exports v2)"]
+            ["`items` → oxplow:oxplow/model?model=maker/items v1: unavailable (maker exports v2)"]
         );
 
         let dir = tempfile::tempdir().unwrap();
@@ -2873,7 +2868,7 @@ commands:
         let report = test_extension(dir.path(), "reader", false).await.unwrap();
         assert_eq!(
             report.imports,
-            ["`items` → model:maker/items v1: unavailable (maker is disabled)"]
+            ["`items` → oxplow:oxplow/model?model=maker/items v1: unavailable (maker is disabled)"]
         );
     }
 
@@ -2938,7 +2933,7 @@ commands:
 name: visits
 intent:
   purpose: Long visits.
-  origin: thread:thr1
+  origin: oxplow:oxplow/thread?id=thr1
   examples: []
 models:
   - name: long_visits
@@ -3048,7 +3043,7 @@ def transform(x):
     thread = e["anchors"].get("thread_id")
     if to == "in_progress" and thread != None:
         return {"commands": [{"name": "oxplow.effort.open",
-                              "input": {"thread": uri.build("thread", thread), "work_item": item}}]}
+                              "input": {"thread": uri.build("oxplow/thread", id = thread), "work_item": item}}]}
     if to == "done" or to == "canceled":
         rows = scope("sql.read", {"sql": "SELECT ref FROM v_effort WHERE work_item = :w AND ended_at IS NULL",
                                   "params": {"w": item}})
@@ -3084,7 +3079,7 @@ implementations:
             root,
             ".oxplow/extensions/acme/fixtures/basic.yaml",
             &format!(
-                "input: {{ implementation: tidy, event: {{ type: thread.checkpoint, payload: {{ thread: \"thread:thr1\", turn: \"turn:trn1\", reason: turn_end, snapshot: \"snapshot:1\", changed: false, writing_tools: 0 }} }} }}\nexpect: {basic_expect}\n"
+                "input: {{ implementation: tidy, event: {{ type: thread.checkpoint, payload: {{ thread: \"oxplow:oxplow/thread?id=thr1\", turn: \"oxplow:oxplow/turn?id=trn1\", reason: turn_end, snapshot: \"oxplow:oxplow/snapshot?id=1\", changed: false, writing_tools: 0 }} }} }}\nexpect: {basic_expect}\n"
             ),
         );
         write(
@@ -3323,8 +3318,8 @@ models:
       - { name: title, type: \"\", doc: Its title. }
 pages:
   - { id: pr, title: Pull request, category: Work, lens: open }
-ref_kinds:
-  - { kind: acme_pr, label: Pull request, id: '^\\d+$', resolve: prs, page: pr, wikilink: pr, icon: git-pull-request }
+resources:
+  - { name: pr, label: Pull request, params: { id: { required: true, pattern: '^[0-9]+$' } }, resolve: prs, page: pr, wikilink: { prefix: pr, param: id }, icon: git-pull-request }
 ",
         );
         write(
@@ -3345,7 +3340,7 @@ ref_kinds:
         write(
             root,
             ".oxplow/extensions/acme/models/prs.sql",
-            "SELECT 'acme_pr:1' AS ref, 'One' AS title",
+            "SELECT 'oxplow:acme/pr?id=1' AS ref, 'One' AS title",
         );
         write(
             root,
@@ -3361,7 +3356,7 @@ ref_kinds:
         write(
             root,
             ".oxplow/extensions/acme/fixtures/link.yaml",
-            "input: { wikilink: \"pr:12\" }\nexpect: { ref: \"acme_pr:12\" }\n",
+            "input: { wikilink: \"pr:12\" }\nexpect: { uri: \"oxplow:acme/pr?id=12\" }\n",
         );
         let report = test_extension(root, "acme", false).await.unwrap();
         assert!(report.ok, "{:?}", report.errors);
@@ -3377,7 +3372,7 @@ ref_kinds:
         write(
             root,
             ".oxplow/extensions/acme/fixtures/link.yaml",
-            "input: { wikilink: \"pr:12\" }\nexpect: { ref: \"acme_pr:13\" }\n",
+            "input: { wikilink: \"pr:12\" }\nexpect: { uri: \"oxplow:acme/pr?id=13\" }\n",
         );
         let errors = test_extension(root, "acme", false)
             .await
@@ -3411,7 +3406,7 @@ name: editor
 intent:
   purpose: Edit work items.
   examples:
-    - { name: edit, input: { form: edit-item, params: { ref: 'work_item:oxplow:tsk1' } }, expect: the ref is fixed }
+    - { name: edit, input: { form: edit-item, params: { ref: 'oxplow:oxplow/work_item?id=tsk1&provider=oxplow' } }, expect: the ref is fixed }
 ",
         );
         write(
@@ -3422,7 +3417,7 @@ intent:
         write(
             root,
             ".oxplow/extensions/editor/fixtures/edit.yaml",
-            "input: { form: edit-item, params: { ref: 'work_item:oxplow:tsk1' } }\nexpect: { values: { ref: 'work_item:oxplow:tsk1' }, fixed: [ref], fields: [title, body] }\n",
+            "input: { form: edit-item, params: { ref: 'oxplow:oxplow/work_item?id=tsk1&provider=oxplow' } }\nexpect: { values: { ref: 'oxplow:oxplow/work_item?id=tsk1&provider=oxplow' }, fixed: [ref], fields: [title, body] }\n",
         );
         let report = test_extension(root, "editor", false).await.unwrap();
         assert_eq!(report.errors, Vec::<String>::new());
@@ -3435,7 +3430,7 @@ intent:
         write(
             root,
             ".oxplow/extensions/editor/fixtures/edit.yaml",
-            "input: { form: edit-item, params: { ref: 'work_item:oxplow:tsk1' } }\nexpect: { fixed: [ref, title] }\n",
+            "input: { form: edit-item, params: { ref: 'oxplow:oxplow/work_item?id=tsk1&provider=oxplow' } }\nexpect: { fixed: [ref, title] }\n",
         );
         let errors = test_extension(root, "editor", false)
             .await

@@ -45,11 +45,9 @@ use std::sync::Arc;
 use super::util::{parse, schema};
 use super::{Handler, HandlerOutput, Invocation};
 
+/// The thread a work-item command names, by its URI.
 fn parse_thread(raw: &str, field: &str) -> Result<ThreadId, CommandError> {
-    raw.parse::<ThreadId>().map_err(|e| CommandError::Invalid {
-        field: Some(field.into()),
-        message: format!("{e}"),
-    })
+    super::util::ref_id(raw, oxplow_domain::uri::resources::THREAD, field)
 }
 
 /// The thread a new item is filed on, whatever tracker holds it
@@ -90,7 +88,7 @@ pub(crate) fn with_loose_refs(
         };
         // A ref stays as it is (a link's target may be any ref);
         // `parent_ref: ""` means no parent.
-        if raw.is_empty() || oxplow_domain::uri::build::type_of(raw).is_some() {
+        if raw.is_empty() || oxplow_domain::uri::build::resource_of(raw).is_some() {
             continue;
         }
         let canonical = registry
@@ -232,12 +230,12 @@ fn target_belongs(
     target: &str,
     field: &str,
 ) -> Result<(), CommandError> {
-    match oxplow_domain::uri::build::type_of(target) {
+    match oxplow_domain::uri::build::resource_of(target) {
         None => Err(invalid_at(
             field,
-            format!("`{target}` isn't a ref (<kind>:<id>)"),
+            format!("`{target}` isn't a URI (oxplow:<extension>/<resource>?…)"),
         )),
-        Some(kind) if kind == oxplow_domain::uri::types::WORK_ITEM => {
+        Some(kind) if kind == oxplow_domain::uri::resources::WORK_ITEM => {
             belongs(provider, target, field)
         }
         Some(_) => Ok(()),
@@ -280,7 +278,7 @@ fn check_link_targets(
 ) -> Result<(), CommandError> {
     let current = vocabulary.current();
     for (field, target) in link_targets(verb, input) {
-        oxplow_domain::uri::validate_ref(&current.kinds, &target)
+        oxplow_domain::uri::validate_uri(&current.resources, &target)
             .map_err(|e| invalid_at(&field, e.to_string()))?;
     }
     Ok(())
@@ -958,15 +956,15 @@ mod tests {
         for (name, input) in [
             (
                 NAME,
-                json!({ "ref": "work_item:issues:ENG-12", "to": "done" }),
+                json!({ "ref": "oxplow:oxplow/work_item?id=ENG-12&provider=issues", "to": "done" }),
             ),
             (
                 UPDATE,
-                json!({ "ref": "work_item:issues:ENG-12", "title": "x" }),
+                json!({ "ref": "oxplow:oxplow/work_item?id=ENG-12&provider=issues", "title": "x" }),
             ),
             (
                 COMMENT,
-                json!({ "ref": "work_item:issues:ENG-12", "body": "x" }),
+                json!({ "ref": "oxplow:oxplow/work_item?id=ENG-12&provider=issues", "body": "x" }),
             ),
         ] {
             let err = fx
@@ -980,7 +978,7 @@ mod tests {
                     assert_eq!(field.as_deref(), Some("/ref"), "{name}");
                     assert_eq!(
                         message,
-                        "`work_item:issues:ENG-12` is issues's, which isn't the active work list (`oxplow`)",
+                        "`oxplow:oxplow/work_item?id=ENG-12&provider=issues` is issues's, which isn't the active work list (`oxplow`)",
                         "{name}"
                     );
                 }
@@ -1000,7 +998,8 @@ mod tests {
             .await
             .unwrap_err();
         assert!(
-            err.to_string().contains("work_item:<provider>:<id>"),
+            err.to_string()
+                .contains("oxplow:oxplow/work_item?id=<id>&provider=<provider>"),
             "{err}"
         );
     }
@@ -1101,7 +1100,7 @@ mod tests {
                 json!({
                     "title": "filed",
                     "body": "the body",
-                    "thread": fx.thread.to_string(),
+                    "thread": oxplow_domain::uri::build::thread_uri(fx.thread),
                     "native": { "priority": "high" },
                 }),
                 false,
@@ -1285,7 +1284,7 @@ mod tests {
         assert!(filed.result["ref"]
             .as_str()
             .unwrap()
-            .starts_with("work_item:oxplow:"));
+            .ends_with("&provider=oxplow"));
         // Naming a provider isn't an input: the person chose the tracker.
         let named = fx
             .svc
@@ -1346,7 +1345,7 @@ mod tests {
             .run(
                 &Actor::Human,
                 CREATE,
-                json!({ "title": "theirs", "thread": fx.thread.to_string() }),
+                json!({ "title": "theirs", "thread": oxplow_domain::uri::build::thread_uri(fx.thread) }),
                 false,
             )
             .await
@@ -1489,7 +1488,7 @@ mod tests {
             stream_id: None,
         };
         let item = work_item_ref(fx.task);
-        let about = json!({ "ref": item, "target": "collector:gone/hot", "link_type": "about" });
+        let about = json!({ "ref": item, "target": "oxplow:oxplow/collector?collector=gone/hot", "link_type": "about" });
         let linked = fx
             .svc
             .commands
@@ -1511,12 +1510,19 @@ mod tests {
         fx.svc.event_pump.run_once().await.unwrap();
         assert_eq!(
             serde_json::to_value(link_rows().await).unwrap(),
-            json!([["collector:gone/hot", "collector", "about"]])
+            json!([[
+                "oxplow:oxplow/collector?collector=gone/hot",
+                "oxplow/collector",
+                "about"
+            ]])
         );
         let backlinks = fx
             .svc
             .page_ref_store
-            .list_backlinks("collector", "gone/hot", None)
+            .list_backlinks(
+                &oxplow_domain::uri::build::collector_uri("gone", "hot"),
+                None,
+            )
             .await
             .unwrap();
         assert_eq!(
@@ -1555,7 +1561,10 @@ mod tests {
 
         for (target, why) in [
             ("nope:x", "an unregistered kind"),
-            ("work_item:fake:W-1", "another list's item"),
+            (
+                "oxplow:oxplow/work_item?id=W-1&provider=fake",
+                "another list's item",
+            ),
             ("collector", "not a ref"),
         ] {
             let err = fx
@@ -1593,7 +1602,7 @@ mod tests {
                 CREATE,
                 json!({
                     "title": "Repair collector:triage/hot",
-                    "links": [{ "target": "collector:triage/hot", "link_type": "about" }],
+                    "links": [{ "target": "oxplow:oxplow/collector?collector=triage/hot", "link_type": "about" }],
                 }),
                 false,
             )
@@ -1614,7 +1623,7 @@ mod tests {
             .rows;
         assert_eq!(
             serde_json::to_value(rows).unwrap(),
-            json!([["collector:triage/hot", "about"]])
+            json!([["oxplow:oxplow/collector?collector=triage/hot", "about"]])
         );
     }
 
@@ -1648,7 +1657,11 @@ mod tests {
             )
             .await
             .unwrap();
-        let from_id = from.rsplit("tsk").next().unwrap().to_string();
+        let from_id = oxplow_domain::uri::build::work_item_of_uri(&from)
+            .unwrap()
+            .1
+            .trim_start_matches("tsk")
+            .to_string();
         assert_eq!(
             column(
                 &fx.svc,
@@ -1707,15 +1720,15 @@ mod tests {
         // Both are the item's page refs once the pump restates it from
         // the interface.
         fx.svc.event_pump.run_once().await.unwrap();
-        let id = from.strip_prefix("work_item:").unwrap().to_string();
+        let id = from.clone();
         let edges: Vec<(String, String)> = fx
             .svc
             .db
             .read(move |tx| {
                 let mut stmt = tx
                     .prepare(
-                        "SELECT ref_type, target_id FROM page_ref
-                         WHERE source_kind = 'work_item' AND source_id = ?1 ORDER BY ref_type",
+                        "SELECT ref_type, target_uri FROM page_ref
+                         WHERE source_uri = ?1 ORDER BY ref_type",
                     )
                     .map_err(oxplow_db::map_sql_err)?;
                 let rows = stmt
@@ -1726,9 +1739,12 @@ mod tests {
             })
             .await
             .unwrap();
-        let other_id = other.strip_prefix("work_item:").unwrap();
+        let other_id = other.as_str();
         assert!(
-            edges.contains(&("comment_file_ref".into(), "src/lib.rs".into())),
+            edges.contains(&(
+                "comment_file_ref".into(),
+                oxplow_domain::uri::build::file_uri("src/lib.rs")
+            )),
             "{edges:?}"
         );
         assert!(
@@ -1968,7 +1984,7 @@ mod tests {
             .run(
                 &other,
                 CREATE,
-                json!({ "title": "mine now", "thread": "thr9", "state": "in_progress" }),
+                json!({ "title": "mine now", "thread": "oxplow:oxplow/thread?id=thr9", "state": "in_progress" }),
                 false,
             )
             .await
@@ -2000,7 +2016,7 @@ mod tests {
                     "title": "filed",
                     "body": "see [[tsk1]]",
                     "state": "in_progress",
-                    "thread": fx.thread.to_string(),
+                    "thread": oxplow_domain::uri::build::thread_uri(fx.thread),
                 }),
                 false,
             )
@@ -2055,11 +2071,7 @@ mod tests {
         let out_refs = fx
             .svc
             .page_ref_store
-            .list_outbound(
-                oxplow_db::page_ref_projections::KIND_WORK_ITEM,
-                &oxplow_tasks::work_item_id(id),
-                None,
-            )
+            .list_outbound(&work_item_ref(id), None)
             .await
             .unwrap();
         assert!(!out_refs.is_empty(), "the body mention was projected");
@@ -2103,7 +2115,7 @@ mod tests {
             .run(
                 &Actor::Human,
                 NAME,
-                json!({ "ref": "work_item:oxplow:tsk999", "to": "done" }),
+                json!({ "ref": "oxplow:oxplow/work_item?id=tsk999&provider=oxplow", "to": "done" }),
                 false,
             )
             .await
@@ -2128,7 +2140,7 @@ mod tests {
             .read(|c| {
                 c.query_row(
                     "SELECT count(*) FROM v_work_item w JOIN task t
-                       ON w.ref = 'work_item:oxplow:tsk' || t.id
+                       ON w.ref = 'oxplow:oxplow/work_item?id=tsk&provider=oxplow' || t.id
                      WHERE w.rank IS NOT t.sort_index",
                     [],
                     |r| r.get(0),
@@ -2173,7 +2185,7 @@ mod tests {
     ) -> String {
         let mut input = json!({ "title": title });
         if let Some(t) = thread {
-            input["thread"] = json!(t.to_string());
+            input["thread"] = json!(oxplow_domain::uri::build::thread_uri(t));
         }
         fx.svc
             .commands

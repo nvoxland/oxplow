@@ -6,7 +6,7 @@
    errors, no warnings; it dry-runs the lens) and `oxplow extension test
    <name>` (the collector over the fixture returns the expected facts).
 2. **Run the collector now:** the `oxplow.collector.sync` command,
-   `{ "collector": "collector:<extension name>/<ns>.scan" }` (`collector:project/<id>`
+   `{ "collector": "collector:<extension name>/<ns>.scan" }` (`oxplow:oxplow/collector?collector=project/<id>`
    for a project collector) — runs it against the latest snapshot and records its
    facts; returns the `facts` count. `oxplow.metric.rebuild`
    (`{ "force": true }` to redo everything) runs every snapshot collector's

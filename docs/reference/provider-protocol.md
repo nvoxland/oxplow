@@ -46,11 +46,11 @@ A knowledge provider keeps the project's pages in its own store and
 declares the `knowledge` capability. It answers `write_page { slug, title?,
 body, verified_refs, removed_refs }` → `{ page }`, `delete_page { slug }`
 and `link { page, target }` → `{}`, and emits `knowledge.page.recorded@1`
-with `{ page: { ref: "wiki:<slug>", title, body, refs, updated_at,
+with `{ page: { ref: "oxplow:oxplow/wiki?slug=<slug>", title, body, refs, updated_at,
 deleted? } }` for every page it writes or deletes (each verb answers it,
 and a `knowledge_pages` collector over the entity `knowledge_page`
 streams them all). `refs` states the page's outbound references in
-oxplow's grammar (`file:<path>`, `wiki:<slug>`); oxplow never parses a
+oxplow's URIs (`oxplow:oxplow/file?path=<path>`, `oxplow:oxplow/wiki?slug=<slug>`); oxplow never parses a
 foreign body.
 
 ## Declaring one
@@ -71,8 +71,8 @@ providers:
 - The program runs from a verified copy of the extension folder, with
   a scrubbed environment: `PATH`, `HOME`, the `env` names, its
   credentials, `OXPLOW_EXTENSION_DIR` and `OXPLOW_PROVIDER_ID` (the
-  instance it runs as, which is the middle of its refs:
-  `work_item:<id>:…`).
+  instance it runs as, which is the `provider` param of its URIs:
+  `oxplow:oxplow/work_item?id=…&provider=<id>`).
 - It runs only from a deployment of its extension, and only if the
   extension declares the permissions it needs (`process`, plus `network`
   and `secrets` for the hosts and credentials above). A person approves

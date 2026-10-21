@@ -30,7 +30,7 @@ pages are THE shell.
   opened here) with no session opens as the person's `newThreadSession`
   says (`newThreadTabs` in `tabs/sessionTabs.ts`, applied by App's
   `openNewThread`): `ask` (the default) opens the **session picker**
-  (`page:new-session`, the `new-session` lens), `none` opens nothing, and an
+  (the `new-session` page, a lens), `none` opens nothing, and an
   agent starts its session — or asks, if it can't start any more. The
   picker is an ordinary tab after that: its × closes it for good, and
   closing a thread's last session leaves its other tabs (or home), not
@@ -70,14 +70,14 @@ pages are THE shell.
 | `apps/desktop/src/tabs/PageNavigationContext.ts` | React context exposing `{ navigate(ref, { newTab? }), goBack, goForward, canGoBack, canGoForward, setTitle, title }` to descendants of an active page tab. Wrapped around every non-agent center tab in `App.tsx`. `BacklinksList` reads it so default-click navigates in-tab. The `usePageTitle(title)` helper registers the page's current title with the host so the same string drives the chrome header AND the tab strip label — no per-page duplicate header markup. |
 | `apps/desktop/src/pages/FilePage.tsx` | Thin Page wrapper around `EditorPane`. Calls `usePageTitle(basename + ● dirty)` so the file's name flows into the shared chrome title, and `useBacklinks(fileRef(path))` so wiki pages, tasks, commits, and findings that reference the file appear in the nav-bar Backlinks dropdown. EditorPane keeps owning Monaco / blame / context menus; the wrapper only provides chrome above. |
 | `apps/desktop/src/pages/DiffPage.tsx` | Thin Page wrapper around `DiffPane` for diff tabs. Calls `usePageTitle(basename + (label))`. |
-| `apps/desktop/src/pages/DiffViewPage.tsx` | The **explicit start→end diff view** (`diff-view` kind). Three modes via `DiffViewSpec`: `snapshot` (legacy `snapshotRef(N)` prev→N drill-in); `effort` (`effortDiffRef(effortId)` — resolves the effort's own start/end snapshot bracket via the `get_effort` IPC on load, carrying the `taskId`/`effortId`, with an "Effort is in progress" notice when the end is null); `turn` (`turnRef(turnId)` — the turn's start snapshot → end snapshot via `get_agent_turn`, start → working tree with a "Turn is still running" notice while it runs; a turn with no start snapshot shows an explanation instead of diffing the empty tree, `resolveTurnEndpoints`, tsk467 — the notice wording is `inProgressNotice(subject)`); `endpoints` (`endpointDiffRef(start, end)` — an explicit pair of revisions, `working` / `snap:<id>` / `git:<rev>`). All modes list the changed files through the `diff` RPC (`Trees`, `.context/vcs.md`) via `useChangedFiles({ kind: "endpoints" })` (`components/ChangedFiles/`), which also gives the two sides' `Revision`s for opening a file's diff. **Page shape (tsk343–346/370):** the page uses the `Page` **`width="reading"`** with a right rail. The `<h1>` title is `Changes: <effort title>` *when the diff is for an effort* (effort passed, OR the start/end snapshots line up exactly with an overlapping effort's bracket), else a comparison label — **`Commit comparison`** when both endpoints are git versions (commit / commit-pinned snapshot), else **`Snapshot comparison`**. The date/commit **range** is passed as the `rightRail`. When the diff **lines up with an effort** (effort passed, or a snapshot range matching an overlapping effort's bracket — `primaryTaskId`/`effortTitle`), the rail **leads with a "Task" row** (`diff-view-task-link`) naming the effort's task and linking to its `taskRef` (in-tab via `onOpenPage`); it self-hides for a non-effort range. Below it: a **date header** (`rangeDateLabel` in `diffViewModel.ts` — a single date when both endpoints fall on the same calendar day, a "start – end" range when they span multiple days, the single known date when only one endpoint is time-based, hidden when neither is) above two **selectable** fields — a "Start"/"End" caption beside an `EndpointPicker` dropdown (`apps/desktop/src/components/Diff/EndpointPicker.tsx`). The closed trigger shows a **time-only** label (so it fits on one line next to the caption); opening it lists the **20 newest snapshots on the same branch as the diffed endpoints** (`pickerBranch` / `snapshotsOnBranch` in `diffViewModel.ts` — reference branch is end snapshot's `git_branch` → start's → `stream.branch`; only snapshots *known* to be on a different branch are dropped, while unrecorded-branch snapshots (detached HEAD) are kept — a branch switch within the stream's worktree never mixes other branches' snapshots in), **constrained per side so the range stays valid** (`rangeEndpointOptions` — the Start list only offers snapshots *before* the current End, the End list only snapshots *after* the current Start, so you can't pick an inverted range; no constraint when the opposite endpoint isn't a snapshot), plus whichever snapshot the current endpoint sits on (so the selection is always present), with the **full date+time** and, for snapshots that pinned a commit, the short commit sha. Picking a snapshot rescopes the diff in place — `onOpenPage(endpointDiffRef(newStart, end))` / `endpointDiffRef(start, newEnd)`, which `navOpen` routes as an **in-tab navigation** (Back returns to the prior range) — so the user can expand/collapse the diff range. The picker's popover is `position:fixed` (escapes the rail panel's overflow), closes on pick / Escape / outside-click, and is disabled when there are no candidate snapshots. The range shows in the rail (or, when the rail collapses on narrow widths, as the same panel stacked at the top of the center column — handled by the `Page` base, see below). Then an optional **Concurrent Efforts** `<ul>` (every effort overlapping the range — `listEffortsOverlappingRange`, **scoped to the diffed snapshot's own stream** so other streams'/branches' efforts whose global snapshot-id windows merely overlap don't leak in — other than the one the diff is for, each linked to its `taskRef`), a **Files Changed** `<h2>` section rendering the shared collapsible `ChangedFilesTree` (A/M/D + zone badges + Expand/Collapse all) — *all* changed files, or only the effort's claimed files (`listEffortFiles`) when the diff was opened **for** an effort. The section says so when there are no test changes. Sections are **boxless** (h2 + content, no card); `ChangedFilesTree` takes `showFileCount={false}` here. **Effort header.** Opened *for* an effort, the title is `EffortHeader` (`pages/EffortHeader.tsx`): the effort's `v_effort.title` (its own, else its item's, else its first prompt's), edited in place with `InlineEdit` (`oxplow.effort.update`; clearing restores the default); a "Linked to" line — the item (opens its page) with Unlink, or "Not linked" — and "Link to task…", an `InlinePromptStrip` taking `tsk42` or a `work_item:` ref (`oxplow.effort.link`); while open, Close effort (`oxplow.effort.close`), else how it closed (`closed_by`). It re-reads on `v_effort` changing; the tab title follows its title. An unlinked effort in Concurrent Efforts is named by its `v_effort.title`, else "Unlinked work". **Section order:** title → (effort **description**) → the **`effort.review.details` slot** → Concurrent Efforts → Files Changed. When the diff is **for an effort** (passed or lined-up): the effort's task **description** renders just under the title (`MarkdownView` via `getTask`), and the `effort.review.details` slot (`LensSlots`, params `effort_id` + the effort's `change_id`) mounts extension lenses — oxplow-bundled's decisions/claims and oxplow-bundled's change analysis (`change-review`: summary, look-here-first, churn treemap, function and test changes, co-change, duplication, cross-zone imports), coverage and tests, metric deltas and agent nudges. Both self-hide for a non-effort range. Chrome/tab title is driven by `usePageTitle` (plain-text mirror of the h1). Pure endpoint-resolution logic (`resolveEffortEndpoints`, `resolveTurnEndpoints`, `inProgressNotice`, `resolveSnapshotEndpoints`, `previousSnapshotId`, `snapshotRange`) lives React-free in `apps/desktop/src/diffViewModel.ts`. `Trees` (`.context/vcs.md`) handles mixed snapshot↔commit (normalizing the snapshot side into VCS object ids), the working-tree side, and per-file line counts (via `similar`). |
+| `apps/desktop/src/pages/DiffViewPage.tsx` | The **explicit start→end diff view** (`diff-view` kind). Three modes via `DiffViewSpec`: `snapshot` (legacy `snapshotRef(N)` prev→N drill-in); `effort` (`effortDiffRef(effortId)` — resolves the effort's own start/end snapshot bracket via the `get_effort` IPC on load, carrying the `taskId`/`effortId`, with an "Effort is in progress" notice when the end is null); `turn` (`turnRef(turnId)` — the turn's start snapshot → end snapshot via `get_agent_turn`, start → working tree with a "Turn is still running" notice while it runs; a turn with no start snapshot shows an explanation instead of diffing the empty tree, `resolveTurnEndpoints`, tsk467 — the notice wording is `inProgressNotice(subject)`); `endpoints` (`endpointDiffRef(start, end)` — an explicit pair of revisions, `working` / `snap:<id>` / `git:<rev>`). All modes list the changed files through the `diff` RPC (`Trees`, `.context/vcs.md`) via `useChangedFiles({ kind: "endpoints" })` (`components/ChangedFiles/`), which also gives the two sides' `Revision`s for opening a file's diff. **Page shape (tsk343–346/370):** the page uses the `Page` **`width="reading"`** with a right rail. The `<h1>` title is `Changes: <effort title>` *when the diff is for an effort* (effort passed, OR the start/end snapshots line up exactly with an overlapping effort's bracket), else a comparison label — **`Commit comparison`** when both endpoints are git versions (commit / commit-pinned snapshot), else **`Snapshot comparison`**. The date/commit **range** is passed as the `rightRail`. When the diff **lines up with an effort** (effort passed, or a snapshot range matching an overlapping effort's bracket — `primaryTaskId`/`effortTitle`), the rail **leads with a "Task" row** (`diff-view-task-link`) naming the effort's task and linking to its `taskRef` (in-tab via `onOpenPage`); it self-hides for a non-effort range. Below it: a **date header** (`rangeDateLabel` in `diffViewModel.ts` — a single date when both endpoints fall on the same calendar day, a "start – end" range when they span multiple days, the single known date when only one endpoint is time-based, hidden when neither is) above two **selectable** fields — a "Start"/"End" caption beside an `EndpointPicker` dropdown (`apps/desktop/src/components/Diff/EndpointPicker.tsx`). The closed trigger shows a **time-only** label (so it fits on one line next to the caption); opening it lists the **20 newest snapshots on the same branch as the diffed endpoints** (`pickerBranch` / `snapshotsOnBranch` in `diffViewModel.ts` — reference branch is end snapshot's `git_branch` → start's → `stream.branch`; only snapshots *known* to be on a different branch are dropped, while unrecorded-branch snapshots (detached HEAD) are kept — a branch switch within the stream's worktree never mixes other branches' snapshots in), **constrained per side so the range stays valid** (`rangeEndpointOptions` — the Start list only offers snapshots *before* the current End, the End list only snapshots *after* the current Start, so you can't pick an inverted range; no constraint when the opposite endpoint isn't a snapshot), plus whichever snapshot the current endpoint sits on (so the selection is always present), with the **full date+time** and, for snapshots that pinned a commit, the short commit sha. Picking a snapshot rescopes the diff in place — `onOpenPage(endpointDiffRef(newStart, end))` / `endpointDiffRef(start, newEnd)`, which `navOpen` routes as an **in-tab navigation** (Back returns to the prior range) — so the user can expand/collapse the diff range. The picker's popover is `position:fixed` (escapes the rail panel's overflow), closes on pick / Escape / outside-click, and is disabled when there are no candidate snapshots. The range shows in the rail (or, when the rail collapses on narrow widths, as the same panel stacked at the top of the center column — handled by the `Page` base, see below). Then an optional **Concurrent Efforts** `<ul>` (every effort overlapping the range — `listEffortsOverlappingRange`, **scoped to the diffed snapshot's own stream** so other streams'/branches' efforts whose global snapshot-id windows merely overlap don't leak in — other than the one the diff is for, each linked to its `taskRef`), a **Files Changed** `<h2>` section rendering the shared collapsible `ChangedFilesTree` (A/M/D + zone badges + Expand/Collapse all) — *all* changed files, or only the effort's claimed files (`listEffortFiles`) when the diff was opened **for** an effort. The section says so when there are no test changes. Sections are **boxless** (h2 + content, no card); `ChangedFilesTree` takes `showFileCount={false}` here. **Effort header.** Opened *for* an effort, the title is `EffortHeader` (`pages/EffortHeader.tsx`): the effort's `v_effort.title` (its own, else its item's, else its first prompt's), edited in place with `InlineEdit` (`oxplow.effort.update`; clearing restores the default); a "Linked to" line — the item (opens its page) with Unlink, or "Not linked" — and "Link to task…", an `InlinePromptStrip` taking `tsk42` or a work item's URI (`oxplow.effort.link`); while open, Close effort (`oxplow.effort.close`), else how it closed (`closed_by`). It re-reads on `v_effort` changing; the tab title follows its title. An unlinked effort in Concurrent Efforts is named by its `v_effort.title`, else "Unlinked work". **Section order:** title → (effort **description**) → the **`effort.review.details` slot** → Concurrent Efforts → Files Changed. When the diff is **for an effort** (passed or lined-up): the effort's task **description** renders just under the title (`MarkdownView` via `getTask`), and the `effort.review.details` slot (`LensSlots`, params `effort_id` + the effort's `change_id`) mounts extension lenses — oxplow-bundled's decisions/claims and oxplow-bundled's change analysis (`change-review`: summary, look-here-first, churn treemap, function and test changes, co-change, duplication, cross-zone imports), coverage and tests, metric deltas and agent nudges. Both self-hide for a non-effort range. Chrome/tab title is driven by `usePageTitle` (plain-text mirror of the h1). Pure endpoint-resolution logic (`resolveEffortEndpoints`, `resolveTurnEndpoints`, `inProgressNotice`, `resolveSnapshotEndpoints`, `previousSnapshotId`, `snapshotRange`) lives React-free in `apps/desktop/src/diffViewModel.ts`. `Trees` (`.context/vcs.md`) handles mixed snapshot↔commit (normalizing the snapshot side into VCS object ids), the working-tree side, and per-file line counts (via `similar`). |
 | `apps/desktop/src/tabs/RouteLink.tsx` | Browser-style link button + the `useRouteDispatch(ref, { onNavigate?, pinnedSlot? })` hook that powers it; `ref` / `to` is a `TabRef` or a ref string (opened through `openRef`). Click semantics: left-click → in-tab navigate via `PageNavigationContext` (or `onNavigate` fallback when no context, e.g. rail / palette), Cmd/Ctrl-click + middle-click + right-click → new tab. The hook returns `{ dispatch, handlers }` so non-button rows (file tree entries, note rows, …) can adopt the same semantics without becoming a `<button>`. |
 | `apps/desktop/src/components/RailHud/RailHud.tsx` | Persistent left rail HUD: a pinned search trigger at the top, then a set of **uniform collapsible panels** (every one an extension's — Go To, Uncommitted, Comments and Work from `oxplow-bundled`). Each renders through the shared `RailSection` wrapper — drag handle (⠿) + expand/collapse chevron + title + optional count badge + optional header action. (What needs the person — proposals, failed operations, undelivered events, firing badges — isn't a rail section: it's the status bar's bell, the Alerts page and toasts; see `.context/usability.md`.) Sections **drag-to-reorder** (MIME `application/x-oxplow-rail-section`, the layout — order, collapsed, hidden — persisted in `panel_layout`; see "Left-nav panels" below). An extension panel with a `collapsed` lens (Work) keeps that summary when collapsed; the rest hide their body. Every section **always renders** (stable list) with an empty-state line ("Working tree clean", "No open comments", …) when it has no content. Passive — never auto-opens tabs. Go To is the `oxplow-bundled` panel `go-to` (bookmarks, then recent or most visited pages). |
 | `apps/desktop/src/components/Navigator.tsx` | Far-left combined **stream + thread navigator** (each stream's open threads — `get_thread_state` leaves closed ones out; they're on the Closed Threads page): a 40px always-visible strip of letter glyphs (`navigator-strip-stream-<id>` / `navigator-strip-thread-<id>`) — a stream is a tab in the guide line's grey (`--text-muted`) with dark text (`--text-on-stream-tile`), coming out of the window's left edge and rounded on the right only, with its threads as tabs under it, all flush with the left edge and butted up against each other, each filling its shorter row and stopping short of the right (in the centre tab strip's header tint, `--panel-header-bg` over `--surface-card`, like a regular tab; the selected thread's accent bar is inside its tab, down its left, not beside it; a marked thread shows its mark as a corner fold on its top-left in `var(--thread-mark-<colour>)` (`navigator-thread-mark`, title "Marked <colour>"), not an outline; stacked tabs are set apart by a 1px divider along each one's bottom but the last's, in the guide line's grey (`--text-muted`), so none falls under the stream's tab, and the strip's column is `--surface-app`); a grey guide line runs down the column's right, flush with the stream tab's right edge, from under the stream's tab, with a tick from each thread's tab into it, ending at the last, each thread's agent status dot a node where the tick meets the tab; a stack's corners are rounded only where no tab sits next to it (the stream's top, the last tab's bottom), the rest flat; the strip draws no line against the HUD rail; in the expanded panel each row's tab runs on across the row carrying the title, set off from its abbreviation by a divider line through every row and a gap (`IconColumn wide`, `IconCell label`), so the tab's colour flows into the label, the glyph kept at its strip width so the two line up; the panel's rows draw the same icon column (`IconColumn`) so the two line up; clicking a glyph navigates directly — a thread glyph selects that thread, a stream glyph switches streams via `onSwitchStream`. **Hovering a glyph shows its full title as a native tooltip and nothing else (tsk269).** The `navigator-overlay` panel (~280px, covering the strip *and* the rail HUD to its right) expands only on an explicit click: the bottom-pinned `navigator-expand` chevron, dead space in the strip (`navigator-strip-empty`, `e.target === e.currentTarget`), a stream glyph (which also switches to that stream, then shows its threads), or the already-selected thread's glyph (selecting it again would do nothing). The chevron is pinned *outside* the scroll container and is the load-bearing affordance — once the list scrolls there is no dead space left, and `+ Add stream` lives only in the panel. The open/close state machine — click-to-open, geometric pointer-leave, Escape, outside-press, background-click, and the passive-vs-explicit guard — lives in the shared `apps/desktop/src/components/useSlideoutStrip.ts` hook (chevron in `SlideoutChevron.tsx`), which the Terminal page's `TerminalTabStrip` also runs on; a new slide-out strip adopts the hook rather than re-deriving it. It dismisses on a click in its own **dead background** (anything resolving to `button/input/select/textarea/a/label/[role=button]` is left alone so controls behave normally), on the pointer leaving its bounds (180ms grace), on Escape, and on any pointerdown outside it. The last two are *explicit* dismissals and beat the mid-rename / mid-new-thread form guard; the first two don't. **Pointer departure is measured geometrically** (document `pointermove` vs. the panel's rect), never `mouseleave` — the panel covers the rail and sits in the same DOM subtree as the strip, so the pointer never "leaves" the wrapper while parked over the covered region, which is what used to strand it open on top of the rail and swallow clicks meant for it (tsk131). Each overlay row (`navigator-stream-row-<id>` / `navigator-thread-row-<id>`) — and each strip glyph, with the same menu — opens its action menu on **right-click** (Menu key / Shift+F10 for keyboard), headed by the stream's or thread's name (`context-menu-header`); Rename and Add thread open the panel for their inline field. **Thread menu:** **"Mark with…"** (`menu-item-thread.mark`) opens a submenu headed by the line "A colour on the thread's tab, for grouping threads your way. It changes nothing else." (`context-submenu-header`, the generic `MenuItem.submenuHeader`) and lists `amber`, `red`, `green`, `blue`, `violet` (each with a colour chip, `MenuItem.swatch`) and None as `menu-item-thread.mark.<colour|none>`, the current one checked; picking one runs `oxplow.thread.mark` (via `onMarkThread` → `App.handleMarkThread`). Then Rename / Settings / Close. A mark only groups threads the person's way; every open thread of a stream shares its worktree. |
 | `apps/desktop/src/tabs/bookmarks.ts` | The person's bookmarks, project data (data-model.md "bookmark"): `useBookmarks(threadId, streamId)` reads `v_bookmark` — a page once, at the narrowest scope the thread sees (thread / stream / project) — and `setBookmark` / `removeBookmark` run `oxplow.bookmark.set` / `oxplow.bookmark.remove`. Pages bookmark via the `PageNavigationContext.bookmark` binding (one `scope`; the star's menu moves it or, on its current scope, takes it off); the Go To lens page's bookmark row actions re-scope and remove. |
-| ~~`apps/desktop/src/tabs/appPageBacklinks.ts`~~ | **Deleted.** Per-kind in-memory backlinks providers used to live here. Cross-page backlinks now come from the persisted `page_ref` graph (`crates/oxplow-db/src/page_ref_store.rs`) via the `list_backlinks` IPC; every page kind goes through the same code path. App pages that need their own provider would register a new `source_kind` writer in the backend instead. |
-| `apps/desktop/src/pages/WorkItemPage.tsx` | Every work item's page (`work_item:<provider>:<id>`), whichever list is active: title and body edited in place (`TaskDetail`), the rail's state pill and the list's declared fields (`TaskDetailRail`), activity (its efforts); Parent, thread/backlog moves, Comment…, Link… and Delete only as the list's features allow (`v_capability_provider`); the `work_item.detail.body` / `.sidebar` slots and the `work_item.detail.state` replacement (beside the state pill, never instead of it). See [work-items.md](./work-items.md). |
-| `apps/desktop/src/pages/GitCommitPage.tsx` | Single-commit page (`commit:<sha>`): commit metadata (collapsing a long body behind "Show more") with cherry-pick / revert, the changed files (`ChangedFilesTree`, parent → commit diffs) and the `vcs.commit.details` lens slot (`change_id` from `useChange`). Routed via `gitCommitRef(sha)`. |
+| ~~`apps/desktop/src/tabs/appPageBacklinks.ts`~~ | **Deleted.** Per-kind in-memory backlinks providers used to live here. Cross-page backlinks now come from the persisted `page_ref` graph (`crates/oxplow-db/src/page_ref_store.rs`) via the `list_backlinks` IPC; every page kind goes through the same code path. App pages that need their own provider would register a new `source_resource` writer in the backend instead. |
+| `apps/desktop/src/pages/WorkItemPage.tsx` | Every work item's page (`oxplow:oxplow/work_item?id=<id>&provider=<provider>`), whichever list is active: title and body edited in place (`TaskDetail`), the rail's state pill and the list's declared fields (`TaskDetailRail`), activity (its efforts); Parent, thread/backlog moves, Comment…, Link… and Delete only as the list's features allow (`v_capability_provider`); the `work_item.detail.body` / `.sidebar` slots and the `work_item.detail.state` replacement (beside the state pill, never instead of it). See [work-items.md](./work-items.md). |
+| `apps/desktop/src/pages/GitCommitPage.tsx` | Single-commit page (`oxplow:oxplow/commit?sha=<sha>`): commit metadata (collapsing a long body behind "Show more") with cherry-pick / revert, the changed files (`ChangedFilesTree`, parent → commit diffs) and the `vcs.commit.details` lens slot (`change_id` from `useChange`). Routed via `gitCommitRef(sha)`. |
 | `apps/desktop/src/components/RailHud/sections.ts` | The launcher's categories (`PAGE_CATEGORY_ORDER`, `PageDirectoryEntry`) and `settingsAreaEntries` (the Settings areas as launcher entries); every other launcher page is a declared page (`components/extensionLauncher.ts`). |
 | `apps/desktop/src/pages/GitDashboardPage.tsx` | Committed-history rollup: branch header (current branch + upstream + ahead/behind + push), small uncommitted mini-card that links to `UncommittedChangesPage`, recent commits rendered through the shared `CommitGraphTable` (last 5, current branch only via `getGitLog({ all: false })`; click a row → reveal in `GitHistoryPage`), worktrees row with per-row "Merge into current", a **"Merge readiness" card** (cross-stream divergence vs the integration branch via `listStreamDivergences()` — per-stream ahead/behind + a clean/will-conflict/integrated badge, naming the overlapping files on conflict, with a one-click "Merge into &lt;base&gt;" offered only while viewing the base stream), recent remote branches with per-row pull/push. Each action asks first exactly when its command's spec does (`SpecConfirm`, tsk898: merge and rebase, which are `Destructive`; pull and push are `Never`, as everywhere else they run). Routed via `gitDashboardRef()`. |
 | `apps/desktop/src/components/History/CommitGraphTable.tsx` | Pure presentation of the git-log graph (branch/merge dots + lines + sha + ref badges + subject + author + relative date). Used by `GitDashboardPage`'s recent-commits card. `indexRefsBySha(log)` exported alongside groups branch heads + tags by sha so callers feed identical maps. |
@@ -87,7 +87,7 @@ pages are THE shell.
 | `apps/desktop/src/tabs/useBacklinks.ts` | React hook that calls the unified `list_backlinks` IPC for a `TabRef` and maps the returned `BacklinkEdge` rows into `BacklinkEntry`s. Used by every page kind including `FilePage` (which previously rendered nothing). The sibling `usePageOutbound` hook does the same for the inverse direction. |
 | `apps/desktop/src/tabs/backlinkTypes.ts` | Renderer-side `BacklinkEntry` interface (`{ ref: TabRef \| null, target, label, subtitle?, dead?, linkType? }`): `ref` is the page the row opens, null for a dead link (nothing resolves the ref; `BacklinkEdge.resolved`) or a resolved ref with no page. Decoupled from the SQLite `BacklinkEdge` shape. |
 | `apps/desktop/src/tabs/BacklinksList.tsx` | Default renderer for the Page chrome's `backlinks` slot — buttons that route via `onOpenPage`; a row with no page renders muted as its raw ref (dead link). `entryMenu` supplies a row's right-click actions (a work item's link rows: Unlink). |
-| `apps/desktop/src/pages/WikiPage.tsx` | Single-record page for a wiki page (`wiki:<slug>`), rendered through `Page` so it gets the unified chrome (title via `usePageTitle`, back/forward + star, backlinks). Edit/Save/Revert/Delete live in a thin toolbar inside the body. In-tab wikilink clicks route through `PageNavigationContext.navigate(wikiPageRef)` so they join tab history. |
+| `apps/desktop/src/pages/WikiPage.tsx` | Single-record page for a wiki page (`oxplow:oxplow/wiki?slug=<slug>`), rendered through `Page` so it gets the unified chrome (title via `usePageTitle`, back/forward + star, backlinks). Edit/Save/Revert/Delete live in a thin toolbar inside the body. In-tab wikilink clicks route through `PageNavigationContext.navigate(wikiPageRef)` so they join tab history. |
 | `apps/desktop/src/pages/CommentsInboxPage.tsx` | Global **Comments Dashboard** (`comments` index kind, `commentsRef()`; titled "Comments Dashboard"). Lists every comment in the current stream (`listCommentsForStream`), grouped by target. The body of a **row opens that comment's full `CommentPopover` inline** (read/reply/intent/resolve/delete — triage the whole backlog from one place); a **group-header click jumps to the target page** (file/wiki/task). Each row also has a **"Go to location" button** that navigates to the target page *and* scrolls to / opens the anchored comment via `comment-reveal-bus.ts` (disabled for orphaned comments). **Defaults to unresolved threads only**; a "Show" dropdown reveals resolved threads bucketed by recency. The bucket thresholds are a tiered ladder — one per day to a week, one per week to a month, then one per month beyond — capped at the oldest actual resolved comment so the largest option reaches all of them (helpers in `comments-filter.ts`: `resolvedWindowOptions` / `visibleThreads`, keyed on `comment.resolved_at`). The holistic "review them all" surface; the agent reaches the same data via the `oxplow_list_comments` MCP tool. |
 | `apps/desktop/src/components/Analytics/DailyBarChart.tsx` | Generic daily bar chart (`{ label, value }[]`); renders `bar` lenses. |
 | `apps/desktop/src/components/CollapsibleSections.tsx` | Collapsible page sections (tsk84, tsk86). Two parts plus a hook: `CollapsibleSections` (state provider), `SectionCollapseControls` (the "Expand all" / "Collapse all" pair), and `useSectionCollapse`, which the kit `Section` (`collapsible`, `defaultCollapsed`; the toggle is a button inside the `<h2>`) reads. Sections register themselves on mount so the controls know what "all" means — only what's **currently rendered** counts, so a filtered-out section is never silently expanded — and the controls self-hide when nothing is registered. **The page places the controls**: Recorded Metrics renders them in the **details rail** beside its filters, which works because the provider wraps the whole `<Page>` and `rightRail` is *rendered* inside Page's subtree (context follows the render tree, not the creation site). For that to be safe the provider renders `children` **bare** — a wrapper element there would break the page chrome's `height: 100%` column. Collapsed ids are the tab entry's state (`useHistoryState`); default is expanded, and stored ids are deliberately **not** reconciled against the rendered set (a section hidden by a page's search must return still collapsed). Pure state/persistence in the sibling `sectionCollapse.ts`. **Not a `Page` prop** — see `.context/usability.md` → "Collapsible page sections". Adopters: `MetricsPage`. |
@@ -98,7 +98,7 @@ pages are THE shell.
 `PageKind` (`apps/desktop/src/tabs/tabState.ts`) is the source of truth;
 this list mirrors it. Grouped by what they are for. Kinds marked **(→
 ext)** are analytics pages slated to move into the `oxplow-bundled`
-extension as `lens:<slug>` pages ([extensions.md](./extensions.md), epic
+extension as `oxplow/lens` pages ([extensions.md](./extensions.md), epic
 tsk275) — don't grow them; new instruments should be lenses once the
 extension host lands.
 
@@ -110,7 +110,7 @@ extension host lands.
   `uncommitted-changes`, `commit`, `git-history`, `git-dashboard`,
   `local-history`, `terminal`
 - **Knowledge:** `wiki`
-- **Lenses:** `lens` (`lens:<extension>/<slug>`, user/agent-built from
+- **Lenses:** `lens` (`oxplow:oxplow/lens?lens=<extension>/<slug>`, user/agent-built from
   `.oxplow/extensions/`; see [extensions.md](./extensions.md))
 - **System:** `settings`, `external-url`
 - **Data (the core explorer; stays core):** `explore-data`, `metrics`,
@@ -128,33 +128,36 @@ An agent session's tab follows its row (`reconcileSessionTabs`). There is no `ch
 Built only by the helpers in `apps/desktop/src/tabs/pageRefs.ts` — never
 hand-format an id.
 
-**Every tab id is a canonical ref** ([resources.md](./resources.md)), parsed
-through the shared grammar (`apps/desktop/src/uri/uri.ts`) so a `:`
-inside an id (`work_item:oxplow:tsk42`) never splits it. Two families:
+**Every tab id is a canonical URI** ([resources.md](./resources.md)), parsed
+through the shared grammar (`apps/desktop/src/uri/uri.ts`), never split
+by hand (`oxplow:oxplow/work_item?id=tsk42&provider=oxplow`). A tab's
+view (`#lines=…`) is not part of its id: the id is the identity. Two families:
 
 - **Entity pages** (`EntityPageKind`): the tab id of a file, directory,
-  wiki page, task, commit, metric or lens *is* its ref, so a `[[…]]`
+  wiki page, task, commit, metric or lens *is* its URI, so a `[[…]]`
   link, a `page_ref` row, a backlink and a tab all agree on one string.
 - **Declared pages** (kind `page`): a page an extension's manifest
   declares under `pages:` — not a thing in the graph. Its id is
-  `page:<id>[?params]` for oxplow's own (oxplow-foundation has
-  `namespace: oxplow`, so its pages are core-named as its commands are:
-  `page:tasks`, `page:settings?area=agents`) and
-  `page:<extension>/<id>[?params]` for any other extension's. Every
+  `oxplow:oxplow/page?page=<id>` plus its params for oxplow's own
+  (oxplow-foundation has `namespace: oxplow`, so its pages are
+  core-named as its commands are: `oxplow:oxplow/page?page=tasks`,
+  `oxplow:oxplow/page?page=settings&area=agents`) and
+  `oxplow:oxplow/page?page=<extension>/<id>` plus its params for any other
+  extension's. Every
   page tab's `TabRef.kind` is `page`; its payload is `PagePayload
   { extension, page, params }` (`extension` null for oxplow's). Nothing
   rides beside the id: what a page shows is its params (a diff's spec,
   Settings' landing section, a new item's parent), and what only one step
   of a tab keeps (a clipboard compare's two texts) is that entry's history
   state. Pages never appear
-  in `page_ref`. Params are a query string whose values escape only
-  what would break the id (`&`, `=`, `+`, `%`, `@`, `#`, whitespace),
+  in `page_ref`. Params are the URI's own, sorted by key, and their values escape only
+  what the grammar needs (`&`, `=`, `#`, `%`, whitespace, non-ASCII),
   so `path=src/a.ts&left=git:abc` stays readable.
 
-`refFromTabId(id)` rebuilds the full ref (with payload) from an id alone
-and returns `null` for text that isn't a ref or an unknown kind —
+`refFromTabId(id)` rebuilds the full tab ref (with payload) from an id alone
+and returns `null` for text that isn't a URI or an unknown resource —
 callers (rail History, Go To, the launcher's Recent) drop the row rather
-than open a blank tab. Any `page:` id rebuilds (`pageTabRef` /
+than open a blank tab. Any `oxplow/page` id rebuilds (`pageTabRef` /
 `extPageRef`); whether a page by that id exists is the declaration's
 business, and an undeclared one draws "No such page". The round-trip
 test in `pageRefs.test.ts` covers every constructor (a page's `state`
@@ -164,26 +167,27 @@ foundation lens form, `new-task`) with its `parent` param.
 There are no sentinel tab ids (`HOME_TAB` in `App.tsx` means "nothing
 chosen", never a tab), and "is this the editor's working-tree file" is
 `diskFilePath(id)` (null for a pinned revision such as
-`file:src/a.rs@git:HEAD`, which is a read-only viewer tab).
+`oxplow:oxplow/file?path=src/a.rs&rev=git:HEAD`, which is a read-only viewer tab).
 
 **No compatibility layer for old ids.** When a kind is renamed or a page
 moves into an extension, its saved tabs/bookmarks/history are dropped
 (the tab-layout keys started fresh again as `oxplow.layout.v3.*` when
-pages became declared, 2026-10-17; bookmarks
+pages became declared, 2026-10-17, and as `oxplow.layout.v5.*` when ids
+became URIs; bookmarks
 moved into the project DB and started fresh again) — see the decision in [resources.md](./resources.md).
 
 | Kind | Id format | Example |
 |---|---|---|
-| file | `file:<path>[@<rev>]` — the working tree has no rev; `@git:<ref>` / `@snap:<id>` pin a version (`revisionSlot` in `revision.ts`); a literal `@`/`#`/`%` in a path is percent-encoded | `file:crates/oxplow-app/src/lib.rs`, `file:src/a.rs@git:HEAD` |
-| dir | `dir:<path>` | `dir:crates/oxplow-app` |
-| wiki | `wiki:<slug>` | `wiki:how-stop-hook-fires` |
-| work_item | `work_item:<provider>:<id>` — every list's item (`workItemTabRef(ref)`, payload `ref`) opens `WorkItemPage` | `work_item:oxplow:tsk142`, `work_item:fake:W-1` |
-| commit | `commit:<sha>` | `commit:abc1234` |
-| metric | `metric:<key>` | `metric:oxplow.coverage.abs_pct` |
-| lens | `lens:<extension>/<slug>[?param=value…]` (params sorted; `lensRef(id, params)`) | `lens:review/waiting-on-me`, `lens:oxplow-bundled/effort-tests?effort_id=12` |
-| page | `page:<id>[?params]` (oxplow's) / `page:<extension>/<id>[?params]` (`pageTabRef(id, params?, state?)`, `extPageRef(ext, id, params?)`, plus typed wrappers: `diffRef`, `endpointDiffRef`, `duplicateBlockRef`, `settingsRef`, `newTaskRef`, …) — a declared page; see "Declared pages" below | `page:tasks`, `page:symbols?path=src/lib.rs`, `page:github/open-prs`, `page:acme/pr?ref=acme_pr:12` |
-| symbol | `symbol:<path>/<id>` (`v_symbol.ref`, `symbolRef(ref)`) — no revision in the id; never a tab: opening one (`handleOpenPage`, or in-tab navigation) resolves it (`resolve_symbol`) and opens its file at the name's line (`openSymbol`). A pinned one (`@snap:<id>` / `@git:<sha>`) opens the file viewer at that revision; if the version is gone it shows a notice and opens the current symbol | `symbol:src/lib.rs/Widget::spin` |
-| agent_session | `agent_session:<ses id>` (`agentSessionRef(id)`, pinned) — an open agent session's terminal; its tab draws its harness's declared logo (`CenterTab.icon` from `HarnessListing.icon`, `AgentIcon`; the generic robot when it declares none) | `agent_session:ses3` |
+| file | `oxplow:oxplow/file?path=<path>[&rev=<rev>]` — the working tree has no `rev`; `rev=git:<ref>` / `rev=snap:<id>` pin a version (`revisionSlot` in `revision.ts`); a literal `&`/`=`/`#`/`%` in a path is percent-encoded | `oxplow:oxplow/file?path=crates/oxplow-app/src/lib.rs`, `oxplow:oxplow/file?path=src/a.rs&rev=git:HEAD` |
+| dir | `oxplow:oxplow/dir?path=<path>` | `oxplow:oxplow/dir?path=crates/oxplow-app` |
+| wiki | `oxplow:oxplow/wiki?slug=<slug>` | `oxplow:oxplow/wiki?slug=how-stop-hook-fires` |
+| work_item | `oxplow:oxplow/work_item?id=<id>&provider=<provider>` — every list's item (`workItemTabRef(uri)`, payload `ref`) opens `WorkItemPage` | `oxplow:oxplow/work_item?id=tsk142&provider=oxplow`, `oxplow:oxplow/work_item?id=W-1&provider=fake` |
+| commit | `oxplow:oxplow/commit?sha=<sha>` | `oxplow:oxplow/commit?sha=abc1234` |
+| metric | `oxplow:oxplow/metric?metric=<key>` | `oxplow:oxplow/metric?metric=oxplow.coverage.abs_pct` |
+| lens | `oxplow:oxplow/lens?lens=<extension>/<slug>[&param=value…]` (params sorted; `lensRef(id, params)`) | `oxplow:oxplow/lens?lens=review/waiting-on-me`, `oxplow:oxplow/lens?effort_id=12&lens=oxplow-bundled/effort-tests` |
+| page | `oxplow:oxplow/page?page=<id>[&params]` (oxplow's) / `oxplow:oxplow/page?page=<extension>/<id>[&params]` (`pageTabRef(id, params?, state?)`, `extPageRef(ext, id, params?)`, plus typed wrappers: `diffRef`, `endpointDiffRef`, `duplicateBlockRef`, `settingsRef`, `newTaskRef`, …) — a declared page; see "Declared pages" below | `oxplow:oxplow/page?page=tasks`, `oxplow:oxplow/page?page=symbols&path=src/lib.rs`, `oxplow:oxplow/page?page=github/open-prs`, `oxplow:oxplow/page?page=acme/pr&ref=oxplow:acme/pr?id%3D12` |
+| symbol | `oxplow:oxplow/symbol?path=<path>&symbol=<name>` (`v_symbol.ref`, `symbolRef(uri)`) — no revision in the id; never a tab: opening one (`handleOpenPage`, or in-tab navigation) resolves it (`resolve_symbol`) and opens its file at the name's line (`openSymbol`). A pinned one (`rev=snap:<id>` / `rev=git:<sha>`) opens the file viewer at that revision; if the version is gone it shows a notice and opens the current symbol | `oxplow:oxplow/symbol?path=src/lib.rs&symbol=Widget::spin` |
+| agent_session | `oxplow:oxplow/agent_session?id=<ses id>` (`agentSessionRef(id)`, pinned) — an open agent session's terminal; its tab draws its harness's declared logo (`CenterTab.icon` from `HarnessListing.icon`, `AgentIcon`; the generic robot when it declares none) | `oxplow:oxplow/agent_session?id=ses3` |
 
 ## Declared pages
 
@@ -208,7 +212,7 @@ id among the enabled extensions), draws a built-in from the
 (`body.kind === "component"`) through `CustomPageView`: the component's
 frame filling the body under the nav bar, told its stream and thread
 and given the whole entry as its view (`useHostedView`), its title and
-actions the frame's (`setTitle`, `setActions`). oxplow's Timeline (`page:timeline`, params `from`, `to`,
+actions the frame's (`setTitle`, `setActions`). oxplow's Timeline (the `timeline` page, params `from`, `to`,
 `thread`) is one: its window is its view params, written on every change
 (not its opening default) and followed on Back/Forward. A frame's
 `setViewParams` reaches the tab as `patchViewParams` (null drops a key). Each built-in body is a
@@ -248,7 +252,7 @@ oxplow's pages and their params:
   picked endpoint is a pushed view change), `duplicate-block` (`left`, `left_lines`,
   `left_at`, `right`, `right_lines`, `right_at`; `duplicateBlockOf`).
 
-New Session (`page:new-session`) is a foundation document lens:
+New Session (the `new-session` page) is a foundation document lens:
 **Start a new session** (a form over `oxplow.agent_session.open`: the agent
 from `v_agent_harness`, and "remember" — the person's `newThreadSession` —
 folded into the command) then **Earlier sessions**, and what extensions
@@ -470,7 +474,7 @@ zone grouping); each appears only when it has content:
 4. **Comments** — an `oxplow-bundled` panel: the stream-scoped
    lens `comments` over `v_comment` shows two open-comment count rows split
    by intent — "For me" (`note`) and "For the agent" (`followup`) — each
-   row and the header (`open: page:comments`) opening the Comments inbox.
+   row and the header (`open` is the `comments` page) opening the Comments inbox.
 5. **Go To** — an `oxplow-bundled` panel (`ext:oxplow-bundled/go-to`):
    the thread-scoped lens `go-to` lists the bookmarks the thread sees
    (`v_bookmark`), then its History — or, through the header's
@@ -485,7 +489,7 @@ zone grouping); each appears only when it has content:
    (`launcherPages`; Work / Code / Git / Activity / Knowledge / Data /
    System) plus the Settings areas, so the launcher empty state reads
    like a start menu. The ↗ opens the **Go To** page
-   (`goToRef()`, `page:go-to`) for the full hub + bookmark management.
+   (`goToRef()`, the `go-to` page) for the full hub + bookmark management.
    With a query, pages rank by `pageRank` (tsk1031): every token starting
    a word of the title, then the title as a subsequence, then the id, then
    the `keywords` — where each token must start a word, since a lens's
@@ -506,7 +510,7 @@ Git history has the phase-by-phase detail if you need it.
 
 The next structural change is not an IA change but a scope change:
 analytics pages move out of core into the `oxplow-bundled` extension as
-`lens:<slug>` pages mounted through slots ([extensions.md](./extensions.md)).
+`oxplow/lens` pages mounted through slots ([extensions.md](./extensions.md)).
 
 ## The title bar
 
@@ -597,7 +601,7 @@ replaced by four focused pages so each has one job:
   it. Header link "View all done →" routes to Done Work; kebab
   carries the `hide-auto` filter and a "View backlog →"
   entry. PageKind is `"tasks"`; ref helper is `tasksRef()`.
-- **Done work** (`page:done-work`, a foundation lens page) —
+- **Done work** (the `done-work` page, a foundation lens page) —
   full descending list of the current thread's closed items (done and canceled).
 - **Backlog** (`page-backlog`) — the active list's items on no thread
   (`v_work_item.thread_id IS NULL`), for a list with the `lists`
@@ -645,7 +649,7 @@ the bodies, Back/Forward, Up/Down, the star, Ask, what agents read.
 **Operations** (pure, tested in `session.test.ts`): `open` (the tab
 showing that exact ref, view params included, else a new tab; active.
 A decision, not an accident: opening Board while a tab shows
-`page:board?show=all` opens a second tab, because the views differ. The
+`oxplow:oxplow/page?page=board&show=all` opens a second tab, because the views differ. The
 one exception is a diff, opened with `identity: pageIdentity`: the same
 diff at another line moves the tab showing it), `navigate` (push; clears forward;
 `replace` takes the current entry's place; a page shown in another tab
@@ -746,12 +750,12 @@ Both are read-only: nothing an agent reads activates a tab or a window.
 
 ## Linking between tabs — single chokepoint rule
 
-**What a ref opens is the registry's; how is the click's.** A kind's
-`v_ref_kind.page` template says where its refs open, for core and
-extension kinds alike, and `tabs/refOpener.ts` (`refTarget`;
+**What a URI opens is the registry's; how is the click's.** A resource's
+`v_resource.page` says where its URIs open, for core and
+extension resources alike, and `tabs/refOpener.ts` (`refTarget`;
 `refTargetNow` when no row is needed) is the one function that fills
 it: a tab, a thread or stream to select, or nothing ([resources.md](./resources.md)
-"Where a ref opens"). **A link to a ref string opens it at the click**
+"The desktop"). **A link to a URI opens it at the click**
 through `tabs/openRef.ts`: `openRef(ref, how, host)` resolves it with
 `refTarget` and does what it says through the window's `RefHost` — a tab
 (in the page's tab or a new one), a thread to select, a stream to show,
@@ -847,12 +851,12 @@ visit) and page memory:
   which files the tree lists, Alerts `open`, a pick, and Board `show` (it follows
   the thread until picked) — `pages/modeViews.ts`); New Session's agent choice
   is page memory;
-  the same table names an **entity kind** whose page has a view: a metric's
-  page is `metric:<key>?range=…&branch=…&slice=…`, its key the identity (so
-  comments, backlinks and visits still anchor on `metric:<key>`). A kind not
+  the same table names an **entity resource** whose page has a view: a metric's
+  page is `oxplow:oxplow/metric?metric=<key>&range=…&branch=…&slice=…`, its key the identity (so
+  comments, backlinks and visits still anchor on `oxplow:oxplow/metric?metric=<key>`). A resource not
   in the table is all identity, and `withView` refuses a view change to it.
-  The ref grammar needs nothing for it: `?` and `=` are legal in an id, and
-  the Rust `metric` kind accepts the query as `lens` and `page` do; a page that
+  The grammar needs nothing for it: params are named and `oxplow/metric`
+  accepts the view params beside its key as `oxplow/lens` and `oxplow/page` do; a page that
   declares none is all identity — a diff's path and sides, a dashboard's
   id — so two diffs in a tab are two pages.
 
@@ -866,7 +870,7 @@ the docs and the skill:
 |---|---|---|---|
 | **view params** | this tab's address: shareable, bookmarkable, agents see it; a filter replaces the entry, a pick pushes one | the entry's ref | `nav.viewParams`, `nav.setViewParams(params, { push })` |
 | **history state** | this step of this tab's history: scroll, open sections, a draft | `Entry.historyState` | `useHistoryState(key, initial)` |
-| **page memory** | this page, for the person, every tab of it, across restarts | `ui_preference`, scoped by the page's ref without params (`page:tasks`, `lens:x/y`) or `kind:<kind>` | `usePageMemory(key, initial)` (scope from the page) |
+| **page memory** | this page, for the person, every tab of it, across restarts | `ui_preference`, scoped by the page's URI without params (`oxplow:oxplow/page?page=tasks`, `oxplow:oxplow/lens?lens=x/y`) or `resource:<ext>/<name>` | `usePageMemory(key, initial)` (scope from the page) |
 | **app preference** | the whole app, for the person | `ui_preference`, scope `app` | `useAppPreference(key, initial)` |
 | (a panel's memory) | a left-nav panel, for the person | `ui_preference`, the panel's ref | `usePanelMemory(panel, key, initial)` |
 | **extension state** | shared with the team, read by scripts | the extension's state | commands |
@@ -930,7 +934,7 @@ bookmark keeps it.
 ## Every tab holds a Page
 
 Every tab is a session tab, whatever its kind (`wiki`, `file`, a
-`page:diff`, `work_item`, `lens`, `commit`, an agent session, …). The
+the diff page, `work_item`, `lens`, `commit`, an agent session, …). The
 builder in `App.tsx` (`centerTabs`) takes each tab's `bodies`, draws
 each with **`pageRenderers: Record<PageKind, (ref, nav) => CenterTab |
 null>`** — one entry per kind, so a kind without a renderer is a
@@ -939,7 +943,7 @@ slot's (`navOpen`, `navOpenFile`, `navOpenDiff`, `navRevealCommit`), so
 a hidden back page that navigates moves its tab as the visible one
 would. `handleOpenPage` special-cases `agent_session` (activate its tab,
 else its transcript), `symbol` (its file at its line), the working
-tree's `file` (its buffer) and a `page:diff` carrying a spec; every
+tree's `file` (its buffer) and the diff page carrying a spec; every
 other kind is `open`.
 
 - `fileSessions[stream.id]` is the editor's content and dirty-state

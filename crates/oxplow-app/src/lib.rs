@@ -117,7 +117,6 @@ mod extension_jobs_tests;
 pub mod extension_models;
 #[cfg(test)]
 mod extension_private_state_tests;
-pub mod extension_ref_kinds;
 pub mod extension_resources;
 #[cfg(test)]
 mod extension_run_health_tests;
@@ -172,6 +171,7 @@ pub mod output_activity;
 pub mod pacing;
 pub mod page_ref_backfill;
 pub mod page_ref_consumers;
+pub mod param_pattern;
 #[cfg(test)]
 mod plan_tests;
 pub mod post_tool_reactors;
@@ -705,7 +705,7 @@ pub struct Services {
     pub otlp_ingest: otlp_ingest::OtlpIngestService,
     pub wiki_page_thread_updates: Arc<SqliteWikiPageThreadUpdateStore>,
     /// Unified cross-page reference graph. Every writer that owns a
-    /// `source_kind` slice mirrors its outbound refs into this store
+    /// source's slice mirrors its outbound URIs into this store
     /// at write time; the reader IPC (`list_backlinks` /
     /// `list_outbound`) exposes the inverse view.
     pub page_ref_store: Arc<SqlitePageRefStore>,
@@ -1423,11 +1423,12 @@ impl Services {
             Arc::new(move || capabilities.work_item_ids(&config_service::read_config(&config)))
         };
         {
-            // Core's still (the service adds extensions' at its first pass).
-            let mut core = oxplow_domain::vocabulary::Vocabulary::core();
-            core.kinds =
-                vocabulary_reactor::with_work_item_ids(core.kinds, work_item_ids().as_ref());
-            vocabulary.swap(core);
+            // oxplow-foundation's resources, built in, until the service's
+            // first pass adds every enabled extension's.
+            let mut boot = oxplow_domain::vocabulary::Vocabulary::core();
+            boot.resources =
+                vocabulary_reactor::with_work_item_ids(boot.resources, work_item_ids().as_ref());
+            vocabulary.swap(boot);
         }
         let vocabulary_service =
             Arc::new(vocabulary_reactor::VocabularyService::new(work_item_ids));

@@ -123,9 +123,10 @@ impl AsyncEventConsumer for EffortLandingConsumer {
         let Some(stream) = event.envelope.anchors.stream_id else {
             return Ok(());
         };
-        let Ok(sha) =
-            oxplow_domain::uri::build::id_of(&indexed.commit, oxplow_domain::uri::types::COMMIT)
-        else {
+        let Ok(sha) = oxplow_domain::uri::build::id_of(
+            &indexed.commit,
+            oxplow_domain::uri::resources::COMMIT,
+        ) else {
             return Ok(());
         };
         let sha = sha.as_str();

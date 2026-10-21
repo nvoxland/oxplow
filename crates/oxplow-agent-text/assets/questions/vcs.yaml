@@ -4,7 +4,7 @@
 # skill that should lead the agent to its answer; everything `reaches`
 # names must be in that skill's text.
 - question: Which commits touched this file, newest first?
-  about: file
+  about: oxplow/file
   skill: oxplow-codebase
   reaches:
     sql: >-
@@ -13,7 +13,7 @@
       WHERE f.path = 'src/lib.rs' ORDER BY c.committed_at DESC LIMIT 20
   shape: { columns: [sha, subject, committed_at] }
 - question: Who has changed this file the most?
-  about: file
+  about: oxplow/file
   skill: oxplow-codebase
   reaches:
     sql: >-
@@ -47,13 +47,13 @@
       WHERE c.kind = 'working' AND c.stream_id = 1
   shape: { columns: [path, staged, untracked] }
 - question: What did this commit change?
-  about: commit
+  about: oxplow/commit
   skill: oxplow-codebase
   reaches:
     sql: SELECT path, status, additions, deletions FROM v_commit_file WHERE sha = 'abc123'
   shape: { columns: [path, status, additions, deletions] }
 - question: What is the recent history of this file?
-  about: file
+  about: oxplow/file
   skill: oxplow-codebase
   reaches:
     tool: oxplow_file_history

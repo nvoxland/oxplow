@@ -313,13 +313,13 @@ pub struct CommandUi {
     #[serde(default)]
     #[specta(type = Option<crate::Json>)]
     pub input: Option<Value>,
-    /// What gathers its input — a page (a tab id, `page:new-task`) or one
+    /// What gathers its input — a page (a tab id, `oxplow:oxplow/page?page=new-task`) or one
     /// of the window's own forms (`new-thread`, `commit`): choosing it
     /// opens that rather than running it.
     #[serde(default)]
     pub form: Option<String>,
     /// The page to open once it ran: a tab id whose `{{result.<field>}}`
-    /// takes the result's field (`page:custom-dashboard?id={{result.id}}`).
+    /// takes the result's field (`oxplow:oxplow/page?id={{result.id}}&page=custom-dashboard`).
     #[serde(default)]
     pub open_after: Option<String>,
     /// It runs as a background task (a slow call out: pull, push) whose
@@ -366,8 +366,11 @@ impl CommandUi {
             return bad("label", "a `ui.label` says what a person reads".into());
         }
         if let Some(kind) = &self.about {
-            if !crate::uri::grammar::is_valid_type(kind) {
-                return bad("about", format!("`{kind}` isn't a ref kind"));
+            if kind.parse::<crate::uri::ResourceName>().is_err() {
+                return bad(
+                    "about",
+                    format!("`{kind}` isn't a resource (`<extension>/<name>`)"),
+                );
             }
         }
         if let Some(form) = &self.form {
@@ -377,12 +380,12 @@ impl CommandUi {
                     "a command with a `form` gathers its input there — drop `input`".into(),
                 );
             }
-            let page = form.contains(':') && crate::uri::grammar::Uri::parse(form).is_ok();
+            let page = crate::uri::OxplowUri::parse(form).is_ok();
             if !page && !WINDOW_FORMS.contains(&form.as_str()) {
                 return bad(
                     "form",
                     format!(
-                        "`{form}` is neither a page's ref (`page:new-task`) nor one of the \
+                        "`{form}` is neither a page's ref (`oxplow:oxplow/page?page=new-task`) nor one of the \
                          window's forms ({})",
                         WINDOW_FORMS.join(", ")
                     ),
@@ -441,9 +444,7 @@ impl CommandUi {
             // is nothing to check until it has run.
             let sample =
                 crate::template::splice::<()>(open, |_| Ok("1".into())).unwrap_or_default();
-            if whole_placeholder(open).is_none()
-                && crate::uri::grammar::Uri::parse(&sample).is_err()
-            {
+            if whole_placeholder(open).is_none() && crate::uri::AnyUri::parse(&sample).is_err() {
                 return bad("open_after", format!("`{open}` isn't a ref to open"));
             }
         }
@@ -702,7 +703,7 @@ impl Actor {
     }
 
     /// The `source` an event or audit row records: `human`, `agent:thr3`,
-    /// `lens:acme/blocked`, `system`, `effect:acme/notify`.
+    /// `oxplow:oxplow/lens?lens=acme/blocked`, `system`, `effect:acme/notify`.
     pub fn source(&self) -> String {
         match self {
             Actor::Human => "human".into(),
@@ -885,7 +886,7 @@ pub enum CommandError {
     /// error stays small on the hot `Result` paths.
     NeedsConfirmation { preview: Box<Preview> },
     /// An agent's run needed a person's confirmation, so it was kept as a
-    /// proposal (`proposal:<id>`) for a person to approve or decline.
+    /// proposal (`oxplow:oxplow/proposal?id=<id>`) for a person to approve or decline.
     /// Nothing ran; nothing else was written.
     Proposed {
         proposal: String,
@@ -1173,11 +1174,11 @@ mod tests {
     fn a_command_ui_is_checked_where_it_is_declared() {
         for good in [
             json!({ "label": "New", "input": { "thread": "{{thread}}", "n": 1 } }),
-            json!({ "label": "Finish", "about": "work_item", "input": { "ref": "{{ref}}", "id": "{{ref.id}}" } }),
-            json!({ "label": "New Task…", "form": "page:new-task" }),
+            json!({ "label": "Finish", "about": "oxplow/work_item", "input": { "ref": "{{ref}}", "id": "{{ref.id}}" } }),
+            json!({ "label": "New Task…", "form": "oxplow:oxplow/page?page=new-task" }),
             json!({ "label": "Commit…", "form": "commit" }),
-            json!({ "label": "New", "open_after": "page:custom-dashboard?id={{result.id}}" }),
-            json!({ "label": "New", "open_after": "agent_session:{{result.id}}" }),
+            json!({ "label": "New", "open_after": "oxplow:oxplow/page?id={{result.id}}&page=custom-dashboard" }),
+            json!({ "label": "New", "open_after": "oxplow:oxplow/agent_session?id={{result.id}}" }),
             // A result field that is itself the ref to open.
             json!({ "label": "New", "open_after": "{{result.page}}" }),
             json!({ "label": "Save", "menu": { "bar": "file", "order": 1 } }),
@@ -1202,7 +1203,7 @@ mod tests {
                 "the whole string",
             ),
             (
-                json!({ "label": "X", "form": "page:new-task", "input": { "a": 1 } }),
+                json!({ "label": "X", "form": "oxplow:oxplow/page?page=new-task", "input": { "a": 1 } }),
                 "/ui/input",
                 "`form`",
             ),
@@ -1214,10 +1215,10 @@ mod tests {
             (
                 json!({ "label": "X", "about": "Work Item" }),
                 "/ui/about",
-                "ref kind",
+                "isn't a resource",
             ),
             (
-                json!({ "label": "X", "open_after": "page:x?id={{row.id}}" }),
+                json!({ "label": "X", "open_after": "oxplow:oxplow/page?id={{row.id}}&page=x" }),
                 "/ui/open_after",
                 "{{result.",
             ),
@@ -1243,11 +1244,14 @@ mod tests {
     /// id is empty.
     #[test]
     fn open_after_is_bound_from_the_result() {
-        let u =
-            ui(json!({ "label": "New", "open_after": "page:custom-dashboard?id={{result.id}}" }));
+        let u = ui(
+            json!({ "label": "New", "open_after": "oxplow:oxplow/page?id={{result.id}}&page=custom-dashboard" }),
+        );
         assert_eq!(
             u.open_after_for(&json!({ "id": 7 })),
-            Ok(Some("page:custom-dashboard?id=7".to_string()))
+            Ok(Some(
+                "oxplow:oxplow/page?id=7&page=custom-dashboard".to_string()
+            ))
         );
         let err = u.open_after_for(&json!({})).unwrap_err();
         assert!(err.contains("`id`"), "{err}");
@@ -1257,8 +1261,8 @@ mod tests {
         );
         let whole = ui(json!({ "label": "New", "open_after": "{{result.page}}" }));
         assert_eq!(
-            whole.open_after_for(&json!({ "page": "wiki:lib" })),
-            Ok(Some("wiki:lib".to_string()))
+            whole.open_after_for(&json!({ "page": "oxplow:oxplow/wiki?slug=lib" })),
+            Ok(Some("oxplow:oxplow/wiki?slug=lib".to_string()))
         );
     }
 
@@ -1400,7 +1404,7 @@ mod tests {
             on_behalf_of: Box::new(agent.clone()),
         };
         assert_eq!(lens.invoker(), Invoker::Lens);
-        assert_eq!(lens.source(), "lens:acme/blocked");
+        assert_eq!(lens.source(), "oxplow:oxplow/lens?lens=acme/blocked");
         assert_eq!(lens.thread_id(), Some(ThreadId::new(3)));
         assert_eq!(Actor::Human.source(), "human");
         assert_eq!(Actor::System.invoker(), Invoker::Human);
@@ -1432,7 +1436,10 @@ mod tests {
         let shown = component(Actor::Human);
         assert_eq!(shown.kind(), ActorKind::Component);
         assert_eq!(shown.invoker(), Invoker::Lens);
-        assert_eq!(shown.source(), "custom_component:acme/board");
+        assert_eq!(
+            shown.source(),
+            "oxplow:oxplow/custom_component?custom_component=acme/board"
+        );
         assert_eq!(shown.id().as_deref(), Some("acme/board"));
         assert!(shown.may_confirm());
         assert!(!shown.proposes());
@@ -1450,7 +1457,10 @@ mod tests {
         })
         .in_stream(StreamId::new(2));
         assert_eq!(moved.stream_id(), Some(StreamId::new(2)));
-        assert_eq!(moved.source(), "custom_component:acme/board");
+        assert_eq!(
+            moved.source(),
+            "oxplow:oxplow/custom_component?custom_component=acme/board"
+        );
     }
 
     /// An agent's session is its own and anchors what it causes; a lens

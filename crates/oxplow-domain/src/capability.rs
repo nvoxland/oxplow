@@ -86,9 +86,9 @@ pub struct ProviderContract {
     pub events: &'static [(&'static str, u32)],
     /// What its collectors stream; `None` when it reads nothing in.
     pub records: Option<Record>,
-    /// The ref kind whose ids are an instance's own
-    /// (`work_item:<instance>:…`); `None` when it owns no refs.
-    pub ref_kind: Option<&'static str>,
+    /// The resource whose URIs an instance owns (`oxplow/work_item`, its
+    /// `provider` param the instance); `None` when it owns none.
+    pub resource: Option<&'static str>,
     /// Whether it keeps items: a manifest's `fields` and `id_pattern` apply.
     pub items: bool,
     /// The JSON Schema of what it declares of itself beyond its features
@@ -144,7 +144,7 @@ impl ProviderContract {
 
 /// A work list's: the `work_item.<verb>` commands dispatch to its verbs,
 /// it records its items as `work_item.recorded@2`, and owns
-/// `work_item:<instance>:…`.
+/// `oxplow:oxplow/work_item?id=…&provider=<instance>`.
 pub const WORK_ITEMS: ProviderContract = ProviderContract {
     verbs: &[
         Verb {
@@ -191,7 +191,7 @@ pub const WORK_ITEMS: ProviderContract = ProviderContract {
         event: ("work_item.recorded", 2),
         key: "item",
     }),
-    ref_kind: Some("work_item"),
+    resource: Some("oxplow/work_item"),
     items: true,
     data: None,
 };
@@ -206,7 +206,7 @@ pub const EFFORT_POLICY: ProviderContract = ProviderContract {
     dispatch: None,
     events: &[],
     records: None,
-    ref_kind: None,
+    resource: None,
     items: false,
     data: None,
 };
@@ -233,7 +233,7 @@ pub const SNAPSHOTS: ProviderContract = ProviderContract {
     dispatch: None,
     events: &[],
     records: None,
-    ref_kind: None,
+    resource: None,
     items: false,
     data: None,
 };
@@ -242,7 +242,7 @@ pub const SNAPSHOTS: ProviderContract = ProviderContract {
 /// page commands dispatch to its verbs, each answering the page's
 /// `knowledge.page.recorded@1` (the body it kept and the refs it states),
 /// and its collector streams its pages (edited outside oxplow) as the same
-/// records. Its pages are `wiki:<slug>`: bare refs, the active store's.
+/// records. Its pages are `oxplow:oxplow/wiki?slug=<slug>`: bare refs, the active store's.
 pub const KNOWLEDGE: ProviderContract = ProviderContract {
     verbs: &[
         Verb {
@@ -265,7 +265,7 @@ pub const KNOWLEDGE: ProviderContract = ProviderContract {
         event: ("knowledge.page.recorded", 1),
         key: "page",
     }),
-    ref_kind: Some("wiki"),
+    resource: Some("oxplow/wiki"),
     items: false,
     data: None,
 };
@@ -314,7 +314,7 @@ pub const AGENT_HARNESS: ProviderContract = ProviderContract {
     dispatch: None,
     events: &[],
     records: None,
-    ref_kind: None,
+    resource: None,
     items: false,
     data: Some(HARNESS_DATA),
 };
@@ -448,7 +448,7 @@ pub fn contract(id: &str) -> Option<&'static ProviderContract> {
 }
 
 /// Why `id` can't name a provider or one of its instances — the segment
-/// of its refs (`work_item:<id>:…`) and its command namespace — or `None`
+/// of its refs (`oxplow:oxplow/work_item?id=…&provider=<id>`) and its command namespace — or `None`
 /// when it can: lowercase letters, digits and underscores, starting with
 /// a letter, and none of oxplow's own (`oxplow`, a core namespace). One
 /// rule for a provider's id and an instance's.
@@ -664,7 +664,7 @@ mod tests {
             knowledge.required(&serde_json::json!({})),
             ["write_page", "delete_page", "link"]
         );
-        assert_eq!(knowledge.ref_kind, Some("wiki"));
+        assert_eq!(knowledge.resource, Some("oxplow/wiki"));
         assert_eq!(
             knowledge.records.map(|r| (r.entity, r.event, r.key)),
             Some(("knowledge_page", ("knowledge.page.recorded", 1), "page"))
@@ -693,7 +693,7 @@ mod tests {
     fn a_contract_says_what_its_provider_owns_and_emits() {
         let work = contract("work_items").unwrap();
         assert_eq!(work.events, [("work_item.recorded", 2)]);
-        assert_eq!(work.ref_kind, Some("work_item"));
+        assert_eq!(work.resource, Some("oxplow/work_item"));
         assert_eq!(
             work.records.map(|r| (r.entity, r.event, r.key)),
             Some(("work_item", ("work_item.recorded", 2), "item"))
@@ -703,7 +703,7 @@ mod tests {
         let policy = contract("effort_policy").unwrap();
         assert!(policy.events.is_empty() && policy.records.is_none());
         assert_eq!(
-            (policy.ref_kind, policy.dispatch, policy.items),
+            (policy.resource, policy.dispatch, policy.items),
             (None, None, false)
         );
     }

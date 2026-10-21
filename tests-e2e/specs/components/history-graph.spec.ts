@@ -56,7 +56,7 @@ test("the history graph's filter is the page's: in the address and kept on a rel
   await openFromLauncher(page, "Git History");
   const frame = page.frameLocator('[data-testid="custom-component-frame"]');
   await expect(frame.locator(".row", { hasText: "Merge side" })).toBeVisible();
-  const body = page.locator('[data-testid^="center-tab-body-oxplow:oxplow/page?page=git-history"]:visible');
+  const body = page.locator('[data-testid^="center-tab-body-oxplow:oxplow/page?"][data-testid*="page=git-history"]:visible');
   await expect(body).toHaveAttribute("data-testid", "center-tab-body-oxplow:oxplow/page?page=git-history");
 
   await frame.locator("#query").fill("side");

@@ -28,7 +28,7 @@ pub struct EventView {
     /// Its place in the log; `null` for a fixture that gives none.
     pub seq: Option<i64>,
     pub at: Option<Timestamp>,
-    /// What emitted it (`agent:thr3`, `human`, `collector:<ext>/<id>`);
+    /// What emitted it (`agent:thr3`, `human`, `oxplow:oxplow/collector?collector=<ext>/<id>`);
     /// `fixture` for a test's.
     pub source: String,
     /// The canonical refs it's about.
@@ -89,7 +89,7 @@ impl EventView {
             .map_err(|e| invalid(e.message()))?;
         let subject = f.subject.unwrap_or_default();
         for s in &subject {
-            crate::uri::validate_ref(&vocabulary.kinds, s)
+            crate::uri::validate_uri(&vocabulary.resources, s)
                 .map_err(|e| invalid(format!("subject `{s}`: {}", e.message())))?;
         }
         Ok(Self {
@@ -183,7 +183,7 @@ mod tests {
     use super::*;
     use crate::events::schema::{DeclaredEventType, EventSchemaRegistry};
     use crate::events::{Envelope, EventId};
-    use crate::uri::types::core_types;
+    use crate::uri::resources::foundation;
 
     /// Core's types plus `acme.thing`, v1 `{ n }` and v2 `{ count }`, its
     /// upcast renaming the field.
@@ -217,19 +217,24 @@ mod tests {
                 },
             )
             .unwrap();
-        Vocabulary::new(events, core_types())
+        Vocabulary::new(events, foundation().clone())
     }
 
     fn stored(v: u32, payload: Value) -> StoredEvent {
-        let mut env = Envelope::new("acme.thing", v, "collector:acme/c", payload)
-            .unwrap()
-            .with_anchors(Anchors {
-                thread_id: Some(ThreadId::new(3)),
-                turn_id: Some(7),
-                ..Default::default()
-            })
-            .with_subject(["work_item:oxplow:tsk4"])
-            .with_cause(EventId("01990000-0000-7000-8000-000000000001".into()));
+        let mut env = Envelope::new(
+            "acme.thing",
+            v,
+            "oxplow:oxplow/collector?collector=acme/c",
+            payload,
+        )
+        .unwrap()
+        .with_anchors(Anchors {
+            thread_id: Some(ThreadId::new(3)),
+            turn_id: Some(7),
+            ..Default::default()
+        })
+        .with_subject(["oxplow:oxplow/work_item?id=tsk4&provider=oxplow"])
+        .with_cause(EventId("01990000-0000-7000-8000-000000000001".into()));
         env.at = Timestamp::parse("2026-10-09T12:00:00.000000Z").unwrap();
         StoredEvent {
             seq: 42,
@@ -252,8 +257,8 @@ mod tests {
                 "v": 2,
                 "seq": 42,
                 "at": "2026-10-09T12:00:00.000000Z",
-                "source": "collector:acme/c",
-                "subject": ["work_item:oxplow:tsk4"],
+                "source": "oxplow:oxplow/collector?collector=acme/c",
+                "subject": ["oxplow:oxplow/work_item?id=tsk4&provider=oxplow"],
                 "anchors": {
                     "stream_id": null, "thread_id": "thr3", "effort_id": null,
                     "turn_id": 7, "agent_session_id": null, "snapshot_id": null
@@ -273,8 +278,8 @@ mod tests {
         let event = stored(1, json!({ "n": 5 }));
         let given = json!({
             "id": event.envelope.id.0, "type": "acme.thing", "v": 1, "seq": 42,
-            "at": "2026-10-09T12:00:00.000000Z", "source": "collector:acme/c",
-            "subject": ["work_item:oxplow:tsk4"],
+            "at": "2026-10-09T12:00:00.000000Z", "source": "oxplow:oxplow/collector?collector=acme/c",
+            "subject": ["oxplow:oxplow/work_item?id=tsk4&provider=oxplow"],
             "anchors": { "thread_id": "thr3", "turn_id": 7 },
             "payload": { "n": 5 },
             "cause": "01990000-0000-7000-8000-000000000001",

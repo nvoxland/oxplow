@@ -126,7 +126,7 @@ A definition's id is its containers' names and its own joined by `::`; then
 `(param types)` in languages that overload by parameters (Java, C#, C++:
 always present on callables, defaults dropped) or a Clojure defmethod
 dispatch value, `area(:circle)`; then `~n` for the nth definition with that
-same id in the file, in position order. The ref is `symbol:<path>/<id>`
+same id in the file, in position order. The URI is `oxplow:oxplow/symbol?path=<path>&symbol=<id>`
 (resources.md); no revision is part of the identity.
 
 - `crates/oxplow-app/src/lib.rs/Services::boot`
@@ -161,8 +161,8 @@ from each live stream's latest snapshot. Columns: `.context/data-model.md`.
 symbol } -> Option<SymbolLocation { path, line, col, revision, versionGone }>`:
 
 - A current ref is its `v_symbol` row.
-- A pinned ref (`@snap:<id>`, `@git:<sha>`) re-extracts the file at that
-  revision; the path is the longest `/`-prefix of the id naming a file there.
+- A pinned URI (`rev=snap:<id>`, `rev=git:<sha>`) re-extracts the file at that
+  revision, reading `path` and the `symbol` id as the URI gives them.
 - A pin whose version is gone, or no longer holds the symbol, falls back to
   the current symbol with `versionGone`.
 

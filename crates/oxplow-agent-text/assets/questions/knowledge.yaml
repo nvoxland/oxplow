@@ -5,7 +5,7 @@
     sql: SELECT ref, title, stale_ref_count FROM v_knowledge_page WHERE stale_ref_count > 0
   shape: { columns: [ref, title, stale_ref_count] }
 - question: Which wiki pages talk about this file?
-  about: file
+  about: oxplow/file
   skill: oxplow-wiki-capture
   reaches:
     sql: SELECT page, stale FROM v_knowledge_ref WHERE path = 'src/lib.rs'
@@ -16,17 +16,17 @@
     command: oxplow.knowledge.write_page
     input: { slug: auth-flow, body: "# Auth flow\n\nHow a login becomes a session." }
 - question: What points at this file — pages, commits, work items?
-  about: file
+  about: oxplow/file
   skill: oxplow-wiki-capture
   reaches:
     sql: >-
-      SELECT source_ref, ref_type FROM v_page_ref
-      WHERE target_ref = 'file:src/lib.rs' ORDER BY source_ref
-  shape: { columns: [source_ref, ref_type] }
+      SELECT source_uri, ref_type FROM v_page_ref
+      WHERE target_uri = 'oxplow:oxplow/file?path=src/lib.rs' ORDER BY source_uri
+  shape: { columns: [source_uri, ref_type] }
 - question: What does this wiki page point at?
   skill: oxplow-wiki-capture
   reaches:
     sql: >-
-      SELECT target_ref, ref_type FROM v_page_ref
-      WHERE source_ref = 'wiki:auth-flow' ORDER BY target_ref
-  shape: { columns: [target_ref, ref_type] }
+      SELECT target_uri, ref_type FROM v_page_ref
+      WHERE source_uri = 'oxplow:oxplow/wiki?slug=auth-flow' ORDER BY target_uri
+  shape: { columns: [target_uri, ref_type] }

@@ -20,7 +20,7 @@
 //! grouped by its dimension, **before** any connection is taken (the engine
 //! holds its own pool permits). The points land in a temp table the query
 //! runs against: `metric_grid(…)` becomes `temp."metric_grid_1"` and each
-//! `MEASURE('<key>')` its column `"measure:<key>"`.
+//! `MEASURE('<key>')` its column `"oxplow:oxplow/measure?measure=%3Ckey%3E"`.
 
 use std::collections::BTreeMap;
 
@@ -133,8 +133,8 @@ pub struct Materialized {
 impl GridPlan {
     /// The grid's column for a metric key.
     pub fn column(key: &str) -> String {
-        oxplow_domain::uri::build::of(
-            oxplow_domain::contribution::ContributionKind::Measure.segment(),
+        oxplow_domain::uri::build::keyed(
+            &oxplow_domain::contribution::ContributionKind::Measure.resource(),
             key,
         )
     }
@@ -345,7 +345,7 @@ mod tests {
             tx.execute(
                 "INSERT INTO metric_catalog (key, title, kind, scope, enabled, trigger, toggleable) \
                  VALUES ('oxplow.doc_coverage', 'Doc coverage', 'coverage', \
-                 'extension:oxplow-foundation', 0, 'on snapshot.taken', 1)",
+                 'oxplow:oxplow/extension?name=oxplow-foundation', 0, 'on snapshot.taken', 1)",
                 [],
             )
             .map_err(oxplow_db::map_sql_err)

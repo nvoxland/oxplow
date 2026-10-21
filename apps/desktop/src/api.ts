@@ -488,14 +488,15 @@ export async function listStreams(): Promise<Stream[]> {
 
 /// Site-wide BM25 search. `streamId` scopes file/stream-bound hits to one
 /// worktree (project-global hits like wiki always included); `null` searches
-/// everything. `kinds` optionally restricts to searchable kinds (`v_ref_kind`) or `file`.
+/// everything. `resources` optionally restricts to searchable resources
+/// (`v_resource.searchable`: `oxplow/wiki`) or `oxplow/file`.
 export async function searchSite(
   query: string,
   streamId: string | null,
-  kinds: string[] | null = null,
+  resources: string[] | null = null,
   limit = 50,
 ): Promise<SearchHit[]> {
-  return unwrap(await commands.search(query, streamId, kinds, limit));
+  return unwrap(await commands.search(query, streamId, resources, limit));
 }
 
 /// Run one read-only `SELECT`/`WITH` over the semantic layer's `v_*`

@@ -475,7 +475,10 @@ async fn a_tx_command_writes_its_state_audit_and_events_together() {
     );
     assert_eq!(events[0].envelope.payload["actor_kind"], "agent");
     assert_eq!(events[0].envelope.source, "agent:thr7");
-    assert_eq!(events[0].envelope.subject, vec!["command:oxplow.kv.set"]);
+    assert_eq!(
+        events[0].envelope.subject,
+        vec!["oxplow:oxplow/command?command=oxplow.kv.set"]
+    );
     assert_eq!(events[1].envelope.event_type, "config.changed");
     assert_eq!(events[1].envelope.cause, out.event_id);
 }
@@ -1134,7 +1137,7 @@ async fn a_namespace_is_one_owners_and_oxplow_is_oxplows() {
     let err = bus
         .register_namespace(
             "ext",
-            "extension:x",
+            "oxplow:oxplow/extension?name=x",
             vec![cmd("ext.thing.a"), cmd("other.thing.b")],
         )
         .unwrap_err();
@@ -1144,34 +1147,44 @@ async fn a_namespace_is_one_owners_and_oxplow_is_oxplows() {
 
     bus.register_namespace(
         "ext",
-        "extension:x",
+        "oxplow:oxplow/extension?name=x",
         vec![cmd("ext.thing.a"), cmd("ext.thing.b")],
     )
     .unwrap();
-    assert_eq!(bus.namespace_owner("ext").as_deref(), Some("extension:x"));
+    assert_eq!(
+        bus.namespace_owner("ext").as_deref(),
+        Some("oxplow:oxplow/extension?name=x")
+    );
     // Another source's namespace is taken.
     let err = bus
         .register_namespace("ext", "provider:ext", vec![cmd("ext.thing.c")])
         .unwrap_err();
-    assert!(err.to_string().contains("extension:x"), "{err}");
+    assert!(
+        err.to_string().contains("oxplow:oxplow/extension?name=x"),
+        "{err}"
+    );
 
     // `oxplow` is reserved: an extension that doesn't ship with oxplow
     // is refused; one that does shares it, ids checked one by one.
     let err = bus
-        .register_namespace("oxplow", "extension:acme", vec![cmd("oxplow.kv.other")])
+        .register_namespace(
+            "oxplow",
+            "oxplow:oxplow/extension?name=acme",
+            vec![cmd("oxplow.kv.other")],
+        )
         .unwrap_err();
     assert!(err.to_string().contains("reserved"), "{err}");
     let err = bus
         .register_namespace(
             "oxplow",
-            "extension:oxplow-bundled",
+            "oxplow:oxplow/extension?name=oxplow-bundled",
             vec![cmd("oxplow.kv.set")],
         )
         .unwrap_err();
     assert!(err.to_string().contains("already registered"), "{err}");
     bus.register_namespace(
         "oxplow",
-        "extension:oxplow-bundled",
+        "oxplow:oxplow/extension?name=oxplow-bundled",
         vec![cmd("oxplow.review.accept")],
     )
     .unwrap();
@@ -1179,11 +1192,15 @@ async fn a_namespace_is_one_owners_and_oxplow_is_oxplows() {
 
     // Unregistering a source takes only its commands.
     assert_eq!(
-        bus.unregister_source("extension:oxplow-bundled"),
+        bus.unregister_source("oxplow:oxplow/extension?name=oxplow-bundled"),
         vec!["oxplow.review.accept".to_string()]
     );
     assert!(bus.input_schema("oxplow.kv.set").is_some());
-    assert_eq!(bus.unregister_source("extension:x").len(), 2);
+    assert_eq!(
+        bus.unregister_source("oxplow:oxplow/extension?name=x")
+            .len(),
+        2
+    );
     assert_eq!(bus.namespace_owner("ext"), None);
 }
 
@@ -2093,10 +2110,7 @@ async fn propose(bus: &CommandBus, k: &str, v: &str) -> i64 {
     let CommandError::Proposed { proposal, .. } = err else {
         panic!("{err:?}");
     };
-    proposal
-        .strip_prefix("proposal:")
-        .and_then(|id| id.parse().ok())
-        .unwrap()
+    oxplow_domain::uri::build::parse_as(&proposal, oxplow_domain::uri::resources::PROPOSAL).unwrap()
 }
 
 /// A newer proposal of the same call replaces the pending one, and
@@ -2117,10 +2131,21 @@ async fn a_proposal_that_replaces_another_names_it() {
     let CommandError::Proposed { supersedes, .. } = &err else {
         panic!("{err:?}");
     };
-    assert_eq!(supersedes, &vec![format!("proposal:{first}")]);
+    assert_eq!(
+        supersedes,
+        &vec![oxplow_domain::uri::build::keyed(
+            oxplow_domain::uri::resources::PROPOSAL,
+            &first.to_string()
+        )]
+    );
     assert!(
-        err.to_string()
-            .contains(&format!("replaces proposal:{first}")),
+        err.to_string().contains(&format!(
+            "replaces {}",
+            oxplow_domain::uri::build::keyed(
+                oxplow_domain::uri::resources::PROPOSAL,
+                &first.to_string()
+            )
+        )),
         "{err}"
     );
     let proposed: Vec<_> = logged(&bus)
@@ -2131,7 +2156,10 @@ async fn a_proposal_that_replaces_another_names_it() {
     assert_eq!(proposed[0].envelope.payload.get("supersedes"), None);
     assert_eq!(
         proposed[1].envelope.payload["supersedes"],
-        json!([format!("proposal:{first}")])
+        json!([oxplow_domain::uri::build::keyed(
+            oxplow_domain::uri::resources::PROPOSAL,
+            &first.to_string()
+        )])
     );
 }
 
@@ -2152,7 +2180,13 @@ async fn an_agents_run_that_needs_confirmation_becomes_a_proposal() {
     let rows = pending(&db).await;
     assert_eq!(rows.len(), 1);
     let row = &rows[0];
-    assert_eq!(proposal, format!("proposal:{}", row.id));
+    assert_eq!(
+        proposal,
+        oxplow_domain::uri::build::keyed(
+            oxplow_domain::uri::resources::PROPOSAL,
+            &format!("{}", row.id)
+        )
+    );
     assert_eq!(row.command, "oxplow.kv.set");
     assert_eq!(row.actor_kind, ActorKind::Agent);
     assert_eq!(row.thread_id, Some(ThreadId::new(7)));
@@ -2244,7 +2278,7 @@ async fn concurrent_approvals_run_it_once() {
     );
     let lost = results.into_iter().find_map(Result::err).unwrap();
     assert!(
-        matches!(&lost, CommandError::Invalid { message, .. } if message.contains(&format!("proposal:{id}"))),
+        matches!(&lost, CommandError::Invalid { message, .. } if message.contains(&oxplow_domain::uri::build::keyed(oxplow_domain::uri::resources::PROPOSAL, &id.to_string()))),
         "{lost:?}"
     );
     assert_eq!(audits(&db).await.len(), 1, "only the run that won");
@@ -2427,7 +2461,7 @@ async fn declining_writes_only_the_decision() {
         .expect("decline logged");
     assert_eq!(
         declined.envelope.payload["proposal"],
-        format!("proposal:{id}")
+        oxplow_domain::uri::build::keyed(oxplow_domain::uri::resources::PROPOSAL, &id.to_string())
     );
     let err = bus.approve(&Actor::Human, id).await.unwrap_err();
     assert!(matches!(err, CommandError::Invalid { .. }), "{err:?}");

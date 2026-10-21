@@ -52,14 +52,14 @@ pub const RESOLVE: &str = "oxplow.handoff.resolve";
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SendInput {
-    /// The thread it is for (`thread:thr3`): an open thread, not the
+    /// The thread it is for (`oxplow:oxplow/thread?id=thr3`): an open thread, not the
     /// sender's own (a note is for that). Any stream's.
     pub to_thread: String,
     /// What is handed over and what the recipient needs to know (markdown;
     /// `[[…]]` links are checked).
     #[schemars(extend("contentMediaType" = "text/markdown"))]
     pub body: String,
-    /// The work item it hands over (`work_item:oxplow:tsk12`, or a loose
+    /// The work item it hands over (`oxplow:oxplow/work_item?id=tsk12&provider=oxplow`, or a loose
     /// id): taking the handoff moves it onto the recipient thread.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub work_item: Option<String>,
@@ -92,7 +92,7 @@ impl From<SettleState> for HandoffState {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SettleInput {
-    /// The handoff (`handoff:hnd3`).
+    /// The handoff (`oxplow:oxplow/handoff?id=hnd3`).
     pub handoff: String,
     /// `taken` or `declined` (its recipient), `withdrawn` (its sender),
     /// `open` (undoing either).
@@ -112,7 +112,7 @@ pub enum Outcome {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ResolveInput {
-    /// The handoff to your thread (`handoff:hnd3`).
+    /// The handoff to your thread (`oxplow:oxplow/handoff?id=hnd3`).
     pub handoff: String,
     /// `taken` moves its work item onto your thread; `declined` leaves it.
     pub outcome: Outcome,
@@ -129,7 +129,9 @@ fn sending_thread(ctx: &TxCtx<'_>, named: Option<&str>) -> Result<ThreadId, Comm
             reason: "an effect whose event has no thread can't hand work off".into(),
         })?;
         if let Some(named) = named {
-            if ref_id::<ThreadId>(named, "thread", "/from_thread")? != own {
+            if ref_id::<ThreadId>(named, oxplow_domain::uri::resources::THREAD, "/from_thread")?
+                != own
+            {
                 return Err(CommandError::Denied {
                     reason: format!(
                         "an effect hands off only from its event's thread (`{}`)",
@@ -179,7 +181,11 @@ pub fn send_op(deps: LinkDeps, work_items: WorkItemsRegistry) -> Op {
         Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
             let input: SendInput = parse(with_loose_refs(&work_items, input)?)?;
             let from = sending_thread(ctx, input.from_thread.as_deref())?;
-            let to: ThreadId = ref_id(&input.to_thread, "thread", "/to_thread")?;
+            let to: ThreadId = ref_id(
+                &input.to_thread,
+                oxplow_domain::uri::resources::THREAD,
+                "/to_thread",
+            )?;
             if to == from {
                 return Err(invalid(
                     "/to_thread",
@@ -213,7 +219,7 @@ pub fn send_op(deps: LinkDeps, work_items: WorkItemsRegistry) -> Op {
             }
             let (handoff, event) = send_tx(
                 ctx.conn,
-                &ctx.events.vocabulary.kinds,
+                &ctx.events.vocabulary.resources,
                 NewHandoff {
                     from_thread: from,
                     from_session: ctx.actor().session_id(),
@@ -283,7 +289,11 @@ pub fn settle_op() -> Op {
         true,
         Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
             let input: SettleInput = parse(input)?;
-            let id: HandoffId = ref_id(&input.handoff, "handoff", "/handoff")?;
+            let id: HandoffId = ref_id(
+                &input.handoff,
+                oxplow_domain::uri::resources::HANDOFF,
+                "/handoff",
+            )?;
             let before = handoff_tx(ctx.conn, id)?
                 .ok_or_else(|| invalid("/handoff", format!("no handoff `{}`", input.handoff)))?;
             let to = HandoffState::from(input.state);
@@ -321,7 +331,11 @@ pub fn resolve_op() -> Op {
     let compose: Arc<Composer> = Arc::new(
         |composing: &Composing<'_>, run: &RunContext, input: &Value| {
             let input: ResolveInput = parse(input.clone())?;
-            let id: HandoffId = ref_id(&input.handoff, "handoff", "/handoff")?;
+            let id: HandoffId = ref_id(
+                &input.handoff,
+                oxplow_domain::uri::resources::HANDOFF,
+                "/handoff",
+            )?;
             let (handoff, item) = composing
                 .runtime
                 .block_on(composing.db.read(move |tx| {
@@ -526,7 +540,7 @@ mod tests {
             &fx.svc,
             &agent,
             SEND,
-            json!({ "to_thread": to_ref, "body": "x", "work_item": "work_item:oxplow:tsk999" }),
+            json!({ "to_thread": to_ref, "body": "x", "work_item": "oxplow:oxplow/work_item?id=tsk999&provider=oxplow" }),
         )
         .await
         .unwrap_err();

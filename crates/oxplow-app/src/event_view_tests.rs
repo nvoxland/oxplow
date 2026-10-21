@@ -125,7 +125,7 @@ async fn every_path_hands_over_the_same_envelope() {
         Envelope::new(
             "acme_pr.merged",
             1,
-            "collector:acme-pr/gh",
+            "oxplow:oxplow/collector?collector=acme-pr/gh",
             json!({ "number": 12 }),
         )
         .unwrap()

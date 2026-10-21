@@ -55,7 +55,7 @@ test("the Tasks page's scope is its tab's: it re-renders the page, a reload keep
   const { page } = fresh;
   await page.goto("/");
   await openFromLauncher(page, "Tasks");
-  const body = () => page.locator('[data-testid^="center-tab-body-oxplow:oxplow/page?page=tasks"]:visible');
+  const body = () => page.locator('[data-testid^="center-tab-body-oxplow:oxplow/page?"][data-testid*="page=tasks"]:visible');
   await expect(body()).toHaveAttribute("data-testid", "center-tab-body-oxplow:oxplow/page?page=tasks");
   // A mark on the page's element: a change of view re-renders the page,
   // it doesn't mount it again.

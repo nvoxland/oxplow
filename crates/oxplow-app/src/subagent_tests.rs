@@ -103,7 +103,13 @@ async fn a_subagent_is_running_finished_or_only_named_by_its_calls() {
     );
     assert_eq!(
         text(&rows[0][0]),
-        format!("subagent:ses{}/a1", fx.session.value())
+        oxplow_domain::uri::build::of(
+            oxplow_domain::uri::resources::SUBAGENT,
+            &[
+                ("session", &format!("ses{}", fx.session.value())),
+                ("agent", "a1")
+            ]
+        )
     );
 
     ingest(envelope(
@@ -123,7 +129,16 @@ async fn a_subagent_is_running_finished_or_only_named_by_its_calls() {
     );
 
     // Its last message is `#result`, to the person and to an agent of the stream.
-    let reference = format!("subagent:ses{}/a1#result", fx.session.value());
+    let reference = format!(
+        "{}#part=result",
+        oxplow_domain::uri::build::of(
+            oxplow_domain::uri::resources::SUBAGENT,
+            &[
+                ("session", &format!("ses{}", fx.session.value())),
+                ("agent", "a1")
+            ]
+        )
+    );
     let read = crate::ref_read::read(
         &fx.svc,
         &reference,

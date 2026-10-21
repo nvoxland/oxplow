@@ -30,7 +30,7 @@ test("the Timeline's window is its tab's: Fit puts it in the address, a reload k
   const frame = page.frameLocator('[data-testid="custom-component-frame"]');
   await expect(frame.locator(".vis-item").first()).toBeVisible();
   // The window it opens at is "the last week", not a date: not in the address.
-  const body = page.locator('[data-testid^="center-tab-body-oxplow:oxplow/page?page=timeline"]:visible');
+  const body = page.locator('[data-testid^="center-tab-body-oxplow:oxplow/page?"][data-testid*="page=timeline"]:visible');
   await expect(body).toHaveAttribute("data-testid", "center-tab-body-oxplow:oxplow/page?page=timeline");
   await expect(page.getByTestId("page-nav-title")).toContainText("Timeline:");
   const opened = await page.getByTestId("page-nav-title").textContent();

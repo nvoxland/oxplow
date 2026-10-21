@@ -261,14 +261,14 @@ pub(crate) async fn react(
             tracing::warn!(%error, "the materialized models didn't resync");
         }
     }
-    // A searchable kind's index follows the kinds declared (`ref_kind`)
-    // and the tables behind each one's view.
-    if ["ref_kind", "model_input", "model"]
+    // A searchable resource's index follows the resources declared
+    // (`resource`) and the tables behind each one's view.
+    if ["resource", "model_input", "model"]
         .iter()
         .any(|t| changed.touched(t))
     {
         if let Err(error) = assets.sync_search_kinds().await {
-            tracing::warn!(%error, "the searchable ref kinds' indexes didn't resync");
+            tracing::warn!(%error, "the searchable resources' indexes didn't resync");
         }
     }
     match changed {
@@ -843,7 +843,7 @@ mod tests {
             .unwrap();
         f.svc
             .page_visit_store
-            .record("wiki", "wiki:home", None, None, None)
+            .record("wiki", "oxplow:oxplow/wiki?slug=home", None, None, None)
             .await
             .unwrap();
         let mut want = vec!["v_usage_event", "v_page_visit"];

@@ -111,7 +111,7 @@ Still open:
 - **Names:** an extension's command namespace is its name with `-` as `_`
   (`effort_review.review.ask`), while its contribution ids and model
   views keep or translate the dash differently
-  (`job:effort-review/review`, `v_effort_review_reviews`).
+  (`oxplow:oxplow/job?job=effort-review/review`, `v_effort_review_reviews`).
 - **The compare-exchange stamp isn't readable** through a public read, so
   a stale write can only be tested as `expected: null` against existing
   state.

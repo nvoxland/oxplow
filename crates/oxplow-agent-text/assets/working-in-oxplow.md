@@ -7,11 +7,12 @@
   itself: oxplow shows your thread as waiting on them.
 - When the person mentions an error they saw in the app (a red toast, the
   Op Errors list), you can read it: `v_op_error` through `oxplow_query_sql`, its
-  output with `oxplow_read` on its event, `event:<id>#output` (the
+  output with `oxplow_read` on its event, `oxplow:oxplow/event?id=<id>#part=output` (the
   `oxplow-codebase` skill).
 - The person's message may carry references oxplow inserted: `@<path>`
-  (a file), `[oxplow ref <kind>:<id>]` (what they're asking about),
-  `[oxplow work_item:… "<title>"]`, `[oxplow lens <id> …]`. Read a ref
-  with `oxplow_read` (a file at a revision: `file:<path>@git:<sha>#L10-20`;
+  (a file), `[oxplow ref <uri>]` (what they're asking about, a URI such as
+  `oxplow:oxplow/commit?sha=abc1234`),
+  `[oxplow <work item uri>: "<title>" (<state>)]`, `[oxplow lens <id> …]`. Read a URI
+  with `oxplow_read` (a file at a revision: `oxplow:oxplow/file?path=<path>&rev=git:<sha>#lines=10-20`;
   anything a model's `ref` column holds); the page they have open with
   `oxplow_get_open_page`.

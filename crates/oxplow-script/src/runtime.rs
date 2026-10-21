@@ -216,7 +216,7 @@ fn collect_helpers(builder: &mut starlark::environment::GlobalsBuilder) {
     /// `language` — a flat list of `{name, id, ref, container, kind,
     /// complexity, length, parameter_count, start_line, end_line,
     /// visibility, has_doc}`. `id` is the symbol's id within the file,
-    /// `ref` its `symbol:<path>/<id>` ref (a fact's subject), `container`
+    /// `ref` its `oxplow:oxplow/symbol?path=<path>&symbol=<id>` ref (a fact's subject), `container`
     /// the `::`-joined names it sits in (or None), `kind` its symbol kind. Backed by `oxplow_code_metrics`' tree-sitter walker (the
     /// cyclomatic-complexity / length / param computations that the in-process
     /// code-quality producer used), exposed generically so a bundled or

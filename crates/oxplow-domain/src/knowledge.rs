@@ -33,7 +33,7 @@ pub struct PageDraft {
 /// every store (`v_knowledge_ref`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RefFreshness {
-    /// What the page relies on (`file:src/lib.rs`).
+    /// What the page relies on (`oxplow:oxplow/file?path=src/lib.rs`).
     pub target: String,
     /// The snapshot the ref was pinned to, if any.
     pub pinned_snapshot: Option<i64>,
@@ -72,8 +72,8 @@ impl PageCall<'_> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Kept {
     pub body: String,
-    /// The refs it states for the page, in oxplow's grammar (`file:…`,
-    /// `wiki:…`): a provider whose body isn't oxplow's markdown says what
+    /// The refs it states for the page, in oxplow's grammar (`oxplow:oxplow/file?path=…`,
+    /// `oxplow:oxplow/wiki?slug=…`): a provider whose body isn't oxplow's markdown says what
     /// it links. `None`: core parses the body (the wiki's).
     pub refs: Option<Vec<String>>,
     pub events: Vec<Envelope>,
@@ -109,7 +109,7 @@ pub trait KnowledgeProvider: Send + Sync {
         call: &PageCall<'_>,
         slug: &str,
     ) -> Result<Option<Vec<Envelope>>, CommandError>;
-    /// Add a link to `target` (a ref: `wiki:other`, `file:src/lib.rs`)
+    /// Add a link to `target` (a ref: `oxplow:oxplow/wiki?slug=other`, `oxplow:oxplow/file?path=src/lib.rs`)
     /// under the page's related links; `None` when it keeps nothing.
     async fn link(
         &self,

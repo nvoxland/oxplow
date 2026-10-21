@@ -44,15 +44,18 @@ impl EventConsumer for UiPush {
             payload["stream"].as_str().and_then(|r| {
                 oxplow_domain::uri::build::parse_as::<StreamId>(
                     r,
-                    oxplow_domain::uri::types::STREAM,
+                    oxplow_domain::uri::resources::STREAM,
                 )
                 .ok()
             })
         });
         let snapshot = env.anchors.snapshot_id.or_else(|| {
             payload["snapshot"].as_str().and_then(|r| {
-                oxplow_domain::uri::build::parse_as::<i64>(r, oxplow_domain::uri::types::SNAPSHOT)
-                    .ok()
+                oxplow_domain::uri::build::parse_as::<i64>(
+                    r,
+                    oxplow_domain::uri::resources::SNAPSHOT,
+                )
+                .ok()
             })
         });
         let trigger = if head_moved {
@@ -88,8 +91,14 @@ mod tests {
         Envelope::typed::<SnapshotTaken>(
             "system:snapshots",
             &SnapshotTakenV2 {
-                stream: format!("stream:{stream}"),
-                snapshot: format!("snapshot:{snapshot}"),
+                stream: oxplow_domain::uri::build::keyed(
+                    oxplow_domain::uri::resources::STREAM,
+                    &stream.to_string(),
+                ),
+                snapshot: oxplow_domain::uri::build::keyed(
+                    oxplow_domain::uri::resources::SNAPSHOT,
+                    &snapshot.to_string(),
+                ),
                 parent: None,
                 trigger: oxplow_domain::snapshot::SnapshotTrigger::Quiet,
                 unchanged,

@@ -1,35 +1,30 @@
-//! Typed reference resolver.
+//! Typed URI resolver.
 //!
-//! Hydrates a canonical `(kind,id)` reference — the same vocabulary the
-//! `page_ref` graph, tab ids, and comment targets use — into a small,
-//! human/LLM-readable [`RefSummary`]. A comment carries its primary
-//! target plus a `context_chain` and `referenced_refs` as bare
-//! `(kind,id)` pairs; before the agent answers a comment we resolve each
-//! of those into a title + detail + body excerpt so the agent sees *what
-//! the highlighted thing is* (the commit subject, the task title+status,
-//! the wiki lead) without a second tool round-trip.
-//!
-//! This generalizes the best-effort `source_label` previously buried in
-//! the IPC backlinks reader: that returned only a label string; this
-//! returns the richer summary the agent context needs. Lives in
-//! `oxplow-app` because it reaches across the store/git surfaces
-//! (`task_store`, `wiki_page_store`, `git`) held by [`Services`].
+//! Hydrates a URI — what the `page_ref` graph, tabs and comment targets
+//! hold — into a small, human/LLM-readable [`RefSummary`]. A comment
+//! carries its target plus a `context_chain` and `referenced` URIs;
+//! before the agent answers a comment we resolve each into a title +
+//! detail + body excerpt so the agent sees *what the highlighted thing
+//! is* (the commit subject, the task title+status, the wiki lead) without
+//! a second tool round-trip. Lives in `oxplow-app` because it reaches
+//! across the store/VCS surfaces held by [`Services`].
 
 use serde::{Deserialize, Serialize};
 
-use oxplow_domain::comment::CommentTarget;
+use oxplow_domain::uri::resources as r;
+use oxplow_domain::uri::OxplowUri;
 
 use crate::Services;
 
-/// A resolved view of one canonical reference. `title`/`detail`/
-/// `body_excerpt` are all best-effort: when the referenced thing is gone
-/// (deleted task, unknown sha) or the kind carries no first-class label
-/// (a bare file path is its own display) they stay `None` and the caller
-/// falls back to `kind`/`id`.
+/// A resolved view of one URI. `title`/`detail`/`body_excerpt` are all
+/// best-effort: when the thing is gone (deleted task, unknown sha) or
+/// carries no first-class label (a bare file path is its own display)
+/// they stay `None` and the caller falls back to the URI.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RefSummary {
-    pub kind: String,
-    pub id: String,
+    pub uri: String,
+    /// Its resource (`oxplow/work_item`); empty when it isn't a URI.
+    pub resource: String,
     /// Primary human label — wiki/task title, commit subject.
     pub title: Option<String>,
     /// Short secondary fact — task status, commit diffstat.
@@ -37,19 +32,19 @@ pub struct RefSummary {
     /// A lead excerpt of the body — task description, commit message
     /// body, wiki lead — capped so it stays cheap in the agent's context.
     pub body_excerpt: Option<String>,
-    /// Whether anything resolved it. A ref whose kind or row is gone —
-    /// an uninstalled extension's, a deleted record's — is a dead link:
-    /// shown as its raw ref, never an error.
+    /// Whether anything resolved it. A URI whose resource or row is gone
+    /// — an uninstalled extension's, a deleted record's — is a dead link:
+    /// shown as its raw URI, never an error.
     pub resolved: bool,
 }
 
 impl RefSummary {
-    /// An unresolved summary carrying only the canonical id. Returned
-    /// for unknown kinds and as the base every resolver enriches.
-    fn bare(kind: &str, id: &str) -> Self {
+    /// An unresolved summary carrying only the URI: the base every
+    /// resolver enriches.
+    fn bare(uri: &str) -> Self {
         Self {
-            kind: kind.to_string(),
-            id: id.to_string(),
+            uri: uri.to_string(),
+            resource: oxplow_domain::uri::build::resource_of(uri).unwrap_or_default(),
             title: None,
             detail: None,
             body_excerpt: None,
@@ -62,93 +57,84 @@ impl RefSummary {
 /// gist, small enough not to bloat the agent's context.
 const EXCERPT_LEN: usize = 280;
 
-/// Resolve a single `(kind,id)` reference into a [`RefSummary`].
-/// `work_item`, `commit`, `file`, `dir`, `wiki` and `finding` have richer
-/// resolvers; any other kind resolves through the model that owns it
-/// (`oxplow_db::ref_models` for core's, the `resolve` view an extension's
-/// `ref_kinds:` names), by its `ref` and title. Anything else — an
-/// unknown kind, a row that's gone — comes back `resolved: false`.
-pub async fn resolve_ref(services: &Services, kind: &str, id: &str) -> RefSummary {
-    let mut summary = match kind {
-        "work_item" => resolve_work_item(services, id).await,
-        "commit" => resolve_commit(services, id).await,
-        "file" => resolve_file(services, id).await,
-        "dir" => resolve_directory(services, id).await,
-        "wiki" => resolve_wiki(services, id).await,
-        "finding" => resolve_finding(services, id).await,
-        _ => resolve_owned(services, kind, id).await,
+/// Resolve one URI into a [`RefSummary`]. Work items, commits, files,
+/// directories, wiki pages and findings have richer resolvers; any other
+/// resource resolves through the view its declaration names (`resolve:`
+/// and `title:`), by its `ref`. Anything else — not a URI, an undeclared
+/// resource, a row that's gone — comes back `resolved: false`.
+pub async fn resolve_ref(services: &Services, uri: &str) -> RefSummary {
+    let base = RefSummary::bare(uri);
+    let Ok(parsed) = OxplowUri::parse(uri) else {
+        return base;
+    };
+    let param = |name: &str| parsed.param(name).unwrap_or_default().to_string();
+    let mut summary = match base.resource.as_str() {
+        r::WORK_ITEM => resolve_work_item(services, base, &parsed.identity()).await,
+        r::COMMIT => resolve_commit(services, base, &param("sha")).await,
+        r::FILE => resolve_file(services, base, &param("path")).await,
+        r::DIR => resolve_directory(services, base, &param("path")).await,
+        r::WIKI => resolve_wiki(services, base, &param("slug")).await,
+        r::FINDING => resolve_finding(services, base, &param("id")).await,
+        _ => resolve_owned(services, base, &parsed).await,
     };
     summary.resolved = summary.title.is_some() || summary.detail.is_some();
     summary
 }
 
-/// A kind some model owns: its title, by its ref.
-async fn resolve_owned(services: &Services, kind: &str, id: &str) -> RefSummary {
-    let mut summary = RefSummary::bare(kind, id);
-    let Ok(parsed) = oxplow_domain::uri::grammar::Uri::new(kind, id, None, None) else {
+/// A resource some model holds: its title, by its URI.
+async fn resolve_owned(
+    services: &Services,
+    mut summary: RefSummary,
+    uri: &OxplowUri,
+) -> RefSummary {
+    let vocabulary = services.vocabulary.current();
+    let Some(decl) = vocabulary.resources.get(uri.resource()) else {
         return summary;
     };
-    let text = |cell: &oxplow_db::SqlCell| match cell {
-        oxplow_db::SqlCell::Text(t) => Some(t.clone()),
-        oxplow_db::SqlCell::Int(i) => Some(i.to_string()),
-        _ => None,
+    let Some(view) = decl.resolve.clone() else {
+        return summary;
     };
-    let (view, title) = match oxplow_db::ref_models::owner_of(kind) {
-        Some(m) => (m.view.to_string(), m.title.to_string()),
-        None => {
-            // An extension's kind names the view that resolves it.
-            let row = services
-                .sql
-                .query_sql(
-                    "SELECT resolve FROM v_ref_kind WHERE kind = ?1 AND resolve IS NOT NULL",
-                    vec![oxplow_db::SqlCell::Text(kind.to_string())],
-                    None,
-                )
-                .await
-                .ok()
-                .and_then(|out| out.rows.into_iter().next());
-            match row.as_ref().and_then(|r| text(&r[0])) {
-                Some(view) => (view, "title".to_string()),
-                None => return summary,
-            }
-        }
-    };
+    let title = decl.title.clone().unwrap_or_else(|| "title".to_string());
     let found = services
         .sql
         .query_sql(
-            &format!("SELECT \"{title}\" FROM \"{view}\" WHERE ref = ?1 LIMIT 1"),
-            vec![oxplow_db::SqlCell::Text(parsed.to_string())],
+            &format!(
+                "SELECT \"{}\" FROM \"{}\" WHERE ref = ?1 LIMIT 1",
+                title.replace('"', ""),
+                view.replace('"', "")
+            ),
+            vec![oxplow_db::SqlCell::Text(uri.identity())],
             None,
         )
         .await
         .ok()
         .and_then(|out| out.rows.into_iter().next());
-    summary.title = found.as_ref().and_then(|r| text(&r[0]));
+    summary.title = found.as_ref().and_then(|row| match &row[0] {
+        oxplow_db::SqlCell::Text(t) => Some(t.clone()),
+        oxplow_db::SqlCell::Int(i) => Some(i.to_string()),
+        _ => None,
+    });
     summary
 }
 
-/// Resolve a batch of refs in order (used for a comment's `context_chain`
-/// and `referenced_refs`).
-pub async fn resolve_refs(services: &Services, refs: &[CommentTarget]) -> Vec<RefSummary> {
-    let mut out = Vec::with_capacity(refs.len());
-    for r in refs {
-        out.push(resolve_ref(services, &r.kind, &r.id).await);
+/// Resolve a batch of URIs in order (a comment's `context_chain` and
+/// `referenced`).
+pub async fn resolve_refs(services: &Services, uris: &[String]) -> Vec<RefSummary> {
+    let mut out = Vec::with_capacity(uris.len());
+    for uri in uris {
+        out.push(resolve_ref(services, uri).await);
     }
     out
 }
 
-/// A work item (`<provider>:<id>`), through the interface: the active
-/// list's items only, whichever list it is; another stays bare.
-async fn resolve_work_item(services: &Services, id: &str) -> RefSummary {
-    let mut summary = RefSummary::bare("work_item", id);
+/// A work item, through the interface: the active list's items only,
+/// whichever list it is; another stays bare.
+async fn resolve_work_item(services: &Services, mut summary: RefSummary, uri: &str) -> RefSummary {
     let row = services
         .sql
         .query_sql(
             "SELECT title, state, body FROM v_work_item WHERE ref = ?1",
-            vec![oxplow_db::SqlCell::Text(oxplow_domain::uri::build::of(
-                oxplow_domain::uri::types::WORK_ITEM,
-                id,
-            ))],
+            vec![oxplow_db::SqlCell::Text(uri.to_string())],
             None,
         )
         .await
@@ -166,12 +152,11 @@ async fn resolve_work_item(services: &Services, id: &str) -> RefSummary {
     summary
 }
 
-async fn resolve_commit(services: &Services, id: &str) -> RefSummary {
-    let mut summary = RefSummary::bare("commit", id);
-    // Resolve against the primary worktree; `commit_detail` accepts both
-    // full and short shas.
+async fn resolve_commit(services: &Services, mut summary: RefSummary, sha: &str) -> RefSummary {
+    // Resolve against the primary worktree; `revision` accepts both full
+    // and short shas.
     let ws = services.worktrees.project_dir();
-    if let Ok(Some(detail)) = services.vcs.revision(ws, id).await {
+    if let Ok(Some(detail)) = services.vcs.revision(ws, sha).await {
         summary.title = Some(detail.info.subject);
         let files = detail.files.len();
         let additions: u32 = detail.files.iter().map(|f| f.additions).sum();
@@ -191,9 +176,8 @@ const FILE_HEAD_BYTES: u64 = 8 * 1024;
 /// representative entries without us serializing a huge tree.
 const DIR_NAME_LIMIT: usize = 12;
 
-async fn resolve_file(services: &Services, id: &str) -> RefSummary {
-    let mut summary = RefSummary::bare("file", id);
-    let path = services.layout.project_dir.join(id);
+async fn resolve_file(services: &Services, mut summary: RefSummary, path: &str) -> RefSummary {
+    let path = services.layout.project_dir.join(path);
     let read = tokio::task::spawn_blocking(move || -> Option<(u64, String)> {
         use std::io::Read as _;
         let meta = std::fs::metadata(&path).ok()?;
@@ -209,16 +193,15 @@ async fn resolve_file(services: &Services, id: &str) -> RefSummary {
     .ok()
     .flatten();
     if let Some((size, head)) = read {
-        // Title stays None: the path (id) is the file's own display.
+        // Title stays None: the path is the file's own display.
         summary.detail = Some(human_size(size));
         summary.body_excerpt = excerpt(&head);
     }
     summary
 }
 
-async fn resolve_directory(services: &Services, id: &str) -> RefSummary {
-    let mut summary = RefSummary::bare("dir", id);
-    let path = services.layout.project_dir.join(id);
+async fn resolve_directory(services: &Services, mut summary: RefSummary, path: &str) -> RefSummary {
+    let path = services.layout.project_dir.join(path);
     let listed = tokio::task::spawn_blocking(move || -> Option<(usize, Vec<String>)> {
         let mut names: Vec<String> = Vec::new();
         let mut count = 0usize;
@@ -245,9 +228,8 @@ async fn resolve_directory(services: &Services, id: &str) -> RefSummary {
     summary
 }
 
-async fn resolve_wiki(services: &Services, id: &str) -> RefSummary {
-    let mut summary = RefSummary::bare("wiki", id);
-    if let Ok(Some(page)) = services.wiki_page_store.get(id).await {
+async fn resolve_wiki(services: &Services, mut summary: RefSummary, slug: &str) -> RefSummary {
+    if let Ok(Some(page)) = services.wiki_page_store.get(slug).await {
         summary.title = Some(page.title);
         // body_excerpt is already a stored lead; re-cap defensively so a
         // long stored excerpt can't blow the agent's context budget.
@@ -256,8 +238,7 @@ async fn resolve_wiki(services: &Services, id: &str) -> RefSummary {
     summary
 }
 
-async fn resolve_finding(services: &Services, id: &str) -> RefSummary {
-    let mut summary = RefSummary::bare("finding", id);
+async fn resolve_finding(services: &Services, mut summary: RefSummary, id: &str) -> RefSummary {
     let Ok(fid) = id.parse::<i64>() else {
         return summary;
     };
@@ -302,6 +283,7 @@ fn excerpt(body: &str) -> Option<String> {
 mod tests {
     use super::*;
     use crate::Services;
+    use oxplow_domain::uri::build;
 
     /// A tempdir holding a real git repo with a single configured commit
     /// touching `a.rs`, so commit resolution has something to find.
@@ -341,8 +323,12 @@ mod tests {
         let services = Services::in_memory(dir.path()).await.unwrap();
         let task = crate::test_fixtures::file_item(&services, serde_json::json!({ "title": "Fix the flaky test", "body": "It fails on CI only.\nSecond line.", "state": "in_progress" })).await;
 
-        let summary = resolve_ref(&services, "work_item", &format!("oxplow:{}", task)).await;
-        assert_eq!(summary.kind, "work_item");
+        let summary = resolve_ref(
+            &services,
+            &build::work_item_uri("oxplow", &task.to_string()),
+        )
+        .await;
+        assert_eq!(summary.resource, "oxplow/work_item");
         assert_eq!(summary.title.as_deref(), Some("Fix the flaky test"));
         assert_eq!(summary.detail.as_deref(), Some("in_progress"));
         assert!(summary
@@ -375,7 +361,11 @@ mod tests {
             .publish(&config, &services.db)
             .await
             .unwrap();
-        let summary = resolve_ref(&services, "work_item", &format!("oxplow:{}", task)).await;
+        let summary = resolve_ref(
+            &services,
+            &build::work_item_uri("oxplow", &task.to_string()),
+        )
+        .await;
         assert_eq!(summary.title, None);
     }
 
@@ -383,10 +373,10 @@ mod tests {
     async fn unknown_task_id_is_bare() {
         let dir = git_repo_with_commit("init", "");
         let services = Services::in_memory(dir.path()).await.unwrap();
-        let summary = resolve_ref(&services, "work_item", "oxplow:tsk999999").await;
+        let summary = resolve_ref(&services, &build::work_item_uri("oxplow", "tsk999999")).await;
         assert_eq!(summary.title, None);
         assert_eq!(summary.detail, None);
-        assert_eq!(summary.id, "oxplow:tsk999999");
+        assert_eq!(summary.uri, build::work_item_uri("oxplow", "tsk999999"));
     }
 
     #[tokio::test]
@@ -395,7 +385,7 @@ mod tests {
         let services = Services::in_memory(dir.path()).await.unwrap();
         let sha = head_sha(dir.path());
 
-        let summary = resolve_ref(&services, "commit", &sha).await;
+        let summary = resolve_ref(&services, &build::commit_uri(&sha)).await;
         assert_eq!(summary.title.as_deref(), Some("Add the widget"));
         // a.rs is one added file.
         let detail = summary.detail.unwrap();
@@ -407,52 +397,52 @@ mod tests {
         );
     }
 
-    /// The pre-P1 kind names are gone, not aliased (tsk404): a caller
-    /// still saying `task` or `git-commit` gets a bare summary.
+    /// An old ref is no URI: a caller still saying `oxplow:oxplow/commit?sha=<sha>` or
+    /// `oxplow:oxplow/work_item?id=tsk1&provider=oxplow` gets a bare summary.
     #[tokio::test]
-    async fn legacy_kind_names_are_not_resolved() {
+    async fn old_refs_are_not_resolved() {
         let dir = git_repo_with_commit("Add the widget", "");
         let services = Services::in_memory(dir.path()).await.unwrap();
         let sha = head_sha(dir.path());
-        for (kind, id) in [
-            ("git-commit", sha.as_str()),
-            ("task", "tsk1"),
-            ("directory", "."),
+        for old in [
+            format!("commit:{sha}"),
+            "work_item:oxplow:tsk1".into(),
+            "dir:.".into(),
         ] {
-            let summary = resolve_ref(&services, kind, id).await;
-            assert_eq!(summary.title, None, "{kind} should be bare");
+            let summary = resolve_ref(&services, &old).await;
+            assert_eq!(summary.title, None, "{old} should be bare");
+            assert_eq!(summary.resource, "");
         }
     }
 
-    /// Any kind a core model owns resolves through that model's `ref`
-    /// and title; a ref nothing resolves — its kind gone, its row gone —
-    /// is a dead link, not an error.
+    /// Any resource a model resolves (its `resolve:`) resolves through
+    /// that model's `ref` and title; a URI nothing resolves — its
+    /// resource undeclared, its row gone — is a dead link, not an error.
     #[tokio::test]
-    async fn a_kind_resolves_through_its_owning_model_or_is_unresolved() {
+    async fn a_resource_resolves_through_its_model_or_is_unresolved() {
         let fx = crate::test_fixtures::services_with_task_effort().await;
-        let id = fx.effort.to_string();
-        let summary = resolve_ref(&fx.svc, "effort", &id).await;
+        let summary = resolve_ref(&fx.svc, &build::effort_uri(fx.effort)).await;
         assert!(summary.resolved, "{summary:?}");
         assert!(summary.title.is_some(), "{summary:?}");
 
-        for (kind, id) in [
-            ("effort", "eff999"),
-            ("collector", "gone/x"),
-            ("mystery", "x"),
+        for uri in [
+            build::keyed(oxplow_domain::uri::resources::EFFORT, "eff999"),
+            build::collector_uri("gone", "x"),
+            "oxplow:mystery/thing?id=x".to_string(),
         ] {
-            let summary = resolve_ref(&fx.svc, kind, id).await;
-            assert!(!summary.resolved, "{kind}:{id} {summary:?}");
+            let summary = resolve_ref(&fx.svc, &uri).await;
+            assert!(!summary.resolved, "{uri} {summary:?}");
             assert_eq!(summary.title, None);
         }
     }
 
     #[tokio::test]
-    async fn unknown_kind_is_bare() {
+    async fn an_undeclared_resource_is_bare() {
         let dir = git_repo_with_commit("init", "");
         let services = Services::in_memory(dir.path()).await.unwrap();
-        let summary = resolve_ref(&services, "mystery", "whatever").await;
-        assert_eq!(summary.kind, "mystery");
-        assert_eq!(summary.id, "whatever");
+        let summary = resolve_ref(&services, "oxplow:mystery/thing?id=whatever").await;
+        assert_eq!(summary.resource, "mystery/thing");
+        assert_eq!(summary.uri, "oxplow:mystery/thing?id=whatever");
         assert_eq!(summary.title, None);
         assert_eq!(summary.detail, None);
     }
@@ -462,8 +452,8 @@ mod tests {
         let dir = git_repo_with_commit("init", "");
         let services = Services::in_memory(dir.path()).await.unwrap();
         // a.rs is `fn main() {}\n` (13 bytes) created by the fixture.
-        let summary = resolve_ref(&services, "file", "a.rs").await;
-        assert_eq!(summary.kind, "file");
+        let summary = resolve_ref(&services, &build::file_uri("a.rs")).await;
+        assert_eq!(summary.resource, "oxplow/file");
         // Path is its own display; no synthetic title.
         assert_eq!(summary.title, None);
         assert_eq!(summary.detail.as_deref(), Some("13 B"));
@@ -474,7 +464,7 @@ mod tests {
     async fn missing_file_is_bare() {
         let dir = git_repo_with_commit("init", "");
         let services = Services::in_memory(dir.path()).await.unwrap();
-        let summary = resolve_ref(&services, "file", "does/not/exist.rs").await;
+        let summary = resolve_ref(&services, &build::file_uri("does/not/exist.rs")).await;
         assert_eq!(summary.detail, None);
         assert_eq!(summary.body_excerpt, None);
     }
@@ -486,7 +476,7 @@ mod tests {
         std::fs::write(dir.path().join("sub/x.rs"), "x").unwrap();
         std::fs::write(dir.path().join("sub/y.rs"), "y").unwrap();
         let services = Services::in_memory(dir.path()).await.unwrap();
-        let summary = resolve_ref(&services, "dir", "sub").await;
+        let summary = resolve_ref(&services, &build::dir_uri("sub")).await;
         assert_eq!(summary.detail.as_deref(), Some("2 entries"));
         let names = summary.body_excerpt.unwrap();
         assert!(
@@ -518,7 +508,7 @@ mod tests {
             .transaction(move |tx| oxplow_db::wiki_page_store::upsert_tx(tx, &page, "", ""))
             .await
             .unwrap();
-        let summary = resolve_ref(&services, "wiki", "architecture").await;
+        let summary = resolve_ref(&services, &build::wiki_uri("architecture")).await;
         assert_eq!(summary.title.as_deref(), Some("System Architecture"));
         assert_eq!(
             summary.body_excerpt.as_deref(),
@@ -554,7 +544,7 @@ mod tests {
             .await
             .unwrap();
         // The first finding gets id 1 (autoincrement).
-        let summary = resolve_ref(&services, "finding", "1").await;
+        let summary = resolve_ref(&services, &build::finding_uri("1")).await;
         assert_eq!(summary.title.as_deref(), Some("high_complexity"));
         assert_eq!(summary.detail.as_deref(), Some("src/app.rs:10-42"));
     }
@@ -563,19 +553,10 @@ mod tests {
     async fn resolve_refs_preserves_order() {
         let dir = git_repo_with_commit("init", "");
         let services = Services::in_memory(dir.path()).await.unwrap();
-        let refs = vec![
-            CommentTarget {
-                kind: "file".into(),
-                id: "a.rs".into(),
-            },
-            CommentTarget {
-                kind: "dir".into(),
-                id: "src".into(),
-            },
-        ];
+        let refs = vec![build::file_uri("a.rs"), build::dir_uri("src")];
         let out = resolve_refs(&services, &refs).await;
         assert_eq!(out.len(), 2);
-        assert_eq!(out[0].id, "a.rs");
-        assert_eq!(out[1].id, "src");
+        assert_eq!(out[0].uri, refs[0]);
+        assert_eq!(out[1].uri, refs[1]);
     }
 }

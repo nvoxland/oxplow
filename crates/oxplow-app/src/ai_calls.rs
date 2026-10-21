@@ -65,7 +65,8 @@ pub async fn read(
     let (caller, request, response) = row.ok_or(AiCallBodyError::UnknownCall(id))?;
     // An agent reads any call but one another agent's thread asked for.
     let another_agents =
-        oxplow_domain::uri::build::parse_type(&caller, oxplow_domain::uri::types::THREAD).is_ok();
+        oxplow_domain::uri::build::parse_resource(&caller, oxplow_domain::uri::resources::THREAD)
+            .is_ok();
     if scope.is_some_and(|s| another_agents && s != caller) {
         return Err(AiCallBodyError::OtherCaller(id));
     }
@@ -118,7 +119,7 @@ mod tests {
             .ai
             .set_role(&Role::SUMMARIZE, Some(RoleBinding::new("m", "x")))
             .unwrap();
-        let mine = "thread:thr1";
+        let mine = "oxplow:oxplow/thread?id=thr1";
         let id = fx
             .svc
             .ai_compute
@@ -142,7 +143,13 @@ mod tests {
             .unwrap();
         assert_eq!(response.text, r#"{"text":"short"}"#);
         assert!(matches!(
-            read(&fx.svc, id, AiCallBody::Request, Some("thread:thr2")).await,
+            read(
+                &fx.svc,
+                id,
+                AiCallBody::Request,
+                Some("oxplow:oxplow/thread?id=thr2")
+            )
+            .await,
             Err(AiCallBodyError::OtherCaller(_))
         ));
         assert!(matches!(

@@ -61,7 +61,7 @@ Things I keep forgetting. Read this before adding any UI.
 - **A long page splits into pages, and a link lands on its section.**
   Settings is a Document page per area (`pages/settingsAreas.ts`:
   overview, Agents, Language Servers, Extensions, Data, Integrations, AI),
-  each its own ref (`settingsRef(area, section)` → `page:settings?area=…`),
+  each its own URI (`settingsRef(area, section)` → `oxplow:oxplow/page?page=settings&area=…`),
   sharing a rail that lists the areas; the launcher lists each area by
   name ("Settings: Agents"). A link that means one place opens its area
   with `section` — one of the area's section ids or an anchor inside one
@@ -105,7 +105,7 @@ Things I keep forgetting. Read this before adding any UI.
   bell (`components/Alerts/AlertsIndicator.tsx`) counts everything that
   needs them — red while something failed, the accent while decisions or
   notices wait, quiet otherwise — and opens the **Alerts page**
-  (`page:alerts`): Needs your decision (each proposal's card, Approve /
+  (the `alerts` page): Needs your decision (each proposal's card, Approve /
   Decline), Problems (failed operations; undelivered events and failed
   reactions with Retry / Discard, the same `DeliveryList` as Settings →
   Data), From extensions (firing panel badges). A toast announces each
@@ -268,7 +268,7 @@ Things I keep forgetting. Read this before adding any UI.
 ## Menus a page or row gets from extensions
 
 - **Order is fixed.** A page's nav bar: Ask, then **Commands** (the
-  commands about the page's ref kind — their `ui.about`; hidden when none
+  commands about the page's resource — their `ui.about`; hidden when none
   apply). A row's right-click menu: Ask About This, the lens's row
   actions, then a separator and one submenu per `ui.group` with the
   commands about the row's ref (`refCommandMenuItems`). A Board card:
@@ -602,16 +602,16 @@ mounts the kit's, so a page moving to a lens (`viz: approvals`, params
 Comments are not editor-only. Any page region can be commentable by
 declaring *what it is* and mounting the generic layer.
 
-- **`data-ref-kind` / `data-ref-id` mark a region as a typed "context
-  node."** The `(kind,id)` pair uses the same canonical vocabulary as
-  tab ids and the `page_ref` graph — the canonical ref kinds of
-  [resources.md](./resources.md): `file` / `dir` / `wiki` / `work_item` /
-  `commit` / `finding`. Stamp them on the element that *is* that thing
-  (e.g. a task row carries `data-ref-kind="work_item"
-  data-ref-id="oxplow:tsk42"`). Nesting is meaningful: a file row inside
-  a commit card yields the chain `[file, commit, …]`, innermost first. Treat
-  these as a first-class seam like `data-testid` — spread
-  `contextNodeProps(kind, id)` from
+- **`data-ref` marks a region as a typed "context node."** Its value is
+  the canonical URI of the thing, the same as tab ids and the `page_ref`
+  graph use ([resources.md](./resources.md)): a file, directory, wiki
+  page, work item, commit or finding. Stamp it on the element that *is*
+  that thing (e.g. a task row carries
+  `data-ref="oxplow:oxplow/work_item?id=tsk42&provider=oxplow"`). Nesting is
+  meaningful: a file row inside a commit card yields the chain
+  `[file URI, commit URI, …]`, innermost first. Treat
+  this as a first-class seam like `data-testid` — spread
+  `contextNodeProps(uri)` from
   `apps/desktop/src/components/Comments/contextNodes.tsx`.
 - **Selecting text on a context node shows a floating "Add comment"
   button** (`SelectionCommentToolbar`), driven by `useDomAnnotations`.
@@ -622,11 +622,11 @@ declaring *what it is* and mounting the generic layer.
   terminal — those own their own comment UX.
 - **`DomCommentLayer` is mounted once, at the app level** (`App.tsx`,
   beside the center tab outlet) — NOT per page. A selection only becomes
-  a comment when it lands inside a `data-ref-*` region and outside the
+  a comment when it lands inside a `data-ref` region and outside the
   editor/terminal carve-out, so a single instance safely serves every
   plain-DOM page; a page with no context nodes simply never captures.
   Adding commenting to a new surface is therefore just "stamp
-  `data-ref-*` on the regions" — no per-page wiring. The layer captures
+  `data-ref` on the regions" — no per-page wiring. The layer captures
   selections, paints existing comments back onto their context node's
   text via the **CSS Custom Highlight API** (no DOM mutation — critical
   for live React lists), and opens a thread popover when a highlight is
@@ -847,7 +847,7 @@ declaring *what it is* and mounting the generic layer.
     pinned set; its rows open them). The `dock-tab-*` testids
     were likewise removed earlier in the IA cleanup.
   - `center-tab-<id>` on CenterTabs tabs (id is `agent` for the
-    agent tab, `file:<path>` for open-file tabs);
+    agent tab, the file's URI for open-file tabs);
     `center-tab-close-<id>` on the × close button. Right-click the tab
     (`fireEvent.contextMenu`) → `menu-item-tab.close-others` /
     `menu-item-tab.close-right` for the universal close actions (plus
@@ -1040,9 +1040,9 @@ no caller may bypass the bus to write to the terminal.
   - file → `@<workspace-relative path> ` (Claude reads the file
     automatically on the next prompt).
   - note → `@.oxplow/wiki/<slug>.md `.
-  - work item → `[oxplow work_item:<provider>:<id>: "<title>" (<state>)] `
+  - work item → `[oxplow oxplow:oxplow/work_item?id=<id>&provider=<provider>: "<title>" (<state>)] `
     (plain-text reference; the agent reads it with `read`).
-  - any canonical ref → `[oxplow ref <ref>] ` — **Ask About This**
+  - any canonical URI → `[oxplow ref <uri>] ` — **Ask About This**
     (below). The agent guide says how to read each kind.
   - Always trailing space so the user can keep typing.
 - **Right-click parity**: every drag source should also offer "Add to
@@ -1053,17 +1053,17 @@ no caller may bypass the bus to write to the terminal.
   same gesture: it puts `[oxplow ref <ref>] ` in the agent's input for
   the person to finish the question, and never sends. It's on:
   - the page nav bar (`page-nav-ask`), for any page whose tab id is a
-    canonical ref (`PageNavigationContext.ask`: `{ ref, streamId }`);
-  - a lens row's right-click menu (`rowAsk`: the first ref the row links
+    canonical URI (`PageNavigationContext.ask`: `{ ref, streamId }`);
+  - a lens row's right-click menu (`rowAsk`: the first URI the row links
     to, else the row as a lens mention);
   - an editor selection and a diff's right-side selection
-    (`askAboutSelection`: `file:<path>[@rev]#L<a>-<b>`). A diff offers it
+    (`askAboutSelection`: `oxplow:oxplow/file?path=<path>[&rev=<rev>]#lines=<a>-<b>`). A diff offers it
     only while its right side names a file (`Diff/diffAsk.ts`, a Monaco
     context key on the action's precondition); a compare with the
     clipboard has no Ask action rather than one that does nothing.
   The nav bar's Ask is a menu (`components/Prompts/AskMenu.tsx`): Ask
-  About This, then the catalog's prompts `about` the page's ref kind
-  (`SuggestedPrompts`), each inserted as `[oxplow ref <ref>] <question>`.
+  About This, then the catalog's prompts `about` the page's resource
+  (`SuggestedPrompts`), each inserted as `[oxplow ref <uri>] <question>`.
   The launcher's last row for any typed text is **Ask the Agent: <text>**,
   which inserts the text the same way. Nothing in oxplow sends agent
   input on its own; these only fill the draft.

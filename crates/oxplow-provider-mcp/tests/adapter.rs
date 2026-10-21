@@ -200,32 +200,38 @@ async fn the_mapping_turns_verbs_into_tool_calls_and_output_into_outcomes() {
     let created = invoke(&peer, &handle, "create", json!({ "title": "First" }))
         .await
         .unwrap();
-    assert_eq!(created.result, json!({ "ref": "work_item:notes:N-1" }));
+    assert_eq!(
+        created.result,
+        json!({ "ref": "oxplow:oxplow/work_item?id=N-1&provider=notes" })
+    );
     let row = &created.events[0].payload["item"];
     assert_eq!(
         (row["state"].clone(), row["native_state"].clone()),
         (json!("todo"), json!("open"))
     );
-    assert_eq!(created.events[0].subject, ["work_item:notes:N-1"]);
+    assert_eq!(
+        created.events[0].subject,
+        ["oxplow:oxplow/work_item?id=N-1&provider=notes"]
+    );
 
     let child = invoke(
         &peer,
         &handle,
         "create",
-        json!({ "title": "Child", "parent_ref": "work_item:notes:N-1" }),
+        json!({ "title": "Child", "parent_ref": "oxplow:oxplow/work_item?id=N-1&provider=notes" }),
     )
     .await
     .unwrap();
     assert_eq!(
         child.events[0].payload["item"]["parent_ref"],
-        "work_item:notes:N-1"
+        "oxplow:oxplow/work_item?id=N-1&provider=notes"
     );
 
     let moved = invoke(
         &peer,
         &handle,
         "transition",
-        json!({ "ref": "work_item:notes:N-1", "to": "blocked" }),
+        json!({ "ref": "oxplow:oxplow/work_item?id=N-1&provider=notes", "to": "blocked" }),
     )
     .await
     .unwrap();
@@ -234,7 +240,7 @@ async fn the_mapping_turns_verbs_into_tool_calls_and_output_into_outcomes() {
         &peer,
         &handle,
         "transition",
-        json!({ "ref": "work_item:notes:N-1", "to": "done", "native_state": "dropped" }),
+        json!({ "ref": "oxplow:oxplow/work_item?id=N-1&provider=notes", "to": "done", "native_state": "dropped" }),
     )
     .await;
     assert!(
@@ -245,7 +251,7 @@ async fn the_mapping_turns_verbs_into_tool_calls_and_output_into_outcomes() {
         &peer,
         &handle,
         "update",
-        json!({ "ref": "work_item:notes:N-9", "title": "x" }),
+        json!({ "ref": "oxplow:oxplow/work_item?id=N-9&provider=notes", "title": "x" }),
     )
     .await;
     assert!(
@@ -260,7 +266,13 @@ async fn the_mapping_turns_verbs_into_tool_calls_and_output_into_outcomes() {
         .iter()
         .filter_map(|(_, p)| p["row"]["ref"].as_str())
         .collect();
-    assert_eq!(refs, ["work_item:notes:N-2", "work_item:notes:N-1"]);
+    assert_eq!(
+        refs,
+        [
+            "oxplow:oxplow/work_item?id=N-2&provider=notes",
+            "oxplow:oxplow/work_item?id=N-1&provider=notes"
+        ]
+    );
     let (method, last) = streamed.last().unwrap();
     assert_eq!(
         (method.as_str(), last["state"].clone()),
@@ -296,8 +308,8 @@ async fn a_mapping_may_not_return_an_undeclared_event_or_a_foreign_ref() {
     );
 
     let (_ext, _child, peer, handle) = with_mapping(
-        "return \"work_item:\" + x[\"provider\"]",
-        "return \"work_item:oxplow:\" + \"\"",
+        "provider = x[\"provider\"], id = id",
+        "provider = \"oxplow\", id = id",
     )
     .await;
     let foreign = invoke(&peer, &handle, "create", json!({ "title": "x" })).await;
@@ -334,7 +346,7 @@ async fn a_tool_error_the_mapping_passes_over_is_an_invalid_input() {
         &peer,
         &handle,
         "update",
-        json!({ "ref": "work_item:notes:N-9", "title": "x" }),
+        json!({ "ref": "oxplow:oxplow/work_item?id=N-9&provider=notes", "title": "x" }),
     )
     .await;
     assert!(
@@ -581,19 +593,25 @@ async fn a_server_by_url_is_pinned_and_called() {
     let created = invoke(&peer, &handle, "create", json!({ "title": "First" }))
         .await
         .unwrap();
-    assert_eq!(created.result, json!({ "ref": "work_item:notes:N-1" }));
+    assert_eq!(
+        created.result,
+        json!({ "ref": "oxplow:oxplow/work_item?id=N-1&provider=notes" })
+    );
     let moved = invoke(
         &peer,
         &handle,
         "transition",
-        json!({ "ref": "work_item:notes:N-1", "to": "blocked" }),
+        json!({ "ref": "oxplow:oxplow/work_item?id=N-1&provider=notes", "to": "blocked" }),
     )
     .await
     .unwrap();
     assert_eq!(moved.events[0].payload["item"]["native_state"], "stuck");
     let (streamed, result) = read(&peer, &handle, None).await;
     assert_eq!(result["records"], 1);
-    assert_eq!(streamed[0].1["row"]["ref"], "work_item:notes:N-1");
+    assert_eq!(
+        streamed[0].1["row"]["ref"],
+        "oxplow:oxplow/work_item?id=N-1&provider=notes"
+    );
 
     // Its service stops taking the token mid-session (the server comes
     // back wanting another): the call answers `Auth`, which is what has

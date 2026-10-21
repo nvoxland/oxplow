@@ -19,7 +19,7 @@ mock.module("../api.js", () => ({
       ui: {
         slots: [],
         commands: [],
-        decorators: [{ id: "flags/0", extension: "flags", view: "v_flags_flags", kind: "oxplow/work_item", placement: "ref-chip", label: "label", color: "color" }],
+        decorators: [{ id: "flags/0", extension: "flags", view: "v_flags_flags", resource: "oxplow/work_item", placement: "ref-chip", label: "label", color: "color" }],
       },
     },
     // P10 (K1): oxplow-bundled's verdict, on the effort it was given on.
@@ -30,7 +30,7 @@ mock.module("../api.js", () => ({
         slots: [],
         commands: [],
         decorators: [
-          { id: "oxplow-bundled/0", extension: "oxplow-bundled", view: "v_oxplow_bundled_verdict", kind: "oxplow/effort", placement: "ref-chip", label: "label", color: "color" },
+          { id: "oxplow-bundled/0", extension: "oxplow-bundled", view: "v_oxplow_bundled_verdict", resource: "oxplow/effort", placement: "ref-chip", label: "label", color: "color" },
         ],
       },
     },

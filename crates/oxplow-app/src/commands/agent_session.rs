@@ -9,8 +9,8 @@
 //! (`SessionProcesses`). Stopping a process alone (`terminate_terminal_session`,
 //! `chat_close_session`) leaves the slot open.
 //!
-//! A session is named by ref (`agent_session:ses3`), a thread by
-//! `thread:thr1`. An agent acts only on sessions in its own stream, and its
+//! A session is named by ref (`oxplow:oxplow/agent_session?id=ses3`), a thread by
+//! `oxplow:oxplow/thread?id=thr1`. An agent acts only on sessions in its own stream, and its
 //! close — destructive — waits for a person as a proposal.
 
 use crate::commands::ops::Op;
@@ -50,7 +50,7 @@ pub const FORK_CONVERSATION: &str = "oxplow.agent_session.fork_conversation";
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct OpenInput {
-    /// The thread (`thread:thr1`).
+    /// The thread (`oxplow:oxplow/thread?id=thr1`).
     pub thread: String,
     /// `terminal` (the default); an `action` session isn't built yet.
     #[serde(default)]
@@ -76,14 +76,14 @@ pub struct OpenInput {
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SessionInput {
-    /// The session (`agent_session:ses3`).
+    /// The session (`oxplow:oxplow/agent_session?id=ses3`).
     pub session: String,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RenameInput {
-    /// The session (`agent_session:ses3`).
+    /// The session (`oxplow:oxplow/agent_session?id=ses3`).
     pub session: String,
     pub title: String,
 }
@@ -91,7 +91,7 @@ pub struct RenameInput {
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ConversationInput {
-    /// The session (`agent_session:ses3`).
+    /// The session (`oxplow:oxplow/agent_session?id=ses3`).
     pub session: String,
     /// One of its harness's saved conversations (its id).
     pub conversation: String,
@@ -100,7 +100,7 @@ pub struct ConversationInput {
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ForkInput {
-    /// The session (`agent_session:ses3`).
+    /// The session (`oxplow:oxplow/agent_session?id=ses3`).
     pub session: String,
     /// The saved conversation to fork (its id); default the one the
     /// session is on.
@@ -122,9 +122,13 @@ fn result(session: &AgentSession) -> HandlerOutput {
     }
 }
 
-/// The session an `agent_session:<id>` ref names.
+/// The session an `oxplow:oxplow/agent_session?id=<id>` ref names.
 fn load(ctx: &TxCtx<'_>, value: &str) -> Result<AgentSession, CommandError> {
-    let id: AgentSessionId = ref_id(value, "agent_session", "/session")?;
+    let id: AgentSessionId = ref_id(
+        value,
+        oxplow_domain::uri::resources::AGENT_SESSION,
+        "/session",
+    )?;
     get_tx(ctx.conn, id)?.ok_or_else(|| invalid("/session", format!("no agent session `{value}`")))
 }
 
@@ -187,7 +191,11 @@ pub fn open_op(config: super::config_commands::ConfigTarget, harnesses: HarnessR
         true,
         Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
             let input: OpenInput = parse(input)?;
-            let thread = ref_id(&input.thread, "thread", "/thread")?;
+            let thread = ref_id(
+                &input.thread,
+                oxplow_domain::uri::resources::THREAD,
+                "/thread",
+            )?;
             let row = oxplow_db::thread_store::get_tx(ctx.conn, thread)
                 .map_err(sql)?
                 .filter(|t| t.archived_at.is_none())
@@ -1030,7 +1038,10 @@ mod tests {
             (json!({ "thread": thread, "harness": "codex" }), "/harness"),
             (json!({ "thread": thread, "harness": "nope" }), "/harness"),
             (json!({ "thread": thread, "harness": "acp" }), "/harness"),
-            (json!({ "thread": "thread:thr99" }), "/thread"),
+            (
+                json!({ "thread": "oxplow:oxplow/thread?id=thr99" }),
+                "/thread",
+            ),
         ] {
             let err = run(&fx, &Actor::Human, OPEN, input.clone(), false)
                 .await

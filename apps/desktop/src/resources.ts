@@ -5,7 +5,7 @@
  * `resourcePageTabId`), how a `[[…]]` names one, and which model holds it.
  *
  * One process-wide list, loaded by `useResourcesLoader` (mounted once, in
- * `App`) and re-read when `v_ref_kind` changes; the pure helpers
+ * `App`) and re-read when `v_resource` changes; the pure helpers
  * (`pageKindIconComponent`, `refFromTabId`, `preprocessWikilinks`) read
  * the current list, and components that render refs of extensions' kinds subscribe with
  * `useResources` so they redraw when it changes.
@@ -65,11 +65,11 @@ import { withPageParams } from "./tabs/pageRefs.js";
 import type { Reads, SqlQueryResult } from "./tauri-bridge/generated/bindings.js";
 
 /**
- * The icons a ref kind may name — the Rust `REF_KIND_ICONS` allowlist
- * (`extension_ref_kinds.rs`), which a Rust test keeps in step with these
+ * The icons a resource may name — the Rust `RESOURCE_ICONS` allowlist
+ * (`extension_resources.rs`), which a Rust test keeps in step with these
  * keys.
  */
-export const REF_KIND_ICONS: Readonly<Record<string, LucideIcon>> = {
+export const RESOURCE_ICONS: Readonly<Record<string, LucideIcon>> = {
   "activity": Activity,
   "archive": Archive,
   "bar-chart-3": BarChart3,
@@ -217,7 +217,7 @@ export function resourcePageTabId(ref: string): string | null {
 /** The icon of a resource, or null. */
 export function resourceIcon(resource: string): LucideIcon | null {
   const icon = current.get(resource)?.icon;
-  return icon ? (REF_KIND_ICONS[icon] ?? null) : null;
+  return icon ? (RESOURCE_ICONS[icon] ?? null) : null;
 }
 
 /** Whether `id` is a value `param` of `resource` may hold. The pattern runs

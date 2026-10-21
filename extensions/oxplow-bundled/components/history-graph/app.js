@@ -35,7 +35,7 @@
     let history = read(component.run);
     let revealed = null;
 
-    const open = (sha, newTab) => component.navigate("commit:" + sha, { newTab }).catch(say);
+    const open = (sha, newTab) => component.navigate("oxplow:oxplow/commit?sha=" + encodeURIComponent(sha), { newTab }).catch(say);
     const draw = () => {
       revealed = render(history, filters(), open);
       if (revealed) revealed.scrollIntoView({ block: "nearest" });

@@ -56,20 +56,22 @@ pub struct ListTabsInput {
     /// Whose tabs: `thread` (default), `stream` or `project`.
     #[serde(default)]
     pub scope: TabScope,
-    /// The thread (`thread:thr3` or `thr3`); default your own.
+    /// The thread (`oxplow:oxplow/thread?id=thr3` or `thr3`); default your own.
     #[serde(default)]
     pub thread: Option<String>,
 }
 
 /// `value` as a thread: its ref or its bare id.
 fn thread_of(field: &str, value: &str) -> Result<ThreadId, CommandError> {
-    refs::parse_as::<ThreadId>(value, oxplow_domain::uri::types::THREAD)
+    refs::parse_as::<ThreadId>(value, oxplow_domain::uri::resources::THREAD)
         .ok()
         .or_else(|| ThreadId::try_from_str(value))
         .ok_or_else(|| {
             invalid(
                 field,
-                format!("expected a thread (`thread:thr3` or `thr3`), got `{value}`"),
+                format!(
+                    "expected a thread (`oxplow:oxplow/thread?id=thr3` or `thr3`), got `{value}`"
+                ),
             )
         })
 }
@@ -110,7 +112,7 @@ async fn lens_text(
     page_id: &str,
     detail: &Value,
 ) -> Result<Value, CommandError> {
-    let Ok(lens_id) = refs::id_of(page_id, oxplow_domain::uri::types::LENS) else {
+    let Ok(lens_id) = refs::id_of(page_id, oxplow_domain::uri::resources::LENS) else {
         return Ok(Value::Null);
     };
     // The app shows the main worktree's lenses, whatever the thread's stream.
@@ -198,7 +200,10 @@ async fn open(svc: &Services, input: OpenPageInput) -> Result<Value, CommandErro
         Value::Null
     };
     let this = pages.iter().find(|p| p.page_id == page_id);
-    let (page, view) = oxplow_domain::uri::build::view_of(&page_id);
+    // A page or lens apart from what it's opened with; anything else (a
+    // file, a commit) is its URI as it is.
+    let (page, view) = oxplow_domain::uri::build::params_of(&page_id)
+        .unwrap_or_else(|| (page_id.clone(), Default::default()));
     let params: serde_json::Map<String, Value> = view
         .into_iter()
         .map(|(k, v)| (k, Value::String(v)))
@@ -257,7 +262,7 @@ async fn list_tabs(
         (_, None) => {
             return Err(invalid(
                 "/thread",
-                "name the thread (`thread:thr3`): you aren't on one",
+                "name the thread (`oxplow:oxplow/thread?id=thr3`): you aren't on one",
             ))
         }
     };
@@ -274,7 +279,11 @@ async fn list_tabs(
                 "title": t.title,
                 "thread": refs::thread_uri(t.thread),
                 "stream": stream_of(t.thread).map(refs::stream_uri),
-                "session": (t.kind == oxplow_domain::uri::types::AGENT_SESSION).then(|| t.tab.clone()),
+                // A session's tab is its session: what the tab names, not
+                // what the window called its kind.
+                "session": (oxplow_domain::uri::build::resource_of(&t.tab).as_deref()
+                    == Some(oxplow_domain::uri::resources::AGENT_SESSION))
+                .then(|| t.tab.clone()),
                 "selected": t.selected,
                 "visible": t.visible,
                 "client": t.client,
@@ -360,15 +369,18 @@ mod tests {
             thread_id: Some(fx.thread),
             stream_id: None,
         };
-        let id = "lens:acme/commits?range=7d&q=numbat+bay";
+        let id = "oxplow:oxplow/lens?lens=acme/commits&q=numbat%20bay&range=7d";
         report(
             &fx.svc,
             "a",
             true,
             fx.thread,
             vec![ReportedTab {
-                back: vec!["wiki:home".into()],
-                forward: vec!["lens:acme/commits?range=7d&q=numbat+bay&commit=abc".into()],
+                back: vec!["oxplow:oxplow/wiki?slug=home".into()],
+                forward: vec![
+                    "oxplow:oxplow/lens?commit=abc&lens=acme/commits&q=numbat%20bay&range=7d"
+                        .into(),
+                ],
                 origin: Some("Recent commits".into()),
                 ..tab(id, "lens")
             }],
@@ -387,15 +399,18 @@ mod tests {
             .unwrap()
             .result;
         assert_eq!(open["open"]["pageId"], id);
-        assert_eq!(open["open"]["page"], "lens:acme/commits");
+        assert_eq!(open["open"]["page"], "oxplow:oxplow/lens?lens=acme/commits");
         assert_eq!(
             open["open"]["params"],
             json!({ "range": "7d", "q": "numbat bay" })
         );
-        assert_eq!(open["open"]["back"], json!(["wiki:home"]));
+        assert_eq!(
+            open["open"]["back"],
+            json!(["oxplow:oxplow/wiki?slug=home"])
+        );
         assert_eq!(
             open["open"]["forward"][0],
-            "lens:acme/commits?range=7d&q=numbat+bay&commit=abc"
+            "oxplow:oxplow/lens?commit=abc&lens=acme/commits&q=numbat%20bay&range=7d"
         );
         assert_eq!(open["open"]["origin"], "Recent commits");
     }
@@ -452,8 +467,8 @@ mod tests {
             "b",
             false,
             fx.thread,
-            vec![tab("wiki:home", "wiki")],
-            "wiki:home",
+            vec![tab("oxplow:oxplow/wiki?slug=home", "wiki")],
+            "oxplow:oxplow/wiki?slug=home",
         );
         report(
             &fx.svc,
@@ -461,29 +476,29 @@ mod tests {
             true,
             fx.thread,
             vec![
-                tab("file:src/a.rs", "file"),
-                tab("page:settings", "settings"),
+                tab("oxplow:oxplow/file?path=src/a.rs", "file"),
+                tab("oxplow:oxplow/page?page=settings", "settings"),
             ],
-            "file:src/a.rs",
+            "oxplow:oxplow/file?path=src/a.rs",
         );
         let open = run(json!({ "thread_id": tid })).await.unwrap().result;
-        assert_eq!(open["open"]["pageId"], "file:src/a.rs");
+        assert_eq!(open["open"]["pageId"], "oxplow:oxplow/file?path=src/a.rs");
         assert_eq!(open["open"]["client"], "a");
         assert_eq!(open["open"]["detail"]["line"], 3);
-        assert_eq!(open["others"][0]["pageId"], "wiki:home");
+        assert_eq!(open["others"][0]["pageId"], "oxplow:oxplow/wiki?slug=home");
         assert_eq!(open["lens"], Value::Null);
 
-        let by_tab = run(json!({ "thread_id": tid, "tab": "page:settings" }))
+        let by_tab = run(json!({ "thread_id": tid, "tab": "oxplow:oxplow/page?page=settings" }))
             .await
             .unwrap()
             .result;
-        assert_eq!(by_tab["open"]["pageId"], "page:settings");
+        assert_eq!(by_tab["open"]["pageId"], "oxplow:oxplow/page?page=settings");
         assert_eq!(
             by_tab["open"]["detail"],
             Value::Null,
             "only the shown page publishes detail"
         );
-        let err = run(json!({ "thread_id": tid, "tab": "wiki:gone" }))
+        let err = run(json!({ "thread_id": tid, "tab": "oxplow:oxplow/wiki?slug=gone" }))
             .await
             .unwrap_err();
         assert!(
@@ -529,22 +544,22 @@ mod tests {
             true,
             fx.thread,
             vec![
-                tab("wiki:home", "wiki"),
-                tab("agent_session:ses1", "agent_session"),
+                tab("oxplow:oxplow/wiki?slug=home", "wiki"),
+                tab("oxplow:oxplow/agent_session?id=ses1", "agent_session"),
             ],
-            "wiki:home",
+            "oxplow:oxplow/wiki?slug=home",
         );
         let listed = run(json!({ "scope": "stream" })).await;
         let rows = listed["tabs"].as_array().unwrap();
         assert_eq!(rows.len(), 2);
-        assert_eq!(rows[0]["tab"], "wiki:home");
-        assert_eq!(rows[0]["title"], "wiki:home title");
+        assert_eq!(rows[0]["tab"], "oxplow:oxplow/wiki?slug=home");
+        assert_eq!(rows[0]["title"], "oxplow:oxplow/wiki?slug=home title");
         assert_eq!(rows[0]["thread"], refs::thread_uri(fx.thread));
         assert_eq!(
             (rows[0]["selected"].clone(), rows[0]["visible"].clone()),
             (json!(true), json!(true))
         );
-        assert_eq!(rows[1]["session"], "agent_session:ses1");
+        assert_eq!(rows[1]["session"], "oxplow:oxplow/agent_session?id=ses1");
         assert_eq!(rows[1]["selected"], false);
         assert_eq!(listed["unreported"], json!([]));
         assert_eq!(

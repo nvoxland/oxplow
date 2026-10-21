@@ -466,7 +466,10 @@ mod tests {
         ));
         let disabled = events(&db, "contribution.disabled").await;
         assert_eq!(disabled.len(), 1);
-        assert_eq!(disabled[0]["contribution"], "provider:tracker/fake");
+        assert_eq!(
+            disabled[0]["contribution"],
+            "oxplow:oxplow/provider?provider=tracker/fake"
+        );
         assert_eq!(h.disabled_reason(&k).await.unwrap(), Some(reason));
 
         h.enable(&k, "human").await.unwrap();

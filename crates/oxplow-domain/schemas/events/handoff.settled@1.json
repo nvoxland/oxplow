@@ -7,7 +7,7 @@
       "type": "string"
     },
     "handoff": {
-      "description": "`handoff:hnd<n>`.",
+      "description": "`oxplow:oxplow/handoff?id=hnd<n>`.",
       "type": "string"
     },
     "state": {

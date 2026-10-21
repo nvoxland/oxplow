@@ -2,7 +2,7 @@ title: Command Runs
 description: The commands agents ran in the last 30 days, with how many were refused as invalid, denied or failed. Open a command for its most common errors. The worst-behaved come first.
 query: |
   SELECT command,
-         lens_ref('oxplow-bundled/interface-command-errors', 'command', command) AS errors_ref,
+         uri('oxplow/lens', 'lens', 'oxplow-bundled/interface-command-errors', 'command', command) AS errors_ref,
          count(*) AS runs,
          sum(outcome = 'invalid') AS invalid,
          sum(outcome = 'denied') AS denied,

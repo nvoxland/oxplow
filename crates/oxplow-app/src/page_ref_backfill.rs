@@ -36,12 +36,11 @@
 
 use std::sync::Arc;
 
-use oxplow_db::page_ref_projections::{finding_edges, note_edges, KIND_FINDING, KIND_THREAD_NOTE};
+use oxplow_db::page_ref_projections::{finding_edges, note_edges};
 use oxplow_db::{
     SourceSlice, SqliteCodeQualityStore, SqliteEffortStore, SqliteHandoffStore, SqlitePageRefStore,
     SqliteThreadNoteStore,
 };
-use oxplow_domain::uri::types::HANDOFF as KIND_HANDOFF;
 use oxplow_domain::vocabulary::VocabularyHandle;
 
 /// Counts of rows touched per kind. Logged at INFO so the boot
@@ -79,14 +78,12 @@ async fn write_batched(
 }
 
 fn slice(
-    kind: &str,
-    id: String,
+    source: String,
     ref_types: Option<Vec<String>>,
     edges: Vec<oxplow_db::PageRefEdge>,
 ) -> SourceSlice {
     SourceSlice {
-        source_kind: kind.to_string(),
-        source_id: id,
+        source,
         ref_types,
         edges,
     }
@@ -213,7 +210,7 @@ pub async fn run(
     } = sources;
     let mut counts = BackfillCounts::default();
     let vocabulary = vocabulary.current();
-    let kinds = &vocabulary.kinds;
+    let kinds = &vocabulary.resources;
 
     // 1. Every work item's body, link and comment slices, from the
     //    interface — whichever list it's on.
@@ -231,7 +228,11 @@ pub async fn run(
                         let vocabulary = vocabulary.clone();
                         move |tx| {
                             for item in &batch {
-                                oxplow_db::work_item_refs::restate_tx(tx, &vocabulary.kinds, item)?;
+                                oxplow_db::work_item_refs::restate_tx(
+                                    tx,
+                                    &vocabulary.resources,
+                                    item,
+                                )?;
                             }
                             Ok(())
                         }
@@ -258,9 +259,9 @@ pub async fn run(
     if let Ok(rows) = thread_notes.list_all_for_backfill().await {
         let slices = rows
             .into_iter()
-            .map(|(id, body)| {
-                let edges = note_edges(kinds, KIND_THREAD_NOTE, &id, &body);
-                slice(KIND_THREAD_NOTE, id, None, edges)
+            .map(|(uri, body)| {
+                let edges = note_edges(kinds, &uri, &body);
+                slice(uri, None, edges)
             })
             .collect();
         counts.notes = write_batched(&page_refs, "notes", slices).await;
@@ -270,9 +271,9 @@ pub async fn run(
     if let Ok(rows) = handoffs.list_all_for_backfill().await {
         let slices = rows
             .into_iter()
-            .map(|(id, body)| {
-                let edges = note_edges(kinds, KIND_HANDOFF, &id, &body);
-                slice(KIND_HANDOFF, id, None, edges)
+            .map(|(uri, body)| {
+                let edges = note_edges(kinds, &uri, &body);
+                slice(uri, None, edges)
             })
             .collect();
         counts.handoffs = write_batched(&page_refs, "handoffs", slices).await;
@@ -285,7 +286,7 @@ pub async fn run(
             .map(|(id, path)| {
                 let id = id.to_string();
                 let edges = finding_edges(&id, &path);
-                slice(KIND_FINDING, id, None, edges)
+                slice(oxplow_domain::uri::build::finding_uri(&id), None, edges)
             })
             .collect();
         counts.findings = write_batched(&page_refs, "findings", slices).await;
@@ -399,7 +400,7 @@ mod tests {
         assert_eq!(counts.findings, 2500);
         assert_eq!(
             page_refs
-                .list_backlinks("file", "src/f42.rs", None)
+                .list_backlinks(&oxplow_domain::uri::build::file_uri("src/f42.rs"), None)
                 .await
                 .unwrap()
                 .len(),
@@ -533,7 +534,11 @@ mod tests {
             .await
             .unwrap();
         let foreign = effort_writer
-            .start("work_item:issues:ENG-12", &ThreadId::new(1), None)
+            .start(
+                "oxplow:oxplow/work_item?id=ENG-12&provider=issues",
+                &ThreadId::new(1),
+                None,
+            )
             .await
             .unwrap();
         effort_writer
@@ -545,11 +550,11 @@ mod tests {
         db.transaction(|tx| {
             for sql in [
                 "INSERT INTO work_item (ref, provider, title, body, state, native_state, created_at, updated_at)
-                 VALUES ('work_item:issues:ENG-12', 'issues', 'Theirs', '', 'todo', 'Todo', 't', 't')",
+                 VALUES ('oxplow:oxplow/work_item?id=ENG-12&provider=issues', 'issues', 'Theirs', '', 'todo', 'Todo', 't', 't')",
                 "INSERT INTO work_item_link (from_ref, to_ref, link_type, created_at)
-                 VALUES ('work_item:issues:ENG-12', 'work_item:issues:ENG-7', 'parent_of', 't')",
+                 VALUES ('oxplow:oxplow/work_item?id=ENG-12&provider=issues', 'oxplow:oxplow/work_item?id=ENG-7&provider=issues', 'parent_of', 't')",
                 "INSERT INTO work_item_comment (id, ref, body, created_at)
-                 VALUES ('work_item:issues:ENG-12#c1', 'work_item:issues:ENG-12', 'see [[src/c.rs]]', 't')",
+                 VALUES ('oxplow:oxplow/work_item?id=ENG-12&provider=issues#part=c1', 'oxplow:oxplow/work_item?id=ENG-12&provider=issues', 'see [[src/c.rs]]', 't')",
             ] {
                 tx.execute(sql, []).map_err(oxplow_db::map_sql_err)?;
             }
@@ -560,14 +565,14 @@ mod tests {
         let page_refs = Arc::new(SqlitePageRefStore::new(db.clone()));
         // Wipe the slices the writes just projected so the table looks
         // like a DB whose graph was reset.
-        for source in [format!("oxplow:{task_id}"), "issues:ENG-12".to_string()] {
-            page_refs
-                .replace_source("work_item", &source, Vec::new())
-                .await
-                .unwrap();
+        for source in [
+            oxplow_domain::uri::build::work_item_uri("oxplow", &task_id.to_string()),
+            oxplow_domain::uri::build::work_item_uri("issues", "ENG-12"),
+        ] {
+            page_refs.replace_source(&source, Vec::new()).await.unwrap();
         }
         let pre = page_refs
-            .list_backlinks("file", "src/app.rs", None)
+            .list_backlinks(&oxplow_domain::uri::build::file_uri("src/app.rs"), None)
             .await
             .unwrap();
         assert!(pre.is_empty());
@@ -587,30 +592,37 @@ mod tests {
         assert_eq!(counts.work_items, 2);
 
         let post = page_refs
-            .list_backlinks("file", "src/app.rs", None)
+            .list_backlinks(&oxplow_domain::uri::build::file_uri("src/app.rs"), None)
             .await
             .unwrap();
         assert_eq!(post.len(), 1, "got {post:?}");
-        assert_eq!(post[0].source_id, format!("oxplow:{task_id}"));
+        assert_eq!(
+            post[0].source,
+            oxplow_domain::uri::build::work_item_uri("oxplow", &task_id.to_string())
+        );
         // Another provider's work item is backfilled too — its effort's
         // summary, its link and its comment …
-        for (kind, id, ref_type) in [
-            ("file", "src/lib.rs", "summary_file_ref"),
-            ("work_item", "issues:ENG-7", "work_item_link:parent_of"),
-            ("file", "src/c.rs", "comment_file_ref"),
+        use oxplow_domain::uri::build;
+        for (target, ref_type) in [
+            (build::file_uri("src/lib.rs"), "summary_file_ref"),
+            (
+                build::work_item_uri("issues", "ENG-7"),
+                "work_item_link:parent_of",
+            ),
+            (build::file_uri("src/c.rs"), "comment_file_ref"),
         ] {
-            let refs = page_refs.list_backlinks(kind, id, None).await.unwrap();
+            let refs = page_refs.list_backlinks(&target, None).await.unwrap();
             assert_eq!(
                 refs.iter()
-                    .map(|r| (r.source_id.as_str(), r.ref_type.as_str()))
+                    .map(|r| (r.source.clone(), r.ref_type.as_str()))
                     .collect::<Vec<_>>(),
-                vec![("issues:ENG-12", ref_type)],
-                "{kind}:{id}"
+                vec![(build::work_item_uri("issues", "ENG-12"), ref_type)],
+                "{target}"
             );
         }
         // … and a declared impact survives the backfill.
         let impacts = page_refs
-            .list_backlinks("wiki", "auth-flow", None)
+            .list_backlinks(&oxplow_domain::uri::build::wiki_uri("auth-flow"), None)
             .await
             .unwrap();
         assert_eq!(impacts.len(), 1, "got {impacts:?}");

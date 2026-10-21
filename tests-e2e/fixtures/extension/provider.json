@@ -310,7 +310,7 @@
             "type": "object",
             "properties": {
               "ref": {
-                "description": "`work_item:<provider>:<id>`.",
+                "description": "`oxplow:oxplow/work_item?id=<id>&provider=<provider>`.",
                 "type": "string"
               },
               "title": {
@@ -405,7 +405,7 @@
             "type": "object",
             "properties": {
               "target": {
-                "description": "What it points at: another item (`work_item:<provider>:<id>`), or\nany ref the item is about (`collector:triage/hot`, `effort:eff12`).",
+                "description": "What it points at: another item (`oxplow:oxplow/work_item?id=<id>&provider=<provider>`), or\nany ref the item is about (`oxplow:oxplow/collector?collector=triage/hot`, `oxplow:oxplow/effort?id=eff12`).",
                 "type": "string"
               },
               "link_type": {

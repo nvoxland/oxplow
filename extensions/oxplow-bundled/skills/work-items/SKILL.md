@@ -45,7 +45,7 @@ rather than filing a new one.
 ## Changing items
 
 The same commands change any list's items, by canonical ref
-(`work_item:<provider>:<id>`): `oxplow.work_item.transition { ref, to,
+(`oxplow:oxplow/work_item?id=<id>&provider=<provider>`): `oxplow.work_item.transition { ref, to,
 native_state? }`, `oxplow.work_item.update { ref, title?, body?, parent_ref?,
 state?, native? }`, `oxplow.work_item.link { ref, target, link_type }`
 (and `oxplow.work_item.unlink`, the same input),
@@ -65,7 +65,7 @@ Link types:
 - **supersedes**: replaces the target, which is stale.
 - **replies_to**: a threaded response to the target.
 - **about**: what the item is about — any ref, not only another item
-  (`effort:eff12`, `file:src/a.rs`, `collector:triage/hot`). Find the
+  (`oxplow:oxplow/effort?id=eff12`, `oxplow:oxplow/file?path=src/a.rs`, `oxplow:oxplow/collector?collector=triage/hot`). Find the
   items about something with `v_work_item_link WHERE to_ref = :ref AND
   link_type = 'about'`, never by matching titles.
 

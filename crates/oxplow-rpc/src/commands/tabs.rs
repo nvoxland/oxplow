@@ -29,8 +29,8 @@ mod tests {
             "report_tabs",
             json!({ "report": {
                 "client": "w1", "focused": true, "visible": true, "shown_thread": "thr1",
-                "threads": [{ "thread": "thr1", "active": "wiki:home",
-                              "tabs": [{ "id": "wiki:home", "kind": "wiki", "title": "Home" }] }],
+                "threads": [{ "thread": "thr1", "active": "oxplow:oxplow/wiki?slug=home",
+                              "tabs": [{ "id": "oxplow:oxplow/wiki?slug=home", "kind": "wiki", "title": "Home" }] }],
                 "detail_json": null
             } }),
             &svc,
@@ -41,7 +41,7 @@ mod tests {
         let pages = svc
             .client_reports
             .open_pages(t, oxplow_domain::Timestamp::now());
-        assert_eq!(pages[0].page_id, "wiki:home");
+        assert_eq!(pages[0].page_id, "oxplow:oxplow/wiki?slug=home");
         assert_eq!(pages[0].client, "w1");
 
         let err = crate::dispatch(

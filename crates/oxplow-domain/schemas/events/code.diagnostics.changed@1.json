@@ -46,7 +46,7 @@
       "type": "string"
     },
     "stream": {
-      "description": "`stream:<id>`.",
+      "description": "`oxplow:oxplow/stream?id=<id>`.",
       "type": "string"
     }
   },

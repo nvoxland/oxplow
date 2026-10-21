@@ -117,7 +117,7 @@ state its links and comments; it declares no `ordering` or `lists`), a
 `work_items`
 collector over the `work_item` entity, and a config schema requiring
 `team`. `check` returns handle `fake:<team>` or a `/team` problem. Items
-live in memory as `work_item:fake:W-<n>` with native states `Backlog`,
+live in memory as `oxplow:oxplow/work_item?id=W-<n>&provider=fake` with native states `Backlog`,
 `Doing`, `Stuck`, `Shipped`, `Dropped` (one per canonical state); every
 `invoke` returns the `work_item.recorded` events the host logs. Each
 write bumps the item's revision (a deleted item stays, marked
@@ -219,9 +219,9 @@ inputs `additionalProperties: false`), the event type
 `knowledge_page` (`discover` lists it), and the same `team` config; the
 event's schema is core's. Pages live in its state
 like items do. Every verb answers the page's record as that event:
-`{ page: { ref: "wiki:<slug>", title, body, refs, updated_at, deleted? } }`.
+`{ page: { ref: "oxplow:oxplow/wiki?slug=<slug>", title, body, refs, updated_at, deleted? } }`.
 `refs` is the body's `[[…]]` interiors in oxplow's grammar (one with a `/`
-or a `.` is `file:<path>`, a bare one `wiki:<slug>`); the title defaults to
+or a `.` is `oxplow:oxplow/file?path=<path>`, a bare one `oxplow:oxplow/wiki?slug=<slug>`); the title defaults to
 the slug; `verified_refs` and `removed_refs` are accepted and ignored (it
 keeps no pins). `link` appends `[[target]]` under a `## Related` heading;
 `delete_page` answers the record with `deleted: true`, and a page that is
@@ -348,7 +348,7 @@ pinned tool added, removed or changed (`ProviderImpact.tools`).
   `$/state`. **Tool output is data**: the mapping reads it and nothing
   runs it. **What the mapping returns is checked**: an event type the
   declarations don't list, or a subject, item or record that isn't this
-  provider's (`work_item:<id>:…`, the id from `OXPLOW_PROVIDER_ID`) fails
+  provider's (`oxplow:oxplow/work_item?…&provider=<id>`, the id from `OXPLOW_PROVIDER_ID`) fails
   the call; so does a `records` answer without a `state` (a missing
   checkpoint would restart every read from nothing). **A tool error**
   (`isError`) is the server refusing the request, not a failure: the
@@ -441,7 +441,7 @@ and whether it keeps items.
 | declares as `data` | nothing | nothing | `env_markers`, `settings` | nothing | nothing |
 | may emit | `work_item.recorded@2` | nothing | nothing | nothing | `knowledge.page.recorded@1` |
 | collectors stream | `work_item` rows, logged as `work_item.recorded@2` `{ item: row }` | nothing | nothing | nothing | `knowledge_page` rows, logged as `knowledge.page.recorded@1` `{ page: row }` |
-| owns refs | `work_item:<instance>:…` | none | none | none | `wiki:<slug>` (bare: the active store's) |
+| owns URIs | `oxplow/work_item` with `provider=<instance>` | none | none | none | `oxplow/wiki` (no `provider` param: the active store's) |
 | keeps items (`fields`, `idPattern`) | yes | no | no | no | no |
 
 Each such capability has a **host** (`registry::CapabilityHost`): what
@@ -458,8 +458,8 @@ knowledge's (`knowledge::KnowledgeHost`) registers an `ExternalKnowledge`
 in `Services.knowledge`. A record row carries its own `ref`; the host
 logs it as the contract's event with the row under the contract's key,
 that ref the subject and the instance the source (`provider:<id>`: whose
-record it is). A ref kind the kind registry doesn't scope by provider
-(`wiki`) is the active implementation's, so any well-formed one is an
+record it is). A URI of a resource with no `provider` param
+(`oxplow/wiki`) is the active implementation's, so any well-formed one is an
 instance's own (`registry::owns`).
 
 Each host's `prepare` validates declarations and constructs its adapter
@@ -483,7 +483,7 @@ removed_refs }` (the body in oxplow's markdown, `title` also given), `link
 Each answers the page's `knowledge.page.recorded@1 { page: { ref, title,
 body, refs, updated_at, deleted? } }`: `body` what it keeps (in its own
 grammar if it likes), `refs` what the page links **in oxplow's grammar**
-(`file:src/lib.rs`, `wiki:other`, `work_item:…`) — core links and pins
+(`oxplow:oxplow/file?path=src/lib.rs`, `oxplow:oxplow/wiki?slug=other`, a work item's URI) — core links and pins
 from those, never parsing a foreign body. A write answering no record of
 the page fails. Core records the row, the edges and the pins from it and
 logs `knowledge.page.written` after the store's own record. Its collector
@@ -642,7 +642,7 @@ One spelling everywhere, because the id is used as it stands:
 
 | Keyed on the **instance id** | Keyed on the **provider (program)** |
 |---|---|
-| the ref segment (`work_item:issues_acme:ENG-1`) and `check_subject` | the extension's deployment (`.oxplow/runtime/extensions/<ext>/<hash>/`) |
+| the URI's `provider` param (`oxplow:oxplow/work_item?id=ENG-1&provider=issues_acme`) and `check_subject` | the extension's deployment (`.oxplow/runtime/extensions/<ext>/<hash>/`) |
 | an extension command's `instance` (`tracker.item.estimate { instance: issues_acme }`) | the extension's permissions (`permissions.process`, `network`, `secrets`) |
 | the work-items registry id, `v_capability_provider.provider`, the `activeProviders` value | the Extensions page's provider row, `declaration_impact` |
 | `OXPLOW_PROVIDER_ID` (the provider is told which instance it is) | the kit's fixtures and transcripts (it tests the program, as its default instance) |
@@ -994,7 +994,7 @@ A run goes through the bus's **provider router**
 (`CommandBus::set_provider_router`, `ProviderRouter for
 ProviderRegistry::run_op`) to the instance its input names — an
 `instance` field, else the instance its `ref` is of
-(`work_item:<instance>:…`), else the provider's default instance —
+(a work item URI's `provider` param), else the provider's default instance —
 `Unavailable` when that one isn't running; its inverse names an
 operation, made a call of the command declared over it (with the
 instance), or `<family>.<verb>` for a capability verb (its contract's
@@ -1012,8 +1012,8 @@ invokes the process and hands the bus its result, its inverse (as
 `<id>.<command>`, or for a verb `work_item.<verb>`) and its events —
 refused if a type isn't declared, a record names another provider's row
 (a `work_item.recorded` another's item), or a subject isn't one of its
-own refs (`check_subject`: its contract's kind, `work_item:<id>:…`, or
-`extension:<ext>`).
+own refs (`check_subject`: its contract's resource with `provider=<id>`, or
+the extension's URI `oxplow:oxplow/extension?name=<ext>`).
 
 **Calls are bounded** (tsk549): `check` and `invoke` time out after
 `HostDeps.call_timeout` (`MachineEnv.provider_call_timeout`: 60 s in the

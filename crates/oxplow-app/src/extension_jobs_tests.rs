@@ -157,16 +157,23 @@ async fn a_job_runs_and_its_result_is_read_back() {
     let fx = fixture().await;
     let queued = run(&fx, "triage.summary.ask", ask("item-1")).await;
     assert_eq!(queued["created"], json!(true), "{queued}");
-    let id = oxplow_domain::uri::build::id_of(queued["jobRun"].as_str().unwrap(), "job_run")
-        .unwrap()
-        .to_owned();
+    let id = oxplow_domain::uri::build::id_of(
+        queued["jobRun"].as_str().unwrap(),
+        oxplow_domain::uri::resources::JOB_RUN,
+    )
+    .unwrap()
+    .to_owned();
 
     let again = run(&fx, "triage.summary.ask", ask("item-1")).await;
     assert_eq!(again["jobRun"], queued["jobRun"], "one intent is one job");
     assert_eq!(again["created"], json!(false));
 
     let done = until(&fx, &id, |s| s["state"] == json!("succeeded")).await;
-    assert_eq!(done["job"], json!("job:triage/summarize"), "{done}");
+    assert_eq!(
+        done["job"],
+        json!("oxplow:oxplow/job?job=triage/summarize"),
+        "{done}"
+    );
     assert!(
         done["result"].to_string().contains("hello"),
         "the model's answer is the result: {done}"
@@ -207,9 +214,12 @@ async fn a_restricted_binding_fails_a_job_needing_what_it_forbids() {
         )
         .unwrap();
     let job_run = |v: Value| {
-        oxplow_domain::uri::build::id_of(v["jobRun"].as_str().unwrap(), "job_run")
-            .unwrap()
-            .to_owned()
+        oxplow_domain::uri::build::id_of(
+            v["jobRun"].as_str().unwrap(),
+            oxplow_domain::uri::resources::JOB_RUN,
+        )
+        .unwrap()
+        .to_owned()
     };
     let mut lookup = ask("item-sql");
     lookup["job"] = json!("lookup");
@@ -237,7 +247,7 @@ async fn a_job_runs_on_its_extensions_ai_profile() {
         run(&fx, "triage.summary.ask", ask_as("item-p", "sort")).await["jobRun"]
             .as_str()
             .unwrap(),
-        "job_run",
+        oxplow_domain::uri::resources::JOB_RUN,
     )
     .unwrap()
     .to_owned();
@@ -300,7 +310,7 @@ async fn a_recorded_job_runs_after_a_restart() {
         run_on(&before, "triage.summary.ask", ask("item-3")).await["jobRun"]
             .as_str()
             .unwrap(),
-        "job_run",
+        oxplow_domain::uri::resources::JOB_RUN,
     )
     .unwrap()
     .to_owned();

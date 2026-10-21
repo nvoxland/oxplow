@@ -2,7 +2,7 @@ title: Extension runs
 description: "What each extension did in the last 7 days: runs, failures, denials, mean CPU and model calls. The ones needing attention come first; open one for its runs."
 query: |
   SELECT extension,
-         lens_ref('oxplow-bundled/extension-runs', 'extension', extension) AS runs_ref,
+         uri('oxplow/lens', 'lens', 'oxplow-bundled/extension-runs', 'extension', extension) AS runs_ref,
          count(*) AS runs,
          sum(outcome = 'failed') AS failures,
          sum(outcome = 'denied') AS denials,

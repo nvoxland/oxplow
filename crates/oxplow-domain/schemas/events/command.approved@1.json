@@ -12,7 +12,7 @@
       "type": "string"
     },
     "proposal": {
-      "description": "`proposal:<id>`.",
+      "description": "`oxplow:oxplow/proposal?id=<id>`.",
       "type": "string"
     }
   },

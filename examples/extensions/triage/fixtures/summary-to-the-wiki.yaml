@@ -4,7 +4,7 @@
 input:
   event:
     type: contribution.job.completed
-    payload: { job_run: "job_run:01990000-0000-7000-8000-000000000000", job: "job:other/x", attempt: 1, fence: 1, outcome: succeeded, version: 1 }
+    payload: { job_run: "oxplow:oxplow/job_run?id=01990000-0000-7000-8000-000000000000", job: "oxplow:oxplow/job?job=other/x", attempt: 1, fence: 1, outcome: succeeded, version: 1 }
 expect:
   effects: []
   commands: []

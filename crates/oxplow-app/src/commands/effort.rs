@@ -45,12 +45,12 @@ pub const UPDATE: &str = "oxplow.effort.update";
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EffortOpenInput {
-    /// The thread doing the work (`thread:thr3`); defaults to the caller's. An
+    /// The thread doing the work (`oxplow:oxplow/thread?id=thr3`); defaults to the caller's. An
     /// agent may name only a thread in its own stream.
     #[serde(default)]
     pub thread: Option<String>,
-    /// The work item it's for, as a canonical ref (`work_item:oxplow:tsk42`,
-    /// `work_item:issues:ENG-12`); unlinked when absent.
+    /// The work item it's for, as a canonical ref (`oxplow:oxplow/work_item?id=tsk42&provider=oxplow`,
+    /// `oxplow:oxplow/work_item?id=ENG-12&provider=issues`); unlinked when absent.
     #[serde(default)]
     pub work_item: Option<String>,
     /// Its own title; absent, it shows its item's, else its first prompt's.
@@ -66,10 +66,10 @@ pub struct EffortOpenInput {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EffortCloseInput {
-    /// The effort (`effort:eff12`).
+    /// The effort (`oxplow:oxplow/effort?id=eff12`).
     #[serde(default)]
     pub effort: Option<String>,
-    /// Or the thread (`thread:thr3`) whose open effort it is.
+    /// Or the thread (`oxplow:oxplow/thread?id=thr3`) whose open effort it is.
     #[serde(default)]
     pub thread: Option<String>,
     /// RFC 3339: close it as of this point; what came after is left to the
@@ -95,10 +95,10 @@ pub enum CloseReason {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EffortLinkInput {
-    /// The effort (`effort:eff12`).
+    /// The effort (`oxplow:oxplow/effort?id=eff12`).
     #[serde(default)]
     pub effort: Option<String>,
-    /// Or the thread (`thread:thr3`) whose open effort it is.
+    /// Or the thread (`oxplow:oxplow/thread?id=thr3`) whose open effort it is.
     #[serde(default)]
     pub thread: Option<String>,
     /// The work item to link it to; `null` unlinks it.
@@ -108,7 +108,7 @@ pub struct EffortLinkInput {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EffortUpdateInput {
-    /// The effort (`effort:eff12`).
+    /// The effort (`oxplow:oxplow/effort?id=eff12`).
     pub effort: String,
     /// Its own title; `null` clears it back to the default.
     pub title: Option<String>,
@@ -155,7 +155,7 @@ fn target_effort(
 ) -> Result<(EffortId, ThreadId), CommandError> {
     let (id, thread) = match (effort, thread) {
         (Some(raw), None) => {
-            let id: EffortId = ref_id(raw, "effort", "/effort")?;
+            let id: EffortId = ref_id(raw, oxplow_domain::uri::resources::EFFORT, "/effort")?;
             let thread: i64 = ctx
                 .conn
                 .query_row(
@@ -169,7 +169,7 @@ fn target_effort(
             (id, ThreadId::new(thread))
         }
         (None, Some(raw)) => {
-            let thread = ref_id(raw, "thread", "/thread")?;
+            let thread = ref_id(raw, oxplow_domain::uri::resources::THREAD, "/thread")?;
             let id = open_for_thread_tx(ctx.conn, thread)
                 .map_err(sql)?
                 .ok_or_else(|| {
@@ -203,7 +203,7 @@ pub fn open_op(work_items: WorkItemsRegistry) -> Op {
             validate_work_item_uri(w).map_err(|e| invalid("/work_item", e.to_string()))?;
         }
         let thread = match input.thread.as_deref() {
-            Some(raw) => ref_id(raw, "thread", "/thread")?,
+            Some(raw) => ref_id(raw, oxplow_domain::uri::resources::THREAD, "/thread")?,
             None => ctx
                 .actor()
                 .thread_id()
@@ -349,7 +349,7 @@ pub fn update_op() -> Op {
 }
 
 /// The effort commands, for the bus. A loose id in `work_item` is the
-/// active work list's (`work_item::with_loose_refs`).
+/// active work list's (`oxplow:oxplow/work_item?id=with_loose_refs&provider=`).
 pub fn ops(work_items: WorkItemsRegistry) -> Vec<Op> {
     vec![
         open_op(work_items.clone()),
@@ -372,7 +372,7 @@ mod tests {
         }
     }
 
-    const ISSUES: &str = "work_item:issues:ENG-12";
+    const ISSUES: &str = "oxplow:oxplow/work_item?id=ENG-12&provider=issues";
 
     /// An agent opens an unlinked effort on its own thread, links it,
     /// titles it and closes it by thread; link and title undo.
@@ -471,9 +471,14 @@ mod tests {
             .unwrap();
         assert_eq!(
             field(
-                bus.run(&agent(&fx), OPEN, json!({ "thread": "thread:thr2" }), false)
-                    .await
-                    .unwrap_err()
+                bus.run(
+                    &agent(&fx),
+                    OPEN,
+                    json!({ "thread": "oxplow:oxplow/thread?id=thr2" }),
+                    false
+                )
+                .await
+                .unwrap_err()
             ),
             "/thread"
         );
@@ -486,21 +491,31 @@ mod tests {
         };
         assert_eq!(
             field(
-                bus.run(&threadless, OPEN, json!({ "thread": "thread:thr2" }), false)
-                    .await
-                    .unwrap_err()
+                bus.run(
+                    &threadless,
+                    OPEN,
+                    json!({ "thread": "oxplow:oxplow/thread?id=thr2" }),
+                    false
+                )
+                .await
+                .unwrap_err()
             ),
             "/thread"
         );
-        bus.run(&agent(&fx), OPEN, json!({ "thread": "thread:thr3" }), false)
-            .await
-            .unwrap();
+        bus.run(
+            &agent(&fx),
+            OPEN,
+            json!({ "thread": "oxplow:oxplow/thread?id=thr3" }),
+            false,
+        )
+        .await
+        .unwrap();
         assert_eq!(
             field(
                 bus.run(
                     &agent(&fx),
                     CLOSE,
-                    json!({ "thread": "thread:thr3", "as_of": "2020-01-01T00:00:00Z" }),
+                    json!({ "thread": "oxplow:oxplow/thread?id=thr3", "as_of": "2020-01-01T00:00:00Z" }),
                     false
                 )
                 .await

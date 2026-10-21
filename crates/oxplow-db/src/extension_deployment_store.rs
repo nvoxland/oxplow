@@ -213,8 +213,12 @@ mod tests {
             .unwrap();
         assert_eq!(
             model,
-            // (`extension:a` once the catalog lists `a`; nothing lists it here.)
-            [("extension_deployment:a@h1".into(), None, 1)]
+            // (`oxplow:oxplow/extension?name=a` once the catalog lists `a`; nothing lists it here.)
+            [(
+                "oxplow:oxplow/extension_deployment?hash=h1&name=a".into(),
+                None,
+                1
+            )]
         );
     }
 }

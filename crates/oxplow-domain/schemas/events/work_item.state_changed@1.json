@@ -20,7 +20,7 @@
       "$ref": "#/$defs/CanonicalState"
     },
     "work_item": {
-      "description": "`work_item:<provider>:<id>`.",
+      "description": "`oxplow:oxplow/work_item?id=<id>&provider=<provider>`.",
       "type": "string"
     }
   },

@@ -3,15 +3,15 @@
 //! answering the page's `knowledge.page.recorded@1` event:
 //!
 //! - `write_page { slug, title?, body, verified_refs, removed_refs }` →
-//!   `{ page: "wiki:<slug>" }`; the title defaults to the slug, and it
+//!   `{ page: "oxplow:oxplow/wiki?slug=%3Cslug%3E" }`; the title defaults to the slug, and it
 //!   keeps no pins, so the two ref lists are accepted and ignored;
 //! - `delete_page { slug }` → `{}`, the page marked `deleted`;
 //! - `link { page, target }` → `{}`: `[[target]]` appended under a
 //!   `## Related` heading.
 //!
 //! A page's `refs` are its body's `[[…]]` interiors in oxplow's ref
-//! grammar: one with a `/` or a `.` is a file (`file:<path>`), a bare one
-//! a page (`wiki:<slug>`). The collector `knowledge_pages` streams the
+//! grammar: one with a `/` or a `.` is a file (`oxplow:oxplow/file?path=<path>`), a bare one
+//! a page (`oxplow:oxplow/wiki?slug=<slug>`). The collector `knowledge_pages` streams the
 //! pages changed after its cursor.
 
 use std::collections::BTreeMap;
@@ -218,12 +218,12 @@ pub(crate) fn answer(
         }
         "link" => {
             let page = str_field(input, "page")?;
-            let slug = oxplow_domain::uri::build::id_of(&page, oxplow_domain::uri::types::WIKI)
+            let slug = oxplow_domain::uri::build::id_of(&page, oxplow_domain::uri::resources::WIKI)
                 .unwrap_or_else(|_| page.clone());
             let target = str_field(input, "target")?;
             let target = [
-                oxplow_domain::uri::types::WIKI,
-                oxplow_domain::uri::types::FILE,
+                oxplow_domain::uri::resources::WIKI,
+                oxplow_domain::uri::resources::FILE,
             ]
             .iter()
             .find_map(|kind| oxplow_domain::uri::build::id_of(&target, kind).ok())

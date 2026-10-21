@@ -1,8 +1,8 @@
 //! Task effort tracking.
 //!
 //! An "effort" is one continuous push of agent work on a single work
-//! item (an oxplow task, `work_item:oxplow:tsk42`, or another provider's
-//! item, `work_item:issues:ENG-12`),
+//! item (an oxplow task, `oxplow:oxplow/work_item?id=tsk42&provider=oxplow`, or another provider's
+//! item, `oxplow:oxplow/work_item?id=ENG-12&provider=issues`),
 //! bounded by snapshots at start and end. This module owns:
 //!
 //! - `effort` (the effort row)
@@ -22,7 +22,6 @@ use crate::database::{string_to_ts, ts_to_string};
 use crate::event_log_store::{anchors_for_thread_tx, EventCtx};
 use crate::page_ref_projections::{
     effort_impact_edges, effort_ref_types, effort_summary_edges, effort_touched_file_edges,
-    KIND_WORK_ITEM,
 };
 use crate::page_ref_store::SqlitePageRefStore;
 use oxplow_domain::events::schema::{
@@ -30,7 +29,7 @@ use oxplow_domain::events::schema::{
     EffortRetitled, EffortRetitledV1,
 };
 use oxplow_domain::uri::build::{
-    effort_uri, snapshot_uri, thread_uri, validate_work_item_uri, work_item_id_of_uri,
+    effort_uri, snapshot_uri, thread_uri, validate_work_item_uri, work_item_of_uri,
 };
 use oxplow_domain::{Anchors, StreamId};
 
@@ -867,15 +866,10 @@ impl SqliteEffortStore {
         let work_item = work_item.to_string();
         let slice = self
             .db
-            .call(move |conn| effort_slice_on(conn, &vocabulary.kinds, &work_item))
+            .call(move |conn| effort_slice_on(conn, &vocabulary.resources, &work_item))
             .await?;
         self.page_refs
-            .replace_source_for_ref_types(
-                &slice.source_kind,
-                &slice.source_id,
-                effort_ref_types(),
-                slice.edges,
-            )
+            .replace_source_for_ref_types(&slice.source, effort_ref_types(), slice.edges)
             .await
     }
 
@@ -894,7 +888,7 @@ impl SqliteEffortStore {
                     .collect::<rusqlite::Result<Vec<_>>>()?;
                 let mut slices = Vec::with_capacity(work_items.len());
                 for work_item in work_items {
-                    match effort_slice_on(conn, &vocabulary.kinds, &work_item) {
+                    match effort_slice_on(conn, &vocabulary.resources, &work_item) {
                         Ok(slice) => slices.push(slice),
                         Err(e) => tracing::warn!(?e, %work_item, "effort slice skipped"),
                     }
@@ -1565,14 +1559,15 @@ impl EffortStore for SqliteEffortStore {
 /// [`SqliteEffortStore::project_effort_slice`]), from its efforts' rows.
 fn effort_slice_on(
     conn: &rusqlite::Connection,
-    kinds: &oxplow_domain::uri::types::TypeRegistry,
+    kinds: &oxplow_domain::uri::resources::ResourceRegistry,
     work_item: &str,
 ) -> rusqlite::Result<crate::SourceSlice> {
-    let Some(source) = work_item_id_of_uri(work_item).map(str::to_string) else {
+    if work_item_of_uri(work_item).is_none() {
         return Err(rusqlite::Error::InvalidParameterName(format!(
-            "`{work_item}` is not a work_item ref"
+            "`{work_item}` is not a work item URI"
         )));
-    };
+    }
+    let source = work_item.to_string();
     // Pick the most-recent `change_kind` per path across
     // every effort on this task. "Most recent" = the
     // effort with the latest `started_at`. The window
@@ -1629,8 +1624,7 @@ fn effort_slice_on(
     edges.extend(effort_summary_edges(kinds, &source, &summaries));
     edges.extend(effort_impact_edges(kinds, &source, &impacts));
     Ok(crate::SourceSlice {
-        source_kind: KIND_WORK_ITEM.to_string(),
-        source_id: source,
+        source,
         ref_types: Some(effort_ref_types()),
         edges,
     })
@@ -1823,7 +1817,7 @@ mod tests {
                         "INSERT INTO effort
                            (id, work_item, thread_id, started_at, ended_at,
                             start_snapshot_id, end_snapshot_id)
-                         VALUES (?1, 'work_item:oxplow:tsk1', 1, ?2, ?3, NULL, NULL)",
+                         VALUES (?1, 'oxplow:oxplow/work_item?id=tsk1&provider=oxplow', 1, ?2, ?3, NULL, NULL)",
                         params![id, start, end],
                     )?;
                 }
@@ -1858,7 +1852,7 @@ mod tests {
                     conn.execute(
                         "INSERT INTO effort
                            (id, work_item, thread_id, started_at, ended_at)
-                         VALUES (?1, 'work_item:oxplow:tsk1', 1, ?2, ?3)",
+                         VALUES (?1, 'oxplow:oxplow/work_item?id=tsk1&provider=oxplow', 1, ?2, ?3)",
                         params![id, start, end],
                     )?;
                 }
@@ -1931,7 +1925,7 @@ mod tests {
         let eff = store.start(&ours, &t, None).await.unwrap();
         assert_eq!(eff.work_item.as_deref(), Some(ours.as_str()));
 
-        let foreign = "work_item:issues:ENG-12";
+        let foreign = "oxplow:oxplow/work_item?id=ENG-12&provider=issues";
         store.finish(&eff.id, None, None).await.unwrap();
         let other = store.start(foreign, &t, None).await.unwrap();
         assert_eq!(
@@ -1965,7 +1959,7 @@ mod tests {
             Some(foreign)
         );
 
-        for bad in ["", "tsk1", "effort:eff1", "work_item:"] {
+        for bad in ["", "tsk1", "oxplow:oxplow/effort?id=eff1", "work_item:"] {
             assert!(
                 matches!(
                     store.start(bad, &t, None).await,
@@ -1997,7 +1991,7 @@ mod tests {
     async fn a_claimed_file_carries_its_session() {
         let (store, db, _tid, t) = fixture_with_db().await;
         let eff = store
-            .start("work_item:oxplow:tsk1", &t, None)
+            .start("oxplow:oxplow/work_item?id=tsk1&provider=oxplow", &t, None)
             .await
             .unwrap();
         let v = FileRefVersion {
@@ -2097,7 +2091,10 @@ mod tests {
     async fn observed_files_carry_the_only_active_session() {
         let (store, db, _tid, t) = fixture_with_db().await;
         seed_turns(&db, &[(1, 1, 5)]).await;
-        let e = store.start("work_item:issues:A-1", &t, None).await.unwrap();
+        let e = store
+            .start("oxplow:oxplow/work_item?id=A-1&provider=issues", &t, None)
+            .await
+            .unwrap();
         observe(&store, e.id, &["a.rs"]).await;
         observe(&store, e.id, &["a.rs"]).await;
         assert_eq!(attributed(&db, e.id).await, [("a.rs".into(), Some(1), 0)]);
@@ -2109,7 +2106,10 @@ mod tests {
     async fn files_seen_while_two_sessions_ran_are_shared() {
         let (store, db, _tid, t) = fixture_with_db().await;
         seed_turns(&db, &[(1, 1, 5), (2, 3, 8)]).await;
-        let e = store.start("work_item:issues:A-1", &t, None).await.unwrap();
+        let e = store
+            .start("oxplow:oxplow/work_item?id=A-1&provider=issues", &t, None)
+            .await
+            .unwrap();
         observe(&store, e.id, &["a.rs"]).await;
         assert_eq!(attributed(&db, e.id).await, [("a.rs".into(), None, 1)]);
     }
@@ -2120,7 +2120,10 @@ mod tests {
     async fn a_path_two_sessions_observe_is_shared_and_a_claim_is_not_touched() {
         let (store, db, _tid, t) = fixture_with_db().await;
         seed_turns(&db, &[(1, 1, 2)]).await;
-        let e = store.start("work_item:issues:A-1", &t, None).await.unwrap();
+        let e = store
+            .start("oxplow:oxplow/work_item?id=A-1&provider=issues", &t, None)
+            .await
+            .unwrap();
         let v = FileRefVersion {
             local_snapshot_id: 0,
             closest_vcs_rev: None,
@@ -2176,9 +2179,16 @@ mod tests {
         })
         .await
         .unwrap();
-        let mine = store.start("work_item:issues:A-1", &t, None).await.unwrap();
+        let mine = store
+            .start("oxplow:oxplow/work_item?id=A-1&provider=issues", &t, None)
+            .await
+            .unwrap();
         let theirs = store
-            .start("work_item:issues:B-1", &ThreadId::new(2), None)
+            .start(
+                "oxplow:oxplow/work_item?id=B-1&provider=issues",
+                &ThreadId::new(2),
+                None,
+            )
             .await
             .unwrap();
         let v = FileRefVersion {
@@ -2241,7 +2251,7 @@ mod tests {
     #[tokio::test]
     async fn effort_open_and_close_are_logged_with_the_write() {
         let (store, db, _tid, t) = fixture_with_db().await;
-        let foreign = "work_item:issues:ENG-12";
+        let foreign = "oxplow:oxplow/work_item?id=ENG-12&provider=issues";
         let eff = store.start(foreign, &t, Some(1)).await.ok();
         // No snapshot 1 exists; the FK refuses it and nothing is logged.
         assert!(eff.is_none());
@@ -2266,11 +2276,23 @@ mod tests {
             vec![
                 (
                     "effort.opened".into(),
-                    vec![format!("effort:{}", eff.id), foreign.into()]
+                    vec![
+                        oxplow_domain::uri::build::keyed(
+                            oxplow_domain::uri::resources::EFFORT,
+                            &format!("{}", eff.id)
+                        ),
+                        foreign.into()
+                    ]
                 ),
                 (
                     "effort.closed".into(),
-                    vec![format!("effort:{}", eff.id), foreign.into()]
+                    vec![
+                        oxplow_domain::uri::build::keyed(
+                            oxplow_domain::uri::resources::EFFORT,
+                            &format!("{}", eff.id)
+                        ),
+                        foreign.into()
+                    ]
                 ),
             ]
         );
@@ -2279,10 +2301,16 @@ mod tests {
         assert_eq!(opened.anchors.thread_id, Some(t));
         assert!(opened.anchors.stream_id.is_some());
         assert_eq!(opened.payload["work_item"], foreign);
-        assert_eq!(opened.payload["thread"], format!("thread:{t}"));
+        assert_eq!(
+            opened.payload["thread"],
+            oxplow_domain::uri::build::keyed(oxplow_domain::uri::resources::THREAD, &t.to_string())
+        );
         assert_eq!(
             events[1].envelope.payload["effort"],
-            format!("effort:{}", eff.id)
+            oxplow_domain::uri::build::keyed(
+                oxplow_domain::uri::resources::EFFORT,
+                &format!("{}", eff.id)
+            )
         );
     }
 
@@ -2293,7 +2321,7 @@ mod tests {
         let (store, tid, t) = fixture().await;
         let first = store.start(&tid, &t, None).await.unwrap();
         let second = store
-            .start("work_item:issues:ENG-1", &t, None)
+            .start("oxplow:oxplow/work_item?id=ENG-1&provider=issues", &t, None)
             .await
             .unwrap();
         let open = store
@@ -2321,7 +2349,11 @@ mod tests {
         // Opening another moves the thread on: still exactly one open.
         let _ = db;
         store
-            .start("work_item:issues:ENG-1", &thread, None)
+            .start(
+                "oxplow:oxplow/work_item?id=ENG-1&provider=issues",
+                &thread,
+                None,
+            )
             .await
             .unwrap();
         assert!(store.find_open_for_thread(&thread).await.unwrap().is_some());
@@ -2355,8 +2387,8 @@ mod tests {
         let page_refs = SqlitePageRefStore::new(db.clone());
         // oxplow's tasks the work list: `tsk99` is one of its items.
         let mut vocabulary = oxplow_domain::vocabulary::Vocabulary::core();
-        vocabulary.kinds = vocabulary
-            .kinds
+        vocabulary.resources = vocabulary
+            .resources
             .with_work_item_ids("oxplow", r"tsk\d+")
             .unwrap();
         let store = SqliteEffortStore::with_vocabulary(
@@ -2374,35 +2406,38 @@ mod tests {
             .unwrap();
 
         let wiki_back = page_refs
-            .list_backlinks("wiki", "url-schemes", None)
+            .list_backlinks(&oxplow_domain::uri::build::wiki_uri("url-schemes"), None)
             .await
             .unwrap();
         assert!(
-            wiki_back.iter().any(|e| e.source_kind == "work_item"
-                && e.source_id == tid.trim_start_matches("work_item:")
-                && e.ref_type == "summary_wikilink"),
+            wiki_back
+                .iter()
+                .any(|e| e.source == tid && e.ref_type == "summary_wikilink"),
             "wiki backlink missing; got {wiki_back:?}"
         );
 
         let file_back = page_refs
-            .list_backlinks("file", "src/foo.rs", None)
+            .list_backlinks(&oxplow_domain::uri::build::file_uri("src/foo.rs"), None)
             .await
             .unwrap();
         assert!(
-            file_back.iter().any(|e| e.ref_type == "summary_file_ref"
-                && e.source_id == tid.trim_start_matches("work_item:")),
+            file_back
+                .iter()
+                .any(|e| e.ref_type == "summary_file_ref" && e.source == tid),
             "file backlink missing; got {file_back:?}"
         );
 
         let task_back = page_refs
-            .list_backlinks("work_item", "oxplow:tsk99", None)
+            .list_backlinks(
+                &oxplow_domain::uri::build::work_item_uri("oxplow", "tsk99"),
+                None,
+            )
             .await
             .unwrap();
         assert!(
             task_back
                 .iter()
-                .any(|e| e.ref_type == "summary_work_item_mention"
-                    && e.source_id == tid.trim_start_matches("work_item:")),
+                .any(|e| e.ref_type == "summary_work_item_mention" && e.source == tid),
             "task backlink missing; got {task_back:?}"
         );
     }
@@ -2462,12 +2497,12 @@ mod tests {
 
         // Edges projected with normalized target kind + action extra
         let wiki = page_refs
-            .list_backlinks("wiki", "url-schemes", None)
+            .list_backlinks(&oxplow_domain::uri::build::wiki_uri("url-schemes"), None)
             .await
             .unwrap();
         let row = wiki
             .iter()
-            .find(|e| e.source_id == tid.trim_start_matches("work_item:"))
+            .find(|e| e.source == tid)
             .expect("wiki impact edge missing");
         assert_eq!(row.ref_type, "impact");
         assert!(row
@@ -2476,15 +2511,12 @@ mod tests {
             .is_some_and(|s| s.contains("created")));
 
         let commit = page_refs
-            .list_backlinks("commit", "abc1234", None)
+            .list_backlinks(&oxplow_domain::uri::build::commit_uri("abc1234"), None)
             .await
             .unwrap();
-        assert!(
-            commit
-                .iter()
-                .any(|e| e.source_id == tid.trim_start_matches("work_item:")
-                    && e.ref_type == "impact")
-        );
+        assert!(commit
+            .iter()
+            .any(|e| e.source == tid && e.ref_type == "impact"));
 
         // Replacing the impact set clears old edges
         store
@@ -2499,24 +2531,21 @@ mod tests {
             .await
             .unwrap();
         let wiki = page_refs
-            .list_backlinks("wiki", "url-schemes", None)
+            .list_backlinks(&oxplow_domain::uri::build::wiki_uri("url-schemes"), None)
             .await
             .unwrap();
         assert!(
-            wiki.iter()
-                .all(|e| e.source_id != tid.rsplit(':').next().unwrap()),
+            wiki.iter().all(|e| e.source != tid),
             "old wiki impact edge wasn't replaced: {wiki:?}"
         );
 
         // Empty list nulls the column and clears all impact edges
         store.set_impacts(&eff.id, &[]).await.unwrap();
         let wiki = page_refs
-            .list_backlinks("wiki", "other-page", None)
+            .list_backlinks(&oxplow_domain::uri::build::wiki_uri("other-page"), None)
             .await
             .unwrap();
-        assert!(wiki
-            .iter()
-            .all(|e| e.source_id != tid.rsplit(':').next().unwrap()));
+        assert!(wiki.iter().all(|e| e.source != tid));
         assert!(store.list_impacts(&eff.id).await.unwrap().is_empty());
     }
 
@@ -2547,13 +2576,11 @@ mod tests {
             .unwrap();
 
         let wiki_back = page_refs
-            .list_backlinks("wiki", "url-schemes", None)
+            .list_backlinks(&oxplow_domain::uri::build::wiki_uri("url-schemes"), None)
             .await
             .unwrap();
         assert!(
-            wiki_back
-                .iter()
-                .any(|e| e.source_id == tid.trim_start_matches("work_item:")),
+            wiki_back.iter().any(|e| e.source == tid),
             "summary slice was clobbered by record_file: {wiki_back:?}"
         );
     }

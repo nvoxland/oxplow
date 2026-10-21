@@ -130,7 +130,7 @@ checklist:
   / `v_dashboard_item` change (structure); the metric specs and catalog re-read when their models change
   (`useRerunOnChange`).
 - **`dashboards`** — the foundation's `dashboards` lens page
-  (`page:dashboards`, `dashboardsRef()`): the user's
+  (the `dashboards` page, `dashboardsRef()`): the user's
   dashboards over `v_dashboard` (each row links to its page) + a **New
   Dashboard** action on `oxplow.dashboard.create`, whose `ui.open_after`
   opens the new one. In the launcher under **Data**.

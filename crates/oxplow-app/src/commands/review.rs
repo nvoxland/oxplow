@@ -8,8 +8,8 @@
 //! `confirm_decision` / `dismiss_decision` ↔ `reopen_decision`. Every run
 //! logs what it decided, caused by the run.
 //!
-//! The claim and the decision are named by ref (`claim:7`,
-//! `decision:3`), whatever effort they belong to.
+//! The claim and the decision are named by ref (`oxplow:oxplow/claim?id=7`,
+//! `oxplow:oxplow/decision?id=3`), whatever effort they belong to.
 
 use crate::commands::ops::Op;
 use std::sync::Arc;
@@ -42,9 +42,9 @@ pub const REVIEWER: &str = "reviewer";
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct VerifyClaimInput {
-    /// The claim (`claim:7`).
+    /// The claim (`oxplow:oxplow/claim?id=7`).
     pub claim: String,
-    /// What backs it (`run:12`, a test, a file). Absent: what it already
+    /// What backs it (`oxplow:oxplow/run?id=12`, a test, a file). Absent: what it already
     /// cites, else `reviewer` — the person checked it themselves.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub evidence: Option<String>,
@@ -53,7 +53,7 @@ pub struct VerifyClaimInput {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct UnverifyClaimInput {
-    /// The claim (`claim:7`).
+    /// The claim (`oxplow:oxplow/claim?id=7`).
     pub claim: String,
     /// What it cites after (what it cited before it was verified); absent,
     /// nothing.
@@ -64,14 +64,14 @@ pub struct UnverifyClaimInput {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ClaimInput {
-    /// The claim (`claim:7`).
+    /// The claim (`oxplow:oxplow/claim?id=7`).
     pub claim: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct DecisionInput {
-    /// The decision (`decision:3`).
+    /// The decision (`oxplow:oxplow/decision?id=3`).
     pub decision: String,
 }
 
@@ -89,7 +89,7 @@ struct ClaimRow {
 
 /// The claim `claim` names, or `Invalid` naming it.
 fn claim_row(ctx: &TxCtx<'_>, claim: &str) -> Result<ClaimRow, CommandError> {
-    let id = ref_id::<i64>(claim, "claim", "/claim")?;
+    let id = ref_id::<i64>(claim, oxplow_domain::uri::resources::CLAIM, "/claim")?;
     ctx.conn
         .query_row(
             "SELECT effort_id, evidence_ref, review FROM claim WHERE id = ?1",
@@ -267,7 +267,11 @@ fn review_decision(
     from: &[&str],
     to: &str,
 ) -> Result<HandlerOutput, CommandError> {
-    let id = ref_id::<i64>(&input.decision, "decision", "/decision")?;
+    let id = ref_id::<i64>(
+        &input.decision,
+        oxplow_domain::uri::resources::DECISION,
+        "/decision",
+    )?;
     let (effort, provenance): (Option<i64>, String) = ctx
         .conn
         .query_row(
@@ -477,7 +481,7 @@ mod tests {
             .run(
                 &Actor::Human,
                 VERIFY_CLAIM,
-                json!({ "claim": r, "evidence": "run:3" }),
+                json!({ "claim": r, "evidence": "oxplow:oxplow/run?id=3" }),
                 false,
             )
             .await
@@ -497,7 +501,7 @@ mod tests {
             .run(
                 &Actor::Human,
                 VERIFY_CLAIM,
-                json!({ "claim": "claim:9999" }),
+                json!({ "claim": "oxplow:oxplow/claim?id=9999" }),
                 false,
             )
             .await
@@ -518,7 +522,7 @@ mod tests {
             .db
             .transaction(move |tx| {
                 tx.execute(
-                    "UPDATE claim SET evidence_ref = 'run:42' WHERE id = ?1",
+                    "UPDATE claim SET evidence_ref = 'oxplow:oxplow/run?id=42' WHERE id = ?1",
                     [claim],
                 )
                 .map_err(oxplow_db::map_sql_err)
@@ -534,7 +538,10 @@ mod tests {
             .unwrap();
         assert_eq!(
             claim_review(&fx, claim).await,
-            (Some("verified".into()), Some("run:42".into()))
+            (
+                Some("verified".into()),
+                Some("oxplow:oxplow/run?id=42".into())
+            )
         );
         fx.svc
             .commands
@@ -543,7 +550,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             claim_review(&fx, claim).await,
-            (None, Some("run:42".into()))
+            (None, Some("oxplow:oxplow/run?id=42".into()))
         );
     }
 

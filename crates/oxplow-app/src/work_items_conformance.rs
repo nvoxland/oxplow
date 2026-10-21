@@ -108,7 +108,6 @@ pub async fn suite(
 ) -> SuiteRun {
     let mut findings = Vec::new();
     let mut fail = |check: &'static str, message: String| findings.push(Finding { check, message });
-    let prefix = oxplow_domain::uri::build::of("work_item", &format!("{provider}:"));
     // Every create files on the active tracker (tsk1058): the host runs the
     // suite with `provider` active.
     let active = probe.active().await;
@@ -146,8 +145,11 @@ pub async fn suite(
         }
     };
     created.push(item.clone());
-    if !item.starts_with(&prefix) {
-        fail("create", format!("`{item}` isn't a `{prefix}…` ref"));
+    if oxplow_domain::uri::build::work_item_of_uri(&item).is_none_or(|(p, _)| p != provider) {
+        fail(
+            "create",
+            format!("`{item}` isn't one of `{provider}`'s work items (`provider={provider}`)"),
+        );
     }
     probe.settle().await;
     if state_changes(probe, &item).await == 0 {
@@ -723,21 +725,15 @@ impl WorkItemsProbe for ServicesProbe<'_> {
     }
 
     async fn titled(&self, provider: &str, title: &str) -> Vec<String> {
-        let (prefix, title) = (
-            format!(
-                "{}%",
-                oxplow_domain::uri::build::of("work_item", &format!("{provider}:"))
-            ),
-            title.to_string(),
-        );
+        let (provider, title) = (provider.to_string(), title.to_string());
         self.0
             .db
             .read(move |c| {
                 let mut stmt = c
-                    .prepare("SELECT ref FROM v_work_item WHERE ref LIKE ?1 AND title = ?2")
+                    .prepare("SELECT ref FROM v_work_item WHERE provider = ?1 AND title = ?2")
                     .map_err(sql)?;
                 let rows = stmt
-                    .query_map([prefix, title], |r| r.get::<_, String>(0))
+                    .query_map([provider, title], |r| r.get::<_, String>(0))
                     .and_then(|rows| rows.collect::<rusqlite::Result<Vec<_>>>())
                     .map_err(sql)?;
                 Ok(rows)

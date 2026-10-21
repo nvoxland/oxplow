@@ -57,7 +57,7 @@ named function. `FunctionMetrics.id` is the definition's id within its file
 
 A change's functions are keyed by that id: base and head are matched on
 `(path, id)`, and each `v_change_function` row carries the function's
-symbol `ref` (`symbol:<path>/<id>`, `build::symbol_ref`), unique per change.
+symbol `ref` (`oxplow:oxplow/symbol?path=<path>&symbol=<id>`, `build::symbol_uri`), unique per change.
 Two overloads (or two same-named functions) in one file are two rows, each
 matched to its own base. The Function Changes and Tests Weakened lenses
 link the function by that ref.

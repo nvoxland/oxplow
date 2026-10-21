@@ -6,8 +6,8 @@ work item its title mentions by id (`tsk42`, `ENG-12` — whichever work list
 is active), and a **PR Lifetimes** lens that draws
 each one as a bar from when it was opened to when it was merged.
 
-A pull request is also something a ref can name: `github_pr:12`, or
-`[[pr:12]]` in a task, a comment or a wiki page. It shows the pull
+A pull request is also a resource a URI can name: `oxplow:github/pr?id=12`,
+or `[[pr:12]]` in a task, a comment or a wiki page. It shows the pull
 request's title, opens its page, and is found by search.
 
 ## Use it
@@ -36,9 +36,9 @@ The repo comes from `git remote get-url origin`, or set
 - `lenses/prs-by-task.yaml`: the lens.
 - `lenses/pr-lifetimes.yaml`, `components/pr-lifetimes/`: the lifetimes lens
   and the bundle it renders (`custom_components:` in `extension.yaml`).
-- `models/pull_request.sql`, `lenses/pr.yaml`: what a `github_pr` ref
-  resolves to, and the page it opens (`ref_kinds:` in `extension.yaml`).
+- `models/pull_request.sql`, `lenses/pr.yaml`: what a `github/pr` URI
+  resolves to, and the page it opens (`resources:` in `extension.yaml`).
 - `fixtures/pr-link.yaml`: `oxplow plugin test`'s check that `[[pr:12]]`
-  names `github_pr:12`.
+  names `oxplow:github/pr?id=12`.
 
 See the [Lenses guide](../../../docs/guide/lenses.md) for the format.

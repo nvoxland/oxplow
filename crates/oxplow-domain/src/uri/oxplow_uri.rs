@@ -197,6 +197,19 @@ impl OxplowUri {
         }
     }
 
+    /// [`OxplowUri::new`] for keys known only at run time (a script's):
+    /// a bad key is an error, not a panic.
+    pub fn build(
+        resource: ResourceName,
+        params: BTreeMap<String, String>,
+        view: BTreeMap<String, String>,
+    ) -> Result<Self, UriParseError> {
+        if let Some(key) = params.keys().chain(view.keys()).find(|k| !is_key(k)) {
+            return Err(UriParseError::BadParam(key.clone()));
+        }
+        Ok(Self::new(resource, params, view))
+    }
+
     pub fn parse(text: &str) -> Result<Self, UriParseError> {
         if text.is_empty() {
             return Err(UriParseError::Empty);

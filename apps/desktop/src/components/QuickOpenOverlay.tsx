@@ -493,8 +493,8 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
               if (result.kind === "hit") {
                 return (
                   <button type="button"
-                    key={`hit:${result.hit.ref}:${result.hit.stream_id ?? ""}`}
-                    data-testid={`launcher-hit-${result.hit.ref}`}
+                    key={`hit:${result.hit.uri}:${result.hit.stream_id ?? ""}`}
+                    data-testid={`launcher-hit-${result.hit.uri}`}
                     data-row-index={index}
                     {...rowA11y(nav.optionProps(index))}
                     onClick={() => confirm(result)}
@@ -504,15 +504,15 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
                     }}
                   >
                     <span style={{ width: 18, display: "inline-flex", justifyContent: "center" }}>
-                      <PageKindIcon kind={shortResource(result.hit.kind)} size={14} style={{ color: "var(--text-secondary)" }} />
+                      <PageKindIcon kind={shortResource(result.hit.resource)} size={14} style={{ color: "var(--text-secondary)" }} />
                     </span>
                     <span style={{ flexShrink: 0, maxWidth: "40%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {result.hit.title || result.hit.ref}
+                      {result.hit.title || result.hit.uri}
                     </span>
                     <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--muted)", fontSize: 11 }}>
                       {result.hit.snippet}
                     </span>
-                    <span style={{ color: "var(--muted)", fontSize: 11 }}>{pageKindLabel(shortResource(result.hit.kind))}</span>
+                    <span style={{ color: "var(--muted)", fontSize: 11 }}>{pageKindLabel(shortResource(result.hit.resource))}</span>
                   </button>
                 );
               }

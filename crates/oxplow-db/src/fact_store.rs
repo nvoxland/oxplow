@@ -98,12 +98,12 @@ impl NewMeasure {
 const MEASURE_COLS: &str = "id, key, title, unit, subject_kind, temporal_semantics, \
      capture_scope, scope, description, created_at, updated_at, extension";
 
-/// How a scope is stored: an extension's `extension:<name>` is kept as
+/// How a scope is stored: an extension's `oxplow:oxplow/extension?name=<name>` is kept as
 /// `scope = 'global'` plus the `extension` column (V84), because the scope
 /// CHECK can't be widened without rebuilding tables whose rows facts
 /// cascade from.
 fn stored_scope(scope: &str) -> (String, Option<String>) {
-    match oxplow_domain::uri::build::id_of(scope, oxplow_domain::uri::types::EXTENSION) {
+    match oxplow_domain::uri::build::id_of(scope, oxplow_domain::uri::resources::EXTENSION) {
         Ok(name) => ("global".to_string(), Some(name)),
         Err(_) => (scope.to_string(), None),
     }
@@ -744,7 +744,7 @@ pub const DURATION_MOVE_MIN_MS: f64 = 20.0;
 /// [`SqliteFactStore::record_test_run`] takes it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TestCaseResult {
-    /// `test:<classname>::<name>` — the fact's subject and the summary key.
+    /// `oxplow:oxplow/test?class=<classname>&name=<name>` — the fact's subject and the summary key.
     pub subject: String,
     /// `passed`, `failed` or `skipped`.
     pub status: String,
@@ -970,8 +970,8 @@ pub struct NewFact {
     pub value: f64,
     pub numerator: Option<f64>,
     pub denominator: Option<f64>,
-    /// What the fact is about, as one ref (`file:src/a.rs`,
-    /// `symbol:src/a.rs/f`); a string that isn't a ref is refused at the
+    /// What the fact is about, as one ref (`oxplow:oxplow/file?path=src/a.rs`,
+    /// `oxplow:oxplow/symbol?path=src/a.rs&symbol=f`); a string that isn't a ref is refused at the
     /// write. The store derives the kind from it.
     pub subject: Option<String>,
     pub path: Option<String>,
@@ -1402,9 +1402,9 @@ fn subject_id(conn: &rusqlite::Connection, subject: Option<&str>) -> rusqlite::R
     if found.is_some() {
         return Ok(found);
     }
-    let kind = oxplow_domain::uri::build::type_of(subject).ok_or_else(|| {
+    let kind = oxplow_domain::uri::build::resource_of(subject).ok_or_else(|| {
         rusqlite::Error::ToSqlConversionFailure(
-            format!("a fact's subject must be a ref (`<kind>:<id>`), not `{subject}`").into(),
+            format!("a fact's subject must be a URI (`oxplow:<extension>/<resource>?…`), not `{subject}`").into(),
         )
     })?;
     conn.prepare_cached("INSERT INTO fact_subject (ref, kind) VALUES (?1, ?2)")?
@@ -1415,9 +1415,9 @@ fn subject_id(conn: &rusqlite::Connection, subject: Option<&str>) -> rusqlite::R
 /// Refuse a fact whose subject isn't a ref, naming the subject.
 fn check_subject(f: &NewFact) -> Result<(), DomainError> {
     match f.subject.as_deref() {
-        Some(s) if oxplow_domain::uri::build::type_of(s).is_none() => {
+        Some(s) if oxplow_domain::uri::build::resource_of(s).is_none() => {
             Err(DomainError::Invalid(format!(
-                "a fact's subject must be a ref (`<kind>:<id>`, like `file:src/a.rs`), not `{s}`"
+                "a fact's subject must be a URI (like `oxplow:oxplow/file?path=src/a.rs`), not `{s}`"
             )))
         }
         _ => Ok(()),
@@ -3839,15 +3839,15 @@ mod tests {
     async fn extension_scoped_specs_and_measures_round_trip_and_prune() {
         let store = fixture().await;
         let mut m = NewMeasure::new("acme.todo", "TODOs");
-        m.scope = "extension:acme".into();
+        m.scope = "oxplow:oxplow/extension?name=acme".into();
         store.upsert_measure(m).await.unwrap();
         assert_eq!(
             store.get_measure("acme.todo").await.unwrap().unwrap().scope,
-            "extension:acme"
+            "oxplow:oxplow/extension?name=acme"
         );
         for key in ["acme.todos", "acme.gone"] {
             let mut s = NewMetricSpec::base(key, key, "acme.todo", "sum");
-            s.scope = "extension:acme".into();
+            s.scope = "oxplow:oxplow/extension?name=acme".into();
             store.upsert_spec(s).await.unwrap();
         }
         let mut p = NewMetricSpec::base("proj.x", "X", "acme.todo", "sum");
@@ -3855,7 +3855,7 @@ mod tests {
         store.upsert_spec(p).await.unwrap();
         assert_eq!(
             store.get_spec("acme.todos").await.unwrap().unwrap().scope,
-            "extension:acme"
+            "oxplow:oxplow/extension?name=acme"
         );
 
         // Only extension specs that are no longer declared go; project ones
@@ -3951,7 +3951,7 @@ mod tests {
                 let task_id = conn.last_insert_rowid();
                 conn.execute(
                     "INSERT INTO effort (id, work_item, thread_id, started_at, ended_at)
-                     VALUES (1, 'work_item:oxplow:tsk' || ?1, 1, '2026-06-30T10:00:00.000000Z', '2026-06-30T11:00:00.000000Z')",
+                     VALUES (1, 'oxplow:oxplow/work_item?id=tsk&provider=oxplow' || ?1, 1, '2026-06-30T10:00:00.000000Z', '2026-06-30T11:00:00.000000Z')",
                     params![task_id],
                 )?;
                 Ok(())
@@ -3990,7 +3990,7 @@ mod tests {
     /// One scanned block: subject `id`, at `id.rs:1`, valued `value`.
     fn block(m: i64, id: &str, value: f64) -> NewFact {
         NewFact {
-            subject: Some(oxplow_domain::uri::build::of("block", id)),
+            subject: Some(oxplow_domain::uri::build::block_uri(id, "1-2")),
             path: Some(format!("{id}.rs")),
             line: Some(1),
             ..NewFact::new(m, value)
@@ -4053,12 +4053,14 @@ mod tests {
         assert_eq!(stored(&store, c3).await, 1, "one changed");
         assert_eq!(stored(&store, c4).await, 0, "one removed");
 
-        let mut expected: Vec<(String, f64)> =
-            many.iter().map(|k| (format!("block:{k}"), 1.0)).collect();
+        let mut expected: Vec<(String, f64)> = many
+            .iter()
+            .map(|k| (oxplow_domain::uri::build::block_uri(k, "1-2"), 1.0))
+            .collect();
         expected.sort_by(|a, b| a.0.cmp(&b.0));
         let with = |x: f64| {
             let mut v = expected.clone();
-            v.push(("block:new".into(), x));
+            v.push((oxplow_domain::uri::build::block_uri("new", "1-2"), x));
             v.sort_by(|a, b| a.0.cmp(&b.0));
             v
         };
@@ -4264,13 +4266,17 @@ mod tests {
         measure_id: i64,
         facts: &[(&str, f64)],
     ) -> i64 {
-        let mut capture = NewMetricCapture::done(1, producer, format!("metric:{producer}"));
+        let mut capture = NewMetricCapture::done(
+            1,
+            producer,
+            oxplow_domain::uri::build::keyed(oxplow_domain::uri::resources::METRIC, producer),
+        );
         capture.snapshot_id = Some(snap_id);
         capture.captured_at = Some(at(captured_at));
         let rows: Vec<NewFact> = facts
             .iter()
             .map(|(path, value)| NewFact {
-                subject: Some(oxplow_domain::uri::build::of("file", path)),
+                subject: Some(oxplow_domain::uri::build::file_uri(path)),
                 path: Some((*path).to_string()),
                 ..NewFact::new(measure_id, *value)
             })
@@ -4332,16 +4338,14 @@ mod tests {
             .await
             .unwrap();
         let capture = |snap: i64, at_: &str, fns: &[(&str, &str, f64)]| {
-            let mut c = NewMetricCapture::done(1, "complexity", "metric:complexity");
+            let mut c =
+                NewMetricCapture::done(1, "complexity", "oxplow:oxplow/metric?metric=complexity");
             c.snapshot_id = Some(snap);
             c.captured_at = Some(at(at_));
             let facts: Vec<NewFact> = fns
                 .iter()
                 .map(|(path, name, v)| NewFact {
-                    subject: Some(oxplow_domain::uri::build::of(
-                        "symbol",
-                        &format!("{path}/{name}"),
-                    )),
+                    subject: Some(oxplow_domain::uri::build::symbol_uri(path, name)),
                     path: Some((*path).to_string()),
                     line: Some(3),
                     dims_json: Some(r#"{"oxplow.language":"rust"}"#.into()),
@@ -4531,14 +4535,18 @@ mod tests {
         measure_id: i64,
         facts: &[(&str, f64)],
     ) -> i64 {
-        let mut capture = NewMetricCapture::done(1, producer, format!("metric:{producer}"));
+        let mut capture = NewMetricCapture::done(
+            1,
+            producer,
+            oxplow_domain::uri::build::keyed(oxplow_domain::uri::resources::METRIC, producer),
+        );
         capture.snapshot_id = Some(snap_id);
         capture.captured_at = Some(at(captured_at));
         capture.scan_kind = "full".into();
         let rows: Vec<NewFact> = facts
             .iter()
             .map(|(path, value)| NewFact {
-                subject: Some(oxplow_domain::uri::build::of("file", path)),
+                subject: Some(oxplow_domain::uri::build::file_uri(path)),
                 path: Some((*path).to_string()),
                 ..NewFact::new(measure_id, *value)
             })
@@ -4568,14 +4576,14 @@ mod tests {
         m: i64,
         fns: &[(&str, &str, f64, i64)],
     ) -> i64 {
-        let mut capture = NewMetricCapture::done(1, "fns", "metric:fns");
+        let mut capture = NewMetricCapture::done(1, "fns", "oxplow:oxplow/metric?metric=fns");
         capture.snapshot_id = Some(snap_id);
         capture.captured_at = Some(at(when));
         capture.scan_kind = scan_kind.into();
         let rows: Vec<NewFact> = fns
             .iter()
             .map(|(path, name, value, line)| NewFact {
-                subject: Some(format!("symbol:{path}::{name}")),
+                subject: Some(oxplow_domain::uri::build::symbol_uri(path, name)),
                 path: Some((*path).to_string()),
                 line: Some(*line),
                 ..NewFact::new(m, *value)
@@ -4665,7 +4673,11 @@ mod tests {
     }
 
     fn sym(name: &str, value: f64, line: i64) -> (String, f64, Option<i64>) {
-        (format!("symbol:a.rs::{name}"), value, Some(line))
+        (
+            oxplow_domain::uri::build::symbol_uri("a.rs", name),
+            value,
+            Some(line),
+        )
     }
 
     /// A rescanned file stores only the functions that changed; one that
@@ -5016,7 +5028,7 @@ mod tests {
         capture.captured_at = Some(at("2026-06-30T11:00:00.000000Z"));
         capture.scan_kind = "asserted".into();
         let rows = vec![NewFact {
-            subject: Some(oxplow_domain::uri::build::of("file", "a.rs")),
+            subject: Some(oxplow_domain::uri::build::file_uri("a.rs")),
             path: Some("a.rs".into()),
             ..NewFact::new(m, 7.0)
         }];
@@ -5056,7 +5068,7 @@ mod tests {
         assert!(!store.has_full_capture("g", 1, Some("v1")).await.unwrap());
 
         // A full capture at v1 counts — for v1 (and for "any version").
-        let mut capture = NewMetricCapture::done(1, "g", "metric:g");
+        let mut capture = NewMetricCapture::done(1, "g", "oxplow:oxplow/metric?metric=g");
         capture.snapshot_id = Some(1);
         capture.scan_kind = "full".into();
         capture.producer_version = Some("v1".into());
@@ -5149,7 +5161,7 @@ mod tests {
         )
         .await;
         // An old effort-stamped capture — attribution history, never pruned.
-        let mut stamped = NewMetricCapture::done(1, "g", "metric:g");
+        let mut stamped = NewMetricCapture::done(1, "g", "oxplow:oxplow/metric?metric=g");
         stamped.snapshot_id = Some(1);
         stamped.captured_at = Some(at("2026-06-30T08:30:00.000000Z"));
         stamped.effort_id = Some(1);
@@ -5383,7 +5395,7 @@ mod tests {
             .await
             .unwrap();
         let subject = |s: &str, v: f64| NewFact {
-            subject: Some(format!("test:{s}")),
+            subject: Some(oxplow_domain::uri::build::test_uri("t", s)),
             ..NewFact::new(m, v)
         };
         let at = |t: &str| at(t);
@@ -5455,10 +5467,26 @@ mod tests {
             .unwrap();
         seed.sort();
         let mut want = vec![
-            ("other".to_string(), "test:A".to_string(), id_of(&f3, 9.0)),
-            ("tests".to_string(), "test:A".to_string(), id_of(&f2, 2.0)),
-            ("tests".to_string(), "test:A".to_string(), id_of(&f2, 2.5)),
-            ("tests".to_string(), "test:B".to_string(), id_of(&f1, 1.5)),
+            (
+                "other".to_string(),
+                oxplow_domain::uri::build::test_uri("t", "A"),
+                id_of(&f3, 9.0),
+            ),
+            (
+                "tests".to_string(),
+                oxplow_domain::uri::build::test_uri("t", "A"),
+                id_of(&f2, 2.0),
+            ),
+            (
+                "tests".to_string(),
+                oxplow_domain::uri::build::test_uri("t", "A"),
+                id_of(&f2, 2.5),
+            ),
+            (
+                "tests".to_string(),
+                oxplow_domain::uri::build::test_uri("t", "B"),
+                id_of(&f1, 1.5),
+            ),
             ("tests".to_string(), "src/p.rs".to_string(), id_of(&f1, 3.0)),
             (
                 "tests".to_string(),
@@ -5494,7 +5522,7 @@ mod tests {
             .await
             .unwrap();
         let result = |t: &str, status: &str, ms: f64| TestCaseResult {
-            subject: format!("test:{t}"),
+            subject: oxplow_domain::uri::build::test_uri("t", t),
             status: status.into(),
             time_ms: Some(ms),
             dims_json: Some(format!(r#"{{"oxplow.status":"{status}"}}"#)),
@@ -5526,7 +5554,11 @@ mod tests {
                 (status, timed)
             }
         };
-        let sets = |a: &[&str]| a.iter().map(|t| format!("test:{t}")).collect::<Vec<_>>();
+        let sets = |a: &[&str]| {
+            a.iter()
+                .map(|t| oxplow_domain::uri::build::test_uri("t", t))
+                .collect::<Vec<_>>()
+        };
 
         // First run on main: everything is new.
         let r1 = store
@@ -5609,7 +5641,10 @@ mod tests {
             .test_case_stats(1, Some("main".into()), "tests")
             .await
             .unwrap();
-        let b = stats.iter().find(|s| s.subject == "test:b").unwrap();
+        let b = stats
+            .iter()
+            .find(|s| s.subject == oxplow_domain::uri::build::test_uri("t", "b"))
+            .unwrap();
         assert_eq!(
             (b.runs, b.failures, b.flips, b.last_status.as_str()),
             (3, 2, 1, "passed")
@@ -5622,7 +5657,10 @@ mod tests {
             b.last_passed_at.as_deref(),
             Some("2026-06-01T10:00:00.000000Z")
         );
-        let a = stats.iter().find(|s| s.subject == "test:a").unwrap();
+        let a = stats
+            .iter()
+            .find(|s| s.subject == oxplow_domain::uri::build::test_uri("t", "a"))
+            .unwrap();
         assert_eq!(
             (a.last_ms, a.max_ms, a.recorded_ms),
             (Some(160.0), Some(160.0), Some(160.0))
@@ -5650,7 +5688,7 @@ mod tests {
             ..NewMetricCapture::done(1, "tests", "t")
         };
         let case = || TestCaseResult {
-            subject: "test:a".into(),
+            subject: oxplow_domain::uri::build::test_uri("t", "a"),
             status: "failed".into(),
             time_ms: None,
             dims_json: None,
@@ -5746,7 +5784,7 @@ mod tests {
         let complete = measure(&store, "acme.level").await; // default: complete
         snapshot_with(&store, 1, &[("a.rs", "oxplow")]).await;
 
-        let mut mixed = NewMetricCapture::done(1, "g", "metric:g");
+        let mut mixed = NewMetricCapture::done(1, "g", "oxplow:oxplow/metric?metric=g");
         mixed.snapshot_id = Some(1);
         mixed.captured_at = Some(at("2026-06-30T08:00:00.000000Z"));
         let mixed_id = store
@@ -5838,7 +5876,7 @@ mod tests {
             ..NewMetricCapture::done(1, "tests", "builtin")
         };
         let subject = |s: &str, v: f64| NewFact {
-            subject: Some(format!("test:{s}")),
+            subject: Some(oxplow_domain::uri::build::test_uri("t", s)),
             ..NewFact::new(m, v)
         };
         // c1 OLD: A=1, later superseded → the one deletable capture.
@@ -5964,7 +6002,7 @@ mod tests {
                     ..NewMetricCapture::done(1, "tests", "builtin")
                 },
                 vec![NewFact {
-                    subject: Some("test:T".into()),
+                    subject: Some(oxplow_domain::uri::build::test_uri("t", "T")),
                     ..NewFact::new(m, 1.0)
                 }],
             )
@@ -6844,7 +6882,7 @@ mod tests {
         let rows: Vec<NewFact> = cases
             .iter()
             .map(|(name, status)| NewFact {
-                subject: Some(format!("test:{name}")),
+                subject: Some(oxplow_domain::uri::build::test_uri("t", name)),
                 dims_json: Some(format!("{{\"oxplow.status\":\"{status}\"}}")),
                 ..NewFact::new(measure_id, 1.0)
             })
@@ -6924,7 +6962,7 @@ mod tests {
         // The gauge times out on the next full-tree scan: a failed, fact-less capture
         // whose snapshot covers BOTH files.
         snapshot_with(&store, 2, &[("a.rs", "oxplow"), ("b.rs", "oxplow")]).await;
-        let mut failed = NewMetricCapture::done(1, "g", "metric:g");
+        let mut failed = NewMetricCapture::done(1, "g", "oxplow:oxplow/metric?metric=g");
         failed.status = "failed".into();
         failed.error = Some("sandbox budget exceeded".into());
         failed.snapshot_id = Some(2);
@@ -6951,7 +6989,7 @@ mod tests {
             let rows: Vec<NewFact> = ms
                 .iter()
                 .map(|(name, v)| NewFact {
-                    subject: Some(format!("test:{name}")),
+                    subject: Some(oxplow_domain::uri::build::test_uri("t", name)),
                     ..NewFact::new(m, *v)
                 })
                 .collect();
@@ -7188,15 +7226,18 @@ mod tests {
             .record_facts(
                 NewMetricCapture::done(1, "t", "builtin"),
                 vec![NewFact {
-                    subject: Some("symbol:a.rs/f".into()),
+                    subject: Some("oxplow:oxplow/symbol?path=a.rs&symbol=f".into()),
                     ..NewFact::new(m, 1.0)
                 }],
             )
             .await
             .unwrap();
         let rows = store.facts_for_captures(m, vec![capture]).await.unwrap();
-        assert_eq!(rows[0].subject.as_deref(), Some("symbol:a.rs/f"));
-        assert_eq!(rows[0].subject_kind.as_deref(), Some("symbol"));
+        assert_eq!(
+            rows[0].subject.as_deref(),
+            Some("oxplow:oxplow/symbol?path=a.rs&symbol=f")
+        );
+        assert_eq!(rows[0].subject_kind.as_deref(), Some("oxplow/symbol"));
         let err = store
             .record_facts(
                 NewMetricCapture::done(1, "t", "builtin"),
@@ -7208,7 +7249,7 @@ mod tests {
             .await
             .unwrap_err();
         assert!(
-            matches!(&err, DomainError::Invalid(m) if m.contains("must be a ref") && m.contains("a.rs")),
+            matches!(&err, DomainError::Invalid(m) if m.contains("must be a URI") && m.contains("a.rs")),
             "{err:?}"
         );
     }
@@ -7275,7 +7316,7 @@ mod tests {
             .unwrap()
             .collect::<Result<_, _>>()
             .unwrap();
-        // `file:b.rs` (old rows 2 and 3) is one subject, as is `ai_model:opus`
+        // `oxplow:oxplow/file?path=b.rs` (old rows 2 and 3) is one subject, as is `oxplow:oxplow/ai_model?name=opus`
         // (bare and already-prefixed model names); the bare subject has none.
         assert_eq!(
             facts,
@@ -7337,13 +7378,13 @@ mod tests {
         // Facts carry no capture_id — record_facts must backfill it.
         let facts = vec![
             NewFact {
-                subject: Some(oxplow_domain::uri::build::of("symbol", "src/a.rs::foo")),
+                subject: Some(oxplow_domain::uri::build::symbol_uri("src/a.rs", "foo")),
                 path: Some("src/a.rs".into()),
                 line: Some(10),
                 ..NewFact::new(m, 14.0)
             },
             NewFact {
-                subject: Some(oxplow_domain::uri::build::of("symbol", "src/a.rs::bar")),
+                subject: Some(oxplow_domain::uri::build::symbol_uri("src/a.rs", "bar")),
                 path: Some("src/a.rs".into()),
                 line: Some(40),
                 ..NewFact::new(m, 3.0)
@@ -7370,7 +7411,10 @@ mod tests {
             .iter()
             .all(|f| f.closest_vcs_rev.as_deref() == Some("abc1234")));
         // Oldest-first within the capture is by fact id (insertion order).
-        assert_eq!(rows[0].subject.as_deref(), Some("symbol:src/a.rs::foo"));
+        assert_eq!(
+            rows[0].subject.as_deref(),
+            Some("oxplow:oxplow/symbol?path=src/a.rs&symbol=foo")
+        );
         assert_eq!(rows[0].value, 14.0);
         assert_eq!(rows[1].value, 3.0);
     }

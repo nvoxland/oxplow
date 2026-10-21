@@ -341,6 +341,6 @@ mod tests {
             );
         }
         assert_eq!(SnapshotTrigger::from_db_str("nope"), None);
-        assert_eq!(snapshot_uri(12), "snapshot:12");
+        assert_eq!(snapshot_uri(12), "oxplow:oxplow/snapshot?id=12");
     }
 }

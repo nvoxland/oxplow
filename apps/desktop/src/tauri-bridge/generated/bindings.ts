@@ -134,7 +134,7 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	search: (query: string, streamId: string | null, kinds: string[] | null, limit: number | null) => typedError<SearchHit[], IpcError_Serialize>(__TAURI_INVOKE("search", { query, streamId, kinds, limit })),
+	search: (query: string, streamId: string | null, resources: string[] | null, limit: number | null) => typedError<SearchHit[], IpcError_Serialize>(__TAURI_INVOKE("search", { query, streamId, resources, limit })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -392,7 +392,7 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listCommentsForTarget: (targetKind: string, targetId: string) => typedError<CommentThread[], IpcError_Serialize>(__TAURI_INVOKE("list_comments_for_target", { targetKind, targetId })),
+	listCommentsForTarget: (target: string) => typedError<CommentThread[], IpcError_Serialize>(__TAURI_INVOKE("list_comments_for_target", { target })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -402,12 +402,12 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listBacklinks: (targetKind: string, targetId: string, limit: number | null) => typedError<BacklinkEdge[], IpcError_Serialize>(__TAURI_INVOKE("list_backlinks", { targetKind, targetId, limit })),
+	listBacklinks: (target: string, limit: number | null) => typedError<BacklinkEdge[], IpcError_Serialize>(__TAURI_INVOKE("list_backlinks", { target, limit })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listOutbound: (sourceKind: string, sourceId: string, limit: number | null) => typedError<BacklinkEdge[], IpcError_Serialize>(__TAURI_INVOKE("list_outbound", { sourceKind, sourceId, limit })),
+	listOutbound: (source: string, limit: number | null) => typedError<BacklinkEdge[], IpcError_Serialize>(__TAURI_INVOKE("list_outbound", { source, limit })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -1299,25 +1299,24 @@ export type BackgroundTaskKind = "vcs" | "code-quality" | "lsp" | "notes-resync"
 
 export type BackgroundTaskStatus = "running" | "done" | "failed";
 
-/**  Edge plus a best-effort renderer label for the source. */
+/**  Edge plus a best-effort renderer label for its other end. */
 export type BacklinkEdge = {
-	source_kind: string,
-	source_id: string,
-	target_kind: string,
-	target_id: string,
+	/**  The URI that refers. */
+	source: string,
+	/**  The URI it refers to. */
+	target: string,
 	ref_type: string,
 	source_extra: string | null,
 	/**
-	 *  Human label for the source (wiki title, task title,
-	 *  commit subject, …). Falls back to `source_id` in the
-	 *  renderer when None.
+	 *  Human label for the other end (the source of a backlink, the
+	 *  target of an outbound edge): wiki title, task title, commit
+	 *  subject, …. The renderer falls back to the URI when None.
 	 */
 	source_label: string | null,
 	/**
-	 *  Whether anything resolves the row the label belongs to (the
-	 *  source for a backlink, the target for an outbound edge). A link
-	 *  to a ref nothing resolves — an extension gone, a record deleted —
-	 *  is a dead link the renderer shows as its raw text.
+	 *  Whether anything resolves the row the label belongs to. A link to
+	 *  a URI nothing resolves — an extension gone, a record deleted — is
+	 *  a dead link the renderer shows as its raw text.
 	 */
 	resolved: boolean,
 };
@@ -1962,14 +1961,14 @@ export type CommandUi = {
 	 */
 	input?: unknown | null,
 	/**
-	 *  What gathers its input — a page (a tab id, `page:new-task`) or one
+	 *  What gathers its input — a page (a tab id, `oxplow:oxplow/page?page=new-task`) or one
 	 *  of the window's own forms (`new-thread`, `commit`): choosing it
 	 *  opens that rather than running it.
 	 */
 	form?: string | null,
 	/**
 	 *  The page to open once it ran: a tab id whose `{{result.<field>}}`
-	 *  takes the result's field (`page:custom-dashboard?id={{result.id}}`).
+	 *  takes the result's field (`oxplow:oxplow/page?id={{result.id}}&page=custom-dashboard`).
 	 */
 	open_after?: string | null,
 	/**
@@ -2014,8 +2013,12 @@ export type Comment = {
 	 *  content comment survives the thread being archived.
 	 */
 	thread_id: ThreadId | null,
-	target_kind: string,
-	target_id: string,
+	/**
+	 *  What the comment is on: a URI (`oxplow:oxplow/wiki?slug=intro`,
+	 *  a file's, a work item's) — the same the `page_ref` graph and tabs
+	 *  use.
+	 */
+	target: string,
 	quote: string,
 	/**  W3C selectors array (opaque to the store; the renderer parses it). */
 	selectors_json: string,
@@ -2023,9 +2026,9 @@ export type Comment = {
 	 *  Ancestor regions the selection sat inside, innermost→outermost,
 	 *  EXCLUDING the primary target. Empty for a top-level selection.
 	 */
-	context_chain: CommentTarget[],
-	/**  Canonical refs found inside the selection (links + mentions). */
-	referenced_refs: CommentTarget[],
+	context_chain: string[],
+	/**  The URIs found inside the selection (links + mentions). */
+	referenced: string[],
 	intent: CommentIntent,
 	status: CommentStatus,
 	orphaned: boolean,
@@ -2065,22 +2068,6 @@ export type CommentMessageId = string;
 
 /**  Lifecycle of a comment thread. */
 export type CommentStatus = "open" | "resolved";
-
-/**
- *  A canonical cross-page reference: `kind` is the page-kind scheme
- *  (`"wiki" | "file" | "dir" | "work_item" | "commit" | "finding"`,
- *  extensible) and `id` is the canonical id for that kind — wiki slug,
- *  worktree-relative path, task id as a string, commit sha, etc. This is
- *  the same `(kind,id)` vocabulary the `page_ref` graph and tab ids use.
- * 
- *  Used as a comment's primary anchor target and, in `Vec` form, as the
- *  `context_chain` (ancestor regions) and `referenced_refs` (refs inside
- *  the selection).
- */
-export type CommentTarget = {
-	kind: string,
-	id: string,
-};
 
 /**  A comment plus its full message thread, oldest-first. */
 export type CommentThread = {
@@ -2153,7 +2140,7 @@ export type Confirm = "never" | "always" |
  *  kind it is, and its id there (for a [`ContributionKind::global_name`]
  *  kind, its global name). Its only public name is its ref
  *  ([`ContributionId::reference`], also its `Display`):
- *  `job:effort-review/review`, `command:oxplow.review.accept`. Storage,
+ *  `oxplow:oxplow/job?job=effort-review/review`, `oxplow:oxplow/command?command=oxplow.review.accept`. Storage,
  *  events, manifests and the desktop all carry that ref
  *  (`.context/resources.md` "Using refs").
  */
@@ -2184,7 +2171,7 @@ export type ContributionImpact = {
 };
 
 /**  Every kind of contribution a manifest can declare. */
-export type ContributionKind = "model" | "measure" | "metric" | "dimension" | "collector" | "event_type" | "ref_kind" | "command" | "job" | "ai_profile" | "effect" | "advisory" | "skill" | "implementation" | "provider" | "lens" | "page" | "panel" | "slot" | "decorator" | "replacement" | "custom_component";
+export type ContributionKind = "model" | "measure" | "metric" | "dimension" | "collector" | "event_type" | "resource" | "command" | "job" | "ai_profile" | "effect" | "advisory" | "skill" | "implementation" | "provider" | "lens" | "page" | "panel" | "slot" | "decorator" | "replacement" | "custom_component";
 
 /**  One credential a provider declares. */
 export type CredentialDecl = {
@@ -2385,7 +2372,7 @@ export type Descriptor = {
 	 *  What it runs after when an event reaches it and them (an effect's
 	 *  or a collector's `after:`), as refs once the catalog resolved them
 	 *  (`oxplow_domain::ordering`): `effect:<ext>/<id>`,
-	 *  `collector:<ext>/<id>` or `consumer:<name>`.
+	 *  `oxplow:oxplow/collector?collector=<ext>/<id>` or `oxplow:oxplow/consumer?name=<name>`.
 	 */
 	after: string[],
 	/**
@@ -2791,15 +2778,15 @@ export type ExtensionInstanceConfig = {
 
 /**
  *  A page an extension contributes (P6.G2, target §11.3): a lens shown
- *  full-page at `page:<extension>/<id>`, listed in the launcher under
+ *  full-page at `oxplow:oxplow/page?page=<extension>/<id>`, listed in the launcher under
  *  its category.
  */
 export type ExtensionPage = {
 	id: string,
 	extension: string,
 	/**
-	 *  Its tab id: `page:<id>` for the oxplow-namespace extension (its
-	 *  pages are core-named, as its commands are), `page:<extension>/<id>`
+	 *  Its tab id: `oxplow:oxplow/page?page=<id>` for the oxplow-namespace extension (its
+	 *  pages are core-named, as its commands are), `oxplow:oxplow/page?page=<extension>/<id>`
 	 *  for any other.
 	 */
 	pageRef: string,
@@ -2812,7 +2799,7 @@ export type ExtensionPage = {
 	category: LauncherCategory | null,
 	/**  More words the launcher matches it on. */
 	keywords: string | null,
-	/**  The params its id carries (`page:settings?area=agents`). */
+	/**  The params its id carries (`oxplow:oxplow/page?area=agents&page=settings`). */
 	params: string[],
 	/**
 	 *  The lens whose value (a `number` lens) is the launcher's badge
@@ -2840,7 +2827,7 @@ export type ExtensionPanel = {
 	/**  The badge lens, which declares an `alert`. */
 	badge: string | null,
 	/**
-	 *  The page its header opens (`page:<kind>`, a canonical ref): a core
+	 *  The page its header opens (`oxplow:oxplow/page?page=<kind>`, a canonical ref): a core
 	 *  page the panel summarizes, as Comments opens the inbox.
 	 *  Absent, the body lens's own page.
 	 */
@@ -2918,11 +2905,6 @@ export type Extension_Deserialize = {
 	 *  them, `vocabulary_reactor`).
 	 */
 	eventTypes: EventTypes,
-	/**
-	 *  Ref kinds it declares (valid ones — the vocabulary registers
-	 *  them, `vocabulary_reactor`).
-	 */
-	refKinds: RefKindDecl[],
 	/**
 	 *  Resources it declares (valid ones — the vocabulary registers
 	 *  them, `vocabulary_reactor`).
@@ -3076,11 +3058,6 @@ export type Extension_Serialize = {
 	 *  them, `vocabulary_reactor`).
 	 */
 	eventTypes: EventTypes,
-	/**
-	 *  Ref kinds it declares (valid ones — the vocabulary registers
-	 *  them, `vocabulary_reactor`).
-	 */
-	refKinds: RefKindDecl[],
 	/**
 	 *  Resources it declares (valid ones — the vocabulary registers
 	 *  them, `vocabulary_reactor`).
@@ -3714,7 +3691,7 @@ export type InstanceState =
 export type Intent = {
 	/**  The question it answers, or the job it does. */
 	purpose: string,
-	/**  The thread or effort ref that created it (`effort:eff42`), when known. */
+	/**  The thread or effort ref that created it (`oxplow:oxplow/effort?id=eff42`), when known. */
 	origin?: string | null,
 	examples?: IntentExample[],
 	/**
@@ -4211,9 +4188,9 @@ export type LensLink = {
 
 /**  A page a column value can link to. */
 export type LensLinkKind = 
-/**  `file:<path>`; the value is a repo-relative path. */
+/**  `oxplow:oxplow/file?path=<path>`; the value is a repo-relative path. */
 "file" | 
-/**  `wiki:<slug>`. */
+/**  `oxplow:oxplow/wiki?slug=<slug>`. */
 "wiki" | 
 /**  The effort's diff view; the value is an effort id. */
 "effort-diff" | 
@@ -4222,8 +4199,8 @@ export type LensLinkKind =
 /**  A metric's page; the value is a metric key. */
 "metric" | 
 /**
- *  Any oxplow page by its tab id (`work_item:oxplow:<id>`,
- *  `commit:<sha>`, `page:git-dashboard`, …),
+ *  Any oxplow page by its tab id (`oxplow:oxplow/work_item?id=<id>&provider=oxplow`,
+ *  `oxplow:oxplow/commit?sha=<sha>`, `oxplow:oxplow/page?page=git-dashboard`, …),
  *  e.g. `v_page_visit.page_id`.
  */
 "page" | 
@@ -4715,7 +4692,7 @@ export type ListedConversation = {
 	/**  The session is on it now. */
 	current: boolean,
 	/**
-	 *  The other open session on it (`agent_session:ses4`), if one is:
+	 *  The other open session on it (`oxplow:oxplow/agent_session?id=ses4`), if one is:
 	 *  resuming it there is refused.
 	 */
 	open_in: string | null,
@@ -5712,7 +5689,7 @@ export type ProviderSpec = {
 	/**
 	 *  The provider's id: its program's approval (`<extension>/<id>`) and
 	 *  the id of its default instance — an instance's id is its refs'
-	 *  segment (`work_item:<id>:…`) and its commands' namespace
+	 *  segment (`oxplow:oxplow/work_item?id=…&provider=<id>`) and its commands' namespace
 	 *  (`<id>.estimate`).
 	 */
 	id: string,
@@ -5846,34 +5823,6 @@ export type Records =
 /**  Linter/analyzer findings (a `static-analysis` capture). */
 "analysis";
 
-/**
- *  A ref kind an extension declares (valid ones; invalid ones are in its
- *  `errors`).
- */
-export type RefKindDecl = {
-	kind: string,
-	extension: string,
-	label: string,
-	/**  The anchored regex its ids match. */
-	idPattern: string,
-	/**  The view whose `title` names one (`v_<extension>_<model>`, by `ref`). */
-	resolve: string,
-	/**
-	 *  The page that opens one: `page:<extension>/<page>`, given
-	 *  `?ref=<ref>`.
-	 */
-	page: string,
-	wikilink: string | null,
-	/**
-	 *  The view whose rows (`ref`, `title`, `body`) search indexes under
-	 *  the kind (`kind_search`); none, its refs aren't found by search.
-	 */
-	searchable: string | null,
-	icon: string,
-	/**  `file:line` of the declaration. */
-	declaredAt: string,
-};
-
 export type Relationship = {
 	column: string,
 	/**  The model the column points into. */
@@ -5905,8 +5854,8 @@ export type ReportInput = {
 /**  One tab, as its window shows it. */
 export type ReportedTab = {
 	/**
-	 *  Its tab id: a canonical ref (`work_item:oxplow:tsk3`,
-	 *  `page:settings`, `agent_session:ses2`).
+	 *  Its tab id: a canonical ref (`oxplow:oxplow/work_item?id=tsk3&provider=oxplow`,
+	 *  `oxplow:oxplow/page?page=settings`, `oxplow:oxplow/agent_session?id=ses2`).
 	 */
 	id: string,
 	/**  Its page kind (`work_item`, `lens`, `agent_session`). */
@@ -5943,6 +5892,11 @@ export type ResourceDecl = {
 	searchable: string | null,
 	icon: string | null,
 	wikilink: WikilinkDecl | null,
+	/**
+	 *  The page one opens on (its page URI), given `ref=<uri>`: an
+	 *  extension's resource until a renderer opens a URI as itself.
+	 */
+	page: string | null,
 };
 
 /**  How long a namespace's event payloads and large content are kept. */
@@ -6101,14 +6055,15 @@ export type ScriptsConfig = {
 };
 
 /**
- *  One ranked search result: the ref it found (`work_item:oxplow:tsk7`,
- *  `file:src/a.rs`), which the caller opens the way it opens any ref.
- *  `stream_id` is `None` for project-global entities (wiki pages);
- *  `score` is the BM25 score (lower = better match).
+ *  One ranked search result: the URI it found
+ *  (`oxplow:oxplow/work_item?id=tsk7&provider=oxplow`), which the caller
+ *  opens the way it opens any URI, and its resource. `stream_id` is `None`
+ *  for project-global entities (wiki pages); `score` is the BM25 score
+ *  (lower = better match).
  */
 export type SearchHit = {
-	kind: string,
-	ref: string,
+	resource: string,
+	uri: string,
 	stream_id: string | null,
 	title: string,
 	snippet: string,
@@ -6344,7 +6299,7 @@ export type SnapshotTrigger =
 export type SourceCoverage = {
 	/**  The model it feeds (`v_acme_pull_request`). */
 	model: string,
-	/**  `collector:<owner>/<id>`. */
+	/**  `oxplow:oxplow/collector?collector=<owner>/<id>`. */
 	source: string,
 	/**
 	 *  `current`, `stale` (past its next due run), `failed` (its last run
@@ -6592,7 +6547,7 @@ export type ThreadMark = "amber" | "red" | "green" | "blue" | "violet";
 
 /**
  *  A note on a thread: the per-thread capture pad an agent writes as it
- *  works (`oxplow.knowledge.add_note`). Its ref is `thread_note:not<n>`.
+ *  works (`oxplow.knowledge.add_note`). Its ref is `oxplow:oxplow/thread_note?id=not<n>`.
  */
 export type ThreadNote = {
 	id: NoteId,
@@ -6671,8 +6626,8 @@ export type UiDecorator = {
 	extension: string,
 	/**  The model's view (`v_<extension>_<model>`), which has a `ref` column. */
 	view: string,
-	/**  The ref kind it decorates (`work_item`). */
-	kind: string,
+	/**  The resource it decorates (`oxplow/work_item`). */
+	resource: string,
 	placement: DecoratorPlacement,
 	/**  The view's column holding the text shown. */
 	label: string,
@@ -6695,8 +6650,9 @@ export type UiLogEntry = {
 /**  One remembered value. */
 export type UiPreference = {
 	/**
-	 *  `app`; a page's ref (`page:…`, `lens:…`) or `kind:<kind>`; a
-	 *  panel's ref (`panel:…`); or `component:<ext>/<id>`.
+	 *  `app`; a page's URI (`oxplow:oxplow/page?…`, `oxplow:oxplow/lens?…`)
+	 *  or `resource:<extension>/<resource>`; a panel's URI
+	 *  (`oxplow:oxplow/panel?…`); or `component:<ext>/<id>`.
 	 */
 	scope: string,
 	key: string,

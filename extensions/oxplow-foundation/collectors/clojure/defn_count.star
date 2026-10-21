@@ -22,5 +22,5 @@ def transform(input):
             if s["text"] == "defn" or s["text"] == "defn-":
                 c += 1
         if c > 0:
-            facts.append({"measure": "oxplow.ast_hit", "value": c, "rule": "defn", "subject": uri.build("file", pair[0]), "path": pair[0], "dims": {"oxplow.language": "clojure"}})
+            facts.append({"measure": "oxplow.ast_hit", "value": c, "rule": "defn", "subject": uri.build("oxplow/file", path = pair[0]), "path": pair[0], "dims": {"oxplow.language": "clojure"}})
     return {"facts": facts}

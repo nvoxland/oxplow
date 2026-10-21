@@ -13,7 +13,7 @@ def transform(input):
                 facts.append({
                     "measure": "schema_review.ddl",
                     "value": n,
-                    "subject": uri.build("file", f["path"]),
+                    "subject": uri.build("oxplow/file", path = f["path"]),
                     "path": f["path"],
                     "dims": {"schema_review.ddl_kind": kind},
                 })

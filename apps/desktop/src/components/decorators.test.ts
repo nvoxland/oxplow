@@ -17,7 +17,7 @@ const decorator = (over: Partial<UiDecorator>): UiDecorator => ({
   id: "flags/0",
   extension: "flags",
   view: "v_flags_flags",
-  kind: "oxplow/work_item",
+  resource: "oxplow/work_item",
   placement: "ref-chip",
   label: "label",
   color: "color",

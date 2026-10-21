@@ -1,13 +1,14 @@
 //! The vocabulary (P8.D1, `.context/data-model.md` "event_log",
 //! `.context/extensions.md`):
 //! what the event log accepts — every event type at every version, with
-//! its schema and upcasts — and what a ref may name — every ref kind with
-//! its id shape. Core's, plus what the running extensions declare
-//! (`event_types:`, `ref_kinds`), so it changes while the app runs: a
-//! [`VocabularyHandle`] holds the current [`Vocabulary`] and swaps it
-//! whole when the extension catalog changes. A writer takes one snapshot
-//! for a transaction (`current()`), so a swap never lands mid-way through
-//! one; two handles never share kinds.
+//! its schema and upcasts — and what a URI may name — every resource with
+//! its params. Core's event types plus what the running extensions declare
+//! (`event_types:`, `resources:`, oxplow-foundation's resources among
+//! them), so it changes while the app runs: a [`VocabularyHandle`] holds
+//! the current [`Vocabulary`] and swaps it whole when the extension
+//! catalog changes. A writer takes one snapshot for a transaction
+//! (`current()`), so a swap never lands mid-way through one; two handles
+//! never share a registry.
 
 use std::sync::{Arc, RwLock};
 
@@ -15,36 +16,31 @@ use serde_json::Value;
 
 use crate::events::schema::EventSchemaRegistry;
 use crate::events::Envelope;
-use crate::uri::types::{core_types, TypeRegistry};
+use crate::uri::resources::ResourceRegistry;
 use crate::DomainError;
 
-/// The event types and ref kinds one process speaks, as of one swap.
+/// The event types and resources one process speaks, as of one swap.
 #[derive(Clone)]
 pub struct Vocabulary {
     pub events: EventSchemaRegistry,
-    pub kinds: TypeRegistry,
     /// Every declared resource (each extension's `resources:`,
     /// oxplow-foundation's included).
-    pub resources: crate::uri::resources::ResourceRegistry,
+    pub resources: ResourceRegistry,
 }
 
 impl Vocabulary {
-    pub fn new(events: EventSchemaRegistry, kinds: TypeRegistry) -> Self {
-        Self {
-            events,
-            kinds,
-            resources: Default::default(),
-        }
+    pub fn new(events: EventSchemaRegistry, resources: ResourceRegistry) -> Self {
+        Self { events, resources }
     }
 
-    /// The same vocabulary with `resources` registered.
-    pub fn with_resources(self, resources: crate::uri::resources::ResourceRegistry) -> Self {
-        Self { resources, ..self }
-    }
-
-    /// Core's event types and ref kinds, nothing more.
+    /// Core's event types and oxplow-foundation's resources
+    /// ([`crate::uri::resources::foundation`]): what a process starts from
+    /// until the first rebuild adds every enabled extension's.
     pub fn core() -> Self {
-        Self::new(EventSchemaRegistry::core(), core_types())
+        Self::new(
+            EventSchemaRegistry::core(),
+            crate::uri::resources::foundation().clone(),
+        )
     }
 
     /// This vocabulary plus what `extension` declares that it doesn't
@@ -75,7 +71,7 @@ impl Vocabulary {
     pub fn validate_envelope(&self, env: &Envelope) -> Result<(), DomainError> {
         self.events.validate(&env.event_type, env.v, &env.payload)?;
         for subject in &env.subject {
-            crate::uri::validate_ref(&self.kinds, subject)
+            crate::uri::validate_uri(&self.resources, subject)
                 .map_err(|e| DomainError::Invalid(format!("{} subject: {e}", env.event_type)))?;
         }
         Ok(())
@@ -122,8 +118,8 @@ impl VocabularyHandle {
         Self(Arc::new(RwLock::new(Arc::new(vocabulary))))
     }
 
-    /// A handle on core's vocabulary alone. Core's is the same for the
-    /// whole process, so it is built once (compiling every core event
+    /// A handle on core's vocabulary ([`Vocabulary::core`]). Core's is the
+    /// same for the whole process, so it is built once (compiling every core event
     /// type's schema) and shared; a swap replaces this handle's, never it.
     pub fn core() -> Self {
         static CORE: std::sync::LazyLock<Arc<Vocabulary>> =
@@ -148,7 +144,6 @@ impl VocabularyHandle {
 mod tests {
     use super::*;
     use crate::events::schema::{EventType, WorkItemStateChanged};
-    use crate::uri::types::TypeSpec;
 
     /// Core's vocabulary is built once per process: compiling every core
     /// event type's schema was most of what building a test's services
@@ -157,7 +152,10 @@ mod tests {
     fn core_handles_share_one_vocabulary_and_swap_alone() {
         let (a, b) = (VocabularyHandle::core(), VocabularyHandle::core());
         assert!(Arc::ptr_eq(&a.current(), &b.current()));
-        a.swap(Vocabulary::new(EventSchemaRegistry::new(), core_types()));
+        a.swap(Vocabulary::new(
+            EventSchemaRegistry::new(),
+            ResourceRegistry::default(),
+        ));
         assert!(!Arc::ptr_eq(&a.current(), &b.current()));
         assert!(!b.current().versions().is_empty(), "b keeps core's");
     }
@@ -166,8 +164,10 @@ mod tests {
     /// snapshot it already took doesn't change under it.
     #[test]
     fn a_swap_reaches_the_holder_but_not_a_snapshot_taken() {
-        let handle =
-            VocabularyHandle::new(Vocabulary::new(EventSchemaRegistry::new(), core_types()));
+        let handle = VocabularyHandle::new(Vocabulary::new(
+            EventSchemaRegistry::new(),
+            ResourceRegistry::default(),
+        ));
         let held = handle.clone();
         let before = held.current();
         assert!(!before.is_registered(WorkItemStateChanged::TYPE, WorkItemStateChanged::V));
@@ -178,17 +178,17 @@ mod tests {
         assert!(!before.is_registered(WorkItemStateChanged::TYPE, WorkItemStateChanged::V));
     }
 
-    /// Two handles in one process don't share kinds: what one adds, the
-    /// other doesn't know.
+    /// Two handles in one process don't share resources: what one adds,
+    /// the other doesn't know.
     #[test]
-    fn two_handles_dont_leak_kinds() {
+    fn two_handles_dont_leak_resources() {
         let (a, b) = (VocabularyHandle::core(), VocabularyHandle::core());
-        let mut kinds = core_types();
-        kinds
-            .register(TypeSpec::new("acme_pr", r"^\d+$").unwrap())
+        let mut resources = ResourceRegistry::default();
+        resources
+            .register(crate::uri::resources::ResourceDecl::keyed("acme/pr", "id"))
             .unwrap();
-        a.swap(Vocabulary::new(EventSchemaRegistry::core(), kinds));
-        assert!(crate::uri::validate_ref(&a.current().kinds, "acme_pr:12").is_ok());
-        assert!(crate::uri::validate_ref(&b.current().kinds, "acme_pr:12").is_err());
+        a.swap(Vocabulary::new(EventSchemaRegistry::core(), resources));
+        assert!(crate::uri::validate_uri(&a.current().resources, "oxplow:acme/pr?id=12").is_ok());
+        assert!(crate::uri::validate_uri(&b.current().resources, "oxplow:acme/pr?id=12").is_err());
     }
 }

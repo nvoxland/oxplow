@@ -89,7 +89,7 @@ pub struct NewProposal {
 }
 
 /// What a newer proposal replaces an older pending one on: the config key
-/// for `oxplow.config.set` / `oxplow.config.unset` (`config:<key>`), else the command and
+/// for `oxplow.config.set` / `oxplow.config.unset` (`oxplow:oxplow/config?key=<key>`), else the command and
 /// its input with keys sorted.
 pub fn proposal_key(command: &str, input: &Value) -> String {
     match (command, input.get("key").and_then(Value::as_str)) {
@@ -339,11 +339,11 @@ mod tests {
     fn the_key_is_the_config_key_or_the_command_and_its_sorted_input() {
         assert_eq!(
             proposal_key("oxplow.config.set", &json!({ "key": "zones", "value": [] })),
-            "config:zones"
+            "oxplow:oxplow/config?key=zones"
         );
         assert_eq!(
             proposal_key("oxplow.config.unset", &json!({ "key": "zones" })),
-            "config:zones"
+            "oxplow:oxplow/config?key=zones"
         );
         let a = proposal_key(
             "oxplow.work_item.delete",
@@ -373,7 +373,7 @@ mod tests {
         assert_eq!(p.actor_id.as_deref(), Some("thr3"));
         assert_eq!(p.thread_id, Some(ThreadId::new(3)));
         assert_eq!(p.stream_id, Some(StreamId::new(1)));
-        assert_eq!(p.key, "config:agentPromptAppend");
+        assert_eq!(p.key, "oxplow:oxplow/config?key=agentPromptAppend");
         assert_eq!(p.preview["summary"], "Set agentPromptAppend");
         assert_eq!(p.dry_run, Some(json!({ "before": null, "after": "hi" })));
         assert_eq!(p.decision, ProposalDecision::Pending);

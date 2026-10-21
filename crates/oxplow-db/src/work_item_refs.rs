@@ -8,13 +8,13 @@
 
 use rusqlite::OptionalExtension;
 
-use oxplow_domain::uri::types::TypeRegistry;
+use oxplow_domain::uri::resources::ResourceRegistry;
 use oxplow_domain::DomainError;
 
 use crate::database::map_sql_err;
 use crate::page_ref_projections::{
     work_item_body_ref_types, work_item_comment_edges, work_item_comment_ref_types,
-    work_item_edges, work_item_link_edges, KIND_WORK_ITEM, RT_LINK_PREFIX,
+    work_item_edges, work_item_link_edges, RT_LINK_PREFIX,
 };
 use crate::page_ref_store::replace_source_for_ref_types_tx;
 
@@ -22,11 +22,15 @@ use crate::page_ref_store::replace_source_for_ref_types_tx;
 /// in the caller's transaction.
 pub fn restate_tx(
     conn: &rusqlite::Connection,
-    kinds: &TypeRegistry,
+    kinds: &ResourceRegistry,
     item_ref: &str,
 ) -> Result<(), DomainError> {
-    let id = oxplow_domain::uri::build::work_item_id_of_uri(item_ref)
-        .ok_or_else(|| DomainError::Invalid(format!("`{item_ref}` is not a work item")))?;
+    if oxplow_domain::uri::build::work_item_of_uri(item_ref).is_none() {
+        return Err(DomainError::Invalid(format!(
+            "`{item_ref}` is not a work item"
+        )));
+    }
+    let id = item_ref;
     let live: Option<(String, String)> = conn
         .query_row(
             "SELECT title, body FROM work_item WHERE ref = ?1 AND deleted_at IS NULL",
@@ -58,20 +62,14 @@ pub fn restate_tx(
             )
         }
     };
-    replace_source_for_ref_types_tx(conn, KIND_WORK_ITEM, id, &work_item_body_ref_types(), body)?;
-    replace_source_for_ref_types_tx(
-        conn,
-        KIND_WORK_ITEM,
-        id,
-        &work_item_comment_ref_types(),
-        comments,
-    )?;
+    replace_source_for_ref_types_tx(conn, id, &work_item_body_ref_types(), body)?;
+    replace_source_for_ref_types_tx(conn, id, &work_item_comment_ref_types(), comments)?;
     // The link slice is every `work_item_link:` type the item has now or
     // had: a list names its own.
     let mut link_types: Vec<String> = rows(
         conn,
         "SELECT DISTINCT ref_type FROM page_ref
-         WHERE source_kind = 'work_item' AND source_id = ?1
+         WHERE source_uri = ?1
            AND substr(ref_type, 1, length('work_item_link:')) = 'work_item_link:'",
         id,
         |r| r.get(0),
@@ -82,7 +80,7 @@ pub fn restate_tx(
         }
     }
     debug_assert!(link_types.iter().all(|t| t.starts_with(RT_LINK_PREFIX)));
-    replace_source_for_ref_types_tx(conn, KIND_WORK_ITEM, id, &link_types, links)
+    replace_source_for_ref_types_tx(conn, id, &link_types, links)
 }
 
 /// Every item the interface holds, deleted ones included (restating one

@@ -315,7 +315,7 @@ welded to collection.
 > every fact (see V52).
 
 - **`measure`** — the namespaced catalog of *fact types*: `key` (`oxplow.*`
-  reserved), `title`, `unit`, `subject_kind` (the grain), `capture_scope`
+  reserved), `title`, `unit`, `subject_kind` (the grain; a resource name, `oxplow/effort`, for the facts core records), `capture_scope`
   (`complete` | `per-path`, V54 — see the box above), `temporal_semantics`
   (`additive` | `semi-additive` | `non-additive` — additivity **over time**:
   tokens additive; complexity + test/lint SNAPSHOTS semi-additive (a run
@@ -420,8 +420,8 @@ welded to collection.
   > captures" this box used to claim were verified to be zero.
 - **`fact`** — the durable atomic measurement (folds `metric_sample` +
   `metric_finding`): `capture_id` **NOT NULL** (→ all context via the capture),
-  `measure_id`, `value`, `numerator`/`denominator`; `subject` (one ref: `file:src/a.rs`, `symbol:src/a.rs/f`,
-  `ai_model:claude-opus-4-8`; a write refuses a string that isn't a ref), `path`/`line`
+  `measure_id`, `value`, `numerator`/`denominator`; `subject` (one URI: `oxplow:oxplow/file?path=src/a.rs`, `oxplow:oxplow/symbol?path=src/a.rs&symbol=f`,
+  `oxplow:oxplow/ai_model?name=claude-opus-4-8`; a write refuses a string that isn't a URI), `path`/`line`
   (location-at-capture); reported finding metadata
   `severity`/`rule`/`detail` (null for pure measurements); `dims_json` (long-tail
   dims). **No when/where/who columns** — those are the capture's.
@@ -1661,8 +1661,8 @@ the change loop announces `OxplowEvent::MetricSamplesChanged` for what landed.
 ## UI
 
 The metric UI is **three pages**, each with one job, all reading the one
-fact table — no per-metric UI code. Recorded Metrics is a declared page (`page:metrics-recorded`, oxplow-foundation's
-`pages:`, a built-in until the kit can draw it); Metric Detail is the `metric:<key>` entity page and cross-links to the others in its header. (History: the
+fact table — no per-metric UI code. Recorded Metrics is a declared page (the `metrics-recorded` page, oxplow-foundation's
+`pages:`, a built-in until the kit can draw it); Metric Detail is the `oxplow/metric` entity page and cross-links to the others in its header. (History: the
 configure surface was split off as a fourth "Metric Settings" page in
 tsk282/tsk80, then **folded back in by tsk117** — per-metric configuration now
 lives on the Metric Detail page; see "The configure surface" below.) Explorer
@@ -1832,7 +1832,7 @@ The mechanics behind those controls (unchanged by tsk117):
   producers/extensions are default-ON unless an `enabled: false` marker
   disables them, and so are those four.
 - **Function facts are keyed by symbol ref.** `code_metrics(text, language,
-  path)` returns each function with its `id`, `ref` (`symbol:<path>/<id>`,
+  path)` returns each function with its `id`, `ref` (`oxplow:oxplow/symbol?path=<path>&symbol=<id>`,
   built by the host through `uri::build::symbol_uri`), `container` and
   `kind`; `fn_count`, `high_complexity_fns` and `long_functions` use `ref`
   as the fact's `subject`, so a function has the one identity `v_symbol`

@@ -40,9 +40,9 @@ export function refTargetNow(ref: string): RefTarget {
   if (!info) return targetOf(ref);
   const tabId = resourcePageTabId(ref);
   if (tabId !== null) return targetOf(tabId);
-  // One of oxplow's own opens as itself; an extension's with no page has
-  // nowhere to open.
-  return info.extension === "oxplow" ? targetOf(ref) : { unopenable: noPage(ref) };
+  // One of oxplow's own (`oxplow/…`, whoever declares it) opens as itself;
+  // an extension's with no page has nowhere to open.
+  return resource.startsWith("oxplow/") ? targetOf(ref) : { unopenable: noPage(ref) };
 }
 
 /** Where `ref` opens. */

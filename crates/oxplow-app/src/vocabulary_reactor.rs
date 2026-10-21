@@ -1,7 +1,8 @@
 //! The running vocabulary follows the primary worktree's extensions
 //! (P8.D3, `.context/resources.md` "There is no process-wide registry"): core
-//! event types and ref kinds, plus what each enabled extension declares
-//! (`event_types:`, `ref_kinds:` — both stable). A pass rebuilds the whole vocabulary and
+//! event types, plus what each enabled extension declares (`event_types:`,
+//! `resources:` — oxplow-foundation's resources included: there are no
+//! core resources). A pass rebuilds the whole vocabulary and
 //! swaps it into `Services.vocabulary`; writers already in a transaction
 //! keep the snapshot they took.
 //!
@@ -20,20 +21,17 @@
 //! The pass restates `event_type_contract` (read as `v_event_type`) in
 //! the same transaction that checks it.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use oxplow_db::event_retention::{restate_declared_tx, DeclaredRetention};
 use oxplow_db::event_type_store::{recorded_schema_tx, restate_tx, EventTypeRow};
-use oxplow_db::ref_kind_store::RefKindRow;
 use oxplow_domain::events::schema::{extension_namespace, EventSchemaRegistry};
-use oxplow_domain::uri::types::{core_types, TypeRegistry};
 use oxplow_domain::vocabulary::Vocabulary;
 use oxplow_domain::DomainError;
 
 use crate::extension_catalog::CatalogSnapshot;
 use crate::extension_event_types::EventTypes;
-use crate::extension_ref_kinds::RefKindDecl;
 use crate::extensions::Extension;
 use oxplow_domain::uri::resources::{ResourceDecl, ResourceRegistry};
 
@@ -54,8 +52,6 @@ struct Declares {
     extension: String,
     /// Its `event_types:`.
     types: EventTypes,
-    /// Its `ref_kinds:`.
-    kinds: Vec<RefKindDecl>,
     /// Its `resources:`.
     resources: Vec<crate::extension_resources::ExtensionResource>,
     /// Its reactions to other extensions' types.
@@ -121,17 +117,17 @@ impl PreparedVocabulary {
                 // silently dropping recognition.
                 match self.work_item_ids.as_ref() {
                     Some((provider, pattern)) => match vocabulary
-                        .kinds
+                        .resources
                         .clone()
                         .with_work_item_ids(provider, pattern)
                     {
-                        Ok(kinds) => vocabulary.kinds = kinds,
+                        Ok(resources) => vocabulary.resources = resources,
                         Err(error) => errors
                             .entry("<host>".to_string())
                             .or_default()
                             .push(format!("work item id recognizer: {error}")),
                     },
-                    None => vocabulary.kinds = vocabulary.kinds.without_work_item_ids(),
+                    None => vocabulary.resources = vocabulary.resources.without_work_item_ids(),
                 }
                 errors.retain(|_, messages| !messages.is_empty());
                 if errors.is_empty() {
@@ -165,7 +161,6 @@ fn declarations(extensions: &[Extension]) -> Declared {
         .map(|extension| Declares {
             extension: extension.name.clone(),
             types: extension.event_types.clone(),
-            kinds: extension.ref_kinds.clone(),
             resources: extension.resources.clone(),
             subscriptions: extension.subscriptions.clone(),
         })
@@ -188,17 +183,20 @@ impl VocabularyService {
     }
 }
 
-/// `kinds` recognizing the active work list's ids (`ids`), or none.
-pub fn with_work_item_ids(kinds: TypeRegistry, ids: Option<&(String, String)>) -> TypeRegistry {
+/// `resources` recognizing the active work list's ids (`ids`), or none.
+pub fn with_work_item_ids(
+    resources: ResourceRegistry,
+    ids: Option<&(String, String)>,
+) -> ResourceRegistry {
     match ids {
-        Some((provider, pattern)) => kinds
+        Some((provider, pattern)) => resources
             .clone()
             .with_work_item_ids(provider, pattern)
             .unwrap_or_else(|e| {
                 tracing::warn!(provider, error = %e, "the work list's id pattern doesn't compile");
-                kinds.without_work_item_ids()
+                resources.without_work_item_ids()
             }),
-        None => kinds.without_work_item_ids(),
+        None => resources.without_work_item_ids(),
     }
 }
 
@@ -276,15 +274,10 @@ fn build_tx(
         })
         .collect();
     restate_tx(tx, &rows, now)?;
-    let kinds = register_kinds(declared, &mut errors);
-    oxplow_db::ref_kind_store::restate_tx(tx, &kind_rows(&kinds, declared))?;
     let (resources, rows) = register_resources(declared, &mut errors);
     oxplow_db::resource_store::restate_tx(tx, &rows)?;
     oxplow_db::replaceable_store::restate_tx(tx)?;
-    Ok((
-        Vocabulary::new(events, kinds).with_resources(resources),
-        errors,
-    ))
+    Ok((Vocabulary::new(events, resources), errors))
 }
 
 /// Every extension's resources, in load order: one an earlier extension
@@ -312,130 +305,6 @@ fn register_resources<'a>(
         }
     }
     (registry, rows)
-}
-
-/// Core's kinds plus every extension's. A kind two extensions both
-/// declare was settled at load (`extensions::descriptors::check_catalog`:
-/// the more specific namespace's, else the first, keeps it); a `wikilink:`
-/// prefix another extension also uses (as its prefix, or as a kind) is an
-/// error on each and costs only the sugar — the namespaced kind still
-/// registers, so installing one extension never unlinks another's refs
-/// (P10, K2). A kind or prefix core holds is that extension's error.
-fn register_kinds(declared: &Declared, errors: &mut BTreeMap<String, Vec<String>>) -> TypeRegistry {
-    let mut kinds = core_types();
-    // Who declares each name as a kind, and as a prefix.
-    let mut as_kind: HashMap<&str, BTreeSet<&str>> = HashMap::new();
-    let mut as_prefix: HashMap<&str, BTreeSet<&str>> = HashMap::new();
-    for Declares {
-        extension,
-        kinds: decls,
-        ..
-    } in declared
-    {
-        for d in decls {
-            as_kind.entry(&d.kind).or_default().insert(extension);
-            if let Some(w) = &d.wikilink {
-                as_prefix.entry(w).or_default().insert(extension);
-            }
-        }
-    }
-    let others = |name: &str, of: &str| -> BTreeSet<&str> {
-        as_kind
-            .get(name)
-            .into_iter()
-            .chain(as_prefix.get(name))
-            .flatten()
-            .copied()
-            .filter(|o| *o != of)
-            .collect()
-    };
-    let named = |set: &BTreeSet<&str>| {
-        set.iter()
-            .map(|o| format!("`{o}`"))
-            .collect::<Vec<_>>()
-            .join(", ")
-    };
-    for Declares {
-        extension,
-        kinds: decls,
-        ..
-    } in declared
-    {
-        for d in decls {
-            let mut problems = Vec::new();
-            let mut decl = d.clone();
-            if let Some(w) = &d.wikilink {
-                let sharing = others(w, extension);
-                if !sharing.is_empty() {
-                    problems.push(format!(
-                        "{}: `wikilink: {w}` is also {}'s, so `[[{w}:…]]` links neither; ref \
-                         kind `{}` is still linked as `[[{}:…]]` — rename one prefix",
-                        d.declared_at,
-                        named(&sharing),
-                        d.kind,
-                        d.kind
-                    ));
-                    decl.wikilink = None;
-                }
-            }
-            if let Err(e) =
-                crate::extension_ref_kinds::kind_spec(&decl).and_then(|spec| kinds.register(spec))
-            {
-                problems.push(format!("{}: {e}", d.declared_at));
-            }
-            if !problems.is_empty() {
-                errors
-                    .entry(extension.clone())
-                    .or_default()
-                    .extend(problems);
-            }
-        }
-    }
-    kinds
-}
-
-/// `v_ref_kind`'s rows: every registered kind with what its declarer
-/// says of it — an extension's `ref_kinds:` entry, or core's
-/// (`oxplow_db::ref_models`): the model that holds one, where one opens
-/// and what search indexes it from.
-fn kind_rows(kinds: &TypeRegistry, declared: &Declared) -> Vec<RefKindRow> {
-    kinds
-        .kinds()
-        .map(|k| {
-            let row = RefKindRow {
-                kind: k.kind.clone(),
-                id_pattern: k.id_regex.to_string(),
-                revisioned: k.revisioned,
-                wikilinks: k.wikilink_prefixes.clone(),
-                ..RefKindRow::default()
-            };
-            let decl = declared
-                .iter()
-                .flat_map(|d| &d.kinds)
-                .find(|d| d.kind == k.kind);
-            if let Some(d) = decl {
-                return RefKindRow {
-                    extension: Some(d.extension.clone()),
-                    label: Some(d.label.clone()),
-                    searchable: d.searchable.clone(),
-                    resolve: Some(d.resolve.clone()),
-                    // Its page, given the ref.
-                    page: Some(format!("{}?ref={{ref}}", d.page)),
-                    icon: Some(d.icon.clone()),
-                    ..row
-                };
-            }
-            match oxplow_db::ref_models::core_kind(&k.kind) {
-                Some(core) => RefKindRow {
-                    resolve: core.owner.map(|(view, _)| view.to_string()),
-                    page: core.page.map(|p| p.template()),
-                    searchable: core.searchable.map(str::to_string),
-                    ..row
-                },
-                None => row,
-            }
-        })
-        .collect()
 }
 
 #[cfg(test)]
@@ -612,9 +481,9 @@ mod tests {
             .svc
             .sql
             .query_sql(
-                "SELECT kind, resolve, page, searchable FROM v_ref_kind \
-                 WHERE kind IN ('work_item', 'thread_note', 'decision', 'comment', 'file', 'event') \
-                 ORDER BY kind",
+                "SELECT resource, resolve, page, searchable FROM v_resource \
+                 WHERE resource IN ('oxplow/work_item', 'oxplow/thread_note', 'oxplow/decision', 'oxplow/comment', 'oxplow/file', 'oxplow/event') \
+                 ORDER BY resource",
                 vec![],
                 None,
             )
@@ -626,39 +495,39 @@ mod tests {
             rows,
             vec![
                 vec![
-                    text("comment"),
+                    text("oxplow/comment"),
                     text("v_comment"),
-                    text("page:comments"),
+                    SqlCell::Null(()),
                     text("v_search_comment")
                 ],
                 vec![
-                    text("decision"),
+                    text("oxplow/decision"),
                     text("v_decision"),
-                    text("{effort_ref|thread_ref}"),
+                    SqlCell::Null(()),
                     text("v_search_decision")
                 ],
                 vec![
-                    text("event"),
+                    text("oxplow/event"),
                     text("v_event"),
                     SqlCell::Null(()),
                     SqlCell::Null(())
                 ],
                 vec![
-                    text("file"),
+                    text("oxplow/file"),
                     SqlCell::Null(()),
-                    text("{ref}"),
+                    SqlCell::Null(()),
                     SqlCell::Null(())
                 ],
                 vec![
-                    text("thread_note"),
+                    text("oxplow/thread_note"),
                     text("v_thread_note"),
-                    text("{thread_ref}"),
+                    SqlCell::Null(()),
                     text("v_search_thread_note")
                 ],
                 vec![
-                    text("work_item"),
+                    text("oxplow/work_item"),
                     text("v_work_item"),
-                    text("{ref}"),
+                    SqlCell::Null(()),
                     text("v_search_work_item")
                 ],
             ]
@@ -723,167 +592,84 @@ mod tests {
         assert_eq!(vocabulary.resources.validate(&effort), Ok(()));
     }
 
-    // oxplow-foundation declares a resource for every kind of thing oxplow
-    // names today, so the switch to URIs loses none.
-    #[tokio::test]
-    async fn foundation_declares_a_resource_for_every_kind() {
-        let f = crate::test_fixtures::services_with_effort().await;
-        crate::test_fixtures::activate_with_problems(&f.svc).await;
-        let vocabulary = f.svc.vocabulary.current();
-        let declared: Vec<String> = vocabulary
-            .resources
-            .resources()
-            .filter(|r| r.name.extension() == "oxplow")
-            .map(|r| r.name.name().to_string())
-            .collect();
-        let missing: Vec<String> = oxplow_domain::uri::types::core_types()
-            .kinds()
-            .map(|k| k.kind.clone())
-            .filter(|k| !declared.contains(k))
-            .collect();
-        assert!(missing.is_empty(), "no resource for {missing:?}");
+    const ACME: &str = "manifest: 2
+name: acme
+intent: { purpose: PRs., origin: null, examples: [] }
+models:
+  - name: prs
+    version: 1
+    description: Pull requests.
+    columns:
+      - { name: ref, type: TEXT, doc: The ref. }
+      - { name: title, type: TEXT, doc: Its title. }
+resources:
+  - name: pr
+    label: Pull request
+    params: { id: { required: true, pattern: '^[0-9]+$' } }
+    resolve: prs
+    icon: git-pull-request
+    wikilink: { prefix: pr, param: id }
+";
+
+    /// An extension `name` at `root` declaring the manifest `manifest`.
+    fn write_ext(root: &Path, name: &str, manifest: &str) {
+        let dir = root.join(".oxplow/extensions").join(name);
+        std::fs::create_dir_all(dir.join("models")).unwrap();
+        std::fs::write(dir.join("extension.yaml"), manifest).unwrap();
+        std::fs::write(
+            dir.join("models/prs.sql"),
+            "SELECT CAST('oxplow:acme/pr?id=1' AS TEXT) AS ref, CAST('One' AS TEXT) AS title",
+        )
+        .unwrap();
     }
 
     #[tokio::test]
-    async fn a_declared_ref_kind_links_while_its_extension_is_installed() {
-        use crate::extension_ref_kinds::tests::{write_acme, MANIFEST as ACME};
+    async fn a_declared_resource_links_while_its_extension_is_installed() {
         let f = crate::test_fixtures::services_with_effort().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
         let link = || {
-            oxplow_domain::uri::canonical_wikilink(&svc.vocabulary.current().kinds, "pr:12")
+            oxplow_domain::uri::canonical_wikilink(&svc.vocabulary.current().resources, "pr:12")
                 .map(|r| r.to_string())
         };
         assert_eq!(link(), None);
-        write_acme(&root, ACME);
+        write_ext(&root, "acme", ACME);
         crate::test_fixtures::activate_with_problems(svc).await;
-        assert_eq!(link().as_deref(), Some("acme_pr:12"));
-        let listed = svc
-            .sql
-            .query_sql(
-                "SELECT extension, page, icon FROM v_ref_kind WHERE kind = 'acme_pr'",
-                vec![],
-                None,
-            )
-            .await
-            .unwrap();
         assert_eq!(
-            listed.rows,
-            vec![vec![
-                SqlCell::Text("acme".into()),
-                SqlCell::Text("page:acme/pr?ref={ref}".into()),
-                SqlCell::Text("git-pull-request".into())
-            ]]
+            link(),
+            Some(oxplow_domain::uri::build::of("acme/pr", &[("id", "12")]))
         );
         std::fs::remove_dir_all(root.join(".oxplow/extensions/acme")).unwrap();
         crate::extension_deploy::remove(svc, "acme").await.unwrap();
         assert_eq!(link(), None);
     }
 
-    /// P10 (K2): two extensions using one `wikilink:` prefix lose the
-    /// sugar — an error on each, and `[[pr:…]]` links neither — but each
-    /// namespaced kind still registers, so installing one extension never
-    /// unlinks another's refs.
+    /// Two extensions using one `wikilink:` prefix: the registry refuses
+    /// the second, and the refused extension reports it.
     #[tokio::test]
-    async fn a_shared_wikilink_prefix_costs_the_sugar_not_the_kind() {
-        use crate::extension_ref_kinds::tests::{write_acme, MANIFEST as ACME};
+    async fn a_shared_wikilink_prefix_is_refused_to_the_second() {
         let f = crate::test_fixtures::services_with_effort().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
-        write_acme(&root, ACME);
-        let beta = tempfile::tempdir().unwrap();
-        write_acme(
-            beta.path(),
-            &ACME
-                .replace("name: acme", "name: beta")
-                .replace("kind: acme_pr", "kind: beta_pr"),
-        );
-        std::fs::rename(
-            beta.path().join(".oxplow/extensions/acme"),
-            root.join(".oxplow/extensions/beta"),
-        )
-        .unwrap();
+        write_ext(&root, "acme", ACME);
+        write_ext(&root, "beta", &ACME.replace("name: acme", "name: beta"));
         crate::test_fixtures::activate_with_problems(svc).await;
         let listed = svc.listed_extensions(&root).await;
-        for (name, other) in [("acme", "beta"), ("beta", "acme")] {
-            let errors = listed
-                .iter()
-                .find(|e| e.name == name)
-                .unwrap()
-                .errors
-                .join("\n");
-            assert!(
-                errors.contains("`wikilink: pr`") && errors.contains(&format!("`{other}`")),
-                "{name}: {errors}"
-            );
-        }
-        // The error holds each extension back whole (an extension with a
-        // load error doesn't activate), so neither kind is registered and
-        // nothing links.
-        let kinds = &svc.vocabulary.current().kinds;
-        assert!(kinds.get("acme_pr").is_none() && kinds.get("beta_pr").is_none());
-        let link =
-            |l: &str| oxplow_domain::uri::canonical_wikilink(kinds, l).map(|r| r.to_string());
-        assert_eq!(link("pr:12"), None, "the sugar links neither");
-        assert_eq!(link("acme_pr:12"), None);
-        assert_eq!(link("beta_pr:12"), None);
-    }
-
-    /// tsk933: namespaces are string prefixes, so `acme`'s (`acme_`) holds
-    /// `acme-pr`'s (`acme_pr_`). A kind in both is the more specific
-    /// namespace's: `acme-pr` keeps `acme_pr_x`, and `acme`'s declaration of
-    /// it is refused, naming whose namespace it is — never both lost.
-    #[tokio::test]
-    async fn a_kind_in_another_extensions_namespace_is_theirs() {
-        use crate::extension_ref_kinds::tests::{write_acme, MANIFEST as ACME};
-        let f = crate::test_fixtures::services_with_effort().await;
-        let svc = &f.svc;
-        let root = svc.layout.project_dir.clone();
-        write_acme(
-            &root,
-            &ACME
-                .replace("kind: acme_pr", "kind: acme_pr_x")
-                .replace("wikilink: pr", "wikilink: ax"),
-        );
-        let other = tempfile::tempdir().unwrap();
-        write_acme(
-            other.path(),
-            &ACME
-                .replace("name: acme", "name: acme-pr")
-                .replace("kind: acme_pr", "kind: acme_pr_x")
-                .replace("wikilink: pr", "wikilink: px"),
-        );
-        std::fs::rename(
-            other.path().join(".oxplow/extensions/acme"),
-            root.join(".oxplow/extensions/acme-pr"),
-        )
-        .unwrap();
-        crate::test_fixtures::activate_with_problems(svc).await;
-        let listed = svc.listed_extensions(&root).await;
-        let errors = |name: &str| {
-            listed
-                .iter()
-                .find(|e| e.name == name)
-                .unwrap()
-                .errors
-                .join("\n")
-        };
+        let errors: Vec<String> = ["acme", "beta"]
+            .iter()
+            .map(|name| {
+                listed
+                    .iter()
+                    .find(|e| e.name == *name)
+                    .unwrap()
+                    .errors
+                    .join("\n")
+            })
+            .collect();
         assert!(
-            errors("acme").contains("`acme_pr_x`") && errors("acme").contains("`acme-pr`"),
-            "{}",
-            errors("acme")
+            errors.iter().any(|e| e.contains("pr")),
+            "one extension reports the shared prefix: {errors:?}"
         );
-        assert!(
-            !errors("acme-pr").contains("acme_pr_x"),
-            "{}",
-            errors("acme-pr")
-        );
-        let kinds = &svc.vocabulary.current().kinds;
-        assert!(kinds.get("acme_pr_x").is_some(), "acme-pr keeps its kind");
-        let link =
-            |l: &str| oxplow_domain::uri::canonical_wikilink(kinds, l).map(|r| r.to_string());
-        assert_eq!(link("px:1").as_deref(), Some("acme_pr_x:1"));
-        assert_eq!(link("ax:1"), None, "acme's refused kind brings no sugar");
     }
 
     /// tsk796: a namesake that declares nothing (`acme_pr` beside

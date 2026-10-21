@@ -54,7 +54,7 @@ pub struct RunLensInput {
 pub struct RunLensActionInput {
     /// Lens id: `<extension>/<slug>`.
     pub id: String,
-    /// The action's id, as the lens declares it (see `read` of `lens:<ext>/<slug>` → `actions`).
+    /// The action's id, as the lens declares it (see `read` of `oxplow:oxplow/lens?lens=<ext>/<slug>` → `actions`).
     pub action: String,
     /// Param overrides by name, as for `oxplow.lens.run`.
     #[serde(default)]
@@ -65,7 +65,7 @@ pub struct RunLensActionInput {
     /// Your thread, as for `oxplow.lens.run`.
     #[serde(default)]
     pub thread_id: Option<String>,
-    /// For a row action (`row: true` in `read` of `lens:<ext>/<slug>` → `actions`): the row
+    /// For a row action (`row: true` in `read` of `oxplow:oxplow/lens?lens=<ext>/<slug>` → `actions`): the row
     /// it runs on, column → value, as `oxplow.lens.run` returned it.
     #[serde(default)]
     pub row: Option<BTreeMap<String, Value>>,

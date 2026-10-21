@@ -1154,7 +1154,7 @@ mod tests {
 
     fn case(measure: i64, subject: &str, value: f64) -> NewFact {
         NewFact {
-            subject: Some(format!("test:{subject}")),
+            subject: Some(oxplow_domain::uri::build::test_uri("t", subject)),
             ..NewFact::new(measure, value)
         }
     }

@@ -552,8 +552,7 @@ impl SqliteCodeQualityStore {
                     let id = tx.last_insert_rowid().to_string();
                     crate::page_ref_store::replace_source_tx(
                         tx,
-                        "finding",
-                        &id,
+                        &oxplow_domain::uri::build::finding_uri(&id),
                         finding_edges(&id, &f.path),
                     )?;
                 }
@@ -571,8 +570,9 @@ impl SqliteCodeQualityStore {
                        AND o.status <> 'running'";
                 tx.execute(
                     &format!(
-                        "DELETE FROM page_ref WHERE source_kind = 'finding' AND source_id IN (
-                           SELECT CAST(f.id AS TEXT) FROM code_quality_finding f
+                        "DELETE FROM page_ref WHERE source_resource = 'oxplow/finding'
+                           AND source_uri IN (
+                           SELECT uri('oxplow/finding', 'id', f.id) FROM code_quality_finding f
                            WHERE f.scan_id IN ({superseded}))"
                     ),
                     params![scan_id],
@@ -644,7 +644,7 @@ impl SqliteCodeQualityStore {
     }
 
     /// Fetch a single finding by its integer id — the canonical
-    /// `finding:<id>` ref. Used by the typed ref-resolver to hydrate a
+    /// `oxplow:oxplow/finding?id=<id>` ref. Used by the typed ref-resolver to hydrate a
     /// finding into a label (kind) + location for agent context.
     pub async fn get_finding(&self, id: i64) -> Result<Option<CodeQualityFinding>, DomainError> {
         self.db
@@ -3039,9 +3039,18 @@ mod tests {
         assert_eq!(taken.len(), 2);
         assert_eq!(
             taken[1]["snapshot"],
-            format!("snapshot:{}", two.snapshot_id)
+            oxplow_domain::uri::build::keyed(
+                oxplow_domain::uri::resources::SNAPSHOT,
+                &format!("{}", two.snapshot_id)
+            )
         );
-        assert_eq!(taken[1]["parent"], format!("snapshot:{}", one.snapshot_id));
+        assert_eq!(
+            taken[1]["parent"],
+            oxplow_domain::uri::build::keyed(
+                oxplow_domain::uri::resources::SNAPSHOT,
+                &format!("{}", one.snapshot_id)
+            )
+        );
         assert_eq!(taken[1]["trigger"], "turn_end");
         assert_eq!(taken[1]["over_budget"], true);
         let turn_anchor: Option<i64> = db
@@ -3191,9 +3200,10 @@ mod tests {
         db.conn()
             .unwrap()
             .execute(
-                "INSERT INTO page_ref (source_kind, source_id, target_kind, target_id, ref_type,
-                   local_snapshot_id, vcs_rev_exact)
-                 VALUES ('wiki', 'w', 'file', 'a.txt', 'mention', ?1, 0)",
+                "INSERT INTO page_ref (source_uri, target_uri, source_resource, target_resource,
+                   ref_type, local_snapshot_id, vcs_rev_exact)
+                 VALUES (uri('oxplow/wiki', 'slug', 'w'), uri('oxplow/file', 'path', 'a.txt'),
+                         'oxplow/wiki', 'oxplow/file', 'mention', ?1, 0)",
                 params![base.snapshot_id],
             )
             .unwrap();
@@ -3265,8 +3275,8 @@ mod tests {
         );
         let moved_events = events(&db, "vcs.head.moved");
         assert_eq!(moved_events.len(), 1);
-        assert_eq!(moved_events[0]["from"], "commit:aaaaaaa");
-        assert_eq!(moved_events[0]["to"], "commit:bbbbbbb");
+        assert_eq!(moved_events[0]["from"], "oxplow:oxplow/commit?sha=aaaaaaa");
+        assert_eq!(moved_events[0]["to"], "oxplow:oxplow/commit?sha=bbbbbbb");
     }
 
     #[tokio::test]
@@ -3310,7 +3320,7 @@ mod tests {
                 conn.execute_batch("PRAGMA foreign_keys = OFF;")?;
                 conn.execute(
                     "INSERT INTO effort (work_item, thread_id, started_at)
-                     VALUES ('work_item:oxplow:tsk1', 1, '2026-01-01T00:00:00Z')",
+                     VALUES ('oxplow:oxplow/work_item?id=tsk1&provider=oxplow', 1, '2026-01-01T00:00:00Z')",
                     [],
                 )?;
                 conn.execute(
@@ -3322,10 +3332,11 @@ mod tests {
                 )?;
                 conn.execute(
                     "INSERT INTO page_ref
-                       (source_kind, source_id, target_kind, target_id, ref_type,
+                       (source_uri, target_uri, source_resource, target_resource, ref_type,
                         source_extra, local_snapshot_id, closest_vcs_rev, vcs_rev_exact)
-                     VALUES ('wiki', 'intro', 'file', 'src/a.rs', 'wiki_file_ref',
-                             NULL, ?1, 'aaaa', 0)",
+                     VALUES (uri('oxplow/wiki', 'slug', 'intro'),
+                             uri('oxplow/file', 'path', 'src/a.rs'), 'oxplow/wiki', 'oxplow/file',
+                             'wiki_file_ref', NULL, ?1, 'aaaa', 0)",
                     params![snap_id],
                 )?;
                 Ok(())
@@ -3356,8 +3367,8 @@ mod tests {
                 )?;
                 let er = conn.query_row(
                     "SELECT closest_vcs_rev, vcs_rev_exact FROM page_ref
-                         WHERE source_kind = 'wiki' AND source_id = 'intro'
-                           AND target_kind = 'file' AND target_id = 'src/a.rs'",
+                         WHERE source_uri = uri('oxplow/wiki', 'slug', 'intro')
+                           AND target_uri = uri('oxplow/file', 'path', 'src/a.rs')",
                     [],
                     |r| Ok((r.get::<_, Option<String>>(0)?, r.get::<_, i64>(1)?)),
                 )?;
@@ -3601,7 +3612,7 @@ mod tests {
         let edges: i64 = db
             .call(|c| {
                 c.query_row(
-                    "SELECT count(*) FROM page_ref WHERE source_kind = 'finding'",
+                    "SELECT count(*) FROM page_ref WHERE source_resource = 'oxplow/finding'",
                     [],
                     |r| r.get(0),
                 )

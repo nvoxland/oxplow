@@ -336,7 +336,7 @@ pub enum CoverageIngest {
 /// ([`CollectionService::sync_report_collector`]).
 #[derive(Debug, Clone, PartialEq)]
 pub enum ReportSync {
-    /// A test run: its capture (the `run:<id>` agents claim), or none when
+    /// A test run: its capture (the `oxplow:oxplow/run?id=<id>` agents claim), or none when
     /// the report held no cases.
     Tests {
         run: Option<i64>,
@@ -1269,7 +1269,10 @@ impl CollectionService {
                                     Skipped => "skipped",
                                 };
                                 results.push(oxplow_db::TestCaseResult {
-                                    subject: format!("test:{}::{}", case.classname, case.name),
+                                    subject: oxplow_domain::uri::build::test_uri(
+                                        &case.classname,
+                                        &case.name,
+                                    ),
                                     status: status.into(),
                                     time_ms: duration
                                         .as_ref()
@@ -2571,7 +2574,10 @@ impl CollectionService {
             // kind as subject so Sum() reconstructs the fired count (epic tsk12).
             if let Some(measure) = self.facts.get_measure("oxplow.nudge").await? {
                 let fact = NewFact {
-                    subject: Some(oxplow_domain::uri::build::of("nudge", kind)),
+                    subject: Some(oxplow_domain::uri::build::keyed(
+                        oxplow_domain::uri::resources::NUDGE,
+                        kind,
+                    )),
                     ..NewFact::new(measure.id, 1.0)
                 };
                 // The nudge's effort, else the one its run was anchored to;
@@ -5096,7 +5102,10 @@ mod tests {
                 .into_iter()
                 .map(|f| f.subject)
                 .collect();
-            assert_eq!(refs, vec![Some("file:src/foo.rs".to_string())]);
+            assert_eq!(
+                refs,
+                vec![Some("oxplow:oxplow/file?path=src/foo.rs".to_string())]
+            );
         }
 
         /// tsk862: a baseline whose bytes are gone (collected) can't be
@@ -5138,9 +5147,13 @@ mod tests {
             );
             assert_eq!(cov[0].numerator, Some(2.0));
             assert_eq!(cov[0].denominator, Some(3.0));
-            assert_eq!(cov[0].subject_kind.as_deref(), Some("file"));
+            assert_eq!(cov[0].subject_kind.as_deref(), Some("oxplow/file"));
             assert!(
-                cov[0].subject.as_deref().unwrap().starts_with("file:"),
+                cov[0]
+                    .subject
+                    .as_deref()
+                    .unwrap()
+                    .starts_with("oxplow:oxplow/file?"),
                 "subject is file:<path>, got {:?}",
                 cov[0].subject
             );
@@ -5187,7 +5200,7 @@ mod tests {
                 "branch value {}",
                 br[0].value
             );
-            assert_eq!(br[0].subject_kind.as_deref(), Some("file"));
+            assert_eq!(br[0].subject_kind.as_deref(), Some("oxplow/file"));
 
             let fm = facts
                 .get_measure("oxplow.coverage.function")
@@ -5924,8 +5937,8 @@ mod tests {
                     .and_then(|v| v["oxplow.status"].as_str().map(String::from))
                     .unwrap_or_default()
             };
-            assert_eq!(status_of("test:mod::t1"), "passed");
-            assert_eq!(status_of("test:mod::t2"), "failed");
+            assert_eq!(status_of("oxplow:oxplow/test?class=mod&name=t1"), "passed");
+            assert_eq!(status_of("oxplow:oxplow/test?class=mod&name=t2"), "failed");
 
             // Keystone (T-B): the producer test specs re-aggregate these facts to
             // the baked counts through the engine — Count(oxplow.test_case) sliced
@@ -6218,7 +6231,7 @@ mod tests {
             (m, facts)
         }
 
-        /// Record one gauge CAPTURE at `at` with sparse `file:<path>` facts (a file
+        /// Record one gauge CAPTURE at `at` with sparse `oxplow:oxplow/file?path=<path>` facts (a file
         /// absent from a capture reads as 0), mimicking a snapshot scan. Gauge
         /// captures are NOT effort-stamped — the `File` family reads them by claimed
         /// files × time. Returns the capture id.
@@ -6245,7 +6258,7 @@ mod tests {
             let rows: Vec<oxplow_db::NewFact> = per_file
                 .iter()
                 .map(|(path, v)| oxplow_db::NewFact {
-                    subject: Some(format!("file:{path}")),
+                    subject: Some(oxplow_domain::uri::build::file_uri(path)),
                     path: Some((*path).into()),
                     ..oxplow_db::NewFact::new(measure_id, *v)
                 })
@@ -6331,7 +6344,7 @@ mod tests {
                 .record_facts(
                     own,
                     vec![oxplow_db::NewFact {
-                        subject: Some("file:src/a.rs".into()),
+                        subject: Some("oxplow:oxplow/file?path=src/a.rs".into()),
                         path: Some("src/a.rs".into()),
                         ..oxplow_db::NewFact::new(m, 5.0)
                     }],
@@ -7351,7 +7364,10 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(synced.len(), 1, "a redelivered run records nothing more");
-            assert_eq!(synced[0]["collector"], "collector:project/tests.junit");
+            assert_eq!(
+                synced[0]["collector"],
+                "oxplow:oxplow/collector?collector=project/tests.junit"
+            );
             assert_eq!(synced[0]["trigger"], "on");
             assert_eq!(synced[0]["status"], "ok");
         }
@@ -7572,8 +7588,11 @@ mod tests {
             let fired = facts.facts_for_measure(measure.id).await.unwrap();
             assert_eq!(fired.len(), 1, "one nudge fact per fired nudge");
             assert_eq!(fired[0].value, 1.0);
-            assert_eq!(fired[0].subject_kind.as_deref(), Some("nudge"));
-            assert_eq!(fired[0].subject.as_deref(), Some("nudge:report-less-run"));
+            assert_eq!(fired[0].subject_kind.as_deref(), Some("oxplow/nudge"));
+            assert_eq!(
+                fired[0].subject.as_deref(),
+                Some("oxplow:oxplow/nudge?kind=report-less-run")
+            );
         }
 
         #[tokio::test]
@@ -7845,7 +7864,7 @@ mod tests {
             assert_eq!(nudge_facts[0].value, 1.0);
             assert_eq!(
                 nudge_facts[0].subject.as_deref(),
-                Some("nudge:report-less-run")
+                Some("oxplow:oxplow/nudge?kind=report-less-run")
             );
 
             // Second run is deduped (returns None) and stores nothing more.
@@ -8071,7 +8090,10 @@ mod tests {
             assert_eq!(details.get(&err_hit.id).map(String::as_str), Some("boom"));
             assert_eq!(err_hit.path.as_deref(), Some("src/a.rs"));
             assert_eq!(err_hit.line, Some(10));
-            assert_eq!(err_hit.subject.as_deref(), Some("file:src/a.rs"));
+            assert_eq!(
+                err_hit.subject.as_deref(),
+                Some("oxplow:oxplow/file?path=src/a.rs")
+            );
         }
 
         #[tokio::test]

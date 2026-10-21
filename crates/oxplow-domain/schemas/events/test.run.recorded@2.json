@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "`test.run.recorded@2`: a test run was captured (`run:<capture>`).",
+  "description": "`test.run.recorded@2`: a test run was captured (`oxplow:oxplow/run?id=<capture>`).",
   "properties": {
     "command": {
       "type": "string"

@@ -4,7 +4,7 @@
   "description": "`knowledge.page.deleted@1`: a knowledge page is gone, its row and\nedges with it.",
   "properties": {
     "page": {
-      "description": "`wiki:<slug>`.",
+      "description": "`oxplow:oxplow/wiki?slug=<slug>`.",
       "type": "string"
     }
   },

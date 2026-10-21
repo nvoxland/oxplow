@@ -17,8 +17,8 @@ use oxplow_db::comment_store::{
 };
 use oxplow_domain::uri::build::{stream_uri, thread_uri};
 use oxplow_domain::{
-    Actor, CommandCall, CommandError, CommentId, CommentIntent, CommentStatus, CommentTarget,
-    CommentThread, Confirm, Invokers, StreamId,
+    Actor, CommandCall, CommandError, CommentId, CommentIntent, CommentStatus, CommentThread,
+    Confirm, Invokers, StreamId,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -37,14 +37,14 @@ pub const RELOCATE: &str = "oxplow.knowledge.relocate_comment";
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct AddInput {
-    /// The stream (`stream:str1`).
+    /// The stream (`oxplow:oxplow/stream?id=str1`).
     pub stream: String,
-    /// The thread it was made in (`thread:thr3`); an agent's is its own.
+    /// The thread it was made in (`oxplow:oxplow/thread?id=thr3`); an agent's is its own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thread: Option<String>,
-    /// What it's anchored to: a page's kind and id (`wiki` / `some-page`,
-    /// `file` / `src/a.rs`, `work_item` / `oxplow:tsk4`).
-    pub target: CommentTarget,
+    /// What it's anchored to: a page's URI
+    /// (`oxplow:oxplow/wiki?slug=some-page`, `oxplow:oxplow/file?path=src/a.rs`).
+    pub target: String,
     /// The text it's about.
     #[serde(default)]
     pub quote: String,
@@ -53,10 +53,10 @@ pub struct AddInput {
     pub selectors_json: String,
     /// The regions the selection sat inside, innermost first.
     #[serde(default)]
-    pub context_chain: Vec<CommentTarget>,
-    /// The refs inside the selection.
+    pub context_chain: Vec<String>,
+    /// The URIs the selection links to.
     #[serde(default)]
-    pub referenced_refs: Vec<CommentTarget>,
+    pub referenced: Vec<String>,
     /// `note` (the agent leaves it alone, the default) or `followup` (the
     /// agent should act on it).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -68,7 +68,7 @@ pub struct AddInput {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ReplyInput {
-    /// The comment (`comment:cmt12`).
+    /// The comment (`oxplow:oxplow/comment?id=cmt12`).
     pub comment: String,
     pub body: String,
 }
@@ -76,7 +76,7 @@ pub struct ReplyInput {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct UpdateInput {
-    /// The comment (`comment:cmt12`).
+    /// The comment (`oxplow:oxplow/comment?id=cmt12`).
     pub comment: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub intent: Option<CommentIntent>,
@@ -99,7 +99,7 @@ pub struct UpdateInput {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RelocateInput {
-    /// The comment (`comment:cmt12`).
+    /// The comment (`oxplow:oxplow/comment?id=cmt12`).
     pub comment: String,
     /// Where its quote sits in the content as rendered now (the W3C
     /// selectors array, as JSON) — its last known place when `orphaned`.
@@ -111,7 +111,7 @@ pub struct RelocateInput {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CommentInput {
-    /// The comment (`comment:cmt12`).
+    /// The comment (`oxplow:oxplow/comment?id=cmt12`).
     pub comment: String,
 }
 
@@ -156,12 +156,16 @@ pub fn add_op() -> Op {
         false,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: AddInput = parse(input)?;
-            let stream = ref_id(&input.stream, "stream", "/stream")?;
+            let stream = ref_id(
+                &input.stream,
+                oxplow_domain::uri::resources::STREAM,
+                "/stream",
+            )?;
             on_own_stream(ctx, stream)?;
             let named = input
                 .thread
                 .as_deref()
-                .map(|t| ref_id(t, "thread", "/thread"))
+                .map(|t| ref_id(t, oxplow_domain::uri::resources::THREAD, "/thread"))
                 .transpose()?;
             let thread = match agent_scope(ctx)? {
                 Some((own, _)) => {
@@ -177,9 +181,29 @@ pub fn add_op() -> Op {
                 }
                 None => named,
             };
+            let resources = &ctx.events.vocabulary.resources;
+            for (at, uri) in std::iter::once(("/target".to_string(), &input.target))
+                .chain(
+                    input
+                        .context_chain
+                        .iter()
+                        .enumerate()
+                        .map(|(i, u)| (format!("/context_chain/{i}"), u)),
+                )
+                .chain(
+                    input
+                        .referenced
+                        .iter()
+                        .enumerate()
+                        .map(|(i, u)| (format!("/referenced/{i}"), u)),
+                )
+            {
+                oxplow_domain::uri::validate_uri(resources, uri)
+                    .map_err(|e| invalid(&at, e.to_string()))?;
+            }
             let (created, events) = create_tx(
                 ctx.conn,
-                &ctx.events.vocabulary.kinds,
+                resources,
                 &NewComment {
                     stream,
                     thread,
@@ -187,7 +211,7 @@ pub fn add_op() -> Op {
                     quote: input.quote,
                     selectors_json: input.selectors_json,
                     context_chain: input.context_chain,
-                    referenced_refs: input.referenced_refs,
+                    referenced: input.referenced,
                     intent: input.intent.unwrap_or(CommentIntent::Note),
                     author: author_of(ctx.actor()).into(),
                     body: input.body,
@@ -211,7 +235,11 @@ pub fn reply_op() -> Op {
         false,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: ReplyInput = parse(input)?;
-            let id = ref_id::<CommentId>(&input.comment, "comment", "/comment")?;
+            let id = ref_id::<CommentId>(
+                &input.comment,
+                oxplow_domain::uri::resources::COMMENT,
+                "/comment",
+            )?;
             on_own_stream(ctx, load(ctx, id)?.comment.stream_id)?;
             let (message, events) =
                 add_message_tx(ctx.conn, id, author_of(ctx.actor()), &input.body)?;
@@ -235,7 +263,11 @@ pub fn update_op() -> Op {
         true,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: UpdateInput = parse(input)?;
-            let id = ref_id::<CommentId>(&input.comment, "comment", "/comment")?;
+            let id = ref_id::<CommentId>(
+                &input.comment,
+                oxplow_domain::uri::resources::COMMENT,
+                "/comment",
+            )?;
             let before = load(ctx, id)?.comment;
             on_own_stream(ctx, before.stream_id)?;
             // A re-attach names both its quote and its anchor — checked
@@ -297,7 +329,11 @@ pub fn delete_op() -> Op {
         false,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: CommentInput = parse(input)?;
-            let id = ref_id::<CommentId>(&input.comment, "comment", "/comment")?;
+            let id = ref_id::<CommentId>(
+                &input.comment,
+                oxplow_domain::uri::resources::COMMENT,
+                "/comment",
+            )?;
             load(ctx, id)?;
             let events = delete_tx(ctx.conn, id)?;
             Ok(HandlerOutput {
@@ -324,7 +360,11 @@ pub fn relocate_op() -> Op {
         false,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: RelocateInput = parse(input)?;
-            let id = ref_id::<CommentId>(&input.comment, "comment", "/comment")?;
+            let id = ref_id::<CommentId>(
+                &input.comment,
+                oxplow_domain::uri::resources::COMMENT,
+                "/comment",
+            )?;
             let before = load(ctx, id)?.comment;
             if before.selectors_json == input.selectors_json && before.orphaned == input.orphaned {
                 return Ok(HandlerOutput {
@@ -378,7 +418,7 @@ mod tests {
     }
 
     fn comment_on(stream: &str, thread: Option<&str>) -> Value {
-        let mut v = json!({ "stream": stream, "target": { "kind": "wiki", "id": "a-page" },
+        let mut v = json!({ "stream": stream, "target": oxplow_domain::uri::build::wiki_uri("a-page"),
                             "quote": "the words", "body": "what about this?" });
         if let Some(t) = thread {
             v["thread"] = json!(t);
@@ -398,9 +438,13 @@ mod tests {
             .unwrap();
         assert_eq!(mine["comment"]["author"], "agent");
         assert_eq!(mine["comment"]["thread_id"], json!(fx.thread));
-        let err = add(&fx, &agent(&fx), comment_on(&stream, Some("thread:thr99")))
-            .await
-            .unwrap_err();
+        let err = add(
+            &fx,
+            &agent(&fx),
+            comment_on(&stream, Some("oxplow:oxplow/thread?id=thr99")),
+        )
+        .await
+        .unwrap_err();
         assert!(matches!(err, CommandError::Denied { .. }), "{err:?}");
         let theirs = add(&fx, &Actor::Human, comment_on(&stream, None))
             .await
@@ -413,7 +457,7 @@ mod tests {
             .run(
                 &Actor::Human,
                 REPLY,
-                json!({ "comment": format!("comment:{}", mine["comment"]["id"].as_str().unwrap()), "body": "ok" }),
+                json!({ "comment": oxplow_domain::uri::build::keyed(oxplow_domain::uri::resources::COMMENT, mine["comment"]["id"].as_str().unwrap()), "body": "ok" }),
                 false,
             )
             .await
@@ -443,7 +487,10 @@ mod tests {
         .unwrap();
         let id = c["comment"]["id"].as_str().unwrap().to_string();
         let cid = CommentId::try_from_str(&id).unwrap();
-        let id = format!("comment:{id}");
+        let id = oxplow_domain::uri::build::keyed(
+            oxplow_domain::uri::resources::COMMENT,
+            &id.to_string(),
+        );
         let before = fx
             .svc
             .comment_store
@@ -513,7 +560,10 @@ mod tests {
         .unwrap();
         let id = c["comment"]["id"].as_str().unwrap().to_string();
         let cid = CommentId::try_from_str(&id).unwrap();
-        let id = format!("comment:{id}");
+        let id = oxplow_domain::uri::build::keyed(
+            oxplow_domain::uri::resources::COMMENT,
+            &id.to_string(),
+        );
         let relocate = |selectors: &str, orphaned: bool| json!({ "comment": id, "selectors_json": selectors, "orphaned": orphaned });
         let run = |actor: Actor, input: Value| {
             let bus = fx.svc.commands.clone();
@@ -604,7 +654,10 @@ mod tests {
         .unwrap();
         let id = c["comment"]["id"].as_str().unwrap().to_string();
         let cid = CommentId::try_from_str(&id).unwrap();
-        let id = format!("comment:{id}");
+        let id = oxplow_domain::uri::build::keyed(
+            oxplow_domain::uri::resources::COMMENT,
+            &id.to_string(),
+        );
         let out = fx
             .svc
             .commands

@@ -559,7 +559,7 @@ mod tests {
         );
     }
 
-    /// A built-in whose items' refs carry a provider (`work_item:oxplow:…`)
+    /// A built-in whose items' refs carry a provider (`oxplow:oxplow/work_item?id=…&provider=oxplow`)
     /// is declared under that id and no other: its refs would otherwise
     /// name a list that refuses them.
     #[test]

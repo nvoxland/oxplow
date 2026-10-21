@@ -1,7 +1,13 @@
 //! Declared cross-extension imports and public contracts end to end: two
 //! extensions in a project's `.oxplow/extensions/`, activated together.
 
+use oxplow_domain::uri::build::keyed;
 use oxplow_domain::DomainError;
+
+/// The URI naming `owner`'s `items` model.
+fn model_ref(owner: &str) -> String {
+    keyed("oxplow/model", &format!("{owner}/items"))
+}
 use std::{path::Path, sync::Arc};
 
 fn write(root: &Path, rel: &str, body: &str) {
@@ -44,9 +50,12 @@ impl Kind {
     /// How `owner` declares and exports its `thing` of this kind.
     fn reference(self, owner: &str) -> String {
         match self {
-            Kind::Collector => format!("collector:{owner}/thing"),
-            Kind::EventType => format!("event_type:{}.thing", owner.replace('-', "_")),
-            Kind::Command => format!("command:{owner}.thing.get"),
+            Kind::Collector => keyed("oxplow/collector", &format!("{owner}/thing")),
+            Kind::EventType => keyed(
+                "oxplow/event_type",
+                &format!("{}.thing", owner.replace('-', "_")),
+            ),
+            Kind::Command => keyed("oxplow/command", &format!("{owner}.thing.get")),
         }
     }
 }
@@ -132,7 +141,8 @@ fn put_in(dir: &Path, e: &Ext) {
     let mut exports = String::new();
     if let Some((visibility, version)) = e.export {
         exports += &format!(
-            "  - {{ contribution: model:{name}/items, version: {version}, visibility: {visibility} }}\n"
+            "  - {{ contribution: {}, version: {version}, visibility: {visibility} }}\n",
+            model_ref(name)
         );
     }
     for (kind, visibility) in &e.kind_exports {
@@ -170,7 +180,8 @@ fn put_in(dir: &Path, e: &Ext) {
             .map(|v| format!(", version: {v}"))
             .unwrap_or_default();
         imports += &format!(
-            "  - {{ id: dep, contribution: model:{target}/items{version}, optional: {optional} }}\n"
+            "  - {{ id: dep, contribution: {}{version}, optional: {optional} }}\n",
+            model_ref(target)
         );
         sql = "SELECT ref FROM import_ref('dep')";
         let params = if e.mounted {
@@ -201,7 +212,8 @@ fn put_in(dir: &Path, e: &Ext) {
         commands += &command("own.act");
         let bindings: Vec<_> = e.kind_imports.iter().map(|i| i.0).collect();
         manifest += &format!(
-            "import_guards:\n  - {{ contribution: command:{name}.own.act, imports: [{}] }}\n",
+            "import_guards:\n  - {{ contribution: {}, imports: [{}] }}\n",
+            keyed("oxplow/command", &format!("{name}.own.act")),
             bindings.join(", ")
         );
     }
@@ -301,7 +313,7 @@ async fn a_breaking_version_mismatch_blocks_only_the_consumer() {
     activate(&svc).await;
     let why = problem(&svc, "cons");
     assert!(
-        why.contains("`dep`") && why.contains("model:prod/items"),
+        why.contains("`dep`") && why.contains("oxplow:oxplow/model?model=prod/items"),
         "{why}"
     );
     assert!(!readable(&svc, "v_cons_items").await);
@@ -321,7 +333,9 @@ async fn a_missing_required_producer_blocks_only_the_consumer() {
     activate(&svc).await;
     let why = problem(&svc, "cons");
     assert!(
-        why.contains("`dep`") && why.contains("model:gone/items") && why.contains("isn't here"),
+        why.contains("`dep`")
+            && why.contains("oxplow:oxplow/model?model=gone/items")
+            && why.contains("isn't here"),
         "{why}"
     );
     assert!(!readable(&svc, "v_cons_plain").await);

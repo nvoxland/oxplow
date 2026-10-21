@@ -63,7 +63,7 @@ pub fn contract_of(spec: &ProviderSpec) -> &'static ProviderContract {
 pub struct ProviderSpec {
     /// The provider's id: its program's approval (`<extension>/<id>`) and
     /// the id of its default instance — an instance's id is its refs'
-    /// segment (`work_item:<id>:…`) and its commands' namespace
+    /// segment (`oxplow:oxplow/work_item?id=…&provider=<id>`) and its commands' namespace
     /// (`<id>.estimate`).
     pub id: String,
     pub capability: String,

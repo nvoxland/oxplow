@@ -236,11 +236,11 @@ macro_rules! oxplow_command_table {
                 // wiki
                 // events (the log's dead-letter queue)
                 // page_refs
-                list_backlinks => $crate::commands::page_refs::list_backlinks { target_kind: String, target_id: String, limit: Option<u32> } -> Vec<$crate::commands::page_refs::BacklinkEdge>,
-                list_outbound => $crate::commands::page_refs::list_outbound { source_kind: String, source_id: String, limit: Option<u32> } -> Vec<$crate::commands::page_refs::BacklinkEdge>,
+                list_backlinks => $crate::commands::page_refs::list_backlinks { target: String, limit: Option<u32> } -> Vec<$crate::commands::page_refs::BacklinkEdge>,
+                list_outbound => $crate::commands::page_refs::list_outbound { source: String, limit: Option<u32> } -> Vec<$crate::commands::page_refs::BacklinkEdge>,
                 // wiki_freshness
                 // search
-                search => $crate::commands::search::search { query: String, stream_id: Option<String>, kinds: Option<Vec<String>>, limit: Option<u32> } -> Vec<::oxplow_db::SearchHit>,
+                search => $crate::commands::search::search { query: String, stream_id: Option<String>, resources: Option<Vec<String>>, limit: Option<u32> } -> Vec<::oxplow_db::SearchHit>,
                 query_sql => $crate::commands::semantic::query_sql { sql: String, params: Option<Vec<::oxplow_db::SqlCell>>, limit: Option<u32>, raw: Option<bool> } -> ::oxplow_db::SqlQueryResult,
                 list_data_entities => $crate::commands::semantic::list_data_entities {} -> Vec<::oxplow_app::semantic_catalog::DataEntity>,
                 get_panel_layout => $crate::commands::semantic::get_panel_layout {} -> Vec<::oxplow_db::PanelPlacement>,
@@ -287,7 +287,7 @@ macro_rules! oxplow_command_table {
                 rename_native_conversation => $crate::commands::conversations::rename_native_conversation { session_id: String, name: String } -> (),
                 list_native_conversations => $crate::commands::conversations::list_native_conversations { session_id: String } -> Vec<$crate::commands::conversations::ListedConversation>,
                 // comments
-                list_comments_for_target => $crate::commands::comments::list_comments_for_target { target_kind: String, target_id: String } -> Vec<::oxplow_domain::CommentThread>,
+                list_comments_for_target => $crate::commands::comments::list_comments_for_target { target: String } -> Vec<::oxplow_domain::CommentThread>,
                 list_comments_for_stream => $crate::commands::comments::list_comments_for_stream { stream_id: ::oxplow_domain::StreamId } -> Vec<::oxplow_domain::CommentThread>,
                 // page_visit
                 record_page_visit => $crate::commands::page_visit::record_page_visit { page_kind: String, page_id: String, label: Option<String>, duration_ms: Option<u32>, thread_id: Option<String> } -> ::oxplow_db::PageVisit,

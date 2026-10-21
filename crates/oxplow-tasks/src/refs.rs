@@ -1,28 +1,22 @@
-//! oxplow's tasks as work items: `work_item:oxplow:tsk<n>`.
+//! oxplow's tasks as work items: `oxplow:oxplow/work_item?id=tsk<n>&provider=oxplow`.
 
 use crate::ids::TaskId;
 
-/// The provider oxplow's tasks are filed under in a `work_item` ref.
+/// The provider oxplow's tasks are filed under in a work item's URI.
 pub const PROVIDER: &str = "oxplow";
 
-/// The `work_item` id of a task: `oxplow:tsk<n>` (the id part of its ref,
-/// as `page_ref` stores it).
-pub fn work_item_id(task: TaskId) -> String {
-    format!("{PROVIDER}:{task}")
-}
-
-/// A task's canonical ref: `work_item:oxplow:tsk<n>`.
+/// A task's URI: `oxplow:oxplow/work_item?id=tsk<n>&provider=oxplow`.
 pub fn work_item_ref(task: TaskId) -> String {
-    format!("work_item:{}", work_item_id(task))
+    oxplow_domain::uri::build::work_item_uri(PROVIDER, &task.to_string())
 }
 
-/// The task behind a canonical `work_item:` ref: `Some` for
-/// `work_item:oxplow:tsk<n>`, `None` for another list's item or any other
-/// kind (strict).
+/// The task behind a work item's URI: `Some` for one of oxplow's tasks,
+/// `None` for another list's item or any other URI (strict).
 pub fn task_of_work_item_ref(r: &str) -> Option<TaskId> {
-    let id = r.strip_prefix("work_item:")?;
-    let native = id.strip_prefix(&format!("{PROVIDER}:"))?;
-    TaskId::try_from_str(native)
+    let (provider, id) = oxplow_domain::uri::build::work_item_of_uri(r)?;
+    (provider == PROVIDER)
+        .then(|| TaskId::try_from_str(&id))
+        .flatten()
 }
 
 #[cfg(test)]
@@ -31,13 +25,32 @@ mod tests {
 
     #[test]
     fn a_tasks_ref_and_its_inverse() {
-        assert_eq!(work_item_ref(TaskId::new(42)), "work_item:oxplow:tsk42");
+        use oxplow_domain::uri::build::{keyed, work_item_uri};
         assert_eq!(
-            task_of_work_item_ref("work_item:oxplow:tsk42"),
+            work_item_ref(TaskId::new(42)),
+            "oxplow:oxplow/work_item?id=tsk42&provider=oxplow"
+        );
+        assert_eq!(
+            task_of_work_item_ref(&work_item_uri("oxplow", "tsk42")),
             Some(TaskId::new(42))
         );
-        assert_eq!(task_of_work_item_ref("work_item:issues:ENG-1"), None);
-        assert_eq!(task_of_work_item_ref("effort:eff1"), None);
-        assert_eq!(task_of_work_item_ref("work_item:oxplow:42"), None, "strict");
+        assert_eq!(
+            task_of_work_item_ref(&work_item_uri("issues", "ENG-1")),
+            None
+        );
+        assert_eq!(
+            task_of_work_item_ref(&keyed(oxplow_domain::uri::resources::EFFORT, "eff1")),
+            None
+        );
+        assert_eq!(
+            task_of_work_item_ref(&work_item_uri("oxplow", "42")),
+            None,
+            "strict"
+        );
+        assert_eq!(
+            task_of_work_item_ref("work_item:oxplow:tsk42"),
+            None,
+            "an old ref"
+        );
     }
 }

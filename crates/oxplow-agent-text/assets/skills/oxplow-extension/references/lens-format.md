@@ -21,14 +21,14 @@ name: review            # must equal the folder name
 description: Lenses for reviewing agent work
 intent:                 # required: what it is for, and how to know it works
   purpose: Show what is waiting on the reviewer in this stream
-  origin: effort:eff42  # the effort you are working under, or null
+  origin: oxplow:oxplow/effort?id=eff42  # the effort you are working under, or null
   examples:
     - name: a stream with one blocked task
       input: { lens: waiting-on-me, params: { stream_id: 1 } }
       expect: one row for the blocked task
   prompts:              # optional: questions it helps answer, offered with Ask
     - { prompt: "What's waiting on me?" }
-    - { prompt: "Who should review this effort?", about: effort }  # also on effort pages
+    - { prompt: "Who should review this effort?", about: oxplow/effort }  # also on effort pages
 ui:                     # optional: what it adds to core pages
   slots:                #   mount a lens into a core page
     - { slot: work_item.detail.body, lens: task-history }
@@ -127,7 +127,7 @@ empty: Nothing is waiting on you.
   columns of a search lens, with its filter param.
 - **`link.kind`** makes cells clickable:
   - `page` takes any page's ref — a work item's (`v_work_item.ref`),
-    `commit:<sha>`, `page:git-dashboard`, ….
+    `oxplow:oxplow/commit?sha=<sha>`, `oxplow:oxplow/page?page=git-dashboard`, ….
   - `file` takes a repo-relative path; add `line: <column>` to open at a
     line.
   - `wiki` takes a slug.
@@ -157,7 +157,7 @@ empty: Nothing is waiting on you.
   icon named by that column's value — `ready`, `todo`, `in_progress`,
   `blocked`, `done`, `canceled`, `archived`, `epic`, `task`, `wiki`,
   `file`, `folder`, `commit`, `diff`, `lens`, `metric`, `dashboard`,
-  `comment` or a ref-kind icon name (`bug`, `git-pull-request`, …) — and
+  `comment` or a resource icon name (`bug`, `git-pull-request`, …) — and
   `tone: hue` colours the cell: `accent`, `success`, `warning`, `danger`,
   `muted`. Unknown values draw nothing. Rows that link somewhere drag
   onto the agent terminal to add the page to its context.

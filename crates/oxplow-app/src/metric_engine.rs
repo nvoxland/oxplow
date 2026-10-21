@@ -409,14 +409,16 @@ pub(crate) fn dim_value_cached(
         }
         // Pseudo-dimensions off the capture/fact spine (not `dims_json`), so
         // `group_by` is uniform server-side (tsk26): branch, the raw subject, and
-        // the model (an `ai_model:<name>` subject → the bare id, else the dims_json
+        // the model (an `oxplow:oxplow/ai_model?name=<name>` subject → the bare id, else the dims_json
         // `oxplow.model`).
         "oxplow.branch" => f.branch.clone(),
         "subject" => f.subject.clone(),
         "oxplow.model" => match &f.subject {
-            Some(s) if f.subject_kind.as_deref() == Some(oxplow_domain::uri::types::AI_MODEL) => {
+            Some(s)
+                if f.subject_kind.as_deref() == Some(oxplow_domain::uri::resources::AI_MODEL) =>
+            {
                 Some(
-                    oxplow_domain::uri::build::id_of(s, oxplow_domain::uri::types::AI_MODEL)
+                    oxplow_domain::uri::build::id_of(s, oxplow_domain::uri::resources::AI_MODEL)
                         .unwrap_or_else(|_| s.clone()),
                 )
             }
@@ -2334,13 +2336,13 @@ mod tests {
             FactRow {
                 numerator: Some(1.0),
                 denominator: Some(1.0),
-                subject: Some("file:a.rs".into()),
+                subject: Some("oxplow:oxplow/file?path=a.rs".into()),
                 ..fact(1, "2026-06-30T10:00:00Z", 1.0)
             },
             FactRow {
                 numerator: Some(0.0),
                 denominator: Some(3.0),
-                subject: Some("file:b.rs".into()),
+                subject: Some("oxplow:oxplow/file?path=b.rs".into()),
                 ..fact(1, "2026-06-30T10:00:00Z", 0.0)
             },
         ];
@@ -2431,13 +2433,13 @@ mod tests {
             FactRow {
                 numerator: Some(1.0),
                 denominator: Some(2.0),
-                subject: Some("file:a.rs".into()),
+                subject: Some("oxplow:oxplow/file?path=a.rs".into()),
                 ..fact(1, "2026-06-30T10:00:00Z", 0.5)
             },
             FactRow {
                 numerator: Some(17.0),
                 denominator: Some(20.0),
-                subject: Some("file:a.rs".into()),
+                subject: Some("oxplow:oxplow/file?path=a.rs".into()),
                 ..fact(2, "2026-06-30T11:00:00Z", 0.85)
             },
         ];
@@ -2561,11 +2563,11 @@ mod tests {
         let f = FactRow {
             path: Some("src/deep/mod.rs".into()),
             subject: Some(oxplow_domain::uri::build::ai_model_uri("opus")),
-            subject_kind: Some("ai_model".into()),
+            subject_kind: Some(oxplow_domain::uri::resources::AI_MODEL.into()),
             branch: Some("feature/x".into()),
             thread_id: Some(4),
             effort_id: Some(9),
-            work_item: Some("work_item:issues:ENG-12".into()),
+            work_item: Some("oxplow:oxplow/work_item?id=ENG-12&provider=issues".into()),
             closest_vcs_rev: Some("abc123".into()),
             severity: Some("error".into()),
             rule: Some("E1".into()),
@@ -2624,7 +2626,7 @@ mod tests {
         let f = FactRow {
             thread_id: Some(4),
             effort_id: Some(9),
-            work_item: Some("work_item:oxplow:tsk12".into()),
+            work_item: Some("oxplow:oxplow/work_item?id=tsk12&provider=oxplow".into()),
             closest_vcs_rev: Some("abc123".into()),
             ..fact(1, "2026-06-30T00:00:00Z", 1.0)
         };
@@ -2644,7 +2646,7 @@ mod tests {
                 Some(f.stream_id.to_string()),
                 Some("4".into()),
                 Some("9".into()),
-                Some("work_item:oxplow:tsk12".into()),
+                Some("oxplow:oxplow/work_item?id=tsk12&provider=oxplow".into()),
                 Some("abc123".into())
             ]
         );
@@ -3071,7 +3073,7 @@ mod tests {
                    VALUES (1, 1, 'One', 'done', 'medium', 'agent', '2026-01-01', '2026-01-01'),
                           (2, 1, 'Two', 'done', 'medium', 'agent', '2026-01-01', '2026-01-01');
                  INSERT INTO effort (id, work_item, thread_id, started_at, ended_at)
-                   VALUES (7, 'work_item:oxplow:tsk1', 1, '2026-01-01', '2026-01-02'), (8, 'work_item:oxplow:tsk2', 1, '2026-01-01', '2026-01-02');",
+                   VALUES (7, 'oxplow:oxplow/work_item?id=tsk1&provider=oxplow', 1, '2026-01-01', '2026-01-02'), (8, 'oxplow:oxplow/work_item?id=tsk2&provider=oxplow', 1, '2026-01-01', '2026-01-02');",
             )
             .map_err(|e| DomainError::Invalid(e.to_string()))
         })
@@ -3118,7 +3120,12 @@ mod tests {
                     .collect::<Vec<_>>()
             }
         };
-        let task = |t: &str| Some(format!("work_item:oxplow:tsk{t}"));
+        let task = |t: &str| {
+            Some(oxplow_domain::uri::build::work_item_uri(
+                "oxplow",
+                &format!("tsk{t}"),
+            ))
+        };
         assert_eq!(
             read(SeriesRead {
                 group_by: Some("oxplow.work_item".into()),
@@ -3143,7 +3150,10 @@ mod tests {
         );
         assert_eq!(
             read(SeriesRead {
-                dim_eq: Some(("oxplow.work_item".into(), "work_item:oxplow:tsk2".into())),
+                dim_eq: Some((
+                    "oxplow.work_item".into(),
+                    "oxplow:oxplow/work_item?id=tsk2&provider=oxplow".into()
+                )),
                 ..SeriesRead::default()
             })
             .await,
@@ -3159,13 +3169,13 @@ mod tests {
                 cap_at("2026-06-30T10:00:00Z"),
                 vec![
                     NewFact {
-                        subject: Some("symbol:a::f".into()),
+                        subject: Some(oxplow_domain::uri::build::symbol_uri("a.rs", "a::f")),
                         path: Some("a.rs".into()),
                         line: Some(3),
                         ..NewFact::new(complexity, 25.0)
                     },
                     NewFact {
-                        subject: Some("symbol:a::g".into()),
+                        subject: Some(oxplow_domain::uri::build::symbol_uri("a.rs", "a::g")),
                         ..NewFact::new(complexity, 12.0)
                     },
                     // Below the filter — not an offender.
@@ -3191,9 +3201,10 @@ mod tests {
                 .unwrap()
         };
         // 25 ≥ fail_at 20 (lower-better) → derived "fail"; 12 crosses neither.
-        assert_eq!(f("symbol:a::f").severity.as_deref(), Some("fail"));
-        assert_eq!(f("symbol:a::f").line, Some(3));
-        assert_eq!(f("symbol:a::g").severity, None);
+        let sym = |name: &str| oxplow_domain::uri::build::symbol_uri("a.rs", name);
+        assert_eq!(f(&sym("a::f")).severity.as_deref(), Some("fail"));
+        assert_eq!(f(&sym("a::f")).line, Some(3));
+        assert_eq!(f(&sym("a::g")).severity, None);
     }
 
     #[tokio::test]
@@ -3207,18 +3218,18 @@ mod tests {
                 cap_at("2026-06-30T10:00:00Z"),
                 vec![
                     NewFact {
-                        subject: Some("file:a.rs".into()),
+                        subject: Some("oxplow:oxplow/file?path=a.rs".into()),
                         path: Some("a.rs".into()),
                         ..NewFact::new(complexity, 0.0)
                     },
                     NewFact {
-                        subject: Some("file:b.rs".into()),
+                        subject: Some("oxplow:oxplow/file?path=b.rs".into()),
                         path: Some("b.rs".into()),
                         ..NewFact::new(complexity, 0.0)
                     },
                     // Covered → not untested, excluded by max_value.
                     NewFact {
-                        subject: Some("file:c.rs".into()),
+                        subject: Some("oxplow:oxplow/file?path=c.rs".into()),
                         ..NewFact::new(complexity, 42.0)
                     },
                 ],
@@ -3246,7 +3257,7 @@ mod tests {
             .record_facts(
                 cap,
                 vec![NewFact {
-                    subject: Some("file:src/a.rs".into()),
+                    subject: Some("oxplow:oxplow/file?path=src/a.rs".into()),
                     ..NewFact::new(complexity, 5.0)
                 }],
             )
@@ -3269,7 +3280,10 @@ mod tests {
             .series_for_spec(&spec, Some("subject"))
             .await
             .unwrap();
-        assert_eq!(by_subject[0].group.as_deref(), Some("file:src/a.rs"));
+        assert_eq!(
+            by_subject[0].group.as_deref(),
+            Some("oxplow:oxplow/file?path=src/a.rs")
+        );
     }
 
     #[tokio::test]
@@ -3280,18 +3294,18 @@ mod tests {
                 cap_at("2026-06-30T10:00:00Z"),
                 vec![
                     NewFact {
-                        subject: Some("file:src/app/a.rs".into()),
+                        subject: Some("oxplow:oxplow/file?path=src/app/a.rs".into()),
                         path: Some("src/app/a.rs".into()),
                         ..NewFact::new(complexity, 12.0)
                     },
                     NewFact {
                         // Below the threshold — must be filtered out before rollup.
-                        subject: Some("file:src/app/b.rs".into()),
+                        subject: Some("oxplow:oxplow/file?path=src/app/b.rs".into()),
                         path: Some("src/app/b.rs".into()),
                         ..NewFact::new(complexity, 3.0)
                     },
                     NewFact {
-                        subject: Some("file:src/util/c.rs".into()),
+                        subject: Some("oxplow:oxplow/file?path=src/util/c.rs".into()),
                         path: Some("src/util/c.rs".into()),
                         ..NewFact::new(complexity, 20.0)
                     },
@@ -3351,7 +3365,7 @@ mod tests {
             path: Some("crates/a/src/lib.rs".into()),
             branch: Some("main".into()),
             subject: Some(oxplow_domain::uri::build::ai_model_uri("opus")),
-            subject_kind: Some("ai_model".into()),
+            subject_kind: Some(oxplow_domain::uri::resources::AI_MODEL.into()),
             ..fact(1, "2026-06-30T10:00:00Z", 1.0)
         };
         assert_eq!(dim_value(&f, "oxplow.language").as_deref(), Some("rust"));
@@ -3493,7 +3507,7 @@ mod tests {
             .await
             .unwrap();
         let case = |subject: &str, value: f64| oxplow_db::NewFact {
-            subject: Some(format!("test:{subject}")),
+            subject: Some(oxplow_domain::uri::build::test_uri("t", subject)),
             ..oxplow_db::NewFact::new(m, value)
         };
         let on = |branch: &str, at: &str| NewMetricCapture {
@@ -3569,7 +3583,7 @@ mod tests {
             .await
             .unwrap();
         let case = |subject: &str, value: f64| oxplow_db::NewFact {
-            subject: Some(format!("test:{subject}")),
+            subject: Some(oxplow_domain::uri::build::test_uri("t", subject)),
             ..oxplow_db::NewFact::new(test_case, value)
         };
         // Worktree 1 runs both cases; worktree 2 then re-runs only `t1`.
@@ -3676,14 +3690,14 @@ mod tests {
                         numerator: Some(17.0),
                         denominator: Some(20.0),
                         path: Some("src/a.rs".into()),
-                        subject: Some("file:src/a.rs".into()),
+                        subject: Some("oxplow:oxplow/file?path=src/a.rs".into()),
                         ..NewFact::new(cov, 85.0)
                     },
                     NewFact {
                         numerator: Some(3.0),
                         denominator: Some(5.0),
                         path: Some("src/b.rs".into()),
-                        subject: Some("file:src/b.rs".into()),
+                        subject: Some("oxplow:oxplow/file?path=src/b.rs".into()),
                         ..NewFact::new(cov, 60.0)
                     },
                 ],

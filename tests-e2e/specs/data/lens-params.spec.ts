@@ -62,7 +62,7 @@ test("the rail's params narrow a lens, a row click shows the next section its pi
 
   // The page's view is its tab's entry: the search and the pick are in
   // its id, so a bookmark or a reopened tab keeps them.
-  const body = page.locator('[data-testid^="center-tab-body-oxplow:oxplow/lens?lens=commit-history/history"]:visible');
+  const body = page.locator('[data-testid^="center-tab-body-oxplow:oxplow/lens?"][data-testid*="lens=commit-history/history"]:visible');
   await expect(body).toHaveAttribute("data-testid", /q=numbat/);
   await expect(body).toHaveAttribute("data-testid", /commit=/);
   // Picking pushed an entry: Back un-selects, the filter stays, and the

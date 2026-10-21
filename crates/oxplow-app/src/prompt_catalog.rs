@@ -81,7 +81,7 @@ mod tests {
                 true,
                 &[
                     ("Which PRs wait on me?", None),
-                    ("Who reviews this commit?", Some("commit")),
+                    ("Who reviews this commit?", Some("oxplow/commit")),
                 ],
             ),
             ext("off", false, &[("Hidden?", None)]),
@@ -89,7 +89,7 @@ mod tests {
         assert!(catalog
             .iter()
             .any(|p| p.prompt == "Who has changed this file the most?"
-                && p.about.as_deref() == Some("file")
+                && p.about.as_deref() == Some("oxplow/file")
                 && p.source == PromptSource::Area("vcs".into())));
         let mine: Vec<_> = catalog
             .iter()
@@ -100,7 +100,7 @@ mod tests {
             mine,
             vec![
                 ("Which PRs wait on me?", None),
-                ("Who reviews this commit?", Some("commit"))
+                ("Who reviews this commit?", Some("oxplow/commit"))
             ]
         );
         assert!(!catalog.iter().any(|p| p.prompt == "Hidden?"));

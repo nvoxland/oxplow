@@ -905,9 +905,9 @@ impl MetricsService {
             return Err(format!("`{name}` is reserved for oxplow's own extensions"));
         }
         if let Some(origin) = origin.as_deref() {
-            oxplow_domain::uri::grammar::Uri::parse(origin).map_err(|e| {
+            oxplow_domain::uri::OxplowUri::parse(origin).map_err(|e| {
                 format!(
-                    "origin `{origin}` is not a canonical ref (`effort:eff42`, `thread:thr3`): {}",
+                    "origin `{origin}` is not a canonical ref (`oxplow:oxplow/effort?id=eff42`, `oxplow:oxplow/thread?id=thr3`): {}",
                     e.reason()
                 )
             })?;
@@ -2484,16 +2484,16 @@ impl MetricsService {
                 f.measure
             ));
         }
-        // A subject is one ref (`file:src/a.rs`): the grammar is strict at
+        // A subject is one ref (`oxplow:oxplow/file?path=src/a.rs`): the grammar is strict at
         // writes, and a bare string would be no identity at all.
         if let Some((f, subject)) = collector_facts.iter().find_map(|f| {
             f.subject
                 .as_deref()
-                .filter(|s| oxplow_domain::uri::build::type_of(s).is_none())
+                .filter(|s| oxplow_domain::uri::build::resource_of(s).is_none())
                 .map(|s| (f, s))
         }) {
             return Some(format!(
-                "a fact for `{}` whose subject `{subject}` isn't a ref (`<kind>:<id>`, like `file:src/a.rs`; build one with `ref.build`)",
+                "a fact for `{}` whose subject `{subject}` isn't a URI (`oxplow:<extension>/<resource>?…`, like `oxplow:oxplow/file?path=src/a.rs`; build one with `uri.build`)",
                 f.measure
             ));
         }
@@ -2880,7 +2880,7 @@ fn collector_fingerprint(collector: &FactCollector, root: &Path) -> Option<Strin
     Some(crate::blob_store::BlobStore::hash(material.as_bytes()))
 }
 
-/// Trust label: in-process tiers are `observed` under a `metric:<key>` source;
+/// Trust label: in-process tiers are `observed` under a `oxplow:oxplow/metric?metric=<key>` source;
 /// the `exec` escape hatch is flagged `exec:<name>` (lower-trust).
 fn collector_source(collector: &FactCollector) -> String {
     if collector.runtime == CollectorRuntime::Exec {
@@ -3119,7 +3119,7 @@ mod tests {
         let (svc, dir) = fixture().await;
         std::fs::write(
             project_ext_file(dir.path(), "once.star"),
-            "def transform(input):\n    return {\"facts\": [{\"measure\": \"oxplow.ast_hit\", \"value\": 1, \"rule\": \"once\", \"subject\": \"tree:.\"}]}\n",
+            "def transform(input):\n    return {\"facts\": [{\"measure\": \"oxplow.ast_hit\", \"value\": 1, \"rule\": \"once\", \"subject\": \"oxplow:oxplow/dir?path=.\"}]}\n",
         )
         .unwrap();
         declare_project_collectors(
@@ -3141,7 +3141,7 @@ mod tests {
                 c.query_row(
                     "SELECT (SELECT count(*) FROM metric_capture WHERE producer = 'repo.once'),
                             (SELECT count(*) FROM event_log WHERE type = 'collector.synced'
-                               AND json_extract(payload, '$.collector') = 'collector:project/repo.once')",
+                               AND json_extract(payload, '$.collector') = 'oxplow:oxplow/collector?collector=project/repo.once')",
                     [],
                     |r| Ok((r.get(0)?, r.get(1)?)),
                 )
@@ -3160,7 +3160,7 @@ mod tests {
         let (svc, dir) = fixture().await;
         std::fs::write(
             project_ext_file(dir.path(), "seen.star"),
-            "def transform(input):\n    return {\"facts\": [{\"measure\": \"oxplow.ast_hit\", \"value\": 1, \"rule\": json.encode(input[\"event\"]), \"subject\": \"tree:.\"}]}\n",
+            "def transform(input):\n    return {\"facts\": [{\"measure\": \"oxplow.ast_hit\", \"value\": 1, \"rule\": json.encode(input[\"event\"]), \"subject\": \"oxplow:oxplow/dir?path=.\"}]}\n",
         )
         .unwrap();
         declare_project_collectors(
@@ -3204,7 +3204,7 @@ mod tests {
         let (svc, dir) = fixture().await;
         std::fs::write(
             project_ext_file(dir.path(), "seen.star"),
-            "def transform(input):\n    return {\"facts\": [{\"measure\": \"oxplow.ast_hit\", \"value\": 1, \"rule\": \"seen\", \"subject\": \"file:\" + f[\"path\"], \"path\": f[\"path\"]} for f in files(\"**\")]}\n",
+            "def transform(input):\n    return {\"facts\": [{\"measure\": \"oxplow.ast_hit\", \"value\": 1, \"rule\": \"seen\", \"subject\": uri.build(\"oxplow/file\", path = f[\"path\"]), \"path\": f[\"path\"]} for f in files(\"**\")]}\n",
         )
         .unwrap();
         let root = dir.path().to_path_buf();
@@ -3288,8 +3288,11 @@ mod tests {
         let env = oxplow_domain::Envelope::typed::<oxplow_domain::events::schema::SnapshotTaken>(
             "system",
             &oxplow_domain::events::schema::SnapshotTakenV2 {
-                stream: "stream:1".into(),
-                snapshot: format!("snapshot:{snap}"),
+                stream: "oxplow:oxplow/stream?id=1".into(),
+                snapshot: oxplow_domain::uri::build::keyed(
+                    oxplow_domain::uri::resources::SNAPSHOT,
+                    &snap.to_string(),
+                ),
                 parent: None,
                 trigger,
                 unchanged,
@@ -3482,7 +3485,15 @@ mod tests {
         settle().await;
         let both = current().await;
         assert_eq!(both.len(), 2, "both sides of the copy: {both:?}");
-        assert!(both[0].starts_with("block:src/a.rs:") && both[1].starts_with("block:src/b.rs:"));
+        let mut block_paths: Vec<String> = both
+            .iter()
+            .map(|b| {
+                oxplow_domain::uri::build::param_of(b, oxplow_domain::uri::resources::BLOCK, "path")
+                    .unwrap()
+            })
+            .collect();
+        block_paths.sort();
+        assert_eq!(block_paths, ["src/a.rs", "src/b.rs"], "{both:?}");
 
         // The copy goes; the next ref move clears the metric.
         let third = snapshot_with_content(&svc, &[("src/b.rs", None)]).await;
@@ -3547,7 +3558,7 @@ mod tests {
         let (svc, dir) = fixture().await;
         std::fs::write(
             project_ext_file(dir.path(), "once.star"),
-            "def transform(input):\n    return {\"facts\": [{\"measure\": \"oxplow.ast_hit\", \"value\": 1, \"rule\": \"once\", \"subject\": \"tree:.\"}]}\n",
+            "def transform(input):\n    return {\"facts\": [{\"measure\": \"oxplow.ast_hit\", \"value\": 1, \"rule\": \"once\", \"subject\": \"oxplow:oxplow/dir?path=.\"}]}\n",
         )
         .unwrap();
         declare_project_collectors(
@@ -3618,7 +3629,7 @@ mod tests {
         let (svc, dir) = fixture().await;
         std::fs::write(
             project_ext_file(dir.path(), "bare.star"),
-            "def transform(input):\n    return {\"facts\": [{\"measure\": \"oxplow.ast_hit\", \"value\": 1, \"rule\": \"bare\", \"subject\": \"tree:.\", \"dims\": {\"language\": \"rust\"}}]}\n",
+            "def transform(input):\n    return {\"facts\": [{\"measure\": \"oxplow.ast_hit\", \"value\": 1, \"rule\": \"bare\", \"subject\": \"oxplow:oxplow/dir?path=.\", \"dims\": {\"language\": \"rust\"}}]}\n",
         )
         .unwrap();
         declare_project_collectors(
@@ -3681,7 +3692,7 @@ mod tests {
         std::fs::write(
             project_ext_file(dir.path(), &format!("{id}.star")),
             format!(
-                "def transform(input):\n    return {{\"facts\": [{{\"measure\": \"{measure}\", \"value\": 1, \"subject\": \"file:src/a.rs\"}}]}}\n"
+                "def transform(input):\n    return {{\"facts\": [{{\"measure\": \"{measure}\", \"value\": 1, \"subject\": \"oxplow:oxplow/file?path=src/a.rs\"}}]}}\n"
             ),
         )
         .unwrap();
@@ -3850,7 +3861,7 @@ def transform(input):
     for f in files("**/*.rs"):
         c = len(ast_query(f["text"], "rust", "(unsafe_block) @u"))
         if c > 0:
-            facts.append({"measure": "oxplow.ast_hit", "value": c, "rule": "unsafe_block", "subject": "file:" + f["path"], "path": f["path"], "dims": {"oxplow.language": "rust"}})
+            facts.append({"measure": "oxplow.ast_hit", "value": c, "rule": "unsafe_block", "subject": uri.build("oxplow/file", path = f["path"]), "path": f["path"], "dims": {"oxplow.language": "rust"}})
     return {"facts": facts}
 "#,
         )
@@ -3898,14 +3909,23 @@ def transform(input):
         let facts = svc.fact_store.facts_for_measure(measure.id).await.unwrap();
         assert_eq!(facts.len(), 1);
         assert_eq!(facts[0].value, 2.0, "two unsafe blocks in src/a.rs");
-        assert_eq!(facts[0].subject_kind.as_deref(), Some("file"));
-        assert_eq!(facts[0].subject.as_deref(), Some("file:src/a.rs"));
+        assert_eq!(
+            facts[0].subject_kind.as_deref(),
+            Some(oxplow_domain::uri::resources::FILE)
+        );
+        assert_eq!(
+            facts[0].subject.as_deref(),
+            Some("oxplow:oxplow/file?path=src/a.rs")
+        );
         assert_eq!(facts[0].path.as_deref(), Some("src/a.rs"));
         assert_eq!(facts[0].rule.as_deref(), Some("unsafe_block"));
         // The capture spine carries the run's version + branch + source.
         assert_eq!(facts[0].closest_vcs_rev.as_deref(), Some("abc1234"));
         assert_eq!(facts[0].branch.as_deref(), Some("metrics-substrate"));
-        assert_eq!(facts[0].source, "metric:repo.unsafe_blocks");
+        assert_eq!(
+            facts[0].source,
+            "oxplow:oxplow/metric?metric=repo.unsafe_blocks"
+        );
         assert_eq!(
             facts[0].dims_json.as_deref(),
             Some("{\"oxplow.language\":\"rust\"}")
@@ -4344,7 +4364,7 @@ def transform(input):
         write(
             "def transform(input):\n    \
              return {\"facts\": [{\"measure\": \"oxplow.todo\", \"value\": 1.0, \
-             \"subject\": \"file:a.rs\", \"path\": \"a.rs\"}]}\n",
+             \"subject\": \"oxplow:oxplow/file?path=a.rs\", \"path\": \"a.rs\"}]}\n",
         );
         let collector =
             starlark_collector_emits("acme.g", "metrics/g.star", vec!["oxplow.todo".to_string()]);
@@ -4379,7 +4399,7 @@ def transform(input):
         write(
             "def transform(input):\n    \
              return {\"facts\": [{\"measure\": \"oxplow.todo\", \"value\": 5.0, \
-             \"subject\": \"file:a.rs\", \"path\": \"a.rs\"}]}\n",
+             \"subject\": \"oxplow:oxplow/file?path=a.rs\", \"path\": \"a.rs\"}]}\n",
         );
         assert!(
             svc.metrics.collector_is_stale(&collector, 1).await,
@@ -4565,7 +4585,7 @@ def transform(input):
             project_ext_file(dir.path(), "metrics/eff.star"),
             r#"
 def transform(input):
-    return {"facts": [{"measure": "oxplow.ast_hit", "value": 1, "rule": "eff", "subject": "tree:."}]}
+    return {"facts": [{"measure": "oxplow.ast_hit", "value": 1, "rule": "eff", "subject": "oxplow:oxplow/dir?path=."}]}
 "#,
         )
         .unwrap();
@@ -4641,7 +4661,7 @@ def transform(input):
         crate::collector_triggers::register(&svc);
         std::fs::write(
             project_ext_file(dir.path(), "metrics/eff.star"),
-            "def transform(input):\n    return {\"facts\": [{\"measure\": \"oxplow.ast_hit\", \"value\": 1, \"rule\": \"eff\", \"subject\": \"tree:.\"}]}\n",
+            "def transform(input):\n    return {\"facts\": [{\"measure\": \"oxplow.ast_hit\", \"value\": 1, \"rule\": \"eff\", \"subject\": \"oxplow:oxplow/dir?path=.\"}]}\n",
         )
         .unwrap();
         declare_project_collectors(
@@ -4725,8 +4745,14 @@ def transform(input):
         let facts = svc.fact_store.facts_for_measure(measure.id).await.unwrap();
         assert_eq!(facts.len(), 1, "one function → one fact");
         assert_eq!(facts[0].path.as_deref(), Some("src/a.rs"));
-        assert_eq!(facts[0].subject_kind.as_deref(), Some("symbol"));
-        assert_eq!(facts[0].subject.as_deref(), Some("symbol:src/a.rs/big"));
+        assert_eq!(
+            facts[0].subject_kind.as_deref(),
+            Some(oxplow_domain::uri::resources::SYMBOL)
+        );
+        assert_eq!(
+            facts[0].subject.as_deref(),
+            Some("oxplow:oxplow/symbol?path=src/a.rs&symbol=big")
+        );
         assert!(facts[0].value >= 3.0);
     }
 
@@ -4859,8 +4885,8 @@ def transform(input):
             r#"
 def transform(input):
     return {"facts": [
-        {"measure": "oxplow.complexity", "value": 5, "subject": "symbol:src/a.rs::foo"},
-        {"measure": "acme.undefined", "value": 9, "subject": "symbol:src/a.rs::bar"},
+        {"measure": "oxplow.complexity", "value": 5, "subject": "oxplow:oxplow/symbol?path=src/a.rs&symbol=foo"},
+        {"measure": "acme.undefined", "value": 9, "subject": "oxplow:oxplow/symbol?path=src/a.rs&symbol=bar"},
     ]}
 "#,
         )
@@ -4923,8 +4949,8 @@ def transform(input):
             r#"
 def transform(input):
     return {"facts": [
-        {"measure": "oxplow.complexity", "value": 5, "subject": "symbol:src/a.rs::foo"},
-        {"measure": "oxplow.fn_length", "value": 9, "subject": "symbol:src/a.rs::bar"},
+        {"measure": "oxplow.complexity", "value": 5, "subject": "oxplow:oxplow/symbol?path=src/a.rs&symbol=foo"},
+        {"measure": "oxplow.fn_length", "value": 9, "subject": "oxplow:oxplow/symbol?path=src/a.rs&symbol=bar"},
     ]}
 "#,
         )
@@ -4996,7 +5022,7 @@ def transform(input):
 def transform(input):
     return {"facts": [
         {"measure": "oxplow.complexity", "value": 0.5, "num": 3, "den": 6,
-         "subject": "file:src/a.rs"},
+         "subject": "oxplow:oxplow/file?path=src/a.rs"},
     ]}
 "#,
         )
@@ -5243,7 +5269,10 @@ def transform(input):
             .iter()
             .find(|s| s.key == "oxplow.tests.failed")
             .expect("the use: resolves");
-        assert_eq!(failed.scope, "extension:oxplow-foundation");
+        assert_eq!(
+            failed.scope,
+            "oxplow:oxplow/extension?name=oxplow-foundation"
+        );
         let spec = svc
             .fact_store
             .get_spec("oxplow.tests.failed")
@@ -5320,11 +5349,11 @@ def transform(input):
                 c.execute_batch(
                     // The active list's items, as the interface holds them.
                     "INSERT INTO work_item (ref, provider, title, state, native_state, native, thread_id, created_at, updated_at, closed_at) VALUES
-                       ('work_item:oxplow:tsk1', 'oxplow', 'a', 'done', 'done', '{\"priority\":\"high\"}', (SELECT min(id) FROM threads), '2026-09-01', '2026-09-01', '2026-09-21T09:00:00Z'),
-                       ('work_item:oxplow:tsk2', 'oxplow', 'b', 'done', 'done', '{\"priority\":\"low\"}', (SELECT min(id) FROM threads), '2026-09-01', '2026-09-01', '2026-09-23T09:00:00Z'),
-                       ('work_item:oxplow:tsk3', 'oxplow', 'c', 'todo', 'ready', '{\"priority\":\"high\"}', (SELECT min(id) FROM threads), '2026-09-01', '2026-09-01', NULL),
-                       ('work_item:oxplow:tsk4', 'oxplow', 'd', 'blocked', 'blocked', '{\"priority\":\"low\"}', (SELECT min(id) FROM threads), '2026-09-01', '2026-09-01', NULL),
-                       ('work_item:oxplow:tsk5', 'oxplow', 'e', 'todo', 'ready', '{\"priority\":\"high\"}', (SELECT min(id) FROM threads), '2026-09-01', '2026-09-01', NULL);",
+                       ('oxplow:oxplow/work_item?id=tsk1&provider=oxplow', 'oxplow', 'a', 'done', 'done', '{\"priority\":\"high\"}', (SELECT min(id) FROM threads), '2026-09-01', '2026-09-01', '2026-09-21T09:00:00Z'),
+                       ('oxplow:oxplow/work_item?id=tsk2&provider=oxplow', 'oxplow', 'b', 'done', 'done', '{\"priority\":\"low\"}', (SELECT min(id) FROM threads), '2026-09-01', '2026-09-01', '2026-09-23T09:00:00Z'),
+                       ('oxplow:oxplow/work_item?id=tsk3&provider=oxplow', 'oxplow', 'c', 'todo', 'ready', '{\"priority\":\"high\"}', (SELECT min(id) FROM threads), '2026-09-01', '2026-09-01', NULL),
+                       ('oxplow:oxplow/work_item?id=tsk4&provider=oxplow', 'oxplow', 'd', 'blocked', 'blocked', '{\"priority\":\"low\"}', (SELECT min(id) FROM threads), '2026-09-01', '2026-09-01', NULL),
+                       ('oxplow:oxplow/work_item?id=tsk5&provider=oxplow', 'oxplow', 'e', 'todo', 'ready', '{\"priority\":\"high\"}', (SELECT min(id) FROM threads), '2026-09-01', '2026-09-01', NULL);",
                 )
                 .map_err(|e| oxplow_domain::DomainError::Invalid(e.to_string()))
             })
@@ -5426,7 +5455,7 @@ def transform(input):
             .expect("seeded");
         assert_eq!(spec.display_kind, "gauge"); // displayKind defaults to gauge
         assert_eq!(spec.aggregation, "sum");
-        assert_eq!(spec.scope, "extension:project");
+        assert_eq!(spec.scope, "oxplow:oxplow/extension?name=project");
         assert_eq!(spec.source_measure.as_deref(), Some("acme.lines"));
     }
 
@@ -5451,7 +5480,7 @@ def transform(input):
             .await
             .unwrap()
             .expect("seeded");
-        assert_eq!(spec.scope, "extension:oxplow-foundation");
+        assert_eq!(spec.scope, "oxplow:oxplow/extension?name=oxplow-foundation");
         assert_eq!(spec.target, Some(5.0));
         assert_eq!(spec.warn_at, Some(8.0));
         assert_eq!(spec.fail_at, Some(13.0));
@@ -5477,7 +5506,7 @@ def transform(input):
             .await
             .unwrap()
             .expect("measure seeded");
-        assert_eq!(measure.scope, "extension:project");
+        assert_eq!(measure.scope, "oxplow:oxplow/extension?name=project");
         assert_eq!(measure.unit.as_deref(), Some("ms"));
         assert_eq!(measure.temporal_semantics, "non-additive");
 
@@ -5486,7 +5515,7 @@ def transform(input):
             .iter()
             .find(|d| d.key == "acme.endpoint")
             .expect("dimension seeded");
-        assert_eq!(ep.scope, "extension:project");
+        assert_eq!(ep.scope, "oxplow:oxplow/extension?name=project");
         assert_eq!(ep.vocabulary_json.as_deref(), Some("[\"list\",\"get\"]"));
     }
 
@@ -5499,14 +5528,14 @@ def transform(input):
         // Zombies: a project measure + spec that no config declares.
         svc.fact_store
             .upsert_measure(oxplow_db::NewMeasure {
-                scope: "extension:project".into(),
+                scope: "oxplow:oxplow/extension?name=project".into(),
                 ..oxplow_db::NewMeasure::new("repo.zombie", "Zombie")
             })
             .await
             .unwrap();
         let mut spec =
             oxplow_db::NewMetricSpec::base("repo.zombie", "Zombie", "repo.zombie", "sum");
-        spec.scope = "extension:project".into();
+        spec.scope = "oxplow:oxplow/extension?name=project".into();
         svc.fact_store.upsert_spec(spec).await.unwrap();
         // A DECLARED project measure+metric that must survive.
         write_project_extension(
@@ -5645,7 +5674,7 @@ def transform(input):
             .await
             .unwrap()
             .expect("seeded");
-        assert_eq!(spec.scope, "extension:oxplow-foundation");
+        assert_eq!(spec.scope, "oxplow:oxplow/extension?name=oxplow-foundation");
         let cat = svc.metrics.catalog().await;
         let entry = cat
             .iter()
@@ -5677,7 +5706,10 @@ def transform(input):
         let (svc, _dir) = fixture().await;
         for key in ["oxplow.tokens", "oxplow.complexity"] {
             let measure = svc.fact_store.get_measure(key).await.unwrap().unwrap();
-            assert_eq!(measure.scope, "extension:oxplow-foundation", "{key}");
+            assert_eq!(
+                measure.scope, "oxplow:oxplow/extension?name=oxplow-foundation",
+                "{key}"
+            );
         }
         let measures = svc.fact_store.list_measures().await.unwrap();
         assert!(
@@ -5702,7 +5734,10 @@ def transform(input):
             .into_iter()
             .find(|e| e.key == "agent.tokens.total")
             .unwrap();
-        assert_eq!(total.scope, "extension:oxplow-foundation");
+        assert_eq!(
+            total.scope,
+            "oxplow:oxplow/extension?name=oxplow-foundation"
+        );
         assert!(total.enabled && total.toggleable);
     }
 
@@ -5752,14 +5787,14 @@ def transform(input):
             .await
             .unwrap()
             .expect("seeded");
-        assert_eq!(spec.scope, "extension:acme");
+        assert_eq!(spec.scope, "oxplow:oxplow/extension?name=acme");
         let measure = svc
             .fact_store
             .get_measure("acme.todo")
             .await
             .unwrap()
             .expect("measure");
-        assert_eq!(measure.scope, "extension:acme");
+        assert_eq!(measure.scope, "oxplow:oxplow/extension?name=acme");
         let entry = svc
             .metrics
             .catalog()
@@ -5857,7 +5892,7 @@ def transform(input):
             .await
             .unwrap()
             .expect("the first extension's metric is still active");
-        assert_eq!(spec.scope, "extension:alpha");
+        assert_eq!(spec.scope, "oxplow:oxplow/extension?name=alpha");
     }
 
     #[tokio::test]
@@ -5902,7 +5937,7 @@ def transform(input):
             .await
             .unwrap()
             .expect("seeded once on");
-        assert_eq!(spec.scope, "extension:oxplow-foundation");
+        assert_eq!(spec.scope, "oxplow:oxplow/extension?name=oxplow-foundation");
     }
 
     #[tokio::test]
@@ -5981,7 +6016,7 @@ def transform(input):
             .iter()
             .find(|d| d.key == "acme.status")
             .expect("seeded");
-        assert_eq!(d.scope, "extension:acme");
+        assert_eq!(d.scope, "oxplow:oxplow/extension?name=acme");
         let spec = svc
             .fact_store
             .get_spec("acme.tasks")
@@ -6056,7 +6091,10 @@ def transform(input):
             .iter()
             .find(|e| e.key == "oxplow.rust.unsafe_blocks")
             .expect("built-in present");
-        assert_eq!(entry.scope, "extension:oxplow-foundation");
+        assert_eq!(
+            entry.scope,
+            "oxplow:oxplow/extension?name=oxplow-foundation"
+        );
         assert!(!entry.enabled, "not enabled before use:");
         assert!(entry.toggleable, "code collectors are toggleable");
         // Matches the seeded spec's category (builtin_ast_specs), so the Catalog
@@ -6081,7 +6119,7 @@ def transform(input):
             .await
             .unwrap()
             .expect("spec seeded on enable (T-E2)");
-        assert_eq!(spec.scope, "extension:oxplow-foundation");
+        assert_eq!(spec.scope, "oxplow:oxplow/extension?name=oxplow-foundation");
         let yaml = std::fs::read_to_string(oxplow_config::config_path(dir.path())).unwrap();
         assert!(
             yaml.contains("oxplow.rust.unsafe_blocks"),
@@ -6308,7 +6346,7 @@ def transform(input):
             .metrics
             .metric_scaffold(
                 "complex-fns",
-                Some("thread:thr1".to_string()),
+                Some("oxplow:oxplow/thread?id=thr1".to_string()),
                 Some("rust".to_string()),
                 Some("src/**/*.rs".to_string()),
             )
@@ -6329,7 +6367,9 @@ def transform(input):
         assert!(script.contains("GLOB = \"src/**/*.rs\""), "{script}");
         assert!(script.contains("complex_fns.complex_functions"), "{script}");
         assert!(
-            t.files[0].content.contains("origin: thread:thr1"),
+            t.files[0]
+                .content
+                .contains("origin: oxplow:oxplow/thread?id=thr1"),
             "{}",
             t.files[0].content
         );
@@ -6353,7 +6393,7 @@ def transform(input):
             .await
             .unwrap()
             .expect("scaffolded spec seeds once written");
-        assert_eq!(spec.scope, "extension:complex-fns");
+        assert_eq!(spec.scope, "oxplow:oxplow/extension?name=complex-fns");
         assert_eq!(spec.display_kind, "findings");
         let measure = svc
             .fact_store

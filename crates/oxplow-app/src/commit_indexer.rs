@@ -23,12 +23,12 @@
 use std::path::Path;
 
 use oxplow_db::page_ref_projections::{
-    KIND_COMMIT, KIND_FILE, KIND_FINDING, KIND_WIKI, KIND_WORK_ITEM, RT_BODY_COMMIT,
-    RT_BODY_FINDING, RT_BODY_WORK_ITEM, RT_TOUCHED_FILE, RT_WIKILINK,
+    RT_BODY_COMMIT, RT_BODY_FINDING, RT_BODY_WORK_ITEM, RT_TOUCHED_FILE, RT_WIKILINK,
 };
 use oxplow_db::{PageRefEdge, SqlitePageRefStore};
+use oxplow_domain::uri::build;
 use oxplow_domain::uri::extract;
-use oxplow_domain::uri::types::TypeRegistry;
+use oxplow_domain::uri::resources::ResourceRegistry;
 use oxplow_domain::vcs::{Branch, LogQuery, RevisionDetail, Vcs};
 
 /// How far a pass walks from a head. It reads `window` revisions, and
@@ -54,8 +54,9 @@ impl IndexDepth {
 
 /// Pure: build the edge set for one commit. Exposed so tests can
 /// exercise the projection independently of a real repo.
-pub fn commit_edges(kinds: &TypeRegistry, detail: &RevisionDetail) -> Vec<PageRefEdge> {
+pub fn commit_edges(kinds: &ResourceRegistry, detail: &RevisionDetail) -> Vec<PageRefEdge> {
     let sha = detail.info.id.as_str();
+    let source = build::commit_uri(sha);
     let mut out = Vec::new();
     // touched-file edges from the diff.
     for f in &detail.files {
@@ -63,10 +64,8 @@ pub fn commit_edges(kinds: &TypeRegistry, detail: &RevisionDetail) -> Vec<PageRe
             continue;
         }
         out.push(PageRefEdge::new(
-            KIND_COMMIT,
-            sha,
-            KIND_FILE,
-            f.path.clone(),
+            &source,
+            build::file_uri(&f.path),
             RT_TOUCHED_FILE,
         ));
     }
@@ -82,29 +81,15 @@ pub fn commit_edges(kinds: &TypeRegistry, detail: &RevisionDetail) -> Vec<PageRe
     }
     let refs = extract(kinds, &combined);
     for item in refs.work_items {
-        out.push(PageRefEdge::new(
-            KIND_COMMIT,
-            sha,
-            KIND_WORK_ITEM,
-            item,
-            RT_BODY_WORK_ITEM,
-        ));
+        out.push(PageRefEdge::new(&source, item, RT_BODY_WORK_ITEM));
     }
     for w in refs.wikis {
-        out.push(PageRefEdge::new(
-            KIND_COMMIT,
-            sha,
-            KIND_WIKI,
-            w,
-            RT_WIKILINK,
-        ));
+        out.push(PageRefEdge::new(&source, build::wiki_uri(&w), RT_WIKILINK));
     }
     for f in refs.findings {
         out.push(PageRefEdge::new(
-            KIND_COMMIT,
-            sha,
-            KIND_FINDING,
-            f,
+            &source,
+            build::finding_uri(&f),
             RT_BODY_FINDING,
         ));
     }
@@ -115,10 +100,8 @@ pub fn commit_edges(kinds: &TypeRegistry, detail: &RevisionDetail) -> Vec<PageRe
             continue;
         }
         out.push(PageRefEdge::new(
-            KIND_COMMIT,
-            sha,
-            KIND_COMMIT,
-            c,
+            &source,
+            build::commit_uri(&c),
             RT_BODY_COMMIT,
         ));
     }
@@ -130,7 +113,7 @@ pub fn commit_edges(kinds: &TypeRegistry, detail: &RevisionDetail) -> Vec<PageRe
 /// `v_commit_file`) and project it into `page_ref`. Returns the ones
 /// newly indexed, with when each was committed.
 pub async fn index_recent(
-    kinds: &TypeRegistry,
+    kinds: &ResourceRegistry,
     vcs: &dyn Vcs,
     ws: &Path,
     page_refs: &SqlitePageRefStore,
@@ -181,7 +164,7 @@ pub async fn index_recent(
 /// Store and project one revision; when it was committed, if it was
 /// stored.
 async fn index_one(
-    kinds: &TypeRegistry,
+    kinds: &ResourceRegistry,
     vcs: &dyn Vcs,
     ws: &Path,
     page_refs: &SqlitePageRefStore,
@@ -192,7 +175,10 @@ async fn index_one(
         return None;
     };
     let edges = commit_edges(kinds, &detail);
-    if let Err(e) = page_refs.replace_source(KIND_COMMIT, sha, edges).await {
+    if let Err(e) = page_refs
+        .replace_source(&build::commit_uri(sha), edges)
+        .await
+    {
         tracing::warn!(?e, %sha, "commit indexer write failed");
         return None;
     }
@@ -233,7 +219,7 @@ pub async fn refresh(svc: &crate::Services) -> usize {
     let mut n = 0;
     for (ws, stream) in workspaces.iter().zip(&stream_of) {
         let indexed = index_recent(
-            &vocabulary.kinds,
+            &vocabulary.resources,
             &*svc.vcs,
             ws,
             &svc.page_ref_store,
@@ -397,8 +383,9 @@ mod tests {
     use super::*;
 
     /// The core kinds with oxplow's tasks as the work list (`tsk<n>`).
-    fn tasks_kinds() -> oxplow_domain::uri::types::TypeRegistry {
-        oxplow_domain::uri::types::core_types()
+    fn tasks_kinds() -> oxplow_domain::uri::resources::ResourceRegistry {
+        oxplow_domain::uri::resources::foundation()
+            .clone()
             .with_work_item_ids("oxplow", r"tsk\d+")
             .unwrap()
     }
@@ -440,10 +427,10 @@ mod tests {
         let files: std::collections::BTreeSet<_> = edges
             .iter()
             .filter(|e| e.ref_type == "touched_file")
-            .map(|e| e.target_id.as_str())
+            .map(|e| e.target.as_str())
             .collect();
-        assert!(files.contains("src/app.rs"));
-        assert!(files.contains("src/lib.rs"));
+        assert!(files.contains(oxplow_domain::uri::build::file_uri("src/app.rs").as_str()));
+        assert!(files.contains(oxplow_domain::uri::build::file_uri("src/lib.rs").as_str()));
     }
 
     #[test]
@@ -455,13 +442,11 @@ mod tests {
             &[],
         );
         let edges = commit_edges(&tasks_kinds(), &c);
-        let targets: Vec<_> = edges
-            .iter()
-            .map(|e| (e.target_kind.as_str(), e.target_id.as_str()))
-            .collect();
-        assert!(targets.contains(&("work_item", "oxplow:tsk42")));
-        assert!(targets.contains(&("wiki", "architecture")));
-        assert!(targets.contains(&("finding", "fnd-7")));
+        let targets: Vec<_> = edges.iter().map(|e| e.target.clone()).collect();
+        use oxplow_domain::uri::build;
+        assert!(targets.contains(&build::work_item_uri("oxplow", "tsk42")));
+        assert!(targets.contains(&build::wiki_uri("architecture")));
+        assert!(targets.contains(&build::finding_uri("fnd-7")));
     }
 
     #[test]
@@ -471,9 +456,8 @@ mod tests {
         let c = commit("abc1234567890def", "revert abc1234", "", &[]);
         let edges = commit_edges(&tasks_kinds(), &c);
         assert!(
-            !edges
-                .iter()
-                .any(|e| e.ref_type == "commit_mention" && e.target_id == "abc1234"),
+            !edges.iter().any(|e| e.ref_type == "commit_mention"
+                && e.target == oxplow_domain::uri::build::commit_uri("abc1234")),
             "self-ref must be dropped"
         );
     }
@@ -637,16 +621,29 @@ mod tests {
 
         // tsk42 has the commit as a backlink.
         let inbound = page_refs
-            .list_backlinks("work_item", "oxplow:tsk42", None)
+            .list_backlinks(
+                &oxplow_domain::uri::build::work_item_uri("oxplow", "tsk42"),
+                None,
+            )
             .await
             .unwrap();
-        assert!(inbound.iter().any(|e| e.source_kind == "commit"));
+        assert!(inbound
+            .iter()
+            .any(
+                |e| oxplow_domain::uri::build::resource_of(&e.source).as_deref()
+                    == Some("oxplow/commit")
+            ));
         // file backlink covers a.rs.
         let file_inbound = page_refs
-            .list_backlinks("file", "a.rs", None)
+            .list_backlinks(&oxplow_domain::uri::build::file_uri("a.rs"), None)
             .await
             .unwrap();
-        assert!(file_inbound.iter().any(|e| e.source_kind == "commit"));
+        assert!(file_inbound
+            .iter()
+            .any(
+                |e| oxplow_domain::uri::build::resource_of(&e.source).as_deref()
+                    == Some("oxplow/commit")
+            ));
 
         // Re-index — nothing new.
         let n2 = index_recent(

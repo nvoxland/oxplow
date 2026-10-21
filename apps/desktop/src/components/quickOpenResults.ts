@@ -49,8 +49,7 @@ export function dedupeSiteHits(
   hits: SearchHit[],
   matchedFilePaths: ReadonlySet<string>,
 ): SearchHit[] {
-  // URI-SWITCH: a hit's `kind` is a resource name.
-  return hits.filter((h) => !(h.kind === "oxplow/file" && matchedFilePaths.has(keyOf(h.ref) ?? "")));
+  return hits.filter((h) => !(h.resource === "oxplow/file" && matchedFilePaths.has(keyOf(h.uri) ?? "")));
 }
 
 /// Split a query on whitespace and require each token to fuzzy-match
@@ -97,7 +96,7 @@ function isExactMatch(r: QuickOpenResult, q: string): boolean {
       return base.toLowerCase() === q || r.file.path.toLowerCase() === q;
     }
     case "hit":
-      return r.hit.title.toLowerCase() === q || (keyOf(r.hit.ref) ?? "").toLowerCase() === q;
+      return r.hit.title.toLowerCase() === q || (keyOf(r.hit.uri) ?? "").toLowerCase() === q;
     case "ask":
       return false;
   }
@@ -114,7 +113,7 @@ function resultKey(r: QuickOpenResult): string {
     case "file":
       return fileUri(r.file.path);
     case "hit":
-      return `hit:${r.hit.ref}:${r.hit.stream_id ?? ""}`;
+      return `hit:${r.hit.uri}:${r.hit.stream_id ?? ""}`;
     case "ask":
       return "ask";
   }
@@ -178,7 +177,7 @@ export function buildQuickOpenResults(input: {
     input.currentStreamId == null
       ? input.siteHits
       : input.siteHits.filter(
-          (h) => h.kind !== "oxplow/file" || h.stream_id == null || h.stream_id === input.currentStreamId,
+          (h) => h.resource !== "oxplow/file" || h.stream_id == null || h.stream_id === input.currentStreamId,
         );
   const dedupedHits = dedupeSiteHits(streamScopedHits, matchedPathsAll);
   const fileResultsAll: QuickOpenResult[] = matchedFilesAll.map((file) => ({ kind: "file", file }));

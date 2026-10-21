@@ -63,7 +63,7 @@ async fn start(
             .run(
                 &Actor::Human,
                 "oxplow.collector.sync",
-                json!({ "collector": "collector:acme/sync" }),
+                json!({ "collector": "oxplow:oxplow/collector?collector=acme/sync" }),
                 false,
             )
             .await

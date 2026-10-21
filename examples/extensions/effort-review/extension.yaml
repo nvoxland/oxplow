@@ -94,7 +94,7 @@ commands:
       required: [effort]
       additionalProperties: false
       properties:
-        effort: { type: string, description: "The effort (`effort:eff<id>`)." }
+        effort: { type: string, description: "The effort (`oxplow:oxplow/effort?id=eff<id>`)." }
     invokers: { human: true, agent: true, lens: true }
   # The model's tool. Also a person's or an agent's read: it only reads.
   - name: effort.evidence
@@ -107,7 +107,7 @@ commands:
       required: [effort]
       additionalProperties: false
       properties:
-        effort: { type: string, description: "The effort (`effort:eff<id>`)." }
+        effort: { type: string, description: "The effort (`oxplow:oxplow/effort?id=eff<id>`)." }
     invokers: { human: true, agent: true, lens: true, job: true }
 
 effects:
@@ -120,7 +120,7 @@ effects:
   - id: publish-review
     summary: When a review job ends, comment its review on the effort's work item.
     on: [contribution.job.completed]
-    where: { job: "job:effort-review/review" }
+    where: { job: "oxplow:oxplow/job?job=effort-review/review" }
     entry: effects/publish_review.star
     needs: [jobs.read, sql.read]
 
@@ -130,15 +130,15 @@ models:
     key: [job_run]
     description: "Each effort review: the effort, its work item, the review job's state and what the model wrote (as far as it got, for one still running or cancelled)."
     columns:
-      - { name: job_run, type: TEXT, doc: "The run of the review job (`job_run:<id>`, `v_job_run.ref`). (v2, was `job`)" }
-      - { name: effort, type: TEXT, doc: "The effort reviewed (`effort:eff<id>`)." }
+      - { name: job_run, type: TEXT, doc: "The run of the review job (`oxplow:oxplow/job_run?id=<id>`, `v_job_run.ref`). (v2, was `job`)" }
+      - { name: effort, type: TEXT, doc: "The effort reviewed (`oxplow:oxplow/effort?id=eff<id>`)." }
       - { name: work_item, type: TEXT, doc: "Its work item's ref; NULL when it had none." }
       - { name: state, type: TEXT, doc: "The job's state: `queued`, `running`, `succeeded`, `failed`, `cancelled` or `interrupted`." }
       - { name: reviewed_at, type: TEXT, doc: "When the job last changed (RFC 3339)." }
       - { name: review, type: TEXT, doc: "What the model wrote in the job's current attempt ('' before it starts)." }
 
 # Another extension may read the reviews: `imports: [{ id: reviews,
-# contribution: model:effort-review/reviews, version: 2 }]` and
+# contribution: oxplow:oxplow/model?model=effort-review/reviews, version: 2 }]` and
 # `import_ref('reviews')` in its SQL.
 exports:
-  - { contribution: model:effort-review/reviews, version: 2, visibility: stable }
+  - { contribution: oxplow:oxplow/model?model=effort-review/reviews, version: 2, visibility: stable }

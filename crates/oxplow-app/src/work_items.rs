@@ -23,7 +23,7 @@ use serde_json::{json, Value};
 use crate::commands::{work_item, CommandBus};
 use crate::event_pump::EventConsumer;
 
-/// oxplow's own provider name: `work_item:oxplow:tsk<n>`.
+/// oxplow's own provider name: `oxplow:oxplow/work_item?id=tsk<n>&provider=oxplow`.
 pub const PROVIDER: &str = oxplow_domain::work_items::OXPLOW;
 /// oxplow's tasks' built-in entry (`capabilities::BUILT_INS`).
 pub const BUILT_IN: &str = "oxplow:tasks";
@@ -423,7 +423,7 @@ impl EventConsumer for WorkItemsProjection {
             for l in links {
                 // The target's kind, read through the grammar: a link to
                 // what isn't a ref is the provider's mistake, and dropped.
-                let Some(kind) = oxplow_domain::uri::build::type_of(&l.target) else {
+                let Some(kind) = oxplow_domain::uri::build::resource_of(&l.target) else {
                     tracing::warn!(item = %item.item_ref, target = %l.target, "a link's target isn't a ref");
                     continue;
                 };
@@ -508,7 +508,7 @@ mod tests {
         };
         let child = run(
             w::CREATE,
-            json!({ "title": "child", "parent_ref": task, "thread": fx.thread.to_string() }),
+            json!({ "title": "child", "parent_ref": task, "thread": oxplow_domain::uri::build::thread_uri(fx.thread) }),
         )
         .await
         .result["ref"]
@@ -610,7 +610,7 @@ mod tests {
     async fn a_providers_records_are_projected_by_ref() {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
-        let r = "work_item:fake:W-1";
+        let r = "oxplow:oxplow/work_item?id=W-1&provider=fake";
         svc.event_log_store
             .append(recorded(r, "first", false))
             .await
@@ -663,14 +663,14 @@ mod tests {
         env
     }
 
-    /// `work_item:fake:W-1`'s links: `(to_ref, created_at)`.
+    /// `oxplow:oxplow/work_item?id=W-1&provider=fake`'s links: `(to_ref, created_at)`.
     async fn links(svc: &crate::Services) -> Vec<(String, String)> {
         svc.db
             .read(|tx| {
                 let mut stmt = tx
                     .prepare(
                         "SELECT to_ref, created_at FROM work_item_link
-                         WHERE from_ref = 'work_item:fake:W-1' ORDER BY to_ref",
+                         WHERE from_ref = 'oxplow:oxplow/work_item?id=W-1&provider=fake' ORDER BY to_ref",
                     )
                     .map_err(oxplow_db::map_sql_err)?;
                 stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
@@ -687,8 +687,11 @@ mod tests {
     async fn a_restated_link_keeps_when_it_was_made() {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
-        let r = "work_item:fake:W-1";
-        let mut first = recorded_with_links(r, &[("work_item:fake:W-2", "blocks")]);
+        let r = "oxplow:oxplow/work_item?id=W-1&provider=fake";
+        let mut first = recorded_with_links(
+            r,
+            &[("oxplow:oxplow/work_item?id=W-2&provider=fake", "blocks")],
+        );
         first.at = oxplow_domain::Timestamp::from_unix_ms(1_000_000);
         svc.event_log_store.append(first).await.unwrap();
         svc.event_pump.run_once().await.unwrap();
@@ -698,8 +701,8 @@ mod tests {
         let mut again = recorded_with_links(
             r,
             &[
-                ("work_item:fake:W-2", "blocks"),
-                ("work_item:fake:W-3", "relates_to"),
+                ("oxplow:oxplow/work_item?id=W-2&provider=fake", "blocks"),
+                ("oxplow:oxplow/work_item?id=W-3&provider=fake", "relates_to"),
             ],
         );
         again.at = oxplow_domain::Timestamp::from_unix_ms(2_000_000);
@@ -707,13 +710,16 @@ mod tests {
         svc.event_pump.run_once().await.unwrap();
         let after = links(svc).await;
         assert_eq!(after[0], before[0], "the kept link keeps its time");
-        assert_eq!(after[1].0, "work_item:fake:W-3");
+        assert_eq!(after[1].0, "oxplow:oxplow/work_item?id=W-3&provider=fake");
         assert_ne!(
             after[1].1, before[0].1,
             "the new link has the record's time"
         );
 
-        let mut dropped = recorded_with_links(r, &[("work_item:fake:W-3", "relates_to")]);
+        let mut dropped = recorded_with_links(
+            r,
+            &[("oxplow:oxplow/work_item?id=W-3&provider=fake", "relates_to")],
+        );
         dropped.at = oxplow_domain::Timestamp::from_unix_ms(3_000_000);
         svc.event_log_store.append(dropped).await.unwrap();
         svc.event_pump.run_once().await.unwrap();
@@ -725,7 +731,7 @@ mod tests {
     async fn an_outside_item_keeps_the_thread_that_filed_it() {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
-        let r = "work_item:fake:W-7";
+        let r = "oxplow:oxplow/work_item?id=W-7&provider=fake";
         let anchored = |title: &str| {
             recorded(r, title, false).with_anchors(oxplow_domain::Anchors {
                 thread_id: Some(fx.thread),

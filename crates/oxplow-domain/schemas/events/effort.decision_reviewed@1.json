@@ -4,7 +4,7 @@
   "description": "`effort.decision_reviewed@1` (P7.C4): a reviewer confirmed or\ndismissed an inferred decision, or reopened one they had reviewed.",
   "properties": {
     "decision": {
-      "description": "`decision:<id>`.",
+      "description": "`oxplow:oxplow/decision?id=<id>`.",
       "type": "string"
     },
     "effort": {

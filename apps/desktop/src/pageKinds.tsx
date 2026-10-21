@@ -33,7 +33,7 @@ import {
   StickyNote,
 } from "lucide-react";
 import type { ComponentProps, ReactElement } from "react";
-import { REF_KIND_ICONS, resourceIcon, resourceInfo } from "./resources.js";
+import { RESOURCE_ICONS, resourceIcon, resourceInfo } from "./resources.js";
 import { useExtensions } from "./extensionsStore.js";
 import { pageKindOf, recordedPageKind, refFromTabId } from "./tabs/pageRefs.js";
 import type { Extension, ExtensionPage } from "./tauri-bridge/generated/bindings.js";
@@ -98,7 +98,7 @@ export function pageKindIconComponent(kind: string, extensions: Extension[] | nu
     case "metric":
       return Gauge;
 
-    // An extension's ref kind (`ref_kinds:`, P8.D7) draws its declared icon.
+    // An extension's resource (`resources:`) draws its declared icon.
     // A declared page draws the icon its `pages:` entry names.
     default:
       return resourceIcon(kind) ?? declaredPageIcon(extensions, kind);
@@ -122,7 +122,7 @@ function declaredPageOf(extensions: Extension[] | null, kind: string): Extension
  *  page has that id or it names none. */
 export function declaredPageIcon(extensions: Extension[] | null, kind: string): LucideIcon | null {
   const icon = declaredPageOf(extensions, kind)?.icon;
-  return icon ? (REF_KIND_ICONS[icon] ?? null) : null;
+  return icon ? (RESOURCE_ICONS[icon] ?? null) : null;
 }
 
 export interface PageKindIconProps extends Omit<ComponentProps<LucideIcon>, "ref"> {

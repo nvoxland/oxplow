@@ -3,7 +3,7 @@ description: The stream's open comments, for you and for the agent to act on. Ea
 params:
   - { name: stream_id, label: Stream }
 query: |
-  SELECT who, open, 'page:comments' AS inbox FROM (
+  SELECT who, open, uri('oxplow/page', 'page', 'comments') AS inbox FROM (
     SELECT 'For me' AS who, 0 AS ord, count(*) AS open
     FROM v_comment WHERE stream_id = :stream_id AND status = 'open' AND intent <> 'followup'
     UNION ALL

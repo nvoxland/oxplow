@@ -1091,7 +1091,10 @@ mod tests {
             .unwrap();
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].ty, "agent.turn.started");
-        assert_eq!(rows[0].payload["turn"], format!("turn:{id}"));
+        assert_eq!(
+            rows[0].payload["turn"],
+            oxplow_domain::uri::build::keyed(oxplow_domain::uri::resources::TURN, &id.to_string())
+        );
         assert_eq!(rows[0].payload["session"], "s1");
         assert_eq!(rows[1].ty, "agent.turn.ended");
         assert_eq!(rows[1].payload["outcome"], "completed");

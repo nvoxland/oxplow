@@ -11,8 +11,9 @@ use oxplow_domain::{DomainError, NoteId, ThreadId, ThreadNote, Timestamp};
 
 use crate::database::Database;
 use crate::database::{string_to_ts, ts_to_string};
-use crate::page_ref_projections::{note_edges, KIND_THREAD_NOTE};
+use crate::page_ref_projections::note_edges;
 use crate::page_ref_store::replace_source_tx;
+use oxplow_domain::uri::build::thread_note_uri;
 
 #[derive(Clone)]
 pub struct SqliteThreadNoteStore {
@@ -70,7 +71,7 @@ fn thread_note_event(
 /// `knowledge.note.written` to log.
 pub fn add_thread_note_tx(
     conn: &rusqlite::Connection,
-    kinds: &oxplow_domain::uri::types::TypeRegistry,
+    kinds: &oxplow_domain::uri::resources::ResourceRegistry,
     thread: ThreadId,
     body: &str,
     author: &str,
@@ -83,12 +84,8 @@ pub fn add_thread_note_tx(
     .map_err(crate::database::map_sql_err)?;
     let id = conn.last_insert_rowid();
     let note_id = NoteId::new(id);
-    replace_source_tx(
-        conn,
-        KIND_THREAD_NOTE,
-        &note_id.to_string(),
-        note_edges(kinds, KIND_THREAD_NOTE, &note_id.to_string(), body),
-    )?;
+    let uri = thread_note_uri(note_id);
+    replace_source_tx(conn, &uri, note_edges(kinds, &uri, body))?;
     Ok((
         ThreadNote {
             id: note_id,
@@ -116,7 +113,7 @@ pub fn note_tx(conn: &rusqlite::Connection, id: NoteId) -> Result<Option<ThreadN
 /// Replace a note's body and its `page_ref` edges; the event to log.
 pub fn update_note_tx(
     conn: &rusqlite::Connection,
-    kinds: &oxplow_domain::uri::types::TypeRegistry,
+    kinds: &oxplow_domain::uri::resources::ResourceRegistry,
     id: NoteId,
     body: &str,
 ) -> Result<Option<oxplow_domain::Envelope>, DomainError> {
@@ -125,12 +122,8 @@ pub fn update_note_tx(
         params![id.value(), body],
     )
     .map_err(crate::database::map_sql_err)?;
-    replace_source_tx(
-        conn,
-        KIND_THREAD_NOTE,
-        &id.to_string(),
-        note_edges(kinds, KIND_THREAD_NOTE, &id.to_string(), body),
-    )?;
+    let uri = thread_note_uri(id);
+    replace_source_tx(conn, &uri, note_edges(kinds, &uri, body))?;
     thread_note_event(conn, id.value(), false).map_err(crate::database::map_sql_err)
 }
 
@@ -143,7 +136,7 @@ pub fn delete_note_tx(
     let event = thread_note_event(conn, id.value(), true).map_err(crate::database::map_sql_err)?;
     conn.execute("DELETE FROM thread_note WHERE id = ?1", params![id.value()])
         .map_err(crate::database::map_sql_err)?;
-    replace_source_tx(conn, KIND_THREAD_NOTE, &id.to_string(), vec![])?;
+    replace_source_tx(conn, &thread_note_uri(id), vec![])?;
     Ok(event)
 }
 
@@ -152,14 +145,14 @@ impl SqliteThreadNoteStore {
         Self { db }
     }
 
-    /// Iterate every note's id + body for the boot-time backfill.
+    /// Every note's URI and body, for the boot-time backfill.
     pub async fn list_all_for_backfill(&self) -> Result<Vec<(String, String)>, DomainError> {
         self.db
             .call(move |conn| {
                 let mut stmt = conn.prepare("SELECT id, body FROM thread_note")?;
                 let rows = stmt.query_map([], |r| {
                     Ok((
-                        NoteId::new(r.get::<_, i64>(0)?).to_string(),
+                        thread_note_uri(NoteId::new(r.get::<_, i64>(0)?)),
                         r.get::<_, String>(1)?,
                     ))
                 })?;
@@ -208,8 +201,9 @@ mod tests {
     use oxplow_domain::stores::{StreamStore, ThreadStore};
     use oxplow_domain::{Stream, StreamId, StreamKind, Thread};
 
-    fn kinds() -> oxplow_domain::uri::types::TypeRegistry {
-        oxplow_domain::uri::types::core_types()
+    fn kinds() -> oxplow_domain::uri::resources::ResourceRegistry {
+        oxplow_domain::uri::resources::foundation()
+            .clone()
             .with_work_item_ids("oxplow", r"tsk\d+")
             .unwrap()
     }
@@ -277,7 +271,13 @@ mod tests {
         assert_eq!(listed, vec![note.clone()]);
         assert_eq!(event.event_type, "knowledge.note.written");
         assert_eq!(event.v, 2);
-        assert_eq!(event.payload["note"], format!("thread_note:{}", note.id));
+        assert_eq!(
+            event.payload["note"],
+            oxplow_domain::uri::build::keyed(
+                oxplow_domain::uri::resources::THREAD_NOTE,
+                &format!("{}", note.id)
+            )
+        );
     }
 
     /// Its links are `thread_note` edges, restated by an update and gone
@@ -288,13 +288,16 @@ mod tests {
         let page_refs = SqlitePageRefStore::new(db.clone());
         let (note, _) = add(&db, tid, "blocked by tsk99 see [[src/app.rs]]").await;
         let inbound = page_refs
-            .list_backlinks("work_item", "oxplow:tsk99", None)
+            .list_backlinks(
+                &oxplow_domain::uri::build::work_item_uri("oxplow", "tsk99"),
+                None,
+            )
             .await
             .unwrap();
         assert!(
             inbound
                 .iter()
-                .any(|e| e.source_kind == "thread_note" && e.source_id == note.id.to_string()),
+                .any(|e| e.source == oxplow_domain::uri::build::thread_note_uri(note.id)),
             "{inbound:?}"
         );
 
@@ -304,7 +307,7 @@ mod tests {
             .unwrap()
             .expect("an update logs its event");
         assert!(page_refs
-            .list_backlinks("file", "src/app.rs", None)
+            .list_backlinks(&oxplow_domain::uri::build::file_uri("src/app.rs"), None)
             .await
             .unwrap()
             .is_empty());

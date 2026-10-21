@@ -180,7 +180,7 @@ mod tests {
         assert_eq!(coverage.len(), 1, "core's models carry none: {coverage:?}");
         assert_eq!(
             (coverage[0].source.as_str(), coverage[0].status.as_str()),
-            ("collector:my-gh/gh", "never")
+            ("oxplow:oxplow/collector?collector=my-gh/gh", "never")
         );
         let store = oxplow_db::SqliteCollectorStore::new(fx.svc.db.clone());
         store

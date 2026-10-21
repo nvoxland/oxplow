@@ -16,7 +16,10 @@ pub async fn a_task(db: &Database, thread: Option<ThreadId>) -> String {
                      '2026-01-01T00:00:00.000000Z')",
             [thread.map(|t| t.value())],
         )?;
-        Ok(format!("work_item:oxplow:tsk{}", c.last_insert_rowid()))
+        Ok(oxplow_domain::uri::build::work_item_uri(
+            "oxplow",
+            &format!("tsk{}", c.last_insert_rowid()),
+        ))
     })
     .await
     .unwrap()

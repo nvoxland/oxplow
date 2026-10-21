@@ -74,7 +74,7 @@ show the pencil — that's the consistent signal "this is for reading."
   editable `<pre><code>` when the caret enters. Round-trips as a
   ` ```mermaid …``` ` fenced code block, so storage is unchanged.
 - **`InternalLink.ts`** — extends Tiptap's standard `Link` mark to
-  allow `file:`, `dir:`, `commit:`, `work_item:` URL schemes through the
+  allow oxplow URIs (the `oxplow:` scheme) through the
   URL sanitizer — Link's `isAllowedUri`, which every parse, render and
   set-link check goes through — and `oxplow-invalid:`, the link an
   unresolvable wikilink is kept as, so it saves back as `[[…]]` instead
@@ -123,16 +123,15 @@ the serialized form.
 Wiki pages use `[[ ]]` syntax extensively (`[[path/to/file]]`,
 `[[dir:src/components|the folder]]`, `[[git:<sha>]]`, `[[tsk<id>]]`, etc.).
 `MarkdownView`'s `preprocessWikilinks` converts these to standard
-markdown links (`[label](file:path)`) for read-rendering; the new
+markdown links (`[label](oxplow:oxplow/file?path=…)`) for read-rendering; the
 `postprocessWikilinks` helper is the inverse — it collapses standard
-markdown links carrying our internal schemes (`file:`, `dir:`,
-`gitcommit:`, `task:`) back into `[[ ]]` form on save.
+markdown links to oxplow URIs back into `[[ ]]` form on save.
 
-**Work item wikilinks** — a full ref (`[[work_item:issues:ENG-1]]`) or a
+**Work item wikilinks** — a full URI (`[[oxplow:oxplow/work_item?id=ENG-1&provider=issues]]`) or a
 bare id of the active list's (`[[tsk42]]` with oxplow's tasks), matched
 by the id pattern the list declares (`v_capability_provider.id_pattern`,
 `workItemRefOfMention`), as the backend ref extractor does — route to the
-item's `work_item:<provider>:<id>` link and **resolve to its title** at
+item's `oxplow/work_item` URI link and **resolve to its title** at
 render time via `useWorkItemTitle` (`apps/desktop/src/workItemTitleCache.ts`,
 a lazy per-ref sibling of `wikiTitleCache`) — same display-swap rule wiki
 slugs use (bare `[[tsk42]]` shows the title; `[[tsk42|label]]` keeps the
@@ -187,13 +186,13 @@ In `apps/desktop/index.html`:
 ## Comments
 
 `RichTextField` becomes comment-enabled when given a `comments`
-config (`{ streamId, threadId, targetKind, targetId, author? }`).
-WikiPageTab passes `{ targetKind: "wiki", targetId: slug, threadId:
+config (`{ streamId, threadId, target, author? }`, `target` a URI).
+WikiPageTab passes `{ target: wikiUri(slug), threadId:
 null }` (wiki pages aren't thread-bound) and additionally wraps the
-body scroll host in a `wiki:<slug>` context node
+body scroll host in the page's URI as a context node
 (`contextNodeProps`), so plain-DOM selections around the editor
 resolve to the page too; WorkItemPage passes
-`{ targetKind: "work_item", targetId: "<provider>:<id>", threadId:
+`{ target: <the item's URI>, threadId:
 item.threadId }`.
 
 - **`CommentDecorations.ts`** is a ProseMirror **plugin extension**,

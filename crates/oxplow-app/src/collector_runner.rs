@@ -1218,7 +1218,7 @@ pub const MAX_RUN_EVENTS: usize = 100;
 
 /// The events a collector's script returned as it may log them (P9.D2):
 /// each one of its **extension's own declared types**, at that type's
-/// newest version, from `collector:<owner>/<id>` — the rule a command's
+/// newest version, from `oxplow:oxplow/collector?collector=<owner>/<id>` — the rule a command's
 /// or an effect's script is held to ([`own_events`]). Refused: a
 /// type the collector itself runs on (its run would trigger itself), and
 /// more than [`MAX_RUN_EVENTS`].
@@ -1269,7 +1269,7 @@ fn plan_events(
 #[derive(Clone)]
 struct Synced {
     source: String,
-    /// `collector:<owner>/<id>`.
+    /// `oxplow:oxplow/collector?collector=<owner>/<id>`.
     collector: String,
     trigger: &'static str,
     /// The trigger event (`on:`): the envelope's cause, and its seq keys
@@ -1858,22 +1858,22 @@ pub const SYNC: &str = "oxplow.collector.sync";
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SyncInput {
-    /// The collector's ref (`collector:<extension>/<id>`).
+    /// The collector's ref (`oxplow:oxplow/collector?collector=<extension>/<id>`).
     pub collector: String,
     /// For a report collector: the thread its run is recorded in
-    /// (`thread:thr3`); an agent's is always its own.
+    /// (`oxplow:oxplow/thread?id=thr3`); an agent's is always its own.
     #[serde(default)]
     pub thread: Option<String>,
 }
 
-/// A collector ref's extension and `id` (`collector:work/hot` → `work`,
+/// A collector ref's extension and `id` (`oxplow:oxplow/collector?collector=work/hot` → `work`,
 /// `hot`).
 fn collector_parts(collector: &str) -> Result<(String, String), oxplow_domain::CommandError> {
     let invalid = |message: String| oxplow_domain::CommandError::Invalid {
         field: Some("/collector".into()),
         message,
     };
-    let id = oxplow_domain::uri::build::id_of(collector, oxplow_domain::uri::types::COLLECTOR)
+    let id = oxplow_domain::uri::build::id_of(collector, oxplow_domain::uri::resources::COLLECTOR)
         .map_err(|e| {
             invalid(format!(
                 "`{}` isn't a collector ref (collector:<extension>/<id>)",
@@ -2671,9 +2671,9 @@ pub(crate) mod tests {
                    VALUES (1, 1, 'T', '2026-01-01', '2026-01-01');
                  INSERT INTO capability_provider (capability, provider, active) VALUES ('work_items', 'oxplow', 1);
                  INSERT INTO work_item (ref, provider, title, state, native_state, native, thread_id, created_at, updated_at) VALUES
-                   ('work_item:oxplow:tsk1', 'oxplow', 'Fix login', 'todo', 'ready', '{\"priority\":\"high\"}', 1, '2026-01-01', '2026-01-01'),
-                   ('work_item:oxplow:tsk2', 'oxplow', 'Tidy docs', 'todo', 'ready', '{\"priority\":\"low\"}', 1, '2026-01-01', '2026-01-01'),
-                   ('work_item:oxplow:tsk3', 'oxplow', 'Ship it', 'done', 'done', '{\"priority\":\"high\"}', 1, '2026-01-01', '2026-01-01');",
+                   ('oxplow:oxplow/work_item?id=tsk1&provider=oxplow', 'oxplow', 'Fix login', 'todo', 'ready', '{\"priority\":\"high\"}', 1, '2026-01-01', '2026-01-01'),
+                   ('oxplow:oxplow/work_item?id=tsk2&provider=oxplow', 'oxplow', 'Tidy docs', 'todo', 'ready', '{\"priority\":\"low\"}', 1, '2026-01-01', '2026-01-01'),
+                   ('oxplow:oxplow/work_item?id=tsk3&provider=oxplow', 'oxplow', 'Ship it', 'done', 'done', '{\"priority\":\"high\"}', 1, '2026-01-01', '2026-01-01');",
             )
             .map_err(|e| DomainError::Invalid(e.to_string()))
         })
@@ -2748,7 +2748,7 @@ pub(crate) mod tests {
                             .run(
                                 &oxplow_domain::Actor::Human,
                                 SYNC,
-                                json!({ "collector": "collector:work/star" }),
+                                json!({ "collector": "oxplow:oxplow/collector?collector=work/star" }),
                                 false,
                             )
                             .await
@@ -2767,7 +2767,11 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn sync_takes_a_collector_ref() {
         let fx = crate::test_fixtures::services_with_effort().await;
-        for bad in ["work/bad", "effort:eff1", "collector:nowhere"] {
+        for bad in [
+            "work/bad",
+            "oxplow:oxplow/effort?id=eff1",
+            "oxplow:oxplow/collector?collector=nowhere",
+        ] {
             let err = fx
                 .svc
                 .commands
@@ -2790,7 +2794,7 @@ pub(crate) mod tests {
             .run(
                 &oxplow_domain::Actor::Human,
                 SYNC,
-                json!({ "collector": "collector:ghost/none" }),
+                json!({ "collector": "oxplow:oxplow/collector?collector=ghost/none" }),
                 false,
             )
             .await
@@ -2819,7 +2823,7 @@ pub(crate) mod tests {
             fx.svc.commands.run(
                 &oxplow_domain::Actor::Human,
                 SYNC,
-                json!({ "collector": "collector:work/bad" }),
+                json!({ "collector": "oxplow:oxplow/collector?collector=work/bad" }),
                 false,
             )
         };
@@ -3030,8 +3034,8 @@ pub(crate) mod tests {
         let ctx = Collectors::of(&fx.svc, &root);
         let event = serde_json::json!({
             "type": "thread.checkpoint",
-            "payload": { "thread": "thread:thr1", "turn": "turn:trn7", "reason": "turn_end",
-                         "snapshot": "snapshot:1", "changed": true, "writing_tools": 1 },
+            "payload": { "thread": "oxplow:oxplow/thread?id=thr1", "turn": "oxplow:oxplow/turn?id=trn7", "reason": "turn_end",
+                         "snapshot": "oxplow:oxplow/snapshot?id=1", "changed": true, "writing_tools": 1 },
             "anchors": { "thread_id": "thr1", "turn_id": 7 },
         });
         let preview = preview_collector(&ctx, "work", "seen", Some(&event), None)
@@ -3220,7 +3224,12 @@ pub(crate) mod tests {
             .unwrap();
         assert_eq!(
             serde_json::to_value(&out.rows).unwrap(),
-            json!([["bug", 1, "collector:work/star", "classify work/sort y"]])
+            json!([[
+                "bug",
+                1,
+                "oxplow:oxplow/collector?collector=work/star",
+                "classify work/sort y"
+            ]])
         );
     }
 
@@ -3271,7 +3280,10 @@ pub(crate) mod tests {
         assert_eq!(hot.columns, vec!["ref", "title"]);
         assert_eq!(
             serde_json::to_value(&hot.rows).unwrap(),
-            json!([["work_item:oxplow:tsk1", "Fix login"]])
+            json!([[
+                "oxplow:oxplow/work_item?id=tsk1&provider=oxplow",
+                "Fix login"
+            ]])
         );
         assert_eq!(hot.total, 1);
         assert!(

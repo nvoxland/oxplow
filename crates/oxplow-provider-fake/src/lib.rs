@@ -3,7 +3,7 @@
 //! conformance kit are tested against, the way `oxplow-acp-fake` stands in
 //! for an agent.
 //!
-//! It keeps items in memory (`work_item:<id>:W-<n>`, `<id>` being the
+//! It keeps items in memory (`oxplow:oxplow/work_item?id=W-<n>&provider=<id>`, `<id>` being the
 //! instance the host says it is — `OXPLOW_PROVIDER_ID`, `fake` by
 //! default), with native states
 //! `Backlog` / `Doing` / `Stuck` / `Shipped` / `Dropped` for the canonical
@@ -998,10 +998,7 @@ async fn handle(
                 let mut foreign = rows.first().map(|(_, r)| r.clone()).unwrap_or_else(
                     || json!({ "title": "x", "state": "todo", "native_state": "Backlog" }),
                 );
-                foreign["ref"] = json!(oxplow_domain::uri::build::of(
-                    oxplow_domain::uri::types::WORK_ITEM,
-                    "other:X-1"
-                ));
+                foreign["ref"] = json!(oxplow_domain::uri::build::work_item_uri("other", "X-1"));
                 rows.insert(0, (after + 1, foreign));
             }
             if hooks.stale_read {
@@ -1049,13 +1046,13 @@ async fn handle(
 
 /// The number of instance `id`'s item `item_ref`.
 fn number_of(id: &str, item_ref: &str) -> Result<u64, ProtocolError> {
-    oxplow_domain::uri::build::work_item_id_of_uri(item_ref)
-        .and_then(|rest| rest.strip_prefix(&format!("{id}:W-")))
-        .and_then(|n| n.parse().ok())
+    oxplow_domain::uri::build::work_item_of_uri(item_ref)
+        .filter(|(provider, _)| provider == id)
+        .and_then(|(_, item)| item.strip_prefix("W-")?.parse().ok())
         .ok_or_else(|| ProtocolError::InvalidInput {
             field: "/ref".into(),
             message: format!(
-                "`{item_ref}` isn't one of `{id}`'s work items (work_item:{id}:W-<n>)"
+                "`{item_ref}` isn't one of `{id}`'s work items (oxplow:oxplow/work_item?id=W-<n>&provider={id})"
             ),
         })
 }
@@ -1147,10 +1144,7 @@ async fn invoke(world: &Shared, command: &str, input: Value) -> Result<Value, Pr
                 native["points"] = points.into();
             }
             let record = WorkItemRecord {
-                item_ref: oxplow_domain::uri::build::of(
-                    oxplow_domain::uri::types::WORK_ITEM,
-                    &format!("{}:W-{n}", w.id),
-                ),
+                item_ref: oxplow_domain::uri::build::work_item_uri(&w.id, &format!("W-{n}")),
                 title,
                 body: input
                     .get("body")

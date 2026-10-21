@@ -5,7 +5,7 @@
 //! VCS and the stream's capture service, so they are `External` and a
 //! person's; archiving is destructive (it can remove the working copy).
 //! Renaming and the prompt are `Tx` over the stream row. A stream is
-//! named by ref (`stream:str1`).
+//! named by ref (`oxplow:oxplow/stream?id=str1`).
 
 use crate::commands::ops::Op;
 use std::sync::Arc;
@@ -64,7 +64,7 @@ pub struct CreateInput {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ArchiveInput {
-    /// The stream (`stream:str2`).
+    /// The stream (`oxplow:oxplow/stream?id=str2`).
     pub stream: String,
     /// Also remove its working copy from disk.
     #[serde(default)]
@@ -74,7 +74,7 @@ pub struct ArchiveInput {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RenameInput {
-    /// The stream (`stream:str1`).
+    /// The stream (`oxplow:oxplow/stream?id=str1`).
     pub stream: String,
     pub title: String,
 }
@@ -82,7 +82,7 @@ pub struct RenameInput {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SetPromptInput {
-    /// The stream (`stream:str1`).
+    /// The stream (`oxplow:oxplow/stream?id=str1`).
     pub stream: String,
     /// Appended to every agent prompt in this stream; empty (or only
     /// whitespace) or absent clears it.
@@ -275,7 +275,7 @@ pub fn archive_op(deps: StreamDeps) -> Op {
                 use crate::agent_status_derive::{derive_session_status, recent_activity};
                 use oxplow_domain::stores::{AgentSessionStore as _, ThreadStore as _};
                 let input: ArchiveInput = parse(input)?;
-                let id = ref_id(&input.stream, "stream", "/stream")?;
+                let id = ref_id(&input.stream, oxplow_domain::uri::resources::STREAM, "/stream")?;
                 // Refused before anything changes: nothing below runs for a
                 // stream that can't be archived.
                 deps.streams.archivable(&id).await.map_err(session)?;
@@ -373,7 +373,11 @@ pub fn rename_op() -> Op {
         true,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: RenameInput = parse(input)?;
-            let id = ref_id(&input.stream, "stream", "/stream")?;
+            let id = ref_id(
+                &input.stream,
+                oxplow_domain::uri::resources::STREAM,
+                "/stream",
+            )?;
             if let Some((_, own)) = agent_scope(ctx)? {
                 if own != id {
                     return Err(CommandError::Denied {
@@ -409,7 +413,14 @@ pub fn set_prompt_op() -> Op {
         true,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: SetPromptInput = parse(input)?;
-            let mut stream = load(ctx, ref_id(&input.stream, "stream", "/stream")?)?;
+            let mut stream = load(
+                ctx,
+                ref_id(
+                    &input.stream,
+                    oxplow_domain::uri::resources::STREAM,
+                    "/stream",
+                )?,
+            )?;
             let before = std::mem::replace(
                 &mut stream.custom_prompt,
                 input.prompt.filter(|p| !p.trim().is_empty()),
@@ -489,7 +500,7 @@ mod tests {
             .run(
                 &agent(&fx),
                 RENAME,
-                json!({ "stream": "stream:str99", "title": "x" }),
+                json!({ "stream": "oxplow:oxplow/stream?id=str99", "title": "x" }),
                 false,
             )
             .await
@@ -801,7 +812,11 @@ mod tests {
         let effort = fx
             .svc
             .effort_store
-            .start("work_item:issues:A-1", &thread.id, start)
+            .start(
+                "oxplow:oxplow/work_item?id=A-1&provider=issues",
+                &thread.id,
+                start,
+            )
             .await
             .unwrap();
         std::fs::write(side_dir.join("work.txt"), "w\n").unwrap();

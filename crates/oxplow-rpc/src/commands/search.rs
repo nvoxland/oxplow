@@ -5,25 +5,26 @@ use oxplow_db::SearchHit;
 
 use crate::error::IpcError;
 
-/// Site-wide BM25 search across every searchable kind (`v_ref_kind.searchable`)
-/// and per-stream file contents; each hit names the ref it found. `stream_id` scopes file/stream-bound hits to one
-/// worktree (project-global hits like wiki always included); `None` searches
-/// everything. `kinds` optionally restricts to some of those kinds (or
-/// `file`). Results are ranked best-first.
+/// Site-wide BM25 search across every searchable resource
+/// (`v_resource.searchable`) and per-stream file contents; each hit names
+/// the URI it found. `stream_id` scopes file/stream-bound hits to one
+/// worktree (project-global hits like wiki always included); `None`
+/// searches everything. `resources` optionally restricts to some of those
+/// (`oxplow/wiki`, or `oxplow/file`). Results are ranked best-first.
 pub async fn search(
     svc: &Services,
     query: String,
     stream_id: Option<String>,
-    kinds: Option<Vec<String>>,
+    resources: Option<Vec<String>>,
     limit: Option<u32>,
 ) -> Result<Vec<SearchHit>, IpcError> {
-    let kinds = kinds.unwrap_or_default();
+    let resources = resources.unwrap_or_default();
     Ok(svc
         .search_store
         .search(
             &query,
             stream_id.as_deref(),
-            &kinds,
+            &resources,
             limit.unwrap_or(50) as usize,
         )
         .await?)

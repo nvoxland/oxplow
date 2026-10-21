@@ -11,8 +11,8 @@
 //!   logged this one.
 //!
 //! An `after:` target is one of three refs: `effect:<ext>/<id>`,
-//! `collector:<ext>/<id>` — any enabled extension's — or
-//! `consumer:<name>`, one of core's own event consumers
+//! `oxplow:oxplow/collector?collector=<ext>/<id>` — any enabled extension's — or
+//! `oxplow:oxplow/consumer?name=<name>`, one of core's own event consumers
 //! (`change.analyze`, `collection`, …). A bare name in a manifest is this
 //! extension's own effect or collector of that id, else a core consumer.
 //! A target nothing declares, or a cycle, is a load error: an order
@@ -22,7 +22,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::contribution::{ContributionKind, ContributionRef};
 
-/// The ref kind of a core event consumer: `consumer:change.analyze`.
+/// The ref kind of a core event consumer: `oxplow:oxplow/consumer?name=change.analyze`.
 pub const CONSUMER: &str = "consumer";
 
 /// A resolved ordering target.
@@ -35,7 +35,7 @@ pub enum After {
 }
 
 impl After {
-    /// The ref as text: `effect:acme/notify`, `consumer:change.analyze`.
+    /// The ref as text: `effect:acme/notify`, `oxplow:oxplow/consumer?name=change.analyze`.
     pub fn to_ref(&self) -> String {
         match self {
             After::Contribution(r) => r.to_string(),
@@ -45,10 +45,8 @@ impl After {
 
     /// Parse a ref: only the three kinds an `after:` may name.
     pub fn parse(text: &str) -> Result<After, String> {
-        let parsed = crate::uri::grammar::Uri::parse(text)
-            .map_err(|e| format!("`{text}` isn't a ref: {e}"))?;
-        if parsed.kind == CONSUMER {
-            return Ok(After::Consumer(parsed.id));
+        if let Ok(name) = crate::uri::build::id_of(text, crate::uri::resources::CONSUMER) {
+            return Ok(After::Consumer(name));
         }
         let r: ContributionRef = text.parse()?;
         match r.kind() {
@@ -79,12 +77,15 @@ pub fn resolve(
     consumers: &[&str],
 ) -> Result<After, String> {
     if entry.contains(':') {
-        return After::parse(entry);
+        return After::parse(
+            &crate::uri::build::expand_short(entry).unwrap_or_else(|| entry.to_string()),
+        );
     }
     for kind in [ContributionKind::Effect, ContributionKind::Collector] {
         if own(kind, entry) {
-            let r: ContributionRef = format!("{}:{extension}/{entry}", kind.segment()).parse()?;
-            return Ok(After::Contribution(r));
+            return Ok(After::Contribution(
+                crate::contribution::ContributionId::new(extension, kind, entry).reference(),
+            ));
         }
     }
     if consumers.contains(&entry) {
@@ -92,7 +93,7 @@ pub fn resolve(
     }
     Err(format!(
         "`{entry}` is none of this extension's effects or collectors and no core consumer; \
-         name another extension's by its ref (`effect:<extension>/<id>`)"
+         name another extension's by its URI or `effect:<extension>/<id>`"
     ))
 }
 
@@ -303,25 +304,36 @@ mod tests {
             resolve("acme", "notify", &own, &consumers)
                 .unwrap()
                 .to_ref(),
-            "effect:acme/notify"
+            "oxplow:oxplow/effect?effect=acme/notify"
         );
         assert_eq!(
             resolve("acme", "sync", &own, &consumers).unwrap().to_ref(),
-            "collector:acme/sync"
+            "oxplow:oxplow/collector?collector=acme/sync"
         );
         assert_eq!(
             resolve("acme", "change.analyze", &own, &consumers).unwrap(),
             After::Consumer("change.analyze".into())
         );
         assert_eq!(
-            resolve("acme", "effect:other/first", &own, &consumers)
-                .unwrap()
-                .to_ref(),
-            "effect:other/first"
+            resolve(
+                "acme",
+                "oxplow:oxplow/effect?effect=other/first",
+                &own,
+                &consumers
+            )
+            .unwrap()
+            .to_ref(),
+            "oxplow:oxplow/effect?effect=other/first"
         );
         let err = resolve("acme", "nope", &own, &consumers).unwrap_err();
         assert!(err.contains("none of this extension's"), "{err}");
-        let err = resolve("acme", "job:acme/review", &own, &consumers).unwrap_err();
+        let err = resolve(
+            "acme",
+            "oxplow:oxplow/job?job=acme/review",
+            &own,
+            &consumers,
+        )
+        .unwrap_err();
         assert!(err.contains("`after` names an effect"), "{err}");
     }
 
@@ -330,31 +342,49 @@ mod tests {
         let order = Order::compile(
             &[
                 node(
-                    "effect:acme/third",
-                    &["effect:acme/second", "consumer:change.analyze"],
+                    "oxplow:oxplow/effect?effect=acme/third",
+                    &[
+                        "oxplow:oxplow/effect?effect=acme/second",
+                        "oxplow:oxplow/consumer?name=change.analyze",
+                    ],
                 ),
-                node("effect:acme/second", &["collector:other/first"]),
-                node("collector:other/first", &[]),
-                node("effect:acme/alone", &[]),
+                node(
+                    "oxplow:oxplow/effect?effect=acme/second",
+                    &["oxplow:oxplow/collector?collector=other/first"],
+                ),
+                node("oxplow:oxplow/collector?collector=other/first", &[]),
+                node("oxplow:oxplow/effect?effect=acme/alone", &[]),
             ],
             &["change.analyze"],
         )
         .unwrap();
-        assert_eq!(order.level(&r("collector:other/first")), Some(0));
-        assert_eq!(order.level(&r("effect:acme/alone")), Some(0));
-        assert_eq!(order.level(&r("effect:acme/second")), Some(1));
-        assert_eq!(order.level(&r("effect:acme/third")), Some(2));
+        assert_eq!(
+            order.level(&r("oxplow:oxplow/collector?collector=other/first")),
+            Some(0)
+        );
+        assert_eq!(
+            order.level(&r("oxplow:oxplow/effect?effect=acme/alone")),
+            Some(0)
+        );
+        assert_eq!(
+            order.level(&r("oxplow:oxplow/effect?effect=acme/second")),
+            Some(1)
+        );
+        assert_eq!(
+            order.level(&r("oxplow:oxplow/effect?effect=acme/third")),
+            Some(2)
+        );
         let ids = [
-            r("effect:acme/third"),
-            r("effect:acme/alone"),
-            r("effect:acme/second"),
+            r("oxplow:oxplow/effect?effect=acme/third"),
+            r("oxplow:oxplow/effect?effect=acme/alone"),
+            r("oxplow:oxplow/effect?effect=acme/second"),
         ];
         assert_eq!(
             order.sorted(&ids),
             vec![
-                r("effect:acme/alone"),
-                r("effect:acme/second"),
-                r("effect:acme/third")
+                r("oxplow:oxplow/effect?effect=acme/alone"),
+                r("oxplow:oxplow/effect?effect=acme/second"),
+                r("oxplow:oxplow/effect?effect=acme/third")
             ]
         );
         assert_eq!(order.consumers(&ids), vec!["change.analyze".to_string()]);
@@ -365,8 +395,11 @@ mod tests {
     fn an_unknown_target_is_an_error_naming_who_waits() {
         let errors = Order::compile(
             &[node(
-                "effect:acme/a",
-                &["effect:acme/gone", "consumer:nope"],
+                "oxplow:oxplow/effect?effect=acme/a",
+                &[
+                    "oxplow:oxplow/effect?effect=acme/gone",
+                    "oxplow:oxplow/consumer?name=nope",
+                ],
             )],
             &["change.analyze"],
         )
@@ -375,18 +408,18 @@ mod tests {
             errors,
             vec![
                 OrderError::Unknown {
-                    by: r("effect:acme/a"),
-                    target: "effect:acme/gone".into()
+                    by: r("oxplow:oxplow/effect?effect=acme/a"),
+                    target: "oxplow:oxplow/effect?effect=acme/gone".into()
                 },
                 OrderError::Unknown {
-                    by: r("effect:acme/a"),
-                    target: "consumer:nope".into()
+                    by: r("oxplow:oxplow/effect?effect=acme/a"),
+                    target: "oxplow:oxplow/consumer?name=nope".into()
                 },
             ]
         );
         assert_eq!(
             errors[0].to_string(),
-            "effect:acme/a runs after effect:acme/gone, which nothing declares"
+            "oxplow:oxplow/effect?effect=acme/a runs after oxplow:oxplow/effect?effect=acme/gone, which nothing declares"
         );
     }
 
@@ -396,13 +429,31 @@ mod tests {
         // node that's fine.
         let errors = Order::compile(
             &[
-                node("effect:a/x", &["effect:a/y"]),
-                node("effect:a/y", &["effect:a/x"]),
-                node("effect:b/p", &["effect:b/r"]),
-                node("effect:b/q", &["effect:b/p"]),
-                node("effect:b/r", &["effect:b/q"]),
-                node("effect:c/me", &["effect:c/me"]),
-                node("effect:c/fine", &[]),
+                node(
+                    "oxplow:oxplow/effect?effect=a/x",
+                    &["oxplow:oxplow/effect?effect=a/y"],
+                ),
+                node(
+                    "oxplow:oxplow/effect?effect=a/y",
+                    &["oxplow:oxplow/effect?effect=a/x"],
+                ),
+                node(
+                    "oxplow:oxplow/effect?effect=b/p",
+                    &["oxplow:oxplow/effect?effect=b/r"],
+                ),
+                node(
+                    "oxplow:oxplow/effect?effect=b/q",
+                    &["oxplow:oxplow/effect?effect=b/p"],
+                ),
+                node(
+                    "oxplow:oxplow/effect?effect=b/r",
+                    &["oxplow:oxplow/effect?effect=b/q"],
+                ),
+                node(
+                    "oxplow:oxplow/effect?effect=c/me",
+                    &["oxplow:oxplow/effect?effect=c/me"],
+                ),
+                node("oxplow:oxplow/effect?effect=c/fine", &[]),
             ],
             &[],
         )
@@ -411,9 +462,9 @@ mod tests {
         assert_eq!(
             cycles,
             vec![
-                "these contributions wait on each other: effect:a/x → effect:a/y",
-                "these contributions wait on each other: effect:b/p → effect:b/r → effect:b/q",
-                "these contributions wait on each other: effect:c/me",
+                "these contributions wait on each other: oxplow:oxplow/effect?effect=a/x → oxplow:oxplow/effect?effect=a/y",
+                "these contributions wait on each other: oxplow:oxplow/effect?effect=b/p → oxplow:oxplow/effect?effect=b/r → oxplow:oxplow/effect?effect=b/q",
+                "these contributions wait on each other: oxplow:oxplow/effect?effect=c/me",
             ]
         );
     }
@@ -422,9 +473,18 @@ mod tests {
     fn a_node_downstream_of_a_cycle_is_not_itself_reported() {
         let errors = Order::compile(
             &[
-                node("effect:a/x", &["effect:a/y"]),
-                node("effect:a/y", &["effect:a/x"]),
-                node("effect:a/after", &["effect:a/x"]),
+                node(
+                    "oxplow:oxplow/effect?effect=a/x",
+                    &["oxplow:oxplow/effect?effect=a/y"],
+                ),
+                node(
+                    "oxplow:oxplow/effect?effect=a/y",
+                    &["oxplow:oxplow/effect?effect=a/x"],
+                ),
+                node(
+                    "oxplow:oxplow/effect?effect=a/after",
+                    &["oxplow:oxplow/effect?effect=a/x"],
+                ),
             ],
             &[],
         )

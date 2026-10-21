@@ -23,8 +23,8 @@ pub const STALE_AFTER_MS: i64 = 60 * 1000;
 /// One tab, as its window shows it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 pub struct ReportedTab {
-    /// Its tab id: a canonical ref (`work_item:oxplow:tsk3`,
-    /// `page:settings`, `agent_session:ses2`).
+    /// Its tab id: a canonical ref (`oxplow:oxplow/work_item?id=tsk3&provider=oxplow`,
+    /// `oxplow:oxplow/page?page=settings`, `oxplow:oxplow/agent_session?id=ses2`).
     pub id: String,
     /// Its page kind (`work_item`, `lens`, `agent_session`).
     pub kind: String,
@@ -281,7 +281,11 @@ mod tests {
                 "a",
                 true,
                 1,
-                vec![thread(1, vec![tab("wiki:home", "wiki")], Some("wiki:home"))],
+                vec![thread(
+                    1,
+                    vec![tab("oxplow:oxplow/wiki?slug=home", "wiki")],
+                    Some("oxplow:oxplow/wiki?slug=home"),
+                )],
             ),
             at(1_000),
         );
@@ -291,11 +295,15 @@ mod tests {
                 false,
                 2,
                 vec![
-                    thread(1, vec![tab("file:src/a.rs", "file")], Some("file:src/a.rs")),
+                    thread(
+                        1,
+                        vec![tab("oxplow:oxplow/file?path=src/a.rs", "file")],
+                        Some("oxplow:oxplow/file?path=src/a.rs"),
+                    ),
                     thread(
                         2,
-                        vec![tab("page:settings", "settings")],
-                        Some("page:settings"),
+                        vec![tab("oxplow:oxplow/page?page=settings", "settings")],
+                        Some("oxplow:oxplow/page?page=settings"),
                     ),
                 ],
             ),
@@ -307,7 +315,10 @@ mod tests {
                 .iter()
                 .map(|p| (p.client.as_str(), p.page_id.as_str(), p.visible))
                 .collect::<Vec<_>>(),
-            [("a", "wiki:home", true), ("b", "file:src/a.rs", false)]
+            [
+                ("a", "oxplow:oxplow/wiki?slug=home", true),
+                ("b", "oxplow:oxplow/file?path=src/a.rs", false)
+            ]
         );
         assert_eq!(pages[0].detail_json.as_deref(), Some("{\"from\":\"a\"}"));
         assert_eq!(pages[1].detail_json, None, "b shows another thread");
@@ -319,8 +330,8 @@ mod tests {
                 1,
                 vec![thread(
                     1,
-                    vec![tab("file:src/a.rs", "file")],
-                    Some("file:src/a.rs"),
+                    vec![tab("oxplow:oxplow/file?path=src/a.rs", "file")],
+                    Some("oxplow:oxplow/file?path=src/a.rs"),
                 )],
             ),
             at(4_000),
@@ -340,15 +351,15 @@ mod tests {
                     thread(
                         1,
                         vec![
-                            tab("wiki:home", "wiki"),
-                            tab("agent_session:ses2", "agent_session"),
+                            tab("oxplow:oxplow/wiki?slug=home", "wiki"),
+                            tab("oxplow:oxplow/agent_session?id=ses2", "agent_session"),
                         ],
-                        Some("wiki:home"),
+                        Some("oxplow:oxplow/wiki?slug=home"),
                     ),
                     thread(
                         2,
-                        vec![tab("page:settings", "settings")],
-                        Some("page:settings"),
+                        vec![tab("oxplow:oxplow/page?page=settings", "settings")],
+                        Some("oxplow:oxplow/page?page=settings"),
                     ),
                 ],
             ),
@@ -361,8 +372,8 @@ mod tests {
                 .map(|t| (t.tab.as_str(), t.selected, t.visible, t.stale))
                 .collect::<Vec<_>>(),
             [
-                ("wiki:home", true, true, false),
-                ("agent_session:ses2", false, false, false)
+                ("oxplow:oxplow/wiki?slug=home", true, true, false),
+                ("oxplow:oxplow/agent_session?id=ses2", false, false, false)
             ]
         );
         // Thread 2's tab is selected there but not on screen.
@@ -383,7 +394,11 @@ mod tests {
                 "a",
                 true,
                 1,
-                vec![thread(1, vec![tab("wiki:home", "wiki")], Some("wiki:home"))],
+                vec![thread(
+                    1,
+                    vec![tab("oxplow:oxplow/wiki?slug=home", "wiki")],
+                    Some("oxplow:oxplow/wiki?slug=home"),
+                )],
             ),
             at(0),
         );

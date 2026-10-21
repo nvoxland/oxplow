@@ -1,27 +1,26 @@
-//! `oxplow_read`: one reader for anything a ref names (`.context/resources.md`,
+//! `oxplow_read`: one reader for anything a URI names (`.context/resources.md`,
 //! `.context/agent-model.md` "The agent's tools"). The agent's single way to look at
 //! a thing it was pointed at or found in a model's `ref` column:
 //!
-//! - the **row** of the model that owns the ref's kind (core's,
-//!   `oxplow_db::ref_models`, or an extension's `ref_kinds:` resolve view),
-//!   every column, by its `ref`;
-//! - what sits **beside** it, for the kinds that have some: a work item's
-//!   links and comments, a commit's files, an effort's files;
-//! - its **content**, for the kinds whose body no model holds: a file at a
-//!   revision (`file:src/a.rs@git:HEAD#L10-40`; the working tree when it
-//!   names none, in the stream asked for else the caller's), an event's
-//!   stored body (`event:<id>#input`, `#output`, `#prompt`, `#result` or `#summary`; the caller's
-//!   own stream's only), a model call's (`ai_call:<id>#request` or
-//!   `#response`; not one another agent's thread asked for), a lens's
-//!   definition.
+//! - the **row** of the model its resource resolves through (its
+//!   declaration's `resolve:`), every column, by its `ref`;
+//! - what sits **beside** it, for the resources that have some: a work
+//!   item's links and comments, a commit's files, an effort's files;
+//! - its **content**, for the resources whose body no model holds: a file
+//!   at a revision (`oxplow:oxplow/file?path=src/a.rs&rev=git:HEAD#lines=10-40`;
+//!   the working tree when it names none, in the stream asked for else the
+//!   caller's), an event's stored body (`#part=input`, `output`, `prompt`,
+//!   `result` or `summary`; the caller's own stream's only), a model call's
+//!   (`#part=request` or `response`; not one another agent's thread asked
+//!   for), a lens's definition.
 //!
 //! Content is cut at [`MAX_CONTENT`] bytes, saying so.
 
 use std::collections::BTreeMap;
 
 use oxplow_db::SqlCell;
-use oxplow_domain::uri::grammar::Uri;
-use oxplow_domain::uri::types;
+use oxplow_domain::uri::resources as r;
+use oxplow_domain::uri::OxplowUri;
 use oxplow_domain::{StreamId, ThreadId};
 use serde::Serialize;
 use serde_json::{Map, Value};
@@ -29,26 +28,26 @@ use serde_json::{Map, Value};
 use crate::Services;
 
 /// The most content one read returns, in bytes; the rest is cut, and
-/// `truncated` says so. Ask for lines (`#L…`) to read further.
+/// `truncated` says so. Ask for lines (`#lines=…`) to read further.
 pub const MAX_CONTENT: usize = 64 * 1024;
 
 /// Rows of one related list a read returns at most.
 const MAX_RELATED: usize = 200;
 
-/// What a ref names, as `oxplow_read` answers it.
+/// What a URI names, as `oxplow_read` answers it.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct RefRead {
-    /// The ref as read, canonical.
-    #[serde(rename = "ref")]
-    pub reference: String,
-    pub kind: String,
-    /// The owning model's row, every column; `None` for a kind no model
-    /// owns (a file, a lens).
+    /// The URI as read, canonical.
+    pub uri: String,
+    /// Its resource (`oxplow/effort`).
+    pub resource: String,
+    /// The resolving model's row, every column; `None` for a resource no
+    /// model holds (a file, a lens).
     pub row: Option<Map<String, Value>>,
     /// What sits beside it, by name (`links`, `comments`, `files`).
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub related: BTreeMap<&'static str, Vec<Map<String, Value>>>,
-    /// Its body, for a kind whose body no model holds.
+    /// Its body, for a resource whose body no model holds.
     pub content: Option<String>,
     /// The content was cut at [`MAX_CONTENT`].
     pub truncated: bool,
@@ -56,7 +55,7 @@ pub struct RefRead {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ReadError {
-    /// The ref doesn't parse, or asks for what its kind can't give.
+    /// The URI doesn't parse, or asks for what its resource can't give.
     #[error("{0}")]
     Invalid(String),
     /// Nothing is there.
@@ -66,26 +65,26 @@ pub enum ReadError {
     Storage(#[from] oxplow_domain::DomainError),
 }
 
-/// What sits beside a kind's row: `(kind, name, query)`, each query's `?1`
-/// the canonical ref.
+/// What sits beside a resource's row: `(resource, name, query)`, each
+/// query's `?1` the URI (its view left out).
 const RELATED: &[(&str, &str, &str)] = &[
     (
-        types::WORK_ITEM,
+        r::WORK_ITEM,
         "links",
         "SELECT * FROM v_work_item_link WHERE from_ref = ?1 ORDER BY created_at",
     ),
     (
-        types::WORK_ITEM,
+        r::WORK_ITEM,
         "comments",
         "SELECT * FROM v_work_item_comment WHERE ref = ?1 ORDER BY created_at",
     ),
     (
-        types::COMMIT,
+        r::COMMIT,
         "files",
         "SELECT * FROM v_commit_file WHERE sha = (SELECT sha FROM v_commit WHERE ref = ?1) ORDER BY path",
     ),
     (
-        types::EFFORT,
+        r::EFFORT,
         "files",
         "SELECT * FROM v_effort_file WHERE effort_id = (SELECT id FROM v_effort WHERE ref = ?1) ORDER BY path",
     ),
@@ -110,30 +109,29 @@ pub async fn read(
     at: Option<StreamId>,
 ) -> Result<RefRead, ReadError> {
     let stream = at.or(reader.stream);
-    let parsed = Uri::parse(raw.trim()).map_err(|e| ReadError::Invalid(e.to_string()))?;
-    let reference = Uri {
-        frag: None,
-        ..parsed.clone()
-    }
-    .to_string();
+    let parsed = OxplowUri::parse(raw.trim()).map_err(|e| ReadError::Invalid(e.to_string()))?;
+    let reference = parsed.identity();
+    let resource = parsed.resource().to_string();
+    let part = parsed.view().get("part").map(String::as_str);
     let mut out = RefRead {
-        reference: parsed.to_string(),
-        kind: parsed.kind.clone(),
+        uri: parsed.to_string(),
+        resource: resource.clone(),
         row: None,
         related: BTreeMap::new(),
         content: None,
         truncated: false,
     };
-    match parsed.kind.as_str() {
-        types::FILE => {
+    let param = |name: &str| parsed.param(name).unwrap_or_default().to_string();
+    match resource.as_str() {
+        r::FILE => {
             let text = file_text(svc, &parsed, stream).await?;
-            let text = match parsed.frag.as_deref() {
-                Some(frag) => lines(&text, frag)?,
+            let text = match parsed.view().get("lines") {
+                Some(span) => lines(&text, span)?,
                 None => text,
             };
             out.set_content(text);
         }
-        types::LENS => {
+        r::LENS => {
             let root = svc
                 .worktrees
                 .resolve(stream.map(|s| s.to_string()).as_deref())
@@ -141,8 +139,8 @@ pub async fn read(
                 .into_local_path();
             let lens = svc
                 .extension_catalog
-                .find_lens(&root, &parsed.id)
-                .map_err(|_| ReadError::NotFound(out.reference.clone()))?;
+                .find_lens(&root, &param("lens"))
+                .map_err(|_| ReadError::NotFound(out.uri.clone()))?;
             let mut body =
                 serde_json::to_value(&lens).map_err(|e| ReadError::Invalid(e.to_string()))?;
             body["origin"] = lens.origin.to_json(svc.worktrees.project_dir());
@@ -152,31 +150,30 @@ pub async fn read(
             );
         }
         _ => {
-            if parsed.rev.is_some() {
+            if parsed.param("rev").is_some() {
                 return Err(ReadError::Invalid(format!(
-                    "a `{}` ref has no revisions; only a file is read at one",
-                    parsed.kind
+                    "a `{resource}` has no revisions; only a file is read at one"
                 )));
             }
             out.row = Some(
-                owned_row(svc, &parsed.kind, &reference)
+                owned_row(svc, &parsed, &reference)
                     .await?
                     .ok_or_else(|| ReadError::NotFound(reference.clone()))?,
             );
-            for (_, name, sql) in RELATED.iter().filter(|(k, _, _)| *k == parsed.kind) {
+            for (_, name, sql) in RELATED.iter().filter(|(k, _, _)| *k == resource) {
                 out.related.insert(name, rows(svc, sql, &reference).await?);
             }
-            match (parsed.kind.as_str(), parsed.frag.as_deref()) {
-                (types::EVENT, Some(frag)) => {
-                    out.set_content(event_body(svc, &parsed.id, frag, reader.stream).await?);
+            match (resource.as_str(), part) {
+                (r::EVENT, Some(part)) => {
+                    out.set_content(event_body(svc, &param("id"), part, reader.stream).await?);
                 }
-                (types::SUBAGENT, Some(frag)) => {
+                (r::SUBAGENT, Some(part)) => {
                     out.set_content(
-                        subagent_result(svc, out.row.as_ref(), frag, reader.stream).await?,
+                        subagent_result(svc, out.row.as_ref(), part, reader.stream).await?,
                     );
                 }
-                (types::AI_CALL, Some(frag)) => {
-                    out.set_content(ai_call_body(svc, &parsed.id, frag, reader.thread).await?);
+                (r::AI_CALL, Some(part)) => {
+                    out.set_content(ai_call_body(svc, &param("id"), part, reader.thread).await?);
                 }
                 _ => {}
             }
@@ -199,16 +196,15 @@ impl RefRead {
     }
 }
 
-/// A file's text at the ref's revision (the working tree when it names
+/// A file's text at the URI's revision (the working tree when it names
 /// none), in the caller's stream's worktree.
 async fn file_text(
     svc: &Services,
-    parsed: &Uri,
+    parsed: &OxplowUri,
     stream: Option<StreamId>,
 ) -> Result<String, ReadError> {
     let revision: oxplow_domain::vcs::Revision = parsed
-        .rev
-        .as_deref()
+        .param("rev")
         .unwrap_or("working")
         .parse()
         .map_err(ReadError::Invalid)?;
@@ -219,7 +215,7 @@ async fn file_text(
         .into_local_path();
     let bytes = svc
         .trees
-        .read_at(&root, &revision, &parsed.id)
+        .read_at(&root, &revision, parsed.param("path").unwrap_or_default())
         .await
         .map_err(|e| match e {
             oxplow_domain::DomainError::Invalid(m) => ReadError::Invalid(m),
@@ -229,19 +225,15 @@ async fn file_text(
     Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
-/// The lines a `L<from>-<to>` (or `L<n>`) fragment names, 1-based and
-/// inclusive.
-fn lines(text: &str, frag: &str) -> Result<String, ReadError> {
+/// The lines a `lines=<from>-<to>` (or `lines=<n>`) view names, 1-based
+/// and inclusive.
+fn lines(text: &str, span: &str) -> Result<String, ReadError> {
     let bad = || {
         ReadError::Invalid(format!(
-            "a file's fragment names lines, `#L10-20` or `#L10`; not `#{frag}`"
+            "a file's view names lines, `#lines=10-20` or `#lines=10`; not `#lines={span}`"
         ))
     };
-    let span = frag.strip_prefix('L').ok_or_else(bad)?;
-    let (from, to) = match span.split_once('-') {
-        Some((a, b)) => (a, b.strip_prefix('L').unwrap_or(b)),
-        None => (span, span),
-    };
+    let (from, to) = span.split_once('-').unwrap_or((span, span));
     let from: usize = from.parse().map_err(|_| bad())?;
     let to: usize = to.parse().map_err(|_| bad())?;
     if from == 0 || to < from {
@@ -255,42 +247,32 @@ fn lines(text: &str, frag: &str) -> Result<String, ReadError> {
         .join("\n"))
 }
 
-/// The row of the model owning `kind` whose `ref` is `reference`.
+/// The row of the model `uri`'s resource resolves through, whose `ref`
+/// is `reference`.
 async fn owned_row(
     svc: &Services,
-    kind: &str,
+    uri: &OxplowUri,
     reference: &str,
 ) -> Result<Option<Map<String, Value>>, ReadError> {
-    let view = match oxplow_db::ref_models::owner_of(kind) {
-        Some(owner) => owner.view.to_string(),
-        None => {
-            let resolve = svc
-                .sql
-                .query_sql(
-                    "SELECT resolve FROM v_ref_kind WHERE kind = ?1 AND resolve IS NOT NULL",
-                    vec![SqlCell::Text(kind.to_string())],
-                    None,
-                )
-                .await?
-                .rows
-                .into_iter()
-                .next()
-                .and_then(|row| match row.into_iter().next() {
-                    Some(SqlCell::Text(view)) => Some(view),
-                    _ => None,
-                });
-            resolve.ok_or_else(|| {
-                ReadError::Invalid(format!(
-                    "no model holds `{kind}` refs; `oxplow_query_sql` over `v_ref_kind` lists the kinds"
-                ))
-            })?
-        }
-    };
-    let sql = format!("SELECT * FROM \"{view}\" WHERE ref = ?1 LIMIT 1");
+    let vocabulary = svc.vocabulary.current();
+    let view = vocabulary
+        .resources
+        .get(uri.resource())
+        .and_then(|decl| decl.resolve.clone())
+        .ok_or_else(|| {
+            ReadError::Invalid(format!(
+                "no model holds `{}` URIs; `oxplow_query_sql` over `v_resource` lists the resources and what resolves each",
+                uri.resource()
+            ))
+        })?;
+    let sql = format!(
+        "SELECT * FROM \"{}\" WHERE ref = ?1 LIMIT 1",
+        view.replace('"', "")
+    );
     Ok(rows(svc, &sql, reference).await?.into_iter().next())
 }
 
-/// `sql` (its `?1` the ref) as JSON objects, up to [`MAX_RELATED`].
+/// `sql` (its `?1` the URI) as JSON objects, up to [`MAX_RELATED`].
 async fn rows(
     svc: &Services,
     sql: &str,
@@ -349,7 +331,7 @@ async fn event_body(
         "summary" => EventBodyKey::Summary,
         other => {
             return Err(ReadError::Invalid(format!(
-                "an event's body is `#input`, `#output`, `#prompt`, `#result` or `#summary`; not `#{other}`"
+                "an event's body is `#part=input`, `output`, `prompt`, `result` or `summary`; not `#part={other}`"
             )))
         }
     };
@@ -360,12 +342,8 @@ async fn event_body(
             other => ReadError::Invalid(other.to_string()),
         })?;
     let body = body.ok_or_else(|| {
-        let named = Uri {
-            kind: types::EVENT.into(),
-            id: id.into(),
-            rev: None,
-            frag: Some(part.into()),
-        };
+        let named =
+            oxplow_domain::uri::build::of_with_view(r::EVENT, &[("id", id)], &[("part", part)]);
         ReadError::NotFound(format!("{named} (no body, or it expired)"))
     })?;
     serde_json::to_string_pretty(&body).map_err(|e| ReadError::Invalid(e.to_string()))
@@ -381,7 +359,7 @@ async fn subagent_result(
 ) -> Result<String, ReadError> {
     if part != "result" {
         return Err(ReadError::Invalid(format!(
-            "a subagent's body is `#result`; not `#{part}`"
+            "a subagent's body is `#part=result`; not `#part={part}`"
         )));
     }
     let finished = row
@@ -407,7 +385,7 @@ async fn ai_call_body(
         "response" => AiCallBody::Response,
         other => {
             return Err(ReadError::Invalid(format!(
-                "a model call's body is `#request` or `#response`; not `#{other}`"
+                "a model call's body is `#part=request` or `#part=response`; not `#part={other}`"
             )))
         }
     };
@@ -458,25 +436,46 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn a_file_reads_at_its_revision_and_lines() {
         let (_dir, svc) = project().await;
-        let working = read(&svc, "file:src/a.txt", &Reader::default(), None)
-            .await
-            .unwrap();
+        let working = read(
+            &svc,
+            "oxplow:oxplow/file?path=src/a.txt",
+            &Reader::default(),
+            None,
+        )
+        .await
+        .unwrap();
         assert_eq!(working.content.as_deref(), Some("one\nTWO\nthree\n"));
         assert_eq!(working.row, None);
-        let head = read(&svc, "file:src/a.txt@git:HEAD", &Reader::default(), None)
-            .await
-            .unwrap();
+        let head = read(
+            &svc,
+            "oxplow:oxplow/file?path=src/a.txt&rev=git:HEAD",
+            &Reader::default(),
+            None,
+        )
+        .await
+        .unwrap();
         assert_eq!(head.content.as_deref(), Some("one\ntwo\nthree\n"));
-        let two = read(&svc, "file:src/a.txt#L2-3", &Reader::default(), None)
-            .await
-            .unwrap();
+        let two = read(
+            &svc,
+            "oxplow:oxplow/file?path=src/a.txt#lines=2-3",
+            &Reader::default(),
+            None,
+        )
+        .await
+        .unwrap();
         assert_eq!(two.content.as_deref(), Some("TWO\nthree"));
         assert!(matches!(
-            read(&svc, "file:src/a.txt#middle", &Reader::default(), None).await,
-            Err(ReadError::Invalid(m)) if m.contains("#L10-20")
+            read(&svc, "oxplow:oxplow/file?path=src/a.txt#lines=middle", &Reader::default(), None).await,
+            Err(ReadError::Invalid(m)) if m.contains("#lines=10-20")
         ));
         assert!(matches!(
-            read(&svc, "file:src/gone.txt", &Reader::default(), None).await,
+            read(
+                &svc,
+                "oxplow:oxplow/file?path=src/gone.txt",
+                &Reader::default(),
+                None
+            )
+            .await,
             Err(ReadError::NotFound(_))
         ));
     }
@@ -534,20 +533,31 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn an_owned_kind_is_its_models_row() {
         let (_dir, svc) = project().await;
-        let stream = read(&svc, "stream:str1", &Reader::default(), None)
-            .await
-            .unwrap();
-        assert_eq!(stream.row.unwrap()["ref"], "stream:str1");
+        let stream = read(
+            &svc,
+            "oxplow:oxplow/stream?id=str1",
+            &Reader::default(),
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(stream.row.unwrap()["ref"], "oxplow:oxplow/stream?id=str1");
         assert!(matches!(
-            read(&svc, "stream:str99", &Reader::default(), None).await,
+            read(
+                &svc,
+                "oxplow:oxplow/stream?id=str99",
+                &Reader::default(),
+                None
+            )
+            .await,
             Err(ReadError::NotFound(_))
         ));
         assert!(matches!(
-            read(&svc, "nonsense_kind:x", &Reader::default(), None).await,
-            Err(ReadError::Invalid(m)) if m.contains("v_ref_kind")
+            read(&svc, "oxplow:acme/nonsense?id=x", &Reader::default(), None).await,
+            Err(ReadError::Invalid(m)) if m.contains("v_resource")
         ));
         assert!(matches!(
-            read(&svc, "stream:str1@git:HEAD", &Reader::default(), None).await,
+            read(&svc, "oxplow:oxplow/stream?id=str1&rev=git:HEAD", &Reader::default(), None).await,
             Err(ReadError::Invalid(m)) if m.contains("no revisions")
         ));
     }
@@ -577,32 +587,49 @@ mod tests {
                     .unwrap()
             }
         };
-        let collectors = call("collector:acme/triage").await;
-        let mine = call("thread:thr1").await;
-        let theirs = call("thread:thr9").await;
+        let collectors = call("oxplow:oxplow/collector?collector=acme/triage").await;
+        let mine = call("oxplow:oxplow/thread?id=thr1").await;
+        let theirs = call("oxplow:oxplow/thread?id=thr9").await;
         let me = Reader {
             thread: Some(oxplow_domain::ThreadId::new(1)),
             stream: None,
         };
-        let row = read(&svc, &format!("ai_call:{collectors}"), &me, None)
-            .await
-            .unwrap();
+        let row = read(
+            &svc,
+            &oxplow_domain::uri::build::keyed(
+                oxplow_domain::uri::resources::AI_CALL,
+                &collectors.to_string(),
+            ),
+            &me,
+            None,
+        )
+        .await
+        .unwrap();
         assert_eq!(row.row.unwrap()["role"], "decide");
-        let asked = read(&svc, &format!("ai_call:{collectors}#request"), &me, None)
+        let ai_call = |id: i64, part: &str| {
+            format!(
+                "{}#part={part}",
+                oxplow_domain::uri::build::keyed(
+                    oxplow_domain::uri::resources::AI_CALL,
+                    &id.to_string()
+                )
+            )
+        };
+        let asked = read(&svc, &ai_call(collectors, "request"), &me, None)
             .await
             .unwrap();
         assert!(asked.content.unwrap().contains("Is it risky?"));
-        let own = read(&svc, &format!("ai_call:{mine}#response"), &me, None)
+        let own = read(&svc, &ai_call(mine, "response"), &me, None)
             .await
             .unwrap();
         assert!(own.content.unwrap().contains("no"));
         assert!(matches!(
-            read(&svc, &format!("ai_call:{theirs}#response"), &me, None).await,
+            read(&svc, &ai_call(theirs, "response"), &me, None).await,
             Err(ReadError::Invalid(m)) if m.contains("another")
         ));
         assert!(matches!(
-            read(&svc, &format!("ai_call:{mine}#middle"), &me, None).await,
-            Err(ReadError::Invalid(m)) if m.contains("#request")
+            read(&svc, &ai_call(mine, "middle"), &me, None).await,
+            Err(ReadError::Invalid(m)) if m.contains("#part=request")
         ));
     }
 
@@ -627,11 +654,18 @@ mod tests {
             thread: None,
             stream: Some(primary.id),
         };
-        let mine = read(&svc, "file:src/a.txt", &me, None).await.unwrap();
-        assert_eq!(mine.content.as_deref(), Some("one\nTWO\nthree\n"));
-        let theirs = read(&svc, "file:src/a.txt", &me, Some(other_id))
+        let mine = read(&svc, "oxplow:oxplow/file?path=src/a.txt", &me, None)
             .await
             .unwrap();
+        assert_eq!(mine.content.as_deref(), Some("one\nTWO\nthree\n"));
+        let theirs = read(
+            &svc,
+            "oxplow:oxplow/file?path=src/a.txt",
+            &me,
+            Some(other_id),
+        )
+        .await
+        .unwrap();
         assert_eq!(theirs.content.as_deref(), Some("theirs"));
     }
 
@@ -639,8 +673,8 @@ mod tests {
     #[test]
     fn long_content_is_cut_and_says_so() {
         let mut out = RefRead {
-            reference: "file:big".into(),
-            kind: "file".into(),
+            uri: oxplow_domain::uri::build::file_uri("big"),
+            resource: oxplow_domain::uri::resources::FILE.into(),
             row: None,
             related: BTreeMap::new(),
             content: None,

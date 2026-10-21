@@ -235,8 +235,8 @@ mod tests {
             serde_json::json!({"to": "done"}),
         )
         .unwrap()
-        .with_subject(["work_item:oxplow:tsk4"])
-        .with_dedupe_key("work_item:tsk4:transition:1");
+        .with_subject(["oxplow:oxplow/work_item?id=tsk4&provider=oxplow"])
+        .with_dedupe_key("oxplow:oxplow/work_item?id=transition:1&provider=tsk4");
         assert_eq!(env.namespace(), "work_item");
         let json = serde_json::to_value(StoredEvent {
             seq: 7,
@@ -247,7 +247,10 @@ mod tests {
         assert_eq!(json["seq"], 7);
         assert_eq!(json["type"], "work_item.transitioned");
         assert_eq!(json["id"], env.id.0);
-        assert_eq!(json["subject"][0], "work_item:oxplow:tsk4");
+        assert_eq!(
+            json["subject"][0],
+            "oxplow:oxplow/work_item?id=tsk4&provider=oxplow"
+        );
         let back: StoredEvent = serde_json::from_value(json).unwrap();
         assert_eq!(back.envelope, env);
     }

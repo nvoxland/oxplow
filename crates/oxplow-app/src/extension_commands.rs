@@ -13,8 +13,8 @@
 //!     access: write                      # write | record | read
 //!     invokers: { human: true, agent: true, lens: true }
 //!     examples:
-//!       - { name: happy, input: { ref: "work_item:oxplow:tsk1" }, expect_commands: [oxplow.work_item.transition] }
-//!       - { name: gone, input: { ref: "work_item:oxplow:tsk9" }, answers: { sql.read: [[]] }, refuses: no such task }
+//!       - { name: happy, input: { ref: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" }, expect_commands: [oxplow.work_item.transition] }
+//!       - { name: gone, input: { ref: "oxplow:oxplow/work_item?id=tsk9&provider=oxplow" }, answers: { sql.read: [[]] }, refuses: no such task }
 //! ```
 //!
 //! The script reads with `scope("sql.read", { sql, params })` (one
@@ -1279,9 +1279,12 @@ impl ExtensionCommands {
                 // The source refused is held, and the one it collided with
                 // when that is an extension of this batch; nothing else.
                 let ours = |source: &str| {
-                    oxplow_domain::uri::build::id_of(source, oxplow_domain::uri::types::EXTENSION)
-                        .ok()
-                        .filter(|name| wanted.contains_key(name) || registered.contains_key(name))
+                    oxplow_domain::uri::build::id_of(
+                        source,
+                        oxplow_domain::uri::resources::EXTENSION,
+                    )
+                    .ok()
+                    .filter(|name| wanted.contains_key(name) || registered.contains_key(name))
                 };
                 std::iter::once(refusal.source.as_str())
                     .chain(refusal.holder.as_deref())
@@ -1613,7 +1616,7 @@ mod tests {
     entry: handlers/finish_review.star
     invokers: { human: true, agent: true, lens: true }
     examples:
-      - { name: happy, input: { ref: \"work_item:oxplow:tsk1\" }, expect_commands: [oxplow.work_item.transition] }
+      - { name: happy, input: { ref: \"oxplow:oxplow/work_item?id=tsk1&provider=oxplow\" }, expect_commands: [oxplow.work_item.transition] }
 ";
 
     /// Write extension `name` with `commands` (the block's entries) and
@@ -1744,7 +1747,7 @@ mod tests {
         // the example input an agent is shown and a refusal quotes.
         assert_eq!(
             c.example,
-            Some(serde_json::json!({ "ref": "work_item:oxplow:tsk1" }))
+            Some(serde_json::json!({ "ref": "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" }))
         );
         assert!(c.needs.is_empty());
         assert_eq!(c.confirm, Confirm::Never);
@@ -1851,7 +1854,7 @@ mod tests {
     #[test]
     fn a_command_declares_its_needs_and_how_a_person_meets_it() {
         let d = tempfile::tempdir().unwrap();
-        let tail = "    needs: [work_items.comments]\n    ui:\n      label: Finish Review\n      group: Review\n      keywords: [done]\n      about: work_item\n      input: { ref: \"{{ref}}\" }\n";
+        let tail = "    needs: [work_items.comments]\n    ui:\n      label: Finish Review\n      group: Review\n      keywords: [done]\n      about: oxplow/work_item\n      input: { ref: \"{{ref}}\" }\n";
         write_ext(
             d.path(),
             "my-review",
@@ -1865,7 +1868,7 @@ mod tests {
         let ui = c.ui.as_ref().unwrap();
         assert_eq!(ui.label, "Finish Review");
         assert_eq!(ui.group.as_deref(), Some("Review"));
-        assert_eq!(ui.about.as_deref(), Some("work_item"));
+        assert_eq!(ui.about.as_deref(), Some("oxplow/work_item"));
         assert_eq!(ui.input, Some(serde_json::json!({ "ref": "{{ref}}" })));
         assert!(!c.stable, "a private extension's command is experimental");
     }
@@ -2128,7 +2131,7 @@ mod tests {
         crate::test_fixtures::activate_with_problems(&fx.svc).await;
         assert_eq!(
             fx.svc.commands.namespace_owner("mine").as_deref(),
-            Some("extension:mine")
+            Some("oxplow:oxplow/extension?name=mine")
         );
         let v = crate::extensions::validate_extension(
             &fx.svc.sql,
@@ -2507,7 +2510,7 @@ mod tests {
             .run(
                 &oxplow_domain::Actor::Human,
                 "acme.page.star",
-                json!({ "ref": "page:metrics", "page_kind": "metrics", "scope": "project", "thread": oxplow_domain::uri::build::thread_uri(fx.thread) }),
+                json!({ "ref": "oxplow:oxplow/page?page=metrics", "page_kind": "metrics", "scope": "project", "thread": oxplow_domain::uri::build::thread_uri(fx.thread) }),
                 false,
             )
             .await
@@ -2931,25 +2934,25 @@ mod tests {
 
         // The project has no such item, but the example's answers stand in.
         let d = check(
-            "      - { name: happy, input: { ref: \"work_item:oxplow:tsk1\" }, answers: { sql.read: [[{ ref: \"work_item:oxplow:tsk1\" }]] }, expect_commands: [oxplow.work_item.transition] }\n      - { name: missing, input: { ref: \"work_item:oxplow:tsk9\" }, answers: { sql.read: [[]] }, refuses: no such item }\n",
+            "      - { name: happy, input: { ref: \"oxplow:oxplow/work_item?id=tsk1&provider=oxplow\" }, answers: { sql.read: [[{ ref: \"oxplow:oxplow/work_item?id=tsk1&provider=oxplow\" }]] }, expect_commands: [oxplow.work_item.transition] }\n      - { name: missing, input: { ref: \"oxplow:oxplow/work_item?id=tsk9&provider=oxplow\" }, answers: { sql.read: [[]] }, refuses: no such item }\n",
         );
         assert_eq!(errors(d).await, "");
 
         for (example, says) in [
             (
-                "      - { name: happy, input: { ref: \"work_item:oxplow:tsk1\" }, expect_commands: [oxplow.work_item.transition] }\n",
+                "      - { name: happy, input: { ref: \"oxplow:oxplow/work_item?id=tsk1&provider=oxplow\" }, expect_commands: [oxplow.work_item.transition] }\n",
                 "example `happy`: refused (no such item) but `expect_commands` is [oxplow.work_item.transition]",
             ),
             (
-                "      - { name: missing, input: { ref: \"work_item:oxplow:tsk1\" }, answers: { sql.read: [[{ ref: \"work_item:oxplow:tsk1\" }]] }, refuses: no such item }\n",
+                "      - { name: missing, input: { ref: \"oxplow:oxplow/work_item?id=tsk1&provider=oxplow\" }, answers: { sql.read: [[{ ref: \"oxplow:oxplow/work_item?id=tsk1&provider=oxplow\" }]] }, refuses: no such item }\n",
                 "example `missing`: composed [oxplow.work_item.transition] but it should refuse (no such item)",
             ),
             (
-                "      - { name: missing, input: { ref: \"work_item:oxplow:tsk1\" }, answers: { sql.read: [[]] }, refuses: unverified }\n",
+                "      - { name: missing, input: { ref: \"oxplow:oxplow/work_item?id=tsk1&provider=oxplow\" }, answers: { sql.read: [[]] }, refuses: unverified }\n",
                 "example `missing`: refused (no such item) but it should refuse (unverified)",
             ),
             (
-                "      - { name: both, input: { ref: \"work_item:oxplow:tsk1\" }, answers: { sql.read: [[]] }, refuses: x, expect_commands: [oxplow.work_item.transition] }\n",
+                "      - { name: both, input: { ref: \"oxplow:oxplow/work_item?id=tsk1&provider=oxplow\" }, answers: { sql.read: [[]] }, refuses: x, expect_commands: [oxplow.work_item.transition] }\n",
                 "example `both` expects commands and a refusal",
             ),
         ] {

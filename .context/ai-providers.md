@@ -521,7 +521,7 @@ turn's prompt (`turn_kind`).
 Each is paid with the person's key, so neither is a read-only tool (no
 `read_only_hint`: a harness doesn't auto-approve it), each takes at most
 `AI_TEXT_MAX` (100,000) characters of text, and each records as the
-asking thread (caller `thread:<id>`, from the session's bearer); a
+asking thread (caller `oxplow:oxplow/thread?id=<id>`, from the session's bearer); a
 connection with no thread identity is refused. Agents can't change
 providers, roles or keys: those IPC commands are UI-only in the
 surface-parity manifest.
@@ -571,7 +571,7 @@ its source; with no model bound, the recorded ones are all there is.
   so asking again about unchanged activity on the same binding reads the
   recorded answer; rebinding the profile asks the new model.
 - **`store-reasoning`** (on `contribution.job.completed`, `where: {
-  contribution: job:oxplow-bundled/reasoning }`) reads the job, drops a
+  contribution: oxplow:oxplow/job?job=oxplow-bundled/reasoning }`) reads the job, drops a
   code fence, and skips — saying so — a reply that isn't a JSON object
   with a `decisions` or a `claims` list (Starlark's `json.decode` has no
   fallback, so the check is the object's braces; malformed JSON inside

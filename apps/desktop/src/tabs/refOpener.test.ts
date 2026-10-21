@@ -5,9 +5,11 @@ import { commentUri, eventUri, fileUri, pageUri, resourceUri, threadUri, wikiUri
 import { extPageRef, fileRef, wikiPageRef, workItemTabRef } from "./pageRefs.js";
 import { refTarget, refTargetNow } from "./refOpener.js";
 
-const resource = (name: string, page: string | null, extension = "oxplow"): Resource => ({
-  resource: `${extension}/${name}`,
-  extension,
+// oxplow's resources are oxplow-foundation's declarations: the URI's
+// extension segment (`oxplow`) isn't the declaring extension's name.
+const resource = (name: string, page: string | null, segment = "oxplow"): Resource => ({
+  resource: `${segment}/${name}`,
+  extension: segment === "oxplow" ? "oxplow-foundation" : segment,
   label: name,
   params: { id: { required: true, pattern: null } },
   additional: false,

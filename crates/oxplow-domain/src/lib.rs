@@ -51,9 +51,7 @@ pub use commands::{
     CommandUi, Confirm, InputValidator, Invoker, Invokers, Lifecycle, MenuPlace, OpRef, Preview,
     OXPLOW_NAMESPACE,
 };
-pub use comment::{
-    Comment, CommentIntent, CommentMessage, CommentStatus, CommentTarget, CommentThread,
-};
+pub use comment::{Comment, CommentIntent, CommentMessage, CommentStatus, CommentThread};
 pub use effort_impact::EffortImpact;
 pub use error::DomainError;
 pub use events::schema::{EventSchemaRegistry, EventType};

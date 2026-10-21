@@ -1,6 +1,6 @@
-//! `search.read/search { query, stream_id?, kinds?, limit? }`: site-wide
-//! BM25 search over every searchable kind (`v_ref_kind.searchable`) and a
-//! stream's files, best first; each hit names the ref it found.
+//! `search.read/search { query, stream_id?, resources?, limit? }`: site-wide
+//! BM25 search over every searchable resource (`v_resource.searchable`) and
+//! a stream's files, best first; each hit names the URI it found.
 
 use std::sync::Arc;
 
@@ -24,10 +24,11 @@ pub struct SiteSearchInput {
     /// wiki are always included). Omit to search every stream.
     #[serde(default)]
     pub stream_id: Option<String>,
-    /// Restrict to these kinds: any `v_ref_kind` lists as `searchable`
-    /// (`work_item`, `wiki`, `thread_note`, an extension's), or `file`.
+    /// Restrict to these resources: any `v_resource` lists as `searchable`
+    /// (`oxplow/work_item`, `oxplow/wiki`, `oxplow/thread_note`, an
+    /// extension's), or `oxplow/file`.
     #[serde(default)]
-    pub kinds: Option<Vec<String>>,
+    pub resources: Option<Vec<String>>,
     /// Max hits to return (default 50).
     #[serde(default)]
     pub limit: Option<u32>,
@@ -52,7 +53,7 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
                     .search(
                         &input.query,
                         input.stream_id.as_deref(),
-                        &input.kinds.unwrap_or_default(),
+                        &input.resources.unwrap_or_default(),
                         input.limit.unwrap_or(50) as usize,
                     )
                     .await
@@ -95,7 +96,7 @@ mod tests {
             .run(
                 &actor,
                 SEARCH_FIND,
-                json!({ "query": "quokk", "kinds": ["task"] }),
+                json!({ "query": "quokk", "resources": ["task"] }),
                 false,
             )
             .await

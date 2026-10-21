@@ -328,8 +328,8 @@ mod tests {
         Envelope::typed::<SnapshotTaken>(
             "system",
             &SnapshotTakenV2 {
-                stream: "stream:str1".into(),
-                snapshot: "snapshot:1".into(),
+                stream: "oxplow:oxplow/stream?id=str1".into(),
+                snapshot: "oxplow:oxplow/snapshot?id=1".into(),
                 parent: None,
                 trigger,
                 unchanged,
@@ -345,10 +345,10 @@ mod tests {
         Envelope::typed::<VcsHeadMoved>(
             "system",
             &VcsHeadMovedV1 {
-                stream: "stream:str1".into(),
-                snapshot: "snapshot:1".into(),
+                stream: "oxplow:oxplow/stream?id=str1".into(),
+                snapshot: "oxplow:oxplow/snapshot?id=1".into(),
                 from: None,
-                to: "commit:abc".into(),
+                to: "oxplow:oxplow/commit?sha=abc".into(),
             },
         )
     }
@@ -411,7 +411,7 @@ mod tests {
             .svc
             .effort_store
             .start(
-                "work_item:issues:B-1",
+                "oxplow:oxplow/work_item?id=B-1&provider=issues",
                 &oxplow_domain::ThreadId::new(7),
                 Some(start),
             )
@@ -880,8 +880,11 @@ mod tests {
             &oxplow_domain::events::schema::EffortFinishedV2 {
                 // The ref, as `effort.lifecycle` logs it.
                 effort: oxplow_domain::uri::build::effort_uri(f.effort),
-                work_item: Some("work_item:oxplow:tsk1".into()),
-                end_snapshot: Some(format!("snapshot:{end}")),
+                work_item: Some("oxplow:oxplow/work_item?id=tsk1&provider=oxplow".into()),
+                end_snapshot: Some(oxplow_domain::uri::build::keyed(
+                    oxplow_domain::uri::resources::SNAPSHOT,
+                    &end.to_string(),
+                )),
             },
         );
         reactor.handle(&log(&f.svc, finished).await).await.unwrap();

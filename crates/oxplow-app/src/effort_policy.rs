@@ -598,7 +598,7 @@ mod tests {
             input["parent_ref"] = json!(parent);
         }
         if thread {
-            input["thread"] = json!(fx.thread.to_string());
+            input["thread"] = json!(oxplow_domain::uri::build::thread_uri(fx.thread));
         }
         let out = fx
             .svc

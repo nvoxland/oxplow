@@ -4,7 +4,7 @@ input:
   effect: infer-reasoning
   event:
     type: effort.finished
-    payload: { effort: "effort:eff7", work_item: "work_item:oxplow:tsk1", end_snapshot: "snapshot:3" }
+    payload: { effort: "oxplow:oxplow/effort?id=eff7", work_item: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", end_snapshot: "oxplow:oxplow/snapshot?id=3" }
   answers:
     ai.discover:
       - { role: oxplow-bundled/reasoning, model: { provider: local, model: llama }, problem: null }

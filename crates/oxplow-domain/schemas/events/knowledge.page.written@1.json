@@ -4,14 +4,14 @@
   "description": "`knowledge.page.written@1`: a knowledge page's row and edges were\nrestated from its body — by `oxplow.knowledge.write_page` / `link` /\n`resync`, or by the wiki watcher after a hand edit\n(`system:wiki_watch`).",
   "properties": {
     "outbound": {
-      "description": "Every ref the page now points at (`file:src/lib.rs`, `wiki:x`, …).",
+      "description": "Every ref the page now points at (`oxplow:oxplow/file?path=src/lib.rs`, `oxplow:oxplow/wiki?slug=x`, …).",
       "items": {
         "type": "string"
       },
       "type": "array"
     },
     "page": {
-      "description": "`wiki:<slug>`.",
+      "description": "`oxplow:oxplow/wiki?slug=<slug>`.",
       "type": "string"
     },
     "snapshot": {

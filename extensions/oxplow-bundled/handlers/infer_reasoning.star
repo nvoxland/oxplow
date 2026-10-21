@@ -54,8 +54,8 @@ def read(sql, effort_id):
 
 def transform(x):
     effort = x["input"]["effort"]
-    if not uri.is_uri(effort) or uri.type(effort) != "effort":
-        return {"refuse": "`effort` is an effort ref, `effort:<id>`"}
+    if not uri.is_uri(effort) or uri.resource(effort) != "oxplow/effort":
+        return {"refuse": "`effort` is an effort ref, `oxplow:oxplow/effort?id=<id>`"}
     found = scope("sql.read", {
         "sql": "SELECT e.id, e.work_item, coalesce(w.title, '') AS title FROM v_effort e "
         + "LEFT JOIN v_work_item w ON w.ref = e.work_item WHERE e.ref = :ref",

@@ -11,5 +11,5 @@ SELECT CAST(h.ref AS TEXT) AS ref, h.extension, h.contribution, h.kind, h.state,
          WHERE l.to_ref = h.ref AND l.link_type = 'about'
            AND w.state NOT IN ('done', 'canceled')
          ORDER BY w.ref DESC LIMIT 1) AS repair_item
-FROM (SELECT *, CAST(kind || ':' || extension || '/' || contribution AS TEXT) AS ref
+FROM (SELECT *, CAST(uri('oxplow/' || kind, kind, extension || '/' || contribution) AS TEXT) AS ref
         FROM source('contribution_health')) h

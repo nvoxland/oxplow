@@ -1,10 +1,11 @@
-//! Search kinds whose rows come from a model (P9.D3, tsk864;
-//! `.context/resources.md` "Searchable kinds"): every kind `ref_kind` lists
-//! with a `searchable` view — core's (`oxplow_db::ref_models`) and an
-//! extension's (`searchable: <model>`) alike — has that view's rows
+//! Search resources whose rows come from a model (P9.D3;
+//! `.context/resources.md` "Searchable resources"): every resource
+//! `resource` lists with a `searchable` view — oxplow-foundation's and
+//! another extension's (`searchable: <model>`) alike — has that view's rows
 //! (`ref`, `title`, `body`, `stream_id`) in the site-wide index
-//! (`search_fts`) under the kind. Files aren't a model's: their input is
-//! snapshot blobs, so the `search.index` consumer indexes them.
+//! (`search_fts`) under the resource, each by its URI. Files aren't a
+//! model's: their input is snapshot blobs, so the `search.index` consumer
+//! indexes them.
 //!
 //! It is **index-time ingestion, as an asset** — not a query-time UNION:
 //! `search_fts` owns the text it ranks (BM25 and `snippet()` need it in
@@ -14,14 +15,14 @@
 //! is a [`Materializer`]: recomputed in its own transaction when a commit
 //! touches one of them — never in the writer's.
 //!
-//! [`Assets::sync_search_kinds`] keeps one per searchable kind in
-//! `ref_kind` (what the vocabulary pass restates): a new or changed kind
-//! is (re)registered, and a kind that is gone — its extension removed,
-//! its `searchable:` dropped — leaves the index with its entries.
+//! [`Assets::sync_search_kinds`] keeps one per searchable resource in
+//! `resource` (what the vocabulary pass restates): a new or changed one
+//! is (re)registered, and one that is gone — its extension removed, its
+//! `searchable:` dropped — leaves the index with its entries.
 //!
-//! An extension's kind is bounded: at most [`MAX_ROWS`] rows, each body cut at
-//! [`MAX_BODY`] bytes; core's aren't. A row whose `ref` isn't one of the
-//! kind's (`<kind>:<id>`, the id matching its pattern) is skipped. A
+//! Another extension's resource is bounded: at most [`MAX_ROWS`] rows, each
+//! body cut at [`MAX_BODY`] bytes; oxplow-foundation's aren't. A row whose
+//! `ref` isn't a URI of the resource is skipped. A
 //! recompute writes only the entries that changed, were added or went: a
 //! feed with a `version` column is planned from its versions alone and
 //! reads the title and body of the changed rows only (a kind of many
@@ -46,13 +47,13 @@ pub const MAX_BODY: usize = 16 * 1024;
 /// query.
 const TEXT_CHUNK: usize = 500;
 
-/// The asset of a kind's index: `search:<kind>`.
+/// The asset of a resource's index: `search:<resource>`.
 pub fn asset_name(kind: &str) -> String {
     format!("search:{kind}")
 }
 
-/// One searchable kind as `ref_kind` and the model registry have it. Any
-/// of it changing re-registers its index.
+/// One searchable resource as `resource` and the model registry have it.
+/// Any of it changing re-registers its index.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SearchableKind {
     /// The view its rows come from.
@@ -60,16 +61,17 @@ pub(crate) struct SearchableKind {
     /// The view's SQL as compiled: an edit of the model changes it — and
     /// what the index holds — without touching the tables (tsk851).
     sql: String,
-    id_pattern: String,
     /// The tables behind the view.
     tables: Vec<String>,
-    /// Core's: its rows aren't bounded.
+    /// oxplow-foundation's: its rows aren't bounded.
     core: bool,
+    /// The resource as declared: a row's `ref` is one of its URIs.
+    decl: oxplow_domain::uri::resources::ResourceDecl,
     /// Its view has a `version` column: a recompute is planned from it.
     versioned: bool,
 }
 
-/// The index of one kind.
+/// The index of one resource.
 struct KindSearchIndex {
     db: Database,
     asset: String,
@@ -87,8 +89,7 @@ impl Materializer for KindSearchIndex {
         self.spec.tables.clone()
     }
 
-    /// What it indexes beyond its tables' rows: the view's SQL and how a
-    /// row's ref reads.
+    /// What it indexes beyond its tables' rows: the view's SQL.
     fn definition(&self) -> Option<String> {
         use sha2::{Digest, Sha256};
         Some(hex::encode(Sha256::digest(
@@ -99,16 +100,18 @@ impl Materializer for KindSearchIndex {
     async fn recompute(&self, _full: bool) -> Result<Recomputed, DomainError> {
         let kind = self.kind.clone();
         let spec = self.spec.clone();
-        let id = regex::Regex::new(&spec.id_pattern)
-            .map_err(|e| DomainError::Invalid(format!("ref kind `{kind}`'s id pattern: {e}")))?;
         let indexed = self
             .db
             .transaction(move |tx| {
+                let mut resources = oxplow_domain::uri::resources::ResourceRegistry::default();
+                resources
+                    .register(spec.decl.clone())
+                    .map_err(|e| DomainError::Invalid(format!("resource `{kind}`: {e}")))?;
                 let feed = Feed {
                     tx,
                     kind: &kind,
                     spec: &spec,
-                    id: &id,
+                    resources,
                 };
                 if spec.versioned {
                     feed.restate_by_version()
@@ -124,12 +127,14 @@ impl Materializer for KindSearchIndex {
     }
 }
 
-/// One kind's feed, read in a recompute's transaction.
+/// One resource's feed, read in a recompute's transaction.
 struct Feed<'a> {
     tx: &'a rusqlite::Connection,
+    /// The resource (`oxplow/effort`).
     kind: &'a str,
     spec: &'a SearchableKind,
-    id: &'a regex::Regex,
+    /// A registry of the resource alone, which a row's URI must hold for.
+    resources: oxplow_domain::uri::resources::ResourceRegistry,
 }
 
 impl Feed<'_> {
@@ -156,14 +161,13 @@ impl Feed<'_> {
         }
     }
 
-    /// `(ref, stream)` of a row as an entry key: the id after `<kind>:`,
-    /// when it is one of the kind's ids — else nothing a hit could open.
+    /// `(ref, stream)` of a row as an entry key: its URI, when it is one
+    /// of the resource's and holds for its params — else nothing a hit
+    /// could open.
     fn key(&self, reference: Option<String>, stream: Option<String>) -> Option<EntryKey> {
-        let id = reference?
-            .strip_prefix(&format!("{}:", self.kind))
-            .filter(|id| self.id.is_match(id))?
-            .to_string();
-        Some((id, stream))
+        let uri = oxplow_domain::uri::build::parse_resource(&reference?, self.kind).ok()?;
+        self.resources.validate(&uri).ok()?;
+        Some((uri.identity(), stream))
     }
 
     fn body(&self, body: Option<String>) -> String {
@@ -183,7 +187,7 @@ impl Feed<'_> {
             tracing::warn!(kind = %self.kind, view = %self.spec.view, "more than {MAX_ROWS} rows; the rest aren't searchable");
         }
         if skipped > 0 {
-            tracing::warn!(kind = %self.kind, view = %self.spec.view, skipped, "rows whose `ref` isn't one of the kind's weren't indexed");
+            tracing::warn!(kind = %self.kind, view = %self.spec.view, skipped, "rows whose `ref` isn't one of the resource's URIs weren't indexed");
         }
     }
 
@@ -253,10 +257,7 @@ impl Feed<'_> {
         let plan = oxplow_db::search_store::plan_restate_tx(self.tx, self.kind, &versions)?;
         let mut texts: BTreeMap<EntryKey, (String, String)> = BTreeMap::new();
         for chunk in plan.write.chunks(TEXT_CHUNK) {
-            let refs: Vec<String> = chunk
-                .iter()
-                .map(|((id, _), ..)| format!("{}:{id}", self.kind))
-                .collect();
+            let refs: Vec<String> = chunk.iter().map(|((id, _), ..)| id.clone()).collect();
             let sql = format!(
                 "SELECT CAST(ref AS TEXT), {}, CAST(title AS TEXT), CAST(body AS TEXT) \
                  FROM {} WHERE ref IN ({})",
@@ -298,32 +299,42 @@ impl Feed<'_> {
     }
 }
 
-/// The searchable kinds `ref_kind` lists: every one of them, and those
+/// The searchable resources `resource` lists: every one of them, and those
 /// whose view is published, each with what decides its rows.
 struct Searchable {
-    /// Every kind `ref_kind` says is searchable, its view published or not.
+    /// Every resource `resource` says is searchable, its view published or not.
     declared: std::collections::BTreeSet<String>,
     /// Those whose view is published: what to index.
     ready: BTreeMap<String, SearchableKind>,
 }
 
 async fn searchable_kinds(db: &Database) -> Result<Searchable, DomainError> {
-    // Each kind with its view's compiled SQL (none while the view isn't
-    // published) and whether the view has a `version` column.
-    type Declared = (String, String, String, bool, Option<String>, bool);
+    // Each resource with its view's compiled SQL (none while the view
+    // isn't published), whether the view has a `version` column, and its
+    // params as declared.
+    type Declared = (String, String, bool, Option<String>, bool, String, bool);
     let kinds: Vec<Declared> = db
         .read(|tx| {
             let mut st = tx
                 .prepare(
-                    "SELECT k.kind, k.searchable, k.id_pattern, k.extension IS NULL, \
+                    "SELECT k.resource, k.searchable, k.extension = 'oxplow-foundation', \
                             (SELECT sql FROM sqlite_master WHERE type = 'view' AND name = k.searchable), \
-                            EXISTS (SELECT 1 FROM pragma_table_info(k.searchable) WHERE name = 'version') \
-                     FROM ref_kind k WHERE k.searchable IS NOT NULL ORDER BY k.kind",
+                            EXISTS (SELECT 1 FROM pragma_table_info(k.searchable) WHERE name = 'version'), \
+                            k.params, k.additional \
+                     FROM resource k WHERE k.searchable IS NOT NULL ORDER BY k.resource",
                 )
                 .map_err(oxplow_db::map_sql_err)?;
             let rows = st
                 .query_map([], |r| {
-                    Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?))
+                    Ok((
+                        r.get(0)?,
+                        r.get(1)?,
+                        r.get(2)?,
+                        r.get(3)?,
+                        r.get(4)?,
+                        r.get(5)?,
+                        r.get(6)?,
+                    ))
                 })
                 .map_err(oxplow_db::map_sql_err)?
                 .collect::<rusqlite::Result<_>>()
@@ -338,17 +349,22 @@ async fn searchable_kinds(db: &Database) -> Result<Searchable, DomainError> {
         .into_iter()
         // A view the compiler hasn't published (yet, or any more) has
         // nothing to index; it registers once the registry lists it.
-        .filter_map(|(kind, view, id_pattern, core, sql, versioned)| {
+        .filter_map(|(kind, view, core, sql, versioned, params, additional)| {
             let tables = tables.get(&view)?.clone();
+            let decl = oxplow_domain::uri::resources::ResourceDecl {
+                params: serde_json::from_str(&params).ok()?,
+                additional,
+                ..oxplow_domain::uri::resources::ResourceDecl::keyed(&kind, "id")
+            };
             Some((
                 kind,
                 SearchableKind {
                     view,
                     sql: sql?,
-                    id_pattern,
                     tables,
                     core,
                     versioned,
+                    decl,
                 },
             ))
         })
@@ -357,14 +373,14 @@ async fn searchable_kinds(db: &Database) -> Result<Searchable, DomainError> {
 }
 
 impl Assets {
-    /// Keep one search index per searchable extension kind (see the module):
-    /// new or changed ones (re)registered, gone ones stopped and their
-    /// entries removed — also those of a kind that went while oxplow
-    /// wasn't running (an `asset_state` row with no kind behind it). A
-    /// kind still declared searchable whose view isn't published — at
-    /// start, before the extension models compile again — keeps its
-    /// entries: "not compiled yet" isn't "gone" (tsk852). Run at start and
-    /// when `ref_kind` or the model registry changes.
+    /// Keep one search index per searchable resource (see the module): new
+    /// or changed ones (re)registered, gone ones stopped and their entries
+    /// removed — also those of a resource that went while oxplow wasn't
+    /// running (an `asset_state` row with nothing behind it). A resource
+    /// still declared searchable whose view isn't published — at start,
+    /// before the extension models compile again — keeps its entries:
+    /// "not compiled yet" isn't "gone". Run at start and when `resource`
+    /// or the model registry changes.
     pub async fn sync_search_kinds(&self) -> Result<(), DomainError> {
         let Searchable {
             declared,
@@ -389,7 +405,7 @@ impl Assets {
             }));
             have.insert(kind.clone(), spec.clone());
         }
-        // What was indexed for a kind that is no longer searchable goes —
+        // What was indexed for a resource that is no longer searchable goes —
         // found wherever it is left: its state, its failure, or entries
         // with neither (a restate that committed after a cleanup, or a
         // process that died between the two), files aside (tsk853).
@@ -410,7 +426,7 @@ impl Assets {
                     .map_err(oxplow_db::map_sql_err)?;
                 // Files aren't a model's.
                 let gone = found.iter().filter(|kind| {
-                    !keep.contains(kind) && kind.as_str() != crate::indexer::KIND_FILE
+                    !keep.contains(kind) && kind.as_str() != oxplow_domain::uri::resources::FILE
                 });
                 for kind in gone {
                     oxplow_db::search_store::restate_kind_tx(tx, kind, &BTreeMap::new())?;
@@ -444,7 +460,7 @@ mod tests {
 
     /// `acme`: pull requests collected as `pr` rows, a `prs` model that
     /// titles them, a `found` model that makes them searchable, and the
-    /// kind `acme_pr` (`searchable` as given).
+    /// kind `acme/pr` (`searchable` as given).
     fn acme(root: &Path, searchable: &str) {
         write(
             root,
@@ -475,10 +491,10 @@ models:
       - {{ name: body, type: TEXT, doc: Its description. }}
 pages:
   - {{ id: pr, title: Pull request, category: Work, lens: open }}
-ref_kinds:
-  - kind: acme_pr
+resources:
+  - name: pr
     label: Pull request
-    id: '^\\d+$'
+    params: {{ id: {{ required: true, pattern: '^\\d+$' }} }}
     resolve: prs
     page: pr
 {searchable}    icon: git-pull-request
@@ -488,12 +504,12 @@ ref_kinds:
         write(
             root,
             ".oxplow/extensions/acme/models/prs.sql",
-            "SELECT CAST('acme_pr:' || n AS TEXT) AS ref, title FROM ref('pr')",
+            "SELECT CAST(uri('acme/pr', 'id', n) AS TEXT) AS ref, title FROM ref('pr')",
         );
         write(
             root,
             ".oxplow/extensions/acme/models/found.sql",
-            "SELECT CAST('acme_pr:' || n AS TEXT) AS ref, title, body FROM ref('pr')",
+            "SELECT CAST(uri('acme/pr', 'id', n) AS TEXT) AS ref, title, body FROM ref('pr')",
         );
         write(
             root,
@@ -534,22 +550,20 @@ ref_kinds:
         .unwrap();
     }
 
-    /// Search for `query` until it finds `want` refs of `acme_pr` (the
+    /// Search for `query` until it finds `want` refs of `acme/pr` (the
     /// index follows its tables after a quiet moment).
     async fn found(svc: &crate::Services, query: &str, want: &[&str]) -> Vec<(String, String)> {
         let mut hits = Vec::new();
         for _ in 0..100 {
             hits = svc
                 .search_store
-                .search(query, None, &["acme_pr".to_string()], 10)
+                .search(query, None, &["acme/pr".to_string()], 10)
                 .await
                 .unwrap()
                 .into_iter()
                 .map(|h| {
-                    (
-                        h.reference.trim_start_matches("acme_pr:").to_string(),
-                        h.title,
-                    )
+                    let id = oxplow_domain::uri::build::param_of(&h.uri, "acme/pr", "id").unwrap();
+                    (id, h.title)
                 })
                 .collect();
             let ids: Vec<&str> = hits.iter().map(|(id, _)| id.as_str()).collect();
@@ -589,7 +603,7 @@ ref_kinds:
         let listed = svc
             .sql
             .query_sql(
-                "SELECT searchable FROM v_ref_kind WHERE kind = 'acme_pr'",
+                "SELECT searchable FROM v_resource WHERE resource = 'acme/pr'",
                 vec![],
                 None,
             )
@@ -622,11 +636,11 @@ ref_kinds:
             .unwrap();
         assert_eq!(
             (
-                by_body[0].kind.as_str(),
-                by_body[0].reference.as_str(),
+                by_body[0].resource.as_str(),
+                by_body[0].uri.as_str(),
                 by_body[0].stream_id.clone()
             ),
-            ("acme_pr", "acme_pr:12", None)
+            ("acme/pr", "oxplow:acme/pr?id=12", None)
         );
         assert!(
             by_body[0].snippet.contains("frobnication"),
@@ -651,7 +665,7 @@ ref_kinds:
         write(
             &root,
             ".oxplow/extensions/acme/models/found.sql",
-            "SELECT CAST('acme_pr:' || n AS TEXT) AS ref, CAST(title || ' (open)' AS TEXT) AS title, body FROM ref('pr')",
+            "SELECT CAST(uri('acme/pr', 'id', n) AS TEXT) AS ref, CAST(title || ' (open)' AS TEXT) AS title, body FROM ref('pr')",
         );
         crate::test_fixtures::activate_with_problems(svc).await;
         assert_eq!(
@@ -667,7 +681,7 @@ ref_kinds:
             .db
             .read(|tx| {
                 tx.query_row(
-                    "SELECT count(*) FROM asset_state WHERE asset = 'search:acme_pr'",
+                    "SELECT count(*) FROM asset_state WHERE asset = 'search:acme/pr'",
                     [],
                     |r| r.get::<_, i64>(0),
                 )
@@ -679,7 +693,7 @@ ref_kinds:
     }
 
     /// tsk854: when the change listener lags it missed some batches — one
-    /// may have held the `ref_kind` or `model` write — so it resyncs the
+    /// may have held the `resource` or `model` write — so it resyncs the
     /// registry as if those changed, not only the assets' inputs.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_lagged_listener_resyncs_the_searchable_kinds() {
@@ -694,7 +708,7 @@ ref_kinds:
         declare_entities(svc).await;
         collect(svc).await;
         crate::test_fixtures::activate_with_problems(svc).await;
-        // Nothing heard the `ref_kind` write: the listener missed it.
+        // Nothing heard the `resource` write: the listener missed it.
         let assets = Assets::new(svc.db.clone(), Duration::from_millis(50));
         let mut lineage = crate::models_changed::Lineage::load(&svc.db).await.unwrap();
         crate::models_changed::react(
@@ -713,27 +727,33 @@ ref_kinds:
 
     /// tsk852: at start, extension models are dropped and compiled again,
     /// so for a moment a searchable kind's view isn't there. That is "not
-    /// compiled yet", not "gone": its entries stay until `ref_kind` stops
+    /// compiled yet", not "gone": its entries stay until `resource` stops
     /// saying it is searchable.
     #[tokio::test]
     async fn a_kind_whose_view_isnt_compiled_yet_keeps_its_entries() {
         let f = crate::test_fixtures::services_with_effort().await;
         let svc = &f.svc;
         svc.search_store
-            .upsert("acme_pr", "12", None, "Widget frobnicator", "")
+            .upsert(
+                "acme/pr",
+                "oxplow:acme/pr?id=12",
+                None,
+                "Widget frobnicator",
+                "",
+            )
             .await
             .unwrap();
         svc.db
             .transaction(|tx| {
                 tx.execute(
-                    "INSERT INTO ref_kind (kind, extension, label, id_pattern, revisioned, wikilinks, searchable) \
-                     VALUES ('acme_pr', 'acme', 'Pull request', '^\\d+$', 0, '[]', 'v_acme_found')",
+                    "INSERT INTO resource (resource, extension, label, params, additional, searchable) \
+                     VALUES ('acme/pr', 'acme', 'Pull request', '{\"id\":{\"required\":true}}', 0, 'v_acme_found')",
                     [],
                 )
                 .map_err(oxplow_db::map_sql_err)?;
                 tx.execute(
                     "INSERT INTO asset_state (asset, computed_at, events_to, elapsed_ms) \
-                     VALUES ('search:acme_pr', '2026-01-01T00:00:00Z', 0, 1)",
+                     VALUES ('search:acme/pr', '2026-01-01T00:00:00Z', 0, 1)",
                     [],
                 )
                 .map(|_| ())
@@ -751,9 +771,9 @@ ref_kinds:
             .await
             .unwrap()
             .into_iter()
-            .map(|h| h.kind)
+            .map(|h| h.resource)
             .collect();
-        assert_eq!(left, vec!["acme_pr"]);
+        assert_eq!(left, vec!["acme/pr"]);
     }
 
     /// tsk853: what a gone kind left is found from the index and the
@@ -766,9 +786,12 @@ ref_kinds:
         let f = crate::test_fixtures::services_with_effort().await;
         let svc = &f.svc;
         for (kind, id) in [
-            ("acme_pr", "12"),
-            ("wiki", "widgets"),
-            ("work_item", "oxplow:tsk7"),
+            ("acme/pr", "oxplow:acme/pr?id=12"),
+            ("oxplow/wiki", "oxplow:oxplow/wiki?slug=widgets"),
+            (
+                "oxplow/work_item",
+                "oxplow:oxplow/work_item?id=tsk7&provider=oxplow",
+            ),
         ] {
             svc.search_store
                 .upsert(kind, id, None, "Widget", "")
@@ -797,12 +820,12 @@ ref_kinds:
             .await
             .unwrap()
             .into_iter()
-            .map(|h| h.kind)
+            .map(|h| h.resource)
             .collect();
         left.sort();
         assert_eq!(
             left,
-            vec!["wiki", "work_item"],
+            vec!["oxplow/wiki", "oxplow/work_item"],
             "core's entries are untouched"
         );
         let failures = svc
@@ -825,18 +848,30 @@ ref_kinds:
         let f = crate::test_fixtures::services_with_effort().await;
         let svc = &f.svc;
         svc.search_store
-            .upsert("acme_pr", "12", None, "Widget frobnicator", "")
+            .upsert(
+                "acme/pr",
+                "oxplow:acme/pr?id=12",
+                None,
+                "Widget frobnicator",
+                "",
+            )
             .await
             .unwrap();
         svc.search_store
-            .upsert("wiki", "widgets", None, "Widgets", "")
+            .upsert(
+                "oxplow/wiki",
+                "oxplow:oxplow/wiki?slug=widgets",
+                None,
+                "Widgets",
+                "",
+            )
             .await
             .unwrap();
         svc.db
             .transaction(|tx| {
                 tx.execute(
                     "INSERT INTO asset_state (asset, computed_at, events_to, elapsed_ms) \
-                     VALUES ('search:acme_pr', '2026-01-01T00:00:00Z', 0, 1)",
+                     VALUES ('search:acme/pr', '2026-01-01T00:00:00Z', 0, 1)",
                     [],
                 )
                 .map(|_| ())
@@ -854,9 +889,9 @@ ref_kinds:
             .await
             .unwrap()
             .into_iter()
-            .map(|h| h.kind)
+            .map(|h| h.resource)
             .collect();
-        assert_eq!(left, vec!["wiki"], "core's entries are untouched");
+        assert_eq!(left, vec!["oxplow/wiki"], "core's entries are untouched");
     }
 }
 
@@ -868,7 +903,7 @@ mod core_tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    use oxplow_domain::{CommentTarget, StreamId, ThreadId};
+    use oxplow_domain::{StreamId, ThreadId};
 
     use crate::assets::Assets;
     use crate::Services;
@@ -938,7 +973,7 @@ mod core_tests {
             .await
             .unwrap()
             .iter()
-            .any(|h| h.kind == kind)
+            .any(|h| h.resource == kind)
     }
 
     /// An item filed on `thread`'s list, through its command.
@@ -946,7 +981,7 @@ mod core_tests {
         run(
             svc,
             crate::commands::work_item::CREATE,
-            serde_json::json!({ "title": title, "thread": thread.to_string() }),
+            serde_json::json!({ "title": title, "thread": oxplow_domain::uri::build::thread_uri(thread) }),
         )
         .await["ref"]
             .as_str()
@@ -964,12 +999,12 @@ mod core_tests {
         change_loop(&svc);
         let t = task(&svc, thread.id, "Quux the sprocket").await;
         eventually("the new task is found", || {
-            found(&svc, "sprocket", Some(stream.id), "work_item")
+            found(&svc, "sprocket", Some(stream.id), "oxplow/work_item")
         })
         .await;
-        let id = t.rsplit(':').next().unwrap().to_string();
+        let id = oxplow_domain::uri::build::work_item_of_uri(&t).unwrap().1;
         assert!(
-            found(&svc, &id, Some(stream.id), "work_item").await,
+            found(&svc, &id, Some(stream.id), "oxplow/work_item").await,
             "its id finds it"
         );
 
@@ -980,10 +1015,10 @@ mod core_tests {
         )
         .await;
         eventually("the edit is found", || {
-            found(&svc, "flange", Some(stream.id), "work_item")
+            found(&svc, "flange", Some(stream.id), "oxplow/work_item")
         })
         .await;
-        assert!(!found(&svc, "sprocket", Some(stream.id), "work_item").await);
+        assert!(!found(&svc, "sprocket", Some(stream.id), "oxplow/work_item").await);
 
         run(
             &svc,
@@ -992,7 +1027,7 @@ mod core_tests {
         )
         .await;
         eventually("the deleted task leaves", || async {
-            entries(&svc, "work_item").await.is_empty()
+            entries(&svc, "oxplow/work_item").await.is_empty()
         })
         .await;
     }
@@ -1006,7 +1041,7 @@ mod core_tests {
         change_loop(&svc);
         task(&svc, thread.id, "Quux the sprocket").await;
         eventually("the task is found", || {
-            found(&svc, "sprocket", Some(stream.id), "work_item")
+            found(&svc, "sprocket", Some(stream.id), "oxplow/work_item")
         })
         .await;
         svc.config
@@ -1017,7 +1052,7 @@ mod core_tests {
         let config = crate::config_service::read_config(&svc.config);
         svc.capabilities.publish(&config, &svc.db).await.unwrap();
         eventually("with no list it leaves", || async {
-            entries(&svc, "work_item").await.is_empty()
+            entries(&svc, "oxplow/work_item").await.is_empty()
         })
         .await;
     }
@@ -1033,7 +1068,7 @@ mod core_tests {
         change_loop(&svc);
         let t = task(&svc, thread.id, "Quux the sprocket").await;
         eventually("indexed", || async {
-            entries(&svc, "work_item").await.len() == 1
+            entries(&svc, "oxplow/work_item").await.len() == 1
         })
         .await;
         let refs: Vec<String> = svc
@@ -1052,16 +1087,13 @@ mod core_tests {
             .await
             .unwrap();
         assert_eq!(refs, vec![t.clone()]);
-        let kinds = oxplow_domain::uri::types::core_types();
+        let kinds = oxplow_domain::uri::resources::foundation().clone();
         for r in &refs {
-            oxplow_domain::uri::validate_ref(&kinds, r).unwrap();
+            oxplow_domain::uri::validate_uri(&kinds, r).unwrap();
         }
         assert_eq!(
-            entries(&svc, "work_item").await,
-            vec![(
-                t.strip_prefix("work_item:").unwrap().to_string(),
-                Some(stream.id.to_string())
-            )]
+            entries(&svc, "oxplow/work_item").await,
+            vec![(t.clone(), Some(stream.id.to_string()))]
         );
     }
 
@@ -1087,23 +1119,17 @@ mod core_tests {
             .unwrap()
             .to_string();
         eventually("all three are indexed", || async {
-            entries(&svc, "work_item").await.len() == 3
+            entries(&svc, "oxplow/work_item").await.len() == 3
         })
         .await;
         oxplow_domain::stores::ThreadStore::archive(&*svc.thread_store, &shelved.id)
             .await
             .unwrap();
         eventually("the archived thread's task leaves", || async {
-            entries(&svc, "work_item").await
+            entries(&svc, "oxplow/work_item").await
                 == vec![
-                    (
-                        stays.strip_prefix("work_item:").unwrap().to_string(),
-                        Some(stream.id.to_string()),
-                    ),
-                    (
-                        backlog.strip_prefix("work_item:").unwrap().to_string(),
-                        None,
-                    ),
+                    (stays.clone(), Some(stream.id.to_string())),
+                    (backlog.clone(), None),
                 ]
         })
         .await;
@@ -1112,13 +1138,7 @@ mod core_tests {
             .unwrap();
         eventually(
             "the archived stream's tasks leave; the backlog stays",
-            || async {
-                entries(&svc, "work_item").await
-                    == vec![(
-                        backlog.strip_prefix("work_item:").unwrap().to_string(),
-                        None,
-                    )]
-            },
+            || async { entries(&svc, "oxplow/work_item").await == vec![(backlog.clone(), None)] },
         )
         .await;
     }
@@ -1132,9 +1152,10 @@ mod core_tests {
         let thread = crate::test_fixtures::new_thread(&svc, stream.id, "T").await;
         change_loop(&svc);
         let t = task(&svc, thread.id, "Quux the sprocket").await;
-        let id = t.strip_prefix("work_item:").unwrap().to_string();
+        let id = t.clone();
         eventually("in its thread's stream", || async {
-            entries(&svc, "work_item").await == vec![(id.clone(), Some(stream.id.to_string()))]
+            entries(&svc, "oxplow/work_item").await
+                == vec![(id.clone(), Some(stream.id.to_string()))]
         })
         .await;
         run(
@@ -1144,7 +1165,7 @@ mod core_tests {
         )
         .await;
         eventually("in the backlog", || async {
-            entries(&svc, "work_item").await == vec![(id.clone(), None)]
+            entries(&svc, "oxplow/work_item").await == vec![(id.clone(), None)]
         })
         .await;
     }
@@ -1160,14 +1181,14 @@ mod core_tests {
         task(&svc, thread.id, "Quux the sprocket").await;
         change_loop(&svc);
         eventually("indexed", || {
-            found(&svc, "sprocket", Some(stream.id), "work_item")
+            found(&svc, "sprocket", Some(stream.id), "oxplow/work_item")
         })
         .await;
         let computed = |svc: Arc<Services>| async move {
             svc.db
                 .read(|c| {
                     c.query_row(
-                        "SELECT computed_at FROM asset_state WHERE asset = 'search:work_item'",
+                        "SELECT computed_at FROM asset_state WHERE asset = 'search:oxplow/work_item'",
                         [],
                         |r| r.get::<_, String>(0),
                     )
@@ -1219,7 +1240,7 @@ mod core_tests {
         )
         .await;
         eventually("the page is found", || {
-            found(&svc, "sprocket", None, "wiki")
+            found(&svc, "sprocket", None, "oxplow/wiki")
         })
         .await;
         std::fs::write(
@@ -1231,7 +1252,7 @@ mod core_tests {
             .await
             .unwrap();
         eventually("a hand edit is found", || {
-            found(&svc, "flange", None, "wiki")
+            found(&svc, "flange", None, "oxplow/wiki")
         })
         .await;
         run(
@@ -1241,7 +1262,7 @@ mod core_tests {
         )
         .await;
         eventually("the deleted page leaves", || async {
-            entries(&svc, "wiki").await.is_empty()
+            entries(&svc, "oxplow/wiki").await.is_empty()
         })
         .await;
     }
@@ -1265,7 +1286,7 @@ mod core_tests {
         )
         .await;
         eventually("the handoff is found", || {
-            found(&svc, "sprocket", Some(stream.id), "handoff")
+            found(&svc, "sprocket", Some(stream.id), "oxplow/handoff")
         })
         .await;
     }
@@ -1286,7 +1307,7 @@ mod core_tests {
         let note: oxplow_domain::NoteId =
             serde_json::from_value(out["note"]["id"].clone()).unwrap();
         eventually("the note is found", || {
-            found(&svc, "gadget", Some(stream.id), "thread_note")
+            found(&svc, "gadget", Some(stream.id), "oxplow/thread_note")
         })
         .await;
         let vocabulary = svc.vocabulary.clone();
@@ -1300,7 +1321,7 @@ mod core_tests {
             .await
             .unwrap();
         eventually("the deleted note leaves", || async {
-            entries(&svc, "thread_note").await.is_empty()
+            entries(&svc, "oxplow/thread_note").await.is_empty()
         })
         .await;
 
@@ -1310,18 +1331,21 @@ mod core_tests {
             serde_json::json!({
                 "stream": oxplow_domain::uri::build::stream_uri(stream.id),
                 "thread": oxplow_domain::uri::build::thread_uri(thread.id),
-                "target": CommentTarget { kind: "file".into(), id: "src/lib.rs".into() },
+                "target": oxplow_domain::uri::build::file_uri("src/lib.rs"),
                 "quote": "quoted text", "body": "this mentions the doohickey",
             }),
         )
         .await;
-        let comment = format!("comment:{}", out["comment"]["id"].as_str().unwrap());
+        let comment = oxplow_domain::uri::build::keyed(
+            oxplow_domain::uri::resources::COMMENT,
+            out["comment"]["id"].as_str().unwrap(),
+        );
         eventually("the comment is found", || {
-            found(&svc, "doohickey", Some(stream.id), "comment")
+            found(&svc, "doohickey", Some(stream.id), "oxplow/comment")
         })
         .await;
         assert!(
-            found(&svc, "quoted", Some(stream.id), "comment").await,
+            found(&svc, "quoted", Some(stream.id), "oxplow/comment").await,
             "by its quote too"
         );
         run(
@@ -1331,7 +1355,7 @@ mod core_tests {
         )
         .await;
         eventually("a reply is found", || {
-            found(&svc, "thingamajig", Some(stream.id), "comment")
+            found(&svc, "thingamajig", Some(stream.id), "oxplow/comment")
         })
         .await;
         run(
@@ -1341,7 +1365,7 @@ mod core_tests {
         )
         .await;
         eventually("the deleted comment leaves", || async {
-            entries(&svc, "comment").await.is_empty()
+            entries(&svc, "oxplow/comment").await.is_empty()
         })
         .await;
     }
@@ -1375,11 +1399,11 @@ mod core_tests {
         )
         .await;
         eventually("found by the effort's words", || {
-            found(&svc, "capacitor", Some(stream.id), "thread")
+            found(&svc, "capacitor", Some(stream.id), "oxplow/thread")
         })
         .await;
         assert!(
-            found(&svc, "plain", Some(stream.id), "thread").await,
+            found(&svc, "plain", Some(stream.id), "oxplow/thread").await,
             "by its title"
         );
         run(
@@ -1395,7 +1419,7 @@ mod core_tests {
         // other kinds' leave-tests take, then it must still be there.
         tokio::time::sleep(Duration::from_millis(400)).await;
         assert!(
-            found(&svc, "capacitor", Some(stream.id), "thread").await,
+            found(&svc, "capacitor", Some(stream.id), "oxplow/thread").await,
             "closed and archived threads stay"
         );
     }
@@ -1430,15 +1454,20 @@ mod core_tests {
             .await
             .unwrap();
         eventually("found by a touched path", || {
-            found(&svc, "zebra_module", Some(stream.id), "agent_session")
+            found(
+                &svc,
+                "zebra_module",
+                Some(stream.id),
+                "oxplow/agent_session",
+            )
         })
         .await;
         eventually("found by a shell command", || {
-            found(&svc, "quokka", Some(stream.id), "agent_session")
+            found(&svc, "quokka", Some(stream.id), "oxplow/agent_session")
         })
         .await;
         assert!(
-            found(&svc, "claude", Some(stream.id), "agent_session").await,
+            found(&svc, "claude", Some(stream.id), "oxplow/agent_session").await,
             "by its harness when it has no title"
         );
         exec(
@@ -1450,7 +1479,15 @@ mod core_tests {
             .await
             .unwrap();
         tokio::time::sleep(Duration::from_millis(400)).await;
-        assert!(found(&svc, "zebra_module", Some(stream.id), "agent_session").await);
+        assert!(
+            found(
+                &svc,
+                "zebra_module",
+                Some(stream.id),
+                "oxplow/agent_session"
+            )
+            .await
+        );
     }
 
     /// A turn is found by what was asked and by what was answered.
@@ -1475,11 +1512,11 @@ mod core_tests {
             .await
             .unwrap();
         eventually("found by the prompt", || {
-            found(&svc, "wombat", Some(stream.id), "turn")
+            found(&svc, "wombat", Some(stream.id), "oxplow/turn")
         })
         .await;
         assert!(
-            found(&svc, "gnu", Some(stream.id), "turn").await,
+            found(&svc, "gnu", Some(stream.id), "oxplow/turn").await,
             "by the answer"
         );
     }
@@ -1503,12 +1540,14 @@ mod core_tests {
         )
         .await;
         eventually("found by its title", || {
-            found(&svc, "reticulate", Some(stream.id), "effort")
+            found(&svc, "reticulate", Some(stream.id), "oxplow/effort")
         })
         .await;
-        let native = item.rsplit(':').next().unwrap().to_string();
+        let native = oxplow_domain::uri::build::work_item_of_uri(&item)
+            .unwrap()
+            .1;
         assert!(
-            found(&svc, &native, Some(stream.id), "effort").await,
+            found(&svc, &native, Some(stream.id), "oxplow/effort").await,
             "by its work item's id"
         );
     }
@@ -1536,12 +1575,12 @@ mod core_tests {
             .await
             .unwrap();
         eventually("found by the question", || {
-            found(&svc, "eviction", Some(stream.id), "decision")
+            found(&svc, "eviction", Some(stream.id), "oxplow/decision")
         })
         .await;
         for word in ["pangolin", "sweep", "fifo"] {
             assert!(
-                found(&svc, word, Some(stream.id), "decision").await,
+                found(&svc, word, Some(stream.id), "oxplow/decision").await,
                 "{word}"
             );
         }
@@ -1563,11 +1602,11 @@ mod core_tests {
         )
         .await;
         eventually("found by its subject", || {
-            found(&svc, "gasket", None, "commit")
+            found(&svc, "gasket", None, "oxplow/commit")
         })
         .await;
         for word in ["narwhal", "marmaduke", "okapi"] {
-            assert!(found(&svc, word, None, "commit").await, "{word}");
+            assert!(found(&svc, word, None, "oxplow/commit").await, "{word}");
         }
     }
 
@@ -1584,9 +1623,12 @@ mod core_tests {
                        '[]', 0, '[]', 'lenses/leaks.yaml');",
         )
         .await;
-        eventually("found by its title", || found(&svc, "finder", None, "lens")).await;
+        eventually("found by its title", || {
+            found(&svc, "finder", None, "oxplow/lens")
+        })
+        .await;
         assert!(
-            found(&svc, "platypus", None, "lens").await,
+            found(&svc, "platypus", None, "oxplow/lens").await,
             "by its description"
         );
     }
@@ -1619,15 +1661,15 @@ mod core_tests {
         )
         .await;
         eventually("found by its title", || {
-            found(&svc, "health", None, "dashboard")
+            found(&svc, "health", None, "oxplow/dashboard")
         })
         .await;
         eventually("found by a text tile", || {
-            found(&svc, "capybara", None, "dashboard")
+            found(&svc, "capybara", None, "oxplow/dashboard")
         })
         .await;
         assert!(
-            found(&svc, "axolotl", None, "dashboard").await,
+            found(&svc, "axolotl", None, "oxplow/dashboard").await,
             "by a query tile's title"
         );
     }
@@ -1647,7 +1689,7 @@ mod core_tests {
         )
         .await;
         eventually("found by a comment", || {
-            found(&svc, "ocelot", Some(stream.id), "work_item")
+            found(&svc, "ocelot", Some(stream.id), "oxplow/work_item")
         })
         .await;
     }

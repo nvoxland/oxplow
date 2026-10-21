@@ -24,7 +24,7 @@ the same way: `oxplow.knowledge.write_page` is open to every thread.
 
 Don't fragment. Look for an existing topic page first: `oxplow_query_sql` over
 `v_knowledge_page` (`slug`, `title`, `excerpt`, `stale_ref_count`), then
-`oxplow_search` with `kinds: ["wiki"]`. If a relevant page exists, **append a
+`oxplow_search` with `resources: ["oxplow/wiki"]`. If a relevant page exists, **append a
 dated section** to it; create a new page only when none fits.
 `references/search-existing.md` has the full lookup, including which
 pages already cite a file.
