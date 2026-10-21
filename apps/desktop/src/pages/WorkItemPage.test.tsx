@@ -66,7 +66,7 @@ mock.module("../api.js", () => ({
     return { lens: { id, title: id, columns: [], viz: "table", actions: [] }, params, result: { columns: [], rows: [], truncated: false, reads: { models: [], tables: [], measures: [] } }, alert: null };
   },
 }));
-const { pageUri, resourceUri } = await import("../uri/uri.js");
+const { collectorUri, pageUri, resourceUri, workItemUri } = await import("../uri/uri.js");
 const { WorkItemPage } = await import("./WorkItemPage.js");
 const { PageNavigationContext } = await import("../tabs/PageNavigationContext.js");
 
@@ -188,14 +188,12 @@ const pageWithNav = () => {
   );
 };
 
-// An edge names its end by (kind, id); an unknown kind is oxplow's, unresolved.
+// An edge names its ends by URI; one no resource claims is unresolved.
 const DEAD = resourceUri("oxplow/acme_pr", { id: 12 });
 
-const aboutEdge = (kind: string, id: string, resolved: boolean, label: string | null) => ({
-  source_kind: "work_item",
-  source_id: "fake:W-1",
-  target_kind: kind,
-  target_id: id,
+const aboutEdge = (target: string, resolved: boolean, label: string | null) => ({
+  source: workItemUri("fake", "W-1"),
+  target,
   ref_type: "work_item_link:about",
   source_extra: null,
   source_label: label,
@@ -219,7 +217,7 @@ test("Link… takes any ref: its placeholder says so, and an `about` link to an 
 
 test("a link row's right-click menu has Unlink, which runs work_item.unlink with the link's input", async () => {
   features = { links: true };
-  outbound = [aboutEdge("collector", "triage/todos", true, "Triage todos")];
+  outbound = [aboutEdge(collectorUri("triage", "todos"), true, "Triage todos")];
   const view = pageWithNav();
   fireEvent.click(await waitFor(() => view.getByTestId("page-nav-outbound-toggle")));
   const row = await waitFor(() => view.getByTestId(`backlinks-entry-${pageUri("settings")}`));
@@ -235,7 +233,7 @@ test("a link row's right-click menu has Unlink, which runs work_item.unlink with
 
 test("a link to a ref nothing resolves is a dead link: raw text, and it still unlinks", async () => {
   features = { links: true };
-  outbound = [aboutEdge("acme_pr", "12", false, null)];
+  outbound = [aboutEdge(DEAD, false, null)];
   const view = pageWithNav();
   fireEvent.click(await waitFor(() => view.getByTestId("page-nav-outbound-toggle")));
   const row = await waitFor(() => view.getByTestId(`backlinks-dead-${DEAD}`));

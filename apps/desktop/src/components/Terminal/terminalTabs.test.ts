@@ -1,3 +1,4 @@
+import { pageUri } from "../../uri/uri.js";
 import { describe, expect, test } from "bun:test";
 import {
   DEFAULT_TERMINAL_ID,
@@ -19,12 +20,12 @@ describe("defaultTerminalList", () => {
 describe("paneTargetFor / commentTargetFor", () => {
   test("default terminal keeps the legacy bare shell + stream targets", () => {
     expect(paneTargetFor(DEFAULT_TERMINAL_ID)).toBe("shell");
-    expect(commentTargetFor("s-1", DEFAULT_TERMINAL_ID)).toBe("s-1");
+    expect(commentTargetFor("s-1", DEFAULT_TERMINAL_ID)).toBe(pageUri("terminal", { stream: "s-1" }));
   });
 
   test("additional terminals get id-scoped targets", () => {
     expect(paneTargetFor("t2")).toBe("shell:t2");
-    expect(commentTargetFor("s-1", "t2")).toBe("s-1:t2");
+    expect(commentTargetFor("s-1", "t2")).toBe(pageUri("terminal", { stream: "s-1", terminal: "t2" }));
   });
 });
 

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
+import { commitUri, dirUri, fileUri } from "../../uri/uri.js";
 import { refFromHref, refsInRange, textContentRange } from "./domAnchor.js";
 
 /// Build a detached element with the given innerHTML for range tests.
@@ -36,12 +37,9 @@ describe("textContentRange", () => {
 
 describe("refFromHref", () => {
   test("maps typed hrefs to canonical refs", () => {
-    expect(refFromHref("oxplow:oxplow/file?path=src/app.rs")).toEqual({ kind: "file", id: "src/app.rs" });
-    expect(refFromHref("oxplow:oxplow/dir?path=src/components")).toEqual({
-      kind: "dir",
-      id: "src/components",
-    });
-    expect(refFromHref("oxplow:oxplow/commit?sha=abc1234")).toEqual({ kind: "commit", id: "abc1234" });
+    expect(refFromHref("oxplow:oxplow/file?path=src/app.rs")).toBe(fileUri("src/app.rs"));
+    expect(refFromHref("oxplow:oxplow/dir?path=src/components")).toBe(dirUri("src/components"));
+    expect(refFromHref("oxplow:oxplow/commit?sha=abc1234")).toBe(commitUri("abc1234"));
   });
 
   test("returns null for external links and anchors", () => {
@@ -60,10 +58,7 @@ describe("refsInRange", () => {
     const range = document.createRange();
     range.selectNodeContents(el);
     const refs = refsInRange(range);
-    expect(refs).toEqual([
-      { kind: "file", id: "src/app.rs" },
-      { kind: "commit", id: "deadbee" },
-    ]);
+    expect(refs).toEqual([fileUri("src/app.rs"), commitUri("deadbee")]);
     el.remove();
   });
 

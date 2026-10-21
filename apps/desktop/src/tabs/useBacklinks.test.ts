@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 
-import { canonicalIdForTarget, dedupeEntriesByTarget, edgeToInboundEntry, edgeToOutboundEntry, humanRefTypeForTest } from "./useBacklinks.js";
+import { dedupeEntriesByTarget, edgeToInboundEntry, edgeToOutboundEntry, graphUriOf, humanRefTypeForTest } from "./useBacklinks.js";
 import type { BacklinkEntry } from "./backlinkTypes.js";
 import type { BacklinkEdge } from "../api.js";
 import { setResources, type Resource } from "../resources.js";
-import { collectorUri, effortUri, pageUri, resourceUri } from "../uri/uri.js";
+import { collectorUri, commitUri, dirUri, effortUri, fileUri, lensUri, pageUri, resourceUri, wikiUri, workItemUri } from "../uri/uri.js";
 import {
   directoryRef,
   effortDiffRef,
@@ -12,40 +12,34 @@ import {
   gitCommitRef,
   lensRef,
   wikiPageRef,
+  pageTabRef,
   workItemTabRef,
 } from "./pageRefs.js";
 
-describe("canonicalIdForTarget", () => {
-  // page_ref rows are a canonical ref's (kind, id): a work item is
-  // `work_item` / `<provider>:<id>` (.context/resources.md), whichever list.
-  test("a work item is its ref's id, as the graph stores it", () => {
-    expect(canonicalIdForTarget(workItemTabRef("oxplow:oxplow/work_item?id=tsk42&provider=oxplow"))).toBe("oxplow:tsk42");
-    expect(canonicalIdForTarget(workItemTabRef("oxplow:oxplow/work_item?id=W-1&provider=fake"))).toBe("fake:W-1");
+describe("graphUriOf", () => {
+  // page_ref rows hang on a resource's URI (.context/resources.md), whichever list.
+  test("a work item is its own URI", () => {
+    const item = workItemUri("fake", "W-1");
+    expect(graphUriOf(workItemTabRef(item))).toBe(item);
   });
 
-  test("wikiPageRef returns slug", () => {
-    expect(canonicalIdForTarget(wikiPageRef("url-schemes"))).toBe("url-schemes");
+  test("a wiki page, a file and a directory are theirs, a file without its revision", () => {
+    expect(graphUriOf(wikiPageRef("url-schemes"))).toBe(wikiUri("url-schemes"));
+    expect(graphUriOf(fileRef("src/app.ts"))).toBe(fileUri("src/app.ts"));
+    expect(graphUriOf(directoryRef("src/components"))).toBe(dirUri("src/components"));
   });
 
-  test("fileRef returns the workspace-relative path", () => {
-    expect(canonicalIdForTarget(fileRef("src/app.ts"))).toBe("src/app.ts");
+  test("gitCommitRef is the commit's", () => {
+    expect(graphUriOf(gitCommitRef("abc1234"))).toBe(commitUri("abc1234"));
   });
 
-  test("directoryRef returns the path", () => {
-    expect(canonicalIdForTarget(directoryRef("src/components"))).toBe("src/components");
+  test("any other kind with a page is its own URI, without its view params", () => {
+    expect(graphUriOf(lensRef("oxplow-bundled/findings", { range: "7d" }))).toBe(lensUri("oxplow-bundled/findings"));
+    expect(graphUriOf(effortDiffRef("eff12"))).toBe(effortUri("eff12"));
   });
 
-  test("gitCommitRef returns the sha", () => {
-    expect(canonicalIdForTarget(gitCommitRef("abc1234"))).toBe("abc1234");
-  });
-
-  test("any other kind with a page is its canonical ref's id", () => {
-    expect(canonicalIdForTarget(lensRef("oxplow-bundled/findings"))).toBe("oxplow-bundled/findings");
-    expect(canonicalIdForTarget(effortDiffRef("eff12"))).toBe("eff12");
-  });
-
-  test("untracked kinds return null", () => {
-    expect(canonicalIdForTarget({ id: "settings", kind: "settings", payload: null })).toBeNull();
+  test("a shell route has none", () => {
+    expect(graphUriOf(pageTabRef("settings"))).toBeNull();
   });
 });
 
@@ -191,10 +185,8 @@ describe("edges to any ref", () => {
   beforeEach(() => setResources(CORE()));
   afterEach(() => setResources([]));
   const edge = (over: Partial<BacklinkEdge>): BacklinkEdge => ({
-    source_kind: "work_item",
-    source_id: "oxplow:tsk1",
-    target_kind: "wiki",
-    target_id: "x",
+    source: workItemUri("oxplow", "tsk1"),
+    target: wikiUri("x"),
     ref_type: "work_item_link:about",
     source_extra: null,
     source_label: null,
@@ -204,7 +196,7 @@ describe("edges to any ref", () => {
 
   test("an about link to a collector resolves and opens a page", () => {
     const entry = edgeToOutboundEntry(
-      edge({ target_kind: "collector", target_id: "triage/todos", source_label: "Triage todos" }),
+      edge({ target: collectorUri("triage", "todos"), source_label: "Triage todos" }),
     );
     expect(entry.dead).toBe(false);
     expect(entry.open).toBe(pageUri("settings"));
@@ -215,7 +207,7 @@ describe("edges to any ref", () => {
   });
 
   test("a link to a core kind with a page opens it", () => {
-    const entry = edgeToOutboundEntry(edge({ target_kind: "effort", target_id: "eff12", source_label: "An effort" }));
+    const entry = edgeToOutboundEntry(edge({ target: effortUri("eff12"), source_label: "An effort" }));
     expect(entry.open).toBe(effortUri("eff12"));
   });
 
@@ -236,7 +228,7 @@ describe("edges to any ref", () => {
       },
     ]);
     try {
-      const entry = edgeToOutboundEntry(edge({ target_kind: "acme/pr", target_id: "12", source_label: "PR 12" }));
+      const entry = edgeToOutboundEntry(edge({ target: resourceUri("acme/pr", { id: 12 }), source_label: "PR 12" }));
       expect(entry.open).toBe(resourceUri("acme/pr", { id: 12 }));
       expect(entry.dead).toBe(false);
     } finally {
@@ -246,7 +238,7 @@ describe("edges to any ref", () => {
 
   test("a link to an uninstalled extension's resource is dead, with its raw text, and does not throw", () => {
     const entry = edgeToOutboundEntry(
-      edge({ target_kind: "acme_pr", target_id: "12", resolved: false, source_label: null }),
+      edge({ target: resourceUri("oxplow/acme_pr", { id: 12 }), resolved: false, source_label: null }),
     );
     expect(entry.open).toBeNull();
     expect(entry.dead).toBe(true);
