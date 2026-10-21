@@ -824,7 +824,7 @@ declaring *what it is* and mounting the generic layer.
   - To open a page in a test, drive the launcher: click `title-bar-search`
     (or open it via Cmd+P), type the page name into the overlay input,
     and Enter / click the result; assert via `page-<kind>` on the body
-    (e.g. `page-git-history`, `page-local-history`, etc.). The old
+    (e.g. `page-git-history`, `page-lens`, etc.). The old
     `rail-page-<entry-id>` / `rail-pages` testids are gone — the rail no
     longer has a "Pages" section (the Go To panel's bookmarks are the
     pinned set; its rows open them). The `dock-tab-*` testids

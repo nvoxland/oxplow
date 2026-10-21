@@ -2034,6 +2034,10 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   fold into one "Nothing found" line) and a dashboard as a kit `TileGrid`
   (`lens/PartsViz.tsx`), running every part together and re-running all of
   them on any part's reads (`useLensRuns`).
+- **A link column is a collection.** The pages a column's links open are
+  its page's **origin** (`lens/linkOrigin.ts`, `.context/pages-and-tabs.md`
+  "Origins"): the opened page's Up and Down step through the rows that have
+  one, labelled by the cell's text. A new tab opens without it.
 - **Columns** also take `width` (pixels: the table lays out fixed, so
   columns line up, and that column's cells are cut to one line with the
   whole text on hover — `DataTable` does it for every table, so a long

@@ -2116,6 +2116,7 @@ mod tests {
             ("catalog", "oxplow-foundation/catalog-overview"),
             ("go-to", "oxplow-foundation/go-to"),
             ("dashboards", "oxplow-foundation/dashboards"),
+            ("local-history", "oxplow-foundation/local-history"),
         ] {
             assert!(pages.contains(&(page, lens)), "{page}: {pages:?}");
         }
@@ -2520,6 +2521,105 @@ mod tests {
         assert_eq!(texts(&rows, 0), ["beta"], "{rows}");
         let rows = run_bundled_lens_with(&f, "oxplow-foundation/wiki-visited", &filter("x")).await;
         assert!(texts(&rows, 0).is_empty(), "{rows}");
+    }
+
+    /// Local History: a snapshot's subject, version, files and why, newest
+    /// first; the same snapshots under the commit each equals, the
+    /// uncommitted ones first, and `all` lifting the caps.
+    #[tokio::test]
+    async fn the_local_history_lenses_list_snapshots_and_group_them_by_commit() {
+        use oxplow_db::analytics_stores::TakeRecord;
+        use oxplow_db::analytics_stores::{FileSnapshot, SnapshotStorage};
+        use oxplow_db::SqlCell::{Int, Text};
+        use oxplow_domain::snapshot::SnapshotTrigger;
+        use oxplow_domain::{StreamId, Timestamp};
+        let f = crate::test_fixtures::services_with_effort().await;
+        let take = |rows: Vec<(&str, &str)>, trigger, revision: Option<&str>| TakeRecord {
+            stream_id: StreamId::new(1),
+            rows: rows
+                .into_iter()
+                .map(|(path, hash)| FileSnapshot {
+                    id: 0,
+                    stream_id: StreamId::new(1),
+                    path: path.into(),
+                    blob_hash: Some(hash.into()),
+                    size_bytes: 1,
+                    captured_at: Timestamp::now(),
+                    storage: SnapshotStorage::Oxplow,
+                    snapshot_id: None,
+                    mtime_ms: Some(1),
+                    content_hash: None,
+                })
+                .collect(),
+            trigger,
+            thread_id: None,
+            turn_id: None,
+            effort_id: None,
+            branch: Some("main".into()),
+            revision: revision.map(|r| r.parse().unwrap()),
+            elapsed_ms: 5,
+            budget_ms: None,
+            source: "test".into(),
+            provider: None,
+            contents: true,
+            handle: None,
+        };
+        for t in [
+            take(vec![("a.txt", "h1")], SnapshotTrigger::Startup, None),
+            take(
+                vec![("a.txt", "h2"), ("b.txt", "h1")],
+                SnapshotTrigger::Quiet,
+                Some("git:abc1234def"),
+            ),
+            take(
+                vec![("a.txt", "h3"), (".oxplow/wiki/idea.md", "w1")],
+                SnapshotTrigger::TurnEnd,
+                None,
+            ),
+        ] {
+            f.svc.snapshot_store.record_take(t).await.unwrap().unwrap();
+        }
+        let lens = |slug: &'static str, mode: &'static str, all: i64| {
+            let f = &f;
+            async move {
+                run_bundled_lens_with(
+                    f,
+                    &format!("oxplow-foundation/{slug}"),
+                    &[
+                        ("stream_id", Int(1)),
+                        ("mode", Text(mode.into())),
+                        ("all", Int(all)),
+                    ],
+                )
+                .await
+            }
+        };
+        // Recent: newest first. The wiki one says which page, the clean one
+        // its commit, the first that it is the first.
+        let rows = lens("local-history-recent", "recent", 0).await;
+        assert_eq!(texts(&rows, 1), ["", "", "Initial Snapshot"], "{rows}");
+        assert_eq!(texts(&rows, 2), ["", "abc1234", ""], "{rows}");
+        assert_eq!(texts(&rows, 3), ["idea", "", ""], "{rows}");
+        assert_eq!(texts(&rows, 4), ["+1 ~1", "+1 ~1", "+1"], "{rows}");
+        assert_eq!(texts(&rows, 5), ["turn end", "idle", "startup"], "{rows}");
+        // Not the grouped view's rows.
+        assert!(lens("local-history-commits", "recent", 0)
+            .await
+            .as_array()
+            .unwrap()
+            .is_empty());
+        // By commit: the uncommitted snapshots under one heading, first.
+        let rows = lens("local-history-commits", "by-commit", 0).await;
+        assert_eq!(
+            texts(&rows, 2),
+            ["Uncommitted", "Uncommitted", "abc1234"],
+            "{rows}"
+        );
+        assert!(lens("local-history-recent", "by-commit", 0)
+            .await
+            .as_array()
+            .unwrap()
+            .is_empty());
     }
 
     /// Go To (the page): the thread's bookmarks with the scope each is at,

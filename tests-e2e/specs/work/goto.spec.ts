@@ -41,3 +41,16 @@ test("New Dashboard on the Dashboards page opens the new dashboard", async ({ fr
   await page.getByRole("button", { name: "New Dashboard" }).filter({ visible: true }).first().click();
   await expect(page.locator('[data-testid="page-custom-dashboard"]:visible')).toBeVisible();
 });
+
+// Local History is the foundation's document of two lenses: its snapshots
+// recent, or by git commit (the `mode` param, in the address).
+test("the Local History page draws its snapshots and keeps its grouping in the address", async ({ fresh }) => {
+  const { page } = fresh;
+  await page.goto("/");
+  await openFromLauncher(page, "Local History");
+  const body = page.locator('[data-testid^="center-tab-body-page:local-history"]:visible');
+  await expect(body.getByRole("heading", { level: 1 })).toHaveText("Local History");
+  await page.getByTestId("lens-param-mode-value").filter({ visible: true }).click();
+  await page.getByTestId("lens-param-mode-edit").filter({ visible: true }).selectOption("by-commit");
+  await expect(page.locator('[data-testid="center-tab-body-page:local-history?mode=by-commit"]:visible')).toHaveCount(1);
+});

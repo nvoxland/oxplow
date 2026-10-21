@@ -231,11 +231,12 @@ oxplow's pages and their params:
 
 - Lens pages: `problems`, `symbols` (`path`, `filter`), `closed-threads`,
   `wiki-index`, `wiki-freshness` (`slug`), `go-to`, `dashboards`,
-  `hook-events`, `done-work`, `catalog`.
+  `hook-events`, `done-work`, `catalog`, `local-history` (a document of
+  two lenses; params `mode` `recent` | `by-commit` and `all`, which lifts
+  the caps — the rail's, so no "View all" step to go Back from).
 - Built-in pages: `tasks`, `backlog` (badge: `backlog-count`), `board`,
   `files`, `git-dashboard`, `git-history`, `uncommitted-changes`,
-  `local-history` (view: `mode` `recent` | `by-commit`, `all` — "View
-  all" pushes it), `comments`, `explore-data`, `metrics-recorded`,
+  `comments`, `explore-data`, `metrics-recorded`,
   `terminal`, `alerts`, `settings` (view: `area`, `section` — another
   area is a pushed view change, never a page opened over it),
   `custom-dashboard` (`id`), `new-session`, `new-stream`, `new-task`
@@ -685,7 +686,8 @@ which carries its spec. New-tab paths drop it. Back/Forward restore each
 entry's own origin. Adopted lists: `BacklinksList`, `FileTree` (file rows
 of one directory), `CommitList` / `CommitGraphTable`
 (`CommitRowDispatcher`), `MetricsPage` (`metricOrigin`, flattened across
-sections), the Local History dashboard. `WorkGroupList` rows open an edit
+sections), and every lens table or list's link column (`lens/linkOrigin.ts`: the
+column's pages, in row order). `WorkGroupList` rows open an edit
 modal, not a page, so they don't adopt.
 
 **Keys.** The global handler in `App.tsx` (`tabs/navigationKeys.ts`):
@@ -918,7 +920,7 @@ params. Its history state is its own object in the entry
 
 **A page never navigates to itself, and a mode is a param, not a page
 name.** Settings' areas, Diff View's endpoints and Local History's
-grouping and "View all" are view changes on one page (pushed when Back
+grouping and "Show every snapshot" are view changes on one page (pushed when Back
 should return), so the page stays mounted and its other state stays.
 
 Core pages follow the same rule: the Tasks page's scope and filter chips

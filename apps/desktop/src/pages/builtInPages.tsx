@@ -12,7 +12,6 @@ import { DiffPage } from "./DiffPage.js";
 import { DuplicateBlockPage } from "./DuplicateBlockPage.js";
 import { SettingsPage } from "./SettingsPage.js";
 import { settingsArea } from "./settingsAreas.js";
-import { LocalHistoryDashboardPage } from "./LocalHistoryDashboardPage.js";
 import { DiffViewPage } from "./DiffViewPage.js";
 import { GitHistoryPage } from "./GitHistoryPage.js";
 import { GitDashboardPage } from "./GitDashboardPage.js";
@@ -208,19 +207,6 @@ export const builtInPages: Record<BuiltInPageName, BuiltInPage> = {
       label: area.id === "overview" ? "Settings" : `Settings: ${area.title}`,
       closable: true,
       render: () => <SettingsPage area={area.id} section={section} onOpenPage={nav.navOpen} />,
-    };
-  },
-  "local-history": ({ ref, nav, scope }) => {
-    return {
-      id: ref.id,
-      label: "Local History",
-      closable: true,
-      render: () => (
-        <LocalHistoryDashboardPage
-          stream={scope.stream}
-          onOpenPage={nav.navOpen}
-        />
-      ),
     };
   },
   "diff-view": ({ ref, params, nav, scope }) => diffViewTab(ref, endpointsOf(params), nav, scope.stream),

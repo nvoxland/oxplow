@@ -1,0 +1,83 @@
+title: Snapshots by git commit
+description: The stream's newest snapshots under the commit each equals; the ones taken with uncommitted changes come first.
+params:
+  - { name: stream_id }
+  - name: mode
+    label: Group by
+    default: recent
+    options:
+      - { value: recent, label: Recent snapshots }
+      - { value: by-commit, label: By git commit }
+  - { name: all, label: Show every snapshot, type: bool, default: false }
+query: |
+  WITH snaps AS (
+    SELECT s.id, s.ref, s.created_at, s.revision,
+           CASE WHEN s.revision LIKE 'git:%' THEN substr(s.revision, 5) END AS sha,
+           row_number() OVER (ORDER BY s.created_at DESC, s.id DESC) AS rn
+    FROM v_snapshot s
+    WHERE s.stream_id = :stream_id
+    ORDER BY s.created_at DESC, s.id DESC
+    LIMIT CASE WHEN :all THEN 500 ELSE 20 END),
+  rows AS (
+    SELECT n.*,
+           (SELECT o.trigger FROM v_snapshot_op o WHERE o.snapshot_id = n.id ORDER BY o.seq LIMIT 1) AS trigger,
+           coalesce((SELECT o.over_budget FROM v_snapshot_op o WHERE o.snapshot_id = n.id ORDER BY o.seq LIMIT 1), 0) AS slow,
+           (SELECT group_concat(replace(replace(f.path, '.oxplow/wiki/', ''), '.md', ''), ', ')
+              FROM v_snapshot_file f
+             WHERE f.snapshot_id = n.id AND f.path LIKE '.oxplow/wiki/%.md') AS wiki,
+           (SELECT sum(f.kind = 'added') FROM v_snapshot_file f WHERE f.snapshot_id = n.id) AS added,
+           (SELECT sum(f.kind = 'modified') FROM v_snapshot_file f WHERE f.snapshot_id = n.id) AS modified,
+           (SELECT sum(f.kind = 'deleted') FROM v_snapshot_file f WHERE f.snapshot_id = n.id) AS deleted,
+           (SELECT group_concat(label, ', ') FROM (
+              SELECT b.name AS label FROM v_branch b WHERE b.head_sha = n.sha AND b.kind = 'local'
+              UNION ALL SELECT t.name FROM v_tag t WHERE t.sha = n.sha)) AS names,
+           (SELECT group_concat(coalesce(w.title, replace(e.work_item, 'work_item:oxplow:', ''), e.title, 'Unlinked work'), ', ')
+              FROM v_effort e LEFT JOIN v_work_item w ON w.ref = e.work_item
+             WHERE e.start_snapshot_id <= n.id AND e.end_snapshot_id = n.id) AS completed,
+           (SELECT group_concat(coalesce(w.title, replace(e.work_item, 'work_item:oxplow:', ''), e.title, 'Unlinked work'), ', ')
+              FROM v_effort e LEFT JOIN v_work_item w ON w.ref = e.work_item
+             WHERE e.start_snapshot_id <= n.id AND (e.end_snapshot_id IS NULL OR e.end_snapshot_id > n.id)) AS in_flight,
+           n.id = (SELECT min(id) FROM v_snapshot WHERE stream_id = :stream_id)
+             AND (SELECT count(*) FROM v_snapshot WHERE stream_id = :stream_id) < CASE WHEN :all THEN 500 ELSE 20 END AS initial
+    FROM snaps n),
+  shown AS (
+    SELECT r.*,
+           CASE
+             WHEN r.completed IS NOT NULL OR r.in_flight IS NOT NULL THEN
+               trim(coalesce('completed: ' || r.completed, '')
+                    || CASE WHEN r.completed IS NOT NULL AND r.in_flight IS NOT NULL THEN ' · ' ELSE '' END
+                    || coalesce('in flight: ' || r.in_flight, ''))
+             WHEN r.initial THEN 'Initial Snapshot'
+             WHEN r.sha IS NOT NULL OR r.wiki IS NOT NULL THEN ''
+             ELSE 'External change'
+           END AS subject,
+           coalesce(r.names, substr(r.sha, 1, 7)) AS version,
+           trim(coalesce('+' || nullif(r.added, 0), '') || ' ' || coalesce('~' || nullif(r.modified, 0), '') || ' ' || coalesce('−' || nullif(r.deleted, 0), '')) AS changes,
+           CASE r.trigger
+             WHEN 'turn_end' THEN 'turn end' WHEN 'quiet' THEN 'idle' WHEN 'effort_start' THEN 'effort start'
+             WHEN 'effort_end' THEN 'effort end' WHEN 'head_moved' THEN 'HEAD moved' WHEN 'git_refs' THEN 'git'
+             WHEN 'run_measured' THEN 'test or lint run' ELSE r.trigger
+           END || CASE WHEN r.slow THEN ' (slow)' ELSE '' END AS why
+    FROM rows r)
+  , grouped AS (
+    SELECT s.*, min(s.rn) OVER (PARTITION BY coalesce(s.sha, '')) AS first_rn FROM shown s),
+  ranked AS (
+    SELECT g.*, CASE WHEN g.sha IS NULL THEN 0
+                     ELSE dense_rank() OVER (PARTITION BY g.sha IS NULL ORDER BY g.first_rn) END AS group_rank
+    FROM grouped g)
+  SELECT ref, subject,
+         CASE WHEN sha IS NULL THEN 'Uncommitted'
+              ELSE coalesce(names || ' · ', '') || substr(sha, 1, 7) END AS heading,
+         sha, why, changes, wiki, created_at
+  FROM ranked
+  WHERE :mode = 'by-commit' AND (:all OR sha IS NULL OR group_rank <= 10)
+  ORDER BY (sha IS NOT NULL), first_rn, rn
+group: { by: heading, link: { kind: commit, from: sha } }
+columns:
+  - { key: subject, label: Snapshot, link: { kind: page, from: ref } }
+  - { key: wiki, label: Wiki, width: 150 }
+  - { key: changes, label: Files, width: 90 }
+  - { key: why, label: Why, width: 130 }
+  - { key: created_at, label: Taken, format: datetime, width: 150 }
+empty: No snapshots yet. oxplow snapshots the working tree as files change and when work starts or ends; they'll show up here.
+hidden: true

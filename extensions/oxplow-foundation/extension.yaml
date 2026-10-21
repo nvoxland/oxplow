@@ -162,7 +162,7 @@ pages:
   - { id: git-history, title: Git History, icon: git-merge, category: Git, component: "oxplow:git-history" }
   - { id: uncommitted-changes, title: Uncommitted, icon: git-branch, category: Git, component: "oxplow:uncommitted-changes" }
   # Activity
-  - { id: local-history, title: Local History, icon: history, category: Activity, component: "oxplow:local-history" }
+  - { id: local-history, title: Local History, icon: history, category: Activity, lens: local-history }
   - { id: comments, title: Comments, icon: inbox, category: Activity, component: "oxplow:comments" }
   - { id: timeline, title: Timeline, icon: history, category: Activity, keywords: efforts sessions commits threads time axis history, params: [from, to, thread], component: timeline }
   - { id: hook-events, title: Hook Events, icon: activity, category: Activity, lens: hook-events }

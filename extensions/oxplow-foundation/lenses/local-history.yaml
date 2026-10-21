@@ -1,0 +1,16 @@
+title: Local History
+description: The stream's snapshots of the working tree, newest first — as a list, or under the git commit each equals. Show every snapshot lifts the cap.
+params:
+  - { name: stream_id }
+  - name: mode
+    label: Group by
+    default: recent
+    options:
+      - { value: recent, label: Recent snapshots }
+      - { value: by-commit, label: By git commit }
+  - { name: all, label: Show every snapshot, type: bool, default: false }
+viz: document
+sections:
+  - { id: recent, title: Snapshots, lens: local-history-recent }
+  - { id: by-commit, title: By git commit, lens: local-history-commits }
+hidden: true

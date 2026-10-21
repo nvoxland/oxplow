@@ -122,6 +122,8 @@ export interface RouteLinkProps {
    * `newTab: true` for the default-context flow.
    */
   pinnedSlot?: boolean;
+  /** The collection this link is one of: the opened page's Up and Down step through it. */
+  origin?: Origin;
   className?: string;
   style?: CSSProperties;
   testId?: string;
@@ -145,6 +147,7 @@ export function RouteLink({
   children,
   onNavigate,
   pinnedSlot = false,
+  origin,
   className,
   style,
   testId,
@@ -152,7 +155,7 @@ export function RouteLink({
   draggable,
   onDragStart,
 }: RouteLinkProps) {
-  const { handlers } = useRouteDispatch(to, { onNavigate, pinnedSlot });
+  const { handlers } = useRouteDispatch(to, { onNavigate, pinnedSlot, origin });
   return (
     <button
       type="button"
