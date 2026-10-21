@@ -8,18 +8,18 @@ import { searchLauncher } from "../../support/ui.js";
 test("search finds a task and a wiki page, and opens them", async ({ page, daemon }) => {
   const created = await run<{ result: { ref: string } }>(daemon, "oxplow.work_item.create", {
     title: "Quokka migration",
-    thread: daemon.thread,
+    thread: daemon.threadUri,
   });
   await run(daemon, "oxplow.knowledge.write_page", { slug: "quokka-notes", title: "Quokka notes", body: "# Quokka notes\n\nWhat we know.\n" });
   await searchable(daemon, "quokka", "work_item");
   await searchable(daemon, "quokka", "wiki");
   await page.goto("/");
   await searchLauncher(page, "quokka");
-  await page.getByTestId(`launcher-hit-work_item:${created.result.ref.slice("work_item:".length)}`).click();
+  await page.getByTestId(`launcher-hit-${created.result.ref}`).click();
   await expect(page.getByTestId("task-rail-delete-trigger")).toBeVisible();
   await expect(page.locator("body")).toContainText("Quokka migration");
   await searchLauncher(page, "quokka");
-  await page.getByTestId("launcher-hit-wiki:quokka-notes").click();
+  await page.getByTestId("launcher-hit-oxplow:oxplow/wiki?slug=quokka-notes").click();
   await expect(page.getByTestId("page-wiki")).toContainText("What we know.");
 });
 

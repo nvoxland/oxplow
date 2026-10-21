@@ -9,7 +9,7 @@ test("an accepted effort's page carries the review's verdict chip", async ({ pag
   const created = await run<{ result: { ref: string } }>(daemon, "oxplow.work_item.create", {
     title: "Wombat fix",
     state: "in_progress",
-    thread: daemon.thread,
+    thread: daemon.threadUri,
   });
   // The effort opens in the background once the item is in progress.
   let effort = "";
@@ -20,12 +20,12 @@ test("an accepted effort's page carries the review's verdict chip", async ({ pag
     effort = (out.rows[0]?.[0] as string | undefined) ?? "";
     return effort !== "";
   });
-  expect(effort).toMatch(/^effort:eff\d+$/);
+  expect(effort).toMatch(/^oxplow:oxplow\/effort\?id=eff\d+$/);
   await run(daemon, "oxplow.review.accept", { ref: effort });
   await searchable(daemon, "Wombat fix", "work_item");
   await page.goto("/");
   await searchLauncher(page, "Wombat fix");
-  await page.getByTestId(`launcher-hit-work_item:${created.result.ref.slice("work_item:".length)}`).click();
+  await page.getByTestId(`launcher-hit-${created.result.ref}`).click();
   // The task's effort, its Review: the effort's own page.
   await page.locator('[data-testid^="tasks-show-in-history-"]').first().click();
   await expect(page.getByTestId("page-chips")).toContainText("Accepted");

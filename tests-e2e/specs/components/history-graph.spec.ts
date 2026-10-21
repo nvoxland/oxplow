@@ -56,18 +56,18 @@ test("the history graph's filter is the page's: in the address and kept on a rel
   await openFromLauncher(page, "Git History");
   const frame = page.frameLocator('[data-testid="custom-component-frame"]');
   await expect(frame.locator(".row", { hasText: "Merge side" })).toBeVisible();
-  const body = page.locator('[data-testid^="center-tab-body-page:git-history"]:visible');
-  await expect(body).toHaveAttribute("data-testid", "center-tab-body-page:git-history");
+  const body = page.locator('[data-testid^="center-tab-body-oxplow:oxplow/page?page=git-history"]:visible');
+  await expect(body).toHaveAttribute("data-testid", "center-tab-body-oxplow:oxplow/page?page=git-history");
 
   await frame.locator("#query").fill("side");
-  await expect(body).toHaveAttribute("data-testid", "center-tab-body-page:git-history?q=side");
+  await expect(body).toHaveAttribute("data-testid", "center-tab-body-oxplow:oxplow/page?page=git-history&q=side");
   await expect(page.getByTestId("page-nav-back").filter({ visible: true })).toBeDisabled();
 
   // The filter re-runs the page's lenses; let them finish, or WebKit reports
   // the reload's aborted requests as page errors.
   await page.waitForLoadState("networkidle");
   await page.reload();
-  await expect(body).toHaveAttribute("data-testid", "center-tab-body-page:git-history?q=side");
+  await expect(body).toHaveAttribute("data-testid", "center-tab-body-oxplow:oxplow/page?page=git-history&q=side");
   await expect(frame.locator("#query")).toHaveValue("side");
   await expect(frame.locator(".row:not(.dimmed)")).toHaveCount(2);
 

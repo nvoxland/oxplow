@@ -89,7 +89,7 @@ test("TODOs are sorted by the scripted model, and a decision from the board or t
     ]);
     await page.goto("/");
     await openFromLauncher(page, "TODO Board");
-    const board = page.getByTestId("center-tab-body-lens:triage/todo-board");
+    const board = page.getByTestId("center-tab-body-oxplow:oxplow/lens?lens=triage/todo-board");
     const frame = board.frameLocator('[data-testid="custom-component-frame"]');
     const card = (line: number) => frame.locator(".card", { hasText: `src/lib.rs:${line}` });
     await expect(frame.locator(".column", { hasText: "bug" }).locator(".card")).toHaveCount(1);
@@ -103,7 +103,7 @@ test("TODOs are sorted by the scripted model, and a decision from the board or t
 
     // A decision from the lens's `Decide…` row action, in its slideover.
     await openFromLauncher(page, "TODOs");
-    const lens = page.getByTestId("center-tab-body-lens:triage/todos");
+    const lens = page.getByTestId("center-tab-body-oxplow:oxplow/lens?lens=triage/todos");
     await lens.getByRole("row").filter({ hasText: "cleanup" }).locator("td").first().click({ button: "right" });
     await page.getByTestId("menu-item-lens-action-decide").click();
     const form = page.getByTestId("lens-action-form");

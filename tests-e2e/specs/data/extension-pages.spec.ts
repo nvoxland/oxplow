@@ -6,7 +6,7 @@ test("an extension's page is offered, and turning the extension off takes it awa
   await page.goto("/");
   // The test extension's `item` page, in the launcher's Work pages.
   await searchLauncher(page, "Item");
-  await expect(page.getByTestId("launcher-page-page:e2e/item")).toBeVisible();
+  await expect(page.getByTestId("launcher-page-oxplow:oxplow/page?page=e2e/item")).toBeVisible();
   await page.keyboard.press("Escape");
   // The Extensions list (the foundation's lens in Settings): Disable is on
   // the row's right-click menu.
@@ -15,5 +15,5 @@ test("an extension's page is offered, and turning the extension off takes it awa
   await row.click({ button: "right" });
   await page.getByTestId("menu-item-lens-action-disable").click();
   await searchLauncher(page, "Item");
-  await expect(page.getByTestId("launcher-page-page:e2e/item")).toHaveCount(0);
+  await expect(page.getByTestId("launcher-page-oxplow:oxplow/page?page=e2e/item")).toHaveCount(0);
 });

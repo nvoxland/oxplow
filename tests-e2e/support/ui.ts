@@ -53,3 +53,10 @@ export async function openFromLauncher(page: Page, query: string): Promise<void>
 export function newSessionPage(page: Page) {
   return page.locator('[data-testid^="center-tab-body-page:new-session"]:visible');
 }
+
+/** The id of a work item's URI (`tsk42` of `oxplow:oxplow/work_item?id=tsk42&provider=oxplow`). */
+export function workItemIdOf(ref: string): string {
+  const id = /[?&]id=([^&#]+)/.exec(ref)?.[1];
+  if (!id) throw new Error(`\`${ref}\` names no work item`);
+  return decodeURIComponent(id);
+}

@@ -16,12 +16,12 @@ test("a closed session is listed on the New Session page and picking it reopens 
   const { page, daemon } = fresh;
   // A session that has run (it is bound to a conversation), then closed.
   const opened = await run<Opened>(daemon, "oxplow.agent_session.open", {
-    thread: `thread:${daemon.thread}`,
+    thread: daemon.threadUri,
     resume: "conv-earlier",
     title: "Parser work",
   });
   const id = opened.result.id;
-  await run(daemon, "oxplow.agent_session.close", { session: `agent_session:${id}` });
+  await run(daemon, "oxplow.agent_session.close", { session: `oxplow:oxplow/agent_session?id=${id}` });
 
   await page.goto("/");
   await expect(newSessionPage(page)).toBeVisible();
@@ -30,11 +30,11 @@ test("a closed session is listed on the New Session page and picking it reopens 
   // A click on the row takes it (its primary action).
   await row.click();
 
-  await expect(page.getByTestId(`center-tab-agent_session:${id}`)).toBeVisible();
+  await expect(page.getByTestId(`center-tab-oxplow:oxplow/agent_session?id=${id}`)).toBeVisible();
   await expect(newSessionPage(page)).toHaveCount(0);
   // Undo (the toast) closes it again.
   await page.getByTestId("undo-toast-undo").click();
-  await expect(page.getByTestId(`center-tab-agent_session:${id}`)).toHaveCount(0);
+  await expect(page.getByTestId(`center-tab-oxplow:oxplow/agent_session?id=${id}`)).toHaveCount(0);
 });
 
 /// A closed session found by search opens its transcript, not nothing; the
@@ -42,22 +42,22 @@ test("a closed session is listed on the New Session page and picking it reopens 
 test("a closed session found by search opens its transcript, which can reopen it", async ({ fresh }) => {
   const { page, daemon } = fresh;
   const opened = await run<Opened>(daemon, "oxplow.agent_session.open", {
-    thread: `thread:${daemon.thread}`,
+    thread: daemon.threadUri,
     resume: "conv-found",
     title: "Zebrafinch review",
   });
   const id = opened.result.id;
-  await run(daemon, "oxplow.agent_session.close", { session: `agent_session:${id}` });
+  await run(daemon, "oxplow.agent_session.close", { session: `oxplow:oxplow/agent_session?id=${id}` });
   await searchable(daemon, "Zebrafinch", "agent_session");
 
   await page.goto("/");
   await searchLauncher(page, "Zebrafinch");
-  await page.getByTestId(`launcher-hit-agent_session:${id}`).click();
+  await page.getByTestId(`launcher-hit-oxplow:oxplow/agent_session?id=${id}`).click();
   // Its transcript (it has no turns yet, so nothing is listed), not a tab
   // that isn't there; Reopen brings the session back.
-  await expect(page.getByTestId(`center-tab-agent_session:${id}`)).toHaveCount(0);
+  await expect(page.getByTestId(`center-tab-oxplow:oxplow/agent_session?id=${id}`)).toHaveCount(0);
   await page.getByTestId("action-lens-action-reopen").click();
-  await expect(page.getByTestId(`center-tab-agent_session:${id}`)).toBeVisible();
+  await expect(page.getByTestId(`center-tab-oxplow:oxplow/agent_session?id=${id}`)).toBeVisible();
 });
 
 /// A session open in this thread is listed too; picking it shows its tab
@@ -65,7 +65,7 @@ test("a closed session found by search opens its transcript, which can reopen it
 test("picking a session open here shows it and keeps the New Session page", async ({ fresh }) => {
   const { page, daemon } = fresh;
   const opened = await run<Opened>(daemon, "oxplow.agent_session.open", {
-    thread: `thread:${daemon.thread}`,
+    thread: daemon.threadUri,
     resume: "conv-open",
     title: "Lexer work",
   });
@@ -79,9 +79,9 @@ test("picking a session open here shows it and keeps the New Session page", asyn
   // Its title is a link to the open session's tab.
   await row.getByRole("button", { name: /Lexer work/ }).click();
 
-  await expect(page.getByTestId(`center-tab-body-agent_session:${id}`)).toBeVisible();
+  await expect(page.getByTestId(`center-tab-body-oxplow:oxplow/agent_session?id=${id}`)).toBeVisible();
   await expect(newSessionPage(page)).toHaveCount(0);
-  await expect(page.getByTestId("center-tab-page:new-session")).toHaveCount(1);
+  await expect(page.getByTestId("center-tab-oxplow:oxplow/page?page=new-session")).toHaveCount(1);
 });
 
 /// An extension adds a section to the New Session page through its
@@ -94,12 +94,12 @@ test("an extension's section lands where its `at` says on the New Session page",
   // Sections with nothing to show fold into one line, so each has a row:
   // an earlier session and a note.
   const earlier = await run<Opened>(daemon, "oxplow.agent_session.open", {
-    thread: `thread:${daemon.thread}`,
+    thread: daemon.threadUri,
     resume: "conv-placed",
     title: "Placed work",
   });
-  await run(daemon, "oxplow.agent_session.close", { session: `agent_session:${earlier.result.id}` });
-  await run(daemon, "oxplow.knowledge.add_note", { thread: `thread:${daemon.thread}`, body: "Remember the lexer." });
+  await run(daemon, "oxplow.agent_session.close", { session: `oxplow:oxplow/agent_session?id=${earlier.result.id}` });
+  await run(daemon, "oxplow.knowledge.add_note", { thread: daemon.threadUri, body: "Remember the lexer." });
 
   await page.goto("/");
   const doc = newSessionPage(page);

@@ -3,18 +3,18 @@ import { join } from "node:path";
 
 import { run, searchable } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
-import { openFromLauncher, searchLauncher } from "../../support/ui.js";
+import { openFromLauncher, searchLauncher, workItemIdOf } from "../../support/ui.js";
 
 /// A wiki page with a link to a task: the page, then the task in the same tab.
-async function wikiWithTask(daemon: Parameters<typeof run>[0] & { thread: string }, slug: string, task: string) {
+async function wikiWithTask(daemon: Parameters<typeof run>[0] & { threadUri: string }, slug: string, task: string) {
   const created = await run<{ result: { ref: string } }>(daemon, "oxplow.work_item.create", {
     title: task,
-    thread: daemon.thread,
+    thread: daemon.threadUri,
   });
   await run(daemon, "oxplow.knowledge.write_page", {
     slug,
     title: `${slug} page`,
-    body: `# ${slug}\n\nFirst do [[${created.result.ref.split(":").pop()}]].\n`,
+    body: `# ${slug}\n\nFirst do [[${workItemIdOf(created.result.ref)}]].\n`,
   });
   await searchable(daemon, slug, "wiki");
   return created.result.ref;
@@ -22,7 +22,7 @@ async function wikiWithTask(daemon: Parameters<typeof run>[0] & { thread: string
 
 async function openWiki(page: import("@playwright/test").Page, slug: string) {
   await searchLauncher(page, `${slug} page`);
-  await page.getByTestId(`launcher-hit-wiki:${slug}`).click();
+  await page.getByTestId(`launcher-hit-oxplow:oxplow/wiki?slug=${slug}`).click();
   await expect(page.getByTestId("page-wiki")).toContainText("First do");
 }
 
@@ -63,9 +63,9 @@ test("Alt+Down steps to the next file of the list it was opened from", async ({ 
   // The file has opened once its editor is up; focus then rests on the tab,
   // not in the editor (which keeps the keys for typing).
   await expect(page.locator(".monaco-editor").first()).toBeVisible();
-  await page.getByTestId("center-tab-file:aa.txt").click();
+  await page.getByTestId("center-tab-oxplow:oxplow/file?path=aa.txt").click();
 
   await page.keyboard.press("Alt+ArrowDown");
-  await expect(page.getByTestId("center-tab-file:bb.txt")).toBeVisible();
-  await expect(page.getByTestId("center-tab-file:aa.txt")).toBeHidden();
+  await expect(page.getByTestId("center-tab-oxplow:oxplow/file?path=bb.txt")).toBeVisible();
+  await expect(page.getByTestId("center-tab-oxplow:oxplow/file?path=aa.txt")).toBeHidden();
 });

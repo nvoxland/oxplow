@@ -11,7 +11,7 @@ test("search offers a new agent session, which opens the picker", async ({ fresh
   await page.goto("/");
   await expect(newSessionPage(page)).toBeVisible();
   await newSessionPage(page).getByTestId("lens-part-start").getByRole("button", { name: "New Session", exact: true }).click();
-  const tab = page.locator('[data-testid^="center-tab-agent_session:"]').first();
+  const tab = page.locator('[data-testid^="center-tab-oxplow:oxplow/agent_session?"]').first();
   await expect(tab).toBeVisible();
   await expect(newSessionPage(page)).toHaveCount(0);
   await searchLauncher(page, "new agent session");
@@ -32,7 +32,7 @@ test("an ended terminal session says so and its tab closes it", async ({ fresh }
   await expect(newSessionPage(page)).toBeVisible();
   await newSessionPage(page).getByTestId("lens-part-start").getByTestId("lens-form-fields-harness").selectOption("claude");
   await newSessionPage(page).getByTestId("lens-part-start").getByRole("button", { name: "New Session", exact: true }).click();
-  const tab = page.locator('[data-testid^="center-tab-agent_session:"]').first();
+  const tab = page.locator('[data-testid^="center-tab-oxplow:oxplow/agent_session?"]').first();
   await expect(tab).toBeVisible();
   await expect(page.getByTestId("terminal-ended")).toBeVisible();
   const tabTestId = (await tab.getAttribute("data-testid")) ?? "";
@@ -67,7 +67,7 @@ test("a session's tab shows its alias, and its fallback once the alias is cleare
   await expect(newSessionPage(page)).toBeVisible();
   await newSessionPage(page).getByTestId("lens-part-start").getByTestId("lens-form-fields-harness").selectOption("claude");
   await newSessionPage(page).getByTestId("lens-part-start").getByRole("button", { name: "New Session", exact: true }).click();
-  const tab = page.locator('[data-testid^="center-tab-agent_session:"]').first();
+  const tab = page.locator('[data-testid^="center-tab-oxplow:oxplow/agent_session?"]').first();
   await expect(tab).toBeVisible();
   await expect(tab).toContainText(/claude \d{4}-\d{2}-\d{2}/i);
   const id = ((await tab.getAttribute("data-testid")) ?? "").slice("center-tab-".length);
@@ -97,12 +97,12 @@ test("search starts an enabled agent's session directly", async ({ fresh }) => {
   await page.keyboard.press("Escape");
   await searchLauncher(page, "new codex session");
   await page.getByTestId("launcher-command-oxplow.agent_session.open_codex").click();
-  const tab = page.locator('[data-testid^="center-tab-agent_session:"]').first();
+  const tab = page.locator('[data-testid^="center-tab-oxplow:oxplow/agent_session?"]').first();
   await expect(tab).toBeVisible();
   await expect(newSessionPage(page)).toHaveCount(0);
 });
 
-const PICKER_CLOSE = "center-tab-close-page:new-session";
+const PICKER_CLOSE = "center-tab-close-oxplow:oxplow/page?page=new-session";
 
 /** A new thread from the navigator: the stream's menu, Add thread, a title. */
 async function addThread(page: import("@playwright/test").Page, daemon: import("../../support/daemon.js").Daemon, title: string) {
@@ -135,10 +135,10 @@ test("a remembered choice is what new threads start with", async ({ fresh }) => 
   await newSessionPage(page).getByTestId("lens-part-start").getByTestId("lens-form-fields-harness").selectOption("claude");
   await newSessionPage(page).getByTestId("lens-part-start").getByTestId("lens-form-fields-remember").check();
   await newSessionPage(page).getByTestId("lens-part-start").getByRole("button", { name: "New Session", exact: true }).click();
-  await expect(page.locator('[data-testid^="center-tab-agent_session:"]')).toHaveCount(1);
+  await expect(page.locator('[data-testid^="center-tab-oxplow:oxplow/agent_session?"]')).toHaveCount(1);
 
   await addThread(page, daemon, "Busy");
-  await expect(page.locator('[data-testid^="center-tab-agent_session:"]')).toHaveCount(1);
+  await expect(page.locator('[data-testid^="center-tab-oxplow:oxplow/agent_session?"]')).toHaveCount(1);
   await expect(page.getByTestId(PICKER_CLOSE)).toHaveCount(0);
   await expect(page.getByTestId("terminal-ended")).toBeVisible();
 });
