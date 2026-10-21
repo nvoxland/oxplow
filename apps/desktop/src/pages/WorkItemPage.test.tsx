@@ -202,7 +202,7 @@ test("Link… takes any ref: its placeholder says so, and an `about` link to an 
   const view = page();
   fireEvent.click(await waitFor(() => view.getByTestId("work-item-link-open")));
   expect((view.getByTestId("work-item-link-target") as HTMLInputElement).placeholder).toBe(
-    "a ref: work_item:…, effort:eff12, collector:x/y",
+    "a ref: work_item:…, oxplow:oxplow/effort?id=eff12, oxplow:oxplow/collector?collector=x/y",
   );
   fireEvent.change(view.getByTestId("work-item-link-link_type"), { target: { value: "about" } });
   fireEvent.change(view.getByTestId("work-item-link-target"), { target: { value: "oxplow:oxplow/effort?id=eff12" } });

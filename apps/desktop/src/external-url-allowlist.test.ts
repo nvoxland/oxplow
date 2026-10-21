@@ -38,7 +38,7 @@ test("rejects malformed input", () => {
 });
 
 test("rejects file: scheme", () => {
-  expect(classifyExternalUrl("oxplow:oxplow/file?path=///etc/passwd")).toEqual({ ok: false, reason: "scheme-not-allowed" });
+  expect(classifyExternalUrl("file:///etc/passwd")).toEqual({ ok: false, reason: "scheme-not-allowed" });
 });
 
 test("rejects javascript: scheme", () => {

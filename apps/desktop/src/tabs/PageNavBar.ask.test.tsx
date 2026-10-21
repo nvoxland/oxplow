@@ -16,7 +16,7 @@ test("Ask About This puts the page's ref in the agent's input", async () => {
   );
   fireEvent.click(view.getByTestId("page-nav-ask"));
   fireEvent.click(view.getByTestId("page-nav-ask-this"));
-  expect(inserted).toEqual(["[oxplow ref commit:abc123] "]);
+  expect(inserted).toEqual(["[oxplow ref oxplow:oxplow/commit?sha=abc123] "]);
   off();
   cleanup();
   const none = render(<PageNavBar canBack={false} canForward={false} onBack={() => {}} onForward={() => {}} />);

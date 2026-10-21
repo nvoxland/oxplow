@@ -263,7 +263,7 @@ describe("rowMention", () => {
 describe("rowAsk", () => {
   test("Ask About This on a row asks about what it links to, else the row itself", () => {
     const linked = lens({ columns: [{ key: "sha", label: null, link: { kind: "commit", from: null, line: null } }] });
-    expect(rowAsk(linked, ["sha", "subject"], ["abc123", "Fix"])).toBe("[oxplow ref commit:abc123] ");
+    expect(rowAsk(linked, ["sha", "subject"], ["abc123", "Fix"])).toBe("[oxplow ref oxplow:oxplow/commit?sha=abc123] ");
     expect(rowAsk(lens(), ["id", "title"], [42, "Fix it"])).toBe('[oxplow lens review/waiting row: id=42, title="Fix it"] ');
   });
 });

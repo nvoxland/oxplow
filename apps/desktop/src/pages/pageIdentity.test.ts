@@ -42,7 +42,7 @@ test("an entity page is its ref, less the view its kind declares", () => {
   expect(pageIdentity(fileRef("src/a.ts"))).toBe(fileRef("src/a.ts").id);
   expect(pageIdentity(metricRef("oxplow.todos", { range: "30d", branch: "main", slice: "oxplow.language" }))).toBe("oxplow:oxplow/metric?metric=oxplow.todos");
   expect(withView(metricRef("oxplow.todos"), { range: "30d" }).id).toBe("oxplow:oxplow/metric?metric=oxplow.todos&range=30d");
-  expect(() => withView(metricRef("oxplow.todos"), { sort: "age" })).toThrow(/`sort` isn't a view param of metric:oxplow.todos/);
+  expect(() => withView(metricRef("oxplow.todos"), { sort: "age" })).toThrow(/`sort` isn't a view param of oxplow:oxplow/metric?metric=oxplow.todos/);
 });
 
 // A page changes only its view: writing a param it doesn't declare as view
@@ -50,6 +50,6 @@ test("an entity page is its ref, less the view its kind declares", () => {
 test("withView writes a page's view params and refuses one that would change what the page is", () => {
   expect(withView(pageTabRef("tasks"), { scope: "all" }).id).toBe("oxplow:oxplow/page?page=tasks&scope=all");
   expect(withView(lensRef("x/y"), { range: "7d" }).id).toBe(lensRef("x/y", { range: "7d" }).id);
-  expect(() => withView(pageTabRef("tasks"), { sort: "age" })).toThrow(/`sort`.*page:tasks.*BUILT_IN_VIEW/);
+  expect(() => withView(pageTabRef("tasks"), { sort: "age" })).toThrow(/`sort`.*oxplow:oxplow/page?page=tasks.*BUILT_IN_VIEW/);
   expect(() => withView(pageTabRef("custom-dashboard", { id: "7" }), { id: "7", sort: "age" })).toThrow(/^`sort` isn't/);
 });

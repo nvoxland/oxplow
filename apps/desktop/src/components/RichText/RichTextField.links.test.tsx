@@ -31,7 +31,7 @@ test("a work item link and an extension's ref open their pages", async () => {
   const nav = { navigate: () => {}, openRef: (ref: string) => opened.push(ref) } as unknown as PageNavigation;
   const view = render(
     <PageNavigationContext.Provider value={nav}>
-      <RichTextField value="See [tsk1](work_item:oxplow:tsk1) and [pr 12](acme_pr:12)." onCommit={() => {}} />
+      <RichTextField value="See [tsk1](oxplow:oxplow/work_item?id=tsk1&provider=oxplow) and [pr 12](acme_pr:12)." onCommit={() => {}} />
     </PageNavigationContext.Provider>,
   );
   await act(async () => {

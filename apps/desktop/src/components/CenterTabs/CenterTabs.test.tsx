@@ -65,7 +65,7 @@ test("Close Tabs to the Right is disabled on the last tab", () => {
 test("closing a batch that swept the active tab refocuses the anchor", () => {
   const closed: string[] = [];
   const activated: string[] = [];
-  // Active is file:a.ts; right-click file:b.ts and Close Other Tabs (closes a + c).
+  // Active is oxplow:oxplow/file?path=a.ts; right-click oxplow:oxplow/file?path=b.ts and Close Other Tabs (closes a + c).
   const { getByTestId } = renderTabs({
     activeId: "oxplow:oxplow/file?path=a.ts",
     onClose: (id) => closed.push(id),
@@ -80,7 +80,7 @@ test("closing a batch that swept the active tab refocuses the anchor", () => {
 
 test("closing tabs that leave the active tab open does not refocus", () => {
   const activated: string[] = [];
-  // Active is file:a.ts (left of anchor); Close Tabs to the Right of b closes
+  // Active is oxplow:oxplow/file?path=a.ts (left of anchor); Close Tabs to the Right of b closes
   // only c, so a stays active and we must not steal focus.
   const { getByTestId } = renderTabs({
     activeId: "oxplow:oxplow/file?path=a.ts",

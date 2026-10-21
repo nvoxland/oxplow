@@ -42,7 +42,7 @@ test("v_prompt's rows are the catalog; prompts about a kind; asking about a ref 
   expect(promptsOf(rows)).toEqual(catalog);
   expect(promptsAbout(catalog, "effort").map((p) => p.prompt)).toEqual(["Which files did this effort touch?"]);
   expect(askText("Who has changed this file the most?", "oxplow:oxplow/file?path=src/a.rs")).toBe(
-    "[oxplow ref file:src/a.rs] Who has changed this file the most?",
+    "[oxplow ref oxplow:oxplow/file?path=src/a.rs] Who has changed this file the most?",
   );
   expect(askText("Which PRs wait on me?", null)).toBe("Which PRs wait on me?");
 });
@@ -52,7 +52,7 @@ test("a page for an effort suggests its prompts, asked about that effort", async
   const ask = await waitFor(() => view.getByText("Which files did this effort touch?"));
   expect(view.queryByText("Who has changed this file the most?")).toBeNull();
   fireEvent.click(ask);
-  expect(inserted).toEqual(["[oxplow ref effort:12] Which files did this effort touch?"]);
+  expect(inserted).toEqual(["[oxplow ref oxplow:oxplow/effort?id=12] Which files did this effort touch?"]);
 });
 
 test("an empty state offers prompts; Ask fills the input", () => {

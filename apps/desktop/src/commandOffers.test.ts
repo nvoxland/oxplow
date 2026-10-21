@@ -86,11 +86,11 @@ test("a form opens its page; a background command runs in the background; anothe
   for (const o of offers) o.run();
   await new Promise((r) => setTimeout(r, 0));
   expect(calls).toEqual([
-    "open page:new-task",
+    "open oxplow:oxplow/page?page=new-task",
     'background oxplow.vcs.pull {"stream":"oxplow:oxplow/stream?id=str2"}',
     'run oxplow.dashboard.create {"title":"Untitled dashboard"}',
     'open_after oxplow.dashboard.create {"id":7}',
-    "open page:custom-dashboard?id=7",
+    "open oxplow:oxplow/page?page=custom-dashboard?id=7",
   ]);
 });
 
@@ -139,8 +139,8 @@ test("a form about a ref opens with that ref as its param; a form about nothing 
   ];
   for (const o of refOffers(specs, "triage:item/7", { streamId: null, threadId: null }, d)) o.run();
   expect(calls).toEqual([
-    "open page:triage/note-form?ref=triage:item/7",
-    "open page:triage/tag-form?mode=quick&ref=triage:item/7",
+    "open oxplow:oxplow/page?page=triage/note-form?ref=triage:item/7",
+    "open oxplow:oxplow/page?page=triage/tag-form?mode=quick&ref=triage:item/7",
     "form new-thread",
   ]);
 });
