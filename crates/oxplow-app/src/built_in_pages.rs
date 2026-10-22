@@ -15,7 +15,6 @@ pub const BUILT_IN_PAGES: &[&str] = &[
     "alerts",
     "backlog",
     "board",
-    "commit",
     "custom-dashboard",
     "diff",
     "diff-view",
@@ -33,7 +32,6 @@ pub const BUILT_IN_PAGES: &[&str] = &[
     "settings",
     "tasks",
     "terminal",
-    "uncommitted-changes",
     "wiki-page",
     "work-item",
 ];

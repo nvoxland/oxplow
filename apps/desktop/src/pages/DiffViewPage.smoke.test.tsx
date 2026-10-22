@@ -114,7 +114,6 @@ mock.module("../tauri-bridge/generated/bindings.js", () => ({
 }));
 
 const { DiffViewPage } = await import("./DiffViewPage.js");
-const { GitCommitPage } = await import("./GitCommitPage.js");
 
 afterEach(cleanup);
 
@@ -132,22 +131,6 @@ test("the diff view lists a revision pair's files through the neutral surface on
   await findByText(/a\.ts/);
   await waitFor(() => expect(diffCalls.length).toBeGreaterThan(0));
   expect(diffCalls[0]).toEqual(["str1", "git:abc1234", "working"]);
-  expect(gitCalls).toEqual([]);
-});
-
-test("the commit page reads its commit through vcsRevision, not git commands", async () => {
-  gitCalls.length = 0;
-  const { findByText } = render(
-    <GitCommitPage
-      stream={STREAM}
-      sha="abc1234def"
-      threadWork={null}
-      onOpenPage={() => {}}
-      onOpenFile={() => {}}
-    />,
-  );
-  await findByText("Fix the widget");
-  await findByText(/b\.ts/);
   expect(gitCalls).toEqual([]);
 });
 

@@ -1,7 +1,7 @@
 //! Foundation lenses that replaced core pages: Settings' Overview and Language
 //! Servers areas (mounted in each area's slot: what they list, how they group
 //! and search, what Ask puts in the agent's input, what the language-server
-//! rows offer) and the Comments inbox.
+//! rows offer), the Comments inbox, and the commit and uncommitted pages.
 
 use oxplow_config::LspServerConfig;
 use oxplow_db::SqlCell;
@@ -260,4 +260,178 @@ async fn the_comments_inbox_lists_threads_by_target_and_a_picked_one_reads_in_or
     )
     .await;
     assert!(none.rows.is_empty());
+}
+
+fn sha_params(stream: i64, sha: &str) -> Vec<(&'static str, SqlCell)> {
+    vec![
+        ("stream_id", SqlCell::Int(stream)),
+        ("sha", SqlCell::Text(sha.to_string())),
+    ]
+}
+
+/// A commit page: its document's row makes the commit's change and hands the
+/// change and its revisions to the parts; the files come as a tree, folders
+/// first, each file with its status and the diff its link opens.
+#[tokio::test]
+async fn the_commit_page_reads_a_commit_its_change_and_its_files_as_a_tree() {
+    let fx = services_with_effort().await;
+    let root = fx.svc.layout.project_dir.clone();
+    std::fs::write(root.join("base.txt"), "x\n").unwrap();
+    crate::test_fixtures::commit_all(&root, "base");
+    std::fs::create_dir_all(root.join("src/deep")).unwrap();
+    std::fs::write(root.join("src/deep/a.rs"), "a\n").unwrap();
+    std::fs::write(root.join("top.txt"), "t\n").unwrap();
+    let sha = crate::test_fixtures::commit_all(&root, "add things\n\nwith a body");
+    let stream = fx.svc.streams.ensure_primary().await.unwrap().id.value();
+
+    let doc = run(&fx, "commit", sha_params(stream, &sha)).await;
+    assert_eq!(doc.rows.len(), 1);
+    let row = &doc.rows[0];
+    assert!(matches!(
+        &row[doc.columns.iter().position(|c| c == "change_id").unwrap()],
+        SqlCell::Int(_)
+    ));
+    assert_eq!(doc.text(row, "head_revision"), Some(format!("git:{sha}")));
+    assert!(doc.text(row, "base_revision").is_some());
+
+    let detail = run(&fx, "commit-detail", sha_params(stream, &sha)).await;
+    let d = &detail.rows[0];
+    assert_eq!(detail.text(d, "subject").as_deref(), Some("add things"));
+    assert_eq!(detail.text(d, "sha"), Some(sha.clone()));
+
+    let files = run(
+        &fx,
+        "commit-files",
+        vec![
+            ("sha", SqlCell::Text(sha.clone())),
+            ("base_revision", SqlCell::Text("git:base".into())),
+            ("head_revision", SqlCell::Text(format!("git:{sha}"))),
+        ],
+    )
+    .await;
+    let nodes: Vec<(String, Option<String>, String, String)> = files
+        .rows
+        .iter()
+        .map(|r| {
+            (
+                files.text(r, "id").unwrap(),
+                files.text(r, "parent"),
+                files.text(r, "name").unwrap(),
+                files.text(r, "icon").unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        nodes,
+        vec![
+            (
+                "src".to_string(),
+                None,
+                "src".to_string(),
+                "folder".to_string()
+            ),
+            (
+                "src/deep".to_string(),
+                Some("src".to_string()),
+                "deep".to_string(),
+                "folder".to_string()
+            ),
+            (
+                "src/deep/a.rs".to_string(),
+                Some("src/deep".to_string()),
+                "a.rs".to_string(),
+                "added".to_string()
+            ),
+            (
+                "top.txt".to_string(),
+                None,
+                "top.txt".to_string(),
+                "added".to_string()
+            ),
+        ]
+    );
+    // A file carries the diff its link opens; a folder has none.
+    assert_eq!(
+        files.text(&files.rows[2], "file").as_deref(),
+        Some("src/deep/a.rs")
+    );
+    assert_eq!(files.text(&files.rows[0], "file"), None);
+    assert_eq!(
+        files.text(&files.rows[2], "head_revision"),
+        Some(format!("git:{sha}"))
+    );
+}
+
+/// The uncommitted page makes the stream's working change and lists the
+/// working tree's files as a tree, untracked ones as the change marks them.
+#[tokio::test]
+async fn the_uncommitted_page_lists_the_working_tree_with_untracked_marked() {
+    let fx = services_with_effort().await;
+    let root = fx.svc.layout.project_dir.clone();
+    std::fs::write(root.join("tracked.txt"), "x\n").unwrap();
+    crate::test_fixtures::commit_all(&root, "base");
+    std::fs::write(root.join("tracked.txt"), "changed\n").unwrap();
+    std::fs::write(root.join("loose.txt"), "n\n").unwrap();
+    let stream = fx.svc.streams.ensure_primary().await.unwrap().id.value();
+
+    let doc = run(
+        &fx,
+        "uncommitted",
+        vec![("stream_id", SqlCell::Int(stream))],
+    )
+    .await;
+    assert_eq!(doc.rows.len(), 1);
+    let row = doc.rows[0].clone();
+    let at = |name: &str| row[doc.columns.iter().position(|c| c == name).unwrap()].clone();
+    let change = at("change_id");
+    assert!(matches!(change, SqlCell::Int(_)), "{change:?}");
+
+    // Its files are listed by the change's analysis, a moment later.
+    let mut icons = Vec::new();
+    for _ in 0..50 {
+        let files = run(
+            &fx,
+            "uncommitted-files",
+            vec![
+                ("change_id", change.clone()),
+                ("base_revision", at("base_revision")),
+                ("head_revision", at("head_revision")),
+            ],
+        )
+        .await;
+        icons = files
+            .rows
+            .iter()
+            .map(|r| (files.text(r, "id").unwrap(), files.text(r, "icon").unwrap()))
+            .collect();
+        if icons.iter().any(|(id, _)| id == "tracked.txt") {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    assert!(
+        icons.contains(&("tracked.txt".to_string(), "modified".to_string())),
+        "{icons:?}"
+    );
+    // A file git doesn't track yet reads as untracked once the change's
+    // status is in, added before.
+    assert!(
+        icons
+            .iter()
+            .any(|(id, icon)| id == "loose.txt" && (icon == "untracked" || icon == "added")),
+        "{icons:?}"
+    );
+
+    // The commit form shows once there are files to commit.
+    let form = run(
+        &fx,
+        "uncommitted-commit",
+        vec![("stream_id", SqlCell::Int(stream)), ("change_id", change)],
+    )
+    .await;
+    assert_eq!(form.rows.len(), 1);
+    assert_eq!(
+        form.text(&form.rows[0], "stream"),
+        Some(format!("str{stream}"))
+    );
 }

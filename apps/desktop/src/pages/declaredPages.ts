@@ -11,7 +11,6 @@ import { extPageUri, pageUri as corePageRef } from "../uri/uri.js";
 /// (`App.tsx` `appRenderers`): the editor's buffers, the thread's sessions.
 export const APP_RENDERERS = [
   "agent-session",
-  "commit",
   "editor",
   "file-viewer",
   "lens",
@@ -43,7 +42,6 @@ export const BUILT_IN_PAGES = [
   "resource",
   "settings",
   "terminal",
-  "uncommitted-changes",
   "tasks",
 ] as const;
 

@@ -1561,10 +1561,7 @@ pub const SLOTS: &[SlotSpec] = &[
     SlotSpec::region("work_item.detail.sidebar", &["uri"]),
     // A thread's plan, as a compact strip.
     SlotSpec::region("thread.plan.header", &["thread_id"]),
-    SlotSpec::region("vcs.commit.details", &["change_id"]),
     // Uncommitted changes: a strip above them, and below the files.
-    SlotSpec::region("vcs.status.header", &["stream_id"]),
-    SlotSpec::region("vcs.status.details", &["change_id"]),
     // A file diff's header strip, above the editor: the file and the two
     // revisions the diff reads (`working`, `snap:<id>`, `git:<sha>`).
     SlotSpec::region(
@@ -1729,24 +1726,35 @@ fn mount_problem(
     mount: &LensSlot,
     lens: &Lens,
     params: &[&str],
+    row: &[&str],
     kind: PartsKind,
     ids: &[&str],
 ) -> Result<Option<String>, String> {
-    // A slot offers params; a mounted lens takes the ones it declares
-    // and must declare at least one, or it can't relate to the page.
-    if !params.is_empty()
-        && !params
+    // A slot offers params (and a page's query row its names); a mounted
+    // lens takes the ones it declares and must declare at least one, or it
+    // can't relate to the page.
+    let offered: Vec<&str> = params.iter().chain(row).copied().collect();
+    if !offered.is_empty()
+        && !offered
             .iter()
             .any(|p| lens.params.iter().any(|lp| lp.name == *p))
     {
-        return Err(format!(
-            "slot `{}` passes {}; lens `{}` must declare at least one in `params`",
-            mount.slot,
-            params
+        let list = |names: &[&str]| {
+            names
                 .iter()
                 .map(|p| format!("`{p}`"))
                 .collect::<Vec<_>>()
-                .join(", "),
+                .join(", ")
+        };
+        let row_note = if row.is_empty() {
+            String::new()
+        } else {
+            format!(" and the page's row gives {}", list(row))
+        };
+        return Err(format!(
+            "slot `{}` passes {}{row_note}; lens `{}` must declare at least one in `params`",
+            mount.slot,
+            list(params),
             lens.slug
         ));
     }
@@ -2640,7 +2648,52 @@ pub(super) fn resolve_catalog(
         })
         .collect();
     place_lens_mounts(&mut out);
+    warn_unread_row_columns(&mut out);
     out
+}
+
+/// A composite's row names a value its parts take as params: one none of
+/// its parts (its own and the mounted ones, once placed) declares is read
+/// by nothing. Said only when every part's lens is loaded.
+fn warn_unread_row_columns(out: &mut [Extension]) {
+    let params: BTreeMap<String, Vec<String>> = out
+        .iter()
+        .flat_map(|e| e.lenses.iter())
+        .map(|l| {
+            (
+                l.id.clone(),
+                l.params.iter().map(|p| p.name.clone()).collect(),
+            )
+        })
+        .collect();
+    for ext in out.iter_mut() {
+        let warnings: Vec<String> = ext
+            .lenses
+            .iter()
+            .filter(|l| matches!(l.viz, LensViz::Document | LensViz::Dashboard))
+            .flat_map(|l| {
+                let parts: Option<Vec<&Vec<String>>> =
+                    l.part_lenses().map(|p| params.get(p)).collect();
+                let taken = |name: &str| {
+                    parts
+                        .as_deref()
+                        .is_none_or(|p| p.iter().any(|ps| ps.iter().any(|x| x == name)))
+                };
+                l.columns
+                    .iter()
+                    .filter(move |c| !taken(&c.key))
+                    .map(|c| {
+                        format!(
+                            "{}: column `{}` of the row is a param of none of its parts — \
+                             remove it, or declare it on the part that reads it",
+                            l.origin.running, c.key
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        ext.warnings.extend(warnings);
+    }
 }
 
 /// Mounts among another lens's parts (`<extension>/<slug>.sections` of a
@@ -2651,6 +2704,8 @@ pub(super) fn resolve_catalog(
 fn place_lens_mounts(out: &mut [Extension]) {
     struct Target {
         params: Vec<String>,
+        /// The names of its query's row (`columns:`), given to its parts.
+        row: Vec<String>,
         kind: PartsKind,
         ids: Vec<String>,
     }
@@ -2667,6 +2722,7 @@ fn place_lens_mounts(out: &mut [Extension]) {
                 l.id.clone(),
                 Target {
                     params: l.params.iter().map(|p| p.name.clone()).collect(),
+                    row: l.columns.iter().map(|c| c.key.clone()).collect(),
                     kind,
                     ids: l.parts.iter().map(|p| p.id.clone()).collect(),
                 },
@@ -2705,8 +2761,9 @@ fn place_lens_mounts(out: &mut [Extension]) {
                 )),
                 Some(t) => {
                     let params: Vec<&str> = t.params.iter().map(String::as_str).collect();
+                    let row: Vec<&str> = t.row.iter().map(String::as_str).collect();
                     let ids: Vec<&str> = t.ids.iter().map(String::as_str).collect();
-                    mount_problem(mount, lens, &params, kind, &ids)
+                    mount_problem(mount, lens, &params, &row, kind, &ids)
                 }
             };
             match checked {
@@ -4062,7 +4119,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             SlotParts::Sections(ids) => (PartsKind::Sections, ids.to_vec()),
             SlotParts::Tiles(ids) => (PartsKind::Tiles, ids.to_vec()),
         };
-        match mount_problem(&mount, lens, spec.params, kind, &ids) {
+        match mount_problem(&mount, lens, spec.params, &[], kind, &ids) {
             Err(problem) => ext.errors.push(at(&file, mount_line, problem)),
             Ok(warning) => {
                 ext.warnings
@@ -4823,6 +4880,39 @@ fn expand_problem(lens: &Lens, ids_in_extension: &[String]) -> Option<String> {
     })
 }
 
+/// A composite's `columns:` name the row its `query` returns (what its
+/// parts and mounts may take as params): only with a query, and only their
+/// `key`s, which is all a row's name has.
+fn row_columns_problem(lens: &Lens) -> Option<String> {
+    if lens.columns.is_empty() {
+        return None;
+    }
+    let viz = format!("{:?}", lens.viz).to_lowercase();
+    if lens.query.trim().is_empty() {
+        return Some(format!("a `{viz}` without a query has no row to name"));
+    }
+    lens.columns
+        .iter()
+        .find(|c| {
+            c.label.is_some()
+                || c.link.is_some()
+                || c.unit.is_some()
+                || c.icon.is_some()
+                || c.tone.is_some()
+                || c.width.is_some()
+                || c.format.is_some()
+                || c.highlight.is_some()
+                || c.select.is_some()
+                || c.expand.is_some()
+        })
+        .map(|c| {
+            format!(
+                "column `{}`: a composite's column is only its `key`: it names a value of its row, not something shown",
+                c.key
+            )
+        })
+}
+
 /// A document's or dashboard's part naming a lens of its own extension
 /// that isn't there (another extension's resolves with the catalog).
 fn parts_problem(lens: &Lens, ids_in_extension: &[String]) -> Option<String> {
@@ -4963,7 +5053,9 @@ fn shape_problem(
                 .or_else(|| form_fields_problem(&f))
         }
         // A grid composes its children; it renders no rows of its own.
-        LensViz::Document | LensViz::Dashboard => parts_problem(lens, ids_in_extension),
+        LensViz::Document | LensViz::Dashboard => {
+            parts_problem(lens, ids_in_extension).or_else(|| row_columns_problem(lens))
+        }
         // Its rows are what the component shows and what an agent reads.
         LensViz::Custom if lens.query.trim().is_empty() => {
             Some("viz `custom` needs a `query`: its rows are what the component shows".into())
@@ -5083,8 +5175,9 @@ fn layout_warnings(lens: &Lens, lenses: &[Lens], renderer: bool) -> Vec<String> 
                 || range && (read(&format!("{}_from", p.name)) || read(&format!("{}_to", p.name)))
                 || templated.contains(&p.name)
                 || marked.contains(&p.name.as_str())
-                // A renderer's lens is run with the URI it shows: the host's to give.
-                || renderer && p.name == "uri")
+                // A renderer's lens is run with the URI it shows and the
+                // stream and thread it is shown in: the host's to give.
+                || renderer && ["uri", "stream_id", "thread_id"].contains(&p.name.as_str()))
             {
                 out.push(format!(
                     "param `{0}` isn't read by any query of the page — remove it, or read it as `:{0}`",
@@ -6176,27 +6269,6 @@ async fn prepare(
             Err(e) => ext.errors.push(e.clone()),
             Ok(run) => {
                 let cols = &run.result.columns;
-                // A composite's row is its parts' params: a column none of
-                // them takes is read by nothing. Only said when every part
-                // is this extension's, whose params are known here.
-                if matches!(run.lens.viz, LensViz::Document | LensViz::Dashboard) {
-                    let parts: Option<Vec<&Lens>> = run
-                        .lens
-                        .part_lenses()
-                        .map(|p| ext.lenses.iter().find(|l| l.id == p))
-                        .collect();
-                    for c in cols {
-                        let taken = |parts: &[&Lens]| {
-                            parts.iter().any(|l| l.params.iter().any(|p| &p.name == c))
-                        };
-                        if parts.as_deref().is_some_and(|p| !taken(p)) {
-                            ext.warnings.push(format!(
-                                "lens {id}: column `{c}` of its query is a param of none of its \
-                                 parts — remove it, or declare it on the part that reads it"
-                            ));
-                        }
-                    }
-                }
                 for (block, k) in run.lens.role_columns() {
                     if !cols.contains(k) {
                         ext.errors.push(format!(
@@ -7431,36 +7503,6 @@ empty: No items.
         );
     }
 
-    /// A column of a document's row that no section takes is read by
-    /// nothing: a warning naming it.
-    #[tokio::test]
-    async fn a_documents_row_column_no_section_takes_warns() {
-        let dir = tempfile::tempdir().unwrap();
-        write(dir.path(), ".oxplow/extensions/review/extension.yaml", EXT);
-        write(
-            dir.path(),
-            ".oxplow/extensions/review/lenses/cards.yaml",
-            "title: Cards\nparams: [{ name: change_id }]\nquery: SELECT :change_id AS n\n",
-        );
-        write(
-            dir.path(),
-            ".oxplow/extensions/review/lenses/page.yaml",
-            "title: Page\nquery: SELECT 7 AS change_id, 1 AS stray\nviz: document\nsections: [{ lens: cards }]\n",
-        );
-        let e = validate_extension(&layer().await, &cat(), dir.path(), "review", None)
-            .await
-            .unwrap();
-        assert!(e.errors.is_empty(), "{:?}", e.errors);
-        let stray: Vec<&String> = e.warnings.iter().filter(|w| w.contains("stray")).collect();
-        assert_eq!(stray.len(), 1, "{:?}", e.warnings);
-        assert!(stray[0].contains("review/page"), "{stray:?}");
-        assert!(
-            !e.warnings.iter().any(|w| w.contains("`change_id`")),
-            "{:?}",
-            e.warnings
-        );
-    }
-
     #[tokio::test]
     async fn validate_dry_runs_every_lens() {
         let dir = tempfile::tempdir().unwrap();
@@ -8258,7 +8300,10 @@ commands:
             ("effort.review.details", "oxplow-bundled/inferred-decisions"),
             ("effort.review.details", "oxplow-bundled/change-review"),
             ("effort.review.details", "oxplow-bundled/effort-tests"),
-            ("vcs.commit.details", "oxplow-bundled/tests-weakened"),
+            (
+                "oxplow-foundation/commit.sections",
+                "oxplow-bundled/tests-weakened",
+            ),
             ("work_item.detail.body", "oxplow-bundled/task-tokens"),
             ("diff.file.header", "oxplow-bundled/file-co-change"),
         ] {
@@ -8651,6 +8696,116 @@ commands:
             "{errs}"
         );
         assert_eq!(addon.ui.slots.len(), 1, "the bad mounts go");
+    }
+
+    /// A composite's `columns:` name its query's row: only with a query,
+    /// and only their `key`s.
+    #[test]
+    fn a_composites_columns_name_its_row_and_nothing_else() {
+        let (_d, ext) = load_x(
+            &[
+                ("part", "title: Part\nparams: [{ name: change_id }]\nquery: SELECT :change_id AS n\n"),
+                ("ok", "title: Ok\nquery: SELECT 7 AS change_id\ncolumns: [{ key: change_id }]\nviz: document\nsections: [{ lens: part }]\n"),
+                ("no-query", "title: NoQuery\ncolumns: [{ key: change_id }]\nviz: document\nsections: [{ lens: part }]\n"),
+                ("shown", "title: Shown\nquery: SELECT 7 AS change_id\ncolumns: [{ key: change_id, label: Change }]\nviz: dashboard\ntiles: [{ lens: part }]\n"),
+            ],
+            "",
+        );
+        assert!(
+            ext.lenses.iter().any(|l| l.slug == "ok"),
+            "{:?}",
+            ext.errors
+        );
+        for slug in ["no-query", "shown"] {
+            assert!(ext.lenses.iter().all(|l| l.slug != slug), "{slug} loaded");
+        }
+        let errs = ext.errors.join("\n");
+        assert!(
+            errs.contains("no-query.yaml")
+                && errs.contains("a `document` without a query has no row to name"),
+            "{errs}"
+        );
+        assert!(
+            errs.contains("shown.yaml") && errs.contains("a composite's column is only its `key`"),
+            "{errs}"
+        );
+    }
+
+    /// A mount into a document's `.sections` may take the page's own params
+    /// or a name of its row; one that takes neither is refused, the error
+    /// naming both. A row name no part takes warns.
+    #[test]
+    fn a_mount_may_take_a_documents_row_and_a_row_name_no_part_takes_warns() {
+        let dir = tempfile::tempdir().unwrap();
+        let ext_yaml = |name: &str, tail: &str| {
+            format!("manifest: 2\nname: {name}\nintent:\n  purpose: x\n  examples: [{{ name: a }}]\n{tail}")
+        };
+        write(
+            dir.path(),
+            ".oxplow/extensions/base/extension.yaml",
+            &ext_yaml("base", ""),
+        );
+        write(
+            dir.path(),
+            ".oxplow/extensions/base/lenses/a.yaml",
+            "title: A\nparams: [{ name: change_id }]\nquery: SELECT :change_id AS n\n",
+        );
+        write(
+            dir.path(),
+            ".oxplow/extensions/base/lenses/page.yaml",
+            "title: Page\nparams: [{ name: sha }]\nquery: SELECT 7 AS change_id, 1 AS stray, 2 AS taken_by_a_mount\ncolumns: [{ key: change_id }, { key: stray }, { key: taken_by_a_mount }]\nviz: document\nsections: [{ lens: a }]\n",
+        );
+        write(
+            dir.path(),
+            ".oxplow/extensions/addon/extension.yaml",
+            &ext_yaml(
+                "addon",
+                "ui:\n  slots:\n    - { slot: base/page.sections, lens: by-row }\n    - { slot: base/page.sections, lens: by-mount }\n    - { slot: base/page.sections, lens: neither }\n",
+            ),
+        );
+        write(
+            dir.path(),
+            ".oxplow/extensions/addon/lenses/by-row.yaml",
+            "title: ByRow\nparams: [{ name: change_id }]\nquery: SELECT 1\n",
+        );
+        write(
+            dir.path(),
+            ".oxplow/extensions/addon/lenses/by-mount.yaml",
+            "title: ByMount\nparams: [{ name: taken_by_a_mount }]\nquery: SELECT 1\n",
+        );
+        write(
+            dir.path(),
+            ".oxplow/extensions/addon/lenses/neither.yaml",
+            "title: Neither\nparams: [{ name: other }]\nquery: SELECT 1\n",
+        );
+        let addon = only(dir.path(), "addon");
+        let errs = addon.errors.join("\n");
+        assert!(
+            errs.contains("lens `neither` must declare at least one in `params`")
+                && errs.contains("`sha`")
+                && errs.contains("`change_id`"),
+            "{errs}"
+        );
+        assert_eq!(addon.ui.slots.len(), 2, "{errs}");
+        let base = only(dir.path(), "base");
+        let stray: Vec<&String> = base
+            .warnings
+            .iter()
+            .filter(|w| w.contains("`stray`"))
+            .collect();
+        assert_eq!(stray.len(), 1, "{:?}", base.warnings);
+        assert!(
+            stray[0].contains("is a param of none of its parts"),
+            "{stray:?}"
+        );
+        assert!(
+            !base
+                .warnings
+                .iter()
+                .any(|w| w.contains("`change_id`") || w.contains("`taken_by_a_mount`")),
+            "{:?}",
+            base.warnings
+        );
     }
 
     /// The documented examples in `examples/extensions/` load cleanly, so
@@ -10586,7 +10741,7 @@ commands:
                 ("both", "title: B\nparams: [{ name: effort_id }]\nquery: SELECT 1\n"),
                 ("none", "title: N\nparams: [{ name: other }]\nquery: SELECT 1\n"),
             ],
-            "ui:\n  slots:\n    - { slot: vcs.commit.details, lens: files }\n    - { slot: vcs.status.details, lens: files }\n    - { slot: effort.review.details, lens: files }\n    - { slot: effort.review.details, lens: both }\n    - { slot: vcs.commit.details, lens: none }\n",
+            "ui:\n  slots:\n    - { slot: effort.review.details, lens: files }\n    - { slot: effort.review.details, lens: both }\n    - { slot: effort.review.details, lens: none }\n",
         );
         let link = ext
             .lenses
@@ -10611,8 +10766,6 @@ commands:
         assert_eq!(
             mounted,
             vec![
-                ("vcs.commit.details", "x/files"),
-                ("vcs.status.details", "x/files"),
                 ("effort.review.details", "x/files"),
                 ("effort.review.details", "x/both")
             ],

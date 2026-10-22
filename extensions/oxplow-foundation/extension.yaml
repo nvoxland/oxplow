@@ -161,7 +161,7 @@ pages:
   # Git
   - { id: git-dashboard, title: Git, icon: git-branch, category: Git, component: "oxplow:git-dashboard" }
   - { id: git-history, title: Git History, icon: git-merge, category: Git, lens: git-history }
-  - { id: uncommitted-changes, title: Uncommitted, icon: git-branch, category: Git, component: "oxplow:uncommitted-changes" }
+  - { id: uncommitted-changes, title: Uncommitted, icon: git-branch, category: Git, lens: uncommitted }
   # Activity
   - { id: local-history, title: Local History, icon: history, category: Activity, lens: local-history }
   - { id: comments, title: Comments, icon: inbox, category: Activity, lens: comments }
@@ -201,7 +201,7 @@ pages:
   - { id: directory, title: Directory, label: "{{param.path}}", for: oxplow/dir, accepts: { rev: absent }, default: true, lens: directory }
   - { id: wiki-page, title: Wiki Page, for: oxplow/wiki, default: true, component: "oxplow:wiki-page" }
   - { id: work-item, title: Work Item, for: oxplow/work_item, default: true, component: "oxplow:work-item" }
-  - { id: commit, title: Commit, for: oxplow/commit, default: true, component: "oxplow:commit" }
+  - { id: commit, title: Commit, label: "{{param.sha}}", for: oxplow/commit, default: true, lens: commit }
   - { id: metric-detail, title: Metric, for: oxplow/metric, default: true, component: "oxplow:metric-detail" }
   - { id: lens, title: Lens, for: oxplow/lens, default: true, component: "oxplow:lens" }
   - { id: agent-session, title: Agent Session, for: oxplow/agent_session, default: true, pinned: true, component: "oxplow:agent-session" }

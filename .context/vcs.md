@@ -306,9 +306,10 @@ objects into the content-identity space for `resolve_for_compare`.
 
 The VCS pages also render complete with no extensions and every flag
 off — the UI half of conformance is `CapabilityUi.smoke.test.tsx`
-([work-items.md](./work-items.md), "Conformance"). Uncommitted's `vcs.status.header` slot
-(P6b.C6) takes `stream_id`; Git History is a declared page with a replaceable
-part.
+([work-items.md](./work-items.md), "Conformance"). The commit and Uncommitted pages are
+foundation documents (their mounts are `oxplow-foundation/commit.sections` and
+`oxplow-foundation/uncommitted.sections`); Git History is a declared page with a
+replaceable part.
 
 `oxplow_app::vcs_conformance` (test-only) holds the contract as
 `async fn(&dyn Vcs, &Path)` checks over a fresh workspace, so a second

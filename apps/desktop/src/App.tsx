@@ -117,7 +117,6 @@ import { declaredPage, isAppRenderer, isBuiltInPage, type AppRendererName } from
 import { useExtensions } from "./extensionsStore.js";
 import { WorkItemPage } from "./pages/WorkItemPage.js";
 import { WikiPage } from "./pages/WikiPage.js";
-import { GitCommitPage } from "./pages/GitCommitPage.js";
 import { PanelRunsProvider } from "./components/Panels/PanelRunsContext.js";
 import { useAlerts } from "./components/Alerts/useAlerts.js";
 import { useAlertToasts } from "./components/Alerts/useAlertToasts.js";
@@ -1538,7 +1537,7 @@ export function App() {
     handleOpenPageRef.current?.(externalUrlRef(verdict.url));
   }, []);
 
-  /** Open the GitCommitPage for a wikilink-resolved commit SHA. */
+  /** Open the commit page for a wikilink-resolved commit SHA. */
   const handleOpenCommit = useCallback((sha: string) => {
     if (!sha) return;
     handleOpenPageRef.current?.(gitCommitRef(sha));
@@ -2259,25 +2258,6 @@ export function App() {
               onCompareWithClipboard={handleCompareWithClipboard}
             />
           ) : null,
-        };
-      },
-      commit: (ref, nav) => {
-        const sha = paramOf(ref.id, "sha") ?? "";
-        return {
-          id: ref.id,
-          label: sha ? sha.slice(0, 7) : "commit",
-          closable: true,
-          render: () => (
-            <GitCommitPage
-              stream={stream}
-              sha={sha}
-              threadWork={selectedThreadWork}
-              onOpenDiff={nav.navOpenDiff}
-              onOpenDiffInTab={nav.navOpenDiff}
-              onOpenPage={nav.navOpen}
-              onOpenFile={nav.navOpenFile}
-            />
-          ),
         };
       },
       "metric-detail": (ref, nav) => {

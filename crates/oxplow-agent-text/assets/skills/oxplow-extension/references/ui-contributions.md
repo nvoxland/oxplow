@@ -4,10 +4,12 @@
   in `extension.yaml`). The lens must declare at least one param the slot
   binds, and gets only the ones it declares:
   - `effort.review.details` (an effort's diff) → `effort_id`, `effort` (the effort's ref, for an action's `input`), `change_id`;
-  - `vcs.commit.details` (a commit page) and `vcs.status.details` (the
-    working tree) → `change_id` (the `v_change*` analysis);
-  - `vcs.status.header` (a strip above the uncommitted changes) and
-    `vcs.history.sidebar` (beside Git History) → `stream_id`;
+  - `oxplow-foundation/commit.sections` (a commit page) and
+    `oxplow-foundation/uncommitted.sections` (the working tree), sections
+    of those documents → `change_id` (the `v_change*` analysis; the page's
+    row, declared in its `columns:`). `at: { before: commit }` puts a
+    strip above the uncommitted page;
+  - `vcs.history.sidebar` (beside Git History) → `stream_id`;
   - `work_item.detail.body` and `work_item.detail.sidebar` (a work item's
     page, whichever list) → `uri`;
   - `thread.plan.header` (the Work panel, compact) → `thread_id`;
