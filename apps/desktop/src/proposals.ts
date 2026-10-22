@@ -9,9 +9,7 @@ import { useCallback, useEffect, useState } from "react";
 import { decideProposal, querySql } from "./api.js";
 import { recordOpError } from "./components/opErrorsStore.js";
 import { NO_READS, useRerunOnChange } from "./lens/lensRerun.js";
-import { configUri } from "./uri/uri.js";
 import { threadRowId } from "./modelIds.js";
-import { valueText } from "./pages/settingsModel.js";
 import type { Reads, SqlCell, SqlQueryResult } from "./tauri-bridge/generated/bindings.js";
 
 /** What the run raised: the command, its summary and input, and whether
@@ -137,6 +135,14 @@ export function useProposals(): Proposal[] {
 /** The proposing thread's title, by the proposal's `thread_id`. */
 const THREAD_TITLE = "(SELECT title FROM v_thread th WHERE th.id = p.thread_id) AS thread_title";
 
+/** A value, compact, for a line. */
+function valueText(value: unknown): string {
+  if (value === null || value === undefined) return "—";
+  if (typeof value === "string") return value === "" ? '""' : value;
+  const text = JSON.stringify(value);
+  return text.length > 80 ? `${text.slice(0, 77)}…` : text;
+}
+
 const field = (value: unknown, name: string): unknown =>
   value && typeof value === "object" ? (value as Record<string, unknown>)[name] : undefined;
 
@@ -162,11 +168,6 @@ export function summarizeProposal(p: Proposal): ProposalSummary {
     destructive: Boolean(p.preview?.destructive),
     details: p.preview?.details ?? [],
   };
-}
-
-/** The pending proposal that changes setting `key`, if any. */
-export function proposalForSetting(proposals: Proposal[], key: string): Proposal | undefined {
-  return proposals.find((p) => p.key === configUri(key));
 }
 
 /** Approve or decline `p` as the person. */

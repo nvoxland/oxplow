@@ -4,26 +4,19 @@ import {
   setAgentSetting,
   setAgents,
   setAgentPromptAppend,
-  subscribeOxplowEvents,
 } from "../api.js";
-import { insertIntoAgent } from "../agent-input-bus.js";
 import type { HarnessListing } from "../tauri-bridge/generated/bindings.js";
-import { readSettings, type EffectiveSetting } from "../configValues.js";
-import { askToChange, groupSettings, matchesSearch, valueText } from "./settingsModel.js";
 import { DocumentLayout, type DocSection } from "../kit/DocumentLayout.js";
 import { useDraft } from "../tabs/useViewParam.js";
 import { useSearchFilter } from "../kit/SearchFilter.js";
 import { Toolbar } from "../kit/Toolbar.js";
 import type { PageAction } from "../kit/actions.js";
-import { LspServersSection } from "../components/LspServersSection.js";
 import { ExtensionsSection } from "../components/ExtensionsSection.js";
 import { DataSection } from "../components/DataSection.js";
 import { CapabilitiesSection } from "../components/CapabilitiesSection.js";
 import { IntegrationsSection } from "../components/IntegrationsSection.js";
 import { AiSection } from "../components/AiSection.js";
 import { NewThreadSessionSetting } from "../components/NewThreadSessionSetting.js";
-import { ProposalList } from "../kit/Approvals.js";
-import { decide, proposalForSetting, useProposals, type Proposal } from "../proposals.js";
 import { useAgentHarnesses } from "../useAgentHarnesses.js";
 import { settingsRef, viewParamsOf } from "../tabs/pageRefs.js";
 import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
@@ -66,7 +59,18 @@ export function SettingsPage({ area: areaId, section, onOpenPage }: SettingsPage
     if (nav?.setViewParams) nav.setViewParams(viewParamsOf(ref), { push: true });
     else onOpenPage(ref);
   };
-  const { sections, actions } = useAreaContent(area, open);
+  const { sections, actions } = useAreaContent(area);
+  // The overview's search is the page's `q` view param; its lenses read it.
+  const filter = useSearchFilter("q", {
+    label: "Search settings",
+    placeholder: "Search settings",
+    testId: "settings-search",
+    inputProps: {
+      onKeyDown: (e) => {
+        if (e.key === "Escape") filter.onChange("");
+      },
+    },
+  });
   return (
     <DocumentLayout
       testId="page-settings"
@@ -75,6 +79,8 @@ export function SettingsPage({ area: areaId, section, onOpenPage }: SettingsPage
       sections={sections}
       actions={actions}
       slot={settingsSlot(area.id)}
+      slotParams={area.slotParams?.includes("q") ? { q: filter.value } : undefined}
+      toolbar={area.slotParams?.includes("q") ? <Toolbar filter={filter} /> : undefined}
       onOpenPage={onOpenPage}
       rail={<SettingsAreasNav current={area.id} onOpen={(id) => open(id)} />}
       railTitle="Settings"
@@ -113,7 +119,7 @@ function SettingsAreasNav({ current, onOpen }: { current: SettingsAreaId; onOpen
 
 /** An area's own sections (titled as the area model titles them) and its
  *  page actions. */
-function useAreaContent(area: SettingsArea, open: (id: SettingsAreaId, anchor?: string | null) => void): { sections: DocSection[]; actions?: PageAction[] } {
+function useAreaContent(area: SettingsArea): { sections: DocSection[]; actions?: PageAction[] } {
   const agents = useAgentsForm(area.id === "agents");
   const title = (id: string) => area.sections.find((s) => s.id === id)?.title ?? id;
   const section = (id: string, body: ReactNode, description?: ReactNode): DocSection => ({
@@ -125,7 +131,8 @@ function useAreaContent(area: SettingsArea, open: (id: SettingsAreaId, anchor?: 
   });
   switch (area.id) {
     case "overview":
-      return { sections: [section("every", <EverySetting onOpenControl={(id) => open(id)} />)] };
+      // Its sections are foundation lenses mounted in the area's slot.
+      return { sections: [] };
     case "agents":
       return {
         sections: [
@@ -147,18 +154,7 @@ function useAreaContent(area: SettingsArea, open: (id: SettingsAreaId, anchor?: 
         actions: [{ id: "save", label: "Save", primary: true, busy: agents.saving, disabled: !agents.loaded, run: agents.save }],
       };
     case "lsp":
-      return {
-        sections: [
-          section(
-            "servers",
-            <LspServersSection />,
-            <>
-              Servers come from <code>.oxplow/project.yaml</code> (<code>lsp.servers</code>) or one-click installs from the Mason registry
-              (in <code>.oxplow/lsp/</code>). Agents can configure these for you too.
-            </>,
-          ),
-        ],
-      };
+      return { sections: [] };
     case "extensions":
       return {
         sections: [
@@ -208,54 +204,6 @@ function useAreaContent(area: SettingsArea, open: (id: SettingsAreaId, anchor?: 
         ],
       };
   }
-}
-
-/** The overview: every setting, searchable, each with where its value
- *  comes from, Ask, and — for one only a person sets — its area. */
-function EverySetting({ onOpenControl }: { onOpenControl(area: SettingsAreaId): void }) {
-  const [settings, setSettings] = useState<EffectiveSetting[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const proposals = useProposals();
-  // The search is the page's `q` view param.
-  const filter = useSearchFilter("q", {
-    label: "Search settings",
-    placeholder: "Search settings",
-    testId: "settings-search",
-    inputProps: {
-      onKeyDown: (e) => {
-        if (e.key === "Escape") filter.onChange("");
-      },
-    },
-  });
-  // The view re-reads when the config changes, whoever changed it.
-  useEffect(() => {
-    const load = () =>
-      void readSettings()
-        .then((r) => setSettings(r.settings))
-        .catch((e) => setError(String(e)));
-    load();
-    return subscribeOxplowEvents((event) => {
-      if (event.kind === "configChanged") load();
-    });
-  }, []);
-  return (
-    <>
-      <p className="ox-section-desc">
-        When the agent changes a setting only a person may change, its change waits on the setting&apos;s row (and in Approvals) for you to
-        approve — or change it yourself on its area&apos;s page.
-      </p>
-      <Toolbar filter={filter} />
-      {error ? <p className="ox-error">{error}</p> : null}
-      {groupSettings(settings.filter((s) => matchesSearch(s, filter.value))).map((g) => (
-        <div key={g.title} data-testid={`settings-group-${g.title}`} style={{ marginBottom: "var(--space-3)" }}>
-          <div className="ox-heading">{g.title}</div>
-          {g.settings.map((s) => (
-            <SettingRow key={s.key} setting={s} proposal={proposalForSetting(proposals, s.key)} onDecide={decide} onOpenControl={onOpenControl} />
-          ))}
-        </div>
-      ))}
-    </>
-  );
 }
 
 /** The Agents area's form: which agents are on and in what order, each
@@ -444,80 +392,6 @@ function AgentPicker({
     </div>
   );
 }
-
-/** The area where a person-only setting's direct control is, if any. */
-export function controlFor(key: string): SettingsAreaId | null {
-  if (["agents", "agentConfig", "agentPromptAppend", "personal.newThreadSession"].includes(key)) return "agents";
-  if (key === "ai" || key.startsWith("ai.")) return "ai";
-  if (key === "lsp") return "lsp";
-  if (key === "extensions") return "extensions";
-  if (key === "extensionInstances" || key === "activeProviders") return "integrations";
-  return null;
-}
-
-const ORIGIN_LABEL: Record<EffectiveSetting["origin"], string> = {
-  default: "default",
-  global: "your global config",
-  project: "project",
-  personal: "just for you",
-  extension: "extension",
-};
-
-/** One setting: its value, where it comes from, and — when the agent has
- *  proposed a change to it — that change with Approve and Decline. */
-export function SettingRow({
-  setting: s,
-  proposal,
-  onDecide,
-  onOpenControl,
-}: {
-  setting: EffectiveSetting;
-  proposal: Proposal | undefined;
-  onDecide(p: Proposal, approve: boolean): Promise<void>;
-  /** Opens the area that holds a person-only setting's control. */
-  onOpenControl?(area: SettingsAreaId): void;
-}) {
-  const control = s.humanOnly ? controlFor(s.key) : null;
-  return (
-    <div data-testid={`setting-${s.key}`} style={{ padding: "var(--space-2)", borderBottom: "1px solid var(--border-subtle)" }}>
-      <div style={{ display: "flex", alignItems: "baseline", gap: "var(--space-2)", flexWrap: "wrap" }}>
-        <code className="ox-mono">{s.key}</code>
-        <span data-testid={`setting-origin-${s.key}`} className="ox-badge" title="Where the value comes from">
-          {ORIGIN_LABEL[s.origin]}
-          {s.extension ? `: ${s.extension}` : ""}
-        </span>
-        {s.humanOnly ? <span className="ox-muted ox-small">yours to set</span> : null}
-        <span style={{ flex: 1 }} />
-        {control && onOpenControl ? (
-          <button type="button" className="ox-link ox-small" style={linkButtonStyle} onClick={() => onOpenControl(control)}>
-            Change It Here
-          </button>
-        ) : null}
-        <button
-          type="button"
-          data-testid={`setting-ask-${s.key}`}
-          className="ox-link ox-small"
-          style={linkButtonStyle}
-          title="Put a request to change this in the agent's input (it isn't sent)"
-          onClick={() => insertIntoAgent(askToChange(s))}
-        >
-          Ask the Agent to Change This
-        </button>
-      </div>
-      <div className="ox-mono ox-small" style={{ marginTop: 2 }}>
-        {valueText(s.value)}
-      </div>
-      {s.doc ? <div className="ox-muted ox-small">{s.doc}</div> : null}
-      {proposal ? (
-        <div style={{ marginTop: "var(--space-1)" }}>
-          <ProposalList proposals={[proposal]} compact onDecide={onDecide} />
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-const linkButtonStyle = { background: "none", border: "none", padding: 0, font: "inherit" } as const;
 
 /// `agentConfig`'s string values, keyed `<harness>.<key>`.
 function harnessSettingValues(agentConfig: Record<string, unknown>): Record<string, string> {

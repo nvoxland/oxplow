@@ -3,8 +3,6 @@ import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
 import type { Proposal } from "../proposals.js";
 import { narrow, ProposalCard, ProposalList } from "./Approvals.js";
-import { SettingRow } from "../pages/SettingsPage.js";
-import type { EffectiveSetting } from "../configValues.js";
 
 afterEach(cleanup);
 
@@ -74,35 +72,6 @@ test("a failed decision shows its error on the card", async () => {
   );
   fireEvent.click(view.getByTestId("proposal-approve-7"));
   await waitFor(() => expect(view.getByTestId("proposal-error-7").textContent).toContain("already declined"));
-});
-
-// A Settings row with the agent's pending change shows it with the same two
-// buttons.
-test("a setting's row shows its pending proposal", async () => {
-  const setting = {
-    key: "agentPromptAppend",
-    value: null,
-    origin: "default",
-    extension: null,
-    humanOnly: true,
-    doc: "Appended to every agent's prompt.",
-  } as unknown as EffectiveSetting;
-  const decided: boolean[] = [];
-  const view = render(
-    <SettingRow
-      setting={setting}
-      proposal={proposal}
-      onDecide={async (_p, approve) => {
-        decided.push(approve);
-      }}
-    />,
-  );
-  expect(view.getByTestId("setting-agentPromptAppend").textContent).toContain("be brief");
-  fireEvent.click(view.getByTestId("proposal-decline-7"));
-  await waitFor(() => expect(decided).toEqual([false]));
-  cleanup();
-  const none = render(<SettingRow setting={setting} proposal={undefined} onDecide={async () => {}} />);
-  expect(none.queryByTestId("proposal-7")).toBeNull();
 });
 
 test("a list narrows to a thread and to a setting, and draws nothing when empty", () => {

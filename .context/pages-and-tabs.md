@@ -261,8 +261,8 @@ oxplow's pages and their params:
 - Built-in pages: `tasks`, `backlog` (badge: `backlog-count`), `board`,
   `files`, `git-dashboard`, `uncommitted-changes`,
   `comments`, `explore-data`, `metrics-recorded`,
-  `terminal`, `alerts`, `settings` (view: `area`, `section` — another
-  area is a pushed view change, never a page opened over it),
+  `terminal`, `alerts`, `settings` (view: `area`, `section`, and `q`, the overview's search — another
+  area is a pushed view change, never a page opened over it; the shell and the rail are React, and the Overview and Language Servers areas are oxplow-foundation lenses mounted in their slots, `settings.overview.sections` / `settings.lsp.sections`),
   `custom-dashboard` (`id`), `new-task`
   (`parent`),
   `external-url` (a renderer for `https` / `http`; the tab id is the URL), `diff` (`path`, `left`, `right`, `label`,

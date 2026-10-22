@@ -1515,13 +1515,13 @@ pub const SLOTS: &[SlotSpec] = &[
     // Settings: each area's page and its sections (`pages/settingsAreas.ts`
     // lists the same ids). An extension's own status or configuration
     // views go beside the area they belong to. No params.
-    SlotSpec::sections("settings.overview.sections", &[], &["every"]),
+    SlotSpec::sections("settings.overview.sections", &["q"], &[]),
     SlotSpec::sections(
         "settings.agents.sections",
         &[],
         &["agents", "new-threads", "prompt"],
     ),
-    SlotSpec::sections("settings.lsp.sections", &[], &["servers"]),
+    SlotSpec::sections("settings.lsp.sections", &[], &[]),
     SlotSpec::sections("settings.extensions.sections", &[], &["health"]),
     SlotSpec::sections("settings.data.sections", &[], &["data"]),
     SlotSpec::sections(

@@ -383,7 +383,7 @@ page's id as a param, so it must declare it:
 | `vcs.status.details` | Uncommitted Changes, below the files | `change_id` |
 | `vcs.history.sidebar` | Git history's side column | `stream_id` |
 | `diff.file.header` | a file diff, above the editor | `path`, `left_revision`, `right_revision`, `stream_id` |
-| `settings.<area>.sections` | A Settings area's page, as sections: `overview` (part `every`), `agents` (`agents`, `new-threads`, `prompt`), `lsp` (`servers`), `extensions` (`installed`), `data` (`data`), `integrations` (`capabilities`, `integrations`), `ai` (`ai`) | none |
+| `settings.<area>.sections` | A Settings area's page, as sections: `overview` and `lsp` (no parts of their own), `agents` (`agents`, `new-threads`, `prompt`), `extensions` (`health`), `data` (`data`), `integrations` (`capabilities`, `integrations`), `ai` (`ai`) | none; `overview` passes `q`, its search |
 
 A lens declares the params its slot passes (a Settings area's lens needs none). `at` works only on a parts slot such as `settings.agents.sections`, or a foundation page's own (`oxplow-foundation/new-session.sections`, part ids `start`, `earlier`, binding `thread_id`). A region slot refuses it. `change_id` points at
 the page's change in `v_change`, with its analysis in `v_change_file`,

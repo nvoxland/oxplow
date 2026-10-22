@@ -194,6 +194,8 @@ pub mod services;
 mod services_tests;
 pub mod session_auth;
 pub mod session_outcome;
+#[cfg(test)]
+mod settings_lenses_tests;
 pub mod snapshot_capture;
 pub mod snapshot_capture_registry;
 pub mod snapshot_conformance;

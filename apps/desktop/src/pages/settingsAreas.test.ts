@@ -19,6 +19,7 @@ test("every area's slot and section ids match what core's SLOTS lists", () => {
   const rust = bare(readFileSync(join(import.meta.dir, "..", "..", "..", "..", "crates", "oxplow-app", "src", "extensions.rs"), "utf8"));
   for (const area of SETTINGS_AREAS) {
     const ids = area.sections.map((s) => `"${s.id}"`).join(",");
-    expect(rust.includes(bare(`SlotSpec::sections("${settingsSlot(area.id)}", &[], &[${ids}])`))).toBe(true);
+    const params = (area.slotParams ?? []).map((p) => `"${p}"`).join(",");
+    expect(rust.includes(bare(`SlotSpec::sections("${settingsSlot(area.id)}", &[${params}], &[${ids}])`))).toBe(true);
   }
 });

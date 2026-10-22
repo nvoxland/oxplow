@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 
 import type { SqlQueryResult } from "./tauri-bridge/generated/bindings.js";
-import { proposalForSetting, proposalsFromResult, summarizeProposal, type Proposal } from "./proposals.js";
+import { proposalsFromResult, summarizeProposal, type Proposal } from "./proposals.js";
 
 const result = (rows: SqlQueryResult["rows"]): SqlQueryResult =>
   ({
@@ -117,13 +117,6 @@ test("a deploy's proposal lists what it adds", () => {
   expect(s.details).toEqual(["process — runs programs with your authority; oxplow does not confine them"]);
   expect(summarizeProposal(proposal({})).details).toEqual([]);
 });
-
-test("a setting's pending proposal is the one keyed on it", () => {
-  const list = [proposal({ id: 1, key: "oxplow:oxplow/config?key=zones" }), proposal({ id: 2, key: "oxplow:oxplow/config?key=ai" })];
-  expect(proposalForSetting(list, "ai")?.id).toBe(2);
-  expect(proposalForSetting(list, "lsp")).toBeUndefined();
-});
-
 
 // P9.A3: a thread's proposals carry their decision.
 test("a row's decision reads through; a read that doesn't select it is pending", () => {
