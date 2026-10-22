@@ -1333,6 +1333,7 @@ mod tests {
                     from: Some("a".into()),
                     to: Some("b".into()),
                     lines: None,
+                    base: None,
                 })
             },
         );
@@ -1391,6 +1392,7 @@ mod tests {
                     from: Some("a".into()),
                     to: Some("b".into()),
                     lines: None,
+                    base: None,
                 })
             },
         );

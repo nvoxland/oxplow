@@ -88,7 +88,6 @@ import { CenterTabs, type CenterTab } from "./components/CenterTabs/CenterTabs.j
 import type { DiffSpec } from "./components/Diff/DiffPane.js";
 import { builtInPages } from "./pages/builtInPages.js";
 import type { AppScope, SlotNav } from "./pages/appScope.js";
-import { FileViewerPage } from "./pages/FileViewerPage.js";
 import { RailHud } from "./components/RailHud/RailHud.js";
 import type { TabRef } from "./tabs/tabState.js";
 import { navigationKey } from "./tabs/navigationKeys.js";
@@ -167,7 +166,7 @@ import { openProject, createProject, listRecentProjects, shellAvailable } from "
 import { onRemoteReconnect, triggerRemoteResync } from "./api.js";
 import type { CommandOutcome, ExtensionPage, RecentProjectView } from "./tauri-bridge/generated/bindings.js";
 import { pickFolder } from "./tauri-bridge/nativeDialog.js";
-import { WORKING, revisionFromSlot, shortRevisionLabel } from "./revision.js";
+import { WORKING } from "./revision.js";
 import { advanceDaemonProbeState, INITIAL_DAEMON_PROBE_STATE } from "./daemon-recovery.js";
 import { offerForShortcut } from "./keybindings.js";
 import { commandOffers, type OfferDeps } from "./commandOffers.js";
@@ -1661,7 +1660,7 @@ export function App() {
           return;
         }
         // Non-disk: no fileSessions entry (that cache is the working
-        // tree's); the render branch picks FileViewerPage by version.
+        // tree's); a file at a revision is a lens page.
         openTab(ref);
         return;
       }
@@ -2203,31 +2202,6 @@ export function App() {
             />
           ),
         };
-      },
-      // A file at a revision: read-only, no dirty state, no save plumbing.
-      // The editor and its save pipeline stay the working tree's, so the
-      // dirty cache, LSP and find-in-file never ask "is this read only?".
-      "file-viewer": (ref) => {
-        const path = paramOf(ref.id, "path");
-        if (!path) return null;
-        const version = revisionFromSlot(paramOf(ref.id, "rev"));
-        const basename = path.split("/").pop() ?? path;
-        {
-          const versionLabel = shortRevisionLabel(version);
-          return {
-            id: ref.id,
-            label: `${basename} (${versionLabel})`,
-            closable: true,
-            render: () => stream ? (
-              <FileViewerPage
-                stream={stream}
-                path={path}
-                version={version}
-                visible={effectiveCenterActive === ref.id}
-              />
-            ) : null,
-          };
-        }
       },
       // The working tree's file, in the editor.
       editor: (ref) => {

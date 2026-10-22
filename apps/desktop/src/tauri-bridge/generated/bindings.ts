@@ -4061,6 +4061,11 @@ export type LensDiff = {
 	 *  newer side.
 	 */
 	lines?: string | null,
+	/**
+	 *  A column naming the older side as the header says it (`vs HEAD`);
+	 *  else the `from` revision, shortened.
+	 */
+	base?: string | null,
 };
 
 /**  `form` viz: the command it submits and the values it starts from. */

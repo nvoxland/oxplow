@@ -84,7 +84,7 @@ empty: Nothing is waiting on you.
     holding 12-40>, sync: <optional bool: editors scroll together> }`.
   - `diff` shows the first row's file between two revisions, at full
     size: `diff: { path: <column>, from: <column>, to: <column>, lines:
-    <optional> }`. Several files are `hunks`.
+    <optional>, base: <optional: the older side's name in the header> }`. Several files are `hunks`.
   - `document` is a wiki-style page of sections: `sections: [...]`. See
     "Document and dashboard lenses" below.
   - `dashboard` is a responsive grid of titled cards: `tiles: [...]`. See

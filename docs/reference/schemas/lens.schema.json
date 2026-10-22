@@ -961,6 +961,14 @@
             "null"
           ],
           "default": null
+        },
+        "base": {
+          "description": "A column naming the older side as the header says it (`vs HEAD`);\nelse the `from` revision, shortened.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
         }
       },
       "additionalProperties": false

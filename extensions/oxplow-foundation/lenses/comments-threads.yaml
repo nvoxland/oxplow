@@ -32,7 +32,8 @@ query: |
 viz: table
 group: { by: target_label, link: { kind: page, from: target } }
 columns:
-  - { key: kind, label: For, width: 90, select: comment }
+  - { key: cid, label: Thread, width: 80, select: comment }
+  - { key: kind, label: For, width: 90 }
   - { key: state, label: State, width: 120 }
   - { key: quote, label: Quote }
   - { key: latest, label: Latest }

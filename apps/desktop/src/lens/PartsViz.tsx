@@ -17,8 +17,6 @@ import { useLensRuns, type PartRun } from "./useLensRuns.js";
 
 /** Rows a dashboard tile shows before "open the lens for the rest". */
 const TILE_MAX_ROWS = 8;
-/** Rows a document section shows. */
-const SECTION_MAX_ROWS = 25;
 
 interface PartsVizProps {
   parts: readonly LensPart[];
@@ -66,7 +64,8 @@ function PartBody({
 }: {
   part: LensPart;
   run: PartRun | undefined;
-  maxRows: number;
+  /** A tile's cap; a document section (the page itself) shows every row. */
+  maxRows?: number;
   streamId: string | null;
   onOpenPage?(ref: TabRef): void;
   params: Record<string, SqlCell>;
@@ -114,7 +113,7 @@ export function DocumentViz(props: PartsVizProps) {
               source={part.from ?? undefined}
               testId={`lens-part-${part.id}`}
             >
-              <PartBody part={part} run={run} maxRows={SECTION_MAX_ROWS} streamId={streamId} onOpenPage={onOpenPage} params={params} onSetParam={onSetParam} />
+              <PartBody part={part} run={run} streamId={streamId} onOpenPage={onOpenPage} params={params} onSetParam={onSetParam} />
             </Section>
           );
         })}

@@ -189,15 +189,15 @@ pages:
   - { id: stream-settings, title: Stream Settings, icon: settings, params: [stream], lens: stream-settings }
   - { id: thread-settings, title: Thread Settings, icon: settings, params: [thread], lens: thread-settings }
   - { id: external-url, title: Web Page, icon: external-link, for: [https, http], default: true, component: "oxplow:external-url" }
-  - { id: diff, title: Diff, icon: git-compare, params: [path, left, right, label], component: "oxplow:diff" }
+  - { id: diff, title: Diff, icon: git-compare, label: "{{param.path}} ({{param.label}})", params: [path, left, right, label, base], lens: diff }
   - { id: diff-view, title: Changes, icon: git-compare, params: [snapshot, effort, start, end], for: [oxplow/snapshot, oxplow/effort, oxplow/turn], default: true, component: "oxplow:diff-view" }
-  - { id: duplicate-block, title: Duplicate Block, icon: copy, params: [left, left_lines, left_at, right, right_lines, right_at], component: "oxplow:duplicate-block" }
+  - { id: duplicate-block, title: Duplicate Block, icon: copy, label: "{{param.left}} ↔ {{param.right}}", params: [left, left_lines, left_at, right, right_lines, right_at], lens: duplicate-block }
   # Renderers: what a URI of oxplow's resources opens on (its tab's id is
   # the URI). A resource with several picks by `accepts`, then the URI's
   # `#oxplow.renderer=`, then its default; one nothing renders opens on
   # `resource`, which shows it (or, when nothing resolves it, its dead link).
   - { id: editor, title: Editor, for: oxplow/file, accepts: { rev: absent }, default: true, component: "oxplow:editor" }
-  - { id: file-viewer, title: File at a Revision, for: oxplow/file, accepts: { rev: present }, component: "oxplow:file-viewer" }
+  - { id: file-viewer, title: File at a Revision, label: "{{param.path}} ({{param.rev}})", for: oxplow/file, accepts: { rev: present }, lens: file-viewer }
   - { id: directory, title: Directory, label: "{{param.path}}", for: oxplow/dir, accepts: { rev: absent }, default: true, lens: directory }
   - { id: wiki-page, title: Wiki Page, for: oxplow/wiki, default: true, component: "oxplow:wiki-page" }
   - { id: work-item, title: Work Item, for: oxplow/work_item, default: true, component: "oxplow:work-item" }

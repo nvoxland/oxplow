@@ -318,7 +318,8 @@ export function diffRef(spec: DiffSpec): TabRef {
       path: spec.path,
       left: spec.leftVersion,
       right: spec.rightVersion,
-      label: spec.labelOverride ?? null,
+      // The tab says it: a diff without a label of its own is "diff".
+      label: spec.labelOverride ?? "diff",
       base: spec.baseLabel && spec.baseLabel !== shortRevisionLabel(spec.leftVersion) ? spec.baseLabel : null,
     },
     lineView(spec.revealLine),
@@ -337,7 +338,7 @@ export function diffSpecOf(ref: TabRef): DiffSpec | null {
     leftVersion: left,
     rightVersion: right,
     baseLabel: params.base ?? shortRevisionLabel(left),
-    labelOverride: params.label,
+    labelOverride: params.label && params.label !== "diff" ? params.label : undefined,
     revealLine: lineOf(ref) ?? undefined,
   };
 }

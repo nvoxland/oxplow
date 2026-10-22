@@ -568,6 +568,10 @@ describe("structure components (P6.A2)", () => {
       revealLine: 7,
     });
     expect(diffRow(l, result(["p", "a", "b", "l"], []))).toBeNull();
+    // A `base` column says the older side as the header reads it.
+    const named = lens({ viz: "diff", diff: { path: "p", from: "a", to: "b", lines: null, base: "m" } });
+    expect(diffRow(named, result(["p", "a", "b", "m"], [["x.rs", "git:abc", "working", "HEAD"]]))?.baseLabel).toBe("HEAD");
+    expect(diffRow(named, result(["p", "a", "b", "m"], [["x.rs", "git:abc", "working", null]]))?.baseLabel).toBe("abc");
   });
 
   test("parseLines reads a line or a range, ends in order", () => {

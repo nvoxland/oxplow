@@ -25,6 +25,6 @@ test("a folder's URI opens its lens: rows open folders and files, the tab is its
   await expect(body.getByTestId("lens-row-0")).toContainText("reeds");
   await expect(body.getByTestId("lens-row-1")).toContainText("frog.txt");
 
-  await body.getByTestId("lens-row-1").getByRole("link", { name: "frog.txt" }).click();
+  await body.getByTestId("lens-row-1").getByRole("button", { name: "frog.txt" }).click();
   await expect(page.getByTestId("center-tab-oxplow:oxplow/file?path=pond/frog.txt")).toBeVisible();
 });
