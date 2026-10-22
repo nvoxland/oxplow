@@ -100,6 +100,14 @@ session (resuming its saved conversation). Leaving the tab never stops the
 process, and nothing is typed on restore. Shell terminals open at once.
 The deciding rule is `mayStartNow` in `terminalSession.ts`.
 
+**A reattach takes the pane's size.** `attach_or_create` resizes a live
+PTY to the cols/rows the attaching pane measured before it replays. The
+pane's first `ResizeObserver` callback fires before its session id is
+back, so it sends no resize; without this, an agent that outlived an app
+restart kept the old window's size and drew its input and status lines
+past the pane's bottom, on top of each other, until the window was
+resized. Locked by `reattaching_resizes_the_live_session_to_the_new_pane`.
+
 **Stopped stays stopped.** `oxplow.agent_session.stop` (a person's only)
 sets `agent_session.stopped_by_user_at` and stops the process; the slot
 and its saved conversation stay. While it is set `open_terminal_session`
