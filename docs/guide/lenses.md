@@ -141,7 +141,7 @@ Charts name the columns they draw:
 
 ```yaml
 viz: bar              # or line
-chart: { x: day, y: visits }          # line also takes series: <column>
+chart: { x: day, y: visits }          # line also takes series: <column> and targets: <column> (a target line per series)
 ```
 
 ```yaml
@@ -153,8 +153,15 @@ A column can also set `width` (in pixels). A long value in that column
 is cut to one line, and the whole value shows when you hover over it.
 A column can also set `format`: `date`,
 `datetime`, `relative` (how long ago), `bytes`, `duration`
-(milliseconds), `integer` or `percent` (a 0-1 fraction). `format`
+(milliseconds), `integer`, `percent` (a 0-1 fraction), `sparkline` (a
+JSON array of numbers, drawn as a small line with its latest value) or
+`badge` (the value as a pill, in the column's `tone`). `format`
 changes only what you see. Agents read the raw values.
+
+A column can set `expand: <lens>` (a lens of the extension, by its slug,
+or `<extension>/<slug>`). The cell gets a ▸ that opens that lens under
+the row, run with the row's values: the params it declares take the
+values of the columns with the same name.
 
 A column can set `highlight: <param>` to mark that param's current value
 in its text, wherever it occurs (any case). A search lens uses it on its
@@ -339,6 +346,9 @@ column whose value picks an icon: `ready`, `todo`, `in_progress`,
 `comment`, or a resource icon such as `bug`. `tone` names a column whose
 value colours the cell: `accent`, `success`, `warning`, `danger` or
 `muted`. Values outside those lists are ignored.
+
+A group's heading shows how many rows it holds, and its ▾ folds them
+away.
 
 Drag a row that links somewhere onto the agent terminal to add that page
 to the agent's context.

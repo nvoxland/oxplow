@@ -2117,8 +2117,8 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   columns line up, and that column's cells are cut to one line with the
   whole text on hover — `DataTable` does it for every table, so a long
   value never runs into the next column) and `format` (`date`, `datetime`, `relative`, `bytes`,
-  `duration` in ms, `integer`, `percent` of a 0–1 fraction), read by
-  `formatCell` in the UI only; an agent reads the raw value. `highlight:
+  `duration` in ms, `integer`, `percent` of a 0–1 fraction, `sparkline` — a JSON array of numbers drawn as a small line with its latest value, `badge` — the value as a pill in the column's `tone`), read by
+  `formatCell` in the UI only; an agent reads the raw value. `expand: <lens>` (a slug of the extension or `<ext>/<slug>`, named whole at load; the loader refuses one the extension lacks or the lens itself: `expand_problem`) puts a ▸ in the cell that opens that lens under the row, run with the row's values (the params it declares; `RowExpansion`, the open rows are the step's history state). A `line` chart's `chart.targets: <column>` draws a target line on each series, its last non-null value of that column (`lineSeries`; the loader refuses it on another viz). A grouped list or table's headings fold their rows (▾ / ▸, history state) and show how many rows each holds. `highlight:
   <param>` draws the cell's text with every case-insensitive occurrence of
   that param's current value marked (`markParts` in `lensModel.ts`,
   `<mark class="ox-mark">` elements, never innerHTML; empty or missing:

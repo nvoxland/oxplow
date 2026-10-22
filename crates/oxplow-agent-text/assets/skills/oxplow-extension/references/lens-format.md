@@ -91,8 +91,15 @@ empty: Nothing is waiting on you.
 - **`columns[].width` and `format`**: `width` is in pixels. The columns
   without one share the rest. `format` is one of `date`, `datetime`,
   `relative` (how long ago), `bytes`, `duration` (milliseconds),
-  `integer` or `percent` (a 0-1 fraction). `format` changes only what
-  the person sees. Agents read the raw values.
+  `integer`, `percent` (a 0-1 fraction), `sparkline` (a JSON array of
+  numbers, drawn as a small line with its latest value) or `badge` (a
+  pill in the column's `tone`). `format` changes only what the person
+  sees. Agents read the raw values.
+- **`columns[].expand: <lens>`** opens that lens (a slug of the
+  extension, or `<extension>/<slug>`) under the row, run with the row's
+  values: the params it declares take the same-named columns.
+- **`chart.targets: <column>`** (`line` only) draws a target line on each
+  series, from that column's last value in it.
 - **Params have a `type`**, which picks their control on the page:
   `text` (the default), `choice` (`options: [{ value, label }]` and a
   `default` that is one of them), `bool` (bound 1 or 0), `search`

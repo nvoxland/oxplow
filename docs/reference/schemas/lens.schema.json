@@ -561,6 +561,14 @@
             "null"
           ],
           "default": null
+        },
+        "expand": {
+          "description": "A lens (`<slug>` of this extension or `<extension>/<slug>`) the row\nopens into: run with the row's values (the params it declares), its\nresult drawn under the row.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
         }
       },
       "additionalProperties": false,
@@ -695,6 +703,16 @@
           "description": "A fraction 0–1 as a percentage (`42%`).",
           "type": "string",
           "const": "percent"
+        },
+        {
+          "description": "A series (a JSON array of numbers) as a small line, with its\nlatest value.",
+          "type": "string",
+          "const": "sparkline"
+        },
+        {
+          "description": "A short value as a pill, in the column's `tone`.",
+          "type": "string",
+          "const": "badge"
         }
       ]
     },
@@ -738,6 +756,14 @@
           "default": null
         },
         "group": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "targets": {
+          "description": "`line` only: a column whose values each draw a horizontal target\nline across the chart (a metric's target, a budget).",
           "type": [
             "string",
             "null"

@@ -273,6 +273,10 @@ pub struct LensChart {
     pub size: Option<String>,
     #[serde(default)]
     pub group: Option<String>,
+    /// `line` only: a column whose values each draw a horizontal target
+    /// line across the chart (a metric's target, a budget).
+    #[serde(default)]
+    pub targets: Option<String>,
 }
 
 /// `tree` viz: which columns nest the rows.
@@ -545,6 +549,7 @@ impl LensChart {
             &self.label,
             &self.size,
             &self.group,
+            &self.targets,
         ]
         .into_iter()
         .flatten()
@@ -664,6 +669,11 @@ pub struct LensColumn {
     /// master and detail. The row whose value it holds is drawn selected.
     #[serde(default)]
     pub select: Option<String>,
+    /// A lens (`<slug>` of this extension or `<extension>/<slug>`) the row
+    /// opens into: run with the row's values (the params it declares), its
+    /// result drawn under the row.
+    #[serde(default)]
+    pub expand: Option<String>,
 }
 
 /// How a column's value reads in the UI. An agent reads the raw value.
@@ -686,6 +696,11 @@ pub enum ColumnFormat {
     Integer,
     /// A fraction 0–1 as a percentage (`42%`).
     Percent,
+    /// A series (a JSON array of numbers) as a small line, with its
+    /// latest value.
+    Sparkline,
+    /// A short value as a pill, in the column's `tone`.
+    Badge,
 }
 
 /// One part of a `document` (a section) or a `dashboard` (a tile):
@@ -3875,12 +3890,23 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
     ext.custom_components
         .retain(|c| !missing_assets.contains(&c.id));
 
+    // A column's `expand` names a lens by slug or `<extension>/<slug>`; the
+    // loaded lens has the whole id.
+    for l in &mut ext.lenses {
+        let extension = l.extension.clone();
+        for c in &mut l.columns {
+            if let Some(e) = c.expand.as_mut().filter(|e| !e.contains('/')) {
+                *e = format!("{extension}/{e}");
+            }
+        }
+    }
     // Drop lenses whose viz lacks what it needs, so every loaded lens renders.
     let components: Vec<String> = ext.custom_components.iter().map(|c| c.id.clone()).collect();
     let mut bad = Vec::new();
     for l in &ext.lenses {
-        if let Some(problem) =
-            shape_problem(l, &ids, &components).or_else(|| choices_problem(l, &ids))
+        if let Some(problem) = shape_problem(l, &ids, &components)
+            .or_else(|| choices_problem(l, &ids))
+            .or_else(|| expand_problem(l, &ids))
         {
             ext.errors.push(format!("{}: {problem}", l.origin.running));
             bad.push(l.id.clone());
@@ -4672,6 +4698,29 @@ fn choices_problem(lens: &Lens, ids_in_extension: &[String]) -> Option<String> {
         })
 }
 
+/// A column's `expand` naming a lens of this extension that isn't there
+/// (another extension's resolves with the catalog), or a lens that expands
+/// into itself.
+fn expand_problem(lens: &Lens, ids_in_extension: &[String]) -> Option<String> {
+    lens.columns.iter().find_map(|c| {
+        let target = c.expand.as_deref()?;
+        let mine = target.split_once('/').map(|(e, _)| e) == Some(lens.extension.as_str());
+        if target == lens.id {
+            Some(format!(
+                "column `{}`: `expand` names the lens itself",
+                c.key
+            ))
+        } else if mine && !ids_in_extension.iter().any(|id| id == target) {
+            Some(format!(
+                "column `{}`: `expand` lens `{target}` isn't in this extension's lenses/",
+                c.key
+            ))
+        } else {
+            None
+        }
+    })
+}
+
 /// A document's or dashboard's part naming a lens of its own extension
 /// that isn't there (another extension's resolves with the catalog).
 fn parts_problem(lens: &Lens, ids_in_extension: &[String]) -> Option<String> {
@@ -4750,6 +4799,9 @@ fn shape_problem(
         return Some(problem);
     }
     let chart = lens.chart.clone().unwrap_or_default();
+    if chart.targets.is_some() && lens.viz != LensViz::Line {
+        return Some("chart: `targets` draws target lines on viz `line` only".to_string());
+    }
     match lens.viz {
         LensViz::Bar | LensViz::Line => need("chart", &[("x", &chart.x), ("y", &chart.y)]),
         LensViz::Treemap => need("chart", &[("label", &chart.label), ("size", &chart.size)]),
@@ -8656,6 +8708,79 @@ commands:
         );
         assert!(
             errs.contains("lacks.yaml") && errs.contains("x/rows") && errs.contains("`commit`"),
+            "{errs}"
+        );
+    }
+
+    /// A column's `expand` names a lens of the extension (by slug or whole
+    /// id); one that isn't there, or the lens itself, fails the load.
+    #[test]
+    fn an_expand_names_a_lens_of_its_extension() {
+        let (_d, ext) = load_x(
+            &[
+                ("detail", "title: Detail\nquery: SELECT 1 AS n\nparams: [{ name: id }]\n"),
+                ("by-slug", "title: By slug\nquery: SELECT 1 AS id\ncolumns: [{ key: id, expand: detail }]\n"),
+                ("by-id", "title: By id\nquery: SELECT 1 AS id\ncolumns: [{ key: id, expand: x/detail }]\n"),
+                ("missing", "title: Missing\nquery: SELECT 1 AS id\ncolumns: [{ key: id, expand: gone }]\n"),
+                ("itself", "title: Itself\nquery: SELECT 1 AS id\ncolumns: [{ key: id, expand: itself }]\n"),
+            ],
+            "",
+        );
+        for slug in ["by-slug", "by-id"] {
+            let lens = ext
+                .lenses
+                .iter()
+                .find(|l| l.slug == slug)
+                .unwrap_or_else(|| panic!("{slug} didn't load: {:?}", ext.errors));
+            // Named whole, whichever way it was written.
+            assert_eq!(lens.columns[0].expand.as_deref(), Some("x/detail"));
+        }
+        for slug in ["missing", "itself"] {
+            assert!(ext.lenses.iter().all(|l| l.slug != slug), "{slug} loaded");
+        }
+        let errs = ext.errors.join("\n");
+        assert!(
+            errs.contains("missing.yaml") && errs.contains("`expand` lens `x/gone`"),
+            "{errs}"
+        );
+        assert!(
+            errs.contains("itself.yaml") && errs.contains("names the lens itself"),
+            "{errs}"
+        );
+    }
+
+    /// `targets` draws target lines on a `line` chart; on another viz it is
+    /// refused. The formats `sparkline` and `badge` load.
+    #[test]
+    fn chart_targets_and_the_new_formats_load() {
+        let (_d, ext) = load_x(
+            &[
+                (
+                    "trend",
+                    "title: Trend\nquery: SELECT 1 AS at, 2 AS v, 3 AS goal, '[1,2]' AS s, 'ok' AS level\nviz: line\nchart: { x: at, y: v, targets: goal }\ncolumns: [{ key: s, format: sparkline }, { key: level, format: badge }]\n",
+                ),
+                (
+                    "bars",
+                    "title: Bars\nquery: SELECT 1 AS at, 2 AS v, 3 AS goal\nviz: bar\nchart: { x: at, y: v, targets: goal }\n",
+                ),
+            ],
+            "",
+        );
+        let trend = ext
+            .lenses
+            .iter()
+            .find(|l| l.slug == "trend")
+            .unwrap_or_else(|| panic!("trend didn't load: {:?}", ext.errors));
+        assert_eq!(
+            trend.chart.as_ref().unwrap().targets.as_deref(),
+            Some("goal")
+        );
+        assert_eq!(trend.columns[0].format, Some(ColumnFormat::Sparkline));
+        assert_eq!(trend.columns[1].format, Some(ColumnFormat::Badge));
+        assert!(ext.lenses.iter().all(|l| l.slug != "bars"));
+        let errs = ext.errors.join("\n");
+        assert!(
+            errs.contains("bars.yaml") && errs.contains("`targets`"),
             "{errs}"
         );
     }

@@ -36,6 +36,9 @@ export interface DataTableProps<R> {
   /** Per row: handlers, test id, `className` (`ox-clickable`,
    *  `ox-selected`, `ox-inert`), aria state. */
   rowProps?(row: R, index: number): RowProps;
+  /** Drawn in a full-width row under the row, when it returns something
+   *  (a row opened into more). */
+  rowDetail?(row: R, index: number): ReactNode;
   /** A cell's own style beyond the column's (a row's indent). */
   cellStyle?(row: R, column: DataColumn<R>, columnIndex: number): React.CSSProperties | undefined;
   /** Draw the column headings (default). */
@@ -58,7 +61,7 @@ function showWhole(e: React.MouseEvent<HTMLTableCellElement>) {
 }
 
 /** The one table: core pages and lenses draw rows through it. */
-export function DataTable<R>({ columns, rows, groups, rowKey, rowProps, cellStyle, header = true, testId, tableProps }: DataTableProps<R>) {
+export function DataTable<R>({ columns, rows, groups, rowKey, rowProps, rowDetail, cellStyle, header = true, testId, tableProps }: DataTableProps<R>) {
   const fixed = columns.some((c) => c.width !== undefined);
   const parts: readonly { key: string; heading: ReactNode | null; rows: readonly R[] }[] =
     groups ?? [{ key: "", heading: null, rows: rows ?? [] }];
@@ -95,8 +98,10 @@ export function DataTable<R>({ columns, rows, groups, rowKey, rowProps, cellStyl
             ) : null}
             {part.rows.map((row) => {
               const i = index++;
+              const detail = rowDetail?.(row, i);
               return (
-                <tr key={rowKey(row, i)} {...rowProps?.(row, i)}>
+                <Fragment key={rowKey(row, i)}>
+                <tr {...rowProps?.(row, i)}>
                   {columns.map((c, j) => {
                     const cut = cuts(c);
                     const title = c.title?.(row);
@@ -113,6 +118,12 @@ export function DataTable<R>({ columns, rows, groups, rowKey, rowProps, cellStyl
                     );
                   })}
                 </tr>
+                {detail ? (
+                  <tr>
+                    <td colSpan={Math.max(columns.length, 1)}>{detail}</td>
+                  </tr>
+                ) : null}
+                </Fragment>
               );
             })}
           </Fragment>

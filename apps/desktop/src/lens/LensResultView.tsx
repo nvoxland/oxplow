@@ -9,6 +9,7 @@ import type { CommandOutcome, FormStart } from "../tauri-bridge/generated/bindin
 import type { LensAction } from "../tauri-bridge/generated/bindings.js";
 import { DailyBarChart } from "../components/Analytics/DailyBarChart.js";
 import { TrendChart } from "../components/charts/TrendChart.js";
+import { Sparkline } from "../components/Sparkline.js";
 import { squarify } from "../components/charts/squarify.js";
 import { formatFullDateTime, formatMetricValue, formatMetricValueExact } from "../components/format.js";
 import { MarkdownView } from "../components/Wiki/MarkdownView.js";
@@ -44,6 +45,7 @@ import {
   rowEmphasized,
   rowGroups,
   rowRef,
+  sparklineValues,
   stepItems,
   timelineEntries,
   treeNodes,
@@ -62,6 +64,7 @@ import { RefBadge } from "../components/RefBadge.js";
 import { CustomComponentViz } from "./CustomComponentViz.js";
 import type { HostedView } from "./hostedView.js";
 import { DashboardViz, DocumentViz } from "./PartsViz.js";
+import { useLensRuns } from "./useLensRuns.js";
 import { DataTable, type DataColumn, type RowProps } from "../kit/DataTable.js";
 import { Facts } from "../kit/Facts.js";
 import { Stat } from "../kit/Stat.js";
@@ -340,6 +343,10 @@ function RowsBody({
   const refOffersFor = useRefOffers();
   const extensions = useExtensions();
   const pageNav = useOptionalPageNavigation();
+  // The groups folded away, and the rows opened into their `expand` lens
+  // (both this step's history state).
+  const folded = useCollapsedSet("lens-groups.closed");
+  const expanded = useCollapsedSet("lens-rows.expanded");
   // The rows in drawing order and the cursor over them: ↑/↓ move it, Enter
   // opens the row's link or runs its first row action (`useListNav`).
   let drawn: SqlCell[][] = result.rows;
@@ -390,7 +397,21 @@ function RowsBody({
     // A timestamp keeps its full local time a hover away.
     // A highlighted column marks its param's current value in the text.
     const needle = c.highlight === null ? "" : String(run.params[c.highlight] ?? "");
-    const text = isTimestamp(raw) ? (
+    const series = c.format === "sparkline" ? sparklineValues(raw) : null;
+    const text = series ? (
+      <span data-testid="lens-sparkline" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+        <Sparkline values={series} width={72} height={18} />
+        <span>{formatted}</span>
+      </span>
+    ) : c.format === "badge" && formatted !== "" ? (
+      <span
+        data-testid="lens-badge"
+        className="ox-badge"
+        style={toneColor(c.toneIndex === null ? null : (row[c.toneIndex] ?? null)) ? { color: toneColor(row[c.toneIndex!] ?? null)! } : undefined}
+      >
+        {formatted}
+      </span>
+    ) : isTimestamp(raw) ? (
       <span title={formatFullDateTime(raw)}>{formatted}</span>
     ) : needle !== "" && typeof formatted === "string" ? (
       markParts(formatted, needle).map((part, i) =>
@@ -418,12 +439,24 @@ function RowsBody({
     ) : (
       text
     );
-    if (!tone && !icon && mine.length === 0) return body;
+    const opens = c.expand ? expanded.has(expansionKey(c, row)) : false;
+    if (!tone && !icon && mine.length === 0 && !c.expand) return body;
     return (
       <span
         data-tone={tone ? String(toneName) : undefined}
         style={{ display: "inline-flex", alignItems: "center", gap: 4, flexWrap: "wrap", color: tone ?? undefined }}
       >
+        {c.expand ? (
+          <button
+            type="button"
+            aria-expanded={opens}
+            aria-label={opens ? "Collapse" : "Expand"}
+            onClick={() => expanded.toggle(expansionKey(c, row))}
+            style={disclosureStyle}
+          >
+            {opens ? "▾" : "▸"}
+          </button>
+        ) : null}
         {icon ? <LensIcon spec={icon} tone={tone} /> : null}
         {body}
         {mine.map((b, i) => (
@@ -517,19 +550,36 @@ function RowsBody({
   };
   // A grouped list or table: its headings, each with its group's actions.
   const groups = rowGroups(lens, result);
-  drawn = groups ? groups.flatMap((g) => g.rows) : result.rows;
+  drawn = groups ? groups.filter((g) => !folded.has(g.key)).flatMap((g) => g.rows) : result.rows;
   const drawnAt = new Map(drawn.map((r, i) => [r, i] as const));
   const heading = (g: RowGroup) => (
     <GroupHeading
       group={g}
+      open={!folded.has(g.key)}
+      onToggle={() => folded.toggle(g.key)}
       actions={lens.actions.filter((a) => a.group === g.key)}
       busy={actions?.busy ?? null}
       onAction={(a) => actions?.run(a, null)}
       onOpenPage={onOpenPage}
     />
   );
+  // Under a row: the lens each of its open `expand` columns names, run
+  // with the row's values.
+  const detail = (row: SqlCell[], index: number): ReactNode => {
+    const open = cols.filter((c) => c.expand && expanded.has(expansionKey(c, row)));
+    if (open.length === 0) return null;
+    return (
+      <div data-testid={`lens-row-expansion-${index}`} style={expansionStyle}>
+        {open.map((c) => (
+          <RowExpansion key={c.key} lensId={c.expand!} params={rowRecord(result.columns, row)} streamId={streamId} onOpenPage={onOpenPage} />
+        ))}
+      </div>
+    );
+  };
   const rowsView: RowsView = {
     groups,
+    folded: (g) => folded.has(g.key),
+    detail,
     heading,
     rowLook,
     cursor: {
@@ -590,6 +640,10 @@ type RowLook = (row: SqlCell[]) => RowLookOut;
 /** What a list, table or tree draws besides cells. */
 interface RowsView {
   groups: RowGroup[] | null;
+  /** Whether a group's rows are folded away under its heading. */
+  folded(g: RowGroup): boolean;
+  /** What a row opens under itself (its `expand` lenses), if anything. */
+  detail(row: SqlCell[], index: number): ReactNode;
   heading(g: RowGroup): ReactNode;
   rowLook: RowLook;
   /** The keyboard cursor over the drawn rows (list and table). */
@@ -604,12 +658,16 @@ interface RowsView {
  *  (linked when the group's `link` resolves) and its group actions. */
 function GroupHeading({
   group,
+  open,
+  onToggle,
   actions,
   busy,
   onAction,
   onOpenPage,
 }: {
   group: RowGroup;
+  open: boolean;
+  onToggle(): void;
   actions: LensAction[];
   busy: string | null;
   onAction(a: LensAction): void;
@@ -618,6 +676,15 @@ function GroupHeading({
   const ref = group.ref;
   return (
     <div data-testid="lens-group-heading" data-group={group.key} style={groupHeadingStyle}>
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-label={`${open ? "Collapse" : "Expand"} ${group.label}`}
+        onClick={onToggle}
+        style={disclosureStyle}
+      >
+        {open ? "▾" : "▸"}
+      </button>
       {ref ? (
         <RouteLink
           to={ref}
@@ -630,6 +697,9 @@ function GroupHeading({
       ) : (
         <span>{group.label}</span>
       )}
+      <span data-testid="lens-group-count" style={{ fontWeight: "normal", color: "var(--text-muted)" }}>
+        {group.rows.length}
+      </span>
       {actions.length > 0 ? (
         <span style={{ marginLeft: "auto", display: "inline-flex", gap: 4 }}>
           {actions.map((a) => (
@@ -1055,6 +1125,33 @@ function TreeItem({ node, path, closed, ...rest }: TreeVizProps & { node: TreeNo
   );
 }
 
+/** A row's `expand` column, as the set of opened ones names it. */
+function expansionKey(c: DisplayColumn, row: SqlCell[]): string {
+  return `${c.key}:${JSON.stringify(row)}`;
+}
+
+const expansionStyle: CSSProperties = { padding: "4px 0 8px 20px" };
+
+/** An `expand` lens run for a row: the params it declares take the row's
+ *  values, and its result is drawn in place. */
+function RowExpansion({
+  lensId,
+  params,
+  streamId,
+  onOpenPage,
+}: {
+  lensId: string;
+  params: Record<string, SqlCell>;
+  streamId: string | null;
+  onOpenPage?(ref: TabRef): void;
+}) {
+  const runs = useLensRuns([{ key: "expansion", lensId }], params, streamId);
+  const part = runs?.get("expansion");
+  if (!part) return <p className="ox-muted ox-small">Loading…</p>;
+  if (part.error) return <p className="ox-error">{part.error}</p>;
+  return part.run ? <LensResultView run={part.run} compact toolbar={false} streamId={streamId} onOpenPage={onOpenPage} /> : null;
+}
+
 /** What a link's `onNavigate` is: a page built from the row goes to the
  *  host's opener when one is given; a ref string always opens through
  *  `openRef`. */
@@ -1184,7 +1281,7 @@ function LineViz({ run }: { run: LensRun }) {
       {series.map((s) => (
         <div key={s.name} data-testid="lens-line-series" style={{ marginBottom: 12 }}>
           {s.name ? <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>{s.name}</div> : null}
-          <TrendChart points={s.points} width={640} height={180} />
+          <TrendChart points={s.points} target={s.target} width={640} height={180} />
         </div>
       ))}
     </div>
@@ -1303,7 +1400,7 @@ function sections(rows: SqlCell[][], view: RowsView | undefined): { group: RowGr
   const index = new Map(rows.map((r, i) => [r, i] as const));
   const groups = view?.groups;
   if (!groups) return [{ group: null, rows: rows.map((r, i) => [r, i]) }];
-  return groups.map((g) => ({ group: g, rows: g.rows.map((r) => [r, index.get(r) ?? 0]) }));
+  return groups.map((g) => ({ group: g, rows: view.folded(g) ? [] : g.rows.map((r) => [r, index.get(r) ?? 0]) }));
 }
 
 const noLook: RowLookOut = { props: {}, emphasized: false, indent: 0, picks: false, selected: false };
@@ -1344,6 +1441,7 @@ function ListViz({ rows, cols, cell, rowMenu, view }: RowsVizProps) {
                       ))}
                     </div>
                   ) : null}
+                  {view?.detail(row, i)}
                 </li>
               );
             })}
@@ -1375,6 +1473,7 @@ function TableViz({ rows, cols, cell, rowMenu, view }: RowsVizProps) {
         rows: inGroup,
       }))}
       rowKey={([, i]) => i}
+      rowDetail={([row, i]) => view?.detail(row, i) ?? null}
       rowProps={([row, i]) => {
         const look = view?.rowLook(row) ?? noLook;
         return {

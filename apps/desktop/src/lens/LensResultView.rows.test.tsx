@@ -10,8 +10,18 @@ import { PageNavigationContext, type PageNavigation } from "../tabs/PageNavigati
 
 const realApi = await import("../api.js");
 const actionRuns: { action: string; row: unknown }[] = [];
+const expandRuns: unknown[] = [];
 mock.module("../api.js", () => ({
   ...realApi,
+  getLens: async (id: string) => ({ ...base, id, slug: id, title: "Detail", params: [{ name: "id", label: null, default: null }] }),
+  runLens: async (id: string, params: unknown) => {
+    expandRuns.push([id, params]);
+    return {
+      lens: { ...base, id, slug: id, title: "Detail", viz: "table" },
+      params,
+      result: { columns: ["note"], rows: [["opened the detail"]], truncated: false, reads: { models: [], tables: [], measures: [] } },
+    };
+  },
   runLensAction: async (_id: string, action: string, _params: unknown, row: unknown) => {
     actionRuns.push({ action, row });
     return { result: null, auditId: 1, eventId: null, inverse: null };
@@ -74,7 +84,7 @@ test("a grouped list puts its rows under a heading per value, in order, and the 
   const view = render(<LensResultView run={runOf(grouped)} compact onOpenPage={() => {}} />);
   const headings = view.getAllByTestId("lens-group-heading");
   expect(headings.map((h) => h.getAttribute("data-group"))).toEqual(["In progress", "Ready"]);
-  expect(headings[0]!.querySelector("button")?.textContent).toBe("In progress");
+  expect(headings[0]!.querySelector("[data-testid=lens-group-link]")?.textContent).toBe("In progress");
   // "Ready" has no ref: plain text, not a link.
   expect(headings[1]!.querySelector("[data-testid=lens-group-link]")).toBeNull();
   // The group column isn't a cell.
@@ -90,6 +100,88 @@ test("a group's action is a button in its heading, even compact, and runs withou
   expect(button.closest("[data-group]")?.getAttribute("data-group")).toBe("Ready");
   fireEvent.click(button);
   await waitFor(() => expect(actionRuns).toEqual([{ action: "add", row: null }]));
+});
+
+// A group's heading says how many rows it holds and folds them away.
+test("a group's heading shows its count and folds its rows", () => {
+  const view = render(<LensResultView run={runOf(grouped)} compact onOpenPage={() => {}} />);
+  const headings = view.getAllByTestId("lens-group-heading");
+  expect(headings.map((h) => h.querySelector("[data-testid=lens-group-count]")?.textContent)).toEqual(["2", "1"]);
+  const toggle = headings[0]!.querySelector("[aria-expanded]") as HTMLElement;
+  expect(toggle.getAttribute("aria-expanded")).toBe("true");
+  fireEvent.click(toggle);
+  expect(view.queryByTestId("lens-row-0")).toBeNull();
+  expect(view.queryByTestId("lens-row-1")).toBeNull();
+  // The other group's rows stay, and a folded heading says so.
+  expect(view.getByTestId("lens-row-2")).toBeTruthy();
+  expect((view.getAllByTestId("lens-group-heading")[0]!.querySelector("[aria-expanded]") as HTMLElement).getAttribute("aria-expanded")).toBe("false");
+  fireEvent.click(view.getAllByTestId("lens-group-heading")[0]!.querySelector("[aria-expanded]") as HTMLElement);
+  expect(view.getByTestId("lens-row-0")).toBeTruthy();
+});
+
+// A cell's format can draw a mark: a series as a small line with its
+// latest value, a short value as a pill in the column's tone.
+test("sparkline and badge formats draw a line and a pill", () => {
+  const run = {
+    lens: {
+      ...base,
+      viz: "table",
+      columns: [
+        { key: "title", label: null, link: null, unit: null, icon: null, tone: null },
+        { key: "trend", label: null, link: null, unit: null, icon: null, tone: null, format: "sparkline" },
+        { key: "level", label: null, link: null, unit: null, icon: null, tone: "hue", format: "badge" },
+      ],
+    },
+    params: {},
+    result: { columns: ["title", "trend", "level", "hue"], rows: [["a", "[1,3,2,4]", "high", "danger"], ["b", "n/a", "low", null]], truncated: false },
+  } as unknown as LensRun;
+  const view = render(<LensResultView run={run} onOpenPage={() => {}} />);
+  const first = view.getByTestId("lens-row-0");
+  expect(first.querySelector("[data-testid=lens-sparkline] svg")).not.toBeNull();
+  expect(first.querySelector("[data-testid=lens-sparkline]")!.textContent).toContain("4");
+  expect(first.querySelector("[data-testid=lens-badge]")!.textContent).toBe("high");
+  // A cell that isn't a series stays plain text.
+  const second = view.getByTestId("lens-row-1");
+  expect(second.querySelector("[data-testid=lens-sparkline]")).toBeNull();
+  expect(second.textContent).toContain("n/a");
+  expect(second.querySelector("[data-testid=lens-badge]")!.textContent).toBe("low");
+});
+
+// A line chart's targets column draws a target line on its series.
+test("a line's targets column draws each series' target line", () => {
+  const run = {
+    lens: { ...base, viz: "line", chart: { x: "at", y: "v", series: null, label: null, size: null, group: null, targets: "goal" } },
+    params: {},
+    result: { columns: ["at", "v", "goal"], rows: [[1, 1, 5], [2, 3, 5], [3, 2, 5]], truncated: false },
+  } as unknown as LensRun;
+  const view = render(<LensResultView run={run} onOpenPage={() => {}} />);
+  expect(view.getByTestId("lens-line").querySelectorAll("[data-testid=trend-target]")).toHaveLength(1);
+  cleanup();
+  const none = render(<LensResultView run={{ ...run, lens: { ...run.lens, chart: { ...run.lens.chart!, targets: null } } }} onOpenPage={() => {}} />);
+  expect(none.getByTestId("lens-line").querySelector("[data-testid=trend-target]")).toBeNull();
+});
+
+// A column's `expand` opens a lens under its row, run with the row's values.
+test("an expand column opens its lens under the row with the row's values", async () => {
+  expandRuns.length = 0;
+  const run = {
+    lens: {
+      ...base,
+      viz: "table",
+      columns: [{ key: "title", label: null, link: null, unit: null, icon: null, tone: null, expand: "x/detail" }],
+    },
+    params: {},
+    result: { columns: ["id", "title"], rows: [[7, "Epic"], [8, "Child"]], truncated: false },
+  } as unknown as LensRun;
+  const view = render(<LensResultView run={run} onOpenPage={() => {}} />);
+  const toggle = view.getAllByRole("button", { name: "Expand" })[0]!;
+  expect(toggle.getAttribute("aria-expanded")).toBe("false");
+  fireEvent.click(toggle);
+  await waitFor(() => expect(view.getByTestId("lens-row-expansion-0").textContent).toContain("opened the detail"));
+  expect(expandRuns).toEqual([["x/detail", { id: 7 }]]);
+  expect(view.queryByTestId("lens-row-expansion-1")).toBeNull();
+  fireEvent.click(view.getAllByRole("button", { name: "Collapse" })[0]!);
+  expect(view.queryByTestId("lens-row-expansion-0")).toBeNull();
 });
 
 test("a group action stays out of the toolbar", () => {
