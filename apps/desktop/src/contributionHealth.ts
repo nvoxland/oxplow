@@ -12,7 +12,7 @@ import { useCallback, useEffect, useState } from "react";
 import { formatContextMention } from "./agent-context-ref.js";
 import { insertIntoAgent } from "./agent-input-bus.js";
 import { querySql } from "./api.js";
-import { recordOpError } from "./components/opErrorsStore.js";
+import { recordOpError } from "./opErrors.js";
 import { NO_READS, useRerunOnChange } from "./lens/lensRerun.js";
 import { personCommands, type PersonCommands } from "./personCommands.js";
 import type { Reads, SqlQueryResult } from "./tauri-bridge/generated/bindings.js";

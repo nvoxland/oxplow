@@ -2,20 +2,19 @@
 /// operations, undelivered events and failed reactions, firing panel
 /// badges, and hints raised to the person. The bell, the Alerts page and the toasts all read it.
 
-import { useMemo, useSyncExternalStore } from "react";
+import { useMemo } from "react";
 
 import { useFailedReactions, useUndelivered } from "../../delivery.js";
 import { extensionProblemLine, useExtensionProblems } from "../../extensionProblems.js";
 import { usePersonHints } from "../../hints.js";
 import { useProposals } from "../../proposals.js";
 import { usePanelRuns } from "../Panels/PanelRunsContext.js";
-import { getOpErrorsStore } from "../opErrorsStore.js";
+import { useOpErrors } from "../../opErrors.js";
 import type { AlertItems } from "./alertsModel.js";
 
 export function useAlerts() {
   const proposals = useProposals();
-  const store = getOpErrorsStore();
-  const opErrors = useSyncExternalStore(store.subscribe, store.getSnapshot);
+  const opErrors = useOpErrors();
   const undelivered = useUndelivered();
   const failedReactions = useFailedReactions();
   const extensionProblems = useExtensionProblems();

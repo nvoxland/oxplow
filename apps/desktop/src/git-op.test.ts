@@ -129,10 +129,10 @@ describe("opErrorOf", () => {
   test("carries the conflicts and the log as the detail", () => {
     expect(
       opErrorOf("Merge x", "merge x", outcome({ success: false, log: "CONFLICT\n", conflicts: ["a.ts"] })),
-    ).toEqual({ label: "Merge x", command: "merge x", stderr: "Conflicts in a.ts\nCONFLICT", blankFailure: false });
+    ).toEqual({ label: "Merge x", command: "merge x", stderr: "Conflicts in a.ts\nCONFLICT" });
   });
 
   test("flags a failure that says nothing", () => {
-    expect(opErrorOf("Push", "push", outcome({ success: false })).blankFailure).toBe(true);
+    expect(opErrorOf("Push", "push", outcome({ success: false })).message).toBe("It failed without saying why: no conflicts and no output.");
   });
 });

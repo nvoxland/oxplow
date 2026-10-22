@@ -15,7 +15,7 @@ import { useAlerts } from "../components/Alerts/useAlerts.js";
 import { OpErrorDetail } from "../components/Alerts/OpErrorDetail.js";
 import { alertsSummary } from "../components/Alerts/alertsModel.js";
 import { DeliveryList } from "../components/DeliveryList.js";
-import { getOpErrorsStore, recordOpError } from "../components/opErrorsStore.js";
+import { dismissAllOpErrors, dismissOpError, markOpErrorSeen, recordOpError } from "../opErrors.js";
 import { ProposalList } from "../kit/Approvals.js";
 import { dismissHint } from "../hints.js";
 import { Section } from "../kit/index.js";
@@ -26,7 +26,9 @@ import type { TabRef } from "../tabs/tabState.js";
 
 export function AlertsPage({ onOpenPage }: { onOpenPage(ref: TabRef): void }) {
   const { items, proposals, opErrors, badges, hints } = useAlerts();
-  const store = getOpErrorsStore();
+  // A mark that fails says so as another failed operation.
+  const marked = (label: string, done: Promise<void>) =>
+    void done.catch((e: unknown) => recordOpError({ label, message: e instanceof Error ? e.message : String(e) }));
   // The row open is a pick: the page's `open` view param, so Back closes it.
   const [open, setOpen] = useViewSelection("open");
   const problems = items.opErrors.length + items.undelivered + items.failedReactions + items.extensionProblems.length;
@@ -73,7 +75,7 @@ export function AlertsPage({ onOpenPage }: { onOpenPage(ref: TabRef): void }) {
             testId="alerts-problems"
             actions={
               opErrors.length > 0
-                ? [{ id: "clear-ops", label: "Clear failed operations", title: "Clear every failed operation", run: () => store.clear() }]
+                ? [{ id: "clear-ops", label: "Clear failed operations", title: "Clear every failed operation", run: () => marked("Clear failed operations", dismissAllOpErrors()) }]
                 : undefined
             }
           >
@@ -87,7 +89,7 @@ export function AlertsPage({ onOpenPage }: { onOpenPage(ref: TabRef): void }) {
                       data-testid={`alerts-op-${e.id}`}
                       aria-expanded={expanded}
                       onClick={() => {
-                        store.markSeen(e.id);
+                        if (!e.seen) marked("Mark a failed operation seen", markOpErrorSeen(e.id));
                         setOpen(expanded ? null : e.id);
                       }}
                       title={expanded ? "Hide the output" : "Show the output"}
@@ -101,7 +103,7 @@ export function AlertsPage({ onOpenPage }: { onOpenPage(ref: TabRef): void }) {
                       type="button"
                       data-testid={`alerts-op-dismiss-${e.id}`}
                       title="Dismiss"
-                      onClick={() => store.dismiss(e.id)}
+                      onClick={() => marked("Dismiss a failed operation", dismissOpError(e.id))}
                       style={linkButtonStyle}
                     >
                       ×

@@ -772,6 +772,21 @@ commands:
     scope: diagnostics.write
     op: report_error
     invokers: { human: true, agent: false, lens: false }
+  - name: op_error.mark_seen
+    summary: "Mark a failed operation as seen: the person opened its output (`v_op_error.seen`)."
+    scope: diagnostics.write
+    op: mark_op_error_seen
+    invokers: { human: true, agent: false, lens: true }
+  - name: op_error.dismiss
+    summary: "Dismiss a failed operation: the app no longer lists it (`v_op_error.dismissed`). The agent can still read it."
+    scope: diagnostics.write
+    op: dismiss_op_error
+    invokers: { human: true, agent: false, lens: true }
+  - name: op_error.dismiss_all
+    summary: "Dismiss every failed operation the person hasn't dismissed."
+    scope: diagnostics.write
+    op: dismiss_all_op_errors
+    invokers: { human: true, agent: false, lens: true }
   # editor.write — the window's; an agent saves in its own thread.
   - name: editor.save
     summary: "Save a file's unsaved changes (`uri`: its tab, `oxplow:oxplow/file?path=src/a.rs`; none saves the one your thread shows)."

@@ -32,7 +32,7 @@ import { sessionStatusKey } from "../agentStatusRollup.js";
 import { Page } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { alertsRef, gitCommitRef, pageTabRef, uncommittedChangesRef } from "../tabs/pageRefs.js";
-import { recordOpError } from "../components/opErrorsStore.js";
+import { recordOpError } from "../opErrors.js";
 import { awaitGitOp, opErrorOf } from "../git-op.js";
 import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
 import { Card, cardLinkButton } from "../components/Card.js";

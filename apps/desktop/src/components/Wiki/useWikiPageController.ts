@@ -4,7 +4,7 @@ import { deleteWikiPage, writeWikiPage } from "../../api.js";
 import { readWikiPage, type WikiPageSummary } from "../../knowledge.js";
 import { NO_READS, useRerunOnChange } from "../../lens/lensRerun.js";
 import type { Reads } from "../../tauri-bridge/generated/bindings.js";
-import { recordOpError } from "../opErrorsStore.js";
+import { recordOpError } from "../../opErrors.js";
 
 export interface WikiPageController {
   summary: WikiPageSummary | null;

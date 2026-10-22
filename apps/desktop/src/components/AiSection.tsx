@@ -5,7 +5,7 @@
 ///
 /// Usability contract (.context/usability.md): no modals; forms submit on
 /// Enter and Escape cancels; Remove uses InlineConfirm; failures land in
-/// opErrorsStore, not alerts. Changes apply immediately, no Save needed.
+/// `recordOpError`, not alerts. Changes apply immediately, no Save needed.
 
 import type { CSSProperties } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -37,7 +37,7 @@ import {
 } from "./aiSettingsModel.js";
 import { formatMetricValue, formatMetricValueExact } from "./format.js";
 import { InlineConfirm } from "./InlineConfirm.js";
-import { recordOpError } from "./opErrorsStore.js";
+import { recordOpError } from "../opErrors.js";
 import { showToast } from "./toastStore.js";
 import { EmptyState } from "./Prompts/EmptyState.js";
 import { DataTable, type DataColumn } from "../kit/index.js";

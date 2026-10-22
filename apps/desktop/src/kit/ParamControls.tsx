@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 
 import { querySql, type SqlCell, type SqlQueryResult } from "../api.js";
-import { recordOpError } from "../components/opErrorsStore.js";
+import { recordOpError } from "../opErrors.js";
 import { isDefaultValue, parseParamInput } from "../lens/lensModel.js";
 import { paramKind, paramOptions, paramOptionsSql, type ParamKind, type ParamOption } from "../lens/lensParams.js";
 import type { LensParam, ParamType } from "../tauri-bridge/generated/bindings.js";

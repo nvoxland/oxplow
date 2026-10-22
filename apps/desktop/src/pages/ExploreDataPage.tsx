@@ -12,7 +12,7 @@ import { adHocLens, NEW_LENS_COMMAND, slugify } from "../lens/lensModel.js";
 import { useCommandDraft } from "../commandDraft.js";
 import { NO_READS, useRerunOnChange } from "../lens/lensRerun.js";
 import { insertIntoAgent } from "../agent-input-bus.js";
-import { recordOpError } from "../components/opErrorsStore.js";
+import { recordOpError } from "../opErrors.js";
 import { DataTable, type DataColumn } from "../kit/index.js";
 import { useRequestGuard } from "../request-guard.js";
 import type { LensChart, Reads, SqlQueryResult } from "../tauri-bridge/generated/bindings.js";

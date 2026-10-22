@@ -4,7 +4,7 @@
 /// again confirmed. Pages that hold their own confirm (lens actions, form
 /// lenses) keep it inline; this is for runs with nowhere to show it.
 import { runCommand, undoCommand } from "./api.js";
-import { recordOpError } from "./components/opErrorsStore.js";
+import { recordOpError } from "./opErrors.js";
 import { showToast } from "./components/toastStore.js";
 import { needsConfirmation } from "./ipc-error.js";
 import type { CommandOutcome } from "./tauri-bridge/generated/bindings.js";

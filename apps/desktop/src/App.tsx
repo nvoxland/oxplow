@@ -122,7 +122,7 @@ import { useAlertToasts } from "./components/Alerts/useAlertToasts.js";
 import { DomCommentLayer } from "./components/Comments/DomCommentLayer.js";
 import { agentSessionRef, diskFilePath, fileOf, lensRef, refFromTabId, directoryRef, effortDiffRef, externalUrlRef, fileRef, gitCommitRef, pageTabRef, pagePayload, recordedPageKind, isPage, diffRef, newSessionRef, newStreamRef, alertsRef, wikiPageRef, streamSettingsRef, threadSettingsRef, workItemTabRef, viewParamsOf, withViewParams, lineOf, fileRefAt, resourceParamsOf, type PagePayload } from "./tabs/pageRefs.js";
 import { requestNewThread } from "./new-thread-bus.js";
-import { getOpErrorsStore, recordOpError } from "./components/opErrorsStore.js";
+import { recordOpError, setOpErrorContext } from "./opErrors.js";
 import { classifyExternalUrl } from "./external-url-allowlist.js";
 import { installContextMenuSuppressor } from "./context-menu.js";
 import { FilePage } from "./pages/FilePage.js";
@@ -326,7 +326,6 @@ export function App() {
     exclude: [],
     include: [],
   });
-  const opErrorsStore = getOpErrorsStore();
   const daemonDownLogged = useRef(false);
   const daemonProbeState = useRef(INITIAL_DAEMON_PROBE_STATE);
   // macOS uses the native top-of-screen menu bar (driven by the
@@ -945,12 +944,10 @@ export function App() {
   );
 
   const selectedThreadWork = selectedThread ? threadWorkStates[selectedThread.id] ?? null : null;
+  // A failed operation from no named thread is the one on screen's.
   useEffect(() => {
-    opErrorsStore.setActiveThread(selectedThreadId);
-  }, [selectedThreadId, opErrorsStore]);
-  useEffect(() => {
-    opErrorsStore.setActiveStream(stream?.id ?? null);
-  }, [stream?.id, opErrorsStore]);
+    setOpErrorContext({ thread: selectedThreadId, stream: stream?.id ?? null });
+  }, [selectedThreadId, stream?.id]);
 
   const streamStatuses = useMemo<Record<string, AgentStatus>>(() => {
     const out: Record<string, AgentStatus> = {};

@@ -41,6 +41,7 @@ pub mod fact_store;
 pub mod git_store;
 pub mod handoff_store;
 pub mod models;
+pub mod op_error_store;
 pub mod page_ref_projections;
 pub mod page_ref_store;
 pub mod panel_layout_store;

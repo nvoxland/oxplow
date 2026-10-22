@@ -7,7 +7,7 @@
 /// what it turns off. See `.context/work-tracking.md` "Capabilities".
 ///
 /// Usability contract (.context/usability.md): a choice applies at once,
-/// failures go to opErrorsStore.
+/// failures go to `recordOpError`.
 
 import type { CSSProperties } from "react";
 import { useCallback, useEffect, useState } from "react";
@@ -17,7 +17,7 @@ import { readSettings } from "../configValues.js";
 import { NO_READS, useRerunOnChange } from "../lens/lensRerun.js";
 import type { Extension, Reads } from "../tauri-bridge/generated/bindings.js";
 import { capabilitiesFromResult, choiceHint, chosenNote, nextChoices, offWithout, type ChoosableCapability } from "./capabilitiesModel.js";
-import { recordOpError } from "./opErrorsStore.js";
+import { recordOpError } from "../opErrors.js";
 
 const QUERY =
   "SELECT capability, provider, extension, features, active, title, source, available, chosen_by, " +

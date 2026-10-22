@@ -24,7 +24,7 @@ import { seriesByGroup } from "../metricsSql.js";
 import { DIMENSIONS_SQL } from "./exploreData.js";
 import { useRequestGuard } from "../request-guard.js";
 import type { Reads } from "../tauri-bridge/generated/bindings.js";
-import { recordOpError } from "../components/opErrorsStore.js";
+import { recordOpError } from "../opErrors.js";
 import { showToast } from "../components/toastStore.js";
 import { useContextMenu } from "../components/useRowContextMenu.js";
 import { buildAddToDashboardMenu, metricTile } from "./customDashboardData.js";

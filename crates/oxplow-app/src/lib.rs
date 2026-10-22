@@ -1565,6 +1565,7 @@ impl Services {
         .chain(commands::comment::ops())
         .chain(commands::reasoning::ops())
         .chain(commands::ui::ops())
+        .chain(commands::op_error::ops())
         .chain(commands::effort_report::ops(
             commands::effort_report::EffortDeps {
                 lifecycle: efforts.clone(),

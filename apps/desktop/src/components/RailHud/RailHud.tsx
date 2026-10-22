@@ -22,7 +22,7 @@ import {
 import { panelChoices, type PanelChoice, type PanelRuns } from "../Panels/usePanelRuns.js";
 import { usePanelRuns } from "../Panels/PanelRunsContext.js";
 import { useContextMenu } from "../useRowContextMenu.js";
-import { recordOpError } from "../opErrorsStore.js";
+import { recordOpError } from "../../opErrors.js";
 import { EmptyState } from "../Prompts/EmptyState.js";
 
 export interface RailHudProps {

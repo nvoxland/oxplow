@@ -13,7 +13,7 @@
 //! abstraction. The shared part is pure result-normalization.
 
 import { taskResult, type BackgroundTask, type GitOpKickoff, type OpOutcome } from "./api.js";
-import type { OpErrorInput } from "./components/opErrorsStore.js";
+import type { OpErrorInput } from "./opErrors.js";
 
 /// Normalize a finished (or failed) background task into an `OpOutcome`.
 /// When the task ended without a result (the command was
@@ -77,7 +77,8 @@ export function gitOpOutcomeMessage(label: string, result: OpOutcome): string {
 }
 
 /// The op-error record for a failed op: the conflicts and the provider's
-/// log as the detail, `blankFailure` when neither says anything.
+/// log as the detail, or a message saying it failed silently when neither
+/// says anything.
 export function opErrorOf(label: string, command: string, result: OpOutcome): OpErrorInput {
   const detail = [
     result.conflicts.length > 0 ? `Conflicts in ${result.conflicts.join(", ")}` : "",
@@ -85,5 +86,7 @@ export function opErrorOf(label: string, command: string, result: OpOutcome): Op
   ]
     .filter(Boolean)
     .join("\n");
-  return { label, command, stderr: detail, blankFailure: detail === "" };
+  return detail === ""
+    ? { label, command, message: "It failed without saying why: no conflicts and no output." }
+    : { label, command, stderr: detail };
 }

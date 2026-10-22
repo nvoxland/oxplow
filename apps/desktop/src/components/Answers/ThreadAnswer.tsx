@@ -12,7 +12,7 @@ import { RouteLink } from "../../tabs/RouteLink.js";
 import { lensRef } from "../../tabs/pageRefs.js";
 import type { TabRef } from "../../tabs/tabState.js";
 import { keepAnswer, type AnswerRow } from "../../threadAnswers.js";
-import { recordOpError } from "../opErrorsStore.js";
+import { recordOpError } from "../../opErrors.js";
 
 export interface ThreadAnswerProps {
   answer: AnswerRow;

@@ -1,7 +1,7 @@
 /// The events oxplow couldn't deliver and the effect reactions that
 /// failed, each with what to do about it: Retry, or Discard (confirmed
 /// inline). Shown in Settings → Data → Delivery and on the Alerts page
-///. Failures land in opErrorsStore.
+///. Failures land in `recordOpError`.
 
 import type { CSSProperties } from "react";
 import { useState } from "react";
@@ -16,7 +16,7 @@ import {
   type UndeliveredEvent,
 } from "../delivery.js";
 import { InlineConfirm } from "./InlineConfirm.js";
-import { recordOpError } from "./opErrorsStore.js";
+import { recordOpError } from "../opErrors.js";
 import { showToast } from "./toastStore.js";
 
 export function DeliveryList({ emptyLabel }: { emptyLabel?: string }) {
