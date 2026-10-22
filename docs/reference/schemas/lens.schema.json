@@ -123,6 +123,17 @@
       ],
       "default": null
     },
+    "markdown": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/LensMarkdown"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
     "form": {
       "anyOf": [
         {
@@ -978,6 +989,20 @@
       },
       "additionalProperties": false
     },
+    "LensMarkdown": {
+      "description": "`markdown` viz: which column of the first row is the text. Without\nit, the first column. A lens with an `edit` action names it: the text\nis what the editor saves.",
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false
+    },
     "LensForm": {
       "description": "`form` viz: the command it submits and the values it starts from.",
       "type": "object",
@@ -1414,6 +1439,11 @@
             "null"
           ],
           "default": null
+        },
+        "edit": {
+          "description": "The Save of a `markdown` viz's editor: the text fills the field\nbound to `{{row.<the text column>}}`.",
+          "type": "boolean",
+          "default": false
         }
       },
       "additionalProperties": false,

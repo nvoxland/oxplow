@@ -50,6 +50,7 @@ const base = {
   hunks: null,
   code: null,
   diff: null,
+  markdown: null,
   form: null,
   custom: null,
   group: null,

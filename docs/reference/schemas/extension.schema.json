@@ -2365,6 +2365,11 @@
           "description": "Its tab leads the strip and isn't evicted (a renderer only).",
           "type": "boolean",
           "default": false
+        },
+        "comments": {
+          "description": "Its text takes comments, anchored to its URI.",
+          "type": "boolean",
+          "default": false
         }
       },
       "additionalProperties": false,
