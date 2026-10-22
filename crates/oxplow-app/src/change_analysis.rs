@@ -1118,6 +1118,42 @@ mod tests {
     /// A forced rerun of a change whose inputs haven't moved — the same
     /// tree, base and own files, by the same build — keeps what's stored
     /// instead of recomputing; a changed tree recomputes.
+    /// A commit that leaves the tree clean leaves the working change with no
+    /// files: its list is restated against the new HEAD, not kept.
+    #[tokio::test]
+    async fn after_a_commit_that_cleans_the_tree_the_working_change_lists_nothing() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let svc = &f.svc;
+        let root = svc.layout.project_dir.clone();
+        crate::test_fixtures::commit_all(&root, "base");
+        std::fs::write(root.join("w.rs"), "fn w() {}\n").unwrap();
+        let stream = svc.streams.ensure_primary().await.unwrap().id;
+        let working = || ChangeTarget::Working {
+            stream_id: stream.to_string(),
+        };
+        let files = |id: i64| async move {
+            svc.sql
+                .query_sql(
+                    "SELECT path FROM v_change_file WHERE change_id = ?1",
+                    vec![oxplow_db::SqlCell::Int(id)],
+                    None,
+                )
+                .await
+                .unwrap()
+                .rows
+        };
+        let before = refresh_files(svc, working()).await.unwrap();
+        assert_eq!(files(before.id).await.len(), 1);
+        crate::test_fixtures::commit_all(&root, "w");
+        let after = refresh_files(svc, working()).await.unwrap();
+        assert_eq!(after.id, before.id, "one working change per stream");
+        assert!(
+            files(after.id).await.is_empty(),
+            "{:?}",
+            files(after.id).await
+        );
+    }
+
     /// A query that names a change by its kind and target has it made: the
     /// row is there when the query reads it, and its analysis lands after.
     #[tokio::test]
