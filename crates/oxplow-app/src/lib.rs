@@ -2513,6 +2513,13 @@ mod tests {
                 "vcs.read/diff",
                 "vcs.read/log",
                 "vcs.read/status",
+                // What a page's lens runs for the person (Commit, Stage,
+                // Ignore, Cherry-pick); the destructive ones ask, and what
+                // moves branches or reaches a remote keeps its floor.
+                "vcs.write/cherry_pick",
+                "vcs.write/commit",
+                "vcs.write/ignore",
+                "vcs.write/stage",
                 "window.show/navigate",
                 "work_items.write/comment",
                 "work_items.write/create",
