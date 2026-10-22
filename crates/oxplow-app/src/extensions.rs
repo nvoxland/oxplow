@@ -3969,16 +3969,6 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             });
         }
     }
-    let layout: Vec<String> = ext
-        .lenses
-        .iter()
-        .flat_map(|l| {
-            layout_warnings(l, &ext.lenses)
-                .into_iter()
-                .map(|w| format!("{}: {w}", l.origin.running))
-        })
-        .collect();
-    ext.warnings.extend(layout);
 
     for s in slot_files {
         let mount_line = entry_line(&manifest, "ui", "lens", &s.lens);
@@ -4083,6 +4073,17 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             at(&file, line.or(key_line(&manifest, "pages")), e)
         }));
     }
+    // Once the pages are known: a renderer's lens is told by its page.
+    let layout: Vec<String> = ext
+        .lenses
+        .iter()
+        .flat_map(|l| {
+            layout_warnings(l, &ext.lenses, renders_a_resource(&ext, l))
+                .into_iter()
+                .map(|w| format!("{}: {w}", l.origin.running))
+        })
+        .collect();
+    ext.warnings.extend(layout);
     if let Some(v) = panel_files {
         let (panels, errors) = parse_panels(name, &ext.lenses, v);
         ext.panels = panels;
@@ -4957,7 +4958,7 @@ const MAX_COLUMNS: usize = 8;
 /// What an agent should change about a lens's page so it reads well: a
 /// warning each, with the fix after the dash. Never a reason to refuse
 /// the lens.
-fn layout_warnings(lens: &Lens, lenses: &[Lens]) -> Vec<String> {
+fn layout_warnings(lens: &Lens, lenses: &[Lens], renderer: bool) -> Vec<String> {
     let mut out = Vec::new();
     // The props of a core component this lens stands in for on another
     // lens's page: the host's to give, so neither a filter a person sets
@@ -5022,7 +5023,9 @@ fn layout_warnings(lens: &Lens, lenses: &[Lens]) -> Vec<String> {
                 || contract.contains(&p.name.as_str())
                 || range && (read(&format!("{}_from", p.name)) || read(&format!("{}_to", p.name)))
                 || templated.contains(&p.name)
-                || marked.contains(&p.name.as_str()))
+                || marked.contains(&p.name.as_str())
+                // A renderer's lens is run with the URI it shows: the host's to give.
+                || renderer && p.name == "uri")
             {
                 out.push(format!(
                     "param `{0}` isn't read by any query of the page — remove it, or read it as `:{0}`",
