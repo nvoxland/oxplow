@@ -2,7 +2,7 @@
 -- the choice, why, and the alternatives that were weighed. Decisions on
 -- archived threads are included. A decision never changes, so `version` is
 -- when it was made.
-SELECT CAST(d.ref AS TEXT) AS ref,
+SELECT CAST(d.uri AS TEXT) AS uri,
        CAST(d.question AS TEXT) AS title,
        CAST(coalesce(d.choice, '') || char(10) || coalesce(d.why, '') || char(10)
             || coalesce(d.alternatives, '') AS TEXT) AS body,

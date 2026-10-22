@@ -1377,17 +1377,17 @@ export async function listRecentRemoteBranches(
 
 /** Write a wiki page — the `oxplow.knowledge.write_page` command (P5.C3): the
  *  row, its links and the file, in one audited run. Every `[[link]]` must
- *  resolve (a dangling one is refused, named). `verifiedRefs` are files
+ *  resolve (a dangling one is refused, named). `verifiedFiles` are files
  *  re-checked against the page: their freshness pins move to now. */
 export async function writeWikiPage(
   slug: string,
   body: string,
-  options?: { verifiedRefs?: string[] },
+  options?: { verifiedFiles?: string[] },
 ): Promise<void> {
   await runCommand("oxplow.knowledge.write_page", {
     slug,
     body,
-    verified_refs: options?.verifiedRefs ?? [],
+    verified_files: options?.verifiedFiles ?? [],
   });
 }
 
@@ -1994,7 +1994,7 @@ export async function listWikiSlugsForSnapshots(
 export async function effortTitles(effortIds: string[]): Promise<Map<string, string>> {
   if (effortIds.length === 0) return new Map();
   const res = await querySql(
-    `SELECT ref, title FROM v_effort WHERE ref IN (SELECT value FROM json_each(?1)) AND title IS NOT NULL`,
+    `SELECT uri, title FROM v_effort WHERE uri IN (SELECT value FROM json_each(?1)) AND title IS NOT NULL`,
     [JSON.stringify(effortIds.map(effortUri))],
     10_000,
   );

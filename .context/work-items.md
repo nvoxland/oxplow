@@ -26,18 +26,18 @@ list at a time, whichever implementation it is, and nothing with none.
 `v_work_item` (table `work_item`, V115) holds the items by URI,
 `oxplow:oxplow/work_item?id=<id>&provider=<provider>`: `title`, `body`, a canonical `state`
 (`todo`, `in_progress`, `blocked`, `done`, `canceled`), the list's own
-`native_state` and `native` JSON, `parent_ref` (NULL when the parent is
+`native_state` and `native` JSON, `parent_uri` (NULL when the parent is
 deleted: a deleted item isn't a live one, so the model's parent
 relationship holds; tsk572), and (V17) `thread_id` — the list it's on, a
 thread's or the backlog (NULL) — `rank` on that list and `closed_at`.
-`v_work_item_link` is its links (`to_ref`, its `to_kind`, `link_type`):
+`v_work_item_link` is its links (`to_uri`, its `to_kind`, `link_type`):
 to another item of the list (`blocks`, `discovered_from`, `relates_to`,
 `duplicates`, `supersedes`, `replies_to`), or `about` any URI — what the
 item is about (`oxplow:oxplow/collector?collector=triage/hot`, `oxplow:oxplow/effort?id=eff12`). A link's target
 needn't resolve; it may name something deleted or an extension's resource
 since uninstalled (resources.md "Using URIs"),
 `v_work_item_comment` its comments. Core reads work items only through
-these: a thread's items (`v_work_item`), a work item's ref summary
+these: a thread's items (`v_work_item`), a work item's URI summary
 (`ref_resolver`), a `[[…]]` link's check (`link_check`) and search
 (`v_search_work_item`).
 
@@ -52,15 +52,15 @@ entry's `fields:`. None declares none. How the rows are written and
 oxplow's state mapping are in [data-model.md](./data-model.md) "`work_item`".
 
 **One writer, one schema.** Every list's rows arrive by projection: its
-`work_item.recorded@2 { item }` events — what each verb answers with,
-and what a read back restates — carry the item as it now stands: ref,
+`work_item.recorded@3 { item }` events — what each verb answers with,
+and what a read back restates — carry the item as it now stands: URI,
 title, body, canonical and native state, native fields, parent, deleted,
 and, when the list keeps them, `rank`, `links`, `comments` and `list`
 (a thread's or the backlog: `List`), each the whole set (stated, the
 host restates it; absent, it keeps what it has; an item whose record
 states no `list` stays on the list its first record was filed from —
 the filing event's thread anchor). The pump consumer `work_items.project`
-(`crates/oxplow-app/src/work_items.rs`) upserts it by ref; a replay
+(`crates/oxplow-app/src/work_items.rs`) upserts it by URI; a replay
 restates the same row. Why one record event rather than state on each of
 `created` / `edited` / `state_changed`: the "what happened" events stay
 small and the same for every list, and the projection is one upsert
@@ -94,7 +94,7 @@ provider each declared built-in names (`built_in_provider`, the factory:
 its features and id pattern from `capabilities::BUILT_INS`, its verbs
 the crate's) when services are built and at every `capabilities::refresh`,
 and unregisters it when nothing declares it — the task data stays, and
-nothing reaches it. A built-in whose items' refs carry a provider id
+nothing reaches it. A built-in whose items' URIs carry a provider id
 (`BuiltIn.provider`: `oxplow:tasks` is `oxplow`, as every
 `oxplow:oxplow/work_item?id=tsk<n>&provider=oxplow` says) is declared under that id and no other;
 `implementations.rs` refuses another, which would register a list that
@@ -110,13 +110,13 @@ boot repair. A list writes no page refs of its own.
 ## Reading them in the UI
 
 The desktop reads **only the interface**, whichever list is active —
-never oxplow's task tables, ids or refs; a guard test
+never oxplow's task tables, ids or URIs; a guard test
 (`apps/desktop/src/workItemInterface.guard.test.ts`) fails on a `v_task`
 name, a built `oxplow/work_item` URI or `tsk` id parsing in desktop code.
 
 `apps/desktop/src/workItems.ts` is the one read and write path:
 
-- **`WorkItem`** is a `v_work_item` row — `ref`, `provider`, `title`,
+- **`WorkItem`** is a `v_work_item` row — `uri`, `provider`, `title`,
   `body`, `state`, `parentRef`, `threadId` (null = the backlog), `rank`,
   `closedAt`, the list's own fields as `native`, and `commentCount`
   (`v_work_item_comment`).
@@ -127,7 +127,7 @@ name, a built `oxplow/work_item` URI or `tsk` id parsing in desktop code.
   `readWorkItem`, `readWorkItemsByRef` and `readWorkItems` (the Board's
   scopes: a thread, the backlog, everything) read the rest;
   `readItemEfforts(ref)` an item's activity.
-- **Writes** are `work_item.*` commands by ref: `createWorkItem` (no
+- **Writes** are `work_item.*` commands by uri: `createWorkItem` (no
   list named — it files on the active one; `native` carries the list's
   own fields), `updateWorkItem`, `transitionWorkItem`, `applyItemChange`
   (an edit from any surface: fields and/or state), `deleteWorkItem`,
@@ -146,7 +146,7 @@ name, a built `oxplow/work_item` URI or `tsk` id parsing in desktop code.
   cards, in the detail rail, in New Item, as bulk "Change …" actions,
   and as the Tasks page's filter chips. oxplow declares `priority` and
   a read-only `author` (who filed it). **`workItemRefOfMention`** turns
-  a loose id in text into a ref by the list's `idPattern` (markdown
+  a loose id in text into a URI by the list's `idPattern` (markdown
   `[[tsk42]]`, the effort header's link field) — none matches nothing.
 
 Every read returns what it read (`reads`), and a consumer re-runs it
@@ -156,7 +156,7 @@ changes. With **none** active every read is empty and the screens show
 their empty states.
 
 **One page for every item** (`pages/WorkItemPage.tsx`, routed from any
-`oxplow/work_item` tab, payload `ref`): title and body edited
+`oxplow/work_item` tab, payload `uri`): title and body edited
 in place, the rail's state pill and declared fields, activity (its
 efforts), backlinks and outbound (the graph is keyed on the item's URI), comments targeting
 the item's URI, and the feature-gated actions above. The item's own
@@ -169,15 +169,15 @@ lens or component over `v_work_item` that changes items only through the
 interface commands, so it works with whichever list is active; the person
 picks whose shows (`replacements`, Settings → Integrations).
 [extensions.md](./extensions.md) "Replacements" has the contracts. The `work_item.detail.body` / `.sidebar` slots get
-`{ ref }`. Link…'s link type is free text (default `relates_to`): the
+`{ uri }`. Link…'s link type is free text (default `relates_to`): the
 provider names its own types, and `about` fits any URI. Its target is
 **any URI** (a work item's, `oxplow:oxplow/effort?id=eff12`, `oxplow:oxplow/collector?collector=x/y`); a link row
 in Outbound has **Unlink** on its right-click menu (`oxplow.work_item.unlink`,
 the link's input, undoable like Link). Link rows render through the
 generic ref → page mapping (`useBacklinks.ts` `openFor` → `openRef`): a
 kind with a page opens it, a contribution (`collector:…`, `job:…`)
-something resolves opens Settings, and a ref nothing resolves is a **dead
-link** — its raw text, muted, tooltip "nothing resolves this ref; its
+something resolves opens Settings, and a URI nothing resolves is a **dead
+link** — its raw text, muted, tooltip "nothing resolves this URI; its
 extension may be gone" — that still unlinks. `BacklinkEdge.resolved` (the
 IPC's `ref_resolver::resolve_ref`) says which.
 
@@ -187,7 +187,7 @@ column, or right-click → Move To, to transition it through
 `personCommands` (one person path: its confirmation and its error
 reporting). List rows and Board cards share one drag
 (`WORK_ITEM_DRAG_MIME`: refs, each one's title and state), which the
-agent terminal reads as context refs. **New Item** files on the active
+agent terminal reads as context URIs. **New Item** files on the active
 list: title, body, a canonical starting state (todo or blocked), the
 list's editable fields and — with `hierarchy` — a parent.
 
@@ -210,7 +210,7 @@ service or models.
 
 `oxplow_domain::work_items`:
 
-- **`WorkItemsProvider`** (a struct): `id` (the ref segment),
+- **`WorkItemsProvider`** (a struct): `id` (the URI segment),
   `features`, `verbs: Arc<dyn WorkItemVerbs>`, its `id_pattern`, and
   `sink` (none).
 - **`WorkItemVerbs::invoke(actor, verb, input, idempotency_key) ->
@@ -226,7 +226,7 @@ service or models.
   idempotency key is done once — [providers.md](./providers.md)
   "Idempotency").
 - **`WorkItemsRegistry`** (`Services.work_items`): providers by name;
-  `for_ref` picks one by the ref's provider segment, and an unknown one
+  `for_ref` picks one by the URI's provider segment, and an unknown one
   is refused naming the registered providers; `active()` names the
   provider every `create` files on, resolved each time by the capability
   registry from the config as it is now — no copy, so a person's choice
@@ -237,19 +237,19 @@ service or models.
 **One write surface: the dispatching `work_item.*`** (P7.A1;
 `commands/work_item.rs`). Each verb is an `External` command
 ([commands.md](./commands.md) "Tx and External") on the item's provider
-— the ref's segment, or for `create` the active one — called through its
+— the URI's segment, or for `create` the active one — called through its
 `WorkItemVerbs`, the same way for every list, with **one audit row**
 `work_item.<verb>`. In a composite it is a step: a sequence of work-item
 verbs runs as steps, not undoable as a whole. Before anything runs it
-refuses: a ref of another list's item (`/ref`,
+refuses: a URI of another list's item (`/ref`,
 naming the active list), a parent, link target or place of another list
-(`/parent_ref`, `/target`, `/before`, `/after`), and a feature the list
+(`/parent_uri`, `/target`, `/before`, `/after`), and a feature the list
 doesn't declare.
 A `create` hands the list the input with `thread` resolved
 ([`filing_thread`]: the named one, else an agent's own; a person's none,
 the backlog), and the list's inverse is renamed to `work_item.<verb>`, so
 an undo dispatches again. **The answer is the interface's**, terse and the
-same for every list: `{ ref }` (a comment's adds `comment`, the list's id
+same for every list: `{ uri }` (a comment's adds `comment`, the list's id
 for it), plus core's `state` when the verb put the item in one and
 `link_warnings` for a body — never a list's own row; a reader reads the
 item from `v_work_item`. A create's, or an update's that sets a body,
@@ -269,24 +269,24 @@ transition an effort's work item whatever its provider
 provider (a provider's verb receives the same input, less `create`'s
 `thread`):
 
-- `create { title, body?, parent_ref?, state?, native_state?, native?,
+- `create { title, body?, parent_uri?, state?, native_state?, native?,
   thread? }` — **always on the active tracker**: the person
   chose it, and nothing a caller says — a person, an agent, an effect or
   oxplow itself — files anywhere else. One that isn't running is an
   error, never a fallback. `thread` is the thread it's filed on: absent,
   an agent's own; a person's without one has none (oxplow: the backlog);
-- `update { ref, title?, body?, parent_ref? ("" detaches), state?,
+- `update { uri, title?, body?, parent_uri? ("" detaches), state?,
   native_state?, native? }`;
-- `transition { ref, to, native_state? }` — `to` canonical; a
+- `transition { uri, to, native_state? }` — `to` canonical; a
   `native_state` must map to it;
-- `link { ref, target, link_type }` / `unlink` (same input): the provider
+- `link { uri, target, link_type }` / `unlink` (same input): the provider
   names its link types, and **every list with `links` takes `about` to
-  any ref** (the conformance suite checks it). A target that is an item
+  any URI** (the conformance suite checks it). A target that is an item
   must be the same list's and is checked to exist; any other target
-  must be a ref of a kind the running vocabulary has, and may dangle.
+  must be a URI of a kind the running vocabulary has, and may dangle.
   `link` and `unlink` undo each other. `create` takes `links: [{ target,
   link_type }]`, made with the item (oxplow: in one transaction);
-  `comment { ref, body }`, `delete { ref }` (Destructive; only with
+  `comment { uri, body }`, `delete { uri }` (Destructive; only with
   `features.delete`).
 
 oxplow's mapping: its status is its `native_state` (`ready` is `todo`;
@@ -331,7 +331,7 @@ doesn't act on it. A create always counts. `to` is taken from the
 asked for, else `todo`).
 `edited` names what the command set, not a diff: a list's prior values
 aren't readable for every list. These are the only versions: the `@1`
-ones spoke oxplow's task list (its statuses, field names and note refs)
+ones spoke oxplow's task list (its statuses, field names and note URIs)
 and `work_item.transitioned` its status moves; V30 rewrote the logged
 ones into these words (a transition beside its run's `state_changed`
 dropped, the rest made `state_changed`) and they left core, with
@@ -360,13 +360,13 @@ available falls to `none` (the work list is optional), listed with
 `available = 0` and the active row's `chosen_by = fallback`. The
 registry's `active()` resolves from the config as it is now, so a
 person's choice applies to the very next `create`. **Every verb goes to
-the active work list**, never another: a ref of another list's item is
+the active work list**, never another: a URI of another list's item is
 refused (`` `oxplow:oxplow/work_item?id=ENG-12&provider=issues` is issues's, which isn't the active
 work list (`oxplow`) ``), as it isn't visible either.
 
 **None is a sink** (`work_items::none_provider`, registered by core
 beside oxplow's): every verb succeeds with `{ tracked: false }` and
-keeps nothing. It has every feature, takes any item's ref and any id
+keeps nothing. It has every feature, takes any item's URI and any id
 (`sink`), and the interface reads empty, so nothing that writes work
 items is refused or retried while no list is active and no screen or
 skill explains it. The typed client's `create` returns `None` for it
@@ -375,14 +375,14 @@ sent to a sink (`safe_to_resend`: the list it was meant for went
 away). **Loose ids.** A work list declares what its ids look
 like (`WorkItemsProvider::id_pattern`, a regex matched whole: oxplow's
 tasks `tsk\d+`, an external one its `providers:` entry's `id_pattern`).
-A work-item field (`ref`, `parent_ref`, `target`, `work_item`, and
-`reorder` / `move`'s refs) holding a loose id that matches the active
+A work-item field (`uri`, `parent_uri`, `target`, `work_item`, and
+`reorder` / `move`'s URIs) holding a loose id that matches the active
 list's is that list's item — `tsk12` is `oxplow:oxplow/work_item?id=tsk12&provider=oxplow` while
 oxplow's tasks are active (`commands/work_item.rs` `with_loose_refs`,
 before routing, over `WorkItemsRegistry::loose_ref`, which compiles each
 list's pattern once; also `oxplow.effort.link` / `oxplow.effort.open`).
 One that doesn't match is `Invalid` at its field, naming both shapes; an
-empty `parent_ref` is left alone (it detaches). Free-text recognition (wikilinks, commit bodies) is still
+empty `parent_uri` is left alone (it detaches). Free-text recognition (wikilinks, commit bodies) is still
 core's. The
 conformance suite runs with the provider under test active, and checks it. The desktop reads it with
 `readCapabilityProviders(capability)` (`workItems.ts`, with `reads`) and

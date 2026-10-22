@@ -145,7 +145,7 @@ impl CommitOrSwitch {
     ) -> Result<Option<(Option<CanonicalState>, Option<ThreadId>)>, DomainError> {
         let rows = self
             .rows(
-                "SELECT state, thread_id FROM v_work_item WHERE ref = ?1",
+                "SELECT state, thread_id FROM v_work_item WHERE uri = ?1",
                 vec![SqlCell::Text(item_ref.into())],
             )
             .await?;
@@ -168,7 +168,7 @@ impl CommitOrSwitch {
         for _ in 0..MAX_DEPTH {
             let rows = self
                 .rows(
-                    "SELECT parent_ref FROM v_work_item WHERE ref = ?1",
+                    "SELECT parent_uri FROM v_work_item WHERE uri = ?1",
                     vec![SqlCell::Text(at.clone())],
                 )
                 .await?;
@@ -254,7 +254,7 @@ impl CommitOrSwitch {
         Ok(match self.item(item_ref).await? {
             Some((Some(CanonicalState::Todo), _)) => vec![call(
                 crate::commands::work_item::NAME,
-                json!({ "ref": item_ref, "to": "in_progress" }),
+                json!({ "uri": item_ref, "to": "in_progress" }),
             )],
             _ => Vec::new(),
         })
@@ -594,7 +594,7 @@ mod tests {
     async fn item(fx: &EffortFixture, title: &str, parent: Option<&str>, thread: bool) -> String {
         let mut input = json!({ "title": title });
         if let Some(parent) = parent {
-            input["parent_ref"] = json!(parent);
+            input["parent_uri"] = json!(parent);
         }
         if thread {
             input["thread"] = json!(fx.thread.to_string());
@@ -610,7 +610,7 @@ mod tests {
             )
             .await
             .unwrap();
-        out.result["ref"].as_str().unwrap().to_string()
+        out.result["uri"].as_str().unwrap().to_string()
     }
 
     async fn transition(fx: &EffortFixture, actor: &Actor, item: &str, to: &str) {
@@ -619,7 +619,7 @@ mod tests {
             .run(
                 actor,
                 crate::commands::work_item::NAME,
-                json!({ "ref": item, "to": to }),
+                json!({ "uri": item, "to": to }),
                 false,
             )
             .await
@@ -660,7 +660,7 @@ mod tests {
             .svc
             .sql
             .query_sql(
-                "SELECT state FROM v_work_item WHERE ref = ?1",
+                "SELECT state FROM v_work_item WHERE uri = ?1",
                 vec![SqlCell::Text(item.into())],
                 None,
             )

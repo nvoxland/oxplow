@@ -141,7 +141,7 @@ test("an invalid input's refusal names its field", async () => {
   const connecting = connect({ target: h.frame });
   h.init();
   const c = await connecting;
-  await expect(c.invoke("oxplow.work_item.update", { ref: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", title: "" })).rejects.toEqual({
+  await expect(c.invoke("oxplow.work_item.update", { uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", title: "" })).rejects.toEqual({
     code: "INVALID",
     message: "a title can't be empty",
     field: "/title",

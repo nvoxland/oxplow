@@ -155,11 +155,11 @@ async fn pending_proposals(
     let result = svc
         .sql
         .query_sql(
-            "SELECT ref, COALESCE(json_extract(preview, '$.summary'), command), actor_kind, \
+            "SELECT uri, COALESCE(json_extract(preview, '$.summary'), command), actor_kind, \
                     (SELECT title FROM v_thread t WHERE t.id = p.thread_id) \
              FROM v_command_proposal p \
              WHERE decision = 'pending' \
-               AND (?1 IS NULL OR thread_id = (SELECT id FROM v_thread WHERE ref = ?1)) \
+               AND (?1 IS NULL OR thread_id = (SELECT id FROM v_thread WHERE uri = ?1)) \
                AND (?2 IS NULL OR key = ?2) \
              ORDER BY id DESC",
             vec![
@@ -494,7 +494,7 @@ fn timeline(run: &LensRun) -> String {
     else {
         return table(run);
     };
-    let link = column(run, t.ref_column.as_ref());
+    let link = column(run, t.uri_column.as_ref());
     let mut entries: Vec<(String, String)> = run
         .result
         .rows
@@ -992,7 +992,7 @@ mod tests {
             run(
                 LensViz::Timeline,
                 None,
-                &["at", "what", "ref"],
+                &["at", "what", "uri"],
                 vec![
                     vec![
                         t("2026-09-30T10:00"),
@@ -1006,7 +1006,7 @@ mod tests {
                 l.timeline = Some(crate::extensions::LensTimeline {
                     at: Some("at".into()),
                     label: Some("what".into()),
-                    ref_column: Some("ref".into()),
+                    uri_column: Some("uri".into()),
                 })
             },
         );

@@ -1164,7 +1164,7 @@ pub struct FactSliceKey {
 }
 
 /// A fact's subject ref, from the dictionary it points into (V38).
-const SUBJECT_REF: &str = "(SELECT ref FROM fact_subject WHERE id = f.subject_id)";
+const SUBJECT_REF: &str = "(SELECT uri FROM fact_subject WHERE id = f.subject_id)";
 
 /// The [`FactRow`] column list, with `$detail` as the `detail` column's
 /// expression: one list for the full and the slim form, so they can't drift.
@@ -1314,7 +1314,7 @@ impl<'c> FactText<'c> {
         }
         let found: (Option<String>, Option<String>) = self
             .conn
-            .prepare_cached("SELECT kind, ref FROM fact_subject WHERE id = ?1")?
+            .prepare_cached("SELECT kind, uri FROM fact_subject WHERE id = ?1")?
             .query_row([id], |r| Ok((Some(r.get(0)?), Some(r.get(1)?))))?;
         self.subjects.insert(id, found.clone());
         Ok(found)
@@ -1396,7 +1396,7 @@ fn subject_id(conn: &rusqlite::Connection, subject: Option<&str>) -> rusqlite::R
         return Ok(None);
     };
     let found = conn
-        .prepare_cached("SELECT id FROM fact_subject WHERE ref = ?1")?
+        .prepare_cached("SELECT id FROM fact_subject WHERE uri = ?1")?
         .query_row(params![subject], |r| r.get(0))
         .optional()?;
     if found.is_some() {
@@ -1407,7 +1407,7 @@ fn subject_id(conn: &rusqlite::Connection, subject: Option<&str>) -> rusqlite::R
             format!("a fact's subject must be a URI (`oxplow:<extension>/<resource>?…`), not `{subject}`").into(),
         )
     })?;
-    conn.prepare_cached("INSERT INTO fact_subject (ref, kind) VALUES (?1, ?2)")?
+    conn.prepare_cached("INSERT INTO fact_subject (uri, kind) VALUES (?1, ?2)")?
         .execute(params![subject, kind])?;
     Ok(Some(conn.last_insert_rowid()))
 }
@@ -2440,10 +2440,10 @@ impl SqliteFactStore {
                 let mut stmt = conn.prepare_cached(
                     "WITH ranked AS (
                        SELECT c.producer,
-                              COALESCE(fs.ref, fp.path, ?3) AS subject_key,
+                              COALESCE(fs.uri, fp.path, ?3) AS subject_key,
                               f.id AS fact_id,
                               DENSE_RANK() OVER (
-                                PARTITION BY c.producer, COALESCE(fs.ref, fp.path, ?3)
+                                PARTITION BY c.producer, COALESCE(fs.uri, fp.path, ?3)
                                 ORDER BY c.captured_at DESC, c.id DESC
                               ) AS latest
                          FROM fact f
@@ -3527,15 +3527,15 @@ impl SqliteFactStore {
                        AND id NOT IN ({by_path})
                        AND id NOT IN ({scalar})",
                     by_subject = latest(
-                        ", fs.ref",
+                        ", fs.uri",
                         "JOIN fact_subject fs ON fs.id = f.subject_id",
-                        "fs.ref IS NOT NULL"
+                        "fs.uri IS NOT NULL"
                     ),
                     by_path = latest(", f.path_id", "", "f.path_id IS NOT NULL"),
                     scalar = latest(
                         "",
                         "LEFT JOIN fact_subject fs ON fs.id = f.subject_id",
-                        "fs.ref IS NULL AND f.path_id IS NULL"
+                        "fs.uri IS NULL AND f.path_id IS NULL"
                     ),
                 );
                 let mut streams: Vec<i64> = {
@@ -3705,14 +3705,14 @@ impl SqliteFactStore {
                     "WITH ranked AS (
                        SELECT f.id AS fact_id,
                               ROW_NUMBER() OVER (
-                                PARTITION BY c.stream_id, c.producer, fs.ref
+                                PARTITION BY c.stream_id, c.producer, fs.uri
                                 ORDER BY c.captured_at DESC, c.id DESC, f.id DESC
                               ) AS rn
                          FROM fact f
                          JOIN metric_capture c ON c.id = f.capture_id
                          JOIN fact_subject fs ON fs.id = f.subject_id
                         WHERE f.measure_id = ?1
-                          AND fs.ref IS NOT NULL
+                          AND fs.uri IS NOT NULL
                           AND c.status = 'done'
                           AND (?2 IS NULL OR c.stream_id = ?2)
                      )

@@ -1,7 +1,7 @@
 title: Item
 description: One item — what an `oxplow:e2e/item?id=<n>` URI opens.
-params: [{ name: ref }]
-query: SELECT title FROM v_e2e_item WHERE ref = :ref
+params: [{ name: uri }]
+query: SELECT title FROM v_e2e_item WHERE uri = :uri
 viz: table
 empty: No such item.
 hidden: true

@@ -3,7 +3,7 @@ description: Recent PRs with the work item their title mentions by its id (tsk42
 params:
   - { name: state, label: "State (open / closed / all)", default: all }
 query: |
-  SELECT pr.number, pr.title, pr.state, pr.author, w.ref AS item_ref, w.title AS item
+  SELECT pr.number, pr.title, pr.state, pr.author, w.uri AS item_ref, w.title AS item
   FROM v_github_pr pr
   LEFT JOIN v_work_item w
     ON pr.title LIKE '%' || w.native_id || '%'

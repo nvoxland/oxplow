@@ -31,8 +31,8 @@ const lens = (over: Partial<Lens> = {}): Lens => ({
 
 describe("displayColumns", () => {
   test("without declared columns shows every result column, its key in words", () => {
-    expect(displayColumns(lens(), ["ref", "title"])).toEqual([
-      { key: "ref", label: "Ref", index: 0, link: null, unitIndex: null, iconIndex: null, toneIndex: null, width: null, format: null, highlight: null },
+    expect(displayColumns(lens(), ["uri", "title"])).toEqual([
+      { key: "uri", label: "Uri", index: 0, link: null, unitIndex: null, iconIndex: null, toneIndex: null, width: null, format: null, highlight: null },
       { key: "title", label: "Title", index: 1, link: null, unitIndex: null, iconIndex: null, toneIndex: null, width: null, format: null, highlight: null },
     ]);
   });
@@ -69,7 +69,7 @@ describe("displayColumns", () => {
 });
 
 describe("row groups and styling", () => {
-  const cols = ["bucket", "title", "ref", "on", "d"];
+  const cols = ["bucket", "title", "uri", "on", "d"];
   const rows = [
     ["Ready", "a", "oxplow:oxplow/page?page=tasks", 0, 0],
     ["Done", "b", null, 1, 1],
@@ -78,7 +78,7 @@ describe("row groups and styling", () => {
   const res = { columns: cols, rows, truncated: false } as never;
 
   test("rows group by a column, in the order each value first appears; the heading links from the group's first row", () => {
-    const l = lens({ viz: "list", group: { by: "bucket", link: { kind: "page", from: "ref", line: null, base: null, head: null } } });
+    const l = lens({ viz: "list", group: { by: "bucket", link: { kind: "page", from: "uri", line: null, base: null, head: null } } });
     const groups = rowGroups(l, res)!;
     expect(groups.map((g) => [g.key, g.label, g.rows.map((r) => r[1])])).toEqual([
       ["Ready", "Ready", ["a", "c"]],
@@ -118,7 +118,7 @@ describe("cellLinkRef", () => {
   const row = [42, "Fix it", "src/a.ts", "auth-flow", "oxplow:oxplow/effort?id=eff7"];
 
   test("a page link reads its ref from `from`", () => {
-    expect(cellLinkRef({ kind: "page", from: "ref", line: null, base: null, head: null }, "title", [...row, "oxplow:oxplow/work_item?id=E-1&provider=issues"], [...cols, "ref"])).toBe("oxplow:oxplow/work_item?id=E-1&provider=issues");
+    expect(cellLinkRef({ kind: "page", from: "uri", line: null, base: null, head: null }, "title", [...row, "oxplow:oxplow/work_item?id=E-1&provider=issues"], [...cols, "uri"])).toBe("oxplow:oxplow/work_item?id=E-1&provider=issues");
   });
   test("file / wiki / effort-diff links default to the column itself", () => {
     expect(cellLinkRef({ kind: "file", from: null, line: null, base: null, head: null }, "path", row, cols)?.id).toBe("oxplow:oxplow/file?path=src/a.ts");
@@ -211,7 +211,7 @@ describe("changedParams", () => {
 
   // What a page writes into its ref: a value is its default by its type,
   // so a bool's echo (0) is its default false, and a key that isn't a
-  // lens param (a page's own `ref`) is kept as it is.
+  // lens param (a page's own `uri`) is kept as it is.
   test("compares by type and keeps keys that aren't lens params", () => {
     const l = lens({
       params: [
@@ -219,7 +219,7 @@ describe("changedParams", () => {
         { name: "range", label: null, default: "30d", type: "date_range" },
       ],
     });
-    expect(changedParams(l, { merges: 0, range: "30d", ref: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" })).toEqual({ ref: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" });
+    expect(changedParams(l, { merges: 0, range: "30d", uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" })).toEqual({ uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" });
     expect(changedParams(l, { merges: true, range: "7d" })).toEqual({ merges: true, range: "7d" });
   });
 });
@@ -263,7 +263,7 @@ describe("rowMention", () => {
 describe("rowAsk", () => {
   test("Ask About This on a row asks about what it links to, else the row itself", () => {
     const linked = lens({ columns: [{ key: "sha", label: null, link: { kind: "commit", from: null, line: null } }] });
-    expect(rowAsk(linked, ["sha", "subject"], ["abc123", "Fix"])).toBe("[oxplow ref oxplow:oxplow/commit?sha=abc123] ");
+    expect(rowAsk(linked, ["sha", "subject"], ["abc123", "Fix"])).toBe("[oxplow uri oxplow:oxplow/commit?sha=abc123] ");
     expect(rowAsk(lens(), ["id", "title"], [42, "Fix it"])).toBe('[oxplow lens review/waiting row: id=42, title="Fix it"] ');
   });
 });
@@ -504,7 +504,7 @@ describe("structure components (P6.A2)", () => {
   });
 
   test("timelineEntries sort oldest first and carry refs", () => {
-    const l = lens({ viz: "timeline", timeline: { at: "at", label: "w", ref: "r" } });
+    const l = lens({ viz: "timeline", timeline: { at: "at", label: "w", uri: "r" } });
     const out = timelineEntries(
       l,
       result(["at", "w", "r"], [

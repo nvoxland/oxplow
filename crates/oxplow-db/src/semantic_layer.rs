@@ -1163,9 +1163,9 @@ mod tests {
                  INSERT INTO threads (id, stream_id, title, created_at, updated_at)
                    VALUES (1, 1, 'Thread', '2026-01-01', '2026-01-01');
                  INSERT INTO capability_provider (capability, provider) VALUES ('work_items', 'oxplow');
-                 INSERT INTO work_item (ref, provider, title, body, state, native_state, thread_id, created_at, updated_at)
+                 INSERT INTO work_item (uri, provider, title, body, state, native_state, thread_id, created_at, updated_at)
                    VALUES ('oxplow:oxplow/work_item?id=a&provider=oxplow', 'oxplow', 'Live item', '', 'in_progress', 'in_progress', 1, '2026-01-01', '2026-01-01');
-                 INSERT INTO work_item (ref, provider, title, body, state, native_state, thread_id, created_at, updated_at, deleted_at)
+                 INSERT INTO work_item (uri, provider, title, body, state, native_state, thread_id, created_at, updated_at, deleted_at)
                    VALUES ('oxplow:oxplow/work_item?id=b&provider=oxplow', 'oxplow', 'Deleted item', '', 'todo', 'ready', 1, '2026-01-01', '2026-01-01', '2026-01-02');",
             )
         })
@@ -1298,10 +1298,10 @@ mod tests {
         );
         // A name the query uses must be given; a positional count must match.
         let err = sl
-            .run(SqlQuery::new("SELECT title FROM v_work_item WHERE ref = :ref").named(vec![]))
+            .run(SqlQuery::new("SELECT title FROM v_work_item WHERE uri = :uri").named(vec![]))
             .await
             .unwrap_err();
-        assert!(err.to_string().contains("no value for :ref"), "{err}");
+        assert!(err.to_string().contains("no value for :uri"), "{err}");
         let err = sl
             .query_sql("SELECT ?1, ?2", vec![SqlCell::Int(1)], None)
             .await
@@ -1328,7 +1328,7 @@ mod tests {
             (vec!["v_work_item".to_string()], vec![])
         );
         let r =
-            reads("WITH t AS (SELECT ref FROM v_work_item) SELECT * FROM t JOIN v_thread th ON 1")
+            reads("WITH t AS (SELECT uri FROM v_work_item) SELECT * FROM t JOIN v_thread th ON 1")
                 .await;
         assert_eq!(
             r.models,
@@ -1353,7 +1353,7 @@ mod tests {
         let r = reads("SELECT name FROM sqlite_master").await;
         assert_eq!(r.tables, vec!["sqlite_master".to_string()]);
         let checked = sl
-            .check("SELECT ref FROM v_work_item WHERE ref = :ref")
+            .check("SELECT uri FROM v_work_item WHERE uri = :uri")
             .await
             .unwrap();
         assert_eq!(checked.models, vec!["v_work_item".to_string()]);
@@ -1412,12 +1412,12 @@ mod tests {
         assert!(refused("SELECT name FROM sqlite_master")
             .await
             .contains("`sqlite_master` is a physical table"));
-        assert!(sl.check("SELECT ref FROM work_item").await.is_err());
+        assert!(sl.check("SELECT uri FROM work_item").await.is_err());
         // Models, counts over them, table-valued functions and temp tables
         // are all fine.
         for ok in [
             "SELECT count(*) FROM v_work_item",
-            "SELECT t.ref FROM v_work_item t JOIN v_thread th ON th.id = t.thread_id",
+            "SELECT t.uri FROM v_work_item t JOIN v_thread th ON th.id = t.thread_id",
             "SELECT j.value FROM v_work_item t, json_each('[1]') j",
         ] {
             sl.query_sql(ok, vec![], None)
@@ -1457,7 +1457,7 @@ mod tests {
         // A refusal leaves the connection writable.
         db.call(|c| {
             c.execute(
-                "UPDATE work_item SET title = 'x' WHERE ref = 'oxplow:oxplow/work_item?id=a&provider=oxplow'",
+                "UPDATE work_item SET title = 'x' WHERE uri = 'oxplow:oxplow/work_item?id=a&provider=oxplow'",
                 [],
             )
         })
@@ -1503,7 +1503,7 @@ mod tests {
         assert_eq!(left, 0);
         db.call(|c| {
             c.execute(
-                "UPDATE work_item SET title = 'w' WHERE ref = 'oxplow:oxplow/work_item?id=a&provider=oxplow'",
+                "UPDATE work_item SET title = 'w' WHERE uri = 'oxplow:oxplow/work_item?id=a&provider=oxplow'",
                 [],
             )
         })
@@ -1516,13 +1516,13 @@ mod tests {
         let (_db, sl) = seeded().await;
         let out = sl
             .query_sql(
-                "SELECT ref, title, state, thread_id FROM v_work_item ORDER BY ref",
+                "SELECT uri, title, state, thread_id FROM v_work_item ORDER BY uri",
                 vec![],
                 None,
             )
             .await
             .unwrap();
-        assert_eq!(out.columns, vec!["ref", "title", "state", "thread_id"]);
+        assert_eq!(out.columns, vec!["uri", "title", "state", "thread_id"]);
         assert_eq!(
             serde_json::to_value(&out.rows).unwrap(),
             json!([[
@@ -1624,7 +1624,7 @@ mod tests {
         // query_only was reset.
         db.call(|c| {
             c.execute(
-                "UPDATE work_item SET title = 'renamed' WHERE ref = 'oxplow:oxplow/work_item?id=a&provider=oxplow'",
+                "UPDATE work_item SET title = 'renamed' WHERE uri = 'oxplow:oxplow/work_item?id=a&provider=oxplow'",
                 [],
             )
         })

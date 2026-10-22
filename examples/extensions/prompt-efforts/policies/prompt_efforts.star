@@ -9,7 +9,7 @@ def _thread_id(thread):
 
 def _open_effort(thread):
     rows = scope("sql.read", {
-        "sql": "SELECT ref, work_item, started_at FROM v_effort WHERE thread_id = :t AND ended_at IS NULL",
+        "sql": "SELECT uri, work_item, started_at FROM v_effort WHERE thread_id = :t AND ended_at IS NULL",
         "params": {"t": _thread_id(thread)},
     })
     return rows[0] if rows else None
@@ -39,7 +39,7 @@ def _checkpoint(e):
         # The previous prompt's effort ends where this turn began; this one
         # carries on its work item.
         commands.append({"name": "oxplow.effort.close",
-                         "input": {"effort": uri.param(current["ref"], "id"), "as_of": since, "reason": "switch"}})
+                         "input": {"effort": uri.param(current["uri"], "id"), "as_of": since, "reason": "switch"}})
         if current["work_item"] != None:
             opened["work_item"] = current["work_item"]
     commands.append({"name": "oxplow.effort.open", "input": opened})
@@ -57,16 +57,16 @@ def _item_moved(e):
         if current["work_item"] == item:
             return {"skip": "the effort is already the item's"}
         return {"commands": [{"name": "oxplow.effort.link",
-                              "input": {"effort": uri.param(current["ref"], "id"), "work_item": item}}]}
+                              "input": {"effort": uri.param(current["uri"], "id"), "work_item": item}}]}
     if to == "done" or to == "canceled":
         rows = scope("sql.read", {
-            "sql": "SELECT ref FROM v_effort WHERE work_item = :w AND ended_at IS NULL",
+            "sql": "SELECT uri FROM v_effort WHERE work_item = :w AND ended_at IS NULL",
             "params": {"w": item},
         })
         if not rows:
             return {"skip": "the item has no open effort"}
         return {"commands": [{"name": "oxplow.effort.close",
-                              "input": {"effort": uri.param(r["ref"], "id"), "reason": "switch"}} for r in rows]}
+                              "input": {"effort": uri.param(r["uri"], "id"), "reason": "switch"}} for r in rows]}
     return {"skip": "a move that changes no effort"}
 
 def transform(x):

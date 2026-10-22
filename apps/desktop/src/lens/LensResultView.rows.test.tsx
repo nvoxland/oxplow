@@ -54,7 +54,7 @@ const base: Lens = {
   needs: [],
   origin: { extension: "", source: null, running: "", deployment: null, bundled: false },
 };
-const columns = ["bucket", "bucket_ref", "id", "title", "status", "hue", "on", "d", "ref"];
+const columns = ["bucket", "bucket_ref", "id", "title", "status", "hue", "on", "d", "uri"];
 const rows: SqlCell[][] = [
   ["In progress", "oxplow:oxplow/page?page=tasks", 1, "Epic", "in_progress", null, 0, 0, "oxplow:oxplow/work_item?id=tsk1&provider=oxplow"],
   ["In progress", "oxplow:oxplow/page?page=tasks", 2, "Child", "done", "warning", 1, 1, "oxplow:oxplow/work_item?id=tsk2&provider=oxplow"],
@@ -66,7 +66,7 @@ const grouped: Partial<Lens> = {
   group: { by: "bucket", link: link("page", "bucket_ref") },
   emphasis: "on",
   depth: "d",
-  columns: [{ key: "title", label: null, link: link("page", "ref"), unit: null, icon: "status", tone: "hue" }],
+  columns: [{ key: "title", label: null, link: link("page", "uri"), unit: null, icon: "status", tone: "hue" }],
   actions: [{ id: "add", label: "+", command: "oxplow.work_item.create", input: {}, row: false, group: "Ready" }],
 };
 
@@ -142,7 +142,7 @@ test("a tree's labels follow their column's link, and its rows drag", () => {
     viz: "tree",
     tree: { id: "id", parent: "d", label: "title" },
     emphasis: "on",
-    columns: [{ key: "title", label: null, link: link("page", "ref"), unit: null, icon: "status", tone: null }],
+    columns: [{ key: "title", label: null, link: link("page", "uri"), unit: null, icon: "status", tone: null }],
   });
   const view = render(<LensResultView run={run} onOpenPage={() => {}} />);
   const nodes = view.getAllByTestId("lens-tree-row");
@@ -210,7 +210,7 @@ test("a row click sets the param its column selects; a link in it doesn't", () =
       params: [{ name: "pick", label: null, default: null, options: [], type: "text", role: "selection", presets: [] }],
       columns: [
         { key: "title", label: null, link: null, unit: null, icon: null, tone: null, select: "pick" },
-        { key: "ref", label: null, link: link("page", "ref"), unit: null, icon: null, tone: null },
+        { key: "uri", label: null, link: link("page", "uri"), unit: null, icon: null, tone: null },
       ] as never,
     }),
     params: { pick: "Child" },
@@ -296,7 +296,7 @@ test("a link opens with its column's pages as the origin", () => {
   const view = render(
     <PageNavigationContext.Provider value={nav}>
       <LensResultView
-        run={runOf({ viz: "table", columns: [{ key: "title", label: null, link: link("page", "ref"), unit: null }] })}
+        run={runOf({ viz: "table", columns: [{ key: "title", label: null, link: link("page", "uri"), unit: null }] })}
       />
     </PageNavigationContext.Provider>,
   );
@@ -319,7 +319,7 @@ test("↑/↓ and Enter open the row under the cursor", () => {
   const view = render(
     <PageNavigationContext.Provider value={nav}>
       <LensResultView
-        run={runOf({ viz: "table", columns: [{ key: "title", label: null, link: link("page", "ref"), unit: null }] })}
+        run={runOf({ viz: "table", columns: [{ key: "title", label: null, link: link("page", "uri"), unit: null }] })}
       />
     </PageNavigationContext.Provider>,
   );

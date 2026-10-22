@@ -89,7 +89,7 @@ mod tests {
         let rows: Vec<(String, String, Option<String>)> = db
             .call(|c| {
                 let mut s =
-                    c.prepare("SELECT ref, kind, version FROM v_contribution ORDER BY ref")?;
+                    c.prepare("SELECT uri, kind, version FROM v_contribution ORDER BY uri")?;
                 let rows = s
                     .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
                     .collect::<rusqlite::Result<Vec<_>>>()?;

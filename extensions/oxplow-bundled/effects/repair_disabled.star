@@ -17,10 +17,10 @@ _STATE = """
 SELECT (SELECT provider FROM v_capability_provider
          WHERE capability = 'work_items' AND active = 1 AND available = 1
            AND provider <> 'none') AS provider,
-       (SELECT w.ref FROM v_work_item_link l JOIN v_work_item w ON w.ref = l.from_ref
-         WHERE l.to_ref = :contribution AND l.link_type = 'about'
+       (SELECT w.uri FROM v_work_item_link l JOIN v_work_item w ON w.uri = l.from_uri
+         WHERE l.to_uri = :contribution AND l.link_type = 'about'
            AND w.state NOT IN ('done', 'canceled')
-         ORDER BY w.ref DESC LIMIT 1) AS open_item
+         ORDER BY w.uri DESC LIMIT 1) AS open_item
 """
 
 # Where it is declared, and its recent failures, newest first: a
@@ -84,7 +84,7 @@ def transform(x):
             lines.extend(["- " + md_text(e) for e in errors[:_ERRORS_SHOWN]])
         return {"commands": [{
             "name": "oxplow.work_item.comment",
-            "input": {"ref": state["open_item"], "body": "\n".join(lines)},
+            "input": {"uri": state["open_item"], "body": "\n".join(lines)},
         }]}
 
     body = [

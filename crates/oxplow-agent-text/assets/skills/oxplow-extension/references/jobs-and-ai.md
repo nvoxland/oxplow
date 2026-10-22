@@ -42,7 +42,7 @@ effects:
   when running it again is harmless: an attempt a restart cuts off is
   then retried, up to three attempts, and the effect hears only the
   final end.
-- Show it running with a lens over `v_job_run_output` (`WHERE job_id = (SELECT id FROM v_job_run WHERE ref = :job_run)`):
+- Show it running with a lens over `v_job_run_output` (`WHERE job_id = (SELECT id FROM v_job_run WHERE uri = :job_run)`):
   it updates as the model writes. oxplow's own Job Runs lens lists every run
   with Cancel.
 - `examples/extensions/triage/` in the oxplow repo has one, with its

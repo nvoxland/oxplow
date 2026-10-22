@@ -33,7 +33,7 @@ pub fn restate_tx(
     let id = item_ref;
     let live: Option<(String, String)> = conn
         .query_row(
-            "SELECT title, body FROM work_item WHERE ref = ?1 AND deleted_at IS NULL",
+            "SELECT title, body FROM work_item WHERE uri = ?1 AND deleted_at IS NULL",
             [item_ref],
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
@@ -44,14 +44,14 @@ pub fn restate_tx(
         Some((title, body)) => {
             let links: Vec<(String, String)> = rows(
                 conn,
-                "SELECT to_ref, link_type FROM work_item_link WHERE from_ref = ?1
-                 ORDER BY created_at, to_ref",
+                "SELECT to_uri, link_type FROM work_item_link WHERE from_uri = ?1
+                 ORDER BY created_at, to_uri",
                 item_ref,
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )?;
             let comments: Vec<String> = rows(
                 conn,
-                "SELECT body FROM work_item_comment WHERE ref = ?1 ORDER BY created_at, id",
+                "SELECT body FROM work_item_comment WHERE uri = ?1 ORDER BY created_at, id",
                 item_ref,
                 |r| r.get(0),
             )?;
@@ -87,7 +87,7 @@ pub fn restate_tx(
 /// clears its slices): what the boot repair restates.
 pub fn all_refs_tx(conn: &rusqlite::Connection) -> Result<Vec<String>, DomainError> {
     let mut stmt = conn
-        .prepare("SELECT ref FROM work_item ORDER BY ref")
+        .prepare("SELECT uri FROM work_item ORDER BY uri")
         .map_err(map_sql_err)?;
     let refs = stmt
         .query_map([], |r| r.get(0))

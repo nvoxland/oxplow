@@ -37,13 +37,13 @@ test("the enabled extensions' decorators for a placement", () => {
 test("one query per decorator, over the refs of its kind", () => {
   expect(decorationQueries(decorator({}), ["oxplow:oxplow/work_item?id=tsk1&provider=oxplow", "oxplow:oxplow/commit?sha=abc1234", "oxplow:oxplow/work_item?id=W-1&provider=fake"])).toEqual([
     {
-      sql: 'SELECT ref, "label" AS label, "color" AS color FROM v_flags_flags WHERE ref IN (?1, ?2)',
+      sql: 'SELECT uri, "label" AS label, "color" AS color FROM v_flags_flags WHERE uri IN (?1, ?2)',
       params: ["oxplow:oxplow/work_item?id=tsk1&provider=oxplow", "oxplow:oxplow/work_item?id=W-1&provider=fake"],
       limit: 2 * MAX_DECORATIONS_PER_REF,
     },
   ]);
   expect(decorationQueries(decorator({ color: null }), ["oxplow:oxplow/work_item?id=tsk1&provider=oxplow"])[0]?.sql).toBe(
-    'SELECT ref, "label" AS label FROM v_flags_flags WHERE ref IN (?1)',
+    'SELECT uri, "label" AS label FROM v_flags_flags WHERE uri IN (?1)',
   );
   expect(decorationQueries(decorator({}), ["oxplow:oxplow/commit?sha=abc1234"])).toEqual([]);
 });
@@ -61,7 +61,7 @@ test("many refs are asked in chunks, each with room for all its decorations", ()
 // tsk934: one extension adds at most a few short labels to a ref.
 test("an extension's decorations on one ref are few and short", () => {
   const res = {
-    columns: ["ref", "label"],
+    columns: ["uri", "label"],
     rows: Array.from({ length: 10 }, (_, i) => ["oxplow:oxplow/work_item?id=tsk1&provider=oxplow", `${i}${"x".repeat(100)}`]),
     truncated: false,
   } as unknown as SqlQueryResult;
@@ -82,7 +82,7 @@ test("a decorator naming anything but identifiers builds no query", () => {
 
 test("decorations become chips for their ref; a color that isn't a plain color is dropped", () => {
   const res = {
-    columns: ["ref", "label", "color"],
+    columns: ["uri", "label", "color"],
     rows: [
       ["oxplow:oxplow/work_item?id=tsk1&provider=oxplow", "urgent", "#ff0000"],
       ["oxplow:oxplow/work_item?id=tsk1&provider=oxplow", "flaky", "url(https://x)"],

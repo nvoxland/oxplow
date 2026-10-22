@@ -47,7 +47,7 @@ mock.module("../../api.js", () => ({
     }
     if (sql.includes("FROM v_command_proposal")) {
       return {
-        columns: ["id", "ref", "created_at", "command", "input", "actor_kind", "actor_id", "thread_id", "key", "preview", "dry_run"],
+        columns: ["id", "uri", "created_at", "command", "input", "actor_kind", "actor_id", "thread_id", "key", "preview", "dry_run"],
         rows: [[7, "oxplow:oxplow/proposal?id=7", "t", "oxplow.config.set", '{"key":"zones","value":[]}', "agent", "thr3", 3, "oxplow:oxplow/config?key=zones", '{"command":"oxplow.config.set","summary":"Set zones","input":{},"destructive":false}', null]],
         truncated: false,
         reads: { models: ["v_command_proposal"], tables: [], measures: [] },

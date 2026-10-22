@@ -2,8 +2,8 @@
 - question: Which wiki pages cite files that changed since they were written?
   skill: oxplow-wiki-capture
   reaches:
-    sql: SELECT ref, title, stale_ref_count FROM v_knowledge_page WHERE stale_ref_count > 0
-  shape: { columns: [ref, title, stale_ref_count] }
+    sql: SELECT uri, title, stale_ref_count FROM v_knowledge_page WHERE stale_ref_count > 0
+  shape: { columns: [uri, title, stale_ref_count] }
 - question: Which wiki pages talk about this file?
   about: oxplow/file
   skill: oxplow-wiki-capture

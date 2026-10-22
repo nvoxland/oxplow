@@ -18,7 +18,7 @@ mock.module("../../api.js", () => ({
   ...realApi,
   listExtensions: async () => extensions,
   listPersonCommands: async () => [
-    personSpec("tracker.item.estimate", { label: "Estimate in Fake", group: "Tracker", about: "oxplow/work_item", input: { ref: "{{ref}}" } }),
+    personSpec("tracker.item.estimate", { label: "Estimate in Fake", group: "Tracker", about: "oxplow/work_item", input: { uri: "{{uri}}" } }),
     personSpec("tracker.commit.sync", { label: "Sync", group: "Tracker", about: "oxplow/commit" }),
   ],
   querySql: async (sql: string, ...rest: unknown[]) => {
@@ -28,7 +28,7 @@ mock.module("../../api.js", () => ({
       return { columns: [], rows: [], truncated: false, reads: { models: ["v_work_item"], tables: [], measures: [] }, freshness: {} };
     }
     return {
-      columns: ["ref", "provider", "title", "body", "state", "parent_ref", "thread_id", "rank", "closed_at", "created_at", "updated_at", "native", "comment_count"],
+      columns: ["uri", "provider", "title", "body", "state", "parent_uri", "thread_id", "rank", "closed_at", "created_at", "updated_at", "native", "comment_count"],
       rows: [
         ["oxplow:oxplow/work_item?id=tsk1&provider=oxplow", "oxplow", "Plan it", "", "todo", null, 1, 0, null, "t", "t", '{"priority":"medium"}', 0],
         ["oxplow:oxplow/work_item?id=tsk2&provider=oxplow", "oxplow", "Ship it", "", "in_progress", null, 1, 1, null, "t", "t", '{"priority":"high"}', 2],
@@ -87,11 +87,11 @@ test("dropping a card on a column, or its menu's Move To, transitions it", async
   const dataTransfer = { getData: (k: string) => data.get(k) ?? "", types: [WORK_ITEM_DRAG_MIME], dropEffect: "move" };
   fireEvent.dragOver(view.getByTestId("board-column-blocked"), { dataTransfer });
   fireEvent.drop(view.getByTestId("board-column-blocked"), { dataTransfer });
-  await waitFor(() => expect(ran).toEqual([["oxplow.work_item.transition", { ref: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", to: "blocked" }]]));
+  await waitFor(() => expect(ran).toEqual([["oxplow.work_item.transition", { uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", to: "blocked" }]]));
 
   fireEvent.contextMenu(view.getByText("Ship it"));
   fireEvent.click(await waitFor(() => view.getByTestId("menu-item-board-move-done")));
-  await waitFor(() => expect(ran[1]).toEqual(["oxplow.work_item.transition", { ref: "oxplow:oxplow/work_item?id=tsk2&provider=oxplow", to: "done" }]));
+  await waitFor(() => expect(ran[1]).toEqual(["oxplow.work_item.transition", { uri: "oxplow:oxplow/work_item?id=tsk2&provider=oxplow", to: "done" }]));
 });
 
 // P6b.C3, P7.A1: every provider's card opens its page and moves through
@@ -104,7 +104,7 @@ test("another provider's card links to its page and moves through oxplow.work_it
   const data = new Map<string, string>([[WORK_ITEM_DRAG_MIME, drag("oxplow:oxplow/work_item?id=W-1&provider=fake")]]);
   const dataTransfer = { getData: (k: string) => data.get(k) ?? "", types: [WORK_ITEM_DRAG_MIME], dropEffect: "move" };
   fireEvent.drop(view.getByTestId("board-column-done"), { dataTransfer });
-  await waitFor(() => expect(ran).toEqual([["oxplow.work_item.transition", { ref: "oxplow:oxplow/work_item?id=W-1&provider=fake", to: "done" }]]));
+  await waitFor(() => expect(ran).toEqual([["oxplow.work_item.transition", { uri: "oxplow:oxplow/work_item?id=W-1&provider=fake", to: "done" }]]));
 });
 
 // The commands about work items (their `ui.about`) join a card's
@@ -120,7 +120,7 @@ test("a card's menu offers the commands about its item", async () => {
   expect(item.textContent).toContain("Estimate in Fake");
   expect(view.queryByTestId("menu-item-ref-command-tracker.commit.sync")).toBeNull();
   fireEvent.click(item);
-  await waitFor(() => expect(ran).toEqual([["tracker.item.estimate", { ref: "oxplow:oxplow/work_item?id=W-1&provider=fake" }]]));
+  await waitFor(() => expect(ran).toEqual([["tracker.item.estimate", { uri: "oxplow:oxplow/work_item?id=W-1&provider=fake" }]]));
 });
 
 // A right-click anywhere on a card — its title link too — opens the card's

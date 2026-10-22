@@ -92,7 +92,7 @@ struct ClaimRow {
 fn claim_row(ctx: &TxCtx<'_>, id: i64) -> Result<ClaimRow, CommandError> {
     ctx.conn
         .query_row(
-            "SELECT effort_id, evidence_ref, review FROM claim WHERE id = ?1",
+            "SELECT effort_id, evidence, review FROM claim WHERE id = ?1",
             [id],
             |r| {
                 Ok(ClaimRow {
@@ -135,7 +135,7 @@ fn set_review(
 ) -> Result<HandlerOutput, CommandError> {
     ctx.conn
         .execute(
-            "UPDATE claim SET review = ?2, evidence_ref = ?3 WHERE id = ?1",
+            "UPDATE claim SET review = ?2, evidence = ?3 WHERE id = ?1",
             rusqlite::params![row.id, review, evidence],
         )
         .map_err(|e| CommandError::from(oxplow_db::map_sql_err(e)))?;
@@ -392,7 +392,7 @@ mod tests {
                         effort_id: Some(effort),
                         statement: "no behavior change".into(),
                         kind: "no_behavior_change".into(),
-                        evidence_ref: None,
+                        evidence: None,
                         agent_session_id: None,
                     },
                 )
@@ -441,7 +441,7 @@ mod tests {
             .db
             .read(move |tx| {
                 tx.query_row(
-                    "SELECT review, evidence_ref FROM v_claim WHERE id = ?1",
+                    "SELECT review, evidence FROM v_claim WHERE id = ?1",
                     [id],
                     |r| Ok((r.get(0)?, r.get(1)?)),
                 )
@@ -516,7 +516,7 @@ mod tests {
             .db
             .transaction(move |tx| {
                 tx.execute(
-                    "UPDATE claim SET evidence_ref = 'oxplow:oxplow/run?id=42' WHERE id = ?1",
+                    "UPDATE claim SET evidence = 'oxplow:oxplow/run?id=42' WHERE id = ?1",
                     [claim],
                 )
                 .map_err(oxplow_db::map_sql_err)

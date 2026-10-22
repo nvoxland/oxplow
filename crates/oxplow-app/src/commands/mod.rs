@@ -232,7 +232,7 @@ pub struct ProviderCall {
     pub provider: String,
     /// The operation, as its declarations name it.
     pub op: String,
-    /// The command's input: a `ref` to one of an instance's items, or an
+    /// The command's input: a `uri` to one of an instance's items, or an
     /// `instance`, says which instance runs it.
     pub input: Value,
     pub invocation: Invocation,

@@ -1,7 +1,7 @@
 -- What site search indexes for each handoff: its body, under the
 -- recipient thread's stream. Settled handoffs stay findable; archived
 -- work leaves search, as a note does.
-SELECT h.ref AS ref,
+SELECT h.uri AS uri,
        CAST('' AS TEXT) AS title,
        CAST(h.body AS TEXT) AS body,
        CAST(CASE WHEN th.stream_id IS NULL THEN NULL ELSE 'str' || th.stream_id END AS TEXT)

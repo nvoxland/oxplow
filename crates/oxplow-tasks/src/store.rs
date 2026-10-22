@@ -687,10 +687,10 @@ mod tests {
         let child_ref = work_item_ref(child);
         let (parent, dangling): (Option<String>, i64) = crate::db::read(&store.db, move |c| {
             c.query_row(
-                "SELECT (SELECT parent_ref FROM v_work_item WHERE ref = ?1),
-                            (SELECT count(*) FROM v_work_item w WHERE w.parent_ref IS NOT NULL
+                "SELECT (SELECT parent_uri FROM v_work_item WHERE uri = ?1),
+                            (SELECT count(*) FROM v_work_item w WHERE w.parent_uri IS NOT NULL
                                AND NOT EXISTS (SELECT 1 FROM v_work_item p
-                                               WHERE p.ref = w.parent_ref))",
+                                               WHERE p.uri = w.parent_uri))",
                 [child_ref],
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
@@ -742,12 +742,12 @@ mod tests {
                     let w = crate::record::record_tx(c, id).unwrap();
                     format!(
                         "{}|{}|{}|{}|{}|{}|{}",
-                        w.item_ref,
+                        w.uri,
                         w.title,
                         w.body,
                         w.state.as_str(),
                         w.native_state,
-                        w.parent_ref.unwrap_or_default(),
+                        w.parent_uri.unwrap_or_default(),
                         w.deleted
                     )
                 })

@@ -251,7 +251,7 @@ mod tests {
             effort_id: Some(effort),
             statement: format!("{kind} on effort {effort}"),
             kind: kind.into(),
-            evidence_ref: evidence.map(str::to_string),
+            evidence: evidence.map(str::to_string),
             agent_session_id: None,
         };
         f.svc
@@ -381,7 +381,7 @@ mod tests {
             .sql
             .query_sql(
                 "SELECT c.kind, c.effort_id, s.verified, s.backed_by
-                 FROM v_claim c JOIN v_oxplow_bundled_claim_status s ON s.ref = c.ref
+                 FROM v_claim c JOIN v_oxplow_bundled_claim_status s ON s.uri = c.uri
                  ORDER BY c.id",
                 vec![],
                 None,
@@ -430,7 +430,7 @@ mod tests {
             .sql
             .query_sql(
                 "SELECT c.kind, s.verified, s.backed_by
-                 FROM v_claim c LEFT JOIN v_oxplow_bundled_claim_status s ON s.ref = c.ref
+                 FROM v_claim c LEFT JOIN v_oxplow_bundled_claim_status s ON s.uri = c.uri
                  ORDER BY c.id",
                 vec![],
                 None,
@@ -991,7 +991,7 @@ mod tests {
             run_bundled_lens_with(
                 &f,
                 "oxplow-bundled/task-token-summary",
-                &[("ref", oxplow_db::SqlCell::Text(item.clone()))],
+                &[("uri", oxplow_db::SqlCell::Text(item.clone()))],
             )
             .await,
             serde_json::json!([[
@@ -1001,7 +1001,7 @@ mod tests {
         let turns = run_bundled_lens_with(
             &f,
             "oxplow-bundled/task-turns",
-            &[("ref", oxplow_db::SqlCell::Text(item.clone()))],
+            &[("uri", oxplow_db::SqlCell::Text(item.clone()))],
         )
         .await;
         assert_eq!(turns.as_array().unwrap().len(), 2);
@@ -1387,7 +1387,7 @@ mod tests {
                             effort_id: Some(effort.value()),
                             statement: statement.into(),
                             kind: "tests_pass".into(),
-                            evidence_ref: evidence.map(str::to_string),
+                            evidence: evidence.map(str::to_string),
                             agent_session_id: None,
                         },
                     )
@@ -2043,7 +2043,7 @@ mod tests {
             .svc
             .sql
             .query_sql(
-                "SELECT ref, transcript_page FROM v_agent_turn ORDER BY id",
+                "SELECT uri, transcript_page FROM v_agent_turn ORDER BY id",
                 vec![],
                 None,
             )
@@ -2116,7 +2116,7 @@ mod tests {
         assert_eq!(col(&rows, 0), ["v_effort"]);
         let columns = &col(&rows, 3)[0];
         assert!(
-            columns.lines().any(|l| l.starts_with("ref TEXT — ")),
+            columns.lines().any(|l| l.starts_with("uri TEXT — ")),
             "{columns}"
         );
         assert!(
@@ -2403,7 +2403,7 @@ mod tests {
                 .run(
                     &oxplow_domain::Actor::Human,
                     "oxplow.work_item.transition",
-                    serde_json::json!({ "ref": r, "to": to }),
+                    serde_json::json!({ "uri": r, "to": to }),
                     false,
                 )
                 .await
@@ -2414,12 +2414,12 @@ mod tests {
             .db
             .transaction(move |tx| {
                 tx.execute(
-                    "UPDATE work_item SET closed_at = '2026-01-05T09:00:00Z' WHERE ref = ?1",
+                    "UPDATE work_item SET closed_at = '2026-01-05T09:00:00Z' WHERE uri = ?1",
                     [&older],
                 )
                 .and_then(|_| {
                     tx.execute(
-                        "UPDATE work_item SET closed_at = '2026-03-01T09:00:00Z' WHERE ref = ?1",
+                        "UPDATE work_item SET closed_at = '2026-03-01T09:00:00Z' WHERE uri = ?1",
                         [&newer],
                     )
                 })
@@ -2824,7 +2824,7 @@ mod tests {
             .run(
                 &human,
                 crate::commands::bookmark::SET,
-                serde_json::json!({ "ref": "oxplow:oxplow/page?page=git-dashboard", "page_kind": "git-dashboard",
+                serde_json::json!({ "uri": "oxplow:oxplow/page?page=git-dashboard", "page_kind": "git-dashboard",
                     "label": "Git", "scope": "thread", "thread": thread.to_string() }),
                 false,
             )
@@ -2886,7 +2886,7 @@ mod tests {
         // own values; removing it takes it off.
         let row =
             |rows: &serde_json::Value| -> std::collections::BTreeMap<String, oxplow_db::SqlCell> {
-                ["title", "page_kind", "ref", "scope", "thread"]
+                ["title", "page_kind", "uri", "scope", "thread"]
                     .iter()
                     .enumerate()
                     .map(|(i, k)| {
@@ -2991,7 +2991,7 @@ mod tests {
                 .run(
                     &oxplow_domain::Actor::Human,
                     "oxplow.work_item.transition",
-                    serde_json::json!({ "ref": r, "to": "done" }),
+                    serde_json::json!({ "uri": r, "to": "done" }),
                     false,
                 )
                 .await
@@ -3002,12 +3002,12 @@ mod tests {
             .db
             .transaction(move |tx| {
                 tx.execute(
-                    "UPDATE work_item SET closed_at = '2026-01-05T09:00:00Z' WHERE ref = ?1",
+                    "UPDATE work_item SET closed_at = '2026-01-05T09:00:00Z' WHERE uri = ?1",
                     [&older],
                 )
                 .and_then(|_| {
                     tx.execute(
-                        "UPDATE work_item SET closed_at = '2026-03-01T09:00:00Z' WHERE ref = ?1",
+                        "UPDATE work_item SET closed_at = '2026-03-01T09:00:00Z' WHERE uri = ?1",
                         [&newer],
                     )
                 })
@@ -3055,7 +3055,7 @@ mod tests {
                 .unwrap()
                 .extend(extra.as_object().unwrap().clone());
             async move {
-                run("oxplow.work_item.create", input).await["ref"]
+                run("oxplow.work_item.create", input).await["uri"]
                     .as_str()
                     .unwrap()
                     .to_string()
@@ -3085,45 +3085,45 @@ mod tests {
             "oxplow.work_item.create",
             serde_json::json!({ "title": "z" }),
         )
-        .await["ref"]
+        .await["uri"]
             .as_str()
             .unwrap()
             .to_string();
         run(
             "oxplow.work_item.link",
-            serde_json::json!({ "ref": z, "target": a, "link_type": "blocks" }),
+            serde_json::json!({ "uri": z, "target": a, "link_type": "blocks" }),
         )
         .await;
         assert_eq!(next().await, ["c ready"], "an open blocker holds a");
         run(
             "oxplow.work_item.transition",
-            serde_json::json!({ "ref": z, "to": "done" }),
+            serde_json::json!({ "uri": z, "to": "done" }),
         )
         .await;
         assert_eq!(next().await, ["a ready", "c ready"], "a closed one doesn't");
 
         run(
             "oxplow.work_item.transition",
-            serde_json::json!({ "ref": a, "to": "done" }),
+            serde_json::json!({ "uri": a, "to": "done" }),
         )
         .await;
         run(
             "oxplow.work_item.transition",
-            serde_json::json!({ "ref": file("x", serde_json::json!({})).await, "to": "in_progress" }),
+            serde_json::json!({ "uri": file("x", serde_json::json!({})).await, "to": "in_progress" }),
         )
         .await;
         // c is next, and becomes an epic once it has children.
         let c1 = file(
             "c1",
-            serde_json::json!({ "parent_ref": next_ref(&f, "c").await }),
+            serde_json::json!({ "parent_uri": next_ref(&f, "c").await }),
         )
         .await;
         file(
             "c2",
-            serde_json::json!({ "parent_ref": next_ref(&f, "c").await, "state": "done" }),
+            serde_json::json!({ "parent_uri": next_ref(&f, "c").await, "state": "done" }),
         )
         .await;
-        file("g", serde_json::json!({ "parent_ref": c1 })).await;
+        file("g", serde_json::json!({ "parent_uri": c1 })).await;
         file("y", serde_json::json!({})).await;
         assert_eq!(next().await, ["c epic", "c1 child", "g child"]);
     }
@@ -3134,7 +3134,7 @@ mod tests {
             .svc
             .sql
             .query_sql(
-                "SELECT ref FROM v_work_item WHERE title = ?1",
+                "SELECT uri FROM v_work_item WHERE title = ?1",
                 vec![oxplow_db::SqlCell::Text(title.into())],
                 None,
             )
@@ -3215,7 +3215,7 @@ mod tests {
         for (title, thread) in [("Child A", f.thread), ("Child B", beta.id)] {
             crate::test_fixtures::file_item(
                 &f.svc,
-                serde_json::json!({ "title": title, "parent_ref": epic_ref,
+                serde_json::json!({ "title": title, "parent_uri": epic_ref,
                     "thread": thread.to_string() }),
             )
             .await;
@@ -3262,7 +3262,7 @@ mod tests {
         let item_rows = run_bundled_lens_with(
             &f,
             "oxplow-bundled/item-shared-work",
-            &[("ref", oxplow_db::SqlCell::Text(item))],
+            &[("uri", oxplow_db::SqlCell::Text(item))],
         )
         .await;
         let kinds: Vec<&str> = item_rows
@@ -3552,7 +3552,7 @@ mod tests {
                 .run(
                     &oxplow_domain::Actor::Human,
                     crate::commands::bookmark::SET,
-                    serde_json::json!({ "ref": r, "page_kind": kind, "label": label,
+                    serde_json::json!({ "uri": r, "page_kind": kind, "label": label,
                                         "scope": scope, "thread": thread.to_string() }),
                     false,
                 )
@@ -3805,7 +3805,7 @@ mod tests {
                         effort_id: Some(effort.value()),
                         statement: "no behavior change".into(),
                         kind: "no_behavior_change".into(),
-                        evidence_ref: None,
+                        evidence: None,
                         agent_session_id: None,
                     },
                 )
@@ -4321,7 +4321,7 @@ mod tests {
         let out = svc
             .sql
             .query_sql(
-                "SELECT w.ref, w.title, w.body FROM v_work_item w JOIN v_work_item_link l ON l.from_ref = w.ref WHERE l.to_ref = 'oxplow:oxplow/collector?collector=work/hot' AND l.link_type = 'about' ORDER BY w.ref",
+                "SELECT w.uri, w.title, w.body FROM v_work_item w JOIN v_work_item_link l ON l.from_uri = w.uri WHERE l.to_uri = 'oxplow:oxplow/collector?collector=work/hot' AND l.link_type = 'about' ORDER BY w.uri",
                 vec![],
                 None,
             )
@@ -4552,7 +4552,7 @@ mod tests {
                             "z".repeat(600)
                         ),
                         kind: "tests_pass".into(),
-                        evidence_ref: None,
+                        evidence: None,
                         agent_session_id: None,
                     },
                 )
@@ -4688,7 +4688,7 @@ mod tests {
                             statement: "tests pass\n# Approved\n- [x] [ship it](https://x.test)"
                                 .into(),
                             kind: "tests_pass".into(),
-                            evidence_ref: None,
+                            evidence: None,
                             agent_session_id: None,
                         },
                     )
@@ -4792,7 +4792,7 @@ mod tests {
                        VALUES (90, 'src/hot.rs', 'modified', 10, 2, 'other', 0),
                               (90, 'src/calm.rs', 'modified', 3, 1, 'other', 0),
                               (90, 'src/big.rs', 'modified', 40, 20, 'other', 0);
-                     INSERT INTO change_function (change_id, path, ref, container, name, status, signature_changed,
+                     INSERT INTO change_function (change_id, path, uri, container, name, status, signature_changed,
                          body_changed, start_line, visibility, is_test, length, params_before, params_after,
                          complexity_delta)
                        VALUES (90, 'src/hot.rs', 'oxplow:oxplow/symbol?path=src/hot.rs&symbol=grow', '', 'grow', 'modified', 0, 1, 1, 'public', 0, 20, 1, 1, 3),
@@ -5198,7 +5198,7 @@ mod tests {
             f.svc
                 .sql
                 .query_sql(
-                    "SELECT ref, label, color FROM v_oxplow_bundled_verdict",
+                    "SELECT uri, label, color FROM v_oxplow_bundled_verdict",
                     vec![],
                     None,
                 )

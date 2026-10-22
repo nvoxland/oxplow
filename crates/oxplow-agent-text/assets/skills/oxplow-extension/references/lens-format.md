@@ -46,15 +46,15 @@ title: Waiting on me
 description: Blocked work items on this stream's threads.
 params:                         # optional; bound as :name in the query
   - { name: stream_id, label: Stream }   # filled in: the viewer's stream; see "Params have a type"
-  # ref / effort_id / thread_id / stream_id are pickers on the lens page
+  # uri / effort_id / thread_id / stream_id are pickers on the lens page
 query: |
-  SELECT w.ref, w.title, w.state, t.title AS thread
+  SELECT w.uri, w.title, w.state, t.title AS thread
   FROM v_work_item w JOIN v_thread t ON t.id = w.thread_id
   WHERE w.state = 'blocked' AND t.stream_id = :stream_id
   ORDER BY w.updated_at DESC
 viz: table                      # table | list | number | markdown | bar | line | treemap | document | dashboard | custom
 columns:                        # optional; controls headers, order and links
-  - { key: title, label: Item, link: { kind: page, from: ref } }
+  - { key: title, label: Item, link: { kind: page, from: uri } }
   - { key: thread }
   # - { key: took, unit: unit }  # a number shown in another column's unit (ms, %, lines)
   # - { key: created_at, format: relative, width: 120 }  # width in pixels; format is display only
@@ -126,12 +126,12 @@ empty: Nothing is waiting on you.
   param is empty). It must name a param the lens declares. Use it on the
   columns of a search lens, with its filter param.
 - **`link.kind`** makes cells clickable:
-  - `page` takes any page's ref — a work item's (`v_work_item.ref`),
+  - `page` takes any page's ref — a work item's (`v_work_item.uri`),
     `oxplow:oxplow/commit?sha=<sha>`, `oxplow:oxplow/page?page=git-dashboard`, ….
   - `file` takes a repo-relative path; add `line: <column>` to open at a
     line.
   - `wiki` takes a slug.
-  - `effort-diff` takes an effort ref (`v_effort.ref`).
+  - `effort-diff` takes an effort ref (`v_effort.uri`).
   - `commit` takes a sha.
   - `metric` takes a metric key.
   
@@ -177,7 +177,7 @@ empty: Nothing is waiting on you.
   the query must return even when `columns:` doesn't show it (select a
   ref for the action and leave it out of `columns:`) —
   e.g. `{ id: finish, label: Finish, command: oxplow.work_item.transition,
-  row: true, input: { ref: "{{row.ref}}", to: done } }`,
+  row: true, input: { uri: "{{row.uri}}", to: done } }`,
   or `{ id: sync, label: Sync PRs, command: oxplow.collector.sync, input:
   { collector: "github/prs" } }`. With `group: <value>` (on a lens with
   `group`), the action is a button in that group's heading instead — it

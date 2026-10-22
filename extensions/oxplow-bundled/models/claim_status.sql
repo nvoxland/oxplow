@@ -3,12 +3,12 @@
 -- the tests pass and its effort's latest test run passed with at least
 -- one test. A claim a reviewer dismissed (the agent didn't make it, or
 -- didn't mean it) isn't here at all: it is neither backed nor unbacked.
-SELECT ref, effort_id, CAST(backed_by IS NOT NULL AS INTEGER) AS verified, backed_by
+SELECT uri, effort_id, CAST(backed_by IS NOT NULL AS INTEGER) AS verified, backed_by
 FROM (
-SELECT c.ref,
+SELECT c.uri,
        c.effort_id,
        CAST(CASE
-         WHEN c.evidence_ref IS NOT NULL OR c.review = 'verified' THEN 'evidence'
+         WHEN c.evidence IS NOT NULL OR c.review = 'verified' THEN 'evidence'
          WHEN c.kind = 'tests_pass' AND c.effort_id IS NOT NULL AND EXISTS (
            SELECT 1 FROM (
              SELECT r.failed, r.total FROM ref('test_run') r

@@ -94,7 +94,7 @@ pub fn plan_restate_tx(
     let sql = crate::database::map_sql_err;
     let mut stored: std::collections::HashMap<EntryKey, (i64, Option<String>)> = {
         let mut st = conn
-            .prepare("SELECT rowid, ref_id, stream_id, version FROM search_entry WHERE kind = ?1")
+            .prepare("SELECT rowid, uri, stream_id, version FROM search_entry WHERE kind = ?1")
             .map_err(sql)?;
         let rows = st
             .query_map(params![kind], |r| {
@@ -149,7 +149,7 @@ pub fn apply_restate_tx(
             }
             None => {
                 conn.execute(
-                    "INSERT INTO search_entry (kind, ref_id, stream_id, version) \
+                    "INSERT INTO search_entry (kind, uri, stream_id, version) \
                      VALUES (?1, ?2, ?3, ?4)",
                     params![kind, key.0, key.1, version],
                 )
@@ -243,7 +243,7 @@ impl SqliteSearchStore {
                 let existing: Option<i64> = tx
                     .query_row(
                         "SELECT rowid FROM search_entry \
-                         WHERE kind = ?1 AND ref_id = ?2 \
+                         WHERE kind = ?1 AND uri = ?2 \
                            AND COALESCE(stream_id, '') = COALESCE(?3, '')",
                         params![kind, ref_id, stream_id],
                         |row| row.get(0),
@@ -258,7 +258,7 @@ impl SqliteSearchStore {
                     }
                     None => {
                         tx.execute(
-                            "INSERT INTO search_entry (kind, ref_id, stream_id) \
+                            "INSERT INTO search_entry (kind, uri, stream_id) \
                              VALUES (?1, ?2, ?3)",
                             params![kind, ref_id, stream_id],
                         )
@@ -291,7 +291,7 @@ impl SqliteSearchStore {
                 let existing: Option<i64> = tx
                     .query_row(
                         "SELECT rowid FROM search_entry \
-                         WHERE kind = ?1 AND ref_id = ?2 \
+                         WHERE kind = ?1 AND uri = ?2 \
                            AND COALESCE(stream_id, '') = COALESCE(?3, '')",
                         params![kind, ref_id, stream_id],
                         |row| row.get(0),
@@ -353,7 +353,7 @@ impl SqliteSearchStore {
                 // Positional binds, in SQL order: match, stream_id (×2),
                 // kinds…, limit.
                 let mut sql = String::from(
-                    "SELECT e.kind, e.ref_id, e.stream_id, f.title, \
+                    "SELECT e.kind, e.uri, e.stream_id, f.title, \
                             snippet(search_fts, 1, '«', '»', '…', 16), \
                             bm25(search_fts, 5.0, 1.0) AS score \
                      FROM search_fts f \

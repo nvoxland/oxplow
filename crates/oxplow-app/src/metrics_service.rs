@@ -4697,7 +4697,7 @@ def transform(input):
     facts = []
     for f in files("**/*.rs"):
         for m in code_metrics(f["text"], "rust", f["path"]):
-            facts.append({"measure": "oxplow.fn_length", "value": m["length"], "subject": m["ref"], "path": f["path"], "line": m["start_line"], "dims": {"oxplow.language": "rust"}})
+            facts.append({"measure": "oxplow.fn_length", "value": m["length"], "subject": m["uri"], "path": f["path"], "line": m["start_line"], "dims": {"oxplow.language": "rust"}})
     return {"facts": facts}
 "#,
         )
@@ -5345,7 +5345,7 @@ def transform(input):
             .transaction(|c| {
                 c.execute_batch(
                     // The active list's items, as the interface holds them.
-                    "INSERT INTO work_item (ref, provider, title, state, native_state, native, thread_id, created_at, updated_at, closed_at) VALUES
+                    "INSERT INTO work_item (uri, provider, title, state, native_state, native, thread_id, created_at, updated_at, closed_at) VALUES
                        ('oxplow:oxplow/work_item?id=tsk1&provider=oxplow', 'oxplow', 'a', 'done', 'done', '{\"priority\":\"high\"}', (SELECT min(id) FROM threads), '2026-09-01', '2026-09-01', '2026-09-21T09:00:00Z'),
                        ('oxplow:oxplow/work_item?id=tsk2&provider=oxplow', 'oxplow', 'b', 'done', 'done', '{\"priority\":\"low\"}', (SELECT min(id) FROM threads), '2026-09-01', '2026-09-01', '2026-09-23T09:00:00Z'),
                        ('oxplow:oxplow/work_item?id=tsk3&provider=oxplow', 'oxplow', 'c', 'todo', 'ready', '{\"priority\":\"high\"}', (SELECT min(id) FROM threads), '2026-09-01', '2026-09-01', NULL),

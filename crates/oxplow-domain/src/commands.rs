@@ -308,7 +308,7 @@ pub struct CommandUi {
     #[serde(default)]
     pub about: Option<String>,
     /// The input it runs with. A string that is exactly `{{stream}}`,
-    /// `{{thread}}`, `{{ref}}` or `{{ref.id}}` is bound from where it runs;
+    /// `{{thread}}`, `{{uri}}` or `{{uri.id}}` is bound from where it runs;
     /// a binding there's nothing for makes it unavailable there.
     #[serde(default)]
     #[specta(type = Option<crate::Json>)]
@@ -346,8 +346,9 @@ pub struct CommandUi {
 }
 
 /// What a command's `ui.input` binds from where it runs: the stream and
-/// thread on screen, and the ref it is about (and that ref's id).
-pub const UI_INPUT_BINDINGS: &[&str] = &["stream", "thread", "ref", "ref.id"];
+/// thread on screen (their bare ids), and the URI it is about (and that
+/// URI's key).
+pub const UI_INPUT_BINDINGS: &[&str] = &["stream", "thread", "uri", "uri.id"];
 
 /// The window's own forms: a `ui.form` that isn't a page's ref
 /// (`App.tsx` `openForm`).
@@ -421,10 +422,10 @@ impl CommandUi {
                     ),
                 );
             }
-            if p.scope == "ref" && self.about.is_none() {
+            if p.scope == "uri" && self.about.is_none() {
                 return bad(
                     "input",
-                    format!("`{{{{{key}}}}}` binds the ref it is about: give it an `about`"),
+                    format!("`{{{{{key}}}}}` binds the URI it is about: give it an `about`"),
                 );
             }
         }
@@ -1175,7 +1176,7 @@ mod tests {
     fn a_command_ui_is_checked_where_it_is_declared() {
         for good in [
             json!({ "label": "New", "input": { "thread": "{{thread}}", "n": 1 } }),
-            json!({ "label": "Finish", "about": "oxplow/work_item", "input": { "ref": "{{ref}}", "id": "{{ref.id}}" } }),
+            json!({ "label": "Finish", "about": "oxplow/work_item", "input": { "uri": "{{uri}}", "id": "{{uri.id}}" } }),
             json!({ "label": "New Task…", "form": "oxplow:oxplow/page?page=new-task" }),
             json!({ "label": "Commit…", "form": "commit" }),
             json!({ "label": "New", "open_after": "oxplow:oxplow/page?id={{result.id}}&page=custom-dashboard" }),
@@ -1194,7 +1195,7 @@ mod tests {
                 "`{{tread}}`",
             ),
             (
-                json!({ "label": "X", "input": { "r": "{{ref}}" } }),
+                json!({ "label": "X", "input": { "r": "{{uri}}" } }),
                 "/ui/input",
                 "`about`",
             ),

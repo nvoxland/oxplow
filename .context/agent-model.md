@@ -101,7 +101,7 @@ harness only delivers them.
 
 | Piece | What | Where it comes from |
 |---|---|---|
-| Preamble | How to work in oxplow: nothing to file, end with the question, reading the errors a person saw, the references oxplow puts in a prompt (`@<path>`, `[oxplow ref <uri>]`, `[oxplow <work item uri>: …]`, `[oxplow lens …]`) | `oxplow_agent_text::WORKING_IN_OXPLOW` (`crates/oxplow-agent-text/assets/working-in-oxplow.md`) |
+| Preamble | How to work in oxplow: nothing to file, end with the question, reading the errors a person saw, the references oxplow puts in a prompt (`@<path>`, `[oxplow uri <uri>]`, `[oxplow <work item uri>: …]`, `[oxplow lens …]`) | `oxplow_agent_text::WORKING_IN_OXPLOW` (`crates/oxplow-agent-text/assets/working-in-oxplow.md`) |
 | Launch prompt | The preamble; the session context only for a harness without `prompt_context`; the thread's and stream's custom prompts; `agentPromptAppend`; the testing hint (`testing.agentHint`); the skill index only for a harness without `runtime_text` | `agent_prompt::assemble_system_prompt(config, stream, thread, around, harness, skills)`, given the session's declared harness (`crates/oxplow-app/src/agent_prompt.rs`) |
 | Skills | Core's (`oxplow-runtime`, `-wiki-capture`, `-mermaid`, `-collection`, `-metrics`, `-extension`, `-codebase`) and the active extensions' | `AgentText` (`oxplow_agent_text::core_text` + `capabilities::agent_text`) |
 | Slash commands | Core's (`review-comments`, `configure`, `new-metric`) and the active extensions' | Same |
@@ -241,11 +241,11 @@ Every tool foundation declares is named below
 
 | Purpose | Tools |
 |---|---|
-| Read oxplow's data | `oxplow_catalog` (every model with its owner, what it holds and its columns; one model's column docs), `oxplow_query_sql` (one read-only statement over the `v_*` models, live models included — [semantic-layer.md](./semantic-layer.md) "Live models"; its result is also structured content, typed by its output schema), `oxplow_read { ref }`, `oxplow_search` (BM25 over every searchable kind — work items, comments, thread notes, wiki pages, an extension's — and file contents; each hit is a ref) |
+| Read oxplow's data | `oxplow_catalog` (every model with its owner, what it holds and its columns; one model's column docs), `oxplow_query_sql` (one read-only statement over the `v_*` models, live models included — [semantic-layer.md](./semantic-layer.md) "Live models"; its result is also structured content, typed by its output schema), `oxplow_read { uri }`, `oxplow_search` (BM25 over every searchable kind — work items, comments, thread notes, wiki pages, an extension's — and file contents; each hit is a URI) |
 | Code and revisions | `oxplow_vcs_log` (a stream's history from any revision, paged, past the index), `oxplow_vcs_status`, `oxplow_vcs_branches`, `oxplow_diff` (versions `working`, `snap:<id>`, `git:<rev>`; `since_fork`), `oxplow_vcs_blame` (through the `Vcs` provider; `working`, `snap:<id>` or `git:<rev>`), `oxplow_code_definition`, `oxplow_code_references`, `oxplow_code_hover`, `oxplow_code_call_hierarchy`, `oxplow_code_symbols` (a file's symbols from its language server, else oxplow's tree-sitter reading of the live file, saying which), `oxplow_code_workspace_symbols` (the editor's language servers, [lsp.md](./lsp.md)), `oxplow_ensure_change` (a change's analysis, then `v_change_*` through `oxplow_query_sql`) |
 | Write | `run_command`, after `list_commands` |
 | Ask a model | `oxplow_ai_decide` (typed questions about some text, on the `decide` role), `oxplow_ai_summarize` (on `summarize`): recorded computations paid with the person's key, as the asking thread ([ai-providers.md](./ai-providers.md)) |
-| Show the person | `oxplow_show_lens`, `oxplow_run_lens`, `oxplow_run_lens_action`, `oxplow_navigate` (takes them to any ref's page, switching stream when needed) |
+| Show the person | `oxplow_show_lens`, `oxplow_run_lens`, `oxplow_run_lens_action`, `oxplow_navigate` (takes them to any URI's page, switching stream when needed) |
 | Common questions, typed | foundation lenses with `tool:`: `oxplow_thread_work`, `oxplow_work_next`, `oxplow_effort_files`, `oxplow_effort_summary`, `oxplow_file_history`, `oxplow_recent_commits`, `oxplow_snapshots`, `oxplow_thread_notes`, `oxplow_thread_sessions` (a thread's sessions with their subagents beneath), `oxplow_session_transcript` (a session's turns and notes oldest first, 50 a page, optionally from a turn) — each returns what its lens shows, for a model that shouldn't have to write SQL for them |
 | What the person has | `oxplow_list_tabs` (the tabs each of their windows shows, per thread, stream or project: selected, on screen, stale), `oxplow_get_open_page` (the page open in a thread in the window they were in last, the others' beside it, or one listed tab; a lens re-run with their params), `oxplow_list_comments` (their anchored comments, hydrated) |
 | Wiki | `oxplow_wiki_ref_drift` (one stale ref's diff against its pin) |
@@ -268,7 +268,7 @@ work items, commits, snapshots, dashboards, diagnostics and errors are
 revision content, live language-server answers, site search, a lens's
 rendering, a dry run.
 
-**`oxplow_read { ref }`** (`oxplow_app::ref_read`) reads anything a ref names and
+**`oxplow_read { uri }`** (`oxplow_app::ref_read`) reads anything a URI names and
 returns `{ uri, resource, row, related, content, truncated }`: the owning
 model's row, `related` lists (a work item's links and comments, a
 commit's or an effort's files), and `content` for the resources whose body no
@@ -305,7 +305,7 @@ is each spec's (`check_command`, "Agent policy").
 something, the agent answers with `oxplow_show_lens` (the `oxplow.lens.show`
 command): an existing lens with params, or its own `spec` (table, chart,
 tree). It renders beside the conversation, live, with "Keep this", and
-the tool returns its ref and its text rendering. `oxplow_run_lens` reads what a
+the tool returns its URI and its text rendering. `oxplow_run_lens` reads what a
 lens shows (text by default, `format: "json"` for rows); `oxplow_run_lens_action`
 runs a lens's declared action as the lens acting for the caller, under
 the same rules as running the command directly.
@@ -1300,7 +1300,7 @@ with their subagents beneath each.
 (`oxplow_session_transcript { session, turn?, page? }`): the session's
 turns from `v_agent_turn` oldest first with the thread's notes where
 they fall, a subagent's hand-back marked (a turn with no prompt), each
-row a turn ref. A turn ref opens it at that turn (`v_agent_turn
+row a turn URI. A turn URI opens it at that turn (`v_agent_turn
 .transcript_page`, built with `uri('oxplow/lens', …)`). Its action **Resume in a new session**
 runs `oxplow.agent_session.open` with `resume`: a saved conversation of
 the harness, bound `chosen` in the same transaction, refused when it is
@@ -1409,7 +1409,7 @@ don't are context channels, which wait for a turn someone else starts.
 None is cross-thread, visible to the person, and acknowledged.
 
 **The record** (`crates/oxplow-app/src/commands/handoff.rs`,
-`oxplow_db::handoff_store`, `v_handoff`, ref `handoff:hnd<n>`):
+`oxplow_db::handoff_store`, `v_handoff`, URI `handoff:hnd<n>`):
 
 - **From** a thread: an agent's own (naming another is refused), an
   effect's event's, or the one a person names; the session and the actor
@@ -1446,9 +1446,9 @@ prompt. `AgentContext::build_context` reads the thread's open,
 undelivered handoffs (`SqliteHandoffStore::peek_for_prompt`) and
 `AgentContext::commit` stamps `delivered_at` and `delivered_to_session_id`
 (`mark_delivered`, by id) once the agent has them and puts them in a `<handoffs>` block after the session
-context: each one's ref, the sender's thread and session (or "the
+context: each one's URI, the sender's thread and session (or "the
 person"), when, its item's quoted title, the body up to
-`HANDOFF_BODY_IN_CONTEXT` characters with its ref for the rest, and how
+`HANDOFF_BODY_IN_CONTEXT` characters with its URI for the rest, and how
 to resolve it. Never with a tool call: a handoff is a unit of work, not
 a nudge, and mustn't land in the middle of other work. The session
 context counts the thread's open ones (`- **Open handoffs to this
@@ -1494,7 +1494,7 @@ nothing: the record and its stamps are in the database. Pinned by the
 **How a Claude Code session is addressed** (checked 2026-10-16, Claude
 Code 2.1.301). `SendMessage { to }` takes the session's **name** as
 `ListAgents` prints it (`oxplow-main [9f6722]`: name, then a six-hex
-`[ref]` that is needed only when two rows share a name, as two `slopp`
+`[uri]` that is needed only when two rows share a name, as two `slopp`
 sessions do). It takes no pid. Each session binds an inbox socket,
 `/tmp/cc-socks/<pid>.sock`, where `<pid>` is its `claude` process: the
 agent's own environment says so (`CLAUDE_CODE_MESSAGING_SOCKET`, which

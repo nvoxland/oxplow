@@ -42,8 +42,8 @@ describe("an extension's ref kind (P8.D7)", () => {
     expect(refFromTabId(ACME_PR_URI)).toBeNull();
     const target = refTargetNow(ACME_PR_URI);
     const tab = target && "tab" in target ? target.tab : null;
-    expect(tab).toEqual(extPageRef("acme", "pr", { ref: ACME_PR_URI }));
-    expect(tab!.payload).toEqual({ extension: "acme", page: "pr", params: { ref: ACME_PR_URI } });
+    expect(tab).toEqual(extPageRef("acme", "pr", { uri: ACME_PR_URI }));
+    expect(tab!.payload).toEqual({ extension: "acme", page: "pr", params: { uri: ACME_PR_URI } });
     // The page id alone (a restored tab) carries the ref back.
     expect(refFromTabId(tab!.id)).toEqual(tab);
   });

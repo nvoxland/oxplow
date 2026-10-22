@@ -11,7 +11,7 @@ params:
   - { name: all, label: Show every snapshot, type: bool, default: false }
 query: |
   WITH snaps AS (
-    SELECT s.id, s.ref, s.created_at, s.revision,
+    SELECT s.id, s.uri, s.created_at, s.revision,
            CASE WHEN s.revision LIKE 'git:%' THEN substr(s.revision, 5) END AS sha,
            row_number() OVER (ORDER BY s.created_at DESC, s.id DESC) AS rn
     FROM v_snapshot s
@@ -32,10 +32,10 @@ query: |
               SELECT b.name AS label FROM v_branch b WHERE b.head_sha = n.sha AND b.kind = 'local'
               UNION ALL SELECT t.name FROM v_tag t WHERE t.sha = n.sha)) AS names,
            (SELECT group_concat(coalesce(w.title, uri_param(e.work_item, 'id'), e.title, 'Unlinked work'), ', ')
-              FROM v_effort e LEFT JOIN v_work_item w ON w.ref = e.work_item
+              FROM v_effort e LEFT JOIN v_work_item w ON w.uri = e.work_item
              WHERE e.start_snapshot_id <= n.id AND e.end_snapshot_id = n.id) AS completed,
            (SELECT group_concat(coalesce(w.title, uri_param(e.work_item, 'id'), e.title, 'Unlinked work'), ', ')
-              FROM v_effort e LEFT JOIN v_work_item w ON w.ref = e.work_item
+              FROM v_effort e LEFT JOIN v_work_item w ON w.uri = e.work_item
              WHERE e.start_snapshot_id <= n.id AND (e.end_snapshot_id IS NULL OR e.end_snapshot_id > n.id)) AS in_flight,
            n.id = (SELECT min(id) FROM v_snapshot WHERE stream_id = :stream_id)
              AND (SELECT count(*) FROM v_snapshot WHERE stream_id = :stream_id) < CASE WHEN :all THEN 500 ELSE 20 END AS initial
@@ -65,7 +65,7 @@ query: |
     SELECT g.*, CASE WHEN g.sha IS NULL THEN 0
                      ELSE dense_rank() OVER (PARTITION BY g.sha IS NULL ORDER BY g.first_rn) END AS group_rank
     FROM grouped g)
-  SELECT ref, subject,
+  SELECT uri, subject,
          CASE WHEN sha IS NULL THEN 'Uncommitted'
               ELSE coalesce(names || ' · ', '') || substr(sha, 1, 7) END AS heading,
          sha, why, changes, wiki, created_at
@@ -74,7 +74,7 @@ query: |
   ORDER BY (sha IS NOT NULL), first_rn, rn
 group: { by: heading, link: { kind: commit, from: sha } }
 columns:
-  - { key: subject, label: Snapshot, link: { kind: page, from: ref } }
+  - { key: subject, label: Snapshot, link: { kind: page, from: uri } }
   - { key: wiki, label: Wiki, width: 150 }
   - { key: changes, label: Files, width: 90 }
   - { key: why, label: Why, width: 130 }

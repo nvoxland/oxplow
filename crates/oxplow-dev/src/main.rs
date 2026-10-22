@@ -339,33 +339,33 @@ impl Tasks {
                 let mut input = Map::new();
                 input.insert("title".into(), json!(arg(1, "<title>")?));
                 put(&mut input, "body", body);
-                put(&mut input, "parent_ref", parent);
+                put(&mut input, "parent_uri", parent);
                 put(&mut input, "state", state);
                 self.command("oxplow.work_item.create", input).await
             }
             Some("transition") => {
                 let mut input = Map::new();
-                input.insert("ref".into(), json!(arg(1, "<id>")?));
+                input.insert("uri".into(), json!(arg(1, "<id>")?));
                 input.insert("to".into(), json!(arg(2, "<state>")?));
                 self.command("oxplow.work_item.transition", input).await
             }
             Some("update") => {
                 let mut input = Map::new();
-                input.insert("ref".into(), json!(arg(1, "<id>")?));
+                input.insert("uri".into(), json!(arg(1, "<id>")?));
                 put(&mut input, "title", title);
                 put(&mut input, "body", body);
-                put(&mut input, "parent_ref", parent);
+                put(&mut input, "parent_uri", parent);
                 self.command("oxplow.work_item.update", input).await
             }
             Some("comment") => {
                 let mut input = Map::new();
-                input.insert("ref".into(), json!(arg(1, "<id>")?));
+                input.insert("uri".into(), json!(arg(1, "<id>")?));
                 input.insert("body".into(), json!(arg(2, "<body>")?));
                 self.command("oxplow.work_item.comment", input).await
             }
             Some(verb @ ("link" | "unlink")) => {
                 let mut input = Map::new();
-                input.insert("ref".into(), json!(arg(1, "<id>")?));
+                input.insert("uri".into(), json!(arg(1, "<id>")?));
                 input.insert("target".into(), json!(arg(2, "<target>")?));
                 input.insert("link_type".into(), json!(arg(3, "<link type>")?));
                 self.command(&format!("oxplow.work_item.{verb}"), input)
@@ -488,7 +488,7 @@ impl Tasks {
         // The interface answers `{ ref, state? }`; this is oxplow's task
         // tool, so it names the task's id too.
         let mut result = out.result;
-        let task = result["ref"]
+        let task = result["uri"]
             .as_str()
             .and_then(oxplow_tasks::task_of_work_item_ref);
         if let (Some(task), Value::Object(fields)) = (task, &mut result) {

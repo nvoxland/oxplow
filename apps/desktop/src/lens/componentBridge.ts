@@ -8,7 +8,7 @@
 ///   frame → host  { type: "ready" }
 ///                 { id, method: "query", asset, params }     a declared lens's run
 ///                 { id, method: "invoke", command, input }   a declared command
-///                 { id, method: "navigate", ref, newTab }    open a page
+///                 { id, method: "navigate", uri, newTab }    open a page
 ///                 { id, method: "querySql", sql, params }    its own SQL (`sql: read`)
 ///                 { id, method: "openForm", command, input } a declared command's form, in the host
 ///                 { id, method: "setTitle", title }          a page's title (a page only)
@@ -84,7 +84,7 @@ export interface ViewInit {
 export type BridgeRequest =
   | { id: string; method: "query"; asset: string; params: Record<string, SqlCell> }
   | { id: string; method: "invoke"; command: string; input: unknown }
-  | { id: string; method: "navigate"; ref: string; newTab: boolean }
+  | { id: string; method: "navigate"; uri: string; newTab: boolean }
   | { id: string; method: "querySql"; sql: string; params: SqlCell[] }
   | { id: string; method: "openForm"; command: string; input: unknown }
   | { id: string; method: "setTitle"; title: string }
@@ -116,9 +116,9 @@ export function parseFrameMessage(data: unknown): FrameMessage | null {
       if (typeof m.command !== "string") return null;
       return { type: "request", request: { id: m.id, method: "invoke", command: m.command, input: m.input ?? {} } };
     case "navigate":
-      if (typeof m.ref !== "string") return null;
+      if (typeof m.uri !== "string") return null;
       if (m.newTab !== undefined && typeof m.newTab !== "boolean") return null;
-      return { type: "request", request: { id: m.id, method: "navigate", ref: m.ref, newTab: m.newTab === true } };
+      return { type: "request", request: { id: m.id, method: "navigate", uri: m.uri, newTab: m.newTab === true } };
     case "querySql": {
       const params = m.params ?? [];
       if (typeof m.sql !== "string" || !Array.isArray(params) || !params.every(isCell)) return null;
@@ -324,7 +324,7 @@ export function createBridgeHost(
         }
         return;
       case "navigate":
-        if (deps.navigate(r.ref, { newTab: r.newTab })) reply(r.id, null);
+        if (deps.navigate(r.uri, { newTab: r.newTab })) reply(r.id, null);
         else fail(r.id, "INVALID", "A component may open oxplow's pages only.");
         return;
       case "querySql":

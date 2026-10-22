@@ -138,8 +138,8 @@
       invoke: (command, input) => call({ method: "invoke", command, input: input === undefined ? {} : input }),
       // Open one of oxplow's pages (`work_item:oxplow:tsk42`); `{ newTab:
       // true }` opens it in a new tab (a Cmd-click).
-      navigate: (ref, options) =>
-        call({ method: "navigate", ref, newTab: !!(options && options.newTab) }),
+      navigate: (uri, options) =>
+        call({ method: "navigate", uri, newTab: !!(options && options.newTab) }),
       // Run read-only SQL over oxplow's models (`?1` parameters): needs
       // `sql: read` on the component. Resolves `{ columns, rows, truncated }`.
       querySql: (sql, params) => call({ method: "querySql", sql, params: params || [] }),

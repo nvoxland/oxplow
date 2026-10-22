@@ -4,7 +4,7 @@ import { summarizeThreadWork } from "./TaskDetailPane.js";
 
 function task(ref: string, state: WorkItem["state"], updatedAt: string): WorkItem {
   return {
-    ref,
+    uri: ref,
     title: `item ${ref}`,
     state,
     updatedAt,
@@ -42,8 +42,8 @@ test("summary counts come from the bucketed arrays, not items", () => {
   });
   const s = summarizeThreadWork(work);
   expect(s.counts).toEqual({ inProgress: 1, ready: 1, blocked: 2, done: 2 });
-  expect(s.oldestBlocked?.ref).toBe("b2");
-  expect(s.recentDone.map((t) => t.ref)).toEqual(["d2", "d1"]);
+  expect(s.oldestBlocked?.uri).toBe("b2");
+  expect(s.recentDone.map((t) => t.uri)).toEqual(["d2", "d1"]);
 });
 
 test("null thread work summarizes to zeros", () => {
@@ -59,5 +59,5 @@ test("the done bucket holds canceled items too; only done counts", () => {
   });
   const s = summarizeThreadWork(work);
   expect(s.counts.done).toBe(1);
-  expect(s.recentDone.map((t) => t.ref)).toEqual(["d1"]);
+  expect(s.recentDone.map((t) => t.uri)).toEqual(["d1"]);
 });

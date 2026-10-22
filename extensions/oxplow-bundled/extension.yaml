@@ -159,13 +159,13 @@ advisories:
     audience: person
     once_per: row
     query: |
-      SELECT w.ref AS key,
+      SELECT w.uri AS key,
              '“' || w.title || '” is still in progress, but a commit landed its work. '
              || 'Mark it done if it is.' AS message
-      FROM v_effort e JOIN v_work_item w ON w.ref = e.work_item
+      FROM v_effort e JOIN v_work_item w ON w.uri = e.work_item
       WHERE e.thread_id = :thread_id AND e.closed_by = 'commit' AND w.state = 'in_progress'
-        AND NOT EXISTS (SELECT 1 FROM v_effort o WHERE o.work_item = w.ref AND o.ended_at IS NULL)
-      GROUP BY w.ref
+        AND NOT EXISTS (SELECT 1 FROM v_effort o WHERE o.work_item = w.uri AND o.ended_at IS NULL)
+      GROUP BY w.uri
   # How code metrics moved this effort, every prompt while any moved.
   # Operational metrics (tokens, cycle time, …) grow every turn and aren't
   # code-health signals, so they're left out.
@@ -412,30 +412,30 @@ models:
       - { name: subject, type: TEXT, doc: "The file path, or `shell` (failed shell commands, whatever the harness)." }
       - { name: count, type: "", doc: "How many edits / failures." }
   - name: claim_status
-    version: 2
-    key: [ref]
-    description: "Whether each of the agent's claims is backed, by this review policy's rule: it cites evidence (`v_claim.evidence_ref` — a run, a test, a file, or `reviewer` when a person verified it) or a person verified it (`v_claim.review`), or it is `tests_pass` and its effort's latest test run (`v_test_run`) passed with at least one test. A claim a person dismissed has no row: it counts neither as backed nor as unbacked."
+    version: 3
+    key: [uri]
+    description: "Whether each of the agent's claims is backed, by this review policy's rule: it cites evidence (`v_claim.evidence` — a run, a test, a file, or `reviewer` when a person verified it) or a person verified it (`v_claim.review`), or it is `tests_pass` and its effort's latest test run (`v_test_run`) passed with at least one test. A claim a person dismissed has no row: it counts neither as backed nor as unbacked."
     columns:
-      - { name: ref, type: TEXT, doc: "The claim (`v_claim.ref`)." }
+      - { name: uri, type: TEXT, doc: "The claim (`v_claim.uri`)." }
       - { name: effort_id, type: INTEGER, doc: "Its effort (v_effort.id), if one was open." }
       - { name: verified, type: INT, doc: "1 when something backs it, else 0." }
       - { name: backed_by, type: TEXT, doc: "`evidence` (it cites some) or `latest run` (a passing latest test run backs `tests pass`); NULL when nothing does." }
   - name: verdicts
-    version: 2
+    version: 3
     key: [seq]
     materialize: { incremental: seq }
     description: "Every verdict a reviewer gave (`oxplow_bundled.accepted` / `.changes_requested`), oldest first — appended as each lands, so reading the latest never scans the log. Read from the events' envelopes alone, which retention keeps: a verdict outlives its payload."
     columns:
       - { name: seq, type: INTEGER, doc: "The verdict's event (v_event.seq)." }
-      - { name: ref, type: TEXT, doc: "The effort reviewed (`oxplow:oxplow/effort?id=eff<id>`)." }
+      - { name: uri, type: TEXT, doc: "The effort reviewed (`oxplow:oxplow/effort?id=eff<id>`)." }
       - { name: verdict, type: TEXT, doc: "`accepted` or `changes_requested`." }
       - { name: forced, type: "", doc: "1 when accepted although claims were unverified or decisions unreviewed (the event names them)." }
   - name: verdict
-    version: 1
-    key: [ref]
+    version: 2
+    key: [uri]
     description: "Each effort's latest verdict, as its decorators show it: a chip on the effort's page and a badge where a lens row links to it."
     columns:
-      - { name: ref, type: TEXT, doc: "The effort (`oxplow:oxplow/effort?id=eff<id>`)." }
+      - { name: uri, type: TEXT, doc: "The effort (`oxplow:oxplow/effort?id=eff<id>`)." }
       - { name: label, type: TEXT, doc: "`Accepted`, `Accepted (forced)` or `Changes requested`." }
       - { name: color, type: TEXT, doc: "`green`, `orange` or `red`." }
   - name: finished_cleared
@@ -446,7 +446,7 @@ models:
       - { name: thread_id, type: INT, doc: "The thread (v_thread.id)." }
       - { name: cleared_at, type: TEXT, doc: "When it was last cleared (RFC 3339)." }
   - name: thread_work
-    version: 3
+    version: 4
     description: "Each thread's Work panel, one row per line in display order, from the active work list (`v_work_item`): what's in progress (the item, under its epic with the epic's other children, and an open effort no item names), up to 10 ready items, and the last 5 finished items, wiki pages and unlinked efforts since the list was cleared."
     columns:
       - { name: thread_id, type: INT, doc: "The thread (v_thread.id)." }
@@ -455,7 +455,7 @@ models:
       - { name: ord, type: INT, doc: "The line's place in its group." }
       - { name: title, type: TEXT, doc: "What to show." }
       - { name: icon, type: TEXT, doc: "A lens icon name: a work-item state (`todo`, `in_progress`, `done`, …), `epic` or `wiki`." }
-      - { name: ref, type: TEXT, doc: "What the line opens (`work_item:…`, `oxplow:oxplow/wiki?slug=<slug>`, `oxplow:oxplow/effort?id=eff<id>`)." }
+      - { name: uri, type: TEXT, doc: "What the line opens (`work_item:…`, `oxplow:oxplow/wiki?slug=<slug>`, `oxplow:oxplow/effort?id=eff<id>`)." }
       - { name: depth, type: INT, doc: "1 for an epic's child, else 0." }
       - { name: active, type: INT, doc: "1 for the item, or the unlinked effort, in progress." }
 event_types:
@@ -587,7 +587,7 @@ commands:
     needs: [sql.read]
     confirm: always
     invokers: { human: true, agent: false, lens: true }
-    ui: { label: Accept Review, group: Review, about: oxplow/effort, input: { effort: "{{ref.id}}" } }
+    ui: { label: Accept Review, group: Review, about: oxplow/effort, input: { effort: "{{uri.id}}" } }
     examples:
       - name: reviewed
         input: { effort: "eff1" }
@@ -622,7 +622,7 @@ commands:
     needs: [sql.read]
     confirm: always
     invokers: { human: true, agent: false, lens: true }
-    ui: { label: Request Changes, group: Review, about: oxplow/effort, input: { effort: "{{ref.id}}" } }
+    ui: { label: Request Changes, group: Review, about: oxplow/effort, input: { effort: "{{uri.id}}" } }
     examples:
       - name: a file outside the area
         input: { effort: "eff1" }

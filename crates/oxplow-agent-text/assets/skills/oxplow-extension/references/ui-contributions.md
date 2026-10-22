@@ -9,7 +9,7 @@
   - `vcs.status.header` (a strip above the uncommitted changes) and
     `vcs.history.sidebar` (beside Git History) → `stream_id`;
   - `work_item.detail.body` and `work_item.detail.sidebar` (a work item's
-    page, whichever list) → `ref`;
+    page, whichever list) → `uri`;
   - `thread.plan.header` (the Work panel, compact) → `thread_id`;
   - `settings.<area>.sections` → no params; a section on that Settings
     area's page (`overview`, `agents`, `lsp`, `extensions`, `data`,
@@ -22,7 +22,7 @@
 
 - **`ui.decorators`** add a label to the URIs of one resource:
   `{ model, resource: oxplow/work_item, placement: ref-chip | row-badge, label, color? }` — the
-  model (this extension's) needs a `ref` column plus the `label` (and
+  model (this extension's) needs a `uri` column plus the `label` (and
   `color`) columns; a chip shows on that URI's page, a badge after a
   linked cell in lens rows.
 
@@ -55,7 +55,7 @@ it); the lens declares each prop as a `param`:
 ui:
   replacements:
     - { target: work_item.board, lens: swimlanes, version: 1 }   # props: scope, thread_id
-    - { target: work_item.detail, lens: edit-item, version: 1 }  # props: ref
+    - { target: work_item.detail, lens: edit-item, version: 1 }  # props: uri
 ```
 
 - Read items from `v_work_item`; change them only through the interface

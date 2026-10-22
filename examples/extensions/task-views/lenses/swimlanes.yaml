@@ -5,7 +5,7 @@ params:
   - { name: scope, label: "Scope (thread / backlog / all)", default: all }
   - { name: thread_id, label: Thread }
 query: |
-  SELECT w.ref, w.title, w.state, w.rank
+  SELECT w.uri, w.title, w.state, w.rank
   FROM v_work_item w
   WHERE :scope = 'all'
      OR (:scope = 'thread' AND w.thread_id = :thread_id)

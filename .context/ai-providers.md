@@ -515,7 +515,7 @@ turn's prompt (`turn_kind`).
 - `oxplow_ai_summarize`: text through the `summarize` role, with an optional focus
   — a recorded computation (`AiCompute::summarize`), so the same text and
   focus is one call.
-- What a call was asked or answered is `read` of its `ai_call` ref (the
+- What a call was asked or answered is `read` of its `ai_call` URI (the
   caller's own calls).
 
 Each is paid with the person's key, so neither is a read-only tool (no
@@ -558,13 +558,13 @@ its source; with no model bound, the recorded ones are all there is.
   the end), a tool's detail to 200, tool calls take at most a quarter of
   the 40,000-character digest, and the newest are kept. Nothing to read
   asks nothing. It enqueues the job with intent key
-  `reasoning:<effort ref>` (a redelivery is the same job); `again: true`
+  `reasoning:<effort URI>` (a redelivery is the same job); `again: true`
   (the lens's **Infer Again**) keys a new one, `…@<n>`. The system
   message asks for JSON only
   (`{"decisions": [...], "claims": [...]}`): a typed request has no JSON
   mode. A claim is what an answer states about the outcome of the work —
   tests pass, behavior unchanged, a case handled — in the agent's words,
-  with an `evidence_ref` only when the answer itself named a run or test;
+  with an `evidence` only when the answer itself named a run or test;
   the model is told to report only claims actually made, never to infer
   one.
 - The job's model call is a recorded computation keyed by its request,

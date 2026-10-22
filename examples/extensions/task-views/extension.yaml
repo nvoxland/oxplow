@@ -23,8 +23,8 @@ intent:
       input: { component: swimlanes }
       expect: renaming an item through the board goes through
     - name: edit-item
-      input: { form: edit-item, params: { ref: "oxplow:oxplow/work_item?id=1&provider=oxplow" } }
-      expect: a form for the item's title and body, its ref fixed
+      input: { form: edit-item, params: { uri: "oxplow:oxplow/work_item?id=1&provider=oxplow" } }
+      expect: a form for the item's title and body, its uri fixed
 permissions:
   commands: [oxplow.work_item.transition, oxplow.work_item.reorder, oxplow.work_item.update]
 custom_components:

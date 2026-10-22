@@ -483,7 +483,7 @@ export function rowRef(lens: Lens, columns: string[], row: SqlCell[]): string | 
 }
 
 /** Ask About This on a lens row (P6.D1): the first ref the row links to
- *  (`[oxplow ref commit:abc]`), or — a row that links nowhere — the row
+ *  (`[oxplow uri commit:abc]`), or — a row that links nowhere — the row
  *  itself as a lens mention. */
 export function rowAsk(lens: Lens, columns: string[], row: SqlCell[]): string {
   const ref = rowRef(lens, columns, row);
@@ -606,7 +606,7 @@ export function treeNodes(lens: Lens, result: SqlQueryResult): TreeNode[] {
 }
 
 /** `timeline` viz: each row's time, label and ref (a canonical ref, when
- *  `timeline.ref` names a column and the row has one), oldest first. */
+ *  `timeline.uri` names a column and the row has one), oldest first. */
 export function timelineEntries(
   lens: Lens,
   result: SqlQueryResult,
@@ -614,7 +614,7 @@ export function timelineEntries(
   const ats = columnValues(result, lens.timeline?.at);
   const labels = columnValues(result, lens.timeline?.label);
   if (!ats || !labels) return [];
-  const refs = columnValues(result, lens.timeline?.ref);
+  const refs = columnValues(result, lens.timeline?.uri);
   return ats
     .map((at, i) => ({
       at: formatCell(at),

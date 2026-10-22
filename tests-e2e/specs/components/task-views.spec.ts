@@ -135,7 +135,7 @@ test("the editor, the list and oxplow's own, each chosen from Settings", async (
   const detail = page.getByTestId("replacement-work_item.detail");
   await expect(detail).toContainText("replaced by task-views");
   // Only the title and body are shown; the item's ref is fixed, not editable.
-  await expect(detail.getByTestId("lens-form-fields-ref")).toHaveCount(0);
+  await expect(detail.getByTestId("lens-form-fields-uri")).toHaveCount(0);
   await expect(detail.getByTestId("lens-form-fields-title")).toHaveValue("Item to edit");
   await expect(page.getByLabel("State")).toBeVisible();
   await expect(detail.getByLabel("State")).toHaveCount(0);

@@ -1,9 +1,0 @@
-{
-  "page": {
-    "ref": "wiki:release-process",
-    "title": "Release process",
-    "body": "# Release process\n\nSee [[scripts/release.sh]].\n",
-    "refs": ["file:scripts/release.sh"],
-    "updated_at": "2026-10-09T12:00:00Z"
-  }
-}

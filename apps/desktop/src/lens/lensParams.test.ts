@@ -6,7 +6,7 @@ import { paramKind, paramOptions, paramOptionsSql } from "./lensParams.js";
 // params pick from what exists instead.
 
 test("oxplow's id params are pickers; anything else is typed", () => {
-  expect(paramKind("ref")).toBe("work_item");
+  expect(paramKind("uri")).toBe("work_item");
   expect(paramKind("effort_id")).toBe("effort");
   expect(paramKind("thread_id")).toBe("thread");
   expect(paramKind("stream_id")).toBe("stream");

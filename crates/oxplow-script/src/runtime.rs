@@ -242,7 +242,7 @@ fn collect_helpers(builder: &mut starlark::environment::GlobalsBuilder) {
                 serde_json::json!({
                     "name": m.name,
                     "id": m.id,
-                    "ref": oxplow_domain::uri::build::symbol_uri(path, &m.id),
+                    "uri": oxplow_domain::uri::build::symbol_uri(path, &m.id),
                     "container": (!m.container_path.is_empty()).then(|| m.container_path.join("::")),
                     "kind": m.kind.as_str(),
                     "complexity": m.complexity,

@@ -4,7 +4,7 @@ params:
   - { name: thread_id, label: Thread }
 query: |
   WITH turns AS (
-    SELECT t.id, t.ref, t.thread_id, t.agent_session_id, t.started_at, t.ended_at,
+    SELECT t.id, t.uri, t.thread_id, t.agent_session_id, t.started_at, t.ended_at,
            nullif(trim(coalesce(t.model, '') || ' ' || coalesce(t.effort, '')), '') AS ran_on,
            -- Tokens in the context at the turn's end, of the window when the harness gave one.
            CASE WHEN t.context_tokens IS NULL THEN NULL
@@ -38,14 +38,14 @@ query: |
          (SELECT sum(k.input_tokens + k.output_tokens + k.cache_creation_input_tokens + k.cache_read_input_tokens)
             FROM v_token_usage k WHERE k.turn_id = u.id) AS tokens,
          u.started_at AS at,
-         u.ref AS turn_ref,
-         e.ref AS effort_ref,
-         uri_param(e.ref, 'id') AS effort
+         u.uri AS turn_ref,
+         e.uri AS effort_uri,
+         uri_param(e.uri, 'id') AS effort
   FROM turns u
   LEFT JOIN v_effort e ON e.id = u.effort_id
   ORDER BY u.started_at DESC, u.id DESC
 viz: list
-group: { by: section, link: { kind: page, from: effort_ref } }
+group: { by: section, link: { kind: page, from: effort_uri } }
 columns:
   - { key: prompt, label: Turn, link: { kind: page, from: turn_ref } }
   - { key: session, label: Session }

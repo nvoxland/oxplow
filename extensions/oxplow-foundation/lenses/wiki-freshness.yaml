@@ -12,7 +12,7 @@ query: |
          CASE WHEN r.stale THEN '⚠ stale' ELSE '✓ fresh' END AS status,
          CASE WHEN r.stale THEN 'warning' ELSE 'success' END AS tone
   FROM v_knowledge_page p
-  JOIN v_knowledge_ref r ON r.page = p.ref
+  JOIN v_knowledge_ref r ON r.page = p.uri
   WHERE p.slug = :slug
   ORDER BY r.path
 group: { by: heading, link: { kind: wiki, from: slug } }
@@ -21,7 +21,7 @@ columns:
   - { key: pinned, label: Captured snapshot }
   - { key: status, label: Status, tone: tone, width: 100 }
 actions:
-  - { id: verify-all, label: Mark all verified, command: oxplow.knowledge.verify_refs, input: { slug: "{{param.slug}}" } }
-  - { id: verify, label: Mark verified, command: oxplow.knowledge.verify_refs, input: { slug: "{{param.slug}}", refs: ["{{row.path}}"] }, row: true }
+  - { id: verify-all, label: Mark all verified, command: oxplow.knowledge.verify_files, input: { slug: "{{param.slug}}" } }
+  - { id: verify, label: Mark verified, command: oxplow.knowledge.verify_files, input: { slug: "{{param.slug}}", files: ["{{row.path}}"] }, row: true }
 empty: This page cites no files.
 hidden: true

@@ -50,7 +50,7 @@ test("an input template binds the stream and thread; one that can't bind is unav
   expect(bindInput(null, ctx)).toEqual({ input: {} });
   expect(bindInput({ stream: "{{stream}}" }, { streamId: null, threadId: null })).toBeNull();
   // A ref is bound where there's one; search has none.
-  expect(bindInput({ ref: "{{ref}}" }, ctx)).toBeNull();
+  expect(bindInput({ uri: "{{uri}}" }, ctx)).toBeNull();
 });
 
 test("search offers ref-less commands under their group, by label and keywords", () => {
@@ -115,8 +115,8 @@ test("a form that isn't a tab id is one of the window's own; an offer says its s
 test("a ref's menus offer the commands about its kind, the ref bound into their input", async () => {
   const { d, calls } = deps();
   const specs = [
-    spec("oxplow.review.accept", { label: "Accept Review", about: "oxplow/effort", input: { ref: "{{ref}}" } }),
-    spec("tracker.item.estimate", { label: "Estimate", about: "oxplow/work_item", input: { ref: "{{ref}}", points: 3 } }),
+    spec("oxplow.review.accept", { label: "Accept Review", about: "oxplow/effort", input: { uri: "{{uri}}" } }),
+    spec("tracker.item.estimate", { label: "Estimate", about: "oxplow/work_item", input: { uri: "{{uri}}", points: 3 } }),
     spec("tracker.item.flag", { label: "Flag", about: "oxplow/work_item" }),
     spec("oxplow.vcs.pull", { label: "Pull" }),
   ];
@@ -125,8 +125,8 @@ test("a ref's menus offer the commands about its kind, the ref bound into their 
   for (const o of offers) o.run();
   await new Promise((r) => setTimeout(r, 0));
   expect(calls).toEqual([
-    'run tracker.item.estimate {"ref":"oxplow:oxplow/work_item?id=W-1&provider=fake","points":3}',
-    'run tracker.item.flag {"ref":"oxplow:oxplow/work_item?id=W-1&provider=fake"}',
+    'run tracker.item.estimate {"uri":"oxplow:oxplow/work_item?id=W-1&provider=fake","points":3}',
+    'run tracker.item.flag {"uri":"oxplow:oxplow/work_item?id=W-1&provider=fake"}',
   ]);
 });
 
@@ -139,8 +139,8 @@ test("a form about a ref opens with that ref as its param; a form about nothing 
   ];
   for (const o of refOffers(specs, "oxplow:triage/item?id=7", { streamId: null, threadId: null }, d)) o.run();
   expect(calls).toEqual([
-    "open oxplow:oxplow/page?page=triage/note-form&ref=oxplow:triage/item?id%3D7",
-    "open oxplow:oxplow/page?mode=quick&page=triage/tag-form&ref=oxplow:triage/item?id%3D7",
+    "open oxplow:oxplow/page?page=triage/note-form&uri=oxplow:triage/item?id%3D7",
+    "open oxplow:oxplow/page?mode=quick&page=triage/tag-form&uri=oxplow:triage/item?id%3D7",
     "form new-thread",
   ]);
 });

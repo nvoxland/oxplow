@@ -1,7 +1,7 @@
 /**
  * Where a URI opens (`.context/pages-and-tabs.md` "Linking between tabs"):
  * the one place that decides it. An extension's resource names the page that
- * shows one (`v_resource.page`), which opens with the URI as its `ref`
+ * shows one (`v_resource.page`), which opens with the URI as its `uri`
  * param; every other URI opens through `refFromTabId`. It says what the
  * window does with the result: open a tab, select a thread or a stream, or
  * nothing.

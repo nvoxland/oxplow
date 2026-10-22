@@ -15,7 +15,7 @@ SELECT t.stream_id,
        max(CASE WHEN t.measure_key = 'oxplow.parameter_count' THEN t.value END) AS parameters,
        max(t.captured_at) AS captured_at
   FROM ref('tree_fact') t
-  JOIN ref('symbol') s ON s.stream_id = t.stream_id AND s.ref = t.subject
+  JOIN ref('symbol') s ON s.stream_id = t.stream_id AND s.uri = t.subject
  WHERE t.subject_kind = 'oxplow/symbol'
    AND t.measure_key IN ('oxplow.complexity', 'oxplow.fn_length', 'oxplow.parameter_count')
  GROUP BY t.stream_id, t.subject

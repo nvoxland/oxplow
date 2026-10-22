@@ -756,8 +756,8 @@
             "null"
           ]
         },
-        "ref": {
-          "description": "A column holding a canonical ref each entry links to.",
+        "uri": {
+          "description": "A column holding the URI each entry links to.",
           "type": [
             "string",
             "null"

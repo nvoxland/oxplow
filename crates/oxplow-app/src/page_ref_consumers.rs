@@ -55,7 +55,7 @@ impl EventConsumer for PageRefWorkItemConsumer {
         let payload = &event.envelope.payload;
         let subject = payload
             .get("work_item")
-            .or_else(|| payload.get("item").and_then(|item| item.get("ref")))
+            .or_else(|| payload.get("item").and_then(|item| item.get("uri")))
             .and_then(|v| v.as_str())
             .ok_or_else(|| DomainError::Invalid("payload names no work item".into()))?;
         let vocabulary = self.vocabulary.current();
@@ -101,7 +101,7 @@ mod tests {
         let edges = db
             .transaction(move |conn| {
                 conn.execute(
-                    "INSERT INTO work_item (ref, provider, title, body, state, native_state, created_at, updated_at)
+                    "INSERT INTO work_item (uri, provider, title, body, state, native_state, created_at, updated_at)
                      VALUES ('oxplow:oxplow/work_item?id=ENG-1&provider=issues', 'issues', 'Fix it', 'see [[src/app.rs]]', 'todo', 'Todo', 't', 't')",
                     [],
                 )
@@ -173,10 +173,10 @@ mod tests {
         };
         db.transaction(move |conn| {
             let run = |sql: &str| conn.execute(sql, []).map(|_| ()).map_err(oxplow_db::map_sql_err);
-            run("INSERT INTO work_item (ref, provider, title, body, state, native_state, created_at, updated_at)
+            run("INSERT INTO work_item (uri, provider, title, body, state, native_state, created_at, updated_at)
                  VALUES ('oxplow:oxplow/work_item?id=ENG-1&provider=issues', 'issues', 'Fix it', 'see [[src/app.rs]]', 'todo', 'Todo', 't', 't')")?;
             // A list's own link type.
-            run("INSERT INTO work_item_link (from_ref, to_ref, link_type, created_at)
+            run("INSERT INTO work_item_link (from_uri, to_uri, link_type, created_at)
                  VALUES ('oxplow:oxplow/work_item?id=ENG-1&provider=issues', 'oxplow:oxplow/work_item?id=ENG-2&provider=issues', 'parent_of', 't')")?;
             consumer.handle(
                 conn,
@@ -186,7 +186,7 @@ mod tests {
                     link_type: "parent_of".into(),
                 }),
             )?;
-            run("INSERT INTO work_item_comment (id, ref, body, created_at)
+            run("INSERT INTO work_item_comment (id, uri, body, created_at)
                  VALUES ('oxplow:oxplow/work_item?id=ENG-1&provider=issues#part=c1', 'oxplow:oxplow/work_item?id=ENG-1&provider=issues', 'and [[src/b.rs]]', 't')")?;
             consumer.handle(
                 conn,
@@ -205,9 +205,9 @@ mod tests {
             );
             // A read back restating the item without its link.
             run("DELETE FROM work_item_link")?;
-            let recorded = oxplow_domain::events::schema::WorkItemRecordedV2 {
+            let recorded = oxplow_domain::events::schema::WorkItemRecordedV3 {
                 item: serde_json::from_value(serde_json::json!({
-                    "ref": item, "title": "Fix it", "state": "todo", "native_state": "Todo",
+                    "uri": item, "title": "Fix it", "state": "todo", "native_state": "Todo",
                     "links": []
                 }))
                 .unwrap(),

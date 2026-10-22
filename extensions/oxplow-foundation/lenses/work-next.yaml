@@ -5,29 +5,29 @@ params:
 query: |
   WITH items AS (
     SELECT * FROM v_work_item
-    WHERE thread_id = (SELECT id FROM v_thread WHERE ref = uri('oxplow/thread', 'id', :thread))),
+    WHERE thread_id = (SELECT id FROM v_thread WHERE uri = uri('oxplow/thread', 'id', :thread))),
   held AS (
-    SELECT l.to_ref FROM v_work_item_link l JOIN v_work_item b ON b.ref = l.from_ref
+    SELECT l.to_uri FROM v_work_item_link l JOIN v_work_item b ON b.uri = l.from_uri
     WHERE l.link_type = 'blocks' AND b.state NOT IN ('done', 'canceled')),
-  epics AS (SELECT DISTINCT parent_ref AS ref FROM items WHERE parent_ref IS NOT NULL),
+  epics AS (SELECT DISTINCT parent_uri AS uri FROM items WHERE parent_uri IS NOT NULL),
   ready AS (
-    SELECT * FROM items WHERE state = 'todo' AND ref NOT IN (SELECT to_ref FROM held)),
+    SELECT * FROM items WHERE state = 'todo' AND uri NOT IN (SELECT to_uri FROM held)),
   head AS (
-    SELECT ref FROM ready ORDER BY rank IS NULL, rank, created_at LIMIT 1),
-  below(ref) AS (
-    SELECT i.ref FROM items i JOIN head h ON i.parent_ref = h.ref
-    UNION SELECT i.ref FROM items i JOIN below b ON i.parent_ref = b.ref)
-  SELECT r.ref, r.title,
-         CASE WHEN r.ref IN (SELECT ref FROM head) AND r.ref IN (SELECT ref FROM epics) THEN 'epic'
-              WHEN r.ref IN (SELECT ref FROM below) THEN 'child'
+    SELECT uri FROM ready ORDER BY rank IS NULL, rank, created_at LIMIT 1),
+  below(uri) AS (
+    SELECT i.uri FROM items i JOIN head h ON i.parent_uri = h.uri
+    UNION SELECT i.uri FROM items i JOIN below b ON i.parent_uri = b.uri)
+  SELECT r.uri, r.title,
+         CASE WHEN r.uri IN (SELECT uri FROM head) AND r.uri IN (SELECT uri FROM epics) THEN 'epic'
+              WHEN r.uri IN (SELECT uri FROM below) THEN 'child'
               ELSE 'ready' END AS role
   FROM ready r
-  WHERE CASE WHEN (SELECT ref FROM head) IN (SELECT ref FROM epics)
-             THEN r.ref IN (SELECT ref FROM head) OR r.ref IN (SELECT ref FROM below)
-             ELSE r.ref NOT IN (SELECT ref FROM epics) END
+  WHERE CASE WHEN (SELECT uri FROM head) IN (SELECT uri FROM epics)
+             THEN r.uri IN (SELECT uri FROM head) OR r.uri IN (SELECT uri FROM below)
+             ELSE r.uri NOT IN (SELECT uri FROM epics) END
   ORDER BY role = 'child', r.rank IS NULL, r.rank, r.created_at
 columns:
-  - { key: title, label: Item, link: { kind: page, from: ref } }
+  - { key: title, label: Item, link: { kind: page, from: uri } }
   - { key: role, label: "" }
 empty: Nothing is ready.
 hidden: true

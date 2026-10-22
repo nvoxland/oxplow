@@ -1,7 +1,7 @@
 -- Each effort review: the run of the review job, the effort its intent key
 -- (`review:<effort id>`) names, the effort's work item, and the text its
 -- current attempt has streamed.
-SELECT j.ref AS job_run,
+SELECT j.uri AS job_run,
        CAST(uri('oxplow/effort', 'id', substr(j.intent_key, length('review:') + 1)) AS TEXT) AS effort,
        e.work_item,
        j.state,
@@ -11,5 +11,5 @@ SELECT j.ref AS job_run,
                                WHERE job_id = j.id AND attempt = j.attempt AND kind = 'text'
                                ORDER BY seq) o), '') AS TEXT) AS review
 FROM ref('job_run') j
-LEFT JOIN ref('effort') e ON e.ref = uri('oxplow/effort', 'id', substr(j.intent_key, length('review:') + 1))
+LEFT JOIN ref('effort') e ON e.uri = uri('oxplow/effort', 'id', substr(j.intent_key, length('review:') + 1))
 WHERE j.job = uri('oxplow/job', 'job', 'effort-review/review')

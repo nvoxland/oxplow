@@ -1,6 +1,6 @@
 -- Archived work leaves search (tsk921): a note in an archived thread or
 -- stream isn't indexed.
-SELECT n.ref AS ref,
+SELECT n.uri AS uri,
        CAST('' AS TEXT) AS title,
        CAST(n.body AS TEXT) AS body,
        CAST(CASE WHEN th.stream_id IS NULL THEN NULL ELSE 'str' || th.stream_id END AS TEXT)

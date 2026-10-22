@@ -5,10 +5,10 @@ params:
 query: |
   WITH e AS (
     -- Its work item, through the interface; one the active list doesn't
-    -- show is named by its ref, an effort on none by its own title.
+    -- show is named by its uri, an effort on none by its own title.
     SELECT e.id, coalesce(w.title, e.work_item, e.title, 'Unlinked work') AS title,
            coalesce(w.body, '') AS description, coalesce(e.summary, '') AS summary
-    FROM v_effort e LEFT JOIN v_work_item w ON w.ref = e.work_item
+    FROM v_effort e LEFT JOIN v_work_item w ON w.uri = e.work_item
     WHERE e.id = :effort_id
   ),
   files AS (
@@ -18,7 +18,7 @@ query: |
   claims AS (
     SELECT group_concat('- ' || statement ||
              CASE WHEN verified = 1 THEN '' ELSE ' (no evidence cited)' END, char(10)) AS list
-    FROM (SELECT c.statement, s.verified FROM v_claim c JOIN v_oxplow_bundled_claim_status s ON s.ref = c.ref
+    FROM (SELECT c.statement, s.verified FROM v_claim c JOIN v_oxplow_bundled_claim_status s ON s.uri = c.uri
           WHERE c.effort_id = :effort_id ORDER BY c.created_at)
   ),
   decisions AS (

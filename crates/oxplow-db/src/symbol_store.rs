@@ -75,7 +75,7 @@ impl SqliteSymbolStore {
                     .map_err(map_sql_err)?;
                     for r in file.rows.iter().flatten() {
                         tx.execute(
-                            "INSERT INTO symbol (ref, snapshot_id, stream_id, path, name, kind,
+                            "INSERT INTO symbol (uri, snapshot_id, stream_id, path, name, kind,
                                container, signature, language, line, col, start_line,
                                start_col, end_line, end_col)
                              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
@@ -204,7 +204,7 @@ mod tests {
         let refs: Vec<(i64, String, i64)> = db
             .call(|c| {
                 let mut stmt = c.prepare(
-                    "SELECT stream_id, ref, snapshot_id FROM symbol ORDER BY stream_id, line",
+                    "SELECT stream_id, uri, snapshot_id FROM symbol ORDER BY stream_id, line",
                 )?;
                 let rows = stmt
                     .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?

@@ -44,11 +44,11 @@ title: Blocked Work
 params:
   - { name: thread_id, label: Thread }
 query: |
-  SELECT ref, title, updated_at FROM v_work_item
+  SELECT uri, title, updated_at FROM v_work_item
   WHERE state = 'blocked' AND thread_id = :thread_id
 viz: table            # table | list | number | markdown | bar | line | treemap | document | dashboard | custom
 columns:
-  - { key: title, label: Item, link: { kind: page, from: ref } }
+  - { key: title, label: Item, link: { kind: page, from: uri } }
   - { key: updated_at, label: Updated, format: relative, width: 120 }
 empty: Nothing is blocked.
 ```
@@ -146,7 +146,7 @@ actions:
   - id: finish
     label: Finish
     command: oxplow.work_item.transition
-    input: { ref: "{{row.ref}}", to: done }
+    input: { uri: "{{row.uri}}", to: done }
     row: true
   - id: sync
     label: Sync PRs
@@ -168,10 +168,10 @@ actions:
   - id: edit
     label: Edit…
     command: oxplow.work_item.update
-    input: { ref: "{{row.ref}}", title: "{{row.title}}" }
+    input: { uri: "{{row.uri}}", title: "{{row.title}}" }
     row: true
     form: true
-    fixed: [ref]
+    fixed: [uri]
 ```
 
 A `viz: form` lens takes the same `fixed`, and `fields` to show only some
@@ -300,7 +300,7 @@ group: { by: bucket, link: { kind: page, from: bucket_page } }   # link is optio
 emphasis: is_current     # a true / non-zero value highlights the row
 depth: level             # a whole number indents the row
 columns:
-  - { key: title, link: { kind: page, from: ref }, icon: state, tone: hue }
+  - { key: title, link: { kind: page, from: uri }, icon: state, tone: hue }
 actions:
   - { id: add, label: "+", command: oxplow.work_item.create, group: Ready, input: { title: New task } }
 ```
@@ -349,8 +349,8 @@ page's id as a param, so it must declare it:
 | Slot | Page | Param |
 |---|---|---|
 | `effort.review.details` | an effort's diff view | `effort_id`, `change_id` |
-| `work_item.detail.body` | a work item's page, below its body | `ref` |
-| `work_item.detail.sidebar` | a work item's page, its side rail | `ref` |
+| `work_item.detail.body` | a work item's page, below its body | `uri` |
+| `work_item.detail.sidebar` | a work item's page, its side rail | `uri` |
 | `thread.plan.header` | a thread's plan, as a compact strip | `thread_id` |
 | `vcs.commit.details` | a commit's page | `change_id` |
 | `vcs.status.header` | Uncommitted Changes, above the files | `stream_id` |
@@ -464,7 +464,7 @@ oxplow.connect().then((component) => {
 });
 // Elsewhere, with `component` in hand:
 //   await component.query("open-tasks", {})
-//   await component.invoke("oxplow.work_item.transition", { ref, to: "done" })
+//   await component.invoke("oxplow.work_item.transition", { uri, to: "done" })
 //   await component.navigate("oxplow:oxplow/work_item?id=tsk42&provider=oxplow")   // oxplow pages only
 ```
 
@@ -533,7 +533,7 @@ actions in the bar and opens a command's form in oxplow:
 oxplow.connect().then(async (component) => {
   component.applyTheme();
   const { rows } = await component.querySql(
-    "SELECT ref, title FROM v_effort WHERE started_at >= ?1", [component.viewParams.from]);
+    "SELECT uri, title FROM v_effort WHERE started_at >= ?1", [component.viewParams.from]);
   await component.setTitle(`Efforts since ${component.viewParams.from}`);
   await component.setActions([{ id: "refresh", label: "Refresh", primary: true }]);
   component.onAction((id) => { if (id === "refresh") location.reload(); });
@@ -592,7 +592,7 @@ ui:
 The lens gets the view's props as params and must declare all of them: the
 Board gets `scope` (`thread`, `backlog` or `all`) and `thread_id`; the list
 gets `scope` (`thread`, `stream` or `all`) and `thread_id`, and its lens may
-declare `stream_id`; the editor gets `ref`. Settings → Integrations lists
+declare `stream_id`; the editor gets `uri`. Settings → Integrations lists
 each replaced view with a choice of whose to show (Default, oxplow's own, or
 an extension); a small "replaced by" badge says whose it is, and if it can't
 load, oxplow's own shows with a line saying why. Some views also share
@@ -684,9 +684,9 @@ collectors:
   - id: hot
     runtime: starlark            # or: jaq
     entry: collectors/hot.star
-    input: "SELECT ref, title FROM v_work_item WHERE json_extract(native, '$.priority') = 'high'"
+    input: "SELECT uri, title FROM v_work_item WHERE json_extract(native, '$.priority') = 'high'"
     entities:
-      - { name: hot_item, key: ref, columns: { ref: text, title: text } }
+      - { name: hot_item, key: uri, columns: { uri: text, title: text } }
 ```
 
 ```python

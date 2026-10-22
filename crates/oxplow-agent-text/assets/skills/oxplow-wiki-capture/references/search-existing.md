@@ -3,7 +3,7 @@
 Before writing, find the topic page if there is one.
 
 1. `oxplow_query_sql` over `v_knowledge_page`: every page's `slug`, `title`,
-   `excerpt`, `outbound_refs` and `stale_ref_count`. Cheap, scan first:
+   `excerpt`, `outbound_uris` and `stale_ref_count`. Cheap, scan first:
    `SELECT slug, title FROM v_knowledge_page WHERE title LIKE '%hook%'`.
 2. `oxplow_search` with `resources: ["oxplow/wiki"]`: full text over page bodies; catches
    pages that discuss the topic but aren't named after it.

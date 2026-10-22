@@ -28,7 +28,7 @@ export interface WikiRefFreshness {
 /** One page as the index lists it. */
 export interface WikiPageSummary {
   /** `wiki:<slug>`. */
-  ref: string;
+  uri: string;
   slug: string;
   title: string;
   excerpt: string;
@@ -36,7 +36,7 @@ export interface WikiPageSummary {
   /** Its file refs whose file changed since they were pinned. */
   stale_ref_count: number;
   /** Every ref it links to (`file:src/a.rs`, `wiki:other`). */
-  outbound_refs: string[];
+  outbound_uris: string[];
 }
 
 // Every read returns what it read (`reads`); a consumer re-runs it through
@@ -48,19 +48,19 @@ export function pagesFromResult(result: SqlQueryResult): WikiPageSummary[] {
   return result.rows.map((row) => {
     let outbound: string[] = [];
     try {
-      const parsed: unknown = JSON.parse(String(cell(result, row, "outbound_refs") ?? "[]"));
+      const parsed: unknown = JSON.parse(String(cell(result, row, "outbound_uris") ?? "[]"));
       if (Array.isArray(parsed)) outbound = parsed.map(String);
     } catch {
       outbound = [];
     }
     return {
-      ref: String(cell(result, row, "ref")),
+      uri: String(cell(result, row, "uri")),
       slug: String(cell(result, row, "slug")),
       title: String(cell(result, row, "title") ?? ""),
       excerpt: String(cell(result, row, "excerpt") ?? ""),
       updated_at: String(cell(result, row, "updated_at") ?? ""),
       stale_ref_count: Number(cell(result, row, "stale_ref_count") ?? 0),
-      outbound_refs: outbound,
+      outbound_uris: outbound,
     };
   });
 }
@@ -68,7 +68,7 @@ export function pagesFromResult(result: SqlQueryResult): WikiPageSummary[] {
 /** Every page, most recently updated first. */
 export async function readWikiPages(): Promise<{ pages: WikiPageSummary[]; reads: Reads }> {
   const res = await querySql(
-    `SELECT ref, slug, title, excerpt, updated_at, stale_ref_count, outbound_refs
+    `SELECT uri, slug, title, excerpt, updated_at, stale_ref_count, outbound_uris
        FROM v_knowledge_page ORDER BY updated_at DESC`,
     [],
     100_000,
@@ -83,12 +83,12 @@ export async function readWikiPage(
 ): Promise<{ page: { summary: WikiPageSummary; body: string } | null; reads: Reads }> {
   const [pages, body] = await Promise.all([
     querySql(
-      `SELECT ref, slug, title, excerpt, updated_at, stale_ref_count, outbound_refs
+      `SELECT uri, slug, title, excerpt, updated_at, stale_ref_count, outbound_uris
          FROM v_knowledge_page WHERE slug = ?1`,
       [slug],
       1,
     ),
-    querySql("SELECT body FROM v_knowledge_body WHERE ref = ?1", [wikiUri(slug)], 1),
+    querySql("SELECT body FROM v_knowledge_body WHERE uri = ?1", [wikiUri(slug)], 1),
   ]);
   const reads = unionReads([pages.reads, body.reads]);
   const summary = pagesFromResult(pages)[0];

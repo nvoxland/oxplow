@@ -24,8 +24,8 @@ export function TasksList({
     if (chosen.length === 0) return list;
     const matches = (i: WorkList["all"][number]) =>
       chosen.every(([name, values]) => values.includes(String(i.native[name] ?? "")));
-    const parents = new Set(list.all.filter(matches).map((i) => i.parentRef).filter((p): p is string => p !== null));
-    return bucketWorkList(list.threadId, list.all.filter((i) => matches(i) || parents.has(i.ref)), list.reads);
+    const parents = new Set(list.all.filter(matches).map((i) => i.parentUri).filter((p): p is string => p !== null));
+    return bucketWorkList(list.threadId, list.all.filter((i) => matches(i) || parents.has(i.uri)), list.reads);
   }, [props.threadWork, props.fields, filter]);
 
   // visibleSections in props takes precedence — Tasks page passes

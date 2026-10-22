@@ -87,7 +87,7 @@ export function pageTabRef(page: string, params?: Record<string, ParamValue>): T
   return { id: pageUri(page, clean), kind: "page", payload };
 }
 
-/** An extension's page: `page:<extension>/<id>[?params]` — `ref`, when it
+/** An extension's page: `page:<extension>/<id>[?params]` — `uri`, when it
  *  opens one of the extension's refs (P8.D7). */
 export function extPageRef(extension: string, page: string, params?: Record<string, ParamValue>): TabRef {
   const clean = cleanParams(params);

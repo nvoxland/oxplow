@@ -16,7 +16,7 @@ async function sql(daemon: Daemon, query: string): Promise<unknown[][]> {
 
 /** The item titled `title`'s ref. */
 async function refOf(daemon: Daemon, title: string): Promise<string> {
-  const rows = await sql(daemon, `SELECT ref FROM v_work_item WHERE title = '${title}'`);
+  const rows = await sql(daemon, `SELECT uri FROM v_work_item WHERE title = '${title}'`);
   return String(rows[0]?.[0]);
 }
 
@@ -24,7 +24,7 @@ async function refOf(daemon: Daemon, title: string): Promise<string> {
 async function notesOn(daemon: Daemon, title: string): Promise<number> {
   const rows = await sql(
     daemon,
-    `SELECT count(*) FROM v_work_item_comment c JOIN v_work_item w ON w.ref = c.ref
+    `SELECT count(*) FROM v_work_item_comment c JOIN v_work_item w ON w.uri = c.uri
       WHERE w.title = '${title}' AND c.body = 'Noted by the suite''s effect.'`,
   );
   return Number(rows[0]?.[0]);
@@ -40,7 +40,7 @@ test("a failed reaction is in Delivery, and a person's Retry composes it afresh"
   await expect(row).toContainText("tsk999999");
   // The person fixes what made it fail, then retries: the effect reads the
   // item as it is now.
-  await run(daemon, "oxplow.work_item.update", { ref: await refOf(daemon, "Plum [fail]"), title: "Plum" });
+  await run(daemon, "oxplow.work_item.update", { uri: await refOf(daemon, "Plum [fail]"), title: "Plum" });
   const key = (await row.getAttribute("data-testid"))!.replace("reaction-row-", "");
   await page.getByTestId(`reaction-retry-${key}-trigger`).click();
   await page.getByTestId(`reaction-retry-${key}-confirm`).click();
@@ -63,7 +63,7 @@ test("a person's Backfill reaches what was logged before the effect was deployed
   );
   writeFileSync(
     join(dir, "effects", "note.star"),
-    'def transform(x):\n    return {"commands": [{"name": "oxplow.work_item.comment", "input": {"ref": x["event"]["payload"]["work_item"], "body": "Noted late."}}]}\n',
+    'def transform(x):\n    return {"commands": [{"name": "oxplow.work_item.comment", "input": {"uri": x["event"]["payload"]["work_item"], "body": "Noted late."}}]}\n',
   );
   await deploy(daemon, "late");
   const late = async () =>
@@ -71,7 +71,7 @@ test("a person's Backfill reaches what was logged before the effect was deployed
       (
         await sql(
           daemon,
-          "SELECT count(*) FROM v_work_item_comment c JOIN v_work_item w ON w.ref = c.ref WHERE w.title = 'Fig' AND c.body = 'Noted late.'",
+          "SELECT count(*) FROM v_work_item_comment c JOIN v_work_item w ON w.uri = c.uri WHERE w.title = 'Fig' AND c.body = 'Noted late.'",
         )
       )[0]?.[0],
     );

@@ -11,8 +11,8 @@ def transform(x):
     effort = x["input"]["effort"]
     if not effort.startswith("eff"):
         return {"refuse": "`effort` is an effort's id, like `eff12`"}
-    ids = scope("sql.read", {"sql": "SELECT id FROM v_effort WHERE ref = :ref",
-                             "params": {"ref": uri.build("oxplow/effort", id = effort)}})
+    ids = scope("sql.read", {"sql": "SELECT id FROM v_effort WHERE uri = :uri",
+                             "params": {"uri": uri.build("oxplow/effort", id = effort)}})
     if not ids:
         return {"refuse": "no effort " + effort}
     effort_id = ids[0]["id"]

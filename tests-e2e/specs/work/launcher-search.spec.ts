@@ -6,7 +6,7 @@ import { expect, test } from "../../support/fixtures.js";
 import { searchLauncher } from "../../support/ui.js";
 
 test("search finds a task and a wiki page, and opens them", async ({ page, daemon }) => {
-  const created = await run<{ result: { ref: string } }>(daemon, "oxplow.work_item.create", {
+  const created = await run<{ result: { uri: string } }>(daemon, "oxplow.work_item.create", {
     title: "Quokka migration",
     thread: daemon.thread,
   });
@@ -15,7 +15,7 @@ test("search finds a task and a wiki page, and opens them", async ({ page, daemo
   await searchable(daemon, "quokka", "wiki");
   await page.goto("/");
   await searchLauncher(page, "quokka");
-  await page.getByTestId(`launcher-hit-${created.result.ref}`).click();
+  await page.getByTestId(`launcher-hit-${created.result.uri}`).click();
   await expect(page.getByTestId("task-rail-delete-trigger")).toBeVisible();
   await expect(page.locator("body")).toContainText("Quokka migration");
   await searchLauncher(page, "quokka");
@@ -39,7 +39,7 @@ test("a lens added while the page is open is in the launcher", async ({ page, da
   );
   writeFileSync(
     join(dir, "lenses", "wombats.yaml"),
-    "title: Wombat Tasks\nquery: SELECT ref FROM v_work_item\nviz: table\nlauncher: { category: Work }\n",
+    "title: Wombat Tasks\nquery: SELECT uri FROM v_work_item\nviz: table\nlauncher: { category: Work }\n",
   );
   await deploy(daemon, "wombat");
   await expect(async () => {

@@ -23,10 +23,10 @@ pub struct PageDraft {
     /// Sets the page's heading.
     pub title: Option<String>,
     pub body: String,
-    /// Refs re-checked against this body: their pins move to now.
-    pub verified_refs: Vec<String>,
-    /// Refs taken out of the body.
-    pub removed_refs: Vec<String>,
+    /// Files re-checked against this body: their pins move to now.
+    pub verified_files: Vec<String>,
+    /// Files taken out of the body.
+    pub removed_files: Vec<String>,
 }
 
 /// How current one of a page's refs is: core's, from the pins it keeps for

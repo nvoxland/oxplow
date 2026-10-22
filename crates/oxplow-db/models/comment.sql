@@ -5,5 +5,5 @@ SELECT c.id, c.stream_id, c.thread_id, c.target_resource, c.target_uri AS target
          ORDER BY m.id LIMIT 1) AS body,
        (SELECT count(*) FROM source('comment_message') m WHERE m.comment_id = c.id)
          AS message_count,
-       CAST(uri('oxplow/comment', 'id', 'cmt' || c.id) AS TEXT) AS ref
+       CAST(uri('oxplow/comment', 'id', 'cmt' || c.id) AS TEXT) AS uri
 FROM source('comment') c

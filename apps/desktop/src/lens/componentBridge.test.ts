@@ -18,13 +18,13 @@ test("frame messages parse into the three requests and ready; anything else is r
     type: "request",
     request: { id: "2", method: "invoke", command: "oxplow.work_item.transition", input: { to: "done" } },
   });
-  expect(parseFrameMessage({ id: "3", method: "navigate", ref: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" })).toEqual({
+  expect(parseFrameMessage({ id: "3", method: "navigate", uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" })).toEqual({
     type: "request",
-    request: { id: "3", method: "navigate", ref: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", newTab: false },
+    request: { id: "3", method: "navigate", uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", newTab: false },
   });
-  expect(parseFrameMessage({ id: "4", method: "navigate", ref: "oxplow:oxplow/commit?sha=abc", newTab: true })).toEqual({
+  expect(parseFrameMessage({ id: "4", method: "navigate", uri: "oxplow:oxplow/commit?sha=abc", newTab: true })).toEqual({
     type: "request",
-    request: { id: "4", method: "navigate", ref: "oxplow:oxplow/commit?sha=abc", newTab: true },
+    request: { id: "4", method: "navigate", uri: "oxplow:oxplow/commit?sha=abc", newTab: true },
   });
   for (const bad of [
     null,
@@ -186,8 +186,8 @@ test("an invoke that asks is confirmed in the host, then runs confirmed; decline
 
 test("navigate opens the ref; a malformed request is answered with an error when it has an id", async () => {
   const h = harness();
-  h.send({ id: "n1", method: "navigate", ref: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" });
-  h.send({ id: "n2", method: "navigate", ref: "oxplow:oxplow/commit?sha=abc", newTab: true });
+  h.send({ id: "n1", method: "navigate", uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" });
+  h.send({ id: "n2", method: "navigate", uri: "oxplow:oxplow/commit?sha=abc", newTab: true });
   h.send({ id: "b1", method: "exec" });
   await h.settle();
   expect(h.calls).toEqual([
@@ -234,7 +234,7 @@ test("a component navigates to app pages only", async () => {
   expect(componentMayOpen("oxplow:oxplow/page?page=external-url&url=https://evil.example/?d%3D1")).toBe(false);
   expect(componentMayOpen("not a ref")).toBe(false);
   const h = harness({ navigate: (ref) => componentMayOpen(ref) });
-  h.send({ id: "n2", method: "navigate", ref: "oxplow:oxplow/page?page=external-url&url=https://evil.example/" });
+  h.send({ id: "n2", method: "navigate", uri: "oxplow:oxplow/page?page=external-url&url=https://evil.example/" });
   await h.settle();
   expect(h.received).toEqual([
     { id: "n2", ok: false, error: { code: "INVALID", message: "A component may open oxplow's pages only." } },

@@ -35,25 +35,25 @@ declare const oxplow: { connect(): Promise<Component> };
 const DAY = 24 * 60 * 60 * 1000;
 
 /** Each kind's rows in the window `?1`..`?2` (`?3`: one thread's), as
- *  `kind, ref, label, start_at, end_at`: efforts, sessions and threads
+ *  `kind, uri, label, start_at, end_at`: efforts, sessions and threads
  *  that started before it ends and hadn't ended by its start, commits in
  *  it. One query a kind, so one busy kind can't crowd out the others
  *  under the row cap, newest first, so a capped kind keeps the latest. */
 const QUERIES: Record<string, string> = {
-  effort: `SELECT 'effort', ref, COALESCE(NULLIF(title, ''), ref), started_at, ended_at
+  effort: `SELECT 'effort', uri, COALESCE(NULLIF(title, ''), uri), started_at, ended_at
              FROM v_effort
             WHERE started_at < ?2 AND COALESCE(ended_at, ?2) > ?1 AND (?3 IS NULL OR thread_id = ?3)
             ORDER BY started_at DESC`,
-  session: `SELECT 'session', ref, COALESCE(display_name, title, harness), opened_at, closed_at
+  session: `SELECT 'session', uri, COALESCE(display_name, title, harness), opened_at, closed_at
               FROM v_agent_session
              WHERE opened_at < ?2 AND COALESCE(closed_at, ?2) > ?1 AND (?3 IS NULL OR thread_id = ?3)
              ORDER BY opened_at DESC`,
-  thread: `SELECT 'thread', ref, title, created_at, closed_at
+  thread: `SELECT 'thread', uri, title, created_at, closed_at
              FROM v_thread
             WHERE created_at < ?2 AND COALESCE(closed_at, ?2) > ?1
               AND (?3 IS NULL OR id = ?3)
             ORDER BY created_at DESC`,
-  commit: `SELECT 'commit', ref, subject, committed_at, NULL
+  commit: `SELECT 'commit', uri, subject, committed_at, NULL
              FROM v_commit
             WHERE committed_at >= ?1 AND committed_at < ?2 AND ?3 IS NULL
             ORDER BY committed_at DESC`,

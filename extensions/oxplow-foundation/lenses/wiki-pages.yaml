@@ -11,9 +11,9 @@ query: |
               ELSE replace(substr(b.body, max(1, instr(lower(b.body), lower(:filter)) - 40), 120), char(10), ' ') END AS snippet,
          '@.oxplow/wiki/' || p.slug || '.md ' AS mention
   FROM v_knowledge_page p
-  JOIN v_knowledge_body b ON b.ref = p.ref
+  JOIN v_knowledge_body b ON b.uri = p.uri
   WHERE CASE WHEN :filter = ''
-             THEN p.ref NOT IN (
+             THEN p.uri NOT IN (
                     SELECT v.page_id FROM v_page_visit v JOIN v_thread t ON t.id = v.thread_id
                     WHERE v.page_kind = 'wiki' AND t.stream_id = :stream_id)
              ELSE instr(lower(p.title), lower(:filter)) > 0 OR instr(lower(b.body), lower(:filter)) > 0 END

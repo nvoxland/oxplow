@@ -89,7 +89,7 @@ winners AS (
    WHERE s.rn = 1 AND s.storage <> 'deleted'
 )
 SELECT f.id, c.id AS capture_id, m.key AS measure_key, f.value, f.numerator,
-       f.denominator, subj.kind AS subject_kind, subj.ref AS subject, w.path, f.line,
+       f.denominator, subj.kind AS subject_kind, subj.uri AS subject, w.path, f.line,
        f.severity, f.rule, f.detail, d.json AS dims_json,
        c.stream_id, c.thread_id, c.effort_id, c.captured_at, c.branch
   FROM winners w
@@ -104,7 +104,7 @@ SELECT f.id, c.id AS capture_id, m.key AS measure_key, f.value, f.numerator,
                       AND y.path_id = f.path_id)
 UNION ALL
 SELECT f.id, c.id AS capture_id, m.key AS measure_key, f.value, f.numerator,
-       f.denominator, subj.kind AS subject_kind, subj.ref AS subject, w.path,
+       f.denominator, subj.kind AS subject_kind, subj.uri AS subject, w.path,
        -- CAST keeps the column INTEGER across the UNION.
        CAST(coalesce((SELECT fl.line FROM source('fact_line') fl
                        WHERE fl.fact_id = f.id AND fl.capture_id <= ph.capture_id

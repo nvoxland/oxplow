@@ -49,7 +49,7 @@ const DEFAULT_LINK_TYPE = "relates_to";
  * between a thread and the backlog, Comment…, Link… and Delete. Every
  * write is a `work_item.*` command, which the bus dispatches to the item's
  * list. Extensions mount lenses in the `work_item.detail.body` and
- * `.sidebar` slots with `{ ref }`; the item's own list may replace how its
+ * `.sidebar` slots with `{ uri }`; the item's own list may replace how its
  * state shows (`work_item.detail.state`).
  */
 export function WorkItemPage({
@@ -108,7 +108,7 @@ export function WorkItemPage({
   }, [workItemRef, guard]);
   useEffect(() => void refresh(), [refresh]);
   useRerunOnChange(reads, () => void refresh());
-  const slotParams = useMemo(() => ({ ref: workItemRef }), [workItemRef]);
+  const slotParams = useMemo(() => ({ uri: workItemRef }), [workItemRef]);
   usePageTitle(item?.title ?? null);
   const graphRef = useMemo(() => workItemTabRef(workItemRef), [workItemRef]);
   const backlinkEntries = useBacklinks(graphRef);
@@ -128,8 +128,8 @@ export function WorkItemPage({
   const remove = async () => {
     if (!item) return;
     try {
-      await deleteWorkItem(item.ref, true);
-      onDeleted?.(item.ref);
+      await deleteWorkItem(item.uri, true);
+      onDeleted?.(item.uri);
     } catch (e) {
       recordOpError({ label: "Delete", message: e instanceof Error ? e.message : String(e) });
     }
@@ -137,7 +137,7 @@ export function WorkItemPage({
   const run = async (label: string, verb: "comment" | "link" | "unlink", input: Record<string, unknown>) => {
     if (!item) return;
     setBusy(true);
-    const ran = await personCommands.run(label, `oxplow.work_item.${verb}`, { ref: item.ref, ...input });
+    const ran = await personCommands.run(label, `oxplow.work_item.${verb}`, { uri: item.uri, ...input });
     setBusy(false);
     if (ran) {
       setPrompt(null);
@@ -205,15 +205,15 @@ export function WorkItemPage({
   const scopeAction = (() => {
     if (!features.lists || !thread) return undefined;
     if (item.threadId === null) {
-      return { label: "Bring to this thread", run: () => void moveWorkItem(item.ref, thread.id) };
+      return { label: "Bring to this thread", run: () => void moveWorkItem(item.uri, thread.id) };
     }
-    if (item.threadId === thread.id) return { label: "Send to backlog", run: () => void moveWorkItem(item.ref, null) };
+    if (item.threadId === thread.id) return { label: "Send to backlog", run: () => void moveWorkItem(item.uri, null) };
     return undefined;
   })();
   // The newest effort (they come newest first) is the one to review.
   const latestEffort = efforts[0]?.effort.id;
   const review = onShowEffortDiff && latestEffort ? () => onShowEffortDiff(latestEffort) : undefined;
-  const commentTarget = item.ref;
+  const commentTarget = item.uri;
 
   const rail = (
     <>
@@ -231,21 +231,21 @@ export function WorkItemPage({
                 replacement offers, the item can always move. */}
             <Replaceable
               target="work_item.detail.state"
-              props={{ ref: item.ref }}
+              props={{ uri: item.uri }}
               streamId={streamId}
               provider={item.provider}
               onOpenPage={onOpenPage}
               fallback={null}
             />
-            {features.hierarchy && item.parentRef ? (
+            {features.hierarchy && item.parentUri ? (
             <div data-testid="work-item-parent">
               <div style={labelStyle}>Parent</div>
               <RouteLink
-                to={workItemTabRef(item.parentRef)}
-                onNavigate={() => onOpenPage(workItemTabRef(item.parentRef!))}
+                to={workItemTabRef(item.parentUri)}
+                onNavigate={() => onOpenPage(workItemTabRef(item.parentUri!))}
                 style={linkStyle}
               >
-                {workItemLabel(item.parentRef)}
+                {workItemLabel(item.parentUri)}
               </RouteLink>
             </div>
             ) : null}
@@ -273,7 +273,7 @@ export function WorkItemPage({
             everything below stay oxplow's. */}
         <Replaceable
           target="work_item.detail"
-          props={{ ref: item.ref }}
+          props={{ uri: item.uri }}
           streamId={streamId}
           onOpenPage={onOpenPage}
           fallback={

@@ -2132,7 +2132,7 @@ mod tests {
                 "created_at",
                 "updated_at",
                 "archived_at",
-                "ref",
+                "uri",
                 "prompt",
                 "head_sha"
             ]
@@ -2144,7 +2144,7 @@ mod tests {
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .unwrap();
-        assert_eq!((owner.as_str(), version), ("core", 5));
+        assert_eq!((owner.as_str(), version), ("core", 6));
         let mut inputs: Vec<(String, String)> = conn
             .prepare("SELECT input, kind FROM model_input WHERE view = 'v_stream'")
             .unwrap()
@@ -2766,8 +2766,8 @@ mod tests {
         let mut conn = fresh();
         let busy = on_change(source(
             "busy",
-            "SELECT ref, title FROM source('work_item') WHERE state = 'blocked'",
-            &["ref TEXT", "title TEXT"],
+            "SELECT uri, title FROM source('work_item') WHERE state = 'blocked'",
+            &["uri TEXT", "title TEXT"],
         ));
         compile(&mut conn, "t", std::slice::from_ref(&busy), &view).unwrap();
         let view_sql: String = conn
@@ -2781,7 +2781,7 @@ mod tests {
         assert_eq!(
             view_columns(&conn, "v_t_busy").unwrap(),
             vec![
-                ("ref".to_string(), "TEXT".to_string()),
+                ("uri".to_string(), "TEXT".to_string()),
                 ("title".to_string(), "TEXT".to_string())
             ]
         );
@@ -2819,8 +2819,8 @@ mod tests {
 
         let mut changed = on_change(source(
             "busy",
-            "SELECT ref FROM source('work_item') WHERE state = 'blocked'",
-            &["ref TEXT"],
+            "SELECT uri FROM source('work_item') WHERE state = 'blocked'",
+            &["uri TEXT"],
         ));
         changed.decl.version = 2;
         compile(&mut conn, "t", &[changed], &view).unwrap();
@@ -2840,8 +2840,8 @@ mod tests {
             "t",
             &[on_change(source(
                 "busy",
-                "SELECT ref FROM source('work_item')",
-                &["ref TEXT"],
+                "SELECT uri FROM source('work_item')",
+                &["uri TEXT"],
             ))],
             &view,
         )
@@ -2851,8 +2851,8 @@ mod tests {
             "t",
             &[on_change(source(
                 "busy",
-                "SELECT ref FROM source('m_v_t_busy')",
-                &["ref TEXT"],
+                "SELECT uri FROM source('m_v_t_busy')",
+                &["uri TEXT"],
             ))],
             &view,
         )
@@ -2891,8 +2891,8 @@ mod tests {
                 "acme",
                 vec![source(
                     "busy",
-                    "SELECT ref FROM ref('work_item')",
-                    &["ref TEXT"],
+                    "SELECT uri FROM ref('work_item')",
+                    &["uri TEXT"],
                 )],
             )])
             .await
@@ -2911,8 +2911,8 @@ mod tests {
             "acme",
             vec![on_change(source(
                 "busy",
-                "SELECT ref FROM ref('work_item')",
-                &["ref TEXT"],
+                "SELECT uri FROM ref('work_item')",
+                &["uri TEXT"],
             ))],
         )];
         let tx = conn.transaction().unwrap();
@@ -2942,8 +2942,8 @@ mod tests {
                     vec![
                         source(
                             "late",
-                            "SELECT ref, title FROM ref('work_item') WHERE state = 'blocked'",
-                            &["ref TEXT", "title TEXT"],
+                            "SELECT uri, title FROM ref('work_item') WHERE state = 'blocked'",
+                            &["uri TEXT", "title TEXT"],
                         ),
                         source(
                             "late_count",
@@ -2995,8 +2995,8 @@ mod tests {
                 "late-work",
                 vec![source(
                     "late",
-                    "SELECT ref, title FROM ref('work_item') WHERE state = 'blocked'",
-                    &["ref TEXT", "title TEXT"],
+                    "SELECT uri, title FROM ref('work_item') WHERE state = 'blocked'",
+                    &["uri TEXT", "title TEXT"],
                 )],
             )],
         )
@@ -3024,8 +3024,8 @@ mod tests {
                     "raw",
                     vec![source(
                         "items",
-                        "SELECT ref FROM\n  source('work_item')",
-                        &["ref TEXT"],
+                        "SELECT uri FROM\n  source('work_item')",
+                        &["uri TEXT"],
                     )],
                 ),
                 ext(
@@ -3033,7 +3033,7 @@ mod tests {
                     vec![
                         source("bad", "SELECT nope FROM ref('work_item')", &["nope"]),
                         source("on_bad", "SELECT * FROM ref('bad')", &["nope"]),
-                        source("fine", "SELECT ref FROM ref('work_item')", &["ref TEXT"]),
+                        source("fine", "SELECT uri FROM ref('work_item')", &["uri TEXT"]),
                         source("lost", "SELECT * FROM ref('missing')", &["x"]),
                     ],
                 ),
@@ -3124,14 +3124,14 @@ mod tests {
     #[test]
     fn a_deprecated_version_is_kept_beside_the_new_one_until_its_date() {
         let mut conn = fresh();
-        let v1 = source("late", "SELECT ref FROM ref('work_item')", &["ref TEXT"]);
+        let v1 = source("late", "SELECT uri FROM ref('work_item')", &["uri TEXT"]);
         publish(&mut conn, &[ext("late-work", vec![v1])]).unwrap();
 
         let twin = |until: &str, sql: &str| {
             let mut v2 = source(
                 "late",
-                "SELECT ref, title FROM ref('work_item')",
-                &["ref TEXT", "title TEXT"],
+                "SELECT uri, title FROM ref('work_item')",
+                &["uri TEXT", "title TEXT"],
             );
             v2.decl.version = 2;
             v2.decl.deprecated = vec![Deprecated {
@@ -3158,13 +3158,13 @@ mod tests {
         };
         let errors = publish(
             &mut conn,
-            &[twin("2999-01-01", "SELECT ref FROM ref('work_item')")],
+            &[twin("2999-01-01", "SELECT uri FROM ref('work_item')")],
         )
         .unwrap();
         assert!(errors["late-work"].is_empty(), "{errors:?}");
         assert_eq!(
             view_columns(&conn, "v_late_work_late_v1").unwrap(),
-            vec![("ref".to_string(), "TEXT".to_string())]
+            vec![("uri".to_string(), "TEXT".to_string())]
         );
         assert_eq!(view_columns(&conn, "v_late_work_late").unwrap().len(), 2);
 
@@ -3181,7 +3181,7 @@ mod tests {
         // Past its date: gone, and said so.
         let errors = publish(
             &mut conn,
-            &[twin("2020-01-01", "SELECT ref FROM ref('work_item')")],
+            &[twin("2020-01-01", "SELECT uri FROM ref('work_item')")],
         )
         .unwrap();
         assert!(
@@ -3192,7 +3192,7 @@ mod tests {
         );
         assert!(conn.prepare("SELECT * FROM v_late_work_late_v1").is_err());
         // A version that never published has no promise to keep.
-        let mut never = source("fresh", "SELECT ref FROM ref('work_item')", &["ref TEXT"]);
+        let mut never = source("fresh", "SELECT uri FROM ref('work_item')", &["uri TEXT"]);
         never.decl.version = 3;
         never.decl.deprecated = vec![Deprecated {
             version: 2,
@@ -3232,8 +3232,8 @@ mod tests {
         {
             let db = crate::Database::open(&path).unwrap();
             db.compile_extension_models(vec![late(
-                "SELECT ref FROM ref('work_item')",
-                &["ref TEXT"],
+                "SELECT uri FROM ref('work_item')",
+                &["uri TEXT"],
             )])
             .await
             .unwrap();
@@ -3242,8 +3242,8 @@ mod tests {
         let errors = ro
             .check_extension_models(
                 vec![late(
-                    "SELECT ref FROM ref('work_item') WHERE state = 'done'",
-                    &["ref TEXT"],
+                    "SELECT uri FROM ref('work_item') WHERE state = 'done'",
+                    &["uri TEXT"],
                 )],
                 vec![],
             )
@@ -3254,8 +3254,8 @@ mod tests {
         let errors = ro
             .check_extension_models(
                 vec![late(
-                    "SELECT ref, title FROM ref('work_item')",
-                    &["ref TEXT", "title TEXT"],
+                    "SELECT uri, title FROM ref('work_item')",
+                    &["uri TEXT", "title TEXT"],
                 )],
                 vec![],
             )

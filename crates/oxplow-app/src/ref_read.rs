@@ -71,22 +71,22 @@ const RELATED: &[(&str, &str, &str)] = &[
     (
         r::WORK_ITEM,
         "links",
-        "SELECT * FROM v_work_item_link WHERE from_ref = ?1 ORDER BY created_at",
+        "SELECT * FROM v_work_item_link WHERE from_uri = ?1 ORDER BY created_at",
     ),
     (
         r::WORK_ITEM,
         "comments",
-        "SELECT * FROM v_work_item_comment WHERE ref = ?1 ORDER BY created_at",
+        "SELECT * FROM v_work_item_comment WHERE uri = ?1 ORDER BY created_at",
     ),
     (
         r::COMMIT,
         "files",
-        "SELECT * FROM v_commit_file WHERE sha = (SELECT sha FROM v_commit WHERE ref = ?1) ORDER BY path",
+        "SELECT * FROM v_commit_file WHERE sha = (SELECT sha FROM v_commit WHERE uri = ?1) ORDER BY path",
     ),
     (
         r::EFFORT,
         "files",
-        "SELECT * FROM v_effort_file WHERE effort_id = (SELECT id FROM v_effort WHERE ref = ?1) ORDER BY path",
+        "SELECT * FROM v_effort_file WHERE effort_id = (SELECT id FROM v_effort WHERE uri = ?1) ORDER BY path",
     ),
 ];
 
@@ -266,7 +266,7 @@ async fn owned_row(
             ))
         })?;
     let sql = format!(
-        "SELECT * FROM \"{}\" WHERE ref = ?1 LIMIT 1",
+        "SELECT * FROM \"{}\" WHERE uri = ?1 LIMIT 1",
         view.replace('"', "")
     );
     Ok(rows(svc, &sql, reference).await?.into_iter().next())
@@ -497,7 +497,7 @@ mod tests {
                     )
                     .await
                     .unwrap()
-                    .result["ref"]
+                    .result["uri"]
                     .as_str()
                     .unwrap()
                     .to_string()
@@ -508,11 +508,11 @@ mod tests {
         for (id, input) in [
             (
                 "oxplow.work_item.link",
-                json!({ "ref": item, "target": other, "link_type": "blocks" }),
+                json!({ "uri": item, "target": other, "link_type": "blocks" }),
             ),
             (
                 "oxplow.work_item.comment",
-                json!({ "ref": item, "body": "Seen on Safari only." }),
+                json!({ "uri": item, "body": "Seen on Safari only." }),
             ),
         ] {
             svc.commands
@@ -523,7 +523,7 @@ mod tests {
         let read = read(&svc, &item, &Reader::default(), None).await.unwrap();
         let row = read.row.unwrap();
         assert_eq!(row["title"], "Fix the login loop");
-        assert_eq!(read.related["links"][0]["to_ref"], json!(other));
+        assert_eq!(read.related["links"][0]["to_uri"], json!(other));
         assert_eq!(read.related["comments"][0]["body"], "Seen on Safari only.");
         assert_eq!(read.content, None);
     }
@@ -541,7 +541,7 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(stream.row.unwrap()["ref"], "oxplow:oxplow/stream?id=str1");
+        assert_eq!(stream.row.unwrap()["uri"], "oxplow:oxplow/stream?id=str1");
         assert!(matches!(
             read(
                 &svc,

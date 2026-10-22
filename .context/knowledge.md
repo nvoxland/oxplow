@@ -10,10 +10,10 @@ what it kept.
 
 ## One write path: `oxplow.knowledge.write_page`
 
-`oxplow.knowledge.write_page { slug, title?, body, verified_refs?, removed_refs? }`
+`oxplow.knowledge.write_page { slug, title?, body, verified_files?, removed_files? }`
 (`crates/oxplow-app/src/knowledge.rs`, an `External` command: the store
 keeps the page) is how a page is written — by an agent (`run_command`),
-by the desktop editor, and by "Mark verified" on the Freshness page (`oxplow.knowledge.verify_refs`, which writes through it). It:
+by the desktop editor, and by "Mark verified" on the Freshness page (`oxplow.knowledge.verify_files`, which writes through it). It:
 
 1. validates the slug (kebab-case) and **every `[[link]]` the write
    adds** — a task, page, file, directory, finding or commit that doesn't
@@ -23,8 +23,8 @@ by the desktop editor, and by "Mark verified" on the Freshness page (`oxplow.kno
    (tsk564) (`link_check::check_links_in`, synchronous: the database,
    the project's files and `Vcs::revision_graph` for commits; a page may
    link to itself);
-2. checks the ref declarations (`refs_borne_out`): `removed_refs` must be
-   gone from the body; `verified_refs` must be cited, or be a file under a
+2. checks the file declarations (`refs_borne_out`): `removed_files` must be
+   gone from the body; `verified_files` must be cited, or be a file under a
    `[[dir:…]]` the body cites — both before anything reaches the store;
 3. hands the page to the **active store** (`KnowledgeProvider::
    write_page`): the wiki writes the file (if it differs; a temp file
@@ -64,9 +64,9 @@ after it, or a new one at the end, with `@version` literals stripped;
 tsk572 — and core records the body it kept), and
 `oxplow.knowledge.resync { slug }` (the wiki's: restate from the file, a
 `Tx` command; the repair when a row and its file disagree), and
-`oxplow.knowledge.verify_refs { slug, refs? }` (re-pin the named files, or
+`oxplow.knowledge.verify_files { slug, files? }` (re-pin the named files, or
 every file the page cites, to now: it rewrites the recorded body through
-`write_page` with them as `verified_refs`, so every store pins the same way;
+`write_page` with them as `verified_files`, so every store pins the same way;
 the Wiki Freshness page's "Mark verified" actions). All are `Record`: any thread captures
 what it explored. `oxplow.knowledge.write_page` replaced MCP
 `record_wiki_page_update`, `resync_wiki_page` and `delete_wiki_page`, and
@@ -100,8 +100,8 @@ rail's "Finished" list) from `knowledge.page.written`'s thread anchor.
 
 ## Reads are SQL (P5.C4)
 
-- **`v_knowledge_page`** — one row per page: `ref` (`oxplow:oxplow/wiki?slug=<slug>`),
-  `provider`, `slug`, `title`, `excerpt`, `body_size`, `outbound_refs`
+- **`v_knowledge_page`** — one row per page: `uri` (`oxplow:oxplow/wiki?slug=<slug>`),
+  `provider`, `slug`, `title`, `excerpt`, `body_size`, `outbound_uris`
   (JSON array of every URI it links to), `stale_ref_count`, `updated_at`.
 - **`v_knowledge_ref`** — each page's file refs: `page`, `path`,
   `pinned_snapshot_id`, `pinned_vcs_rev`, `pinned_vcs_rev_exact`,
@@ -115,7 +115,7 @@ a verified one stale (tsk563). `v_knowledge_ref` is the **one
 definition**: `v_knowledge_page.stale_ref_count` counts its rows,
 `KnowledgeProvider::freshness` reads it, and so do the wiki page's
 freshness chip and the Freshness page.
-- **`v_knowledge_body`** (P6.E2) — `ref`, `body`: each page's markdown,
+- **`v_knowledge_body`** (P6.E2) — `uri`, `body`: each page's markdown,
   apart from `v_knowledge_page` so listing pages never reads bodies.
 - **`v_knowledge_touch`** — which threads wrote which pages (the rail's
   Finished section).
@@ -176,7 +176,7 @@ definition of staleness), the same for every store. `WikiKnowledge` is
 the wiki: it keeps `.oxplow/wiki/<slug>.md`. A provider's store is
 `providers::knowledge::ExternalKnowledge` (`.context/providers.md` "A
 knowledge provider"): its write verbs answer the page's
-`knowledge.page.recorded@1`, whose `refs` (oxplow's grammar) core links
+`knowledge.page.recorded@2`, whose `uris` (oxplow's grammar) core links
 and pins from (`PageWrite.stated`, `page_ref_projections::stated_edges`)
 instead of parsing a body written in the store's own grammar; its
 collector's records of pages edited outside oxplow are restated by

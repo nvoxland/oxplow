@@ -3,19 +3,19 @@ description: Questions your agents are waiting on you to answer, work handed to 
 query: |
   SELECT * FROM (
   SELECT 'Waiting for your answer' AS what, coalesce(a.detail, 'Waiting on you') AS title,
-         NULL AS ref, t.title AS thread, a.since AS since
+         NULL AS uri, t.title AS thread, a.since AS since
   FROM v_agent_status a
   JOIN v_thread t ON t.id = a.thread_id
   WHERE a.state = 'awaiting_user' AND t.closed_at IS NULL
   UNION ALL
-  SELECT 'Handed to a thread with no agent', substr(h.body, 1, 120), h.to_thread_ref, t.title, h.sent_at
+  SELECT 'Handed to a thread with no agent', substr(h.body, 1, 120), h.to_thread_uri, t.title, h.sent_at
   FROM v_handoff h
   JOIN v_thread t ON t.id = h.to_thread_id
   WHERE h.state = 'open' AND t.closed_at IS NULL
     AND NOT EXISTS (SELECT 1 FROM v_agent_session s
                      WHERE s.thread_id = h.to_thread_id AND s.closed_at IS NULL)
   UNION ALL
-  SELECT 'Blocked', title, ref, NULL, updated_at
+  SELECT 'Blocked', title, uri, NULL, updated_at
   FROM v_work_item WHERE state = 'blocked'
   UNION ALL
   SELECT 'Open note', coalesce(body, quote), NULL, NULL, last_activity_at
@@ -25,7 +25,7 @@ query: |
 viz: table
 columns:
   - { key: what, label: What }
-  - { key: title, label: Item, link: { kind: page, from: ref } }
+  - { key: title, label: Item, link: { kind: page, from: uri } }
   - { key: thread, label: Thread }
   - { key: since, label: Since }
 empty: Nothing is waiting on you.

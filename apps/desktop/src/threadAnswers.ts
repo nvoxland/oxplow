@@ -11,7 +11,7 @@ import type { Reads } from "./tauri-bridge/generated/bindings.js";
 
 export interface AnswerRow {
   /** `answer:<id>`. */
-  ref: string;
+  uri: string;
   title: string;
   /** The existing lens it shows, if it shows one. */
   lens: string | null;
@@ -19,12 +19,12 @@ export interface AnswerRow {
   keptLens: string | null;
 }
 
-const ANSWERS_SQL = `SELECT ref, title, lens, kept_lens FROM v_thread_answer
+const ANSWERS_SQL = `SELECT uri, title, lens, kept_lens FROM v_thread_answer
                       WHERE thread_id = ?1 ORDER BY id DESC`;
 
 export function answersFromRows(rows: SqlCell[][]): AnswerRow[] {
   return rows.map(([ref, title, lens, kept]) => ({
-    ref: String(ref),
+    uri: String(ref),
     title: String(title ?? ""),
     lens: lens === null ? null : String(lens),
     keptLens: kept === null ? null : String(kept),

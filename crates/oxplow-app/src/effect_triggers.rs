@@ -990,7 +990,7 @@ mod tests {
 
     /// Marks a finished item's title.
     const MARK_DONE: &str = "  - id: mark-done\n    summary: Mark a finished item.\n    on: [work_item.state_changed]\n    where: { to: done }\n    needs: [sql.read]\n    entry: mark.star\n";
-    const MARK: &str = "def transform(x):\n    rows = scope(\"sql.read\", {\"sql\": \"SELECT title FROM v_work_item WHERE ref = :work_item\", \"params\": {\"work_item\": x[\"event\"][\"payload\"][\"work_item\"]}})\n    ref = x[\"event\"][\"payload\"][\"work_item\"]\n    return {\"commands\": [{\"name\": \"oxplow.work_item.update\", \"input\": {\"ref\": ref, \"title\": rows[0][\"title\"] + \" (done)\"}}]}\n";
+    const MARK: &str = "def transform(x):\n    rows = scope(\"sql.read\", {\"sql\": \"SELECT title FROM v_work_item WHERE uri = :work_item\", \"params\": {\"work_item\": x[\"event\"][\"payload\"][\"work_item\"]}})\n    uri = x[\"event\"][\"payload\"][\"work_item\"]\n    return {\"commands\": [{\"name\": \"oxplow.work_item.update\", \"input\": {\"uri\": uri, \"title\": rows[0][\"title\"] + \" (done)\"}}]}\n";
 
     /// Write extension `acme` into the project and publish the generation
     /// that carries it.
@@ -1143,7 +1143,7 @@ mod tests {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
         let stamp = "  - id: stamp\n    summary: Stamp the event's seq.\n    on: [work_item.state_changed]\n    where: { to: done }\n    needs: [sql.read]\n    entry: stamp.star\n";
-        let script = "def transform(x):\n    rows = scope(\"sql.read\", {\"sql\": \"SELECT seq, type FROM v_event WHERE id = :event_id AND seq = :event_seq\", \"params\": {\"event_id\": x[\"event\"][\"id\"], \"event_seq\": x[\"event\"][\"seq\"]}})\n    ref = x[\"event\"][\"payload\"][\"work_item\"]\n    return {\"commands\": [{\"name\": \"oxplow.work_item.update\", \"input\": {\"ref\": ref, \"title\": rows[0][\"type\"] + \" #\" + str(rows[0][\"seq\"])}}]}\n";
+        let script = "def transform(x):\n    rows = scope(\"sql.read\", {\"sql\": \"SELECT seq, type FROM v_event WHERE id = :event_id AND seq = :event_seq\", \"params\": {\"event_id\": x[\"event\"][\"id\"], \"event_seq\": x[\"event\"][\"seq\"]}})\n    uri = x[\"event\"][\"payload\"][\"work_item\"]\n    return {\"commands\": [{\"name\": \"oxplow.work_item.update\", \"input\": {\"uri\": uri, \"title\": rows[0][\"type\"] + \" #\" + str(rows[0][\"seq\"])}}]}\n";
         extension(svc, stamp, &[("stamp.star", script)]).await;
         start(svc).await;
         let ev = log(svc, state_changed(&fx, CanonicalState::Done)).await;
@@ -1303,7 +1303,7 @@ mod tests {
 
     /// A reaction of two steps: the item marked inside oxplow, then a
     /// write outside it (`oxplow.probe.write`).
-    const PROBE: &str = "def transform(x):\n    ref = x[\"event\"][\"payload\"][\"work_item\"]\n    return {\"commands\": [{\"name\": \"oxplow.work_item.update\", \"input\": {\"ref\": ref, \"title\": \"probed\"}}, {\"name\": \"oxplow.probe.write\", \"input\": {\"n\": 1}}]}\n";
+    const PROBE: &str = "def transform(x):\n    ref = x[\"event\"][\"payload\"][\"work_item\"]\n    return {\"commands\": [{\"name\": \"oxplow.work_item.update\", \"input\": {\"uri\": ref, \"title\": \"probed\"}}, {\"name\": \"oxplow.probe.write\", \"input\": {\"n\": 1}}]}\n";
 
     /// `oxplow.probe.write`: a write outside oxplow that keeps each idempotency
     /// key it is sent, and fails while `fail` is set.
@@ -1616,7 +1616,7 @@ mod tests {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
         let bang = "  - id: bang\n    summary: Add a bang.\n    on: [work_item.edited]\n    needs: [sql.read]\n    entry: bang.star\n";
-        let script = "def transform(x):\n    rows = scope(\"sql.read\", {\"sql\": \"SELECT title FROM v_work_item WHERE ref = :work_item\", \"params\": {\"work_item\": x[\"event\"][\"payload\"][\"work_item\"]}})\n    return {\"commands\": [{\"name\": \"oxplow.work_item.update\", \"input\": {\"ref\": x[\"event\"][\"payload\"][\"work_item\"], \"title\": rows[0][\"title\"] + \"!\"}}]}\n";
+        let script = "def transform(x):\n    rows = scope(\"sql.read\", {\"sql\": \"SELECT title FROM v_work_item WHERE uri = :work_item\", \"params\": {\"work_item\": x[\"event\"][\"payload\"][\"work_item\"]}})\n    return {\"commands\": [{\"name\": \"oxplow.work_item.update\", \"input\": {\"uri\": x[\"event\"][\"payload\"][\"work_item\"], \"title\": rows[0][\"title\"] + \"!\"}}]}\n";
         extension(svc, bang, &[("bang.star", script)]).await;
         start(svc).await;
         let consumer = EffectTriggers::new(Arc::downgrade(svc));
@@ -1625,7 +1625,7 @@ mod tests {
             .run(
                 &oxplow_domain::Actor::Human,
                 "oxplow.work_item.update",
-                json!({ "ref": r, "title": "renamed" }),
+                json!({ "uri": r, "title": "renamed" }),
                 false,
             )
             .await
@@ -1692,7 +1692,7 @@ mod tests {
     async fn a_command_that_asks_leaves_a_proposal() {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
-        let script = "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.work_item.delete\", \"input\": {\"ref\": x[\"event\"][\"payload\"][\"work_item\"]}}]}\n";
+        let script = "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.work_item.delete\", \"input\": {\"uri\": x[\"event\"][\"payload\"][\"work_item\"]}}]}\n";
         extension(
             svc,
             &MARK_DONE.replace("entry: mark.star", "entry: drop.star"),
@@ -1869,7 +1869,7 @@ mod tests {
                 ("skip.star", "def transform(x):\n    return {\"skip\": \"not today\"}\n"),
                 (
                     "drop.star",
-                    "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.work_item.delete\", \"input\": {\"ref\": x[\"event\"][\"payload\"][\"work_item\"]}}]}\n",
+                    "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.work_item.delete\", \"input\": {\"uri\": x[\"event\"][\"payload\"][\"work_item\"]}}]}\n",
                 ),
             ],
         ).await;
@@ -1948,7 +1948,7 @@ mod tests {
             &root,
             ".oxplow/extensions/acme/note.star",
             &format!(
-                "def transform(x):\n    e = x[\"event\"]\n    return {{\"commands\": [{{\"name\": \"oxplow.work_item.update\", \"input\": {{\"ref\": \"{task}\", \"title\": \"#%d v%d by %s\" % (e[\"payload\"][\"number\"], e[\"v\"], e[\"payload\"][\"by\"])}}}}]}}\n"
+                "def transform(x):\n    e = x[\"event\"]\n    return {{\"commands\": [{{\"name\": \"oxplow.work_item.update\", \"input\": {{\"uri\": \"{task}\", \"title\": \"#%d v%d by %s\" % (e[\"payload\"][\"number\"], e[\"v\"], e[\"payload\"][\"by\"])}}}}]}}\n"
             ),
         );
         crate::test_fixtures::activate_with_problems(svc).await;
@@ -2152,7 +2152,7 @@ mod tests {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
         let bang = "  - id: bang\n    summary: Add a bang.\n    on: [work_item.edited]\n    needs: [sql.read]\n    entry: bang.star\n";
-        let script = "def transform(x):\n    rows = scope(\"sql.read\", {\"sql\": \"SELECT title FROM v_work_item WHERE ref = :work_item\", \"params\": {\"work_item\": x[\"event\"][\"payload\"][\"work_item\"]}})\n    return {\"commands\": [{\"name\": \"oxplow.work_item.update\", \"input\": {\"ref\": x[\"event\"][\"payload\"][\"work_item\"], \"title\": rows[0][\"title\"] + \"!\"}}]}\n";
+        let script = "def transform(x):\n    rows = scope(\"sql.read\", {\"sql\": \"SELECT title FROM v_work_item WHERE uri = :work_item\", \"params\": {\"work_item\": x[\"event\"][\"payload\"][\"work_item\"]}})\n    return {\"commands\": [{\"name\": \"oxplow.work_item.update\", \"input\": {\"uri\": x[\"event\"][\"payload\"][\"work_item\"], \"title\": rows[0][\"title\"] + \"!\"}}]}\n";
         extension(svc, bang, &[("bang.star", script)]).await;
         register(svc);
         let r = oxplow_tasks::work_item_ref(fx.task);

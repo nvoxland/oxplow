@@ -143,7 +143,7 @@ mod tests {
             )
             .await
             .unwrap();
-        let item = made.result["ref"].as_str().unwrap().to_string();
+        let item = made.result["uri"].as_str().unwrap().to_string();
         let out = crate::dispatch("list_outbound", serde_json::json!({ "source": item }), &svc)
             .await
             .unwrap();

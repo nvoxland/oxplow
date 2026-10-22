@@ -668,7 +668,7 @@ mod tests {
 
     const EXT: &str =
         "manifest: 2\nname: review\nintent:\n  purpose: x\n  examples: [{ name: a }]\n";
-    const LENS: &str = "title: Tasks\nquery: SELECT ref FROM v_work_item\nviz: table\n";
+    const LENS: &str = "title: Tasks\nquery: SELECT uri FROM v_work_item\nviz: table\n";
 
     fn names(snapshot: &CatalogSnapshot) -> Vec<String> {
         let mut names: Vec<String> = snapshot
@@ -856,7 +856,7 @@ mod tests {
         write(
             dir.path(),
             ".oxplow/extensions/review/lenses/tasks.yaml",
-            "title: Tasks by status\nquery: SELECT ref FROM v_work_item\nviz: table\n",
+            "title: Tasks by status\nquery: SELECT uri FROM v_work_item\nviz: table\n",
         );
         assert_eq!(
             catalog.find_lens(dir.path(), "review/tasks").unwrap().title,

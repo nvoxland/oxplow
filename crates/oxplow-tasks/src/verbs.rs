@@ -128,9 +128,9 @@ pub fn create_tx(
     input: WorkItemCreateInput,
 ) -> Result<Answer, CommandError> {
     let parent_id = input
-        .parent_ref
+        .parent_uri
         .as_deref()
-        .map(|r| task_ref(r, "/parent_ref"))
+        .map(|r| task_ref(r, "/parent_uri"))
         .transpose()?;
     let native = oxplow_native(input.native.as_ref())?;
     let thread = input
@@ -178,7 +178,7 @@ pub fn create_tx(
             .map_err(CommandError::from)?;
     }
     Ok(Answer {
-        result: json!({ "ref": work_item_ref(id) }),
+        result: json!({ "uri": work_item_ref(id) }),
         inverse: None,
         changed: vec![id],
     })
@@ -190,11 +190,11 @@ pub fn update_tx(
     conn: &rusqlite::Connection,
     input: WorkItemUpdateInput,
 ) -> Result<Answer, CommandError> {
-    let id = task_ref(&input.item_ref, "/ref")?;
-    let parent = match input.parent_ref.as_deref() {
+    let id = task_ref(&input.uri, "/uri")?;
+    let parent = match input.parent_uri.as_deref() {
         None => None,
         Some("") => Some(None),
-        Some(r) => Some(Some(task_ref(r, "/parent_ref")?)),
+        Some(r) => Some(Some(task_ref(r, "/parent_uri")?)),
     };
     let native = oxplow_native(input.native.as_ref())?;
     let status = oxplow_status(input.state, input.native_state.as_deref())?;
@@ -230,11 +230,11 @@ pub fn update_tx(
     // its canonical state and its native one (`archived` is both).
     let moved = input.state.is_some() || input.native_state.is_some();
     let inverse = WorkItemUpdateInput {
-        item_ref: input.item_ref.clone(),
+        uri: input.uri.clone(),
         title: input.title.as_ref().map(|_| before.title.clone()),
         body: input.body.as_ref().map(|_| before.description.clone()),
-        parent_ref: input
-            .parent_ref
+        parent_uri: input
+            .parent_uri
             .as_ref()
             .map(|_| before.parent_id.map(work_item_ref).unwrap_or_default()),
         state: moved.then(|| canonical_of(&before)),
@@ -244,7 +244,7 @@ pub fn update_tx(
             .map(|_| json!({ "priority": before.priority })),
     };
     Ok(Answer {
-        result: json!({ "ref": input.item_ref }),
+        result: json!({ "uri": input.uri }),
         inverse: Some(CommandCall {
             name: "update".into(),
             input: serde_json::to_value(inverse).expect("input serializes"),
@@ -293,7 +293,7 @@ pub fn transition_tx(
     conn: &rusqlite::Connection,
     input: WorkItemTransitionInput,
 ) -> Result<Answer, CommandError> {
-    let id = task_ref(&input.item_ref, "/ref")?;
+    let id = task_ref(&input.uri, "/uri")?;
     let to = oxplow_status(Some(input.to), input.native_state.as_deref())?
         .ok_or_else(|| invalid_at("/to", "a transition needs a state".into()))?;
     let task = store::get_task_tx(conn, id)
@@ -303,11 +303,11 @@ pub fn transition_tx(
         })?;
     let change = set_status_through(conn, &task, to, Some(input.to), Timestamp::now())?;
     Ok(Answer {
-        result: json!({ "ref": input.item_ref }),
+        result: json!({ "uri": input.uri }),
         inverse: Some(CommandCall {
             name: "transition".into(),
             input: serde_json::to_value(WorkItemTransitionInput {
-                item_ref: input.item_ref,
+                uri: input.uri,
                 to: canonical_of(&change.before),
                 native_state: Some(status_str(change.before.status)),
             })
@@ -357,14 +357,14 @@ pub fn link_tx(
     conn: &rusqlite::Connection,
     input: WorkItemLinkInput,
 ) -> Result<Answer, CommandError> {
-    let from = task_ref(&input.item_ref, "/ref")?;
-    live_task_tx(conn, from, &input.item_ref, "/ref")?;
+    let from = task_ref(&input.uri, "/uri")?;
+    live_task_tx(conn, from, &input.uri, "/uri")?;
     link_target_tx(conn, &input.target)?;
     let link_type = link_type_of(&input.link_type)?;
     let added = crate::satellite::create_link_tx(conn, from, &input.target, link_type)
         .map_err(CommandError::from)?;
     Ok(Answer {
-        result: json!({ "ref": input.item_ref, "linked": added }),
+        result: json!({ "uri": input.uri, "linked": added }),
         inverse: added.then(|| CommandCall {
             name: "unlink".into(),
             input: serde_json::to_value(&input).expect("input serializes"),
@@ -378,12 +378,12 @@ pub fn unlink_tx(
     conn: &rusqlite::Connection,
     input: WorkItemLinkInput,
 ) -> Result<Answer, CommandError> {
-    let from = task_ref(&input.item_ref, "/ref")?;
+    let from = task_ref(&input.uri, "/uri")?;
     let link_type = link_type_of(&input.link_type)?;
     let removed = crate::satellite::delete_link_tx(conn, from, &input.target, link_type)
         .map_err(CommandError::from)?;
     Ok(Answer {
-        result: json!({ "ref": input.item_ref, "unlinked": removed }),
+        result: json!({ "uri": input.uri, "unlinked": removed }),
         inverse: removed.then(|| CommandCall {
             name: "link".into(),
             input: serde_json::to_value(&input).expect("input serializes"),
@@ -399,15 +399,15 @@ pub fn comment_tx(
     actor: &Actor,
     input: WorkItemCommentInput,
 ) -> Result<Answer, CommandError> {
-    let task = task_ref(&input.item_ref, "/ref")?;
-    live_task_tx(conn, task, &input.item_ref, "/ref")?;
+    let task = task_ref(&input.uri, "/uri")?;
+    live_task_tx(conn, task, &input.uri, "/uri")?;
     if input.body.trim().is_empty() {
         return Err(invalid_at("/body", "a comment needs a body".into()));
     }
     let note = crate::satellite::add_task_note_tx(conn, task, &input.body, &note_author(actor))
         .map_err(CommandError::from)?;
     Ok(Answer {
-        result: json!({ "ref": input.item_ref, "comment": note.id.to_string() }),
+        result: json!({ "uri": input.uri, "comment": note.id.to_string() }),
         inverse: None,
         changed: vec![task],
     })
@@ -418,13 +418,13 @@ pub fn delete_tx(
     conn: &rusqlite::Connection,
     input: WorkItemDeleteInput,
 ) -> Result<Answer, CommandError> {
-    let id = task_ref(&input.item_ref, "/ref")?;
+    let id = task_ref(&input.uri, "/uri")?;
     store::soft_delete_tx(conn, id, Timestamp::now()).map_err(|e| match e {
-        DomainError::NotFound => invalid_at("/ref", format!("no work item `{}`", input.item_ref)),
+        DomainError::NotFound => invalid_at("/uri", format!("no work item `{}`", input.uri)),
         other => CommandError::from(other),
     })?;
     Ok(Answer {
-        result: json!({ "ref": input.item_ref }),
+        result: json!({ "uri": input.uri }),
         inverse: None,
         changed: vec![id],
     })
@@ -488,7 +488,7 @@ fn place(
         }
     }
     store::place_task_tx(conn, id, dest, at, Timestamp::now()).map_err(|e| match e {
-        DomainError::NotFound => invalid_at("/ref", format!("no work item {}", work_item_ref(id))),
+        DomainError::NotFound => invalid_at("/uri", format!("no work item {}", work_item_ref(id))),
         DomainError::Invalid(message) => CommandError::Invalid {
             field: None,
             message,
@@ -503,25 +503,22 @@ pub fn reorder_tx(
     conn: &rusqlite::Connection,
     input: WorkItemReorderInput,
 ) -> Result<Answer, CommandError> {
-    let id = task_ref(&input.item_ref, "/ref")?;
+    let id = task_ref(&input.uri, "/uri")?;
     let at = placement(&input.before, &input.after)?;
     let Some(list) = store::get_task_tx(conn, id)
         .map_err(CommandError::from)?
         .map(|t| t.thread_id)
     else {
-        return Err(invalid_at(
-            "/ref",
-            format!("no work item `{}`", input.item_ref),
-        ));
+        return Err(invalid_at("/uri", format!("no work item `{}`", input.uri)));
     };
     let placed = place(conn, id, list, at)?;
     let (before, after) = neighbour(placed.from_place);
     Ok(Answer {
-        result: json!({ "ref": input.item_ref }),
+        result: json!({ "uri": input.uri }),
         inverse: Some(CommandCall {
             name: "reorder".into(),
             input: serde_json::to_value(WorkItemReorderInput {
-                item_ref: input.item_ref,
+                uri: input.uri,
                 before,
                 after,
             })
@@ -537,16 +534,16 @@ pub fn move_tx(
     conn: &rusqlite::Connection,
     input: WorkItemMoveInput,
 ) -> Result<Answer, CommandError> {
-    let id = task_ref(&input.item_ref, "/ref")?;
+    let id = task_ref(&input.uri, "/uri")?;
     let at = placement(&input.before, &input.after)?;
     let placed = place(conn, id, move_dest(&input.to)?, at)?;
     let (before, after) = neighbour(placed.from_place);
     Ok(Answer {
-        result: json!({ "ref": input.item_ref }),
+        result: json!({ "uri": input.uri }),
         inverse: Some(CommandCall {
             name: "move".into(),
             input: serde_json::to_value(WorkItemMoveInput {
-                item_ref: input.item_ref,
+                uri: input.uri,
                 to: move_to(placed.from_thread),
                 before,
                 after,

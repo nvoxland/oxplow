@@ -98,7 +98,7 @@ mod tests {
         std::fs::write(p, body).unwrap();
     }
 
-    const MANIFEST: &str = "manifest: 2\nname: late\nintent:\n  purpose: x\n  examples: [{ name: a }]\nmodels:\n  - name: blocked\n    version: 1\n    description: Blocked work items.\n    columns:\n      - { name: ref, type: TEXT, doc: Work item ref. }\n  - name: broken\n    version: 1\n    description: Broken.\n    columns:\n      - { name: nope, doc: x }\n";
+    const MANIFEST: &str = "manifest: 2\nname: late\nintent:\n  purpose: x\n  examples: [{ name: a }]\nmodels:\n  - name: blocked\n    version: 1\n    description: Blocked work items.\n    columns:\n      - { name: uri, type: TEXT, doc: Work item ref. }\n  - name: broken\n    version: 1\n    description: Broken.\n    columns:\n      - { name: nope, doc: x }\n";
 
     /// P4.9 (tsk494): an extension's model publishes its view; one that
     /// doesn't compile is that extension's error in the list, not a boot
@@ -115,7 +115,7 @@ mod tests {
         write(
             &root,
             ".oxplow/extensions/late/models/blocked.sql",
-            "SELECT ref FROM ref('work_item') WHERE state = 'blocked'",
+            "SELECT uri FROM ref('work_item') WHERE state = 'blocked'",
         );
         write(
             &root,
@@ -135,7 +135,7 @@ mod tests {
         );
         crate::test_fixtures::activate_with_problems(svc).await;
         svc.sql
-            .query_sql("SELECT ref FROM v_late_blocked", vec![], None)
+            .query_sql("SELECT uri FROM v_late_blocked", vec![], None)
             .await
             .unwrap();
         let listed = svc.listed_extensions(&root).await;
@@ -154,7 +154,7 @@ mod tests {
         crate::test_fixtures::activate_with_problems(svc).await;
         assert!(svc
             .sql
-            .query_sql("SELECT ref FROM v_late_blocked", vec![], None)
+            .query_sql("SELECT uri FROM v_late_blocked", vec![], None)
             .await
             .is_err());
     }
@@ -175,12 +175,12 @@ mod tests {
         write(
             &root,
             ".oxplow/extensions/late/extension.yaml",
-            "manifest: 2\nname: late\nintent:\n  purpose: x\nmodels:\n  - name: counted\n    version: 1\n    description: The work items.\n    columns:\n      - { name: ref, type: TEXT, doc: Work item ref. }\n",
+            "manifest: 2\nname: late\nintent:\n  purpose: x\nmodels:\n  - name: counted\n    version: 1\n    description: The work items.\n    columns:\n      - { name: uri, type: TEXT, doc: Work item ref. }\n",
         );
         write(
             &root,
             ".oxplow/extensions/late/models/counted.sql",
-            "SELECT ref FROM ref('work_item')",
+            "SELECT uri FROM ref('work_item')",
         );
         write(
             &root,
@@ -224,7 +224,7 @@ mod tests {
                 "manifest: 2\nname: late\nintent:\n  purpose: x\n  examples: [{{ name: a }}]\nmodels:\n  - name: blocked\n    version: 1\n    description: Blocked work items.\n    columns:\n{cols}"
             )
         };
-        let id = "      - { name: ref, type: TEXT, doc: Work item ref. }\n";
+        let id = "      - { name: uri, type: TEXT, doc: Work item ref. }\n";
         let title = "      - { name: title, type: TEXT, doc: Title. }\n";
         write(
             &root,
@@ -234,7 +234,7 @@ mod tests {
         write(
             &root,
             ".oxplow/extensions/late/models/blocked.sql",
-            "SELECT ref FROM ref('work_item') WHERE state = 'blocked'",
+            "SELECT uri FROM ref('work_item') WHERE state = 'blocked'",
         );
         crate::test_fixtures::activate_with_problems(svc).await;
         let validate = || async {
@@ -259,7 +259,7 @@ mod tests {
         write(
             &root,
             ".oxplow/extensions/late/models/blocked.sql",
-            "SELECT ref, title FROM ref('work_item') WHERE state = 'blocked'",
+            "SELECT uri, title FROM ref('work_item') WHERE state = 'blocked'",
         );
         let errors = validate().await;
         assert!(
@@ -269,7 +269,7 @@ mod tests {
         write(
             &root,
             ".oxplow/extensions/late/models/blocked.sql",
-            "SELECT ref, title FROM source('work_item')",
+            "SELECT uri, title FROM source('work_item')",
         );
         assert!(validate().await.contains("only its own extension's tables"));
     }

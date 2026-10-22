@@ -264,7 +264,7 @@ mod tests {
 query: "SELECT kind FROM v_stream WHERE kind = :kind"
 params: [{ name: kind, default: primary }, { name: item, default: "" }]
 actions:
-  - { id: finish, label: Finish, command: oxplow.work_item.transition, input: { ref: "{{param.item}}", to: done } }
+  - { id: finish, label: Finish, command: oxplow.work_item.transition, input: { uri: "{{param.item}}", to: done } }
 "#,
         )
         .unwrap();

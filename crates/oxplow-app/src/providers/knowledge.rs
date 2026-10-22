@@ -4,11 +4,11 @@
 //! a provider may implement"). The page commands check a write against
 //! core's record, then call it; each verb is one invoke:
 //!
-//! - `write_page { slug, title?, body, verified_refs, removed_refs }`,
+//! - `write_page { slug, title?, body, verified_files, removed_files }`,
 //! - `delete_page { slug }`,
 //! - `link { page, target }` (`target` a wikilink's inside),
 //!
-//! each answering the page's `knowledge.page.recorded@1` — the body it
+//! each answering the page's `knowledge.page.recorded@2` — the body it
 //! keeps and the refs it states, in oxplow's grammar — which core records
 //! (row, links, pins) the same way it records the wiki's. Its collector
 //! streams its pages as the same records, for pages edited outside oxplow;
@@ -20,7 +20,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use oxplow_domain::capability::KNOWLEDGE;
 use oxplow_domain::events::schema::{
-    EventType as _, KnowledgePageRecorded, KnowledgePageRecordedV1,
+    EventType as _, KnowledgePageRecorded, KnowledgePageRecordedV2,
 };
 use oxplow_domain::events::Envelope;
 use oxplow_domain::knowledge::{Kept, KnowledgeProvider, KnowledgeRegistry, PageCall, PageDraft};
@@ -140,13 +140,13 @@ impl ExternalKnowledge {
             .iter()
             .filter(|e| e.event_type == KnowledgePageRecorded::TYPE)
             .filter_map(|e| {
-                serde_json::from_value::<KnowledgePageRecordedV1>(e.payload.clone()).ok()
+                serde_json::from_value::<KnowledgePageRecordedV2>(e.payload.clone()).ok()
             })
-            .find(|r| r.page.page_ref == page)
+            .find(|r| r.page.uri == page)
             .ok_or_else(|| self.failed(format!("it answered no record of `{page}`")))?;
         Ok(Kept {
             body: record.page.body,
-            refs: Some(record.page.refs),
+            refs: Some(record.page.uris),
             events,
         })
     }
@@ -166,8 +166,8 @@ impl KnowledgeProvider for ExternalKnowledge {
         let mut input = json!({
             "slug": draft.slug,
             "body": draft.body,
-            "verified_refs": draft.verified_refs,
-            "removed_refs": draft.removed_refs,
+            "verified_files": draft.verified_files,
+            "removed_files": draft.removed_files,
         });
         if let Some(title) = &draft.title {
             input["title"] = json!(title);
@@ -232,10 +232,10 @@ impl crate::event_pump::AsyncEventConsumer for KnowledgeRecords {
         if env.source != oxplow_domain::uri::build::provider_source(&self.stores.active_id()) {
             return Ok(());
         }
-        let KnowledgePageRecordedV1 { page } = serde_json::from_value(env.payload.clone())
+        let KnowledgePageRecordedV2 { page } = serde_json::from_value(env.payload.clone())
             .map_err(|e| DomainError::Invalid(format!("knowledge.page.recorded payload: {e}")))?;
         let Some(slug) =
-            oxplow_domain::uri::build::id_of(&page.page_ref, oxplow_domain::uri::resources::WIKI)
+            oxplow_domain::uri::build::id_of(&page.uri, oxplow_domain::uri::resources::WIKI)
                 .ok()
                 .filter(|s| crate::knowledge::valid_slug(s))
         else {
@@ -274,7 +274,7 @@ impl crate::event_pump::AsyncEventConsumer for KnowledgeRecords {
                             verified: &[],
                             removed: &[],
                             updated_at: oxplow_domain::Timestamp::now(),
-                            stated: Some(&page.refs),
+                            stated: Some(&page.uris),
                             anchors: oxplow_domain::Anchors::default(),
                         },
                     )?;

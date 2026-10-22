@@ -1,0 +1,29 @@
+{
+  "item": {
+    "title": "Fix the login redirect",
+    "body": "",
+    "state": "in_progress",
+    "native_state": "In Progress",
+    "native": {
+      "team": "ENG",
+      "estimate": 3
+    },
+    "deleted": false,
+    "rank": 2.5,
+    "links": [
+      {
+        "target": "work_item:issues:ENG-7",
+        "link_type": "blocks"
+      }
+    ],
+    "comments": [
+      {
+        "id": "c1",
+        "body": "Repro steps attached.",
+        "author": "sam"
+      }
+    ],
+    "uri": "work_item:issues:ENG-12",
+    "parent_uri": "work_item:issues:ENG-1"
+  }
+}

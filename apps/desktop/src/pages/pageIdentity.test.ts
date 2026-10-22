@@ -9,7 +9,7 @@ import { pageIdentity, withView } from "./pageIdentity.js";
 test("a lens's and an extension page's params are their view; an extension page's ref says what it is", () => {
   expect(pageIdentity(lensRef("x/y", { range: "7d" }))).toBe("oxplow:oxplow/lens?lens=x/y");
   expect(pageIdentity(extPageRef("acme", "pulls", { state: "open" }))).toBe("oxplow:oxplow/page?page=acme/pulls");
-  expect(pageIdentity(extPageRef("acme", "pr", { ref: "oxplow:oxplow/work_item?id=1&provider=gh", tab: "files" }))).toBe(extPageRef("acme", "pr", { ref: "oxplow:oxplow/work_item?id=1&provider=gh" }).id);
+  expect(pageIdentity(extPageRef("acme", "pr", { uri: "oxplow:oxplow/work_item?id=1&provider=gh", tab: "files" }))).toBe(extPageRef("acme", "pr", { uri: "oxplow:oxplow/work_item?id=1&provider=gh" }).id);
 });
 
 test("a built-in page's identity keeps every param but the view params it declares", () => {

@@ -39,7 +39,7 @@ materialized ones refilled), and the advisory reads it on its next run.
   read them when the effort finished (nothing the agent records), what
   each cites, and a reviewer's `review` (`verified`, `dismissed`, or NULL).
   `v_oxplow_bundled_claim_status` (this extension's model) says whether
-  something backs it: `verified = 0` means no `evidence_ref`, no person's
+  something backs it: `verified = 0` means no `evidence`, no person's
   verification, and for a `tests_pass` claim no passing latest test run in
   the effort. A dismissed claim has no row there: it counts for nothing.
 - `v_decision` — the forks the agent resolved. `provenance = 'inferred'`

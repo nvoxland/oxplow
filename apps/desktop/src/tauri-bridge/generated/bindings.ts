@@ -1956,7 +1956,7 @@ export type CommandUi = {
 	about?: string | null,
 	/**
 	 *  The input it runs with. A string that is exactly `{{stream}}`,
-	 *  `{{thread}}`, `{{ref}}` or `{{ref.id}}` is bound from where it runs;
+	 *  `{{thread}}`, `{{uri}}` or `{{uri.id}}` is bound from where it runs;
 	 *  a binding there's nothing for makes it unavailable there.
 	 */
 	input?: unknown | null,
@@ -4465,8 +4465,8 @@ export type LensSteps = {
 export type LensTimeline = {
 	at: string | null,
 	label: string | null,
-	/**  A column holding a canonical ref each entry links to. */
-	ref: string | null,
+	/**  A column holding the URI each entry links to. */
+	uri: string | null,
 };
 
 /**  `tree` viz: which columns nest the rows. */

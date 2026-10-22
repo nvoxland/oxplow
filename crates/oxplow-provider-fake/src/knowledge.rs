@@ -2,14 +2,14 @@
 //! pages in memory (kept in `OXPLOW_FAKE_STATE` as items are), each write
 //! answering the page's `knowledge.page.recorded@1` event:
 //!
-//! - `write_page { slug, title?, body, verified_refs, removed_refs }` →
+//! - `write_page { slug, title?, body, verified_files, removed_files }` →
 //!   `{ page: "oxplow:oxplow/wiki?slug=%3Cslug%3E" }`; the title defaults to the slug, and it
 //!   keeps no pins, so the two ref lists are accepted and ignored;
 //! - `delete_page { slug }` → `{}`, the page marked `deleted`;
 //! - `link { page, target }` → `{}`: `[[target]]` appended under a
 //!   `## Related` heading.
 //!
-//! A page's `refs` are its body's `[[…]]` interiors in oxplow's ref
+//! A page's `uris` are its body's `[[…]]` interiors in oxplow's ref
 //! grammar: one with a `/` or a `.` is a file (`oxplow:oxplow/file?path=<path>`), a bare one
 //! a page (`oxplow:oxplow/wiki?slug=<slug>`). The collector `knowledge_pages` streams the
 //! pages changed after its cursor.
@@ -61,10 +61,10 @@ pub fn declarations() -> InitializeResult {
             crate::command(
                 "write_page",
                 "Write a page: create it, or replace its body.",
-                json!({ "type": "object", "required": ["slug", "body", "verified_refs", "removed_refs"],
+                json!({ "type": "object", "required": ["slug", "body", "verified_files", "removed_files"],
                         "additionalProperties": false,
                         "properties": { "slug": string, "title": string, "body": string,
-                                        "verified_refs": refs, "removed_refs": refs } }),
+                                        "verified_files": refs, "removed_files": refs } }),
             ),
             crate::command(
                 "delete_page",
@@ -82,12 +82,12 @@ pub fn declarations() -> InitializeResult {
         ],
         event_types: vec![EventTypeDecl {
             event_type: RECORDED.into(),
-            v: 1,
+            v: 2,
             // Core's schema, as a provider must declare it.
             schema: oxplow_domain::vocabulary::Vocabulary::core()
                 .schema(
                     <oxplow_domain::events::schema::KnowledgePageRecorded as oxplow_domain::events::schema::EventType>::TYPE,
-                    1,
+                    2,
                 )
                 .cloned()
                 .unwrap_or(Value::Null),
@@ -153,9 +153,9 @@ fn updated_at(rev: u64) -> String {
 fn event(record: &Value) -> Value {
     serde_json::to_value(EventDraft {
         event_type: RECORDED.into(),
-        v: 1,
+        v: 2,
         payload: json!({ "page": record }),
-        subject: vec![record["ref"].as_str().unwrap_or_default().to_string()],
+        subject: vec![record["uri"].as_str().unwrap_or_default().to_string()],
     })
     .expect("a draft serializes")
 }
@@ -170,8 +170,8 @@ fn keep(pages: &mut Pages, rev: &mut u64, slug: &str, mut record: Value) -> Valu
 }
 
 fn record_of(slug: &str, title: &str, body: &str, deleted: bool) -> Value {
-    let mut record = json!({ "ref": oxplow_domain::uri::build::wiki_uri(slug), "title": title, "body": body,
-                             "refs": refs_of(body), "updated_at": "" });
+    let mut record = json!({ "uri": oxplow_domain::uri::build::wiki_uri(slug), "title": title, "body": body,
+                             "uris": refs_of(body), "updated_at": "" });
     if deleted {
         record["deleted"] = json!(true);
     }

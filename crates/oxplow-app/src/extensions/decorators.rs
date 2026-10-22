@@ -97,7 +97,7 @@ pub fn parse_decorators(
         let line = item_line;
         let model = models.iter().find(|m| m.decl.name == d.model);
         let has = |col: &str| model.is_some_and(|m| m.decl.columns.iter().any(|c| c.name == col));
-        let wanted: Vec<&str> = ["ref", d.label.as_str()]
+        let wanted: Vec<&str> = ["uri", d.label.as_str()]
             .into_iter()
             .chain(d.color.as_deref())
             .collect();
@@ -112,7 +112,7 @@ pub fn parse_decorators(
             Some(format!("`{bad}` isn't a column name"))
         } else if let Some(missing) = wanted.iter().find(|c| !has(c)) {
             Some(format!(
-                "model `{}` has no `{missing}` column (a decorator's model needs `ref` and the \
+                "model `{}` has no `{missing}` column (a decorator's model needs `uri` and the \
                  columns it names)",
                 d.model
             ))
@@ -154,13 +154,13 @@ mod tests {
             d.path(),
             ".oxplow/extensions/flags/extension.yaml",
             &format!(
-                "manifest: 2\nname: flags\nengine: \">=0.1\"\nversion: 0.1.0\nintent:\n  purpose: p\n  examples: [{{ name: a }}]\nmodels:\n  - name: flags\n    version: 1\n    description: d\n    columns:\n      - {{ name: ref, type: TEXT, doc: r }}\n      - {{ name: label, type: TEXT, doc: l }}\n      - {{ name: color, type: TEXT, doc: c }}\nui:\n  decorators:\n{decorators}"
+                "manifest: 2\nname: flags\nengine: \">=0.1\"\nversion: 0.1.0\nintent:\n  purpose: p\n  examples: [{{ name: a }}]\nmodels:\n  - name: flags\n    version: 1\n    description: d\n    columns:\n      - {{ name: uri, type: TEXT, doc: r }}\n      - {{ name: label, type: TEXT, doc: l }}\n      - {{ name: color, type: TEXT, doc: c }}\nui:\n  decorators:\n{decorators}"
             ),
         );
         write(
             d.path(),
             ".oxplow/extensions/flags/models/flags.sql",
-            "SELECT 'oxplow:oxplow/work_item?id=tsk1&provider=oxplow' AS ref, 'urgent' AS label, '#f00' AS color\n",
+            "SELECT 'oxplow:oxplow/work_item?id=tsk1&provider=oxplow' AS uri, 'urgent' AS label, '#f00' AS color\n",
         );
         load_extensions(d.path())
             .into_iter()

@@ -185,10 +185,10 @@ pub const WORK_ITEMS: ProviderContract = ProviderContract {
         },
     ],
     dispatch: Some("oxplow.work_item"),
-    events: &[("work_item.recorded", 2)],
+    events: &[("work_item.recorded", 3)],
     records: Some(Record {
         entity: "work_item",
-        event: ("work_item.recorded", 2),
+        event: ("work_item.recorded", 3),
         key: "item",
     }),
     resource: Some("oxplow/work_item"),
@@ -259,10 +259,10 @@ pub const KNOWLEDGE: ProviderContract = ProviderContract {
         },
     ],
     dispatch: None,
-    events: &[("knowledge.page.recorded", 1)],
+    events: &[("knowledge.page.recorded", 2)],
     records: Some(Record {
         entity: "knowledge_page",
-        event: ("knowledge.page.recorded", 1),
+        event: ("knowledge.page.recorded", 2),
         key: "page",
     }),
     resource: Some("oxplow/wiki"),
@@ -667,7 +667,7 @@ mod tests {
         assert_eq!(knowledge.resource, Some("oxplow/wiki"));
         assert_eq!(
             knowledge.records.map(|r| (r.entity, r.event, r.key)),
-            Some(("knowledge_page", ("knowledge.page.recorded", 1), "page"))
+            Some(("knowledge_page", ("knowledge.page.recorded", 2), "page"))
         );
         let snapshots = contract("snapshots").unwrap();
         assert_eq!(
@@ -692,11 +692,11 @@ mod tests {
     #[test]
     fn a_contract_says_what_its_provider_owns_and_emits() {
         let work = contract("work_items").unwrap();
-        assert_eq!(work.events, [("work_item.recorded", 2)]);
+        assert_eq!(work.events, [("work_item.recorded", 3)]);
         assert_eq!(work.resource, Some("oxplow/work_item"));
         assert_eq!(
             work.records.map(|r| (r.entity, r.event, r.key)),
-            Some(("work_item", ("work_item.recorded", 2), "item"))
+            Some(("work_item", ("work_item.recorded", 3), "item"))
         );
         assert_eq!(work.dispatch, Some("oxplow.work_item"));
         assert!(work.items);

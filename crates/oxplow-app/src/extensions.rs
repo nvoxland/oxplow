@@ -294,9 +294,9 @@ pub struct LensTree {
 pub struct LensTimeline {
     pub at: Option<String>,
     pub label: Option<String>,
-    /// A column holding a canonical ref each entry links to.
-    #[serde(rename = "ref")]
-    pub ref_column: Option<String>,
+    /// A column holding the URI each entry links to.
+    #[serde(rename = "uri")]
+    pub uri_column: Option<String>,
 }
 
 /// `steps` viz: each step's text and status.
@@ -1492,9 +1492,9 @@ pub const SLOTS: &[SlotSpec] = &[
     // An effort's review (its diff view).
     SlotSpec::region("effort.review.details", &["effort_id", "change_id"]),
     // A work item's page, below its body: the item's ref, whichever list.
-    SlotSpec::region("work_item.detail.body", &["ref"]),
+    SlotSpec::region("work_item.detail.body", &["uri"]),
     // The same page's side rail.
-    SlotSpec::region("work_item.detail.sidebar", &["ref"]),
+    SlotSpec::region("work_item.detail.sidebar", &["uri"]),
     // A thread's plan, as a compact strip.
     SlotSpec::region("thread.plan.header", &["thread_id"]),
     SlotSpec::region("vcs.commit.details", &["change_id"]),
@@ -4908,7 +4908,7 @@ impl Lens {
         }
         if let Some(t) = &self.timeline {
             out.extend(
-                [&t.at, &t.label, &t.ref_column]
+                [&t.at, &t.label, &t.uri_column]
                     .into_iter()
                     .flatten()
                     .map(|k| ("timeline", k)),
@@ -6570,10 +6570,10 @@ description: Every work item in a given state.
 params:
   - { name: state, label: State, default: in_progress }
 query: |
-  SELECT ref, title FROM v_work_item WHERE state = :state ORDER BY title
+  SELECT uri, title FROM v_work_item WHERE state = :state ORDER BY title
 viz: table
 columns:
-  - { key: title, label: Item, link: { kind: page, from: ref } }
+  - { key: title, label: Item, link: { kind: page, from: uri } }
 empty: No items.
 "#;
 
@@ -6630,7 +6630,7 @@ empty: No items.
             l.columns[0].link,
             Some(LensLink {
                 kind: LensLinkKind::Page,
-                from: Some("ref".into()),
+                from: Some("uri".into()),
                 line: None,
                 base: None,
                 head: None,
@@ -7079,7 +7079,7 @@ empty: No items.
         let project = tempfile::tempdir().unwrap();
         let spec = LensSpec {
             title: "Open Tasks".into(),
-            query: "SELECT ref, title FROM v_work_item".into(),
+            query: "SELECT uri, title FROM v_work_item".into(),
             ..spec_base()
         };
         save_lens(
@@ -7109,7 +7109,7 @@ empty: No items.
         let new = || LensSpec {
             title: "Open Tasks".into(),
             description: "From Explore Data".into(),
-            query: "SELECT ref, title FROM v_work_item".into(),
+            query: "SELECT uri, title FROM v_work_item".into(),
             ..spec_base()
         };
         let lens = save_lens(
@@ -7457,7 +7457,7 @@ collectors:
   - id: things
     runtime: starlark
     entry: collectors/things.star
-    input: \"SELECT ref FROM v_work_item\"
+    input: \"SELECT uri FROM v_work_item\"
     entities:
       - { name: thing, key: id, columns: { id: int, label: text } }
 models:
@@ -7985,7 +7985,7 @@ commands:
             &[
                 ("presets", "title: Presets\nquery: SELECT 1\n"),
                 ("stray", "title: Stray\nquery: SELECT 1\n"),
-                ("region", "title: R\nparams: [{ name: ref }]\nquery: SELECT 1\n"),
+                ("region", "title: R\nparams: [{ name: uri }]\nquery: SELECT 1\n"),
                 ("sized", "title: S\nquery: SELECT 1\n"),
             ],
             "ui:\n  slots:\n    - { slot: settings.agents.sections, lens: presets, title: Team presets, at: { after: agents } }\n    - { slot: settings.agents.sections, lens: stray, at: { before: gone } }\n    - { slot: work_item.detail.body, lens: region, at: start }\n    - { slot: settings.agents.sections, lens: sized, size: wide }\n",
@@ -8715,7 +8715,7 @@ commands:
                 ("doc", "title: D\nviz: document\nparams: [{ name: q }]\nsections: [{ lens: n }]\n"),
                 (
                     "act",
-                    "title: A\nparams: [{ name: k }]\nquery: SELECT 1 AS a\nactions:\n  - { id: go, label: Go, command: oxplow.work_item.transition, input: { ref: '{{param.k}}' } }\n",
+                    "title: A\nparams: [{ name: k }]\nquery: SELECT 1 AS a\nactions:\n  - { id: go, label: Go, command: oxplow.work_item.transition, input: { uri: '{{param.k}}' } }\n",
                 ),
             ],
             "",
@@ -8888,7 +8888,7 @@ commands:
 
     #[test]
     fn slots_bind_params_the_lens_must_declare() {
-        let task_lens = "title: T\nparams: [{ name: ref }]\nquery: SELECT :ref\n";
+        let task_lens = "title: T\nparams: [{ name: uri }]\nquery: SELECT :uri\n";
         let thread_lens = "title: Th\nparams: [{ name: thread_id }]\nquery: SELECT :thread_id\n";
         let (_d, ext) = load_x(
             &[("t", task_lens), ("th", thread_lens), ("plain", "title: P\nquery: SELECT 1\n")],
@@ -8908,7 +8908,7 @@ commands:
             ]
         );
         let errs = ext.errors.join("\n");
-        assert!(errs.contains("`ref`") && errs.contains("plain"), "{errs}");
+        assert!(errs.contains("`uri`") && errs.contains("plain"), "{errs}");
     }
 
     /// P9.A2: a file diff's header strip takes lenses about the file — its
@@ -9062,7 +9062,7 @@ commands:
             "    version: 1",
             "    description: Blocked work items.",
             "    columns:",
-            "      - { name: ref, type: TEXT, doc: Work item ref. }",
+            "      - { name: uri, type: TEXT, doc: Work item ref. }",
             "  - { name: gone, version: 1, description: No file., columns: [] }",
             "",
         ]
@@ -9071,7 +9071,7 @@ commands:
         write(
             dir.path(),
             ".oxplow/extensions/x/models/late.sql",
-            "SELECT ref FROM ref('work_item') WHERE state = 'blocked'",
+            "SELECT uri FROM ref('work_item') WHERE state = 'blocked'",
         );
         write(
             dir.path(),
@@ -9572,7 +9572,7 @@ commands:
             &[
                 (
                     "a",
-                    "title: A\nquery: SELECT 1 AS id\nparams: [{ name: item, default: '' }]\nactions:\n  - { id: finish, label: Finish, command: oxplow.work_item.transition, input: { ref: '{{param.item}}', to: done } }\n  - { id: row, label: Row, command: oxplow.work_item.transition, row: true, input: { ref: 'work_item:oxplow:tsk{{row.id}}', to: done } }\n",
+                    "title: A\nquery: SELECT 1 AS id\nparams: [{ name: item, default: '' }]\nactions:\n  - { id: finish, label: Finish, command: oxplow.work_item.transition, input: { uri: '{{param.item}}', to: done } }\n  - { id: row, label: Row, command: oxplow.work_item.transition, row: true, input: { uri: 'work_item:oxplow:tsk{{row.id}}', to: done } }\n",
                 ),
                 ("b", "title: B\nquery: SELECT 1\nactions: [copy]\n"),
                 ("c", "title: C\nquery: SELECT 1\nactions: [{ action: run-source, source: a/b }]\n"),

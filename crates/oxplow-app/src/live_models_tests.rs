@@ -143,7 +143,7 @@ async fn collector_state_and_credentials_are_read_live() {
     crate::test_fixtures::activate(&fx.svc).await;
 
     let state =
-        "SELECT ref, owner, id, network_enforced FROM v_collector_state WHERE owner = 'acme'";
+        "SELECT uri, owner, id, network_enforced FROM v_collector_state WHERE owner = 'acme'";
     assert_eq!(
         rows(&fx, state).await,
         vec![vec![

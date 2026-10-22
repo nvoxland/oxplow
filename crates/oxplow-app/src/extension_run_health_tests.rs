@@ -86,7 +86,7 @@ async fn rows(fx: &TaskEffortFixture, sql: &str) -> Vec<Vec<Value>> {
 async fn fresh(fx: &TaskEffortFixture) -> Vec<Vec<Value>> {
     rows(
         fx,
-        "SELECT fresh, state FROM v_contribution_health WHERE ref = 'oxplow:oxplow/collector?collector=acme/sync'",
+        "SELECT fresh, state FROM v_contribution_health WHERE uri = 'oxplow:oxplow/collector?collector=acme/sync'",
     )
     .await
 }
@@ -206,7 +206,7 @@ async fn a_cancelled_run_is_recorded_as_cancelled_and_publishes_nothing() {
     assert_eq!(seen, vec![vec![json!(0)]]);
     let health = rows(
         &fx,
-        "SELECT consecutive_failures FROM v_contribution_health WHERE ref = 'oxplow:oxplow/collector?collector=acme/sync'",
+        "SELECT consecutive_failures FROM v_contribution_health WHERE uri = 'oxplow:oxplow/collector?collector=acme/sync'",
     )
     .await;
     assert!(

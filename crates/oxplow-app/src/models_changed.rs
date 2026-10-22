@@ -617,7 +617,7 @@ mod tests {
                 sources: vec![
                     model(
                         "titles",
-                        "SELECT ref AS id, title FROM ref('work_item')",
+                        "SELECT uri AS id, title FROM ref('work_item')",
                         &[("id", "TEXT"), ("title", "TEXT")],
                         true,
                     ),
@@ -776,7 +776,7 @@ mod tests {
                 .await
                 .unwrap()
         };
-        compile(1, "SELECT ref AS id, title FROM ref('work_item')", "TEXT").await;
+        compile(1, "SELECT uri AS id, title FROM ref('work_item')", "TEXT").await;
         let assets =
             crate::assets::Assets::new(f.svc.db.clone(), std::time::Duration::from_millis(50));
         assets.sync_models().await.unwrap();
@@ -785,7 +785,7 @@ mod tests {
 
         compile(
             2,
-            "SELECT ref AS id, title || '' AS title FROM ref('work_item')",
+            "SELECT uri AS id, title || '' AS title FROM ref('work_item')",
             "",
         )
         .await;

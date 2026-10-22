@@ -38,4 +38,4 @@ runs, claims and decisions in one call.
 - `oxplow_session_transcript { session, turn?, page? }` — a session's turns
   oldest first, 50 a page, with the thread's notes where they fall and a
   subagent's hand-back marked; each row is a turn URI. A subagent's last
-  message is `oxplow_read { ref: "oxplow:oxplow/subagent?agent=<id>&session=ses3#part=result" }`.
+  message is `oxplow_read { uri: "oxplow:oxplow/subagent?agent=<id>&session=ses3#part=result" }`.

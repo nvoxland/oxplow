@@ -31,7 +31,7 @@ Pass your own `stream_id` when in a worktree stream. `check`,
 with `name: oxplow-extension` and `reference: <name>`):
 
 - `references/scaffolding.md`: the kinds `extension new` makes, the words used exactly.
-- `references/semantic-layer.md`: finding data, refs in SQL and scripts, publishing and
+- `references/semantic-layer.md`: finding data, URIs in SQL and scripts, publishing and
   importing models.
 - `references/lens-format.md`: manifest, lens keys, viz, params, links, row styling, alerts, actions.
 - `references/page-layout.md`: where things go on a page (nav bar, body, rail) and what check warns about.
@@ -48,7 +48,7 @@ with `name: oxplow-extension` and `reference: <name>`):
 - `references/reading-data.md`: before you report numbers: `truncated`, `coverage`, metric folds, scope, example queries.
 - `references/dashboards.md`: choosing a lens, dashboard, component or snapshot; building a dashboard; adapting outside HTML into a component.
 
-Rules that live in other skills: wikilinks and refs in prose, see
+Rules that live in other skills: wikilinks and URIs in prose, see
 `oxplow-wiki-capture`; waiting on the person, `oxplow-runtime`; test
 commands run in the foreground, `oxplow-collection`; metrics, `oxplow-metrics`.
 An extension declares `permissions:`; a person approves them when it is

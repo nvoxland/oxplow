@@ -1864,21 +1864,21 @@ impl EventType for WorkItemCommented {
     type Payload = WorkItemCommentedV2;
 }
 
-/// `work_item.recorded@2`: a list's item as it now stands — how every
+/// `work_item.recorded@3`: a list's item as it now stands — how every
 /// list's items reach the work-item interface (the `work_items.project`
 /// consumer upserts it by ref), with its rank, links, comments and list
 /// when it states them. A list's verbs answer with it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct WorkItemRecordedV2 {
+pub struct WorkItemRecordedV3 {
     pub item: crate::work_items::WorkItemRecord,
 }
 
 pub struct WorkItemRecorded;
 impl EventType for WorkItemRecorded {
     const TYPE: &'static str = "work_item.recorded";
-    const V: u32 = 2;
-    type Payload = WorkItemRecordedV2;
+    const V: u32 = 3;
+    type Payload = WorkItemRecordedV3;
 }
 
 /// How many diagnostics of each severity a file has.
@@ -1983,11 +1983,11 @@ impl EventType for KnowledgePageWritten {
 #[serde(deny_unknown_fields)]
 pub struct KnowledgePageRecord {
     /// `oxplow:oxplow/wiki?slug=<slug>`.
-    #[serde(rename = "ref")]
-    pub page_ref: String,
+    pub uri: String,
     pub title: String,
     pub body: String,
-    pub refs: Vec<String>,
+    /// What it links, as URIs.
+    pub uris: Vec<String>,
     /// RFC 3339: when the store last changed it.
     pub updated_at: String,
     /// It was deleted in the store.
@@ -1995,19 +1995,19 @@ pub struct KnowledgePageRecord {
     pub deleted: bool,
 }
 
-/// `knowledge.page.recorded@1`: a knowledge store's page, as it recorded
+/// `knowledge.page.recorded@2`: a knowledge store's page, as it recorded
 /// it (`.context/knowledge.md` "The capability").
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct KnowledgePageRecordedV1 {
+pub struct KnowledgePageRecordedV2 {
     pub page: KnowledgePageRecord,
 }
 
 pub struct KnowledgePageRecorded;
 impl EventType for KnowledgePageRecorded {
     const TYPE: &'static str = "knowledge.page.recorded";
-    const V: u32 = 1;
-    type Payload = KnowledgePageRecordedV1;
+    const V: u32 = 2;
+    type Payload = KnowledgePageRecordedV2;
 }
 
 /// `lens.shown@2`: an agent showed the person an answer in a thread —
@@ -2334,7 +2334,7 @@ mod tests {
                 ("knowledge.note.deleted", 3),
                 ("knowledge.note.written", 3),
                 ("knowledge.page.deleted", 2),
-                ("knowledge.page.recorded", 1),
+                ("knowledge.page.recorded", 2),
                 ("knowledge.page.written", 2),
                 ("lens.kept", 3),
                 ("lens.shown", 2),
@@ -2350,7 +2350,7 @@ mod tests {
                 ("work_item.deleted", 2),
                 ("work_item.edited", 2),
                 ("work_item.linked", 2),
-                ("work_item.recorded", 2),
+                ("work_item.recorded", 3),
                 ("work_item.state_changed", 1),
                 ("work_item.unlinked", 1),
             ]

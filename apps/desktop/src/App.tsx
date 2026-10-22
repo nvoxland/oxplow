@@ -872,7 +872,7 @@ export function App() {
   /** A drag's new order on a list: the item it moved, placed by its
    *  neighbour (`oxplow.work_item.reorder`). */
   async function reorderList(list: WorkList | null | undefined, orderedRefs: string[]) {
-    const before = (list?.all ?? []).map((i) => i.ref).filter((ref) => orderedRefs.includes(ref));
+    const before = (list?.all ?? []).map((i) => i.uri).filter((ref) => orderedRefs.includes(ref));
     await runTaskWrite(() => reorderWorkItems(before, orderedRefs));
   }
 
@@ -1856,8 +1856,8 @@ export function App() {
       return thread;
     };
     const refOf = (input: unknown) => {
-      const id = (input as { ref?: unknown } | null)?.ref;
-      if (typeof id !== "string") throw new Error("`ref` is a page's ref (`file:src/a.rs`)");
+      const id = (input as { uri?: unknown } | null)?.uri;
+      if (typeof id !== "string") throw new Error("`uri` is a page's URI");
       const ref = refFromTabId(id);
       if (!ref) throw new Error(`\`${id}\` isn't a page's ref`);
       return ref;
@@ -1867,7 +1867,7 @@ export function App() {
       const ref = refOf(input);
       if (thread === selectedThreadId && focus) {
         handleOpenPageRef.current?.(ref);
-        return { ref: ref.id, focused: true };
+        return { uri: ref.id, focused: true };
       }
       // A working-tree file's content lives in its stream's session: read
       // it first (a path that isn't a file opens nothing), keeping what
@@ -1887,14 +1887,14 @@ export function App() {
         // Opened without focus, it waits behind what the thread shows.
         return focus ? opened : { ...opened, active: session.active, mru: [...session.mru, ...opened.mru.filter((m) => !session.mru.includes(m))] };
       });
-      return { ref: ref.id, focused: focus };
+      return { uri: ref.id, focused: focus };
     };
     return {
       "editor.write": {
-        // The file `ref` names, else the one the thread shows.
+        // The file `uri` names, else the one the thread shows.
         save: async (input, ctx) => {
           const thread = threadOf(ctx);
-          const id = (input as { ref?: unknown } | null)?.ref;
+          const id = (input as { uri?: unknown } | null)?.uri;
           const shown = thread === selectedThreadId ? centerActive : activeRef(sessions[thread])?.id;
           const tab = typeof id === "string" ? id : shown;
           const path = tab ? diskFilePath(tab) : null;
@@ -1924,7 +1924,7 @@ export function App() {
           const plan = await planNavigation(input, threadStates, stream?.id ?? null);
           if (plan.page) {
             if (!plan.threadId) throw new Error(`stream \`${plan.streamId}\` has no thread`);
-            await open({ ref: plan.page.id }, { threadId: plan.threadId, actor: "human", call: null }, true);
+            await open({ uri: plan.page.id }, { threadId: plan.threadId, actor: "human", call: null }, true);
           }
           if (stream?.id !== plan.streamId) await handleSwitch(plan.streamId);
           if (plan.selectThread && plan.threadId) await handleSelectThread(plan.streamId, plan.threadId);
@@ -1968,7 +1968,7 @@ export function App() {
               return slot ? sessionClose(session, slot) : session;
             });
           }
-          return { ref: ref.id, closed: true };
+          return { uri: ref.id, closed: true };
         },
       },
     };
@@ -2331,7 +2331,7 @@ export function App() {
       work_item: (ref, nav) => {
         // Every work item, whichever list it's on, has one page.
         const itemRef = (ref.payload as { ref?: string } | null)?.ref ?? ref.id;
-        const loaded = selectedThreadWork?.all.find((i) => i.ref === itemRef);
+        const loaded = selectedThreadWork?.all.find((i) => i.uri === itemRef);
         return {
           id: ref.id,
           label: loaded ? loaded.title : workItemLabel(itemRef),

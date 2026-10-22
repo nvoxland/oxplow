@@ -101,7 +101,7 @@ fn sequence_schema() -> Value {
                 "calls": [
                     {
                         "name": "oxplow.work_item.transition",
-                        "input": { "ref": item, "to": "done" }
+                        "input": { "uri": item, "to": "done" }
                     },
                     {
                         "name": "oxplow.effort.report",
@@ -197,8 +197,8 @@ mod tests {
                 &agent,
                 SEQUENCE,
                 json!({ "calls": [
-                    { "name": "oxplow.work_item.update", "input": { "ref": task, "title": "Renamed" } },
-                    { "name": "oxplow.work_item.transition", "input": { "ref": task, "to": "done" } },
+                    { "name": "oxplow.work_item.update", "input": { "uri": task, "title": "Renamed" } },
+                    { "name": "oxplow.work_item.transition", "input": { "uri": task, "to": "done" } },
                 ] }),
                 false,
             )

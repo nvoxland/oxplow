@@ -2317,7 +2317,7 @@ mod tests {
                 "oxplow.knowledge.delete_page",
                 "oxplow.knowledge.drift",
                 "oxplow.knowledge.link",
-                "oxplow.knowledge.verify_refs",
+                "oxplow.knowledge.verify_files",
                 "oxplow.knowledge.write_page",
                 // Lens files on disk (P6 review, tsk597): a Tx handler may
                 // run twice, and a retried file write strands the first.
@@ -2460,7 +2460,7 @@ mod tests {
                 "knowledge.write/resync",
                 "knowledge.write/update_comment",
                 "knowledge.write/update_note",
-                "knowledge.write/verify_refs",
+                "knowledge.write/verify_files",
                 "knowledge.write/write_page",
                 "lenses.read/run",
                 "lenses.show/show",

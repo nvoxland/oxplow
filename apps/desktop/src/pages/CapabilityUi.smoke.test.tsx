@@ -14,7 +14,7 @@ const realBindings = await import("../tauri-bridge/generated/bindings.js");
 
 const ok = <T,>(data: T) => ({ status: "ok" as const, data });
 const reads = { models: ["v_work_item"], tables: [], measures: [] };
-const WORK_ITEM_COLUMNS = ["ref", "provider", "title", "body", "state", "parent_ref", "thread_id", "rank", "closed_at", "created_at", "updated_at", "native", "comment_count"];
+const WORK_ITEM_COLUMNS = ["uri", "provider", "title", "body", "state", "parent_uri", "thread_id", "rank", "closed_at", "created_at", "updated_at", "native", "comment_count"];
 let extensions: unknown[] = [];
 let extensionLoads = 0;
 const lensRuns: Array<[string, unknown]> = [];
@@ -293,11 +293,11 @@ test("an extension's view replaces the Board, whichever list is active", async (
 // state pill and Move To — and the rest of the page stay oxplow's, so an
 // item can always move whatever the editor offers.
 test("an extension's editor replaces a work item's title and body, and the rail stays", async () => {
-  extensions = [replacing("views", "work_item.detail", "edit", ["ref"], "detail editor")];
+  extensions = [replacing("views", "work_item.detail", "edit", ["uri"], "detail editor")];
   const page = mount("oxplow:oxplow/work_item?id=W-1&provider=fake", <WorkItemPage workItemRef="oxplow:oxplow/work_item?id=W-1&provider=fake" stream={null} thread={null} onOpenPage={() => {}} />);
   const replaced = await waitFor(() => page.getByTestId("replacement-work_item.detail"));
   expect(replaced.textContent).toContain("replaced by views");
-  expect(lensRuns).toEqual([["views/edit", { ref: "oxplow:oxplow/work_item?id=W-1&provider=fake" }]]);
+  expect(lensRuns).toEqual([["views/edit", { uri: "oxplow:oxplow/work_item?id=W-1&provider=fake" }]]);
   expect(page.getByLabelText("State")).toBeTruthy();
   expect(replaced.contains(page.getByLabelText("State"))).toBe(false);
   // Oxplow's own title field isn't there; the lens is.
@@ -317,7 +317,7 @@ test("a work item's own provider's extension replaces its state control, not the
         { id: `${name}/work_item.detail.state`, extension: name, target: "work_item.detail.state", capability: "work_items", boundToProvider: true, lensId: `${name}/state`, label: "state control", version: 1, view: [] },
       ],
     },
-    lenses: [{ id: `${name}/state`, params: [{ name: "ref", label: null, default: null }] }],
+    lenses: [{ id: `${name}/state`, params: [{ name: "uri", label: null, default: null }] }],
   });
   extensions = [stateLens("x"), stateLens("y")];
   const realQuery = answers.querySql!;
@@ -345,7 +345,7 @@ test("a work item's own provider's extension replaces its state control, not the
     // states the lens offers, the item can always move.
     expect(replaced.getByLabelText("State")).toBeTruthy();
     expect(replaced.getByTestId("replacement-work_item.detail.state").contains(replaced.getByLabelText("State"))).toBe(false);
-    expect(lensRuns).toEqual([["y/state", { ref: "oxplow:oxplow/work_item?id=W-1&provider=fake" }]]);
+    expect(lensRuns).toEqual([["y/state", { uri: "oxplow:oxplow/work_item?id=W-1&provider=fake" }]]);
     // The rest of the page is still oxplow's.
     expect(replaced.getByTestId("work-item-page").textContent).toContain("It breaks.");
     cleanup();

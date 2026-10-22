@@ -187,14 +187,14 @@ impl Feed<'_> {
             tracing::warn!(kind = %self.kind, view = %self.spec.view, "more than {MAX_ROWS} rows; the rest aren't searchable");
         }
         if skipped > 0 {
-            tracing::warn!(kind = %self.kind, view = %self.spec.view, skipped, "rows whose `ref` isn't one of the resource's URIs weren't indexed");
+            tracing::warn!(kind = %self.kind, view = %self.spec.view, skipped, "rows whose `uri` isn't one of the resource's URIs weren't indexed");
         }
     }
 
     /// Every row's text, compared by its hash.
     fn restate_by_text(&self) -> Result<usize, DomainError> {
         let sql = format!(
-            "SELECT CAST(ref AS TEXT), CAST(title AS TEXT), CAST(body AS TEXT), {} FROM {}{}",
+            "SELECT CAST(uri AS TEXT), CAST(title AS TEXT), CAST(body AS TEXT), {} FROM {}{}",
             self.stream(),
             self.view(),
             self.limit()
@@ -230,7 +230,7 @@ impl Feed<'_> {
     /// Every row's version, then the text of the changed rows only.
     fn restate_by_version(&self) -> Result<usize, DomainError> {
         let sql = format!(
-            "SELECT CAST(ref AS TEXT), {}, CAST(version AS TEXT) FROM {}{}",
+            "SELECT CAST(uri AS TEXT), {}, CAST(version AS TEXT) FROM {}{}",
             self.stream(),
             self.view(),
             self.limit()
@@ -259,8 +259,8 @@ impl Feed<'_> {
         for chunk in plan.write.chunks(TEXT_CHUNK) {
             let refs: Vec<String> = chunk.iter().map(|((id, _), ..)| id.clone()).collect();
             let sql = format!(
-                "SELECT CAST(ref AS TEXT), {}, CAST(title AS TEXT), CAST(body AS TEXT) \
-                 FROM {} WHERE ref IN ({})",
+                "SELECT CAST(uri AS TEXT), {}, CAST(title AS TEXT), CAST(body AS TEXT) \
+                 FROM {} WHERE uri IN ({})",
                 self.stream(),
                 self.view(),
                 vec!["?"; refs.len()].join(", ")
@@ -480,13 +480,13 @@ models:
     version: 1
     description: Pull requests.
     columns:
-      - {{ name: ref, type: TEXT, doc: The ref. }}
+      - {{ name: uri, type: TEXT, doc: The ref. }}
       - {{ name: title, type: TEXT, doc: Its title. }}
   - name: found
     version: 1
     description: Pull requests, as search finds them.
     columns:
-      - {{ name: ref, type: TEXT, doc: The ref. }}
+      - {{ name: uri, type: TEXT, doc: The ref. }}
       - {{ name: title, type: TEXT, doc: Its title. }}
       - {{ name: body, type: TEXT, doc: Its description. }}
 pages:
@@ -504,12 +504,12 @@ resources:
         write(
             root,
             ".oxplow/extensions/acme/models/prs.sql",
-            "SELECT CAST(uri('acme/pr', 'id', n) AS TEXT) AS ref, title FROM ref('pr')",
+            "SELECT CAST(uri('acme/pr', 'id', n) AS TEXT) AS uri, title FROM ref('pr')",
         );
         write(
             root,
             ".oxplow/extensions/acme/models/found.sql",
-            "SELECT CAST(uri('acme/pr', 'id', n) AS TEXT) AS ref, title, body FROM ref('pr')",
+            "SELECT CAST(uri('acme/pr', 'id', n) AS TEXT) AS uri, title, body FROM ref('pr')",
         );
         write(
             root,
@@ -665,7 +665,7 @@ resources:
         write(
             &root,
             ".oxplow/extensions/acme/models/found.sql",
-            "SELECT CAST(uri('acme/pr', 'id', n) AS TEXT) AS ref, CAST(title || ' (open)' AS TEXT) AS title, body FROM ref('pr')",
+            "SELECT CAST(uri('acme/pr', 'id', n) AS TEXT) AS uri, CAST(title || ' (open)' AS TEXT) AS title, body FROM ref('pr')",
         );
         crate::test_fixtures::activate_with_problems(svc).await;
         assert_eq!(
@@ -950,9 +950,7 @@ mod core_tests {
         svc.db
             .read(move |c| {
                 let mut s = c
-                    .prepare(
-                        "SELECT ref_id, stream_id FROM search_entry WHERE kind = ?1 ORDER BY ref_id",
-                    )
+                    .prepare("SELECT uri, stream_id FROM search_entry WHERE kind = ?1 ORDER BY uri")
                     .map_err(oxplow_db::map_sql_err)?;
                 let rows = s
                     .query_map([kind], |r| Ok((r.get(0)?, r.get(1)?)))
@@ -983,7 +981,7 @@ mod core_tests {
             crate::commands::work_item::CREATE,
             serde_json::json!({ "title": title, "thread": thread.to_string() }),
         )
-        .await["ref"]
+        .await["uri"]
             .as_str()
             .unwrap()
             .to_string()
@@ -1011,7 +1009,7 @@ mod core_tests {
         run(
             &svc,
             crate::commands::work_item::UPDATE,
-            serde_json::json!({ "ref": t, "title": "Quux the flange" }),
+            serde_json::json!({ "uri": t, "title": "Quux the flange" }),
         )
         .await;
         eventually("the edit is found", || {
@@ -1023,7 +1021,7 @@ mod core_tests {
         run(
             &svc,
             crate::commands::work_item::DELETE,
-            serde_json::json!({ "ref": t }),
+            serde_json::json!({ "uri": t }),
         )
         .await;
         eventually("the deleted task leaves", || async {
@@ -1075,7 +1073,7 @@ mod core_tests {
             .db
             .read(|c| {
                 let mut s = c
-                    .prepare("SELECT ref FROM v_search_work_item")
+                    .prepare("SELECT uri FROM v_search_work_item")
                     .map_err(oxplow_db::map_sql_err)?;
                 let rows = s
                     .query_map([], |r| r.get(0))
@@ -1114,7 +1112,7 @@ mod core_tests {
             crate::commands::work_item::CREATE,
             serde_json::json!({ "title": "On the backlog" }),
         )
-        .await["ref"]
+        .await["uri"]
             .as_str()
             .unwrap()
             .to_string();
@@ -1161,7 +1159,7 @@ mod core_tests {
         run(
             &svc,
             crate::commands::work_item::MOVE,
-            serde_json::json!({ "ref": t, "to": "backlog" }),
+            serde_json::json!({ "uri": t, "to": "backlog" }),
         )
         .await;
         eventually("in the backlog", || async {
@@ -1682,7 +1680,7 @@ mod core_tests {
         run(
             &svc,
             crate::commands::work_item::COMMENT,
-            serde_json::json!({ "ref": item, "body": "the ocelot repro is attached" }),
+            serde_json::json!({ "uri": item, "body": "the ocelot repro is attached" }),
         )
         .await;
         eventually("found by a comment", || {

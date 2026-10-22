@@ -6,8 +6,8 @@ params:
   - { name: thread_id }
   - { name: parent }
 query: |
-  SELECT 'todo' AS state, :parent AS parent_ref,
-         (SELECT uri_param(t.ref, 'id') FROM v_thread t WHERE t.id = :thread_id) AS thread
+  SELECT 'todo' AS state, :parent AS parent_uri,
+         (SELECT uri_param(t.uri, 'id') FROM v_thread t WHERE t.id = :thread_id) AS thread
 viz: form
 form:
   command: oxplow.work_item.create
@@ -17,10 +17,10 @@ form:
     - body
     - state
     - thread
-    - parent_ref
+    - parent_uri
     - { name: native, from: oxplow-foundation/work-item-fields }
   choices:
     state: oxplow-foundation/new-task-states
     thread: oxplow-foundation/new-task-threads
-    parent_ref: oxplow-foundation/new-task-parents
-  again: { label: Save and Another, keep: [state, thread, parent_ref, native] }
+    parent_uri: oxplow-foundation/new-task-parents
+  again: { label: Save and Another, keep: [state, thread, parent_uri, native] }

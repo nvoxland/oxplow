@@ -9,7 +9,7 @@ use async_trait::async_trait;
 use serde_json::Value;
 
 use oxplow_db::Database;
-use oxplow_domain::events::schema::{WorkItemRecorded, WorkItemRecordedV2};
+use oxplow_domain::events::schema::{WorkItemRecorded, WorkItemRecordedV3};
 use oxplow_domain::work_items::{VerbCall, VerbOutcome, WorkItemRecord, WorkItemVerbs};
 use oxplow_domain::{Actor, CommandError, DomainError, Envelope};
 
@@ -17,10 +17,10 @@ use crate::verbs::{self, Answer};
 
 /// `item`'s `work_item.recorded`, as oxplow's tasks answer with it.
 pub fn recorded(item: WorkItemRecord) -> Envelope {
-    let subject = item.item_ref.clone();
+    let subject = item.uri.clone();
     Envelope::typed::<WorkItemRecorded>(
         oxplow_domain::uri::build::provider_source(crate::refs::PROVIDER),
-        &WorkItemRecordedV2 { item },
+        &WorkItemRecordedV3 { item },
     )
     .with_subject([subject])
 }
@@ -141,11 +141,11 @@ mod tests {
             )
             .await
             .unwrap();
-        let item = created.result["ref"].as_str().unwrap().to_string();
+        let item = created.result["uri"].as_str().unwrap().to_string();
         assert_eq!(created.events.len(), 1);
-        let WorkItemRecordedV2 { item: record } =
+        let WorkItemRecordedV3 { item: record } =
             serde_json::from_value(created.events[0].payload.clone()).unwrap();
-        assert_eq!(record.item_ref, item);
+        assert_eq!(record.uri, item);
         assert_eq!(record.list, Some(oxplow_domain::work_items::List::Backlog));
         assert_eq!(created.events[0].subject, vec![item.clone()]);
 
@@ -153,18 +153,18 @@ mod tests {
             .invoke(
                 VerbCall::bare(&Actor::Human, None),
                 "transition",
-                json!({ "ref": item, "to": "done" }),
+                json!({ "uri": item, "to": "done" }),
             )
             .await
             .unwrap();
-        let WorkItemRecordedV2 { item: record } =
+        let WorkItemRecordedV3 { item: record } =
             serde_json::from_value(moved.events[0].payload.clone()).unwrap();
         assert_eq!(record.state.as_str(), "done");
         assert_eq!(moved.inverse.unwrap().name, "transition");
     }
 
     fn recorded_state(out: &VerbOutcome) -> (String, String) {
-        let WorkItemRecordedV2 { item } =
+        let WorkItemRecordedV3 { item } =
             serde_json::from_value(out.events[0].payload.clone()).unwrap();
         (item.state.as_str().to_string(), item.native_state)
     }
@@ -193,12 +193,12 @@ mod tests {
             )
             .await
             .unwrap();
-        let item = plain.result["ref"].as_str().unwrap().to_string();
+        let item = plain.result["uri"].as_str().unwrap().to_string();
         let updated = tasks
             .invoke(
                 VerbCall::bare(&Actor::Human, None),
                 "update",
-                json!({ "ref": item, "state": "done", "native_state": "archived" }),
+                json!({ "uri": item, "state": "done", "native_state": "archived" }),
             )
             .await
             .unwrap();
@@ -218,12 +218,12 @@ mod tests {
             )
             .await
             .unwrap();
-        let item = filed.result["ref"].as_str().unwrap().to_string();
+        let item = filed.result["uri"].as_str().unwrap().to_string();
         let reopened = tasks
             .invoke(
                 VerbCall::bare(&Actor::Human, None),
                 "update",
-                json!({ "ref": item, "state": "todo" }),
+                json!({ "uri": item, "state": "todo" }),
             )
             .await
             .unwrap();

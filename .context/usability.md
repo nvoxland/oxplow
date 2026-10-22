@@ -1042,7 +1042,7 @@ no caller may bypass the bus to write to the terminal.
   - note → `@.oxplow/wiki/<slug>.md `.
   - work item → `[oxplow oxplow:oxplow/work_item?id=<id>&provider=<provider>: "<title>" (<state>)] `
     (plain-text reference; the agent reads it with `read`).
-  - any canonical URI → `[oxplow ref <uri>] ` — **Ask About This**
+  - any canonical URI → `[oxplow uri <uri>] ` — **Ask About This**
     (below). The agent guide says how to read each kind.
   - Always trailing space so the user can keep typing.
 - **Right-click parity**: every drag source should also offer "Add to
@@ -1050,7 +1050,7 @@ no caller may bypass the bus to write to the terminal.
   shouldn't have to drag. Funnel both paths through the same
   `insertIntoAgent + formatContextMention` calls.
 - **Ask About This** (P6.D1) is the conversation-first form of the
-  same gesture: it puts `[oxplow ref <ref>] ` in the agent's input for
+  same gesture: it puts `[oxplow uri <uri>] ` in the agent's input for
   the person to finish the question, and never sends. It's on:
   - the page nav bar (`page-nav-ask`), for any page whose tab id is a
     canonical URI (`PageNavigationContext.ask`: `{ ref, streamId }`);
@@ -1063,13 +1063,13 @@ no caller may bypass the bus to write to the terminal.
     clipboard has no Ask action rather than one that does nothing.
   The nav bar's Ask is a menu (`components/Prompts/AskMenu.tsx`): Ask
   About This, then the catalog's prompts `about` the page's resource
-  (`SuggestedPrompts`), each inserted as `[oxplow ref <uri>] <question>`.
+  (`SuggestedPrompts`), each inserted as `[oxplow uri <uri>] <question>`.
   The launcher's last row for any typed text is **Ask the Agent: <text>**,
   which inserts the text the same way. Nothing in oxplow sends agent
   input on its own; these only fill the draft.
 - **Repair with the Agent** (P7.C3, Settings → Extensions, on a disabled
   contribution with an open repair item) is the same gesture: it fills
-  the input with `Repair the extension described in [oxplow ref <item>]
+  the input with `Repair the extension described in [oxplow uri <item>]
   — read it first.` (`contributionHealth.ts` → `repairWithAgent`). The brief
   itself is the work item's body, not the inserted line — a one-line
   mention is all `insertIntoAgent` can carry.

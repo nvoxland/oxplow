@@ -56,8 +56,8 @@ export function pageIdentity(ref: TabRef): string {
     return withViewParams(ref, identity).id;
   }
   if (page.extension !== null) {
-    const opened = page.params.ref;
-    return opened === undefined ? identityOf(ref.id) : extPageRef(page.extension, page.page, { ref: opened }).id;
+    const opened = page.params.uri;
+    return opened === undefined ? identityOf(ref.id) : extPageRef(page.extension, page.page, { uri: opened }).id;
   }
   if (!isBuiltInPage(page.page)) return identityOf(ref.id);
   const isView = BUILT_IN_VIEW[page.page];

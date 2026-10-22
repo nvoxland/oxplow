@@ -129,7 +129,7 @@ impl LinkDeps {
                     (Some(t), _) => Some(t),
                     (None, Some(item)) => tx
                         .query_row(
-                            "SELECT thread_id FROM work_item WHERE ref = ?1",
+                            "SELECT thread_id FROM work_item WHERE uri = ?1",
                             [item],
                             |r| r.get::<_, Option<i64>>(0),
                         )
@@ -254,7 +254,7 @@ fn unresolved_ref(
         .conn
         .query_row(
             &format!(
-                "SELECT 1 FROM \"{}\" WHERE ref = ?1",
+                "SELECT 1 FROM \"{}\" WHERE uri = ?1",
                 resolve.replace('"', "")
             ),
             [&at],
@@ -273,7 +273,7 @@ fn missing_reason(world: &LinkWorld<'_>, reference: &Reference) -> Option<String
     match reference {
         // Through the interface: the active list's items.
         Reference::WorkItem(uri) => {
-            (!exists(world.conn, "SELECT 1 FROM v_work_item WHERE ref = ?1", uri))
+            (!exists(world.conn, "SELECT 1 FROM v_work_item WHERE uri = ?1", uri))
                 .then(|| format!("work item `{uri}` does not exist"))
         }
         Reference::Wiki(slug) => (world.this_page != Some(slug.as_str())

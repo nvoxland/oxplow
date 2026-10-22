@@ -18,12 +18,12 @@ const NO_READS = { models: [], tables: [], measures: [] };
 
 function item(ref: string, state: CanonicalState, extra: Partial<WorkItem> = {}): WorkItem {
   return {
-    ref,
+    uri: ref,
     provider: "oxplow",
     title: ref,
     body: "",
     state,
-    parentRef: null,
+    parentUri: null,
     threadId: "thr1",
     rank: null,
     closedAt: null,
@@ -54,7 +54,7 @@ test("splitIntoSections returns sections in fixed order, each in the order given
     item("w1", "todo"),
   ]);
   expect(sections.map((s) => s.kind)).toEqual(["inProgress", "ready", "blocked", "done"]);
-  expect(sections[1]?.items.map((i) => i.ref)).toEqual(["w2", "w1"]);
+  expect(sections[1]?.items.map((i) => i.uri)).toEqual(["w2", "w1"]);
 });
 
 test("splitIntoSections skips empty sections entirely so no header renders for them", () => {
@@ -91,7 +91,7 @@ test("buildBacklogGroups returns a single group, empty or not", () => {
   expect(buildBacklogGroups(null)).toEqual([{ epic: null, items: [], epicChildren: new Map() }]);
   expect(buildBacklogGroups(emptyWorkList(null))[0]?.items).toEqual([]);
   const backlog = bucketWorkList(null, [item("r1", "todo"), item("b1", "blocked"), item("r2", "todo")], [], NO_READS);
-  expect(buildBacklogGroups(backlog)[0]?.items.map((i) => i.ref)).toEqual(["r1", "b1", "r2"]);
+  expect(buildBacklogGroups(backlog)[0]?.items.map((i) => i.uri)).toEqual(["r1", "b1", "r2"]);
 });
 
 test("openBacklogCount counts ready + blocked + in progress, not done", () => {
@@ -125,13 +125,13 @@ test("buildGroups keeps an epic's children under it, in list order", () => {
   const groups = buildGroups(
     list([
       item("e", "todo"),
-      item("c1", "in_progress", { parentRef: "e" }),
+      item("c1", "in_progress", { parentUri: "e" }),
       item("r", "todo"),
-      item("c2", "todo", { parentRef: "e" }),
+      item("c2", "todo", { parentUri: "e" }),
     ]),
   );
-  expect(groups[0]!.items.map((i) => i.ref)).toEqual(["e", "r"]);
-  expect(groups[0]!.epicChildren.get("e")!.map((i) => i.ref)).toEqual(["c1", "c2"]);
+  expect(groups[0]!.items.map((i) => i.uri)).toEqual(["e", "r"]);
+  expect(groups[0]!.epicChildren.get("e")!.map((i) => i.uri)).toEqual(["c1", "c2"]);
   expect(buildGroups(null)).toEqual([]);
 });
 
@@ -152,13 +152,13 @@ test("filterByFields keeps rows matching each chosen field; epics stay, their ch
     },
   ];
   const filtered = filterByFields(groups, { author: ["user"] });
-  expect(filtered[0]!.items.map((i) => i.ref)).toEqual(["u", "e"]);
-  expect(filtered[0]!.epicChildren.get("e")!.map((i) => i.ref)).toEqual(["c1"]);
-  expect(filterByFields(groups, {})[0]!.items.map((i) => i.ref)).toEqual(["u", "a", "e"]);
+  expect(filtered[0]!.items.map((i) => i.uri)).toEqual(["u", "e"]);
+  expect(filtered[0]!.epicChildren.get("e")!.map((i) => i.uri)).toEqual(["c1"]);
+  expect(filterByFields(groups, {})[0]!.items.map((i) => i.uri)).toEqual(["u", "a", "e"]);
 });
 
 test("applyStateFilter keeps or drops by state", () => {
   const groups = [{ epic: null, items: [item("t", "todo"), item("c", "canceled"), item("d", "done")], epicChildren: new Map() }];
-  expect(applyStateFilter(groups, { exclude: ["canceled"] })[0]!.items.map((i) => i.ref)).toEqual(["t", "d"]);
-  expect(applyStateFilter(groups, { only: ["done", "canceled"] })[0]!.items.map((i) => i.ref)).toEqual(["c", "d"]);
+  expect(applyStateFilter(groups, { exclude: ["canceled"] })[0]!.items.map((i) => i.uri)).toEqual(["t", "d"]);
+  expect(applyStateFilter(groups, { only: ["done", "canceled"] })[0]!.items.map((i) => i.uri)).toEqual(["c", "d"]);
 });

@@ -30,7 +30,7 @@ export interface ProposalPreview {
 export interface Proposal {
   id: number;
   /** `proposal:<id>`. */
-  ref: string;
+  uri: string;
   createdAt: string;
   command: string;
   input: unknown;
@@ -84,7 +84,7 @@ export function proposalsFromResult(result: SqlQueryResult): Proposal[] {
   const at = (row: SqlCell[], name: string) => row[result.columns.indexOf(name)] ?? null;
   return result.rows.map((row) => ({
     id: Number(at(row, "id")),
-    ref: String(at(row, "ref")),
+    uri: String(at(row, "uri")),
     createdAt: String(at(row, "created_at") ?? ""),
     command: String(at(row, "command")),
     input: json(at(row, "input")),
@@ -105,7 +105,7 @@ export function proposalsFromResult(result: SqlQueryResult): Proposal[] {
 /** The pending proposals, newest first, and what was read. */
 export async function readPendingProposals(): Promise<{ proposals: Proposal[]; reads: Reads }> {
   const res = await querySql(
-    `SELECT id, ref, created_at, command, input, actor_kind, actor_id, thread_id, ${THREAD_TITLE}, key, preview, dry_run
+    `SELECT id, uri, created_at, command, input, actor_kind, actor_id, thread_id, ${THREAD_TITLE}, key, preview, dry_run
        FROM v_command_proposal p WHERE decision = 'pending' ORDER BY id DESC`,
     [],
     1_000,
@@ -175,7 +175,7 @@ export async function decide(p: Proposal, approve: boolean): Promise<void> {
 }
 
 const COLUMNS =
-  "id, ref, created_at, command, input, actor_kind, actor_id, thread_id, (SELECT title FROM v_thread th WHERE th.id = p.thread_id) AS thread_title, key, preview, dry_run, decision, decided_at, audit_id";
+  "id, uri, created_at, command, input, actor_kind, actor_id, thread_id, (SELECT title FROM v_thread th WHERE th.id = p.thread_id) AS thread_title, key, preview, dry_run, decision, decided_at, audit_id";
 
 /** A thread's proposals, newest first — pending and decided — and what
  *  was read. */

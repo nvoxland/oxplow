@@ -108,10 +108,10 @@ describe("pageRefs", () => {
     expect(ref.id).toBe("oxplow:oxplow/page?page=tasks");
     expect(ref.kind).toBe("page");
     expect(hookEventsRef()).toEqual({ id: "oxplow:oxplow/page?page=hook-events", kind: "page", payload: { extension: null, page: "hook-events", params: {} } });
-    expect(extPageRef("gh", "open-prs", { ref: "acme_pr:1" })).toEqual({
-      id: "oxplow:oxplow/page?page=gh/open-prs&ref=acme_pr:1",
+    expect(extPageRef("gh", "open-prs", { uri: "acme_pr:1" })).toEqual({
+      id: "oxplow:oxplow/page?page=gh/open-prs&uri=acme_pr:1",
       kind: "page",
-      payload: { extension: "gh", page: "open-prs", params: { ref: "acme_pr:1" } },
+      payload: { extension: "gh", page: "open-prs", params: { uri: "acme_pr:1" } },
     });
     expect(uncommittedChangesRef().id).toBe("oxplow:oxplow/page?page=uncommitted-changes");
   });

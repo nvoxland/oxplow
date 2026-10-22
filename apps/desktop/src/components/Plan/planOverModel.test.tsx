@@ -14,7 +14,7 @@ afterEach(cleanup);
 // plan's own grouping — whichever list is active.
 test("the list renders a thread's work read from v_work_item", () => {
   const result = {
-    columns: ["ref", "provider", "title", "body", "state", "parent_ref", "thread_id", "rank", "closed_at", "created_at", "updated_at", "native", "comment_count"],
+    columns: ["uri", "provider", "title", "body", "state", "parent_uri", "thread_id", "rank", "closed_at", "created_at", "updated_at", "native", "comment_count"],
     rows: [
       ["oxplow:oxplow/work_item?id=E-1&provider=issues", "issues", "Epic", "", "todo", null, 1, 0, null, "t", "t", null, 0],
       ["oxplow:oxplow/work_item?id=E-2&provider=issues", "issues", "Child step", "", "in_progress", "oxplow:oxplow/work_item?id=E-1&provider=issues", 1, 1, null, "t", "t", null, 1],
