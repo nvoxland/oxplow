@@ -102,6 +102,14 @@ pub enum LensViz {
     /// An ordered checklist: `steps.label`, with `steps.status` (`done`,
     /// `active`, `failed`, anything else pending).
     Steps,
+    /// Per row, the file `code.path` at revision `code.revision`,
+    /// read-only, at full size: its `code.lines` marked and revealed, the
+    /// editors side by side (scrolling together with `code.sync`).
+    Code,
+    /// The first row's file `diff.path` between revisions `diff.from` and
+    /// `diff.to`, at full size, read-only; `diff.lines` revealed on the
+    /// newer side.
+    Diff,
     /// Per row, the diff of the file `hunks.path` between the revisions
     /// `hunks.from` and `hunks.to` (`working`, `snap:<id>`,
     /// `<vcs>:<rev>`), read-only.
@@ -526,6 +534,38 @@ fn plain_json<S: serde::Serializer>(
         Some(v) => s.serialize_some(&Plain(v)),
         None => s.serialize_none(),
     }
+}
+
+/// `code` viz: the file each row shows, read-only, at a revision; the
+/// lines it marks and reveals; whether the editors scroll together.
+#[derive(
+    Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
+)]
+#[serde(deny_unknown_fields)]
+pub struct LensCode {
+    pub path: Option<String>,
+    pub revision: Option<String>,
+    /// A column holding `12-40` (or `12`): the lines marked and revealed.
+    #[serde(default)]
+    pub lines: Option<String>,
+    /// Several rows' editors scroll together, each from its marked lines.
+    #[serde(default)]
+    pub sync: bool,
+}
+
+/// `diff` viz: the first row's file, between two revisions, at full size.
+#[derive(
+    Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
+)]
+#[serde(deny_unknown_fields)]
+pub struct LensDiff {
+    pub path: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    /// A column holding a line (or `12-40`: its start) to reveal on the
+    /// newer side.
+    #[serde(default)]
+    pub lines: Option<String>,
 }
 
 /// `hunks` viz: the file and the two revisions each row diffs.
@@ -1138,6 +1178,10 @@ struct LensFile {
     steps: Option<LensSteps>,
     #[serde(default)]
     hunks: Option<LensHunks>,
+    #[serde(default)]
+    code: Option<LensCode>,
+    #[serde(default)]
+    diff: Option<LensDiff>,
     #[serde(default)]
     form: Option<LensForm>,
     #[serde(default)]
@@ -2032,6 +2076,8 @@ pub struct Lens {
     pub timeline: Option<LensTimeline>,
     pub steps: Option<LensSteps>,
     pub hunks: Option<LensHunks>,
+    pub code: Option<LensCode>,
+    pub diff: Option<LensDiff>,
     pub form: Option<LensForm>,
     /// For `custom`: the component and its props.
     pub custom: Option<LensCustom>,
@@ -3908,6 +3954,8 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                 timeline: l.timeline,
                 steps: l.steps,
                 hunks: l.hunks,
+                code: l.code,
+                diff: l.diff,
                 form: l.form,
                 custom: l.custom,
                 group: l.group,
@@ -4964,6 +5012,17 @@ fn shape_problem(
             let s = lens.steps.clone().unwrap_or_default();
             need("steps", &[("label", &s.label)])
         }
+        LensViz::Code => {
+            let c = lens.code.clone().unwrap_or_default();
+            need("code", &[("path", &c.path), ("revision", &c.revision)])
+        }
+        LensViz::Diff => {
+            let d = lens.diff.clone().unwrap_or_default();
+            need(
+                "diff",
+                &[("path", &d.path), ("from", &d.from), ("to", &d.to)],
+            )
+        }
         LensViz::Hunks => {
             let h = lens.hunks.clone().unwrap_or_default();
             need(
@@ -5312,6 +5371,22 @@ impl Lens {
                     .into_iter()
                     .flatten()
                     .map(|k| ("hunks", k)),
+            );
+        }
+        if let Some(c) = &self.code {
+            out.extend(
+                [&c.path, &c.revision, &c.lines]
+                    .into_iter()
+                    .flatten()
+                    .map(|k| ("code", k)),
+            );
+        }
+        if let Some(d) = &self.diff {
+            out.extend(
+                [&d.path, &d.from, &d.to, &d.lines]
+                    .into_iter()
+                    .flatten()
+                    .map(|k| ("diff", k)),
             );
         }
         if let Some(g) = &self.group {
@@ -5987,6 +6062,8 @@ fn check_components(
                 ("timeline", l.timeline.is_some()),
                 ("steps", l.steps.is_some()),
                 ("hunks", l.hunks.is_some()),
+                ("code", l.code.is_some()),
+                ("diff", l.diff.is_some()),
             ]
             .into_iter()
             .filter(|(_, set)| *set)
@@ -6307,6 +6384,10 @@ pub struct LensSpec {
     #[serde(default)]
     pub hunks: Option<LensHunks>,
     #[serde(default)]
+    pub code: Option<LensCode>,
+    #[serde(default)]
+    pub diff: Option<LensDiff>,
+    #[serde(default)]
     pub form: Option<LensForm>,
     #[serde(default)]
     pub group: Option<LensGroup>,
@@ -6337,6 +6418,8 @@ impl Lens {
             timeline: spec.timeline.clone(),
             steps: spec.steps.clone(),
             hunks: spec.hunks.clone(),
+            code: spec.code.clone(),
+            diff: spec.diff.clone(),
             form: spec.form.clone(),
             custom: None,
             group: spec.group.clone(),
@@ -6368,6 +6451,8 @@ impl Lens {
             timeline: self.timeline.clone(),
             steps: self.steps.clone(),
             hunks: self.hunks.clone(),
+            code: self.code.clone(),
+            diff: self.diff.clone(),
             form: self.form.clone(),
             group: self.group.clone(),
             emphasis: self.emphasis.clone(),
@@ -7469,6 +7554,8 @@ empty: No items.
             timeline: None,
             steps: None,
             hunks: None,
+            code: None,
+            diff: None,
             form: None,
             group: None,
             emphasis: None,
@@ -8895,6 +8982,46 @@ commands:
         assert!(
             errs.contains("nohunks")
                 && errs.contains("`hunks: { path: <column>, from: <column>, to: <column> }`"),
+            "{errs}"
+        );
+    }
+
+    /// `code` shows each row's file at a revision, `diff` the first row's
+    /// file between two: each needs its block's columns, and the rest of
+    /// the block is optional.
+    #[test]
+    fn code_and_diff_lenses_name_their_columns() {
+        let (_d, ext) = load_x(
+            &[
+                ("c", "title: C\nquery: SELECT 'f' AS p, 'working' AS r, '3-8' AS l\nviz: code\ncode: { path: p, revision: r, lines: l, sync: true }\n"),
+                ("c2", "title: C\nquery: SELECT 'f' AS p, 'working' AS r\nviz: code\ncode: { path: p, revision: r }\n"),
+                ("df", "title: D\nquery: SELECT 'f' AS p, 'git:HEAD' AS a, 'working' AS b\nviz: diff\ndiff: { path: p, from: a, to: b }\n"),
+                ("nocode", "title: N\nquery: SELECT 'f' AS p\nviz: code\ncode: { path: p }\n"),
+                ("nodiff", "title: N\nquery: SELECT 1\nviz: diff\n"),
+            ],
+            "",
+        );
+        let lens = |slug: &str| ext.lenses.iter().find(|l| l.slug == slug);
+        let c = lens("c").expect("c loads");
+        assert_eq!(
+            c.code,
+            Some(LensCode {
+                path: Some("p".into()),
+                revision: Some("r".into()),
+                lines: Some("l".into()),
+                sync: true,
+            })
+        );
+        assert!(!lens("c2").unwrap().code.as_ref().unwrap().sync);
+        assert_eq!(
+            lens("df").unwrap().diff.as_ref().unwrap().to.as_deref(),
+            Some("b")
+        );
+        assert!(lens("nocode").is_none() && lens("nodiff").is_none());
+        let errs = ext.errors.join("\n");
+        assert!(errs.contains("`code: { revision: <column> }`"), "{errs}");
+        assert!(
+            errs.contains("`diff: { path: <column>, from: <column>, to: <column> }`"),
             "{errs}"
         );
     }

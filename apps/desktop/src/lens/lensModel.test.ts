@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Extension, Lens, LensRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
-import { markParts, treeNodes, timelineEntries, stepItems, hunkRows, slotRuns, mergeDirectory, barRows, childParams, partParams, lineSeries, sparklineValues, numericRowId, treemapItems, cellLinkRef, changedParams, lensViewChange, misplacedViewParams, foldEmpty, displayColumns, formatCell, lensDirectoryEntries, parseParamInput, limitRows, slugify, adHocLens, rowMention, rowAsk, effortRowId, slotExtensions, isTimestamp, rowGroups, rowEmphasized, rowDepth, rowContextRef } from "./lensModel.js";
+import { markParts, treeNodes, timelineEntries, stepItems, hunkRows, codeRows, diffRow, parseLines, slotRuns, mergeDirectory, barRows, childParams, partParams, lineSeries, sparklineValues, numericRowId, treemapItems, cellLinkRef, changedParams, lensViewChange, misplacedViewParams, foldEmpty, displayColumns, formatCell, lensDirectoryEntries, parseParamInput, limitRows, slugify, adHocLens, rowMention, rowAsk, effortRowId, slotExtensions, isTimestamp, rowGroups, rowEmphasized, rowDepth, rowContextRef } from "./lensModel.js";
 import { formatMetricValue, formatShortDateTime } from "../components/format.js";
 import { diffSpecOf, duplicateBlockOf, isPage, lineOf, pagePayload } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
@@ -546,6 +546,36 @@ describe("structure components (P6.A2)", () => {
       { label: "test", status: "failed", row: ["test", "failed"] },
       { label: "ship", status: "pending", row: ["ship", "later"] },
     ]);
+  });
+
+  test("codeRows keep rows naming a file and a revision, with their marked lines", () => {
+    const l = lens({ viz: "code", code: { path: "p", revision: "r", lines: "l", sync: false } });
+    expect(
+      codeRows(l, result(["p", "r", "l"], [["x.rs", "git:abc", "40-12"], ["y.rs", "working", null], ["z.rs", null, "1"]])),
+    ).toEqual([
+      { path: "x.rs", revision: "git:abc", lines: { start: 12, end: 40 }, row: ["x.rs", "git:abc", "40-12"] },
+      { path: "y.rs", revision: "working", lines: null, row: ["y.rs", "working", null] },
+    ]);
+  });
+
+  test("diffRow is the first row's file, two revisions and the line it lands on", () => {
+    const l = lens({ viz: "diff", diff: { path: "p", from: "a", to: "b", lines: "l" } });
+    expect(diffRow(l, result(["p", "a", "b", "l"], [["x.rs", "git:abc", "working", "7-9"], ["y.rs", "git:abc", "working", null]]))).toEqual({
+      path: "x.rs",
+      leftVersion: "git:abc",
+      rightVersion: "working",
+      baseLabel: "abc",
+      revealLine: 7,
+    });
+    expect(diffRow(l, result(["p", "a", "b", "l"], []))).toBeNull();
+  });
+
+  test("parseLines reads a line or a range, ends in order", () => {
+    expect(parseLines("12")).toEqual({ start: 12, end: 12 });
+    expect(parseLines(" 40-12 ")).toEqual({ start: 12, end: 40 });
+    expect(parseLines("0-3")).toBeNull();
+    expect(parseLines("x")).toBeNull();
+    expect(parseLines(null)).toBeNull();
   });
 
   test("hunkRows keep rows naming a file and two revisions", () => {

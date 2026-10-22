@@ -196,6 +196,32 @@ regular editor pane and closes the diff tab. For literal-content diffs
 (e.g. Compare with Clipboard) this still opens the workspace file,
 which is the useful action.
 
+## Read-only code and diff vizes
+
+A lens shows files through two kit vizes (`.context/extensions.md`
+"Lenses"):
+
+- **`code`** (`lens/CodeViz.tsx`): one read-only Monaco per row, side by
+  side, each with a strip (path, marked lines, revision, Open file). The
+  content comes from `readAt` at the row's revision; a file not there
+  says so in its strip. A row's `lines` are a whole-line decoration with
+  the kit classes `.ox-code-mark` / `.ox-code-mark-margin`
+  (`oxplow-kit.css`), revealed near the top. Without a mark, the view
+  state (scroll, cursor) stays with the tab's entry
+  (`useMonacoViewState`); with one, the mark is where the page lands.
+  `code.sync` scrolls the editors together (`lens/codeScrollSync.ts`,
+  plain logic): the marks line up two lines below the top (less when one
+  is near its file's top), then a scroll moves the others the same
+  distance from their own anchors, never to the same absolute position.
+- **`diff`** (`lens/DiffViz.tsx`): `DiffPane` at full size for the first
+  row, its `lines` revealed on the modified side; Open file shows the
+  working file.
+
+Open file navigates in the tab when there is one, else opens a page.
+`FileViewerPage` and `DuplicateBlockPage` still mount their own editors
+until they become lenses over these vizes; `DiffPane` stays (it is the
+`hunks` viz's and `diff`'s).
+
 ## Comment overlay
 
 `MonacoCommentLayer` (`apps/desktop/src/components/Comments/MonacoCommentLayer.tsx`)

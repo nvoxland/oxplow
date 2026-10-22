@@ -67,6 +67,12 @@ empty: Nothing is blocked.
     `path:start-end|peer:start-end`, and `head:` names a revision column.
   - A revision is `working` (the files on disk), `snap:<id>` (a
     local-history snapshot) or `git:<rev>` (a sha, branch or `HEAD`).
+- `viz: code` shows a file, read-only, at a revision, filling the page:
+  `code: { path: <column>, revision: <column> }`. Add `lines` (a column
+  holding `12-40`) to mark and reveal lines. Two rows sit side by side;
+  `sync: true` scrolls them together.
+- `viz: diff` shows one file's diff, filling the page: `diff: { path:
+  <column>, from: <column>, to: <column> }`. Several files are `hunks`.
 - Unknown keys are errors, so typos show up instead of being ignored.
 
 ### Typed params

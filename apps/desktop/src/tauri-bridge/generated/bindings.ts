@@ -3985,6 +3985,19 @@ export type LensChart = {
 	targets?: string | null,
 };
 
+/**
+ *  `code` viz: the file each row shows, read-only, at a revision; the
+ *  lines it marks and reveals; whether the editors scroll together.
+ */
+export type LensCode = {
+	path: string | null,
+	revision: string | null,
+	/**  A column holding `12-40` (or `12`): the lines marked and revealed. */
+	lines?: string | null,
+	/**  Several rows' editors scroll together, each from its marked lines. */
+	sync?: boolean,
+};
+
 /**  How one result column is shown. */
 export type LensColumn = {
 	/**  Result column name. */
@@ -4051,6 +4064,18 @@ export type LensCustom_Serialize = {
 	component: string | null,
 	/**  Handed to the component as is. */
 	props: unknown | null,
+};
+
+/**  `diff` viz: the first row's file, between two revisions, at full size. */
+export type LensDiff = {
+	path: string | null,
+	from: string | null,
+	to: string | null,
+	/**
+	 *  A column holding a line (or `12-40`: its start) to reveal on the
+	 *  newer side.
+	 */
+	lines?: string | null,
 };
 
 /**  `form` viz: the command it submits and the values it starts from. */
@@ -4468,6 +4493,8 @@ export type LensSpec_Deserialize = {
 	timeline?: LensTimeline | null,
 	steps?: LensSteps | null,
 	hunks?: LensHunks | null,
+	code?: LensCode | null,
+	diff?: LensDiff | null,
 	form?: LensForm_Deserialize | null,
 	group?: LensGroup | null,
 	emphasis?: string | null,
@@ -4498,6 +4525,8 @@ export type LensSpec_Serialize = {
 	timeline: LensTimeline | null,
 	steps: LensSteps | null,
 	hunks: LensHunks | null,
+	code: LensCode | null,
+	diff: LensDiff | null,
 	form: LensForm_Serialize | null,
 	group: LensGroup | null,
 	emphasis: string | null,
@@ -4581,6 +4610,18 @@ export type LensViz =
  */
 "steps" | 
 /**
+ *  Per row, the file `code.path` at revision `code.revision`,
+ *  read-only, at full size: its `code.lines` marked and revealed, the
+ *  editors side by side (scrolling together with `code.sync`).
+ */
+"code" | 
+/**
+ *  The first row's file `diff.path` between revisions `diff.from` and
+ *  `diff.to`, at full size, read-only; `diff.lines` revealed on the
+ *  newer side.
+ */
+"diff" | 
+/**
  *  Per row, the diff of the file `hunks.path` between the revisions
  *  `hunks.from` and `hunks.to` (`working`, `snap:<id>`,
  *  `<vcs>:<rev>`), read-only.
@@ -4631,6 +4672,8 @@ export type Lens_Deserialize = {
 	timeline: LensTimeline | null,
 	steps: LensSteps | null,
 	hunks: LensHunks | null,
+	code: LensCode | null,
+	diff: LensDiff | null,
 	form: LensForm_Deserialize | null,
 	/**  For `custom`: the component and its props. */
 	custom: LensCustom_Deserialize | null,
@@ -4693,6 +4736,8 @@ export type Lens_Serialize = {
 	timeline: LensTimeline | null,
 	steps: LensSteps | null,
 	hunks: LensHunks | null,
+	code: LensCode | null,
+	diff: LensDiff | null,
 	form: LensForm_Serialize | null,
 	/**  For `custom`: the component and its props. */
 	custom: LensCustom_Serialize | null,

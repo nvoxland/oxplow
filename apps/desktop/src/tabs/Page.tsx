@@ -123,6 +123,10 @@ export interface PageProps {
    *  owns its padding; `"reading"` is a padded, bounded reading column
    *  (`.oxplow-reading-column`, 78ch, centered) that its children fill. */
   width?: "full" | "reading";
+  /** The body is one region that takes the page's whole height (a file, a
+   *  diff): beside the rail it stretches instead of sitting at the top,
+   *  and its children lay out as a column. Defaults to false. */
+  fill?: boolean;
   /** The page's control panel, a sticky column at the right, beside a
    *  body of either width (padded then). Below ~960px it moves to the top
    *  of the body. Purely responsive — no user-controlled toggle. */
@@ -156,7 +160,7 @@ export const pageH1Style: CSSProperties = {
  * The chrome reads only semantic CSS variables. Both light and dark
  * themes are styled by `public/index.html`.
  */
-export function Page({ title, titleIcon, kind, chips: ownChips, actions, pin, children, backlinks, outbound, snapshots, commentsNav, navBar, testId, titleInBody = false, width = "full", rightRail, rightRailTitle }: PageProps) {
+export function Page({ title, titleIcon, kind, chips: ownChips, actions, pin, children, backlinks, outbound, snapshots, commentsNav, navBar, testId, titleInBody = false, width = "full", fill = false, rightRail, rightRailTitle }: PageProps) {
   const [backlinksOpen, setBacklinksOpen] = useState(false);
   // Pages that don't pass an explicit `navBar` prop still get one
   // when rendered inside a PageNavigationContext provider — that's
@@ -337,7 +341,7 @@ export function Page({ title, titleIcon, kind, chips: ownChips, actions, pin, ch
         </div>
       ) : null}
       {width === "reading" || rightRail != null ? (
-        <RailBody width={width} rightRail={rightRail} rightRailTitle={rightRailTitle}>{children}</RailBody>
+        <RailBody width={width} fill={fill} rightRail={rightRail} rightRailTitle={rightRailTitle}>{children}</RailBody>
       ) : (
         <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: "auto", display: "flex", flexDirection: "column" }}>
           {children}
@@ -405,7 +409,7 @@ function Chip({ chip }: { chip: PageChip }) {
 
 /** A padded body: a reading column or every pixel, with the page's rail
  *  beside it (or above it, when narrow). */
-function RailBody({ children, width, rightRail, rightRailTitle }: { children: ReactNode; width: "full" | "reading"; rightRail?: ReactNode; rightRailTitle?: ReactNode }) {
+function RailBody({ children, width, fill, rightRail, rightRailTitle }: { children: ReactNode; width: "full" | "reading"; fill: boolean; rightRail?: ReactNode; rightRailTitle?: ReactNode }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [showRail, setShowRail] = useState(true);
 
@@ -487,7 +491,9 @@ function RailBody({ children, width, rightRail, rightRailTitle }: { children: Re
         gridTemplateColumns: railAside ? "1fr 320px" : "1fr",
         gap: railAside ? 24 : 0,
         padding: 24,
-        alignItems: "start",
+        // A body that fills stretches to the page's height, row and all.
+        alignItems: fill ? "stretch" : "start",
+        gridTemplateRows: fill ? "minmax(0, 1fr)" : undefined,
       }}
     >
       <div
@@ -498,7 +504,7 @@ function RailBody({ children, width, rightRail, rightRailTitle }: { children: Re
         // instead of each managing its own width. `minWidth: 0` keeps the
         // grid item from overflowing the track.
         className={width === "reading" ? "oxplow-reading-column" : undefined}
-        style={{ minWidth: 0 }}
+        style={fill ? { minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column" } : { minWidth: 0 }}
       >
         {railInline ? railPanel("inline") : null}
         {children}
