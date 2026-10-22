@@ -1030,7 +1030,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     database)
   - Tests Weakened (deleted test functions from `v_change_function`,
     fewer assertions and new skip markers from `v_change_test_file`;
-    also mounted in the `vcs.commit.details` and `vcs.status.details` slots)
+    also mounted in the `oxplow-foundation/commit.sections` and `oxplow-foundation/uncommitted.sections` slots)
   - Struggled Here (`v_oxplow_bundled_struggle`, the bundled model: a file edited 5+ times or 3+ failed shell commands per effort)
   - Review Prompt (a copyable markdown prompt for reviewing the effort
     with a second harness: the task, the agent's summary, the files it
@@ -2117,8 +2117,15 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   says what its sections read — a commit's document `SELECT id AS
   change_id FROM v_change WHERE kind = 'commit' AND target = :sha`, which
   also makes the change (`.context/semantic-layer.md` "Made on demand").
-  A row column no part takes warns at check (only when every part is the
-  extension's own, whose params are known). A part lens of its own extension must exist at load
+  The row is declared with `columns:`, the names of what the query returns
+  (only their `key`: a composite's column is not something shown, and
+  `columns:` needs a `query`; `row_columns_problem`): they are what its
+  parts, and the lenses mounted at its `.sections` / `.tiles` slot, may
+  take as params, next to the composite's own `params`
+  (`mount_problem`), and a name none of its parts (its own and the
+  mounted ones) declares warns at load (`warn_unread_row_columns`). A
+  renderer's lens declares its resource's params in `params`; its row
+  names are not params of the resource. A part lens of its own extension must exist at load
   (`parts_problem`); another extension's resolves with the catalog, and a
   missing one drops the composite. `lens_text` renders a composite as a
   `###` section per part. A standalone spec can't be either
@@ -2203,9 +2210,8 @@ they live under `ui:`.
 | `work_item.detail.body` | WorkItemPage, below the body | `uri` | — |
 | `work_item.detail.sidebar` | WorkItemPage, in the side rail | `uri` | — |
 | `thread.plan.header` | PlanPane (compact strip) | `thread_id` |
-| `vcs.commit.details` | GitCommitPage | `change_id` |
-| `vcs.status.header` | UncommittedChangesPage, a strip above everything | `stream_id` |
-| `vcs.status.details` | UncommittedChangesPage | `change_id` |
+| `oxplow-foundation/commit.sections` | the commit page (a document: parts `detail`, `files`) | its params (`uri`, `sha`, `stream_id`) and its row (`change_id`, `base_revision`, `head_revision`) |
+| `oxplow-foundation/uncommitted.sections` | the Uncommitted Changes page (a document: parts `commit`, `files`) | its params (`stream_id`) and its row (`change_id`, `base_revision`, `head_revision`) |
 | `diff.file.header` | a file diff (`DiffPane`), a strip under its header (P9.A2; `DiffFileHeaderSlot`) | `path`, `left_revision`, `right_revision` (each a revision in its wire form: `working`, `snap:<id>`, `git:<sha>`), `stream_id` |
 | `settings.<area>.sections` (core's parts per area: `agents` `agents`, `new-threads`, `prompt`; `extensions` `health`; `data` `data`; `integrations` `capabilities`, `integrations`; `ai` `ai`; `overview` and `lsp` have none — their sections are oxplow-foundation's lenses) | each Settings area's page (`pages/settingsAreas.ts` lists the same ids; a TS test checks they match): an extension's status or setup views go beside the area they belong to | none (`overview`: `q`, the page's search) |
 
@@ -4634,13 +4640,14 @@ What moves out of core, and what it becomes:
 |---|---|
 | Planning / Review / Quality dashboards | `document` lenses (**done**: `planning`, `review`, `quality`) |
 | Code-quality runner, dup scan, FindingPage, DuplicateBlockPage | **done:** the `findings` / `duplicate-blocks` lenses; the dup scan runs in core's change analysis; `DuplicateBlockPage` stays core as the compare page |
-| Change-analysis cards (treemap, look-here-first, functions, co-change, zones) | **done:** the `change-review` document in the `effort.review.details` / `vcs.commit.details` / `vcs.status.details` slots; core keeps a changed-files tree (`ChangedFilesTree`, `useChangedFiles`) |
+| Change-analysis cards (treemap, look-here-first, functions, co-change, zones) | **done:** the `change-review` document in the `effort.review.details` / `oxplow-foundation/commit.sections` / `oxplow-foundation/uncommitted.sections` slots; core keeps a changed-files tree (`ChangedFilesTree`, `useChangedFiles`) |
 | Fact collectors (`.oxplow/extensions/project/collectors/*.star`, idiom `.star`; gauges until P7.B3) | extensions can declare fact collectors (tsk311); done: the code metrics are oxplow-foundation's (the opt-in ones say `default: off`) |
 | Metric-threshold nudges | **done:** the `threshold-crossed` advisory (with `metric-deltas`) |
 | Usage / page analytics / token pages, `ThreadTokenTotal`, `EffortTokenUsage` | **done:** the `usage` dashboard; `task-tokens` (`work_item.detail.body` slot) and `thread-tokens` (`thread.plan.header` slot) |
 | Git History's commit graph | **done:** the `history-graph` component, replacing core's plain `CommitList` (`vcs.history.graph`) |
 | Local history dashboard | stays core (snapshots are substrate); the `recent-snapshots` lens in `review` covers the at-a-glance view |
 | Effort metrics block, effort coverage page, tests-run and nudge blocks | **done:** `effort.review.details` slot lenses `effort-tests` (a document: coverage, untested files, test runs, failed tests, analysis findings), `effort-metric-deltas`, `effort-nudges` |
+| Git Commit and Uncommitted Changes pages | **done:** the `commit` and `uncommitted` documents (a `query` row for the change, declared in `columns:`; parts `commit-detail`, `commit-files`, `uncommitted-commit`, `uncommitted-files`); the analysis moves to the `oxplow-foundation/commit.sections` and `oxplow-foundation/uncommitted.sections` mounts (the old `vcs.commit.details`, `vcs.status.header` and `vcs.status.details` slots are gone); the commit tab is labelled by its sha, not its subject, and the file totals line and Cherry-pick's inline confirm are gone; `GitCommitPage` and `UncommittedChangesPage` are deleted |
 | Comments inbox | **done:** the `comments` document lens (`comments-threads`, a grouped table over `v_comment` with `select` on the `comment` param; `comments-conversation`, over `v_comment_message`); the resolved filter is a static `choice` ladder (the old one was cut to the oldest resolved comment) and "Go to location" is a plain link, so it no longer scrolls to the anchor; `CommentsInboxPage` and `comments-filter` are gone |
 | Directory page | **done:** the `directory` lens, the renderer of `oxplow/dir` (`pages:` entry `lens: directory`, `label: "{{param.path}}"`); `DirectoryPage` is gone |
 | Settings → Overview and Language Servers | **done:** the areas have no React sections; oxplow-foundation mounts lenses in their slots. Overview: `settings-proposals` (the `approvals` viz) and `settings-values` (a grouped `list` over `v_config_value`: its source, value, doc, Ask the Agent to Change This through `oxplow.agent.draft`, and Change It Here — a link to the area that holds a person-only setting's control; the page's search is the slot param `q`, which the lens reads as `:q`). Language servers: `lsp-servers` (`v_lsp_server`, a row per stream a server runs in; Restart and Remove through `oxplow.lsp.restart_server` / `remove_server`), `lsp-install` (a form over `oxplow.lsp.install_server`) and `lsp-suggestions` (the curated Mason packages for languages with no server). The shell (`SettingsPage`, the rail, the other areas) stays until they convert |

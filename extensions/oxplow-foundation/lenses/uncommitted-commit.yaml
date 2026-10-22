@@ -1,0 +1,14 @@
+title: Commit
+description: Commits every changed file, untracked ones too.
+params:
+  - { name: stream_id }
+  - { name: change_id }
+query: |
+  SELECT 'str' || :stream_id AS stream, '' AS message
+  WHERE EXISTS (SELECT 1 FROM v_change_file WHERE change_id = :change_id)
+viz: form
+form:
+  command: oxplow.vcs.commit
+  fields: [message]
+  fixed: []
+hidden: true

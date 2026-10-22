@@ -12,7 +12,6 @@ import { SettingsPage } from "./SettingsPage.js";
 import { settingsArea } from "./settingsAreas.js";
 import { DiffViewPage } from "./DiffViewPage.js";
 import { GitDashboardPage } from "./GitDashboardPage.js";
-import { UncommittedChangesPage } from "./UncommittedChangesPage.js";
 import { TerminalPage } from "./TerminalPage.js";
 import { FilesPage } from "./FilesPage.js";
 import { TasksPage } from "./TasksPage.js";
@@ -172,22 +171,6 @@ export const builtInPages: Record<BuiltInPageName, BuiltInPage> = {
           stream={scope.stream}
           onOpenPage={nav.navOpen}
           onRevealCommit={nav.navRevealCommit}
-        />
-      ),
-    };
-  },
-  "uncommitted-changes": ({ ref, nav, scope }) => {
-    return {
-      id: ref.id,
-      label: "Uncommitted",
-      closable: true,
-      render: () => (
-        <UncommittedChangesPage
-          stream={scope.stream}
-          onOpenPage={nav.navOpen}
-          onOpenFile={nav.navOpenFile}
-          onOpenDiff={nav.navOpenDiff}
-          onOpenDiffInTab={nav.navOpenDiff}
         />
       ),
     };

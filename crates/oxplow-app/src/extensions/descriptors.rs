@@ -550,7 +550,7 @@ mod tests {
              panels:\n  - {{ id: inbox, title: Inbox, scope: project, body: open }}\n\
              resources:\n  - {{ name: pr, label: Pull request, params: {{ id: {{ required: true, pattern: '^[0-9]+$' }} }}, resolve: prs, icon: git-pull-request }}\n\
              custom_components:\n  - {{ id: chart }}\n\
-             ui:\n  slots:\n    - {{ slot: effort.review.details, lens: open }}\n    - {{ slot: vcs.commit.details, lens: open }}\n  decorators:\n    - {{ model: prs, resource: oxplow/work_item, placement: ref-chip, label: title }}\n"
+             ui:\n  slots:\n    - {{ slot: effort.review.details, lens: open }}\n    - {{ slot: effort.review.details, lens: open }}\n  decorators:\n    - {{ model: prs, resource: oxplow/work_item, placement: ref-chip, label: title }}\n"
         )
     }
 
@@ -709,7 +709,7 @@ mod tests {
             ids,
             vec![
                 "oxplow:oxplow/slot?slot=acme-pr/effort.review.details-0",
-                "oxplow:oxplow/slot?slot=acme-pr/vcs.commit.details-1"
+                "oxplow:oxplow/slot?slot=acme-pr/effort.review.details-1"
             ]
         );
         for d in slots {

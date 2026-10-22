@@ -43,7 +43,7 @@ test("the history graph draws lanes, filters and opens a commit", async ({ fresh
   await frame.locator("#query").fill("");
 
   await frame.locator(".row", { hasText: "Main work" }).click();
-  await expect(page.getByTestId("page-git-commit")).toContainText("Main work");
+  await expect(page.locator('[data-testid="page-lens"]:visible')).toContainText("Main work");
 });
 
 // The graph's filters are Git History's view params (its contract's

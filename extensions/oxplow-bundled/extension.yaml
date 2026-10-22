@@ -93,8 +93,8 @@ skills:
 ui:
   slots:
     - { slot: effort.review.details, lens: change-review }
-    - { slot: vcs.commit.details, lens: change-review }
-    - { slot: vcs.status.details, lens: change-review }
+    - { slot: oxplow-foundation/commit.sections, lens: change-review }
+    - { slot: oxplow-foundation/uncommitted.sections, lens: change-review }
     - { slot: effort.review.details, lens: effort-tests }
     - { slot: effort.review.details, lens: effort-metric-deltas }
     - { slot: effort.review.details, lens: effort-nudges }
@@ -110,8 +110,8 @@ ui:
     - { slot: effort.review.details, lens: unverified-claims }
     - { slot: effort.review.details, lens: what-deviated }
     - { slot: effort.review.details, lens: tests-weakened }
-    - { slot: vcs.commit.details, lens: tests-weakened }
-    - { slot: vcs.status.details, lens: tests-weakened }
+    - { slot: oxplow-foundation/commit.sections, lens: tests-weakened }
+    - { slot: oxplow-foundation/uncommitted.sections, lens: tests-weakened }
     - { slot: effort.review.details, lens: struggled }
     - { slot: effort.review.details, lens: session-files }
     - { slot: effort.review.details, lens: context-read }

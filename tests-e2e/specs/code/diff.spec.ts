@@ -18,13 +18,15 @@ test("a committed change shows its hunk", async ({ page, daemon }) => {
     .frameLocator('[data-testid="custom-component-frame"]')
     .locator(".row", { hasText: "Add the emu file" })
     .click();
-  await expect(page.getByTestId("page-git-commit")).toBeVisible();
-  // Its Change Analysis lenses read their extension's models (tsk977):
-  // once the slot has rendered its runs, none failed.
-  await expect(page.getByTestId("page-git-commit")).toContainText("1 file");
-  await expect(page.getByTestId("vcs.commit.details-oxplow-bundled/change-review")).toBeVisible();
-  await expect(page.getByTestId("page-git-commit")).not.toContainText("no such table");
-  await page.getByTestId("git-commit-files").getByText("emu.txt").click();
+  // The commit is the foundation's `commit` lens page.
+  const commit = page.locator('[data-testid="page-lens"]:visible');
+  await expect(commit).toContainText("Add the emu file");
+  // Its Change Analysis lenses (oxplow-bundled's mounts in the page's
+  // `.sections` slot) read their extension's models (tsk977): once they
+  // have rendered their runs, none failed.
+  await expect(commit.getByText("Change Analysis")).toBeVisible();
+  await expect(commit).not.toContainText("no such table");
+  await commit.getByRole("link", { name: "emu.txt" }).click();
   await expect(page.getByTestId("page-diff")).toContainText("second emu line");
   // A diff is its address: a reload draws the same diff, its base named.
   const named = await page.getByTestId("page-diff").getByText(/^vs /).textContent();

@@ -295,6 +295,9 @@ tiles:
   are params for its parts too, so `SELECT id AS change_id FROM v_change
   WHERE kind = 'commit' AND target = :sha` gives every section that
   declares `change_id` the commit's change. A param the page holds wins.
+  Name the row's columns in `columns:` (each only a `key`); they are what
+  the parts and the lenses mounted into the page's `.sections` slot may
+  declare as params, besides the page's own `params`.
 - A document folds sections with no rows into one line: "Nothing found:
   ...".
 - A tile has a `size`: `small` (default), `wide`, `tall` or `full`. A
@@ -392,9 +395,8 @@ page's id as a param, so it must declare it:
 | `work_item.detail.body` | a work item's page, below its body | `uri` |
 | `work_item.detail.sidebar` | a work item's page, its side rail | `uri` |
 | `thread.plan.header` | a thread's plan, as a compact strip | `thread_id` |
-| `vcs.commit.details` | a commit's page | `change_id` |
-| `vcs.status.header` | Uncommitted Changes, above the files | `stream_id` |
-| `vcs.status.details` | Uncommitted Changes, below the files | `change_id` |
+| `oxplow-foundation/commit.sections` | a commit's page, as sections (`detail`, `files`) | `change_id` (the page's row) |
+| `oxplow-foundation/uncommitted.sections` | Uncommitted Changes, as sections (`commit`, `files`); `at: { before: commit }` for a strip above everything | `change_id` (the page's row) |
 | `vcs.history.sidebar` | Git history's side column | `stream_id` |
 | `diff.file.header` | a file diff, above the editor | `path`, `left_revision`, `right_revision`, `stream_id` |
 | `settings.<area>.sections` | A Settings area's page, as sections: `overview` and `lsp` (no parts of their own), `agents` (`agents`, `new-threads`, `prompt`), `extensions` (`health`), `data` (`data`), `integrations` (`capabilities`, `integrations`), `ai` (`ai`) | none; `overview` passes `q`, its search |

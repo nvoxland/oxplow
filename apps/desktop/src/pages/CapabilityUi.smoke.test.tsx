@@ -84,8 +84,6 @@ mock.module("../tauri-bridge/generated/bindings.js", () => ({
 const { PageNavigationContext } = await import("../tabs/PageNavigationContext.js");
 const { WorkItemPage } = await import("./WorkItemPage.js");
 const { BoardPage } = await import("./BoardPage.js");
-const { GitCommitPage } = await import("./GitCommitPage.js");
-const { UncommittedChangesPage } = await import("./UncommittedChangesPage.js");
 const { DocumentViz } = await import("../lens/PartsViz.js");
 const { DiffFileHeaderSlot } = await import("../components/Diff/DiffFileHeaderSlot.js");
 
@@ -133,43 +131,15 @@ test("another provider's item, with every flag off, is its core content and no m
   await expectPlain(view);
 });
 
-test("the Board, the commit page, uncommitted changes and history render plain", async () => {
+test("the Board and history render plain", async () => {
   const board = mount("oxplow:oxplow/page?page=board", <BoardPage threadId={null} streamId="str1" onOpenPage={() => {}} />);
   await waitFor(() => expect(board.getByTestId("work-board").textContent).toContain("Their bug"));
   await expectPlain(board);
   cleanup();
 
-  const commit = mount("oxplow:oxplow/commit?sha=abc1234def", <GitCommitPage stream={STREAM} sha="abc1234def" threadWork={null} onOpenPage={() => {}} onOpenFile={() => {}} />);
-  await waitFor(() => expect(commit.container.textContent).toContain("Fix the widget"));
-  await expectPlain(commit);
-  cleanup();
-
-  const uncommitted = mount("oxplow:oxplow/page?page=uncommitted-changes", <UncommittedChangesPage stream={STREAM} onOpenPage={() => {}} onOpenFile={() => {}} />);
-  await waitFor(() => expect(uncommitted.getByTestId("uncommitted-files").textContent).toContain("a.ts"));
-  await expectPlain(uncommitted);
-  cleanup();
-
   const history = mount("oxplow:oxplow/page?page=git-history", historyPage());
   await waitFor(() => expect(history.getByTestId("lens-document")).toBeTruthy());
   await expectPlain(history);
-});
-
-test("an extension's mount reaches the uncommitted strip", async () => {
-  extensions = [
-    {
-      name: "x",
-      enabled: true,
-      ui: {
-        slots: [{ slot: "vcs.status.header", lensId: "x/status" }],
-        commands: [],
-        decorators: [],
-        replacements: [],
-      },
-      lenses: [{ id: "x/status", params: [{ name: "stream_id", label: null, default: null }] }],
-    },
-  ];
-  mount("oxplow:oxplow/page?page=uncommitted-changes", <UncommittedChangesPage stream={STREAM} onOpenPage={() => {}} onOpenFile={() => {}} />);
-  await waitFor(() => expect(lensRuns).toContainEqual(["x/status", { stream_id: 1 }]));
 });
 
 // Git History's commits are oxplow's plain list with every enhancement
