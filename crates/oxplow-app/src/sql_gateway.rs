@@ -266,7 +266,7 @@ impl SqlGateway {
         // Boxed: the engine reads entity metrics through a gateway, so
         // this future contains another `run`.
         let (sql, temp, views, measures) =
-            Box::pin(self.materialize(&query.sql, query.stream, true)).await?;
+            Box::pin(self.materialize(&query.sql, query.stream, Some(&query.params))).await?;
         query.sql = sql;
         query.temp.extend(temp);
         query.temp_views.extend(self.overlay.iter().cloned());
@@ -291,16 +291,17 @@ impl SqlGateway {
         Ok(self.fresh(out))
     }
 
-    /// `sql` with its metric functions computed (`with_rows`) or only
-    /// resolved (a check): the rewritten SQL, its temp tables, and the
-    /// measures behind them. Each function is planned over the SQL the
-    /// previous one rewrote, so their offsets hold.
+    /// `sql` with its metric functions and live models computed (run with
+    /// `params`) or only resolved (a check, `None`): the rewritten SQL, its
+    /// temp tables, and the measures behind them. Each function is planned
+    /// over the SQL the previous one rewrote, so their offsets hold.
     async fn materialize(
         &self,
         sql: &str,
         stream: Option<i64>,
-        with_rows: bool,
+        params: Option<&oxplow_db::SqlParams>,
     ) -> Result<(String, Vec<TempTable>, Vec<TempView>, Vec<String>), DomainError> {
+        let with_rows = params.is_some();
         let mut sql = sql.to_string();
         let mut temp = Vec::new();
         let mut measures = Vec::new();
@@ -314,7 +315,7 @@ impl SqlGateway {
                 live[0]
             )));
         }
-        let (live_tables, live_views) = self.live.materialize(&live, stream, with_rows).await?;
+        let (live_tables, live_views) = self.live.materialize(&live, stream, &sql, params).await?;
         temp.extend(live_tables);
         if let Some(plan) = crate::metric_grid::plan(&sql)? {
             let grid = plan
@@ -365,7 +366,7 @@ impl SqlGateway {
         // The metrics are resolved (a dimension checked) but not read; the
         // query compiles against empty tables.
         let (rewritten, temp, views, measures) =
-            Box::pin(self.materialize(sql, None, false)).await?;
+            Box::pin(self.materialize(sql, None, None)).await?;
         let mut q = SqlQuery::new(rewritten).limit(Some(1));
         q.temp = temp;
         q.temp_views = self.overlay.to_vec();

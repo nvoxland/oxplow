@@ -26,12 +26,14 @@
   `color`) columns; a chip shows on that URI's page, a badge after a
   linked cell in lens rows.
 
-- **Pages** give a lens a place of its own: `pages: [{ id, title, icon?,
-  category?, keywords?, params?, count?, lens }]` opens it full-page at
+- **Pages** give a lens a place of its own: `pages: [{ id, title, label?,
+  icon?, category?, keywords?, params?, count?, lens }]` opens it full-page at
   `oxplow:oxplow/page?page=<extension>/<id>` (plus its params) and lists it in the launcher under
   `category` (Work, Code, Git, Activity, Knowledge, Data, Lenses,
   System; leave it out for a page only opened from elsewhere).
-  `params` are what its id carries, handed to the lens; `count` names a
+  `params` are what its id carries, handed to the lens; `label` is what
+  its tab says, `{{param.<name>}}` filled from them (`title` stays its
+  name in the launcher); `count` names a
   `number` lens whose value is the launcher badge; `keywords` are more
   words the launcher matches. A page with `for: <resource>` (or a list;
   your own `<extension>/<name>`, oxplow's `oxplow/*`, another
@@ -41,7 +43,9 @@
   pattern> }` limits it to URIs whose params fit; `default: true` (only
   for a resource your extension declares, one page per resource) makes
   it the page a plain open uses; `pinned: true` pins its tabs. Its lens
-  must declare a `uri` param and runs with the URI. A resource has no
+  must declare a `uri` param and runs with the URI; a param named like
+  one of the URI's params (`id`, `path`) gets its value, and any other
+  param must be a `role: filter`. A resource has no
   `page:` field; a URI nothing draws shows on a fallback page, not an
   error.
 - **Panels** put a lens in the left nav (`panels: [{ id, title, icon?,

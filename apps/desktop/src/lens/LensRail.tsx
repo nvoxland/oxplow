@@ -23,6 +23,9 @@ export interface LensRailProps {
   outOfDate: boolean;
   onApply(name: string, value: SqlCell): void;
   onOpenPage(ref: TabRef): void;
+  /** Params that are what the page is, never a control (a renderer's
+   *  `uri`). */
+  fixed?: readonly string[];
 }
 
 /**
@@ -30,8 +33,8 @@ export interface LensRailProps {
  * params as rows), Selection (what a row click picked, never an input),
  * and About this page (its extension and the source file to edit).
  */
-export function LensRail({ lens, values, picked, outOfDate, onApply, onOpenPage }: LensRailProps) {
-  const filters = lens.params.filter((p) => p.role !== "selection");
+export function LensRail({ lens, values, picked, outOfDate, onApply, onOpenPage, fixed = [] }: LensRailProps) {
+  const filters = lens.params.filter((p) => p.role !== "selection" && !fixed.includes(p.name));
   const selections = lens.params.filter((p) => p.role === "selection");
   const changed = filters.filter((p) => !isDefault(p, values[p.name] ?? null));
   const reset = changed.length > 0 ? { id: "lens-rail-reset", label: "Reset", title: "Put every filter back to its default", run: () => changed.forEach((p) => onApply(p.name, p.default ?? null)) } : undefined;

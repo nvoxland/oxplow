@@ -210,7 +210,8 @@ Every page is a `pages:` entry in an extension's manifest
 (`.context/extensions.md` "Pages"); oxplow's own are in
 oxplow-foundation's. A page with no `for` is a **route**
 (`oxplow:oxplow/page?page=<id>`); a page with `for` is a **renderer** of
-a resource ("Renderers"). The declaration gives the title, icon, launcher
+a resource ("Renderers"). The declaration gives the title (its name), the `label` its tab says
+(`{{param.<name>}}` over what it shows; none: the title), icon, launcher
 `category` (none: not in the launcher — a page only opened from
 elsewhere), `keywords`, the `params` its id carries, a `count:` lens for
 the launcher badge, and what draws it: a `lens:` (most pages) or, for
@@ -221,7 +222,11 @@ oxplow's own until the kit can draw them, `component: oxplow:<name>`, a
 `fixtures/built_in_pages.json`. The list grew once with the renderers
 (`agent-session`, `commit`, `directory`, `editor`, `file-viewer`, `lens`,
 `metric-detail`, `resource`, `wiki-page`, `work-item`) and only shrinks
-again (a page leaves when it becomes a lens);
+again (a page leaves when it becomes a lens). It ends at six: `editor`,
+`terminal`, `agent-session` and `external-url` wait for an editor,
+terminal and embed viz; `lens` (the lens runtime, which draws every lens
+page) and `resource` (the fallback when nothing declares a URI) stay —
+neither can be a lens;
 `pages/declaredPages.ts`'s `BUILT_IN_PAGES` mirrors it and a test checks
 they match.
 
@@ -1019,7 +1024,8 @@ renderer, with no desktop code:
 2. Add a `pages:` entry with `for: <extension>/<name>`, optional
    `accepts`, `default: true` (the extension's own resource, one page
    per resource) and `pinned`. A lens renderer declares a `uri` param
-   and is run with the URI. [extensions.md](./extensions.md) "Pages" has
+   and is run with the URI; its other params that the URI carries get
+   their values from it. [extensions.md](./extensions.md) "Pages" has
    the rules.
 3. Plumb any list rows that target the thing through
    `useRouteDispatch` / `RouteLink` so plain-click navigates in-tab.

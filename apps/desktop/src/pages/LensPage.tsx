@@ -9,7 +9,7 @@ import { lensRef, withResourceParams } from "../tabs/pageRefs.js";
 import { getPageDetailStore } from "../tabs/openPageDetail.js";
 import { insertIntoAgent } from "../agent-input-bus.js";
 import { formatContextMention } from "../agent-context-ref.js";
-import { pageView } from "./renderers.js";
+import { pageView, shellView, withRenderedParams } from "./renderers.js";
 import { changedParams, lensViewChange, misplacedViewParams } from "../lens/lensModel.js";
 import { useHostedView } from "../lens/hostedView.js";
 import { NO_READS, useRerunOnChange } from "../lens/lensRerun.js";
@@ -30,6 +30,10 @@ export interface LensPageProps {
   title?: string;
   stream: Stream | null;
   onOpenPage(ref: TabRef): void;
+  /** The URI it renders, when it is a renderer's lens (run with `{ uri }`):
+   *  the page is that URI, so another value of one of its params is that
+   *  resource with the param changed (`withRenderedParams`). */
+  renders?: string;
 }
 
 /**
@@ -40,7 +44,10 @@ export interface LensPageProps {
  * picked, and where it comes from; Copy, Add to Agent Context and its
  * own actions are the page's, in the nav bar. See `.context/extensions.md`.
  */
-export function LensPage({ lensId, params, title: pageTitle, stream, onOpenPage }: LensPageProps) {
+/** What a renderer's lens is run with, never a control: the URI it shows. */
+const RENDERED = ["uri"];
+
+export function LensPage({ lensId, params, title: pageTitle, stream, onOpenPage, renders }: LensPageProps) {
   const streamId = stream?.id ?? null;
   const [run, setRun] = useState<LensRun | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -136,6 +143,7 @@ export function LensPage({ lensId, params, title: pageTitle, stream, onOpenPage 
     const change = lensViewChange(lens, overridesRef.current, patch);
     const same = JSON.stringify(sorted(change.resource)) === JSON.stringify(sorted(resource));
     if (same || !nav?.ref) nav!.setViewParams!(change.view, { push: change.push });
+    else if (renders) nav.navigate({ id: withRenderedParams(renders, change.resource, { ...shellView(nav.viewParams ?? {}), ...change.view }) });
     else nav.navigate(withResourceParams(nav.ref, change.resource, change.view));
   };
   // A filter or a pick belongs in the URI's `#`: one in its `?` is a link
@@ -157,7 +165,7 @@ export function LensPage({ lensId, params, title: pageTitle, stream, onOpenPage 
   });
   const outOfDate = useOutOfDate(lens?.origin.extension ?? null, lens?.origin.deployment ?? null);
   const rightRail = lens ? (
-    <LensRail lens={lens} values={run?.params ?? {}} picked={picked} outOfDate={outOfDate} onApply={setParam} onOpenPage={onOpenPage} />
+    <LensRail lens={lens} values={run?.params ?? {}} picked={picked} outOfDate={outOfDate} onApply={setParam} onOpenPage={onOpenPage} fixed={renders ? RENDERED : undefined} />
   ) : undefined;
 
   return (

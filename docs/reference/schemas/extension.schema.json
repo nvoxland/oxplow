@@ -2271,6 +2271,14 @@
         "title": {
           "type": "string"
         },
+        "label": {
+          "description": "What its tab says, when not its `title`: `{{param.<name>}}` filled\nfrom what it shows (a renderer's URI, a route's `params`).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
         "icon": {
           "type": [
             "string",

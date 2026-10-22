@@ -77,7 +77,7 @@ import { showToast } from "./components/toastStore.js";
 import { awaitGitOp, opErrorOf } from "./git-op.js";
 import { UndoToastStack } from "./components/UndoToast.js";
 import { identityOf, keyOf, paramOf, parseUri, typeOf } from "./uri/uri.js";
-import { rendererFor, shellView } from "./pages/renderers.js";
+import { rendererFor, shellView, tabLabel } from "./pages/renderers.js";
 import { PersonCommandConfirm } from "./components/PersonCommandConfirm.js";
 import { RemoteConnectionBanner } from "./components/RemoteConnectionBanner.js";
 import { subscribeUiError } from "./ui-error.js";
@@ -2382,11 +2382,11 @@ export function App() {
               : null;
         if (builtIn && isBuiltInPage(builtIn)) {
           const tab = builtInPages[builtIn]({ ref, params: page.params, nav, scope });
-          return tab ? { ...tab, label: tab.label || declared?.title || page.page } : null;
+          return tab ? { ...tab, label: tab.label || (declared ? tabLabel(declared, page.params) : page.page) } : null;
         }
         return {
           id: ref.id,
-          label: declared?.title ?? page.page,
+          label: declared ? tabLabel(declared, page.params) : page.page,
           closable: true,
           render: () => (
             <DeclaredPageView page={page} declared={declared} stream={stream} threadId={selectedThread?.id ?? null} onOpenPage={nav.navOpen} />
@@ -2405,7 +2405,7 @@ export function App() {
       const page = rendererFor(ref.id, declaredPages, viewParamsOf(ref)) ?? fallbackRenderer;
       if (!page) return null;
       const tab = renderBody(page, ref, nav);
-      return tab ? { ...tab, label: tab.label || page.title, ...(page.pinned ? { pinned: true } : {}) } : null;
+      return tab ? { ...tab, label: tab.label || tabLabel(page, parseUri(ref.id)?.params ?? {}), ...(page.pinned ? { pinned: true } : {}) } : null;
     };
     const renderBody = (page: ExtensionPage, ref: TabRef, nav: SlotNav): CenterTab | null => {
       switch (page.body.kind) {
@@ -2419,11 +2419,11 @@ export function App() {
           const lens = page.body.lens;
           return {
             id: ref.id,
-            label: page.title,
+            label: tabLabel(page, parseUri(ref.id)?.params ?? {}),
             closable: true,
             // A renderer's lens is run with the URI it shows.
             render: () => (
-              <LensPage lensId={lens} title={page.title} params={{ uri: identityOf(ref.id) ?? ref.id }} stream={stream} onOpenPage={nav.navOpen} />
+              <LensPage lensId={lens} title={tabLabel(page, parseUri(ref.id)?.params ?? {})} params={{ uri: identityOf(ref.id) ?? ref.id }} renders={ref.id} stream={stream} onOpenPage={nav.navOpen} />
             ),
           };
         }
@@ -2431,7 +2431,7 @@ export function App() {
           const shown: PagePayload = { extension: page.extension, page: page.id, params: { uri: identityOf(ref.id) ?? ref.id } };
           return {
             id: ref.id,
-            label: page.title,
+            label: tabLabel(page, parseUri(ref.id)?.params ?? {}),
             closable: true,
             render: () => (
               <DeclaredPageView page={shown} declared={page} stream={stream} threadId={selectedThread?.id ?? null} onOpenPage={nav.navOpen} />

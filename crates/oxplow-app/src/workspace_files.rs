@@ -51,6 +51,15 @@ pub struct WorkspaceIndexedFile {
     pub status: Option<FileStatus>,
 }
 
+/// A file or folder of a workspace that its filter keeps.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkspacePath {
+    pub path: String,
+    pub is_dir: bool,
+    /// A file's change against HEAD; none on a folder.
+    pub status: Option<FileStatus>,
+}
+
 #[derive(Debug, Error)]
 pub enum WorkspaceError {
     #[error("io: {0}")]
@@ -157,6 +166,27 @@ impl WorkspaceFiles {
             list_workspace_files(&root, &statuses, "", &|path| {
                 filter.ignore(Path::new(path), false)
             })
+        })
+        .await
+    }
+
+    /// The files and folders the stream's filter keeps
+    /// ([`list_workspace_paths`]): in `folder` alone, or the whole tree.
+    pub async fn list_paths(
+        &self,
+        stream_id: Option<&str>,
+        generated: &oxplow_config::GeneratedConfig,
+        folder: Option<String>,
+    ) -> Result<Vec<WorkspacePath>, WorkspaceError> {
+        let root = self.router.resolve(stream_id).await.into_local_path();
+        let filter = Self::filter_for(&root, generated);
+        let statuses = self.statuses(&root).await;
+        Self::blocking(move || {
+            let ignore = |path: &str, is_dir: bool| filter.ignore(Path::new(path), is_dir);
+            match folder {
+                Some(folder) => list_workspace_paths(&root, &statuses, &folder, false, &ignore),
+                None => list_workspace_paths(&root, &statuses, "", true, &ignore),
+            }
         })
         .await
     }
@@ -338,6 +368,65 @@ pub fn list_workspace_files(
     }
     files.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(files)
+}
+
+/// The files and folders in `relative_path` that `ignore` keeps (asked
+/// with each workspace-relative path and whether it is a folder), and with
+/// `recursive` everything below them; an ignored folder is pruned, never
+/// entered. So one folder's listing is exactly the rows the whole walk has
+/// with that parent: a folder that is ignored, lies under an ignored one,
+/// or isn't there has none.
+pub fn list_workspace_paths(
+    root_dir: &Path,
+    statuses: &HashMap<String, FileStatus>,
+    relative_path: &str,
+    recursive: bool,
+    ignore: &dyn Fn(&str, bool) -> bool,
+) -> Result<Vec<WorkspacePath>, WorkspaceError> {
+    let mut above = String::new();
+    for segment in relative_path.split('/').filter(|s| !s.is_empty()) {
+        above = normalize_relative_path(&above, segment);
+        if segment == ".git" || ignore(&above, true) {
+            return Ok(Vec::new());
+        }
+    }
+    let dir = resolve_workspace_path(root_dir, relative_path)?;
+    let entries = match std::fs::read_dir(&dir) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound && !relative_path.is_empty() => {
+            return Ok(Vec::new())
+        }
+        Err(e) => return Err(e.into()),
+    };
+    let mut paths = Vec::new();
+    for entry in entries {
+        let entry = entry?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name == ".git" {
+            continue;
+        }
+        let path = normalize_relative_path(relative_path, &name);
+        let is_dir = entry.file_type()?.is_dir();
+        if ignore(&path, is_dir) {
+            continue;
+        }
+        if is_dir && recursive {
+            paths.extend(list_workspace_paths(
+                root_dir, statuses, &path, true, ignore,
+            )?);
+        }
+        paths.push(WorkspacePath {
+            status: if is_dir {
+                None
+            } else {
+                statuses.get(&path).copied()
+            },
+            path,
+            is_dir,
+        });
+    }
+    paths.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok(paths)
 }
 
 /// A line of a workspace file that matched a text search.

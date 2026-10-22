@@ -470,6 +470,60 @@ async fn workspace_files_are_the_streams_worktrees() {
     );
 }
 
+/// A query that says which folder (`WHERE parent = …`, a literal or a
+/// parameter) reads that folder alone, and gets the rows the whole walk
+/// has for it: its files and folders the filter keeps, an empty folder too.
+/// A folder the walk can't enter elsewhere in the tree doesn't stop it.
+#[tokio::test]
+async fn a_folder_listing_reads_that_folder_alone() {
+    use std::os::unix::fs::PermissionsExt;
+    let fx = services_with_effort().await;
+    let root = fx._dir.path();
+    std::fs::create_dir_all(root.join("src/deep")).unwrap();
+    std::fs::create_dir_all(root.join("src/empty")).unwrap();
+    std::fs::create_dir_all(root.join("src/skipped")).unwrap();
+    std::fs::write(root.join("src/a.rs"), "a").unwrap();
+    std::fs::write(root.join("src/deep/x.rs"), "x").unwrap();
+    std::fs::write(root.join("src/skipped/y.rs"), "y").unwrap();
+    std::fs::write(root.join(".gitignore"), "skipped/\n").unwrap();
+
+    let walked =
+        "SELECT path, name, kind FROM v_workspace_file WHERE parent || '' = 'src' ORDER BY path";
+    let expected = vec![
+        vec![json!("src/a.rs"), json!("a.rs"), json!("file")],
+        vec![json!("src/deep"), json!("deep"), json!("dir")],
+        vec![json!("src/empty"), json!("empty"), json!("dir")],
+    ];
+    assert_eq!(rows(&fx, walked).await, expected);
+    let folder = "SELECT path, name, kind FROM v_workspace_file WHERE parent = ?1 ORDER BY path";
+    let read = |sql: &'static str, p: &'static str| {
+        let svc = fx.svc.clone();
+        async move {
+            let out = svc
+                .sql
+                .query_sql(sql, vec![oxplow_db::SqlCell::Text(p.into())], None)
+                .await;
+            out.map(|o| serde_json::to_value(&o.rows).unwrap())
+        }
+    };
+    assert_eq!(read(folder, "src").await.unwrap(), json!(expected));
+    // An ignored folder, or one under it, lists nothing — as the walk,
+    // which never enters it; so does one that isn't there.
+    for gone in ["src/skipped", "nowhere"] {
+        assert_eq!(read(folder, gone).await.unwrap(), json!([]), "{gone}");
+    }
+
+    // A folder the walk can't read: the walk fails, the folder read doesn't.
+    let locked = root.join("locked");
+    std::fs::create_dir_all(&locked).unwrap();
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let walk = fx.svc.sql.query_sql(walked, vec![], None).await;
+    let folder_read = read(folder, "src").await;
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(walk.is_err(), "the whole walk enters every folder");
+    assert_eq!(folder_read.unwrap(), json!(expected));
+}
+
 /// The repository's working copies, and the stream using each: one no
 /// stream uses is what "adopt a worktree" offers.
 #[tokio::test]

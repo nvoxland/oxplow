@@ -521,9 +521,21 @@ rows are read when a query names the model.
   `v_workspace_file`, `v_agent_conversation` — reads that stream's, and the
   primary checkout's when the query names none; its rows carry the
   `stream_id` they list. `LiveModels::materialize` takes the stream.
+- **Narrowed by the query:** a model can name the columns it reads
+  narrowed by (`live_models::pushdown`). When the query certainly keeps only
+  rows with `<column> = <value>` (`sql_tokens::equality_filters`: one plain
+  `SELECT` reading the model once as its only source, the condition a
+  top-level `AND` term, a literal or a parameter — an `OR`, `BETWEEN`,
+  `CASE`, join, compound, `WITH` or second read of the model gives none),
+  the read gets the value and returns only those rows; anything else reads
+  them all, which is always correct. `v_workspace_file` narrows by
+  `parent`: `WHERE parent = :path` is one `read_dir`, not a walk. Both go
+  through `workspace_files::list_workspace_paths`, so a folder's rows are
+  the walk's rows for it (an ignored folder, or one under one, has none).
 - **Cheap, and current:** a read walks in-memory registries, a config file,
-  the keychain, the stream store, a worktree's files (`v_workspace_file` and
-  `v_zone` walk them on every query) or each harness's conversation index;
+  the keychain, the stream store, a worktree's files (`v_zone`, and
+  `v_workspace_file` unless the query names a folder, walk them on every
+  query) or each harness's conversation index;
   it holds no lock while the query runs. Nothing is cached, so a result is
   as current as the query. A live read has no watermark, so a result's
   `freshness` doesn't mention it.

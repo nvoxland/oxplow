@@ -25,7 +25,7 @@
 
 use std::sync::{Arc, OnceLock};
 
-use oxplow_db::{SqlCell, TempTable, TempView};
+use oxplow_db::{SqlCell, SqlParams, TempTable, TempView};
 use oxplow_domain::agent::harness::{
     AgentHarness, ConversationQuery, HarnessError, NativeConversation,
 };
@@ -116,6 +116,54 @@ pub fn columns(name: &str) -> &'static [&'static str] {
         "workspace_file" => &["stream_id", "path", "parent", "name", "kind", "status"],
         _ => &[],
     }
+}
+
+/// The columns a live model can read narrowed by: a query that says
+/// `<column> = <value>` of every row it reads is handed only those rows.
+pub fn pushdown(name: &str) -> &'static [&'static str] {
+    match name {
+        // One folder is one `read_dir`; the whole tree is a walk.
+        "workspace_file" => &["parent"],
+        _ => &[],
+    }
+}
+
+/// `sql`'s certain `<column> = <text>` conditions on `name`'s [`pushdown`]
+/// columns, its parameters' values filled in from `params`. One whose
+/// value isn't text, or is a parameter it can't find, narrows nothing.
+fn filters(
+    name: &str,
+    sql: &str,
+    params: &SqlParams,
+) -> Result<Vec<(String, String)>, DomainError> {
+    use oxplow_db::sql_tokens::{equality_filters, Operand};
+    let columns = pushdown(name);
+    if columns.is_empty() {
+        return Ok(Vec::new());
+    }
+    let value = |operand: Operand| -> Option<String> {
+        let cell = match operand {
+            Operand::Text(t) => return Some(t),
+            Operand::Param(p) => match params {
+                SqlParams::Positional(values) => {
+                    let n: usize = p.strip_prefix('?')?.parse().ok()?;
+                    values.get(n.checked_sub(1)?)?
+                }
+                SqlParams::Named(values) => {
+                    let bare = p.trim_start_matches([':', '@', '$']);
+                    &values.iter().find(|(n, _)| n == bare)?.1
+                }
+            },
+        };
+        match cell {
+            SqlCell::Text(t) => Some(t.clone()),
+            _ => None,
+        }
+    };
+    Ok(equality_filters(sql, &format!("v_{name}"), columns)?
+        .into_iter()
+        .filter_map(|(column, operand)| Some((column, value(operand)?)))
+        .collect())
 }
 
 /// What can change a live model's rows.
@@ -277,23 +325,29 @@ impl LiveModels {
         Ok(found)
     }
 
-    /// The temp table and view that stand for each of `names` in a query
+    /// The temp table and view that stand for each of `names` in `sql`,
     /// run for `stream` (a row id; none: the primary checkout): the rows
-    /// read now (`with_rows`), or none for a check, which only compiles.
+    /// read now with the query's `params`, or none for a check (`None`),
+    /// which only compiles. A model reads only the rows `sql`'s conditions
+    /// on its [`pushdown`] columns keep, when they certainly apply
+    /// (`sql_tokens::equality_filters`).
     pub async fn materialize(
         &self,
         names: &[&'static str],
         stream: Option<i64>,
-        with_rows: bool,
+        sql: &str,
+        params: Option<&SqlParams>,
     ) -> Result<(Vec<TempTable>, Vec<TempView>), DomainError> {
         let mut tables = Vec::new();
         let mut views = Vec::new();
         let stream = stream.map(StreamId::new);
         for name in names {
-            let rows = if with_rows {
-                self.read(name, stream).await?
-            } else {
-                Vec::new()
+            let rows = match params {
+                Some(params) => {
+                    let filters = filters(name, sql, params)?;
+                    self.read(name, stream, &filters).await?
+                }
+                None => Vec::new(),
             };
             let table = format!("live_{name}");
             views.push(TempView {
@@ -313,6 +367,7 @@ impl LiveModels {
         &self,
         name: &str,
         stream: Option<StreamId>,
+        filters: &[(String, String)],
     ) -> Result<Vec<Vec<SqlCell>>, DomainError> {
         // A table core ships: nothing to bind.
         if name == "scope" {
@@ -335,7 +390,12 @@ impl LiveModels {
             "config_value" => sources.config_values().await,
             "agent_conversation" => sources.agent_conversations(stream).await,
             "vcs_workspace" => sources.vcs_workspaces().await,
-            "workspace_file" => sources.workspace_files(stream).await,
+            "workspace_file" => {
+                let parent = filters.iter().find(|(c, _)| c == "parent");
+                sources
+                    .workspace_files(stream, parent.map(|(_, v)| v.clone()))
+                    .await
+            }
             "agent_harness" => Ok(sources.agent_harnesses()),
             other => Err(DomainError::Invalid(format!(
                 "`v_{other}` isn't a live model"
@@ -739,11 +799,12 @@ impl LiveSources {
             .collect())
     }
 
-    /// The stream's worktree's files its filter keeps, and every folder
-    /// above them.
+    /// The files and folders the stream's worktree's filter keeps: in
+    /// `parent` alone when the query names one, else the whole tree.
     async fn workspace_files(
         &self,
         stream: Option<StreamId>,
+        parent: Option<String>,
     ) -> Result<Vec<Vec<SqlCell>>, DomainError> {
         let stream = self.stream(stream).await?;
         let generated = self
@@ -752,47 +813,28 @@ impl LiveSources {
             .unwrap_or_else(|e| e.into_inner())
             .generated
             .clone();
-        let files = self
+        let paths = self
             .workspace_files
-            .list_files(Some(&stream.id.to_string()), &generated)
+            .list_paths(Some(&stream.id.to_string()), &generated, parent)
             .await
             .map_err(|e| DomainError::Invalid(e.to_string()))?;
         let id = SqlCell::Int(stream.id.value());
-        let split = |path: &str| match path.rsplit_once('/') {
-            Some((parent, name)) => (parent.to_string(), name.to_string()),
-            None => (String::new(), path.to_string()),
-        };
-        let mut dirs = std::collections::BTreeSet::new();
-        let mut rows = Vec::with_capacity(files.len());
-        for file in files {
-            let mut at = file.path.as_str();
-            while let Some((parent, _)) = at.rsplit_once('/') {
-                if !dirs.insert(parent.to_string()) {
-                    break;
-                }
-                at = parent;
-            }
-            let (parent, name) = split(&file.path);
-            rows.push(vec![
-                id.clone(),
-                text(file.path.clone()),
-                text(parent),
-                text(name),
-                text("file"),
-                opt(file.status.map(|s| s.as_str())),
-            ]);
-        }
-        rows.extend(dirs.into_iter().map(|dir| {
-            let (parent, name) = split(&dir);
-            vec![
-                id.clone(),
-                text(dir),
-                text(parent),
-                text(name),
-                text("dir"),
-                SqlCell::Null(()),
-            ]
-        }));
-        Ok(rows)
+        Ok(paths
+            .into_iter()
+            .map(|p| {
+                let (parent, name) = match p.path.rsplit_once('/') {
+                    Some((parent, name)) => (parent.to_string(), name.to_string()),
+                    None => (String::new(), p.path.clone()),
+                };
+                vec![
+                    id.clone(),
+                    text(p.path),
+                    text(parent),
+                    text(name),
+                    text(if p.is_dir { "dir" } else { "file" }),
+                    opt(p.status.map(|s| s.as_str())),
+                ]
+            })
+            .collect())
     }
 }
