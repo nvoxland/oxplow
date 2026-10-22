@@ -1534,8 +1534,8 @@
     - { not_null: path }
     - { unique: path }
 - name: workspace_file
-  version: 1
-  description: "The files and folders of a stream's worktree that its filter keeps (the project's `generated:` lists and the worktree's `.gitignore`s), with each file's change status. Read live when a query names it, for the stream the query runs for (the primary checkout's when none); each query walks the worktree. A folder's listing is `WHERE parent = 'src'` (the top level: `parent = ''`)."
+  version: 2
+  description: "The files and folders of a stream's worktree that its filter keeps (the project's `generated:` lists and the worktree's `.gitignore`s), an empty folder too, with each file's change status. Read live when a query names it, for the stream the query runs for (the primary checkout's when none). A folder's listing is `WHERE parent = 'src'` (the top level: `parent = ''`; a literal or a parameter): such a query reads that one folder, any other walks the worktree."
   columns:
     - { name: "stream_id", type: "INT", doc: "The stream whose worktree it lists (v_stream.id)." }
     - { name: "path", type: "TEXT", doc: "Its path in the worktree, `/`-separated." }

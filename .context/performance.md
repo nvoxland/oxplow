@@ -470,11 +470,11 @@ status, the filtered walk, and the rows into a temp table. On this repo
 (2,321 files kept by the filter): status ~28 ms, walk ~40 ms, temp table
 ~2 ms — about 70 ms a query, and the walk grows with the tree. Listing one
 folder through `list_workspace_entries` costs the status and one
-`read_dir`, about 30 ms. So the Project panel, Quick Open's file index and
-the Directory page keep their workspace-listing IPCs until a live model
-can be read for one folder (a pushdown of `parent = ?` into the read);
-`v_workspace_file` serves lenses and the agent's whole-tree questions,
-where one walk per query is fine.
+`read_dir`, about 30 ms. So a query that names one folder (`WHERE parent =
+…`) reads that folder alone (`live_models::pushdown`, semantic-layer.md
+"Live models"): the status and one `read_dir`, as the IPC. The Project
+panel, Quick Open's file index and the Directory page can then read the
+model; the whole-tree walk is left to the queries that need the tree.
 
 ## Daemon transport: what a loopback HTTP hop costs (tsk255)
 

@@ -21203,6 +21203,41 @@
         }
       ],
       "key": []
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "stream_id",
+          "type": "INT",
+          "doc": "The stream whose worktree it lists (v_stream.id)."
+        },
+        {
+          "name": "path",
+          "type": "TEXT",
+          "doc": "Its path in the worktree, `/`-separated."
+        },
+        {
+          "name": "parent",
+          "type": "TEXT",
+          "doc": "The folder it is in; `''` at the top level."
+        },
+        {
+          "name": "name",
+          "type": "TEXT",
+          "doc": "Its last path segment."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "`file` or `dir`."
+        },
+        {
+          "name": "status",
+          "type": "TEXT",
+          "doc": "A file's change against HEAD (`added`, `modified`, `deleted`, `renamed`, `untracked`, `conflicted`); NULL when unchanged, and on a folder."
+        }
+      ],
+      "key": []
     }
   },
   "extension_deployment": {

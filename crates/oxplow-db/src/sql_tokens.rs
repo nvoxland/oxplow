@@ -301,6 +301,132 @@ pub fn string_literal(text: &str) -> Option<String> {
     }
 }
 
+/// The value a condition compares a column with: a string literal's value,
+/// or a parameter as written (`:name`, `?2`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Operand {
+    Text(String),
+    Param(String),
+}
+
+/// The `<column> = <value>` conditions every row `sql` reads of `view` must
+/// meet, for the `columns` asked about (the name as `columns` spells it) —
+/// so a reader of `view` may hand the query only the rows that meet them.
+/// It says so only when it is sure: `sql` is one plain `SELECT` reading
+/// `view` once, as its only source (`FROM view [[AS] alias] WHERE …`), and
+/// each condition is a top-level conjunct of exactly `[q.]column = value`
+/// (either way round; `value` a string literal or a parameter). An `OR`,
+/// `BETWEEN` or `CASE` in the `WHERE`, a join, a compound, a `WITH` or a
+/// second read of `view` gives none.
+pub fn equality_filters(
+    sql: &str,
+    view: &str,
+    columns: &[&str],
+) -> Result<Vec<(String, Operand)>, DomainError> {
+    let tokens = tokenize(sql)?;
+    let sig: Vec<&Token<'_>> = significant(&tokens).collect();
+    let names_view = |t: &Token<'_>| match t.kind {
+        TokenKind::Word => t.text.eq_ignore_ascii_case(view),
+        TokenKind::QuotedIdent => t.text[1..t.text.len() - 1].eq_ignore_ascii_case(view),
+        _ => false,
+    };
+    // Depth of each token: 0 outside every parenthesis.
+    let mut depths = Vec::with_capacity(sig.len());
+    let mut depth = 0usize;
+    for t in &sig {
+        if t.is_punct(')') {
+            depth = depth.saturating_sub(1);
+        }
+        depths.push(depth);
+        if t.is_punct('(') {
+            depth += 1;
+        }
+    }
+    let top = |i: usize, kw: &str| depths[i] == 0 && sig[i].is_word(kw);
+    if !sig.first().is_some_and(|t| t.is_word("SELECT"))
+        || (0..sig.len())
+            .filter(|&j| names_view(sig[j]) && !sig.get(j + 1).is_some_and(|n| n.is_punct('.')))
+            .count()
+            != 1
+        || (0..sig.len()).any(|i| top(i, "UNION") || top(i, "INTERSECT") || top(i, "EXCEPT"))
+    {
+        return Ok(Vec::new());
+    }
+    let Some(at) = sig.iter().position(|t| names_view(t)) else {
+        return Ok(Vec::new());
+    };
+    if depths[at] != 0 || at == 0 || !top(at - 1, "FROM") {
+        return Ok(Vec::new());
+    }
+    let (alias, mut i) = match sig.get(at + 1) {
+        Some(t) if t.is_word("AS") => (sig.get(at + 2).map(|a| a.text), at + 3),
+        Some(t) if t.kind == TokenKind::Word && !t.is_word("WHERE") => (Some(t.text), at + 2),
+        _ => (None, at + 1),
+    };
+    if !sig.get(i).is_some_and(|t| t.is_word("WHERE")) {
+        return Ok(Vec::new());
+    }
+    i += 1;
+    let end = (i..sig.len())
+        .find(|&j| {
+            depths[j] == 0
+                && (["GROUP", "ORDER", "LIMIT", "HAVING", "WINDOW"]
+                    .iter()
+                    .any(|kw| sig[j].is_word(kw))
+                    || sig[j].is_punct(';'))
+        })
+        .unwrap_or(sig.len());
+    if (i..end).any(|j| top(j, "OR") || top(j, "BETWEEN") || top(j, "CASE")) {
+        return Ok(Vec::new());
+    }
+    let column = |c: &[&&Token<'_>]| -> Option<String> {
+        let (qualifier, name) = match c {
+            [name] => (None, name),
+            [q, dot, name] if dot.is_punct('.') => (Some(q.text), name),
+            _ => return None,
+        };
+        if name.kind != TokenKind::Word {
+            return None;
+        }
+        if let Some(q) = qualifier {
+            let ok =
+                q.eq_ignore_ascii_case(view) || alias.is_some_and(|a| q.eq_ignore_ascii_case(a));
+            if !ok {
+                return None;
+            }
+        }
+        columns
+            .iter()
+            .find(|c| c.eq_ignore_ascii_case(name.text))
+            .map(|c| c.to_string())
+    };
+    let operand = |t: &Token<'_>| match t.kind {
+        TokenKind::Str => string_literal(t.text).map(Operand::Text),
+        TokenKind::Param => Some(Operand::Param(t.text.to_string())),
+        _ => None,
+    };
+    let mut found = Vec::new();
+    let mut start = i;
+    for j in i..=end {
+        if j < end && !top(j, "AND") {
+            continue;
+        }
+        let conjunct: Vec<&&Token<'_>> = sig[start..j].iter().collect();
+        start = j + 1;
+        let Some(eq) = conjunct.iter().position(|t| t.is_punct('=')) else {
+            continue;
+        };
+        let (left, right) = (&conjunct[..eq], &conjunct[eq + 1..]);
+        let pair = match (left, right) {
+            (l, [v]) => column(l).zip(operand(v)),
+            ([v], r) => column(r).zip(operand(v)),
+            _ => None,
+        };
+        found.extend(pair);
+    }
+    Ok(found)
+}
+
 /// The names of the common table expressions `sql` defines, at any depth
 /// (`WITH a AS (…)`, `b(x) AS MATERIALIZED (…)`), lowercased and unquoted.
 /// SQLite names a CTE — not the view around it — as the accessor of the
@@ -465,5 +591,81 @@ mod tests {
             vec!["a", "b c", "d", "inner_one"]
         );
         assert!(cte_names("SELECT x AS y FROM t").unwrap().is_empty());
+    }
+
+    fn filters(sql: &str) -> Vec<(String, Operand)> {
+        equality_filters(sql, "v_workspace_file", &["parent", "path"]).unwrap()
+    }
+
+    fn text(col: &str, v: &str) -> (String, Operand) {
+        (col.to_string(), Operand::Text(v.to_string()))
+    }
+
+    #[test]
+    fn a_top_level_equality_on_the_one_source_is_a_filter() {
+        assert_eq!(
+            filters("SELECT * FROM v_workspace_file WHERE parent = 'src'"),
+            vec![text("parent", "src")]
+        );
+        // Either side, qualified by the view or its alias, a parameter, any
+        // case, beside conditions on other columns and before what follows.
+        assert_eq!(
+            filters(
+                "select name from V_WORKSPACE_FILE f where f.stream_id = :stream_id \
+                 and :p = f.Parent and kind <> 'dir' order by name limit 5"
+            ),
+            vec![("parent".to_string(), Operand::Param(":p".to_string()))]
+        );
+        assert_eq!(
+            filters("SELECT 1 FROM v_workspace_file WHERE v_workspace_file.path = ?2"),
+            vec![("path".to_string(), Operand::Param("?2".to_string()))]
+        );
+        assert_eq!(
+            filters("SELECT 1 FROM v_workspace_file AS w WHERE w.path = 'x'"),
+            vec![text("path", "x")]
+        );
+        // A subquery in a condition is that condition's own business.
+        assert_eq!(
+            filters(
+                "SELECT 1 FROM v_workspace_file WHERE parent = 'a' \
+                 AND path IN (SELECT path FROM v_change_file WHERE status = 'x' OR 1)"
+            ),
+            vec![text("parent", "a")]
+        );
+        assert_eq!(
+            filters("SELECT 1 FROM v_workspace_file WHERE parent = 'it''s'"),
+            vec![text("parent", "it's")]
+        );
+    }
+
+    /// Only a condition every row read must meet narrows the read: an `OR`,
+    /// a `BETWEEN` or `CASE` whose `AND` isn't a conjunction, a join, a
+    /// second read of the view, a compound or a `WITH`, a comparison that
+    /// isn't a plain `=` — each reads everything.
+    #[test]
+    fn anything_but_a_plain_conjunction_on_the_one_source_reads_everything() {
+        for sql in [
+            "SELECT * FROM v_workspace_file",
+            "SELECT * FROM v_workspace_file WHERE parent = 'a' OR parent = 'b'",
+            "SELECT * FROM v_workspace_file WHERE name BETWEEN 'a' AND parent = 'b'",
+            "SELECT * FROM v_workspace_file WHERE CASE WHEN 1 THEN 1 END AND parent = 'b'",
+            "SELECT * FROM v_workspace_file f JOIN v_change_file c ON c.path = f.path WHERE f.parent = 'a'",
+            "SELECT * FROM v_workspace_file, v_stream WHERE parent = 'a'",
+            "SELECT * FROM v_stream WHERE id IN (SELECT stream_id FROM v_workspace_file WHERE parent = 'a')",
+            "SELECT * FROM v_workspace_file WHERE parent = 'a' UNION SELECT * FROM v_workspace_file",
+            "SELECT (SELECT count(*) FROM v_workspace_file) FROM v_workspace_file WHERE parent = 'a'",
+            "WITH x AS (SELECT 1) SELECT * FROM v_workspace_file WHERE parent = 'a'",
+            "SELECT * FROM v_workspace_file WHERE NOT parent = 'a'",
+            "SELECT * FROM v_workspace_file WHERE parent = 'a' COLLATE NOCASE",
+            "SELECT * FROM v_workspace_file WHERE parent = lower('A')",
+            "SELECT * FROM v_workspace_file WHERE other.parent = 'a'",
+        ] {
+            assert_eq!(filters(sql), vec![], "{sql}");
+        }
+        // A column it wasn't asked about isn't one.
+        assert_eq!(
+            filters("SELECT * FROM v_workspace_file WHERE kind = 'dir'"),
+            vec![]
+        );
     }
 }
