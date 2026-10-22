@@ -27,7 +27,7 @@ import { QueryTile } from "../components/Dashboard/QueryTile.js";
 import { moveToIndex } from "../components/CenterTabs/centerTabsReorder.js";
 import { InlineConfirm } from "../components/InlineConfirm.js";
 import { InlineEdit } from "../components/InlineEdit.js";
-import { recordOpError } from "../components/opErrorsStore.js";
+import { recordOpError } from "../opErrors.js";
 import { dashboardsRef } from "../tabs/pageRefs.js";
 import { Page, pageH1Style } from "../tabs/Page.js";
 import { usePageTitle } from "../tabs/PageNavigationContext.js";

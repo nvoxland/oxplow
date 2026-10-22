@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "The failed operation a person's mark is about: a `ui.op_failed` event.",
+  "properties": {
+    "event": {
+      "description": "The `ui.op_failed` event (`v_op_error.event_id`).",
+      "type": "string"
+    }
+  },
+  "required": [
+    "event"
+  ],
+  "title": "UiOpErrorMarkV1",
+  "type": "object"
+}

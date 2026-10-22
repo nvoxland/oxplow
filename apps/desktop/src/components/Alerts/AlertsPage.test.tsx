@@ -10,6 +10,9 @@ const realApi = await import("../../api.js");
  *  where another file's mock answered first (tsk1012). */
 const noRows = { columns: [], rows: [], truncated: false, reads: { models: [], tables: [], measures: [] }, freshness: {} };
 let extensionRows: unknown[][] = [];
+/** The failed operations `v_op_error` answers with. */
+let opErrorRows: unknown[][] = [];
+const pushFailed = ["e-push", "2026-10-22T10:00:00Z", "Push to origin", "git push", null, 1, null, 40, 12, 0];
 const saved: unknown[] = [];
 const ran: [string, unknown][] = [];
 mock.module("../../api.js", () => ({
@@ -22,6 +25,8 @@ mock.module("../../api.js", () => ({
   listCommentsForStream: async () => [],
   subscribeCommentEvents: () => () => {},
   subscribeOxplowEvents: () => () => {},
+  readEventContent: async (id: string, body: string) =>
+    id === "e-push" && body === "output" ? { text: JSON.stringify({ stderr: "rejected" }), size: 20, truncated: false } : null,
   runCommand: async (name: string, input: unknown) => {
     ran.push([name, input]);
     return { result: null, audit_id: 1, event_id: "e", inverse: null };
@@ -33,6 +38,15 @@ mock.module("../../api.js", () => ({
         rows: extensionRows,
         truncated: false,
         reads: { models: ["v_extension"], tables: [], measures: [] },
+        freshness: {},
+      };
+    }
+    if (sql.includes("FROM v_op_error")) {
+      return {
+        columns: ["event_id", "at", "label", "command", "message", "exit_code", "signal", "duration_ms", "output_size", "seen"],
+        rows: opErrorRows,
+        truncated: false,
+        reads: { models: ["v_op_error"], tables: [], measures: [] },
         freshness: {},
       };
     }
@@ -72,7 +86,6 @@ mock.module("../../api.js", () => ({
 const { AlertsPage } = await import("../../pages/AlertsPage.js");
 const { AlertsIndicator } = await import("./AlertsIndicator.js");
 const { PanelRunsProvider } = await import("../Panels/PanelRunsContext.js");
-const { getOpErrorsStore, recordOpError } = await import("../opErrorsStore.js");
 const { alertsRef, settingsRef } = await import("../../tabs/pageRefs.js");
 const { getToastStore } = await import("../toastStore.js");
 const { useAlertToasts, SETTLE_MS } = await import("./useAlertToasts.js");
@@ -87,23 +100,40 @@ const withRuns = (node: React.ReactNode) => (
 afterEach(() => {
   saved.length = 0;
   ran.length = 0;
-  getOpErrorsStore().clear();
+  opErrorRows = [];
   cleanup();
 });
 
 test("the page lists a waiting proposal as its card, failed operations and undelivered events", async () => {
-  recordOpError({ label: "Push to origin", stderr: "rejected" });
+  opErrorRows = [pushFailed];
   const view = render(withRuns(<AlertsPage onOpenPage={() => {}} />));
   const decisions = await waitFor(() => view.getByTestId("alerts-decisions"));
   await waitFor(() => expect(within(decisions).getByTestId("proposal-7")).toBeTruthy());
   const problems = view.getByTestId("alerts-problems");
   await waitFor(() => expect(within(problems).getByTestId("delivery-row-8")).toBeTruthy());
   expect(within(problems).getByTestId("delivery-row-9")).toBeTruthy();
-  const op = getOpErrorsStore().getSnapshot()[0]!;
-  const row = within(problems).getByTestId(`alerts-op-${op.id}`);
-  expect(view.queryByTestId(`op-error-detail-${op.id}`)).toBeNull();
+  const row = await waitFor(() => within(problems).getByTestId("alerts-op-e-push"));
+  expect(view.queryByTestId("op-error-detail-e-push")).toBeNull();
   fireEvent.click(row);
-  expect(view.getByTestId(`op-error-detail-${op.id}`).textContent).toContain("rejected");
+  // Its output is the failure's event body, read as it opens.
+  await waitFor(() => expect(view.getByTestId("op-error-detail-e-push").textContent).toContain("rejected"));
+});
+
+/** The person's marks are commands: the model holds them, so they last. */
+test("opening a failed operation marks it seen; × dismisses it; Clear dismisses them all", async () => {
+  opErrorRows = [pushFailed];
+  const view = render(withRuns(<AlertsPage onOpenPage={() => {}} />));
+  const row = await waitFor(() => view.getByTestId("alerts-op-e-push"));
+  fireEvent.click(row);
+  fireEvent.click(view.getByTestId("alerts-op-dismiss-e-push"));
+  fireEvent.click(view.getByTestId("action-clear-ops"));
+  await waitFor(() =>
+    expect(ran.filter(([n]) => n.startsWith("oxplow.op_error."))).toEqual([
+      ["oxplow.op_error.mark_seen", { event: "e-push" }],
+      ["oxplow.op_error.dismiss", { event: "e-push" }],
+      ["oxplow.op_error.dismiss_all", {}],
+    ]),
+  );
 });
 
 test("a hint raised to the person is listed with its thread, and Dismiss dismisses it", async () => {
@@ -116,7 +146,7 @@ test("a hint raised to the person is listed with its thread, and Dismiss dismiss
 });
 
 test("the bell counts everything, red for a problem, and opens Alerts", async () => {
-  recordOpError({ label: "Push to origin", stderr: "rejected" });
+  opErrorRows = [pushFailed];
   const opened: unknown[] = [];
   const view = render(withRuns(<AlertsIndicator onOpenPage={(r) => opened.push(r)} />));
   // One proposal, one hint, two undelivered events, one failed operation.

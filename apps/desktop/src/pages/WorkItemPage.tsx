@@ -7,7 +7,7 @@ import type { DiffSpec } from "../components/Diff/DiffPane.js";
 import { InlinePromptStrip } from "../components/InlinePromptStrip.js";
 import { ActivityTimeline, TaskDetail, TaskDetailRail } from "../components/Plan/TaskDetail.js";
 import { Replaceable } from "../components/Replaceable.js";
-import { recordOpError } from "../components/opErrorsStore.js";
+import { recordOpError } from "../opErrors.js";
 import { LensSlots } from "../lens/LensSlots.js";
 import { NO_READS, unionReads, useRerunOnChange } from "../lens/lensRerun.js";
 import { personCommands } from "../personCommands.js";

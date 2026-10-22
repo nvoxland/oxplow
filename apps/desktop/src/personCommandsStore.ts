@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from "react";
 
 import { listPersonCommands, onRemoteReconnect, subscribeOxplowEvents } from "./api.js";
-import { recordOpError } from "./components/opErrorsStore.js";
+import { recordOpError } from "./opErrors.js";
 import { extensionsChanged } from "./lens/lensRerun.js";
 import type { CommandSpec } from "./tauri-bridge/generated/bindings.js";
 

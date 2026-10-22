@@ -59,7 +59,7 @@ import {
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 
 import { querySql } from "./api.js";
-import { recordOpError } from "./components/opErrorsStore.js";
+import { recordOpError } from "./opErrors.js";
 import { NO_READS, useRerunOnChange } from "./lens/lensRerun.js";
 import { resourceUri, typeOf } from "./uri/uri.js";
 import type { Reads, SqlQueryResult } from "./tauri-bridge/generated/bindings.js";

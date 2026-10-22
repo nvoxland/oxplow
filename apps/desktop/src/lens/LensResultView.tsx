@@ -73,7 +73,7 @@ import { useLensRuns } from "./useLensRuns.js";
 import { DataTable, type DataColumn, type RowProps } from "../kit/DataTable.js";
 import { Facts } from "../kit/Facts.js";
 import { Stat } from "../kit/Stat.js";
-import { recordOpError } from "../components/opErrorsStore.js";
+import { recordOpError } from "../opErrors.js";
 import { showToast } from "../components/toastStore.js";
 import { actionOffered, addLensToContext, copyLens, openAfterAction, performLensAction, rowRecord } from "./lensActions.js";
 import { LensIcon, lensIcon, toneColor } from "./lensIcons.js";

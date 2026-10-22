@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { querySql } from "./api.js";
-import { recordOpError } from "./components/opErrorsStore.js";
+import { recordOpError } from "./opErrors.js";
 import { NO_READS, useRerunOnChange } from "./lens/lensRerun.js";
 import type { Reads, SqlQueryResult } from "./tauri-bridge/generated/bindings.js";
 

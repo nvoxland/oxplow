@@ -7,7 +7,7 @@
 /// Discard (confirmed inline). See `.context/semantic-layer.md`.
 ///
 /// Usability contract (.context/usability.md): no modals; failures land in
-/// opErrorsStore, not alerts.
+/// `recordOpError`, not alerts.
 
 import type { CSSProperties } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -38,7 +38,7 @@ import { collectorRowModel, COLLECTOR_RUNS } from "./extensionRowModel.js";
 import { DeliveryList } from "./DeliveryList.js";
 import { DataTable, type DataColumn } from "../kit/index.js";
 import { EnableAllButton } from "./ExtensionsSection.js";
-import { recordOpError } from "./opErrorsStore.js";
+import { recordOpError } from "../opErrors.js";
 import { showToast } from "./toastStore.js";
 
 export function DataSection() {

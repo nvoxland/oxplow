@@ -14,7 +14,7 @@ import { useWorkListProfile } from "../../useWorkListProfile.js";
 import { workItemRefOfMention } from "../../workItems.js";
 import { contextNodeProps } from "../Comments/contextNodes.js";
 import { RichTextField } from "../RichText/RichTextField.js";
-import { recordOpError } from "../opErrorsStore.js";
+import { recordOpError } from "../../opErrors.js";
 import { useOptionalPageNavigation } from "../../tabs/PageNavigationContext.js";
 import { fileRef } from "../../tabs/pageRefs.js";
 import { useHistoryState } from "../../tabs/useHistoryState.js";

@@ -9,7 +9,7 @@
 ///
 /// Usability contract (.context/usability.md): inline edits, Escape
 /// resets an edit, the actions disabled while a field has a problem,
-/// failures in opErrorsStore.
+/// failures in `recordOpError`.
 
 import type { CSSProperties } from "react";
 import { useDraft } from "../tabs/useViewParam.js";
@@ -53,7 +53,7 @@ import {
   signInLine,
 } from "./integrationsModel.js";
 import { SchemaForm } from "./SchemaForm/SchemaForm.js";
-import { recordOpError } from "./opErrorsStore.js";
+import { recordOpError } from "../opErrors.js";
 import { showToast } from "./toastStore.js";
 
 export function IntegrationsSection() {

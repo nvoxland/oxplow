@@ -240,6 +240,9 @@ impl EventSchemaRegistry {
         r.register::<CommandDeclined>()
             .expect("core type registers");
         r.register::<UiOpFailed>().expect("core type registers");
+        r.register::<UiOpErrorSeen>().expect("core type registers");
+        r.register::<UiOpErrorDismissed>()
+            .expect("core type registers");
         r
     }
 
@@ -2088,6 +2091,33 @@ impl EventType for UiOpFailed {
     type Payload = UiOpFailedV1;
 }
 
+/// The failed operation a person's mark is about: a `ui.op_failed` event.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct UiOpErrorMarkV1 {
+    /// The `ui.op_failed` event (`v_op_error.event_id`).
+    pub event: String,
+}
+
+/// `ui.op_error.seen@1`: the person opened a failed operation's output
+/// (`oxplow.op_error.mark_seen`); `v_op_error.seen` reads it.
+pub struct UiOpErrorSeen;
+impl EventType for UiOpErrorSeen {
+    const TYPE: &'static str = "ui.op_error.seen";
+    const V: u32 = 1;
+    type Payload = UiOpErrorMarkV1;
+}
+
+/// `ui.op_error.dismissed@1`: the person dismissed a failed operation
+/// (`oxplow.op_error.dismiss`, `dismiss_all`); `v_op_error.dismissed`
+/// reads it.
+pub struct UiOpErrorDismissed;
+impl EventType for UiOpErrorDismissed {
+    const TYPE: &'static str = "ui.op_error.dismissed";
+    const V: u32 = 1;
+    type Payload = UiOpErrorMarkV1;
+}
+
 /// `knowledge.page.deleted@2`: a knowledge page is gone, its row and
 /// edges with it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -2342,6 +2372,8 @@ mod tests {
                 ("test.coverage.recorded", 1),
                 ("test.run.recorded", 3),
                 ("thread.checkpoint", 2),
+                ("ui.op_error.dismissed", 1),
+                ("ui.op_error.seen", 1),
                 ("ui.op_failed", 1),
                 ("vcs.commit.indexed", 2),
                 ("vcs.head.moved", 2),

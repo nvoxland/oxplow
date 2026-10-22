@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from "react";
 
 import { listExtensions, onRemoteReconnect, subscribeOxplowEvents, type Extension } from "./api.js";
-import { recordOpError } from "./components/opErrorsStore.js";
+import { recordOpError } from "./opErrors.js";
 import { extensionsChanged } from "./lens/lensRerun.js";
 
 /**

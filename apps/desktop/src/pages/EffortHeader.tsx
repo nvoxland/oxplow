@@ -4,7 +4,7 @@ import type { CSSProperties } from "react";
 import { querySql, runCommand } from "../api.js";
 import { InlineEdit } from "../components/InlineEdit.js";
 import { InlinePromptStrip } from "../components/InlinePromptStrip.js";
-import { recordOpError } from "../components/opErrorsStore.js";
+import { recordOpError } from "../opErrors.js";
 import { readsOf, useRerunOnChange } from "../lens/lensRerun.js";
 import { effortRowId } from "../lens/lensModel.js";
 import { pageH1Style } from "../tabs/Page.js";

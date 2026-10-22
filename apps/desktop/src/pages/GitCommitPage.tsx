@@ -9,7 +9,7 @@ import { awaitGitOp, gitOpErrorMessage, gitOpOutcomeMessage, opErrorOf } from ".
 import { logUi } from "../logger.js";
 import type { DiffSpec } from "../components/Diff/DiffPane.js";
 import { InlineConfirm } from "../components/InlineConfirm.js";
-import { recordOpError } from "../components/opErrorsStore.js";
+import { recordOpError } from "../opErrors.js";
 import { showToast } from "../components/toastStore.js";
 import { Page } from "../tabs/Page.js";
 import { useBacklinks, usePageOutbound } from "../tabs/useBacklinks.js";

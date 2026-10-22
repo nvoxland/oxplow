@@ -26,7 +26,7 @@ import {
   type WorkItem,
   type WorkItemScope,
 } from "../../workItems.js";
-import { recordOpError } from "../opErrorsStore.js";
+import { recordOpError } from "../../opErrors.js";
 import { refCommandMenuItems, useRefOffers } from "../refCommands.js";
 import { useContextMenu } from "../useRowContextMenu.js";
 

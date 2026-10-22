@@ -52,14 +52,14 @@ and run; "what calls X" and anything the stored view can't know go to the
 ## Errors the person saw (`v_op_error`)
 
 When an operation fails in front of the person — a merge, a push, a save, a
-query in the app — they get a red toast and an entry in the Op Errors list.
-Each one is also recorded, so "can you see that error?" is answerable
+query in the app — they get a red toast and a row on the Alerts page.
+Each is recorded, so "can you see that error?" is answerable
 without a screenshot:
 
 - **`v_op_error`** — one row per failure (`at`, `label` — what they were
   doing — `command`, `message`, `exit_code`, `signal`, `duration_ms`,
-  `thread`, `stream_id`, and `output_size`, the length of the captured
-  stderr / stdout), newest last. The latest few:
+  `thread`, `stream_id`, `output_size` (the output's length), `seen` and
+  `dismissed` (the person opened / cleared it)). The latest:
   `SELECT event_id, at, label, command, message FROM v_op_error ORDER BY
   at DESC LIMIT 5`.
 - **The output itself** is the event's `output` body: call

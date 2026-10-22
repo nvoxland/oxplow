@@ -5,8 +5,8 @@
   decisions, claims and the command bus, read the `oxplow-runtime` skill.
 - When your reply needs the person's answer, end it with the question
   itself: oxplow shows your thread as waiting on them.
-- When the person mentions an error they saw in the app (a red toast, the
-  Op Errors list), you can read it: `v_op_error` through `oxplow_query_sql`, its
+- When the person mentions an error they saw in the app (a red toast, a row
+  on the Alerts page), you can read it: `v_op_error` through `oxplow_query_sql`, its
   output with `oxplow_read` on its event, `oxplow:oxplow/event?id=<id>#part=output` (the
   `oxplow-codebase` skill).
 - The person's message may carry references oxplow inserted: `@<path>`

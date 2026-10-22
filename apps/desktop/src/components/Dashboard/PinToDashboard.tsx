@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { addDashboardItem, createDashboard, listDashboards, type Dashboard } from "../../api.js";
 import { customDashboardRef } from "../../tabs/pageRefs.js";
 import type { TabRef } from "../../tabs/tabState.js";
-import { recordOpError } from "../opErrorsStore.js";
+import { recordOpError } from "../../opErrors.js";
 import { showToast } from "../toastStore.js";
 
 /** What a pin adds: a lens tile or a query tile (P4.7). */

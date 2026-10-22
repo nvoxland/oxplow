@@ -9,7 +9,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { componentForm, invokeComponentCommand } from "../api.js";
 import { EmptyState } from "../components/Prompts/EmptyState.js";
-import { recordOpError } from "../components/opErrorsStore.js";
+import { recordOpError } from "../opErrors.js";
 import type { PageAction } from "../kit/actions.js";
 import { ComponentFrame, CustomBadge, noteStyle, useComponentBundle, type BridgeHost } from "../lens/ComponentFrame.js";
 import type { FrameAction, PageInit } from "../lens/componentBridge.js";

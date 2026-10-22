@@ -11,7 +11,7 @@
 /// `.context/extensions.md` -> "Health, disable and repair".
 ///
 /// Usability contract (.context/usability.md): no modals; failures land in
-/// opErrorsStore, not alerts.
+/// `recordOpError`, not alerts.
 
 import type { CSSProperties } from "react";
 import { useCallback, useEffect, useState } from "react";
@@ -32,7 +32,7 @@ import { COLLECTOR_RUNS, extensionCredentials, secretCredentials, secretRowModel
 import { extensionsChanged, useRerunOnChange } from "../lens/lensRerun.js";
 import { InlineConfirm } from "./InlineConfirm.js";
 import { InlineEdit } from "./InlineEdit.js";
-import { recordOpError } from "./opErrorsStore.js";
+import { recordOpError } from "../opErrors.js";
 import { showToast } from "./toastStore.js";
 
 export function ExtensionsSection() {

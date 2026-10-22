@@ -1,27 +1,46 @@
-/// A failed operation's details (shown inline on the Alerts
-/// page, where the separate Op Error page used to be): the captured
-/// command, stderr, stdout, exit code and when — read-only; resolving it
-/// happens where it was started.
+/// A failed operation's details (shown inline on the Alerts page): the
+/// command, when, its signal, and its captured stderr / stdout, read from
+/// the failure's event body when it opens (`readOpErrorOutput`) —
+/// read-only; resolving it happens where it was started.
 
-import type { OpError } from "../opErrorsStore.js";
+import { useEffect, useState } from "react";
+
+import { readOpErrorOutput, type OpError } from "../../opErrors.js";
+
+type Output = { stderr: string | null; stdout: string | null } | null;
 
 export function OpErrorDetail({ entry }: { entry: OpError }) {
   const when = new Date(entry.at);
+  // undefined: still reading.
+  const [output, setOutput] = useState<Output | undefined>(entry.outputSize === null ? null : undefined);
+  useEffect(() => {
+    if (entry.outputSize === null) return;
+    let live = true;
+    readOpErrorOutput(entry.id)
+      .then((o) => {
+        if (live) setOutput(o);
+      })
+      .catch(() => {
+        if (live) setOutput(null);
+      });
+    return () => {
+      live = false;
+    };
+  }, [entry.id, entry.outputSize]);
+  const stderr = output?.stderr ?? null;
+  const stdout = output?.stdout ?? null;
   return (
     <div data-testid={`op-error-detail-${entry.id}`} style={{ display: "flex", flexDirection: "column", gap: 12, padding: "8px 0" }}>
       {entry.command ? <Field label="Command" value={entry.command} mono /> : null}
-      {entry.args && entry.args.length > 0 ? <Field label="Argv" value={JSON.stringify(entry.args)} mono /> : null}
       <Field label="When" value={`${when.toLocaleString()}${formatTiming(entry)}`} />
       {entry.signal ? <Field label="Signal" value={entry.signal} mono /> : null}
-      {entry.stderr ? <Block label="stderr" body={entry.stderr} tone="error" /> : null}
-      {entry.stdout ? <Block label="stdout" body={entry.stdout} /> : null}
-      {entry.message && !entry.stderr ? <Block label="Message" body={entry.message} tone="error" /> : null}
-      {!entry.stderr && !entry.stdout && !entry.message ? (
+      {output === undefined ? <div style={{ color: "var(--text-muted)" }}>Loading the output…</div> : null}
+      {stderr ? <Block label="stderr" body={stderr} tone="error" /> : null}
+      {stdout ? <Block label="stdout" body={stdout} /> : null}
+      {entry.message && !stderr ? <Block label="Message" body={entry.message} tone="error" /> : null}
+      {output !== undefined && !stderr && !stdout && !entry.message ? (
         <div style={{ color: "var(--text-muted)", fontStyle: "italic" }}>
-          No output was captured.
-          {entry.blankFailure
-            ? " (Runner reported a blank failure — no stderr, stdout, or exit code. Likely an awaitDone race or process kill; check the main-process log for the matching `git op` entry.)"
-            : ""}
+          {entry.outputSize !== null ? "The output has expired." : "No output was captured."}
         </div>
       ) : null}
     </div>

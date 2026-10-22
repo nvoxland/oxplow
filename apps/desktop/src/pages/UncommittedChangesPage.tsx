@@ -9,7 +9,7 @@ import { opErrorOf, settleGitOp } from "../git-op.js";
 import { Page } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { alertsRef, pageTabRef } from "../tabs/pageRefs.js";
-import { recordOpError } from "../components/opErrorsStore.js";
+import { recordOpError } from "../opErrors.js";
 import { ChangedFilesTree } from "../components/ChangedFiles/ChangedFilesTree.js";
 import { useChangedFiles } from "../components/ChangedFiles/useChangedFiles.js";
 import type { DiffSpec } from "../components/Diff/DiffPane.js";
