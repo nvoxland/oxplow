@@ -26,11 +26,14 @@ pub const MAX_HUNK_BYTES: usize = 8_000;
 /// What a component needs beyond its rows: the runs of a document's or a
 /// dashboard's lens parts (in part order), a
 /// `hunks` lens's diffs (one per row, in row order, up to
-/// [`MAX_HUNK_FILES`]).
+/// [`MAX_HUNK_FILES`]) or a `diff` lens's one, a `code` lens's files.
 #[derive(Debug, Clone, Default)]
 pub struct Resolved {
     pub children: Vec<LensRun>,
     pub diffs: Vec<String>,
+    /// A `code` lens's files, one per row (up to [`MAX_HUNK_FILES`]): each
+    /// one's text at its revision, cut to its marked lines.
+    pub files: Vec<String>,
     /// An `approvals` lens's pending proposals, one line each.
     pub approvals: Vec<String>,
 }
@@ -121,6 +124,36 @@ pub async fn resolve(
             }
         }
         LensViz::Approvals => out.approvals = pending_proposals(svc, run).await?,
+        LensViz::Code => {
+            let c = run.lens.code.clone().unwrap_or_default();
+            let (Some(p), Some(r)) = (
+                column(run, c.path.as_ref()),
+                column(run, c.revision.as_ref()),
+            ) else {
+                return Ok(out);
+            };
+            let l = column(run, c.lines.as_ref());
+            for row in run.result.rows.iter().take(MAX_HUNK_FILES) {
+                let at = |i: usize| row.get(i).map(cell).unwrap_or_default();
+                let lines = l.and_then(|i| parse_lines(&at(i)));
+                out.files
+                    .push(file_text(svc, root, &at(p), &at(r), lines).await);
+            }
+        }
+        LensViz::Diff => {
+            let d = run.lens.diff.clone().unwrap_or_default();
+            let (Some(p), Some(f), Some(t), Some(row)) = (
+                column(run, d.path.as_ref()),
+                column(run, d.from.as_ref()),
+                column(run, d.to.as_ref()),
+                run.result.rows.first(),
+            ) else {
+                return Ok(out);
+            };
+            let at = |i: usize| row.get(i).map(cell).unwrap_or_default();
+            out.diffs
+                .push(file_diff(svc, root, &at(p), &at(f), &at(t)).await);
+        }
         LensViz::Hunks => {
             let h = run.lens.hunks.clone().unwrap_or_default();
             let (Some(p), Some(f), Some(t)) = (
@@ -183,6 +216,54 @@ async fn pending_proposals(
             format!("- {} — {} (proposed by {by})", at(0), at(1))
         })
         .collect())
+}
+
+/// Lines `"12-40"` (or `"12"`) as a 1-based inclusive range, ends in
+/// order; none when the text isn't one.
+pub fn parse_lines(text: &str) -> Option<(usize, usize)> {
+    let (a, b) = match text.trim().split_once('-') {
+        Some((a, b)) => (a.trim(), b.trim()),
+        None => (text.trim(), text.trim()),
+    };
+    let (a, b): (usize, usize) = (a.parse().ok()?, b.parse().ok()?);
+    (a > 0 && b > 0).then(|| (a.min(b), a.max(b)))
+}
+
+/// `path` at revision `rev`, cut to `lines` when given and to
+/// [`MAX_HUNK_BYTES`], or why it can't be shown.
+async fn file_text(
+    svc: &crate::Services,
+    root: &Path,
+    path: &str,
+    rev: &str,
+    lines: Option<(usize, usize)>,
+) -> String {
+    let parsed: oxplow_domain::vcs::Revision = match rev.parse() {
+        Ok(r) => r,
+        Err(e) => return format!("(can't read it: {e})"),
+    };
+    let text = match svc.trees.read_at(root, &parsed, path).await {
+        Ok(Some(bytes)) => String::from_utf8_lossy(&bytes).into_owned(),
+        Ok(None) => return format!("(not there at {rev})"),
+        Err(e) => return format!("(can't read it: {e})"),
+    };
+    let text = match lines {
+        Some((from, to)) => text
+            .lines()
+            .skip(from - 1)
+            .take(to + 1 - from)
+            .collect::<Vec<_>>()
+            .join("\n"),
+        None => text,
+    };
+    if text.len() <= MAX_HUNK_BYTES {
+        return text;
+    }
+    let mut end = MAX_HUNK_BYTES;
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}\n(cut at {MAX_HUNK_BYTES} bytes)", &text[..end])
 }
 
 /// `path`'s unified diff from revision `from` to `to`, or why there is
@@ -282,6 +363,8 @@ pub fn render(run: &LensRun, resolved: &Resolved) -> String {
         LensViz::Detail => detail(run),
         LensViz::Steps => steps(run),
         LensViz::Hunks => hunks(run, &resolved.diffs),
+        LensViz::Code => code(run, &resolved.files),
+        LensViz::Diff => one_diff(run, &resolved.diffs),
         LensViz::Approvals => {
             if resolved.approvals.is_empty() {
                 "No proposals wait for a decision.".to_string()
@@ -591,6 +674,69 @@ fn hunks(run: &LensRun, diffs: &[String]) -> String {
     out.join("\n\n")
 }
 
+/// Code: each row's file, revision and marked lines, then its text in a
+/// fence named for its extension.
+fn code(run: &LensRun, files: &[String]) -> String {
+    let c = run.lens.code.clone().unwrap_or_default();
+    let (Some(p), Some(r)) = (
+        column(run, c.path.as_ref()),
+        column(run, c.revision.as_ref()),
+    ) else {
+        return table(run);
+    };
+    let l = column(run, c.lines.as_ref());
+    let rows = &run.result.rows;
+    let mut out: Vec<String> = rows
+        .iter()
+        .zip(files)
+        .map(|(row, text)| {
+            let at = |i: usize| row.get(i).map(cell).unwrap_or_default();
+            let path = at(p);
+            let lines = l
+                .and_then(|i| parse_lines(&at(i)))
+                .map(|(a, b)| format!(":{a}-{b}"))
+                .unwrap_or_default();
+            let fence = std::path::Path::new(&path)
+                .extension()
+                .and_then(|e| e.to_str())
+                .filter(|e| e.chars().all(|c| c.is_ascii_alphanumeric()))
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            format!(
+                "#### {path}@{}{lines}\n\n```{fence}\n{}\n```",
+                at(r),
+                text.trim_end()
+            )
+        })
+        .collect();
+    if rows.len() > files.len() {
+        out.push(format!("({} more files)", rows.len() - files.len()));
+    }
+    out.join("\n\n")
+}
+
+/// Diff: the first row's file and revisions, then its diff.
+fn one_diff(run: &LensRun, diffs: &[String]) -> String {
+    let d = run.lens.diff.clone().unwrap_or_default();
+    let (Some(p), Some(f), Some(t), Some(row), Some(diff)) = (
+        column(run, d.path.as_ref()),
+        column(run, d.from.as_ref()),
+        column(run, d.to.as_ref()),
+        run.result.rows.first(),
+        diffs.first(),
+    ) else {
+        return table(run);
+    };
+    let at = |i: usize| row.get(i).map(cell).unwrap_or_default();
+    format!(
+        "#### {} ({} → {})\n\n```diff\n{}\n```",
+        at(p),
+        at(f),
+        at(t),
+        diff.trim_end()
+    )
+}
+
 /// `lines` joined, capped at [`MAX_ROWS`] with how many more.
 fn capped_lines(lines: Vec<String>) -> String {
     let more = lines.len().saturating_sub(MAX_ROWS);
@@ -766,6 +912,8 @@ mod tests {
                 timeline: None,
                 steps: None,
                 hunks: None,
+                code: None,
+                diff: None,
                 form: None,
                 custom: None,
                 group: None,
@@ -919,6 +1067,7 @@ mod tests {
                 &Resolved {
                     children: vec![a, b],
                     diffs: Vec::new(),
+                    files: Vec::new(),
                     approvals: Vec::new(),
                 }
             ),
@@ -1084,6 +1233,7 @@ mod tests {
         let resolved = Resolved {
             children: Vec::new(),
             diffs: vec!["-old\n+new\n".into()],
+            files: Vec::new(),
             approvals: Vec::new(),
         };
         assert_eq!(
@@ -1124,6 +1274,128 @@ mod tests {
         .await
         .unwrap();
         assert!(text.contains("-one") && text.contains("+two"), "{text}");
+    }
+
+    /// Code is each row's file, revision and marked lines, then its text
+    /// in a fence named for its extension; files past the resolved ones
+    /// are counted.
+    #[test]
+    fn code_shows_each_files_lines() {
+        let r = with(
+            run(
+                LensViz::Code,
+                None,
+                &["path", "rev", "lines"],
+                vec![
+                    vec![t("src/x.rs"), t("git:abc"), t("8-3")],
+                    vec![t("y.rs"), t("working"), SqlCell::Null(())],
+                ],
+            ),
+            |l| {
+                l.code = Some(crate::extensions::LensCode {
+                    path: Some("path".into()),
+                    revision: Some("rev".into()),
+                    lines: Some("lines".into()),
+                    sync: false,
+                })
+            },
+        );
+        let resolved = Resolved {
+            files: vec!["fn x() {}\n".into()],
+            ..Resolved::default()
+        };
+        assert_eq!(
+            render(&r, &resolved),
+            "#### src/x.rs@git:abc:3-8\n\n```rs\nfn x() {}\n```\n\n(1 more files)"
+        );
+        assert_eq!(parse_lines("12"), Some((12, 12)));
+        assert_eq!(parse_lines(" 40-12 "), Some((12, 40)));
+        assert_eq!(parse_lines("0-3"), None);
+        assert_eq!(parse_lines("x"), None);
+    }
+
+    /// A diff is the first row's file and revisions, then its diff.
+    #[test]
+    fn a_diff_shows_the_first_rows_diff() {
+        let r = with(
+            run(
+                LensViz::Diff,
+                None,
+                &["path", "a", "b"],
+                vec![
+                    vec![t("x.rs"), t("git:abc"), t("working")],
+                    vec![t("y.rs"), t("git:abc"), t("working")],
+                ],
+            ),
+            |l| {
+                l.diff = Some(crate::extensions::LensDiff {
+                    path: Some("path".into()),
+                    from: Some("a".into()),
+                    to: Some("b".into()),
+                    lines: None,
+                })
+            },
+        );
+        let resolved = Resolved {
+            diffs: vec!["-old\n+new\n".into()],
+            ..Resolved::default()
+        };
+        assert_eq!(
+            render(&r, &resolved),
+            "#### x.rs (git:abc → working)\n\n```diff\n-old\n+new\n```"
+        );
+    }
+
+    /// A code lens reads each row's file at its revision, cut to its
+    /// lines; a diff lens diffs its first row's file.
+    #[tokio::test]
+    async fn code_and_diff_resolve_from_the_workspace() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let root = fx.svc.layout.project_dir.clone();
+        std::fs::write(root.join("c.txt"), "one\ntwo\nthree\n").unwrap();
+        let sha = crate::test_fixtures::commit_all(&root, "c");
+        std::fs::write(root.join("c.txt"), "uno\n").unwrap();
+        let ctx = crate::extensions::LensContext::default();
+        let code = with(
+            run(
+                LensViz::Code,
+                None,
+                &["path", "rev", "lines"],
+                vec![
+                    vec![t("c.txt"), t(&format!("git:{sha}")), t("2-3")],
+                    vec![t("gone.txt"), t("working"), SqlCell::Null(())],
+                ],
+            ),
+            |l| {
+                l.code = Some(crate::extensions::LensCode {
+                    path: Some("path".into()),
+                    revision: Some("rev".into()),
+                    lines: Some("lines".into()),
+                    sync: false,
+                })
+            },
+        );
+        let text = text_of(&fx.svc, &root, &code, &ctx).await.unwrap();
+        assert!(text.contains("```txt\ntwo\nthree\n```"), "{text}");
+        assert!(text.contains("(not there at working)"), "{text}");
+        let diff = with(
+            run(
+                LensViz::Diff,
+                None,
+                &["path", "a", "b"],
+                vec![vec![t("c.txt"), t(&format!("git:{sha}")), t("working")]],
+            ),
+            |l| {
+                l.diff = Some(crate::extensions::LensDiff {
+                    path: Some("path".into()),
+                    from: Some("a".into()),
+                    to: Some("b".into()),
+                    lines: None,
+                })
+            },
+        );
+        let text = text_of(&fx.svc, &root, &diff, &ctx).await.unwrap();
+        assert!(text.contains("-one") && text.contains("+uno"), "{text}");
     }
 
     /// An approvals lens reads the pending proposals itself: an agent

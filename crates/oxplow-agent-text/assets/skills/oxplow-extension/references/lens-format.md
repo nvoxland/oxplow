@@ -79,6 +79,12 @@ empty: Nothing is waiting on you.
   - `treemap` draws nested rectangles: `chart: { label: <column>, size:
     <column>, group: <optional column> }`. A tile click follows the
     lens's first column link.
+  - `code` shows each row's file read-only at a revision, at full size:
+    `code: { path: <column>, revision: <column>, lines: <optional column
+    holding 12-40>, sync: <optional bool: editors scroll together> }`.
+  - `diff` shows the first row's file between two revisions, at full
+    size: `diff: { path: <column>, from: <column>, to: <column>, lines:
+    <optional> }`. Several files are `hunks`.
   - `document` is a wiki-style page of sections: `sections: [...]`. See
     "Document and dashboard lenses" below.
   - `dashboard` is a responsive grid of titled cards: `tiles: [...]`. See

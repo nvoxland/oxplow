@@ -101,6 +101,28 @@
       ],
       "default": null
     },
+    "code": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/LensCode"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "diff": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/LensDiff"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
     "form": {
       "anyOf": [
         {
@@ -284,6 +306,16 @@
           "description": "An ordered checklist: `steps.label`, with `steps.status` (`done`,\n`active`, `failed`, anything else pending).",
           "type": "string",
           "const": "steps"
+        },
+        {
+          "description": "Per row, the file `code.path` at revision `code.revision`,\nread-only, at full size: its `code.lines` marked and revealed, the\neditors side by side (scrolling together with `code.sync`).",
+          "type": "string",
+          "const": "code"
+        },
+        {
+          "description": "The first row's file `diff.path` between revisions `diff.from` and\n`diff.to`, at full size, read-only; `diff.lines` revealed on the\nnewer side.",
+          "type": "string",
+          "const": "diff"
         },
         {
           "description": "Per row, the diff of the file `hunks.path` between the revisions\n`hunks.from` and `hunks.to` (`working`, `snap:<id>`,\n`<vcs>:<rev>`), read-only.",
@@ -864,6 +896,71 @@
             "string",
             "null"
           ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "LensCode": {
+      "description": "`code` viz: the file each row shows, read-only, at a revision; the\nlines it marks and reveals; whether the editors scroll together.",
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "revision": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "lines": {
+          "description": "A column holding `12-40` (or `12`): the lines marked and revealed.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "sync": {
+          "description": "Several rows' editors scroll together, each from its marked lines.",
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "LensDiff": {
+      "description": "`diff` viz: the first row's file, between two revisions, at full size.",
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "from": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "to": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "lines": {
+          "description": "A column holding a line (or `12-40`: its start) to reveal on the\nnewer side.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
         }
       },
       "additionalProperties": false

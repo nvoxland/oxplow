@@ -51,6 +51,8 @@ import {
   treeNodes,
   treemapItems,
   partParams,
+  codeRows,
+  diffRow,
   type DisplayColumn,
   type RowGroup,
   type StepStatus,
@@ -65,6 +67,8 @@ import { RefBadge } from "../components/RefBadge.js";
 import { CustomComponentViz } from "./CustomComponentViz.js";
 import type { HostedView } from "./hostedView.js";
 import { DashboardViz, DocumentViz } from "./PartsViz.js";
+import { CodeViz } from "./CodeViz.js";
+import { DiffViz } from "./DiffViz.js";
 import { useLensRuns } from "./useLensRuns.js";
 import { DataTable, type DataColumn, type RowProps } from "../kit/DataTable.js";
 import { Facts } from "../kit/Facts.js";
@@ -799,6 +803,10 @@ function LensViz({
       return <Approvals thread={paramText(run.params.thread)} setting={paramText(run.params.setting)} />;
     case "hunks":
       return <HunksViz rows={hunkRows(lens, result)} streamId={streamId} rowMenu={rowMenu} />;
+    case "code":
+      return <CodeViz rows={codeRows(lens, result)} streamId={streamId} sync={lens.code?.sync ?? false} onOpenPage={onOpenPage} />;
+    case "diff":
+      return <DiffViz spec={diffRow(lens, result)} streamId={streamId} onOpenPage={onOpenPage} />;
     case "list":
       return <ListViz rows={result.rows} cols={cols} cell={cell} rowMenu={rowMenu} view={rowsView} />;
     case "custom":

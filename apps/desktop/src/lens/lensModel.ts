@@ -20,6 +20,7 @@ import { PAGE_CATEGORY_ORDER, type PageDirectoryEntry } from "../components/Rail
 import { diffRef, duplicateBlockRef, effortDiffRef, fileRefAt, gitCommitRef, lensRef, metricRef, wikiPageRef } from "../tabs/pageRefs.js";
 import { WORKING, parseRevision, shortRevisionLabel } from "../revision.js";
 import type { TabRef } from "../tabs/tabState.js";
+import type { DiffSpec } from "../components/Diff/DiffPane.js";
 import { formatContextMention, type ContextRef } from "../agent-context-ref.js";
 import { idOf, parseUri, typeOf } from "../uri/uri.js";
 
@@ -487,6 +488,8 @@ export function adHocLens(query: string, viz: LensViz, chart: LensChart | null =
     timeline: null,
     steps: null,
     hunks: null,
+    code: null,
+    diff: null,
     form: null,
     custom: null,
     group: null,
@@ -694,6 +697,47 @@ export function hunkRows(lens: Lens, result: SqlQueryResult): { path: string; fr
     }
   });
   return out;
+}
+
+/** Lines `"12-40"` (or `"12"`) as a 1-based inclusive range, ends in
+ *  order; null when the value isn't one (Rust's `lens_text::parse_lines`). */
+export function parseLines(value: SqlCell | undefined): { start: number; end: number } | null {
+  if (typeof value !== "string" && typeof value !== "number") return null;
+  const text = String(value).trim();
+  const [a, b = a] = text.split("-").map((p) => p.trim());
+  const start = Number(a);
+  const end = Number(b);
+  if (!Number.isInteger(start) || !Number.isInteger(end) || start < 1 || end < 1 || !a || !b) return null;
+  return { start: Math.min(start, end), end: Math.max(start, end) };
+}
+
+/** `code` viz: each row's file, the revision it is read at and the lines
+ *  it marks. Rows without a file or a revision are left out. */
+export function codeRows(lens: Lens, result: SqlQueryResult): { path: string; revision: string; lines: { start: number; end: number } | null; row: SqlCell[] }[] {
+  const paths = columnValues(result, lens.code?.path);
+  const revisions = columnValues(result, lens.code?.revision);
+  if (!paths || !revisions) return [];
+  const lines = columnValues(result, lens.code?.lines);
+  const out: { path: string; revision: string; lines: { start: number; end: number } | null; row: SqlCell[] }[] = [];
+  paths.forEach((p, i) => {
+    const revision = revisions[i];
+    if (typeof p === "string" && p && typeof revision === "string" && revision) {
+      out.push({ path: p, revision, lines: parseLines(lines?.[i]), row: result.rows[i] ?? [] });
+    }
+  });
+  return out;
+}
+
+/** `diff` viz: the first row's file between its two revisions, landing on
+ *  its `lines`' start; null when the first row doesn't name them. */
+export function diffRow(lens: Lens, result: SqlQueryResult): DiffSpec | null {
+  const at = (column: string | null | undefined) => columnValues(result, column)?.[0];
+  const path = at(lens.diff?.path);
+  const from = parseRevision(at(lens.diff?.from));
+  const to = parseRevision(at(lens.diff?.to));
+  if (typeof path !== "string" || !path || !from || !to) return null;
+  const line = parseLines(at(lens.diff?.lines))?.start;
+  return { path, leftVersion: from, rightVersion: to, baseLabel: shortRevisionLabel(from), ...(line ? { revealLine: line } : {}) };
 }
 
 /** `bar` viz rows: `chart.x` labels and `chart.y` values (NULL → 0). */

@@ -168,20 +168,24 @@ export function LensPage({ lensId, params, title: pageTitle, stream, onOpenPage,
     <LensRail lens={lens} values={run?.params ?? {}} picked={picked} outOfDate={outOfDate} onApply={setParam} onOpenPage={onOpenPage} fixed={renders ? RENDERED : undefined} />
   ) : undefined;
 
+  // A file or a diff fills the page: its title is the chrome's, its body
+  // every pixel the page has.
+  const fills = lens?.viz === "code" || lens?.viz === "diff";
   return (
     <Page
       testId="page-lens"
       kind="lens"
-      titleInBody
+      titleInBody={!fills}
       // A dashboard wants every pixel; everything else reads as a document.
-      width={lens?.viz === "dashboard" ? "full" : "reading"}
+      width={lens?.viz === "dashboard" || fills ? "full" : "reading"}
+      fill={fills}
       actions={actions}
       pin={{ tile: { kind: "lens", lensId, optionsJson: JSON.stringify({ size: "wide" }) }, onOpenPage }}
       rightRail={rightRail}
     >
-      <div style={lens?.viz === "dashboard" ? { padding: "var(--space-5)" } : undefined}>
-      <h1 className="ox-title">{title}</h1>
-      {lens?.description ? <p className="ox-intro">{lens.description}</p> : null}
+      <div style={lens?.viz === "dashboard" ? { padding: "var(--space-5)" } : fills ? fillStyle : undefined}>
+      {fills ? null : <h1 className="ox-title">{title}</h1>}
+      {lens?.description && !fills ? <p className="ox-intro">{lens.description}</p> : null}
       {misplaced.length > 0 ? (
         <div data-testid="lens-error" style={errorStyle}>
           <div style={{ fontWeight: 600, marginBottom: 4 }}>This link puts the lens's view in its address.</div>
@@ -208,6 +212,7 @@ export function LensPage({ lensId, params, title: pageTitle, stream, onOpenPage,
 }
 
 const NO_PARAMS: Record<string, SqlCell> = {};
+const fillStyle: CSSProperties = { display: "flex", flexDirection: "column", flex: 1, minHeight: 0 };
 
 /** `values`' entries in key order: two sets compared by their text. */
 function sorted(values: Record<string, SqlCell>): [string, SqlCell][] {

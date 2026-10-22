@@ -1963,7 +1963,11 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   binding.
 - `viz`: `table`, `list`, `number`, `markdown`, `bar`, `line`, `treemap`,
   `document`, `dashboard` (both below), `tree`, `timeline`, `detail`,
-  `steps`, `hunks`, `approvals` (core's consent component: it reads the
+  `steps`, `hunks`, `code` and `diff` (the full-size readers: a file at a
+  revision, or one file's diff, read-only, filling a lens page —
+  `LensPage`'s `fill`, no in-body title — `lens/CodeViz.tsx`,
+  `lens/DiffViz.tsx`, `.context/editor-and-monaco.md` "Read-only code and
+  diff vizes"), `approvals` (core's consent component: it reads the
   pending `v_command_proposal` itself and decides through the person-only
   path, so the lens needs only `query: SELECT 1`; the lens's rows are
   ignored; params `thread` (a thread URI) and `setting` (a config key)
@@ -2012,7 +2016,13 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   its own block: `chart` (`x`, `y`, `series`, `label`, `size`, `group`),
   `tree` (`id`, `parent`, `label`), `timeline` (`at`, `label`, `uri`),
   `steps` (`label`, `status`), `hunks` (`path`, `from`, `to` — two
-  revisions, `working` / `snap:<id>` / `git:<rev>`).
+  revisions, `working` / `snap:<id>` / `git:<rev>`), `code` (`path`,
+  `revision`; optional `lines`, a column holding `12-40` or `12`, marked
+  and revealed, and `sync: true`, the rows' editors scrolling together from
+  their marks), `diff` (`path`, `from`, `to`, optional `lines`: the first
+  row only, its line revealed on the newer side). An agent reads `code` as
+  each file's lines in a fence, `diff` as its unified diff
+  (`lens_text`).
 - `columns`: `key`, `label`, `link: {kind, from, line?, base?, head?}`
   to a core page, so rows are page-graph links (kinds: `task`, `file`,
   `wiki`, `effort-diff`, `commit`, `metric`, `page`, `diff-at`,
