@@ -341,10 +341,8 @@ fn check_tree(
     let (mut asks, mut destructive) = (false, false);
     for c in calls {
         let spec = &c.command.spec;
-        if !spec.invokers.allows(actor.invoker()) {
-            return Err(CommandError::Denied {
-                reason: format!("`{}` is not open to {:?} callers", spec.id, actor.invoker()),
-            });
+        if let Some(err) = super::invoker_refusal(spec, actor) {
+            return Err(err);
         }
         if let Some(thread_id) = actor.gated_thread() {
             let gated = may_write.filter(|_| spec.access.needs_thread());

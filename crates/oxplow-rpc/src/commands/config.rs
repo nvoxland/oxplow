@@ -40,65 +40,6 @@ fn value_of<T: Serialize>(v: &T) -> Value {
     serde_json::to_value(v).expect("config values serialize")
 }
 
-pub async fn set_agent_prompt_append(
-    svc: &Services,
-    text: String,
-) -> Result<OxplowConfig, IpcError> {
-    let value = (!text.trim().is_empty()).then(|| Value::String(text));
-    set_key(svc, "agentPromptAppend", value).await
-}
-
-/// The enabled agent harnesses, by key, in priority order. Each must be
-/// registered.
-pub async fn set_agents(svc: &Services, agents: Vec<String>) -> Result<OxplowConfig, IpcError> {
-    for agent in &agents {
-        svc.harnesses
-            .get(agent)
-            .map_err(|e| IpcError::invalid(e.to_string()))?;
-    }
-    set_key(svc, "agents", Some(value_of(&agents))).await
-}
-
-/// Set (or clear, with `None`/blank) one of a harness's settings:
-/// `agentConfig.<agent>.<key>` in .oxplow/project.yaml, which its launch
-/// reads. The harness must be registered and declare the setting
-/// (`AgentHarness::settings`).
-pub async fn set_agent_setting(
-    svc: &Services,
-    agent: String,
-    key: String,
-    value: Option<String>,
-) -> Result<OxplowConfig, IpcError> {
-    let harness = svc
-        .harnesses
-        .get(&agent)
-        .map_err(|e| IpcError::invalid(e.to_string()))?;
-    if !harness.settings().iter().any(|s| s.key == key) {
-        return Err(IpcError::invalid(format!(
-            "agent `{agent}` has no setting `{key}`"
-        )));
-    }
-    let mut all = read_config(&svc.config).agent_config;
-    let mut entry = all.remove(&agent).unwrap_or_else(|| json!({}));
-    let fields = entry.as_object_mut().expect("agentConfig entries are maps");
-    match value
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty())
-    {
-        Some(v) => {
-            fields.insert(key, Value::String(v));
-        }
-        None => {
-            fields.remove(&key);
-        }
-    }
-    if !fields.is_empty() {
-        all.insert(agent, entry);
-    }
-    let value = (!all.is_empty()).then(|| value_of(&all));
-    set_key(svc, "agentConfig", value).await
-}
-
 /// The generated-file include/exclude lists. The snapshot captures pick up
 /// the new filter from the `config.changed` event (`config_reactors`), the
 /// same way they do when an agent sets the key.
@@ -186,18 +127,10 @@ mod tests {
     #[tokio::test]
     async fn settings_writes_are_the_persons_config_commands() {
         let (svc, dir) = services().await;
-        for (command, args) in [
-            ("set_agents", json!({ "agents": ["claude", "codex"] })),
-            ("set_agent_prompt_append", json!({ "text": "Be brief." })),
-            (
-                "set_agent_setting",
-                json!({ "agent": "opencode", "key": "model", "value": "m1" }),
-            ),
-            (
-                "set_generated",
-                json!({ "generated": { "exclude": ["dist"], "include": [] } }),
-            ),
-        ] {
+        for (command, args) in [(
+            "set_generated",
+            json!({ "generated": { "exclude": ["dist"], "include": [] } }),
+        )] {
             crate::dispatch(command, args, &svc)
                 .await
                 .unwrap_or_else(|e| panic!("{command}: {}", e.message));
@@ -210,26 +143,8 @@ mod tests {
                 key
             })
             .collect();
-        assert_eq!(
-            keys,
-            ["agents", "agentPromptAppend", "agentConfig", "generated",]
-        );
+        assert_eq!(keys, ["generated"]);
         let file = std::fs::read_to_string(dir.path().join(".oxplow/project.yaml")).unwrap();
-        for expected in ["codex", "Be brief.", "m1", "dist"] {
-            assert!(file.contains(expected), "{expected} missing from:\n{file}");
-        }
-        // Clearing a value unsets its key.
-        let out = crate::dispatch(
-            "set_agent_setting",
-            json!({ "agent": "opencode", "key": "model", "value": null }),
-            &svc,
-        )
-        .await
-        .unwrap();
-        assert_eq!(out["agentConfig"], json!({}));
-        assert_eq!(
-            audited_config_sets(&svc).await.last().unwrap().1,
-            "agentConfig"
-        );
+        assert!(file.contains("dist"), "dist missing from:\n{file}");
     }
 }

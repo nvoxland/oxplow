@@ -16,6 +16,7 @@
 
 pub mod agent_reads;
 pub mod agent_session;
+pub mod agent_settings;
 pub mod ai_settings;
 pub mod bookmark;
 pub mod comment;
@@ -1065,7 +1066,7 @@ impl CommandBus {
             .read()
             .commands
             .values()
-            .filter(|c| c.spec.invokers.allows(actor.invoker()))
+            .filter(|c| c.spec.invokers.admits(actor))
             .filter(|c| active.as_ref().is_none_or(|a| a.refusal(&c.spec).is_none()))
             .map(|c| c.spec.clone())
             .collect()
@@ -1334,10 +1335,7 @@ impl CommandBus {
             }
         };
         // 2. The invoker must be admitted…
-        if !spec.invokers.allows(actor.invoker()) {
-            let err = CommandError::Denied {
-                reason: format!("`{}` is not open to {:?} callers", spec.id, actor.invoker()),
-            };
+        if let Some(err) = invoker_refusal(spec, actor) {
             self.audit_only(run, spec, &input, Outcome::Denied, Some(err.to_string()))
                 .await;
             return Err(err);
@@ -1856,6 +1854,25 @@ pub(super) fn offered(
         }),
         None => Ok(()),
     }
+}
+
+/// Why `actor` may not run `spec`, if it may not: its invoker isn't
+/// admitted, or it is a lens (or component) whose presser isn't — a lens
+/// grants no power.
+pub(crate) fn invoker_refusal(spec: &CommandSpec, actor: &Actor) -> Option<CommandError> {
+    if spec.invokers.admits(actor) {
+        return None;
+    }
+    let reason = match actor.presser() {
+        Some(presser) if spec.invokers.allows(actor.invoker()) => format!(
+            "`{}` is not open to {:?} callers acting for {:?}",
+            spec.id,
+            actor.invoker(),
+            presser.invoker()
+        ),
+        _ => format!("`{}` is not open to {:?} callers", spec.id, actor.invoker()),
+    };
+    Some(CommandError::Denied { reason })
 }
 
 #[cfg(test)]

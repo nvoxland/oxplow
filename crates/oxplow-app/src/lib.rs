@@ -1757,6 +1757,10 @@ impl Services {
         }
         for command in commands::config_commands::ops(config_target.clone())
             .into_iter()
+            .chain(commands::agent_settings::ops(
+                config_target.clone(),
+                harnesses.clone(),
+            ))
             .chain(commands::metric::ops(commands::metric::MetricTarget {
                 config: config_target,
                 metrics: metrics.clone(),

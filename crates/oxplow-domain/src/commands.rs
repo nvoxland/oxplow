@@ -47,6 +47,13 @@ impl Invokers {
         job: false,
     };
 
+    /// Whether `actor` may run it: its invoker is admitted, and for a lens
+    /// or a component, whoever pressed it is too — a lens grants no power,
+    /// so one an agent presses runs only what an agent may.
+    pub fn admits(&self, actor: &Actor) -> bool {
+        self.allows(actor.invoker()) && actor.presser().is_none_or(|presser| self.admits(presser))
+    }
+
     pub fn allows(&self, invoker: Invoker) -> bool {
         match invoker {
             Invoker::Human => self.human,
@@ -686,6 +693,17 @@ impl Actor {
                 on_behalf_of.agent_thread()
             }
             Actor::Human | Actor::System | Actor::Effect { .. } | Actor::Job { .. } => None,
+        }
+    }
+
+    /// Who pressed a lens or a component acting: its `on_behalf_of`. None
+    /// for any other actor.
+    pub fn presser(&self) -> Option<&Actor> {
+        match self {
+            Actor::Lens { on_behalf_of, .. } | Actor::Component { on_behalf_of, .. } => {
+                Some(on_behalf_of)
+            }
+            _ => None,
         }
     }
 

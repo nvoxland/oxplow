@@ -417,10 +417,6 @@ pub const MANIFEST: &[Capability] = &[
         "the session picker's and Settings' harnesses: an agent never starts an agent",
     ),
     ui(
-        "set_agents",
-        "which agents a thread can run is a person's choice",
-    ),
-    ui(
         "get_thread_state",
         "the person's selected and active thread; an agent reads threads in `v_thread` and has no selection",
     ),
@@ -480,16 +476,8 @@ pub const MANIFEST: &[Capability] = &[
         "the renderer's whole config; an agent reads keys with `oxplow.config.list_keys`",
     ),
     ui(
-        "set_agent_prompt_append",
-        "the Settings form for a person-only key: an agent's `oxplow.config.set` of it is a proposal the person decides",
-    ),
-    ui(
         "set_generated",
         "the Settings form; an agent sets config with `oxplow.config.set`",
-    ),
-    ui(
-        "set_agent_setting",
-        "the Settings form for a person-only key (`agentConfig`): an agent's `oxplow.config.set` of it is a proposal the person decides",
     ),
     ui(
         "get_workspace_context",

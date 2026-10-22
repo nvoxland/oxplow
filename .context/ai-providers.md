@@ -611,9 +611,10 @@ its source; with no model bound, the recorded ones are all there is.
 
 `apps/desktop/src/components/AiSection.tsx` (+ pure `aiSettingsModel.ts`),
 a section of the Settings page. It reads with the `ai_settings` IPC and
-writes with commands (`commands/ai_settings.rs`), each a person's alone
-(`Invokers::HUMAN_ONLY`: not an agent, not a lens acting for one — the keys and
-where the person's money goes are theirs): `oxplow.ai.set_provider { id, kind,
+writes with commands (`commands/ai_settings.rs`), each a person's or their
+own lens's (`Invokers::NO_AGENT`, so Settings → AI can be a form lens: the
+keys and where the person's money goes are theirs, and the bus denies a
+lens an agent presses, since a lens grants no power): `oxplow.ai.set_provider { id, kind,
 base_url?, key? }` (scope `ai.settings`; `key` is `with_unrecorded`, so a
 refusal that could quote it is recorded without its words, and it goes only to
 the keychain), `oxplow.ai.remove_provider { id }`, `oxplow.ai.set_role { role,

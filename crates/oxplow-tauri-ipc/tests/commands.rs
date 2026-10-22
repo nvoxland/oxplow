@@ -275,43 +275,6 @@ async fn stream_reads() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn config_setters_round_trip() {
     let app = TestApp::build().await;
-    let config =
-        commands::generated::set_agents(app.state(), vec!["claude".into(), "codex".into()])
-            .await
-            .unwrap();
-    assert_eq!(config.agents, ["claude", "codex"]);
-    assert!(
-        commands::generated::set_agents(app.state(), vec!["nope".into()])
-            .await
-            .is_err(),
-        "a harness nothing registers is refused"
-    );
-    let config = commands::generated::set_agent_setting(
-        app.state(),
-        "opencode".into(),
-        "model".into(),
-        Some("github-copilot/gpt-5-mini".into()),
-    )
-    .await
-    .unwrap();
-    assert_eq!(
-        config.agent_config["opencode"]["model"],
-        "github-copilot/gpt-5-mini"
-    );
-    assert!(
-        commands::generated::set_agent_setting(
-            app.state(),
-            "claude".into(),
-            "no_such_setting".into(),
-            Some("x".into())
-        )
-        .await
-        .is_err(),
-        "a setting the harness doesn't declare is refused"
-    );
-    commands::generated::set_agent_prompt_append(app.state(), "be concise".into())
-        .await
-        .unwrap();
     commands::generated::set_generated(
         app.state(),
         oxplow_config::GeneratedConfig {

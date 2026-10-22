@@ -496,14 +496,16 @@ Each activation publishes the declared ones (`harnesses::prepare_built_ins`
 → `set_declared`) and keeps a registered instance. `agents: [...]` in
 `.oxplow/project.yaml` lists the enabled ones in priority order (the
 first is a new session's default); left out, every registered harness is
-enabled and the first declared is the default. `set_agents` and
+enabled and the first declared is the default. `oxplow.agent.set_agents` and
 `oxplow.agent_session.open` check keys against the registry. A harness's
 own settings are `agentConfig: { <key>: { … } }`, what its `launch`
 reads; it declares the ones a person sets (`AgentHarness::settings`:
 opencode's `model`, Claude's `mcpServers` / `model` / `effort`, Codex's
 `model` / `effort`; a blank value passes nothing, and a value the harness
 refuses is its to refuse), and Settings → Agents renders a field for each,
-saved by `set_agent_setting`, which refuses an undeclared one. The UI
+saved by `oxplow.agent.set_setting`, which refuses an undeclared one (and
+the order by `oxplow.agent.set_agents`, which refuses an unregistered key;
+`.context/commands.md`). The UI
 reads the harnesses through `list_agent_harnesses` (`useAgentHarnesses`,
 `agentKinds.ts`). Each session keeps its own harness, so Claude and Codex
 sessions run side by side.

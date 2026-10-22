@@ -629,25 +629,25 @@ commands:
     summary: "Add or replace an AI provider: its kind and API base, and its key (kept in the OS keychain, never read back or recorded). Left out, the stored key stays. A person's alone."
     scope: ai.settings
     op: set_provider
-    invokers: { human: true, agent: false, lens: false }
+    invokers: { human: true, agent: false, lens: true }
     example: {"id": "anthropic", "kind": "anthropic", "key": "sk-ant-…"}
   - name: ai.remove_provider
     summary: "Remove an AI provider and its key. Refused while a role uses it. A person's alone."
     scope: ai.settings
     op: remove_provider
-    invokers: { human: true, agent: false, lens: false }
+    invokers: { human: true, agent: false, lens: true }
     example: {"id": "anthropic"}
   - name: ai.set_role
     summary: "Bind a role (`main`, `summarize`, `decide`, or an extension's profile `acme/review`) to a provider and model, or unbind it with neither. `restrict` forbids `tools`, `sql`, `streaming` or `images` for the binding. A person's alone."
     scope: ai.settings
     op: set_role
-    invokers: { human: true, agent: false, lens: false }
+    invokers: { human: true, agent: false, lens: true }
     example: {"role": "summarize", "provider": "anthropic", "model": "claude-haiku-5-5"}
   - name: ai.test_provider
     summary: "Make one small call to a provider's model to check its key, URL and model; returns the reply. Spends the person's key. A person's alone."
     scope: ai.test
     op: test_provider
-    invokers: { human: true, agent: false, lens: false }
+    invokers: { human: true, agent: false, lens: true }
     example: {"id": "anthropic", "model": "claude-haiku-5-5"}
   # bookmarks.write — a person's navigation, not the agent's.
   - name: bookmark.set
@@ -703,6 +703,16 @@ commands:
     op: set
     invokers: { human: true, agent: true, lens: true }
     example: {"key": "metricRetentionDays", "value": 30}
+  - name: agent.set_agents
+    summary: "Set which agent harnesses are on, by key, in priority order: the first is a new session's default. Each must be registered. Writes `agents` in .oxplow/project.yaml (logged as config.changed, undoable). A person's, or their lens's."
+    scope: config.write
+    op: set_agents
+    invokers: { human: true, agent: false, lens: true }
+  - name: agent.set_setting
+    summary: "Set one of an agent harness's declared settings (`agentConfig.<agent>.<key>`, what its launch reads); a blank value clears it. Logged as config.changed, undoable. A person's, or their lens's."
+    scope: config.write
+    op: set_agent_setting
+    invokers: { human: true, agent: false, lens: true }
   - name: config.unset
     summary: "Remove one .oxplow/project.yaml key so it returns to its default (or, with `layer: personal`, a person's own choice); logged as config.changed, undo restores it."
     scope: config.write

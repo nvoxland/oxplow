@@ -407,10 +407,10 @@ For commonly-filtered events there are scoped helpers in `apps/desktop/src/api.t
 Add a new helper any time more than one component would write the same
 filter.
 
-Config IPC includes `set_agents(agents: Vec<String>)`, which writes the
-project's ordered enabled-harness list in `.oxplow/project.yaml` (each key must
-be registered), and `set_agent_setting(agent, key, value)`, which writes
-`agentConfig.<agent>.<key>` for a setting the harness declares. `oxplow.agent_session.open` takes an optional
+The project's ordered enabled-harness list (`agents`) and a harness's
+declared settings (`agentConfig.<agent>.<key>`) are written by the
+commands `oxplow.agent.set_agents` / `oxplow.agent.set_setting`, not IPC
+(`.context/commands.md`). `oxplow.agent_session.open` takes an optional
 `harness`; it must be registered and enabled, else the project's default
 runs.
 

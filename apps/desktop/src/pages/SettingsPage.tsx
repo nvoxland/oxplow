@@ -1,10 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import {
-  getConfig,
-  setAgentSetting,
-  setAgents,
-  setAgentPromptAppend,
-} from "../api.js";
+import { getConfig, runCommand } from "../api.js";
 import type { HarnessListing } from "../tauri-bridge/generated/bindings.js";
 import { DocumentLayout, type DocSection } from "../kit/DocumentLayout.js";
 import { useDraft } from "../tabs/useViewParam.js";
@@ -250,15 +245,20 @@ function useAgentsForm(active: boolean) {
     setSaved(null);
     try {
       if (agents.length === 0) throw new Error("Enable at least one agent.");
-      if (editedAgents) await setAgents(editedAgents);
+      // Each is a person's command (audited, undoable); Save is their word.
+      if (editedAgents) await runCommand("oxplow.agent.set_agents", { agents: editedAgents }, true);
       for (const h of harnesses) {
         for (const s of h.settings) {
           const at = `${h.id}.${s.key}`;
           const value = (harnessSettings[at] ?? "").trim();
-          if (value !== (loadedSettings[at] ?? "")) await setAgentSetting(h.id, s.key, value || null);
+          if (value !== (loadedSettings[at] ?? "")) await runCommand("oxplow.agent.set_setting", { agent: h.id, key: s.key, value }, true);
         }
       }
-      await setAgentPromptAppend(promptAppend);
+      if (promptAppend.trim() !== loadedPrompt.trim()) {
+        await (promptAppend.trim()
+          ? runCommand("oxplow.config.set", { key: "agentPromptAppend", value: promptAppend }, true)
+          : runCommand("oxplow.config.unset", { key: "agentPromptAppend" }, true));
+      }
       setLoadedPrompt(promptAppend);
       setLoadedSettings(harnessSettings);
       clearPrompt();

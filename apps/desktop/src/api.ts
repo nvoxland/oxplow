@@ -939,13 +939,7 @@ export async function getConfig(): Promise<OxplowConfig> {
 }
 
 /// The enabled agent harnesses, by key, in priority order.
-export async function setAgents(agents: string[]): Promise<OxplowConfig> {
-  return unwrap(await commands.setAgents(agents));
-}
 
-export async function setAgentPromptAppend(text: string): Promise<OxplowConfig> {
-  return unwrap(await commands.setAgentPromptAppend(text));
-}
 
 export async function setGenerated(
   generated: { exclude: string[]; include: string[] },
@@ -956,9 +950,6 @@ export async function setGenerated(
 /// Set (or clear, with null/blank) one of a harness's declared settings —
 /// `agentConfig.<agent>.<key>` in .oxplow/project.yaml, which its launch
 /// reads (the harness's listing names its settings).
-export async function setAgentSetting(agent: string, key: string, value: string | null): Promise<OxplowConfig> {
-  return unwrap(await commands.setAgentSetting(agent, key, value));
-}
 
 export type CommitRefLabel = import("./tauri-bridge/generated/bindings.js").CommitRefLabel;
 

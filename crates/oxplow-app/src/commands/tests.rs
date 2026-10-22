@@ -916,6 +916,50 @@ async fn concurrent_undos_apply_the_inverse_once() {
     assert_eq!(ok_runs, 3, "two sets and one undo");
 }
 
+/// A lens grants no power: a command closed to agents is closed to a lens
+/// an agent presses, not only to the agent. A person's lens runs it, and
+/// only theirs is offered it.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_command_closed_to_agents_is_closed_to_a_lens_an_agent_presses() {
+    let (_db, bus) = bus();
+    bus.register(
+        Command::new(
+            kv_spec("oxplow.kv.set", Invokers::NO_AGENT, Confirm::Never),
+            kv_set(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let lens = |presser: Actor| Actor::Lens {
+        lens_id: "acme/x".into(),
+        on_behalf_of: Box::new(presser),
+    };
+    let err = bus
+        .run(
+            &lens(agent()),
+            "oxplow.kv.set",
+            json!({"k": "a", "v": "1"}),
+            true,
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&err, CommandError::Denied { reason } if reason.contains("acting for Agent")),
+        "{err:?}"
+    );
+    bus.run(
+        &lens(Actor::Human),
+        "oxplow.kv.set",
+        json!({"k": "a", "v": "1"}),
+        false,
+    )
+    .await
+    .unwrap();
+    let offered = |actor: &Actor| bus.list(actor).iter().any(|s| s.id == "oxplow.kv.set");
+    assert!(offered(&lens(Actor::Human)));
+    assert!(!offered(&lens(agent())));
+}
+
 /// A lens acting for an agent is held to the agent rules: it can't
 /// confirm (its run is proposed), and the agent policy applies.
 #[tokio::test(flavor = "multi_thread")]

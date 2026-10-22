@@ -2,9 +2,10 @@
 //! provider (and stores its key in the keychain), `remove_provider` takes
 //! one away, `set_role` binds a role to a provider and model (or unbinds
 //! it) and `test_provider` makes one small call to check a provider. They
-//! are a person's alone (`Invokers::HUMAN_ONLY`): the keys and where the
-//! person's money goes are theirs to set, so neither an agent nor a lens
-//! acting for one reaches them. `set_provider` keeps the `key` out of the
+//! are a person's alone (`Invokers::NO_AGENT`): the keys and where the
+//! person's money goes are theirs to set. Their own lens (Settings → AI as
+//! a form) runs them; an agent can't, and neither can a lens an agent
+//! presses (the bus admits a lens only when its presser is admitted). `set_provider` keeps the `key` out of the
 //! audit (`with_unrecorded`: only that one was given is recorded).
 //! `External`: the settings are the user-global `ai.yaml` and the OS
 //! keychain, outside oxplow's database. Reading them is
@@ -119,7 +120,7 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
                 })
             })),
         )
-        .open_to(Invokers::HUMAN_ONLY)
+        .open_to(Invokers::NO_AGENT)
         .with_unrecorded(&["key"])
     };
     let remove_provider = {
@@ -144,7 +145,7 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
                 })
             })),
         )
-        .open_to(Invokers::HUMAN_ONLY)
+        .open_to(Invokers::NO_AGENT)
     };
     let set_role = {
         let services = services.clone();
@@ -189,7 +190,7 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
                 })
             })),
         )
-        .open_to(Invokers::HUMAN_ONLY)
+        .open_to(Invokers::NO_AGENT)
     };
     let test_provider = Op::new(
         "ai.test",
@@ -213,7 +214,7 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
             })
         })),
     )
-    .open_to(Invokers::HUMAN_ONLY);
+    .open_to(Invokers::NO_AGENT);
     vec![set_provider, remove_provider, set_role, test_provider]
 }
 
@@ -297,6 +298,68 @@ mod tests {
         let error = format!("{:?}", audited.rows[0][0]);
         assert!(error.contains("private input"), "{error}");
         assert!(!error.contains("sk-secret-123"), "{error}");
+
+        // A person's lens (Settings → AI as a form) runs it, and its record
+        // keeps the key out too; a lens an agent presses can't.
+        let lens = |presser: Actor| Actor::Lens {
+            lens_id: "oxplow-foundation/ai".into(),
+            on_behalf_of: Box::new(presser),
+        };
+        run(
+            &fx,
+            &lens(Actor::Human),
+            super::SET_PROVIDER,
+            json!({ "id": "viaform", "kind": "openrouter", "key": "sk-form-456" }),
+        )
+        .await
+        .unwrap();
+        assert!(fx
+            .svc
+            .ai
+            .settings()
+            .await
+            .unwrap()
+            .providers
+            .iter()
+            .any(|p| p.id == "viaform" && p.key_set));
+        let recorded = fx
+            .svc
+            .commands
+            .audit_store()
+            .list_recent(5)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|r| r.command == super::SET_PROVIDER)
+            .unwrap();
+        let input = recorded.input.to_string();
+        assert!(
+            input.contains("viaform") && !input.contains("sk-form-456"),
+            "{input}"
+        );
+        let agent = Actor::Agent {
+            session_id: None,
+            thread_id: Some(fx.thread),
+            stream_id: None,
+        };
+        let err = run(
+            &fx,
+            &lens(agent),
+            super::SET_PROVIDER,
+            json!({ "id": "byagent", "kind": "openrouter", "key": "sk-x" }),
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(err, CommandError::Denied { .. }), "{err:?}");
+        assert!(!fx
+            .svc
+            .ai
+            .settings()
+            .await
+            .unwrap()
+            .providers
+            .iter()
+            .any(|p| p.id == "byagent"));
     }
 
     /// A role's binding is config, so changing it announces `ConfigChanged`

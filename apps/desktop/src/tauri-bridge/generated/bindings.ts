@@ -631,22 +631,7 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	setAgentPromptAppend: (text: string) => typedError<OxplowConfig, IpcError_Serialize>(__TAURI_INVOKE("set_agent_prompt_append", { text })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	setAgents: (agents: string[]) => typedError<OxplowConfig, IpcError_Serialize>(__TAURI_INVOKE("set_agents", { agents })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	setGenerated: (generated: GeneratedConfig) => typedError<OxplowConfig, IpcError_Serialize>(__TAURI_INVOKE("set_generated", { generated })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	setAgentSetting: (agent: string, key: string, value: string | null) => typedError<OxplowConfig, IpcError_Serialize>(__TAURI_INVOKE("set_agent_setting", { agent, key, value })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
