@@ -623,7 +623,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     loader refuses one with both or neither condition. Every `LensRun`
     (IPC and MCP `run_lens`) carries `alert: {firing, count, value,
     message}`; the message is `label: count`, `N rows`, or `label: value`.
-  - **Pages** (P6.G2, target §11.3): `pages: [{ id, title, icon?,
+  - **Pages** (P6.G2, target §11.3): `pages: [{ id, title, label?, icon?,
     category?, keywords?, params?, count?, for?, accepts?, default?,
     pinned?, lens | component }]` — every page is one of these, oxplow's own included
     (`Extension.pages`, `ExtensionPage`; checked at load in
@@ -635,7 +635,12 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     it. `category` lists it in the launcher (none: a page only opened
     from elsewhere — a diff, a form); `keywords` are more words the
     launcher matches; `count` names a `number` lens whose value is its
-    launcher badge (Backlog's ready count). `body` is what draws it:
+    launcher badge (Backlog's ready count). `title` is its name (the
+    launcher's, Open with's); `label` is what its tab says when that
+    isn't the name, `{{param.<name>}}` filled from what it shows
+    (`label: "{{param.path}}"`; `pages/renderers.ts` `tabLabel`; filled
+    to nothing, the title). A renderer's label names params of what it
+    renders, a route's its `params` (else a load error). `body` is what draws it:
     exactly one of `lens:` or `component:`. `component: oxplow:<name>`
     names a **built-in page** (`built_in_pages::BUILT_IN_PAGES`) and only
     the required bundled extension may use it — a stepping stone for

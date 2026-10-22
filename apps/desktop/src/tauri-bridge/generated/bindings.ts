@@ -2790,7 +2790,13 @@ export type ExtensionPage = {
 	 *  for any other.
 	 */
 	pageRef: string,
+	/**  Its name: the launcher's, Open with's, a kind label's. */
 	title: string,
+	/**
+	 *  What its tab says, when not its title: `{{param.<name>}}` placeholders
+	 *  over the params of what it shows (`label: "{{param.path}}"`).
+	 */
+	label: string | null,
 	icon: string | null,
 	/**
 	 *  Its launcher section; none = not in the launcher (a page only

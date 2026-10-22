@@ -1,13 +1,14 @@
 import { describe, expect, test } from "bun:test";
 
 import type { ExtensionPage } from "../tauri-bridge/generated/bindings.js";
-import { RENDERER_VIEW_KEY, pageView, renderedResourceOf, rendererFor, renderersFor, shellView, withRenderedParams } from "./renderers.js";
+import { RENDERER_VIEW_KEY, pageView, renderedResourceOf, rendererFor, renderersFor, shellView, tabLabel, withRenderedParams } from "./renderers.js";
 
 const page = (id: string, more: Partial<ExtensionPage> = {}): ExtensionPage => ({
   id,
   extension: "oxplow-foundation",
   pageRef: `oxplow:oxplow/page?page=${id}`,
   title: id,
+  label: null,
   icon: null,
   category: null,
   keywords: null,
@@ -74,4 +75,14 @@ test("a renderer's params change the URI it renders", () => {
   expect(withRenderedParams("oxplow:acme/pr?id=1&repo=a", { id: 2 }, { tab: "files" })).toBe("oxplow:acme/pr?id=2&repo=a#tab=files");
   expect(withRenderedParams("oxplow:acme/pr?id=1&repo=a", { repo: null }, {})).toBe("oxplow:acme/pr?id=1");
   expect(withRenderedParams("https://example.com", { id: 2 }, {})).toBe("https://example.com");
+});
+
+// A page's tab says its `label`, filled from what it shows; a label that
+// fills to nothing, or none, says its title.
+test("a page's tab label is its label filled from its params, else its title", () => {
+  const dir = page("directory", { title: "Directory", label: "{{param.path}}" });
+  expect(tabLabel(dir, { path: "src/lib" })).toBe("src/lib");
+  expect(tabLabel(dir, {})).toBe("Directory");
+  expect(tabLabel(page("pr", { title: "PR", label: "PR #{{ param.id }}" }), { id: "12" })).toBe("PR #12");
+  expect(tabLabel(page("tasks", { title: "Tasks" }), { id: "12" })).toBe("Tasks");
 });

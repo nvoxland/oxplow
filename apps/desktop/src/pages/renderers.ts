@@ -97,3 +97,14 @@ export function withRenderedParams(
   for (const [k, v] of Object.entries(view)) if (v !== null && v !== "") shown[k] = String(v);
   return formatUri({ resource: u.resource, params: next, view: shown });
 }
+
+/** What a tab of `page` says: its `label` with each `{{param.<name>}}`
+ *  filled from `params` (what it shows: a renderer's URI params, a
+ *  route's), else — no label, or one that fills to nothing — its title. */
+export function tabLabel(page: ExtensionPage, params: Record<string, unknown>): string {
+  const filled = (page.label ?? "").replace(/\{\{\s*param\.([a-z0-9_]+)\s*\}\}/g, (_, name: string) => {
+    const v = params[name];
+    return v === null || v === undefined ? "" : String(v);
+  });
+  return filled.trim() || page.title;
+}

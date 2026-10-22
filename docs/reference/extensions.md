@@ -564,7 +564,7 @@ pages:
     for: github/pr          # a resource, or a list of them
     default: true           # the page a plain open uses
     accepts: { id: '^\d+$' }   # optional: only URIs whose params fit
-    params: { uri: {} }
+    label: "PR #{{param.id}}"  # optional: what its tab says
     lens: pr-detail         # must declare a `uri` param
 ```
 
@@ -577,6 +577,10 @@ pages:
   page per resource. A page that draws another extension's resource is
   never its default: the person picks it with **Open with**.
 - `pinned: true` pins the tab the page opens in.
+- `label` is what the page's tab says, if not its `title`.
+  `{{param.<name>}}` is replaced with that param of the URI (of a
+  route page: one of its `params`). `title` stays the page's name in the
+  launcher and in **Open with**.
 - A lens page that renders must declare a `uri` param. It runs with the
   URI of the thing. A param it declares with the same name as one of the
   URI's params (`id`, `path`) gets that value, so the query can use it
