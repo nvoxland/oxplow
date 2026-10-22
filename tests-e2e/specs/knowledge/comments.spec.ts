@@ -19,17 +19,20 @@ test("the Comments inbox lists a thread, shows its conversation, and resolves it
   await page.goto("/");
   await openFromLauncher(page, "Comments");
   const inbox = page.locator('[data-testid="page-lens"]:visible');
-  const row = inbox.getByTestId("lens-row-0");
+  // The threads are the table; the conversation under it is a list.
+  const threads = inbox.getByTestId("lens-table");
+  const row = threads.getByTestId("lens-row-0");
   await expect(row).toContainText("hold hands");
   await expect(inbox.getByTestId("lens-group-heading")).toContainText("wiki/otters");
 
   // Picking the row reads its messages, oldest first.
   await row.click();
-  await expect(inbox.getByText("Is that true?")).toBeVisible();
-  await expect(inbox.getByText("Checking.")).toBeVisible();
+  // The conversation section is the last place each message shows.
+  await expect(inbox.getByText("Is that true?").last()).toBeVisible();
+  await expect(inbox.getByText("Checking.").last()).toBeVisible();
 
   // Resolving takes it out of the unresolved list.
   await row.click({ button: "right" });
   await page.getByTestId("menu-item-lens-action-resolve").click();
-  await expect(inbox.getByTestId("lens-row-0")).toHaveCount(0);
+  await expect(threads.getByTestId("lens-row-0")).toHaveCount(0);
 });

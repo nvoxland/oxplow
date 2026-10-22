@@ -2019,8 +2019,8 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   revisions, `working` / `snap:<id>` / `git:<rev>`), `code` (`path`,
   `revision`; optional `lines`, a column holding `12-40` or `12`, marked
   and revealed, and `sync: true`, the rows' editors scrolling together from
-  their marks), `diff` (`path`, `from`, `to`, optional `lines`: the first
-  row only, its line revealed on the newer side). An agent reads `code` as
+  their marks), `diff` (`path`, `from`, `to`, optional `lines` and `base`: the first
+  row only, its line revealed on the newer side, `base` the header's name for the older side). An agent reads `code` as
   each file's lines in a fence, `diff` as its unified diff
   (`lens_text`).
 - `columns`: `key`, `label`, `link: {kind, from, line?, base?, head?}`
@@ -4657,6 +4657,7 @@ What moves out of core, and what it becomes:
 | Git History's commit graph | **done:** the `history-graph` component, replacing core's plain `CommitList` (`vcs.history.graph`) |
 | Local history dashboard | stays core (snapshots are substrate); the `recent-snapshots` lens in `review` covers the at-a-glance view |
 | Effort metrics block, effort coverage page, tests-run and nudge blocks | **done:** `effort.review.details` slot lenses `effort-tests` (a document: coverage, untested files, test runs, failed tests, analysis findings), `effort-metric-deltas`, `effort-nudges` |
+| Diff and File at a Revision pages | **done:** the `diff` lens (a `diff` viz; its `diff:` block takes a `base` column for the header's `vs <base>`; a clipboard compare's text stays in the entry's history state, read by `DiffViz`) and the `file-viewer` lens (a `code` viz); `DiffPage` and `FileViewerPage` are gone |
 | Git Commit and Uncommitted Changes pages | **done:** the `commit` and `uncommitted` documents (a `query` row for the change, declared in `columns:`; parts `commit-detail`, `commit-files`, `uncommitted-commit`, `uncommitted-files`); the analysis moves to the `oxplow-foundation/commit.sections` and `oxplow-foundation/uncommitted.sections` mounts (the old `vcs.commit.details`, `vcs.status.header` and `vcs.status.details` slots are gone); the commit tab is labelled by its sha, not its subject, and the file totals line and Cherry-pick's inline confirm are gone; `GitCommitPage` and `UncommittedChangesPage` are deleted |
 | Comments inbox | **done:** the `comments` document lens (`comments-threads`, a grouped table over `v_comment` with `select` on the `comment` param; `comments-conversation`, over `v_comment_message`); the resolved filter is a static `choice` ladder (the old one was cut to the oldest resolved comment) and "Go to location" is a plain link, so it no longer scrolls to the anchor; `CommentsInboxPage` and `comments-filter` are gone |
 | Directory page | **done:** the `directory` lens, the renderer of `oxplow/dir` (`pages:` entry `lens: directory`, `label: "{{param.path}}"`); `DirectoryPage` is gone |

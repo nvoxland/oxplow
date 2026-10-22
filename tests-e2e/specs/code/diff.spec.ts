@@ -26,11 +26,11 @@ test("a committed change shows its hunk", async ({ page, daemon }) => {
   // have rendered their runs, none failed.
   await expect(commit.getByText("Change Analysis")).toBeVisible();
   await expect(commit).not.toContainText("no such table");
-  await commit.getByRole("button", { name: "emu.txt" }).click();
-  await expect(page.getByTestId("page-diff")).toContainText("second emu line");
-  // A diff is its address: a reload draws the same diff, its base named.
-  const named = await page.getByTestId("page-diff").getByText(/^vs /).textContent();
+  await commit.getByTestId("lens-part-files").getByRole("button", { name: "emu.txt" }).click();
+  await expect(page.getByTestId("lens-diff")).toContainText("second emu line");
+  // The diff is the foundation's `diff` lens page. A diff is its address: a reload draws the same diff, its base named.
+  const named = await page.getByTestId("lens-diff").getByText(/^vs /).textContent();
   await page.reload();
-  await expect(page.getByTestId("page-diff")).toContainText("second emu line");
-  await expect(page.getByTestId("page-diff").getByText(/^vs /)).toHaveText(named!);
+  await expect(page.getByTestId("lens-diff")).toContainText("second emu line");
+  await expect(page.getByTestId("lens-diff").getByText(/^vs /)).toHaveText(named!);
 });

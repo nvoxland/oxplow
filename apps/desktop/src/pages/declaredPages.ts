@@ -30,7 +30,6 @@ export const BUILT_IN_PAGES = [
   "backlog",
   "board",
   "custom-dashboard",
-  "diff",
   "diff-view",
   "duplicate-block",
   "explore-data",

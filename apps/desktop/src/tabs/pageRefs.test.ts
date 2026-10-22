@@ -65,9 +65,10 @@ describe("pageRefs", () => {
   test("a diff is its params: path, both versions, the label and the base's name; its line is its view", () => {
     const spec = { path: "src/a.ts", leftVersion: "git:abc", rightVersion: "working", baseLabel: "abc" };
     const a = diffRef(spec);
-    // A base named as its version reads says nothing more: left out.
-    expect(a.id).toBe("oxplow:oxplow/page?left=git:abc&page=diff&path=src/a.ts&right=working");
-    expect(pagePayload(a)).toEqual({ extension: null, page: "diff", params: { path: "src/a.ts", left: "git:abc", right: "working" } });
+    // A base named as its version reads says nothing more: left out. The
+    // label the tab says defaults to "diff".
+    expect(a.id).toBe("oxplow:oxplow/page?label=diff&left=git:abc&page=diff&path=src/a.ts&right=working");
+    expect(pagePayload(a)).toEqual({ extension: null, page: "diff", params: { path: "src/a.ts", left: "git:abc", right: "working", label: "diff" } });
     expect(diffSpecOf(refFromTabId(a.id)!)).toEqual({ ...spec, labelOverride: undefined, revealLine: undefined });
     const full = { ...spec, baseLabel: "HEAD", labelOverride: "wi 3", revealLine: 7 };
     const b = diffRef(full);

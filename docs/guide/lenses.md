@@ -72,7 +72,8 @@ empty: Nothing is blocked.
   holding `12-40`) to mark and reveal lines. Two rows sit side by side;
   `sync: true` scrolls them together.
 - `viz: diff` shows one file's diff, filling the page: `diff: { path:
-  <column>, from: <column>, to: <column> }`. Several files are `hunks`.
+  <column>, from: <column>, to: <column> }`; `lines` reveals a line, and `base` names the
+  older side in the header (`vs HEAD`). Several files are `hunks`.
 - Unknown keys are errors, so typos show up instead of being ignored.
 
 ### Typed params

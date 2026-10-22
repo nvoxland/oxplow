@@ -189,7 +189,7 @@ pages:
   - { id: stream-settings, title: Stream Settings, icon: settings, params: [stream], lens: stream-settings }
   - { id: thread-settings, title: Thread Settings, icon: settings, params: [thread], lens: thread-settings }
   - { id: external-url, title: Web Page, icon: external-link, for: [https, http], default: true, component: "oxplow:external-url" }
-  - { id: diff, title: Diff, icon: git-compare, params: [path, left, right, label], component: "oxplow:diff" }
+  - { id: diff, title: Diff, icon: git-compare, label: "{{param.path}} ({{param.label}})", params: [path, left, right, label, base], lens: diff }
   - { id: diff-view, title: Changes, icon: git-compare, params: [snapshot, effort, start, end], for: [oxplow/snapshot, oxplow/effort, oxplow/turn], default: true, component: "oxplow:diff-view" }
   - { id: duplicate-block, title: Duplicate Block, icon: copy, params: [left, left_lines, left_at, right, right_lines, right_at], component: "oxplow:duplicate-block" }
   # Renderers: what a URI of oxplow's resources opens on (its tab's id is

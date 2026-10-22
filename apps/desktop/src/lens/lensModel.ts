@@ -737,7 +737,9 @@ export function diffRow(lens: Lens, result: SqlQueryResult): DiffSpec | null {
   const to = parseRevision(at(lens.diff?.to));
   if (typeof path !== "string" || !path || !from || !to) return null;
   const line = parseLines(at(lens.diff?.lines))?.start;
-  return { path, leftVersion: from, rightVersion: to, baseLabel: shortRevisionLabel(from), ...(line ? { revealLine: line } : {}) };
+  const base = at(lens.diff?.base);
+  const baseLabel = typeof base === "string" && base ? base : shortRevisionLabel(from);
+  return { path, leftVersion: from, rightVersion: to, baseLabel, ...(line ? { revealLine: line } : {}) };
 }
 
 /** `bar` viz rows: `chart.x` labels and `chart.y` values (NULL → 0). */
