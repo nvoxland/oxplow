@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { ipc } from "../../support/daemon.js";
+import { run } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
 import { openFromLauncher } from "../../support/ui.js";
 
@@ -12,18 +12,23 @@ test("an enabled harness's declared settings are offered and saved", async ({ fr
   const { page, daemon } = fresh;
   await page.goto("/");
   await openFromLauncher(page, "Settings: Agents");
-  await expect(page.getByTestId("settings-agent-opencode-model")).toHaveCount(0);
-  await ipc(daemon, "set_agents", { agents: ["terminal", "opencode"] });
+  await expect(page.getByText("OpenCode — Model")).toHaveCount(0);
+  await run(daemon, "oxplow.agent.set_agents", { agents: ["terminal", "opencode"] });
   await page.reload();
   await openFromLauncher(page, "Settings: Agents");
-  const model = page.getByTestId("settings-agent-opencode-model");
-  await expect(model).toBeVisible();
-  await model.fill("github-copilot/gpt-5");
-  await page.locator('[data-testid="action-save"]:visible').click();
+  const row = page.getByRole("row", { name: /OpenCode — Model/ });
+  await expect(row).toBeVisible();
+
+  // Change… opens the command's form; its field starts from the saved value.
+  await row.click({ button: "right" });
+  await page.getByTestId("menu-item-lens-action-change").click();
+  const form = page.getByTestId("lens-action-form");
+  await form.getByTestId("lens-action-form-fields-value").fill("github-copilot/gpt-5");
+  await form.getByTestId("lens-action-form-fields-submit").click();
   await expect
     .poll(() => readFileSync(join(daemon.project, ".oxplow", "project.yaml"), "utf8"))
     .toContain("github-copilot/gpt-5");
   await page.reload();
   await openFromLauncher(page, "Settings: Agents");
-  await expect(page.getByTestId("settings-agent-opencode-model")).toHaveValue("github-copilot/gpt-5");
+  await expect(page.getByRole("row", { name: /OpenCode — Model.*github-copilot\/gpt-5/ })).toBeVisible();
 });

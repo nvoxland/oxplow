@@ -1,7 +1,7 @@
 //! Foundation lenses that replaced core pages: Settings' Overview and Language
 //! Servers areas (mounted in each area's slot: what they list, how they group
 //! and search, what Ask puts in the agent's input, what the language-server
-//! rows offer), the Comments inbox, the commit and uncommitted pages, and the Alerts page.
+//! rows offer), the Comments inbox, the commit and uncommitted pages, the Alerts page, and Settings → Agents.
 
 use oxplow_config::LspServerConfig;
 use oxplow_db::SqlCell;
@@ -539,4 +539,87 @@ async fn the_alerts_page_lists_failures_and_each_part_runs() {
     // Extensions with problems: none in a clean fixture.
     let ext = run(&fx, "alerts-extensions", vec![]).await;
     assert!(ext.rows.iter().all(|r| ext.text(r, "settings").is_some()));
+}
+
+/// Settings → Agents: the agents in priority order with the lists a row's
+/// actions hand `set_agents`; the declared settings of the enabled ones; what
+/// new threads start with.
+#[tokio::test]
+async fn the_agents_area_hands_set_agents_each_new_order() {
+    let fx = services_with_effort().await;
+    let ids: Vec<String> = fx
+        .svc
+        .harnesses
+        .all()
+        .iter()
+        .map(|h| h.id().to_string())
+        .collect();
+    assert!(ids.len() >= 3, "{ids:?}");
+
+    let list = run(&fx, "agents-list", vec![]).await;
+    assert_eq!(list.rows.len(), ids.len());
+    let second = &list.rows[1];
+    let second_id = list.text(second, "id").unwrap();
+    let first_id = list.text(&list.rows[0], "id").unwrap();
+    assert!(list.flag(second, "can_up") && list.flag(second, "can_disable"));
+    assert!(!list.flag(&list.rows[0], "can_up"));
+    // Move Up swaps the second with the first; the list is a JSON array.
+    let up: Vec<String> = serde_json::from_str(&list.text(second, "moved_up").unwrap()).unwrap();
+    assert_eq!(&up[..2], [second_id.clone(), first_id.clone()]);
+    command(
+        &fx,
+        "oxplow.agent.set_agents",
+        serde_json::json!({ "agents": up }),
+    )
+    .await;
+    let after = run(&fx, "agents-list", vec![]).await;
+    assert_eq!(after.text(&after.rows[0], "id"), Some(second_id.clone()));
+
+    // Disable drops it from the order; Enable puts it back last.
+    let without: Vec<String> =
+        serde_json::from_str(&after.text(&after.rows[0], "without_it").unwrap()).unwrap();
+    assert!(!without.contains(&second_id));
+    command(
+        &fx,
+        "oxplow.agent.set_agents",
+        serde_json::json!({ "agents": without }),
+    )
+    .await;
+    let off = run(&fx, "agents-list", vec![]).await;
+    let dropped = off.keyed("id", &second_id);
+    assert!(off.flag(dropped, "can_enable") && !off.flag(dropped, "can_disable"));
+    let with_it: Vec<String> =
+        serde_json::from_str(&off.text(dropped, "with_it").unwrap()).unwrap();
+    assert_eq!(with_it.last(), Some(&second_id));
+
+    // What new threads start with: the picker, until a choice is made.
+    let start = run(&fx, "agents-new-thread", vec![]).await;
+    assert!(start.flag(start.keyed("value", "ask"), "current"));
+    // `config.set` asks first; a lens action's click is the person's yes.
+    fx.svc
+        .commands
+        .run(
+            &oxplow_domain::Actor::Human,
+            "oxplow.config.set",
+            serde_json::json!({ "key": "newThreadSession", "value": "none", "layer": "personal" }),
+            true,
+        )
+        .await
+        .unwrap();
+    let chosen = run(&fx, "agents-new-thread", vec![]).await;
+    assert!(chosen.flag(chosen.keyed("value", "none"), "current"));
+    assert!(chosen.flag(chosen.keyed("value", "ask"), "can_ask"));
+
+    // The prompt addition prefills the form with what is saved.
+    command(
+        &fx,
+        "oxplow.agent.set_prompt_append",
+        serde_json::json!({ "text": "Prefer TDD." }),
+    )
+    .await;
+    let prompt = run(&fx, "agents-prompt", vec![]).await;
+    assert_eq!(
+        prompt.text(&prompt.rows[0], "text").as_deref(),
+        Some("Prefer TDD.")
+    );
 }

@@ -1,0 +1,23 @@
+title: New threads
+description: "What a new thread starts with: the session picker, no session, or an agent. Yours alone (`.oxplow/personal.yaml`)."
+query: |
+  WITH cur(choice) AS (
+    SELECT coalesce((SELECT json_extract(value, '$') FROM v_config_value WHERE key = 'personal.newThreadSession'), 'ask')
+  )
+  SELECT v.value, v.label, (v.value = cur.choice) AS current,
+         (v.value <> cur.choice) AND v.value = 'ask' AS can_ask,
+         (v.value <> cur.choice) AND v.value <> 'ask' AS can_use
+  FROM cur, (
+    SELECT 'ask' AS value, 'Ask (the session picker)' AS label, 0 AS ord
+    UNION ALL SELECT 'none', 'No session', 1
+    UNION ALL SELECT id, title, 2 + position FROM v_agent_harness WHERE enabled = 1
+  ) v
+  ORDER BY v.ord
+viz: table
+emphasis: current
+columns:
+  - { key: label, label: Start with }
+actions:
+  - { id: use, label: Use This, command: oxplow.config.set, input: { key: newThreadSession, value: "{{row.value}}", layer: personal }, row: true, when: can_use }
+  - { id: ask, label: Use This, command: oxplow.config.unset, input: { key: newThreadSession, layer: personal }, row: true, when: can_ask }
+hidden: true

@@ -1397,6 +1397,17 @@ fn parse_actions(
                 f.id
             ));
         }
+        for s in oxplow_domain::template::strings(&input) {
+            if let Some(filter) = oxplow_domain::template::placeholders(s)
+                .into_iter()
+                .find_map(|p| p.filter.filter(|f| f != "json"))
+            {
+                return Err(format!(
+                    "actions: `{}`: unknown placeholder filter `{filter}` (the only one is `json`)",
+                    f.id
+                ));
+            }
+        }
         for (scope, name) in action_templates(&input) {
             match scope.as_str() {
                 "param"
@@ -1576,11 +1587,7 @@ pub const SLOTS: &[SlotSpec] = &[
     // lists the same ids). An extension's own status or configuration
     // views go beside the area they belong to. No params.
     SlotSpec::sections("settings.overview.sections", &["q"], &[]),
-    SlotSpec::sections(
-        "settings.agents.sections",
-        &[],
-        &["agents", "new-threads", "prompt"],
-    ),
+    SlotSpec::sections("settings.agents.sections", &[], &[]),
     SlotSpec::sections("settings.lsp.sections", &[], &[]),
     SlotSpec::sections("settings.extensions.sections", &[], &["health"]),
     SlotSpec::sections("settings.data.sections", &[], &["data"]),
@@ -8599,7 +8606,7 @@ commands:
                 ("region", "title: R\nparams: [{ name: uri }]\nquery: SELECT 1\n"),
                 ("sized", "title: S\nquery: SELECT 1\n"),
             ],
-            "ui:\n  slots:\n    - { slot: settings.agents.sections, lens: presets, title: Team presets, at: { after: agents } }\n    - { slot: settings.agents.sections, lens: stray, at: { before: gone } }\n    - { slot: work_item.detail.body, lens: region, at: start }\n    - { slot: settings.agents.sections, lens: sized, size: wide }\n",
+            "ui:\n  slots:\n    - { slot: settings.integrations.sections, lens: presets, title: Team presets, at: { after: capabilities } }\n    - { slot: settings.integrations.sections, lens: stray, at: { before: gone } }\n    - { slot: work_item.detail.body, lens: region, at: start }\n    - { slot: settings.integrations.sections, lens: sized, size: wide }\n",
         );
         let mounts: Vec<_> = ext
             .ui
@@ -8613,7 +8620,7 @@ commands:
                 (
                     "x/presets",
                     Some(SlotAt::After {
-                        after: "agents".into()
+                        after: "capabilities".into()
                     }),
                     Some("Team presets")
                 ),
@@ -8631,7 +8638,7 @@ commands:
         assert!(errs.contains("`size` is a dashboard tile's"), "{errs}");
         let warns = ext.warnings.join("\n");
         assert!(
-            warns.contains("has no part `gone` (it has `agents`, `new-threads`, `prompt`)"),
+            warns.contains("has no part `gone` (it has `capabilities`, `integrations`)"),
             "{warns}"
         );
     }
@@ -9235,6 +9242,31 @@ commands:
         assert!(
             errs.contains("lacks.yaml") && errs.contains("x/rows") && errs.contains("`commit`"),
             "{errs}"
+        );
+    }
+
+    /// A placeholder's `|json` filter loads; any other filter is refused.
+    #[test]
+    fn an_action_placeholder_may_only_filter_with_json() {
+        let (_d, ext) = load_x(
+            &[
+                ("ok", "title: Ok\nquery: SELECT '[1]' AS order_json\nactions:\n  - { id: a, label: A, command: oxplow.agent.set_agents, row: true, input: { agents: \"{{row.order_json|json}}\" } }\n"),
+                ("bad", "title: Bad\nquery: SELECT 1 AS n\nactions:\n  - { id: a, label: A, command: oxplow.agent.set_agents, row: true, input: { agents: \"{{row.n|upper}}\" } }\n"),
+            ],
+            "",
+        );
+        assert!(
+            ext.lenses.iter().any(|l| l.slug == "ok"),
+            "{:?}",
+            ext.errors
+        );
+        assert!(ext.lenses.iter().all(|l| l.slug != "bad"));
+        assert!(
+            ext.errors
+                .join("\n")
+                .contains("unknown placeholder filter `upper`"),
+            "{:?}",
+            ext.errors
         );
     }
 

@@ -1,8 +1,5 @@
-import { useEffect, useState, type ReactNode } from "react";
-import { getConfig, runCommand } from "../api.js";
-import type { HarnessListing } from "../tauri-bridge/generated/bindings.js";
+import { useEffect, type ReactNode } from "react";
 import { DocumentLayout, type DocSection } from "../kit/DocumentLayout.js";
-import { useDraft } from "../tabs/useViewParam.js";
 import { useSearchFilter } from "../kit/SearchFilter.js";
 import { Toolbar } from "../kit/Toolbar.js";
 import type { PageAction } from "../kit/actions.js";
@@ -11,8 +8,6 @@ import { DataSection } from "../components/DataSection.js";
 import { CapabilitiesSection } from "../components/CapabilitiesSection.js";
 import { IntegrationsSection } from "../components/IntegrationsSection.js";
 import { AiSection } from "../components/AiSection.js";
-import { NewThreadSessionSetting } from "../components/NewThreadSessionSetting.js";
-import { useAgentHarnesses } from "../useAgentHarnesses.js";
 import { settingsRef, viewParamsOf } from "../tabs/pageRefs.js";
 import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
 import type { TabRef } from "../tabs/tabState.js";
@@ -115,7 +110,6 @@ function SettingsAreasNav({ current, onOpen }: { current: SettingsAreaId; onOpen
 /** An area's own sections (titled as the area model titles them) and its
  *  page actions. */
 function useAreaContent(area: SettingsArea): { sections: DocSection[]; actions?: PageAction[] } {
-  const agents = useAgentsForm(area.id === "agents");
   const title = (id: string) => area.sections.find((s) => s.id === id)?.title ?? id;
   const section = (id: string, body: ReactNode, description?: ReactNode): DocSection => ({
     id,
@@ -126,29 +120,9 @@ function useAreaContent(area: SettingsArea): { sections: DocSection[]; actions?:
   });
   switch (area.id) {
     case "overview":
-      // Its sections are foundation lenses mounted in the area's slot.
-      return { sections: [] };
     case "agents":
-      return {
-        sections: [
-          section(
-            "agents",
-            agents.agentsBody,
-            "Enabled agents for this project. The first enabled agent is the default for new sessions.",
-          ),
-          section("new-threads", <NewThreadSessionSetting harnesses={agents.harnesses} />),
-          section(
-            "prompt",
-            agents.promptBody,
-            <>
-              Text appended to every agent&apos;s system prompt, in <code>.oxplow/project.yaml</code>. It applies to sessions started after
-              Save; running ones keep the prompt they launched with.
-            </>,
-          ),
-        ],
-        actions: [{ id: "save", label: "Save", primary: true, busy: agents.saving, disabled: !agents.loaded, run: agents.save }],
-      };
     case "lsp":
+      // Their sections are foundation lenses mounted in the area's slot.
       return { sections: [] };
     case "extensions":
       return {
@@ -201,206 +175,3 @@ function useAreaContent(area: SettingsArea): { sections: DocSection[]; actions?:
   }
 }
 
-/** The Agents area's form: which agents are on and in what order, each
- *  one's declared settings, and the prompt additions — saved together. */
-function useAgentsForm(active: boolean) {
-  const harnesses = useAgentHarnesses();
-  // What is edited and not yet saved is this step's history state (a
-  // draft; `null` until edited, which shows what is saved).
-  const [loadedPrompt, setLoadedPrompt] = useState("");
-  const [promptDraft, setPromptAppend, clearPrompt] = useDraft<string | null>("agentPrompt", null);
-  const promptAppend = promptDraft ?? loadedPrompt;
-  // The enabled harnesses in priority order; `null` until edited, which
-  // shows what the project has (every harness when `agents:` names none).
-  const [editedAgents, setEditedAgents, clearAgents] = useDraft<string[] | null>("agents", null);
-  const agents = editedAgents ?? harnesses.filter((h) => h.enabled).map((h) => h.id);
-  // Each harness's settings as loaded (`agentConfig.<harness>.<key>`) and
-  // as edited, keyed `<harness>.<key>`.
-  const [loadedSettings, setLoadedSettings] = useState<Record<string, string>>({});
-  const [settingsDraft, setHarnessSettings, clearSettings] = useDraft<Record<string, string> | null>("agentSettings", null);
-  const harnessSettings = settingsDraft ?? loadedSettings;
-  const [loaded, setLoaded] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!active) return;
-    setLoaded(false);
-    void getConfig()
-      .then((config) => {
-        setLoadedPrompt(config.agentPromptAppend ?? "");
-        setLoadedSettings(harnessSettingValues(config.agentConfig ?? {}));
-        setLoaded(true);
-      })
-      .catch((e) => {
-        setError(String(e));
-        setLoaded(true);
-      });
-  }, [active]);
-
-  async function save() {
-    setSaving(true);
-    setError(null);
-    setSaved(null);
-    try {
-      if (agents.length === 0) throw new Error("Enable at least one agent.");
-      // Each is a person's command (audited, undoable); Save is their word.
-      if (editedAgents) await runCommand("oxplow.agent.set_agents", { agents: editedAgents }, true);
-      for (const h of harnesses) {
-        for (const s of h.settings) {
-          const at = `${h.id}.${s.key}`;
-          const value = (harnessSettings[at] ?? "").trim();
-          if (value !== (loadedSettings[at] ?? "")) await runCommand("oxplow.agent.set_setting", { agent: h.id, key: s.key, value }, true);
-        }
-      }
-      if (promptAppend.trim() !== loadedPrompt.trim()) {
-        await (promptAppend.trim()
-          ? runCommand("oxplow.config.set", { key: "agentPromptAppend", value: promptAppend }, true)
-          : runCommand("oxplow.config.unset", { key: "agentPromptAppend" }, true));
-      }
-      setLoadedPrompt(promptAppend);
-      setLoadedSettings(harnessSettings);
-      clearPrompt();
-      clearSettings();
-      clearAgents();
-      setSaved("Saved. The prompt applies to sessions started from now on.");
-    } catch (e) {
-      setError(String(e instanceof Error ? e.message : e));
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  const status = error ? (
-    <p className="ox-error" data-testid="settings-save-error">
-      {error}
-    </p>
-  ) : saved ? (
-    <p className="ox-muted ox-small" data-testid="settings-saved">
-      {saved}
-    </p>
-  ) : null;
-  const disabled = !loaded || saving;
-  const agentsBody = (
-    <>
-      {status}
-      <AgentPicker harnesses={harnesses} agents={agents} onChange={setEditedAgents} disabled={disabled} />
-      {harnesses
-        .filter((h) => agents.includes(h.id))
-        .flatMap((h) =>
-          h.settings.map((s) => {
-            const at = `${h.id}.${s.key}`;
-            return (
-              <label key={at} className="ox-field" style={{ marginTop: "var(--space-3)" }}>
-                <span className="ox-label">
-                  {h.title} — {s.title}: {s.hint}
-                </span>
-                <input
-                  data-testid={`settings-agent-${h.id}-${s.key}`}
-                  className="ox-input"
-                  type="text"
-                  value={harnessSettings[at] ?? ""}
-                  onChange={(event) => setHarnessSettings({ ...harnessSettings, [at]: event.target.value })}
-                  disabled={disabled}
-                  placeholder={s.placeholder}
-                  style={{ width: 320 }}
-                />
-              </label>
-            );
-          }),
-        )}
-    </>
-  );
-  const promptBody = (
-    <textarea
-      data-testid="settings-page-prompt-append"
-      className="ox-textarea"
-      value={promptAppend}
-      onChange={(event) => setPromptAppend(event.target.value)}
-      disabled={disabled}
-      rows={10}
-      placeholder="e.g. Prefer red/green TDD. Never run destructive git commands without asking."
-      style={{ width: "100%", fontFamily: "var(--font-mono)" }}
-    />
-  );
-  return { harnesses, loaded, saving, save, agentsBody, promptBody };
-}
-
-/// The registered harnesses, the enabled ones first in their order.
-function AgentPicker({
-  harnesses,
-  agents,
-  onChange,
-  disabled,
-}: {
-  harnesses: HarnessListing[];
-  agents: string[];
-  onChange(next: string[]): void;
-  disabled: boolean;
-}) {
-  const ordered = [
-    ...agents.flatMap((id) => harnesses.filter((h) => h.id === id)),
-    ...harnesses.filter((h) => !agents.includes(h.id)),
-  ];
-  function setEnabled(agent: string, enabled: boolean) {
-    if (enabled) {
-      onChange(agents.includes(agent) ? agents : [...agents, agent]);
-      return;
-    }
-    onChange(agents.filter((a) => a !== agent));
-  }
-  function move(agent: string, direction: -1 | 1) {
-    const index = agents.indexOf(agent);
-    const nextIndex = index + direction;
-    if (index < 0 || nextIndex < 0 || nextIndex >= agents.length) return;
-    const next = agents.slice();
-    [next[index], next[nextIndex]] = [next[nextIndex]!, next[index]!];
-    onChange(next);
-  }
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
-      {ordered.map(({ id: agent, title }) => {
-        const enabled = agents.includes(agent);
-        return (
-          <label key={agent} style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
-            <input
-              type="checkbox"
-              checked={enabled}
-              disabled={disabled || (enabled && agents.length === 1)}
-              onChange={(event) => setEnabled(agent, event.target.checked)}
-            />
-            <span style={{ minWidth: 64 }}>{title}</span>
-            {enabled ? (
-              <>
-                <button type="button" className="ox-button" disabled={disabled || agents.indexOf(agent) === 0} onClick={() => move(agent, -1)}>
-                  Up
-                </button>
-                <button
-                  type="button"
-                  className="ox-button"
-                  disabled={disabled || agents.indexOf(agent) === agents.length - 1}
-                  onClick={() => move(agent, 1)}
-                >
-                  Down
-                </button>
-              </>
-            ) : null}
-          </label>
-        );
-      })}
-    </div>
-  );
-}
-
-/// `agentConfig`'s string values, keyed `<harness>.<key>`.
-function harnessSettingValues(agentConfig: Record<string, unknown>): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const [harness, fields] of Object.entries(agentConfig)) {
-    if (!fields || typeof fields !== "object") continue;
-    for (const [key, value] of Object.entries(fields as Record<string, unknown>)) {
-      if (typeof value === "string") out[`${harness}.${key}`] = value;
-    }
-  }
-  return out;
-}

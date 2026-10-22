@@ -29,11 +29,7 @@ export const SETTINGS_AREAS: readonly SettingsArea[] = [
     id: "agents",
     title: "Agents",
     intro: "The coding agents this project runs, what new threads start with, and what every agent is told.",
-    sections: [
-      { id: "agents", title: "Agents" },
-      { id: "new-threads", title: "New threads" },
-      { id: "prompt", title: "Agent prompt additions" },
-    ],
+    sections: [],
   },
   {
     id: "lsp",

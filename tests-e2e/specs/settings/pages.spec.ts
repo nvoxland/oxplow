@@ -50,18 +50,27 @@ test("a Settings area is the page's view: the same page, and Back returns to the
   await expect(body.getByRole("heading", { level: 1 })).toHaveText("Settings");
 });
 
+// The Agents area's prompt addition is an edit form over
+// `oxplow.agent.set_prompt_append` (Save only when changed), written to
+// project.yaml and kept across a reload.
 test("a config edit is saved to project.yaml and read back", async ({ page, daemon }) => {
   await page.goto("/");
   await openFromLauncher(page, "Settings: Agents");
-  const field = page.getByTestId("settings-page-prompt-append");
-  await field.fill("Prefer small, reviewable commits.");
-  await page.locator('[data-testid="action-save"]:visible').click();
+  const prompt = page.getByTestId("settings.agents.sections-oxplow-foundation/agents-prompt");
+  const box = prompt.getByRole("textbox");
+  const save = prompt.getByRole("button", { name: "Save" });
+  await expect(save).toBeDisabled();
+  await box.fill("Prefer small, reviewable commits.");
+  await expect(save).toBeEnabled();
+  await save.click();
   await expect
     .poll(() => readFileSync(join(daemon.project, ".oxplow", "project.yaml"), "utf8"))
     .toContain("Prefer small, reviewable commits.");
   await page.reload();
   await openFromLauncher(page, "Settings: Agents");
-  await expect(page.getByTestId("settings-page-prompt-append")).toHaveValue("Prefer small, reviewable commits.");
+  await expect(
+    page.getByTestId("settings.agents.sections-oxplow-foundation/agents-prompt").getByRole("textbox"),
+  ).toHaveValue("Prefer small, reviewable commits.");
 });
 
 // Stream Settings is the foundation's document over `v_stream`: its prompt

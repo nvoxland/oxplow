@@ -510,6 +510,11 @@ ui:
     # Settings → Overview and Language Servers: the whole area.
     - { slot: settings.overview.sections, lens: settings-proposals }
     - { slot: settings.overview.sections, lens: settings-values }
+    # Settings → Agents: the whole area.
+    - { slot: settings.agents.sections, lens: agents-list }
+    - { slot: settings.agents.sections, lens: agents-settings }
+    - { slot: settings.agents.sections, lens: agents-new-thread }
+    - { slot: settings.agents.sections, lens: agents-prompt }
     - { slot: settings.lsp.sections, lens: lsp-servers }
     - { slot: settings.lsp.sections, lens: lsp-install }
     - { slot: settings.lsp.sections, lens: lsp-suggestions }
@@ -712,6 +717,11 @@ commands:
     summary: "Set one of an agent harness's declared settings (`agentConfig.<agent>.<key>`, what its launch reads); a blank value clears it. Logged as config.changed, undoable. A person's, or their lens's."
     scope: config.write
     op: set_agent_setting
+    invokers: { human: true, agent: false, lens: true }
+  - name: agent.set_prompt_append
+    summary: "Set the text appended to every agent's system prompt (`agentPromptAppend`); blank removes it. It applies to sessions started after. Logged as config.changed, undoable. A person's, or their lens's."
+    scope: config.write
+    op: set_prompt_append
     invokers: { human: true, agent: false, lens: true }
   - name: config.unset
     summary: "Remove one .oxplow/project.yaml key so it returns to its default (or, with `layer: personal`, a person's own choice); logged as config.changed, undo restores it."

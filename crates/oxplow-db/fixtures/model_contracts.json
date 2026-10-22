@@ -21717,6 +21717,38 @@
       "key": [
         "id"
       ]
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "doc": "Its key: what a session's `harness` and `agents:` name."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "What it is called."
+        },
+        {
+          "name": "enabled",
+          "type": "INT",
+          "doc": "1 when the project enables it (`agents:` names it, or names none)."
+        },
+        {
+          "name": "position",
+          "type": "INT",
+          "doc": "Its place in priority order, from 0."
+        },
+        {
+          "name": "settings",
+          "type": "TEXT",
+          "doc": "The settings it declares for the person to set (`agentConfig.<id>.<key>` in project.yaml), as a JSON array of `{ key, title, hint, placeholder }`; `[]` when it declares none. (v2)"
+        }
+      ],
+      "key": [
+        "id"
+      ]
     }
   },
   "resource": {

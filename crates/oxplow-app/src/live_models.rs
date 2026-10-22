@@ -112,7 +112,7 @@ pub fn columns(name: &str) -> &'static [&'static str] {
             "problem",
         ],
         "vcs_workspace" => &["path", "branch", "head", "is_main", "stream_id"],
-        "agent_harness" => &["id", "title", "enabled", "position"],
+        "agent_harness" => &["id", "title", "enabled", "position", "settings"],
         "workspace_file" => &["stream_id", "path", "parent", "name", "kind", "status"],
         _ => &[],
     }
@@ -739,6 +739,7 @@ impl LiveSources {
                     text(h.title().to_string()),
                     flag(agents.is_empty() || agents.iter().any(|a| a == h.id())),
                     SqlCell::Int(position as i64),
+                    json(&h.settings()),
                 ]
             })
             .collect()

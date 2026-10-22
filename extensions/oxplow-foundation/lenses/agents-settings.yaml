@@ -1,0 +1,20 @@
+title: Agent settings
+description: "What each enabled agent declares you can set, read when a session of it starts (a model, an effort). Blank clears one."
+query: |
+  SELECT h.id AS agent, json_extract(s.value, '$.key') AS key,
+         h.title || ' — ' || json_extract(s.value, '$.title') AS setting,
+         coalesce(json_extract(json_extract(c.value, '$'), '$.' || h.id || '.' || json_extract(s.value, '$.key')), '') AS value,
+         json_extract(s.value, '$.hint') AS hint
+  FROM v_agent_harness h, json_each(h.settings) s
+  LEFT JOIN v_config_value c ON c.key = 'agentConfig'
+  WHERE h.enabled = 1
+  ORDER BY h.position, s.key
+viz: table
+columns:
+  - { key: setting, label: Setting }
+  - { key: value, label: Value }
+  - { key: hint, label: What it does }
+actions:
+  - { id: change, label: Change…, command: oxplow.agent.set_setting, form: true, row: true, fixed: [agent, key], input: { agent: "{{row.agent}}", key: "{{row.key}}", value: "{{row.value}}" } }
+empty: No enabled agent declares a setting.
+hidden: true

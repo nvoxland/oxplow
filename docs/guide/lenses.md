@@ -195,7 +195,8 @@ actions:
 ```
 
 `{{param.x}}` and `{{row.col}}` fill the input from the lens's params or
-the row. A command that asks for confirmation asks you before it runs.
+the row. `{{row.col|json}}` is the JSON a text column holds, as the value
+it is (a list the row's query built, such as an order). A command that asks for confirmation asks you before it runs.
 
 With `form: true` an action opens the command's form in a side panel
 instead of running at once, its fields starting from `input`; you edit
@@ -406,7 +407,7 @@ page's id as a param, so it must declare it:
 | `oxplow-foundation/uncommitted.sections` | Uncommitted Changes, as sections (`commit`, `files`); `at: { before: commit }` for a strip above everything | `change_id` (the page's row) |
 | `vcs.history.sidebar` | Git history's side column | `stream_id` |
 | `diff.file.header` | a file diff, above the editor | `path`, `left_revision`, `right_revision`, `stream_id` |
-| `settings.<area>.sections` | A Settings area's page, as sections: `overview` and `lsp` (no parts of their own), `agents` (`agents`, `new-threads`, `prompt`), `extensions` (`health`), `data` (`data`), `integrations` (`capabilities`, `integrations`), `ai` (`ai`) | none; `overview` passes `q`, its search |
+| `settings.<area>.sections` | A Settings area's page, as sections: `overview`, `agents` and `lsp` (no parts of their own), `extensions` (`health`), `data` (`data`), `integrations` (`capabilities`, `integrations`), `ai` (`ai`) | none; `overview` passes `q`, its search |
 
 A lens declares the params its slot passes (a Settings area's lens needs none). `at` works only on a parts slot such as `settings.agents.sections`, or a foundation page's own (`oxplow-foundation/new-session.sections`, part ids `start`, `earlier`, binding `thread_id`). A region slot refuses it. `change_id` points at
 the page's change in `v_change`, with its analysis in `v_change_file`,
