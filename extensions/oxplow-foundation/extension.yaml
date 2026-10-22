@@ -151,7 +151,7 @@ pages:
   # Work
   - { id: tasks, title: Tasks, icon: check-square, category: Work, keywords: dashboard work list, component: "oxplow:tasks" }
   - { id: backlog, title: Backlog, icon: inbox, category: Work, count: backlog-count, component: "oxplow:backlog" }
-  - { id: board, title: Board, icon: columns-3, category: Work, keywords: kanban columns state work items, component: "oxplow:board" }
+  - { id: board, title: Board, icon: columns-3, category: Work, keywords: kanban columns state work items, lens: board }
   - { id: done-work, title: Done Work, icon: circle-check, category: Work, lens: done-work }
   - { id: go-to, title: Go To, icon: star, category: Work, keywords: bookmarks visits recent history, lens: go-to }
   # Code

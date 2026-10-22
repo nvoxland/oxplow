@@ -27,7 +27,6 @@ export function isAppRenderer(name: string): name is AppRendererName {
 /// The rest of the built-ins (`builtInPages.tsx`).
 export const BUILT_IN_PAGES = [
   "backlog",
-  "board",
   "custom-dashboard",
   "diff-view",
   "explore-data",

@@ -40,9 +40,9 @@ pub struct Replaceable {
 
 /// Every replaceable sub-component.
 pub const REPLACEABLE: &[Replaceable] = &[
-    // The Board's columns of cards (`WorkBoard`): `scope` is `thread`,
-    // `backlog` or `all`; `thread_id` the thread when `scope` is `thread`,
-    // else null. A view of the capability as a whole, so any extension
+    // The Board's columns of cards (the `board-cards` part of the `board`
+    // document): `scope` is `thread`, `backlog` or `all`; `thread_id` the
+    // viewed thread, which applies when `scope` is `thread`. A view of the capability as a whole, so any extension
     // may bring one: it reads `v_work_item` and runs the interface verbs
     // (`oxplow.work_item.transition`, `reorder`, `update`, …), whichever
     // list is active.

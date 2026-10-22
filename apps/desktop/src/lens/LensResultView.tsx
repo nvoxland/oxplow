@@ -632,6 +632,10 @@ function RowsBody({
   };
   const rowMenu: RowMenu = (row) => ({
     tabIndex: 0,
+    // In the capture phase: a link in the row opens its page in a new tab
+    // on its own right-click, and the row's menu is what a right-click on
+    // a row means, wherever on it.
+    onContextMenuCapture: (e) => ctxMenu.open(e, rowItems(row)),
     onContextMenu: (e) => ctxMenu.open(e, rowItems(row)),
     onKeyDown: (e) => {
       if (picks && e.key === "Enter" && e.target === e.currentTarget) {
@@ -996,6 +1000,7 @@ function GroupHeading({
 
 type RowMenu = (row: SqlCell[]) => {
   tabIndex: number;
+  onContextMenuCapture(e: React.MouseEvent): void;
   onContextMenu(e: React.MouseEvent): void;
   onKeyDown(e: React.KeyboardEvent): void;
   onClick?(e: React.MouseEvent): void;

@@ -2311,7 +2311,7 @@ it props it doesn't know.
 
 | Target | Core component | Capability | Bound | Props | View |
 |---|---|---|---|---|---|
-| `work_item.board` | the Board's columns of cards (`WorkBoard`, `BoardPage`) | `work_items` | no | `scope` (`thread` / `backlog` / `all`), `thread_id` (the thread when `scope` is `thread`, else null) | — |
+| `work_item.board` | the Board's columns of cards (the `board-cards` part of the `board` document) | `work_items` | no | `scope` (`thread` / `backlog` / `all`), `thread_id` (the viewed thread; it applies when `scope` is `thread`) | — |
 | `work_item.list` | the Tasks page's list (`TasksList`, `TasksPage`): the scope picker, detail pane and backlog drawer stay oxplow's; the lens's `stream_id` is the scope's stream | `work_items` | no | `scope` (`thread` / `stream` / `all`), `thread_id` (the thread when `scope` is `thread`, else null) | — |
 | `work_item.detail` | a work item's editor, its title and body (`TaskDetail`, `WorkItemPage`): the rail (state pill, Move To, fields, Delete), Comment / Link, slots and activity stay oxplow's | `work_items` | no | `uri` (the item) | — |
 | `work_item.detail.state` | a work item's State (`WorkItemPage`'s rail; P10) — never its Move To, which stays oxplow's canonical states, so a replacement can't strand an item (tsk919) | `work_items` | yes | `uri` (the item) | — |
@@ -2319,7 +2319,7 @@ it props it doesn't know.
 | `vcs.history.graph` | Git History's commits (a part of the `git-history` document): oxplow's own is a plain list, the part's lens (`git-history-commits`) | `vcs` | no | `head_sha` (the stream's head), `reveal_sha` (a commit to scroll to and mark, or null), `limit` | `q`, `author`, `branch` (Git History's filters; v2) |
 
 **Who places a target.** A core component (`<Replaceable target …
-fallback>`, `BoardPage`) or a **lens part** of a declared page: a
+fallback>`) or a **lens part** of a declared page: a
 `document` section or `dashboard` tile with `replaceable: <target>`
 (`LensPart.replaceable`, `PartsViz`). The part's own lens is oxplow's own
 and the fallback; it must declare every prop of the target's contract
@@ -2371,7 +2371,7 @@ lensId, label }`).
 
 **At render** (`lens/useReplacement.ts`, `components/Replaceable.tsx`).
 A core page wraps the component: `<Replaceable target props streamId
-fallback={<WorkBoard …/>}>` (`BoardPage`). `useReplacement` reads the
+fallback={…}>` (a core page that still places one). `useReplacement` reads the
 enabled extensions' replacements of the target and, only when one
 exists, what decides it:
 - **bound**: the host passes the provider of the thing it shows
@@ -4717,6 +4717,7 @@ What moves out of core, and what it becomes:
 | Git Commit and Uncommitted Changes pages | **done:** the `commit` and `uncommitted` documents (a `query` row for the change, declared in `columns:`; parts `commit-detail`, `commit-files`, `uncommitted-commit`, `uncommitted-files`); the analysis moves to the `oxplow-foundation/commit.sections` and `oxplow-foundation/uncommitted.sections` mounts (the old `vcs.commit.details`, `vcs.status.header` and `vcs.status.details` slots are gone); the commit tab is labelled by its sha, not its subject, and the file totals line and Cherry-pick's inline confirm are gone; `GitCommitPage` and `UncommittedChangesPage` are deleted |
 | Comments inbox | **done:** the `comments` document lens (`comments-threads`, a grouped table over `v_comment` with `select` on the `comment` param; `comments-conversation`, over `v_comment_message`); the resolved filter is a static `choice` ladder (the old one was cut to the oldest resolved comment) and "Go to location" is a plain link, so it no longer scrolls to the anchor; `CommentsInboxPage` and `comments-filter` are gone |
 | Directory page | **done:** the `directory` lens, the renderer of `oxplow/dir` (`pages:` entry `lens: directory`, `label: "{{param.path}}"`); `DirectoryPage` is gone |
+| Board page | **done:** the `board` document, one `replaceable: work_item.board` part `board-cards` (`viz: board` grouped by state, a `drag: true` move action and `Move to` row actions); `scope` comes from the page's `show` filter through the document's query row. Cards show the declared enum fields as text (no `FieldBadge` colours). `BoardPage` and `WorkBoard` are gone; a right-click anywhere on a lens row, a link in it included, opens the row's menu (`onContextMenuCapture`) |
 | Settings → AI | **done:** foundation lenses in `settings.ai.sections`: `ai-providers` (`v_ai_provider`; Test… and Remove… row actions, Remove asks first), `ai-provider-form` (a `form` lens over `oxplow.ai.set_provider`, its `key` a `secret: true` field, `kind` chosen from `v_capability_provider`), `ai-roles` (`v_ai_role`; Assign… / Unassign over `oxplow.ai.set_role`), `ai-calls` (the last 7 days of `v_ai_call`). `set_provider` and `remove_provider` now announce `ConfigChanged` so the lists follow. `AiSection`, `aiSettingsModel` and the AI `api.ts` wrappers are gone |
 | Settings → Agents | **done:** foundation lenses in `settings.agents.sections`: `agents-list` (the harnesses from `v_agent_harness`; Enable / Disable / Move Up / Move Down each hand `oxplow.agent.set_agents` the whole new order, built in SQL and bound with `{{row.x|json}}`), `agents-settings` (the declared settings, `v_agent_harness.settings` (v2) joined with `agentConfig`, a `Change…` form over `oxplow.agent.set_setting`), `agents-new-thread` (`personal.newThreadSession`, `Use This` on `oxplow.config.set` / `unset`, which ask first), `agents-prompt` (an edit form over the new `oxplow.agent.set_prompt_append`). No page-wide Save: each part saves itself. `AgentPicker`, `NewThreadSessionSetting` and the Agents form are gone |
 | Settings → Overview and Language Servers | **done:** the areas have no React sections; oxplow-foundation mounts lenses in their slots. Overview: `settings-proposals` (the `approvals` viz) and `settings-values` (a grouped `list` over `v_config_value`: its source, value, doc, Ask the Agent to Change This through `oxplow.agent.draft`, and Change It Here — a link to the area that holds a person-only setting's control; the page's search is the slot param `q`, which the lens reads as `:q`). Language servers: `lsp-servers` (`v_lsp_server`, a row per stream a server runs in; Restart and Remove through `oxplow.lsp.restart_server` / `remove_server`), `lsp-install` (a form over `oxplow.lsp.install_server`) and `lsp-suggestions` (the curated Mason packages for languages with no server). The shell (`SettingsPage`, the rail, the other areas) stays until they convert |

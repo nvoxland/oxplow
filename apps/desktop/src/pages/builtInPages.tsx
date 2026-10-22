@@ -17,7 +17,6 @@ import { BacklogPage } from "./BacklogPage.js";
 import { MetricsPage } from "./MetricsPage.js";
 import { CustomDashboardPage } from "./CustomDashboardPage.js";
 import { ExploreDataPage } from "./ExploreDataPage.js";
-import { BoardPage } from "./BoardPage.js";
 import { ExternalUrlPage } from "./ExternalUrlPage.js";
 
 /** What a built-in page body gets: its tab ref and the ref's payload, the slot's navigation, and core's scope. */
@@ -192,14 +191,6 @@ export const builtInPages: Record<BuiltInPageName, BuiltInPage> = {
       render: () => <CustomDashboardPage dashboardId={params.id} onOpenPage={nav.navOpen} />,
     };
   },
-  board: ({ ref, nav, scope }) => ({
-    id: ref.id,
-    label: "Board",
-    closable: true,
-    render: () => (
-      <BoardPage threadId={scope.threadId ?? null} streamId={scope.stream?.id ?? null} onOpenPage={nav.navOpen} />
-    ),
-  }),
   "explore-data": ({ ref, nav, scope }) => {
     return {
       id: ref.id,

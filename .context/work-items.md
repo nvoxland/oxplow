@@ -181,13 +181,14 @@ link** — its raw text, muted, tooltip "nothing resolves this URI; its
 extension may be gone" — that still unlinks. `BacklinkEdge.resolved` (the
 IPC's `ref_resolver::resolve_ref`) says which.
 
-The **Board** (the `board` page, `components/Board/WorkBoard.tsx`) shows
+The **Board** (the `board` page, the foundation's `board` document with its
+`board-cards` part: a `viz: board` over `v_work_item`) shows
 items as cards in one column per canonical state. Drag a card to a
-column, or right-click → Move To, to transition it through
-`personCommands` (one person path: its confirmation and its error
-reporting). List rows and Board cards share one drag
-(`WORK_ITEM_DRAG_MIME`: refs, each one's title and state), which the
-agent terminal reads as context URIs. **New Item** files on the active
+column (a `drag: true` action on `oxplow.work_item.transition`), or
+right-click → Move To, to transition it through the work list. Its scope
+(this thread, the backlog, everything) is the page's `show` filter. List
+rows and Board cards drag as lens rows, which the agent terminal reads as
+context URIs. **New Item** files on the active
 list: title, body, a canonical starting state (todo or blocked), the
 list's editable fields and — with `hierarchy` — a parent.
 

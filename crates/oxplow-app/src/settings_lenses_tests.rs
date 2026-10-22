@@ -1,7 +1,7 @@
 //! Foundation lenses that replaced core pages: Settings' Overview and Language
 //! Servers areas (mounted in each area's slot: what they list, how they group
 //! and search, what Ask puts in the agent's input, what the language-server
-//! rows offer), the Comments inbox, the commit and uncommitted pages, the Alerts page, and Settings → Agents and AI.
+//! rows offer), the Comments inbox, the commit and uncommitted pages, the Alerts page, Settings → Agents and AI, and the Board.
 
 use oxplow_config::LspServerConfig;
 use oxplow_db::SqlCell;
@@ -675,4 +675,93 @@ async fn the_ai_area_lists_providers_roles_and_choices() {
         Some("m1")
     );
     assert!(run(&fx, "ai-calls", vec![]).await.rows.is_empty());
+}
+
+/// The Board: every work item in scope as a card in its state, with the
+/// declared enum fields and the comment count; the scope narrows it.
+#[tokio::test]
+async fn the_board_lists_work_items_by_scope() {
+    let fx = crate::test_fixtures::services_with_task_effort().await;
+    let thread = fx.thread.to_string();
+    for (title, thread) in [
+        ("On the thread", Some(thread.clone())),
+        ("In the backlog", None),
+    ] {
+        let mut input = serde_json::json!({ "title": title });
+        if let Some(t) = thread {
+            input["thread"] = serde_json::json!(t);
+        }
+        fx.svc
+            .commands
+            .run(
+                &oxplow_domain::Actor::Human,
+                "oxplow.work_item.create",
+                input,
+                false,
+            )
+            .await
+            .unwrap();
+    }
+    let params = |scope: &str| {
+        vec![
+            ("scope", SqlCell::Text(scope.into())),
+            ("thread_id", SqlCell::Int(fx.thread.value())),
+        ]
+    };
+    let thread_run = run_task(&fx, "board-cards", params("thread")).await;
+    assert!(thread_run.has("title", "On the thread") && !thread_run.has("title", "In the backlog"));
+    let backlog = run_task(&fx, "board-cards", params("backlog")).await;
+    assert!(backlog.has("title", "In the backlog") && !backlog.has("title", "On the thread"));
+    let all = run_task(&fx, "board-cards", params("all")).await;
+    assert!(all.has("title", "On the thread") && all.has("title", "In the backlog"));
+    let card = all.keyed("title", "On the thread");
+    assert_eq!(all.text(card, "state").as_deref(), Some("todo"));
+    assert!(all.flag(card, "not_done") && !all.flag(card, "not_todo"));
+
+    // The page's row says which scope its part draws.
+    let doc = run_task(
+        &fx,
+        "board",
+        vec![
+            ("show", SqlCell::Text("backlog".into())),
+            ("thread_id", SqlCell::Int(fx.thread.value())),
+        ],
+    )
+    .await;
+    assert_eq!(doc.text(&doc.rows[0], "scope").as_deref(), Some("backlog"));
+    let doc = run_task(
+        &fx,
+        "board",
+        vec![
+            ("show", SqlCell::Text("thread".into())),
+            ("thread_id", SqlCell::Null(())),
+        ],
+    )
+    .await;
+    assert_eq!(doc.text(&doc.rows[0], "scope").as_deref(), Some("all"));
+}
+
+async fn run_task(
+    fx: &crate::test_fixtures::TaskEffortFixture,
+    lens: &str,
+    params: Vec<(&str, SqlCell)>,
+) -> Run {
+    let svc = &fx.svc;
+    let run = run_lens(
+        &svc.sql,
+        &svc.extension_catalog,
+        svc.layout.project_dir.as_path(),
+        &format!("oxplow-foundation/{lens}"),
+        params
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v))
+            .collect(),
+        &LensContext::default(),
+    )
+    .await
+    .unwrap();
+    Run {
+        columns: run.result.columns,
+        rows: run.result.rows,
+    }
 }

@@ -13,7 +13,6 @@
 pub const BUILT_IN_PAGES: &[&str] = &[
     "agent-session",
     "backlog",
-    "board",
     "custom-dashboard",
     "diff-view",
     "editor",
