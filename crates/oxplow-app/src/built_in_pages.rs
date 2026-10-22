@@ -17,7 +17,6 @@ pub const BUILT_IN_PAGES: &[&str] = &[
     "board",
     "custom-dashboard",
     "diff-view",
-    "duplicate-block",
     "editor",
     "explore-data",
     "external-url",

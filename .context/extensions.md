@@ -981,7 +981,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   change links too). `compare` takes
   a `path:start-end|peer:start-end` value (build it in SQL) plus an
   optional `head` version column and opens the side-by-side
-  `duplicate-block` page, which is now the general core compare page.
+  `duplicate-block` page, which is now the general compare page (the foundation `duplicate-block` lens: two `code` rows with `sync: true`).
   Both URIs carry their whole spec, so App's `handleOpenPage` and
   in-tab navigation register them directly.
 - **Disabling.** An extension that is off contributes nothing: it has
@@ -4649,7 +4649,7 @@ What moves out of core, and what it becomes:
 | Today (core) | Becomes |
 |---|---|
 | Planning / Review / Quality dashboards | `document` lenses (**done**: `planning`, `review`, `quality`) |
-| Code-quality runner, dup scan, FindingPage, DuplicateBlockPage | **done:** the `findings` / `duplicate-blocks` lenses; the dup scan runs in core's change analysis; `DuplicateBlockPage` stays core as the compare page |
+| Code-quality runner, dup scan, FindingPage, DuplicateBlockPage | **done:** the `findings` / `duplicate-blocks` lenses; the dup scan runs in core's change analysis; the compare page is the foundation `duplicate-block` lens (`DuplicateBlockPage` is gone) |
 | Change-analysis cards (treemap, look-here-first, functions, co-change, zones) | **done:** the `change-review` document in the `effort.review.details` / `oxplow-foundation/commit.sections` / `oxplow-foundation/uncommitted.sections` slots; core keeps a changed-files tree (`ChangedFilesTree`, `useChangedFiles`) |
 | Fact collectors (`.oxplow/extensions/project/collectors/*.star`, idiom `.star`; gauges until P7.B3) | extensions can declare fact collectors (tsk311); done: the code metrics are oxplow-foundation's (the opt-in ones say `default: off`) |
 | Metric-threshold nudges | **done:** the `threshold-crossed` advisory (with `metric-deltas`) |
@@ -4657,6 +4657,7 @@ What moves out of core, and what it becomes:
 | Git History's commit graph | **done:** the `history-graph` component, replacing core's plain `CommitList` (`vcs.history.graph`) |
 | Local history dashboard | stays core (snapshots are substrate); the `recent-snapshots` lens in `review` covers the at-a-glance view |
 | Effort metrics block, effort coverage page, tests-run and nudge blocks | **done:** `effort.review.details` slot lenses `effort-tests` (a document: coverage, untested files, test runs, failed tests, analysis findings), `effort-metric-deltas`, `effort-nudges` |
+| Duplicate Block page | **done:** the `duplicate-block` lens — `SELECT :left … UNION ALL SELECT :right …` over two route-param sides (a missing `*_at` is `working`), `viz: code` with `sync: true`, tab label `{{param.left}} ↔ {{param.right}}` |
 | Diff and File at a Revision pages | **done:** the `diff` lens (a `diff` viz; its `diff:` block takes a `base` column for the header's `vs <base>`; a clipboard compare's text stays in the entry's history state, read by `DiffViz`) and the `file-viewer` lens (a `code` viz); `DiffPage` and `FileViewerPage` are gone |
 | Git Commit and Uncommitted Changes pages | **done:** the `commit` and `uncommitted` documents (a `query` row for the change, declared in `columns:`; parts `commit-detail`, `commit-files`, `uncommitted-commit`, `uncommitted-files`); the analysis moves to the `oxplow-foundation/commit.sections` and `oxplow-foundation/uncommitted.sections` mounts (the old `vcs.commit.details`, `vcs.status.header` and `vcs.status.details` slots are gone); the commit tab is labelled by its sha, not its subject, and the file totals line and Cherry-pick's inline confirm are gone; `GitCommitPage` and `UncommittedChangesPage` are deleted |
 | Comments inbox | **done:** the `comments` document lens (`comments-threads`, a grouped table over `v_comment` with `select` on the `comment` param; `comments-conversation`, over `v_comment_message`); the resolved filter is a static `choice` ladder (the old one was cut to the oldest resolved comment) and "Go to location" is a plain link, so it no longer scrolls to the anchor; `CommentsInboxPage` and `comments-filter` are gone |

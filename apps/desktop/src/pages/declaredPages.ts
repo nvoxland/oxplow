@@ -31,7 +31,6 @@ export const BUILT_IN_PAGES = [
   "board",
   "custom-dashboard",
   "diff-view",
-  "duplicate-block",
   "explore-data",
   "external-url",
   "files",

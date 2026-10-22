@@ -1,12 +1,11 @@
 import { ResourcePage } from "./ResourcePage.js";
-import { diffViewOf, duplicateBlockOf, fileRef, isPage, newTaskRef, viewParamsOf, workItemTabRef, type DiffViewPayload } from "../tabs/pageRefs.js";
+import { diffViewOf, isPage, newTaskRef, viewParamsOf, workItemTabRef, type DiffViewPayload } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
 import type { Stream } from "../api.js";
 import { openExternalUrl } from "../api.js";
 import type { CenterTab } from "../components/CenterTabs/CenterTabs.js";
 import type { BuiltInPageName } from "./declaredPages.js";
 import type { AppScope, SlotNav } from "./appScope.js";
-import { DuplicateBlockPage } from "./DuplicateBlockPage.js";
 import { SettingsPage } from "./SettingsPage.js";
 import { settingsArea } from "./settingsAreas.js";
 import { DiffViewPage } from "./DiffViewPage.js";
@@ -94,27 +93,6 @@ export const diffViewTab = (ref: TabRef, payload: DiffViewPayload | null, nav: S
 };
 
 export const builtInPages: Record<BuiltInPageName, BuiltInPage> = {
-  "duplicate-block": ({ ref, params, nav, scope }) => {
-    const payload = duplicateBlockOf(params);
-    if (!payload) return null;
-    const leftBase = payload.leftPath.split("/").pop() ?? payload.leftPath;
-    const rightBase = payload.rightPath.split("/").pop() ?? payload.rightPath;
-    return {
-      id: ref.id,
-      label: `${leftBase} ↔ ${rightBase}`,
-      closable: true,
-      render: () => scope.stream ? (
-        <DuplicateBlockPage
-          stream={scope.stream}
-          payload={payload}
-          visible={scope.effectiveCenterActive === ref.id}
-          onJumpToSource={(p, v) => {
-            scope.handleNavigateInTab(nav.slotId, fileRef(p, v));
-          }}
-        />
-      ) : null,
-    };
-  },
   settings: ({ ref, nav }) => {
     const view = viewParamsOf(ref);
     const area = settingsArea(typeof view.area === "string" ? view.area : undefined);
