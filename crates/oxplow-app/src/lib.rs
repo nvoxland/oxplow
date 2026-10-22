@@ -59,6 +59,8 @@ pub mod dashboard_tiles;
 #[cfg(test)]
 mod dashboards_reference_tests;
 pub mod diagnostics;
+#[cfg(test)]
+mod directory_lens_tests;
 pub mod duplication_scan;
 #[cfg(test)]
 mod earlier_sessions_tests;

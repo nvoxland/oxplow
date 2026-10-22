@@ -107,7 +107,6 @@ import { renameHint, renameSession } from "./sessionRename.js";
 import { useAgentHarnesses } from "./useAgentHarnesses.js";
 import { readThreadSessions, useThreadSessions } from "./agentSessions.js";
 import { rollUpAgentStatus, threadStatuses } from "./agentStatusRollup.js";
-import { DirectoryPage } from "./pages/DirectoryPage.js";
 import { MetricDetailPage } from "./pages/MetricDetailPage.js";
 import { LensPage } from "./pages/LensPage.js";
 import { insertIntoAgent } from "./agent-input-bus.js";
@@ -1548,7 +1547,7 @@ export function App() {
     handleOpenPageRef.current?.(gitCommitRef(sha));
   }, []);
 
-  /** Open the DirectoryPage for a wikilink-resolved workspace dir. */
+  /** Open the directory page for a wikilink-resolved workspace dir. */
   const handleOpenDirectory = useCallback((path: string) => {
     if (!path) return;
     handleOpenPageRef.current?.(directoryRef(path));
@@ -2327,22 +2326,6 @@ export function App() {
               onOpenExternalUrl={handleOpenExternalUrl}
             />
           ) : null,
-        };
-      },
-      directory: (ref) => {
-        const dirPath = paramOf(ref.id, "path") ?? "";
-        const dirNavOpen = (newRef: TabRef) => handleNavigateInTab(ref.id, newRef);
-        return {
-          id: ref.id,
-          label: dirPath || "/",
-          closable: true,
-          render: () => (
-            <DirectoryPage
-              stream={stream}
-              path={dirPath}
-              onOpenPage={dirNavOpen}
-            />
-          ),
         };
       },
       "work-item": (ref, nav) => {

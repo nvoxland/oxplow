@@ -123,7 +123,7 @@ otherwise. A tab's label and icon come from `recordedPageKind(ref)` /
 (`oxplow/file`), else a web page's scheme.
 
 Foundation declares oxplow's renderers (`agent-session`, `commit`,
-`directory`, `editor`, `file-viewer`, `lens`, `metric-detail`,
+`editor`, `file-viewer`, `lens`, `metric-detail`,
 `resource`, `wiki-page`, `work-item`, and `diff-view` also for
 `oxplow/snapshot`, `oxplow/effort` and `oxplow/turn`; `custom-dashboard`
 for `oxplow/dashboard`; `external-url` for `https` and `http`). Their
@@ -258,7 +258,7 @@ category (`launcherPages`), each `count:` lens run when it opens
 
 oxplow's pages and their params:
 
-- Lens pages: `problems`, `symbols` (`path`, `filter`), `closed-threads`,
+- Lens pages: `directory` (the renderer of `oxplow/dir`, `accepts: { rev: absent }`, tab label `{{param.path}}`: a folder's rows from `v_workspace_file WHERE stream_id = :stream_id AND parent = :path`, folders first, each linking to its folder or file; params `uri`, `path`, `stream_id`), `problems`, `symbols` (`path`, `filter`), `closed-threads`,
   `wiki-index`, `wiki-freshness` (`slug`), `go-to`, `dashboards`,
   `hook-events`, `done-work`, `catalog`, `new-stream` (a form: `visible_if` on its `source`, `oxplow.stream.create`), `stream-settings` (`stream`) and `thread-settings` (`thread`) (documents: a hint, the thread's open sessions, and the prompt as an edit form over `v_stream` / `v_thread` with `oxplow.*.set_prompt`), `git-history` (a document with one replaceable part: the commit list, or the history graph; params `q`, `author`, `branch`), `local-history` (a document of
   two lenses; params `mode` `recent` | `by-commit` and `all`, which lifts

@@ -198,7 +198,7 @@ pages:
   # `resource`, which shows it (or, when nothing resolves it, its dead link).
   - { id: editor, title: Editor, for: oxplow/file, accepts: { rev: absent }, default: true, component: "oxplow:editor" }
   - { id: file-viewer, title: File at a Revision, for: oxplow/file, accepts: { rev: present }, component: "oxplow:file-viewer" }
-  - { id: directory, title: Directory, for: oxplow/dir, default: true, component: "oxplow:directory" }
+  - { id: directory, title: Directory, label: "{{param.path}}", for: oxplow/dir, accepts: { rev: absent }, default: true, lens: directory }
   - { id: wiki-page, title: Wiki Page, for: oxplow/wiki, default: true, component: "oxplow:wiki-page" }
   - { id: work-item, title: Work Item, for: oxplow/work_item, default: true, component: "oxplow:work-item" }
   - { id: commit, title: Commit, for: oxplow/commit, default: true, component: "oxplow:commit" }
