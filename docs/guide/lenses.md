@@ -277,6 +277,36 @@ a second submit: it runs the command, and the form starts again with the
 `keep` fields as they were and the rest from its defaults. Enter still
 runs the first submit.
 
+A `viz: markdown` lens shows a column of its first row as markdown, the
+way every page in oxplow shows it: links that open their page, mermaid
+diagrams, tables, and code blocks with a Copy button. Give it an action
+with `edit: true` and it becomes an editor. That action is its Save:
+Save is enabled only when you changed the text, Discard puts back what
+is saved, Cmd/Ctrl+S saves, and what you typed stays through Back and a
+restart. Bind one input field to the text column; the text you wrote
+fills it:
+
+```yaml
+query: |
+  SELECT p.slug, b.body FROM v_knowledge_page p
+  JOIN v_knowledge_body b ON b.uri = p.uri
+  WHERE p.slug = :slug
+viz: markdown
+markdown: { text: body }
+actions:
+  - id: save
+    label: Save
+    command: oxplow.knowledge.write_page
+    edit: true
+    fixed: [slug]
+    input: { slug: "{{row.slug}}", body: "{{row.body}}" }
+```
+
+A page whose `pages:` entry says `comments: true` takes comments on its
+text: select some text, and Add comment appears. The page's nav bar
+steps through its comments, and its rail lists the markdown's headings
+under Contents.
+
 For several forms on one
 page, make a document whose parts are form lenses; each submits on its
 own.

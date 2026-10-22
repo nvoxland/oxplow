@@ -269,7 +269,7 @@
           "const": "number"
         },
         {
-          "description": "The first column of the first row, rendered as markdown.",
+          "description": "The first row's text (`markdown: { text }`, else its first column), rendered as markdown; with an `edit` action, edited.",
           "type": "string",
           "const": "markdown"
         },

@@ -225,8 +225,11 @@ The file-viewer and duplicate-block pages are lenses over these vizes;
 
 `MonacoCommentLayer` (`apps/desktop/src/components/Comments/MonacoCommentLayer.tsx`)
 is mounted inside `EditorPane`'s relative container once `monacoReady`
-and `filePath` are set (target `oxplow:oxplow/file?path=<repo-relative path>`, stream-scoped
-— files aren't thread-bound, so `threadId` is null). It mirrors the
+and `filePath` are set (its `target` is `oxplow:oxplow/file?path=<repo-relative path>`, stream-scoped
+— files aren't thread-bound, so `threadId` is null). The `code` viz mounts
+it too, per file, on a page that takes comments (`comments: true`), with
+the file's URI at its revision as `target`, "Add Comment" on Monaco's
+own menu and a click on a highlight opening the thread. It mirrors the
 rich-text integration:
 
 - **Highlights** are inline `deltaDecorations`

@@ -1542,12 +1542,6 @@ export function App() {
     handleOpenPageRef.current?.(gitCommitRef(sha));
   }, []);
 
-  /** Open the directory page for a wikilink-resolved workspace dir. */
-  const handleOpenDirectory = useCallback((path: string) => {
-    if (!path) return;
-    handleOpenPageRef.current?.(directoryRef(path));
-  }, []);
-
   const handleReorderCenterTabs = useCallback((orderedIds: string[]) => {
     if (!stream) return;
     const orderedFiles = orderedIds.flatMap((id) => {
@@ -2269,12 +2263,8 @@ export function App() {
               slug={slug}
               threadWork={selectedThreadWork}
               onClosed={() => closeOrGoBackPageTab(ref.id)}
-              onOpenWikiPage={handleOpenWiki}
               onOpenFile={nav.navOpenFile}
-              onOpenDirectory={handleOpenDirectory}
               onOpenPage={wikiNavOpen}
-              onOpenCommit={handleOpenCommit}
-              onOpenExternalUrl={handleOpenExternalUrl}
             />
           ) : null,
         };
@@ -2357,7 +2347,7 @@ export function App() {
             closable: true,
             // A renderer's lens is run with the URI it shows.
             render: () => (
-              <LensPage lensId={lens} title={tabLabel(page, parseUri(ref.id)?.params ?? {})} params={{ uri: identityOf(ref.id) ?? ref.id }} renders={ref.id} stream={stream} onOpenPage={nav.navOpen} />
+              <LensPage lensId={lens} title={tabLabel(page, parseUri(ref.id)?.params ?? {})} params={{ uri: identityOf(ref.id) ?? ref.id }} renders={ref.id} stream={stream} onOpenPage={nav.navOpen} comments={page.comments} threadId={selectedThread?.id ?? null} />
             ),
           };
         }

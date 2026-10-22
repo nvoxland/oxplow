@@ -3,7 +3,8 @@ import { NodeViewContent, NodeViewWrapper, ReactNodeViewRenderer } from "@tiptap
 import type { NodeViewProps } from "@tiptap/react";
 import { CodeBlock } from "@tiptap/extension-code-block";
 import { Pencil } from "lucide-react";
-import { renderMermaidInto } from "../Wiki/mermaidRender.js";
+import { renderMermaidInto } from "./mermaidRender.js";
+import { CopyCodeButton } from "./CopyCodeButton.js";
 
 /**
  * Tiptap node that renders fenced `mermaid` code blocks as live SVG
@@ -141,12 +142,13 @@ export const MermaidBlock = CodeBlock.extend({
       if (lang === "mermaid") {
         return <MermaidNodeView {...props} />;
       }
-      // Non-mermaid code blocks: fall through to default <pre><code>.
+      // Any other code block: its source, with the viewer's Copy.
       return (
         <NodeViewWrapper
-          className="oxplow-rt-block oxplow-rt-code"
+          className="oxplow-rt-block oxplow-rt-code oxplow-md-code"
           style={{ margin: "12px 0" }}
         >
+          <CopyCodeButton read={() => props.node.textContent} />
           <pre
             style={{
               margin: 0,

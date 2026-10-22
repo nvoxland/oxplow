@@ -1,10 +1,12 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 
 import type { CommentIntent } from "../../tauri-bridge/generated/bindings.js";
+import { Markdown } from "../Markdown/Markdown.js";
 
-/// Shared textarea composer for both the new-comment flow and replies.
-/// Multi-line: Enter inserts a newline, Cmd/Ctrl+Enter submits, Escape
-/// cancels (per the usability rules). Submit is disabled while empty.
+/// Shared composer for both the new-comment flow and replies: the one
+/// Markdown editor, so a comment is written as it reads. Enter adds a
+/// line, Cmd/Ctrl+Enter submits, Escape cancels (per the usability
+/// rules). Submit is disabled while empty.
 export function CommentComposer({
   submitLabel,
   placeholder,
@@ -28,20 +30,18 @@ export function CommentComposer({
 }) {
   const [body, setBody] = useState("");
   const [busy, setBusy] = useState(false);
-  const ref = useRef<HTMLTextAreaElement | null>(null);
-
-  useEffect(() => {
-    if (autofocus) ref.current?.focus();
-  }, [autofocus]);
+  // A new editor after a send: the next comment starts empty.
+  const [round, setRound] = useState(0);
 
   const canSubmit = body.trim().length > 0 && !busy;
 
-  const submit = async () => {
-    if (!canSubmit) return;
+  const submit = async (text = body) => {
+    if (text.trim().length === 0 || busy) return;
     setBusy(true);
     try {
-      await onSubmit(body.trim());
+      await onSubmit(text.trim());
       setBody("");
+      setRound((r) => r + 1);
     } finally {
       setBusy(false);
     }
@@ -49,32 +49,24 @@ export function CommentComposer({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-      <textarea
-        ref={ref}
-        value={body}
+      <Markdown
+        key={round}
+        value=""
         placeholder={placeholder ?? "Add a comment…"}
-        data-testid={`${testIdPrefix}-input`}
-        onChange={(e) => setBody(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-            e.preventDefault();
-            void submit();
-          } else if (e.key === "Escape") {
-            e.preventDefault();
-            onCancel?.();
-          }
-        }}
-        rows={8}
+        testId={`${testIdPrefix}-input`}
+        autofocus={autofocus}
+        hidePencil
+        onChange={setBody}
+        onSubmitShortcut={(text) => void submit(text)}
+        onEscape={() => onCancel?.()}
         style={{
-          resize: "vertical",
           minHeight: 150,
+          maxHeight: 320,
+          overflowY: "auto",
           padding: "8px 10px",
           background: "var(--surface-card)",
-          color: "var(--text-primary)",
           border: "1px solid var(--border-subtle)",
           borderRadius: 6,
-          font: "inherit",
-          fontFamily: "var(--font-ui)",
           fontSize: "var(--text-sm)",
         }}
       />

@@ -20,6 +20,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { createComment, listCommentsForStream, subscribeCommentEvents } from "../../api.js";
 import type { CommentIntent, CommentThread } from "../../tauri-bridge/generated/bindings.js";
+import { describeChain, shouldSuppressContextMenu } from "../../context-menu.js";
 import { resolveAnchor } from "./anchor.js";
 import { CommentPopover } from "./CommentPopover.js";
 import { clearCommentHighlights, paintCommentHighlights } from "./cssHighlight.js";
@@ -83,6 +84,10 @@ export function DomCommentLayer({
       if (res.offset === null) continue;
       const range = textContentRange(el, res.offset, res.length);
       if (!range) continue;
+      // Text in an editor (a markdown editor, Monaco, a terminal) is that
+      // surface's to paint, as its selections are its own: painted here
+      // too, a comment made there would show twice.
+      if (!shouldSuppressContextMenu(describeChain(range.startContainer))) continue;
       (res.confidence === "fuzzy" ? approx : exact).push(range);
       painted.push({ commentId: c.id, range });
     }

@@ -367,6 +367,17 @@
         margin: 0 0 1em;
       }
       .oxplow-md pre code { background: transparent; border: 0; padding: 0; }
+      /* A code block's Copy (viewer and editor): top-right, shown on hover. */
+      .oxplow-md-code { position: relative; }
+      .oxplow-md-code-copy {
+        position: absolute; top: 6px; right: 6px; z-index: 1;
+        display: inline-flex; align-items: center; padding: 3px;
+        background: var(--surface-elevated); color: var(--text-secondary);
+        border: 1px solid var(--border-subtle); border-radius: 4px;
+        cursor: pointer; opacity: 0; transition: opacity 80ms ease;
+      }
+      .oxplow-md-code:hover .oxplow-md-code-copy,
+      .oxplow-md-code-copy:focus-visible { opacity: 1; }
       .oxplow-md blockquote {
         border-left: 3px solid var(--border-subtle);
         padding: 0.1em 0 0.1em 0.9em;

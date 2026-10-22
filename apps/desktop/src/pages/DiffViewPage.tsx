@@ -48,7 +48,7 @@ import { useBacklinks, usePageOutbound } from "../tabs/useBacklinks.js";
 import { BacklinksList } from "../tabs/BacklinksList.js";
 import { ChangedFilesTree } from "../components/ChangedFiles/ChangedFilesTree.js";
 import { useChangedFiles } from "../components/ChangedFiles/useChangedFiles.js";
-import { MarkdownView } from "../components/Wiki/MarkdownView.js";
+import { Markdown } from "../components/Markdown/Markdown.js";
 import { LensSlots } from "../lens/LensSlots.js";
 import { useChange } from "../lens/useChange.js";
 import { effortRowId } from "../lens/lensModel.js";
@@ -693,12 +693,7 @@ function ResolvedEndpointDiff({
         <div data-testid="diff-view-effort-description" style={{ fontSize: "var(--text-sm)" }}>
           {/* Override `.oxplow-md`'s `margin: 0 auto` so the description
               left-aligns with the page's other sections instead of centering. */}
-          <MarkdownView
-            body={effortDescription}
-            onOpenFile={onOpenFile ? (path) => onOpenFile(path) : undefined}
-            renderMermaid
-            style={{ marginLeft: 0, marginRight: 0 }}
-          />
+          <Markdown value={effortDescription} style={{ marginLeft: 0, marginRight: 0 }} />
         </div>
       ) : null}
 

@@ -121,7 +121,7 @@ test("preprocessWikilinks: |display syntax", () => {
 
 test("preprocessWikilinks: bare slug routes to wiki note", () => {
   expect(preprocessWikilinks("see [[architecture]] note"))
-    .toBe("see [architecture](architecture) note");
+    .toBe("see [architecture](oxplow:oxplow/wiki?slug=architecture) note");
 });
 
 test("preprocessWikilinks: leaves wikilinks inside fenced code untouched", () => {
@@ -143,7 +143,7 @@ test("preprocessWikilinks: handles multiple wikilinks on one line", () => {
 
 test("preprocessWikilinks: a target with no extension and no slash is a slug", () => {
   expect(preprocessWikilinks("[[architecture]]"))
-    .toBe("[architecture](architecture)");
+    .toBe("[architecture](oxplow:oxplow/wiki?slug=architecture)");
 });
 
 test("preprocessWikilinks: nested-looking brackets do not match", () => {
@@ -185,12 +185,12 @@ test("preprocessWikilinks: SHA detection is case-insensitive and normalizes to l
 
 test("preprocessWikilinks: 6-char hex is too short to be a SHA — treated as slug", () => {
   expect(preprocessWikilinks("[[abc123]]"))
-    .toBe("[abc123](abc123)");
+    .toBe("[abc123](oxplow:oxplow/wiki?slug=abc123)");
 });
 
 test("preprocessWikilinks: hex with non-hex chars is a slug", () => {
   expect(preprocessWikilinks("[[abc-1234]]"))
-    .toBe("[abc-1234](abc-1234)");
+    .toBe("[abc-1234](oxplow:oxplow/wiki?slug=abc-1234)");
 });
 
 test("parseMarkdownLink: commit: scheme", () => {
@@ -336,8 +336,8 @@ test("preprocessWikilinks: a full work item ref links whichever list", () => {
 test("preprocessWikilinks: what isn't the active list's id is a wiki slug", () => {
   // `tsk-notes` doesn't match the list's ids; with no list (none), even
   // `tsk42` is an ordinary slug.
-  expect(preprocessWikilinks("[[tsk-notes]]", oxplowIds)).toBe("[tsk-notes](tsk-notes)");
-  expect(preprocessWikilinks("[[tsk42]]")).toBe("[tsk42](tsk42)");
+  expect(preprocessWikilinks("[[tsk-notes]]", oxplowIds)).toBe("[tsk-notes](oxplow:oxplow/wiki?slug=tsk-notes)");
+  expect(preprocessWikilinks("[[tsk42]]")).toBe("[tsk42](oxplow:oxplow/wiki?slug=tsk42)");
 });
 
 test("parseMarkdownLink: work_item: scheme, any list", () => {
@@ -369,10 +369,16 @@ test("preprocessWikilinks: GitHub-style [[#13]] becomes an oxplow-invalid link",
     .toBe("Follow-up in [#13](oxplow-invalid:%2313).");
 });
 
+test("a wiki page's link goes into the editor as its URI and comes back as [[slug]]", () => {
+  for (const body of ["See [[architecture]].", "See [[architecture|the design]]."]) {
+    expect(postprocessWikilinks(preprocessWikilinks(body))).toBe(body);
+  }
+});
+
 test("preprocessWikilinks: valid slugs (incl .md) stay live wiki links", () => {
-  expect(preprocessWikilinks("[[architecture]]")).toBe("[architecture](architecture)");
-  expect(preprocessWikilinks("[[some_note-2]]")).toBe("[some_note-2](some_note-2)");
-  expect(preprocessWikilinks("[[some-note.md]]")).toBe("[some-note.md](some-note.md)");
+  expect(preprocessWikilinks("[[architecture]]")).toBe("[architecture](oxplow:oxplow/wiki?slug=architecture)");
+  expect(preprocessWikilinks("[[some_note-2]]")).toBe("[some_note-2](oxplow:oxplow/wiki?slug=some_note-2)");
+  expect(preprocessWikilinks("[[some-note.md]]")).toBe("[some-note.md](oxplow:oxplow/wiki?slug=some-note)");
 });
 
 test("parseMarkdownLink: oxplow-invalid decodes the target into a broken link", () => {

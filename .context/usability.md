@@ -18,6 +18,15 @@ Things I keep forgetting. Read this before adding any UI.
 > lives in `.context/pages-and-tabs.md`. Plan:
 > `/Users/nvoxland/.claude/plans/the-ui-is-very-delightful-badger.md`.
 
+## Markdown is one component
+
+Wherever markdown is read or written — a wiki page, a work item's body,
+an effort summary, a comment and its composer, a form's markdown field,
+a lens's `markdown` viz — it is the one `Markdown` component
+(`.context/markdown.md`), so links, mermaid, code blocks with Copy,
+tables and comments behave the same everywhere. A surface never renders
+markdown itself, nor edits it in a `<textarea>`.
+
 ## Forms
 
 - **A form that edits what is saved saves only when changed.** Save is
@@ -410,7 +419,8 @@ discoverable without knowing the modifier.
 
 The rule that keeps this honest: every page-bearing link resolves
 through one `linkRef(parsed)` and one `openRef(ref, { newTab })` call
-(`components/Wiki/MarkdownView.tsx`). Per-kind click branches are
+(`components/Markdown/links.ts`, `followLink` and `linkMenu`, which the
+markdown viewer and editor both use). Per-kind click branches are
 how it drifted before — task links honoured the modifier while file,
 directory and commit links silently ignored it (tsk265). A new link kind
 gets the behaviour by being added to `linkRef`, not by growing
@@ -609,6 +619,18 @@ mounts the kit's, so a page moving to a lens (`viz: approvals`, params
 
 Comments are not editor-only. Any page region can be commentable by
 declaring *what it is* and mounting the generic layer.
+
+- **Comments are a page's.** A declared page says `comments: true` on its
+  `pages:` entry and core does the rest (`LensPage`, `lens/pageComments.ts`):
+  its URI (its tab's identity) is the comments' target, the nav bar gets
+  the `CommentNavigator`, the body carries `data-ref` (so plain text and
+  the markdown viewer take selections through the app-level layer), a
+  markdown editor anchors comments in its own layer, and a `code` viz's
+  files take them on their URI at their revision (Monaco's menu has Add
+  Comment; a click on a highlight opens its thread). A page that doesn't
+  declare it is not commentable. Text inside an editor (Tiptap, Monaco,
+  the terminal) is painted by that editor's layer only: the app-level
+  layer skips it, as it skips its selections.
 
 - **`data-ref` marks a region as a typed "context node."** Its value is
   the canonical URI of the thing, the same as tab ids and the `page_ref`

@@ -19,7 +19,6 @@ mock.module("../../api.js", () => ({
   ...realApi,
   listCommentsForTarget: async () => [{ comment, replies: [] }],
   subscribeCommentEvents: () => () => {},
-  onRemoteReconnect: () => () => {},
   relocateComment: async (id: string, _anchor: string, orphaned: boolean) => {
     relocated.push([id, orphaned]);
   },

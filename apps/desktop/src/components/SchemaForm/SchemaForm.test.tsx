@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { useState } from "react";
 
 import { SchemaForm } from "./SchemaForm.js";
@@ -171,7 +171,7 @@ const handoff = {
   },
 };
 
-test("a markdown field is a text area: Enter adds a line, Cmd/Ctrl+Enter submits", () => {
+test("a markdown field is the Markdown editor: Enter adds a line, Cmd/Ctrl+Enter submits", async () => {
   const submitted: unknown[] = [];
   const { getByTestId } = render(
     <SchemaForm
@@ -181,9 +181,13 @@ test("a markdown field is a text area: Enter adds a line, Cmd/Ctrl+Enter submits
       testIdPrefix="f"
     />,
   );
-  const body = getByTestId("f-body");
-  expect(body.tagName).toBe("TEXTAREA");
-  fireEvent.change(body, { target: { value: "line one" } });
+  const body = await waitFor(() => getByTestId("f-body")) as HTMLElement & {
+    editor?: { commands: { insertContent(text: string): boolean } };
+  };
+  expect(body.getAttribute("contenteditable")).toBe("true");
+  await act(async () => {
+    body.editor?.commands.insertContent("line one");
+  });
   fireEvent.keyDown(body, { key: "Enter" });
   expect(submitted).toEqual([]);
   fireEvent.keyDown(body, { key: "Enter", metaKey: true });

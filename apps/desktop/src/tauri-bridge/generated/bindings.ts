@@ -4621,7 +4621,7 @@ export type LensViz =
 "list" | 
 /**  A single value: the first column of the first row. */
 "number" | 
-/**  The first column of the first row, rendered as markdown. */
+/**  The first row's text (`markdown: { text }`, else its first column), rendered as markdown; with an `edit` action, edited. */
 "markdown" | 
 /**  Bars: `chart.x` labels, `chart.y` values. */
 "bar" | 

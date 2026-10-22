@@ -12,6 +12,8 @@ import type { TabRef } from "../tabs/tabState.js";
 const reads: { path: string; revision: string }[] = [];
 const decorations: { startLineNumber: number; endLineNumber: number }[] = [];
 const diffModels: number[] = [];
+const actions: string[] = [];
+const commentTargets: string[] = [];
 
 function fakeEditor() {
   let model: { lines: number } | null = null;
@@ -32,6 +34,11 @@ function fakeEditor() {
     getOption: () => 20,
     onDidScrollChange: () => ({ dispose() {} }),
     onDidChangeCursorPosition: () => ({ dispose() {} }),
+    onMouseDown: () => ({ dispose() {} }),
+    addAction(a: { id: string }) {
+      actions.push(a.id);
+      return { dispose() {} };
+    },
     saveViewState: () => null,
     setScrollTop() {},
     setScrollLeft() {},
@@ -47,7 +54,7 @@ mock.module("monaco-editor", () => ({
   editor: {
     create: () => fakeEditor(),
     createDiffEditor: () => fakeEditor(),
-    createModel: (text: string) => ({ lines: text.split("\n").length, getLineCount: () => text.split("\n").length, getLineMaxColumn: () => 1, dispose() {} }),
+    createModel: (text: string) => ({ lines: text.split("\n").length, getLineCount: () => text.split("\n").length, getLineMaxColumn: () => 1, getValue: () => text, dispose() {} }),
     EditorOption: { lineHeight: 0 },
   },
   Range: class {
@@ -66,7 +73,13 @@ mock.module("../api.js", () => ({
     reads.push({ path, revision });
     return path === "gone.rs" ? null : Array.from({ length: 50 }, (_, i) => `line ${i + 1}`).join("\n");
   },
+  listCommentsForTarget: async (target: string) => {
+    commentTargets.push(target);
+    return [];
+  },
+  subscribeCommentEvents: () => () => {},
 }));
+const { PageCommentsContext } = await import("./pageComments.js");
 
 const { LensResultView } = await import("./LensResultView.js");
 
@@ -75,6 +88,27 @@ afterEach(() => {
   reads.length = 0;
   decorations.length = 0;
   diffModels.length = 0;
+  actions.length = 0;
+  commentTargets.length = 0;
+});
+
+// On a page that takes comments, a code viz's file takes them on its URI
+// at its revision (Monaco's menu has Add Comment); elsewhere it doesn't.
+test("a code lens's file takes comments on its URI at its revision, on a page that takes them", async () => {
+  const lensRun = run({ viz: "code", code: { path: "p", revision: "r", lines: null, sync: false } }, ["p", "r"], [["src/a.rs", "git:abc1234"]]);
+  const plain = render(<LensResultView run={lensRun} streamId="str1" onOpenPage={() => {}} />);
+  await waitFor(() => expect(reads).toHaveLength(1));
+  expect(actions).toEqual([]);
+  expect(commentTargets).toEqual([]);
+  plain.unmount();
+  render(
+    <PageCommentsContext.Provider value={{ target: "oxplow:oxplow/file?path=src%2Fa.rs&rev=git%3Aabc1234", streamId: "str1", threadId: null }}>
+      <LensResultView run={lensRun} streamId="str1" onOpenPage={() => {}} />
+    </PageCommentsContext.Provider>,
+  );
+  await waitFor(() => expect(actions).toEqual(["oxplow.comment.add"]));
+  const { fileUri } = await import("../uri/uri.js");
+  await waitFor(() => expect(commentTargets).toEqual([fileUri("src/a.rs", "git:abc1234")]));
 });
 
 const base = {
