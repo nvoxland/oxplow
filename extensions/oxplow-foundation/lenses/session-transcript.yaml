@@ -2,12 +2,12 @@ title: Session transcript
 description: What happened in an agent session, oldest first, 50 a page — each turn's prompt and answer, how many tool calls it made and whether it was a subagent's hand-back, with the thread's notes where they fall. Reopen the session if you closed it, or resume its conversation in a new session, from here.
 params:
   - { name: session, label: Session (`ses3`) }
-  - { name: turn, label: Start at turn (`trn7`), default: "" }
-  - { name: page, label: Page, default: 1 }
+  - { name: turn, role: filter, label: Start at turn (`trn7`), default: "" }
+  - { name: page, role: filter, label: Page, default: 1 }
 query: |
-  WITH s AS (SELECT * FROM v_agent_session WHERE ref = uri('oxplow/agent_session', 'id', :session)),
+  WITH s AS (SELECT * FROM v_agent_session WHERE uri = uri('oxplow/agent_session', 'id', :session)),
   items AS (
-    SELECT t.ref AS ref,
+    SELECT t.uri AS uri,
            t.started_at AS at,
            CASE WHEN trim(t.prompt) = '' THEN 'hand-back' ELSE 'turn' END AS kind,
            t.ended_at AS ended_at,
@@ -17,18 +17,18 @@ query: |
     FROM v_agent_turn t
     WHERE t.agent_session_id = (SELECT id FROM s)
     UNION ALL
-    SELECT n.ref, n.created_at, 'note', NULL, n.body, '', 0
+    SELECT n.uri, n.created_at, 'note', NULL, n.body, '', 0
     FROM v_thread_note n, s
     WHERE n.thread_id = s.thread_id
       AND n.created_at >= s.opened_at
       AND n.created_at <= coalesce(s.closed_at, '9999')
   )
-  SELECT i.ref, i.at, i.kind, i.ended_at, i.prompt, i.answer, i.tool_calls,
+  SELECT i.uri, i.at, i.kind, i.ended_at, i.prompt, i.answer, i.tool_calls,
          s.thread_id AS thread_id, s.harness AS harness, s.resume_session_id AS conversation,
-         (SELECT uri_param(th.ref, 'id') FROM v_thread th WHERE th.id = s.thread_id) AS thread_id_bare
+         (SELECT uri_param(th.uri, 'id') FROM v_thread th WHERE th.id = s.thread_id) AS thread_id_bare
   FROM items i, s
-  WHERE :turn = '' OR i.at >= coalesce((SELECT started_at FROM v_agent_turn WHERE ref = uri('oxplow/turn', 'id', :turn)), '')
-  ORDER BY i.at, i.ref
+  WHERE :turn = '' OR i.at >= coalesce((SELECT started_at FROM v_agent_turn WHERE uri = uri('oxplow/turn', 'id', :turn)), '')
+  ORDER BY i.at, i.uri
   LIMIT 50 OFFSET (max(CAST(:page AS INTEGER), 1) - 1) * 50
 columns:
   - { key: at, label: Started }

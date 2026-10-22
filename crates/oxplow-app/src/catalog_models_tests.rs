@@ -42,7 +42,7 @@ async fn lenses_and_extensions_are_models_that_follow_the_catalog() {
     assert_eq!(
         rows(
             &fx,
-            "SELECT ref, extension, slug, title, description, viz, hidden, launcher_category, params
+            "SELECT uri, extension, slug, title, description, viz, hidden, launcher_category, params
              FROM v_lens WHERE extension = 'acme' ORDER BY slug"
         )
         .await,
@@ -57,7 +57,7 @@ async fn lenses_and_extensions_are_models_that_follow_the_catalog() {
                 json!(0),
                 json!("Data"),
                 json!(
-                    r#"[{"name":"kind","label":null,"default":null,"options":[],"type":"text","role":"filter","presets":[]}]"#
+                    r#"[{"name":"kind","label":null,"default":null,"options":[],"type":"text","role":"resource","presets":[]}]"#
                 )
             ],
             vec![
@@ -76,7 +76,7 @@ async fn lenses_and_extensions_are_models_that_follow_the_catalog() {
     assert_eq!(
         rows(
             &fx,
-            "SELECT ref, name, version, origin, enabled, purpose, errors
+            "SELECT uri, name, version, origin, enabled, purpose, errors
              FROM v_extension WHERE name = 'acme'"
         )
         .await,

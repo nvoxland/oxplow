@@ -31,7 +31,7 @@ complex AS (
   GROUP BY c.target
 ),
 judged AS (
-  SELECT s.effort_id, e.ref, s.statements,
+  SELECT s.effort_id, e.uri, s.statements,
          rtrim(
            CASE WHEN s.drops > 0 THEN 'drops a table; ' ELSE '' END
            || CASE WHEN r.effort_id IS NULL THEN 'no test run; '
@@ -47,7 +47,7 @@ judged AS (
   LEFT JOIN coverage cv ON cv.effort_id = s.effort_id
   LEFT JOIN complex cx ON cx.effort_id = s.effort_id
 )
-SELECT effort_id, ref,
+SELECT effort_id, uri,
        CAST(CASE WHEN reasons = '' THEN 'accepted' ELSE 'changes requested' END AS TEXT) AS verdict,
        reasons, statements,
        CAST(CASE WHEN reasons = '' THEN 'Schema OK' ELSE 'Schema: changes' END AS TEXT) AS label,

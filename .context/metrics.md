@@ -1832,14 +1832,14 @@ The mechanics behind those controls (unchanged by tsk117):
   producers/extensions are default-ON unless an `enabled: false` marker
   disables them, and so are those four.
 - **Function facts are keyed by symbol ref.** `code_metrics(text, language,
-  path)` returns each function with its `id`, `ref` (`oxplow:oxplow/symbol?path=<path>&symbol=<id>`,
+  path)` returns each function with its `id`, `uri` (`oxplow:oxplow/symbol?path=<path>&symbol=<id>`,
   built by the host through `uri::build::symbol_uri`), `container` and
-  `kind`; `fn_count`, `high_complexity_fns` and `long_functions` use `ref`
+  `kind`; `fn_count`, `high_complexity_fns` and `long_functions` use `uri`
   as the fact's `subject`, so a function has the one identity `v_symbol`
   has. `v_function` is one row per ref and stream (overloads and
   same-named functions are separate rows): `symbol` is the whole ref, and
   `name`, `container` and `kind` are joined from `v_symbol` on
-  `(stream_id, ref)` — a function the symbol index doesn't hold isn't listed.
+  `(stream_id, uri)` — a function the symbol index doesn't hold isn't listed.
   Token-usage facts use `ai_model:<name>` subjects (`ai_model_ref`).
 - **Enable/disable** via the `oxplow.metric.enable { keys, enabled }` command
   (`commands/metric.rs`; the desktop's `enable_metrics` IPC runs it as the

@@ -46,7 +46,7 @@
   "use strict";
 
   // The protocol this library speaks; `init` says which one the host does.
-  const PROTOCOL = 8;
+  const PROTOCOL = 9;
 
   function component(port, init) {
     let next = 0;
@@ -136,10 +136,16 @@
       // Run a command this component declares in `commands`, as the person
       // looking at it; one that asks is confirmed by them, in oxplow.
       invoke: (command, input) => call({ method: "invoke", command, input: input === undefined ? {} : input }),
-      // Open one of oxplow's pages (`work_item:oxplow:tsk42`); `{ newTab:
-      // true }` opens it in a new tab (a Cmd-click).
-      navigate: (ref, options) =>
-        call({ method: "navigate", ref, newTab: !!(options && options.newTab) }),
+      // Open one of oxplow's pages (`oxplow:oxplow/wiki?slug=intro`), as a
+      // browser follows a link; `{ newTab: true }` opens it in a new tab (a
+      // Cmd-click), `{ replace: true }` in place of the page (Back skips it).
+      navigate: (uri, options) =>
+        call({
+          method: "navigate",
+          uri,
+          newTab: !!(options && options.newTab),
+          replace: !!(options && options.replace),
+        }),
       // Run read-only SQL over oxplow's models (`?1` parameters): needs
       // `sql: read` on the component. Resolves `{ columns, rows, truncated }`.
       querySql: (sql, params) => call({ method: "querySql", sql, params: params || [] }),

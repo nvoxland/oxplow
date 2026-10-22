@@ -49,7 +49,7 @@ pub fn record_tx(conn: &rusqlite::Connection, id: TaskId) -> Result<WorkItemReco
     let (state, native_state) = state_pair(status, completed);
     let links = rows(
         conn,
-        "SELECT to_ref, link_type FROM task_link WHERE from_item_id = ?1
+        "SELECT to_uri, link_type FROM task_link WHERE from_item_id = ?1
          ORDER BY created_at, id",
         id,
         |r| {
@@ -74,13 +74,13 @@ pub fn record_tx(conn: &rusqlite::Connection, id: TaskId) -> Result<WorkItemReco
         },
     )?;
     Ok(WorkItemRecord {
-        item_ref: work_item_ref(id),
+        uri: work_item_ref(id),
         title,
         body,
         state,
         native_state,
         native: json!({ "priority": priority, "author": author }),
-        parent_ref: parent.map(|p| work_item_ref(TaskId::new(p))),
+        parent_uri: parent.map(|p| work_item_ref(TaskId::new(p))),
         deleted,
         rank: Some(sort_index as f64),
         links: Some(links),

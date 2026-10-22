@@ -6,7 +6,7 @@ import { searchLauncher } from "../../support/ui.js";
 // in the effort page's header.
 
 test("an accepted effort's page carries the review's verdict chip", async ({ page, daemon }) => {
-  const created = await run<{ result: { ref: string } }>(daemon, "oxplow.work_item.create", {
+  const created = await run<{ result: { uri: string } }>(daemon, "oxplow.work_item.create", {
     title: "Wombat fix",
     state: "in_progress",
     thread: daemon.thread,
@@ -15,7 +15,7 @@ test("an accepted effort's page carries the review's verdict chip", async ({ pag
   let effort = "";
   await until("the item's effort to open", 30_000, async () => {
     const out = await ipc<{ rows: unknown[][] }>(daemon, "query_sql", {
-      sql: `SELECT ref FROM v_effort WHERE work_item = '${created.result.ref}'`,
+      sql: `SELECT uri FROM v_effort WHERE work_item = '${created.result.uri}'`,
     });
     effort = (out.rows[0]?.[0] as string | undefined) ?? "";
     return effort !== "";
@@ -25,7 +25,7 @@ test("an accepted effort's page carries the review's verdict chip", async ({ pag
   await searchable(daemon, "Wombat fix", "work_item");
   await page.goto("/");
   await searchLauncher(page, "Wombat fix");
-  await page.getByTestId(`launcher-hit-${created.result.ref}`).click();
+  await page.getByTestId(`launcher-hit-${created.result.uri}`).click();
   // The task's effort, its Review: the effort's own page.
   await page.locator('[data-testid^="tasks-show-in-history-"]').first().click();
   await expect(page.getByTestId("page-chips")).toContainText("Accepted");

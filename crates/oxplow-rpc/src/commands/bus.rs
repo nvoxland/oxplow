@@ -242,7 +242,7 @@ mod tests {
         assert_eq!(pull["ui"]["background"], true);
         let new_task = by_id("oxplow.work_item.create").expect("New Task is offered");
         assert_eq!(new_task["ui"]["form"], "oxplow:oxplow/page?page=new-task");
-        assert_eq!(new_task["ui"]["open_after"], "{{result.ref}}");
+        assert_eq!(new_task["ui"]["open_after"], "{{result.uri}}");
         let dashboard = by_id("oxplow.dashboard.create").expect("New Dashboard is offered");
         assert_eq!(
             dashboard["ui"]["open_after"],

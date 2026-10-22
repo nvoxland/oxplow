@@ -105,7 +105,7 @@ export function sectionDefaultState(section: TaskSectionKind): CanonicalState | 
  * the renderer will display.
  */
 export function classifyRow(item: WorkItem, epicChildrenMap: Map<string, WorkItem[]>): TaskSectionKind {
-  const children = epicChildrenMap.get(item.ref);
+  const children = epicChildrenMap.get(item.uri);
   if (children && children.length > 0) return classifyEpic(item, children);
   return classifyState(item.state);
 }
@@ -189,7 +189,7 @@ export function filterByFields(groups: TaskGroup[], filter: FieldFilter): TaskGr
     const isParent = (ref: string) => (group.epicChildren.get(ref)?.length ?? 0) > 0;
     const epicChildren = new Map<string, WorkItem[]>();
     for (const [epic, children] of group.epicChildren.entries()) epicChildren.set(epic, children.filter(keep));
-    return { epic: group.epic, items: group.items.filter((i) => isParent(i.ref) || keep(i)), epicChildren };
+    return { epic: group.epic, items: group.items.filter((i) => isParent(i.uri) || keep(i)), epicChildren };
   });
 }
 
@@ -211,14 +211,14 @@ export function applyStateFilter(
  *  every row in list order. */
 export function buildGroups(list: WorkList | null): TaskGroup[] {
   if (!list) return [];
-  const epics = new Set(list.epics.map((e) => e.ref));
+  const epics = new Set(list.epics.map((e) => e.uri));
   const epicChildren = new Map<string, WorkItem[]>();
-  for (const e of list.epics) epicChildren.set(e.ref, []);
+  for (const e of list.epics) epicChildren.set(e.uri, []);
   const roots: WorkItem[] = [];
   for (const item of list.all) {
     // Children render only inside their epic, which moves between sections
     // as a block (`classifyEpic`).
-    if (item.parentRef && epics.has(item.parentRef)) epicChildren.get(item.parentRef)!.push(item);
+    if (item.parentUri && epics.has(item.parentUri)) epicChildren.get(item.parentUri)!.push(item);
     else roots.push(item);
   }
   return [{ epic: null, items: roots, epicChildren }];

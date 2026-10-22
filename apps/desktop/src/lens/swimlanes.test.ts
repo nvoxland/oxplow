@@ -11,17 +11,17 @@ const dir = join(import.meta.dir, "../../../../examples/extensions/task-views/co
 const page = readFileSync(join(dir, "index.html"), "utf8").replace(/<script[\s\S]*?<\/script>/g, "");
 const script = readFileSync(join(dir, "app.js"), "utf8");
 
-type Item = { ref: string; title: string; state: string };
+type Item = { uri: string; title: string; state: string };
 const ITEMS: Item[] = [
-  { ref: "oxplow:oxplow/work_item?id=1&provider=a", title: "First", state: "todo" },
-  { ref: "oxplow:oxplow/work_item?id=2&provider=a", title: "Second", state: "todo" },
-  { ref: "oxplow:oxplow/work_item?id=3&provider=a", title: "Third", state: "todo" },
-  { ref: "oxplow:oxplow/work_item?id=4&provider=a", title: "Fourth", state: "done" },
+  { uri: "oxplow:oxplow/work_item?id=1&provider=a", title: "First", state: "todo" },
+  { uri: "oxplow:oxplow/work_item?id=2&provider=a", title: "Second", state: "todo" },
+  { uri: "oxplow:oxplow/work_item?id=3&provider=a", title: "Third", state: "todo" },
+  { uri: "oxplow:oxplow/work_item?id=4&provider=a", title: "Fourth", state: "done" },
 ];
 const run = (items: Item[]) => ({
   lens: { id: "task-views/swimlanes" },
   params: { scope: "thread", thread_id: "t1" },
-  result: { columns: ["ref", "title", "state", "rank"], rows: items.map((i, n) => [i.ref, i.title, i.state, n]), truncated: false },
+  result: { columns: ["uri", "title", "state", "rank"], rows: items.map((i, n) => [i.uri, i.title, i.state, n]), truncated: false },
 });
 
 let invokes: Array<[string, unknown]> = [];
@@ -112,7 +112,7 @@ test("a card dropped on another column is transitioned; the dragged-over column 
   fire(lane("blocked"), "drop");
   await settle();
   expect(lane("blocked").classList.contains("ox-drop-target")).toBe(false);
-  expect(invokes).toEqual([["oxplow.work_item.transition", { ref: "oxplow:oxplow/work_item?id=1&provider=a", to: "blocked" }]]);
+  expect(invokes).toEqual([["oxplow.work_item.transition", { uri: "oxplow:oxplow/work_item?id=1&provider=a", to: "blocked" }]]);
 });
 
 test("a drop within a column reorders it only when the work list keeps an order", async () => {
@@ -120,8 +120,8 @@ test("a drop within a column reorders it only when the work list keeps an order"
   await drag("oxplow:oxplow/work_item?id=3&provider=a", card("oxplow:oxplow/work_item?id=1&provider=a"));
   await drag("oxplow:oxplow/work_item?id=1&provider=a", card("oxplow:oxplow/work_item?id=2&provider=a"));
   expect(invokes).toEqual([
-    ["oxplow.work_item.reorder", { ref: "oxplow:oxplow/work_item?id=3&provider=a", before: "oxplow:oxplow/work_item?id=1&provider=a" }],
-    ["oxplow.work_item.reorder", { ref: "oxplow:oxplow/work_item?id=1&provider=a", after: "oxplow:oxplow/work_item?id=2&provider=a" }],
+    ["oxplow.work_item.reorder", { uri: "oxplow:oxplow/work_item?id=3&provider=a", before: "oxplow:oxplow/work_item?id=1&provider=a" }],
+    ["oxplow.work_item.reorder", { uri: "oxplow:oxplow/work_item?id=1&provider=a", after: "oxplow:oxplow/work_item?id=2&provider=a" }],
   ]);
 
   invokes = [];
@@ -147,7 +147,7 @@ test("a title is edited in place: Enter submits it, Escape leaves it as it was",
   again.closest("form")!.dispatchEvent(submit);
   await settle();
   expect(submit.defaultPrevented).toBe(true);
-  expect(invokes).toEqual([["oxplow.work_item.update", { ref: "oxplow:oxplow/work_item?id=1&provider=a", title: "Renamed" }]]);
+  expect(invokes).toEqual([["oxplow.work_item.update", { uri: "oxplow:oxplow/work_item?id=1&provider=a", title: "Renamed" }]]);
   expect(opened).toEqual([]);
 });
 

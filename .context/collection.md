@@ -635,7 +635,7 @@ it):
   `source_files()` and `duplicate_blocks()`. The snapshot is
   content-addressed/immutable → determinism + `observed` trust hold. A
   fact collector's `report:` is pre-parsed by `parse_report`.
-- `code_metrics(text, language, path)` → per-function `[{name, id, ref,
+- `code_metrics(text, language, path)` → per-function `[{name, id, uri,
   container, kind, complexity, length, parameter_count, start_line, end_line, visibility, has_doc}]` via
   `oxplow-code-metrics`. `has_doc` (tsk125) is per-language doc detection
   (`LanguageSpec::doc`): a doc comment immediately preceding the item —

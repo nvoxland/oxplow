@@ -8,6 +8,6 @@ def transform(input):
         c = len(ast_query(f["text"], "rust", q))
         if c > 0:
             facts.append({"measure": "repo.rust_dyn", "value": c,
-                          "subject": ref.build("file", f["path"]), "path": f["path"],
+                          "subject": uri.build("oxplow/file", path = f["path"]), "path": f["path"],
                           "dims": {"oxplow.language": "rust"}})
     return {"facts": facts}

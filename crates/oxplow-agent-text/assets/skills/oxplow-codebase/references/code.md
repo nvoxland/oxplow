@@ -1,7 +1,7 @@
 # Code: symbols, diagnostics, language servers
 
 - **`v_symbol`** — what each stream's files define, as oxplow's own
-  tree-sitter parsing reads them, in every supported language (`ref`, `path`,
+  tree-sitter parsing reads them, in every supported language (`uri`, `path`,
   `name`, `kind`, `container`, `signature`, `line`, `col`), restated at each
   snapshot. `kind` is one of function, method, constructor, class, struct,
   enum, enum_member, interface, trait, type, field, constant, variable,
@@ -9,7 +9,7 @@
   languages that overload by them (Java, C#, C++), else NULL. Where
   something is defined: `SELECT path, line, kind, container FROM
   v_symbol WHERE name = 'main'`; what a file declares: `WHERE path = …
-  ORDER BY line`. `ref` is `oxplow:oxplow/symbol?path=<path>&symbol=<id>` (no revision); no language
+  ORDER BY line`. `uri` is `oxplow:oxplow/symbol?path=<path>&symbol=<id>` (no revision); no language
   server is needed. `v_symbol_capture` says what each snapshot's collection
   covered (`files_collected`, `files_failed`).
 - **`v_diagnostic`** — what the language servers report now (`path`,

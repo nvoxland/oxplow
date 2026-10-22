@@ -28,8 +28,8 @@ const UPDATE: CommandSpec = {
   id: "oxplow.work_item.update",
   input_schema: {
     type: "object",
-    required: ["ref"],
-    properties: { ref: { type: "string" }, title: { type: "string" } },
+    required: ["uri"],
+    properties: { uri: { type: "string" }, title: { type: "string" } },
   },
 } as unknown as CommandSpec;
 
@@ -37,8 +37,8 @@ mock.module("../api.js", () => ({
   ...realApi,
   lensActionForm: async (_id: string, _action: string, _params: unknown, row: Record<string, unknown> | null) => ({
     command: UPDATE,
-    values: { ref: row?.ref, title: row?.title },
-    fixed: ["ref"],
+    values: { uri: row?.uri, title: row?.title },
+    fixed: ["uri"],
     fields: null,
   }),
   runLensAction: async (
@@ -58,8 +58,8 @@ mock.module("../api.js", () => ({
     formStarts += 1;
     return {
     command: UPDATE,
-    values: fixedStart ?? { ref: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", title: storedTitle },
-    fixed: ["ref"],
+    values: fixedStart ?? { uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", title: storedTitle },
+    fixed: ["uri"],
     fields: ["title"],
     };
   },
@@ -110,11 +110,11 @@ const lens: Lens = {
       id: "retitle",
       label: "Retitle…",
       command: "oxplow.work_item.update",
-      input: { ref: "{{row.ref}}", title: "{{row.title}}" },
+      input: { uri: "{{row.uri}}", title: "{{row.title}}" },
       row: true,
       group: null,
       form: true,
-      fixed: ["ref"],
+      fixed: ["uri"],
     },
   ],
   alert: null,
@@ -123,7 +123,7 @@ const lens: Lens = {
 const run: LensRun = {
   lens,
   params: {},
-  result: { columns: ["ref", "title"], rows: [["oxplow:oxplow/work_item?id=tsk1&provider=oxplow", "Old"]], truncated: false },
+  result: { columns: ["uri", "title"], rows: [["oxplow:oxplow/work_item?id=tsk1&provider=oxplow", "Old"]], truncated: false },
 } as unknown as LensRun;
 
 test("a form action opens its form in a slideover and runs what the person filled in", async () => {
@@ -133,15 +133,15 @@ test("a form action opens its form in a slideover and runs what the person fille
   // It opened a form instead of running.
   await waitFor(() => view.getByTestId("lens-action-form"));
   expect(runs).toEqual([]);
-  // The fixed ref is shown, not an input; the title starts from the row.
-  expect(view.getByTestId("lens-action-form-fields-ref-fixed").textContent).toContain("oxplow:oxplow/work_item?id=tsk1&provider=oxplow");
+  // The fixed uri is shown, not an input; the title starts from the row.
+  expect(view.getByTestId("lens-action-form-fields-uri-fixed").textContent).toContain("oxplow:oxplow/work_item?id=tsk1&provider=oxplow");
   const title = view.getByTestId("lens-action-form-fields-title") as HTMLInputElement;
   expect(title.value).toBe("Old");
   fireEvent.change(title, { target: { value: "New" } });
   fireEvent.submit(view.getByTestId("lens-action-form-fields"));
   await waitFor(() => expect(runs).toHaveLength(1));
-  expect(runs[0].input).toEqual({ ref: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", title: "New" });
-  expect(runs[0].row).toEqual({ ref: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", title: "Old" });
+  expect(runs[0].input).toEqual({ uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", title: "New" });
+  expect(runs[0].row).toEqual({ uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", title: "Old" });
   // Success closes it.
   await waitFor(() => expect(view.queryByTestId("lens-action-form")).toBeNull());
 });
@@ -162,7 +162,7 @@ test("an invalid field's message shows under it, and the form stays open", async
 test("a form lens shows only its fields, keeps its fixed ones, and puts errors under the field", async () => {
   invalidField = "/title";
   const form: LensRun = {
-    lens: { ...lens, viz: "form", form: { command: "oxplow.work_item.update", defaults: null, fixed: ["ref"], fields: ["title"] }, actions: [] },
+    lens: { ...lens, viz: "form", form: { command: "oxplow.work_item.update", defaults: null, fixed: ["uri"], fields: ["title"] }, actions: [] },
     params: {},
     result: { columns: [], rows: [], truncated: false },
   } as unknown as LensRun;
@@ -172,7 +172,7 @@ test("a form lens shows only its fields, keeps its fixed ones, and puts errors u
   fireEvent.change(title, { target: { value: "" } });
   fireEvent.submit(view.getByTestId("lens-form-fields"));
   // An emptied text field is left out; the fixed ref is always sent.
-  await waitFor(() => expect(submits).toEqual([{ ref: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" }]));
+  await waitFor(() => expect(submits).toEqual([{ uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" }]));
   const error = await waitFor(() => view.getByTestId("lens-form-fields-title-error"));
   expect(error.textContent).toContain("can't be empty");
 });
@@ -181,7 +181,7 @@ test("a form lens shows only its fields, keeps its fixed ones, and puts errors u
 // again from the models, not from the values it first opened with.
 test("a form lens starts again from the current values after it saves", async () => {
   const form: LensRun = {
-    lens: { ...lens, viz: "form", form: { command: "oxplow.work_item.update", defaults: null, fixed: ["ref"], fields: ["title"] }, actions: [] },
+    lens: { ...lens, viz: "form", form: { command: "oxplow.work_item.update", defaults: null, fixed: ["uri"], fields: ["title"] }, actions: [] },
     params: {},
     result: { columns: [], rows: [], truncated: false },
   } as unknown as LensRun;
@@ -189,14 +189,14 @@ test("a form lens starts again from the current values after it saves", async ()
   const title = await waitFor(() => view.getByTestId("lens-form-fields-title") as HTMLInputElement);
   fireEvent.change(title, { target: { value: "New" } });
   fireEvent.submit(view.getByTestId("lens-form-fields"));
-  await waitFor(() => expect(submits).toEqual([{ ref: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", title: "New" }]));
+  await waitFor(() => expect(submits).toEqual([{ uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", title: "New" }]));
   await waitFor(() => expect(formStarts).toBe(2));
   await waitFor(() => expect((view.getByTestId("lens-form-fields-title") as HTMLInputElement).value).toBe("New"));
 });
 
 function formLens(then: ActionThen): LensRun {
   return {
-    lens: { ...lens, viz: "form", form: { command: "oxplow.work_item.update", defaults: null, fixed: ["ref"], fields: ["title"], then }, actions: [] },
+    lens: { ...lens, viz: "form", form: { command: "oxplow.work_item.update", defaults: null, fixed: ["uri"], fields: ["title"], then }, actions: [] },
     params: {},
     result: { columns: [], rows: [], truncated: false },
   } as unknown as LensRun;
@@ -238,7 +238,7 @@ function againLens(keep: string[]): LensRun {
     lens: {
       ...lens,
       viz: "form",
-      form: { command: "oxplow.work_item.update", defaults: null, fixed: ["ref"], fields: ["title"], then: "open", again: { label: "Save and Another", keep } },
+      form: { command: "oxplow.work_item.update", defaults: null, fixed: ["uri"], fields: ["title"], then: "open", again: { label: "Save and Another", keep } },
       actions: [],
     },
     params: {},
@@ -250,7 +250,7 @@ function againLens(keep: string[]): LensRun {
 // says), and starts the form again with the `keep` fields' values carried
 // over and the rest from the form's own start.
 test("a form's second submit starts again with the kept fields carried over", async () => {
-  fixedStart = { ref: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", title: "Start" };
+  fixedStart = { uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", title: "Start" };
   openAfterPage = "oxplow:oxplow/work_item?id=tsk1&provider=oxplow";
   const opened: unknown[] = [];
   const nav = { openRef: (ref: string) => opened.push(ref) } as unknown as PageNavigation;
@@ -262,14 +262,14 @@ test("a form's second submit starts again with the kept fields carried over", as
   const title = await waitFor(() => view.getByTestId("lens-form-fields-title") as HTMLInputElement);
   fireEvent.change(title, { target: { value: "One" } });
   fireEvent.click(view.getByTestId("lens-form-fields-again"));
-  await waitFor(() => expect(submits).toEqual([{ ref: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", title: "One" }]));
+  await waitFor(() => expect(submits).toEqual([{ uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", title: "One" }]));
   await waitFor(() => expect(formStarts).toBe(2));
   await waitFor(() => expect((view.getByTestId("lens-form-fields-title") as HTMLInputElement).value).toBe("One"));
   expect(opened).toEqual([]);
 });
 
 test("a field not kept starts again from the form's own start", async () => {
-  fixedStart = { ref: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", title: "Start" };
+  fixedStart = { uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", title: "Start" };
   const view = render(<LensResultView run={againLens([])} onOpenPage={() => {}} />);
   const title = await waitFor(() => view.getByTestId("lens-form-fields-title") as HTMLInputElement);
   fireEvent.change(title, { target: { value: "One" } });
@@ -297,7 +297,7 @@ function Tab({ state, children }: { state: Record<string, unknown>; children: Re
 test("an edit form keeps its draft in the tab and saves only when changed", async () => {
   const state: Record<string, unknown> = {};
   const edit: LensRun = {
-    lens: { ...lens, viz: "form", form: { command: "oxplow.work_item.update", defaults: null, fixed: ["ref"], fields: ["title"], mode: "edit" }, actions: [] },
+    lens: { ...lens, viz: "form", form: { command: "oxplow.work_item.update", defaults: null, fixed: ["uri"], fields: ["title"], mode: "edit" }, actions: [] },
     params: {},
     result: { columns: [], rows: [], truncated: false },
   } as unknown as LensRun;
@@ -309,7 +309,7 @@ test("an edit form keeps its draft in the tab and saves only when changed", asyn
   const title = await waitFor(() => view.getByTestId("lens-form-fields-title") as HTMLInputElement);
   expect((view.getByTestId("lens-form-fields-submit") as HTMLButtonElement).disabled).toBe(true);
   fireEvent.change(title, { target: { value: "Half" } });
-  expect(state["form:x/l"]).toEqual({ ref: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", title: "Half" });
+  expect(state["form:x/l"]).toEqual({ uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", title: "Half" });
   cleanup();
 
   // The page again, from its kept step: the draft is there.
@@ -325,6 +325,6 @@ test("an edit form keeps its draft in the tab and saves only when changed", asyn
   expect(state["form:x/l"]).toBe(null);
   fireEvent.change(kept, { target: { value: "New" } });
   fireEvent.submit(again.getByTestId("lens-form-fields"));
-  await waitFor(() => expect(submits).toEqual([{ ref: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", title: "New" }]));
+  await waitFor(() => expect(submits).toEqual([{ uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", title: "New" }]));
   await waitFor(() => expect(state["form:x/l"]).toBe(null));
 });

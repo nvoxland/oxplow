@@ -8,7 +8,7 @@ def transform(input):
         c = len(regex_find(r"!important", f["text"]))
         if c > 0:
             facts.append({"measure": "repo.css_important", "value": c,
-                          "subject": ref.build("file", f["path"]), "path": f["path"],
+                          "subject": uri.build("oxplow/file", path = f["path"]), "path": f["path"],
                           "dims": {"oxplow.language": "css"}})
     q = "(string) @s (template_string) @s"
     for lang_glob in [("**/*.ts", "typescript"), ("**/*.tsx", "tsx")]:
@@ -18,6 +18,6 @@ def transform(input):
                 c += len(regex_find(r"!important", s["text"]))
             if c > 0:
                 facts.append({"measure": "repo.css_important", "value": c,
-                              "subject": ref.build("file", f["path"]), "path": f["path"],
+                              "subject": uri.build("oxplow/file", path = f["path"]), "path": f["path"],
                               "dims": {"oxplow.language": "typescript"}})
     return {"facts": facts}

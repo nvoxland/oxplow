@@ -670,7 +670,7 @@ mod tests {
     fn spec() -> Value {
         json!({
             "title": "Busy Tasks",
-            "query": "SELECT title, ref AS id FROM v_work_item ORDER BY ref",
+            "query": "SELECT title, uri AS id FROM v_work_item ORDER BY uri",
             "viz": "bar",
             "chart": { "x": "title", "y": "id" }
         })
@@ -860,7 +860,7 @@ mod tests {
         let fx = crate::test_fixtures::services_with_effort().await;
         let mut s = spec();
         s["params"] = json!([{ "name": "limit", "default": 5 }]);
-        s["query"] = json!("SELECT title, ref AS id FROM v_work_item ORDER BY ref LIMIT :limit");
+        s["query"] = json!("SELECT title, uri AS id FROM v_work_item ORDER BY uri LIMIT :limit");
         let answer = fx
             .svc
             .commands

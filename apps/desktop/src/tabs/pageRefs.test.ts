@@ -38,9 +38,10 @@ import {
   viewParamsOf,
   withViewParams,
   type PagePayload,
+  withResourceParams,
 } from "./pageRefs.js";
 import type { TabRef } from "./tabState.js";
-import { idOf, typeOf } from "../uri/uri.js";
+import { idOf, identityOf, typeOf } from "../uri/uri.js";
 
 describe("pageRefs", () => {
   test("an agent session's tab is its ref, pinned; the picker is a closable page", () => {
@@ -66,24 +67,24 @@ describe("pageRefs", () => {
     });
   });
 
-  test("a diff is its params: path, both versions, the label, the base's name and the line", () => {
+  test("a diff is its params: path, both versions, the label and the base's name; its line is its view", () => {
     const spec = { path: "src/a.ts", leftVersion: "git:abc", rightVersion: "working", baseLabel: "abc" };
     const a = diffRef(spec);
     // A base named as its version reads says nothing more: left out.
     expect(a.id).toBe("oxplow:oxplow/page?left=git:abc&page=diff&path=src/a.ts&right=working");
     expect(a.payload).toEqual({ extension: null, page: "diff", params: { path: "src/a.ts", left: "git:abc", right: "working" } });
-    expect(diffSpecOf((refFromTabId(a.id)!.payload as PagePayload).params)).toEqual({ ...spec, labelOverride: undefined, revealLine: undefined });
+    expect(diffSpecOf(refFromTabId(a.id)!)).toEqual({ ...spec, labelOverride: undefined, revealLine: undefined });
     const full = { ...spec, baseLabel: "HEAD", labelOverride: "wi 3", revealLine: 7 };
     const b = diffRef(full);
-    expect(b.id).toBe("oxplow:oxplow/page?base=HEAD&label=wi%203&left=git:abc&line=7&page=diff&path=src/a.ts&right=working");
-    expect(diffSpecOf((refFromTabId(b.id)!.payload as PagePayload).params)).toEqual(full);
+    expect(b.id).toBe("oxplow:oxplow/page?base=HEAD&label=wi%203&left=git:abc&page=diff&path=src/a.ts&right=working#lines=7-7");
+    expect(diffSpecOf(refFromTabId(b.id)!)).toEqual(full);
     expect(diffRef({ ...spec, rightVersion: "git:xyz" }).id).not.toBe(a.id);
   });
 
-  test("a Settings area and the section it lands on are its params", () => {
+  test("a Settings area and the section it lands on are its view", () => {
     expect(settingsRef().id).toBe("oxplow:oxplow/page?page=settings");
     expect(settingsRef("overview").id).toBe("oxplow:oxplow/page?page=settings");
-    expect(settingsRef("agents", "models").id).toBe("oxplow:oxplow/page?area=agents&page=settings&section=models");
+    expect(settingsRef("agents", "models").id).toBe("oxplow:oxplow/page?page=settings#area=agents&section=models");
   });
 
   test("wikiPageRef and workItemTabRef encode canonical refs", () => {
@@ -108,10 +109,10 @@ describe("pageRefs", () => {
     expect(ref.id).toBe("oxplow:oxplow/page?page=tasks");
     expect(ref.kind).toBe("page");
     expect(hookEventsRef()).toEqual({ id: "oxplow:oxplow/page?page=hook-events", kind: "page", payload: { extension: null, page: "hook-events", params: {} } });
-    expect(extPageRef("gh", "open-prs", { ref: "acme_pr:1" })).toEqual({
-      id: "oxplow:oxplow/page?page=gh/open-prs&ref=acme_pr:1",
+    expect(extPageRef("gh", "open-prs", { uri: "acme_pr:1" })).toEqual({
+      id: "oxplow:oxplow/page?page=gh/open-prs&uri=acme_pr:1",
       kind: "page",
-      payload: { extension: "gh", page: "open-prs", params: { ref: "acme_pr:1" } },
+      payload: { extension: "gh", page: "open-prs", params: { uri: "acme_pr:1" } },
     });
     expect(uncommittedChangesRef().id).toBe("oxplow:oxplow/page?page=uncommitted-changes");
   });
@@ -180,19 +181,20 @@ describe("pageRefs", () => {
       "snap:1",
       "snap:9",
     );
-    expect(a.id).toBe("oxplow:oxplow/page?end=snap:9&page=diff-view&start=snap:1");
+    expect(a.id).toBe("oxplow:oxplow/page?page=diff-view#end=snap:9&start=snap:1");
     expect(a.id).toBe(b.id);
     expect(a.kind).toBe("page");
-    expect(endpointsOf((a.payload as PagePayload).params)).toEqual({ mode: "endpoints", start: "snap:1", end: "snap:9" });
+    expect(endpointsOf(a)).toEqual({ mode: "endpoints", start: "snap:1", end: "snap:9" });
     const c = endpointDiffRef(null, "git:abc123");
-    expect(c.id).toBe("oxplow:oxplow/page?end=git:abc123&page=diff-view&start=none");
-    expect(c.id).not.toBe(a.id);
+    expect(c.id).toBe("oxplow:oxplow/page?page=diff-view#end=git:abc123&start=none");
+    // The endpoints are the page's view: another pair is the same page.
+    expect(identityOf(c.id)).toBe(identityOf(a.id));
   });
 });
 
 describe("refFromTabId — diff-view", () => {
-  test("an effort is its own page now: diff-view params without endpoints name none", () => {
-    expect(endpointsOf((refFromTabId("oxplow:oxplow/page?effort=eff42&page=diff-view")!.payload as PagePayload).params)).toBeNull();
+  test("an effort is its own page now: diff-view without endpoints names none", () => {
+    expect(endpointsOf(refFromTabId("oxplow:oxplow/page?effort=eff42&page=diff-view")!)).toBeNull();
   });
 
   test("round-trips snapshot↔snapshot endpoints", () => {
@@ -258,7 +260,7 @@ describe("refFromTabId", () => {
   test("a diff page rebuilds its whole spec from its id", () => {
     const spec = { path: "src/a.ts", leftVersion: "snap:3", rightVersion: "git:HEAD", baseLabel: "x", labelOverride: "eff9", revealLine: undefined } as const;
     const rebuilt = refFromTabId(diffRef(spec).id)!;
-    expect(diffSpecOf((rebuilt.payload as PagePayload).params)).toEqual(spec);
+    expect(diffSpecOf(rebuilt)).toEqual(spec);
   });
 
   test("diskFilePath names the working-tree file a tab id shows, or null", () => {
@@ -341,23 +343,24 @@ describe("refFromTabId", () => {
     expect(refFromTabId(r.id)).toEqual(r);
   });
 
-  test("lensRef carries params in the id, sorted, and round-trips them", () => {
-    const r = lensRef("x/effort-tests", { effort_id: 12, label: "a b" });
-    expect(r.id).toBe("oxplow:oxplow/lens?effort_id=12&label=a%20b&lens=x/effort-tests");
+  test("lensRef carries its resource params in the `?` and its view in the `#`, and round-trips them", () => {
+    const r = lensRef("x/effort-tests", { effort_id: 12 }, { label: "a b" });
+    expect(r.id).toBe("oxplow:oxplow/lens?effort_id=12&lens=x/effort-tests#label=a%20b");
     expect(typeOf(r.id)).toBe("oxplow/lens");
-    expect(r.payload).toEqual({ lensId: "x/effort-tests", params: { effort_id: 12, label: "a b" } });
+    expect(r.payload).toEqual({ lensId: "x/effort-tests", params: { effort_id: 12 } });
     expect(refFromTabId(r.id)).toEqual(r);
+    expect(viewParamsOf(r)).toEqual({ label: "a b" });
     expect(lensRef("x/y", {}).id).toBe("oxplow:oxplow/lens?lens=x/y");
   });
 
-  test("a metric's view rides in its ref as a query and round-trips", () => {
+  test("a metric's view rides in its URI's `#` and round-trips", () => {
     const r = metricRef("oxplow.todos", { slice: "oxplow.language", range: "2026-06-01..2026-06-03" });
-    expect(r.id).toBe("oxplow:oxplow/metric?metric=oxplow.todos&range=2026-06-01..2026-06-03&slice=oxplow.language");
+    expect(r.id).toBe("oxplow:oxplow/metric?metric=oxplow.todos#range=2026-06-01..2026-06-03&slice=oxplow.language");
     expect(typeOf(r.id)).toBe("oxplow/metric");
     expect(idOf(r.id, "oxplow/metric")).toBe("oxplow.todos");
     expect(refFromTabId(r.id)).toEqual(r);
     expect(viewParamsOf(r)).toEqual({ slice: "oxplow.language", range: "2026-06-01..2026-06-03" });
-    expect(withViewParams(metricRef("oxplow.todos"), { range: "30d" }).id).toBe("oxplow:oxplow/metric?metric=oxplow.todos&range=30d");
+    expect(withViewParams(metricRef("oxplow.todos"), { range: "30d" }).id).toBe("oxplow:oxplow/metric?metric=oxplow.todos#range=30d");
     expect(metricRef("oxplow.todos", {}).id).toBe("oxplow:oxplow/metric?metric=oxplow.todos");
   });
 });
@@ -372,22 +375,25 @@ test("a work item ref opens for every provider", () => {
 
 
 
-// A page's view params are its ref's; the host writes a new view back
-// into the same kind of ref, keeping what isn't view (a page's state).
+// A page's view is its URI's `#`; the host writes a new view back into the
+// same ref, what the page is (its `?`, its payload) unchanged.
 describe("view params", () => {
-  test("a lens's and a page's view params read from their ref", () => {
-    expect(viewParamsOf(lensRef("x/y", { range: "7d", n: 3 }))).toEqual({ range: "7d", n: 3 });
-    expect(viewParamsOf(extPageRef("acme", "pulls", { state: "open" }))).toEqual({ state: "open" });
+  test("a page's view reads from its URI's `#`", () => {
+    expect(viewParamsOf(lensRef("x/y", { stream_id: 2 }, { range: "7d", n: 3 }))).toEqual({ range: "7d", n: 3 });
+    expect(viewParamsOf(extPageRef("acme", "pulls", {}, { state: "open" }))).toEqual({ state: "open" });
     expect(viewParamsOf(wikiPageRef("home"))).toEqual({});
   });
 
-  test("withViewParams writes the view into the page's own kind of ref", () => {
-    expect(withViewParams(lensRef("x/y", { range: "7d" }), { q: "a" }).id).toBe(lensRef("x/y", { q: "a" }).id);
-    expect(withViewParams(extPageRef("acme", "pulls"), { state: "open" }).id).toBe("oxplow:oxplow/page?page=acme/pulls&state=open");
-    const own = pageTabRef("settings", { area: "agents", section: "x" });
-    expect(withViewParams(own, { area: "data" }).id).toBe("oxplow:oxplow/page?area=data&page=settings");
-    // A page with no view keeps its ref.
-    const wiki = wikiPageRef("home");
-    expect(withViewParams(wiki, { a: "b" })).toBe(wiki);
+  test("withViewParams writes the view into the same ref, whatever its kind", () => {
+    expect(withViewParams(lensRef("x/y", { stream_id: 2 }, { range: "7d" }), { q: "a" }).id).toBe(lensRef("x/y", { stream_id: 2 }, { q: "a" }).id);
+    expect(withViewParams(extPageRef("acme", "pulls"), { state: "open" }).id).toBe("oxplow:oxplow/page?page=acme/pulls#state=open");
+    const own = pageTabRef("settings", {}, { area: "agents", section: "x" });
+    expect(withViewParams(own, { area: "data" }).id).toBe("oxplow:oxplow/page?page=settings#area=data");
+    expect(withViewParams(wikiPageRef("home"), { lines: "3-3" })).toEqual({ ...wikiPageRef("home"), id: "oxplow:oxplow/wiki?slug=home#lines=3-3" });
+  });
+
+  test("withResourceParams names another resource of the same page", () => {
+    expect(withResourceParams(lensRef("x/y", { stream_id: 1 }, { q: "a" }), { stream_id: 2 }).id).toBe("oxplow:oxplow/lens?lens=x/y&stream_id=2");
+    expect(withResourceParams(lensRef("x/y"), { stream_id: 2 }, { q: "b" })).toEqual(lensRef("x/y", { stream_id: 2 }, { q: "b" }));
   });
 });

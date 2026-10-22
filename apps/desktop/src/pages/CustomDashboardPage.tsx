@@ -79,7 +79,7 @@ export function CustomDashboardPage({
   const [defs, setDefs] = useState<Map<string, MetricSpec>>(new Map());
   const [catalog, setCatalog] = useState<MetricCatalogEntry[]>([]);
   // Dashboard-level filter, inherited by every tile.
-  // The dashboard's filter is its view params (`metricsView.ts`); its `id` is its identity.
+  // The dashboard's filter is its view params; its `id` is its identity.
   const [rangeKey, setRangeKey] = useViewParam<string>("range", "all");
   const [branchName, setBranch] = useViewParam<string>("branch", "");
   const branch = branchName || null;

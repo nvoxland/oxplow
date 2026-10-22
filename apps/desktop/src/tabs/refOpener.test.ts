@@ -42,7 +42,7 @@ const RESOURCES: Resource[] = [
 afterEach(() => setResources([]));
 
 // Every URI opens by one rule: an extension's resource opens its page with
-// the URI as `ref`; every other URI opens as itself, through `refFromTabId`
+// the URI as `uri`; every other URI opens as itself, through `refFromTabId`
 // (a thread or a stream selects instead of opening a tab).
 test("a URI opens where its resource's page says, or as itself", () => {
   setResources(RESOURCES);
@@ -52,14 +52,14 @@ test("a URI opens where its resource's page says, or as itself", () => {
   expect(refTargetNow(fileUri("src/a.ts"))).toEqual({ tab: fileRef("src/a.ts") });
   expect(refTargetNow(threadUri("thr4"))).toEqual({ thread: "thr4" });
   const pr = resourceUri("acme/pr", { id: 12 });
-  expect(refTargetNow(pr)).toEqual({ tab: extPageRef("acme", "pr", { ref: pr }) });
+  expect(refTargetNow(pr)).toEqual({ tab: extPageRef("acme", "pr", { uri: pr }) });
 });
 
 test("an oxplow resource with a page opens it with the URI as its ref", () => {
   setResources(RESOURCES);
   const comment = commentUri("cmt7");
   expect(refTargetNow(comment)).toEqual({
-    tab: expect.objectContaining({ id: pageUri("comments", { ref: comment }), kind: "page" }),
+    tab: expect.objectContaining({ id: pageUri("comments", { uri: comment }), kind: "page" }),
   });
 });
 

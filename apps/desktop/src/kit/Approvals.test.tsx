@@ -10,7 +10,7 @@ afterEach(cleanup);
 
 const proposal: Proposal = {
   id: 7,
-  ref: "oxplow:oxplow/proposal?id=7",
+  uri: "oxplow:oxplow/proposal?id=7",
   createdAt: "2026-10-01T00:00:00Z",
   command: "oxplow.config.set",
   input: { key: "agentPromptAppend", value: "be brief" },

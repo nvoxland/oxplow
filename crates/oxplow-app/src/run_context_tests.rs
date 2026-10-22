@@ -48,7 +48,7 @@ fn acme(root: &Path, task: &str) {
         "def transform(input):\n    return {\"entities\": {\"seen\": [{\"k\": \"x\"}]}}\n",
     );
     let compose = format!(
-        "{{\"commands\": [{{\"name\": \"oxplow.work_item.update\", \"input\": {{\"ref\": \"{task}\", \"title\": \"merged\"}}}}]}}"
+        "{{\"commands\": [{{\"name\": \"oxplow.work_item.update\", \"input\": {{\"uri\": \"{task}\", \"title\": \"merged\"}}}}]}}"
     );
     write(
         root,

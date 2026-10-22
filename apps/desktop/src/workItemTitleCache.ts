@@ -29,7 +29,7 @@ function fetchTitle(id: string): Promise<void> {
   const p = (async () => {
     try {
       const { items } = await readWorkItemsByRef([id]);
-      titles.set(id, items.find((r) => r.ref === id)?.title ?? null);
+      titles.set(id, items.find((r) => r.uri === id)?.title ?? null);
       notify();
     } catch {
       // Leave it unresolved so a later render retries.

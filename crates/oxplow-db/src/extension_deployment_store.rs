@@ -203,7 +203,7 @@ mod tests {
         let model: Vec<(String, Option<String>, i64)> = db
             .read(|c| {
                 c.query_row(
-                    "SELECT ref, extension_ref, active FROM v_extension_deployment",
+                    "SELECT uri, extension_uri, active FROM v_extension_deployment",
                     [],
                     |r| Ok(vec![(r.get(0)?, r.get(1)?, r.get(2)?)]),
                 )

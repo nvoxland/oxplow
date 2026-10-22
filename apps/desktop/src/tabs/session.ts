@@ -7,15 +7,16 @@
  *
  * - A **tab** is a slot (a stable name, never an id) with its entries and
  *   where it is among them.
- * - An **entry** is a page: its `ref` — identity (kind + id) and view (the
- *   params in its payload, `kind:id?k=v` as a string) — its `historyState`
+ * - An **entry** is a page: its `ref`, whose id is a URI — what it shows
+ *   (`?`, its identity) and how (`#`, its view) — its `historyState`
  *   (scroll, a draft, …), and `from`, the collection it was opened from.
- * - A page changes its own view with `setView`: a filter replaces the
- *   entry, a selection pushes one.
+ * - **One `navigate`**, as a browser has it: the same identity in another
+ *   view keeps the page and changes its view (a filter replaces the entry,
+ *   a pick pushes one); another identity is another page.
  */
 
 import type { TabRef } from "./tabState.js";
-import { keyIdentityOf } from "../uri/uri.js";
+import { identityOf as uriIdentityOf } from "../uri/uri.js";
 
 /** One item of the collection a page was opened from. */
 export interface OriginItem {
@@ -61,9 +62,11 @@ export interface Session {
 /** The most tabs a thread keeps open; pinned tabs don't count. */
 export const MAX_PAGE_TABS = 15;
 
-/** The slot of the tab showing `id` now; null when none does. */
+/** The slot of the tab showing the page `id` names now (in any view);
+ *  null when none does. */
 export function slotShowing(s: Session, id: string): string | null {
-  return s.tabs.find((t) => current(t).ref.id === id)?.slot ?? null;
+  const page = identityOf(id);
+  return s.tabs.find((t) => identityOf(current(t).ref.id) === page)?.slot ?? null;
 }
 
 /** The active tab's current page; null when none is active. */
@@ -80,10 +83,10 @@ export function current(tab: Tab): Entry {
   return tab.entries[tab.at]!;
 }
 
-/** A page's or lens's identity: its id without the params it is viewed
- *  with (only its key param stays). */
+/** A page's identity: its id without its view (`#`); an id that isn't one
+ *  of oxplow's URIs is its own. */
 export function identityOf(id: string): string {
-  return keyIdentityOf(id) ?? id;
+  return uriIdentityOf(id) ?? id;
 }
 
 function touched(mru: string[], slot: string): string[] {
@@ -100,18 +103,12 @@ function withTab(s: Session, slot: string, f: (t: Tab) => Tab): Session {
   return { ...s, tabs };
 }
 
-/** Show `entry`: the tab already showing its page (its ref refreshed,
- *  its state kept), else a new tab. The tab becomes active. Its page is
- *  its ref's id, or what `identity` says (a diff at another line is the
- *  diff showing). */
-export function open(
-  s: Session,
-  entry: Entry,
-  opts: { pinned?: boolean; identity?: (ref: Entry["ref"]) => string } = {},
-): Session {
-  const same = opts.identity ?? ((ref: Entry["ref"]) => ref.id);
-  const page = same(entry.ref);
-  const there = s.tabs.find((t) => same(current(t).ref) === page);
+/** Show `entry`: the tab already showing its page — in any view — now in
+ *  `entry`'s (its ref refreshed, its state kept), else a new tab. The tab
+ *  becomes active. */
+export function open(s: Session, entry: Entry, opts: { pinned?: boolean } = {}): Session {
+  const page = identityOf(entry.ref.id);
+  const there = s.tabs.find((t) => identityOf(current(t).ref.id) === page);
   if (there) {
     const refreshed = withTab(s, there.slot, (t) => {
       const entries = [...t.entries];
@@ -125,36 +122,39 @@ export function open(
   return { tabs: [...s.tabs, tab], active: slot, mru: touched(s.mru, slot), next: s.next + 1 };
 }
 
-/** Go to `entry` in `slot`: pushed after the current entry (what was
- *  forward is dropped), or in its place with `replace`. Another tab
- *  showing the same page closes, so a page shows once. */
+/** Go to `entry` in `slot`, as a browser does: pushed after the current
+ *  entry (what was forward is dropped), or in its place with `replace`.
+ *  The same page in another view (`entry`'s identity is the current
+ *  entry's) is that page further on: it keeps the page's state (open
+ *  sections, a draft) and its origin, and its body stays mounted; replaced,
+ *  it is the entry rewritten (`history.replaceState`: what was forward
+ *  stays). Another tab showing the page closes, so a page shows once. */
 export function navigate(s: Session, slot: string, entry: Entry, opts: { replace?: boolean } = {}): Session {
   const tab = s.tabs.find((t) => t.slot === slot);
-  if (!tab || current(tab).ref.id === entry.ref.id) return s;
+  if (!tab) return s;
+  const now = current(tab);
+  if (now.ref.id === entry.ref.id) return s;
+  const page = identityOf(entry.ref.id);
+  const samePage = identityOf(now.ref.id) === page;
+  const step: Entry = samePage
+    ? {
+        ...(now.from ? { from: now.from } : {}),
+        ...(now.historyState !== undefined ? { historyState: now.historyState } : {}),
+        ...entry,
+      }
+    : entry;
+  if (samePage && opts.replace) {
+    return withTab(s, slot, (t) => {
+      const entries = [...t.entries];
+      entries[t.at] = step;
+      return { ...t, entries };
+    });
+  }
   const kept = opts.replace ? tab.entries.slice(0, tab.at) : tab.entries.slice(0, tab.at + 1);
-  const moved: Tab = { ...tab, entries: [...kept, entry], at: kept.length };
-  const others = s.tabs.filter((t) => t.slot !== slot && current(t).ref.id === entry.ref.id).map((t) => t.slot);
+  const moved: Tab = { ...tab, entries: [...kept, step], at: kept.length };
+  const others = s.tabs.filter((t) => t.slot !== slot && identityOf(current(t).ref.id) === page).map((t) => t.slot);
   const out = withTab(s, slot, () => moved);
   return others.reduce(close, out);
-}
-
-/** The page in `slot` now shows `ref` — its own view changed. A filter
- *  replaces the entry (keeping its state, its origin and both history
- *  directions); a selection (`push`) adds an entry, so Back undoes it. */
-export function setView(s: Session, slot: string, ref: TabRef, opts: { push?: boolean } = {}): Session {
-  const tab = s.tabs.find((t) => t.slot === slot);
-  if (!tab || current(tab).ref.id === ref.id) return s;
-  // A pick is the same page further on: it starts with the page's state
-  // (its open sections) and its origin.
-  if (opts.push) {
-    const now = current(tab);
-    return navigate(s, slot, { ref, ...(now.from ? { from: now.from } : {}), ...(now.historyState !== undefined ? { historyState: now.historyState } : {}) });
-  }
-  return withTab(s, slot, (t) => {
-    const entries = [...t.entries];
-    entries[t.at] = { ...entries[t.at]!, ref };
-    return { ...t, entries };
-  });
 }
 
 /** Keep `state` as the history state of `slot`'s current entry. */
@@ -289,15 +289,15 @@ export interface Body {
 
 /**
  * The pages a tab keeps mounted: one per page identity among its entries
- * (`identity`: a ref without its view params, `pages/pageIdentity.ts`),
- * drawing the current entry when it is that page's, else the nearest.
+ * (its id without its `#` view), drawing the current entry when it is
+ * that page's, else the nearest.
  * Every page is a function of its entry, so a change of view params (a
  * filter, a pick, Back between them) re-renders the page and never
  * remounts it; other pages stay mounted hidden, so Back shows them as they
  * were.
  */
-export function bodies(tab: Tab, identity: (ref: TabRef) => string = (ref) => identityOf(ref.id)): Body[] {
-  const keyOf = (entry: Entry) => `${tab.slot}/${identity(entry.ref)}`;
+export function bodies(tab: Tab): Body[] {
+  const keyOf = (entry: Entry) => `${tab.slot}/${identityOf(entry.ref.id)}`;
   const nearest = new Map<string, number>();
   tab.entries.forEach((entry, i) => {
     const key = keyOf(entry);

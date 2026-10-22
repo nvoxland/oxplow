@@ -2,23 +2,23 @@
 
 - **A command on a URI's menus** (its page's Commands, a row's
   right-click) says so in its own `ui`: `ui: { label, group?, about:
-  oxplow/work_item, input?: { ref: "{{ref}}" } }` (`about` is a resource
-  name, `<extension>/<name>`; `"{{ref.id}}"` binds the URI's key param, such as
+  oxplow/work_item, input?: { uri: "{{uri}}" } }` (`about` is a resource
+  name, `<extension>/<name>`; `"{{uri.id}}"` binds the URI's key param, such as
   the id, alone). To offer another command there with
   a fixed input, declare your own over the same operation.
 - **A provider's own operations** are your commands too: `commands: [{
   name: item.estimate, summary, provider: <your provider id>, op:
   estimate, ui? }]` — the operation's input (plus an optional
   `instance`) and access come from its declarations; it runs on the
-  instance its `ref` (or `instance`) names. Its capability verbs aren't
+  instance its `uri` (or `instance`) names. Its capability verbs aren't
   declared: they run as `oxplow.work_item.<verb>`.
 
 - **`commands:`** register commands of your own, as
   `<namespace>.<area>.<verb>`: `{ name: area.verb, summary, input_schema,
   entry: handlers/x.star, needs?: [sql.read], confirm?, access?,
   invokers?, examples? }`. The Starlark `transform(x)` gets `{ input }`,
-  reads with `scope("sql.read", { "sql": "SELECT … WHERE ref = :ref",
-  "params": { "ref": x["input"]["ref"] } })` (a list of row dicts; it must
+  reads with `scope("sql.read", { "sql": "SELECT … WHERE uri = :uri",
+  "params": { "uri": x["input"]["uri"] } })` (a list of row dicts; it must
   list `sql.read` in `needs`) and returns `{ commands: [{ name, input }],
   result? }`
   — or `{ refuse: "why" }` to decline (the caller sees the reason).
@@ -36,8 +36,8 @@
   <part of the reason>`. An agent is shown an `example:` input beside the
   schema (a script's first example that runs, unless it declares one;
   give one to a command over a `scope:` op). `access: read` makes a command that only reads
-  and returns a `result` (it composes nothing). A command on a URI's menu (`ui.about`) gets `{ ref }` unless its
-  `ui.input` says otherwise, so name its input field `ref`. `extensions/oxplow-bundled/` (bundled) is a
+  and returns a `result` (it composes nothing). A command on a URI's menu (`ui.about`) gets `{ uri }` unless its
+  `ui.input` says otherwise, so name its input field `uri`. `extensions/oxplow-bundled/` (bundled) is a
   working example.
 - **`custom_components:`** (stable; not in a bundled extension) are web bundles a
   `viz: custom` lens renders: `{ id, title?, bundle?: components/<id>,
@@ -63,7 +63,7 @@
 - **A form lens** (`viz: form`) is one command's input:
   `form: { command, defaults?, fixed?, fields? }`. `defaults` takes
   `{{param.x}}`; a `query` prefills from its first row; `fixed` fields
-  show their default and can't be changed (an item's `ref`); `fields`
+  show their default and can't be changed (an item's `uri`); `fields`
   says which to show.
 - **Editing what is saved:** `mode: edit` (and list its `fields`). Save
   is enabled only when changed, Discard puts the saved values back, and
@@ -87,7 +87,7 @@
   command's form (a side panel) starting from its `input`, instead of
   running at once; `fixed` keeps fields to the bound values:
   `{ id: edit, label: Edit…, command: oxplow.work_item.update, row: true,
-  form: true, fixed: [ref], input: { ref: "{{row.ref}}", title: "{{row.title}}" } }`.
+  form: true, fixed: [uri], input: { uri: "{{row.uri}}", title: "{{row.title}}" } }`.
 - **In a component**, a `<form>` is fine: handle `submit` in your script
   (`preventDefault`) and run the command with `invoke`. A refusal rejects
   with `{ code, message, field? }`; show `message` under the field it

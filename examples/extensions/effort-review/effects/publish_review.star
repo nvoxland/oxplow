@@ -15,7 +15,7 @@ def transform(x):
     if not effort.startswith("eff"):
         return {"skip": "not an effort review: " + key}
     efforts = scope("sql.read", {
-        "sql": "SELECT work_item FROM v_effort WHERE ref = :effort",
+        "sql": "SELECT work_item FROM v_effort WHERE uri = :effort",
         "params": {"effort": uri.build("oxplow/effort", id = effort)},
     })
     if not efforts or not efforts[0]["work_item"]:
@@ -28,5 +28,5 @@ def transform(x):
         text += "\n\n_The review was cancelled after " + str(len(text.split())) + " words._"
     return {"commands": [{
         "name": "oxplow.work_item.comment",
-        "input": {"ref": efforts[0]["work_item"], "body": "**Review of " + effort + "**\n\n" + text},
+        "input": {"uri": efforts[0]["work_item"], "body": "**Review of " + effort + "**\n\n" + text},
     }]}

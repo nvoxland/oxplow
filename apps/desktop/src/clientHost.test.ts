@@ -72,14 +72,14 @@ test("a call runs its handler in the caller's thread and answers with its result
       },
     },
   });
-  h.emit(call("open", { ref: "oxplow:oxplow/file?path=a.rs" }));
-  h.emit(call("close", { ref: "oxplow:oxplow/file?path=x" }));
+  h.emit(call("open", { uri: "oxplow:oxplow/file?path=a.rs" }));
+  h.emit(call("close", { uri: "oxplow:oxplow/file?path=x" }));
   h.emit(call("pin", {}));
   h.emit({ kind: "configChanged" } as OxplowEvent);
   await settle();
   // The handler knows the call it answers: what it runs on the daemon for
   // it runs as the call's actor.
-  expect(seen).toEqual([[{ ref: "oxplow:oxplow/file?path=a.rs" }, "thr3", "agent:thr3", { client: "w1", id: "c-open" }]]);
+  expect(seen).toEqual([[{ uri: "oxplow:oxplow/file?path=a.rs" }, "thr3", "agent:thr3", { client: "w1", id: "c-open" }]]);
   expect([...h.answers].sort((a, b) => a[1].localeCompare(b[1]))).toEqual([
     ["w1", "c-close", { error: "no tab `oxplow:oxplow/file?path=x`" }],
     ["w1", "c-open", { result: { open: true } }],
@@ -90,7 +90,7 @@ test("a call runs its handler in the caller's thread and answers with its result
 test("a call addressed to another window is left to it", async () => {
   const seen: unknown[] = [];
   const h = harness({ "tabs.write": { open: (input) => void seen.push(input) } });
-  h.emit(call("open", { ref: "oxplow:oxplow/file?path=a.rs" }, "w2"));
+  h.emit(call("open", { uri: "oxplow:oxplow/file?path=a.rs" }, "w2"));
   await settle();
   expect(seen).toEqual([]);
   expect(h.answers).toEqual([]);

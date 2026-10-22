@@ -3,10 +3,10 @@ description: The pages you bookmarked, as the thread sees them — this thread's
 params:
   - { name: thread_id }
 query: |
-  SELECT coalesce(nullif(trim(w.title), ''), nullif(trim(b.label), ''), b.ref) AS title,
-         b.page_kind, b.ref, b.scope, uri_param(t.ref, 'id') AS thread
+  SELECT coalesce(nullif(trim(w.title), ''), nullif(trim(b.label), ''), b.uri) AS title,
+         b.page_kind, b.uri, b.scope, uri_param(t.uri, 'id') AS thread
   FROM (
-    SELECT bk.*, row_number() OVER (PARTITION BY bk.ref ORDER BY
+    SELECT bk.*, row_number() OVER (PARTITION BY bk.uri ORDER BY
              CASE bk.scope WHEN 'thread' THEN 0 WHEN 'stream' THEN 1 ELSE 2 END) AS n
     FROM v_bookmark bk
     WHERE (bk.scope = 'thread' AND bk.thread_id = :thread_id)
@@ -14,16 +14,16 @@ query: |
        OR bk.scope = 'project'
   ) b
   JOIN v_thread t ON t.id = :thread_id
-  LEFT JOIN v_knowledge_page w ON w.ref = b.ref
+  LEFT JOIN v_knowledge_page w ON w.uri = b.uri
   WHERE b.n = 1
   ORDER BY b.added_at DESC, b.id DESC
 columns:
-  - { key: title, label: Page, icon: page_kind, link: { kind: page, from: ref } }
+  - { key: title, label: Page, icon: page_kind, link: { kind: page, from: uri } }
   - { key: scope, label: Scope, width: 90 }
 actions:
-  - { id: to-thread, label: Move to this thread, command: oxplow.bookmark.set, input: { ref: "{{row.ref}}", page_kind: "{{row.page_kind}}", label: "{{row.title}}", scope: thread, thread: "{{row.thread}}" }, row: true }
-  - { id: to-stream, label: Move to this stream, command: oxplow.bookmark.set, input: { ref: "{{row.ref}}", page_kind: "{{row.page_kind}}", label: "{{row.title}}", scope: stream, thread: "{{row.thread}}" }, row: true }
-  - { id: to-project, label: Move to the project, command: oxplow.bookmark.set, input: { ref: "{{row.ref}}", page_kind: "{{row.page_kind}}", label: "{{row.title}}", scope: project, thread: "{{row.thread}}" }, row: true }
-  - { id: remove, label: Remove bookmark, command: oxplow.bookmark.remove, input: { ref: "{{row.ref}}", thread: "{{row.thread}}" }, row: true }
+  - { id: to-thread, label: Move to this thread, command: oxplow.bookmark.set, input: { uri: "{{row.uri}}", page_kind: "{{row.page_kind}}", label: "{{row.title}}", scope: thread, thread: "{{row.thread}}" }, row: true }
+  - { id: to-stream, label: Move to this stream, command: oxplow.bookmark.set, input: { uri: "{{row.uri}}", page_kind: "{{row.page_kind}}", label: "{{row.title}}", scope: stream, thread: "{{row.thread}}" }, row: true }
+  - { id: to-project, label: Move to the project, command: oxplow.bookmark.set, input: { uri: "{{row.uri}}", page_kind: "{{row.page_kind}}", label: "{{row.title}}", scope: project, thread: "{{row.thread}}" }, row: true }
+  - { id: remove, label: Remove bookmark, command: oxplow.bookmark.remove, input: { uri: "{{row.uri}}", thread: "{{row.thread}}" }, row: true }
 empty: No bookmarks yet. Star a page to pin it here.
 hidden: true

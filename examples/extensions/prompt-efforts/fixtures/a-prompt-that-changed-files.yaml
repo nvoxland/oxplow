@@ -4,5 +4,5 @@ input:
   answers:
     sql.read:
       - [{ started_at: "2026-10-09T10:00:00Z" }]
-      - [{ ref: "oxplow:oxplow/effort?id=eff3", work_item: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", started_at: "2026-10-09T09:00:00Z" }]
+      - [{ uri: "oxplow:oxplow/effort?id=eff3", work_item: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", started_at: "2026-10-09T09:00:00Z" }]
 expect: { commands: [oxplow.effort.close, oxplow.effort.open] }

@@ -32,7 +32,7 @@
           "body": {
             "type": "string"
           },
-          "parent_ref": {
+          "parent_uri": {
             "type": "string"
           },
           "state": {
@@ -60,11 +60,11 @@
       "input_schema": {
         "type": "object",
         "required": [
-          "ref"
+          "uri"
         ],
         "additionalProperties": false,
         "properties": {
-          "ref": {
+          "uri": {
             "type": "string"
           },
           "title": {
@@ -73,7 +73,7 @@
           "body": {
             "type": "string"
           },
-          "parent_ref": {
+          "parent_uri": {
             "type": "string"
           },
           "state": {
@@ -101,12 +101,12 @@
       "input_schema": {
         "type": "object",
         "required": [
-          "ref",
+          "uri",
           "to"
         ],
         "additionalProperties": false,
         "properties": {
-          "ref": {
+          "uri": {
             "type": "string"
           },
           "to": {
@@ -132,7 +132,7 @@
   "event_types": [
     {
       "type": "work_item.recorded",
-      "v": 2,
+      "v": 3,
       "schema": {
         "$defs": {
           "CanonicalState": {
@@ -270,7 +270,7 @@
               "native_state": {
                 "type": "string"
               },
-              "parent_ref": {
+              "parent_uri": {
                 "type": [
                   "string",
                   "null"
@@ -284,19 +284,19 @@
                   "null"
                 ]
               },
-              "ref": {
-                "description": "`oxplow:oxplow/work_item?id=<id>&provider=<provider>`.",
-                "type": "string"
-              },
               "state": {
                 "$ref": "#/$defs/CanonicalState"
               },
               "title": {
                 "type": "string"
+              },
+              "uri": {
+                "description": "`oxplow:oxplow/work_item?id=<id>&provider=<provider>`.",
+                "type": "string"
               }
             },
             "required": [
-              "ref",
+              "uri",
               "title",
               "state",
               "native_state"
@@ -306,7 +306,7 @@
         },
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties": false,
-        "description": "`work_item.recorded@2`: a list's item as it now stands — how every\nlist's items reach the work-item interface (the `work_items.project`\nconsumer upserts it by ref), with its rank, links, comments and list\nwhen it states them. A list's verbs answer with it.",
+        "description": "`work_item.recorded@3`: a list's item as it now stands — how every\nlist's items reach the work-item interface (the `work_items.project`\nconsumer upserts it by ref), with its rank, links, comments and list\nwhen it states them. A list's verbs answer with it.",
         "properties": {
           "item": {
             "$ref": "#/$defs/WorkItemRecord"
@@ -315,7 +315,7 @@
         "required": [
           "item"
         ],
-        "title": "WorkItemRecordedV2",
+        "title": "WorkItemRecordedV3",
         "type": "object"
       }
     }

@@ -136,7 +136,7 @@ fn put_in(dir: &Path, e: &Ext) {
     let version = e.model_version;
     let mut manifest = format!("manifest: 2\nname: {name}\n");
     manifest += &format!(
-        "intent:\n  purpose: p\nmodels:\n  - name: items\n    version: {version}\n    description: Items.\n    columns:\n      - {{ name: ref, type: TEXT, doc: Work item ref. }}\n  - name: plain\n    version: 1\n    description: Plain.\n    columns:\n      - {{ name: ref, type: TEXT, doc: Work item ref. }}\n"
+        "intent:\n  purpose: p\nmodels:\n  - name: items\n    version: {version}\n    description: Items.\n    columns:\n      - {{ name: uri, type: TEXT, doc: Work item ref. }}\n  - name: plain\n    version: 1\n    description: Plain.\n    columns:\n      - {{ name: uri, type: TEXT, doc: Work item ref. }}\n"
     );
     let mut exports = String::new();
     if let Some((visibility, version)) = e.export {
@@ -174,7 +174,7 @@ fn put_in(dir: &Path, e: &Ext) {
         }
     }
     let mut imports = String::new();
-    let mut sql = "SELECT ref FROM ref('work_item')";
+    let mut sql = "SELECT uri FROM ref('work_item')";
     if let Some((target, version, optional)) = e.import {
         let version = version
             .map(|v| format!(", version: {v}"))
@@ -183,16 +183,16 @@ fn put_in(dir: &Path, e: &Ext) {
             "  - {{ id: dep, contribution: {}{version}, optional: {optional} }}\n",
             model_ref(target)
         );
-        sql = "SELECT ref FROM import_ref('dep')";
+        sql = "SELECT uri FROM import_ref('dep')";
         let params = if e.mounted {
-            "params: [{ name: ref }]\n"
+            "params: [{ name: uri }]\n"
         } else {
             ""
         };
         write(
             dir,
             "lenses/seen.yaml",
-            &format!("title: Seen\n{params}query: SELECT ref FROM import_ref('dep')\n"),
+            &format!("title: Seen\n{params}query: SELECT uri FROM import_ref('dep')\n"),
         );
         if e.mounted {
             manifest += "ui:\n  slots:\n    - { slot: work_item.detail.body, lens: seen }\n";
@@ -223,7 +223,7 @@ fn put_in(dir: &Path, e: &Ext) {
     write(dir, "extension.yaml", &manifest);
     write(dir, "handlers/get.star", HANDLER);
     write(dir, "models/items.sql", sql);
-    write(dir, "models/plain.sql", "SELECT ref FROM ref('work_item')");
+    write(dir, "models/plain.sql", "SELECT uri FROM ref('work_item')");
 }
 
 const HANDLER: &str = "def transform(x):\n    return {\"commands\": [], \"result\": {}}\n";
@@ -249,7 +249,7 @@ async fn activate(svc: &Arc<crate::Services>) {
 
 async fn readable(svc: &crate::Services, view: &str) -> bool {
     svc.sql
-        .query_sql(&format!("SELECT ref FROM {view}"), vec![], None)
+        .query_sql(&format!("SELECT uri FROM {view}"), vec![], None)
         .await
         .is_ok()
 }

@@ -7,7 +7,7 @@
 -- shown as context, never as the active item. A linked effort shows as
 -- its item.
 WITH item AS (
-  SELECT w.*, EXISTS (SELECT 1 FROM ref('work_item') c WHERE c.parent_ref = w.ref) AS is_epic,
+  SELECT w.*, EXISTS (SELECT 1 FROM ref('work_item') c WHERE c.parent_uri = w.uri) AS is_epic,
          row_number() OVER (PARTITION BY w.thread_id
                             ORDER BY w.rank IS NULL, w.rank, w.created_at) AS pos
   FROM ref('work_item') w
@@ -20,47 +20,47 @@ active AS (
   ) WHERE rn = 1
 ),
 epic AS (
-  SELECT a.thread_id, e.ref AS epic_ref, e.title AS epic_title, a.ref AS active_ref
-  FROM active a JOIN item e ON e.ref = a.parent_ref AND e.is_epic
+  SELECT a.thread_id, e.uri AS epic_ref, e.title AS epic_title, a.uri AS active_ref
+  FROM active a JOIN item e ON e.uri = a.parent_uri AND e.is_epic
 ),
 unlinked AS (
-  SELECT e.thread_id, e.id, e.ref, coalesce(e.title, 'Work in progress') AS title, e.ended_at
+  SELECT e.thread_id, e.id, e.uri, coalesce(e.title, 'Work in progress') AS title, e.ended_at
   FROM ref('effort') e
   WHERE e.work_item IS NULL
 ),
 finished AS (
-  SELECT i.thread_id, i.title, 'done' AS icon, i.ref, i.closed_at AS at
+  SELECT i.thread_id, i.title, 'done' AS icon, i.uri, i.closed_at AS at
   FROM item i
   WHERE i.state = 'done' AND i.closed_at IS NOT NULL AND i.thread_id IS NOT NULL
   UNION ALL
-  SELECT k.thread_id, p.title, 'wiki', p.ref, k.last_seen_at
-  FROM ref('knowledge_touch') k JOIN ref('knowledge_page') p ON p.ref = k.page
+  SELECT k.thread_id, p.title, 'wiki', p.uri, k.last_seen_at
+  FROM ref('knowledge_touch') k JOIN ref('knowledge_page') p ON p.uri = k.page
   UNION ALL
-  SELECT u.thread_id, u.title, 'done', u.ref, u.ended_at
+  SELECT u.thread_id, u.title, 'done', u.uri, u.ended_at
   FROM unlinked u WHERE u.ended_at IS NOT NULL
 ),
 lines AS (
 SELECT a.thread_id, 'In progress' AS grp, 0 AS g, 0 AS ord, a.title, a.state AS icon,
-       a.ref, 0 AS depth, 1 AS active
+       a.uri, 0 AS depth, 1 AS active
 FROM active a
 WHERE NOT EXISTS (SELECT 1 FROM epic e WHERE e.thread_id = a.thread_id)
 UNION ALL
-SELECT u.thread_id, 'In progress', 0, -2, u.title, 'in_progress', u.ref, 0, 1
+SELECT u.thread_id, 'In progress', 0, -2, u.title, 'in_progress', u.uri, 0, 1
 FROM unlinked u WHERE u.ended_at IS NULL
 UNION ALL
 SELECT e.thread_id, 'In progress', 0, -1, e.epic_title, 'epic', e.epic_ref, 0, 0
 FROM epic e
 UNION ALL
-SELECT e.thread_id, 'In progress', 0, c.pos, c.title, c.state, c.ref, 1, c.ref = e.active_ref
-FROM epic e JOIN item c ON c.parent_ref = e.epic_ref AND c.state <> 'canceled'
+SELECT e.thread_id, 'In progress', 0, c.pos, c.title, c.state, c.uri, 1, c.uri = e.active_ref
+FROM epic e JOIN item c ON c.parent_uri = e.epic_ref AND c.state <> 'canceled'
 UNION ALL
-SELECT thread_id, 'Ready', 1, rn, title, 'todo', ref, 0, 0 FROM (
+SELECT thread_id, 'Ready', 1, rn, title, 'todo', uri, 0, 0 FROM (
   SELECT i.*, row_number() OVER (PARTITION BY i.thread_id ORDER BY i.pos) AS rn
   FROM item i
   WHERE i.state = 'todo' AND NOT i.is_epic AND i.thread_id IS NOT NULL
 ) WHERE rn <= 10
 UNION ALL
-SELECT thread_id, 'Finished', 3, rn, title, icon, ref, 0, 0 FROM (
+SELECT thread_id, 'Finished', 3, rn, title, icon, uri, 0, 0 FROM (
   SELECT f.*, row_number() OVER (PARTITION BY f.thread_id ORDER BY f.at DESC) AS rn
   FROM finished f LEFT JOIN ref('finished_cleared') c ON c.thread_id = f.thread_id
   WHERE c.cleared_at IS NULL OR f.at > c.cleared_at
@@ -69,5 +69,5 @@ SELECT thread_id, 'Finished', 3, rn, title, icon, ref, 0, 0 FROM (
 -- One type per column: a UNION blends its arms' types.
 SELECT CAST(thread_id AS INTEGER) AS thread_id, CAST(grp AS TEXT) AS grp, CAST(g AS INTEGER) AS g,
        CAST(ord AS INTEGER) AS ord, CAST(title AS TEXT) AS title, CAST(icon AS TEXT) AS icon,
-       CAST(ref AS TEXT) AS ref, CAST(depth AS INTEGER) AS depth, CAST(active AS INTEGER) AS active
+       CAST(uri AS TEXT) AS uri, CAST(depth AS INTEGER) AS depth, CAST(active AS INTEGER) AS active
 FROM lines

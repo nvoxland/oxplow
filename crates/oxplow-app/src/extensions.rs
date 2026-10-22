@@ -294,9 +294,9 @@ pub struct LensTree {
 pub struct LensTimeline {
     pub at: Option<String>,
     pub label: Option<String>,
-    /// A column holding a canonical ref each entry links to.
-    #[serde(rename = "ref")]
-    pub ref_column: Option<String>,
+    /// A column holding the URI each entry links to.
+    #[serde(rename = "uri")]
+    pub uri_column: Option<String>,
 }
 
 /// `steps` viz: each step's text and status.
@@ -845,12 +845,13 @@ pub struct LensParam {
     /// says.
     #[serde(default, rename = "type")]
     pub kind: Option<ParamType>,
-    /// What it is to the page, which follows from the columns and is
-    /// never written: a `selection` when a column of the lens (or of a
-    /// part of the page) selects it, else a `filter`. A loaded lens
-    /// always says.
+    /// What it is to the page, and so where it rides in the page's URI:
+    /// a `resource` (the default) names what the page shows, in the URI's
+    /// `?`; `filter` narrows how it shows it, in the URI's `#` view. A
+    /// `selection` follows from the columns and is never written: a param
+    /// a column of the lens (or of a part of the page) selects, in the
+    /// view too. A loaded lens always says.
     #[serde(default)]
-    #[schemars(skip)]
     pub role: Option<ParamRole>,
     /// A `date_range`'s quick picks, of `1d 2d 3d 7d 30d 90d all`; the
     /// default is `1d 7d 30d all`.
@@ -889,7 +890,11 @@ pub enum ParamType {
 )]
 #[serde(rename_all = "lowercase")]
 pub enum ParamRole {
-    /// Narrows what the page shows; a control in the page's rail.
+    /// Names what the page shows (its URI's `?`); a control in the
+    /// page's rail whose change opens another resource.
+    Resource,
+    /// Narrows how the page shows it (its URI's `#` view); a control in
+    /// the page's rail whose change replaces the view.
     Filter,
     /// The row a click picked; the rail shows that row, never an input.
     Selection,
@@ -1022,10 +1027,10 @@ fn range_ends(value: &str, now: time::OffsetDateTime) -> Option<(Option<String>,
 fn param_problem(lens: &Lens) -> Option<String> {
     lens.params.iter().find_map(|p| {
         let kind = p.kind();
-        let problem = if p.role.is_some() {
+        let problem = if p.role == Some(ParamRole::Selection) {
             Some(
-                "`role` follows from the columns (a param a column `select`s is a selection); \
-                 leave it out"
+                "`role: selection` follows from the columns (a param a column `select`s is \
+                 one); leave it out"
                     .to_string(),
             )
         } else if kind == ParamType::Choice && p.options.is_empty() {
@@ -1492,9 +1497,9 @@ pub const SLOTS: &[SlotSpec] = &[
     // An effort's review (its diff view).
     SlotSpec::region("effort.review.details", &["effort_id", "change_id"]),
     // A work item's page, below its body: the item's ref, whichever list.
-    SlotSpec::region("work_item.detail.body", &["ref"]),
+    SlotSpec::region("work_item.detail.body", &["uri"]),
     // The same page's side rail.
-    SlotSpec::region("work_item.detail.sidebar", &["ref"]),
+    SlotSpec::region("work_item.detail.sidebar", &["uri"]),
     // A thread's plan, as a compact strip.
     SlotSpec::region("thread.plan.header", &["thread_id"]),
     SlotSpec::region("vcs.commit.details", &["change_id"]),
@@ -1781,7 +1786,9 @@ pub struct ExtensionPage {
     pub category: Option<LauncherCategory>,
     /// More words the launcher matches it on.
     pub keywords: Option<String>,
-    /// The params its id carries (`oxplow:oxplow/page?area=agents&page=settings`).
+    /// The params naming what it shows, in its URI's `?`
+    /// (`oxplow:oxplow/page?page=settings&stream=str1`); its lens's filters and
+    /// selections ride in the `#` view.
     pub params: Vec<String>,
     /// The lens whose value (a `number` lens) is the launcher's badge
     /// (`<extension>/<slug>`).
@@ -1840,7 +1847,8 @@ struct PageFile {
     category: Option<LauncherCategory>,
     #[serde(default)]
     keywords: Option<String>,
-    /// The params its id carries.
+    /// The params naming what it shows, in its URI's `?`; its lens's filters
+    /// and selections ride in the `#` view.
     #[serde(default)]
     params: Vec<String>,
     /// A `number` lens of this extension whose value is the launcher badge.
@@ -3873,7 +3881,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             p.role = Some(if names.contains(&p.name) {
                 ParamRole::Selection
             } else {
-                ParamRole::Filter
+                p.role.unwrap_or(ParamRole::Resource)
             });
         }
     }
@@ -4684,7 +4692,7 @@ fn layout_warnings(lens: &Lens, lenses: &[Lens]) -> Vec<String> {
     let filters = lens
         .params
         .iter()
-        .filter(|p| p.role == Some(ParamRole::Filter) && !contract.contains(&p.name.as_str()))
+        .filter(|p| p.role != Some(ParamRole::Selection) && !contract.contains(&p.name.as_str()))
         .count();
     if filters > MAX_FILTERS {
         out.push(format!(
@@ -4908,7 +4916,7 @@ impl Lens {
         }
         if let Some(t) = &self.timeline {
             out.extend(
-                [&t.at, &t.label, &t.ref_column]
+                [&t.at, &t.label, &t.uri_column]
                     .into_iter()
                     .flatten()
                     .map(|k| ("timeline", k)),
@@ -6570,10 +6578,10 @@ description: Every work item in a given state.
 params:
   - { name: state, label: State, default: in_progress }
 query: |
-  SELECT ref, title FROM v_work_item WHERE state = :state ORDER BY title
+  SELECT uri, title FROM v_work_item WHERE state = :state ORDER BY title
 viz: table
 columns:
-  - { key: title, label: Item, link: { kind: page, from: ref } }
+  - { key: title, label: Item, link: { kind: page, from: uri } }
 empty: No items.
 "#;
 
@@ -6630,7 +6638,7 @@ empty: No items.
             l.columns[0].link,
             Some(LensLink {
                 kind: LensLinkKind::Page,
-                from: Some("ref".into()),
+                from: Some("uri".into()),
                 line: None,
                 base: None,
                 head: None,
@@ -7079,7 +7087,7 @@ empty: No items.
         let project = tempfile::tempdir().unwrap();
         let spec = LensSpec {
             title: "Open Tasks".into(),
-            query: "SELECT ref, title FROM v_work_item".into(),
+            query: "SELECT uri, title FROM v_work_item".into(),
             ..spec_base()
         };
         save_lens(
@@ -7109,7 +7117,7 @@ empty: No items.
         let new = || LensSpec {
             title: "Open Tasks".into(),
             description: "From Explore Data".into(),
-            query: "SELECT ref, title FROM v_work_item".into(),
+            query: "SELECT uri, title FROM v_work_item".into(),
             ..spec_base()
         };
         let lens = save_lens(
@@ -7457,7 +7465,7 @@ collectors:
   - id: things
     runtime: starlark
     entry: collectors/things.star
-    input: \"SELECT ref FROM v_work_item\"
+    input: \"SELECT uri FROM v_work_item\"
     entities:
       - { name: thing, key: id, columns: { id: int, label: text } }
 models:
@@ -7985,7 +7993,7 @@ commands:
             &[
                 ("presets", "title: Presets\nquery: SELECT 1\n"),
                 ("stray", "title: Stray\nquery: SELECT 1\n"),
-                ("region", "title: R\nparams: [{ name: ref }]\nquery: SELECT 1\n"),
+                ("region", "title: R\nparams: [{ name: uri }]\nquery: SELECT 1\n"),
                 ("sized", "title: S\nquery: SELECT 1\n"),
             ],
             "ui:\n  slots:\n    - { slot: settings.agents.sections, lens: presets, title: Team presets, at: { after: agents } }\n    - { slot: settings.agents.sections, lens: stray, at: { before: gone } }\n    - { slot: work_item.detail.body, lens: region, at: start }\n    - { slot: settings.agents.sections, lens: sized, size: wide }\n",
@@ -8341,9 +8349,9 @@ commands:
             ("bad_range", "`soon`"),
             ("bad_bool", "`maybe`"),
             // A page draws every param in its rail; where is not the
-            // author's to say, and a role follows from the columns.
+            // author's to say, and a selection follows from the columns.
             ("placed", "unknown field `place`"),
-            ("roled", "`role` follows from the columns"),
+            ("roled", "`role: selection` follows from the columns"),
         ] {
             assert!(ext.lenses.iter().all(|l| l.slug != slug), "{slug} loaded");
             assert!(
@@ -8478,14 +8486,14 @@ commands:
     }
 
     /// A param a column selects is a selection, on the lens whose rows
-    /// set it and on the page that holds it for its parts; every other
-    /// param is a filter.
+    /// set it and on the page that holds it for its parts; one that says
+    /// `role: filter` is a filter; every other param names the resource.
     #[test]
-    fn a_param_a_column_selects_is_a_selection() {
+    fn a_params_role_is_resource_unless_it_filters_or_a_column_selects_it() {
         let (_d, ext) = load_x(
             &[
-                ("rows", "title: Rows\nquery: SELECT 'a' AS sha\nparams: [{ name: commit }, { name: q, type: search }]\ncolumns: [{ key: sha, select: commit }]\n"),
-                ("page", "title: Page\nviz: document\nparams: [{ name: q, type: search }, { name: commit }]\nsections: [{ lens: rows }]\n"),
+                ("rows", "title: Rows\nquery: SELECT 'a' AS sha\nparams: [{ name: commit }, { name: q, type: search, role: filter }, { name: stream_id }]\ncolumns: [{ key: sha, select: commit }]\n"),
+                ("page", "title: Page\nviz: document\nparams: [{ name: q, type: search, role: filter }, { name: commit }, { name: stream_id }]\nsections: [{ lens: rows }]\n"),
             ],
             "",
         );
@@ -8494,7 +8502,26 @@ commands:
             let role = |name: &str| lens.params.iter().find(|p| p.name == name).unwrap().role;
             assert_eq!(role("commit"), Some(ParamRole::Selection), "{slug}");
             assert_eq!(role("q"), Some(ParamRole::Filter), "{slug}");
+            assert_eq!(role("stream_id"), Some(ParamRole::Resource), "{slug}");
         }
+    }
+
+    /// A selection follows from the columns: a lens that writes one is
+    /// refused.
+    #[test]
+    fn a_written_selection_role_is_refused() {
+        let (_d, ext) = load_x(
+            &[(
+                "rows",
+                "title: Rows\nquery: SELECT 1 AS n\nparams: [{ name: commit, role: selection }]\n",
+            )],
+            "",
+        );
+        let errs = ext.errors.join("\n");
+        assert!(
+            errs.contains("`role: selection` follows from the columns"),
+            "{errs}"
+        );
     }
 
     /// A lens says where it comes from: the source file to edit, relative
@@ -8715,7 +8742,7 @@ commands:
                 ("doc", "title: D\nviz: document\nparams: [{ name: q }]\nsections: [{ lens: n }]\n"),
                 (
                     "act",
-                    "title: A\nparams: [{ name: k }]\nquery: SELECT 1 AS a\nactions:\n  - { id: go, label: Go, command: oxplow.work_item.transition, input: { ref: '{{param.k}}' } }\n",
+                    "title: A\nparams: [{ name: k }]\nquery: SELECT 1 AS a\nactions:\n  - { id: go, label: Go, command: oxplow.work_item.transition, input: { uri: '{{param.k}}' } }\n",
                 ),
             ],
             "",
@@ -8888,7 +8915,7 @@ commands:
 
     #[test]
     fn slots_bind_params_the_lens_must_declare() {
-        let task_lens = "title: T\nparams: [{ name: ref }]\nquery: SELECT :ref\n";
+        let task_lens = "title: T\nparams: [{ name: uri }]\nquery: SELECT :uri\n";
         let thread_lens = "title: Th\nparams: [{ name: thread_id }]\nquery: SELECT :thread_id\n";
         let (_d, ext) = load_x(
             &[("t", task_lens), ("th", thread_lens), ("plain", "title: P\nquery: SELECT 1\n")],
@@ -8908,7 +8935,7 @@ commands:
             ]
         );
         let errs = ext.errors.join("\n");
-        assert!(errs.contains("`ref`") && errs.contains("plain"), "{errs}");
+        assert!(errs.contains("`uri`") && errs.contains("plain"), "{errs}");
     }
 
     /// P9.A2: a file diff's header strip takes lenses about the file — its
@@ -9062,7 +9089,7 @@ commands:
             "    version: 1",
             "    description: Blocked work items.",
             "    columns:",
-            "      - { name: ref, type: TEXT, doc: Work item ref. }",
+            "      - { name: uri, type: TEXT, doc: Work item ref. }",
             "  - { name: gone, version: 1, description: No file., columns: [] }",
             "",
         ]
@@ -9071,7 +9098,7 @@ commands:
         write(
             dir.path(),
             ".oxplow/extensions/x/models/late.sql",
-            "SELECT ref FROM ref('work_item') WHERE state = 'blocked'",
+            "SELECT uri FROM ref('work_item') WHERE state = 'blocked'",
         );
         write(
             dir.path(),
@@ -9572,7 +9599,7 @@ commands:
             &[
                 (
                     "a",
-                    "title: A\nquery: SELECT 1 AS id\nparams: [{ name: item, default: '' }]\nactions:\n  - { id: finish, label: Finish, command: oxplow.work_item.transition, input: { ref: '{{param.item}}', to: done } }\n  - { id: row, label: Row, command: oxplow.work_item.transition, row: true, input: { ref: 'work_item:oxplow:tsk{{row.id}}', to: done } }\n",
+                    "title: A\nquery: SELECT 1 AS id\nparams: [{ name: item, default: '' }]\nactions:\n  - { id: finish, label: Finish, command: oxplow.work_item.transition, input: { uri: '{{param.item}}', to: done } }\n  - { id: row, label: Row, command: oxplow.work_item.transition, row: true, input: { uri: 'work_item:oxplow:tsk{{row.id}}', to: done } }\n",
                 ),
                 ("b", "title: B\nquery: SELECT 1\nactions: [copy]\n"),
                 ("c", "title: C\nquery: SELECT 1\nactions: [{ action: run-source, source: a/b }]\n"),

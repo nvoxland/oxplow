@@ -13,7 +13,7 @@ optional: oxplow tracks your work in efforts either way.
 File one when it helps the person follow the work:
 
 - a plan of several separately reviewable steps (an epic and children,
-  each child filed with `"parent_ref": "<the epic's ref>"`);
+  each child filed with `"parent_uri": "<the epic's uri>"`);
 - work the person wants done in a later turn;
 - a follow-up you noticed but can't do now.
 
@@ -29,7 +29,7 @@ concern per item. An epic is an item with children: file one when the
 change has three or more steps a reviewer would inspect separately;
 otherwise file a single item.
 
-Starting an item (`oxplow.work_item.transition { ref, to: "in_progress" }`)
+Starting an item (`oxplow.work_item.transition { uri, to: "in_progress" }`)
 links your effort to it; starting an unrelated one begins a new effort.
 oxplow never marks an item done. If you're tracking one, move it to
 `done` when it ships.
@@ -44,12 +44,12 @@ rather than filing a new one.
 
 ## Changing items
 
-The same commands change any list's items, by canonical ref
-(`oxplow:oxplow/work_item?id=<id>&provider=<provider>`): `oxplow.work_item.transition { ref, to,
-native_state? }`, `oxplow.work_item.update { ref, title?, body?, parent_ref?,
-state?, native? }`, `oxplow.work_item.link { ref, target, link_type }`
+The same commands change any list's items, by canonical uri
+(`oxplow:oxplow/work_item?id=<id>&provider=<provider>`): `oxplow.work_item.transition { uri, to,
+native_state? }`, `oxplow.work_item.update { uri, title?, body?, parent_uri?,
+state?, native? }`, `oxplow.work_item.link { uri, target, link_type }`
 (and `oxplow.work_item.unlink`, the same input),
-`oxplow.work_item.comment { ref, body }`. `oxplow.work_item.create` takes
+`oxplow.work_item.comment { uri, body }`. `oxplow.work_item.create` takes
 `links: [{ target, link_type }]` too. The active list's own ids work as
 refs too (oxplow's tasks: `tsk12`). `list_commands` shows only what the
 active list supports.
@@ -64,23 +64,23 @@ Link types:
 - **duplicates**: the same work as the target; close the duplicate.
 - **supersedes**: replaces the target, which is stale.
 - **replies_to**: a threaded response to the target.
-- **about**: what the item is about — any ref, not only another item
+- **about**: what the item is about — any uri, not only another item
   (`oxplow:oxplow/effort?id=eff12`, `oxplow:oxplow/file?path=src/a.rs`, `oxplow:oxplow/collector?collector=triage/hot`). Find the
-  items about something with `v_work_item_link WHERE to_ref = :ref AND
+  items about something with `v_work_item_link WHERE to_uri = :uri AND
   link_type = 'about'`, never by matching titles.
 
 ## Reading items
 
-- `oxplow_read { ref }` — one item: its row, its links and its comments.
+- `oxplow_read { uri }` — one item: its row, its links and its comments.
 - `oxplow_work_next { thread: "thr3" }` — what to pick up next on a
   thread's list (an epic with its ready descendants, or the ready items).
 - `oxplow_thread_work { thread }` — a thread's items by state, with their
   efforts; `oxplow_thread_notes { thread }` — the notes recorded on it.
-- `oxplow_query_sql` over `v_work_item` (`ref`, `title`, `body`, `state`,
-  `native_state`, `native`, `parent_ref`, `thread_id` — NULL on the
+- `oxplow_query_sql` over `v_work_item` (`uri`, `title`, `body`, `state`,
+  `native_state`, `native`, `parent_uri`, `thread_id` — NULL on the
   backlog — `rank`, `closed_at`), `v_work_item_link` and
   `v_work_item_comment` for anything else: a list's items in order are
   `WHERE thread_id = … ORDER BY rank IS NULL, rank, created_at`.
 
 What's been done on an item is its efforts: `v_effort` where `work_item`
-is the item's ref (`started_at`, `ended_at`, `summary`).
+is the item's uri (`started_at`, `ended_at`, `summary`).

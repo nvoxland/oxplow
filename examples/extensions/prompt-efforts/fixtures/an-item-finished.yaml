@@ -3,5 +3,5 @@ input:
   event: { type: work_item.state_changed, payload: { work_item: "oxplow:oxplow/work_item?id=tsk2&provider=oxplow", to: done } }
   answers:
     sql.read:
-      - [{ ref: "oxplow:oxplow/effort?id=eff4" }]
+      - [{ uri: "oxplow:oxplow/effort?id=eff4" }]
 expect: { commands: [oxplow.effort.close] }

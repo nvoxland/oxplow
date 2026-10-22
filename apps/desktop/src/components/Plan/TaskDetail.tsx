@@ -84,23 +84,23 @@ export function TaskDetail({
       onClick={(event) => event.stopPropagation()}
     >
       <TitleField
-        key={`title-${item.ref}`}
+        key={`title-${item.uri}`}
         value={item.title}
         onCommit={(value) => {
           const trimmed = value.trim();
           if (!trimmed || trimmed === item.title) return;
-          void onUpdateTask(item.ref, { title: trimmed });
+          void onUpdateTask(item.uri, { title: trimmed });
         }}
       />
       <RichTextField
-        key={`desc-${item.ref}`}
+        key={`desc-${item.uri}`}
         value={item.body}
         placeholder="Add a description…"
         style={{ paddingLeft: 0, paddingRight: 22 }}
         comments={comments}
         onCommit={(value) => {
           if (value === item.body) return;
-          void onUpdateTask(item.ref, { body: value });
+          void onUpdateTask(item.uri, { body: value });
         }}
       />
     </div>
@@ -240,7 +240,7 @@ export function TaskDetailRail({
           <FieldPill
             field={field}
             value={item.native[field.name]}
-            onChange={(value) => void onUpdateTask(item.ref, { native: { [field.name]: value } })}
+            onChange={(value) => void onUpdateTask(item.uri, { native: { [field.name]: value } })}
           />
         </RailPillRow>
       ))}
@@ -267,7 +267,7 @@ export function TaskDetailRail({
         color: "var(--text-muted)",
         fontSize: "var(--text-xs)",
       }}>
-        <RailMetaRow label="ID">{workItemLabel(item.ref)}</RailMetaRow>
+        <RailMetaRow label="ID">{workItemLabel(item.uri)}</RailMetaRow>
         <RailMetaRow label="Created">{formatTimestamp(item.createdAt)}</RailMetaRow>
         <RailMetaRow label="Updated">{formatTimestamp(item.updatedAt)}</RailMetaRow>
         {item.closedAt ? <RailMetaRow label="Closed">{formatTimestamp(item.closedAt)}</RailMetaRow> : null}
@@ -347,7 +347,7 @@ function StatePill({
       color={stateColor(item.state)}
       label="State"
       render={(v) => STATE_LABEL[v as CanonicalState] ?? v}
-      onChange={(value) => void onUpdateTask(item.ref, { state: value as CanonicalState })}
+      onChange={(value) => void onUpdateTask(item.uri, { state: value as CanonicalState })}
     />
   );
 }

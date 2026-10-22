@@ -11,5 +11,5 @@ def transform(input):
     for f in source_files():
         lang = f["language"]
         for m in code_metrics(f["text"], lang, f["path"]):
-            facts.append({"measure": "oxplow.fn_length", "value": m["length"], "subject": m["ref"], "path": f["path"], "line": m["start_line"], "dims": {"oxplow.language": lang}})
+            facts.append({"measure": "oxplow.fn_length", "value": m["length"], "subject": m["uri"], "path": f["path"], "line": m["start_line"], "dims": {"oxplow.language": lang}})
     return {"facts": facts}

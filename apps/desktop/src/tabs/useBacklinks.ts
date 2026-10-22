@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { listBacklinks, listPageOutbound, type BacklinkEdge } from "../api.js";
 import { lensRef } from "./pageRefs.js";
 import { refTargetNow } from "./refOpener.js";
-import { commitUri, contributionOf, dirUri, fileUri, idOf, keyIdentityOf, keyOf, typeOf, pageUri, wikiUri } from "../uri/uri.js";
+import { commitUri, contributionOf, dirUri, fileUri, idOf, identityOf, keyOf, typeOf, pageUri, wikiUri } from "../uri/uri.js";
 import type { TabRef } from "./tabState.js";
 import type { BacklinkEntry } from "./backlinkTypes.js";
 
@@ -108,7 +108,7 @@ export function graphUriOf(ref: TabRef): string | null {
     default:
       // Any other kind with a page is its own URI (a lens, an effort, a
       // collector's page).
-      return keyIdentityOf(ref.id) ?? ref.id;
+      return identityOf(ref.id) ?? ref.id;
   }
 }
 

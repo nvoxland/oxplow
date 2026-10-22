@@ -4,5 +4,5 @@ input:
   answers:
     sql.read:
       - [{ started_at: "2026-10-09T10:00:00Z" }]
-      - [{ ref: "oxplow:oxplow/effort?id=eff4", work_item: null, started_at: "2026-10-09T10:00:05Z" }]
+      - [{ uri: "oxplow:oxplow/effort?id=eff4", work_item: null, started_at: "2026-10-09T10:00:05Z" }]
 expect: { skip: $any }

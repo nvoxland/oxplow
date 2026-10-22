@@ -5,11 +5,11 @@ import { useOptionalPageNavigation, usePageTitle } from "../tabs/PageNavigationC
 import type { TabRef } from "../tabs/tabState.js";
 import type { Stream } from "../tauri-bridge/index.js";
 import { querySql, runLens, type LensRun, type SqlCell } from "../api.js";
-import { lensRef } from "../tabs/pageRefs.js";
+import { lensRef, withResourceParams } from "../tabs/pageRefs.js";
 import { getPageDetailStore } from "../tabs/openPageDetail.js";
 import { insertIntoAgent } from "../agent-input-bus.js";
 import { formatContextMention } from "../agent-context-ref.js";
-import { changedParams, lensViewChange } from "../lens/lensModel.js";
+import { changedParams, lensViewChange, misplacedViewParams } from "../lens/lensModel.js";
 import { useHostedView } from "../lens/hostedView.js";
 import { NO_READS, useRerunOnChange } from "../lens/lensRerun.js";
 import { useRequestGuard } from "../request-guard.js";
@@ -20,8 +20,9 @@ import type { PageAction } from "../kit/actions.js";
 export interface LensPageProps {
   /** `<extension>/<slug>`. */
   lensId: string;
-  /** Its view params: what its ref carries (a slot's `{ effort_id }`, a
-   *  filter, a row picked). The page draws from them. */
+  /** Its resource params: what its URI's `?` carries (a slot's
+   *  `{ effort_id }`). Its filters and picks are its tab's view (the URI's
+   *  `#`, `PageNavigation.viewParams`). */
   params?: Record<string, SqlCell>;
   /** The page's name as its host knows it (an extension page's manifest
    *  title); the lens's own title otherwise. */
@@ -42,13 +43,15 @@ export function LensPage({ lensId, params, title: pageTitle, stream, onOpenPage 
   const streamId = stream?.id ?? null;
   const [run, setRun] = useState<LensRun | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // Its view params are its tab's (`tabs/session.ts`): a change goes back
-  // through the tab and the page redraws from what it gets. Outside a tab
-  // (no `setViewParams`) it keeps them itself.
+  // What it shows is its URI's `?` (`params`), how its tab's view (the
+  // `#`): a change goes back through the tab and the page redraws from
+  // what it gets. Outside a tab (no `setViewParams`) it keeps them itself.
   const nav = useOptionalPageNavigation();
   const inTab = !!nav?.setViewParams;
   const [own, setOwn] = useState<Record<string, SqlCell>>(params ?? {});
-  const fromRef = params ?? NO_PARAMS;
+  const resource = params ?? NO_PARAMS;
+  const view = nav?.viewParams ?? NO_PARAMS;
+  const fromRef = useMemoObject({ ...resource, ...view });
   const overrides = inTab ? fromRef : own;
   const overridesRef = useRef(overrides);
   overridesRef.current = overrides;
@@ -88,7 +91,7 @@ export function LensPage({ lensId, params, title: pageTitle, stream, onOpenPage 
   // agent asking "what am I looking at" (`get_open_page`) re-runs it with
   // exactly these values.
   const runParams = run?.params;
-  const pageId = nav?.ref?.id ?? lensRef(lensId, overrides).id;
+  const pageId = nav?.ref?.id ?? lensRef(lensId, resource, view).id;
   useEffect(() => {
     const store = getPageDetailStore();
     store.publish(pageId, { lensId, params: runParams ?? {} });
@@ -118,16 +121,23 @@ export function LensPage({ lensId, params, title: pageTitle, stream, onOpenPage 
   // Kept in the entry's history state, so Back and a restart still show the
   // row's facts, not the bare value.
   const [picked, setPicked] = useHistoryState<Record<string, PickedRow>>("picked", NO_PICKED);
-  // What the ref carries: the values that differ from the defaults. A
-  // filter refines what's shown (the entry is replaced); a row picked is
-  // somewhere to come back from (an entry is pushed).
+  // What the URI carries: the values that differ from the defaults. A
+  // filter refines how it's shown (the entry is replaced); a row picked is
+  // somewhere to come back from (an entry is pushed); another resource
+  // param is another page (pushed).
   const setView = (patch: Record<string, SqlCell>) => {
-    const { params: next, push } = lens
-      ? lensViewChange(lens, overridesRef.current, patch)
-      : { params: { ...overridesRef.current, ...patch }, push: false };
-    if (inTab) nav!.setViewParams!(next, { push });
-    else setOwn(next);
+    if (!inTab || !lens) {
+      setOwn({ ...overridesRef.current, ...patch });
+      return;
+    }
+    const change = lensViewChange(lens, overridesRef.current, patch);
+    const same = JSON.stringify(sorted(change.resource)) === JSON.stringify(sorted(resource));
+    if (same || !nav?.ref) nav!.setViewParams!(change.view, { push: change.push });
+    else nav.navigate(withResourceParams(nav.ref, change.resource, change.view));
   };
+  // A filter or a pick belongs in the URI's `#`: one in its `?` is a link
+  // spelled wrong, refused rather than guessed.
+  const misplaced = lens && inTab ? misplacedViewParams(lens, resource) : [];
   const setParam = (name: string, value: SqlCell, row?: PickedRow) => {
     setView({ [name]: value });
     const { [name]: _, ...rest } = picked;
@@ -161,6 +171,15 @@ export function LensPage({ lensId, params, title: pageTitle, stream, onOpenPage 
       <div style={lens?.viz === "dashboard" ? { padding: "var(--space-5)" } : undefined}>
       <h1 className="ox-title">{title}</h1>
       {lens?.description ? <p className="ox-intro">{lens.description}</p> : null}
+      {misplaced.length > 0 ? (
+        <div data-testid="lens-error" style={errorStyle}>
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>This link puts the lens's view in its address.</div>
+          <div>
+            {misplaced.map((n) => `\`${n}\``).join(", ")} {misplaced.length === 1 ? "is a filter or a pick" : "are filters or picks"} of
+            this lens: {misplaced.length === 1 ? "it belongs" : "they belong"} in the URI's <code>#</code>, not its <code>?</code>.
+          </div>
+        </div>
+      ) : null}
       {error ? (
         <div data-testid="lens-error" style={errorStyle}>
           <div style={{ fontWeight: 600, marginBottom: 4 }}>This lens couldn't run.</div>
@@ -178,6 +197,19 @@ export function LensPage({ lensId, params, title: pageTitle, stream, onOpenPage 
 }
 
 const NO_PARAMS: Record<string, SqlCell> = {};
+
+/** `values`' entries in key order: two sets compared by their text. */
+function sorted(values: Record<string, SqlCell>): [string, SqlCell][] {
+  return Object.entries(values).sort(([a], [b]) => a.localeCompare(b));
+}
+
+/** The same object while its contents stay the same, so a merged set of
+ *  params doesn't re-run the lens on every render. */
+function useMemoObject<T extends object>(value: T): T {
+  const ref = useRef(value);
+  if (JSON.stringify(ref.current) !== JSON.stringify(value)) ref.current = value;
+  return ref.current;
+}
 const NO_KEYS: string[] = [];
 const NO_PICKED: Record<string, PickedRow> = {};
 

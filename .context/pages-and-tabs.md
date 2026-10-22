@@ -131,7 +131,9 @@ hand-format an id.
 **Every tab id is a canonical URI** ([resources.md](./resources.md)), parsed
 through the shared grammar (`apps/desktop/src/uri/uri.ts`), never split
 by hand (`oxplow:oxplow/work_item?id=tsk42&provider=oxplow`). A tab's
-view (`#lines=…`) is not part of its id: the id is the identity. Two families:
+view (`#lines=…`, a filter, a pick) rides in the id after `#` but is not
+its identity: the `?` names what the page shows, the `#` how it shows it,
+and the identity is the id without its `#` (`identityOf`). Two families:
 
 - **Entity pages** (`EntityPageKind`): the tab id of a file, directory,
   wiki page, task, commit, metric or lens *is* its URI, so a `[[…]]`
@@ -149,7 +151,8 @@ view (`#lines=…`) is not part of its id: the id is the identity. Two families:
   rides beside the id: what a page shows is its params (a diff's spec,
   Settings' landing section, a new item's parent), and what only one step
   of a tab keeps (a clipboard compare's two texts) is that entry's history
-  state. Pages never appear
+  state. A `?` param names the thing shown; a view (a filter, a pick, a
+  line, a mode, an open panel) is the `#`. Pages never appear
   in `page_ref`. Params are the URI's own, sorted by key, and their values escape only
   what the grammar needs (`&`, `=`, `#`, `%`, whitespace, non-ASCII),
   so `path=src/a.ts&left=git:abc` stays readable.
@@ -172,21 +175,21 @@ chosen", never a tab), and "is this the editor's working-tree file" is
 **No compatibility layer for old ids.** When a kind is renamed or a page
 moves into an extension, its saved tabs/bookmarks/history are dropped
 (the tab-layout keys started fresh again as `oxplow.layout.v3.*` when
-pages became declared, 2026-10-17, and as `oxplow.layout.v5.*` when ids
-became URIs; bookmarks
+pages became declared, 2026-10-17, as `oxplow.layout.v5.*` when ids
+became URIs, and as `oxplow.layout.v6.*` when the view moved to the `#`; bookmarks
 moved into the project DB and started fresh again) — see the decision in [resources.md](./resources.md).
 
 | Kind | Id format | Example |
 |---|---|---|
-| file | `oxplow:oxplow/file?path=<path>[&rev=<rev>]` — the working tree has no `rev`; `rev=git:<ref>` / `rev=snap:<id>` pin a version (`revisionSlot` in `revision.ts`); a literal `&`/`=`/`#`/`%` in a path is percent-encoded | `oxplow:oxplow/file?path=crates/oxplow-app/src/lib.rs`, `oxplow:oxplow/file?path=src/a.rs&rev=git:HEAD` |
+| file | `oxplow:oxplow/file?path=<path>[&rev=<rev>][#lines=N-N]` — a line is the view (`fileRefAt(path, line)`, `lineOf(ref)`); the working tree has no `rev`; `rev=git:<ref>` / `rev=snap:<id>` pin a version (`revisionSlot` in `revision.ts`); a literal `&`/`=`/`#`/`%` in a path is percent-encoded | `oxplow:oxplow/file?path=crates/oxplow-app/src/lib.rs`, `oxplow:oxplow/file?path=src/a.rs&rev=git:HEAD` |
 | dir | `oxplow:oxplow/dir?path=<path>` | `oxplow:oxplow/dir?path=crates/oxplow-app` |
 | wiki | `oxplow:oxplow/wiki?slug=<slug>` | `oxplow:oxplow/wiki?slug=how-stop-hook-fires` |
 | work_item | `oxplow:oxplow/work_item?id=<id>&provider=<provider>` — every list's item (`workItemTabRef(uri)`, payload `ref`) opens `WorkItemPage` | `oxplow:oxplow/work_item?id=tsk142&provider=oxplow`, `oxplow:oxplow/work_item?id=W-1&provider=fake` |
 | commit | `oxplow:oxplow/commit?sha=<sha>` | `oxplow:oxplow/commit?sha=abc1234` |
-| metric | `oxplow:oxplow/metric?metric=<key>` | `oxplow:oxplow/metric?metric=oxplow.coverage.abs_pct` |
-| lens | `oxplow:oxplow/lens?lens=<extension>/<slug>[&param=value…]` (params sorted; `lensRef(id, params)`) | `oxplow:oxplow/lens?lens=review/waiting-on-me`, `oxplow:oxplow/lens?effort_id=12&lens=oxplow-bundled/effort-tests` |
-| page | `oxplow:oxplow/page?page=<id>[&params]` (oxplow's) / `oxplow:oxplow/page?page=<extension>/<id>[&params]` (`pageTabRef(id, params?, state?)`, `extPageRef(ext, id, params?)`, plus typed wrappers: `diffRef`, `endpointDiffRef`, `duplicateBlockRef`, `settingsRef`, `newTaskRef`, …) — a declared page; see "Declared pages" below | `oxplow:oxplow/page?page=tasks`, `oxplow:oxplow/page?page=symbols&path=src/lib.rs`, `oxplow:oxplow/page?page=github/open-prs`, `oxplow:oxplow/page?page=acme/pr&ref=oxplow:acme/pr?id%3D12` |
-| symbol | `oxplow:oxplow/symbol?path=<path>&symbol=<name>` (`v_symbol.ref`, `symbolRef(uri)`) — no revision in the id; never a tab: opening one (`handleOpenPage`, or in-tab navigation) resolves it (`resolve_symbol`) and opens its file at the name's line (`openSymbol`). A pinned one (`rev=snap:<id>` / `rev=git:<sha>`) opens the file viewer at that revision; if the version is gone it shows a notice and opens the current symbol | `oxplow:oxplow/symbol?path=src/lib.rs&symbol=Widget::spin` |
+| metric | `oxplow:oxplow/metric?metric=<key>[#view]` (`metricRef(key, view?)`) | `oxplow:oxplow/metric?metric=oxplow.coverage.abs_pct` |
+| lens | `oxplow:oxplow/lens?lens=<extension>/<slug>[&param=value…][#view]` (params sorted; `lensRef(id, params, view)`: `params` are the lens's `resource` params, its filters and picks are the `#`) | `oxplow:oxplow/lens?lens=review/waiting-on-me`, `oxplow:oxplow/lens?effort_id=12&lens=oxplow-bundled/effort-tests` |
+| page | `oxplow:oxplow/page?page=<id>[&params]` (oxplow's) / `oxplow:oxplow/page?page=<extension>/<id>[&params]` (`pageTabRef(id, params?, view?)`, `extPageRef(ext, id, params?, view?)`, plus typed wrappers: `diffRef`, `endpointDiffRef`, `duplicateBlockRef`, `settingsRef`, `newTaskRef`, …) — a declared page; see "Declared pages" below | `oxplow:oxplow/page?page=tasks`, `oxplow:oxplow/page?page=symbols&path=src/lib.rs`, `oxplow:oxplow/page?page=github/open-prs`, `oxplow:oxplow/page?page=acme/pr&ref=oxplow:acme/pr?id%3D12` |
+| symbol | `oxplow:oxplow/symbol?path=<path>&symbol=<name>` (`v_symbol.uri`, `symbolRef(uri)`) — no revision in the id; never a tab: opening one (`handleOpenPage`, or in-tab navigation) resolves it (`resolve_symbol`) and opens its file at the name's line (`openSymbol`). A pinned one (`rev=snap:<id>` / `rev=git:<sha>`) opens the file viewer at that revision; if the version is gone it shows a notice and opens the current symbol | `oxplow:oxplow/symbol?path=src/lib.rs&symbol=Widget::spin` |
 | agent_session | `oxplow:oxplow/agent_session?id=<ses id>` (`agentSessionRef(id)`, pinned) — an open agent session's terminal; its tab draws its harness's declared logo (`CenterTab.icon` from `HarnessListing.icon`, `AgentIcon`; the generic robot when it declares none) | `oxplow:oxplow/agent_session?id=ses3` |
 
 ## Declared pages
@@ -215,7 +218,7 @@ and given the whole entry as its view (`useHostedView`), its title and
 actions the frame's (`setTitle`, `setActions`). oxplow's Timeline (the `timeline` page, params `from`, `to`,
 `thread`) is one: its window is its view params, written on every change
 (not its opening default) and followed on Back/Forward. A frame's
-`setViewParams` reaches the tab as `patchViewParams` (null drops a key). Each built-in body is a
+`setViewParams` reaches the tab as `patchViewParams` (null drops a key); both write the id's `#`. Each built-in body is a
 `(ctx) => CenterTab | null` over `{ ref, params, state, nav, scope }`;
 `scope` is the `AppScope` (`pages/appScope.ts`), the explicit list of
 what core offers them (selection, work state, handlers) that `App.tsx`
@@ -639,42 +642,47 @@ the bodies, Back/Forward, Up/Down, the star, Ask, what agents read.
 | Browser | oxplow |
 |---|---|
 | a tab's session history | `Tab { slot, entries, at, pinned? }` — `slot` a stable name (`t3`), never an id |
-| URL = path + query | an entry's `ref`: identity (kind + id) and view (its payload's `params`; `kind:id?k=v` as a string) |
+| URL = path + query + fragment | an entry's `ref`: identity (the `?`, what it shows) and view (the `#`, how it shows it); `PagePayload.params` holds only the `?` params |
 | `history.state` | `Entry.historyState` (persisted when it is JSON) |
 | the page you came from a list of | `Entry.from: Origin { title, items: [{ ref, label }], index }` |
-| pushState / replaceState | `navigate(slot, entry, { replace })`, `setView(slot, ref, { push })` |
-| back-forward cache | `bodies(tab, pageIdentity)`: hidden bodies stay mounted |
-| a SPA re-rendering on popstate | **every page is live**: one body per page identity, keyed `slot/identity`, so entries that differ only in view params re-render it — no remount, no Loading |
+| pushState / replaceState | one `navigate(s, slot, entry, { replace })` |
+| back-forward cache | `bodies(tab)`: hidden bodies stay mounted, keyed by identity |
+| a SPA re-rendering on popstate | **every page is live**: one body per page identity, keyed `slot/identity`, so entries that differ only in the `#` re-render it — no remount, no Loading |
 
-**Operations** (pure, tested in `session.test.ts`): `open` (the tab
-showing that exact ref, view params included, else a new tab; active.
-A decision, not an accident: opening Board while a tab shows
-`oxplow:oxplow/page?page=board&show=all` opens a second tab, because the views differ. The
-one exception is a diff, opened with `identity: pageIdentity`: the same
-diff at another line moves the tab showing it), `navigate` (push; clears forward;
-`replace` takes the current entry's place; a page shown in another tab
-closes there), `setView` (a page changes its own view), `setHistoryState`, `patchHistoryState`,
+**Operations** (pure, tested in `session.test.ts`): `open` (finds the tab
+showing that **identity**, else a new tab; active. The same page at another
+view — a diff at another line, Board with another filter — moves the tab
+showing it to that view), `navigate` (the one move: pushes and clears
+forward; `{ replace: true }` takes the current entry's place. The same
+identity in another view keeps the page: its state, origin and mounted
+body. A same-page `replace` rewrites the entry in place and keeps forward
+history, so a typed filter leaves Back and Forward alone. A page shown in
+another tab closes there), `setHistoryState`, `patchHistoryState`,
 `back`, `forward`, `stepOrigin` (Up/Down in place, history untouched),
 `close` (the most recent other tab becomes active, as a browser does),
 `dropCurrent` (the page's record was deleted: back, dropping the entry,
 else close), `setStrip` (the strip as a list of refs: agent-session
 reconcile, a new thread's tabs, an agent's `oxplow.tab.*` in another
 thread), `reorder`, `activate`, `evictions` (`MAX_PAGE_TABS` = 15;
-never the active, a pinned or a dirty file's tab).
+never the active, a pinned or a dirty file's tab). There is no
+`setView`: a view change is a `navigate` to the same identity.
 
-**A page changes its view params through `PageNavigation.setViewParams(params, { push })`**
-(the whole set, defaults left out; the host writes them into the page's
-own kind of ref, `withViewParams`, and reads them back as
-`PageNavigation.viewParams`, `viewParamsOf`).
-A filter replaces the entry (typing a search adds nothing to Back); a
-selection — a param a column `select`s — pushes one, so Back un-selects
-and Forward re-selects. Core decides by the param's role; no page
-chooses. Only the body drawing the tab's current entry gets
-`setViewParams`. `PageNavigation.ref` is the entry's ref the body draws.
+**A page changes its view through `PageNavigation.setViewParams(view, { push })`**
+(the whole set, defaults left out) or `patchViewParams(patch, { push })`
+(a merge; `undefined` drops a key). Both write the `#` of the tab's
+current entry through `navigate` (`withViewParams`, any kind of ref) and
+`PageNavigation.viewParams` reads it back (`viewParamsOf(ref)`). They
+replace unless `push`: a filter replaces (typing a search adds nothing to
+Back); a selection — a param a column `select`s — pushes, so Back
+un-selects and Forward re-selects. Core decides by the param's role; no
+page chooses. A change of what the page shows — another `?` — is
+`withResourceParams(ref, params, view)`: another resource of the same page.
+Only the body drawing the tab's current entry gets these.
+`PageNavigation.ref` is the entry's ref the body draws.
 
 **Names say the scope**, the same in core, `PageNavigation`, the
-component bridge, the docs and the skill: **view params** (this tab's
-address), **history state** (this step of this tab's history), **page
+component bridge, the docs and the skill: **view params** (the `#`: how
+this tab shows the page), **history state** (this step of this tab's history), **page
 memory** (this page, for this person, every tab) and **app preference**
 (the whole app, for this person).
 
@@ -702,15 +710,16 @@ Monaco — those keys are the field's.
 `center-tab-<id>` / `center-tab-body-<id>` test ids, titles
 (`pageTitles`), bookmarks and the tab report by the current ref id;
 visits by the page's **identity** (`identityOf`: the id without its
-`?…`) — a filter or a pick isn't a new visit, so Recents lists the page
-once. A bookmark is of the values: change a filter and the star goes
-off; set it back and it's on.
+`#…`) — a filter or a pick isn't a new visit, so Recents lists the page
+once (V102 emptied `page_visit` when the identity rule changed). A
+bookmark is of the full URI, view included: change a filter and the star
+goes off; set it back and it's on.
 
-**Persistence.** One key, `oxplow.layout.v4.sessions` (`{ [thread]:
+**Persistence.** One key, `oxplow.layout.v6.sessions` (`{ [thread]:
 Session }`, written on every change, read on start; corrupt text reads
 as none). It holds every tab's history and the active tab, so a restart
 comes back to the same pages at the same params. A diff's spec rides in
-its ref (`diffRef`'s state), so diffs survive too. The open files'
+its ref (`diffRef`), so diffs survive too. The open files'
 paths per stream stay in `oxplow.layout.v2.fileSessions`
 (`fileSessionPersistence.ts`): fileSessions is the editor's document
 model (content, drafts), not navigation.
@@ -740,8 +749,8 @@ forgotten, a report older than a minute is listed as stale.
 - `oxplow_get_open_page { thread_id, tab? }` is the page selected in the
   thread in the window the person was in last (most recently focused),
   with `others` (each other window's), or the listed `tab`: its
-  `pageId`, its `page` (identity) and `params` (the view, decoded —
-  `uri::build::view_of`; an agent never parses an id), its tab's
+  `pageId`, its `page` (the identity, the id without its `#`) and `view`
+  (the `#`, decoded — `uri::build::view_of`; an agent never parses an id), its tab's
   `back`, `forward` and `origin`, and, for a lens, the lens re-run as
   text. Detail comes only from a window showing that thread's page. Two windows never
   collapse into one "open page".
@@ -788,7 +797,8 @@ When `useRouteDispatch` isn't structurally available (e.g. the row
 is built inside a `useMemo` where hooks can't be called), grab the
 nav context once at the top of the host component
 (`const ctxNav = useOptionalPageNavigation()`) and have the row's
-`onClick` call `ctxNav.navigate(ref, { newTab })`. Falling back to
+`onClick` call `ctxNav.navigate(ref, { newTab })`. (`navigate(uri, { newTab, replace })`
+is the one move; the default is the shown tab, pushed.) Falling back to
 the host's `onOpenFile` / `onOpenPage` callback is **only**
 acceptable when no PageNavigationContext is present (rail HUD,
 palette) — those callbacks always open new tabs and that's correct
@@ -829,36 +839,25 @@ should only survive as the rail-side fallback.
 
 ## Live by default: a page is a function of its entry
 
-A tab keeps **one mounted body per page identity** (`bodies(tab,
-pageIdentity)`), so a change of view params — a filter, a pick, Back or
-Forward between them — re-renders the page and never mounts it again: its
-state, its scroll and its loaded data stay. A page therefore reads its
-view from its props or `PageNavigation.viewParams` on every render; a
-`useState(fromProp)` seeded once is a bug.
+A tab keeps **one mounted body per page identity** (`bodies(tab)`), so a
+change of the `#` — a filter, a pick, Back or Forward between them —
+re-renders the page and never mounts it again: its state, its scroll and
+its loaded data stay. A page therefore reads its view from its props or
+`PageNavigation.viewParams` on every render; a `useState(fromProp)` seeded
+once is a bug.
 
-**A page's identity is its ref without its view params**
-(`pages/pageIdentity.ts`), which also keys visits (a filter isn't a new
-visit) and page memory:
-- a lens: all its params are view;
-- an extension's page: all but `ref` (what it was opened for);
-- one of oxplow's own pages: the view params it declares in
-  `BUILT_IN_VIEW` (Tasks and Backlog: `isTasksViewParam`; Metrics: range, branch,
-  slice, q, show; a custom dashboard: range, branch — `pages/metricsView.ts`;
-  the searches — `pages/searchViews.ts`: Git History `q`/`author`/`branch`,
-  Comments `days`, Settings `q`, Explore Data `model` (a pick, so it
-  pushes), `sql` (the query that ran), `viz`, `chart`, `template`, `raw`; the
-  SQL being edited and not yet run is history state `sql`; Files `filter`,
-  which files the tree lists, Alerts `open`, a pick, and Board `show` (it follows
-  the thread until picked) — `pages/modeViews.ts`); New Session's agent choice
-  is page memory;
-  the same table names an **entity resource** whose page has a view: a metric's
-  page is `oxplow:oxplow/metric?metric=<key>&range=…&branch=…&slice=…`, its key the identity (so
-  comments, backlinks and visits still anchor on `oxplow:oxplow/metric?metric=<key>`). A resource not
-  in the table is all identity, and `withView` refuses a view change to it.
-  The grammar needs nothing for it: params are named and `oxplow/metric`
-  accepts the view params beside its key as `oxplow/lens` and `oxplow/page` do; a page that
-  declares none is all identity — a diff's path and sides, a dashboard's
-  id — so two diffs in a tab are two pages.
+**A page's identity is its ref without its `#`** (`identityOf`). One rule
+for every page, with no table: the `?` is identity, the `#` is view.
+`BUILT_IN_VIEW`, `pageIdentity` and `withView` are gone. A built-in page
+that has a filter (Tasks' scope and chips, Metrics' range, Git History's
+`q`, Files' `filter`, Explore Data's `model`) keeps it in the `#`; its
+`?` is only what it shows (a diff's path and sides, a dashboard's id, a
+metric's key), so two diffs in a tab are two pages. A param written in
+the wrong place is not read from there: a lens whose `?` holds a
+`filter` or `selection` param draws a `lens-error` box
+(`misplacedViewParams`). Page memory is scoped by `keyIdentityOf` (the
+identity without its `?` params: `oxplow:oxplow/page?page=tasks`) for
+a page, or `resource:<ext>/<name>` for a resource page.
 
 ## Page state: four homes, one name each
 
@@ -868,9 +867,9 @@ the docs and the skill:
 
 | Name | Scope | Home | API |
 |---|---|---|---|
-| **view params** | this tab's address: shareable, bookmarkable, agents see it; a filter replaces the entry, a pick pushes one | the entry's ref | `nav.viewParams`, `nav.setViewParams(params, { push })` |
+| **view params** | this tab's view: shareable, bookmarkable, agents see it; a filter replaces the entry, a pick pushes one | the `#` of the entry's ref | `nav.viewParams`, `nav.setViewParams(view, { push })`, `nav.patchViewParams(patch, { push })` |
 | **history state** | this step of this tab's history: scroll, open sections, a draft | `Entry.historyState` | `useHistoryState(key, initial)` |
-| **page memory** | this page, for the person, every tab of it, across restarts | `ui_preference`, scoped by the page's URI without params (`oxplow:oxplow/page?page=tasks`, `oxplow:oxplow/lens?lens=x/y`) or `resource:<ext>/<name>` | `usePageMemory(key, initial)` (scope from the page) |
+| **page memory** | this page, for the person, every tab of it, across restarts | `ui_preference`, scoped by `keyIdentityOf` (the page's URI without its view and its non-key params: `oxplow:oxplow/page?page=tasks`, `oxplow:oxplow/lens?lens=x/y`) or `resource:<ext>/<name>` | `usePageMemory(key, initial)` (scope from the page) |
 | **app preference** | the whole app, for the person | `ui_preference`, scope `app` | `useAppPreference(key, initial)` |
 | (a panel's memory) | a left-nav panel, for the person | `ui_preference`, the panel's ref | `usePanelMemory(panel, key, initial)` |
 | **extension state** | shared with the team, read by scripts | the extension's state | commands |
@@ -890,7 +889,7 @@ outside a tab each is the component's own state:
 
 | Hook | Kind | Writes |
 |---|---|---|
-| `useViewParam(key, initial)` | a filter (a range, a search, a mode) | replaces the entry; typed back by `initial`'s type; dropped at `initial` |
+| `useViewParam(key, initial)` | a filter (a range, a search, a mode) | the `#`, replacing the entry; typed back by `initial`'s type; dropped at `initial` |
 | `useViewSelection(key)` | a pick (a row, a commit) | pushes when set (Back un-selects), replaces when cleared |
 | `useViewList(key)` | several values (authors, states) | comma-joined, as a filter |
 | `useCollapsedSet(key, initial?)` | open/closed groups (`ids`, `has`, `toggle`, `set`) | history state |
@@ -898,19 +897,16 @@ outside a tab each is the component's own state:
 
 A filter inside a part that many pages host (the changed-files tree's
 search, `HierarchyView`) is history state, not a view param: it is a small
-narrowing inside the page, and the commit and work-item pages are entity
-kinds with no view. New Session's `q` is a view param because it is a
+narrowing inside the page. New Session's `q` is a view param because it is a
 built-in page whose list is the page.
 
-They write through `nav.patchViewParams(patch, { push })`, which merges
-into the tab's *current* entry inside the session update (`undefined`
-drops a key), so two changes in one tick both land. Every write goes
-through `withView` (`pages/pageIdentity.ts`): a key that would change the
-page's identity — one a built-in page didn't declare in `BUILT_IN_VIEW` —
-is refused as an op error and the tab stays, rather than silently
-remounting the page. A list's cursor (↑/↓ before a pick) is the list's
-own (`useListNav`); only a pick is a selection, and `useListNav`'s
-`selected` puts the cursor on a kept pick.
+They read `nav.viewParams` and write through
+`nav.patchViewParams(patch, { push })`, which merges into the tab's
+*current* entry inside the session update (`undefined` drops a key), so
+two changes in one tick both land. A key goes to the `#` and never
+changes the identity, so nothing is refused. A list's cursor (↑/↓ before a
+pick) is the list's own (`useListNav`); only a pick is a selection, and
+`useListNav`'s `selected` puts the cursor on a kept pick.
 
 **A component inside a page shares the page's view only where its host
 says which keys** (`lens/hostedView.ts`; `.context/extensions.md` "Whose

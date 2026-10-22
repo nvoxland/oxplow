@@ -241,7 +241,7 @@ pub fn scaffold_with(
         }
         Kind::Collector => (
             format!(
-                "{{ collector: items, rows: [{{ ref: \"{}\", title: First, state: todo }}, {{ ref: \"{}\", title: Second, state: done }}] }}",
+                "{{ collector: items, rows: [{{ uri: \"{}\", title: First, state: todo }}, {{ uri: \"{}\", title: Second, state: done }}] }}",
                 work_item_uri("demo", "1"),
                 work_item_uri("demo", "2"),
             ),
@@ -250,7 +250,7 @@ pub fn scaffold_with(
         ),
         Kind::Metric => unreachable!("a metric is written from its template above"),
         Kind::Command => (
-            format!("{{ command: {ns}.notes.add, input: {{ ref: \"{work_item}\" }} }}"),
+            format!("{{ command: {ns}.notes.add, input: {{ uri: \"{work_item}\" }} }}"),
             "a comment on the work item",
             Some("{ commands: [oxplow.work_item.comment] }".to_string()),
         ),
@@ -316,16 +316,16 @@ pub fn scaffold_with(
              \x20   entry: collectors/items.star\n\
              \x20   # Services its script may use: {services}.\n\
              \x20   needs: []\n\
-             \x20   input: \"SELECT ref, title, state FROM v_work_item\"\n\
+             \x20   input: \"SELECT uri, title, state FROM v_work_item\"\n\
              \x20   entities:\n\
-             \x20     - {{ name: item, key: ref, columns: {{ ref: text, title: text }} }}\n\
+             \x20     - {{ name: item, key: uri, columns: {{ uri: text, title: text }} }}\n\
              models:\n\
              \x20 # v_{ns}_open_items: SQL over the entity (`ref('item')`), checked at load.\n\
              \x20 - name: open_items\n\
              \x20   version: 1\n\
              \x20   description: \"TODO: what these rows are.\"\n\
              \x20   columns:\n\
-             \x20     - {{ name: ref, type: TEXT, doc: \"The work item (oxplow:oxplow/work_item?id=<id>&provider=<provider>).\" }}\n\
+             \x20     - {{ name: uri, type: TEXT, doc: \"The work item (oxplow:oxplow/work_item?id=<id>&provider=<provider>).\" }}\n\
              \x20     - {{ name: title, type: TEXT, doc: \"Its title.\" }}\n"
         )),
         Kind::Command => manifest.push_str(&format!(
@@ -338,17 +338,17 @@ pub fn scaffold_with(
              \x20   summary: \"TODO: what it does. Here: comment on a work item.\"\n\
              \x20   input_schema:\n\
              \x20     type: object\n\
-             \x20     required: [ref]\n\
+             \x20     required: [uri]\n\
              \x20     properties:\n\
-             \x20       ref: {{ type: string, description: \"The work item (oxplow:oxplow/work_item?id=<id>&provider=<provider>).\" }}\n\
+             \x20       uri: {{ type: string, description: \"The work item (oxplow:oxplow/work_item?id=<id>&provider=<provider>).\" }}\n\
              \x20     additionalProperties: false\n\
              \x20   entry: handlers/note.star\n\
              \x20   # Who may run it: a person, an agent, a lens (each child command checks its own too).\n\
              \x20   invokers: {{ human: true, agent: true, lens: true }}\n\
              \x20   # On a work item's page (Commands) and a row's right-click.\n\
-             \x20   ui: {{ label: Add Note, about: oxplow/work_item, input: {{ ref: \"{{{{ref}}}}\" }} }}\n\
+             \x20   ui: {{ label: Add Note, about: oxplow/work_item, input: {{ uri: \"{{{{uri}}}}\" }} }}\n\
              \x20   examples:\n\
-             \x20     - {{ name: happy, input: {{ ref: \"{work_item}\" }}, expect_commands: [oxplow.work_item.comment] }}\n"
+             \x20     - {{ name: happy, input: {{ uri: \"{work_item}\" }}, expect_commands: [oxplow.work_item.comment] }}\n"
         )),
         Kind::Effect => manifest.push_str(
             "# Its script runs core commands as the caller.\n\
@@ -489,18 +489,18 @@ pub fn scaffold_with(
                  \x20 # Filled in with the viewer's stream unless a value is given.\n\
                  \x20 - {{ name: stream_id, label: Stream }}\n\
                  query: |\n\
-                 \x20 SELECT w.ref, w.title, w.state, w.updated_at\n\
+                 \x20 SELECT w.uri, w.title, w.state, w.updated_at\n\
                  \x20 FROM v_work_item w JOIN v_thread t ON t.id = w.thread_id\n\
                  \x20 WHERE t.stream_id = :stream_id AND w.state IN ('todo', 'in_progress', 'blocked')\n\
                  \x20 ORDER BY w.updated_at DESC\n\
                  viz: table\n\
                  columns:\n\
-                 \x20 - {{ key: title, label: Item, link: {{ kind: page, from: ref }} }}\n\
+                 \x20 - {{ key: title, label: Item, link: {{ kind: page, from: uri }} }}\n\
                  \x20 - {{ key: state }}\n\
                  actions:\n\
                  \x20 # In each row's right-click menu: a command run as the person, the\n\
                  \x20 # row's values bound in (`{{{{row.<column>}}}}`).\n\
-                 \x20 - {{ id: start, label: Start, command: oxplow.work_item.transition, input: {{ ref: \"{{{{row.ref}}}}\", to: in_progress }}, row: true }}\n\
+                 \x20 - {{ id: start, label: Start, command: oxplow.work_item.transition, input: {{ uri: \"{{{{row.uri}}}}\", to: in_progress }}, row: true }}\n\
                  empty: No open work items in this stream.\n\
                  launcher: {{ category: Work }}\n",
                 modeline = lens_modeline,
@@ -514,7 +514,7 @@ pub fn scaffold_with(
                  # declares. Sandboxed: no files, network or clock.\n\
                  def transform(x):\n\
                  \x20   return {\"entities\": {\"item\": [\n\
-                 \x20       {\"ref\": r[\"ref\"], \"title\": r[\"title\"]}\n\
+                 \x20       {\"uri\": r[\"uri\"], \"title\": r[\"title\"]}\n\
                  \x20       for r in x[\"rows\"]\n\
                  \x20       if r[\"state\"] != \"done\"\n\
                  \x20   ]}}\n"
@@ -522,17 +522,17 @@ pub fn scaffold_with(
             )?;
             write(
                 &format!("{rel_dir}/models/open_items.sql"),
-                "SELECT ref, title FROM ref('item')\n".to_string(),
+                "SELECT uri, title FROM ref('item')\n".to_string(),
             )?;
             write(
                 &format!("{rel_dir}/lenses/{name}.yaml"),
                 format!(
                     "{modeline}title: {title}\n\
                      description: \"TODO: what this lens answers.\"\n\
-                     query: SELECT ref, title FROM v_{ns}_open_items ORDER BY title\n\
+                     query: SELECT uri, title FROM v_{ns}_open_items ORDER BY title\n\
                      viz: table\n\
                      columns:\n\
-                     \x20 - {{ key: title, label: Item, link: {{ kind: page, from: ref }} }}\n\
+                     \x20 - {{ key: title, label: Item, link: {{ kind: page, from: uri }} }}\n\
                      empty: Nothing collected yet — sync the collector (Settings → Data).\n\
                      launcher: {{ category: Work }}\n",
                     modeline = lens_modeline,
@@ -546,7 +546,7 @@ pub fn scaffold_with(
              # as the caller (in one transaction when every one can, else as steps) — or {\"refuse\": \"why\"}. No I/O.\n\
              def transform(x):\n\
              \x20   return {\"commands\": [\n\
-             \x20       {\"name\": \"oxplow.work_item.comment\", \"input\": {\"ref\": x[\"input\"][\"ref\"], \"body\": \"TODO: the note\"}},\n\
+             \x20       {\"name\": \"oxplow.work_item.comment\", \"input\": {\"uri\": x[\"input\"][\"uri\"], \"body\": \"TODO: the note\"}},\n\
              \x20   ]}\n"
                 .to_string(),
         )?,
@@ -556,9 +556,9 @@ pub fn scaffold_with(
              # (the event envelope, at its type's newest version) and returns the\n\
              # commands to run — or {\"skip\": \"why\"}. No I/O.\n\
              def transform(x):\n\
-             \x20   ref = x[\"event\"][\"payload\"][\"work_item\"]\n\
+             \x20   uri = x[\"event\"][\"payload\"][\"work_item\"]\n\
              \x20   return {\"commands\": [\n\
-             \x20       {\"name\": \"oxplow.work_item.comment\", \"input\": {\"ref\": ref, \"body\": \"TODO: the note\"}},\n\
+             \x20       {\"name\": \"oxplow.work_item.comment\", \"input\": {\"uri\": uri, \"body\": \"TODO: the note\"}},\n\
              \x20   ]}\n"
                 .to_string(),
         )?,
@@ -574,7 +574,7 @@ pub fn scaffold_with(
                      # The rows the component gets (`component.run`), and what an agent reads:\n\
                      # agents always see the table, never the frame.\n\
                      query: |\n\
-                     \x20 SELECT w.ref, w.title, w.state\n\
+                     \x20 SELECT w.uri, w.title, w.state\n\
                      \x20 FROM v_work_item w JOIN v_thread t ON t.id = w.thread_id\n\
                      \x20 WHERE t.stream_id = :stream_id AND w.state IN ('todo', 'in_progress', 'blocked')\n\
                      \x20 ORDER BY w.updated_at DESC\n\
@@ -628,13 +628,13 @@ pub fn scaffold_with(
                  \x20 # Filled in with the viewer's stream unless a value is given.\n\
                  \x20 - {{ name: stream_id, label: Stream }}\n\
                  query: |\n\
-                 \x20 SELECT w.ref, w.title, w.state\n\
+                 \x20 SELECT w.uri, w.title, w.state\n\
                  \x20 FROM v_work_item w JOIN v_thread t ON t.id = w.thread_id\n\
                  \x20 WHERE t.stream_id = :stream_id AND w.state IN ('todo', 'in_progress', 'blocked')\n\
                  \x20 ORDER BY w.updated_at DESC\n\
                  viz: table\n\
                  columns:\n\
-                 \x20 - {{ key: title, label: Item, link: {{ kind: page, from: ref }} }}\n\
+                 \x20 - {{ key: title, label: Item, link: {{ kind: page, from: uri }} }}\n\
                  \x20 - {{ key: state }}\n\
                  empty: No open work items in this stream.\n",
                 modeline = lens_modeline,
@@ -701,8 +701,8 @@ fn provider_starter(capability: &str) -> ProviderStarter {
     match capability {
         "work_items" => ProviderStarter {
             input: "{ command: create, input: { title: First } }".to_string(),
-            expect: "the new item's ref",
-            fixture: "{ ref: $any }".to_string(),
+            expect: "the new item's URI",
+            fixture: "{ uri: $any }".to_string(),
             needs: None,
             data: serde_json::Value::Null,
         },
@@ -742,7 +742,7 @@ fn provider_starter(capability: &str) -> ProviderStarter {
             data: serde_json::Value::Null,
         },
         "knowledge" => ProviderStarter {
-            input: "{ command: write_page, input: { slug: example, body: '# Example', verified_refs: [], removed_refs: [] } }"
+            input: "{ command: write_page, input: { slug: example, body: '# Example', verified_files: [], removed_files: [] } }"
                 .to_string(),
             expect: "the page's slug",
             fixture: "{ page: example }".to_string(),
@@ -780,14 +780,14 @@ fn verb_input(capability: &str, verb: &str) -> (String, serde_json::Value) {
         ),
         ("work_items", "update") => (
             "Change a work item's title, body or state.".into(),
-            json!({ "type": "object", "required": ["ref"], "additionalProperties": false,
-                    "properties": { "ref": str_prop, "title": str_prop, "body": str_prop,
+            json!({ "type": "object", "required": ["uri"], "additionalProperties": false,
+                    "properties": { "uri": str_prop, "title": str_prop, "body": str_prop,
                                     "state": state, "native_state": str_prop } }),
         ),
         ("work_items", "transition") => (
             "Move a work item to a canonical state, optionally naming a native one.".into(),
-            json!({ "type": "object", "required": ["ref", "to"], "additionalProperties": false,
-                    "properties": { "ref": str_prop, "to": state, "native_state": str_prop } }),
+            json!({ "type": "object", "required": ["uri", "to"], "additionalProperties": false,
+                    "properties": { "uri": str_prop, "to": state, "native_state": str_prop } }),
         ),
         ("agent_harness", "launch") => (
             "How a session of it starts: the launch's input in, { spec: { kind: pty, command, env } } out — \
@@ -849,11 +849,11 @@ fn verb_input(capability: &str, verb: &str) -> (String, serde_json::Value) {
             "Write a page, creating it or replacing its body: { page } (the slug), and answer its \
              `knowledge.page.recorded` event with its `refs` (`oxplow:oxplow/file?path=…` / `oxplow:oxplow/wiki?slug=…`)."
                 .into(),
-            json!({ "type": "object", "required": ["slug", "body", "verified_refs", "removed_refs"],
+            json!({ "type": "object", "required": ["slug", "body", "verified_files", "removed_files"],
                     "additionalProperties": false,
                     "properties": { "slug": str_prop, "title": str_prop, "body": str_prop,
-                                    "verified_refs": { "type": "array", "items": str_prop },
-                                    "removed_refs": { "type": "array", "items": str_prop } } }),
+                                    "verified_files": { "type": "array", "items": str_prop },
+                                    "removed_files": { "type": "array", "items": str_prop } } }),
         ),
         ("knowledge", "delete_page") => (
             "Delete a page: {}, answering its record with `deleted: true`.".into(),
@@ -1499,10 +1499,10 @@ mod tests {
         assert_eq!(verbs, ["create", "update", "transition"]);
         let vocabulary = oxplow_domain::vocabulary::Vocabulary::core();
         assert_eq!(d["event_types"][0]["type"], "work_item.recorded");
-        assert_eq!(d["event_types"][0]["v"], 2);
+        assert_eq!(d["event_types"][0]["v"], 3);
         assert_eq!(
             Some(&d["event_types"][0]["schema"]),
-            vocabulary.schema("work_item.recorded", 2)
+            vocabulary.schema("work_item.recorded", 3)
         );
         assert_eq!(d["collectors"][0]["entity"], "work_item");
 

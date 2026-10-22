@@ -282,7 +282,7 @@ mod tests {
         assert_eq!(
             rows(
                 &svc,
-                "SELECT ref, kind, container, snapshot_id FROM v_symbol ORDER BY ref"
+                "SELECT uri, kind, container, snapshot_id FROM v_symbol ORDER BY uri"
             )
             .await,
             serde_json::json!([
@@ -328,7 +328,7 @@ mod tests {
         )
         .await;
         assert_eq!(
-            rows(&svc, "SELECT ref, snapshot_id FROM v_symbol ORDER BY ref").await,
+            rows(&svc, "SELECT uri, snapshot_id FROM v_symbol ORDER BY uri").await,
             serde_json::json!([["oxplow:oxplow/symbol?path=Lib/b.py&symbol=go", later]])
         );
     }
@@ -348,7 +348,7 @@ mod tests {
             .unwrap();
         assert_eq!(backfill(&svc).await.unwrap(), 1);
         assert_eq!(
-            rows(&svc, "SELECT ref, snapshot_id FROM v_symbol ORDER BY ref").await,
+            rows(&svc, "SELECT uri, snapshot_id FROM v_symbol ORDER BY uri").await,
             serde_json::json!([
                 ["oxplow:oxplow/symbol?path=a.py&symbol=Widget", snap],
                 ["oxplow:oxplow/symbol?path=a.py&symbol=Widget::spin", snap]

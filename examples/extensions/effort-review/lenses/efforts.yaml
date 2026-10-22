@@ -1,11 +1,11 @@
 title: Finished Efforts
 description: The efforts that finished in the last week, with their work items — Review asks a model to review one from its evidence.
 query: |
-  SELECT ref AS effort,
+  SELECT uri AS effort,
          work_item,
          title,
          ended_at,
-         uri_param(ref, 'id') AS effort_id
+         uri_param(uri, 'id') AS effort_id
   FROM v_effort
   WHERE ended_at IS NOT NULL
     AND ended_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-7 days')

@@ -195,11 +195,13 @@ async fn open(svc: &Services, input: OpenPageInput) -> Result<Value, CommandErro
         Value::Null
     };
     let this = pages.iter().find(|p| p.page_id == page_id);
-    // A page or lens apart from what it's opened with; anything else (a
-    // file, a commit) is its URI as it is.
-    let (page, view) = oxplow_domain::uri::build::params_of(&page_id)
-        .unwrap_or_else(|| (page_id.clone(), Default::default()));
-    let params: serde_json::Map<String, Value> = view
+    // What it is (the URI without its `#`) and how it's viewed (the `#`'s
+    // params: a filter, a pick, a line); a URI that isn't oxplow's is as it is.
+    let (page, view) = match oxplow_domain::uri::oxplow_uri::OxplowUri::parse(&page_id) {
+        Ok(u) => (u.identity(), u.view().clone()),
+        Err(_) => (page_id.clone(), Default::default()),
+    };
+    let view: serde_json::Map<String, Value> = view
         .into_iter()
         .map(|(k, v)| (k, Value::String(v)))
         .collect();
@@ -213,7 +215,7 @@ async fn open(svc: &Services, input: OpenPageInput) -> Result<Value, CommandErro
             // What it is and how it's viewed, apart: the id is only their
             // string form.
             "page": page,
-            "params": params,
+            "view": view,
             "kind": kind,
             "detail": detail,
             "back": this.map(|p| p.back.clone()).unwrap_or_default(),
@@ -354,17 +356,17 @@ mod tests {
     }
 
     /// The open page reads as what it is and how it's viewed: its identity
-    /// and its params apart, and where its tab's history leads — so an
-    /// agent never parses a tab id.
+    /// (the URI without its `#`) and its view (the `#`'s params) apart, and
+    /// where its tab's history leads — so an agent never parses a tab id.
     #[tokio::test]
-    async fn the_open_page_says_its_page_its_params_and_its_history() {
+    async fn the_open_page_says_its_page_its_view_and_its_history() {
         let fx = services_with_effort().await;
         let actor = Actor::Agent {
             session_id: None,
             thread_id: Some(fx.thread),
             stream_id: None,
         };
-        let id = "oxplow:oxplow/lens?lens=acme/commits&q=numbat%20bay&range=7d";
+        let id = "oxplow:oxplow/lens?lens=acme/commits#q=numbat%20bay&range=7d";
         report(
             &fx.svc,
             "a",
@@ -373,7 +375,7 @@ mod tests {
             vec![ReportedTab {
                 back: vec!["oxplow:oxplow/wiki?slug=home".into()],
                 forward: vec![
-                    "oxplow:oxplow/lens?commit=abc&lens=acme/commits&q=numbat%20bay&range=7d"
+                    "oxplow:oxplow/lens?lens=acme/commits#commit=abc&q=numbat%20bay&range=7d"
                         .into(),
                 ],
                 origin: Some("Recent commits".into()),
@@ -396,7 +398,7 @@ mod tests {
         assert_eq!(open["open"]["pageId"], id);
         assert_eq!(open["open"]["page"], "oxplow:oxplow/lens?lens=acme/commits");
         assert_eq!(
-            open["open"]["params"],
+            open["open"]["view"],
             json!({ "range": "7d", "q": "numbat bay" })
         );
         assert_eq!(
@@ -405,7 +407,7 @@ mod tests {
         );
         assert_eq!(
             open["open"]["forward"][0],
-            "oxplow:oxplow/lens?commit=abc&lens=acme/commits&q=numbat%20bay&range=7d"
+            "oxplow:oxplow/lens?lens=acme/commits#commit=abc&q=numbat%20bay&range=7d"
         );
         assert_eq!(open["open"]["origin"], "Recent commits");
     }

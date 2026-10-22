@@ -70,7 +70,7 @@
     - { name: "detail", type: "", doc: "What it's waiting on (the question, the permission asked), or why it stopped." }
     - { name: "since", type: "TEXT", doc: "When it moved to this status (RFC 3339)." }
 - name: agent_session_binding
-  version: 2
+  version: 3
   description: "Which native conversation each agent slot was bound to, and when: its first, one the harness moved it to (a native `/resume`), a fork's copy, or one the person chose. The open one (no `unbound_at`) is the slot's `resume_session_id`; a fresh start or `/clear` ends it with none after."
   columns:
     - { name: "id", type: "INTEGER", doc: "Row id." }
@@ -79,13 +79,13 @@
     - { name: "origin", type: "TEXT", doc: "`started` (its first, or the first since it had none), `switched` (the harness moved it), `forked` (a fork launch's copy) or `chosen` (the person chose it)." }
     - { name: "bound_at", type: "TEXT", doc: "RFC 3339 timestamp." }
     - { name: "unbound_at", type: "TEXT", doc: "When the next one replaced it or the slot was left with none; NULL while it is the slot's." }
-    - { name: "session_ref", type: "TEXT", doc: "The slot's ref (`oxplow:oxplow/agent_session?id=ses<n>`)." }
+    - { name: "session_uri", type: "TEXT", doc: "The slot's URI (`oxplow:oxplow/agent_session?id=ses<n>`)." }
   tests:
     - { not_null: id }
     - { unique: id }
     - { relationships: { column: agent_session_id, to: agent_session, field: id } }
 - name: agent_turn
-  version: 8
+  version: 10
   description: "Agent turns: each human prompt and the agent's answer, per thread and agent session. start_snapshot_id → snapshot_id is what the turn changed (the snapshot the worktree was at when it opened and when it ended)."
   columns:
     - { name: "id", type: "INTEGER", doc: "Turn id." }
@@ -98,8 +98,8 @@
     - { name: "ended_at", type: "TEXT", doc: "RFC 3339 timestamp; NULL while running." }
     - { name: "start_snapshot_id", type: "INTEGER", doc: "Snapshot the worktree was at when the turn opened (v_snapshot.id); NULL if the stream had none yet." }
     - { name: "snapshot_id", type: "INTEGER", doc: "Snapshot the worktree was at when the turn ended (v_snapshot.id); NULL while running." }
-    - { name: "ref", type: "TEXT", doc: "`oxplow:oxplow/turn?id=trn<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v3)" }
-    - { name: "transcript_page", type: "TEXT", doc: "The session's transcript lens opened at this turn (`oxplow:oxplow/lens?lens=oxplow-foundation/session-transcript&session=…&turn=…`): where a turn opens. NULL for a turn no session claims. (v4)" }
+    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/turn?id=trn<id>`: its URI, the one place SQL spells it — select and join on this, never rebuild it. (v3)" }
+    - { name: "transcript_page", type: "TEXT", doc: "The session's transcript lens shown from this turn (`oxplow:oxplow/lens?lens=oxplow-foundation/session-transcript&session=ses2#turn=trn7`: the session in its `?`, the turn its view): where a turn opens. NULL for a turn no session claims. (v4; v10: bare ids, the turn in the view)" }
     - { name: "model", type: "TEXT", doc: "The model the turn ran on, as its harness reported it with the turn's end; NULL while running, or when the harness said nothing (opencode). (v5)" }
     - { name: "effort", type: "TEXT", doc: "The reasoning effort the turn ran at (`high`, `medium`, …), as its harness reported it with the turn's end; NULL while running, or when it said nothing. (v5)" }
     - { name: "context_tokens", type: "INTEGER", doc: "Tokens in the agent's context when the turn ended (input plus cache reads and writes of the turn's last request), as its harness reported it with the turn's end; NULL while running, or when the harness said nothing. (v6)" }
@@ -109,14 +109,14 @@
     - { not_null: id }
     - { unique: id }
 - name: ai_call
-  version: 6
+  version: 7
   description: "Every model call oxplow itself made (not the coding agent's): role, provider, model, tokens, latency and whether it succeeded."
   columns:
     - { name: "id", type: "INTEGER", doc: "Row id." }
     - { name: "role", type: "TEXT", doc: "Role used (`main`, `summarize`, `decide`)." }
     - { name: "provider", type: "TEXT", doc: "Provider id from ai.yaml." }
     - { name: "model", type: "TEXT", doc: "Model id." }
-    - { name: "caller", type: "TEXT", doc: "What asked: the asking thread's ref (`oxplow:oxplow/thread?id=<id>`) for an agent's MCP call, `oxplow:oxplow/collector?collector=<owner>/<id>`, `inferred-decisions`, …" }
+    - { name: "caller", type: "TEXT", doc: "What asked: the asking thread's URI (`oxplow:oxplow/thread?id=<id>`) for an agent's MCP call, `oxplow:oxplow/collector?collector=<owner>/<id>`, `inferred-decisions`, …" }
     - { name: "input_tokens", type: "INTEGER", doc: "Input tokens." }
     - { name: "output_tokens", type: "INTEGER", doc: "Output tokens." }
     - { name: "latency_ms", type: "INTEGER", doc: "Round-trip time." }
@@ -127,7 +127,7 @@
     - { name: "request_hash", type: "TEXT", doc: "Content hash of what the model was asked (`{ system, prompt, json }` or `{ state, questions }`), its body kept for the `ai` retention window (`read_ai_call`); NULL for a call made before requests were kept." }
     - { name: "response_hash", type: "TEXT", doc: "Content hash of what the model answered (`{ text }` or `{ answers }`), kept like the request; NULL when the call failed." }
     - { name: "run_id", type: "TEXT", doc: "The extension run that made the call (`v_extension_run.run_id`); NULL for oxplow's own calls. (v3)" }
-    - { name: "ref", type: "TEXT", doc: "`oxplow:oxplow/ai_call?id=<id>`: its ref. `oxplow_read` gives its row and, with `#request` / `#response`, its bodies. (v4)" }
+    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/ai_call?id=<id>`: its URI. `oxplow_read` gives its row and, with `#request` / `#response`, its bodies. (v4)" }
   tests:
     - { not_null: id }
     - { unique: id }
@@ -153,10 +153,10 @@
     - { unique: id }
     - { relationships: { column: ai_call_id, to: ai_call, field: id } }
 - name: ui_preference
-  version: 2
-  description: "What the person's oxplow remembers for them outside any one tab: a page's page memory (scoped by the page's ref without its params — `oxplow:oxplow/page?page=tasks`, `oxplow:oxplow/lens?lens=acme/board` — or `kind:<kind>` for every page of an entity kind; shared by every tab of it), a panel's (its `panel:` ref), a custom component's own (`component:<extension>/<id>`) and the app's preferences (`app`). A tab's view params and history state are in its tab, not here. Local to this project, never the repo."
+  version: 3
+  description: "What the person's oxplow remembers for them outside any one tab: a page's page memory (scoped by the page's URI without its params — `oxplow:oxplow/page?page=tasks`, `oxplow:oxplow/lens?lens=acme/board` — or `kind:<kind>` for every page of an entity kind; shared by every tab of it), a panel's (its `panel:` ref), a custom component's own (`component:<extension>/<id>`) and the app's preferences (`app`). A tab's view params and history state are in its tab, not here. Local to this project, never the repo."
   columns:
-    - { name: "scope", type: "TEXT", doc: "`app`; a page's ref (`oxplow:oxplow/page?page=…`, `oxplow:oxplow/lens?lens=…`) or `kind:<kind>`; a panel's ref; or `component:<extension>/<id>`." }
+    - { name: "scope", type: "TEXT", doc: "`app`; a page's URI (`oxplow:oxplow/page?page=…`, `oxplow:oxplow/lens?lens=…`) or `kind:<kind>`; a panel's URI; or `component:<extension>/<id>`." }
     - { name: "key", type: "TEXT", doc: "What is remembered, within its scope (`railWidth`, `mergeMode.str1.main`)." }
     - { name: "value_json", type: "TEXT", doc: "Its value, as JSON text." }
     - { name: "updated_at", type: "TEXT", doc: "RFC 3339 timestamp of the last change." }
@@ -164,11 +164,11 @@
     - { not_null: scope }
     - { not_null: key }
 - name: bookmark
-  version: 1
-  description: "Pages the person bookmarked, each at one scope: a thread's, a stream's or the whole project's. A thread sees its own, its stream's and the project's; a ref is bookmarked at most once across those."
+  version: 2
+  description: "Pages the person bookmarked, each at one scope: a thread's, a stream's or the whole project's. A thread sees its own, its stream's and the project's; a URI is bookmarked at most once across those."
   columns:
     - { name: "id", type: "INTEGER", doc: "Bookmark id." }
-    - { name: "ref", type: "TEXT", doc: "The page's canonical ref (its tab id): what the bookmark opens." }
+    - { name: "uri", type: "TEXT", doc: "The page's canonical ref (its tab id): what the bookmark opens." }
     - { name: "page_kind", type: "TEXT", doc: "Its page kind (`page`, `file`, `wiki`, …), for the icon." }
     - { name: "label", type: "TEXT", doc: "The page's title when it was bookmarked." }
     - { name: "scope", type: "TEXT", doc: "`thread`, `stream` or `project`." }
@@ -178,7 +178,7 @@
   tests:
     - { not_null: id }
     - { unique: id }
-    - { not_null: ref }
+    - { not_null: uri }
 - name: branch
   version: 2
   description: "Local and remote-tracking branches, refreshed on boot and whenever refs move."
@@ -262,12 +262,12 @@
     - { name: "staged", type: "INTEGER", doc: "For a `working` change: 1 when the file's change is in the index (staged, ready to commit), else 0; NULL for the other kinds of change. (v2)" }
     - { name: "untracked", type: "INTEGER", doc: "For a `working` change: 1 when git doesn't track the file yet (it shows as `added`), else 0; NULL for the other kinds of change. (v2)" }
 - name: change_function
-  version: 3
+  version: 4
   description: "Functions a change added, deleted or modified (signature and/or body), with metric deltas and per-function churn. Unchanged functions aren't listed."
   columns:
     - { name: "change_id", type: "INTEGER", doc: "The change (v_change.id)." }
     - { name: "path", type: "TEXT", doc: "File." }
-    - { name: "ref", type: "TEXT", doc: "The function's symbol ref, `oxplow:oxplow/symbol?path=<path>&symbol=<id>` (`v_symbol.ref` without the snapshot): overloads and same-named functions are separate rows. Unique per change." }
+    - { name: "uri", type: "TEXT", doc: "The function's symbol ref, `oxplow:oxplow/symbol?path=<path>&symbol=<id>` (`v_symbol.uri` without the snapshot): overloads and same-named functions are separate rows. Unique per change." }
     - { name: "container", type: "TEXT", doc: "Enclosing class/impl/module path, `::`-joined; '' at top level." }
     - { name: "name", type: "TEXT", doc: "Function name." }
     - { name: "status", type: "TEXT", doc: "`added`, `deleted` or `modified`." }
@@ -311,7 +311,7 @@
     - { name: "skips_before", type: "INTEGER", doc: "Skip markers on the base side." }
     - { name: "skips_after", type: "INTEGER", doc: "Skip markers on the head side." }
 - name: claim
-  version: 9
+  version: 10
   description: "Claims the agent made about its work (\"tests pass\", \"no behavior change\") and what each cites: the ones it stated in `oxplow.effort.report` and the ones a model read in its answers when the effort finished. (v8: both sources, `provenance`.)"
   columns:
     - { name: "id", type: "INTEGER", doc: "Claim id." }
@@ -322,11 +322,11 @@
     - { name: "agent_session_id", type: "INTEGER", doc: "The agent session that made it (v_agent_session.id); NULL when not recorded. (v4)" }
     - { name: "statement", type: "TEXT", doc: "The claim in words." }
     - { name: "kind", type: "TEXT", doc: "`tests_pass`, `no_behavior_change`, `handles_case` or `other`." }
-    - { name: "evidence_ref", type: "TEXT", doc: "What it cites (`oxplow:oxplow/run?id=<id>`, a test, a file, or `reviewer` when a person verified it with `oxplow.effort.verify_claim`); NULL if nothing was cited. Whether anything else backs it is a review policy's call (oxplow-bundled's `v_oxplow_bundled_claim_status`). (v6)" }
-    - { name: "review", type: "TEXT", doc: "A reviewer's verdict: `verified` (`oxplow.effort.verify_claim`, with what backs it in `evidence_ref`) or `dismissed` (the agent didn't claim it, or didn't mean it: `oxplow.effort.dismiss_claim`); NULL while unreviewed. Reading the effort again, or reporting again, replaces only that source's unreviewed claims. (v7)" }
+    - { name: "evidence", type: "TEXT", doc: "What it cites (`oxplow:oxplow/run?id=<id>`, a test, a file, or `reviewer` when a person verified it with `oxplow.effort.verify_claim`); NULL if nothing was cited. Whether anything else backs it is a review policy's call (oxplow-bundled's `v_oxplow_bundled_claim_status`). (v6)" }
+    - { name: "review", type: "TEXT", doc: "A reviewer's verdict: `verified` (`oxplow.effort.verify_claim`, with what backs it in `evidence`) or `dismissed` (the agent didn't claim it, or didn't mean it: `oxplow.effort.dismiss_claim`); NULL while unreviewed. Reading the effort again, or reporting again, replaces only that source's unreviewed claims. (v7)" }
     - { name: "provenance", type: "TEXT", doc: "`recorded` (the agent stated it in `oxplow.effort.report`'s `claims`) or `inferred` (a model read it in the effort's answers). The review treats both alike. (v8)" }
     - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
-    - { name: "ref", type: "TEXT", doc: "`oxplow:oxplow/claim?id=<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v5)" }
+    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/claim?id=<id>`: its URI, the one place SQL spells it — select and join on this, never rebuild it. (v5)" }
 - name: code_quality_finding
   version: 1
   description: "Findings from code-quality scans, e.g. duplicated blocks, each with its scan's tool and time."
@@ -358,7 +358,7 @@
     - { not_null: id }
     - { unique: id }
 - name: comment
-  version: 3
+  version: 4
   description: "Comment threads anchored to a page (file, wiki page, task…). `intent` says who should act."
   columns:
     - { name: "id", type: "INTEGER", doc: "Comment id." }
@@ -377,9 +377,9 @@
     - { name: "resolved_at", type: "TEXT", doc: "Set when resolved." }
     - { name: "body", type: "TEXT", doc: "Text of the first message." }
     - { name: "message_count", type: "", doc: "Number of messages in the thread." }
-    - { name: "ref", type: "TEXT", doc: "`oxplow:oxplow/comment?id=cmt<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v2)" }
+    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/comment?id=cmt<id>`: its URI, the one place SQL spells it — select and join on this, never rebuild it. (v2)" }
 - name: commit
-  version: 3
+  version: 4
   description: "Commits the indexer has read: the last 500 reachable from every stream's head, kept as heads move. A stream's history is a recursive read over `parents` from its branch's `v_branch.head_sha`."
   columns:
     - { name: "sha", type: "TEXT", doc: "Full commit sha." }
@@ -391,7 +391,7 @@
     - { name: "first_parent", type: "", doc: "First parent's sha; NULL for a root commit." }
     - { name: "parent_count", type: "", doc: "Number of parents (2+ for a merge)." }
     - { name: "parents", type: "TEXT", doc: "Every parent's sha, as a JSON array (first parent first)." }
-    - { name: "ref", type: "TEXT", doc: "`oxplow:oxplow/commit?sha=<sha>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v2)" }
+    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/commit?sha=<sha>`: its URI, the one place SQL spells it — select and join on this, never rebuild it. (v2)" }
 - name: commit_file
   version: 1
   description: "Files each commit changed, against its first parent."
@@ -402,13 +402,13 @@
     - { name: "additions", type: "INTEGER", doc: "Lines added." }
     - { name: "deletions", type: "INTEGER", doc: "Lines deleted." }
 - name: commit_work_item
-  version: 2
+  version: 3
   description: "The active work list's items each commit was for: the ones its message mentions (`tsk42`, `[[tsk42]]`, by the list's id pattern), the ones that declared it as an impact, and the ones whose effort's work it holds (its version of every file they share is the effort's end version)."
   columns:
     - { name: "sha", type: "TEXT", doc: "The commit (v_commit.sha)." }
-    - { name: "work_item", type: "TEXT", doc: "The work item (v_work_item.ref)." }
+    - { name: "work_item", type: "TEXT", doc: "The work item (v_work_item.uri)." }
   tests:
-    - { relationships: { column: work_item, to: work_item, field: ref } }
+    - { relationships: { column: work_item, to: work_item, field: uri } }
 - name: context_read
   version: 1
   description: "Which `.context/*.md` project docs the agent read, and when. Compare with the files it changed to spot work done without reading the relevant doc."
@@ -422,7 +422,7 @@
     - { not_null: id }
     - { unique: id }
 - name: dashboard
-  version: 3
+  version: 4
   description: "User-created dashboards."
   columns:
     - { name: "id", type: "INTEGER", doc: "Dashboard id." }
@@ -430,7 +430,7 @@
     - { name: "sort_index", type: "INTEGER", doc: "Order in the dashboards list." }
     - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
     - { name: "updated_at", type: "TEXT", doc: "RFC 3339 timestamp." }
-    - { name: "ref", type: "TEXT", doc: "`oxplow:oxplow/dashboard?id=dsh<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v2)" }
+    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/dashboard?id=dsh<id>`: its URI, the one place SQL spells it — select and join on this, never rebuild it. (v2)" }
   tests:
     - { not_null: id }
     - { unique: id }
@@ -447,7 +447,7 @@
     - { not_null: id }
     - { unique: id }
 - name: decision
-  version: 6
+  version: 7
   description: "Decisions: forks the agent resolved while working (what it chose, what it didn't, why), recorded by the agent or inferred by oxplow. What a reviewer most wants to check."
   columns:
     - { name: "id", type: "INTEGER", doc: "Decision id." }
@@ -462,9 +462,9 @@
     - { name: "why", type: "TEXT", doc: "The reasoning." }
     - { name: "provenance", type: "TEXT", doc: "`recorded` (the agent recorded it), `inferred` (oxplow proposed it from the effort's activity when the effort closed — a recorded `extract` computation on the `main` role; unconfirmed), or what a reviewer made of an inferred one: `confirmed` or `dismissed` (`oxplow.effort.confirm_decision` / `oxplow.effort.dismiss_decision`)." }
     - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
-    - { name: "ref", type: "TEXT", doc: "`oxplow:oxplow/decision?id=<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v4)" }
-    - { name: "effort_ref", type: "TEXT", doc: "Its effort's ref (`oxplow:oxplow/effort?id=eff<n>`), when it was made during one: where a decision opens. (v5)" }
-    - { name: "thread_ref", type: "TEXT", doc: "Its thread's ref (`oxplow:oxplow/thread?id=thr<n>`): where a decision opens when it has no effort. (v5)" }
+    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/decision?id=<id>`: its URI, the one place SQL spells it — select and join on this, never rebuild it. (v4)" }
+    - { name: "effort_uri", type: "TEXT", doc: "Its effort's URI (`oxplow:oxplow/effort?id=eff<n>`), when it was made during one: where a decision opens. (v5)" }
+    - { name: "thread_uri", type: "TEXT", doc: "Its thread's URI (`oxplow:oxplow/thread?id=thr<n>`): where a decision opens when it has no effort. (v5)" }
   tests:
     - { not_null: id }
     - { unique: id }
@@ -485,7 +485,7 @@
     - { name: "end_col", type: "INTEGER", doc: "End column (1-based)." }
     - { name: "updated_at", type: "TEXT", doc: "When the server last published this file (RFC 3339)." }
 - name: effort
-  version: 7
+  version: 8
   description: "Efforts: one span of a thread's work between a start and an end snapshot, opened and closed by oxplow and linked to a work item when there is one (.context/work-tracking.md). At most one is open per thread."
   columns:
     - { name: "id", type: "INTEGER", doc: "Effort id." }
@@ -499,7 +499,7 @@
     - { name: "summary", type: "", doc: "What shipped: the summary `oxplow.effort.report` recorded, else the final message of the last agent turn in the effort." }
     - { name: "title", type: "", doc: "Its own title, else its work item's, else the first line of its first prompt. (v2)" }
     - { name: "closed_by", type: "TEXT", doc: "What closed it: `commit`, `switch`, `person`, `agent` or `system`; NULL while open. (v2)" }
-    - { name: "ref", type: "TEXT", doc: "`oxplow:oxplow/effort?id=eff<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v6)" }
+    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/effort?id=eff<id>`: its URI, the one place SQL spells it — select and join on this, never rebuild it. (v6)" }
 - name: effort_file
   version: 4
   description: "Files each effort changed, with how they changed: claimed by an edit tool, or observed changing during one of its thread's turns."
@@ -551,7 +551,7 @@
     - { name: "local_snapshot_id", type: "INTEGER", doc: "Snapshot it was captured against." }
     - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
 - name: event
-  version: 4
+  version: 5
   description: "The event log: every activity and state change, oldest first by `seq`, written in the same transaction as the change it records (.context/data-model.md \"event_log\")."
   columns:
     - { name: "seq", type: "INTEGER", doc: "Insert order — the delivery order consumers checkpoint on." }
@@ -572,7 +572,7 @@
     - { name: "payload_expired_at", type: "TEXT", doc: "When retention replaced the payload with `{}` (the envelope stays); NULL while it's kept." }
     - { name: "cause", type: "TEXT", doc: "The event id that caused this one." }
     - { name: "dedupe_key", type: "TEXT", doc: "Emitter-derived key; unique." }
-    - { name: "ref", type: "TEXT", doc: "`oxplow:oxplow/event?id=<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v3)" }
+    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/event?id=<id>`: its URI, the one place SQL spells it — select and join on this, never rebuild it. (v3)" }
 - name: event_checkpoint
   version: 1
   description: "How far each event consumer has read."
@@ -688,158 +688,158 @@
     - { not_null: id }
     - { unique: id }
 - name: search_comment
-  version: 3
+  version: 4
   description: "What site search indexes for each comment (tsk864): the `comment` kind's index is restated from these rows when they change."
   columns:
-    - { name: "ref", type: "TEXT", doc: "The comment's canonical ref (`oxplow:oxplow/comment?id=cmt<n>`): what a hit opens." }
+    - { name: "uri", type: "TEXT", doc: "The comment's canonical ref (`oxplow:oxplow/comment?id=cmt<n>`): what a hit opens." }
     - { name: "title", type: "TEXT", doc: "The quote it's anchored to." }
     - { name: "body", type: "TEXT", doc: "The quote, then every message, a line each." }
     - { name: "stream_id", type: "TEXT", doc: "Its stream (`str1`)." }
     - { name: "version", type: "TEXT", doc: "Changes whenever the row's text does; a recompute reads the text of rows whose version moved only. (v2: the newer of the comment's change and its last message)" }
   tests:
-    - { not_null: ref }
-    - { unique: ref }
+    - { not_null: uri }
+    - { unique: uri }
 - name: search_agent_session
-  version: 2
+  version: 3
   description: "What site search indexes for each agent session: the `agent_session` kind's index is restated from these rows when they change. Closed sessions and sessions on archived threads are included."
   columns:
-    - { name: "ref", type: "TEXT", doc: "`oxplow:oxplow/agent_session?id=ses<n>`: what a hit opens." }
+    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/agent_session?id=ses<n>`: what a hit opens." }
     - { name: "title", type: "TEXT", doc: "`v_agent_session.display_name`." }
     - { name: "body", type: "TEXT", doc: "The harness, the titles of its thread's efforts that overlapped it, and what it touched: the distinct paths of its tool calls and the commands of its shell calls (up to 300 of each)." }
     - { name: "stream_id", type: "TEXT", doc: "Its thread's stream (`str1`)." }
     - { name: "version", type: "TEXT", doc: "The newer of the session's change and its last tool call." }
   tests:
-    - { not_null: ref }
-    - { unique: ref }
+    - { not_null: uri }
+    - { unique: uri }
 - name: search_commit
-  version: 2
+  version: 3
   description: "What site search indexes for each commit `v_commit` holds (the last 500 reachable from every stream's head): the `commit` kind's index is restated from these rows when they change."
   columns:
-    - { name: "ref", type: "TEXT", doc: "`oxplow:oxplow/commit?sha=<sha>`: what a hit opens." }
+    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/commit?sha=<sha>`: what a hit opens." }
     - { name: "title", type: "TEXT", doc: "The subject." }
     - { name: "body", type: "TEXT", doc: "The message body, the author, and the paths it changed (up to 300)." }
     - { name: "stream_id", type: "TEXT", doc: "Always NULL: commits belong to the project." }
     - { name: "version", type: "TEXT", doc: "The sha: a commit never changes." }
   tests:
-    - { not_null: ref }
-    - { unique: ref }
+    - { not_null: uri }
+    - { unique: uri }
 - name: search_dashboard
-  version: 2
+  version: 3
   description: "What site search indexes for each dashboard: the `dashboard` kind's index is restated from these rows when they change."
   columns:
-    - { name: "ref", type: "TEXT", doc: "`oxplow:oxplow/dashboard?id=dsh<n>`: what a hit opens." }
+    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/dashboard?id=dsh<n>`: what a hit opens." }
     - { name: "title", type: "TEXT", doc: "The dashboard's title." }
     - { name: "body", type: "TEXT", doc: "The text of its text tiles and the titles of its query tiles, a line each, in order." }
     - { name: "stream_id", type: "TEXT", doc: "Always NULL: dashboards belong to the project." }
     - { name: "version", type: "TEXT", doc: "The newer of the dashboard's change and its tiles'." }
   tests:
-    - { not_null: ref }
-    - { unique: ref }
+    - { not_null: uri }
+    - { unique: uri }
 - name: search_decision
-  version: 2
+  version: 3
   description: "What site search indexes for each decision: the `decision` kind's index is restated from these rows when they change. Decisions on archived threads are included."
   columns:
-    - { name: "ref", type: "TEXT", doc: "`oxplow:oxplow/decision?id=<n>`: what a hit opens." }
+    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/decision?id=<n>`: what a hit opens." }
     - { name: "title", type: "TEXT", doc: "The question." }
     - { name: "body", type: "TEXT", doc: "The choice, why, and the alternatives, a line each." }
     - { name: "stream_id", type: "TEXT", doc: "Its thread's stream (`str1`)." }
     - { name: "version", type: "TEXT", doc: "When it was made: a decision never changes." }
   tests:
-    - { not_null: ref }
-    - { unique: ref }
+    - { not_null: uri }
+    - { unique: uri }
 - name: search_effort
-  version: 2
+  version: 3
   description: "What site search indexes for each effort: the `effort` kind's index is restated from these rows when they change. Efforts on archived threads are included. Unversioned: an open effort's summary follows its turns, so its text is compared."
   columns:
-    - { name: "ref", type: "TEXT", doc: "`oxplow:oxplow/effort?id=eff<n>`: what a hit opens." }
+    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/effort?id=eff<n>`: what a hit opens." }
     - { name: "title", type: "TEXT", doc: "The effort's title." }
-    - { name: "body", type: "TEXT", doc: "Its summary, then the work item it was on (the ref, so its id finds it)." }
+    - { name: "body", type: "TEXT", doc: "Its summary, then the work item it was on (the URI, so its id finds it)." }
     - { name: "stream_id", type: "TEXT", doc: "Its thread's stream (`str1`)." }
   tests:
-    - { not_null: ref }
-    - { unique: ref }
+    - { not_null: uri }
+    - { unique: uri }
 - name: search_lens
-  version: 2
+  version: 3
   description: "What site search indexes for each lens: the `lens` kind's index is restated from these rows when they change. Hidden lenses (the agent's typed tools) are included."
   columns:
-    - { name: "ref", type: "TEXT", doc: "`oxplow:oxplow/lens?lens=<extension>/<slug>`: what a hit opens." }
+    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/lens?lens=<extension>/<slug>`: what a hit opens." }
     - { name: "title", type: "TEXT", doc: "The lens's title." }
     - { name: "body", type: "TEXT", doc: "Its description." }
     - { name: "stream_id", type: "TEXT", doc: "Always NULL: lenses belong to the project." }
   tests:
-    - { not_null: ref }
-    - { unique: ref }
+    - { not_null: uri }
+    - { unique: uri }
 - name: search_thread
-  version: 2
+  version: 3
   description: "What site search indexes for each thread: the `thread` kind's index is restated from these rows when they change. Closed and archived threads are included."
   columns:
-    - { name: "ref", type: "TEXT", doc: "`oxplow:oxplow/thread?id=thr<n>`: what a hit opens." }
+    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/thread?id=thr<n>`: what a hit opens." }
     - { name: "title", type: "TEXT", doc: "The thread's title." }
     - { name: "body", type: "TEXT", doc: "Its efforts' titles and summaries, then its sessions' names." }
     - { name: "stream_id", type: "TEXT", doc: "Its stream (`str1`)." }
     - { name: "version", type: "TEXT", doc: "The newest of the thread's change, its efforts' starts and ends, its sessions' changes and its last turn." }
   tests:
-    - { not_null: ref }
-    - { unique: ref }
+    - { not_null: uri }
+    - { unique: uri }
 - name: search_turn
-  version: 2
+  version: 3
   description: "What site search indexes for each agent turn: the `turn` kind's index is restated from these rows when they change. Turns on archived threads are included."
   columns:
-    - { name: "ref", type: "TEXT", doc: "`oxplow:oxplow/turn?id=trn<n>`: what a hit opens." }
+    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/turn?id=trn<n>`: what a hit opens." }
     - { name: "title", type: "TEXT", doc: "The session's name and when the turn started." }
     - { name: "body", type: "TEXT", doc: "The prompt, then the answer." }
     - { name: "stream_id", type: "TEXT", doc: "Its thread's stream (`str1`)." }
     - { name: "version", type: "TEXT", doc: "When the turn ended, else when it started." }
   tests:
-    - { not_null: ref }
-    - { unique: ref }
+    - { not_null: uri }
+    - { unique: uri }
 - name: search_handoff
-  version: 2
+  version: 3
   description: "What site search indexes for each handoff: the `handoff` kind's index is restated from these rows when they change."
   columns:
-    - { name: "ref", type: "TEXT", doc: "The handoff's canonical ref (`oxplow:oxplow/handoff?id=hnd<n>`): what a hit opens." }
+    - { name: "uri", type: "TEXT", doc: "The handoff's canonical ref (`oxplow:oxplow/handoff?id=hnd<n>`): what a hit opens." }
     - { name: "title", type: "TEXT", doc: "Empty: a handoff has no title." }
     - { name: "body", type: "TEXT", doc: "The handoff's markdown." }
     - { name: "stream_id", type: "TEXT", doc: "Its recipient thread's stream (`str1`)." }
     - { name: "version", type: "TEXT", doc: "Changes whenever the row's text does; a recompute reads the text of rows whose version moved only (when it was sent; a body is not edited)." }
   tests:
-    - { not_null: ref }
-    - { unique: ref }
+    - { not_null: uri }
+    - { unique: uri }
 - name: search_thread_note
-  version: 5
+  version: 6
   description: "What site search indexes for each thread note: the `thread_note` kind's index is restated from these rows when they change."
   columns:
-    - { name: "ref", type: "TEXT", doc: "The note's canonical ref (`oxplow:oxplow/thread_note?id=not<n>`): what a hit opens." }
+    - { name: "uri", type: "TEXT", doc: "The note's canonical ref (`oxplow:oxplow/thread_note?id=not<n>`): what a hit opens." }
     - { name: "title", type: "TEXT", doc: "Empty: a note has no title." }
     - { name: "body", type: "TEXT", doc: "The note's markdown." }
     - { name: "stream_id", type: "TEXT", doc: "Its thread's stream (`str1`)." }
     - { name: "version", type: "TEXT", doc: "Changes whenever the row's text does; a recompute reads the text of rows whose version moved only. (v4: when it was written; a note is not edited)" }
   tests:
-    - { not_null: ref }
-    - { unique: ref }
+    - { not_null: uri }
+    - { unique: uri }
 - name: search_work_item
-  version: 3
+  version: 4
   description: "What site search indexes for each of the active work list's items (the `work_item` kind's index is restated from these rows when they change), through the work-item interface. Deleted items, and items on archived threads or streams, aren't in it. v2: each item's comments follow its body."
   columns:
-    - { name: "ref", type: "TEXT", doc: "The item's canonical ref (`oxplow:oxplow/work_item?id=<id>&provider=<provider>`): what a hit opens." }
+    - { name: "uri", type: "TEXT", doc: "The item's canonical ref (`oxplow:oxplow/work_item?id=<id>&provider=<provider>`): what a hit opens." }
     - { name: "title", type: "TEXT", doc: "The item's title." }
     - { name: "body", type: "TEXT", doc: "Its own id (so typing `tsk42` finds it), then its body." }
     - { name: "stream_id", type: "TEXT", doc: "Its thread's stream (`str1`); NULL for a backlog item." }
   tests:
-    - { not_null: ref }
-    - { unique: ref }
+    - { not_null: uri }
+    - { unique: uri }
 - name: search_wiki
-  version: 3
+  version: 4
   description: "What site search indexes for each wiki page (tsk864): the `wiki` kind's index is restated from these rows when they change."
   columns:
-    - { name: "ref", type: "TEXT", doc: "`oxplow:oxplow/wiki?slug=<slug>`." }
+    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/wiki?slug=<slug>`." }
     - { name: "title", type: "TEXT", doc: "The page's title." }
     - { name: "body", type: "TEXT", doc: "The page's full markdown." }
     - { name: "stream_id", type: "TEXT", doc: "Always NULL: wiki pages are project-global." }
     - { name: "version", type: "TEXT", doc: "Changes whenever the row's text does; a recompute reads the text of rows whose version moved only. (v2: the page's `updated_at`)" }
   tests:
-    - { not_null: ref }
-    - { unique: ref }
+    - { not_null: uri }
+    - { unique: uri }
 - name: usage_event
   version: 1
   description: "What the person used in oxplow, one row per use (a wiki page opened, a command run) — the telemetry behind the wiki's recent and most-used lists."
@@ -875,14 +875,14 @@
   tests:
     - { not_null: effect }
 - name: extension_run
-  version: 4
+  version: 5
   key: [run_id]
   description: "Each finished run of extension code, one row each: which contribution at which version and catalog generation, who ran it and on whose behalf, what caused it and where it sat, how it ended, what it cost and which scopes it called. What an extension actually did, never what it read or wrote: no input, result, credential value or prompt is kept. Kept 90 days, like a collector's events."
   columns:
     - { name: "run_id", type: "TEXT", doc: "The run (a UUIDv7). `v_command_audit`-style records name it in their `run_id`." }
     - { name: "parent_run_id", type: "TEXT", doc: "The run it was nested in (a person's `oxplow.collector.sync`, an effect's composing script); NULL for a top-level run." }
     - { name: "extension", type: "TEXT", doc: "The extension it belongs to." }
-    - { name: "contribution", type: "TEXT", doc: "The contribution's ref (`v_contribution.ref`): `oxplow:oxplow/command?command=oxplow.review.accept`, `oxplow:oxplow/job?job=effort-review/review`." }
+    - { name: "contribution", type: "TEXT", doc: "The contribution's URI (`v_contribution.uri`): `oxplow:oxplow/command?command=oxplow.review.accept`, `oxplow:oxplow/job?job=effort-review/review`." }
     - { name: "kind", type: "TEXT", doc: "`collector`, `effect`, `command`, `implementation`, …" }
     - { name: "version", type: "TEXT", doc: "The extension's declared `version:` when it ran; NULL when it declares none." }
     - { name: "generation", type: "TEXT", doc: "The extension catalog's generation it ran against (`v_*` query results name theirs the same way); NULL for a run that holds none — a collector's, an effect's or a job's belongs to its extension's version. (v2)" }
@@ -911,12 +911,12 @@
     - { not_null: run_id }
     - { unique: run_id }
 - name: job_run
-  version: 4
+  version: 5
   key: [id]
   description: "Each job run: one execution of a job an extension declares (a `jobs:` declaration, run through its `jobs.write/enqueue` command) — which job, its state and its current attempt, and what that attempt has used so far. A job is the declaration (`oxplow:oxplow/job?job=<extension>/<id>`); a job run is one execution of it (`oxplow:oxplow/job_run?id=<id>`). What it was asked and what it answered stay private to the extension (`jobs.read/snapshot`); what it streams is in `v_job_run_output`."
   columns:
     - { name: "id", type: "TEXT", doc: "The run's id (a UUIDv7)." }
-    - { name: "job", type: "TEXT", doc: "The job it runs: `oxplow:oxplow/job?job=<extension>/<id>` (`v_contribution.ref`)." }
+    - { name: "job", type: "TEXT", doc: "The job it runs: `oxplow:oxplow/job?job=<extension>/<id>` (`v_contribution.uri`)." }
     - { name: "intent_key", type: "TEXT", doc: "What it is about: the `intentKey` it was started with, one run per key and job (`review:oxplow:oxplow/effort?id=eff12`). (v2)" }
     - { name: "extension", type: "TEXT", doc: "The extension it belongs to." }
     - { name: "version", type: "TEXT", doc: "The extension's declared `version:` when it was started; NULL when it declares none." }
@@ -933,7 +933,7 @@
     - { name: "tool_calls", type: "INT", doc: "Tools the model called in its current attempt." }
     - { name: "input_tokens", type: "INT", doc: "Input tokens its current attempt's rounds reported (observed usage only)." }
     - { name: "output_tokens", type: "INT", doc: "Output tokens likewise." }
-    - { name: "ref", type: "TEXT", doc: "`oxplow:oxplow/job_run?id=<id>`: its ref — what `jobs.read/snapshot`, `jobs.write/cancel` and `oxplow.job_run.cancel` take. (v3)" }
+    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/job_run?id=<id>`: its URI — what `jobs.read/snapshot`, `jobs.write/cancel` and `oxplow.job_run.cancel` take. (v3)" }
   tests:
     - { not_null: id }
     - { unique: id }
@@ -999,7 +999,7 @@
     - { not_null: target }
     - { unique: target }
 - name: resource
-  version: 2
+  version: 3
   key: [resource]
   description: "Every resource a URI may name (`oxplow:<extension>/<resource>?<params>`), as the extensions declare them in `resources:` — oxplow-foundation's included, so none is special. Says what each one's params are and which view names it."
   columns:
@@ -1013,15 +1013,15 @@
     - { name: "searchable", type: "TEXT", doc: "The view search indexes it from; NULL when search doesn't." }
     - { name: "icon", type: "TEXT", doc: "The icon it is drawn with." }
     - { name: "wikilink", type: "TEXT", doc: "JSON `{ prefix, param }`: `[[<prefix>:<value>]]` names it with that param set; NULL when it has no sugar." }
-    - { name: "page", type: "TEXT", doc: "The page URI one opens on, given `ref=<uri>` (v2): an extension's resource with a page of its own; NULL for one that opens as itself." }
+    - { name: "page", type: "TEXT", doc: "The page URI one opens on, given `uri=<uri>` (v3; `ref=` before): an extension's resource with a page of its own; NULL for one that opens as itself." }
   tests:
     - { not_null: resource }
     - { unique: resource }
 - name: contribution_health
-  version: 4
+  version: 5
   description: "Each extension contribution's health on this machine: a provider instance, a collector or an effect, under one failure policy — three failures in a row disable it until a person runs `oxplow.contribution.enable`."
   columns:
-    - { name: "ref", type: "TEXT", doc: "The contribution's ref (`effect:tracker/fake`): the same as its `v_contribution.ref`." }
+    - { name: "uri", type: "TEXT", doc: "The contribution's URI (`effect:tracker/fake`): the same as its `v_contribution.uri`." }
     - { name: "extension", type: "TEXT", doc: "The extension it belongs to." }
     - { name: "contribution", type: "TEXT", doc: "The provider's, collector's or effect's id within it." }
     - { name: "kind", type: "TEXT", doc: "`provider`, `collector` or `effect`." }
@@ -1033,13 +1033,13 @@
     - { name: "mean_ms", type: "REAL", doc: "A moving average of its successful runs or calls, in milliseconds." }
     - { name: "next_due_at", type: "TEXT", doc: "When it should next run (a schedule's next slot), if it runs on one." }
     - { name: "updated_at", type: "TEXT", doc: "When this row last changed." }
-    - { name: "dead_letters", type: "", doc: "Events it couldn't handle and that wait for a person: dead letters of its consumer (its `ref`) or of events whose subject names it (its `ref`)." }
+    - { name: "dead_letters", type: "", doc: "Events it couldn't handle and that wait for a person: dead letters of its consumer (its `uri`) or of events whose subject names it (its `uri`)." }
     - { name: "fresh", type: "", doc: "1 unless a scheduled run is overdue (`next_due_at` has passed) or a collector's last run failed (`state` isn't `ok`): its data is then the last good run's, not current. (v3)" }
     - { name: "repair_item", type: "TEXT", doc: "The open repair work item for it — the one whose title starts `Repair <extension> <contribution>:`, filed by the bundled repair effect; NULL when none is open." }
   tests:
     - { not_null: extension }
 - name: snapshot
-  version: 3
+  version: 4
   description: "Snapshots: point-in-time captures of a stream's worktree, used to bracket efforts and diffs."
   columns:
     - { name: "id", type: "INTEGER", doc: "Snapshot id." }
@@ -1048,7 +1048,7 @@
     - { name: "revision", type: "TEXT", doc: "The VCS revision the captured tree equals (`git:<sha>`): set when the workspace was clean at the head; NULL otherwise." }
     - { name: "branch", type: "TEXT", doc: "Branch when captured, if known." }
     - { name: "tree_hash", type: "TEXT", doc: "Whole-tree identity: two snapshots with the same tree_hash hold the same files. NULL before V96." }
-    - { name: "ref", type: "TEXT", doc: "`oxplow:oxplow/snapshot?id=<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v2)" }
+    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/snapshot?id=<id>`: its URI, the one place SQL spells it — select and join on this, never rebuild it. (v2)" }
   tests:
     - { not_null: id }
     - { unique: id }
@@ -1090,7 +1090,7 @@
     - { name: "contents", type: "INTEGER", doc: "1 when the take kept file contents; 0 when it recorded identities only ('Track changes only'): a read of that snapshot answers 'no contents', not 'expired'. (v2)" }
     - { name: "handle", type: "TEXT", doc: "A snapshot provider's own name for the state the take marked, which core hands back to it as the next mark's parent; NULL for takes by oxplow's own capture. (v3)" }
 - name: stream
-  version: 5
+  version: 6
   description: "Streams: parallel lines of work, each its own git worktree. Exactly one is `primary` (the repo itself)."
   columns:
     - { name: "id", type: "INTEGER", doc: "Stream id." }
@@ -1101,14 +1101,14 @@
     - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
     - { name: "updated_at", type: "TEXT", doc: "RFC 3339 timestamp." }
     - { name: "archived_at", type: "TEXT", doc: "Set when the stream was archived; NULL while live." }
-    - { name: "ref", type: "TEXT", doc: "`oxplow:oxplow/stream?id=str<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v2)" }
+    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/stream?id=str<id>`: its URI, the one place SQL spells it — select and join on this, never rebuild it. (v2)" }
     - { name: "prompt", type: "TEXT", doc: "The standing instructions the person set for every agent session in this stream (appended to its system prompt); NULL when none. (v3)" }
     - { name: "head_sha", type: "TEXT", doc: "The commit its workspace is on (HEAD), whether it has a branch checked out or is detached; NULL before its first commit or the first refs scan. Restated whenever refs move. (v4)" }
   tests:
     - { not_null: id }
     - { unique: id }
 - name: subagent
-  version: 2
+  version: 3
   description: "Subagents of an agent session: who in a session acted, from the `agent.subagent.started` / `.finished` events that bracket one and the tool calls that name it. A subagent is not a session; it has no process oxplow knows. Claude Code brackets its subagents, so they are `running` or `finished`; Codex and opencode children appear only in tool calls, so they are `unknown` (calls but no bracket)."
   columns:
     - { name: "id", type: "TEXT", doc: "The harness's id for it, or the id of the call that started it." }
@@ -1122,16 +1122,16 @@
     - { name: "last_activity_at", type: "TEXT", doc: "The newest of its start, its calls and its finish." }
     - { name: "state", type: "TEXT", doc: "`running` (started, not finished), `finished`, or `unknown` (only tool calls name it)." }
     - { name: "finished_event_id", type: "TEXT", doc: "The event that finished it; its `result` body is the subagent's last message, read as `subagent:<id>#result`." }
-    - { name: "session_ref", type: "TEXT", doc: "Its session's ref (`oxplow:oxplow/agent_session?id=ses3`): where it opens." }
-    - { name: "ref", type: "TEXT", doc: "`oxplow:oxplow/subagent?agent=<id>&session=ses<n>`: its ref, the one place SQL spells it — select and join on this." }
+    - { name: "session_uri", type: "TEXT", doc: "Its session's URI (`oxplow:oxplow/agent_session?id=ses3`): where it opens." }
+    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/subagent?agent=<id>&session=ses<n>`: its URI, the one place SQL spells it — select and join on this." }
   tests:
-    - { not_null: ref }
-    - { unique: ref }
+    - { not_null: uri }
+    - { unique: uri }
 - name: symbol
-  version: 3
+  version: 4
   description: "What each stream's files define — functions, methods, types, fields, constants, modules — as oxplow's own tree-sitter extraction reads them (every supported language, no language server needed): the current tree, restated per changed file at each snapshot. `v_symbol_capture` says what each snapshot's collection covered."
   columns:
-    - { name: "ref", type: "TEXT", doc: "`oxplow:oxplow/symbol?path=<path>&symbol=<id>`, the current symbol (no revision; pin one with `@snap:<id>` / `@git:<sha>`). The id is the containers and the name joined by `::` (`Parser::parse`, `<Parser as Display>::fmt`), the parameter types in languages that overload by them (`Parser::parse(String,int)`), and `~n` for the nth same id in a file (`main~2`). Unique per stream." }
+    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/symbol?path=<path>&symbol=<id>`, the current symbol (no revision; pin one with `@snap:<id>` / `@git:<sha>`). The id is the containers and the name joined by `::` (`Parser::parse`, `<Parser as Display>::fmt`), the parameter types in languages that overload by them (`Parser::parse(String,int)`), and `~n` for the nth same id in a file (`main~2`). Unique per stream." }
     - { name: "snapshot_id", type: "INTEGER", doc: "The snapshot the file's symbols were read at." }
     - { name: "stream_id", type: "INTEGER", doc: "The stream (v_stream.id)." }
     - { name: "path", type: "TEXT", doc: "Workspace-relative file." }
@@ -1147,9 +1147,9 @@
     - { name: "end_line", type: "INTEGER", doc: "Where the whole definition ends (its body included), 1-based: the lines `start_line`..`end_line` are the symbol." }
     - { name: "end_col", type: "INTEGER", doc: "1-based, exclusive." }
   tests:
-    - { not_null: ref }
+    - { not_null: uri }
     - { not_null: name }
-    - { sql: "SELECT 1 FROM v_symbol GROUP BY stream_id, ref HAVING count(*) > 1" }
+    - { sql: "SELECT 1 FROM v_symbol GROUP BY stream_id, uri HAVING count(*) > 1" }
 - name: symbol_capture
   version: 2
   description: "One row per snapshot the symbol collector handled: how many changed files it read definitions from, and how many it couldn't read."
@@ -1202,7 +1202,7 @@
     - { name: "captured_at", type: "TEXT", doc: "When it was recorded (RFC 3339)." }
     - { name: "turn_id", type: "INTEGER", doc: "The agent turn it ran in (v_agent_turn.id), if it ran in one." }
 - name: thread
-  version: 6
+  version: 7
   description: "Threads: independent lines of the person's work inside a stream. A thread needs no agent and may have several: its agent sessions are v_agent_session rows."
   columns:
     - { name: "id", type: "INTEGER", doc: "Thread id." }
@@ -1213,17 +1213,17 @@
     - { name: "updated_at", type: "TEXT", doc: "RFC 3339 timestamp." }
     - { name: "closed_at", type: "TEXT", doc: "Set when the thread was closed; NULL while it is open. Open or closed is all a thread's state is (v4: `status` is gone)." }
     - { name: "archived_at", type: "TEXT", doc: "Set when the thread was archived." }
-    - { name: "ref", type: "TEXT", doc: "`oxplow:oxplow/thread?id=thr<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v3)" }
+    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/thread?id=thr<id>`: its URI, the one place SQL spells it — select and join on this, never rebuild it. (v3)" }
     - { name: "mark", type: "TEXT", doc: "The person's colour for its tab — `amber`, `red`, `green`, `blue` or `violet` — or NULL when unmarked. It changes nothing else. (v4)" }
     - { name: "prompt", type: "TEXT", doc: "The standing instructions the person set for this thread's agent sessions (appended to its system prompt, after the stream's); NULL when none. (v5)" }
   tests:
     - { not_null: id }
     - { unique: id }
 - name: agent_session
-  version: 8
+  version: 9
   description: "Agent sessions: the agent slots a person opened on a thread — a terminal agent, or a one-shot action. The row is the slot, not the process: a harness process ending leaves it open; closing the session, its thread or its stream's archive closes it."
   columns:
-    - { name: "id", type: "INTEGER", doc: "Session id (its ref is `oxplow:oxplow/agent_session?id=ses<id>`)." }
+    - { name: "id", type: "INTEGER", doc: "Session id (its URI is `oxplow:oxplow/agent_session?id=ses<id>`)." }
     - { name: "thread_id", type: "INTEGER", doc: "The thread it's on (v_thread.id)." }
     - { name: "kind", type: "TEXT", doc: "`terminal` (a harness in a PTY) or `action` (a one-shot session). (v7: `chat` is gone.)" }
     - { name: "harness", type: "TEXT", doc: "What runs in it: `claude`, `codex`, `opencode`, or a harness an extension declares." }
@@ -1237,7 +1237,7 @@
     - { name: "pid", type: "INTEGER", doc: "OS pid of the process the daemon spawned for it, rewritten on every spawn; NULL for a session with no process of its own (a chat) or not yet spawned. May be dead or reused: read it with last_seen_at. (v2)" }
     - { name: "last_seen_at", type: "TEXT", doc: "The newest hook seen from it, to the 30 s (RFC 3339); NULL before the first. A live agent has a recent one and a pid that exists. (v2)" }
     - { name: "stopped_by_user_at", type: "TEXT", doc: "When the person deliberately stopped it; NULL once started again, and after a crash or backend restart (which resume when the tab is shown). A stopped session is not spawned until a person starts it. (v3)" }
-    - { name: "ref", type: "TEXT", doc: "`oxplow:oxplow/agent_session?id=ses<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v4)" }
+    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/agent_session?id=ses<id>`: its URI, the one place SQL spells it — select and join on this, never rebuild it. (v4)" }
     - { name: "native_title", type: "TEXT", doc: "The name its harness gives the conversation it is bound to (Claude's `/rename`, a generated title); empty when it gave none, and cleared when the slot moves to another conversation. (v6)" }
     - { name: "fork_next", type: "INTEGER", doc: "1 when its next launch forks the conversation it is bound to instead of resuming it. (v6)" }
     - { name: "display_name", type: "TEXT", doc: "What a person calls it: its `title`, else its `native_title`, else the harness and the day it was opened. The one place a session is named. (v5; v6: the native title)" }
@@ -1287,7 +1287,7 @@
     - { not_null: subject }
     - { relationships: { column: stream_id, to: stream, field: id } }
 - name: collector_run
-  version: 5
+  version: 6
   description: "Each collector's last run: its outcome, the row counts it wrote and its checkpoint. A collector is owned by an extension, the project (`project`) or oxplow (`built-in`)."
   columns:
     - { name: "owner", type: "TEXT", doc: "The extension that declares it, `project` for `.oxplow/project.yaml`, or `built-in`." }
@@ -1299,7 +1299,7 @@
     - { name: "cursor_json", type: "TEXT", doc: "Its checkpoint: the opaque state its script or provider read returned last." }
     - { name: "last_event_id", type: "INTEGER", doc: "The seq of the last trigger event it ran for." }
     - { name: "run_id", type: "TEXT", doc: "Its last run (`v_extension_run.run_id`); NULL for a run before runs were recorded. (v2)" }
-    - { name: "ref", type: "TEXT", doc: "`oxplow:oxplow/collector?collector=<owner>/<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v3)" }
+    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/collector?collector=<owner>/<id>`: its URI, the one place SQL spells it — select and join on this, never rebuild it. (v3)" }
   tests:
     - { not_null: owner }
     - { not_null: id }
@@ -1314,11 +1314,11 @@
     - { name: "since", type: "TEXT", doc: "When its run was first deferred (RFC 3339)." }
     - { name: "touched", type: "TEXT", doc: "When a triggering event last arrived for it (RFC 3339): what `settle` counts from." }
 - name: contribution
-  version: 4
-  key: [ref]
-  description: "Every enabled extension's contributions, one row each, as their descriptors say: its ref (`<kind>:<extension>/<id>`, or `<kind>:<name>` for a command, metric, measure, dimension, event type or ref kind — the model that owns every contribution kind's ref), who contributed it and at what version, how it runs, what it needs, and the shared name it holds. What `list_extensions` counts and the reference documents. Kinds move onto descriptors one by one; a kind not yet listed here keeps its own listing."
+  version: 5
+  key: [uri]
+  description: "Every enabled extension's contributions, one row each, as their descriptors say: its URI (`<kind>:<extension>/<id>`, or `<kind>:<name>` for a command, metric, measure, dimension, event type or ref kind — the model that owns every contribution kind's URI), who contributed it and at what version, how it runs, what it needs, and the shared name it holds. What `list_extensions` counts and the reference documents. Kinds move onto descriptors one by one; a kind not yet listed here keeps its own listing."
   columns:
-    - { name: "ref", type: "TEXT", doc: "Its ref: `oxplow:oxplow/job?job=effort-review/review`, `oxplow:oxplow/collector?collector=triage/todos`, `oxplow:oxplow/command?command=oxplow.review.accept`. (v3, was `id`)" }
+    - { name: "uri", type: "TEXT", doc: "Its ref: `oxplow:oxplow/job?job=effort-review/review`, `oxplow:oxplow/collector?collector=triage/todos`, `oxplow:oxplow/command?command=oxplow.review.accept`. (v3, was `id`)" }
     - { name: "extension", type: "TEXT", doc: "The extension that declares it." }
     - { name: "kind", type: "TEXT", doc: "`collector`, `effect`, `command`, `metric`, `skill`, `provider`, `lens`, …" }
     - { name: "local", type: "TEXT", doc: "Its id within the extension, or its global name (a command's bus id, a metric's key)." }
@@ -1333,13 +1333,13 @@
     - { name: "file", type: "TEXT", doc: "The manifest it's declared in." }
     - { name: "line", type: "INTEGER", doc: "Its line there, when the kind tracks lines." }
   tests:
-    - { not_null: ref }
+    - { not_null: uri }
 - name: lens
-  version: 4
-  key: [ref]
+  version: 5
+  key: [uri]
   description: "Every lens of every enabled extension: a saved query over the models and how to show it. Each is a page for the person (unless hidden); open one with `oxplow_show_lens`, run one with `oxplow_run_lens`, read its definition with `oxplow_read { ref }`. Restated with each extension generation, so it is what the running catalog holds."
   columns:
-    - { name: "ref", type: "TEXT", doc: "`oxplow:oxplow/lens?lens=<extension>/<slug>`: its ref, the one place SQL spells it." }
+    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/lens?lens=<extension>/<slug>`: its URI, the one place SQL spells it." }
     - { name: "extension", type: "TEXT", doc: "The extension that declares it (v_extension.name)." }
     - { name: "slug", type: "TEXT", doc: "Its id within the extension: the lens file's name." }
     - { name: "title", type: "TEXT", doc: "What the person sees." }
@@ -1351,14 +1351,14 @@
     - { name: "needs", type: "TEXT", doc: "The capabilities (or features) it needs, as a JSON array; without them its run says so." }
     - { name: "source", type: "TEXT", doc: "Its source file, the one to edit, relative to the project; NULL when no source is here (it ships with oxplow). A deployed extension runs a copy of it in the store." }
   tests:
-    - { not_null: ref }
-    - { unique: ref }
+    - { not_null: uri }
+    - { unique: uri }
 - name: extension
-  version: 5
-  key: [ref]
+  version: 6
+  key: [uri]
   description: "Every extension the project knows — its own (sources in `.oxplow/extensions/`, or where `extensionSources` says) and the ones that ship with oxplow — enabled or not, with where its files come from (`deployment`) and why it loaded badly if it did. One listed as on that has nothing to run here is a row too (`undeployed`, `not_here`). What an extension contributes is in `v_contribution` (count it by `extension` and `kind`); its lenses are `v_lens`. Restated with each extension generation; an extension that fails to load holds its generation back, so it is not a row — `oxplow_validate_extension` says why. `errors` and `warnings` are what a loaded one reports."
   columns:
-    - { name: "ref", type: "TEXT", doc: "`oxplow:oxplow/extension?name=<name>`." }
+    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/extension?name=<name>`." }
     - { name: "name", type: "TEXT", doc: "Its name." }
     - { name: "namespace", type: "TEXT", doc: "The namespace its commands' ids are under." }
     - { name: "description", type: "TEXT", doc: "What it is, in a line." }
@@ -1375,15 +1375,15 @@
     - { name: "pending", type: "TEXT", doc: "What an extension that is on but undeployed waits on a person for: the permissions its source would add, one line each, as a JSON array; `[]` when nothing waits. Startup deploys an undeployed extension only when it asks for nothing. (v3)" }
     - { name: "shared", type: "INTEGER", doc: "1 when it is the team's: the project's `extensions:` list names it (`oxplow.extension.share`). (v4)" }
   tests:
-    - { not_null: ref }
-    - { unique: ref }
+    - { not_null: uri }
+    - { unique: uri }
 - name: extension_deployment
-  version: 4
-  key: [ref]
+  version: 5
+  key: [uri]
   description: "Each deployment of an extension: an immutable copy of its source in the store (`.oxplow/runtime/extensions/<name>/<hash>/`), named by the hash of the source it was copied from, and which one runs now (`active`). `oxplow.extension.deploy` makes one; `oxplow.extension.rollback` makes an older one active again. The store keeps the active one and the five newest. A bundled extension with no active row runs the copy that ships with oxplow."
   columns:
-    - { name: "ref", type: "TEXT", doc: "`oxplow:oxplow/extension_deployment?hash=<hash>&name=<name>`." }
-    - { name: "extension_ref", type: "TEXT", doc: "`oxplow:oxplow/extension?name=<name>`: the extension it is a deployment of; NULL when the catalog no longer lists it." }
+    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/extension_deployment?hash=<hash>&name=<name>`." }
+    - { name: "extension_uri", type: "TEXT", doc: "`oxplow:oxplow/extension?name=<name>`: the extension it is a deployment of; NULL when the catalog no longer lists it." }
     - { name: "name", type: "TEXT", doc: "The extension's name." }
     - { name: "hash", type: "TEXT", doc: "The hash of the source it was copied from: its identity." }
     - { name: "deployed_at", type: "TEXT", doc: "When it was first deployed." }
@@ -1393,12 +1393,12 @@
     - { name: "permissions", type: "TEXT", doc: "What it declares it may reach beyond the baseline, as a JSON object (`v_extension.permissions`'s shape): what a person approved when it was deployed. (v2)" }
     - { name: "build", type: "TEXT", doc: "The command it was built with (its manifest's `build.run`), which a person approved when it was deployed; NULL when it has no build. (v3)" }
   tests:
-    - { not_null: ref }
-    - { unique: ref }
+    - { not_null: uri }
+    - { unique: uri }
 - name: prompt
-  version: 1
+  version: 2
   key: [position]
-  description: "What a person can ask oxplow's agent: every question one of core's areas answers and every enabled extension's `intent.prompts`, in the catalog's order (core first, then extensions by name). The Catalog page lists them with Ask; a page for a ref offers the ones `about` its kind. Restated with each extension generation."
+  description: "What a person can ask oxplow's agent: every question one of core's areas answers and every enabled extension's `intent.prompts`, in the catalog's order (core first, then extensions by name). The Catalog page lists them with Ask; a page for a URI offers the ones `about` its kind. Restated with each extension generation."
   columns:
     - { name: "position", type: "INTEGER", doc: "Its place in the catalog, from 1." }
     - { name: "source_kind", type: "TEXT", doc: "`area` (one of core's) or `extension`." }
@@ -1559,11 +1559,11 @@
     - { name: "spends", type: "INT", doc: "1 when a run over it spends the person's money (a model call on their provider key), so a tool over it asks before it runs; 0 otherwise. (v2)" }
     - { name: "summary", type: "TEXT", doc: "What it lets a handler do." }
 - name: command_proposal
-  version: 3
+  version: 4
   description: "Commands an agent ran that need a person's confirmation: each kept with its preview and what it would have done, until a person approves (the command then runs as them) or declines it. A newer proposal with the same `key` supersedes a pending one. The Alerts panel shows the pending ones."
   columns:
     - { name: "id", type: "INTEGER", doc: "Proposal id." }
-    - { name: "ref", type: "TEXT", doc: "`oxplow:oxplow/proposal?id=<id>`." }
+    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/proposal?id=<id>`." }
     - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
     - { name: "command", type: "TEXT", doc: "The command (`oxplow.config.set`, `oxplow.work_item.delete`)." }
     - { name: "input", type: "TEXT", doc: "Its input (JSON)." }
@@ -1580,14 +1580,14 @@
     - { name: "superseded_by", type: "INTEGER", doc: "The proposal that replaced it." }
   tests:
     - { not_null: id }
-    - { unique: ref }
+    - { unique: uri }
     - { accepted_values: { column: decision, values: [pending, approved, declined, superseded] } }
 - name: thread_answer
-  version: 3
+  version: 4
   description: "An agent's answers in a thread: what `oxplow_show_lens` showed the person — an existing lens with its params, or the answer's own lens spec — and, once kept, the lens it became."
   columns:
     - { name: "id", type: "INTEGER", doc: "Answer id." }
-    - { name: "ref", type: "TEXT", doc: "`oxplow:oxplow/answer?id=<id>`." }
+    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/answer?id=<id>`." }
     - { name: "thread_id", type: "INTEGER", doc: "The thread it was shown in (v_thread.id)." }
     - { name: "turn_id", type: "INTEGER", doc: "The turn it was shown in (v_agent_turn.id), when one was open." }
     - { name: "effort_id", type: "INTEGER", doc: "The effort open in the thread at the time, if any." }
@@ -1599,7 +1599,7 @@
     - { name: "kept_lens", type: "TEXT", doc: "The lens it was kept as (`oxplow.lens.keep`), if it was." }
   tests:
     - { not_null: id }
-    - { unique: ref }
+    - { unique: uri }
     - { relationships: { column: thread_id, to: thread, field: id } }
 - name: token_usage
   version: 1
@@ -1623,18 +1623,18 @@
     - { not_null: id }
     - { unique: id }
 - name: handoff
-  version: 2
+  version: 3
   description: "Work handed from one thread to another (`oxplow.handoff.send`; ref `oxplow:oxplow/handoff?id=hnd<n>`): who sent it, the thread it is for, the work item it hands over, when the recipient's agent was given it, and how it ended. A record oxplow keeps, never a message it delivers: the recipient's agent is given it at its next prompt."
   columns:
     - { name: "id", type: "INTEGER", doc: "Handoff id (`hnd<n>`)." }
-    - { name: "ref", type: "TEXT", doc: "`oxplow:oxplow/handoff?id=hnd<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it." }
+    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/handoff?id=hnd<id>`: its URI, the one place SQL spells it — select and join on this, never rebuild it." }
     - { name: "from_thread_id", type: "INTEGER", doc: "The thread that sent it." }
-    - { name: "from_thread_ref", type: "TEXT", doc: "That thread's ref (`oxplow:oxplow/thread?id=thr<n>`)." }
+    - { name: "from_thread_uri", type: "TEXT", doc: "That thread's URI (`oxplow:oxplow/thread?id=thr<n>`)." }
     - { name: "from_session_id", type: "INTEGER", doc: "The agent session that sent it; NULL when a person or an effect did." }
-    - { name: "from_session_ref", type: "TEXT", doc: "That session's ref (`oxplow:oxplow/agent_session?id=ses<n>`)." }
+    - { name: "from_session_uri", type: "TEXT", doc: "That session's URI (`oxplow:oxplow/agent_session?id=ses<n>`)." }
     - { name: "from_actor", type: "TEXT", doc: "Who sent it: `user`, `agent`, `effect`, `job` or `system` (the actor, never an input)." }
     - { name: "to_thread_id", type: "INTEGER", doc: "The thread it is for (never a session: the thread outlives its processes)." }
-    - { name: "to_thread_ref", type: "TEXT", doc: "That thread's ref: where a handoff opens." }
+    - { name: "to_thread_uri", type: "TEXT", doc: "That thread's URI: where a handoff opens." }
     - { name: "work_item", type: "TEXT", doc: "The work item it hands over (a `work_item:` ref), when it names one; taking the handoff moves the item onto the recipient thread." }
     - { name: "body", type: "TEXT", doc: "Markdown body." }
     - { name: "sent_at", type: "TEXT", doc: "RFC 3339 timestamp." }
@@ -1650,7 +1650,7 @@
     - { relationships: { column: from_thread_id, to: thread, field: id } }
     - { relationships: { column: to_thread_id, to: thread, field: id } }
 - name: thread_note
-  version: 4
+  version: 5
   description: "A thread's notes: the capture pad an agent writes as it works (`oxplow.knowledge.add_note`; ref `oxplow:oxplow/thread_note?id=not<n>`)."
   columns:
     - { name: "id", type: "INTEGER", doc: "Note id (`not<n>`)." }
@@ -1658,8 +1658,8 @@
     - { name: "body", type: "TEXT", doc: "Markdown body." }
     - { name: "author", type: "TEXT", doc: "Who wrote it (`agent`, `user`, …)." }
     - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
-    - { name: "ref", type: "TEXT", doc: "`oxplow:oxplow/thread_note?id=not<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v2)" }
-    - { name: "thread_ref", type: "TEXT", doc: "Its thread's ref (`oxplow:oxplow/thread?id=thr<n>`): where a note opens. (v3)" }
+    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/thread_note?id=not<id>`: its URI, the one place SQL spells it — select and join on this, never rebuild it. (v2)" }
+    - { name: "thread_uri", type: "TEXT", doc: "Its thread's URI (`oxplow:oxplow/thread?id=thr<n>`): where a note opens. (v3)" }
   tests:
     - { not_null: id }
     - { unique: id }
@@ -1696,75 +1696,75 @@
     - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
     - { name: "updated_at", type: "TEXT", doc: "RFC 3339 timestamp." }
 - name: work_item
-  version: 4
+  version: 5
   description: "The active work list's items — the work-item interface everything reads, whichever implementation is active (oxplow's tasks, a provider's tracker; none: nothing). Deleted items excluded. `state` is the canonical state every list maps to; a list's own fields are in `native` (described by its declared fields). Links are `v_work_item_link`, comments `v_work_item_comment`."
   columns:
-    - { name: "ref", type: "TEXT", doc: "`oxplow:oxplow/work_item?id=<id>&provider=<provider>` (`oxplow:oxplow/work_item?id=tsk42&provider=oxplow`)." }
+    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/work_item?id=<id>&provider=<provider>` (`oxplow:oxplow/work_item?id=tsk42&provider=oxplow`)." }
     - { name: "provider", type: "TEXT", doc: "The implementation it comes from: the active work list (`oxplow`, a provider instance)." }
-    - { name: "native_id", type: "TEXT", doc: "The id the list itself knows it by (`tsk42`, `ENG-12`): the ref without `oxplow:oxplow/work_item?id=&provider=<provider>`. Match a tracker's own rows on this, never by slicing `ref`." }
+    - { name: "native_id", type: "TEXT", doc: "The id the list itself knows it by (`tsk42`, `ENG-12`): the URI without `oxplow:oxplow/work_item?id=&provider=<provider>`. Match a tracker's own rows on this, never by slicing `uri`." }
     - { name: "title", type: "TEXT", doc: "Title." }
     - { name: "body", type: "TEXT", doc: "Markdown body." }
     - { name: "state", type: "TEXT", doc: "Canonical state: `todo`, `in_progress`, `blocked`, `done` or `canceled`." }
     - { name: "native_state", type: "TEXT", doc: "The list's own state (oxplow: the task status, `archived` included)." }
     - { name: "native", type: "TEXT", doc: "The list's own fields as JSON (its declared fields; oxplow: priority, author, …)." }
-    - { name: "parent_ref", type: "TEXT", doc: "The parent work item's ref (an epic); NULL at top level or when the parent is deleted." }
+    - { name: "parent_uri", type: "TEXT", doc: "The parent work item's URI (an epic); NULL at top level or when the parent is deleted." }
     - { name: "thread_id", type: "INTEGER", doc: "The list it's on: a thread's, or NULL for the backlog." }
     - { name: "rank", type: "REAL", doc: "Its order on its list (ascending); NULL orders by `created_at`." }
     - { name: "closed_at", type: "TEXT", doc: "When it first reached `done` or `canceled` (RFC 3339); NULL while open." }
     - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
     - { name: "updated_at", type: "TEXT", doc: "RFC 3339 timestamp." }
   tests:
-    - { not_null: ref }
-    - { unique: ref }
+    - { not_null: uri }
+    - { unique: uri }
     - { accepted_values: { column: state, values: [todo, in_progress, blocked, done, canceled] } }
-    - { relationships: { column: parent_ref, to: work_item, field: ref } }
+    - { relationships: { column: parent_uri, to: work_item, field: uri } }
 - name: work_item_link
-  version: 2
+  version: 3
   description: "Links from the active work list's items (`oxplow.work_item.link`): to another item (`blocks`, `relates_to`, …) or to any ref (`about` a collector, an effort, a file). A target needn't resolve — what it names may have been deleted or its extension removed — so join it to its kind's model when you need it there."
   columns:
-    - { name: "from_ref", type: "TEXT", doc: "The item the link is from." }
-    - { name: "to_ref", type: "TEXT", doc: "What it points at: any ref." }
+    - { name: "from_uri", type: "TEXT", doc: "The item the link is from." }
+    - { name: "to_uri", type: "TEXT", doc: "What it points at: any ref." }
     - { name: "to_kind", type: "TEXT", doc: "The target's kind (`work_item`, `collector`, `effort`, …). (v2)" }
     - { name: "link_type", type: "TEXT", doc: "The list's own link type; oxplow's tasks: `blocks` (from must finish before to starts), `discovered_from`, `relates_to`, `duplicates`, `supersedes`, `replies_to` or `about` (the item is about the target)." }
     - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
   tests:
-    - { relationships: { column: from_ref, to: work_item, field: ref } }
+    - { relationships: { column: from_uri, to: work_item, field: uri } }
 - name: work_item_comment
-  version: 1
+  version: 2
   description: "Comments on the active work list's items (`oxplow.work_item.comment`)."
   columns:
     - { name: "id", type: "TEXT", doc: "The list's own id for the comment (oxplow: `task_note:<id>`)." }
-    - { name: "ref", type: "TEXT", doc: "The item it's on." }
+    - { name: "uri", type: "TEXT", doc: "The item it's on." }
     - { name: "body", type: "TEXT", doc: "Markdown body." }
     - { name: "author", type: "TEXT", doc: "Who wrote it, as the list records it." }
     - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
   tests:
     - { unique: id }
-    - { relationships: { column: ref, to: work_item, field: ref } }
+    - { relationships: { column: uri, to: work_item, field: uri } }
 - name: knowledge_page
-  version: 3
+  version: 4
   description: "Knowledge pages (the wiki): one row per page with what it links to and how many of its file refs have drifted since they were pinned. A page's full text is `v_knowledge_body`; search them with the `oxplow_search` tool."
   columns:
-    - { name: "ref", type: "TEXT", doc: "`oxplow:oxplow/wiki?slug=<slug>`." }
+    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/wiki?slug=<slug>`." }
     - { name: "provider", type: "TEXT", doc: "The knowledge store that keeps it: the project's active one (`oxplow`, the wiki; a provider's instance). The pages are the active store's. (v2)" }
     - { name: "slug", type: "TEXT", doc: "Page slug (link with [[slug]])." }
     - { name: "title", type: "TEXT", doc: "The page's first `# ` heading, else its slug." }
     - { name: "excerpt", type: "TEXT", doc: "Start of the body." }
     - { name: "body_size", type: "INTEGER", doc: "Size of the full body, bytes." }
-    - { name: "outbound_refs", type: "TEXT", doc: "JSON array of every ref the page links to (`oxplow:oxplow/file?path=src/lib.rs`, `oxplow:oxplow/wiki?slug=other`, `oxplow:oxplow/work_item?id=tsk42&provider=oxplow`)." }
-    - { name: "stale_ref_count", type: "INT", doc: "Its `stale` rows in v_knowledge_ref: file refs whose file has a newer primary-stream snapshot than the one the ref was pinned to (or that were never pinned but have been snapshotted): what may no longer hold." }
+    - { name: "outbound_uris", type: "TEXT", doc: "JSON array of every ref the page links to (`oxplow:oxplow/file?path=src/lib.rs`, `oxplow:oxplow/wiki?slug=other`, `oxplow:oxplow/work_item?id=tsk42&provider=oxplow`)." }
+    - { name: "stale_ref_count", type: "INT", doc: "Its `stale` rows in v_knowledge_ref: file refs whose file has a newer primary-stream snapshot than the one the URI was pinned to (or that were never pinned but have been snapshotted): what may no longer hold." }
     - { name: "updated_at", type: "TEXT", doc: "RFC 3339 timestamp." }
   tests:
-    - { not_null: ref }
-    - { unique: ref }
+    - { not_null: uri }
+    - { unique: uri }
     - { accepted_values: { column: provider, values: [oxplow] } }
 - name: knowledge_pin
-  version: 2
-  description: "Each knowledge page's file refs and how current they are, keyed by the page's slug: the one definition of staleness `v_knowledge_ref` (keyed by the page's ref) and `v_knowledge_page.stale_ref_count` both read."
+  version: 3
+  description: "Each knowledge page's file refs and how current they are, keyed by the page's slug: the one definition of staleness `v_knowledge_ref` (keyed by the page's URI) and `v_knowledge_page.stale_ref_count` both read."
   columns:
     - { name: "slug", type: "TEXT", doc: "The page's slug (v_knowledge_page.slug)." }
     - { name: "path", type: "TEXT", doc: "The file it relies on (workspace-relative)." }
-    - { name: "pinned_snapshot_id", type: "INTEGER", doc: "The snapshot the ref was pinned to (written or verified against); NULL if never pinned." }
+    - { name: "pinned_snapshot_id", type: "INTEGER", doc: "The snapshot the URI was pinned to (written or verified against); NULL if never pinned." }
     - { name: "pinned_vcs_rev", type: "TEXT", doc: "The VCS revision nearest the pin (v_commit.sha for git); NULL without one." }
     - { name: "pinned_vcs_rev_exact", type: "INT", doc: "1 when the pinned snapshot is exactly `pinned_vcs_rev` (a clean worktree), else 0." }
     - { name: "latest_snapshot_id", type: "INT", doc: "The file's latest primary-stream snapshot (the stream a pin comes from); NULL if it was never captured there." }
@@ -1772,39 +1772,39 @@
   tests:
     - { not_null: slug }
 - name: knowledge_ref
-  version: 2
-  description: "Each knowledge page's file refs and how current they are: the snapshot a ref was pinned to against the file's latest — both the primary stream's, the one definition of staleness every reader uses. `stale` rows are what `v_knowledge_page.stale_ref_count` counts; `oxplow_wiki_ref_drift` shows one's diff."
+  version: 3
+  description: "Each knowledge page's file refs and how current they are: the snapshot a URI was pinned to against the file's latest — both the primary stream's, the one definition of staleness every reader uses. `stale` rows are what `v_knowledge_page.stale_ref_count` counts; `oxplow_wiki_ref_drift` shows one's diff."
   columns:
-    - { name: "page", type: "TEXT", doc: "The page (`oxplow:oxplow/wiki?slug=<slug>`, v_knowledge_page.ref)." }
+    - { name: "page", type: "TEXT", doc: "The page (`oxplow:oxplow/wiki?slug=<slug>`, v_knowledge_page.uri)." }
     - { name: "path", type: "TEXT", doc: "The file it relies on (workspace-relative)." }
-    - { name: "pinned_snapshot_id", type: "INTEGER", doc: "The snapshot the ref was pinned to (written or verified against); NULL if never pinned." }
+    - { name: "pinned_snapshot_id", type: "INTEGER", doc: "The snapshot the URI was pinned to (written or verified against); NULL if never pinned." }
     - { name: "pinned_vcs_rev", type: "TEXT", doc: "The VCS revision nearest the pin (v_commit.sha for git); NULL without one." }
     - { name: "pinned_vcs_rev_exact", type: "INT", doc: "1 when the pinned snapshot is exactly `pinned_vcs_rev` (a clean worktree), else 0." }
     - { name: "latest_snapshot_id", type: "INT", doc: "The file's latest primary-stream snapshot (the stream a pin comes from); NULL if it was never captured there." }
     - { name: "stale", type: "INT", doc: "1 when the file changed after the pin (or was captured but never pinned)." }
   tests:
     - { not_null: page }
-    - { relationships: { column: page, to: knowledge_page, field: ref } }
+    - { relationships: { column: page, to: knowledge_page, field: uri } }
 - name: knowledge_body
-  version: 2
+  version: 3
   description: "Each knowledge page's full markdown body, apart from v_knowledge_page so listing pages never reads bodies."
   columns:
-    - { name: "ref", type: "TEXT", doc: "`oxplow:oxplow/wiki?slug=<slug>` (v_knowledge_page.ref)." }
+    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/wiki?slug=<slug>` (v_knowledge_page.uri)." }
     - { name: "body", type: "TEXT", doc: "The page's markdown, as its file holds it." }
   tests:
-    - { not_null: ref }
-    - { unique: ref }
-    - { relationships: { column: ref, to: knowledge_page, field: ref } }
+    - { not_null: uri }
+    - { unique: uri }
+    - { relationships: { column: uri, to: knowledge_page, field: uri } }
 - name: knowledge_touch
-  version: 2
+  version: 3
   description: "Which threads wrote or updated which knowledge pages, and when a thread last did (the rail's Finished section)."
   columns:
-    - { name: "page", type: "TEXT", doc: "The page (`oxplow:oxplow/wiki?slug=<slug>`, v_knowledge_page.ref)." }
+    - { name: "page", type: "TEXT", doc: "The page (`oxplow:oxplow/wiki?slug=<slug>`, v_knowledge_page.uri)." }
     - { name: "thread_id", type: "INTEGER", doc: "The thread (v_thread.id)." }
     - { name: "last_seen_at", type: "TEXT", doc: "RFC 3339 timestamp of that thread's latest write to it." }
   tests:
     - { not_null: page }
-    - { relationships: { column: page, to: knowledge_page, field: ref } }
+    - { relationships: { column: page, to: knowledge_page, field: uri } }
 - name: model
   version: 2
   description: "Models: every published view, as compiled at this open — core ones and each extension's. Read a model's columns in `v_model_column`, what it reads in `v_model_lineage` and its declared tests' results in `v_model_test`."
@@ -1835,12 +1835,12 @@
     - { name: doc, type: "", doc: "What the column holds." }
     - { name: key_part, type: "", doc: "Its 1-based place in the model's key; null when it isn't part of the key." }
 - name: model_lineage
-  version: 1
-  description: "Model lineage: what each model reads directly — another model (`ref`, by view) or a table (`source`). Confirmed at compile against what SQLite reports the view reading."
+  version: 2
+  description: "Model lineage: what each model reads directly — another model (`uri`, by view) or a table (`source`). Confirmed at compile against what SQLite reports the view reading."
   columns:
     - { name: view, type: TEXT, doc: "The reading model's view." }
-    - { name: input, type: TEXT, doc: "The view (`ref`) or table (`source`) it reads." }
-    - { name: kind, type: TEXT, doc: "`ref` or `source`." }
+    - { name: input, type: TEXT, doc: "The view (`uri`) or table (`source`) it reads." }
+    - { name: kind, type: TEXT, doc: "`uri` or `source`." }
 - name: model_test
   version: 1
   description: "Model tests: the last result of each model's declared tests (`not_null`, `unique`, `accepted_values`, `relationships`, `sql`)."
@@ -1910,11 +1910,11 @@
     - { not_null: id }
     - { unique: id }
 - name: function
-  version: 3
+  version: 4
   description: "Functions in the current code tree, one row per function ref and stream: its latest cyclomatic complexity, length and parameter count from the code gauges (over `v_tree_fact`), named by `v_symbol`: a function the symbol index doesn't have isn't listed."
   columns:
     - { name: "stream_id", type: "INTEGER", doc: "The stream (worktree) whose tree it's in." }
-    - { name: "symbol", type: "TEXT", doc: "The function's `oxplow:oxplow/symbol?path=<path>&symbol=<id>` ref (`v_symbol.ref`)." }
+    - { name: "symbol", type: "TEXT", doc: "The function's `oxplow:oxplow/symbol?path=<path>&symbol=<id>` ref (`v_symbol.uri`)." }
     - { name: "path", type: "TEXT", doc: "The file it's in." }
     - { name: "name", type: "TEXT", doc: "The function's own name (`v_symbol.name`)." }
     - { name: "container", type: "TEXT", doc: "What it's inside, `::`-joined; NULL at top level (`v_symbol.container`)." }
@@ -1996,11 +1996,11 @@
     - { name: "running_streams", type: "TEXT", doc: "Those streams' ids, a JSON array." }
     - { name: "completion_trigger_characters", type: "TEXT", doc: "A running session's completion trigger characters, a JSON array; NULL when none runs." }
 - name: collector_state
-  version: 3
-  key: [ref]
+  version: 4
+  key: [uri]
   description: "Each declared collector's standing on this machine: whether this OS enforces its `network` list, and why failures disabled it. Read live when a query names it. What it may do is its extension's `permissions:` (`v_extension.permissions`). Its runs are `v_collector_run`; its declaration `v_contribution`."
   columns:
-    - { name: "ref", type: "TEXT", doc: "`oxplow:oxplow/collector?collector=<owner>/<id>`." }
+    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/collector?collector=<owner>/<id>`." }
     - { name: "owner", type: "TEXT", doc: "The extension that declares it." }
     - { name: "id", type: "TEXT", doc: "Its id within the extension." }
     - { name: "network_enforced", type: "INT", doc: "1 when this OS enforces the collector's `network` list." }
@@ -2014,10 +2014,10 @@
     - { name: "path", type: "TEXT", doc: "Its source folder, relative to the project when inside it." }
     - { name: "hash", type: "TEXT", doc: "The hash of the source as it is now (`v_extension_deployment.hash` of a deploy of it)." }
 - name: collector_credential
-  version: 1
+  version: 2
   key: [collector, name]
   description: "Each credential a collector declares and whether a value is set for it in this machine's keychain (never the value). Read live when a query names it. A person sets one in Settings → Data."
   columns:
-    - { name: "collector", type: "TEXT", doc: "The collector's ref (`v_collector_state.ref`)." }
+    - { name: "collector", type: "TEXT", doc: "The collector's URI (`v_collector_state.uri`)." }
     - { name: "name", type: "TEXT", doc: "The credential's name, as the collector reads it (`env: [NAME]`)." }
     - { name: "is_set", type: "INT", doc: "1 when the keychain holds a value for it." }

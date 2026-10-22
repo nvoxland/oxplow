@@ -16,7 +16,7 @@ mock.module("../api.js", () => ({
       label: "Hand Off Work…",
       group: "Threads",
       about: "oxplow/thread",
-      input: { from_thread: "{{ref}}" },
+      input: { from_thread: "{{uri}}" },
     }),
     personSpec("tracker.item.estimate", {
       label: "Estimate",

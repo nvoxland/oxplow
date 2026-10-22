@@ -3,11 +3,11 @@ description: One effort at a glance — its title and summary, its work item, th
 params:
   - { name: effort, label: Effort (`eff9`) }
 query: |
-  WITH e AS (SELECT * FROM v_effort WHERE ref = uri('oxplow/effort', 'id', :effort))
+  WITH e AS (SELECT * FROM v_effort WHERE uri = uri('oxplow/effort', 'id', :effort))
   SELECT 0 AS ord, 'effort' AS section, coalesce(title, '') AS text, coalesce(summary, '') AS detail FROM e
   UNION ALL
-  SELECT 1, 'item', w.title, w.state || ' ' || w.ref
-  FROM e JOIN v_work_item w ON w.ref = e.work_item
+  SELECT 1, 'item', w.title, w.state || ' ' || w.uri
+  FROM e JOIN v_work_item w ON w.uri = e.work_item
   UNION ALL
   SELECT 2, 'file', f.path, f.change_kind
   FROM v_effort_file f WHERE f.effort_id = (SELECT id FROM e)

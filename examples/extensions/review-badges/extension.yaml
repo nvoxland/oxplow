@@ -16,7 +16,7 @@ intent:
       input: { lens: review-verdicts }
       expect: no rows until effort-review has reviewed an effort
     - name: item-review
-      input: { lens: item-review, params: { ref: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" } }
+      input: { lens: item-review, params: { uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" } }
       expect: nothing for an item that has no review yet
 # Optional: with effort-review missing, disabled or exporting another
 # version, the two lenses below are withheld (a warning in Settings →

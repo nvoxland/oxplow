@@ -8,7 +8,7 @@ work-item commands, so they work with whichever list is active.
 |---|---|---|
 | `work_item.board` | `swimlanes` | A `viz: custom` component: a column per state, cards you drag |
 | `work_item.list` | `compact-list` | A table with title (a page link), state and updated; row actions **Done** and **Edit…** |
-| `work_item.detail` | `edit-item` | A `viz: form` over `oxplow.work_item.update`: title and body, `ref` fixed |
+| `work_item.detail` | `edit-item` | A `viz: form` over `oxplow.work_item.update`: title and body, `uri` fixed |
 
 ```yaml
 ui:

@@ -55,11 +55,11 @@ collectors:
           - { to: v_work_item, on: "v_github_pr.title LIKE '%' || v_work_item.native_id || '%'" }
 models:
   - name: pull_request
-    version: 1
-    key: [ref]
+    version: 2
+    key: [uri]
     description: "Each synced pull request as a URI oxplow can name (`oxplow:github/pr?id=<number>`): its title, which a link to it shows, and its description, which search finds."
     columns:
-      - { name: ref, type: TEXT, doc: "`oxplow:github/pr?id=<number>`." }
+      - { name: uri, type: TEXT, doc: "`oxplow:github/pr?id=<number>`." }
       - { name: title, type: TEXT, doc: "Its title." }
       - { name: body, type: TEXT, doc: "Its description ('' for none)." }
 pages:

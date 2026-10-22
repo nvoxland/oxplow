@@ -2,10 +2,10 @@
  * One piece of a page's state as easily as `useState`, but kept where it
  * belongs (`.context/pages-and-tabs.md` "Page state"):
  *
- * - `useViewParam(key, initial)` — a **view param**, a filter: what the
- *   page shows, in its tab's address. A change replaces the tab's entry; a
- *   value at its default leaves the address. With `{ push: true }` a change
- *   is a step Back returns from ("View all").
+ * - `useViewParam(key, initial)` — a **view param**, a filter: how the
+ *   page shows what it shows, in its tab's URI's `#`. A change replaces the
+ *   tab's entry; a value at its default leaves the URI. With
+ *   `{ push: true }` a change is a step Back returns from ("View all").
  * - `useViewSelection(key)` — a view param that is a **pick**: setting one
  *   pushes an entry, so Back un-selects; clearing replaces.
  * - `useViewList(key)` — a view param holding several values.
@@ -13,9 +13,9 @@
  *   step's **history state**.
  * - `useDraft(key, initial)` — an unsaved form, in history state.
  *
- * A built-in page declares its view params' keys (`BUILT_IN_VIEW`,
- * `pages/pageIdentity.ts`); the host refuses one it doesn't. Outside a tab
- * each is the page's own state. A cursor moving over a list before
+ * A view param is never what the page is: that is its URI's `?`, and
+ * another value of it is another page. Outside a tab each is the page's
+ * own state. A cursor moving over a list before
  * anything is picked is not a selection: it stays the list's own.
  */
 

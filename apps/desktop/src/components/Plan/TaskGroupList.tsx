@@ -132,7 +132,7 @@ export function TaskGroupList({
   const openEpics = useCollapsedSet("epicsOpen");
 
   const { sections, allRows } = useMemo(() => {
-    const work: QueueRow[] = group.items.map((item) => ({ kind: "work" as const, id: item.ref, item }));
+    const work: QueueRow[] = group.items.map((item) => ({ kind: "work" as const, id: item.uri, item }));
     const buckets: Record<TaskSectionKind, QueueRow[]> = {
       inProgress: [], ready: [], blocked: [], done: [],
     };
@@ -177,9 +177,9 @@ export function TaskGroupList({
   // it to add each marked row as a context ref without its own lookup.
   const allItemsByRef = useMemo(() => {
     const map = new Map<string, WorkItem>();
-    for (const item of group.items) map.set(item.ref, item);
+    for (const item of group.items) map.set(item.uri, item);
     for (const children of epicChildrenMap.values()) {
-      for (const child of children) map.set(child.ref, child);
+      for (const child of children) map.set(child.uri, child);
     }
     return map;
   }, [group.items, epicChildrenMap]);
@@ -215,7 +215,7 @@ export function TaskGroupList({
       resetDrag();
       return;
     }
-    const isMultiDrag = dragged.kind === "work" && markedIds && markedIds.has(dragged.item.ref) && markedIds.size > 1;
+    const isMultiDrag = dragged.kind === "work" && markedIds && markedIds.has(dragged.item.uri) && markedIds.size > 1;
     // Track any state changes the drop implies so we can feed the *effective*
     // new state into finalizeReorderRefs below — otherwise the dragged row
     // would still look like its old section to the run detector, which
@@ -231,20 +231,20 @@ export function TaskGroupList({
       // is computed from children. Don't try to mutate an epic's status
       // when it crosses a section boundary; the rollup will follow once
       // its children change.
-      if (fromSection !== toSection && !(group.epicChildren.get(dragged.item.ref) ?? []).length) {
+      if (fromSection !== toSection && !(group.epicChildren.get(dragged.item.uri) ?? []).length) {
         const nextStatus = sectionDefaultState(toSection);
         if (nextStatus) {
           if (isMultiDrag && markedIds) {
             for (const id of markedIds) {
               const row = allRows.find((r) => r.kind === "work" && r.id === id);
-              if (row && row.kind === "work" && !(group.epicChildren.get(row.item.ref) ?? []).length && row.item.state !== nextStatus) {
+              if (row && row.kind === "work" && !(group.epicChildren.get(row.item.uri) ?? []).length && row.item.state !== nextStatus) {
                 void onUpdateTask(id, { state: nextStatus });
                 statusOverrides.set(id, nextStatus);
               }
             }
           } else if (nextStatus !== dragged.item.state) {
-            void onUpdateTask(dragged.item.ref, { state: nextStatus });
-            statusOverrides.set(dragged.item.ref, nextStatus);
+            void onUpdateTask(dragged.item.uri, { state: nextStatus });
+            statusOverrides.set(dragged.item.uri, nextStatus);
           }
         }
       }
@@ -311,22 +311,22 @@ export function TaskGroupList({
     if (!nextStatus) return;
     // An epic's section is computed from its children. Section drops on
     // an epic are no-ops.
-    if ((epicChildrenMap.get(draggedTask.ref) ?? []).length > 0) return;
+    if ((epicChildrenMap.get(draggedTask.uri) ?? []).length > 0) return;
     if (classifyRow(draggedTask, epicChildrenMap) === section) return;
-    const isMultiDrag = markedIds && markedIds.has(draggedTask.ref) && markedIds.size > 1;
+    const isMultiDrag = markedIds && markedIds.has(draggedTask.uri) && markedIds.size > 1;
     if (isMultiDrag && markedIds) {
       for (const id of markedIds) {
         const row = allRows.find((r) => r.kind === "work" && r.id === id);
         if (
           row && row.kind === "work" &&
-          !(group.epicChildren.get(row.item.ref) ?? []).length &&
+          !(group.epicChildren.get(row.item.uri) ?? []).length &&
           classifyRow(row.item, epicChildrenMap) !== section
         ) {
           void onUpdateTask(id, { state: nextStatus });
         }
       }
     } else {
-      void onUpdateTask(draggedTask.ref, { state: nextStatus });
+      void onUpdateTask(draggedTask.uri, { state: nextStatus });
     }
   };
 
@@ -339,7 +339,7 @@ export function TaskGroupList({
     const suppressDropLine = targetSection === "done";
     const isOver = overKey === key && draggingKey !== key && !suppressDropLine;
     const isDragging = draggingKey === key;
-    const isMarked = markedIds?.has(row.item.ref) ?? false;
+    const isMarked = markedIds?.has(row.item.uri) ?? false;
     const sharedDragHandlers = {
       onDragStart: (event: React.DragEvent) => {
         // Populate dataTransfer FIRST and let dragstart return before
@@ -352,15 +352,15 @@ export function TaskGroupList({
         // identical at the moment the browser snapshots the source,
         // so the drag actually starts. Reorder + cross-section drop
         // logic still runs as before once `dragging` state lands.
-        const refs = isMarked && markedIds && markedIds.size > 1 ? [...markedIds] : [row.item.ref];
+        const refs = isMarked && markedIds && markedIds.size > 1 ? [...markedIds] : [row.item.uri];
         // Each carried item's {ref, title, state}, so cross-pane drop
         // targets (e.g. the agent terminal) can build context refs without
         // their own lookup. The dragged row is always present even if not
         // in the page-local index — it's the row the person grabbed.
         const items = refs
-          .map((ref) => allItemsByRef.get(ref) ?? (ref === row.item.ref ? row.item : null))
+          .map((ref) => allItemsByRef.get(ref) ?? (ref === row.item.uri ? row.item : null))
           .filter((item): item is WorkItem => item !== null)
-          .map((item) => ({ ref: item.ref, title: item.title, state: item.state }));
+          .map((item) => ({ ref: item.uri, title: item.title, state: item.state }));
         setWorkItemDrag(event, { refs, items, fromThreadId: scopeThreadId });
         queueMicrotask(() => setDraggingKey(key));
       },
@@ -382,9 +382,9 @@ export function TaskGroupList({
         }
       },
     };
-    if ((group.epicChildren.get(row.item.ref) ?? []).length > 0) {
-      const isExpanded = openEpics.has(row.item.ref);
-      const children = epicChildrenMap.get(row.item.ref) ?? [];
+    if ((group.epicChildren.get(row.item.uri) ?? []).length > 0) {
+      const isExpanded = openEpics.has(row.item.uri);
+      const children = epicChildrenMap.get(row.item.uri) ?? [];
       // Surface stale-epic-children: when the epic is closed but
       // children are still ready/in_progress the rollup pulls the
       // epic back into Ready, hiding the closed state. The banner
@@ -400,8 +400,8 @@ export function TaskGroupList({
             rowKey={key}
             item={row.item}
             isExpanded={isExpanded}
-            onToggleExpand={() => openEpics.toggle(row.item.ref)}
-            isSelected={selectedId === row.item.ref}
+            onToggleExpand={() => openEpics.toggle(row.item.uri)}
+            isSelected={selectedId === row.item.uri}
             isMarked={isMarked}
             isOver={isOver}
             isDragging={isDragging}
@@ -420,14 +420,14 @@ export function TaskGroupList({
               staleChildren={staleChildren}
               onCascade={(targetStatus) => {
                 for (const child of staleChildren) {
-                  void onUpdateTask(child.ref, { state: targetStatus });
+                  void onUpdateTask(child.uri, { state: targetStatus });
                 }
               }}
             />
           ) : null}
           {isExpanded ? (
             <EpicChildrenPane
-              epicRef={row.item.ref}
+              epicRef={row.item.uri}
               children={children}
               onReorderTasks={onReorderTasks}
               onReparentTask={onReparentTask}
@@ -450,7 +450,7 @@ export function TaskGroupList({
         key={key}
         rowKey={key}
         item={row.item}
-        isSelected={selectedId === row.item.ref}
+        isSelected={selectedId === row.item.uri}
         isMarked={isMarked}
         isOver={isOver}
         isDragging={isDragging}
@@ -479,7 +479,7 @@ export function TaskGroupList({
         }
         const canDrop = !!draggedTask
           && section.kind !== "inProgress"
-          && !(epicChildrenMap.get(draggedTask.ref) ?? []).length
+          && !(epicChildrenMap.get(draggedTask.uri) ?? []).length
           && classifyRow(draggedTask, epicChildrenMap) !== section.kind;
         const isOverSection = canDrop && overSection === section.kind;
         const headerDropHandlers = canDrop
@@ -696,8 +696,8 @@ function EpicInlineRow({
       onClick={(event) => {
         const toggle = event.metaKey || event.ctrlKey;
         const range = event.shiftKey && !toggle;
-        if (toggle || range) { onSelect?.(item.ref, { toggle, range }); return; }
-        onSelect?.(item.ref);
+        if (toggle || range) { onSelect?.(item.uri, { toggle, range }); return; }
+        onSelect?.(item.uri);
         onRequestEdit?.(item);
       }}
       onContextMenu={(event) => {
@@ -714,10 +714,10 @@ function EpicInlineRow({
       }}
       title={locked ? `${item.title} (in progress — pinned in place)` : item.title}
       data-key={rowKey}
-      data-testid={`tasks-row-${item.ref}`}
-      data-ref={item.ref}
+      data-testid={`tasks-row-${item.uri}`}
+      data-ref={item.uri}
     >
-      <InlineStatusPicker status={item.state} onChange={(state) => { void onUpdateTask(item.ref, { state }); }} locked={locked} />
+      <InlineStatusPicker status={item.state} onChange={(state) => { void onUpdateTask(item.uri, { state }); }} locked={locked} />
       <span
         onClick={(event) => { event.stopPropagation(); onToggleExpand(); }}
         style={{ flexShrink: 0, width: 12, textAlign: "center", color: "var(--muted)", fontSize: 10, cursor: "pointer" }}
@@ -761,14 +761,14 @@ function EpicChildrenPane({
 
   const handleDropOnChild = (targetId: string) => {
     if (draggingKey === null || draggingKey === targetId) { resetDrag(); return; }
-    const from = children.findIndex((c) => c.ref === draggingKey);
-    const to = children.findIndex((c) => c.ref === targetId);
+    const from = children.findIndex((c) => c.uri === draggingKey);
+    const to = children.findIndex((c) => c.uri === targetId);
     if (from < 0 || to < 0) { resetDrag(); return; }
     const next = children.slice();
     const [moved] = next.splice(from, 1);
     next.splice(to, 0, moved!);
     resetDrag();
-    void onReorderTasks?.(next.map((c) => c.ref));
+    void onReorderTasks?.(next.map((c) => c.uri));
   };
 
   const handleExternalDrop = (event: React.DragEvent) => {
@@ -777,23 +777,23 @@ function EpicChildrenPane({
     const drag = decodeWorkItemDrag(event.dataTransfer.getData(WORK_ITEM_DRAG_MIME));
     if (!drag || !onReparentTask) return;
     for (const ref of drag.refs) {
-      if (!children.some((c) => c.ref === ref)) void onReparentTask(ref, epicRef);
+      if (!children.some((c) => c.uri === ref)) void onReparentTask(ref, epicRef);
     }
   };
 
   return (
     <div style={{ marginLeft: 20, borderLeft: "2px solid var(--border)", paddingLeft: 4 }}>
       {children.map((child) => {
-        const key = child.ref;
+        const key = child.uri;
         const isOver = overKey === key && draggingKey !== key;
         const isDragging = draggingKey === key;
-        const isMarked = markedIds?.has(child.ref) ?? false;
+        const isMarked = markedIds?.has(child.uri) ?? false;
         return (
           <InlineItemRow
             key={key}
             rowKey={key}
             item={child}
-            isSelected={selectedId === child.ref}
+            isSelected={selectedId === child.uri}
             isMarked={isMarked}
             isOver={isOver}
             isDragging={isDragging}
@@ -807,14 +807,14 @@ function EpicChildrenPane({
               // Same drag-cancel workaround as the parent pane's rows —
               // populate dataTransfer first, defer state mutation that
               // would re-render the dragged row in-tick.
-              const refs = isMarked && markedIds && markedIds.size > 1 ? [...markedIds] : [child.ref];
+              const refs = isMarked && markedIds && markedIds.size > 1 ? [...markedIds] : [child.uri];
               // Only resolve the items we can see locally — this pane
               // only carries the epic's children. Unresolved refs drop
               // through.
               const items = refs
-                .map((ref) => children.find((c) => c.ref === ref) ?? null)
+                .map((ref) => children.find((c) => c.uri === ref) ?? null)
                 .filter((item): item is WorkItem => item !== null)
-                .map((item) => ({ ref: item.ref, title: item.title, state: item.state }));
+                .map((item) => ({ ref: item.uri, title: item.title, state: item.state }));
               setWorkItemDrag(event, { refs, items, fromThreadId: scopeThreadId, parentEpicRef: epicRef });
               queueMicrotask(() => setDraggingKey(key));
             }}
@@ -934,10 +934,10 @@ function InlineItemRow({
         const toggle = event.metaKey || event.ctrlKey;
         const range = event.shiftKey && !toggle;
         if (toggle || range) {
-          onSelect?.(item.ref, { toggle, range });
+          onSelect?.(item.uri, { toggle, range });
           return;
         }
-        onSelect?.(item.ref);
+        onSelect?.(item.uri);
         onRequestEdit?.(item);
       }}
       onContextMenu={(event) => {
@@ -971,12 +971,12 @@ function InlineItemRow({
       }}
       title={locked ? `${item.title} (in progress — pinned in place)` : item.title}
       data-key={rowKey}
-      data-testid={`tasks-row-${item.ref}`}
-      data-ref={item.ref}
+      data-testid={`tasks-row-${item.uri}`}
+      data-ref={item.uri}
     >
       <InlineStatusPicker
         status={item.state}
-        onChange={(state) => { void onUpdateTask(item.ref, { state }); }}
+        onChange={(state) => { void onUpdateTask(item.uri, { state }); }}
         locked={locked}
       />
       {/* Title is user-selectable so a comment can anchor to it (the
@@ -1066,7 +1066,7 @@ function InlineFieldPickers({
             <select
               aria-label={field.title}
               value={value}
-              onChange={(event) => void onUpdateTask(item.ref, { native: { [field.name]: event.target.value } })}
+              onChange={(event) => void onUpdateTask(item.uri, { native: { [field.name]: event.target.value } })}
               onClick={(event) => event.stopPropagation()}
               style={{ position: "absolute", inset: 0, opacity: 0, cursor: "pointer", width: "100%", height: "100%", font: "inherit" }}
             >
@@ -1101,7 +1101,7 @@ function StaleEpicChildrenBanner({
   const label = `Close ${n} ${noun} as ${statusLabel(targetStatus)}`;
   return (
     <div
-      data-testid={`stale-epic-children-banner-${epic.ref}`}
+      data-testid={`stale-epic-children-banner-${epic.uri}`}
       style={{
         display: "flex",
         alignItems: "center",
@@ -1120,7 +1120,7 @@ function StaleEpicChildrenBanner({
       <button
         type="button"
         onClick={() => onCascade(targetStatus)}
-        data-testid={`stale-epic-children-cascade-${epic.ref}`}
+        data-testid={`stale-epic-children-cascade-${epic.uri}`}
         style={{
           padding: "2px 8px",
           fontSize: 11,

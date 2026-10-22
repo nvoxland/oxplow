@@ -8,7 +8,7 @@
 ///   frame → host  { type: "ready" }
 ///                 { id, method: "query", asset, params }     a declared lens's run
 ///                 { id, method: "invoke", command, input }   a declared command
-///                 { id, method: "navigate", ref, newTab }    open a page
+///                 { id, method: "navigate", uri, newTab, replace }    open a page
 ///                 { id, method: "querySql", sql, params }    its own SQL (`sql: read`)
 ///                 { id, method: "openForm", command, input } a declared command's form, in the host
 ///                 { id, method: "setTitle", title }          a page's title (a page only)
@@ -55,8 +55,10 @@ import type { CommandOutcome, LensRun, SqlCell, SqlQueryResult } from "../tauri-
 /// `historyState`) and **page memory** (`pageMemoryGet`, `pageMemorySet`:
 /// the component's own, for the person, every tab of it). 8: the view is
 /// the host's, not the page's — `init.view` beside `init.page` — so a
-/// replacement and a lens page's component have one too.
-export const BRIDGE_PROTOCOL = 8;
+/// replacement and a lens page's component have one too. 9: a page's view
+/// is its URI's `#` (`viewParams` are the fragment's), and `navigate`
+/// carries `replace` as a browser's does.
+export const BRIDGE_PROTOCOL = 9;
 
 /** A page action a component declares; core draws it in the nav bar. */
 export interface FrameAction {
@@ -84,7 +86,7 @@ export interface ViewInit {
 export type BridgeRequest =
   | { id: string; method: "query"; asset: string; params: Record<string, SqlCell> }
   | { id: string; method: "invoke"; command: string; input: unknown }
-  | { id: string; method: "navigate"; ref: string; newTab: boolean }
+  | { id: string; method: "navigate"; uri: string; newTab: boolean; replace: boolean }
   | { id: string; method: "querySql"; sql: string; params: SqlCell[] }
   | { id: string; method: "openForm"; command: string; input: unknown }
   | { id: string; method: "setTitle"; title: string }
@@ -116,9 +118,13 @@ export function parseFrameMessage(data: unknown): FrameMessage | null {
       if (typeof m.command !== "string") return null;
       return { type: "request", request: { id: m.id, method: "invoke", command: m.command, input: m.input ?? {} } };
     case "navigate":
-      if (typeof m.ref !== "string") return null;
+      if (typeof m.uri !== "string") return null;
       if (m.newTab !== undefined && typeof m.newTab !== "boolean") return null;
-      return { type: "request", request: { id: m.id, method: "navigate", ref: m.ref, newTab: m.newTab === true } };
+      if (m.replace !== undefined && typeof m.replace !== "boolean") return null;
+      return {
+        type: "request",
+        request: { id: m.id, method: "navigate", uri: m.uri, newTab: m.newTab === true, replace: m.replace === true },
+      };
     case "querySql": {
       const params = m.params ?? [];
       if (typeof m.sql !== "string" || !Array.isArray(params) || !params.every(isCell)) return null;
@@ -217,7 +223,7 @@ export interface BridgeDeps {
   invoke(command: string, input: unknown, confirmed: boolean): Promise<CommandOutcome>;
   /** Open `ref`'s page, in a new tab when asked; false when it isn't one
    *  a component may open (`componentMayOpen`). */
-  navigate(ref: string, opts: { newTab: boolean }): boolean;
+  navigate(ref: string, opts: { newTab: boolean; replace: boolean }): boolean;
   /** Ask the person, in the host, to confirm `command`. */
   confirm(command: string): Promise<boolean>;
   onReady(): void;
@@ -324,7 +330,7 @@ export function createBridgeHost(
         }
         return;
       case "navigate":
-        if (deps.navigate(r.ref, { newTab: r.newTab })) reply(r.id, null);
+        if (deps.navigate(r.uri, { newTab: r.newTab, replace: r.replace })) reply(r.id, null);
         else fail(r.id, "INVALID", "A component may open oxplow's pages only.");
         return;
       case "querySql":

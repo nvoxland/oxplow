@@ -1,6 +1,6 @@
 title: Agent Tokens
 description: What the agent was asked while working this work item, and what each turn cost.
-params: [{ name: ref }]
+params: [{ name: uri }]
 viz: document
 sections:
   - { lens: task-token-summary }

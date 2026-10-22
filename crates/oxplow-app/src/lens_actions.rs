@@ -1029,15 +1029,15 @@ mod tests {
         std::fs::write(
             ext.join("lenses/tasks.yaml"),
             r#"title: Tasks
-query: "SELECT ref, title FROM v_work_item"
+query: "SELECT uri, title FROM v_work_item"
 params: [{ name: item, default: "" }]
 actions:
-  - { id: finish, label: Finish, command: oxplow.work_item.transition, input: { ref: "{{param.item}}", to: done } }
-  - { id: finish-row, label: Finish, command: oxplow.work_item.transition, row: true, input: { ref: "{{row.ref}}", to: done } }
-  - { id: finish-open, label: Finish, command: oxplow.work_item.transition, row: true, when: open, input: { ref: "{{row.ref}}", to: done } }
+  - { id: finish, label: Finish, command: oxplow.work_item.transition, input: { uri: "{{param.item}}", to: done } }
+  - { id: finish-row, label: Finish, command: oxplow.work_item.transition, row: true, input: { uri: "{{row.uri}}", to: done } }
+  - { id: finish-open, label: Finish, command: oxplow.work_item.transition, row: true, when: open, input: { uri: "{{row.uri}}", to: done } }
   - { id: commit, label: Commit, command: oxplow.vcs.commit, input: { stream: str1, message: "x" } }
   - { id: prompt, label: Prompt, command: oxplow.config.set, input: { key: agentPromptAppend, value: be brief } }
-  - { id: retitle, label: Retitle…, command: oxplow.work_item.update, row: true, form: true, fixed: [ref], input: { ref: "{{row.ref}}", title: "{{row.title}}" } }
+  - { id: retitle, label: Retitle…, command: oxplow.work_item.update, row: true, form: true, fixed: [uri], input: { uri: "{{row.uri}}", title: "{{row.title}}" } }
 "#,
         )
         .unwrap();
@@ -1118,7 +1118,7 @@ actions:
     async fn a_row_action_binds_its_row() {
         let (fx, root) = fixture().await;
         let row = BTreeMap::from([(
-            "ref".to_string(),
+            "uri".to_string(),
             SqlCell::Text(oxplow_tasks::work_item_ref(fx.task)),
         )]);
         let run = |action: &'static str, row: Option<BTreeMap<String, SqlCell>>| {
@@ -1147,7 +1147,7 @@ actions:
         let row = |open: SqlCell| {
             BTreeMap::from([
                 (
-                    "ref".to_string(),
+                    "uri".to_string(),
                     SqlCell::Text(oxplow_tasks::work_item_ref(fx.task)),
                 ),
                 ("open".to_string(), open),
@@ -1229,7 +1229,7 @@ actions:
         let (fx, root) = fixture().await;
         let item = work_item_ref(fx.task);
         let row = BTreeMap::from([
-            ("ref".to_string(), SqlCell::Text(item.clone())),
+            ("uri".to_string(), SqlCell::Text(item.clone())),
             ("title".to_string(), SqlCell::Text("Old title".into())),
         ]);
         let start = action_form(
@@ -1247,12 +1247,12 @@ actions:
         .await
         .unwrap();
         assert_eq!(start.command.id, "oxplow.work_item.update");
-        assert_eq!(start.values, json!({ "ref": item, "title": "Old title" }));
-        assert_eq!(start.fixed, vec!["ref".to_string()]);
+        assert_eq!(start.values, json!({ "uri": item, "title": "Old title" }));
+        assert_eq!(start.fixed, vec!["uri".to_string()]);
 
         let mut press = call("retitle", BTreeMap::new(), Some(row), Actor::Human, false);
         press.input = Some(
-            json!({ "ref": "oxplow:oxplow/work_item?id=tsk999999&provider=oxplow", "title": "New title" }),
+            json!({ "uri": "oxplow:oxplow/work_item?id=tsk999999&provider=oxplow", "title": "New title" }),
         );
         run_lens_action(&fx.svc, &root, press, &extensions::LensContext::default())
             .await
@@ -1264,7 +1264,7 @@ actions:
                 let item = item.clone();
                 move |c| {
                     c.query_row(
-                        "SELECT title FROM v_work_item WHERE ref = ?1",
+                        "SELECT title FROM v_work_item WHERE uri = ?1",
                         [item],
                         |r| r.get(0),
                     )
@@ -1327,7 +1327,7 @@ actions:
             &fx.svc,
             &root,
             "oxplow-foundation/hand-off",
-            BTreeMap::from([("ref".to_string(), SqlCell::Text(me.clone()))]),
+            BTreeMap::from([("uri".to_string(), SqlCell::Text(me.clone()))]),
             &extensions::LensContext::default(),
         )
         .await
@@ -1448,7 +1448,7 @@ actions:
         let item = work_item_ref(fx.task);
         std::fs::write(
             root.join(".oxplow/extensions/acme/lenses/leaky.yaml"),
-            "title: Leaky\nviz: form\nparams: [{ name: ref }]\nquery: SELECT title FROM v_work_item WHERE ref = :ref\nform: { command: oxplow.work_item.update, defaults: { ref: '{{param.ref}}' }, fixed: [ref], fields: [{ name: title, secret: true }] }\n",
+            "title: Leaky\nviz: form\nparams: [{ name: uri }]\nquery: SELECT title FROM v_work_item WHERE uri = :uri\nform: { command: oxplow.work_item.update, defaults: { uri: '{{param.uri}}' }, fixed: [uri], fields: [{ name: title, secret: true }] }\n",
         )
         .unwrap();
         std::fs::write(
@@ -1457,7 +1457,7 @@ actions:
         )
         .unwrap();
         crate::test_fixtures::activate(&fx.svc).await;
-        let params = BTreeMap::from([("ref".to_string(), SqlCell::Text(item))]);
+        let params = BTreeMap::from([("uri".to_string(), SqlCell::Text(item))]);
         let ctx = extensions::LensContext::default();
         let refused = form_start(&fx.svc, &root, "acme/leaky", params, &ctx)
             .await
@@ -1482,11 +1482,11 @@ actions:
         let item = work_item_ref(fx.task);
         std::fs::write(
             root.join(".oxplow/extensions/acme/lenses/edit.yaml"),
-            "title: Edit\nviz: form\nparams: [{ name: ref }]\nquery: SELECT title FROM v_work_item WHERE ref = :ref\nform: { command: oxplow.work_item.update, defaults: { ref: '{{param.ref}}' }, fixed: [ref], fields: [title] }\n",
+            "title: Edit\nviz: form\nparams: [{ name: uri }]\nquery: SELECT title FROM v_work_item WHERE uri = :uri\nform: { command: oxplow.work_item.update, defaults: { uri: '{{param.uri}}' }, fixed: [uri], fields: [title] }\n",
         )
         .unwrap();
         crate::test_fixtures::activate(&fx.svc).await;
-        let params = BTreeMap::from([("ref".to_string(), SqlCell::Text(item.clone()))]);
+        let params = BTreeMap::from([("uri".to_string(), SqlCell::Text(item.clone()))]);
         let start = form_start(
             &fx.svc,
             &root,
@@ -1496,18 +1496,18 @@ actions:
         )
         .await
         .unwrap();
-        assert_eq!(start.fixed, vec!["ref".to_string()]);
+        assert_eq!(start.fixed, vec!["uri".to_string()]);
         assert_eq!(
             start.fields,
             Some(vec![crate::extensions::LensFormField::Name("title".into())])
         );
-        assert_eq!(start.values["ref"], json!(item));
+        assert_eq!(start.values["uri"], json!(item));
         submit_form(
             &fx.svc,
             &root,
             FormSubmission {
                 lens_id: "acme/edit".into(),
-                input: json!({ "ref": "oxplow:oxplow/work_item?id=tsk999999&provider=oxplow", "title": "Edited" }),
+                input: json!({ "uri": "oxplow:oxplow/work_item?id=tsk999999&provider=oxplow", "title": "Edited" }),
                 params,
                 on_behalf_of: Actor::Human,
                 confirmed: false,
@@ -1521,7 +1521,7 @@ actions:
             .db
             .read(move |c| {
                 c.query_row(
-                    "SELECT title FROM v_work_item WHERE ref = ?1",
+                    "SELECT title FROM v_work_item WHERE uri = ?1",
                     [item],
                     |r| r.get(0),
                 )
@@ -1552,11 +1552,11 @@ actions:
     #[test]
     fn a_params_id_is_the_key_of_its_uri() {
         let params = BTreeMap::from([(
-            "ref".to_string(),
+            "uri".to_string(),
             SqlCell::Text("oxplow:oxplow/thread?id=thr3".into()),
         )]);
         let bound = bind_input(
-            &json!({ "from_thread": "{{param.ref.id}}", "t": "on {{param.ref.id}}" }),
+            &json!({ "from_thread": "{{param.uri.id}}", "t": "on {{param.uri.id}}" }),
             &params,
             None,
         )
@@ -1589,7 +1589,7 @@ actions:
         )
         .await
         .unwrap();
-        let item = out.result["ref"].as_str().unwrap().to_string();
+        let item = out.result["uri"].as_str().unwrap().to_string();
         let (kind, _) = audit_actor(&fx.svc).await;
         assert_eq!(kind, "lens");
         let row: (String, String) = fx
@@ -1597,7 +1597,7 @@ actions:
             .db
             .read(move |c| {
                 c.query_row(
-                    "SELECT title, body FROM v_work_item WHERE ref = ?1",
+                    "SELECT title, body FROM v_work_item WHERE uri = ?1",
                     [item],
                     |r| Ok((r.get(0)?, r.get(1)?)),
                 )
@@ -1662,7 +1662,7 @@ actions:
         ComponentInvoke {
             component: "acme/board".into(),
             command: command.into(),
-            input: serde_json::json!({ "ref": oxplow_tasks::work_item_ref(fx.task), "to": "done" }),
+            input: serde_json::json!({ "uri": oxplow_tasks::work_item_ref(fx.task), "to": "done" }),
             on_behalf_of: Actor::Human,
             confirmed: false,
             version: version.into(),
@@ -1985,9 +1985,9 @@ actions:
             SqlCell::Null(()),
         ];
         for sql in [
-            "SELECT 'effort', ref, COALESCE(NULLIF(title, ''), ref), started_at, ended_at FROM v_effort WHERE started_at < ?2 AND COALESCE(ended_at, ?2) > ?1 AND (?3 IS NULL OR thread_id = ?3) ORDER BY started_at",
-            "SELECT 'commit', ref, subject, committed_at, NULL FROM v_commit WHERE committed_at >= ?1 AND committed_at < ?2 AND ?3 IS NULL ORDER BY committed_at",
-            "SELECT 'thread', ref, title, created_at, closed_at FROM v_thread WHERE created_at < ?2 AND COALESCE(closed_at, ?2) > ?1 AND (?3 IS NULL OR ref = 'oxplow:oxplow/thread?id=thr' || ?3) ORDER BY created_at",
+            "SELECT 'effort', uri, COALESCE(NULLIF(title, ''), uri), started_at, ended_at FROM v_effort WHERE started_at < ?2 AND COALESCE(ended_at, ?2) > ?1 AND (?3 IS NULL OR thread_id = ?3) ORDER BY started_at",
+            "SELECT 'commit', uri, subject, committed_at, NULL FROM v_commit WHERE committed_at >= ?1 AND committed_at < ?2 AND ?3 IS NULL ORDER BY committed_at",
+            "SELECT 'thread', uri, title, created_at, closed_at FROM v_thread WHERE created_at < ?2 AND COALESCE(closed_at, ?2) > ?1 AND (?3 IS NULL OR uri = 'oxplow:oxplow/thread?id=thr' || ?3) ORDER BY created_at",
         ] {
             let direct = fx.svc.sql.query_sql(sql, window.clone(), None).await.unwrap();
             let out = run_component_sql(

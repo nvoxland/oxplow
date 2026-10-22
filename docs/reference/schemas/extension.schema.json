@@ -1989,7 +1989,7 @@
           "default": null
         },
         "input": {
-          "description": "The input it runs with. A string that is exactly `{{stream}}`,\n`{{thread}}`, `{{ref}}` or `{{ref.id}}` is bound from where it runs;\na binding there's nothing for makes it unavailable there.",
+          "description": "The input it runs with. A string that is exactly `{{stream}}`,\n`{{thread}}`, `{{uri}}` or `{{uri.id}}` is bound from where it runs;\na binding there's nothing for makes it unavailable there.",
           "default": null
         },
         "form": {
@@ -2298,7 +2298,7 @@
           "default": null
         },
         "params": {
-          "description": "The params its id carries.",
+          "description": "The params naming what it shows, in its URI's `?`; its lens's filters\nand selections ride in the `#` view.",
           "type": "array",
           "items": {
             "type": "string"

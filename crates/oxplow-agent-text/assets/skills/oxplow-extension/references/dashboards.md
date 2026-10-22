@@ -176,7 +176,7 @@ only, `?1` params), titles the page with `setTitle`, puts its actions in
 oxplow's bar with `setActions([{ id, label, primary? }])` and hears them
 with `onAction`, and opens a declared command's form in oxplow with
 `openForm(command, input)`. Its view (a range, a search, what is picked)
-is its page's **view params**: change them with `setViewParams({ k: v })`
+is its page's **view params** (the `#` of its address): change them with `setViewParams({ k: v })`
 (null drops one) and draw from `onViewParams(cb)`; this step's scroll or
 what's expanded is its **history state** (`setHistoryState`,
 `onHistoryState`); its own memory for the person, in every tab, is

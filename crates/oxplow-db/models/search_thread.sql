@@ -5,7 +5,7 @@
 -- own change, its efforts' starts and ends, its sessions' changes and its
 -- last turn (an open effort's summary follows the turns), so a recompute
 -- reads the text of the threads that moved only.
-SELECT CAST(t.ref AS TEXT) AS ref,
+SELECT CAST(t.uri AS TEXT) AS uri,
        CAST(t.title AS TEXT) AS title,
        CAST(trim(
          coalesce((SELECT group_concat(char(10) || e.title || char(10) || coalesce(e.summary, ''), '')

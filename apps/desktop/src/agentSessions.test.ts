@@ -5,7 +5,7 @@ import { agentSessionsFromResult } from "./agentSessions.js";
 
 test("a v_agent_session row reads as a session under the UI's ids", () => {
   const result = {
-    columns: ["ref", "thread_ref", "kind", "harness", "title", "native_title", "display_name", "opened_at", "stopped_by_user_at"],
+    columns: ["uri", "thread_uri", "kind", "harness", "title", "native_title", "display_name", "opened_at", "stopped_by_user_at"],
     rows: [
       ["oxplow:oxplow/agent_session?id=ses3", "oxplow:oxplow/thread?id=thr1", "terminal", "claude", "", "", "claude 2026-10-08", "2026-10-08T00:00:00Z", null],
       ["oxplow:oxplow/agent_session?id=ses4", "oxplow:oxplow/thread?id=thr1", "terminal", "codex", "review", "Login fix", "review", "2026-10-08T00:01:00Z", "2026-10-08T00:02:00Z"],

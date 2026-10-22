@@ -160,7 +160,7 @@ async fn report(
                 effort_id: Some(effort.id.value()),
                 statement: c.statement,
                 kind: c.kind.as_str().into(),
-                evidence_ref: c.evidence_ref,
+                evidence: c.evidence,
                 agent_session_id: session,
             })
             .collect()
@@ -246,7 +246,7 @@ mod tests {
                 crate::commands::compose::SEQUENCE,
                 json!({ "calls": [
                     { "name": crate::commands::work_item::NAME,
-                      "input": { "ref": item, "to": "done" } },
+                      "input": { "uri": item, "to": "done" } },
                     { "name": REPORT, "input": report },
                 ] }),
                 false,
@@ -479,7 +479,7 @@ mod tests {
             }
         };
         report(json!([
-            { "statement": "the parser tests pass", "kind": "tests_pass", "evidence_ref": "oxplow:oxplow/run?id=1" },
+            { "statement": "the parser tests pass", "kind": "tests_pass", "evidence": "oxplow:oxplow/run?id=1" },
             { "statement": "no behavior change", "kind": "no_behavior_change" },
         ]))
         .await;
@@ -500,7 +500,7 @@ mod tests {
                 .svc
                 .sql
                 .query_sql(
-                    "SELECT statement, provenance, evidence_ref, review FROM v_claim
+                    "SELECT statement, provenance, evidence, review FROM v_claim
                      WHERE effort_id = ?1 ORDER BY statement",
                     vec![oxplow_db::SqlCell::Int(fx.effort.value())],
                     None,

@@ -10,9 +10,9 @@
   output with `oxplow_read` on its event, `oxplow:oxplow/event?id=<id>#part=output` (the
   `oxplow-codebase` skill).
 - The person's message may carry references oxplow inserted: `@<path>`
-  (a file), `[oxplow ref <uri>]` (what they're asking about, a URI such as
+  (a file), `[oxplow uri <uri>]` (what they're asking about, a URI such as
   `oxplow:oxplow/commit?sha=abc1234`),
   `[oxplow <work item uri>: "<title>" (<state>)]`, `[oxplow lens <id> …]`. Read a URI
   with `oxplow_read` (a file at a revision: `oxplow:oxplow/file?path=<path>&rev=git:<sha>#lines=10-20`;
-  anything a model's `ref` column holds); the page they have open with
+  anything a model's `uri` column holds); the page they have open with
   `oxplow_get_open_page`.

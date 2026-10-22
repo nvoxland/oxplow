@@ -68,7 +68,7 @@ pub const REPLACEABLE: &[Replaceable] = &[
         view: &[],
         label: "list",
     },
-    // A work item's editor (`TaskDetail`: its title and body): `ref` is
+    // A work item's editor (`TaskDetail`: its title and body): `uri` is
     // the item. The page's rail (the state pill and Move To, fields,
     // Delete), its Comment and Link, slots and activity stay oxplow's.
     Replaceable {
@@ -76,12 +76,12 @@ pub const REPLACEABLE: &[Replaceable] = &[
         capability: "work_items",
         bound_to_provider: false,
         version: 1,
-        props: &["ref"],
+        props: &["uri"],
         view: &[],
         label: "detail editor",
     },
     // A work item's state control (`WorkItemPage`'s State; its Move To is
-    // never replaced, so an item can always move — tsk919): `ref` is the
+    // never replaced, so an item can always move — tsk919): `uri` is the
     // item (P10). The item's own provider's extension replaces it,
     // whichever is active (tsk918): it shows that provider's own states.
     Replaceable {
@@ -89,7 +89,7 @@ pub const REPLACEABLE: &[Replaceable] = &[
         capability: "work_items",
         bound_to_provider: true,
         version: 1,
-        props: &["ref"],
+        props: &["uri"],
         view: &[],
         label: "state control",
     },

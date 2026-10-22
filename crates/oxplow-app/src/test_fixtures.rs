@@ -306,7 +306,7 @@ pub async fn file_item(svc: &crate::Services, input: serde_json::Value) -> TaskI
         )
         .await
         .unwrap();
-    oxplow_tasks::task_of_work_item_ref(out.result["ref"].as_str().unwrap()).unwrap()
+    oxplow_tasks::task_of_work_item_ref(out.result["uri"].as_str().unwrap()).unwrap()
 }
 
 /// Restate task `task` in the work-item interface, as its list does after

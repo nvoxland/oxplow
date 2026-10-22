@@ -1166,7 +1166,7 @@ mod tests {
         run_command(
             &f,
             crate::commands::work_item::NAME,
-            serde_json::json!({ "ref": item_ref(&f), "to": "done" }),
+            serde_json::json!({ "uri": item_ref(&f), "to": "done" }),
         )
         .await;
         assert!(bundled_hits(&f, LANDED, AdvisoryOn::TurnEnd, None)

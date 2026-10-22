@@ -11,7 +11,7 @@
 //!     searchable: prs             # …and `body`, which search indexes
 //!     icon: git-pull-request
 //!     wikilink: { prefix: pr, param: id }   # [[pr:12]]
-//!     page: pr                    # one of its pages, opened with `ref=<uri>`
+//!     page: pr                    # one of its pages, opened with `uri=<uri>`
 //! ```
 //!
 //! A resource is `<extension>/<name>`, where the extension segment is the
@@ -247,7 +247,7 @@ fn decl_of(
     let resolve = f
         .resolve
         .as_deref()
-        .map(|m| view_with("resolve", m, &["ref", title], "it gives each one's title"))
+        .map(|m| view_with("resolve", m, &["uri", title], "it gives each one's title"))
         .transpose()?;
     let searchable = f
         .searchable
@@ -256,7 +256,7 @@ fn decl_of(
             view_with(
                 "searchable",
                 m,
-                &["ref", "title", "body"],
+                &["uri", "title", "body"],
                 "what search indexes",
             )
         })
@@ -327,7 +327,7 @@ models:
     version: 1
     description: Pull requests.
     columns:
-      - { name: ref, type: TEXT, doc: The ref. }
+      - { name: uri, type: TEXT, doc: The ref. }
       - { name: title, type: TEXT, doc: Its title. }
 resources:
   - name: pr
@@ -345,7 +345,7 @@ resources:
         std::fs::write(root.join("extension.yaml"), manifest).unwrap();
         std::fs::write(
             root.join("models/prs.sql"),
-            "SELECT CAST('oxplow:acme/pr?id=1' AS TEXT) AS ref, CAST('One' AS TEXT) AS title",
+            "SELECT CAST('oxplow:acme/pr?id=1' AS TEXT) AS uri, CAST('One' AS TEXT) AS title",
         )
         .unwrap();
         load_extensions(dir.path())

@@ -17,13 +17,13 @@ def note_id(x, r):
 
 def record(x, note):
     return {
-        "ref": ref(x, note["id"]),
+        "uri": ref(x, note["id"]),
         "title": note["title"],
         "body": note["body"],
         "state": CANONICAL[note["state"]],
         "native_state": note["state"],
         "native": {},
-        "parent_ref": ref(x, note["parent"]) if note["parent"] else None,
+        "parent_uri": ref(x, note["parent"]) if note["parent"] else None,
         "deleted": False,
     }
 
@@ -51,21 +51,21 @@ def tool_call(x):
         if input.get("body"):
             args["body"] = input["body"]
     else:
-        id = note_id(x, input["ref"])
+        id = note_id(x, input["uri"])
         if not id:
-            return refuse("/ref", "`%s` isn't a note" % input["ref"])
+            return refuse("/uri", "`%s` isn't a note" % input["uri"])
         args["id"] = id
         for field in ["title", "body"]:
             if input.get(field) != None:
                 args[field] = input[field]
-    parent = input.get("parent_ref")
+    parent = input.get("parent_uri")
     if parent != None:
         if parent == "":
             args["parent"] = ""
         else:
             pid = note_id(x, parent)
             if not pid:
-                return refuse("/parent_ref", "`%s` isn't a note" % parent)
+                return refuse("/parent_uri", "`%s` isn't a note" % parent)
             args["parent"] = pid
     state, refused = state_of(input, "to" if x["command"] == "transition" else "state")
     if refused:
@@ -75,7 +75,7 @@ def tool_call(x):
     return {"tool": "create_item" if x["command"] == "create" else "update_item", "arguments": args}
 
 # The note argument a tool error names, as the verb's input field.
-FIELDS = {"id": "/ref", "parent": "/parent_ref", "state": "/native_state"}
+FIELDS = {"id": "/uri", "parent": "/parent_uri", "state": "/native_state"}
 
 def transform(x):
     phase = x["phase"]
@@ -86,8 +86,8 @@ def transform(x):
     if phase == "invoked":
         item = record(x, x["output"])
         return {
-            "result": {"ref": item["ref"]},
-            "events": [{"type": "work_item.recorded", "v": 2, "payload": {"item": item}, "subject": [item["ref"]]}],
+            "result": {"uri": item["uri"]},
+            "events": [{"type": "work_item.recorded", "v": 3, "payload": {"item": item}, "subject": [item["uri"]]}],
         }
     if phase == "read":
         state = x["state"] or {}

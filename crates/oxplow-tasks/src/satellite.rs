@@ -61,7 +61,7 @@ pub fn create_link_tx(
 ) -> Result<bool, DomainError> {
     let added = conn
         .execute(
-            "INSERT OR IGNORE INTO task_link (from_item_id, to_ref, link_type, created_at)
+            "INSERT OR IGNORE INTO task_link (from_item_id, to_uri, link_type, created_at)
              VALUES (?1, ?2, ?3, ?4)",
             params![
                 from.value(),
@@ -84,7 +84,7 @@ pub fn delete_link_tx(
 ) -> Result<bool, DomainError> {
     let removed = conn
         .execute(
-            "DELETE FROM task_link WHERE from_item_id = ?1 AND to_ref = ?2 AND link_type = ?3",
+            "DELETE FROM task_link WHERE from_item_id = ?1 AND to_uri = ?2 AND link_type = ?3",
             params![from.value(), to, link_type_to_str(link_type)],
         )
         .map_err(map_sql_err)?;

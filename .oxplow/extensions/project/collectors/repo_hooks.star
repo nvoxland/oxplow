@@ -21,6 +21,6 @@ def transform(input):
                 c += 1
         if c > 0:
             facts.append({"measure": "repo.ts_hooks", "value": c,
-                          "subject": ref.build("file", tri[0]), "path": tri[0],
+                          "subject": uri.build("oxplow/file", path = tri[0]), "path": tri[0],
                           "dims": {"oxplow.language": "typescript"}})
     return {"facts": facts}

@@ -32,9 +32,9 @@ export interface BookmarkViewer {
 /** What a viewer sees, newest first — a page once, at the narrowest scope
  *  it's bookmarked at. */
 export const BOOKMARKS_SQL = `
-  SELECT ref, label, scope FROM (
-    SELECT ref, label, scope, added_at, id,
-           row_number() OVER (PARTITION BY ref ORDER BY
+  SELECT uri, label, scope FROM (
+    SELECT uri, label, scope, added_at, id,
+           row_number() OVER (PARTITION BY uri ORDER BY
              CASE scope WHEN 'thread' THEN 0 WHEN 'stream' THEN 1 ELSE 2 END) AS n
     FROM v_bookmark
     WHERE (scope = 'thread' AND thread_id = ?1)
@@ -54,7 +54,7 @@ export function bookmarksFromResult(result: SqlQueryResult): Bookmark[] {
   const at = (row: SqlCell[], name: string) => row[result.columns.indexOf(name)] ?? null;
   const out: Bookmark[] = [];
   for (const row of result.rows) {
-    const ref = refFromTabId(String(at(row, "ref")));
+    const ref = refFromTabId(String(at(row, "uri")));
     if (!ref) continue;
     const label = at(row, "label");
     out.push({ ref, label: label == null ? null : String(label), scope: String(at(row, "scope")) as BookmarkScope });
@@ -98,7 +98,7 @@ function viewerInput(viewer: BookmarkViewer): Record<string, string> {
 }
 
 export function setBookmarkInput(viewer: BookmarkViewer, ref: TabRef, label: string | null, scope: BookmarkScope) {
-  return { ref: ref.id, page_kind: recordedPageKind(ref), ...(label ? { label } : {}), scope, ...viewerInput(viewer) };
+  return { uri: ref.id, page_kind: recordedPageKind(ref), ...(label ? { label } : {}), scope, ...viewerInput(viewer) };
 }
 
 /** Bookmark `ref` at `scope`, moving it if it's at another. */
@@ -109,5 +109,5 @@ export async function setBookmark(viewer: BookmarkViewer, ref: TabRef, label: st
 /** Take `ref`'s bookmark off; the outcome carries the audit id its undo
  *  needs (`undoCommand`). */
 export function removeBookmark(viewer: BookmarkViewer, refId: string): ReturnType<typeof runCommand> {
-  return runCommand("oxplow.bookmark.remove", { ref: refId, ...viewerInput(viewer) });
+  return runCommand("oxplow.bookmark.remove", { uri: refId, ...viewerInput(viewer) });
 }

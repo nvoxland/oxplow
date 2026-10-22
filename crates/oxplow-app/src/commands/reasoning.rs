@@ -84,7 +84,7 @@ pub struct ClaimInput {
     /// anything.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(length(min = 1, max = 400))]
-    pub evidence_ref: Option<String>,
+    pub evidence: Option<String>,
 }
 
 /// What a claim is about.
@@ -209,7 +209,7 @@ fn place(
         None => ctx
             .conn
             .query_row(
-                "SELECT thread_id FROM v_work_item WHERE ref = ?1",
+                "SELECT thread_id FROM v_work_item WHERE uri = ?1",
                 [work_item],
                 |r| r.get::<_, Option<i64>>(0),
             )
@@ -348,7 +348,7 @@ pub fn replace_inferred_claims_op() -> Op {
                     effort_id: Some(effort.value()),
                     statement: c.statement,
                     kind: c.kind.as_str().into(),
-                    evidence_ref: c.evidence_ref,
+                    evidence: c.evidence,
                     agent_session_id: None,
                 })
                 .collect();
@@ -597,7 +597,7 @@ mod tests {
                 effort_id: Some(effort),
                 statement: statement.into(),
                 kind: "other".into(),
-                evidence_ref: None,
+                evidence: None,
                 agent_session_id: None,
             };
             async move {

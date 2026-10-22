@@ -307,17 +307,6 @@ pub fn extension_page_uri(extension: &str, page: &str) -> String {
     page_uri(&format!("{extension}/{page}"), &[])
 }
 
-/// A page or lens URI apart: the URI naming the page or lens alone (its
-/// key param, no view) and the params it is opened with.
-pub fn params_of(text: &str) -> Option<(String, BTreeMap<String, String>)> {
-    let u = OxplowUri::parse(text).ok()?;
-    let resource = u.resource().to_string();
-    let key = key_param(&resource)?;
-    let mut params = u.params().clone();
-    let head = params.remove(&key)?;
-    Some((of(&resource, &[(&key, &head)]), params))
-}
-
 /// A metric by its key.
 pub fn metric_uri(key: &str) -> String {
     keyed(r::METRIC, key)
@@ -527,13 +516,6 @@ mod tests {
         assert_eq!(
             page_uri("settings", &[("area", "ai")]),
             "oxplow:oxplow/page?area=ai&page=settings"
-        );
-        assert_eq!(
-            params_of("oxplow:oxplow/page?area=ai&page=settings#lines=3"),
-            Some((
-                "oxplow:oxplow/page?page=settings".to_string(),
-                [("area".to_string(), "ai".to_string())].into()
-            ))
         );
         assert_eq!(
             extension_page_uri("github", "pr"),

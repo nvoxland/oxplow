@@ -600,7 +600,7 @@ models:
     version: 1
     description: Pull requests.
     columns:
-      - { name: ref, type: TEXT, doc: The ref. }
+      - { name: uri, type: TEXT, doc: The ref. }
       - { name: title, type: TEXT, doc: Its title. }
 resources:
   - name: pr
@@ -618,7 +618,7 @@ resources:
         std::fs::write(dir.join("extension.yaml"), manifest).unwrap();
         std::fs::write(
             dir.join("models/prs.sql"),
-            "SELECT CAST('oxplow:acme/pr?id=1' AS TEXT) AS ref, CAST('One' AS TEXT) AS title",
+            "SELECT CAST('oxplow:acme/pr?id=1' AS TEXT) AS uri, CAST('One' AS TEXT) AS title",
         )
         .unwrap();
     }

@@ -5,7 +5,7 @@ import { proposalForSetting, proposalsFromResult, summarizeProposal, type Propos
 
 const result = (rows: SqlQueryResult["rows"]): SqlQueryResult =>
   ({
-    columns: ["id", "ref", "created_at", "command", "input", "actor_kind", "actor_id", "thread_id", "thread_title", "key", "preview", "dry_run"],
+    columns: ["id", "uri", "created_at", "command", "input", "actor_kind", "actor_id", "thread_id", "thread_title", "key", "preview", "dry_run"],
     rows,
     truncated: false,
     reads: { models: ["v_command_proposal"], tables: [], measures: [] },
@@ -14,7 +14,7 @@ const result = (rows: SqlQueryResult["rows"]): SqlQueryResult =>
 
 const proposal = (over: Partial<Proposal>): Proposal => ({
   id: 1,
-  ref: "oxplow:oxplow/proposal?id=1",
+  uri: "oxplow:oxplow/proposal?id=1",
   createdAt: "t",
   command: "oxplow.config.set",
   input: {},
@@ -52,7 +52,7 @@ test("rows read as proposals, JSON columns parsed", () => {
   );
   expect(p).toEqual({
     id: 4,
-    ref: "oxplow:oxplow/proposal?id=4",
+    uri: "oxplow:oxplow/proposal?id=4",
     createdAt: "2026-10-01T00:00:00Z",
     command: "oxplow.config.set",
     input: { key: "agentPromptAppend", value: "be brief" },
@@ -129,7 +129,7 @@ test("a setting's pending proposal is the one keyed on it", () => {
 test("a row's decision reads through; a read that doesn't select it is pending", () => {
   const withDecision = {
     ...result([]),
-    columns: ["id", "ref", "command", "preview", "decision", "decided_at"],
+    columns: ["id", "uri", "command", "preview", "decision", "decided_at"],
     rows: [[4, "oxplow:oxplow/proposal?id=4", "oxplow.work_item.delete", "{}", "approved", "2026-10-03T00:00:00Z"]],
   } as unknown as SqlQueryResult;
   expect(proposalsFromResult(withDecision)[0]).toMatchObject({ id: 4, decision: "approved", decidedAt: "2026-10-03T00:00:00Z" });

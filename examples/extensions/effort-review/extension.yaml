@@ -69,7 +69,7 @@ commands:
   # what lets the `review-on-finish` effect ask (an effect acts as an
   # agent); `lens: true` lets the Reviews and Efforts lenses' buttons.
   - name: review.ask
-    summary: Ask a model to review one effort; returns the job. The intent key `review:<effort ref>` makes it one job per effort.
+    summary: Ask a model to review one effort; returns the job. The intent key `review:<effort uri>` makes it one job per effort.
     scope: jobs.write
     op: enqueue
     invokers: { human: true, agent: true, lens: true }
@@ -130,9 +130,9 @@ models:
     key: [job_run]
     description: "Each effort review: the effort, its work item, the review job's state and what the model wrote (as far as it got, for one still running or cancelled)."
     columns:
-      - { name: job_run, type: TEXT, doc: "The run of the review job (`oxplow:oxplow/job_run?id=<id>`, `v_job_run.ref`). (v2, was `job`)" }
+      - { name: job_run, type: TEXT, doc: "The run of the review job (`oxplow:oxplow/job_run?id=<id>`, `v_job_run.uri`). (v2, was `job`)" }
       - { name: effort, type: TEXT, doc: "The effort reviewed (`oxplow:oxplow/effort?id=eff<id>`)." }
-      - { name: work_item, type: TEXT, doc: "Its work item's ref; NULL when it had none." }
+      - { name: work_item, type: TEXT, doc: "Its work item's uri; NULL when it had none." }
       - { name: state, type: TEXT, doc: "The job's state: `queued`, `running`, `succeeded`, `failed`, `cancelled` or `interrupted`." }
       - { name: reviewed_at, type: TEXT, doc: "When the job last changed (RFC 3339)." }
       - { name: review, type: TEXT, doc: "What the model wrote in the job's current attempt ('' before it starts)." }

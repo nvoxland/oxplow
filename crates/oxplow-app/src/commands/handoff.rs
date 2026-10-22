@@ -204,7 +204,7 @@ pub fn send_op(deps: LinkDeps, work_items: WorkItemsRegistry) -> Op {
             if let Some(item) = &input.work_item {
                 let known = ctx
                     .conn
-                    .query_row("SELECT 1 FROM v_work_item WHERE ref = ?1", [item], |_| {
+                    .query_row("SELECT 1 FROM v_work_item WHERE uri = ?1", [item], |_| {
                         Ok(())
                     })
                     .optional()
@@ -349,7 +349,7 @@ pub fn resolve_op() -> Op {
                                         EXISTS (SELECT 1 FROM v_capability_provider p
                                                  WHERE p.capability = 'work_items' AND p.active = 1
                                                    AND instr(p.features, '\"lists\"') > 0)
-                                   FROM v_work_item w WHERE w.ref = ?1",
+                                   FROM v_work_item w WHERE w.uri = ?1",
                                 [item],
                                 |r| Ok((r.get::<_, Option<i64>>(0)?, r.get::<_, bool>(1)?)),
                             )
@@ -374,7 +374,7 @@ pub fn resolve_op() -> Op {
                 if thread != Some(handoff.to_thread_id.value()) {
                     calls.push(CommandCall {
                         name: super::work_item::MOVE.into(),
-                        input: json!({ "ref": item, "to": { "thread": handoff.to_thread_id.to_string() } }),
+                        input: json!({ "uri": item, "to": { "thread": handoff.to_thread_id.to_string() } }),
                     });
                 }
             }
@@ -410,7 +410,7 @@ pub fn resolve_op() -> Op {
 fn shown(h: &Handoff) -> Value {
     json!({
         "id": h.id.to_string(),
-        "ref": handoff_uri(h.id),
+        "uri": handoff_uri(h.id),
         "from_thread": h.from_thread_id.to_string(),
         "to_thread": h.to_thread_id.to_string(),
         "work_item": h.work_item,
@@ -685,7 +685,7 @@ mod tests {
             svc.db
                 .read(move |tx| {
                     tx.query_row(
-                        "SELECT state FROM v_handoff WHERE ref = uri('oxplow/handoff', 'id', ?1)",
+                        "SELECT state FROM v_handoff WHERE uri = uri('oxplow/handoff', 'id', ?1)",
                         [&h],
                         |r| r.get::<_, String>(0),
                     )

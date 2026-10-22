@@ -103,7 +103,7 @@ async fn refs(peer: &Peer, handle: &Handle, incoming: &mut Receiver<Incoming>) -
         if let Some(Incoming::Notification { method, params }) = incoming.recv().await {
             if method == notify::RECORD {
                 refs.push(
-                    params["row"]["ref"]
+                    params["row"]["uri"]
                         .as_str()
                         .unwrap_or_default()
                         .to_string(),
@@ -251,7 +251,7 @@ async fn a_peer_drives_the_fake_over_stdio() {
         .unwrap();
     assert_eq!(
         created.result,
-        json!({ "ref": "oxplow:oxplow/work_item?id=W-1&provider=fake" })
+        json!({ "uri": "oxplow:oxplow/work_item?id=W-1&provider=fake" })
     );
     assert_eq!(created.events[0].event_type, "work_item.recorded");
     assert_eq!(created.events[0].payload["item"]["native_state"], "Backlog");
@@ -262,7 +262,7 @@ async fn a_peer_drives_the_fake_over_stdio() {
         &peer,
         &handle,
         "transition",
-        json!({ "ref": "oxplow:oxplow/work_item?id=W-1&provider=fake", "to": "in_progress" }),
+        json!({ "uri": "oxplow:oxplow/work_item?id=W-1&provider=fake", "to": "in_progress" }),
     )
     .await
     .unwrap();
@@ -271,12 +271,12 @@ async fn a_peer_drives_the_fake_over_stdio() {
         &peer,
         &handle,
         "transition",
-        json!({ "ref": "oxplow:oxplow/work_item?id=W-9&provider=fake", "to": "done" }),
+        json!({ "uri": "oxplow:oxplow/work_item?id=W-9&provider=fake", "to": "done" }),
     )
     .await
     .unwrap_err();
     assert!(
-        matches!(refused, ProtocolError::InvalidInput { ref field, .. } if field == "/ref"),
+        matches!(refused, ProtocolError::InvalidInput { ref field, .. } if field == "/uri"),
         "{refused:?}"
     );
 
@@ -304,7 +304,7 @@ async fn a_peer_drives_the_fake_over_stdio() {
             Ok(())
         );
         match method.as_str() {
-            notify::RECORD => streamed.push(params["row"]["ref"].clone()),
+            notify::RECORD => streamed.push(params["row"]["uri"].clone()),
             notify::STATE => state = Some(params["state"].clone()),
             other => panic!("unexpected {other}"),
         }
@@ -450,7 +450,7 @@ async fn the_read_hooks_stream_progress_fail_midway_and_misreport() {
     let handle = check(&peer).await;
     let (_, seen) = read(&peer, &handle, &mut incoming).await;
     assert_eq!(
-        seen[0].1["row"]["ref"],
+        seen[0].1["row"]["uri"],
         "oxplow:oxplow/work_item?id=X-1&provider=other"
     );
 }
@@ -485,14 +485,14 @@ async fn the_fake_takes_its_id_from_the_host_and_reports_a_missing_credential() 
         .await
         .unwrap();
     assert_eq!(
-        created.result["ref"],
+        created.result["uri"],
         "oxplow:oxplow/work_item?id=W-1&provider=fake_second"
     );
     let moved = invoke(
         &peer,
         &handle,
         "transition",
-        json!({ "ref": "oxplow:oxplow/work_item?id=W-1&provider=fake_second", "to": "done" }),
+        json!({ "uri": "oxplow:oxplow/work_item?id=W-1&provider=fake_second", "to": "done" }),
     )
     .await;
     assert!(moved.is_ok(), "{moved:?}");
@@ -501,7 +501,7 @@ async fn the_fake_takes_its_id_from_the_host_and_reports_a_missing_credential() 
         &peer,
         &handle,
         "transition",
-        json!({ "ref": "oxplow:oxplow/work_item?id=W-1&provider=fake", "to": "done" }),
+        json!({ "uri": "oxplow:oxplow/work_item?id=W-1&provider=fake", "to": "done" }),
     )
     .await;
     assert!(
@@ -740,7 +740,7 @@ async fn as_a_snapshots_provider_it_marks_tells_what_changed_and_gives_bytes_bac
     let root = dir.path();
     std::fs::create_dir_all(root.join("src")).unwrap();
     std::fs::create_dir_all(root.join(".git")).unwrap();
-    std::fs::write(root.join(".git/HEAD"), "ref").unwrap();
+    std::fs::write(root.join(".git/HEAD"), "uri").unwrap();
     std::fs::write(root.join("a.txt"), "one").unwrap();
     std::fs::write(root.join("src/b.txt"), "two").unwrap();
     let (_child, peer) = spawn_snapshots("contents");
@@ -899,7 +899,7 @@ fn spawn_knowledge(state: Option<&std::path::Path>) -> (Child, Peer, Receiver<In
 }
 
 fn page_write(slug: &str, body: &str) -> Value {
-    json!({ "slug": slug, "body": body, "verified_refs": [], "removed_refs": [] })
+    json!({ "slug": slug, "body": body, "verified_files": [], "removed_files": [] })
 }
 
 #[tokio::test]
@@ -932,7 +932,7 @@ async fn as_a_knowledge_provider_it_declares_its_verbs_event_and_collector() {
             declared.event_types[0].event_type.as_str(),
             declared.event_types[0].v
         ),
-        ("knowledge.page.recorded", 1)
+        ("knowledge.page.recorded", 2)
     );
     assert_eq!(
         (
@@ -963,16 +963,16 @@ async fn as_a_knowledge_provider_a_write_answers_the_page_and_its_record() {
     assert_eq!(wrote.events.len(), 1);
     let event = &wrote.events[0];
     assert_eq!(event.event_type, "knowledge.page.recorded");
-    assert_eq!(event.v, 1);
+    assert_eq!(event.v, 2);
     assert_eq!(
         event.subject,
         vec!["oxplow:oxplow/wiki?slug=design".to_string()]
     );
     let page = &event.payload["page"];
-    assert_eq!(page["ref"], "oxplow:oxplow/wiki?slug=design");
+    assert_eq!(page["uri"], "oxplow:oxplow/wiki?slug=design");
     assert_eq!(page["title"], "design");
     assert_eq!(
-        page["refs"],
+        page["uris"],
         json!([
             "oxplow:oxplow/file?path=src/lib.rs",
             "oxplow:oxplow/wiki?slug=other-page"
@@ -1000,7 +1000,7 @@ async fn as_a_knowledge_provider_a_write_answers_the_page_and_its_record() {
         "{page}"
     );
     assert_eq!(
-        page["refs"],
+        page["uris"],
         json!([
             "oxplow:oxplow/file?path=src/lib.rs",
             "oxplow:oxplow/wiki?slug=other-page",
@@ -1088,7 +1088,7 @@ async fn as_a_knowledge_provider_it_streams_changed_pages_and_keeps_them() {
     assert!(rows.iter().all(|r| r["entity"] == "knowledge_page"));
     let slugs: Vec<_> = rows
         .iter()
-        .map(|r| r["row"]["ref"].as_str().unwrap().to_string())
+        .map(|r| r["row"]["uri"].as_str().unwrap().to_string())
         .collect();
     assert_eq!(
         slugs,

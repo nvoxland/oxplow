@@ -51,7 +51,7 @@ export function decorationQueries(decorator: UiDecorator, refs: string[]): Decor
     const chunk = mine.slice(at, at + REFS_PER_QUERY);
     const slots = chunk.map((_, i) => `?${i + 1}`).join(", ");
     out.push({
-      sql: `SELECT ref, "${decorator.label}" AS label${color} FROM ${decorator.view} WHERE ref IN (${slots})`,
+      sql: `SELECT uri, "${decorator.label}" AS label${color} FROM ${decorator.view} WHERE uri IN (${slots})`,
       params: chunk,
       limit: chunk.length * MAX_DECORATIONS_PER_REF,
     });
@@ -74,7 +74,7 @@ export function decorationsFromResult(result: SqlQueryResult, extension: string)
   for (const row of result.rows) {
     const label = at(row, "label");
     if (label === null || label === "") continue;
-    const ref = String(at(row, "ref"));
+    const ref = String(at(row, "uri"));
     const count = perRef.get(ref) ?? 0;
     if (count >= MAX_DECORATIONS_PER_REF) continue;
     perRef.set(ref, count + 1);

@@ -46,15 +46,15 @@ title: Waiting on me
 description: Blocked work items on this stream's threads.
 params:                         # optional; bound as :name in the query
   - { name: stream_id, label: Stream }   # filled in: the viewer's stream; see "Params have a type"
-  # ref / effort_id / thread_id / stream_id are pickers on the lens page
+  # uri / effort_id / thread_id / stream_id are pickers on the lens page
 query: |
-  SELECT w.ref, w.title, w.state, t.title AS thread
+  SELECT w.uri, w.title, w.state, t.title AS thread
   FROM v_work_item w JOIN v_thread t ON t.id = w.thread_id
   WHERE w.state = 'blocked' AND t.stream_id = :stream_id
   ORDER BY w.updated_at DESC
 viz: table                      # table | list | number | markdown | bar | line | treemap | document | dashboard | custom
 columns:                        # optional; controls headers, order and links
-  - { key: title, label: Item, link: { kind: page, from: ref } }
+  - { key: title, label: Item, link: { kind: page, from: uri } }
   - { key: thread }
   # - { key: took, unit: unit }  # a number shown in another column's unit (ms, %, lines)
   # - { key: created_at, format: relative, width: 120 }  # width in pixels; format is display only
@@ -112,8 +112,14 @@ empty: Nothing is waiting on you.
        AND (:q IS NULL OR subject LIKE '%' || :q || '%')
        AND (:merges = 0 OR parent_count > 1)
   ```
-  You don't say where a param goes, and you never write its `role`: the
-  page puts every param in its rail. Read `references/page-layout.md`
+  You don't say where a param draws: the page puts every param in its
+  rail. A param's `role` says where its value rides in the URI. The
+  default, `resource`, names what the page shows (in the `?`; a change
+  opens another resource). Write `role: filter` on a param that only
+  narrows or re-views it (a search, a range): it rides in the `#` and a
+  change replaces the entry. Never write `role: selection`: a column's
+  `select` makes it (in the `#`; a pick pushes). A `filter` or
+  `selection` found in a `?` is refused. Read `references/page-layout.md`
   before you add params to a page.
 - **`columns[].select: <param>`** makes a row clickable: a click sets
   that param to the column's value, and the page shows the picked row as
@@ -126,12 +132,12 @@ empty: Nothing is waiting on you.
   param is empty). It must name a param the lens declares. Use it on the
   columns of a search lens, with its filter param.
 - **`link.kind`** makes cells clickable:
-  - `page` takes any page's ref — a work item's (`v_work_item.ref`),
+  - `page` takes any page's ref — a work item's (`v_work_item.uri`),
     `oxplow:oxplow/commit?sha=<sha>`, `oxplow:oxplow/page?page=git-dashboard`, ….
   - `file` takes a repo-relative path; add `line: <column>` to open at a
     line.
   - `wiki` takes a slug.
-  - `effort-diff` takes an effort ref (`v_effort.ref`).
+  - `effort-diff` takes an effort ref (`v_effort.uri`).
   - `commit` takes a sha.
   - `metric` takes a metric key.
   
@@ -177,7 +183,7 @@ empty: Nothing is waiting on you.
   the query must return even when `columns:` doesn't show it (select a
   ref for the action and leave it out of `columns:`) —
   e.g. `{ id: finish, label: Finish, command: oxplow.work_item.transition,
-  row: true, input: { ref: "{{row.ref}}", to: done } }`,
+  row: true, input: { uri: "{{row.uri}}", to: done } }`,
   or `{ id: sync, label: Sync PRs, command: oxplow.collector.sync, input:
   { collector: "github/prs" } }`. With `group: <value>` (on a lens with
   `group`), the action is a button in that group's heading instead — it

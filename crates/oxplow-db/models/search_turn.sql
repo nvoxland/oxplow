@@ -2,7 +2,7 @@
 -- the turn started, and in the body what was asked and what the agent
 -- answered. Turns on archived threads are included. `version` is when the
 -- turn ended, else when it started: a turn's text is final once it ends.
-SELECT CAST(t.ref AS TEXT) AS ref,
+SELECT CAST(t.uri AS TEXT) AS uri,
        CAST(coalesce(s.display_name, 'turn') || ' · ' || t.started_at AS TEXT) AS title,
        CAST(coalesce(t.prompt, '') || char(10) || coalesce(t.answer, '') AS TEXT) AS body,
        CAST('str' || th.stream_id AS TEXT) AS stream_id,

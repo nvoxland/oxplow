@@ -2543,6 +2543,99 @@ mod tests {
         );
     }
 
+    /// V101: a URI is called one — the renamed columns, `work_item.recorded`
+    /// at v3 with `item.uri` / `item.parent_uri`, and an undo's inverse with
+    /// its renamed input keys.
+    #[test]
+    fn v101_names_uris_uri() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::sql_functions::register(&conn).unwrap();
+        crate::models::drop_all(&conn).unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(100))
+            .run(&mut conn)
+            .unwrap();
+        conn.execute_batch(
+            r#"INSERT INTO event_log (id, type, v, at, source, subject, payload) VALUES
+                 ('a', 'work_item.recorded', 2, 't', 'system', '[]',
+                  '{"item":{"ref":"oxplow:oxplow/work_item?id=tsk2&provider=oxplow","parent_ref":"oxplow:oxplow/work_item?id=tsk1&provider=oxplow","title":"x"}}');
+               INSERT INTO command_audit (at, command, actor_kind, input_json, outcome, inverse_json)
+               VALUES ('t', 'oxplow.work_item.update', 'human', '{}', 'ok',
+                 '{"name":"oxplow.work_item.update","input":{"ref":"oxplow:oxplow/work_item?id=tsk2&provider=oxplow","parent_ref":null,"title":"x"}}');"#,
+        )
+        .unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(101))
+            .run(&mut conn)
+            .unwrap();
+        let rows: Vec<String> = conn
+            .prepare(
+                "SELECT * FROM (SELECT v || ' ' || payload FROM event_log ORDER BY seq)
+                 UNION ALL SELECT inverse_json FROM command_audit",
+            )
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        let json = |s: &str| -> serde_json::Value { serde_json::from_str(s).unwrap() };
+        assert_eq!(&rows[0][..2], "3 ");
+        assert_eq!(
+            json(&rows[0][2..]),
+            serde_json::json!({ "item": {
+                "uri": "oxplow:oxplow/work_item?id=tsk2&provider=oxplow",
+                "parent_uri": "oxplow:oxplow/work_item?id=tsk1&provider=oxplow",
+                "title": "x",
+            }})
+        );
+        assert_eq!(
+            json(&rows[1]),
+            serde_json::json!({ "name": "oxplow.work_item.update", "input": {
+                "uri": "oxplow:oxplow/work_item?id=tsk2&provider=oxplow",
+                "parent_uri": null,
+                "title": "x",
+            }})
+        );
+        let columns = |table: &str| -> Vec<String> {
+            conn.prepare(&format!("SELECT name FROM pragma_table_info('{table}')"))
+                .unwrap()
+                .query_map([], |r| r.get(0))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap()
+        };
+        assert!(columns("work_item").contains(&"parent_uri".to_string()));
+        assert!(columns("search_entry").contains(&"uri".to_string()));
+        assert!(columns("claim").contains(&"evidence".to_string()));
+        assert!(columns("wiki_page").contains(&"files_json".to_string()));
+    }
+
+    /// V102: the page visits recorded with their view in the `?` go.
+    #[test]
+    fn v102_empties_the_page_visits() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::sql_functions::register(&conn).unwrap();
+        crate::models::drop_all(&conn).unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(101))
+            .run(&mut conn)
+            .unwrap();
+        conn.execute(
+            "INSERT INTO page_visit (page_kind, page_id, visited_at) \
+             VALUES ('page', 'oxplow:oxplow/page?f.state=todo&page=tasks', 't')",
+            [],
+        )
+        .unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(102))
+            .run(&mut conn)
+            .unwrap();
+        let n: i64 = conn
+            .query_row("SELECT count(*) FROM page_visit", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 0);
+    }
+
     /// V70: every event written at a version older than its type's newest
     /// is rewritten to the newest, so no reader carries an upcast: an old
     /// tool event gets its kind from the tool's name and its path as a list.
@@ -3388,7 +3481,7 @@ mod tests {
         migrate_and_compile(&mut conn).unwrap();
         let subject: String = conn
             .query_row(
-                "SELECT s.ref FROM fact JOIN fact_subject s ON s.id = fact.subject_id",
+                "SELECT s.uri FROM fact JOIN fact_subject s ON s.id = fact.subject_id",
                 [],
                 |r| r.get(0),
             )

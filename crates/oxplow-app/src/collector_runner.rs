@@ -2663,7 +2663,7 @@ pub(crate) mod tests {
                  INSERT INTO threads (id, stream_id, title, created_at, updated_at)
                    VALUES (1, 1, 'T', '2026-01-01', '2026-01-01');
                  INSERT INTO capability_provider (capability, provider, active) VALUES ('work_items', 'oxplow', 1);
-                 INSERT INTO work_item (ref, provider, title, state, native_state, native, thread_id, created_at, updated_at) VALUES
+                 INSERT INTO work_item (uri, provider, title, state, native_state, native, thread_id, created_at, updated_at) VALUES
                    ('oxplow:oxplow/work_item?id=tsk1&provider=oxplow', 'oxplow', 'Fix login', 'todo', 'ready', '{\"priority\":\"high\"}', 1, '2026-01-01', '2026-01-01'),
                    ('oxplow:oxplow/work_item?id=tsk2&provider=oxplow', 'oxplow', 'Tidy docs', 'todo', 'ready', '{\"priority\":\"low\"}', 1, '2026-01-01', '2026-01-01'),
                    ('oxplow:oxplow/work_item?id=tsk3&provider=oxplow', 'oxplow', 'Ship it', 'done', 'done', '{\"priority\":\"high\"}', 1, '2026-01-01', '2026-01-01');",
@@ -2729,10 +2729,10 @@ pub(crate) mod tests {
                         extension(
                             &svc.layout.project_dir,
                             "work",
-                            "manifest: 2\nname: work\nintent:\n  purpose: test\npermissions: { ai: true }\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: kind.star\n    input: \"SELECT 'a' AS ref\"\n    entities:\n      - { name: kind, key: ref, columns: { ref: text, kind: text } }\n",
+                            "manifest: 2\nname: work\nintent:\n  purpose: test\npermissions: { ai: true }\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: kind.star\n    input: \"SELECT 'a' AS uri\"\n    entities:\n      - { name: kind, key: uri, columns: { uri: text, kind: text } }\n",
                             &[(
                                 "kind.star",
-                                "def transform(input):\n    rows = []\n    for r in input[\"rows\"]:\n        a = ai_classify(\"is this a bug?\", [\"bug\", \"feature\"])\n        rows.append({\"ref\": r[\"ref\"], \"kind\": a[\"label\"]})\n    return {\"entities\": {\"kind\": rows}}\n",
+                                "def transform(input):\n    rows = []\n    for r in input[\"rows\"]:\n        a = ai_classify(\"is this a bug?\", [\"bug\", \"feature\"])\n        rows.append({\"uri\": r[\"uri\"], \"kind\": a[\"label\"]})\n    return {\"entities\": {\"kind\": rows}}\n",
                             )],
                         );
                         crate::test_fixtures::activate_with_problems(svc).await;
@@ -2883,10 +2883,10 @@ pub(crate) mod tests {
         extension(
             &root,
             "work",
-            "manifest: 2\nname: work\nintent:\n  purpose: test\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: hot.star\n    trigger: { every: 10m }\n    input: \"SELECT ref, title FROM v_work_item\"\n    entities:\n      - { name: hot, key: ref, columns: { ref: text, title: text } }\n",
+            "manifest: 2\nname: work\nintent:\n  purpose: test\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: hot.star\n    trigger: { every: 10m }\n    input: \"SELECT uri, title FROM v_work_item\"\n    entities:\n      - { name: hot, key: uri, columns: { uri: text, title: text } }\n",
             &[(
                 "hot.star",
-                "def transform(input):\n    return {\"entities\": {\"hot\": [{\"ref\": r[\"ref\"], \"title\": r[\"title\"]} for r in input[\"rows\"]]}}\n",
+                "def transform(input):\n    return {\"entities\": {\"hot\": [{\"uri\": r[\"uri\"], \"title\": r[\"title\"]} for r in input[\"rows\"]]}}\n",
             )],
         );
         crate::test_fixtures::activate_with_problems(&fx.svc).await;
@@ -3056,21 +3056,21 @@ pub(crate) mod tests {
     async fn derived_sources_transform_their_input() {
         let root = tempfile::tempdir().unwrap();
         let entity =
-            "    entities:\n      - { name: hot, key: ref, columns: { ref: text, title: text } }\n";
+            "    entities:\n      - { name: hot, key: uri, columns: { uri: text, title: text } }\n";
         extension(
             root.path(),
             "work",
             &format!(
-                "manifest: 2\nname: work\nintent:\n  purpose: test\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: hot.star\n    input: \"SELECT ref, title, json_extract(native, '$.priority') AS priority FROM v_work_item WHERE state = 'todo'\"\n{entity}  - id: jq\n    runtime: jaq\n    entry: hot.jq\n    input: \"SELECT ref, title FROM v_work_item\"\n    entities:\n      - {{ name: upper, key: ref, columns: {{ ref: text, title: text }} }}\n"
+                "manifest: 2\nname: work\nintent:\n  purpose: test\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: hot.star\n    input: \"SELECT uri, title, json_extract(native, '$.priority') AS priority FROM v_work_item WHERE state = 'todo'\"\n{entity}  - id: jq\n    runtime: jaq\n    entry: hot.jq\n    input: \"SELECT uri, title FROM v_work_item\"\n    entities:\n      - {{ name: upper, key: uri, columns: {{ uri: text, title: text }} }}\n"
             ),
             &[
                 (
                     "hot.star",
-                    "def transform(input):\n    return {\"entities\": {\"hot\": [{\"ref\": r[\"ref\"], \"title\": r[\"title\"]} for r in input[\"rows\"] if r[\"priority\"] == \"high\"]}}\n",
+                    "def transform(input):\n    return {\"entities\": {\"hot\": [{\"uri\": r[\"uri\"], \"title\": r[\"title\"]} for r in input[\"rows\"] if r[\"priority\"] == \"high\"]}}\n",
                 ),
                 (
                     "hot.jq",
-                    "{entities: {upper: [.rows[] | {ref, title: (.title | ascii_upcase)}]}}",
+                    "{entities: {upper: [.rows[] | {uri, title: (.title | ascii_upcase)}]}}",
                 ),
             ],
         );
@@ -3135,10 +3135,10 @@ pub(crate) mod tests {
         extension(
             root.path(),
             "work",
-            "manifest: 2\nname: work\nintent:\n  purpose: test\npermissions: { ai: true }\nai_profiles:\n  - { id: sort, description: Sorts., fallback: decide }\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: kind.star\n    input: \"SELECT ref, title FROM v_work_item\"\n    entities:\n      - { name: kind, key: ref, columns: { ref: text, kind: text } }\n",
+            "manifest: 2\nname: work\nintent:\n  purpose: test\npermissions: { ai: true }\nai_profiles:\n  - { id: sort, description: Sorts., fallback: decide }\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: kind.star\n    input: \"SELECT uri, title FROM v_work_item\"\n    entities:\n      - { name: kind, key: uri, columns: { uri: text, kind: text } }\n",
             &[(
                 "kind.star",
-                "def transform(input):\n    rows = []\n    for r in input[\"rows\"]:\n        a = ai_classify(\"is this a bug?\", [\"bug\", \"feature\"], role = \"sort\")\n        b = ai_classify(\"is this a bug?\", [\"bug\", \"feature\"], role = \"sort\")\n        rows.append({\"ref\": r[\"ref\"], \"kind\": a[\"label\"] if a == b else \"differs\"})\n    return {\"entities\": {\"kind\": rows}}\n",
+                "def transform(input):\n    rows = []\n    for r in input[\"rows\"]:\n        a = ai_classify(\"is this a bug?\", [\"bug\", \"feature\"], role = \"sort\")\n        b = ai_classify(\"is this a bug?\", [\"bug\", \"feature\"], role = \"sort\")\n        rows.append({\"uri\": r[\"uri\"], \"kind\": a[\"label\"] if a == b else \"differs\"})\n    return {\"entities\": {\"kind\": rows}}\n",
             )],
         );
         let db = task_db().await;
@@ -3235,10 +3235,10 @@ pub(crate) mod tests {
         extension(
             root.path(),
             "work",
-            "manifest: 2\nname: work\nintent:\n  purpose: test\npermissions: { process: true }\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: hot.star\n    input: \"SELECT ref, title, json_extract(native, '$.priority') AS priority FROM v_work_item WHERE state = 'todo'\"\n    entities:\n      - { name: hot, key: ref, columns: { ref: text, title: text } }\n  - id: sh\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - { name: raw, key: id, columns: { id: int } }\n",
+            "manifest: 2\nname: work\nintent:\n  purpose: test\npermissions: { process: true }\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: hot.star\n    input: \"SELECT uri, title, json_extract(native, '$.priority') AS priority FROM v_work_item WHERE state = 'todo'\"\n    entities:\n      - { name: hot, key: uri, columns: { uri: text, title: text } }\n  - id: sh\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - { name: raw, key: id, columns: { id: int } }\n",
             &[(
                 "hot.star",
-                "def transform(input):\n    return {\"entities\": {\"hot\": [{\"ref\": r[\"ref\"], \"title\": r[\"title\"]} for r in input[\"rows\"] if r[\"priority\"] == \"high\"]}}\n",
+                "def transform(input):\n    return {\"entities\": {\"hot\": [{\"uri\": r[\"uri\"], \"title\": r[\"title\"]} for r in input[\"rows\"] if r[\"priority\"] == \"high\"]}}\n",
             )],
         );
         script(
@@ -3270,7 +3270,7 @@ pub(crate) mod tests {
             (hot.entity.as_str(), hot.view.as_str()),
             ("hot", "v_work_hot")
         );
-        assert_eq!(hot.columns, vec!["ref", "title"]);
+        assert_eq!(hot.columns, vec!["uri", "title"]);
         assert_eq!(
             serde_json::to_value(&hot.rows).unwrap(),
             json!([[

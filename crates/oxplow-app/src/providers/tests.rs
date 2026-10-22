@@ -53,7 +53,7 @@ fn write_extension(project: &Path, hooks: &str) {
     std::fs::create_dir_all(dir.join("bin")).unwrap();
     std::fs::write(
         dir.join("extension.yaml"),
-        "manifest: 2\nname: tracker\nintent:\n  purpose: the fake tracker\n  examples: [{ name: a }]\ncommands:\n  - name: item.estimate\n    summary: Set a work item's points.\n    provider: fake\n    op: estimate\n    invokers: { human: true, agent: true, lens: true }\n    ui: { label: \"Estimate in Fake…\", group: Tracker, about: oxplow/work_item, input: { ref: \"{{ref}}\", points: 3 } }\npermissions: { process: true }\nproviders:\n  - id: fake\n    capability: work_items\n    entry: bin/provider\n    declarations: provider.json\n",
+        "manifest: 2\nname: tracker\nintent:\n  purpose: the fake tracker\n  examples: [{ name: a }]\ncommands:\n  - name: item.estimate\n    summary: Set a work item's points.\n    provider: fake\n    op: estimate\n    invokers: { human: true, agent: true, lens: true }\n    ui: { label: \"Estimate in Fake…\", group: Tracker, about: oxplow/work_item, input: { uri: \"{{uri}}\", points: 3 } }\npermissions: { process: true }\nproviders:\n  - id: fake\n    capability: work_items\n    entry: bin/provider\n    declarations: provider.json\n",
     )
     .unwrap();
     let script = dir.join("bin/provider");
@@ -503,7 +503,7 @@ async fn a_repair_item_is_filed_on_the_active_alternate_provider() {
         .svc
         .sql
         .query_sql(
-            "SELECT w.ref FROM v_work_item w JOIN v_work_item_link l ON l.from_ref = w.ref WHERE l.to_ref = 'oxplow:oxplow/collector?collector=work/hot' AND l.link_type = 'about'",
+            "SELECT w.uri FROM v_work_item w JOIN v_work_item_link l ON l.from_uri = w.uri WHERE l.to_uri = 'oxplow:oxplow/collector?collector=work/hot' AND l.link_type = 'about'",
             vec![],
             None,
         )
@@ -573,7 +573,7 @@ async fn work_item_commands_write_another_providers_items_through_its_process() 
         .run(
             &Actor::Human,
             "tracker.item.estimate",
-            json!({ "ref": item, "points": 5 }),
+            json!({ "uri": item, "points": 5 }),
             false,
         )
         .await
@@ -585,7 +585,7 @@ async fn work_item_commands_write_another_providers_items_through_its_process() 
         .run(
             &Actor::Human,
             "tracker.item.estimate",
-            json!({ "ref": item, "points": 5, "instance": "fake_nope" }),
+            json!({ "uri": item, "points": 5, "instance": "fake_nope" }),
             false,
         )
         .await
@@ -672,7 +672,7 @@ async fn an_outside_item_is_filed_on_the_thread_named_or_the_agents() {
             let out = svc
                 .sql
                 .query_sql(
-                    "SELECT thread_id FROM v_work_item WHERE ref = ?1",
+                    "SELECT thread_id FROM v_work_item WHERE uri = ?1",
                     vec![oxplow_db::SqlCell::Text(item)],
                     None,
                 )
@@ -692,7 +692,7 @@ async fn an_outside_item_is_filed_on_the_thread_named_or_the_agents() {
         )
         .await
         .unwrap();
-    let named = named.result["ref"].as_str().unwrap().to_string();
+    let named = named.result["uri"].as_str().unwrap().to_string();
     assert_eq!(
         oxplow_domain::uri::build::work_item_of_uri(&named).map(|(provider, _)| provider),
         Some("fake".to_string()),
@@ -715,7 +715,7 @@ async fn an_outside_item_is_filed_on_the_thread_named_or_the_agents() {
         )
         .await
         .unwrap();
-    let own = own.result["ref"].as_str().unwrap().to_string();
+    let own = own.result["uri"].as_str().unwrap().to_string();
     assert_eq!(thread_of(own).await, json!([[fx.thread.value()]]));
 }
 
@@ -744,8 +744,8 @@ async fn a_composite_writes_another_providers_item_as_steps() {
             &Actor::Human,
             "oxplow.command.sequence",
             json!({ "calls": [
-                { "name": "oxplow.work_item.comment", "input": { "ref": item, "body": "Looks good." } },
-                { "name": "oxplow.work_item.transition", "input": { "ref": item, "to": "done" } },
+                { "name": "oxplow.work_item.comment", "input": { "uri": item, "body": "Looks good." } },
+                { "name": "oxplow.work_item.transition", "input": { "uri": item, "to": "done" } },
             ] }),
             false,
         )
@@ -798,25 +798,25 @@ async fn an_external_verb_input_is_checked_and_stays_on_its_provider() {
     // An oxplow item: refused for its provider before it's looked up.
     let task = "oxplow:oxplow/work_item?id=tsk1&provider=oxplow".to_string();
     let err = run(
-        json!({ "title": "x", "parent_ref": task }),
+        json!({ "title": "x", "parent_uri": task }),
         "oxplow.work_item.create",
     )
     .await
     .unwrap_err();
     assert!(
         matches!(&err, oxplow_domain::CommandError::Invalid { field: Some(f), message }
-            if f == "/parent_ref" && message.contains(ours)),
+            if f == "/parent_uri" && message.contains(ours)),
         "{err:?}"
     );
     let item = run(json!({ "title": "x" }), "oxplow.work_item.create")
         .await
         .unwrap()
-        .result["ref"]
+        .result["uri"]
         .as_str()
         .unwrap()
         .to_string();
     let err = run(
-        json!({ "ref": item, "target": task, "link_type": "relates_to" }),
+        json!({ "uri": item, "target": task, "link_type": "relates_to" }),
         "oxplow.work_item.link",
     )
     .await
@@ -826,7 +826,7 @@ async fn an_external_verb_input_is_checked_and_stays_on_its_provider() {
         "{err:?}"
     );
     let err = run(
-        json!({ "ref": item, "to": "done", "native_state": "Doing" }),
+        json!({ "uri": item, "to": "done", "native_state": "Doing" }),
         "oxplow.work_item.transition",
     )
     .await
@@ -846,7 +846,7 @@ async fn an_external_verb_input_is_checked_and_stays_on_its_provider() {
         .run(
             &agent,
             "oxplow.work_item.delete",
-            json!({ "ref": item }),
+            json!({ "uri": item }),
             false,
         )
         .await
@@ -945,7 +945,7 @@ async fn a_provider_reads_the_host_through_what_it_needs() {
             .run(
                 &Actor::Human,
                 "tracker.item.estimate",
-                json!({ "ref": item, "points": 2 }),
+                json!({ "uri": item, "points": 2 }),
                 false,
             )
             .await;
@@ -1022,7 +1022,7 @@ async fn a_provider_reads_its_extensions_configuration_through_host_call() {
         .run(
             &Actor::Human,
             "tracker.item.estimate",
-            json!({ "ref": item, "points": 2 }),
+            json!({ "uri": item, "points": 2 }),
             false,
         )
         .await
@@ -1082,7 +1082,7 @@ async fn a_verbs_host_reads_are_recorded_with_its_run() {
         .run(
             &Actor::Human,
             "oxplow.work_item.update",
-            json!({ "ref": item, "title": "renamed" }),
+            json!({ "uri": item, "title": "renamed" }),
             false,
         )
         .await
@@ -1115,7 +1115,7 @@ async fn a_provider_command_is_declared_over_an_operation_it_lists() {
         .find(|c| c.name == "tracker.item.estimate")
         .unwrap();
     let schema = estimate.input_schema.as_ref().unwrap();
-    assert_eq!(schema["required"], json!(["ref", "points"]));
+    assert_eq!(schema["required"], json!(["uri", "points"]));
     assert_eq!(schema["properties"]["instance"]["type"], json!("string"));
     let manifest = root.join(".oxplow/extensions/tracker/extension.yaml");
     let base = std::fs::read_to_string(&manifest).unwrap();
@@ -1665,7 +1665,7 @@ fn a_provider_may_implement_an_effort_policy_by_its_contract() {
     emitting.event_types = oxplow_provider_fake::declarations().event_types;
     let err = spec::check_declarations(&spec, &emitting).unwrap_err();
     assert!(
-        err.contains("work_item.recorded@2") && err.contains("may emit only"),
+        err.contains("work_item.recorded@3") && err.contains("may emit only"),
         "{err}"
     );
 }
@@ -1860,7 +1860,7 @@ async fn recorded_for(fx: &EffortFixture, item: &str) -> usize {
     logged(fx, "work_item.recorded")
         .await
         .iter()
-        .filter(|p| p["item"]["ref"] == item)
+        .filter(|p| p["item"]["uri"] == item)
         .count()
 }
 
@@ -2344,7 +2344,7 @@ async fn an_effect_doesnt_hear_its_own_external_write_echoed_by_a_read() {
     .unwrap();
     std::fs::write(
         dir.join("shout.star"),
-        "def transform(x):\n    item = x[\"event\"][\"payload\"][\"item\"]\n    return {\"commands\": [{\"name\": \"oxplow.work_item.update\", \"input\": {\"ref\": item[\"ref\"], \"title\": item[\"title\"] + \"!\"}}]}\n",
+        "def transform(x):\n    item = x[\"event\"][\"payload\"][\"item\"]\n    return {\"commands\": [{\"name\": \"oxplow.work_item.update\", \"input\": {\"uri\": item[\"uri\"], \"title\": item[\"title\"] + \"!\"}}]}\n",
     )
     .unwrap();
     let ext = extension(&project);
@@ -2427,7 +2427,7 @@ async fn an_effect_doesnt_hear_its_own_external_write_echoed_by_a_read() {
     let titles: Vec<String> = logged(&fx, "work_item.recorded")
         .await
         .iter()
-        .filter(|p| p["item"]["ref"] == item.as_str())
+        .filter(|p| p["item"]["uri"] == item.as_str())
         .map(|p| p["item"]["title"].as_str().unwrap().to_string())
         .collect();
     assert_eq!(titles.last().map(String::as_str), Some("theirs!"));
@@ -5028,7 +5028,7 @@ async fn a_retry_whose_provider_went_away_is_not_sent() {
 /// failure waits for a person's retry, and counts.
 #[tokio::test(flavor = "multi_thread")]
 async fn an_interrupted_attempt_retries_only_toward_a_declaring_provider() {
-    let with_a_task_step = "def transform(x):\n    ref = x[\"event\"][\"payload\"][\"work_item\"]\n    return {\"commands\": [{\"name\": \"oxplow.work_item.update\", \"input\": {\"ref\": ref, \"title\": \"filed\"}}, {\"name\": \"oxplow.work_item.create\", \"input\": {\"title\": \"from effect\"}}]}\n";
+    let with_a_task_step = "def transform(x):\n    ref = x[\"event\"][\"payload\"][\"work_item\"]\n    return {\"commands\": [{\"name\": \"oxplow.work_item.update\", \"input\": {\"uri\": ref, \"title\": \"filed\"}}, {\"name\": \"oxplow.work_item.create\", \"input\": {\"title\": \"from effect\"}}]}\n";
     for (hooks, script) in [
         ("lose-reply,plain-writes", FILE_ON_FAKE),
         ("lose-reply", with_a_task_step),
@@ -5983,7 +5983,7 @@ async fn agent_moves(fx: &EffortFixture, item: &str, to: &str) {
         .run(
             &agent,
             crate::commands::work_item::NAME,
-            json!({ "ref": item, "to": to }),
+            json!({ "uri": item, "to": to }),
             false,
         )
         .await
@@ -6010,7 +6010,7 @@ async fn file_task(fx: &EffortFixture) -> String {
         )
         .await
         .unwrap();
-    out.result["ref"].as_str().unwrap().to_string()
+    out.result["uri"].as_str().unwrap().to_string()
 }
 
 /// `(work_item, open?)` of the thread's efforts, oldest first, and the
@@ -6172,7 +6172,7 @@ async fn a_provider_policy_composing_no_command_runs_nothing() {
         .svc
         .sql
         .query_sql(
-            "SELECT state FROM v_work_item WHERE ref = ?1",
+            "SELECT state FROM v_work_item WHERE uri = ?1",
             vec![oxplow_db::SqlCell::Text(task)],
             None,
         )
@@ -6660,8 +6660,8 @@ async fn a_knowledge_provider_keeps_pages_and_core_records_them() {
         serde_json::to_string(&json!({
             "items": {}, "next": 1, "rev": 1, "answered": {},
             "pages": { "outside": { "rev": 1, "record": {
-                "ref": "oxplow:oxplow/wiki?slug=outside", "title": "Outside", "body": "# Outside\n\nWritten in the vault.\n",
-                "refs": [], "updated_at": "2026-10-09T00:00:01Z"
+                "uri": "oxplow:oxplow/wiki?slug=outside", "title": "Outside", "body": "# Outside\n\nWritten in the vault.\n",
+                "uris": [], "updated_at": "2026-10-09T00:00:01Z"
             } } }
         }))
         .unwrap(),
@@ -6722,7 +6722,7 @@ async fn a_knowledge_provider_keeps_pages_and_core_records_them() {
             &Actor::Human,
             crate::knowledge::WRITE_PAGE,
             json!({ "slug": "design", "body": "# Design\n\nSee [[src/lib.rs]].\n",
-                    "verified_refs": ["src/lib.rs"] }),
+                    "verified_files": ["src/lib.rs"] }),
             true,
         )
         .await

@@ -3,5 +3,5 @@ input:
   lens: compact-list
   params: { scope: all }
 expect:
-  columns: [ref, title, state, updated_at]
+  columns: [uri, title, state, updated_at]
   rows: 0

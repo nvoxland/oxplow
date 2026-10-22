@@ -24,7 +24,7 @@ export function useAlerts() {
   const items: AlertItems = useMemo(
     () => ({
       proposals: proposals.map((p) => ({
-        id: p.ref,
+        id: p.uri,
         title: `${p.threadTitle ? `“${p.threadTitle}”` : "An agent"} wants to run ${p.command}`,
       })),
       opErrors: opErrors.map((e) => ({ id: e.id, label: e.label })),

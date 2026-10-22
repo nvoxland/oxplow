@@ -10,10 +10,10 @@ const realApi = await import("../api.js");
 mock.module("../api.js", () => ({
   ...realApi,
   listPersonCommands: async () => [
-    personSpec("tracker.item.estimate", { label: "Estimate in Fake…", group: "Tracker", about: "oxplow/work_item", input: { ref: "{{ref}}", points: 3 } }),
-    personSpec("tracker.commit.sync", { label: "Sync", group: "Tracker", about: "oxplow/commit", input: { sha: "{{ref.id}}" } }),
-    personSpec("oxplow.review.accept", { label: "Accept Review", group: "Review", about: "oxplow/effort", input: { ref: "{{ref}}" } }),
-    personSpec("oxplow.review.request_changes", { label: "Request Changes", group: "Review", about: "oxplow/effort", input: { ref: "{{ref}}" } }),
+    personSpec("tracker.item.estimate", { label: "Estimate in Fake…", group: "Tracker", about: "oxplow/work_item", input: { uri: "{{uri}}", points: 3 } }),
+    personSpec("tracker.commit.sync", { label: "Sync", group: "Tracker", about: "oxplow/commit", input: { sha: "{{uri.id}}" } }),
+    personSpec("oxplow.review.accept", { label: "Accept Review", group: "Review", about: "oxplow/effort", input: { uri: "{{uri}}" } }),
+    personSpec("oxplow.review.request_changes", { label: "Request Changes", group: "Review", about: "oxplow/effort", input: { uri: "{{uri}}" } }),
   ],
 }));
 const { RefCommandsMenu } = await import("./RefCommandsMenu.js");
@@ -31,7 +31,7 @@ test("a page's ref gets its kind's commands, run with the ref bound", async () =
   expect(view.getByTestId("page-nav-commands-menu").textContent).toContain("Tracker");
   expect(view.queryByTestId("page-nav-command-tracker.commit.sync")).toBeNull();
   fireEvent.click(view.getByTestId("page-nav-command-tracker.item.estimate"));
-  await waitFor(() => expect(ran).toEqual([["tracker.item.estimate", { ref: "oxplow:oxplow/work_item?id=W-1&provider=fake", points: 3 }]]));
+  await waitFor(() => expect(ran).toEqual([["tracker.item.estimate", { uri: "oxplow:oxplow/work_item?id=W-1&provider=fake", points: 3 }]]));
 });
 
 test("no commands for the page's kind, no menu", async () => {
@@ -49,5 +49,5 @@ test("an effort's page offers Accept Review and Request Changes", async () => {
   expect(menu).toContain("Accept Review");
   expect(menu).toContain("Request Changes");
   fireEvent.click(view.getByTestId("page-nav-command-oxplow.review.accept"));
-  await waitFor(() => expect(ran).toEqual([["oxplow.review.accept", { ref: "oxplow:oxplow/effort?id=eff3" }]]));
+  await waitFor(() => expect(ran).toEqual([["oxplow.review.accept", { uri: "oxplow:oxplow/effort?id=eff3" }]]));
 });

@@ -27,15 +27,15 @@ export function ThreadAnswer({ answer, onOpenPage }: ThreadAnswerProps) {
   useEffect(() => setKept(answer.keptLens), [answer.keptLens]);
   // A kept answer is a lens now, a link away: one line until asked for,
   // so kept answers don't crowd the terminal (tsk1042).
-  const [shown, setShown] = useHistoryState(`answer-shown:${answer.ref}`, answer.keptLens === null);
+  const [shown, setShown] = useHistoryState(`answer-shown:${answer.uri}`, answer.keptLens === null);
   const refresh = useCallback(async () => {
     try {
-      setRun(await runAnswer(answer.ref));
+      setRun(await runAnswer(answer.uri));
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
-  }, [answer.ref]);
+  }, [answer.uri]);
   useEffect(() => void refresh(), [refresh]);
   useRerunOnChange(run?.result.reads ?? NO_READS, () => void refresh());
 
@@ -57,7 +57,7 @@ export function ThreadAnswer({ answer, onOpenPage }: ThreadAnswerProps) {
             {lens}
           </RouteLink>
         ) : (
-          <KeepThis answer={answer.ref} onKept={setKept} />
+          <KeepThis answer={answer.uri} onKept={setKept} />
         )}
         {kept ? (
           <button type="button" data-testid="thread-answer-show" onClick={() => setShown(!shown)}>

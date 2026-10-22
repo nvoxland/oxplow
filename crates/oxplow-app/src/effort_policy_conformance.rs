@@ -87,7 +87,7 @@ async fn run(
         )
         .await
         .map_err(|e| format!("filing an item: {e}"))?
-        .result["ref"]
+        .result["uri"]
         .as_str()
         .ok_or("the work list filed no item")?
         .to_string();
@@ -157,7 +157,7 @@ async fn transition(
         .run(
             actor,
             crate::commands::work_item::NAME,
-            json!({ "ref": item, "to": to }),
+            json!({ "uri": item, "to": to }),
             false,
         )
         .await

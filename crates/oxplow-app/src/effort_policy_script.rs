@@ -89,10 +89,10 @@ def transform(x):
         return {"commands": [{"name": "oxplow.effort.open",
                               "input": {"thread": thread, "work_item": item}}]}
     if to == "done" or to == "canceled":
-        rows = scope("sql.read", {"sql": "SELECT ref FROM v_effort WHERE work_item = :w AND ended_at IS NULL",
+        rows = scope("sql.read", {"sql": "SELECT uri FROM v_effort WHERE work_item = :w AND ended_at IS NULL",
                                   "params": {"w": item}})
         return {"commands": [{"name": "oxplow.effort.close",
-                              "input": {"effort": uri.param(r["ref"], "id"), "reason": "switch"}}
+                              "input": {"effort": uri.param(r["uri"], "id"), "reason": "switch"}}
                              for r in rows]}
     return {"skip": "a move that changes no effort"}
 "#;
@@ -151,7 +151,7 @@ def transform(x):
             )
             .await
             .unwrap();
-        out.result["ref"].as_str().unwrap().to_string()
+        out.result["uri"].as_str().unwrap().to_string()
     }
 
     async fn agent_moves(fx: &EffortFixture, item: &str, to: &str) {
@@ -165,7 +165,7 @@ def transform(x):
             .run(
                 &agent,
                 crate::commands::work_item::NAME,
-                json!({ "ref": item, "to": to }),
+                json!({ "uri": item, "to": to }),
                 false,
             )
             .await

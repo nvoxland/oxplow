@@ -9,19 +9,19 @@ const result = (columns: string[], rows: SqlQueryResult["rows"]): SqlQueryResult
 test("the index reads v_knowledge_page rows", () => {
   const pages = pagesFromResult(
     result(
-      ["ref", "slug", "title", "excerpt", "updated_at", "stale_ref_count", "outbound_refs"],
+      ["uri", "slug", "title", "excerpt", "updated_at", "stale_ref_count", "outbound_uris"],
       [["oxplow:oxplow/wiki?slug=auth", "auth", "Auth", "How login…", "2026-09-30T00:00:00Z", 2, '["oxplow:oxplow/file?path=src/a.rs","oxplow:oxplow/wiki?slug=other"]']],
     ),
   );
   expect(pages).toEqual([
     {
-      ref: "oxplow:oxplow/wiki?slug=auth",
+      uri: "oxplow:oxplow/wiki?slug=auth",
       slug: "auth",
       title: "Auth",
       excerpt: "How login…",
       updated_at: "2026-09-30T00:00:00Z",
       stale_ref_count: 2,
-      outbound_refs: ["oxplow:oxplow/file?path=src/a.rs", "oxplow:oxplow/wiki?slug=other"],
+      outbound_uris: ["oxplow:oxplow/file?path=src/a.rs", "oxplow:oxplow/wiki?slug=other"],
     },
   ]);
 });

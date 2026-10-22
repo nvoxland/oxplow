@@ -350,7 +350,7 @@ impl Instance {
                 decl.name, self.spec.capability, decl.entity
             ));
         };
-        let own = record.row["ref"].as_str().unwrap_or_default().to_string();
+        let own = record.row["uri"].as_str().unwrap_or_default().to_string();
         if !super::registry::owns(spec::contract_of(&self.spec), &self.id, &own) {
             return Err(format!(
                 "collector `{}` streamed `{own}`, which isn't one of its {}s",
@@ -426,8 +426,8 @@ impl Instance {
 }
 
 /// Whether `record` says what the last event of its type about the same
-/// row (its `<key>.ref`) already said. The path is the contract's literal
-/// (`$.item.ref`), so the lookup is the expression `event_log_work_item_ref`
+/// row (its `<key>.uri`) already said. The path is the contract's literal
+/// (`$.item.uri`), so the lookup is the expression `event_log_work_item_uri`
 /// indexes; a capability that streams another entity indexes its own.
 fn restates(
     tx: &rusqlite::Connection,
@@ -435,8 +435,8 @@ fn restates(
     record: &Envelope,
 ) -> Result<bool, oxplow_domain::DomainError> {
     use rusqlite::OptionalExtension;
-    let path = format!("$.{key}.ref");
-    let Some(row) = record.payload[key]["ref"].as_str() else {
+    let path = format!("$.{key}.uri");
+    let Some(row) = record.payload[key]["uri"].as_str() else {
         return Ok(false);
     };
     let last: Option<String> = tx

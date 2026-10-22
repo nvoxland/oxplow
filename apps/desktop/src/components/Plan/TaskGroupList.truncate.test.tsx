@@ -20,7 +20,7 @@ const LONG = "In progress task with an extremely long title ".repeat(12);
 
 function inProgressTask(): WorkItem {
   return {
-    ref: "oxplow:oxplow/work_item?id=tsk9&provider=oxplow",
+    uri: "oxplow:oxplow/work_item?id=tsk9&provider=oxplow",
     title: LONG,
     state: "in_progress",
     native: { priority: "medium" },

@@ -61,7 +61,7 @@ pub async fn resolve(
         .db
         .read(move |tx| {
             tx.query_row(
-                "SELECT path, line, col FROM symbol WHERE stream_id = ?1 AND ref = ?2",
+                "SELECT path, line, col FROM symbol WHERE stream_id = ?1 AND uri = ?2",
                 rusqlite::params![id, current],
                 |row| Ok((row.get::<_, String>(0)?, row.get(1)?, row.get(2)?)),
             )

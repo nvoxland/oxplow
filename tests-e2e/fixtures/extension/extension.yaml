@@ -47,11 +47,11 @@ effects:
     needs: [sql.read]
 models:
   - name: item
-    version: 1
-    key: [ref]
+    version: 2
+    key: [uri]
     description: "Each oxplow task as an `e2e/item` URI: what the resource resolves."
     columns:
-      - { name: ref, type: TEXT, doc: "`oxplow:e2e/item?id=<n>`." }
+      - { name: uri, type: TEXT, doc: "`oxplow:e2e/item?id=<n>`." }
       - { name: title, type: TEXT, doc: "The item's title." }
 pages:
   - { id: item, title: Item, category: Work, lens: item }

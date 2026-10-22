@@ -3,12 +3,13 @@ description: The stream's snapshots of the working tree, newest first — as a l
 params:
   - { name: stream_id }
   - name: mode
+    role: filter
     label: Group by
     default: recent
     options:
       - { value: recent, label: Recent snapshots }
       - { value: by-commit, label: By git commit }
-  - { name: all, label: Show every snapshot, type: bool, default: false }
+  - { name: all, role: filter, label: Show every snapshot, type: bool, default: false }
 viz: document
 sections:
   - { id: recent, title: Snapshots, lens: local-history-recent }

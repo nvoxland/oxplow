@@ -1164,7 +1164,7 @@ fn script_and_sql_sources() -> Vec<(String, String)> {
 
 /// Every place a script, lens query or model SQL spells or takes apart a
 /// ref of a core kind by hand, as `path:line text`. A kind's owning model
-/// (a resource's `resolve` view) spells its prefix in its `ref`
+/// (a resource's `resolve` view) spells its prefix in its `uri`
 /// column and is exempt.
 fn hand_made_script_refs() -> Vec<String> {
     use regex::Regex;
@@ -1208,9 +1208,9 @@ fn hand_made_script_refs() -> Vec<String> {
     out
 }
 
-/// A ref's owner spells it and everyone else carries it: scripts build a
-/// ref with `ref.build` and read one with `ref.id` / `ref.parse`, and SQL
-/// selects or joins on the owning model's `ref` column — never
+/// A URI's owner spells it and everyone else carries it: scripts build a
+/// URI with `uri.build` and read one with `uri.id` / `uri.parse`, and SQL
+/// selects or joins on the owning model's `uri` column — never
 /// `"file:" + path`, `'oxplow:oxplow/effort?id=eff' || id`, `startswith("oxplow:oxplow/effort?id=eff")`
 /// (`.context/resources.md`, "Using refs"). The kept list is empty.
 #[test]

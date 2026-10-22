@@ -33,8 +33,8 @@ describe("graphUriOf", () => {
     expect(graphUriOf(gitCommitRef("abc1234"))).toBe(commitUri("abc1234"));
   });
 
-  test("any other kind with a page is its own URI, without its view params", () => {
-    expect(graphUriOf(lensRef("oxplow-bundled/findings", { range: "7d" }))).toBe(lensUri("oxplow-bundled/findings"));
+  test("any other kind with a page is its own URI, without its view", () => {
+    expect(graphUriOf(lensRef("oxplow-bundled/findings", {}, { range: "7d" }))).toBe(lensUri("oxplow-bundled/findings"));
     expect(graphUriOf(effortDiffRef("eff12"))).toBe(effortUri("eff12"));
   });
 

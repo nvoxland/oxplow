@@ -22,5 +22,5 @@ SELECT j.id,
        CAST((SELECT COALESCE(sum(json_extract(o.content_json, '$.outputTokens')), 0)
                FROM source('extension_job_output') o
               WHERE o.job_id = j.id AND o.attempt = j.attempt AND o.kind = 'usage') AS INTEGER) AS output_tokens,
-       CAST(uri('oxplow/job_run', 'id', j.id) AS TEXT) AS ref
+       CAST(uri('oxplow/job_run', 'id', j.id) AS TEXT) AS uri
 FROM source('extension_job') j

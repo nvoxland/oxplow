@@ -9,15 +9,15 @@
 # inferred decisions, files outside the item's area (JSON arrays).
 _REVIEW = """
 SELECT e.work_item,
-       (SELECT json_group_array(json_object('claim', c.ref, 'statement', c.statement))
-          FROM v_claim c JOIN v_oxplow_bundled_claim_status s ON s.ref = c.ref
+       (SELECT json_group_array(json_object('claim', c.uri, 'statement', c.statement))
+          FROM v_claim c JOIN v_oxplow_bundled_claim_status s ON s.uri = c.uri
          WHERE c.effort_id = e.id AND s.verified = 0) AS unverified,
-       (SELECT json_group_array(json_object('decision', d.ref, 'question', d.question, 'choice', d.choice))
+       (SELECT json_group_array(json_object('decision', d.uri, 'question', d.question, 'choice', d.choice))
           FROM v_decision d WHERE d.effort_id = e.id AND d.provenance = 'inferred') AS inferred,
        (SELECT json_group_array(v.path)
           FROM v_oxplow_bundled_deviation v WHERE v.effort_id = e.id) AS deviated
 FROM v_effort e
-WHERE e.ref = uri('oxplow/effort', 'id', :effort)
+WHERE e.uri = uri('oxplow/effort', 'id', :effort)
 """
 
 def _list(text):
@@ -58,8 +58,8 @@ def transform(x):
     item = row["work_item"]
     return {
         "commands": [
-            {"name": "oxplow.work_item.comment", "input": {"ref": item, "body": "\n".join(lines)}},
-            {"name": "oxplow.work_item.transition", "input": {"ref": item, "to": "done"}},
+            {"name": "oxplow.work_item.comment", "input": {"uri": item, "body": "\n".join(lines)}},
+            {"name": "oxplow.work_item.transition", "input": {"uri": item, "to": "done"}},
         ],
         "events": [{
             "type": "oxplow_bundled.accepted",

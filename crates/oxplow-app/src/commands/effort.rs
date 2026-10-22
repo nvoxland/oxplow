@@ -49,7 +49,7 @@ pub struct EffortOpenInput {
     /// agent may name only a thread in its own stream.
     #[serde(default)]
     pub thread: Option<String>,
-    /// The work item it's for, as a canonical ref (`oxplow:oxplow/work_item?id=tsk42&provider=oxplow`,
+    /// The work item it's for, as a canonical URI (`oxplow:oxplow/work_item?id=tsk42&provider=oxplow`,
     /// `oxplow:oxplow/work_item?id=ENG-12&provider=issues`); unlinked when absent.
     #[serde(default)]
     pub work_item: Option<String>,

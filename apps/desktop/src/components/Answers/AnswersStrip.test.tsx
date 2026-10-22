@@ -12,7 +12,7 @@ let answerRows: (string | null)[][] = [];
 /** `v_command_proposal` rows: id, thread_id, decision. */
 let proposalRows: Array<{ id: number; thread: number; decision: string }> = [];
 const decided: Array<[number, boolean]> = [];
-const PROPOSAL_COLUMNS = ["id", "ref", "created_at", "command", "input", "actor_kind", "actor_id", "thread_id", "key", "preview", "dry_run", "decision", "decided_at"];
+const PROPOSAL_COLUMNS = ["id", "uri", "created_at", "command", "input", "actor_kind", "actor_id", "thread_id", "key", "preview", "dry_run", "decision", "decided_at"];
 
 const lens = (title: string): Lens => ({
   id: "answer/1",
@@ -53,7 +53,7 @@ mock.module("../../api.js", () => ({
               `proposal:${p.id}`,
               "2026-10-03T00:00:00Z",
               "oxplow.work_item.delete",
-              '{"ref":"oxplow:oxplow/work_item?id=tsk1&provider=oxplow"}',
+              '{"uri":"oxplow:oxplow/work_item?id=tsk1&provider=oxplow"}',
               "agent",
               `thr${p.thread}`,
               p.thread,
@@ -68,7 +68,7 @@ mock.module("../../api.js", () => ({
           freshness: {},
         }
       : {
-          columns: ["ref", "title", "lens", "kept_lens"],
+          columns: ["uri", "title", "lens", "kept_lens"],
           rows: answerRows,
           truncated: false,
           reads: { models: ["v_thread_answer"], tables: [], measures: [] },
@@ -134,7 +134,7 @@ test("the strip collapses, and Escape inside it collapses it", async () => {
 });
 
 test("Keep This asks for a slug inline; Enter keeps it with lens.keep, Escape cancels", async () => {
-  const answer = { ref: "oxplow:oxplow/answer?id=2", title: "Churn", lens: null, keptLens: null };
+  const answer = { uri: "oxplow:oxplow/answer?id=2", title: "Churn", lens: null, keptLens: null };
   const view = render(<ThreadAnswer answer={answer} onOpenPage={() => {}} />);
   fireEvent.click(await waitFor(() => view.getByTestId("thread-answer-keep")));
   const input = view.getByTestId("thread-answer-slug") as HTMLInputElement;
@@ -154,7 +154,7 @@ test("Keep This asks for a slug inline; Enter keeps it with lens.keep, Escape ca
 
 test("a kept answer links to its lens", async () => {
   const opened: string[] = [];
-  const answer = { ref: "oxplow:oxplow/answer?id=1", title: "Open tasks", lens: "review/waiting", keptLens: "review/waiting" };
+  const answer = { uri: "oxplow:oxplow/answer?id=1", title: "Open tasks", lens: "review/waiting", keptLens: "review/waiting" };
   const view = render(<ThreadAnswer answer={answer} onOpenPage={(r) => opened.push(r.id)} />);
   fireEvent.click(await waitFor(() => view.getByTestId("thread-answer-lens")));
   expect(opened).toEqual(["oxplow:oxplow/lens?lens=review/waiting"]);
@@ -163,7 +163,7 @@ test("a kept answer links to its lens", async () => {
 // tsk1042: a kept answer is a lens now, a link away; in the strip it's one
 // line until asked for, so kept answers don't crowd the terminal.
 test("a kept answer is one line until shown", async () => {
-  const answer = { ref: "oxplow:oxplow/answer?id=1", title: "Open tasks", lens: "review/waiting", keptLens: "review/waiting" };
+  const answer = { uri: "oxplow:oxplow/answer?id=1", title: "Open tasks", lens: "review/waiting", keptLens: "review/waiting" };
   const view = render(<ThreadAnswer answer={answer} />);
   await waitFor(() => view.getByTestId("thread-answer-lens"));
   expect(view.queryByTestId("thread-answer-body")).toBeNull();
@@ -174,8 +174,8 @@ test("a kept answer is one line until shown", async () => {
 test("whether a kept answer is shown is the step's history state", async () => {
   const { PageNavigationContext } = await import("../../tabs/PageNavigationContext.js");
   const states: Record<string, unknown>[] = [];
-  const answer = { ref: "oxplow:oxplow/answer?id=1", title: "Open tasks", lens: "review/waiting", keptLens: "review/waiting" };
-  const nav = { viewParams: {}, patchViewParams() {}, historyState: { [`answer-shown:${answer.ref}`]: true }, setHistoryState: (p: Record<string, unknown>) => states.push(p) } as never;
+  const answer = { uri: "oxplow:oxplow/answer?id=1", title: "Open tasks", lens: "review/waiting", keptLens: "review/waiting" };
+  const nav = { viewParams: {}, patchViewParams() {}, historyState: { [`answer-shown:${answer.uri}`]: true }, setHistoryState: (p: Record<string, unknown>) => states.push(p) } as never;
   const view = render(
     <PageNavigationContext.Provider value={nav}>
       <ThreadAnswer answer={answer} />
@@ -183,7 +183,7 @@ test("whether a kept answer is shown is the step's history state", async () => {
   );
   await waitFor(() => view.getByTestId("thread-answer-body"));
   fireEvent.click(view.getByTestId("thread-answer-show"));
-  expect(states).toEqual([{ [`answer-shown:${answer.ref}`]: false }]);
+  expect(states).toEqual([{ [`answer-shown:${answer.uri}`]: false }]);
 });
 
 // P9.A3: what the agent asked for waits where the conversation is.

@@ -3,12 +3,12 @@ description: The wiki pages opened most recently in the stream, newest first. Em
 needs: [knowledge]
 params:
   - { name: stream_id }
-  - { name: filter, label: Search titles + bodies, default: "" }
+  - { name: filter, role: filter, label: Search titles + bodies, default: "" }
 query: |
   SELECT p.slug, p.title, max(v.visited_at) AS visited_at
   FROM v_page_visit v
   JOIN v_thread t ON t.id = v.thread_id
-  JOIN v_knowledge_page p ON p.ref = v.page_id
+  JOIN v_knowledge_page p ON p.uri = v.page_id
   WHERE v.page_kind = 'wiki' AND t.stream_id = :stream_id AND :filter = ''
   GROUP BY p.slug
   ORDER BY visited_at DESC

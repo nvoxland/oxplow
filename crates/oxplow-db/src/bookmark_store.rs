@@ -53,8 +53,8 @@ pub struct Viewer {
 /// One page bookmarked at a scope, as a viewer sees it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Bookmark {
-    /// The page's canonical ref (its tab id).
-    #[serde(rename = "ref")]
+    /// The page's canonical URI (its tab id).
+    #[serde(rename = "uri")]
     pub page_ref: String,
     pub page_kind: String,
     pub label: Option<String>,
@@ -82,8 +82,8 @@ pub fn visible_tx(
     page_ref: &str,
 ) -> Result<Option<Bookmark>, DomainError> {
     conn.query_row(
-        "SELECT ref, page_kind, label, scope FROM bookmark
-         WHERE ref = ?1
+        "SELECT uri, page_kind, label, scope FROM bookmark
+         WHERE uri = ?1
            AND ((scope = 'thread' AND thread_id = ?2)
                 OR (scope = 'stream' AND stream_id = ?3)
                 OR scope = 'project')
@@ -117,7 +117,7 @@ pub fn remove_tx(
     let before = visible_tx(conn, viewer, page_ref)?;
     conn.execute(
         "DELETE FROM bookmark
-         WHERE ref = ?1
+         WHERE uri = ?1
            AND ((scope = 'thread' AND thread_id = ?2)
                 OR (scope = 'stream' AND stream_id = ?3)
                 OR scope = 'project')",
@@ -141,7 +141,7 @@ pub fn set_tx(
     let (thread_id, stream_id) = owner(viewer, bookmark.scope)?;
     let before = remove_tx(conn, viewer, &bookmark.page_ref)?;
     conn.execute(
-        "INSERT INTO bookmark (ref, page_kind, label, scope, thread_id, stream_id, added_at)
+        "INSERT INTO bookmark (uri, page_kind, label, scope, thread_id, stream_id, added_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         params![
             bookmark.page_ref,

@@ -61,7 +61,7 @@ pub struct RecordInput {
     pub key: String,
     /// The asserted value.
     pub value: f64,
-    /// What it's about, as a ref (`oxplow:oxplow/file?path=src/a.rs`, `oxplow:oxplow/ai_model?name=opus`).
+    /// What it's about, as a URI (`oxplow:oxplow/file?path=src/a.rs`, `oxplow:oxplow/ai_model?name=opus`).
     #[serde(default)]
     pub subject: Option<String>,
     /// Extra dimensions, recorded on the fact.

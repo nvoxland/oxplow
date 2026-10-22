@@ -11,29 +11,30 @@
           "description": "It was deleted in the store.",
           "type": "boolean"
         },
-        "ref": {
-          "description": "`oxplow:oxplow/wiki?slug=<slug>`.",
-          "type": "string"
-        },
-        "refs": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
         "title": {
           "type": "string"
         },
         "updated_at": {
           "description": "RFC 3339: when the store last changed it.",
           "type": "string"
+        },
+        "uri": {
+          "description": "`oxplow:oxplow/wiki?slug=<slug>`.",
+          "type": "string"
+        },
+        "uris": {
+          "description": "What it links, as URIs.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         }
       },
       "required": [
-        "ref",
+        "uri",
         "title",
         "body",
-        "refs",
+        "uris",
         "updated_at"
       ],
       "type": "object"
@@ -41,7 +42,7 @@
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "`knowledge.page.recorded@1`: a knowledge store's page, as it recorded\nit (`.context/knowledge.md` \"The capability\").",
+  "description": "`knowledge.page.recorded@2`: a knowledge store's page, as it recorded\nit (`.context/knowledge.md` \"The capability\").",
   "properties": {
     "page": {
       "$ref": "#/$defs/KnowledgePageRecord"
@@ -50,6 +51,6 @@
   "required": [
     "page"
   ],
-  "title": "KnowledgePageRecordedV1",
+  "title": "KnowledgePageRecordedV2",
   "type": "object"
 }

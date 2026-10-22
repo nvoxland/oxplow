@@ -1643,12 +1643,12 @@ mod tests {
 - id: hot
   runtime: starlark
   entry: collectors/hot.star
-  input: "SELECT ref, title FROM v_work_item WHERE json_extract(native, '$.priority') = 'high'"
+  input: "SELECT uri, title FROM v_work_item WHERE json_extract(native, '$.priority') = 'high'"
   sync: upsert
   entities:
     - name: hot_task
-      key: ref
-      columns: { ref: text, title: text }
+      key: uri
+      columns: { uri: text, title: text }
 "#;
 
     /// A Starlark collector declares the services its script uses beyond
@@ -1694,15 +1694,15 @@ mod tests {
         assert!(errors.is_empty(), "{errors:?}");
         assert_eq!(out[0].input.as_ref().and_then(|i| i.limit), None);
         let bounded = DERIVED.replace(
-            r#"input: "SELECT ref, title FROM v_work_item WHERE json_extract(native, '$.priority') = 'high'""#,
-            "input: { sql: \"SELECT ref, title FROM v_work_item\", limit: 50 }",
+            r#"input: "SELECT uri, title FROM v_work_item WHERE json_extract(native, '$.priority') = 'high'""#,
+            "input: { sql: \"SELECT uri, title FROM v_work_item\", limit: 50 }",
         );
         let (out, errors) = parse(&bounded);
         assert!(errors.is_empty(), "{errors:?}");
         assert_eq!(
             out[0].input,
             Some(CollectorInput {
-                sql: "SELECT ref, title FROM v_work_item".into(),
+                sql: "SELECT uri, title FROM v_work_item".into(),
                 limit: Some(50),
             })
         );
@@ -1727,7 +1727,7 @@ mod tests {
         assert!(s.runtime.is_derived());
         assert_eq!(
             s.input.as_ref().map(|i| i.sql.as_str()),
-            Some("SELECT ref, title FROM v_work_item WHERE json_extract(native, '$.priority') = 'high'")
+            Some("SELECT uri, title FROM v_work_item WHERE json_extract(native, '$.priority') = 'high'")
         );
         assert_eq!(parse(GOOD).0[0].sync, CollectorSync::Replace);
         for (from, to, needle) in [

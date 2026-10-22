@@ -3,7 +3,7 @@ description: The definitions oxplow finds in the stream's files, nested under th
 params:
   - { name: stream_id }
   - { name: path, label: File (empty for every file), default: "" }
-  - { name: filter, label: Name contains, default: "" }
+  - { name: filter, role: filter, label: Name contains, default: "" }
 query: |
   WITH matched AS (
     SELECT * FROM v_symbol
@@ -14,8 +14,8 @@ query: |
   SELECT path AS id, NULL AS parent, path AS label, path, 1 AS line
   FROM matched WHERE :path = '' GROUP BY path
   UNION ALL
-  SELECT s.ref, coalesce(
-           (SELECT min(p.ref) FROM matched p
+  SELECT s.uri, coalesce(
+           (SELECT min(p.uri) FROM matched p
             WHERE p.path = s.path AND s.container IS NOT NULL
               AND CASE WHEN p.container IS NULL THEN p.name ELSE p.container || '::' || p.name END = s.container),
            CASE WHEN :path = '' THEN s.path END),

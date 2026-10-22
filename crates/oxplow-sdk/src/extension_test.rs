@@ -541,7 +541,7 @@ async fn start_effects(host: &Host, ext: &Extension) -> Result<(), String> {
 /// `commands` or `pages` delivers the `contribution.job.completed` the job
 /// logs to the extension's effects, running there too: the
 /// effects that reacted (`[{ id, state? }]`), the commands they ran
-/// (`[names]`) and which of the named wiki pages (`[ref]`) now exist.
+/// (`[names]`) and which of the named wiki pages (`[uri]`) now exist.
 async fn job_example(
     host: &Host,
     ext: &Extension,
@@ -762,7 +762,7 @@ async fn job_example(
                 .svc
                 .sql
                 .query_sql(
-                    "SELECT 1 FROM v_knowledge_page WHERE ref = ?1",
+                    "SELECT 1 FROM v_knowledge_page WHERE uri = ?1",
                     vec![oxplow_db::SqlCell::Text(page.clone())],
                     None,
                 )
@@ -2059,7 +2059,7 @@ async fn session(
                 // is left in the provider's system.
                 let resource =
                     oxplow_domain::capability::contract(&spec.capability).and_then(|c| c.resource);
-                if let Some(made) = out.result.get("ref").and_then(Value::as_str).filter(|u| {
+                if let Some(made) = out.result.get("uri").and_then(Value::as_str).filter(|u| {
                     resource
                         .is_some_and(|r| oxplow_domain::uri::build::parse_resource(u, r).is_ok())
                 }) {
@@ -2629,7 +2629,7 @@ collectors:
   - id: things
     runtime: starlark
     entry: collectors/things.star
-    input: \"SELECT ref FROM v_work_item\"
+    input: \"SELECT uri FROM v_work_item\"
     entities:
       - {{ name: thing, key: id, columns: {{ id: int, label: text }} }}
   - id: shell
@@ -2647,11 +2647,11 @@ models:
 commands:
   - name: work.note
     summary: Note a work item.
-    input_schema: {{ type: object, required: [ref], properties: {{ ref: {{ type: string }} }} }}
+    input_schema: {{ type: object, required: [uri], properties: {{ uri: {{ type: string }} }} }}
     entry: handlers/note.star
     invokers: {{ human: true, agent: true, lens: true }}
     examples:
-      - {{ name: happy, input: {{ ref: \"work_item:oxplow:tsk1\" }}, expect_commands: {command_expect} }}
+      - {{ name: happy, input: {{ uri: \"work_item:oxplow:tsk1\" }}, expect_commands: {command_expect} }}
 "
             ),
         );
@@ -2673,7 +2673,7 @@ commands:
         write(
             root,
             ".oxplow/extensions/tally/handlers/note.star",
-            "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.work_item.comment\", \"input\": {\"ref\": x[\"input\"][\"ref\"], \"body\": \"noted\"}}]}\n",
+            "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.work_item.comment\", \"input\": {\"uri\": x[\"input\"][\"uri\"], \"body\": \"noted\"}}]}\n",
         );
         write(
             root,
@@ -2705,7 +2705,7 @@ commands:
         write(
             root,
             ".oxplow/extensions/tally/questions.yaml",
-            "- question: Which things are labelled?\n  skill: README.md\n  reaches:\n    sql: SELECT id, label FROM v_tally_labelled\n  shape: { columns: [id, label] }\n- question: Note a work item.\n  skill: README.md\n  reaches:\n    command: tally.work.note\n    input: { ref: \"work_item:oxplow:tsk1\" }\n",
+            "- question: Which things are labelled?\n  skill: README.md\n  reaches:\n    sql: SELECT id, label FROM v_tally_labelled\n  shape: { columns: [id, label] }\n- question: Note a work item.\n  skill: README.md\n  reaches:\n    command: tally.work.note\n    input: { uri: \"work_item:oxplow:tsk1\" }\n",
         );
     }
 
@@ -2803,13 +2803,13 @@ commands:
             root,
             ".oxplow/extensions/maker/extension.yaml",
             &format!(
-                "manifest: 2\nname: maker\nintent:\n  purpose: Make items.\nmodels:\n  - name: items\n    version: {version}\n    description: Items.\n    columns:\n      - {{ name: ref, type: TEXT, doc: A work item. }}\nexports:\n  - {{ contribution: oxplow:oxplow/model?model=maker/items, version: {version}, visibility: stable }}\n"
+                "manifest: 2\nname: maker\nintent:\n  purpose: Make items.\nmodels:\n  - name: items\n    version: {version}\n    description: Items.\n    columns:\n      - {{ name: uri, type: TEXT, doc: A work item. }}\nexports:\n  - {{ contribution: oxplow:oxplow/model?model=maker/items, version: {version}, visibility: stable }}\n"
             ),
         );
         write(
             root,
             ".oxplow/extensions/maker/models/items.sql",
-            "SELECT ref FROM ref('work_item')\n",
+            "SELECT uri FROM ref('work_item')\n",
         );
         write(
             root,
@@ -2819,7 +2819,7 @@ commands:
         write(
             root,
             ".oxplow/extensions/reader/lenses/seen.yaml",
-            "title: Seen\nquery: SELECT ref FROM import_ref('items')\n",
+            "title: Seen\nquery: SELECT uri FROM import_ref('items')\n",
         );
     }
 
@@ -3045,10 +3045,10 @@ def transform(x):
         return {"commands": [{"name": "oxplow.effort.open",
                               "input": {"thread": thread, "work_item": item}}]}
     if to == "done" or to == "canceled":
-        rows = scope("sql.read", {"sql": "SELECT ref FROM v_effort WHERE work_item = :w AND ended_at IS NULL",
+        rows = scope("sql.read", {"sql": "SELECT uri FROM v_effort WHERE work_item = :w AND ended_at IS NULL",
                                   "params": {"w": item}})
         return {"commands": [{"name": "oxplow.effort.close",
-                              "input": {"effort": uri.param(r["ref"], "id"), "reason": "switch"}}
+                              "input": {"effort": uri.param(r["uri"], "id"), "reason": "switch"}}
                              for r in rows]}
     return {"skip": "a move that changes no effort"}
 "#;
@@ -3090,7 +3090,7 @@ implementations:
         write(
             root,
             ".oxplow/extensions/acme/fixtures/finish.yaml",
-            "input: { implementation: tidy, event: { type: work_item.state_changed, payload: { work_item: \"work_item:oxplow:tsk1\", to: done } }, answers: { sql.read: [[{ ref: \"oxplow:oxplow/effort?id=eff3\" }]] } }\nexpect: { commands: [oxplow.effort.close] }\n",
+            "input: { implementation: tidy, event: { type: work_item.state_changed, payload: { work_item: \"work_item:oxplow:tsk1\", to: done } }, answers: { sql.read: [[{ uri: \"oxplow:oxplow/effort?id=eff3\" }]] } }\nexpect: { commands: [oxplow.effort.close] }\n",
         );
     }
 
@@ -3314,7 +3314,7 @@ models:
     version: 1
     description: PRs.
     columns:
-      - { name: ref, type: \"\", doc: The ref. }
+      - { name: uri, type: \"\", doc: The ref. }
       - { name: title, type: \"\", doc: Its title. }
 pages:
   - { id: pr, title: Pull request, category: Work, lens: open }
@@ -3340,7 +3340,7 @@ resources:
         write(
             root,
             ".oxplow/extensions/acme/models/prs.sql",
-            "SELECT 'oxplow:acme/pr?id=1' AS ref, 'One' AS title",
+            "SELECT 'oxplow:acme/pr?id=1' AS uri, 'One' AS title",
         );
         write(
             root,
@@ -3406,18 +3406,18 @@ name: editor
 intent:
   purpose: Edit work items.
   examples:
-    - { name: edit, input: { form: edit-item, params: { ref: 'oxplow:oxplow/work_item?id=tsk1&provider=oxplow' } }, expect: the ref is fixed }
+    - { name: edit, input: { form: edit-item, params: { uri: 'oxplow:oxplow/work_item?id=tsk1&provider=oxplow' } }, expect: the ref is fixed }
 ",
         );
         write(
             root,
             ".oxplow/extensions/editor/lenses/edit-item.yaml",
-            "title: Edit\nviz: form\nparams: [{ name: ref }]\nquery: SELECT title, body FROM v_work_item WHERE ref = :ref\nform: { command: oxplow.work_item.update, defaults: { ref: '{{param.ref}}' }, fixed: [ref], fields: [title, body] }\n",
+            "title: Edit\nviz: form\nparams: [{ name: uri }]\nquery: SELECT title, body FROM v_work_item WHERE uri = :uri\nform: { command: oxplow.work_item.update, defaults: { uri: '{{param.uri}}' }, fixed: [uri], fields: [title, body] }\n",
         );
         write(
             root,
             ".oxplow/extensions/editor/fixtures/edit.yaml",
-            "input: { form: edit-item, params: { ref: 'oxplow:oxplow/work_item?id=tsk1&provider=oxplow' } }\nexpect: { values: { ref: 'oxplow:oxplow/work_item?id=tsk1&provider=oxplow' }, fixed: [ref], fields: [title, body] }\n",
+            "input: { form: edit-item, params: { uri: 'oxplow:oxplow/work_item?id=tsk1&provider=oxplow' } }\nexpect: { values: { uri: 'oxplow:oxplow/work_item?id=tsk1&provider=oxplow' }, fixed: [uri], fields: [title, body] }\n",
         );
         let report = test_extension(root, "editor", false).await.unwrap();
         assert_eq!(report.errors, Vec::<String>::new());
@@ -3430,7 +3430,7 @@ intent:
         write(
             root,
             ".oxplow/extensions/editor/fixtures/edit.yaml",
-            "input: { form: edit-item, params: { ref: 'oxplow:oxplow/work_item?id=tsk1&provider=oxplow' } }\nexpect: { fixed: [ref, title] }\n",
+            "input: { form: edit-item, params: { uri: 'oxplow:oxplow/work_item?id=tsk1&provider=oxplow' } }\nexpect: { fixed: [uri, title] }\n",
         );
         let errors = test_extension(root, "editor", false)
             .await

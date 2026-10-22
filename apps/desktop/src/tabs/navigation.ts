@@ -26,7 +26,7 @@ function streamIdOf(ref: string): string {
   return idOf(ref, "oxplow/stream") ?? ref;
 }
 
-/** What `input` (`{ ref, stream? }`) asks for, given the window's `states`
+/** What `input` (`{ uri, stream? }`) asks for, given the window's `states`
  *  and the stream it `shown`: where the ref opens (`refOpener`). Throws
  *  what it can't reach. */
 export async function planNavigation(
@@ -35,8 +35,8 @@ export async function planNavigation(
   shown: string | null,
   resolve: (ref: string) => Promise<RefTarget> = refTarget,
 ): Promise<NavigationPlan> {
-  const { ref, stream } = (input ?? {}) as { ref?: unknown; stream?: unknown };
-  if (typeof ref !== "string") throw new Error("`ref` is what to show (`file:src/a.rs`, `work_item:oxplow:tsk3`)");
+  const { uri: ref, stream } = (input ?? {}) as { uri?: unknown; stream?: unknown };
+  if (typeof ref !== "string") throw new Error("`uri` is the URI of what to show");
   const known = (id: string) => {
     if (!states[id]) throw new Error(`no stream \`${id}\``);
     return id;

@@ -104,7 +104,7 @@ export function TaskDetailPane({
         <div style={{ borderTop: "1px solid var(--border)", paddingTop: 8 }}>
           <div style={{ color: "var(--muted)", fontSize: 11, marginBottom: 4 }}>Recently completed</div>
           {recent.map((item) => (
-            <div key={item.ref} style={{ marginBottom: 4 }}>
+            <div key={item.uri} style={{ marginBottom: 4 }}>
               <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 ✓ {item.title}
               </div>

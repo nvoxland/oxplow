@@ -764,7 +764,7 @@ mod tests {
             )
             .await
             .unwrap();
-        oxplow_tasks::task_of_work_item_ref(out.result["ref"].as_str().unwrap()).unwrap()
+        oxplow_tasks::task_of_work_item_ref(out.result["uri"].as_str().unwrap()).unwrap()
     }
 
     #[tokio::test]
@@ -888,13 +888,13 @@ mod tests {
         );
         deploy_sources(&services).await;
 
-        // A lens's definition is what `read` gives for its ref.
+        // A lens's definition is what `read` gives for its URI.
         let read: serde_json::Value = serde_json::from_str(&text_payload(
             call(
                 &server,
                 &rmcp::model::Extensions::new(),
                 "oxplow_read",
-                serde_json::json!({ "ref": "oxplow:oxplow/lens?lens=demo/streams" }),
+                serde_json::json!({ "uri": "oxplow:oxplow/lens?lens=demo/streams" }),
             )
             .await
             .unwrap(),
@@ -942,7 +942,7 @@ mod tests {
             &server,
             &rmcp::model::Extensions::new(),
             "oxplow_read",
-            serde_json::json!({ "ref": "oxplow:oxplow/lens?lens=demo/nope" }),
+            serde_json::json!({ "uri": "oxplow:oxplow/lens?lens=demo/nope" }),
         )
         .await
         .unwrap_err();
@@ -1296,7 +1296,7 @@ mod tests {
                     &server,
                     &rmcp::model::Extensions::new(),
                     "oxplow_read",
-                    serde_json::json!({ "ref": oxplow_domain::uri::build::work_item_uri("oxplow", &format!("{id}")) }),
+                    serde_json::json!({ "uri": oxplow_domain::uri::build::work_item_uri("oxplow", &format!("{id}")) }),
                 )
                 .await
                 .map(|r| serde_json::from_str::<serde_json::Value>(&text_payload(r)).unwrap())
@@ -1730,7 +1730,7 @@ mod tests {
             &server,
             &extensions_for(parts_as(thread.id, other_id, &[])),
             "oxplow_read",
-            serde_json::json!({ "ref": "oxplow:oxplow/file?path=who.txt" }),
+            serde_json::json!({ "uri": "oxplow:oxplow/file?path=who.txt" }),
         )
         .await
         .unwrap();
@@ -1742,7 +1742,7 @@ mod tests {
             &extensions_for(parts_as(thread.id, other_id, &[])),
             "oxplow_read",
             serde_json::json!({
-                "ref": "oxplow:oxplow/file?path=who.txt",
+                "uri": "oxplow:oxplow/file?path=who.txt",
                 "stream": primary.id.to_string(),
             }),
         )
@@ -1754,7 +1754,7 @@ mod tests {
             &server,
             &extensions_for(parts_as(thread.id, other_id, &[])),
             "oxplow_read",
-            serde_json::json!({ "ref": "oxplow:oxplow/file?path=who.txt", "stream": "oxplow:oxplow/stream?id=str2" }),
+            serde_json::json!({ "uri": "oxplow:oxplow/file?path=who.txt", "stream": "oxplow:oxplow/stream?id=str2" }),
         )
         .await
         .unwrap_err();

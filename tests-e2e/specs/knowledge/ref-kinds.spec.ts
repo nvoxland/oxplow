@@ -3,11 +3,11 @@ import { expect, test } from "../../support/fixtures.js";
 import { searchLauncher, workItemIdOf } from "../../support/ui.js";
 
 test("an extension's ref renders as a link and opens its page", async ({ page, daemon }) => {
-  const created = await run<{ result: { ref: string } }>(daemon, "oxplow.work_item.create", {
+  const created = await run<{ result: { uri: string } }>(daemon, "oxplow.work_item.create", {
     title: "Platypus item",
     thread: daemon.thread,
   });
-  const n = workItemIdOf(created.result.ref).replace(/^tsk/, "");
+  const n = workItemIdOf(created.result.uri).replace(/^tsk/, "");
   // `[[item:<n>]]` is the test extension's wikilink for `oxplow:e2e/item?id=%3Cn%3E`.
   await run(daemon, "oxplow.knowledge.write_page", {
     slug: "platypus-notes",

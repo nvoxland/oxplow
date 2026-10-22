@@ -235,13 +235,13 @@ async fn a_model_that_does_not_compile_holds_back_only_its_extension() {
         dir.path(),
         "late",
         1,
-        "models:\n  - name: blocked\n    version: 1\n    description: Blocked work items.\n    columns:\n      - { name: ref, type: TEXT, doc: Work item ref. }\n",
+        "models:\n  - name: blocked\n    version: 1\n    description: Blocked work items.\n    columns:\n      - { name: uri, type: TEXT, doc: Work item ref. }\n",
     );
     std::fs::create_dir_all(dir.path().join(".oxplow/extensions/late/models")).unwrap();
     std::fs::write(
         dir.path()
             .join(".oxplow/extensions/late/models/blocked.sql"),
-        "SELECT no_such_column AS ref FROM ref('work_item')",
+        "SELECT no_such_column AS uri FROM ref('work_item')",
     )
     .unwrap();
     write_ext(dir.path(), "alpha", 2, "");

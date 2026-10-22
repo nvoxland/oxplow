@@ -286,8 +286,8 @@ as the type-erased form for polymorphic boundaries (the MCP
 `expect_id_kind` validator). Rowid `0` is the `placeholder()` sentinel
 (insert allocates a real id and returns it; AUTOINCREMENT never issues 0).
 A polymorphic reference is stored as a URI ([resources.md](./resources.md)):
-`page_ref.source_uri`/`target_uri` and `search_entry.ref_id` (and every
-model's `ref` column) hold `oxplow:<extension>/<resource>?<params>`
+`page_ref.source_uri`/`target_uri` and `search_entry.uri` (and every
+model's `uri` column) hold `oxplow:<extension>/<resource>?<params>`
 (`event_log.id` is a UUIDv7, also TEXT). Refs in prose/wiki use the bare
 self-typed sugar, e.g. `[[tsk42]]`.
 
@@ -540,7 +540,7 @@ AUTOINCREMENT` — stored as a plain integer, surfaced as `tsk<int>` (see
 `kind` column was dropped: there is no `epic`/`subtask`/`bug`/`note`
 discriminator any more. An **epic is any task that has children** —
 i.e. any row that's a `parent_id` target. The UI reads it through the
-interface — an item that is some item's `parent_ref`
+interface — an item that is some item's `parent_uri`
 (`workItems.bucketWorkList`, `WorkList.epics`); there's no flag on the
 row itself.
 
@@ -599,7 +599,7 @@ it (`Task::set_status`).
 One row per work item, keyed by its URI (`oxplow:oxplow/work_item?id=<id>&provider=<provider>`):
 `provider`, `title`, `body`, canonical `state` (`todo`, `in_progress`,
 `blocked`, `done`, `canceled`), the provider's own `native_state`, its
-other fields as `native` JSON, `parent_ref`, timestamps and
+other fields as `native` JSON, `parent_uri`, timestamps and
 `deleted_at`; since V17 the interface's own `thread_id` (the list it's
 on, NULL = backlog), `rank` (order on the list) and `closed_at` (when it
 first reached done or canceled; reopened, NULL). Published as
@@ -609,8 +609,8 @@ empty). oxplow's tasks publish no model of their own (`v_task`,
 `v_task_link` and `v_task_note` were removed): everything reads the
 interface, and oxplow's own fields are `native_state` and `native`.
 
-**`work_item_link`** `(from_ref, to_ref, link_type, created_at)` and
-**`work_item_comment`** `(id, ref, body, author, created_at)` (V17) are
+**`work_item_link`** `(from_uri, to_uri, link_type, created_at)` and
+**`work_item_comment`** `(id, uri, body, author, created_at)` (V17) are
 the interface's links and comments, published as `v_work_item_link` /
 `v_work_item_comment` over the active list's items, restated from each
 list's records (a comment's id is `<item ref>#<the list's id for it>`;
@@ -672,7 +672,7 @@ row has `id`, `thread_id`, `body`, `author` (free-form: `agent`, `user`,
 its `[[…]]` links are `page_ref` edges from `thread_note`, and each
 change logs `knowledge.note.written@3` / `deleted@3` (V31 rewrote the
 v1 rows, which named the note `task_note:not<n>`, and v1 went). `v_thread_note` reads it,
-`v_search_thread_note` indexes it (`thread_ref` on `v_thread_note`, v3, is
+`v_search_thread_note` indexes it (`thread_uri` on `v_thread_note`, v3, is
 where a note opens: its thread).
 
 **`task_note`** holds only the comments on oxplow's tasks
@@ -1206,8 +1206,8 @@ it behind an `RwLock`) and on the copy used to build future ones.
 ### `symbol` + `symbol_capture` — `SqliteSymbolStore` (`crates/oxplow-db/src/symbol_store.rs`, migration `V62__symbols_from_tree_sitter.sql`)
 
 The symbol index: each stream's files' definitions, restated per changed
-file by the symbol collector at each snapshot. `symbol` columns: `ref`
-(`oxplow:oxplow/symbol?path=<path>&symbol=<name>`, no revision; unique per `(stream_id, ref)`),
+file by the symbol collector at each snapshot. `symbol` columns: `uri`
+(`oxplow:oxplow/symbol?path=<path>&symbol=<name>`, no revision; unique per `(stream_id, uri)`),
 `snapshot_id` (the snapshot the file was read at), `name`, `kind`,
 `container`, `signature` (parameter types or dispatch value, NULL where the
 language doesn't overload), `language`, 1-based `line`/`col` (the name) and
@@ -1290,15 +1290,15 @@ to "edges not in the body are deleted": a `wiki_file_ref` edge whose
 `target_id` is a file under a directory the body cites
 (`[[dir:…]]`) is re-included (`path_under_any_dir`) so `merge_source`
 preserves it and its pin. These are **verification edges**, made by
-`oxplow.knowledge.write_page`'s `verified_refs` when the agent verifies a fact
+`oxplow.knowledge.write_page`'s `verified_files` when the agent verifies a fact
 against a specific file it references only by directory. They self-clean: once
 the covering `[[dir:…]]` ref leaves the body, the edge is no longer
 re-included and gets pruned.
 
-**`verified_refs` / `removed_refs`.** `oxplow.knowledge.write_page` takes
-the paths the agent re-read against the new body (`verified_refs`: re-
+**`verified_files` / `removed_files`.** `oxplow.knowledge.write_page` takes
+the paths the agent re-read against the new body (`verified_files`: re-
 pinned to the current snapshot; a file under a cited directory is
-materialized as an edge) and the paths it took out (`removed_refs`:
+materialized as an edge) and the paths it took out (`removed_files`:
 must be gone). Refs left in the body but in NEITHER list keep their
 existing pin — that's how "this content relies on a stale source" stays
 accurate ([knowledge.md](./knowledge.md)).
@@ -1310,8 +1310,8 @@ primary-stream `file_snapshot` per target path, a `stale` flag per ref.
 The foundation's `wiki-freshness` lens
 (the `wiki-freshness` page, with `slug=<slug>`) shows
 the table with per-ref + per-page "Mark verified" actions, which run
-`oxplow.knowledge.verify_refs` (re-writing the page with those refs in
-`verified_refs`). The wiki page chrome adds a `Freshness (N stale)` action
+`oxplow.knowledge.verify_files` (re-writing the page with those refs in
+`verified_files`). The wiki page chrome adds a `Freshness (N stale)` action
 chip that routes to the page.
 
 Every stored `source_uri` / `target_uri` is a canonical URI (see
@@ -1330,6 +1330,11 @@ backfill regenerates the derived ones. `V100__bare_ids.sql` then moved the
 event payload fields named for one resource (and undo inverses, pending
 proposals) from URIs to bare ids, at new event versions; see
 [resources.md](./resources.md) "The bare-id migration (V100)".
+`V101__uri_names.sql` then renamed the columns that held a URI under the
+name `ref` (`work_item.uri` / `parent_uri`, `work_item_link.from_uri` /
+`to_uri`, `search_entry.uri`, `claim.evidence`, …) and moved
+`work_item.recorded` to v3 and `knowledge.page.recorded` to v2; see
+"The rename (V101)" there.
 
 **Writers own slices by `ref_type`.** A single `source_uri`
 can have rows from multiple owners — a work item's body,
@@ -2227,7 +2232,7 @@ V129 (P7.A3). Where each provider instance's collector left off:
 own opaque `$/state` checkpoint), `status` (`never` / `reading` / `ok` /
 `error`), `error`, `last_read_at`, `records` (what reads have delivered).
 `checkpoint_tx` runs in the same transaction as the
-`work_item.recorded@2` events a checkpoint covers, so a read that fails
+`work_item.recorded@3` events a checkpoint covers, so a read that fails
 midway resumes from the last batch that landed; `finish_tx` records the
 outcome. Read by `oxplow.provider.sync` and Settings → Integrations; see
 [providers.md](./providers.md) "Reading: collectors and sync".
@@ -2265,7 +2270,7 @@ recorded by `App.handleOpenPage` (skipping `agent`, `new-stream`,
 `new-task`).
 
 Rows carry canonical tab ids ([resources.md](./resources.md)); V93 wiped the
-pre-canonical ones. Columns: `id`, `page_kind`, `page_id`, `visited_at` (ISO),
+pre-canonical ones, and V102 emptied the table again when a visit became the page's identity (the id without its `#`), so no row holds a view. Columns: `id`, `page_kind`, `page_id`, `visited_at` (ISO),
 `duration_ms?`, `thread_id?` (added in v3 — nullable so legacy rows and
 boot-screen visits with no selected thread still record). Indexes on
 `visited_at DESC`, `(page_kind, page_id)`, and
@@ -2394,8 +2399,8 @@ commands (P8.A6); the renderer re-reads the comment models on
 The unified site-wide search index (FTS5/BM25). `search_fts` is a standalone
 FTS5 virtual table (`tokenize = 'porter unicode61'`, `prefix = '2 3'`) storing
 `(title, body)` for every searchable entity; `search_entry` maps
-`(kind, ref_id, stream_id)` (resource, URI, stream) → the FTS rowid so a single entity can be updated
-or removed in place (a `UNIQUE` index over `(kind, ref_id, COALESCE(stream_id,''))`
+`(kind, uri, stream_id)` (resource, URI, stream) → the FTS rowid so a single entity can be updated
+or removed in place (a `UNIQUE` index over `(kind, uri, COALESCE(stream_id,''))`
 enforces identity, treating global rows' `NULL` stream as `''`).
 
 - `kind` holds a resource (`oxplow/wiki`) that `v_resource` lists as
@@ -2404,7 +2409,7 @@ enforces identity, treating global rows' `NULL` stream as `''`).
   `oxplow/agent_session`, `oxplow/turn`, `oxplow/effort`,
   `oxplow/decision`, `oxplow/commit`, `oxplow/lens`, `oxplow/dashboard`; an
   extension's, P9.D3), or
-  `oxplow/file`; `ref_id` is the thing's URI, and a hit is that URI.
+  `oxplow/file`; `uri` is the thing's URI, and a hit is that URI.
   Every resource but `oxplow/file` is derived from a model by an asset per kind
   (`kind_search.rs`: `plan_restate_tx` decides from each entry's `version`
   — the feed's own `version` column, else its title-and-body hash; V77

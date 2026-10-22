@@ -1,11 +1,11 @@
 title: Review
 description: The latest model review of this work item, if effort-review has written one.
 hidden: true
-params: [{ name: ref }]
+params: [{ name: uri }]
 query: |
   SELECT r.state, r.reviewed_at, r.review
   FROM import_ref('reviews') r
-  WHERE r.work_item = :ref
+  WHERE r.work_item = :uri
   ORDER BY r.reviewed_at DESC, r.job_run DESC
   LIMIT 1
 viz: table

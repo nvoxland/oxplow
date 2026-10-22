@@ -47,7 +47,7 @@ async fn a_qualified_read_reaches_only_its_model_and_what_derives_from_it() {
         (
             "items",
             "sql.read:v_work_item",
-            "SELECT ref FROM v_work_item",
+            "SELECT uri FROM v_work_item",
         ),
         ("efforts", "sql.read:v_work_item", "SELECT id FROM v_effort"),
         ("any", "sql.read", "SELECT id FROM v_effort"),
@@ -59,17 +59,17 @@ async fn a_qualified_read_reaches_only_its_model_and_what_derives_from_it() {
         (
             "joined",
             "sql.read:v_work_item",
-            "SELECT w.ref FROM v_work_item w, v_effort e",
+            "SELECT w.uri FROM v_work_item w, v_effort e",
         ),
         (
             "ownlineage",
             "sql.read:v_acme_mine",
-            "SELECT ref FROM v_acme_mine",
+            "SELECT uri FROM v_acme_mine",
         ),
         (
             "both",
             "sql.read:v_acme_mine, sql.read:v_work_item",
-            "SELECT ref FROM v_acme_mine",
+            "SELECT uri FROM v_acme_mine",
         ),
         ("anyderived", "sql.read", "SELECT id FROM v_acme_efforts"),
     ];
@@ -81,7 +81,7 @@ async fn a_qualified_read_reaches_only_its_model_and_what_derives_from_it() {
         &root,
         ".oxplow/extensions/acme/extension.yaml",
         &format!(
-            "manifest: 2\nname: acme\nintent:\n  purpose: p\npermissions: {{ sql: read }}\nmodels:\n  - name: efforts\n    version: 1\n    description: Efforts.\n    columns:\n      - {{ name: id, type: INTEGER, doc: Id. }}\n  - name: mine\n    version: 1\n    description: Items.\n    columns:\n      - {{ name: ref, type: TEXT, doc: Ref. }}\ncommands:\n{block}"
+            "manifest: 2\nname: acme\nintent:\n  purpose: p\npermissions: {{ sql: read }}\nmodels:\n  - name: efforts\n    version: 1\n    description: Efforts.\n    columns:\n      - {{ name: id, type: INTEGER, doc: Id. }}\n  - name: mine\n    version: 1\n    description: Items.\n    columns:\n      - {{ name: uri, type: TEXT, doc: Ref. }}\ncommands:\n{block}"
         ),
     );
     write(
@@ -92,7 +92,7 @@ async fn a_qualified_read_reaches_only_its_model_and_what_derives_from_it() {
     write(
         &root,
         ".oxplow/extensions/acme/models/mine.sql",
-        "SELECT ref FROM ref('work_item')",
+        "SELECT uri FROM ref('work_item')",
     );
     for (name, _, sql) in commands {
         write(
@@ -489,7 +489,7 @@ async fn a_script_composing_a_command_outside_its_namespace_needs_the_commands_p
         &root,
         ".oxplow/extensions/acme/note.star",
         &format!(
-            "def transform(x):\n    return {{\"commands\": [{{\"name\": \"oxplow.work_item.comment\", \"input\": {{\"ref\": \"{item}\", \"body\": \"noted\"}}}}]}}\n"
+            "def transform(x):\n    return {{\"commands\": [{{\"name\": \"oxplow.work_item.comment\", \"input\": {{\"uri\": \"{item}\", \"body\": \"noted\"}}}}]}}\n"
         ),
     );
     write(

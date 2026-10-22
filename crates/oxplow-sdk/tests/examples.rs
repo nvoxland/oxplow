@@ -86,7 +86,7 @@ async fn the_github_example_checks_tests_and_its_pr_opens() {
         serde_json::json!([["oxplow:oxplow/page?page=github/pr", "v_github_pull_request"]])
     );
     assert_eq!(
-        row("SELECT title FROM v_github_pull_request WHERE ref = 'oxplow:github/pr?id=12'").await,
+        row("SELECT title FROM v_github_pull_request WHERE uri = 'oxplow:github/pr?id=12'").await,
         serde_json::json!([["Fix the hover state"]])
     );
     // tsk894: `[[pr:12]]` is a valid link; one to a pull request the
@@ -100,14 +100,14 @@ async fn the_github_example_checks_tests_and_its_pr_opens() {
         vec!["pr:99"],
         "{warnings:?}"
     );
-    // Its page is the `pr` lens, given `?ref=`.
+    // Its page is the `pr` lens, given `?uri=`.
     let run = oxplow_app::extensions::run_lens(
         &svc.sql,
         &svc.extension_catalog,
         root,
         "github/pr",
         [(
-            "ref".to_string(),
+            "uri".to_string(),
             oxplow_db::SqlCell::Text("oxplow:github/pr?id=12".into()),
         )]
         .into_iter()
@@ -636,7 +636,7 @@ async fn the_effort_review_example_reviews_evidence_and_can_be_cancelled() {
         json!({ "title": "Parse blocks" }),
     )
     .await;
-    let item = item["ref"].as_str().unwrap().to_string();
+    let item = item["uri"].as_str().unwrap().to_string();
     as_person(
         &svc,
         "oxplow.effort.open",
@@ -805,7 +805,7 @@ async fn inferred_reasoning_run(
     let svc = common::booted(root).await;
     let model = std::sync::Arc::new(oxplow_ai::fixture::FixtureModel::new(
         serde_json::from_value::<Vec<oxplow_ai::fixture::FixtureReply>>(serde_json::json!([
-            "```json\n{\"decisions\": [{\"question\": \"Which CSV library?\", \"choice\": \"csv crate\", \"alternatives\": [\"hand-rolled\"], \"confidence\": \"medium\"}], \"claims\": [{\"statement\": \"The export tests pass.\", \"kind\": \"tests_pass\", \"evidence_ref\": \"oxplow:oxplow/run?id=12\"}]}\n```"
+            "```json\n{\"decisions\": [{\"question\": \"Which CSV library?\", \"choice\": \"csv crate\", \"alternatives\": [\"hand-rolled\"], \"confidence\": \"medium\"}], \"claims\": [{\"statement\": \"The export tests pass.\", \"kind\": \"tests_pass\", \"evidence\": \"oxplow:oxplow/run?id=12\"}]}\n```"
         ]))
         .unwrap(),
     ));
@@ -857,7 +857,7 @@ async fn inferred_reasoning_run(
     as_person(
         &svc,
         "oxplow.effort.open",
-        json!({ "thread": "thr1", "work_item": item["ref"] }),
+        json!({ "thread": "thr1", "work_item": item["uri"] }),
     )
     .await;
     svc.tool_call_store
@@ -914,7 +914,7 @@ async fn the_bundled_extension_infers_an_efforts_decisions_and_claims_on_its_pro
     // what the answer named.
     let claim = until_row(
         &svc,
-        "SELECT statement, kind, evidence_ref, review FROM v_claim WHERE effort_id = 1",
+        "SELECT statement, kind, evidence, review FROM v_claim WHERE effort_id = 1",
     )
     .await;
     assert_eq!(
@@ -1304,7 +1304,7 @@ async fn a_review_effort_review_wrote_shows_in_review_badges() {
         "oxplow.work_item.create",
         json!({ "title": "Parse blocks" }),
     )
-    .await["ref"]
+    .await["uri"]
         .as_str()
         .unwrap()
         .to_string();
@@ -1366,14 +1366,14 @@ async fn a_review_effort_review_wrote_shows_in_review_badges() {
         .starts_with("The tests pass and coverage is fine"));
     let here = lens(
         "review-badges/item-review",
-        vec![("ref", oxplow_db::SqlCell::Text(item.clone()))],
+        vec![("uri", oxplow_db::SqlCell::Text(item.clone()))],
     )
     .await;
     assert_eq!(here[0][0], json!("succeeded"), "{here}");
     let elsewhere = lens(
         "review-badges/item-review",
         vec![(
-            "ref",
+            "uri",
             oxplow_db::SqlCell::Text("oxplow:oxplow/work_item?id=tsk99&provider=oxplow".into()),
         )],
     )

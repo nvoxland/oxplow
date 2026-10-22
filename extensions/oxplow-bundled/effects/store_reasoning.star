@@ -71,9 +71,9 @@ def transform(x):
             continue
         kind = text_of(c.get("kind")).lower()
         claim = {"statement": statement[:1000], "kind": kind if kind in KINDS else "other"}
-        evidence = text_of(c.get("evidence_ref"))
+        evidence = text_of(c.get("evidence"))
         if evidence:
-            claim["evidence_ref"] = evidence[:400]
+            claim["evidence"] = evidence[:400]
         claims.append(claim)
         if len(claims) == MAX:
             break

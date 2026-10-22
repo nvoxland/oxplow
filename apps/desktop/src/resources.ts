@@ -141,7 +141,7 @@ export interface Resource {
   /** Its `[[prefix:value]]` sugar: the prefix and the param it sets. */
   wikilink: { prefix: string; param: string } | null;
   /** The page that shows one, as a page URI (`oxplow:oxplow/page?page=acme/pr`);
-   *  one opens there with `ref=<its URI>` added. Null when it has none. */
+   *  one opens there with `uri=<its URI>` added. Null when it has none. */
   page: string | null;
 }
 
@@ -205,13 +205,13 @@ export function resourceInfo(resource: string): Resource | null {
 
 /**
  * The tab id `ref` opens as when its resource names a page: that page's
- * URI with `ref=<ref>` added. Null when its resource has no page (it opens
+ * URI with `uri=<uri>` added. Null when its resource has no page (it opens
  * as itself, through `refFromTabId`, or has nowhere to open).
  */
 export function resourcePageTabId(ref: string): string | null {
   const resource = typeOf(ref);
   const page = resource ? current.get(resource)?.page : null;
-  return page ? withPageParams(page, { ref }) : null;
+  return page ? withPageParams(page, { uri: ref }) : null;
 }
 
 /** The icon of a resource, or null. */
@@ -325,7 +325,7 @@ export function useExtensionRefTitle(ref: string | null): string | null {
       return;
     }
     // URI-SWITCH: the model's key column becomes `uri`.
-    void querySql(`SELECT ${column} FROM ${view} WHERE ref = ?1 LIMIT 1`, [ref], 1)
+    void querySql(`SELECT ${column} FROM ${view} WHERE uri = ?1 LIMIT 1`, [ref], 1)
       .then((res) => {
         const cell = res.rows[0]?.[0];
         setTitle(cell == null ? null : String(cell));
