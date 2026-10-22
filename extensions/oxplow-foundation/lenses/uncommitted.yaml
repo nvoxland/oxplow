@@ -4,7 +4,7 @@ params:
   - { name: stream_id }
 query: |
   SELECT id AS change_id, base_revision, head_revision
-  FROM v_change WHERE kind = 'working' AND target = ''
+  FROM v_change WHERE kind = 'working' AND target = '' AND stream_id = :stream_id
 columns: [{ key: change_id }, { key: base_revision }, { key: head_revision }]
 viz: document
 sections:
