@@ -1,8 +1,8 @@
 import { afterEach, expect, mock, test } from "bun:test";
 import { cleanup, within, fireEvent, render, waitFor } from "@testing-library/react";
 
-// Everything that needs the person is on the Alerts page,
-// counted by the status bar's bell, and announced by a toast once.
+// Everything that needs the person is counted by the status bar's bell and
+// announced by a toast once; the Alerts page itself is a foundation lens.
 
 const realApi = await import("../../api.js");
 /** Any other read (the Go To section's wiki pages, …): no rows. Never the
@@ -83,10 +83,9 @@ mock.module("../../api.js", () => ({
     return noRows;
   },
 }));
-const { AlertsPage } = await import("../../pages/AlertsPage.js");
 const { AlertsIndicator } = await import("./AlertsIndicator.js");
 const { PanelRunsProvider } = await import("../Panels/PanelRunsContext.js");
-const { alertsRef, settingsRef } = await import("../../tabs/pageRefs.js");
+const { alertsRef } = await import("../../tabs/pageRefs.js");
 const { getToastStore } = await import("../toastStore.js");
 const { useAlertToasts, SETTLE_MS } = await import("./useAlertToasts.js");
 const { renderHook } = await import("@testing-library/react");
@@ -102,47 +101,6 @@ afterEach(() => {
   ran.length = 0;
   opErrorRows = [];
   cleanup();
-});
-
-test("the page lists a waiting proposal as its card, failed operations and undelivered events", async () => {
-  opErrorRows = [pushFailed];
-  const view = render(withRuns(<AlertsPage onOpenPage={() => {}} />));
-  const decisions = await waitFor(() => view.getByTestId("alerts-decisions"));
-  await waitFor(() => expect(within(decisions).getByTestId("proposal-7")).toBeTruthy());
-  const problems = view.getByTestId("alerts-problems");
-  await waitFor(() => expect(within(problems).getByTestId("delivery-row-8")).toBeTruthy());
-  expect(within(problems).getByTestId("delivery-row-9")).toBeTruthy();
-  const row = await waitFor(() => within(problems).getByTestId("alerts-op-e-push"));
-  expect(view.queryByTestId("op-error-detail-e-push")).toBeNull();
-  fireEvent.click(row);
-  // Its output is the failure's event body, read as it opens.
-  await waitFor(() => expect(view.getByTestId("op-error-detail-e-push").textContent).toContain("rejected"));
-});
-
-/** The person's marks are commands: the model holds them, so they last. */
-test("opening a failed operation marks it seen; × dismisses it; Clear dismisses them all", async () => {
-  opErrorRows = [pushFailed];
-  const view = render(withRuns(<AlertsPage onOpenPage={() => {}} />));
-  const row = await waitFor(() => view.getByTestId("alerts-op-e-push"));
-  fireEvent.click(row);
-  fireEvent.click(view.getByTestId("alerts-op-dismiss-e-push"));
-  fireEvent.click(view.getByTestId("action-clear-ops"));
-  await waitFor(() =>
-    expect(ran.filter(([n]) => n.startsWith("oxplow.op_error."))).toEqual([
-      ["oxplow.op_error.mark_seen", { event: "e-push" }],
-      ["oxplow.op_error.dismiss", { event: "e-push" }],
-      ["oxplow.op_error.dismiss_all", {}],
-    ]),
-  );
-});
-
-test("a hint raised to the person is listed with its thread, and Dismiss dismisses it", async () => {
-  const view = render(withRuns(<AlertsPage onOpenPage={() => {}} />));
-  const hints = await waitFor(() => view.getByTestId("alerts-hints"));
-  expect(within(hints).getByTestId("alerts-hint-4").textContent).toContain("“t” is still in progress");
-  expect(within(hints).getByTestId("alerts-hint-4").textContent).toContain("Main");
-  fireEvent.click(within(hints).getByTestId("alerts-hint-dismiss-4"));
-  await waitFor(() => expect(ran).toEqual([["oxplow.hint.dismiss", { nudge: 4 }]]));
 });
 
 test("the bell counts everything, red for a problem, and opens Alerts", async () => {
@@ -173,15 +131,4 @@ test("a toast once per new item, after the start-up settle, offering only Review
   expect(toasts.map((t) => [t.message, t.actionLabel])).toEqual([["New one", "Review"]]);
   getToastStore().undo(toasts[0]!.id);
   expect(reviewed).toEqual([1]);
-});
-
-test("an extension with problems is listed under Problems and opens Settings → Extensions", async () => {
-  extensionRows = [["oxplow-foundation", 0, '["held back","other"]', null]];
-  const opened: unknown[] = [];
-  const view = render(withRuns(<AlertsPage onOpenPage={(r) => opened.push(r)} />));
-  const row = await waitFor(() => view.getByTestId("alerts-extension-oxplow-foundation"));
-  expect(row.textContent).toContain("isn't running as it should: held back (+1 more)");
-  fireEvent.click(view.getByTestId("alerts-extension-open-oxplow-foundation"));
-  expect(opened).toEqual([settingsRef("extensions")]);
-  extensionRows = [];
 });

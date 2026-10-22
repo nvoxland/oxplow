@@ -1,0 +1,17 @@
+title: How it ended
+description: One failed operation's command, exit and message, and its captured output.
+params:
+  - { name: event_id }
+query: |
+  SELECT command, message, exit_code, signal, duration_ms,
+         'oxplow:oxplow/event?id=' || event_id || '#part=output' AS output
+  FROM v_op_error WHERE event_id = :event_id
+viz: detail
+columns:
+  - { key: command, label: Command }
+  - { key: message, label: Message }
+  - { key: exit_code, label: Exit code }
+  - { key: signal, label: Signal }
+  - { key: duration_ms, label: Took, unit: ms }
+  - { key: output, label: Output, link: { kind: page, from: output } }
+hidden: true

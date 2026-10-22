@@ -1609,6 +1609,65 @@ mod tests {
         );
     }
 
+    /// A retry is open to a lens (the Alerts page's failed reactions) and
+    /// to no agent: a lens a person presses runs it, only once the person
+    /// confirms; a lens an agent presses is refused, as the agent is.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_lens_a_person_presses_retries_with_confirmation_and_an_agents_is_denied() {
+        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let svc = &fx.svc;
+        let lens = |presser: oxplow_domain::Actor| oxplow_domain::Actor::Lens {
+            lens_id: "oxplow-foundation/alerts-reactions".into(),
+            on_behalf_of: Box::new(presser),
+        };
+        let agent = oxplow_domain::Actor::Agent {
+            session_id: None,
+            thread_id: Some(fx.thread),
+            stream_id: None,
+        };
+        let input = json!({ "effect": "acme/nope", "event": "0" });
+        let denied = svc
+            .commands
+            .run(
+                &lens(agent),
+                crate::commands::effect::RETRY,
+                input.clone(),
+                true,
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(denied, CommandError::Denied { .. }), "{denied:?}");
+        let asks = svc
+            .commands
+            .run(
+                &lens(oxplow_domain::Actor::Human),
+                crate::commands::effect::RETRY,
+                input.clone(),
+                false,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(asks, CommandError::NeedsConfirmation { .. }),
+            "{asks:?}"
+        );
+        // Confirmed, it runs: this one names no effect, so it is invalid.
+        let invalid = svc
+            .commands
+            .run(
+                &lens(oxplow_domain::Actor::Human),
+                crate::commands::effect::RETRY,
+                input,
+                true,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(invalid, CommandError::Invalid { .. }),
+            "{invalid:?}"
+        );
+    }
+
     /// The loop guard: an effect never reacts to what its own run caused,
     /// and stops after a chain of [`MAX_CHAIN`] effect runs.
     #[tokio::test(flavor = "multi_thread")]

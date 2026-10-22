@@ -1,0 +1,18 @@
+title: Failed reactions
+description: Effects that failed on an event. Retry has the effect react again as it is now; if the failed attempt was interrupted, a step outside oxplow may already have run, and a retry sends it again, so it asks first.
+query: |
+  SELECT r.effect, r.event_id,
+         r.effect || ' failed on ' || coalesce(e.type, 'an event') || ' (event ' || r.event_seq || ')'
+           || CASE WHEN r.attempt > 1 THEN ', attempt ' || r.attempt ELSE '' END
+           || CASE WHEN r.retry_at IS NULL THEN '' ELSE '; sent again by itself shortly' END AS what,
+         r.reason
+  FROM v_effect_run r LEFT JOIN v_event e ON e.id = r.event_id
+  WHERE r.latest = 1 AND r.state = 'failed' ORDER BY r.id DESC
+viz: table
+columns:
+  - { key: what, label: Reaction }
+  - { key: reason, label: Why }
+actions:
+  - { id: retry, label: Retry, command: oxplow.effect.retry, input: { effect: "{{row.effect}}", event: "{{row.event_id}}" }, row: true }
+empty: No reaction failed.
+hidden: true

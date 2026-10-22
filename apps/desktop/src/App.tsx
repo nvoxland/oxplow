@@ -2542,7 +2542,7 @@ export function App() {
     // One owner of every extension panel's runs, read by the rail, the
     // status bar's bell and the Alerts page.
     <PanelRunsProvider streamId={stream?.id ?? null} threadId={selectedThreadId}>
-    <AlertToasts onReview={() => handleOpenPage(alertsRef())} />
+    <AlertToasts onReview={(lens) => handleOpenPage(lens ? lensRef(lens) : alertsRef())} />
     <div style={{ display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden" }}>
       {/* macOS uses an Overlay titlebar (transparent, hidden title), so the
           webview reaches the top edge: the title bar is the window's top,
@@ -2778,8 +2778,8 @@ export function App() {
   );
 }
 
-/** A toast as each new thing needs the person; Review opens Alerts. */
-function AlertToasts({ onReview }: { onReview(): void }) {
+/** A toast as each new thing needs the person; Review opens Alerts (a badge's, its lens). */
+function AlertToasts({ onReview }: { onReview(lens?: string): void }) {
   const { items } = useAlerts();
   useAlertToasts(items, onReview);
   return null;

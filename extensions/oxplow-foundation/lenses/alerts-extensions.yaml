@@ -1,0 +1,15 @@
+title: Extensions with problems
+description: Extensions that aren't running as they should, held back or not. Each opens Settings → Extensions.
+query: |
+  SELECT name,
+         '`' || name || '` isn''t running as it should: ' || coalesce(json_extract(errors, '$[0]'), 'unknown error')
+           || CASE WHEN json_array_length(errors) > 1 THEN ' (+' || (json_array_length(errors) - 1) || ' more)' ELSE '' END AS what,
+         'Open Extensions' AS open,
+         'oxplow:oxplow/page?area=extensions&page=settings' AS settings
+  FROM v_extension WHERE json_array_length(errors) > 0 ORDER BY name
+viz: table
+columns:
+  - { key: what, label: Problem }
+  - { key: open, label: "", width: 140, link: { kind: page, from: settings } }
+empty: Every extension is running as it should.
+hidden: true

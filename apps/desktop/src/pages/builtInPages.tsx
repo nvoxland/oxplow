@@ -19,7 +19,6 @@ import { CustomDashboardPage } from "./CustomDashboardPage.js";
 import { ExploreDataPage } from "./ExploreDataPage.js";
 import { BoardPage } from "./BoardPage.js";
 import { ExternalUrlPage } from "./ExternalUrlPage.js";
-import { AlertsPage } from "./AlertsPage.js";
 
 /** What a built-in page body gets: its tab ref and the ref's payload, the slot's navigation, and core's scope. */
 export interface BuiltInPageContext {
@@ -151,14 +150,6 @@ export const builtInPages: Record<BuiltInPageName, BuiltInPage> = {
           }}
         />
       ),
-    };
-  },
-  alerts: ({ ref, nav }) => {
-    return {
-      id: ref.id,
-      label: "Alerts",
-      closable: true,
-      render: () => <AlertsPage onOpenPage={nav.navOpen} />,
     };
   },
   files: ({ ref, nav, scope }) => {

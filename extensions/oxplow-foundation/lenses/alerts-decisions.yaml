@@ -1,0 +1,5 @@
+title: Needs your decision
+description: What your agents asked to run and a person must approve, each with its preview and Approve / Decline.
+query: SELECT 1
+viz: approvals
+hidden: true

@@ -5,10 +5,11 @@ import { alertsSummary, alertKeys, newAlerts, type AlertItems } from "./alertsMo
 const none: AlertItems = { proposals: [], opErrors: [], undelivered: 0, failedReactions: 0, extensionProblems: [], badges: [], hints: [] };
 
 // One bell for everything that needs the person.
-test("the bell counts every item, red for a problem, accent for a decision", () => {
+test("the bell counts what the Alerts page lists, red for a problem, accent for a decision", () => {
   expect(alertsSummary(none)).toEqual({ count: 0, tone: "none" });
   expect(alertsSummary({ ...none, proposals: [{ id: "oxplow:oxplow/proposal?id=1", title: "x" }] })).toEqual({ count: 1, tone: "accent" });
-  expect(alertsSummary({ ...none, badges: [{ id: "x/b", title: "B", message: "2" }] })).toEqual({ count: 1, tone: "accent" });
+  // A panel's badge is shown by its panel and toasted; the page doesn't list it, so the bell doesn't count it.
+  expect(alertsSummary({ ...none, badges: [{ id: "x/b", title: "B", message: "2" }] })).toEqual({ count: 0, tone: "none" });
   expect(
     alertsSummary({
       ...none,
@@ -39,6 +40,8 @@ test("new alerts are the items not seen before, once each", () => {
     "Push failed",
     "Waiting on You: 2 items",
   ]);
+  // A badge's Review opens the panel's lens; the others open Alerts.
+  expect(newAlerts(before, now).map((a) => a.lens ?? null)).toEqual([null, null, "x/b"]);
   expect(newAlerts(alertKeys(now), now)).toEqual([]);
   // Delivery: a toast when it starts failing, not on each new letter.
   expect(newAlerts(alertKeys(none), { ...none, undelivered: 1 }).map((a) => a.message)).toEqual([

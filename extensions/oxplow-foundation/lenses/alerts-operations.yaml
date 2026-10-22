@@ -1,0 +1,15 @@
+title: Failed operations
+description: What failed in front of you in the app. Open one for how it ended and its output; it counts as seen then. Dismiss takes it off the list (the agent can still read it).
+query: |
+  SELECT event_id, label, at, seen, (NOT seen) AS unseen, CASE WHEN seen THEN 'muted' ELSE 'danger' END AS tone
+  FROM v_op_error WHERE dismissed = 0 ORDER BY at DESC
+viz: table
+columns:
+  - { key: label, label: Operation, tone: tone, expand: alerts-operation }
+  - { key: at, label: When, format: relative, width: 130 }
+actions:
+  - { id: seen, label: Mark Seen, command: oxplow.op_error.mark_seen, input: { event: "{{row.event_id}}" }, row: true, when: unseen }
+  - { id: dismiss, label: Dismiss, command: oxplow.op_error.dismiss, input: { event: "{{row.event_id}}" }, row: true }
+  - { id: clear, label: Clear failed operations, command: oxplow.op_error.dismiss_all, input: {} }
+empty: No failed operations.
+hidden: true

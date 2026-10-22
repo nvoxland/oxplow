@@ -181,7 +181,7 @@ pages:
   - { id: closed-threads, title: Closed Threads, icon: archive, category: System, lens: closed-threads }
   - { id: extensions, title: Extensions, icon: package, category: System, keywords: deploy rollback permissions enable disable share, lens: extensions }
   # Opened from elsewhere
-  - { id: alerts, title: Alerts, icon: bell, component: "oxplow:alerts" }
+  - { id: alerts, title: Alerts, icon: bell, lens: alerts }
   - { id: custom-dashboard, title: Dashboard, icon: layout-dashboard, params: [id], for: oxplow/dashboard, default: true, component: "oxplow:custom-dashboard" }
   - { id: new-session, title: New Session, icon: plus, lens: new-session }
   - { id: new-stream, title: New Stream, icon: plus, lens: new-stream }
@@ -907,7 +907,7 @@ commands:
     summary: "Have an effect react again to an event its reaction to failed, as its next attempt. If the failed attempt was interrupted with a step outside oxplow under way, that step may already have run: retrying sends it again. It runs the effect as it is now, composing afresh from the event."
     scope: effects.run
     op: retry
-    invokers: { human: true, agent: false, lens: false }
+    invokers: { human: true, agent: false, lens: true }
     confirm: always
   # jobs.manage
   - name: job_run.cancel

@@ -1,0 +1,16 @@
+title: Hints for you
+description: What a hint raised to you said (or that oxplow muted one that kept firing at the agent), until you dismiss it.
+query: |
+  SELECT n.id, n.message,
+         (SELECT title FROM v_thread th WHERE th.id = n.thread_id) AS thread
+  FROM v_agent_nudge n
+  WHERE n.audience = 'person' AND n.delivered_at IS NULL
+  ORDER BY n.id DESC
+viz: list
+columns:
+  - { key: message, label: Hint }
+  - { key: thread, label: Thread }
+actions:
+  - { id: dismiss, label: Dismiss, command: oxplow.hint.dismiss, input: { nudge: "{{row.id}}" }, row: true }
+empty: No hints for you.
+hidden: true

@@ -26,7 +26,9 @@ export type AlertTone = "none" | "accent" | "danger";
  *  (a problem), the accent while only decisions and notices wait. */
 export function alertsSummary(items: AlertItems): { count: number; tone: AlertTone } {
   const problems = items.opErrors.length + items.undelivered + items.failedReactions + items.extensionProblems.length;
-  const count = items.proposals.length + items.badges.length + items.hints.length + problems;
+  // A panel's badges are its own (its panel, and a toast that opens its
+  // lens); the Alerts page doesn't list them, so the bell doesn't count them.
+  const count = items.proposals.length + items.hints.length + problems;
   return { count, tone: problems > 0 ? "danger" : count > 0 ? "accent" : "none" };
 }
 
@@ -47,10 +49,10 @@ export function alertKeys(items: AlertItems): Set<string> {
 /** What to toast: the items whose key `seen` doesn't hold, in the page's
  *  order. A toast only ever offers Review — a decision is made where its
  *  preview is. */
-export function newAlerts(seen: Set<string>, items: AlertItems): { key: string; message: string }[] {
-  const out: { key: string; message: string }[] = [];
-  const add = (key: string, message: string) => {
-    if (!seen.has(key)) out.push({ key, message });
+export function newAlerts(seen: Set<string>, items: AlertItems): { key: string; message: string; lens?: string }[] {
+  const out: { key: string; message: string; lens?: string }[] = [];
+  const add = (key: string, message: string, lens?: string) => {
+    if (!seen.has(key)) out.push({ key, message, ...(lens ? { lens } : {}) });
   };
   for (const p of items.proposals) add(proposalUri(p.id), p.title);
   for (const e of items.opErrors) add(`op:${e.id}`, e.label);
@@ -61,7 +63,7 @@ export function newAlerts(seen: Set<string>, items: AlertItems): { key: string; 
     add("reactions", items.failedReactions === 1 ? "An effect failed to react" : `${items.failedReactions} effects failed to react`);
   }
   for (const x of items.extensionProblems) add(`ext-problem:${x.name}`, x.message);
-  for (const b of items.badges) add(`badge:${b.id}`, `${b.title}: ${b.message}`);
+  for (const b of items.badges) add(`badge:${b.id}`, `${b.title}: ${b.message}`, b.id);
   for (const h of items.hints) add(`hint:${h.id}`, h.message);
   return out;
 }

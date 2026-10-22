@@ -1,7 +1,7 @@
 //! Foundation lenses that replaced core pages: Settings' Overview and Language
 //! Servers areas (mounted in each area's slot: what they list, how they group
 //! and search, what Ask puts in the agent's input, what the language-server
-//! rows offer), the Comments inbox, and the commit and uncommitted pages.
+//! rows offer), the Comments inbox, the commit and uncommitted pages, and the Alerts page.
 
 use oxplow_config::LspServerConfig;
 use oxplow_db::SqlCell;
@@ -434,4 +434,76 @@ async fn the_uncommitted_page_lists_the_working_tree_with_untracked_marked() {
         form.text(&form.rows[0], "stream"),
         Some(format!("str{stream}"))
     );
+}
+
+/// Alerts: a reported failure lists red until it is seen, then muted, and
+/// leaves the list once dismissed; its expansion carries how it ended and the
+/// event page its output is on. Every part of the page runs.
+#[tokio::test]
+async fn the_alerts_page_lists_failures_and_each_part_runs() {
+    let fx = services_with_effort().await;
+    command(
+        &fx,
+        crate::commands::ui::REPORT_ERROR,
+        serde_json::json!({
+            "label": "Merge bugfixes into current",
+            "command": "git merge bugfixes",
+            "message": "conflict",
+            "exit_code": 1,
+            "stderr": "CONFLICT in a.txt",
+        }),
+    )
+    .await;
+
+    let ops = run(&fx, "alerts-operations", vec![]).await;
+    assert_eq!(ops.rows.len(), 1);
+    let row = &ops.rows[0];
+    assert_eq!(
+        ops.text(row, "label").as_deref(),
+        Some("Merge bugfixes into current")
+    );
+    assert_eq!(ops.text(row, "tone").as_deref(), Some("danger"));
+    assert!(ops.flag(row, "unseen"));
+    let event = ops.text(row, "event_id").unwrap();
+
+    let detail = run(
+        &fx,
+        "alerts-operation",
+        vec![("event_id", SqlCell::Text(event.clone()))],
+    )
+    .await;
+    assert_eq!(detail.rows.len(), 1);
+    let d = &detail.rows[0];
+    assert_eq!(
+        detail.text(d, "command").as_deref(),
+        Some("git merge bugfixes")
+    );
+    assert_eq!(
+        detail.text(d, "output"),
+        Some(format!("oxplow:oxplow/event?id={event}#part=output"))
+    );
+
+    command(
+        &fx,
+        "oxplow.op_error.mark_seen",
+        serde_json::json!({ "event": event }),
+    )
+    .await;
+    let seen = run(&fx, "alerts-operations", vec![]).await;
+    assert_eq!(seen.text(&seen.rows[0], "tone").as_deref(), Some("muted"));
+    command(
+        &fx,
+        "oxplow.op_error.dismiss",
+        serde_json::json!({ "event": event }),
+    )
+    .await;
+    assert!(run(&fx, "alerts-operations", vec![]).await.rows.is_empty());
+
+    // The other parts run over a quiet project and list nothing.
+    for lens in ["alerts-hints", "alerts-deliveries", "alerts-reactions"] {
+        assert!(run(&fx, lens, vec![]).await.rows.is_empty(), "{lens}");
+    }
+    // Extensions with problems: none in a clean fixture.
+    let ext = run(&fx, "alerts-extensions", vec![]).await;
+    assert!(ext.rows.iter().all(|r| ext.text(r, "settings").is_some()));
 }

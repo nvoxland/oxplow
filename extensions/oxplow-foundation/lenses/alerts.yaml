@@ -1,0 +1,11 @@
+title: Alerts
+description: "Everything that needs you, in one place: decisions waiting on you, hints raised to you, operations that failed, events and reactions that couldn't be delivered, and extensions that aren't running as they should. Opened from the status bar's bell or a toast's Review."
+viz: document
+sections:
+  - { id: decisions, lens: alerts-decisions }
+  - { id: hints, lens: alerts-hints }
+  - { id: operations, lens: alerts-operations }
+  - { id: deliveries, lens: alerts-deliveries }
+  - { id: reactions, lens: alerts-reactions }
+  - { id: extensions, lens: alerts-extensions }
+hidden: true

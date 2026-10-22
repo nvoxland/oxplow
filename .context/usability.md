@@ -105,13 +105,16 @@ Things I keep forgetting. Read this before adding any UI.
   bell (`components/Alerts/AlertsIndicator.tsx`) counts everything that
   needs them — red while something failed, the accent while decisions or
   notices wait, quiet otherwise — and opens the **Alerts page**
-  (the `alerts` page): Needs your decision (each proposal's card, Approve /
-  Decline), Problems (failed operations; undelivered events and failed
-  reactions with Retry / Discard, the same `DeliveryList` as Settings →
-  Data), From extensions (firing panel badges). A toast announces each
-  new item once (`useAlertToasts`; what's there in the first seconds
-  after the app opens counts as seen) and offers only **Review** — never
-  Approve: consent is given where the preview is.
+  (the `alerts` page, the foundation's `alerts` document lens): Needs your
+  decision (each proposal's card, Approve / Decline), Hints for you,
+  Failed operations (each opening into how it ended), Undelivered events
+  and Failed reactions with Retry / Discard (`oxplow.delivery.*`,
+  `oxplow.effect.retry`, as lens actions that ask first), and Extensions
+  with problems. A firing panel badge is the panel's own: it is not on the
+  page and the bell does not count it. A toast announces each new item once
+  (`useAlertToasts`; what's there in the first seconds after the app opens
+  counts as seen) and offers only **Review** — never Approve: consent is
+  given where the preview is. A badge's Review opens the panel's lens.
 - **Async-op failures don't `alert`.** Record them:
   `recordOpError({ label, command?, stderr?, stdout?, exitCode?,
   message? })` (`opErrors.ts`) reports it to the daemon, fire-and-forget,
@@ -121,11 +124,12 @@ Things I keep forgetting. Read this before adding any UI.
   `oxplow-codebase` skill say so, so "can you see that error?" needs no
   screenshot). A failure is one of the things that need the person
   (below): a toast as it arrives ("<label> — Review"), the status bar's
-  bell counts it (red), and the **Alerts page** lists it under Problems
-  (`useOpErrors`, live, those not dismissed), each row opening to its
-  output (the event's `output` body, read as it opens). Opening one runs
-  `oxplow.op_error.mark_seen` (it stops being red), × runs
-  `oxplow.op_error.dismiss`, "Clear failed operations" `dismiss_all`. For
+  bell counts it (red), and the **Alerts page** lists it under Failed
+  operations (`v_op_error`, those not dismissed), each row expanding
+  (`columns[].expand`, the `alerts-operation` lens) into how it ended and
+  its output. Mark Seen runs `oxplow.op_error.mark_seen` (it stops being
+  red), Dismiss `oxplow.op_error.dismiss`, "Clear failed operations"
+  `dismiss_all`. For
   ops that already have a page focus when they fail (e.g. `runOp` in
   GitDashboardPage), call `onOpenPage(alertsRef())` after recording so
   the person lands where it's shown. A report, or a read of the list,

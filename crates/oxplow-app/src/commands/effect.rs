@@ -490,6 +490,6 @@ pub fn retry_op(services: ServicesSlot) -> Op {
             })
         })),
     )
-    .open_to(Invokers::HUMAN_ONLY)
+    .open_to(Invokers::NO_AGENT)
     .confirm_at_least(Confirm::Always)
 }
