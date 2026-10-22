@@ -3,7 +3,7 @@
 # observations, metrics and findings.
 input:
   command: effort_review.effort.evidence
-  input: { effort: "oxplow:oxplow/effort?id=eff7" }
+  input: { effort: "eff7" }
   answers:
     sql.read:
       - [{ id: 7 }]
@@ -17,7 +17,7 @@ input:
 expect:
   commands: []
   result:
-    effort: "oxplow:oxplow/effort?id=eff7"
+    effort: "eff7"
     workItem: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow"
     files: [{ path: src/parse.rs, additions: 40 }]
     functions: [{ name: parse_block, complexity_delta: 3 }]

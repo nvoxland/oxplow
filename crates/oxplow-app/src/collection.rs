@@ -351,7 +351,7 @@ impl ReportSync {
     pub fn to_json(&self) -> serde_json::Value {
         match self {
             ReportSync::Tests { run: Some(run) } => {
-                json!({ "status": "stored", "records": "tests", "run": oxplow_domain::uri::build::run_uri(*run) })
+                json!({ "status": "stored", "records": "tests", "run": *run })
             }
             ReportSync::Tests { run: None } => {
                 json!({ "status": "no_cases", "records": "tests" })
@@ -374,7 +374,7 @@ impl ReportSync {
             }) => json!({
                 "status": "stored",
                 "records": "coverage",
-                "run": oxplow_domain::uri::build::run_uri(*run),
+                "run": *run,
                 "summaryPct": summary_pct,
                 "instrumentedLines": changed_lines,
                 "coveredLines": covered_lines,
@@ -389,7 +389,7 @@ impl ReportSync {
             }) => json!({
                 "status": "stored",
                 "records": "analysis",
-                "run": oxplow_domain::uri::build::run_uri(*run),
+                "run": *run,
                 "errorCount": error_count,
                 "warningCount": warning_count,
                 "infoCount": info_count,
@@ -1363,8 +1363,8 @@ impl CollectionService {
                     owning_val,
                     turn,
                     origin,
-                    oxplow_domain::events::schema::TestRunRecordedV2 {
-                        run: String::new(), // filled with the capture id
+                    oxplow_domain::events::schema::TestRunRecordedV3 {
+                        run: 0, // filled with the capture id
                         command: command.to_string(),
                         exit_code,
                         passed: passed.map(|v| v.max(0) as u64),
@@ -1411,7 +1411,7 @@ impl CollectionService {
         owning: Option<i64>,
         turn: Option<i64>,
         origin: RunOrigin<'_>,
-        payload: oxplow_domain::events::schema::TestRunRecordedV2,
+        payload: oxplow_domain::events::schema::TestRunRecordedV3,
     ) -> oxplow_db::fact_store::CaptureEvent {
         let cause = origin.cause();
         use oxplow_domain::events::schema::TestRunRecorded;
@@ -1441,8 +1441,8 @@ impl CollectionService {
                 let run = oxplow_domain::uri::build::run_uri(capture_id);
                 let env = oxplow_domain::Envelope::typed::<TestRunRecorded>(
                     oxplow_domain::uri::build::system_source("collection"),
-                    &oxplow_domain::events::schema::TestRunRecordedV2 {
-                        run: run.clone(),
+                    &oxplow_domain::events::schema::TestRunRecordedV3 {
+                        run: capture_id,
                         ..payload.clone()
                     },
                 )
@@ -7364,10 +7364,7 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(synced.len(), 1, "a redelivered run records nothing more");
-            assert_eq!(
-                synced[0]["collector"],
-                "oxplow:oxplow/collector?collector=project/tests.junit"
-            );
+            assert_eq!(synced[0]["collector"], "project/tests.junit");
             assert_eq!(synced[0]["trigger"], "on");
             assert_eq!(synced[0]["status"], "ok");
         }

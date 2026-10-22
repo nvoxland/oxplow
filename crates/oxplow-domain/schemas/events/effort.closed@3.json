@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`effort.closed@3`: a span of a thread's work ended, linked to a work\nitem or not, and what closed it.",
+  "properties": {
+    "closed_by": {
+      "description": "What closed it: `commit`, `switch`, `person`, `agent` or `system`.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "effort": {
+      "description": "The effort (`eff12`).",
+      "type": "string"
+    },
+    "end_snapshot": {
+      "description": "The end snapshot, when the close already had it.",
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "work_item": {
+      "description": "The linked work item, when there is one.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "effort"
+  ],
+  "title": "EffortClosedV3",
+  "type": "object"
+}

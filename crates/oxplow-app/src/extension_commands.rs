@@ -6,15 +6,15 @@
 //! commands:
 //!   - name: review.finish                # registered as <namespace>.review.finish
 //!     summary: Mark the task done and leave a note.
-//!     input_schema: { type: object, required: [ref], properties: { ref: { type: string } } }
+//!     input_schema: { type: object, required: [uri], properties: { uri: { type: string } } }
 //!     entry: handlers/finish_review.star # defines transform({ input })
 //!     needs: [sql.read]                  # the scopes it calls
 //!     confirm: never                     # never | always | destructive
 //!     access: write                      # write | record | read
 //!     invokers: { human: true, agent: true, lens: true }
 //!     examples:
-//!       - { name: happy, input: { ref: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" }, expect_commands: [oxplow.work_item.transition] }
-//!       - { name: gone, input: { ref: "oxplow:oxplow/work_item?id=tsk9&provider=oxplow" }, answers: { sql.read: [[]] }, refuses: no such task }
+//!       - { name: happy, input: { uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" }, expect_commands: [oxplow.work_item.transition] }
+//!       - { name: gone, input: { uri: "oxplow:oxplow/work_item?id=tsk9&provider=oxplow" }, answers: { sql.read: [[]] }, refuses: no such task }
 //! ```
 //!
 //! The script reads with `scope("sql.read", { sql, params })` (one
@@ -131,14 +131,14 @@ pub fn no_providers(
 }
 
 /// `schema` with an optional `instance` field: which of the provider's
-/// instances runs it, when its input has no `ref` to say.
+/// instances runs it, when its input has no `uri` to say.
 fn with_instance(mut schema: Value) -> Value {
     if let Some(props) = schema.get_mut("properties").and_then(Value::as_object_mut) {
         props.insert(
             "instance".into(),
             json!({
                 "type": "string",
-                "description": "The instance that runs it (its id); else the one its `ref` names, else the provider's own."
+                "description": "The instance that runs it (its id); else the one its `uri` names, else the provider's own."
             }),
         );
     }
@@ -1608,15 +1608,15 @@ mod tests {
     }
 
     /// Moves a task to done.
-    const HANDLER: &str = "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.work_item.transition\", \"input\": {\"ref\": x[\"input\"][\"ref\"], \"to\": \"done\"}}]}\n";
+    const HANDLER: &str = "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.work_item.transition\", \"input\": {\"uri\": x[\"input\"][\"uri\"], \"to\": \"done\"}}]}\n";
 
     const GOOD: &str = "  - name: review.finish
     summary: Mark the task done.
-    input_schema: { type: object, required: [ref], properties: { ref: { type: string } }, additionalProperties: false }
+    input_schema: { type: object, required: [uri], properties: { uri: { type: string } }, additionalProperties: false }
     entry: handlers/finish_review.star
     invokers: { human: true, agent: true, lens: true }
     examples:
-      - { name: happy, input: { ref: \"oxplow:oxplow/work_item?id=tsk1&provider=oxplow\" }, expect_commands: [oxplow.work_item.transition] }
+      - { name: happy, input: { uri: \"oxplow:oxplow/work_item?id=tsk1&provider=oxplow\" }, expect_commands: [oxplow.work_item.transition] }
 ";
 
     /// Write extension `name` with `commands` (the block's entries) and
@@ -1670,7 +1670,7 @@ mod tests {
     fn a_commands_ui_is_checked_at_load() {
         let d = tempfile::tempdir().unwrap();
         let commands =
-            format!("{GOOD}    ui: {{ label: Finish, input: {{ ref: \"{{{{tread}}}}\" }} }}\n");
+            format!("{GOOD}    ui: {{ label: Finish, input: {{ uri: \"{{{{tread}}}}\" }} }}\n");
         write_ext(
             d.path(),
             "my-review",
@@ -1689,8 +1689,8 @@ mod tests {
     #[test]
     fn a_command_keeps_named_inputs_out_of_its_record() {
         let d = tempfile::tempdir().unwrap();
-        let schema = "    input_schema: { type: object, required: [ref], properties: { ref: { type: string } }, additionalProperties: false }";
-        let with_token = "    input_schema: { type: object, required: [ref], properties: { ref: { type: string }, token: { type: string } }, additionalProperties: false }";
+        let schema = "    input_schema: { type: object, required: [uri], properties: { uri: { type: string } }, additionalProperties: false }";
+        let with_token = "    input_schema: { type: object, required: [uri], properties: { uri: { type: string }, token: { type: string } }, additionalProperties: false }";
         write_ext(
             d.path(),
             "keeps",
@@ -1741,13 +1741,13 @@ mod tests {
         );
         assert_eq!(
             c.input_schema.as_ref().unwrap()["required"],
-            serde_json::json!(["ref"])
+            serde_json::json!(["uri"])
         );
         // Its first example that runs (not one expecting a refusal) is
         // the example input an agent is shown and a refusal quotes.
         assert_eq!(
             c.example,
-            Some(serde_json::json!({ "ref": "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" }))
+            Some(serde_json::json!({ "uri": "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" }))
         );
         assert!(c.needs.is_empty());
         assert_eq!(c.confirm, Confirm::Never);
@@ -1854,7 +1854,7 @@ mod tests {
     #[test]
     fn a_command_declares_its_needs_and_how_a_person_meets_it() {
         let d = tempfile::tempdir().unwrap();
-        let tail = "    needs: [work_items.comments]\n    ui:\n      label: Finish Review\n      group: Review\n      keywords: [done]\n      about: oxplow/work_item\n      input: { ref: \"{{ref}}\" }\n";
+        let tail = "    needs: [work_items.comments]\n    ui:\n      label: Finish Review\n      group: Review\n      keywords: [done]\n      about: oxplow/work_item\n      input: { uri: \"{{uri}}\" }\n";
         write_ext(
             d.path(),
             "my-review",
@@ -1869,7 +1869,7 @@ mod tests {
         assert_eq!(ui.label, "Finish Review");
         assert_eq!(ui.group.as_deref(), Some("Review"));
         assert_eq!(ui.about.as_deref(), Some("oxplow/work_item"));
-        assert_eq!(ui.input, Some(serde_json::json!({ "ref": "{{ref}}" })));
+        assert_eq!(ui.input, Some(serde_json::json!({ "uri": "{{uri}}" })));
         assert!(!c.stable, "a private extension's command is experimental");
     }
 
@@ -2052,7 +2052,7 @@ mod tests {
                 .run(
                     &oxplow_domain::Actor::Human,
                     "my_review.review.finish",
-                    json!({ "ref": r }),
+                    json!({ "uri": r }),
                     false,
                 )
                 .await
@@ -2152,8 +2152,8 @@ mod tests {
     async fn validate_dry_runs_command_examples_against_the_registry() {
         let transition_schema = serde_json::json!({
             "type": "object",
-            "required": ["ref", "to"],
-            "properties": { "ref": { "type": "string" }, "to": { "type": "string" } },
+            "required": ["uri", "to"],
+            "properties": { "uri": { "type": "string" }, "to": { "type": "string" } },
             "additionalProperties": false
         });
         let schema = move |name: &str| {
@@ -2192,13 +2192,13 @@ mod tests {
                 &[(
                     "handlers/finish_review.star",
                     &format!(
-                        "def transform(x):\n    rows = scope(\"sql.read\", {{\"sql\": \"{sql}\", \"params\": {{\"ref\": x[\"input\"][\"ref\"]}}}})\n    return {{\"commands\": [{{\"name\": \"oxplow.work_item.transition\", \"input\": {{\"ref\": rows[0][\"r\"], \"to\": \"done\"}}}}]}}\n"
+                        "def transform(x):\n    rows = scope(\"sql.read\", {{\"sql\": \"{sql}\", \"params\": {{\"uri\": x[\"input\"][\"uri\"]}}}})\n    return {{\"commands\": [{{\"name\": \"oxplow.work_item.transition\", \"input\": {{\"uri\": rows[0][\"r\"], \"to\": \"done\"}}}}]}}\n"
                     ),
                 )],
             );
             d
         };
-        let d = reads("SELECT :ref AS r");
+        let d = reads("SELECT :uri AS r");
         let v = validate_extension(&layer, &cat, d.path(), "x", Some(&schema))
             .await
             .unwrap();
@@ -2222,7 +2222,7 @@ mod tests {
                 "example `happy`: no command `no.such`",
             ),
             (
-                "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.work_item.transition\", \"input\": {\"ref\": 1}}]}\n",
+                "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.work_item.transition\", \"input\": {\"uri\": 1}}]}\n",
                 "example `happy`: the input doesn't fit `oxplow.work_item.transition`",
             ),
             (
@@ -2266,7 +2266,7 @@ mod tests {
             "my-review",
             "  - name: review.finish
     summary: Finish the task.
-    input_schema: { type: object, required: [ref], properties: { ref: { type: string } }, additionalProperties: false }
+    input_schema: { type: object, required: [uri], properties: { uri: { type: string } }, additionalProperties: false }
     entry: handlers/finish.star
     invokers: { human: true, agent: true, lens: true }
     needs: [sql.read]
@@ -2279,15 +2279,15 @@ mod tests {
     /// Transitions the task to done and renames it after its row.
     const FINISH: &str = "def transform(x):
     row = scope(\"sql.read\", {
-        \"sql\": \"SELECT ref, title FROM v_work_item WHERE ref = :ref\",
-        \"params\": {\"ref\": x[\"input\"][\"ref\"]},
+        \"sql\": \"SELECT uri, title FROM v_work_item WHERE uri = :uri\",
+        \"params\": {\"uri\": x[\"input\"][\"uri\"]},
     })[0]
     return {
         \"commands\": [
-            {\"name\": \"oxplow.work_item.update\", \"input\": {\"ref\": row[\"ref\"], \"title\": row[\"title\"] + \" (reviewed)\"}},
-            {\"name\": \"oxplow.work_item.transition\", \"input\": {\"ref\": row[\"ref\"], \"to\": \"done\"}},
+            {\"name\": \"oxplow.work_item.update\", \"input\": {\"uri\": row[\"uri\"], \"title\": row[\"title\"] + \" (reviewed)\"}},
+            {\"name\": \"oxplow.work_item.transition\", \"input\": {\"uri\": row[\"uri\"], \"to\": \"done\"}},
         ],
-        \"result\": {\"finished\": row[\"ref\"]},
+        \"result\": {\"finished\": row[\"uri\"]},
     }
 ";
 
@@ -2305,24 +2305,24 @@ mod tests {
     }
 
     /// `my-review`, declaring `my_review.finished@1`, with a `finish`
-    /// command whose script emits `{type}` for its `ref`; registered.
+    /// command whose script emits `{type}` for its `uri`; registered.
     async fn with_emitting_finish(fx: &crate::test_fixtures::EffortFixture, event_type: &str) {
         let root = fx._dir.path();
         write(
             root,
             ".oxplow/extensions/my-review/extension.yaml",
-            "manifest: 2\nname: my-review\nintent:\n  purpose: p\nevent_types:\n  types:\n    - { type: my_review.finished, v: 1, schema: finished.json, summary: A review finished. }\ncommands:\n  - name: review.finish\n    summary: Finish the review.\n    input_schema: { type: object, required: [ref], properties: { ref: { type: string } } }\n    entry: finish.star\n    invokers: { human: true, agent: true, lens: true }\n",
+            "manifest: 2\nname: my-review\nintent:\n  purpose: p\nevent_types:\n  types:\n    - { type: my_review.finished, v: 1, schema: finished.json, summary: A review finished. }\ncommands:\n  - name: review.finish\n    summary: Finish the review.\n    input_schema: { type: object, required: [uri], properties: { uri: { type: string } } }\n    entry: finish.star\n    invokers: { human: true, agent: true, lens: true }\n",
         );
         write(
             root,
             ".oxplow/extensions/my-review/finished.json",
-            r#"{"type": "object", "required": ["ref"], "properties": {"ref": {"type": "string"}}}"#,
+            r#"{"type": "object", "required": ["uri"], "properties": {"uri": {"type": "string"}}}"#,
         );
         write(
             root,
             ".oxplow/extensions/my-review/finish.star",
             &format!(
-                "def transform(x):\n    return {{\"commands\": [], \"events\": [{{\"type\": \"{event_type}\", \"payload\": {{\"ref\": x[\"input\"][\"ref\"]}}, \"subject\": [x[\"input\"][\"ref\"]]}}]}}\n"
+                "def transform(x):\n    return {{\"commands\": [], \"events\": [{{\"type\": \"{event_type}\", \"payload\": {{\"uri\": x[\"input\"][\"uri\"]}}, \"subject\": [x[\"input\"][\"uri\"]]}}]}}\n"
             ),
         );
         crate::test_fixtures::activate_with_problems(&fx.svc).await;
@@ -2342,7 +2342,7 @@ mod tests {
             .run(
                 &oxplow_domain::Actor::Human,
                 "my_review.review.finish",
-                json!({ "ref": r }),
+                json!({ "uri": r }),
                 false,
             )
             .await
@@ -2377,7 +2377,7 @@ mod tests {
                 .run(
                     &oxplow_domain::Actor::Human,
                     "my_review.review.finish",
-                    json!({ "ref": r }),
+                    json!({ "uri": r }),
                     false,
                 )
                 .await
@@ -2401,7 +2401,7 @@ mod tests {
             .run(
                 &agent(&fx),
                 "my_review.review.finish",
-                json!({ "ref": r }),
+                json!({ "uri": r }),
                 false,
             )
             .await
@@ -2510,7 +2510,7 @@ mod tests {
             .run(
                 &oxplow_domain::Actor::Human,
                 "acme.page.star",
-                json!({ "ref": "oxplow:oxplow/page?page=metrics", "page_kind": "metrics", "scope": "project", "thread": oxplow_domain::uri::build::thread_uri(fx.thread) }),
+                json!({ "uri": "oxplow:oxplow/page?page=metrics", "page_kind": "metrics", "scope": "project", "thread": fx.thread.to_string() }),
                 false,
             )
             .await
@@ -2562,7 +2562,7 @@ mod tests {
     return {{
         "commands": [{{
             "name": "oxplow.work_item.transition",
-            "input": {{"ref": x["input"]["ref"], "to": "done"}},
+            "input": {{"uri": x["input"]["uri"], "to": "done"}},
         }}],
         "result": {{"rows": len(rows)}},
     }}
@@ -2576,7 +2576,7 @@ mod tests {
             .run(
                 &oxplow_domain::Actor::Human,
                 "my_review.review.finish",
-                json!({ "ref": r }),
+                json!({ "uri": r }),
                 false,
             )
             .await
@@ -2596,7 +2596,7 @@ mod tests {
             .run(
                 &oxplow_domain::Actor::Human,
                 "my_review.review.finish",
-                json!({ "ref": r }),
+                json!({ "uri": r }),
                 false,
             )
             .await
@@ -2633,7 +2633,7 @@ mod tests {
         assert_eq!(out.audit_id, None, "a read isn't recorded");
 
         with_count(&format!(
-            "def transform(x):\n    return {{\"commands\": [{{\"name\": \"oxplow.work_item.transition\", \"input\": {{\"ref\": \"{}\", \"to\": \"done\"}}}}]}}\n",
+            "def transform(x):\n    return {{\"commands\": [{{\"name\": \"oxplow.work_item.transition\", \"input\": {{\"uri\": \"{}\", \"to\": \"done\"}}}}]}}\n",
             oxplow_tasks::work_item_ref(fx.task)
         ));
         crate::test_fixtures::activate_with_problems(&fx.svc).await;
@@ -2647,7 +2647,7 @@ mod tests {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         with_finish(
             &fx,
-            "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.work_item.delete\", \"input\": {\"ref\": x[\"input\"][\"ref\"]}}]}\n",
+            "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.work_item.delete\", \"input\": {\"uri\": x[\"input\"][\"uri\"]}}]}\n",
         )
         .await;
         let r = oxplow_tasks::work_item_ref(fx.task);
@@ -2657,7 +2657,7 @@ mod tests {
             .run(
                 &agent(&fx),
                 "my_review.review.finish",
-                json!({ "ref": r }),
+                json!({ "uri": r }),
                 false,
             )
             .await
@@ -2702,7 +2702,7 @@ mod tests {
             let err = fx
                 .svc
                 .commands
-                .run(&oxplow_domain::Actor::Human, "my_review.review.finish", json!({ "ref": r }), false)
+                .run(&oxplow_domain::Actor::Human, "my_review.review.finish", json!({ "uri": r }), false)
                 .await
                 .unwrap_err();
             assert!(err.to_string().contains(says), "{script}: {err}");
@@ -2717,7 +2717,7 @@ mod tests {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         with_finish(
             &fx,
-            "def transform(x):\n    r = x[\"input\"][\"ref\"]\n    return {\"commands\": [\n        {\"name\": \"oxplow.work_item.update\", \"input\": {\"ref\": r, \"title\": \"again\"}},\n        {\"name\": \"my_review.review.finish\", \"input\": {\"ref\": r}},\n    ]}\n",
+            "def transform(x):\n    r = x[\"input\"][\"uri\"]\n    return {\"commands\": [\n        {\"name\": \"oxplow.work_item.update\", \"input\": {\"uri\": r, \"title\": \"again\"}},\n        {\"name\": \"my_review.review.finish\", \"input\": {\"uri\": r}},\n    ]}\n",
         )
         .await;
         let r = oxplow_tasks::work_item_ref(fx.task);
@@ -2728,7 +2728,7 @@ mod tests {
             .run(
                 &oxplow_domain::Actor::Human,
                 "my_review.review.finish",
-                json!({ "ref": r }),
+                json!({ "uri": r }),
                 false,
             )
             .await
@@ -2760,7 +2760,7 @@ mod tests {
             .run(
                 &oxplow_domain::Actor::Human,
                 "my_review.review.finish",
-                json!({ "ref": r }),
+                json!({ "uri": r }),
                 false,
             )
             .await
@@ -2865,7 +2865,7 @@ mod tests {
             .run(
                 &oxplow_domain::Actor::Human,
                 "my_review.review.finish",
-                json!({ "ref": r }),
+                json!({ "uri": r }),
                 false,
             )
             .await
@@ -2886,8 +2886,8 @@ mod tests {
     async fn an_example_runs_on_its_answers_and_may_expect_a_refusal() {
         let transition_schema = serde_json::json!({
             "type": "object",
-            "required": ["ref", "to"],
-            "properties": { "ref": { "type": "string" }, "to": { "type": "string" } },
+            "required": ["uri", "to"],
+            "properties": { "uri": { "type": "string" }, "to": { "type": "string" } },
             "additionalProperties": false
         });
         let schema = move |name: &str| {
@@ -2896,10 +2896,10 @@ mod tests {
         let layer = crate::sql_gateway::SqlGateway::new(oxplow_db::Database::in_memory());
         let cat = crate::extension_catalog::ExtensionCatalog::new();
         const SCRIPT: &str = "def transform(x):
-    rows = scope(\"sql.read\", {\"sql\": \"SELECT ref FROM v_work_item WHERE ref = :ref\", \"params\": {\"ref\": x[\"input\"][\"ref\"]}})
+    rows = scope(\"sql.read\", {\"sql\": \"SELECT uri FROM v_work_item WHERE uri = :uri\", \"params\": {\"uri\": x[\"input\"][\"uri\"]}})
     if not rows:
         return {\"refuse\": \"no such item\"}
-    return {\"commands\": [{\"name\": \"oxplow.work_item.transition\", \"input\": {\"ref\": rows[0][\"ref\"], \"to\": \"done\"}}]}
+    return {\"commands\": [{\"name\": \"oxplow.work_item.transition\", \"input\": {\"uri\": rows[0][\"uri\"], \"to\": \"done\"}}]}
 ";
         let check = |examples: &str| {
             let d = tempfile::tempdir().unwrap();
@@ -2909,7 +2909,7 @@ mod tests {
                 &format!(
                     "  - name: review.finish
     summary: Mark the task done.
-    input_schema: {{ type: object, required: [ref], properties: {{ ref: {{ type: string }} }} }}
+    input_schema: {{ type: object, required: [uri], properties: {{ uri: {{ type: string }} }} }}
     entry: handlers/finish_review.star
     invokers: {{ human: true, agent: true, lens: true }}
     needs: [sql.read]
@@ -2934,25 +2934,25 @@ mod tests {
 
         // The project has no such item, but the example's answers stand in.
         let d = check(
-            "      - { name: happy, input: { ref: \"oxplow:oxplow/work_item?id=tsk1&provider=oxplow\" }, answers: { sql.read: [[{ ref: \"oxplow:oxplow/work_item?id=tsk1&provider=oxplow\" }]] }, expect_commands: [oxplow.work_item.transition] }\n      - { name: missing, input: { ref: \"oxplow:oxplow/work_item?id=tsk9&provider=oxplow\" }, answers: { sql.read: [[]] }, refuses: no such item }\n",
+            "      - { name: happy, input: { uri: \"oxplow:oxplow/work_item?id=tsk1&provider=oxplow\" }, answers: { sql.read: [[{ uri: \"oxplow:oxplow/work_item?id=tsk1&provider=oxplow\" }]] }, expect_commands: [oxplow.work_item.transition] }\n      - { name: missing, input: { uri: \"oxplow:oxplow/work_item?id=tsk9&provider=oxplow\" }, answers: { sql.read: [[]] }, refuses: no such item }\n",
         );
         assert_eq!(errors(d).await, "");
 
         for (example, says) in [
             (
-                "      - { name: happy, input: { ref: \"oxplow:oxplow/work_item?id=tsk1&provider=oxplow\" }, expect_commands: [oxplow.work_item.transition] }\n",
+                "      - { name: happy, input: { uri: \"oxplow:oxplow/work_item?id=tsk1&provider=oxplow\" }, expect_commands: [oxplow.work_item.transition] }\n",
                 "example `happy`: refused (no such item) but `expect_commands` is [oxplow.work_item.transition]",
             ),
             (
-                "      - { name: missing, input: { ref: \"oxplow:oxplow/work_item?id=tsk1&provider=oxplow\" }, answers: { sql.read: [[{ ref: \"oxplow:oxplow/work_item?id=tsk1&provider=oxplow\" }]] }, refuses: no such item }\n",
+                "      - { name: missing, input: { uri: \"oxplow:oxplow/work_item?id=tsk1&provider=oxplow\" }, answers: { sql.read: [[{ uri: \"oxplow:oxplow/work_item?id=tsk1&provider=oxplow\" }]] }, refuses: no such item }\n",
                 "example `missing`: composed [oxplow.work_item.transition] but it should refuse (no such item)",
             ),
             (
-                "      - { name: missing, input: { ref: \"oxplow:oxplow/work_item?id=tsk1&provider=oxplow\" }, answers: { sql.read: [[]] }, refuses: unverified }\n",
+                "      - { name: missing, input: { uri: \"oxplow:oxplow/work_item?id=tsk1&provider=oxplow\" }, answers: { sql.read: [[]] }, refuses: unverified }\n",
                 "example `missing`: refused (no such item) but it should refuse (unverified)",
             ),
             (
-                "      - { name: both, input: { ref: \"oxplow:oxplow/work_item?id=tsk1&provider=oxplow\" }, answers: { sql.read: [[]] }, refuses: x, expect_commands: [oxplow.work_item.transition] }\n",
+                "      - { name: both, input: { uri: \"oxplow:oxplow/work_item?id=tsk1&provider=oxplow\" }, answers: { sql.read: [[]] }, refuses: x, expect_commands: [oxplow.work_item.transition] }\n",
                 "example `both` expects commands and a refusal",
             ),
         ] {

@@ -544,7 +544,7 @@ mod tests {
         let ns = name.replace('-', "_");
         format!(
             "manifest: 2\nname: {name}\nintent: {{ purpose: p, origin: null, examples: [] }}\n\
-             models:\n  - name: prs\n    version: 3\n    description: Pull requests.\n    columns:\n      - {{ name: ref, type: TEXT, doc: The ref. }}\n      - {{ name: title, type: TEXT, doc: Its title. }}\n\
+             models:\n  - name: prs\n    version: 3\n    description: Pull requests.\n    columns:\n      - {{ name: uri, type: TEXT, doc: The ref. }}\n      - {{ name: title, type: TEXT, doc: Its title. }}\n\
              event_types:\n  types:\n    - {{ type: {ns}.merged, v: 1, schema: merged.json, summary: Merged. }}\n\
              pages:\n  - {{ id: pr, title: Pull request, category: Work, lens: open }}\n\
              panels:\n  - {{ id: inbox, title: Inbox, scope: project, body: open }}\n\
@@ -560,7 +560,7 @@ mod tests {
         write(
             root,
             &format!("{dir}/models/prs.sql"),
-            "SELECT 'oxplow:oxplow/work_item?id=tsk1&provider=oxplow' AS ref, 'One' AS title",
+            "SELECT 'oxplow:oxplow/work_item?id=tsk1&provider=oxplow' AS uri, 'One' AS title",
         );
         write(
             root,

@@ -17,6 +17,14 @@ try to talk to app-internal endpoints, exfiltrate cookies/auth, or
 escape the sandbox into the host renderer. Defense in depth keeps the
 trade safe.
 
+## A web page is a resource
+
+A web page's tab id is its URL (`https://example.com/docs`), and foundation's
+`external-url` page renders it with `for: [https, http]`
+([pages-and-tabs.md](./pages-and-tabs.md) "Renderers"). `externalUrlRef(url)`
+is `{ id: url }`. The allowlist gates `refFromTabId`: an http(s) URL that
+passes `classifyExternalUrl` is a tab, any other text is not.
+
 ## How it works under Tauri 2
 
 Tauri 2 doesn't render an Electron-style `<webview>` tag inside the
@@ -56,7 +64,7 @@ oxplow's IPC surface.
 | File | Purpose |
 |---|---|
 | `apps/desktop/src/external-url-allowlist.ts` | Pure: `classifyExternalUrl(url)` → `{ ok, url } \| { ok: false, reason }`, `isAllowedExternalUrl`, `describeRejection`. Default policy: http(s) only. Tested in `external-url-allowlist.test.ts`. |
-| `apps/desktop/src/tabs/pageRefs.ts` | `externalUrlRef(url)` — must be called only after passing through the allowlist. |
+| `apps/desktop/src/tabs/pageRefs.ts` | `externalUrlRef(url)` (`{ id: url }`) — must be called only after passing through the allowlist; `refFromTabId` applies it to any http(s) URL. |
 | `apps/desktop/src/pages/ExternalUrlPage.tsx` | Status / re-open panel; auto-invokes `desktopBridge().openExternalUrl(url)` on mount. No `<webview>` element. |
 | `crates/oxplow-tauri-ipc/src/commands/webview.rs` | `open_external_url(url)` Tauri command. Validates scheme, generates `ext-url-<uuid>` label, builds the new `WebviewWindow`. |
 | `apps/desktop/src-tauri/capabilities/external-url.json` | Empty-permission capability; matches `ext-url-*` window labels. |

@@ -433,7 +433,7 @@ pub fn finished_tx(
     use oxplow_db::effect_run_store::ReactionOrigin;
     use oxplow_db::effect_run_store::RunState;
     use oxplow_domain::events::schema::{
-        EffectOrigin, EffectOutcome, EffectResult, EffectResultV4,
+        EffectOrigin, EffectOutcome, EffectResult, EffectResultV5,
     };
     let now = oxplow_domain::Timestamp::now().to_string();
     oxplow_db::effect_run_store::finish_tx(tx, key, done, &now)?;
@@ -447,14 +447,12 @@ pub fn finished_tx(
     let event_ref = oxplow_domain::uri::build::event_uri(&key.event_id.to_string());
     let mut result = oxplow_domain::Envelope::typed::<EffectResult>(
         oxplow_domain::uri::build::effect_source(&key.effect),
-        &EffectResultV4 {
+        &EffectResultV5 {
             effect: key.effect.clone(),
-            event: Some(event_ref.clone()),
+            event: Some(key.event_id.to_string()),
             outcome,
             reason: done.reason.clone(),
-            proposal: done
-                .proposal_id
-                .map(oxplow_domain::uri::build::proposal_uri),
+            proposal: done.proposal_id,
             detail: serde_json::Value::Null,
             attempt: key.attempt,
             origin: match key.origin {

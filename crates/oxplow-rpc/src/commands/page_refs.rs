@@ -136,14 +136,14 @@ mod tests {
                 "oxplow.work_item.create",
                 serde_json::json!({
                     "title": "Fix it",
-                    "thread": oxplow_domain::uri::build::thread_uri(thread),
+                    "thread": thread.to_string(),
                     "links": [{ "target": "oxplow:oxplow/collector?collector=ghost/none", "link_type": "about" }],
                 }),
                 false,
             )
             .await
             .unwrap();
-        let item = made.result["ref"].as_str().unwrap().to_string();
+        let item = made.result["uri"].as_str().unwrap().to_string();
         let out = crate::dispatch("list_outbound", serde_json::json!({ "source": item }), &svc)
             .await
             .unwrap();

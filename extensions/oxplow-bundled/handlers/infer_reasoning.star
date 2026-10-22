@@ -6,7 +6,7 @@
 # record and the claims it stated — into one digest, newest kept when it's long, and asks the
 # `reasoning` job for both lists in one call: the forks the agent resolved
 # without recording them, and the claims its answers made about its work.
-# The intent key names the effort (`reasoning:<effort ref>`), so asking
+# The intent key names the effort (`reasoning:<effort id>`, as `reasoning:eff3`), so asking
 # twice returns the same job; `again` asks a new one (`…@<n>`), which a
 # changed binding or new activity answers afresh. The `store-reasoning`
 # effect stores what comes back.
@@ -23,10 +23,10 @@ SYSTEM = """You review a coding agent's work session and report two things.
 
 Decisions: find the decisions it made without asking: forks where it picked one approach over another (where to put code, which library, what to change or leave, how to handle a case). Only real forks with a plausible alternative; skip routine steps. Don't repeat decisions it already recorded. For each: `question` is what had to be decided, `choice` what it chose, `alternatives` the options not taken, `why` its reasoning if visible, and `confidence` (low, medium or high) how sure you are it was a real decision. At most 8; an empty list is fine.
 
-Claims: find what the agent's answers (the "Agent:" lines) state about the outcome of its work: that tests pass, that behavior is unchanged, that a case is handled. Only claims the agent actually made; never infer one it didn't make. Don't repeat claims it already stated. For each: `statement` is the claim in the agent's own words, `kind` is one of tests_pass, no_behavior_change, handles_case or other, and `evidence_ref` is a run id (like run:12) or test name the answer itself named for it, left out when it named none. At most 8; an empty list is fine.
+Claims: find what the agent's answers (the "Agent:" lines) state about the outcome of its work: that tests pass, that behavior is unchanged, that a case is handled. Only claims the agent actually made; never infer one it didn't make. Don't repeat claims it already stated. For each: `statement` is the claim in the agent's own words, `kind` is one of tests_pass, no_behavior_change, handles_case or other, and `evidence` is a run id (like run:12) or test name the answer itself named for it, left out when it named none. At most 8; an empty list is fine.
 
 Reply with JSON only, no prose and no code fence:
-{"decisions": [{"question": "...", "choice": "...", "alternatives": ["..."], "why": "...", "confidence": "low"}], "claims": [{"statement": "...", "kind": "tests_pass", "evidence_ref": "run:12"}]}"""
+{"decisions": [{"question": "...", "choice": "...", "alternatives": ["..."], "why": "...", "confidence": "low"}], "claims": [{"statement": "...", "kind": "tests_pass", "evidence": "run:12"}]}"""
 
 def clip(text, most):
     text = text or ""
@@ -54,12 +54,10 @@ def read(sql, effort_id):
 
 def transform(x):
     effort = x["input"]["effort"]
-    if not uri.is_uri(effort) or uri.resource(effort) != "oxplow/effort":
-        return {"refuse": "`effort` is an effort ref, `oxplow:oxplow/effort?id=<id>`"}
     found = scope("sql.read", {
         "sql": "SELECT e.id, e.work_item, coalesce(w.title, '') AS title FROM v_effort e "
-        + "LEFT JOIN v_work_item w ON w.ref = e.work_item WHERE e.ref = :ref",
-        "params": {"ref": effort},
+        + "LEFT JOIN v_work_item w ON w.uri = e.work_item WHERE e.uri = uri('oxplow/effort', 'id', :effort)",
+        "params": {"effort": effort},
     })
     if not found:
         return {"refuse": "no effort " + effort}

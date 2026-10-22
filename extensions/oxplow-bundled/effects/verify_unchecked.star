@@ -13,11 +13,11 @@
 # runs are the only reads the event can't answer.
 _ACCEPTED = """
 SELECT (SELECT json_group_array(json_object('claim', s.value, 'statement', c.statement))
-          FROM json_each(:subject) s JOIN v_claim c ON s.value = c.ref
-          JOIN v_oxplow_bundled_claim_status cs ON cs.ref = c.ref
+          FROM json_each(:subject) s JOIN v_claim c ON s.value = c.uri
+          JOIN v_oxplow_bundled_claim_status cs ON cs.uri = c.uri
          WHERE cs.verified = 0) AS claims,
        (SELECT json_group_array(json_object('decision', s.value, 'question', d.question, 'choice', d.choice))
-          FROM json_each(:subject) s JOIN v_decision d ON s.value = d.ref
+          FROM json_each(:subject) s JOIN v_decision d ON s.value = d.uri
          WHERE d.provenance = 'inferred') AS decisions
 WHERE NOT EXISTS (
     SELECT 1 FROM v_event p
@@ -38,7 +38,7 @@ _ITEMS = 50
 def transform(x):
     event = x["event"]
     subject = event["subject"]
-    effort = event["payload"].get("effort")
+    effort = event["payload"].get("effort")  # the bare id, `eff12`
     item = event["payload"].get("work_item")
     if not effort or not item:
         return {"skip": "an acceptance names an effort and its item"}
@@ -47,7 +47,7 @@ def transform(x):
         "params": {
             "subject": json.encode(subject),
             "event_seq": event["seq"],
-            "effort": effort,
+            "effort": uri.build("oxplow/effort", id = effort),
         },
     })
     if not rows:
@@ -69,7 +69,7 @@ def transform(x):
             "input": {
                 "title": "Verify what the review of %s accepted unchecked" % effort,
                 "body": "\n".join(lines),
-                "links": [{"target": effort, "link_type": "about"}],
+                "links": [{"target": uri.build("oxplow/effort", id = effort), "link_type": "about"}],
             },
         }],
     }

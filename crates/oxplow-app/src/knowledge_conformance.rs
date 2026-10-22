@@ -41,7 +41,7 @@ pub async fn suite(svc: &crate::Services, actor: &Actor) -> Vec<Finding> {
         json!({
             "slug": "conformance-page",
             "body": body,
-            "verified_refs": verified,
+            "verified_files": verified,
         })
     };
     let run = |input: serde_json::Value, name: &'static str| async move {
@@ -53,7 +53,10 @@ pub async fn suite(svc: &crate::Services, actor: &Actor) -> Vec<Finding> {
 
     // 1. A write lands the page, its body and its event.
     let page = match run(write(&body, &[]), crate::knowledge::WRITE_PAGE).await {
-        Ok(result) => result["page"].as_str().unwrap_or_default().to_string(),
+        // The result names the page by its slug; the record is keyed by its ref.
+        Ok(result) => {
+            oxplow_domain::uri::build::wiki_uri(result["page"].as_str().unwrap_or_default())
+        }
         Err(e) => {
             fail("write", format!("write failed: {e}"));
             return findings;
@@ -205,7 +208,7 @@ impl World<'_> {
             .read(move |c| {
                 use rusqlite::OptionalExtension;
                 c.query_row(
-                    "SELECT title, updated_at FROM v_knowledge_page WHERE ref = ?1",
+                    "SELECT title, updated_at FROM v_knowledge_page WHERE uri = ?1",
                     [page],
                     |r| {
                         Ok(PageRow {
@@ -229,7 +232,7 @@ impl World<'_> {
             .read(move |c| {
                 use rusqlite::OptionalExtension;
                 c.query_row(
-                    "SELECT body FROM v_knowledge_body WHERE ref = ?1",
+                    "SELECT body FROM v_knowledge_body WHERE uri = ?1",
                     [page],
                     |r| r.get(0),
                 )

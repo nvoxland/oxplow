@@ -17,10 +17,10 @@ _STATE = """
 SELECT (SELECT provider FROM v_capability_provider
          WHERE capability = 'work_items' AND active = 1 AND available = 1
            AND provider <> 'none') AS provider,
-       (SELECT w.ref FROM v_work_item_link l JOIN v_work_item w ON w.ref = l.from_ref
-         WHERE l.to_ref = :contribution AND l.link_type = 'about'
+       (SELECT w.uri FROM v_work_item_link l JOIN v_work_item w ON w.uri = l.from_uri
+         WHERE l.to_uri = :contribution AND l.link_type = 'about'
            AND w.state NOT IN ('done', 'canceled')
-         ORDER BY w.ref DESC LIMIT 1) AS open_item
+         ORDER BY w.uri DESC LIMIT 1) AS open_item
 """
 
 # Where it is declared, and its recent failures, newest first: a
@@ -32,8 +32,7 @@ SELECT (SELECT file || ':' || coalesce(line, 1) FROM v_contribution
        (SELECT json_group_array(error) FROM (
           SELECT json_extract(payload, '$.error') AS error FROM v_event
            WHERE :kind = 'collector' AND type = 'collector.synced'
-             AND json_extract(payload, '$.collector') = (SELECT ref FROM v_contribution
-                                                           WHERE extension = :extension AND kind = :kind AND local = :contribution)
+             AND json_extract(payload, '$.collector') = :extension || '/' || :contribution
              AND json_extract(payload, '$.status') = 'error'
              AND json_extract(payload, '$.error') IS NOT NULL
            ORDER BY seq DESC LIMIT 5)) AS collector_errors,
@@ -85,7 +84,7 @@ def transform(x):
             lines.extend(["- " + md_text(e) for e in errors[:_ERRORS_SHOWN]])
         return {"commands": [{
             "name": "oxplow.work_item.comment",
-            "input": {"ref": state["open_item"], "body": "\n".join(lines)},
+            "input": {"uri": state["open_item"], "body": "\n".join(lines)},
         }]}
 
     body = [

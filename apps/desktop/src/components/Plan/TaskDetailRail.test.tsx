@@ -7,12 +7,12 @@ import { TaskDetailRail, type TaskDetailChanges } from "./TaskDetail.js";
 afterEach(cleanup);
 
 const item: WorkItem = {
-  ref: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow",
+  uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow",
   provider: "oxplow",
   title: "Fix it",
   body: "",
   state: "todo",
-  parentRef: null,
+  parentUri: null,
   threadId: "thr1",
   rank: 0,
   closedAt: null,

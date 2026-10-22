@@ -498,12 +498,12 @@ impl TokenUsageService {
         &self,
         event: &oxplow_domain::StoredEvent,
     ) -> Result<usize, DomainError> {
-        use oxplow_domain::events::schema::{AgentTokensReportedV1, TokenKind};
+        use oxplow_domain::events::schema::{AgentTokensReportedV2, TokenKind};
         let env = &event.envelope;
         let (Some(thread), Some(stream)) = (env.anchors.thread_id, env.anchors.stream_id) else {
             return Ok(0);
         };
-        let reported: AgentTokensReportedV1 = serde_json::from_value(env.payload.clone())
+        let reported: AgentTokensReportedV2 = serde_json::from_value(env.payload.clone())
             .map_err(|e| DomainError::Invalid(format!("agent.tokens.reported: {e}")))?;
         // Stop-collecting gates (tsk31), one per measure this export can feed:
         // input/output → `oxplow.tokens` (the agent.tokens.* specs), cache
@@ -652,7 +652,7 @@ impl crate::event_pump::AsyncEventConsumer for TurnTokensConsumer {
         let (Some(thread), Some(turn_id)) = (env.anchors.thread_id, env.anchors.turn_id) else {
             return Ok(());
         };
-        let payload: oxplow_domain::events::schema::AgentTurnEndedV2 =
+        let payload: oxplow_domain::events::schema::AgentTurnEndedV3 =
             serde_json::from_value(env.payload.clone())
                 .map_err(|e| DomainError::Invalid(format!("agent.turn.ended: {e}")))?;
         let turn = self

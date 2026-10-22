@@ -84,7 +84,7 @@ pub fn columns(name: &str) -> &'static [&'static str] {
             "running_streams",
             "completion_trigger_characters",
         ],
-        "collector_state" => &["ref", "owner", "id", "network_enforced", "disabled"],
+        "collector_state" => &["uri", "owner", "id", "network_enforced", "disabled"],
         "collector_credential" => &["collector", "name", "is_set"],
         "extension_source" => &["name", "path", "hash"],
         "zone" => &["position", "zone", "patterns", "color", "files"],

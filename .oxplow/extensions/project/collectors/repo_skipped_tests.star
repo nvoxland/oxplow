@@ -14,7 +14,7 @@ def transform(input):
                 c += 1
         if c > 0:
             facts.append({"measure": "repo.skipped_tests", "value": c,
-                          "subject": ref.build("file", f["path"]), "path": f["path"],
+                          "subject": uri.build("oxplow/file", path = f["path"]), "path": f["path"],
                           "dims": {"oxplow.language": "rust"}})
     # TS/JS: `.skip` / `.todo` markers (member access, not object keys like
     # `{ skip: ... }` which are pairs), in test files only.
@@ -28,6 +28,6 @@ def transform(input):
                     c += 1
             if c > 0:
                 facts.append({"measure": "repo.skipped_tests", "value": c,
-                              "subject": ref.build("file", f["path"]), "path": f["path"],
+                              "subject": uri.build("oxplow/file", path = f["path"]), "path": f["path"],
                               "dims": {"oxplow.language": "typescript"}})
     return {"facts": facts}

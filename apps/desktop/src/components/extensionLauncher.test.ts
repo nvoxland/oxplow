@@ -28,9 +28,9 @@ test("the launcher lists every declared page with a category, by its tab id", ()
     ext({ name: "gh", pages: [page({ id: "open-prs", extension: "gh", pageRef: "oxplow:oxplow/page?page=gh/open-prs", title: "Open PRs", category: "Work" })] } as never),
     ext({ name: "off", enabled: false, pages: [page({ id: "x", extension: "off", pageRef: "oxplow:oxplow/page?page=off/x", title: "X", category: "Work" })] } as never),
   ]);
-  const rows = out.map((p) => [p.label, p.category, p.ref.id, p.ref.kind]);
-  expect(rows).toContainEqual(["Tasks", "Work", "oxplow:oxplow/page?page=tasks", "page"]);
-  expect(rows).toContainEqual(["Open PRs", "Work", "oxplow:oxplow/page?page=gh/open-prs", "page"]);
+  const rows = out.map((p) => [p.label, p.category, p.ref.id]);
+  expect(rows).toContainEqual(["Tasks", "Work", "oxplow:oxplow/page?page=tasks"]);
+  expect(rows).toContainEqual(["Open PRs", "Work", "oxplow:oxplow/page?page=gh/open-prs"]);
   // No category: opened from elsewhere, not the launcher. A disabled extension's pages aren't there.
   expect(rows.map((r) => r[0])).not.toContain("Diff");
   expect(rows.map((r) => r[0])).not.toContain("X");

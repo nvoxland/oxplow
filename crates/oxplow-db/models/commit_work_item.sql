@@ -1,5 +1,5 @@
 -- The active work list's items each commit was for.
-SELECT DISTINCT CAST(c.sha AS TEXT) AS sha, CAST(w.ref AS TEXT) AS work_item
+SELECT DISTINCT CAST(c.sha AS TEXT) AS sha, CAST(w.uri AS TEXT) AS work_item
 FROM (
   -- Its message mentions the item.
   SELECT uri_param(source_uri, 'sha') AS sha, target_uri AS item
@@ -13,4 +13,4 @@ FROM (
   WHERE source_resource = 'oxplow/work_item'
     AND target_resource = 'oxplow/commit'
 ) c
-JOIN ref('work_item') w ON w.ref = c.item
+JOIN ref('work_item') w ON w.uri = c.item

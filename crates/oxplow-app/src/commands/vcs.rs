@@ -25,7 +25,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use super::util::{parse, ref_id, schema};
+use super::util::{bare_id, parse, schema};
 use super::{Handler, HandlerOutput, Invocation};
 use crate::events::{EventBus, OxplowEvent, WorkspaceChangeKind};
 use crate::vcs::GitProvider;
@@ -102,7 +102,7 @@ where
             let op = op.clone();
             Box::pin(async move {
                 let input: I = parse(input)?;
-                let stream: StreamId = ref_id(input.stream(), oxplow_domain::uri::resources::STREAM, "/stream")?;
+                let stream: StreamId = bare_id(input.stream(), oxplow_domain::uri::resources::STREAM, "/stream")?;
                 // Isolation: an agent, or an effect in its event's stream,
                 // works in its own stream's worktree only.
                 if invocation.actor().confined_to_own_stream()
@@ -212,7 +212,7 @@ fn done() -> Result<Value, CommandError> {
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CommitInput {
-    /// The stream whose workspace to commit (`oxplow:oxplow/stream?id=str1`).
+    /// The stream whose workspace to commit (`str1`).
     pub stream: String,
     pub message: String,
     /// Commit untracked files too (default), not only changes to tracked
@@ -548,8 +548,7 @@ mod tests {
         let root = svc.layout.project_dir.clone();
         std::fs::write(root.join("a.txt"), "one\n").unwrap();
         commit_all(&root, "base");
-        let stream =
-            oxplow_domain::uri::build::stream_uri(svc.stream_store.list().await.unwrap()[0].id);
+        let stream = svc.stream_store.list().await.unwrap()[0].id.to_string();
         let err = svc
             .commands
             .run(
@@ -612,7 +611,7 @@ mod tests {
         std::fs::write(root.join("a.txt"), "one\n").unwrap();
         commit_all(&root, "base");
         let own = svc.stream_store.list().await.unwrap()[0].id;
-        let stream = oxplow_domain::uri::build::stream_uri(own);
+        let stream = own.to_string();
 
         let agent = |stream_id| Actor::Agent {
             session_id: None,
@@ -719,7 +718,7 @@ mod tests {
             .run(
                 &Actor::Human,
                 "oxplow.vcs.commit",
-                json!({ "stream": "oxplow:oxplow/stream?id=str999", "message": "m" }),
+                json!({ "stream": "str999", "message": "m" }),
                 false,
             )
             .await

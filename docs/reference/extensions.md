@@ -313,7 +313,7 @@ collectors:
   - id: prs
     runtime: starlark        # starlark | jaq | exec
     entry: collectors/prs.star
-    input: "SELECT ref, title FROM v_work_item"
+    input: "SELECT uri, title FROM v_work_item"
     trigger: { every: 15m }  # or manual (the default), or { on: [event types] }
     entities:
       - { name: pr, key: number, columns: { number: int, title: text } }
@@ -370,11 +370,11 @@ those need, like any extension. `.oxplow/project.yaml` takes only `use:` entries
 commands:
   - name: review.finish             # its id is <namespace>.review.finish
     summary: Mark the task done.
-    input_schema: { type: object, required: [ref], properties: { ref: { type: string } } }
+    input_schema: { type: object, required: [uri], properties: { uri: { type: string } } }
     entry: handlers/finish.star     # transform(x) → { commands: [...] } | { refuse: "why" }
     needs: [sql.read]               # the scopes its script calls
     invokers: { human: true, agent: true, lens: true }
-    ui: { label: Finish Review, group: Review, about: oxplow/work_item, input: { ref: "{{ref}}" } }
+    ui: { label: Finish Review, group: Review, about: oxplow/work_item, input: { uri: "{{uri}}" } }
 ```
 
 - A script reaches oxplow only through the scopes in `needs`. Today a
@@ -394,18 +394,24 @@ commands:
   `uri.build(resource, **params)` makes one (`uri.build("oxplow/file",
   path = f["path"])`), and `uri.parse(u)` (`{resource, params, view}`),
   `uri.param(u, name)`, `uri.id(u, resource=)`, `uri.resource(u)` and
-  `uri.is_uri(v)` read one. In SQL, select a model's `ref` column and
-  compare URIs to URIs (`WHERE ref = :ref`); build one with
-  `uri('oxplow/effort', 'id', 'eff' || id)` and read a param with
-  `uri_param(ref, 'id')`. Don't concatenate `'oxplow:oxplow/effort?id=' || id`
-  or slice a URI. A URI can outlive what it names, so store it even when
+  `uri.is_uri(v)` read one. In SQL, select a model's `uri` column and
+  compare URIs to URIs (`WHERE uri = :uri`); build one with
+  `uri('oxplow/effort', 'id', json_extract(e.payload, '$.effort'))` and
+  read a param with `uri_param(uri, 'id')`. Don't concatenate
+  `'oxplow:oxplow/effort?id=' || id` or slice a URI. A field named for one
+  resource (a command input `thread`, `effort`, `session`, `claim`, an event
+  payload field) carries that resource's bare id, not a URI: a lens or form
+  that feeds one selects `uri_param(x.uri, 'id')` (or the model's integer
+  `id` for a claim or decision), and a script builds a URI with
+  `uri.build("oxplow/effort", id = e)` only where it becomes a link target
+  or is compared with a `uri`. A URI can outlive what it names, so store it even when
   the thing may go.
 - `ui` says how a person meets it. `about` names a resource
-  (`oxplow/work_item`, `acme/pr`) and offers the command on a URI of it, its page and rows. `input` binds `{{stream}}`, `{{thread}}`,
-  `{{ref}}` or `{{ref.id}}`, each as a whole string. `form` opens a
+  (`oxplow/work_item`, `acme/pr`) and offers the command on a URI of it, its page and rows. `input` binds `{{stream}}` and `{{thread}}` (bare ids),
+  `{{uri}}` (the page's URI) or `{{uri.id}}` (its key), each as a whole string. `form` opens a
   page to gather the input instead; offered on a URI (`about`), the page
-  opens with `ref=<uri>`, which a `pages:` lens form prefills from with
-  `defaults: { ref: "{{param.ref}}" }`. `open_after` opens a URI once it
+  opens with `uri=<uri>`, which a `pages:` lens form prefills from with
+  `defaults: { uri: "{{param.uri}}" }`. `open_after` opens a URI once it
   ran, taking `{{result.<field>}}` from its result.
 - A mistake in `ui` is a load error naming the field, not a menu entry
   that never shows.
@@ -521,9 +527,8 @@ resources:
   - name: pr
     label: Pull request
     params: { id: { required: true, pattern: '^\d+$' } }
-    resolve: pull_request     # a model with `ref` and `title` columns
-    searchable: pull_request  # optional: a model with `ref`, `title`, `body`
-    page: pr                  # optional: one of your pages, opened with `ref=<uri>`
+    resolve: pull_request     # a model with `uri` and `title` columns
+    searchable: pull_request  # optional: a model with `uri`, `title`, `body`
     icon: git-pull-request
     wikilink: { prefix: pr, param: id }   # [[pr:12]]
 ```
@@ -532,16 +537,50 @@ resources:
   anchored (`^…$`) and limited to plain characters, classes, `\d`, `\w`,
   escapes and quantifiers: no groups, alternation or `.`.
 - `resolve` gives each thing a title in links and backlinks. `searchable`
-  puts the model's rows in search; a row whose `ref` isn't a URI of this
+  puts the model's rows in search; a row whose `uri` isn't a URI of this
   resource is skipped.
 - A URI that nothing resolves (the extension is off, or the thing is
   gone) shows as its raw text. It never errors.
+- A resource has no page of its own to name. A URI opens as itself, and
+  a page you declare with `for:` draws it ("Showing a resource" below).
 - `about:` on a command or a prompt, and `resource:` on a decorator, take
   a resource name: `oxplow/work_item`, `github/pr`.
 
-`oxplow extension check` refuses an unknown model, an unknown page, a pattern
+`oxplow extension check` refuses an unknown model, a pattern
 outside that subset, an icon oxplow doesn't draw, and a resource or
 wikilink prefix that another extension already uses.
+
+#### Showing a resource
+
+A page with `for:` is a **renderer**: it draws the URIs of a resource.
+When a person opens `oxplow:github/pr?id=12`, oxplow picks one of the
+pages that name `github/pr` in `for:`.
+
+```yaml
+pages:
+  - id: pr
+    title: Pull request
+    icon: git-pull-request
+    for: github/pr          # a resource, or a list of them
+    default: true           # the page a plain open uses
+    accepts: { id: '^\d+$' }   # optional: only URIs whose params fit
+    params: { uri: {} }
+    lens: pr-detail         # must declare a `uri` param
+```
+
+- `for` names a resource of your own, one of oxplow's (`oxplow/file`),
+  another extension's, or `https` / `http` to draw web pages.
+- `accepts` has one entry per param of the resource. The value is
+  `present`, `absent` or an anchored pattern like the ones in `params`.
+  The page draws a URI only when every entry holds.
+- `default: true` is for the resources your extension declares, and one
+  page per resource. A page that draws another extension's resource is
+  never its default: the person picks it with **Open with**.
+- `pinned: true` pins the tab the page opens in.
+- A lens page that renders must declare a `uri` param. It runs with the
+  URI of the thing.
+- Nothing draws a URI? oxplow shows its label and params, or the raw URI
+  in a muted style if the thing is gone. This is not an error.
 
 ### Replacing a core view
 
@@ -560,8 +599,8 @@ The same table is the `v_replaceable` model.
 |---|---|---|---|---|---|
 | `work_item.board` | board | no | 1 | `scope`, `thread_id` | — |
 | `work_item.list` | list | no | 1 | `scope`, `thread_id` | — |
-| `work_item.detail` | detail editor | no | 1 | `ref` | — |
-| `work_item.detail.state` | state control | yes | 1 | `ref` | — |
+| `work_item.detail` | detail editor | no | 1 | `uri` | — |
+| `work_item.detail.state` | state control | yes | 1 | `uri` | — |
 | `vcs.history.graph` | history graph | no | 2 | `head_sha`, `reveal_sha`, `limit` | `q`, `author`, `branch` |
 | `effort.verdict` | effort verdict | no | 1 | `effort_id` | — |
 <!-- replaceables:end -->

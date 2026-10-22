@@ -3,12 +3,12 @@ import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
 import type { Lens, LensRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
 import { PageNavigationContext, type PageNavigation } from "../tabs/PageNavigationContext.js";
-import { lensRef } from "../tabs/pageRefs.js";
+import { lensRef, resourceParamsOf, viewParamsOf } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
 
-// A lens page is a function of its entry: its params come from its ref,
-// and a change goes back through the tab — a filter replaces the entry,
-// a row picked pushes one.
+// A lens page is a function of its entry: its filters and picks are its
+// URI's `#` view, and a change goes back through the tab — a filter
+// replaces the entry, a row picked pushes one.
 
 const runs: Record<string, SqlCell>[] = [];
 const realApi = await import("../api.js");
@@ -71,14 +71,15 @@ function nav(ref: TabRef, replaced: { ref: TabRef; push: boolean }[], historySta
     canGoBack: false,
     canGoForward: false,
     ref,
-    setViewParams: (params, opts) => replaced.push({ ref: lensRef("x/y", params), push: !!opts?.push }),
+    viewParams: viewParamsOf(ref),
+    setViewParams: (params, opts) => replaced.push({ ref: lensRef("x/y", {}, params), push: !!opts?.push }),
     historyState,
     setHistoryState: (patch) => states?.push(patch),
   };
 }
 
 function page(ref: TabRef, replaced: { ref: TabRef; push: boolean }[], historyState?: Record<string, unknown>, states?: Record<string, unknown>[]) {
-  const params = (ref.payload as { params?: Record<string, SqlCell> }).params;
+  const params = resourceParamsOf(ref);
   return (
     <PageNavigationContext.Provider value={nav(ref, replaced, historyState, states)}>
       <LensPage lensId="x/y" params={params} stream={null} onOpenPage={() => {}} />
@@ -92,9 +93,9 @@ test("a filter replaces the tab's entry; a value back at its default leaves the 
   await waitFor(() => expect(view.getByTestId("lens-param-range-value").textContent).toBe("Last 30 days"));
   fireEvent.click(view.getByTestId("lens-param-range-value"));
   fireEvent.change(view.getByTestId("lens-param-range-edit"), { target: { value: "7d" } });
-  expect(replaced).toEqual([{ ref: lensRef("x/y", { range: "7d" }), push: false }]);
+  expect(replaced).toEqual([{ ref: lensRef("x/y", {}, { range: "7d" }), push: false }]);
   // The tab now shows that ref: the page redraws from it, not remounted.
-  view.rerender(page(lensRef("x/y", { range: "7d" }), replaced));
+  view.rerender(page(lensRef("x/y", {}, { range: "7d" }), replaced));
   await waitFor(() => expect(runs.at(-1)).toEqual({ range: "7d" }));
   fireEvent.click(view.getByTestId("lens-param-range-value"));
   fireEvent.change(view.getByTestId("lens-param-range-edit"), { target: { value: "30d" } });
@@ -103,17 +104,26 @@ test("a filter replaces the tab's entry; a value back at its default leaves the 
 
 test("a row picked pushes an entry, keeping the filters", async () => {
   const replaced: { ref: TabRef; push: boolean }[] = [];
-  const view = render(page(lensRef("x/y", { range: "7d" }), replaced));
+  const view = render(page(lensRef("x/y", {}, { range: "7d" }), replaced));
   await waitFor(() => expect(view.getByTestId("lens-row-1")).not.toBeNull());
   fireEvent.click(view.getByTestId("lens-row-1"));
-  expect(replaced).toEqual([{ ref: lensRef("x/y", { range: "7d", commit: "def" }), push: true }]);
+  expect(replaced).toEqual([{ ref: lensRef("x/y", {}, { range: "7d", commit: "def" }), push: true }]);
+});
+
+// A filter or a pick in the URI's `?` is a link spelled wrong: refused,
+// never moved into the view.
+test("a filter in the URI's `?` is refused, naming it", async () => {
+  const replaced: { ref: TabRef; push: boolean }[] = [];
+  const view = render(page(lensRef("x/y", { range: "7d" }), replaced));
+  await waitFor(() => expect(view.getByTestId("lens-error").textContent).toContain("`range` is a filter or a pick"));
+  expect(replaced).toEqual([]);
 });
 
 test("nothing is written back while nothing changes", async () => {
   const replaced: { ref: TabRef; push: boolean }[] = [];
-  const view = render(page(lensRef("x/y", { range: "7d" }), replaced));
+  const view = render(page(lensRef("x/y", {}, { range: "7d" }), replaced));
   await waitFor(() => expect(runs).toEqual([{ range: "7d" }]));
-  view.rerender(page(lensRef("x/y", { range: "7d" }), replaced));
+  view.rerender(page(lensRef("x/y", {}, { range: "7d" }), replaced));
   expect(replaced).toEqual([]);
   expect(runs).toHaveLength(1);
 });
@@ -123,13 +133,13 @@ test("nothing is written back while nothing changes", async () => {
 test("the picked row is written to, and read from, the entry's history state", async () => {
   const replaced: { ref: TabRef; push: boolean }[] = [];
   const states: Record<string, unknown>[] = [];
-  const view = render(page(lensRef("x/y", { range: "7d" }), replaced, undefined, states));
+  const view = render(page(lensRef("x/y", {}, { range: "7d" }), replaced, undefined, states));
   await waitFor(() => expect(view.getByTestId("lens-row-1")).not.toBeNull());
   fireEvent.click(view.getByTestId("lens-row-1"));
   expect(states).toEqual([{ picked: { commit: { value: "def", facts: [{ label: "Commit", text: "def" }] } } }]);
   cleanup();
   const back = render(
-    page(lensRef("x/y", { commit: "def" }), replaced, { picked: { commit: { value: "def", facts: [{ label: "Subject", text: "Fix the thing" }] } } }),
+    page(lensRef("x/y", {}, { commit: "def" }), replaced, { picked: { commit: { value: "def", facts: [{ label: "Subject", text: "Fix the thing" }] } } }),
   );
   await waitFor(() => expect(back.getByTestId("lens-selection-commit").textContent).toContain("Fix the thing"));
 });

@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`lens.shown@2`: an agent showed the person an answer in a thread —\nan existing lens or its own lens spec (`oxplow.lens.show`, P6.C1).",
+  "properties": {
+    "answer": {
+      "description": "The answer's id.",
+      "format": "int64",
+      "type": "integer"
+    },
+    "lens": {
+      "description": "The lens (`<extension>/<slug>`) when it shows an existing one.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "thread": {
+      "description": "The thread (`thr3`).",
+      "type": "string"
+    }
+  },
+  "required": [
+    "answer",
+    "thread"
+  ],
+  "title": "LensShownV2",
+  "type": "object"
+}

@@ -467,10 +467,10 @@ impl Envelope {
 /// `jobs.read` (`scope("jobs.read", { job_run })`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct ContributionJobCompletedV1 {
-    /// The run (`oxplow:oxplow/job_run?id=<id>`).
+pub struct ContributionJobCompletedV2 {
+    /// The run's id (a UUID).
     pub job_run: String,
-    /// The job it ran (`oxplow:oxplow/job?job=<extension>/<id>`).
+    /// The job it ran (`<extension>/<id>`).
     pub job: String,
     pub version: Option<u32>,
     /// Its last attempt (0 when it was cancelled before one started).
@@ -495,8 +495,8 @@ pub enum JobOutcome {
 pub struct ContributionJobCompleted;
 impl EventType for ContributionJobCompleted {
     const TYPE: &'static str = "contribution.job.completed";
-    const V: u32 = 1;
-    type Payload = ContributionJobCompletedV1;
+    const V: u32 = 2;
+    type Payload = ContributionJobCompletedV2;
 }
 
 /// Who ran a command (`.context/target-architecture.md` §7).
@@ -585,15 +585,15 @@ impl EventType for CommandExecuted {
     type Payload = CommandExecutedV4;
 }
 
-/// `command.proposed@2`: an agent or an effect ran a command that needs a
+/// `command.proposed@3`: an agent or an effect ran a command that needs a
 /// person's confirmation; it is kept as a proposal until a person decides
 /// — v1, with an effect among the actor kinds (P8.D8). A v1 payload is a
 /// v2 one as is.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct CommandProposedV2 {
-    /// `oxplow:oxplow/proposal?id=<id>`.
-    pub proposal: String,
+pub struct CommandProposedV3 {
+    /// The proposal's id.
+    pub proposal: i64,
     /// The command's name (`oxplow.config.set`).
     pub command: String,
     pub actor_kind: ActorKindV2,
@@ -601,26 +601,26 @@ pub struct CommandProposedV2 {
     pub actor_id: Option<String>,
     /// Whether the command is destructive.
     pub destructive: bool,
-    /// The pending proposals of the same call (`oxplow:oxplow/proposal?id=<id>`) this one
-    /// replaced — marked superseded in the same transaction.
+    /// The ids of the pending proposals of the same call this one replaced —
+    /// marked superseded in the same transaction.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub supersedes: Vec<String>,
+    pub supersedes: Vec<i64>,
 }
 
 pub struct CommandProposed;
 impl EventType for CommandProposed {
     const TYPE: &'static str = "command.proposed";
-    const V: u32 = 2;
-    type Payload = CommandProposedV2;
+    const V: u32 = 3;
+    type Payload = CommandProposedV3;
 }
 
-/// `command.approved@1`: a person approved a proposal and the command ran
+/// `command.approved@2`: a person approved a proposal and the command ran
 /// as them, audited as `audit_id`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct CommandApprovedV1 {
-    /// `oxplow:oxplow/proposal?id=<id>`.
-    pub proposal: String,
+pub struct CommandApprovedV2 {
+    /// The proposal's id.
+    pub proposal: i64,
     pub command: String,
     /// The approving run's `command_audit` row.
     pub audit_id: i64,
@@ -629,24 +629,24 @@ pub struct CommandApprovedV1 {
 pub struct CommandApproved;
 impl EventType for CommandApproved {
     const TYPE: &'static str = "command.approved";
-    const V: u32 = 1;
-    type Payload = CommandApprovedV1;
+    const V: u32 = 2;
+    type Payload = CommandApprovedV2;
 }
 
-/// `command.declined@1`: a person declined a proposal; nothing ran.
+/// `command.declined@2`: a person declined a proposal; nothing ran.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct CommandDeclinedV1 {
-    /// `oxplow:oxplow/proposal?id=<id>`.
-    pub proposal: String,
+pub struct CommandDeclinedV2 {
+    /// The proposal's id.
+    pub proposal: i64,
     pub command: String,
 }
 
 pub struct CommandDeclined;
 impl EventType for CommandDeclined {
     const TYPE: &'static str = "command.declined";
-    const V: u32 = 1;
-    type Payload = CommandDeclinedV1;
+    const V: u32 = 2;
+    type Payload = CommandDeclinedV2;
 }
 
 /// Which layer of a project's config a change was to.
@@ -830,23 +830,23 @@ pub enum EffectOrigin {
     Auto,
 }
 
-/// `effect.result@4` (P10): v3, its origin able to say `auto` — an
+/// `effect.result@5` (P10): v3, its origin able to say `auto` — an
 /// attempt sent again by itself.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct EffectResultV4 {
+pub struct EffectResultV5 {
     /// The effect (`effect:<extension>/<id>`).
     pub effect: String,
-    /// The event it reacted to (`oxplow:oxplow/event?id=<id>`); absent on a v1 result.
+    /// The id of the event it reacted to (a UUID); absent on a v1 result.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub event: Option<String>,
     pub outcome: EffectOutcome,
     /// Why it skipped or failed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
-    /// The proposal it left for a person (`oxplow:oxplow/proposal?id=<id>`).
+    /// The id of the proposal it left for a person.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub proposal: Option<String>,
+    pub proposal: Option<i64>,
     /// Effect-specific detail, opaque to the log.
     #[serde(default)]
     pub detail: Value,
@@ -858,22 +858,24 @@ pub struct EffectResultV4 {
 pub struct EffectResult;
 impl EventType for EffectResult {
     const TYPE: &'static str = "effect.result";
-    const V: u32 = 4;
-    type Payload = EffectResultV4;
+    const V: u32 = 5;
+    type Payload = EffectResultV5;
 }
 
-/// `snapshot.taken@2` (tsk883): v1, its trigger able to say
+/// `snapshot.taken@3` (tsk883): v1, its trigger able to say
 /// `run_measured` — the take that pins a run's reports to the code it
 /// measured.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct SnapshotTakenV2 {
+pub struct SnapshotTakenV3 {
+    /// The stream (`str1`).
     pub stream: String,
     /// The snapshot the worktree is at after the take: a new one, or the
     /// parent when nothing changed (`unchanged`).
-    pub snapshot: String,
+    pub snapshot: i64,
+    /// The snapshot it was taken from, when there was one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub parent: Option<String>,
+    pub parent: Option<i64>,
     pub trigger: crate::snapshot::SnapshotTrigger,
     /// True when the take recorded no new snapshot.
     pub unchanged: bool,
@@ -890,41 +892,42 @@ pub struct SnapshotTakenV2 {
 pub struct SnapshotTaken;
 impl EventType for SnapshotTaken {
     const TYPE: &'static str = "snapshot.taken";
-    const V: u32 = 2;
-    type Payload = SnapshotTakenV2;
+    const V: u32 = 3;
+    type Payload = SnapshotTakenV3;
 }
 
-/// `vcs.head.moved@1`: HEAD moved while the worktree was clean, so the
+/// `vcs.head.moved@2`: HEAD moved while the worktree was clean, so the
 /// latest snapshot now also is that commit.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct VcsHeadMovedV1 {
+pub struct VcsHeadMovedV2 {
+    /// The stream (`str1`).
     pub stream: String,
     /// The snapshot re-stamped with the new commit.
-    pub snapshot: String,
-    /// `oxplow:oxplow/commit?sha=<sha>` the snapshot pointed at before, if any.
+    pub snapshot: i64,
+    /// The commit (its sha) the snapshot pointed at before, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub from: Option<String>,
-    /// `oxplow:oxplow/commit?sha=<sha>` HEAD points at now.
+    /// The commit (its sha) HEAD points at now.
     pub to: String,
 }
 
 pub struct VcsHeadMoved;
 impl EventType for VcsHeadMoved {
     const TYPE: &'static str = "vcs.head.moved";
-    const V: u32 = 1;
-    type Payload = VcsHeadMovedV1;
+    const V: u32 = 2;
+    type Payload = VcsHeadMovedV2;
 }
 
-/// `vcs.commit.indexed@1`: the commit indexer stored a commit it hadn't
+/// `vcs.commit.indexed@2`: the commit indexer stored a commit it hadn't
 /// seen, reachable from a stream's head — every commit, however it was made
 /// (a `vcs.head.moved` needs a clean worktree, so it misses most).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct VcsCommitIndexedV1 {
-    /// `oxplow:oxplow/commit?sha=<sha>`.
+pub struct VcsCommitIndexedV2 {
+    /// The commit's sha.
     pub commit: String,
-    /// `oxplow:oxplow/stream?id=strN`, the stream whose workspace it was found from.
+    /// The stream whose workspace it was found from (`str1`).
     pub stream: String,
     /// When it was committed (RFC 3339).
     pub committed_at: String,
@@ -933,17 +936,17 @@ pub struct VcsCommitIndexedV1 {
 pub struct VcsCommitIndexed;
 impl EventType for VcsCommitIndexed {
     const TYPE: &'static str = "vcs.commit.indexed";
-    const V: u32 = 1;
-    type Payload = VcsCommitIndexedV1;
+    const V: u32 = 2;
+    type Payload = VcsCommitIndexedV2;
 }
 
-/// `agent.turn.started@1`: a person's prompt opened a turn.
+/// `agent.turn.started@2`: a person's prompt opened a turn.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct AgentTurnStartedV1 {
-    /// `oxplow:oxplow/turn?id=trn12`.
+pub struct AgentTurnStartedV2 {
+    /// The turn (`trn12`).
     pub turn: String,
-    /// `oxplow:oxplow/thread?id=thr3`.
+    /// The thread (`thr3`).
     pub thread: String,
     /// The harness session id, when it reported one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -953,8 +956,8 @@ pub struct AgentTurnStartedV1 {
 pub struct AgentTurnStarted;
 impl EventType for AgentTurnStarted {
     const TYPE: &'static str = "agent.turn.started";
-    const V: u32 = 1;
-    type Payload = AgentTurnStartedV1;
+    const V: u32 = 2;
+    type Payload = AgentTurnStartedV2;
 }
 
 /// A turn's token counts, when the harness reported them with the turn
@@ -970,12 +973,14 @@ pub struct TurnUsage {
     pub model: Option<String>,
 }
 
-/// `agent.turn.ended@2`: a turn closed, with what the token-usage reactor
+/// `agent.turn.ended@3`: a turn closed, with what the token-usage reactor
 /// needs to count it — the transcript to read, or the counts themselves.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct AgentTurnEndedV2 {
+pub struct AgentTurnEndedV3 {
+    /// The turn (`trn12`).
     pub turn: String,
+    /// The thread (`thr3`).
     pub thread: String,
     pub outcome: crate::hook::TurnOutcome,
     /// The harness's session transcript (Claude's `transcript_path`).
@@ -989,8 +994,8 @@ pub struct AgentTurnEndedV2 {
 pub struct AgentTurnEnded;
 impl EventType for AgentTurnEnded {
     const TYPE: &'static str = "agent.turn.ended";
-    const V: u32 = 2;
-    type Payload = AgentTurnEndedV2;
+    const V: u32 = 3;
+    type Payload = AgentTurnEndedV3;
 }
 
 /// Where a large or sensitive body lives: `event_content.hash` (xxh3-128
@@ -1048,13 +1053,14 @@ impl From<LoggedAgentStatus> for crate::hook::AgentStatusState {
     }
 }
 
-/// `agent.session.started@2`: v1 with the harness as its registry key
+/// `agent.session.started@3`: v1 with the harness as its registry key
 /// (`claude`, or whatever an extension declares). A v1 payload is a v2 one
 /// as is: its four names are those keys.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct AgentSessionStartedV2 {
+pub struct AgentSessionStartedV3 {
     pub session: String,
+    /// The thread (`thr3`).
     pub thread: String,
     /// The harness's registry key; empty when no agent session claims the
     /// hook (an agent oxplow didn't start).
@@ -1066,15 +1072,16 @@ pub struct AgentSessionStartedV2 {
 pub struct AgentSessionStarted;
 impl EventType for AgentSessionStarted {
     const TYPE: &'static str = "agent.session.started";
-    const V: u32 = 2;
-    type Payload = AgentSessionStartedV2;
+    const V: u32 = 3;
+    type Payload = AgentSessionStartedV3;
 }
 
-/// `agent.session.ended@1`: the harness ended a session (`/clear`, exit).
+/// `agent.session.ended@2`: the harness ended a session (`/clear`, exit).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct AgentSessionEndedV1 {
+pub struct AgentSessionEndedV2 {
     pub session: String,
+    /// The thread (`thr3`).
     pub thread: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
@@ -1083,8 +1090,8 @@ pub struct AgentSessionEndedV1 {
 pub struct AgentSessionEnded;
 impl EventType for AgentSessionEnded {
     const TYPE: &'static str = "agent.session.ended";
-    const V: u32 = 1;
-    type Payload = AgentSessionEndedV1;
+    const V: u32 = 2;
+    type Payload = AgentSessionEndedV2;
 }
 
 /// A kind of token an agent's telemetry counts. Cache kinds are their
@@ -1125,12 +1132,13 @@ pub struct TokenCount {
     pub value: u64,
 }
 
-/// `agent.tokens.reported@1`: an agent's own telemetry (an OTLP export)
+/// `agent.tokens.reported@2`: an agent's own telemetry (an OTLP export)
 /// reported token counts. Anchored to the turn the export's time window
 /// fell in — exports lag the turn — and the thread's single open effort.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct AgentTokensReportedV1 {
+pub struct AgentTokensReportedV2 {
+    /// The thread (`thr3`).
     pub thread: String,
     pub counts: Vec<TokenCount>,
     /// The end of the export's time window (RFC 3339), when it said.
@@ -1141,17 +1149,19 @@ pub struct AgentTokensReportedV1 {
 pub struct AgentTokensReported;
 impl EventType for AgentTokensReported {
     const TYPE: &'static str = "agent.tokens.reported";
-    const V: u32 = 1;
-    type Payload = AgentTokensReportedV1;
+    const V: u32 = 2;
+    type Payload = AgentTokensReportedV2;
 }
 
-/// `agent.prompt.submitted@1`: a person sent the agent a prompt. Every
+/// `agent.prompt.submitted@2`: a person sent the agent a prompt. Every
 /// prompt logs one; only a prompt with no turn open also opens a turn
 /// (`reprompt` says it landed inside an open one).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct AgentPromptSubmittedV1 {
+pub struct AgentPromptSubmittedV2 {
+    /// The thread (`thr3`).
     pub thread: String,
+    /// The turn it opened (`trn12`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1165,8 +1175,8 @@ pub struct AgentPromptSubmittedV1 {
 pub struct AgentPromptSubmitted;
 impl EventType for AgentPromptSubmitted {
     const TYPE: &'static str = "agent.prompt.submitted";
-    const V: u32 = 1;
-    type Payload = AgentPromptSubmittedV1;
+    const V: u32 = 2;
+    type Payload = AgentPromptSubmittedV2;
 }
 
 /// What oxplow's agent policy said about a tool call.
@@ -1260,12 +1270,13 @@ impl EventType for AgentToolFinished {
     type Payload = AgentToolFinishedV3;
 }
 
-/// `agent.subagent.started@1`: a subagent of the session started.
+/// `agent.subagent.started@2`: a subagent of the session started.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct AgentSubagentStartedV1 {
+pub struct AgentSubagentStartedV2 {
+    /// The thread (`thr3`).
     pub thread: String,
-    /// The session's turn it started in, when one was open.
+    /// The turn (`trn12`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn: Option<String>,
     pub subagent: SubagentRef,
@@ -1274,17 +1285,18 @@ pub struct AgentSubagentStartedV1 {
 pub struct AgentSubagentStarted;
 impl EventType for AgentSubagentStarted {
     const TYPE: &'static str = "agent.subagent.started";
-    const V: u32 = 1;
-    type Payload = AgentSubagentStartedV1;
+    const V: u32 = 2;
+    type Payload = AgentSubagentStartedV2;
 }
 
-/// `agent.subagent.finished@1`: a subagent of the session finished — it
+/// `agent.subagent.finished@2`: a subagent of the session finished — it
 /// stopped, or handed its report back. One per subagent.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct AgentSubagentFinishedV1 {
+pub struct AgentSubagentFinishedV2 {
+    /// The thread (`thr3`).
     pub thread: String,
-    /// The session's turn open when it finished, when one was.
+    /// The turn (`trn12`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn: Option<String>,
     pub subagent: SubagentRef,
@@ -1297,18 +1309,19 @@ pub struct AgentSubagentFinishedV1 {
 pub struct AgentSubagentFinished;
 impl EventType for AgentSubagentFinished {
     const TYPE: &'static str = "agent.subagent.finished";
-    const V: u32 = 1;
-    type Payload = AgentSubagentFinishedV1;
+    const V: u32 = 2;
+    type Payload = AgentSubagentFinishedV2;
 }
 
-/// `agent.peer_message.received@1`: another agent session's message
+/// `agent.peer_message.received@2`: another agent session's message
 /// reached the thread's agent as a prompt (Claude Code's cross-session
 /// message). Observed only: oxplow never sends one.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct AgentPeerMessageReceivedV1 {
+pub struct AgentPeerMessageReceivedV2 {
+    /// The thread (`thr3`).
     pub thread: String,
-    /// The turn it opened, or the one it arrived in.
+    /// The turn it opened, or the one it arrived in (`trn12`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn: Option<String>,
     /// The sender's own name for its session (its socket when it has no
@@ -1319,17 +1332,18 @@ pub struct AgentPeerMessageReceivedV1 {
 pub struct AgentPeerMessageReceived;
 impl EventType for AgentPeerMessageReceived {
     const TYPE: &'static str = "agent.peer_message.received";
-    const V: u32 = 1;
-    type Payload = AgentPeerMessageReceivedV1;
+    const V: u32 = 2;
+    type Payload = AgentPeerMessageReceivedV2;
 }
 
-/// `agent.context.compacted@1`: the agent's context was summarized to make
+/// `agent.context.compacted@2`: the agent's context was summarized to make
 /// room, so what it was told earlier is no longer in front of it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct AgentContextCompactedV1 {
+pub struct AgentContextCompactedV2 {
+    /// The thread (`thr3`).
     pub thread: String,
-    /// The session's turn open when it compacted, when one was.
+    /// The turn (`trn12`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn: Option<String>,
     /// What started it, as the harness names it (Claude's `auto` or
@@ -1346,15 +1360,16 @@ pub struct AgentContextCompactedV1 {
 pub struct AgentContextCompacted;
 impl EventType for AgentContextCompacted {
     const TYPE: &'static str = "agent.context.compacted";
-    const V: u32 = 1;
-    type Payload = AgentContextCompactedV1;
+    const V: u32 = 2;
+    type Payload = AgentContextCompactedV2;
 }
 
-/// `agent.status.changed@1`: a thread's agent moved to another state.
+/// `agent.status.changed@2`: a thread's agent moved to another state.
 /// Logged on a transition only.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct AgentStatusChangedV1 {
+pub struct AgentStatusChangedV2 {
+    /// The thread (`thr3`).
     pub thread: String,
     pub state: LoggedAgentStatus,
     /// What it's waiting on (the question, the permission asked), or why
@@ -1363,16 +1378,17 @@ pub struct AgentStatusChangedV1 {
     pub detail: Option<String>,
 }
 
-/// `agent.plan.proposed@1`: the agent put a plan to the person before
+/// `agent.plan.proposed@2`: the agent put a plan to the person before
 /// acting (Claude's `ExitPlanMode`, Codex's `plan` item; opencode's
 /// `plan_exit` carries no text, so it records none). Whether the person
 /// accepted it is in no hook, so it isn't recorded. The text sits in the
 /// payload, capped, so `v_agent_plan` reads it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct AgentPlanProposedV1 {
+pub struct AgentPlanProposedV2 {
+    /// The thread (`thr3`).
     pub thread: String,
-    /// The session's turn open when it proposed, when one was.
+    /// The turn (`trn12`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn: Option<String>,
     pub text: String,
@@ -1384,22 +1400,23 @@ pub struct AgentPlanProposedV1 {
 pub struct AgentPlanProposed;
 impl EventType for AgentPlanProposed {
     const TYPE: &'static str = "agent.plan.proposed";
-    const V: u32 = 1;
-    type Payload = AgentPlanProposedV1;
+    const V: u32 = 2;
+    type Payload = AgentPlanProposedV2;
 }
 
 pub struct AgentStatusChanged;
 impl EventType for AgentStatusChanged {
     const TYPE: &'static str = "agent.status.changed";
-    const V: u32 = 1;
-    type Payload = AgentStatusChangedV1;
+    const V: u32 = 2;
+    type Payload = AgentStatusChangedV2;
 }
 
-/// `test.run.recorded@2`: a test run was captured (`oxplow:oxplow/run?id=<capture>`).
+/// `test.run.recorded@3`: a test run was captured (`oxplow:oxplow/run?id=<capture>`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct TestRunRecordedV2 {
-    pub run: String,
+pub struct TestRunRecordedV3 {
+    /// The run's id (its capture).
+    pub run: i64,
     pub command: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exit_code: Option<i64>,
@@ -1419,8 +1436,8 @@ pub struct TestRunRecordedV2 {
 pub struct TestRunRecorded;
 impl EventType for TestRunRecorded {
     const TYPE: &'static str = "test.run.recorded";
-    const V: u32 = 2;
-    type Payload = TestRunRecordedV2;
+    const V: u32 = 3;
+    type Payload = TestRunRecordedV3;
 }
 
 /// `test.coverage.recorded@1`: a coverage report was captured.
@@ -1443,39 +1460,39 @@ impl EventType for TestCoverageRecorded {
     type Payload = TestCoverageRecordedV1;
 }
 
-/// `effort.opened@2`: a span of a thread's work began, linked to a work
+/// `effort.opened@3`: a span of a thread's work began, linked to a work
 /// item or not (`.context/work-tracking.md`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct EffortOpenedV2 {
-    /// `oxplow:oxplow/effort?id=eff12`.
+pub struct EffortOpenedV3 {
+    /// The effort (`eff12`).
     pub effort: String,
     /// `oxplow:oxplow/work_item?id=tsk42&provider=oxplow`, or another provider's item, when linked.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub work_item: Option<String>,
-    /// `oxplow:oxplow/thread?id=thr3` — the thread doing the work.
+    /// The thread doing the work (`thr3`).
     pub thread: String,
-    /// `oxplow:oxplow/snapshot?id=N`, when the open already had its start snapshot.
+    /// The start snapshot, when the open already had it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub start_snapshot: Option<String>,
+    pub start_snapshot: Option<i64>,
 }
 
 pub struct EffortOpened;
 impl EventType for EffortOpened {
     const TYPE: &'static str = "effort.opened";
-    const V: u32 = 2;
-    type Payload = EffortOpenedV2;
+    const V: u32 = 3;
+    type Payload = EffortOpenedV3;
 }
 
-/// `effort.claim_verified@1` (P7.C4): a reviewer verified one of an
+/// `effort.claim_verified@2` (P7.C4): a reviewer verified one of an
 /// effort's claims (`oxplow.effort.verify_claim`), naming what backs it — or
 /// took that back (`oxplow.effort.unverify_claim`, `evidence` absent).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct EffortClaimVerifiedV1 {
-    /// `oxplow:oxplow/claim?id=<id>`.
-    pub claim: String,
-    /// `oxplow:oxplow/effort?id=<id>`, when the claim was made in one.
+pub struct EffortClaimVerifiedV2 {
+    /// The claim's id.
+    pub claim: i64,
+    /// The effort it's on (`eff12`), when on one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effort: Option<String>,
     /// What backs it now (`reviewer`, `oxplow:oxplow/run?id=12`); absent once unverified.
@@ -1486,20 +1503,20 @@ pub struct EffortClaimVerifiedV1 {
 pub struct EffortClaimVerified;
 impl EventType for EffortClaimVerified {
     const TYPE: &'static str = "effort.claim_verified";
-    const V: u32 = 1;
-    type Payload = EffortClaimVerifiedV1;
+    const V: u32 = 2;
+    type Payload = EffortClaimVerifiedV2;
 }
 
-/// `effort.claim_dismissed@1`: a reviewer dismissed one of an effort's
+/// `effort.claim_dismissed@2`: a reviewer dismissed one of an effort's
 /// claims (`oxplow.effort.dismiss_claim`: the agent didn't claim it, or
 /// didn't mean it) — or took that back (`oxplow.effort.reopen_claim`,
 /// `dismissed: false`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct EffortClaimDismissedV1 {
-    /// `oxplow:oxplow/claim?id=<id>`.
-    pub claim: String,
-    /// `oxplow:oxplow/effort?id=<id>`, when the claim was made in one.
+pub struct EffortClaimDismissedV2 {
+    /// The claim's id.
+    pub claim: i64,
+    /// The effort it's on (`eff12`), when on one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effort: Option<String>,
     /// Dismissed now; `false` once reopened.
@@ -1509,17 +1526,18 @@ pub struct EffortClaimDismissedV1 {
 pub struct EffortClaimDismissed;
 impl EventType for EffortClaimDismissed {
     const TYPE: &'static str = "effort.claim_dismissed";
-    const V: u32 = 1;
-    type Payload = EffortClaimDismissedV1;
+    const V: u32 = 2;
+    type Payload = EffortClaimDismissedV2;
 }
 
-/// `effort.decision_reviewed@1` (P7.C4): a reviewer confirmed or
+/// `effort.decision_reviewed@2` (P7.C4): a reviewer confirmed or
 /// dismissed an inferred decision, or reopened one they had reviewed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct EffortDecisionReviewedV1 {
-    /// `oxplow:oxplow/decision?id=<id>`.
-    pub decision: String,
+pub struct EffortDecisionReviewedV2 {
+    /// The decision's id.
+    pub decision: i64,
+    /// The effort it's on (`eff12`), when on one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effort: Option<String>,
     /// `confirmed`, `dismissed` or `inferred` (reopened).
@@ -1529,16 +1547,16 @@ pub struct EffortDecisionReviewedV1 {
 pub struct EffortDecisionReviewed;
 impl EventType for EffortDecisionReviewed {
     const TYPE: &'static str = "effort.decision_reviewed";
-    const V: u32 = 1;
-    type Payload = EffortDecisionReviewedV1;
+    const V: u32 = 2;
+    type Payload = EffortDecisionReviewedV2;
 }
 
-/// `effort.decisions_inferred@1`: a model's proposals replaced an
+/// `effort.decisions_inferred@2`: a model's proposals replaced an
 /// effort's inferred decisions (`oxplow.effort.replace_inferred_decisions`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct EffortDecisionsInferredV1 {
-    /// `oxplow:oxplow/effort?id=eff<id>`.
+pub struct EffortDecisionsInferredV2 {
+    /// The effort (`eff12`).
     pub effort: String,
     /// The effort's work item, when it has one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1550,19 +1568,19 @@ pub struct EffortDecisionsInferredV1 {
 pub struct EffortDecisionsInferred;
 impl EventType for EffortDecisionsInferred {
     const TYPE: &'static str = "effort.decisions_inferred";
-    const V: u32 = 1;
-    type Payload = EffortDecisionsInferredV1;
+    const V: u32 = 2;
+    type Payload = EffortDecisionsInferredV2;
 }
 
-/// `collector.synced@1` (P7.B3): a collector ran — by hand
+/// `collector.synced@2` (P7.B3): a collector ran — by hand
 /// (`oxplow.collector.sync`), on its schedule, or for an event its `on:` trigger
 /// names (then the envelope's `cause` is that event). Logged in the
 /// transaction that wrote what it collected; a run that failed logs one
 /// too, with what went wrong.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct CollectorSyncedV1 {
-    /// `oxplow:oxplow/collector?collector=<owner>/<id>`.
+pub struct CollectorSyncedV2 {
+    /// The collector (`<extension>/<id>`).
     pub collector: String,
     /// What ran it: `manual`, `every` or `on`.
     pub trigger: String,
@@ -1586,8 +1604,8 @@ fn is_zero(n: &i64) -> bool {
 pub struct CollectorSynced;
 impl EventType for CollectorSynced {
     const TYPE: &'static str = "collector.synced";
-    const V: u32 = 1;
-    type Payload = CollectorSyncedV1;
+    const V: u32 = 2;
+    type Payload = CollectorSyncedV2;
 }
 
 /// Why a thread reached a checkpoint.
@@ -1598,21 +1616,21 @@ pub enum CheckpointReason {
     TurnEnd,
 }
 
-/// `thread.checkpoint@1`: a point in a thread's work oxplow observed, with
+/// `thread.checkpoint@2`: a point in a thread's work oxplow observed, with
 /// what changed since the turn began — what an effort policy reacts to
 /// without reading snapshots or harness tool names
 /// (`.context/work-tracking.md`). Logged by the `thread.checkpoint`
 /// consumer once a turn's end take lands.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct ThreadCheckpointV1 {
-    /// `oxplow:oxplow/thread?id=thr3`.
+pub struct ThreadCheckpointV2 {
+    /// The thread (`thr3`).
     pub thread: String,
-    /// `oxplow:oxplow/turn?id=trn12`.
+    /// The turn (`trn12`).
     pub turn: String,
     pub reason: CheckpointReason,
-    /// `oxplow:oxplow/snapshot?id=N`, the worktree at the checkpoint.
-    pub snapshot: String,
+    /// The snapshot of the worktree at the checkpoint.
+    pub snapshot: i64,
     /// The worktree differs from where the turn began.
     pub changed: bool,
     /// The turn's calls to tools that can change the worktree (edits,
@@ -1624,8 +1642,8 @@ pub struct ThreadCheckpointV1 {
 pub struct ThreadCheckpoint;
 impl EventType for ThreadCheckpoint {
     const TYPE: &'static str = "thread.checkpoint";
-    const V: u32 = 1;
-    type Payload = ThreadCheckpointV1;
+    const V: u32 = 2;
+    type Payload = ThreadCheckpointV2;
 }
 
 /// `work_item.state_changed@1`: a `work_item.*` command put an item in
@@ -1649,12 +1667,12 @@ impl EventType for WorkItemStateChanged {
     type Payload = WorkItemStateChangedV1;
 }
 
-/// `effort.linked@1`: an effort's work item was set, changed or cleared
+/// `effort.linked@2`: an effort's work item was set, changed or cleared
 /// (`oxplow.effort.link`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct EffortLinkedV1 {
-    /// `oxplow:oxplow/effort?id=eff12`.
+pub struct EffortLinkedV2 {
+    /// The effort (`eff12`).
     pub effort: String,
     /// The work item it's linked to now; absent when unlinked.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1664,19 +1682,19 @@ pub struct EffortLinkedV1 {
 pub struct EffortLinked;
 impl EventType for EffortLinked {
     const TYPE: &'static str = "effort.linked";
-    const V: u32 = 1;
-    type Payload = EffortLinkedV1;
+    const V: u32 = 2;
+    type Payload = EffortLinkedV2;
 }
 
-/// `effort.landed@1`: a commit holds an open effort's work — every file
+/// `effort.landed@2`: a commit holds an open effort's work — every file
 /// the effort changed is in the commit as the effort left it (`complete`),
 /// or only some of them. What an effort policy closes an effort on.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct EffortLandedV1 {
-    /// `oxplow:oxplow/effort?id=eff12`.
+pub struct EffortLandedV2 {
+    /// The effort (`eff12`).
     pub effort: String,
-    /// `oxplow:oxplow/commit?sha=<sha>`.
+    /// The commit's sha.
     pub commit: String,
     pub complete: bool,
 }
@@ -1684,16 +1702,16 @@ pub struct EffortLandedV1 {
 pub struct EffortLanded;
 impl EventType for EffortLanded {
     const TYPE: &'static str = "effort.landed";
-    const V: u32 = 1;
-    type Payload = EffortLandedV1;
+    const V: u32 = 2;
+    type Payload = EffortLandedV2;
 }
 
-/// `effort.retitled@1`: an effort's own title was set or cleared
+/// `effort.retitled@2`: an effort's own title was set or cleared
 /// (`oxplow.effort.update`); cleared, it shows its default again.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct EffortRetitledV1 {
-    /// `oxplow:oxplow/effort?id=eff12`.
+pub struct EffortRetitledV2 {
+    /// The effort (`eff12`).
     pub effort: String,
     /// Its title now; absent when cleared.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1703,22 +1721,23 @@ pub struct EffortRetitledV1 {
 pub struct EffortRetitled;
 impl EventType for EffortRetitled {
     const TYPE: &'static str = "effort.retitled";
-    const V: u32 = 1;
-    type Payload = EffortRetitledV1;
+    const V: u32 = 2;
+    type Payload = EffortRetitledV2;
 }
 
-/// `effort.closed@2`: a span of a thread's work ended, linked to a work
+/// `effort.closed@3`: a span of a thread's work ended, linked to a work
 /// item or not, and what closed it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct EffortClosedV2 {
+pub struct EffortClosedV3 {
+    /// The effort (`eff12`).
     pub effort: String,
     /// The linked work item, when there is one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub work_item: Option<String>,
-    /// `oxplow:oxplow/snapshot?id=N`, when the close already had its end snapshot.
+    /// The end snapshot, when the close already had it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub end_snapshot: Option<String>,
+    pub end_snapshot: Option<i64>,
     /// What closed it: `commit`, `switch`, `person`, `agent` or `system`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub closed_by: Option<String>,
@@ -1727,8 +1746,8 @@ pub struct EffortClosedV2 {
 pub struct EffortClosed;
 impl EventType for EffortClosed {
     const TYPE: &'static str = "effort.closed";
-    const V: u32 = 2;
-    type Payload = EffortClosedV2;
+    const V: u32 = 3;
+    type Payload = EffortClosedV3;
 }
 
 // The work-item events are the interface's: core logs them for every
@@ -1845,21 +1864,21 @@ impl EventType for WorkItemCommented {
     type Payload = WorkItemCommentedV2;
 }
 
-/// `work_item.recorded@2`: a list's item as it now stands — how every
+/// `work_item.recorded@3`: a list's item as it now stands — how every
 /// list's items reach the work-item interface (the `work_items.project`
 /// consumer upserts it by ref), with its rank, links, comments and list
 /// when it states them. A list's verbs answer with it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct WorkItemRecordedV2 {
+pub struct WorkItemRecordedV3 {
     pub item: crate::work_items::WorkItemRecord,
 }
 
 pub struct WorkItemRecorded;
 impl EventType for WorkItemRecorded {
     const TYPE: &'static str = "work_item.recorded";
-    const V: u32 = 2;
-    type Payload = WorkItemRecordedV2;
+    const V: u32 = 3;
+    type Payload = WorkItemRecordedV3;
 }
 
 /// How many diagnostics of each severity a file has.
@@ -1872,14 +1891,14 @@ pub struct DiagnosticCounts {
     pub hint: u32,
 }
 
-/// `code.diagnostics.changed@1`: what a file's language servers report
+/// `code.diagnostics.changed@2`: what a file's language servers report
 /// about it changed (a publish, or a server gone and its reports with
 /// it). Logged debounced, once per file per burst, with the counts after
 /// it; `v_diagnostic` has the rows.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct CodeDiagnosticsChangedV1 {
-    /// `oxplow:oxplow/stream?id=<id>`.
+pub struct CodeDiagnosticsChangedV2 {
+    /// The stream (`str1`).
     pub stream: String,
     /// Workspace-relative.
     pub path: String,
@@ -1889,8 +1908,8 @@ pub struct CodeDiagnosticsChangedV1 {
 pub struct CodeDiagnosticsChanged;
 impl EventType for CodeDiagnosticsChanged {
     const TYPE: &'static str = "code.diagnostics.changed";
-    const V: u32 = 1;
-    type Payload = CodeDiagnosticsChangedV1;
+    const V: u32 = 2;
+    type Payload = CodeDiagnosticsChangedV2;
 }
 
 /// `contribution.disabled@1` (P7.C1): one of an extension's contributions —
@@ -1932,28 +1951,27 @@ impl EventType for ContributionEnabled {
     type Payload = ContributionEnabledV1;
 }
 
-/// `knowledge.page.written@1`: a knowledge page's row and edges were
+/// `knowledge.page.written@2`: a knowledge page's row and edges were
 /// restated from its body — by `oxplow.knowledge.write_page` / `link` /
 /// `resync`, or by the wiki watcher after a hand edit
 /// (`system:wiki_watch`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct KnowledgePageWrittenV1 {
-    /// `oxplow:oxplow/wiki?slug=<slug>`.
+pub struct KnowledgePageWrittenV2 {
+    /// The page's slug.
     pub page: String,
     /// Every ref the page now points at (`oxplow:oxplow/file?path=src/lib.rs`, `oxplow:oxplow/wiki?slug=x`, …).
     pub outbound: Vec<String>,
-    /// The snapshot its new refs are pinned to (`snap:<id>`), when there
-    /// is one.
+    /// The snapshot its new refs are pinned to, when there is one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub snapshot: Option<String>,
+    pub snapshot: Option<i64>,
 }
 
 pub struct KnowledgePageWritten;
 impl EventType for KnowledgePageWritten {
     const TYPE: &'static str = "knowledge.page.written";
-    const V: u32 = 1;
-    type Payload = KnowledgePageWrittenV1;
+    const V: u32 = 2;
+    type Payload = KnowledgePageWrittenV2;
 }
 
 /// A knowledge page as a store records it: what a provider's write verb
@@ -1965,11 +1983,11 @@ impl EventType for KnowledgePageWritten {
 #[serde(deny_unknown_fields)]
 pub struct KnowledgePageRecord {
     /// `oxplow:oxplow/wiki?slug=<slug>`.
-    #[serde(rename = "ref")]
-    pub page_ref: String,
+    pub uri: String,
     pub title: String,
     pub body: String,
-    pub refs: Vec<String>,
+    /// What it links, as URIs.
+    pub uris: Vec<String>,
     /// RFC 3339: when the store last changed it.
     pub updated_at: String,
     /// It was deleted in the store.
@@ -1977,31 +1995,31 @@ pub struct KnowledgePageRecord {
     pub deleted: bool,
 }
 
-/// `knowledge.page.recorded@1`: a knowledge store's page, as it recorded
+/// `knowledge.page.recorded@2`: a knowledge store's page, as it recorded
 /// it (`.context/knowledge.md` "The capability").
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct KnowledgePageRecordedV1 {
+pub struct KnowledgePageRecordedV2 {
     pub page: KnowledgePageRecord,
 }
 
 pub struct KnowledgePageRecorded;
 impl EventType for KnowledgePageRecorded {
     const TYPE: &'static str = "knowledge.page.recorded";
-    const V: u32 = 1;
-    type Payload = KnowledgePageRecordedV1;
+    const V: u32 = 2;
+    type Payload = KnowledgePageRecordedV2;
 }
 
-/// `lens.shown@1`: an agent showed the person an answer in a thread —
+/// `lens.shown@2`: an agent showed the person an answer in a thread —
 /// an existing lens or its own lens spec (`oxplow.lens.show`, P6.C1).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct LensShownV1 {
-    /// `oxplow:oxplow/answer?id=<id>`.
-    pub answer: String,
-    /// `oxplow:oxplow/thread?id=<id>`.
+pub struct LensShownV2 {
+    /// The answer's id.
+    pub answer: i64,
+    /// The thread (`thr3`).
     pub thread: String,
-    /// `oxplow:oxplow/lens?lens=<extension>/<slug>` when it shows an existing lens.
+    /// The lens (`<extension>/<slug>`) when it shows an existing one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lens: Option<String>,
 }
@@ -2009,27 +2027,27 @@ pub struct LensShownV1 {
 pub struct LensShown;
 impl EventType for LensShown {
     const TYPE: &'static str = "lens.shown";
-    const V: u32 = 1;
-    type Payload = LensShownV1;
+    const V: u32 = 2;
+    type Payload = LensShownV2;
 }
 
-/// `lens.kept@2` (P11, tsk943): a lens was kept — an answer from a thread,
+/// `lens.kept@3` (P11, tsk943): a lens was kept — an answer from a thread,
 /// or a spec (Explore Data's Save as Lens) — written as a private lens.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct LensKeptV2 {
-    /// `oxplow:oxplow/answer?id=<id>`, when it was an answer that was kept.
+pub struct LensKeptV3 {
+    /// The answer's id, when it was an answer that was kept.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub answer: Option<String>,
-    /// `oxplow:oxplow/lens?lens=<extension>/<slug>`.
+    pub answer: Option<i64>,
+    /// The lens (`<extension>/<slug>`).
     pub lens: String,
 }
 
 pub struct LensKept;
 impl EventType for LensKept {
     const TYPE: &'static str = "lens.kept";
-    const V: u32 = 2;
-    type Payload = LensKeptV2;
+    const V: u32 = 3;
+    type Payload = LensKeptV3;
 }
 
 /// `ui.op_failed@1` (tsk1072): an operation the person started in the
@@ -2070,67 +2088,67 @@ impl EventType for UiOpFailed {
     type Payload = UiOpFailedV1;
 }
 
-/// `knowledge.page.deleted@1`: a knowledge page is gone, its row and
+/// `knowledge.page.deleted@2`: a knowledge page is gone, its row and
 /// edges with it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct KnowledgePageDeletedV1 {
-    /// `oxplow:oxplow/wiki?slug=<slug>`.
+pub struct KnowledgePageDeletedV2 {
+    /// The page's slug.
     pub page: String,
 }
 
 pub struct KnowledgePageDeleted;
 impl EventType for KnowledgePageDeleted {
     const TYPE: &'static str = "knowledge.page.deleted";
-    const V: u32 = 1;
-    type Payload = KnowledgePageDeletedV1;
+    const V: u32 = 2;
+    type Payload = KnowledgePageDeletedV2;
 }
 
-/// `knowledge.note.written@2`: a thread note was added or its body
+/// `knowledge.note.written@3`: a thread note was added or its body
 /// changed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct KnowledgeNoteWrittenV2 {
-    /// `oxplow:oxplow/thread_note?id=not<n>`.
+pub struct KnowledgeNoteWrittenV3 {
+    /// The note (`not3`).
     pub note: String,
-    /// The thread it's on (`oxplow:oxplow/thread?id=thr<n>`).
+    /// The thread it's on (`thr3`).
     pub thread: String,
 }
 
 pub struct KnowledgeNoteWritten;
 impl EventType for KnowledgeNoteWritten {
     const TYPE: &'static str = "knowledge.note.written";
-    const V: u32 = 2;
-    type Payload = KnowledgeNoteWrittenV2;
+    const V: u32 = 3;
+    type Payload = KnowledgeNoteWrittenV3;
 }
 
-/// `knowledge.note.deleted@2`: a thread note is gone.
+/// `knowledge.note.deleted@3`: a thread note is gone.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct KnowledgeNoteDeletedV2 {
-    /// `oxplow:oxplow/thread_note?id=not<n>`.
+pub struct KnowledgeNoteDeletedV3 {
+    /// The note (`not3`).
     pub note: String,
-    /// The thread it was on (`oxplow:oxplow/thread?id=thr<n>`).
+    /// The thread it was on (`thr3`).
     pub thread: String,
 }
 
 pub struct KnowledgeNoteDeleted;
 impl EventType for KnowledgeNoteDeleted {
     const TYPE: &'static str = "knowledge.note.deleted";
-    const V: u32 = 2;
-    type Payload = KnowledgeNoteDeletedV2;
+    const V: u32 = 3;
+    type Payload = KnowledgeNoteDeletedV3;
 }
 
-/// `handoff.sent@1`: work was handed from one thread to another
+/// `handoff.sent@2`: work was handed from one thread to another
 /// (`oxplow.handoff.send`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct HandoffSentV1 {
-    /// `oxplow:oxplow/handoff?id=hnd<n>`.
+pub struct HandoffSentV2 {
+    /// The handoff (`hnd1`).
     pub handoff: String,
-    /// The sending thread (`oxplow:oxplow/thread?id=thr<n>`).
+    /// The sending thread (`thr3`).
     pub from_thread: String,
-    /// The receiving thread (`oxplow:oxplow/thread?id=thr<n>`).
+    /// The receiving thread (`thr4`).
     pub to_thread: String,
     /// The work item it hands over, when it names one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2140,37 +2158,39 @@ pub struct HandoffSentV1 {
 pub struct HandoffSent;
 impl EventType for HandoffSent {
     const TYPE: &'static str = "handoff.sent";
-    const V: u32 = 1;
-    type Payload = HandoffSentV1;
+    const V: u32 = 2;
+    type Payload = HandoffSentV2;
 }
 
-/// `handoff.settled@1`: a handoff's state moved (`oxplow.handoff.settle`):
+/// `handoff.settled@2`: a handoff's state moved (`oxplow.handoff.settle`):
 /// taken or declined by its recipient, withdrawn by its sender, or open
 /// again (an undo).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct HandoffSettledV1 {
-    /// `oxplow:oxplow/handoff?id=hnd<n>`.
+pub struct HandoffSettledV2 {
+    /// The handoff (`hnd1`).
     pub handoff: String,
     /// `open`, `taken`, `declined` or `withdrawn`.
     pub state: String,
+    /// The sending thread (`thr3`).
     pub from_thread: String,
+    /// The receiving thread (`thr4`).
     pub to_thread: String,
 }
 
 pub struct HandoffSettled;
 impl EventType for HandoffSettled {
     const TYPE: &'static str = "handoff.settled";
-    const V: u32 = 1;
-    type Payload = HandoffSettledV1;
+    const V: u32 = 2;
+    type Payload = HandoffSettledV2;
 }
 
-/// `knowledge.comment.written@2`: a comment (a threaded annotation on a
+/// `knowledge.comment.written@3`: a comment (a threaded annotation on a
 /// page) was created or changed — a reply, its intent, status or anchor.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct KnowledgeCommentWrittenV2 {
-    /// The comment's URI.
+pub struct KnowledgeCommentWrittenV3 {
+    /// The comment (`cmt5`).
     pub comment: String,
     /// What it annotates: a URI.
     pub target: String,
@@ -2179,15 +2199,15 @@ pub struct KnowledgeCommentWrittenV2 {
 pub struct KnowledgeCommentWritten;
 impl EventType for KnowledgeCommentWritten {
     const TYPE: &'static str = "knowledge.comment.written";
-    const V: u32 = 2;
-    type Payload = KnowledgeCommentWrittenV2;
+    const V: u32 = 3;
+    type Payload = KnowledgeCommentWrittenV3;
 }
 
-/// `knowledge.comment.deleted@2`: a comment is gone, its messages with it.
+/// `knowledge.comment.deleted@3`: a comment is gone, its messages with it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct KnowledgeCommentDeletedV2 {
-    /// The comment's URI.
+pub struct KnowledgeCommentDeletedV3 {
+    /// The comment (`cmt5`).
     pub comment: String,
     /// What it annotated: a URI.
     pub target: String,
@@ -2196,11 +2216,11 @@ pub struct KnowledgeCommentDeletedV2 {
 pub struct KnowledgeCommentDeleted;
 impl EventType for KnowledgeCommentDeleted {
     const TYPE: &'static str = "knowledge.comment.deleted";
-    const V: u32 = 2;
-    type Payload = KnowledgeCommentDeletedV2;
+    const V: u32 = 3;
+    type Payload = KnowledgeCommentDeletedV3;
 }
 
-/// `effort.finished@2`: a closed effort has its end snapshot
+/// `effort.finished@3`: a closed effort has its end snapshot
 /// pinned and its lifecycle metrics projected. Logged once per effort by the
 /// effort-lifecycle consumer (dedupe key `effort.finished:<effort>`),
 /// caused by the `effort.closed` it handled; what the effort reactors
@@ -2208,20 +2228,22 @@ impl EventType for KnowledgeCommentDeleted {
 /// consume.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct EffortFinishedV2 {
+pub struct EffortFinishedV3 {
+    /// The effort (`eff12`).
     pub effort: String,
     /// The linked work item, when there is one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub work_item: Option<String>,
+    /// The end snapshot.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub end_snapshot: Option<String>,
+    pub end_snapshot: Option<i64>,
 }
 
 pub struct EffortFinished;
 impl EventType for EffortFinished {
     const TYPE: &'static str = "effort.finished";
-    const V: u32 = 2;
-    type Payload = EffortFinishedV2;
+    const V: u32 = 3;
+    type Payload = EffortFinishedV3;
 }
 
 /// Whether `event_type` is one of core's types (any version) — what a
@@ -2264,77 +2286,77 @@ mod tests {
         assert_eq!(
             versions,
             vec![
-                ("agent.context.compacted", 1),
-                ("agent.peer_message.received", 1),
-                ("agent.plan.proposed", 1),
-                ("agent.prompt.submitted", 1),
-                ("agent.session.ended", 1),
-                ("agent.session.started", 2),
-                ("agent.status.changed", 1),
-                ("agent.subagent.finished", 1),
-                ("agent.subagent.started", 1),
-                ("agent.tokens.reported", 1),
+                ("agent.context.compacted", 2),
+                ("agent.peer_message.received", 2),
+                ("agent.plan.proposed", 2),
+                ("agent.prompt.submitted", 2),
+                ("agent.session.ended", 2),
+                ("agent.session.started", 3),
+                ("agent.status.changed", 2),
+                ("agent.subagent.finished", 2),
+                ("agent.subagent.started", 2),
+                ("agent.tokens.reported", 2),
                 ("agent.tool.finished", 3),
                 ("agent.tool.requested", 3),
-                ("agent.turn.ended", 2),
-                ("agent.turn.started", 1),
+                ("agent.turn.ended", 3),
+                ("agent.turn.started", 2),
                 ("capability.switched", 1),
-                ("code.diagnostics.changed", 1),
-                ("collector.synced", 1),
-                ("command.approved", 1),
-                ("command.declined", 1),
+                ("code.diagnostics.changed", 2),
+                ("collector.synced", 2),
+                ("command.approved", 2),
+                ("command.declined", 2),
                 ("command.executed", 4),
-                ("command.proposed", 2),
+                ("command.proposed", 3),
                 ("config.changed", 2),
                 ("contribution.disabled", 1),
                 ("contribution.enabled", 1),
-                ("contribution.job.completed", 1),
-                ("effect.result", 4),
-                ("effort.claim_dismissed", 1),
-                ("effort.claim_verified", 1),
-                ("effort.closed", 2),
-                ("effort.decision_reviewed", 1),
-                ("effort.decisions_inferred", 1),
-                ("effort.finished", 2),
-                ("effort.landed", 1),
-                ("effort.linked", 1),
-                ("effort.opened", 2),
-                ("effort.retitled", 1),
+                ("contribution.job.completed", 2),
+                ("effect.result", 5),
+                ("effort.claim_dismissed", 2),
+                ("effort.claim_verified", 2),
+                ("effort.closed", 3),
+                ("effort.decision_reviewed", 2),
+                ("effort.decisions_inferred", 2),
+                ("effort.finished", 3),
+                ("effort.landed", 2),
+                ("effort.linked", 2),
+                ("effort.opened", 3),
+                ("effort.retitled", 2),
                 ("file.created", 1),
                 ("file.deleted", 1),
                 ("file.directory_created", 1),
                 ("file.renamed", 1),
                 ("file.saved", 1),
-                ("handoff.sent", 1),
-                ("handoff.settled", 1),
-                ("knowledge.comment.deleted", 2),
-                ("knowledge.comment.written", 2),
-                ("knowledge.note.deleted", 2),
-                ("knowledge.note.written", 2),
-                ("knowledge.page.deleted", 1),
-                ("knowledge.page.recorded", 1),
-                ("knowledge.page.written", 1),
-                ("lens.kept", 2),
-                ("lens.shown", 1),
-                ("snapshot.taken", 2),
+                ("handoff.sent", 2),
+                ("handoff.settled", 2),
+                ("knowledge.comment.deleted", 3),
+                ("knowledge.comment.written", 3),
+                ("knowledge.note.deleted", 3),
+                ("knowledge.note.written", 3),
+                ("knowledge.page.deleted", 2),
+                ("knowledge.page.recorded", 2),
+                ("knowledge.page.written", 2),
+                ("lens.kept", 3),
+                ("lens.shown", 2),
+                ("snapshot.taken", 3),
                 ("test.coverage.recorded", 1),
-                ("test.run.recorded", 2),
-                ("thread.checkpoint", 1),
+                ("test.run.recorded", 3),
+                ("thread.checkpoint", 2),
                 ("ui.op_failed", 1),
-                ("vcs.commit.indexed", 1),
-                ("vcs.head.moved", 1),
+                ("vcs.commit.indexed", 2),
+                ("vcs.head.moved", 2),
                 ("work_item.commented", 2),
                 ("work_item.created", 2),
                 ("work_item.deleted", 2),
                 ("work_item.edited", 2),
                 ("work_item.linked", 2),
-                ("work_item.recorded", 2),
+                ("work_item.recorded", 3),
                 ("work_item.state_changed", 1),
                 ("work_item.unlinked", 1),
             ]
         );
         assert_eq!(r.latest("work_item.created"), Some(2));
-        assert_eq!(r.latest("agent.turn.ended"), Some(2));
+        assert_eq!(r.latest("agent.turn.ended"), Some(3));
         assert_eq!(r.owner("config.changed", 2), Some(None));
     }
 

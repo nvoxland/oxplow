@@ -1,4 +1,4 @@
-/// Settings' areas: one Document page each (`page:settings?area=<id>`),
+/// Settings' areas: one Document page each (`page:settings#area=<id>`),
 /// sharing a rail that lists them. Each area's sections have stable ids —
 /// the same ones `SLOTS` lists for its `settings.<area>.sections` slot, so
 /// an extension adds its own settings beside the right one.

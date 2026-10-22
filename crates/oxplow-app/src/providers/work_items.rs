@@ -8,8 +8,8 @@
 //!
 //! The verbs and their inputs are the work-items contract every provider
 //! implements — the `v_work_item` columns: `create { title, body?,
-//! parent_ref?, state?, native_state?, native? }`, `update { ref, title?,
-//! body?, parent_ref? ("" detaches), state?, native_state?, native? }`,
+//! parent_uri?, state?, native_state?, native? }`, `update { ref, title?,
+//! body?, parent_uri? ("" detaches), state?, native_state?, native? }`,
 //! `transition { ref, to, native_state? }`, `link { ref, target,
 //! link_type }`, `comment { ref, body }` and `delete { ref }`.
 

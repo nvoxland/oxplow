@@ -104,7 +104,7 @@ mod tests {
             "run_command",
             json!({
                 "id": "oxplow.collector.sync",
-                "input": { "collector": "oxplow:oxplow/collector?collector=my-gh/gh" },
+                "input": { "collector": "my-gh/gh" },
                 "confirmed": false,
             }),
             &svc,
@@ -125,10 +125,7 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(
-            logged["rows"],
-            json!([["oxplow:oxplow/collector?collector=my-gh/gh", "manual", 1]])
-        );
+        assert_eq!(logged["rows"], json!([["my-gh/gh", "manual", 1]]));
 
         let q = crate::dispatch(
             "query_sql",

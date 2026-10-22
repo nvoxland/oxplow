@@ -14,7 +14,7 @@ test("answers read newest first, with the lens they show or were kept as", () =>
       ["oxplow:oxplow/answer?id=1", "Open tasks", "review/waiting", null],
     ]),
   ).toEqual([
-    { ref: "oxplow:oxplow/answer?id=2", title: "Churn", lens: null, keptLens: "my-lenses/churn" },
-    { ref: "oxplow:oxplow/answer?id=1", title: "Open tasks", lens: "review/waiting", keptLens: null },
+    { uri: "oxplow:oxplow/answer?id=2", title: "Churn", lens: null, keptLens: "my-lenses/churn" },
+    { uri: "oxplow:oxplow/answer?id=1", title: "Open tasks", lens: "review/waiting", keptLens: null },
   ]);
 });

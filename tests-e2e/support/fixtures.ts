@@ -12,7 +12,7 @@ type Thread = { id: string };
  *  seeded with. It has no agent session; one opened on it runs the
  *  project's default agent — here the fake terminal harness (`agents:
  *  [terminal]`), so the suite never starts a real agent CLI. */
-async function seededThread(daemon: Daemon): Promise<{ stream: string; thread: string; streamUri: string; threadUri: string }> {
+async function seededThread(daemon: Daemon): Promise<{ stream: string; thread: string }> {
   const [stream] = await ipc<Stream[]>(daemon, "list_streams");
   if (!stream) throw new Error("the daemon has no stream");
   const threads = await ipc<Thread[]>(daemon, "list_threads", { streamId: stream.id });
@@ -23,14 +23,11 @@ async function seededThread(daemon: Daemon): Promise<{ stream: string; thread: s
   return {
     stream: stream.id,
     thread: seeded.id,
-    // What a command names them by.
-    streamUri: `oxplow:oxplow/stream?id=${stream.id}`,
-    threadUri: `oxplow:oxplow/thread?id=${seeded.id}`,
   };
 }
 
 /** A worker's daemon, and the stream and thread its pages open on. */
-export type Workspace = Daemon & { stream: string; thread: string; streamUri: string; threadUri: string };
+export type Workspace = Daemon & { stream: string; thread: string };
 
 /** A daemon booted, settled and pointed at the fake agent's thread; one
  *  that fails on the way is stopped, its project removed. */

@@ -1,0 +1,109 @@
+{
+  "$defs": {
+    "EffectOrigin": {
+      "description": "What started an attempt at a reaction.",
+      "oneOf": [
+        {
+          "const": "live",
+          "description": "The pump delivering the event.",
+          "type": "string"
+        },
+        {
+          "const": "retry",
+          "description": "A person's `effect.retry` of a reaction that failed.",
+          "type": "string"
+        },
+        {
+          "const": "backfill",
+          "description": "A person's `effect.backfill` over events the effect never saw.",
+          "type": "string"
+        },
+        {
+          "const": "auto",
+          "description": "Sent again by itself (P10): a failed attempt whose every step went\nto a provider that keeps `idempotent_writes`.",
+          "type": "string"
+        }
+      ]
+    },
+    "EffectOutcome": {
+      "description": "How an effect's reaction to one event ended.",
+      "oneOf": [
+        {
+          "const": "ok",
+          "description": "Its commands ran.",
+          "type": "string"
+        },
+        {
+          "const": "skipped",
+          "description": "Its script decided there was nothing to do.",
+          "type": "string"
+        },
+        {
+          "const": "proposed",
+          "description": "A command it composed needs a person's confirmation: kept as a\nproposal.",
+          "type": "string"
+        },
+        {
+          "const": "failed",
+          "description": "It failed (or was interrupted), and its steps aren't sent again.",
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`effect.result@5` (P10): v3, its origin able to say `auto` — an\nattempt sent again by itself.",
+  "properties": {
+    "attempt": {
+      "description": "Which attempt at the reaction, from 1.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "detail": {
+      "default": null,
+      "description": "Effect-specific detail, opaque to the log."
+    },
+    "effect": {
+      "description": "The effect (`effect:<extension>/<id>`).",
+      "type": "string"
+    },
+    "event": {
+      "description": "The id of the event it reacted to (a UUID); absent on a v1 result.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "origin": {
+      "$ref": "#/$defs/EffectOrigin"
+    },
+    "outcome": {
+      "$ref": "#/$defs/EffectOutcome"
+    },
+    "proposal": {
+      "description": "The id of the proposal it left for a person.",
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "reason": {
+      "description": "Why it skipped or failed.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "effect",
+    "outcome",
+    "attempt",
+    "origin"
+  ],
+  "title": "EffectResultV5",
+  "type": "object"
+}

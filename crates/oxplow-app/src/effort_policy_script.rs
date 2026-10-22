@@ -87,12 +87,12 @@ def transform(x):
     thread = e["anchors"].get("thread_id")
     if to == "in_progress" and thread != None:
         return {"commands": [{"name": "oxplow.effort.open",
-                              "input": {"thread": uri.build("oxplow/thread", id = thread), "work_item": item}}]}
+                              "input": {"thread": thread, "work_item": item}}]}
     if to == "done" or to == "canceled":
-        rows = scope("sql.read", {"sql": "SELECT ref FROM v_effort WHERE work_item = :w AND ended_at IS NULL",
+        rows = scope("sql.read", {"sql": "SELECT uri FROM v_effort WHERE work_item = :w AND ended_at IS NULL",
                                   "params": {"w": item}})
         return {"commands": [{"name": "oxplow.effort.close",
-                              "input": {"effort": r["ref"], "reason": "switch"}}
+                              "input": {"effort": uri.param(r["uri"], "id"), "reason": "switch"}}
                              for r in rows]}
     return {"skip": "a move that changes no effort"}
 "#;
@@ -132,7 +132,7 @@ def transform(x):
             .run(
                 &Actor::Human,
                 crate::commands::effort::CLOSE,
-                json!({ "effort": oxplow_domain::uri::build::effort_uri(fx.effort) }),
+                json!({ "effort": fx.effort.to_string() }),
                 false,
             )
             .await
@@ -146,12 +146,12 @@ def transform(x):
             .run(
                 &Actor::Human,
                 crate::commands::work_item::CREATE,
-                json!({ "title": "scripted", "thread": oxplow_domain::uri::build::thread_uri(fx.thread) }),
+                json!({ "title": "scripted", "thread": fx.thread.to_string() }),
                 false,
             )
             .await
             .unwrap();
-        out.result["ref"].as_str().unwrap().to_string()
+        out.result["uri"].as_str().unwrap().to_string()
     }
 
     async fn agent_moves(fx: &EffortFixture, item: &str, to: &str) {
@@ -165,7 +165,7 @@ def transform(x):
             .run(
                 &agent,
                 crate::commands::work_item::NAME,
-                json!({ "ref": item, "to": to }),
+                json!({ "uri": item, "to": to }),
                 false,
             )
             .await

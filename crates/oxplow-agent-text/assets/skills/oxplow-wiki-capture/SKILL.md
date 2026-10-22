@@ -57,9 +57,9 @@ Never write `@<version>` on a link; freshness is tracked per reference.
 
 One command writes the row, the links and the file; don't write the
 file yourself: `run_command oxplow.knowledge.write_page { slug, body,
-verified_refs, removed_refs }`. Every `[[link]]` must resolve (a dangling
-one is refused and named). `verified_refs` are files you re-read against
-this body; `removed_refs` are files you dropped. Open
+verified_files, removed_files }`. Every `[[link]]` must resolve (a dangling
+one is refused and named). `verified_files` are files you re-read against
+this body; `removed_files` are files you dropped. Open
 `references/write-page.md` for the mechanics, `oxplow.knowledge.link` /
 `delete_page`, declaring the page in an effort report, a project with no
 knowledge store, and folding in Explore subagent notes.

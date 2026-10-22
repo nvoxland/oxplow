@@ -109,7 +109,7 @@ async fn a_scaffolded_collector_checks_before_its_first_sync_and_runs() {
         .run(
             &oxplow_domain::Actor::Human,
             "oxplow.collector.sync",
-            serde_json::json!({ "collector": oxplow_domain::uri::build::keyed(oxplow_domain::uri::resources::COLLECTOR, &format!("open-items/{}", collector.id)) }),
+            serde_json::json!({ "collector": format!("open-items/{}", collector.id).to_string() }),
             true,
         )
         .await
@@ -203,13 +203,13 @@ async fn a_scaffolded_command_checks_tests_and_runs_through_the_bus() {
         )
         .await
         .unwrap();
-    let item = task.result["ref"].as_str().unwrap().to_string();
+    let item = task.result["uri"].as_str().unwrap().to_string();
     let ran = svc
         .commands
         .run(
             &human,
             &ext.commands[0].name,
-            serde_json::json!({ "ref": item }),
+            serde_json::json!({ "uri": item }),
             true,
         )
         .await
@@ -249,12 +249,12 @@ async fn a_scaffolded_effect_checks_tests_and_once_started_reacts() {
         )
         .await
         .unwrap();
-    let item = task.result["ref"].as_str().unwrap().to_string();
+    let item = task.result["uri"].as_str().unwrap().to_string();
     svc.commands
         .run(
             &human,
             "oxplow.work_item.transition",
-            serde_json::json!({ "ref": item, "to": "done" }),
+            serde_json::json!({ "uri": item, "to": "done" }),
             true,
         )
         .await
@@ -385,7 +385,7 @@ async fn a_scaffolded_provider_is_red_until_a_program_speaks_for_it() {
     .unwrap();
     std::fs::write(
         ext.join("fixtures/basic.yaml"),
-        "input: { command: create, input: { title: First } }\nexpect: { ref: $any }\n",
+        "input: { command: create, input: { title: First } }\nexpect: { uri: $any }\n",
     )
     .unwrap();
     let blessed = kit_on_a_fresh_service(dir.path(), true).await;
@@ -655,7 +655,7 @@ async fn extension_test_runs_the_knowledge_suite_over_a_knowledge_provider() {
     let ext = dir.path().join(".oxplow/extensions/shelf");
     std::fs::create_dir_all(ext.join("bin")).unwrap();
     std::fs::create_dir_all(ext.join("fixtures")).unwrap();
-    let write = "{ command: write_page, input: { slug: example, body: '# Example', verified_refs: [], removed_refs: [] } }";
+    let write = "{ command: write_page, input: { slug: example, body: '# Example', verified_files: [], removed_files: [] } }";
     std::fs::write(
         ext.join("extension.yaml"),
         format!("manifest: 2\nname: shelf\nintent:\n  purpose: Knowledge over the protocol.\n  examples:\n    - {{ name: basic, input: {write}, expect: the page }}\npermissions: {{ process: true }}\nproviders:\n  - id: shelf\n    capability: knowledge\n    entry: bin/provider\n    declarations: provider.json\n"),
@@ -663,7 +663,7 @@ async fn extension_test_runs_the_knowledge_suite_over_a_knowledge_provider() {
     .unwrap();
     std::fs::write(
         ext.join("fixtures/basic.yaml"),
-        format!("input: {write}\nexpect: {{ page: 'oxplow:oxplow/wiki?slug=example' }}\n"),
+        format!("input: {write}\nexpect: {{ page: example }}\n"),
     )
     .unwrap();
     std::fs::write(

@@ -4,8 +4,8 @@ hidden: true
 params:
   - { name: stream_id, label: Stream }
   - { name: head_sha, label: Head commit }
-  - { name: reveal_sha, label: Commit to reveal, default: "" }
-  - { name: limit, label: Commits, default: 500 }
+  - { name: reveal_sha, role: filter, label: Commit to reveal, default: "" }
+  - { name: limit, role: filter, label: Commits, default: 500 }
 query: |
   WITH RECURSIVE reach(sha) AS (
     SELECT :head_sha

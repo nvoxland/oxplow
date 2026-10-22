@@ -9,7 +9,7 @@
   - `vcs.status.header` (a strip above the uncommitted changes) and
     `vcs.history.sidebar` (beside Git History) → `stream_id`;
   - `work_item.detail.body` and `work_item.detail.sidebar` (a work item's
-    page, whichever list) → `ref`;
+    page, whichever list) → `uri`;
   - `thread.plan.header` (the Work panel, compact) → `thread_id`;
   - `settings.<area>.sections` → no params; a section on that Settings
     area's page (`overview`, `agents`, `lsp`, `extensions`, `data`,
@@ -22,7 +22,7 @@
 
 - **`ui.decorators`** add a label to the URIs of one resource:
   `{ model, resource: oxplow/work_item, placement: ref-chip | row-badge, label, color? }` — the
-  model (this extension's) needs a `ref` column plus the `label` (and
+  model (this extension's) needs a `uri` column plus the `label` (and
   `color`) columns; a chip shows on that URI's page, a badge after a
   linked cell in lens rows.
 
@@ -33,7 +33,17 @@
   System; leave it out for a page only opened from elsewhere).
   `params` are what its id carries, handed to the lens; `count` names a
   `number` lens whose value is the launcher badge; `keywords` are more
-  words the launcher matches.
+  words the launcher matches. A page with `for: <resource>` (or a list;
+  your own `<extension>/<name>`, oxplow's `oxplow/*`, another
+  extension's, or `https` / `http`) is a **renderer**: it draws the URIs
+  of that resource, and has no launcher entry unless it has a
+  `category`. `accepts: { <param>: present | absent | <anchored
+  pattern> }` limits it to URIs whose params fit; `default: true` (only
+  for a resource your extension declares, one page per resource) makes
+  it the page a plain open uses; `pinned: true` pins its tabs. Its lens
+  must declare a `uri` param and runs with the URI. A resource has no
+  `page:` field; a URI nothing draws shows on a fallback page, not an
+  error.
 - **Panels** put a lens in the left nav (`panels: [{ id, title, icon?,
   scope, body, badge?, open?, collapsed?, count? }]`): `body` renders
   compact; `badge` (a lens with an `alert`) gives the panel's count and
@@ -55,7 +65,7 @@ it); the lens declares each prop as a `param`:
 ui:
   replacements:
     - { target: work_item.board, lens: swimlanes, version: 1 }   # props: scope, thread_id
-    - { target: work_item.detail, lens: edit-item, version: 1 }  # props: ref
+    - { target: work_item.detail, lens: edit-item, version: 1 }  # props: uri
 ```
 
 - Read items from `v_work_item`; change them only through the interface

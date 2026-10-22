@@ -47,7 +47,7 @@ function statusOrderRank(state: CanonicalState): number {
 export type KbPickerKind = { kind: "state" } | { kind: "field"; field: FieldDecl };
 
 const mention = (item: WorkItem) =>
-  formatContextMention({ kind: "work_item", ref: item.ref, title: item.title, state: item.state });
+  formatContextMention({ kind: "work_item", ref: item.uri, title: item.title, state: item.state });
 
 function isEditableTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
@@ -206,10 +206,10 @@ export function PlanPane({
     for (const group of groups) {
       const sorted = group.items.slice().sort((a, b) => statusOrderRank(a.state) - statusOrderRank(b.state));
       for (const item of sorted) {
-        ids.push(item.ref);
-        const children = group.epicChildren.get(item.ref);
+        ids.push(item.uri);
+        const children = group.epicChildren.get(item.uri);
         if (children) {
-          for (const child of children) ids.push(child.ref);
+          for (const child of children) ids.push(child.uri);
         }
       }
     }
@@ -275,10 +275,10 @@ export function PlanPane({
   const selectedItem: WorkItem | null = useMemo(() => {
     if (!selectedId) return null;
     for (const group of groups) {
-      const hit = group.items.find((item) => item.ref === selectedId);
+      const hit = group.items.find((item) => item.uri === selectedId);
       if (hit) return hit;
       for (const children of group.epicChildren.values()) {
-        const childHit = children.find((item) => item.ref === selectedId);
+        const childHit = children.find((item) => item.uri === selectedId);
         if (childHit) return childHit;
       }
     }
@@ -313,11 +313,11 @@ export function PlanPane({
         // effect. Reordering is section-local so the keyboard path
         // doesn't silently promote/demote.
         if (!selectedId || !activeReorder) return;
-        const selected = allItems.find((item) => item.ref === selectedId);
+        const selected = allItems.find((item) => item.uri === selectedId);
         if (!selected) return;
         const selSection = classifyState(selected.state);
         const sectionIds = navigableIds.filter((id) => {
-          const item = allItems.find((i) => i.ref === id);
+          const item = allItems.find((i) => i.uri === id);
           return item ? classifyState(item.state) === selSection : false;
         });
         const posInSection = sectionIds.indexOf(selectedId);
@@ -343,10 +343,10 @@ export function PlanPane({
         setSelectedId(navigableIds[next] ?? null);
       } else if (key === "Enter" && selectedId) {
         event.preventDefault();
-        const item = allItems.find((i) => i.ref === selectedId);
+        const item = allItems.find((i) => i.uri === selectedId);
         if (item) openEditModal(item);
       } else if ((key === "s" || key === "S") && selectedId) {
-        if (allItems.find((i) => i.ref === selectedId)?.state === "in_progress") return;
+        if (allItems.find((i) => i.uri === selectedId)?.state === "in_progress") return;
         event.preventDefault();
         setKbPicker({ kind: "state", itemId: selectedId });
       } else if ((key === "p" || key === "P") && selectedId && editableEnums[0]) {
@@ -384,8 +384,8 @@ export function PlanPane({
   const openEditModal = (item: WorkItem) => {
     // Row clicks (and Enter on the keyboard-selected row) open the item's
     // page, which renders a readable view with inline editing.
-    setSelectedId(item.ref);
-    onOpenTaskPage?.(item.ref);
+    setSelectedId(item.uri);
+    onOpenTaskPage?.(item.uri);
   };
 
   useEffect(() => {
@@ -400,9 +400,9 @@ export function PlanPane({
     if (!editRequest) return;
     const allItems = groups.flatMap((g) => [
       ...g.items,
-      ...g.items.flatMap((item) => g.epicChildren?.get(item.ref) ?? []),
+      ...g.items.flatMap((item) => g.epicChildren?.get(item.uri) ?? []),
     ]);
-    const item = allItems.find((i) => i.ref === editRequest.ref);
+    const item = allItems.find((i) => i.uri === editRequest.ref);
     if (item) openEditModal(item);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editRequest?.token]);
@@ -435,7 +435,7 @@ export function PlanPane({
             ...[...g.epicChildren.values()].flat(),
           ]);
           const markedItems = [...markedIds]
-            .map((id) => allItems.find((item) => item.ref === id))
+            .map((id) => allItems.find((item) => item.uri === id))
             .filter((item): item is WorkItem => item !== undefined);
           if (markedItems.length === 0) return null;
           return (
@@ -446,20 +446,20 @@ export function PlanPane({
               onChangeStatus={() => {
                 const liveIds = markedItems
                   .filter((item) => item.state !== "in_progress")
-                  .map((item) => item.ref);
+                  .map((item) => item.uri);
                 if (liveIds.length === 0) return;
                 const anchor = markedItems.find((item) => item.state !== "in_progress") ?? markedItems[0]!;
-                setSelectedId(anchor.ref);
-                setKbPicker({ kind: "state", itemId: anchor.ref, extraIds: liveIds.filter((id) => id !== anchor.ref) });
+                setSelectedId(anchor.uri);
+                setKbPicker({ kind: "state", itemId: anchor.uri, extraIds: liveIds.filter((id) => id !== anchor.uri) });
               }}
               onChangeField={(field) => {
                 const anchor = markedItems[0]!;
-                setSelectedId(anchor.ref);
+                setSelectedId(anchor.uri);
                 setKbPicker({
                   kind: "field",
                   field,
-                  itemId: anchor.ref,
-                  extraIds: markedItems.map((item) => item.ref).filter((id) => id !== anchor.ref),
+                  itemId: anchor.uri,
+                  extraIds: markedItems.map((item) => item.uri).filter((id) => id !== anchor.uri),
                 });
               }}
               onAddAllToAgent={() => {
@@ -470,7 +470,7 @@ export function PlanPane({
               onDelete={activeDelete ? () => {
                 const liveIds = markedItems
                   .filter((item) => item.state !== "in_progress")
-                  .map((item) => item.ref);
+                  .map((item) => item.uri);
                 if (liveIds.length === 0) return;
                 for (const id of liveIds) void activeDelete(id);
                 showToast({ message: `Deleted ${liveIds.length} item${liveIds.length === 1 ? "" : "s"}.` });
@@ -518,14 +518,14 @@ export function PlanPane({
             }
             return (
               <TaskGroupList
-                key={group.epic?.ref ?? "__root__"}
+                key={group.epic?.uri ?? "__root__"}
                 group={group}
                 scopeThreadId={currentScopeThreadId}
                 fields={fields}
                 onUpdateTask={activeUpdate}
                 onReorderTasks={activeReorder ?? undefined}
                 onOpenMenu={(rect, item) => {
-                  const groupIds = markedIds.has(item.ref) && markedIds.size > 1
+                  const groupIds = markedIds.has(item.uri) && markedIds.size > 1
                     ? [...markedIds]
                     : null;
                   setContextMenu({ x: rect.right, y: rect.bottom + 4, item, groupIds });
@@ -536,7 +536,7 @@ export function PlanPane({
                 onSelect={handleSelect}
                 onRequestEdit={openEditModal}
                 epicChildrenMap={group.epicChildren}
-                onReparentTask={features.hierarchy ? (ref, parentRef) => activeUpdate(ref, { parentRef }) : undefined}
+                onReparentTask={features.hierarchy ? (ref, parentRef) => activeUpdate(ref, { parentUri: parentRef }) : undefined}
                 onAddChildTask={features.hierarchy ? (epicRef) => openCreateModal(epicRef) : undefined}
                 isActive={isActive}
                 agentStatus={agentStatus}
@@ -556,20 +556,20 @@ export function PlanPane({
             ? buildGroupMenu(contextMenu.item, contextMenu.groupIds, editableEnums, {
                 onChangeStatus: (item, ids) => {
                   setContextMenu(null);
-                  setSelectedId(item.ref);
+                  setSelectedId(item.uri);
                   const allWi = groups.flatMap((g) => [...g.items, ...[...g.epicChildren.values()].flat()]);
-                  const liveIds = ids.filter((id) => allWi.find((i) => i.ref === id)?.state !== "in_progress");
-                  setKbPicker({ kind: "state", itemId: item.ref, extraIds: liveIds.filter((id) => id !== item.ref) });
+                  const liveIds = ids.filter((id) => allWi.find((i) => i.uri === id)?.state !== "in_progress");
+                  setKbPicker({ kind: "state", itemId: item.uri, extraIds: liveIds.filter((id) => id !== item.uri) });
                 },
                 onChangeField: (item, ids, field) => {
                   setContextMenu(null);
-                  setSelectedId(item.ref);
-                  setKbPicker({ kind: "field", field, itemId: item.ref, extraIds: ids.filter((id) => id !== item.ref) });
+                  setSelectedId(item.uri);
+                  setKbPicker({ kind: "field", field, itemId: item.uri, extraIds: ids.filter((id) => id !== item.uri) });
                 },
                 onDelete: activeDelete ? (_item, ids) => {
                   setContextMenu(null);
                   const allWi = groups.flatMap((g) => [...g.items, ...[...g.epicChildren.values()].flat()]);
-                  const liveIds = ids.filter((id) => allWi.find((i) => i.ref === id)?.state !== "in_progress");
+                  const liveIds = ids.filter((id) => allWi.find((i) => i.uri === id)?.state !== "in_progress");
                   if (liveIds.length === 0) return;
                   for (const id of liveIds) void activeDelete(id);
                   showToast({ message: `Deleted ${liveIds.length} item${liveIds.length === 1 ? "" : "s"}.` });
@@ -578,7 +578,7 @@ export function PlanPane({
                   setContextMenu(null);
                   const allWi = groups.flatMap((g) => [...g.items, ...[...g.epicChildren.values()].flat()]);
                   const text = ids
-                    .map((id) => allWi.find((i) => i.ref === id))
+                    .map((id) => allWi.find((i) => i.uri === id))
                     .filter((item): item is WorkItem => item !== undefined)
                     .map(mention)
                     .join("");
@@ -588,23 +588,23 @@ export function PlanPane({
             : buildItemMenu(contextMenu.item, editableEnums, {
                 onDelete: activeDelete ? (item) => {
                   setContextMenu(null);
-                  void activeDelete(item.ref);
+                  void activeDelete(item.uri);
                   showToast({ message: `Deleted "${item.title}".` });
                 } : null,
                 onRename: (item) => {
                   setContextMenu(null);
-                  setSelectedId(item.ref);
+                  setSelectedId(item.uri);
                   openEditModal(item);
                 },
                 onChangeStatus: (item) => {
                   setContextMenu(null);
-                  setSelectedId(item.ref);
-                  setKbPicker({ kind: "state", itemId: item.ref });
+                  setSelectedId(item.uri);
+                  setKbPicker({ kind: "state", itemId: item.uri });
                 },
                 onChangeField: (item, field) => {
                   setContextMenu(null);
-                  setSelectedId(item.ref);
-                  setKbPicker({ kind: "field", field, itemId: item.ref });
+                  setSelectedId(item.uri);
+                  setKbPicker({ kind: "field", field, itemId: item.uri });
                 },
                 onAddToAgent: (item) => {
                   setContextMenu(null);
@@ -743,7 +743,7 @@ const kbPickerStyle: CSSProperties = {
 /// app-level layer via the compose bus.
 function openCommentForTask(item: WorkItem): void {
   const el = document.querySelector(
-    `[data-ref="${CSS.escape(item.ref)}"]`,
+    `[data-ref="${CSS.escape(item.uri)}"]`,
   );
   if (!el) return;
   const req = composeForElement(el, item.title, el.getBoundingClientRect());

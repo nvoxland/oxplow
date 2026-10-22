@@ -171,7 +171,7 @@ mod tests {
         std::fs::write(p, body).unwrap();
     }
 
-    const BOARD: &str = "title: Board\nparams: [{ name: scope }, { name: thread_id }]\nquery: SELECT ref, title, state FROM v_work_item\n";
+    const BOARD: &str = "title: Board\nparams: [{ name: scope }, { name: thread_id }]\nquery: SELECT uri, title, state FROM v_work_item\n";
 
     /// Extension `tracker`, with `providers` (YAML, or none),
     /// a `board` lens taking the Board's whole contract, a `partial` one
@@ -209,7 +209,7 @@ mod tests {
         write(
             d.path(),
             ".oxplow/extensions/tracker/lenses/state.yaml",
-            "title: State\nparams: [{ name: ref }]\nquery: SELECT :ref AS ref\n",
+            "title: State\nparams: [{ name: uri }]\nquery: SELECT :uri AS uri\n",
         );
         write(
             d.path(),
@@ -311,7 +311,7 @@ mod tests {
             PROVIDER,
             "    - { target: work_item.detail.state, lens: board }\n",
         );
-        assert!(said(&ext).contains("must declare `ref`"), "{}", said(&ext));
+        assert!(said(&ext).contains("must declare `uri`"), "{}", said(&ext));
     }
 
     /// An effort's verdict is a review policy's: any extension may bring

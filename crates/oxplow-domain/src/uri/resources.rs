@@ -100,9 +100,6 @@ pub struct ResourceDecl {
     pub searchable: Option<String>,
     pub icon: Option<String>,
     pub wikilink: Option<WikilinkDecl>,
-    /// The page one opens on (its page URI), given `ref=<uri>`: an
-    /// extension's resource until a renderer opens a URI as itself.
-    pub page: Option<String>,
 }
 
 /// A `resources:` entry as a manifest holds it. `resolve` and `searchable`
@@ -128,10 +125,6 @@ pub struct ResourceEntry {
     pub icon: Option<String>,
     #[serde(default)]
     pub wikilink: Option<WikilinkDecl>,
-    /// One of the extension's pages (its id), which opens one given
-    /// `ref=<uri>`.
-    #[serde(default)]
-    pub page: Option<String>,
 }
 
 impl ResourceEntry {
@@ -154,7 +147,6 @@ impl ResourceEntry {
             searchable: self.searchable,
             icon: self.icon,
             wikilink: self.wikilink,
-            page: self.page,
         })
     }
 }
@@ -180,7 +172,6 @@ impl ResourceDecl {
             searchable: None,
             icon: None,
             wikilink: None,
-            page: None,
         }
     }
 }
@@ -447,7 +438,6 @@ mod tests {
             searchable: None,
             icon: None,
             wikilink: None,
-            page: None,
         }
     }
 

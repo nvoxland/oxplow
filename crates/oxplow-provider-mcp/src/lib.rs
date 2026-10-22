@@ -714,7 +714,7 @@ fn invoke_result(adapter: &Adapter, answer: Value) -> Result<InvokeResult, Proto
             own_ref(prefix, &json!(s), "a subject")?;
         }
         if let Some(item) = e.payload.get("item") {
-            own_ref(prefix, &item["ref"], "an item")?;
+            own_ref(prefix, &item["uri"], "an item")?;
         }
     }
     Ok(result)
@@ -809,7 +809,7 @@ async fn handle(
             let prefix = adapter.provider_id.as_str();
             let rows = answer["records"].as_array().cloned().unwrap_or_default();
             for row in &rows {
-                own_ref(prefix, &row["ref"], "a record")?;
+                own_ref(prefix, &row["uri"], "a record")?;
             }
             for row in &rows {
                 peer.notify(

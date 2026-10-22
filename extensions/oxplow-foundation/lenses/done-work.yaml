@@ -3,15 +3,15 @@ description: Every closed work item (done and canceled) on the thread's list, th
 params:
   - { name: thread_id }
 query: |
-  SELECT w.ref, w.title, w.state, w.closed_at
+  SELECT w.uri, w.title, w.state, w.closed_at
   FROM v_work_item w
   WHERE w.thread_id = :thread_id AND w.state IN ('done', 'canceled')
   ORDER BY w.closed_at DESC, w.rank
 columns:
-  - { key: title, label: Item, link: { kind: page, from: ref }, icon: state }
+  - { key: title, label: Item, link: { kind: page, from: uri }, icon: state }
   - { key: state, label: State, width: 110 }
   - { key: closed_at, label: Closed, format: relative, width: 120 }
 actions:
-  - { id: reopen, label: Reopen, command: oxplow.work_item.transition, input: { ref: "{{row.ref}}", to: todo }, row: true }
+  - { id: reopen, label: Reopen, command: oxplow.work_item.transition, input: { uri: "{{row.uri}}", to: todo }, row: true }
 empty: Nothing is done yet. Items you finish (or cancel) show up here, latest first.
 hidden: true

@@ -44,11 +44,11 @@ title: Blocked Work
 params:
   - { name: thread_id, label: Thread }
 query: |
-  SELECT ref, title, updated_at FROM v_work_item
+  SELECT uri, title, updated_at FROM v_work_item
   WHERE state = 'blocked' AND thread_id = :thread_id
 viz: table            # table | list | number | markdown | bar | line | treemap | document | dashboard | custom
 columns:
-  - { key: title, label: Item, link: { kind: page, from: ref } }
+  - { key: title, label: Item, link: { kind: page, from: uri } }
   - { key: updated_at, label: Updated, format: relative, width: 120 }
 empty: Nothing is blocked.
 ```
@@ -98,6 +98,32 @@ query: |
   its last day.
 
 Every param shows in the page's side panel. You don't choose where.
+
+### Where a param lives in the address
+
+A page's address has two parts: the part after `?` says what the page
+shows, and the part after `#` says how it shows it. A param has a `role`
+that decides which part it goes in:
+
+- `resource` (the default) names what the page shows, such as
+  `effort_id`. It goes after `?`. A new value opens another thing, so Back
+  returns to the old one.
+- `filter` narrows what the page shows, such as a search or a range. Write
+  `role: filter` on the param. It goes after `#`. A new value replaces the
+  current step, so typing in a search does not fill Back.
+- `selection` is the row you picked. You do not write it. oxplow sets it
+  when a column has `select` for that param. It goes after `#`. Each pick
+  adds a step, so Back un-picks.
+
+```yaml
+params:
+  - { name: effort_id }                       # resource: after ?
+  - { name: q, type: search, role: filter }   # filter: after #
+```
+
+A page you declare with `pages:` lists its `?` params in `params:`. The
+filters and picks of its lens go after `#`. If a link puts a `filter` or
+`selection` param after `?`, the page shows an error and ignores it.
 The values you change are kept in the page's tab: a bookmark, a
 reopened tab or a restart shows the same filters and the same row
 picked. Changing a filter doesn't add a step to Back; picking a row
@@ -146,7 +172,7 @@ actions:
   - id: finish
     label: Finish
     command: oxplow.work_item.transition
-    input: { ref: "{{row.ref}}", to: done }
+    input: { uri: "{{row.uri}}", to: done }
     row: true
   - id: sync
     label: Sync PRs
@@ -168,10 +194,10 @@ actions:
   - id: edit
     label: Edit…
     command: oxplow.work_item.update
-    input: { ref: "{{row.ref}}", title: "{{row.title}}" }
+    input: { uri: "{{row.uri}}", title: "{{row.title}}" }
     row: true
     form: true
-    fixed: [ref]
+    fixed: [uri]
 ```
 
 A `viz: form` lens takes the same `fixed`, and `fields` to show only some
@@ -300,7 +326,7 @@ group: { by: bucket, link: { kind: page, from: bucket_page } }   # link is optio
 emphasis: is_current     # a true / non-zero value highlights the row
 depth: level             # a whole number indents the row
 columns:
-  - { key: title, link: { kind: page, from: ref }, icon: state, tone: hue }
+  - { key: title, link: { kind: page, from: uri }, icon: state, tone: hue }
 actions:
   - { id: add, label: "+", command: oxplow.work_item.create, group: Ready, input: { title: New task } }
 ```
@@ -349,8 +375,8 @@ page's id as a param, so it must declare it:
 | Slot | Page | Param |
 |---|---|---|
 | `effort.review.details` | an effort's diff view | `effort_id`, `change_id` |
-| `work_item.detail.body` | a work item's page, below its body | `ref` |
-| `work_item.detail.sidebar` | a work item's page, its side rail | `ref` |
+| `work_item.detail.body` | a work item's page, below its body | `uri` |
+| `work_item.detail.sidebar` | a work item's page, its side rail | `uri` |
 | `thread.plan.header` | a thread's plan, as a compact strip | `thread_id` |
 | `vcs.commit.details` | a commit's page | `change_id` |
 | `vcs.status.header` | Uncommitted Changes, above the files | `stream_id` |
@@ -409,8 +435,9 @@ and on the Extensions page, each with what to do instead.
 - **Improve with Agent** puts `[oxplow lens <id>]` in the agent's input so you
   can ask for changes.
 - **Pin to Dashboard** adds it as a [dashboard](dashboards.md) tile.
-- The agent can see what you're looking at: `oxplow_get_open_page` returns the lens
-  with the exact rows on your screen.
+- The agent can see what you're looking at: `oxplow_get_open_page` returns the page
+  (what it shows), its view (your filters and picks) and, for a lens, the exact rows
+  on your screen.
 
 ## Custom components
 
@@ -464,8 +491,10 @@ oxplow.connect().then((component) => {
 });
 // Elsewhere, with `component` in hand:
 //   await component.query("open-tasks", {})
-//   await component.invoke("oxplow.work_item.transition", { ref, to: "done" })
+//   await component.invoke("oxplow.work_item.transition", { uri, to: "done" })
 //   await component.navigate("oxplow:oxplow/work_item?id=tsk42&provider=oxplow")   // oxplow pages only
+//   await component.navigate(uri, { newTab: true })    // open it in a new tab
+//   await component.navigate(uri, { replace: true })   // take the place of this step in Back
 ```
 
 `oxplow extension new component <name>` writes all of this for you.
@@ -533,7 +562,7 @@ actions in the bar and opens a command's form in oxplow:
 oxplow.connect().then(async (component) => {
   component.applyTheme();
   const { rows } = await component.querySql(
-    "SELECT ref, title FROM v_effort WHERE started_at >= ?1", [component.viewParams.from]);
+    "SELECT uri, title FROM v_effort WHERE started_at >= ?1", [component.viewParams.from]);
   await component.setTitle(`Efforts since ${component.viewParams.from}`);
   await component.setActions([{ id: "refresh", label: "Refresh", primary: true }]);
   component.onAction((id) => { if (id === "refresh") location.reload(); });
@@ -558,7 +587,7 @@ all of its page's params; a replacement has the keys its view's contract
 lists (`v_replaceable.view`); a `viz: custom` lens on its own page has
 the lens's params. In a dashboard tile or a slot `viewParams` is null and
 the component keeps its filters itself. Each kind of state has a name that says how far
-it reaches: **view params** (the tab's address: what the page shows, kept
+it reaches: **view params** (the part of the address after `#`: how the page shows it, kept
 by Back, a bookmark and a reopened tab, seen by an agent), **history
 state** (this step of the tab: scroll, what's expanded) and **page
 memory** (yours, in every tab of the component; JSON, 64 KB a value and
@@ -592,7 +621,7 @@ ui:
 The lens gets the view's props as params and must declare all of them: the
 Board gets `scope` (`thread`, `backlog` or `all`) and `thread_id`; the list
 gets `scope` (`thread`, `stream` or `all`) and `thread_id`, and its lens may
-declare `stream_id`; the editor gets `ref`. Settings → Integrations lists
+declare `stream_id`; the editor gets `uri`. Settings → Integrations lists
 each replaced view with a choice of whose to show (Default, oxplow's own, or
 an extension); a small "replaced by" badge says whose it is, and if it can't
 load, oxplow's own shows with a line saying why. Some views also share
@@ -684,9 +713,9 @@ collectors:
   - id: hot
     runtime: starlark            # or: jaq
     entry: collectors/hot.star
-    input: "SELECT ref, title FROM v_work_item WHERE json_extract(native, '$.priority') = 'high'"
+    input: "SELECT uri, title FROM v_work_item WHERE json_extract(native, '$.priority') = 'high'"
     entities:
-      - { name: hot_item, key: ref, columns: { ref: text, title: text } }
+      - { name: hot_item, key: uri, columns: { uri: text, title: text } }
 ```
 
 ```python

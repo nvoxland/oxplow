@@ -84,7 +84,7 @@ async fn filed(
         .create(actor, item)
         .await?
         .ok_or_else(|| oxplow_domain::CommandError::Failed {
-            message: "the create kept nothing (no ref)".into(),
+            message: "the create kept nothing (no uri)".into(),
         })
 }
 
@@ -124,10 +124,10 @@ pub async fn suite(
             left: Vec::new(),
         };
     }
-    let new = |title: &str, parent_ref: Option<String>| NewItem {
+    let new = |title: &str, parent_uri: Option<String>| NewItem {
         title: title.into(),
         body: "made by the conformance suite".into(),
-        parent_ref,
+        parent_uri,
         native: native.clone(),
         ..NewItem::default()
     };
@@ -175,7 +175,7 @@ pub async fn suite(
         .update(
             actor,
             WorkItemUpdateInput {
-                item_ref: item.clone(),
+                uri: item.clone(),
                 title: Some("conformance item, renamed".into()),
                 ..WorkItemUpdateInput::default()
             },
@@ -258,9 +258,9 @@ pub async fn suite(
         (true, Ok(child)) => {
             created.push(child.clone());
             probe.settle().await;
-            let parent = probe.record(&child).await.and_then(|r| r.parent_ref);
+            let parent = probe.record(&child).await.and_then(|r| r.parent_uri);
             if parent.as_deref() != Some(item.as_str()) {
-                fail("hierarchy", format!("child's parent_ref is {parent:?}"));
+                fail("hierarchy", format!("child's parent_uri is {parent:?}"));
             }
         }
         (true, Err(e)) => fail("hierarchy", format!("a child was refused: {e}")),
@@ -501,7 +501,7 @@ pub async fn suite(
                 let restarted = verbs
                     .invoke(VerbCall::bare(actor, Some(key)), "create", input)
                     .await;
-                let item_of = |r: &serde_json::Value| r["ref"].as_str().map(str::to_string);
+                let item_of = |r: &serde_json::Value| r["uri"].as_str().map(str::to_string);
                 // Whatever was made is cleaned up below, however it went.
                 for r in [&first, &again, &other, &restarted]
                     .into_iter()
@@ -638,8 +638,8 @@ impl WorkItemsProbe for ServicesProbe<'_> {
                     Option<String>,
                 )> = c
                     .query_row(
-                        "SELECT ref, title, body, state, native_state, native, parent_ref
-                     FROM work_item WHERE ref = ?1 AND deleted_at IS NULL",
+                        "SELECT uri, title, body, state, native_state, native, parent_uri
+                     FROM work_item WHERE uri = ?1 AND deleted_at IS NULL",
                         [item_ref],
                         |r| {
                             Ok((
@@ -661,15 +661,15 @@ impl WorkItemsProbe for ServicesProbe<'_> {
             .ok()
             .flatten()
             .and_then(
-                |(item_ref, title, body, state, native_state, native, parent_ref)| {
+                |(item_ref, title, body, state, native_state, native, parent_uri)| {
                     Some(WorkItemRecord {
-                        item_ref,
+                        uri: item_ref,
                         title,
                         body,
                         state: serde_json::from_value(serde_json::Value::String(state)).ok()?,
                         native_state,
                         native: serde_json::from_str(&native).ok()?,
-                        parent_ref,
+                        parent_uri,
                         deleted: false,
                         rank: None,
                         links: None,
@@ -730,7 +730,7 @@ impl WorkItemsProbe for ServicesProbe<'_> {
             .db
             .read(move |c| {
                 let mut stmt = c
-                    .prepare("SELECT ref FROM v_work_item WHERE provider = ?1 AND title = ?2")
+                    .prepare("SELECT uri FROM v_work_item WHERE provider = ?1 AND title = ?2")
                     .map_err(sql)?;
                 let rows = stmt
                     .query_map([provider, title], |r| r.get::<_, String>(0))
@@ -748,7 +748,7 @@ impl WorkItemsProbe for ServicesProbe<'_> {
             .db
             .read(move |c| {
                 let mut stmt = c
-                    .prepare("SELECT to_ref, link_type FROM v_work_item_link WHERE from_ref = ?1")
+                    .prepare("SELECT to_uri, link_type FROM v_work_item_link WHERE from_uri = ?1")
                     .map_err(sql)?;
                 let rows = stmt
                     .query_map([item_ref], |r| Ok((r.get(0)?, r.get(1)?)))
@@ -766,7 +766,7 @@ impl WorkItemsProbe for ServicesProbe<'_> {
             .db
             .read(move |c| {
                 let mut stmt = c
-                    .prepare("SELECT body FROM v_work_item_comment WHERE ref = ?1")
+                    .prepare("SELECT body FROM v_work_item_comment WHERE uri = ?1")
                     .map_err(sql)?;
                 let rows = stmt
                     .query_map([item_ref], |r| r.get(0))
@@ -785,7 +785,7 @@ impl WorkItemsProbe for ServicesProbe<'_> {
             .read(move |c| {
                 use rusqlite::OptionalExtension;
                 c.query_row(
-                    "SELECT thread_id, rank FROM v_work_item WHERE ref = ?1",
+                    "SELECT thread_id, rank FROM v_work_item WHERE uri = ?1",
                     [item_ref],
                     |r| Ok((r.get(0)?, r.get(1)?)),
                 )

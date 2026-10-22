@@ -76,7 +76,7 @@ or exact mechanics.
 | LSP (session manager, document mirror, Mason installer, lsp RPCs/events, server config, MCP lsp tools) | `.context/lsp.md` |
 | Code quality scans (in-process metrics + duplication detector + findings store + Code quality panel) | `.context/code-quality.md` |
 | Effort-scoped collection (test-run + diff-coverage observations, report collectors and their bundled parsers, the `testing:` profile, `/oxplow:configure`) | `.context/collection.md` |
-| Resources and their URIs — building, reading, storing or linking any `<kind>:<id>` string in Rust, SQL, Starlark or TS (builders, readers, `ref` columns, dead links); the grammar and type registry; resource / renderer / view | `.context/resources.md` "Using refs" |
+| Resources and their URIs — building, reading, storing or linking any `<kind>:<id>` string in Rust, SQL, Starlark or TS (builders, readers, `uri` columns, dead links); the grammar and type registry; resource / renderer / view | `.context/resources.md` "Using refs" |
 | Commands — the command bus (spec, actors, validate → policy → confirm → run + audit + `command.executed` in one transaction, undo), adding a command | `.context/commands.md` |
 | Knowledge (the wiki) — `knowledge.write_page` and its sibling commands, pins, hand-edit convergence, the wiki write guard | `.context/knowledge.md` |
 | External providers — the JSON-RPC/NDJSON protocol crate and meta-model, the fake provider, the host (consent, spawn, handshake, `ExternalWorkItems`), instances and health, Settings → Integrations, the conformance kit and `oxplow extension test` | `.context/providers.md` |
@@ -87,7 +87,7 @@ or exact mechanics.
 | Fact substrate (measure/dimension/metric_spec/capture/fact, cube, fact collectors, MCP/IPC reads, Metrics page) | `.context/metrics.md` |
 | Profiling (the `cube_equivalence` harness, samply traps), what's already optimized, what measurement ruled out | `.context/performance.md` |
 | User-created dashboards (dashboard/dashboard_item stores, the `dashboard.*` commands, custom-dashboard page + tile grid) | `.context/dashboards.md` |
-| Tab store, page chrome, rail HUD, page kinds + tab id format | `.context/pages-and-tabs.md` |
+| Tab store, page chrome, rail HUD, renderers (which page draws a URI) + tab id format | `.context/pages-and-tabs.md` |
 | External URL tabs, sandboxed webview, allowlist, partition policy | `.context/external-url-tabs.md` |
 | Remote daemon mode (oxplow-rpc dispatch, oxplow-daemon, transport switch, connect flow, reconnect banner) | `.context/remote-daemon.md` |
 | Blog posts, user docs, release notes, README copy — anything reader-facing | `.context/writing-tone.md` |

@@ -1,0 +1,11 @@
+{
+  "page": {
+    "title": "Release process",
+    "body": "# Release process\n\nSee [[scripts/release.sh]].\n",
+    "updated_at": "2026-10-09T12:00:00Z",
+    "uri": "wiki:release-process",
+    "uris": [
+      "file:scripts/release.sh"
+    ]
+  }
+}

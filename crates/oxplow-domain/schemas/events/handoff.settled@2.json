@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`handoff.settled@2`: a handoff's state moved (`oxplow.handoff.settle`):\ntaken or declined by its recipient, withdrawn by its sender, or open\nagain (an undo).",
+  "properties": {
+    "from_thread": {
+      "description": "The sending thread (`thr3`).",
+      "type": "string"
+    },
+    "handoff": {
+      "description": "The handoff (`hnd1`).",
+      "type": "string"
+    },
+    "state": {
+      "description": "`open`, `taken`, `declined` or `withdrawn`.",
+      "type": "string"
+    },
+    "to_thread": {
+      "description": "The receiving thread (`thr4`).",
+      "type": "string"
+    }
+  },
+  "required": [
+    "handoff",
+    "state",
+    "from_thread",
+    "to_thread"
+  ],
+  "title": "HandoffSettledV2",
+  "type": "object"
+}

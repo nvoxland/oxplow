@@ -28,7 +28,7 @@ mock.module("../api.js", () => ({
     }
     if (sql.includes("FROM v_work_item w")) {
       return {
-        columns: ["ref", "provider", "title", "body", "state", "parent_ref", "thread_id", "rank", "closed_at", "created_at", "updated_at", "native", "comment_count"],
+        columns: ["uri", "provider", "title", "body", "state", "parent_uri", "thread_id", "rank", "closed_at", "created_at", "updated_at", "native", "comment_count"],
         rows: [["oxplow:oxplow/work_item?id=W-1&provider=fake", "fake", "Their bug", "It breaks.", "todo", parent, null, null, null, "t", "t", null, 0]],
         truncated: false,
         reads: { models: ["v_work_item"], tables: [], measures: [] },
@@ -58,7 +58,7 @@ mock.module("../api.js", () => ({
         decorators: [],
         replacements: [],
       },
-      lenses: ["x/body", "x/side"].map((id) => ({ id, params: [{ name: "ref", label: null, default: null }] })),
+      lenses: ["x/body", "x/side"].map((id) => ({ id, params: [{ name: "uri", label: null, default: null }] })),
     },
   ],
   runLens: async (id: string, params: unknown) => {
@@ -76,7 +76,7 @@ beforeEach(() =>
   setResources(
     ["work_item", "collector"].map((name) => ({
       resource: `oxplow/${name}`, extension: "oxplow", label: name, params: {}, additional: false, resolve: null,
-      title: null, searchable: null, icon: null, wikilink: null, page: null,
+      title: null, searchable: null, icon: null, wikilink: null,
     })),
   ),
 );
@@ -111,7 +111,7 @@ test("Delete shows with the provider's delete feature and runs work_item.delete 
   const view = page();
   fireEvent.click(await waitFor(() => view.getByTestId("task-rail-delete-trigger")));
   fireEvent.click(view.getByTestId("task-rail-delete-confirm"));
-  await waitFor(() => expect(ran).toEqual([["oxplow.work_item.delete", { ref: "oxplow:oxplow/work_item?id=W-1&provider=fake", confirmed: true }]]));
+  await waitFor(() => expect(ran).toEqual([["oxplow.work_item.delete", { uri: "oxplow:oxplow/work_item?id=W-1&provider=fake", confirmed: true }]]));
 });
 
 // P7.A1: every write is a `work_item.*` command, whatever the provider.
@@ -125,7 +125,7 @@ test("comments, links and a parent show when the provider declares them; Comment
   fireEvent.change(view.getByTestId("work-item-comment-body"), { target: { value: "Seen it too." } });
   fireEvent.keyDown(view.getByTestId("work-item-comment-body"), { key: "Enter", metaKey: true });
   await waitFor(() =>
-    expect(ran).toEqual([["oxplow.work_item.comment", { ref: "oxplow:oxplow/work_item?id=W-1&provider=fake", body: "Seen it too." }]]),
+    expect(ran).toEqual([["oxplow.work_item.comment", { uri: "oxplow:oxplow/work_item?id=W-1&provider=fake", body: "Seen it too." }]]),
   );
   await waitFor(() => expect(view.queryByTestId("work-item-comment-body") === null).toBe(true));
 });
@@ -139,7 +139,7 @@ test("Link… takes any link type the provider names, not oxplow's list", async 
   fireEvent.change(view.getByTestId("work-item-link-target"), { target: { value: "oxplow:oxplow/work_item?id=W-9&provider=fake" } });
   fireEvent.click(view.getByTestId("work-item-link-submit"));
   await waitFor(() =>
-    expect(ran).toEqual([["oxplow.work_item.link", { ref: "oxplow:oxplow/work_item?id=W-1&provider=fake", target: "oxplow:oxplow/work_item?id=W-9&provider=fake", link_type: "caused_by" }]]),
+    expect(ran).toEqual([["oxplow.work_item.link", { uri: "oxplow:oxplow/work_item?id=W-1&provider=fake", target: "oxplow:oxplow/work_item?id=W-9&provider=fake", link_type: "caused_by" }]]),
   );
 });
 
@@ -159,12 +159,12 @@ test("a state change runs the provider's transition; the item's slots get its re
   features = {};
   const view = page();
   fireEvent.change(await waitFor(() => view.getByLabelText("State")), { target: { value: "done" } });
-  await waitFor(() => expect(ran).toEqual([["oxplow.work_item.transition", { ref: "oxplow:oxplow/work_item?id=W-1&provider=fake", to: "done" }]]));
+  await waitFor(() => expect(ran).toEqual([["oxplow.work_item.transition", { uri: "oxplow:oxplow/work_item?id=W-1&provider=fake", to: "done" }]]));
   await waitFor(() =>
     expect(lensRuns.map(([id, p]) => [id, p])).toEqual(
       expect.arrayContaining([
-        ["x/body", { ref: "oxplow:oxplow/work_item?id=W-1&provider=fake" }],
-        ["x/side", { ref: "oxplow:oxplow/work_item?id=W-1&provider=fake" }],
+        ["x/body", { uri: "oxplow:oxplow/work_item?id=W-1&provider=fake" }],
+        ["x/side", { uri: "oxplow:oxplow/work_item?id=W-1&provider=fake" }],
       ]),
     ),
   );
@@ -189,7 +189,9 @@ const pageWithNav = () => {
 };
 
 // An edge names its ends by URI; one no resource claims is unresolved.
-const DEAD = resourceUri("oxplow/acme_pr", { id: 12 });
+// Every oxplow URI opens (an unresolved one on the fallback page), so a dead
+// link is what is no URI the window opens: raw text.
+const DEAD = "gone_kind:12";
 
 const aboutEdge = (target: string, resolved: boolean, label: string | null) => ({
   source: workItemUri("fake", "W-1"),
@@ -211,7 +213,7 @@ test("Link… takes any ref: its placeholder says so, and an `about` link to an 
   fireEvent.change(view.getByTestId("work-item-link-target"), { target: { value: "oxplow:oxplow/effort?id=eff12" } });
   fireEvent.click(view.getByTestId("work-item-link-submit"));
   await waitFor(() =>
-    expect(ran).toEqual([["oxplow.work_item.link", { ref: "oxplow:oxplow/work_item?id=W-1&provider=fake", target: "oxplow:oxplow/effort?id=eff12", link_type: "about" }]]),
+    expect(ran).toEqual([["oxplow.work_item.link", { uri: "oxplow:oxplow/work_item?id=W-1&provider=fake", target: "oxplow:oxplow/effort?id=eff12", link_type: "about" }]]),
   );
 });
 
@@ -220,13 +222,13 @@ test("a link row's right-click menu has Unlink, which runs work_item.unlink with
   outbound = [aboutEdge(collectorUri("triage", "todos"), true, "Triage todos")];
   const view = pageWithNav();
   fireEvent.click(await waitFor(() => view.getByTestId("page-nav-outbound-toggle")));
-  const row = await waitFor(() => view.getByTestId(`backlinks-entry-${pageUri("settings")}`));
+  const row = await waitFor(() => view.getByTestId(`backlinks-entry-${collectorUri("triage", "todos")}`));
   expect(row.textContent).toContain("Triage todos");
   fireEvent.contextMenu(row, { clientX: 3, clientY: 3 });
   fireEvent.click(view.getByTestId("menu-item-unlink"));
   await waitFor(() =>
     expect(ran).toEqual([
-      ["oxplow.work_item.unlink", { ref: "oxplow:oxplow/work_item?id=W-1&provider=fake", target: "oxplow:oxplow/collector?collector=triage/todos", link_type: "about" }],
+      ["oxplow.work_item.unlink", { uri: "oxplow:oxplow/work_item?id=W-1&provider=fake", target: "oxplow:oxplow/collector?collector=triage/todos", link_type: "about" }],
     ]),
   );
 });

@@ -46,16 +46,26 @@ pub fn failed(e: impl std::fmt::Display) -> CommandError {
     }
 }
 
-/// The key a URI of `resource` names, parsed (`oxplow:oxplow/thread?id=thr3`
-/// → `ThreadId(3)`) — the one way a command's input names a record
-/// (`.context/resources.md`); anything else is refused at `field`, saying
-/// the form.
-pub fn ref_id<T: std::str::FromStr>(
+/// The bare id a field named for one `resource` carries, parsed (`thr3` →
+/// `ThreadId(3)`, a claim's `7` → `7`): the id type's own spelling, never a
+/// URI (`.context/resources.md` "Bare ids"). Anything else is refused at
+/// `field`, saying the form.
+pub fn bare_id<T: std::str::FromStr>(
     raw: &str,
     resource: &str,
     field: &str,
 ) -> Result<T, CommandError> {
-    oxplow_domain::uri::build::parse_as(raw, resource).map_err(|e| invalid(field, e.to_string()))
+    if let Ok(id) = raw.parse() {
+        return Ok(id);
+    }
+    let hint = match oxplow_domain::uri::build::id_of(raw, resource) {
+        Ok(id) => format!("; pass the id (`{id}`), not its URI"),
+        Err(_) => String::new(),
+    };
+    Err(invalid(
+        field,
+        format!("`{raw}` isn't an {resource} id{hint}"),
+    ))
 }
 
 /// The services the operations that reach across them run against, filled
@@ -85,42 +95,42 @@ mod tests {
     use super::*;
     use oxplow_domain::{StreamId, ThreadId};
 
-    /// A record is named by its ref, and only by it: a bare id, another
-    /// kind's ref or an empty one is refused at the field, saying the form.
+    /// A field named for one resource carries its bare id, and only it: a
+    /// URI, another id type's spelling or an empty one is refused at the
+    /// field, saying the form.
     #[test]
-    fn a_record_is_named_by_its_ref() {
+    fn a_fixed_field_takes_a_bare_id() {
         assert_eq!(
-            ref_id::<ThreadId>(
-                "oxplow:oxplow/thread?id=thr3",
-                oxplow_domain::uri::resources::THREAD,
-                "/thread"
-            )
-            .unwrap(),
+            bare_id::<ThreadId>("thr3", oxplow_domain::uri::resources::THREAD, "/thread").unwrap(),
             ThreadId::new(3)
         );
         assert_eq!(
-            ref_id::<StreamId>(
-                "oxplow:oxplow/stream?id=str1",
-                oxplow_domain::uri::resources::STREAM,
-                "/stream"
-            )
-            .unwrap(),
+            bare_id::<StreamId>("str1", oxplow_domain::uri::resources::STREAM, "/stream").unwrap(),
             StreamId::new(1)
         );
-        for raw in [
-            "thr3",
-            "oxplow:oxplow/stream?id=str1",
-            "thread:",
-            "threads:thr3",
-            "oxplow:oxplow/thread?id=nope",
-        ] {
-            let err = ref_id::<ThreadId>(raw, oxplow_domain::uri::resources::THREAD, "/thread")
+        assert_eq!(
+            bare_id::<i64>("7", oxplow_domain::uri::resources::CLAIM, "/claim").unwrap(),
+            7
+        );
+        for raw in ["str1", "", "3", "thread:thr3", "nope"] {
+            let err = bare_id::<ThreadId>(raw, oxplow_domain::uri::resources::THREAD, "/thread")
                 .unwrap_err();
             assert!(
                 matches!(&err, CommandError::Invalid { field: Some(f), message }
-                    if f == "/thread" && message.contains("isn't an oxplow/thread URI")),
+                    if f == "/thread" && message.contains("isn't an oxplow/thread id")),
                 "{raw}: {err:?}"
             );
         }
+        let err = bare_id::<ThreadId>(
+            "oxplow:oxplow/thread?id=thr3",
+            oxplow_domain::uri::resources::THREAD,
+            "/thread",
+        )
+        .unwrap_err();
+        assert!(
+            matches!(&err, CommandError::Invalid { message, .. }
+                if message.contains("pass the id (`thr3`), not its URI")),
+            "{err:?}"
+        );
     }
 }

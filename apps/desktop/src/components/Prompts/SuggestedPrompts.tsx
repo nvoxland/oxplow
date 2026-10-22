@@ -1,5 +1,5 @@
 /// What to ask about the ref a page shows (P6.D2): the catalog's prompts
-/// `about` its kind, each an Ask that puts `[oxplow ref …] <question>` in
+/// `about` its kind, each an Ask that puts `[oxplow uri …] <question>` in
 /// the agent's input — never sent. Renders nothing when there are none.
 import type { CSSProperties } from "react";
 

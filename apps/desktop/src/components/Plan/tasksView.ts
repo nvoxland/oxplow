@@ -1,7 +1,7 @@
 /**
  * The Tasks page's view — which threads it shows (its scope) and its
- * filter chips — as the page's **view params** (`.context/pages-and-tabs.md`
- * "Page state"): in its tab's address, so two Tasks tabs can differ, Back
+ * filter chips — as the page's **view params** (the address's `#`, the whole
+ * of it: the page is one page, `scope` is how it lists, not a resource), so two Tasks tabs can differ, Back
  * undoes a change, a bookmark keeps it and an agent reading the open page
  * sees it. A change replaces the tab's entry (a filter, not a pick).
  *
@@ -25,11 +25,6 @@ export interface TasksView {
 
 const FILTER = "f.";
 const SCOPE_KEYS = ["scope", "stream", "thread"];
-
-/** Whether `key` is one of the Tasks page's view params. */
-export function isTasksViewParam(key: string): boolean {
-  return SCOPE_KEYS.includes(key) || key.startsWith(FILTER);
-}
 
 const text = (v: SqlCell | undefined) => (typeof v === "string" ? v : typeof v === "number" ? String(v) : "");
 

@@ -397,8 +397,8 @@ mod tests {
     async fn log(svc: &Services, effort: oxplow_domain::EffortId, evidence: &str) -> StoredEvent {
         let env = Envelope::typed::<oxplow_domain::events::schema::EffortClaimVerified>(
             "human",
-            &oxplow_domain::events::schema::EffortClaimVerifiedV1 {
-                claim: "oxplow:oxplow/claim?id=1".into(),
+            &oxplow_domain::events::schema::EffortClaimVerifiedV2 {
+                claim: 1,
                 effort: None,
                 evidence: Some(evidence.into()),
             },
@@ -693,10 +693,10 @@ mod tests {
         assert_eq!(
             rows(
                 &fx.svc,
-                "SELECT json_extract(payload, '$.collector') FROM v_event WHERE type = 'collector.synced' AND uri_param(json_extract(payload, '$.collector'), 'collector') LIKE 'work/%' ORDER BY seq",
+                "SELECT json_extract(payload, '$.collector') FROM v_event WHERE type = 'collector.synced' AND json_extract(payload, '$.collector') LIKE 'work/%' ORDER BY seq",
             )
             .await,
-            json!([["oxplow:oxplow/collector?collector=work/sooner"], ["oxplow:oxplow/collector?collector=work/later"]])
+            json!([["work/sooner"], ["work/later"]])
         );
     }
 
@@ -988,11 +988,8 @@ mod tests {
         for i in 0..crate::event_lineage::MAX_CHAIN {
             let mut synced = Envelope::typed::<oxplow_domain::events::schema::CollectorSynced>(
                 "system",
-                &oxplow_domain::events::schema::CollectorSyncedV1 {
-                    collector: oxplow_domain::uri::build::keyed(
-                        oxplow_domain::uri::resources::COLLECTOR,
-                        &format!("other/c{i}"),
-                    ),
+                &oxplow_domain::events::schema::CollectorSyncedV2 {
+                    collector: format!("other/c{i}").to_string(),
                     trigger: "on".into(),
                     status: "ok".into(),
                     entities: Default::default(),

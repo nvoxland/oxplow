@@ -111,8 +111,8 @@ capability (hierarchy, comments, links, delete and `idempotent_writes`),
 the work-items verbs `create` / `update` / `transition` (undoable: its
 inverse moves the item back) / `link` / `comment` / `delete` over the contract's inputs (`state` /
 `native_state`, its `native.points`; `additionalProperties: false`), one
-command of its own, `estimate { ref, points }`, the
-`work_item.recorded@2` event type with the core schema (its records
+command of its own, `estimate { uri, points }`, the
+`work_item.recorded@3` event type with the core schema (its records
 state its links and comments; it declares no `ordering` or `lists`), a
 `work_items`
 collector over the `work_item` entity, and a config schema requiring
@@ -165,7 +165,7 @@ extension (`providers/tests.rs` `write_extension`, the SDK's
 `just_works.rs`, the desktop `extension_cli.rs`) set it to
 `<project>/.oxplow/fake-state-$OXPLOW_PROVIDER_ID.json` — outside the
 extension folder, whose contents are the deployment — and the kit tests
-clear it before each run, since the golden transcript records the refs
+clear it before each run, since the golden transcript records the URIs
 handed out. Without it the fake forgets on exit, and a declared
 `idempotent_writes` fails the kit's restart check.
 Two notifications drive it from a test: `fake/changed { collectors? }`
@@ -211,18 +211,18 @@ provider that wasn't chosen was asked nothing.
 
 **As a knowledge provider** (`OXPLOW_FAKE_CAPABILITY=knowledge`) it
 declares `knowledge_declarations()` — the `knowledge` capability (no
-features), the verbs `write_page { slug, title?, body, verified_refs,
-removed_refs }` → `{ page: "wiki:<slug>" }`, `delete_page { slug }` and
+features), the verbs `write_page { slug, title?, body, verified_files,
+removed_files }` → `{ page: "wiki:<slug>" }`, `delete_page { slug }` and
 `link { page, target }` → `{}` (each `confirm: never`, `access: record`,
 inputs `additionalProperties: false`), the event type
-`knowledge.page.recorded@1`, a `knowledge_pages` collector over entity
+`knowledge.page.recorded@2`, a `knowledge_pages` collector over entity
 `knowledge_page` (`discover` lists it), and the same `team` config; the
 event's schema is core's. Pages live in its state
 like items do. Every verb answers the page's record as that event:
-`{ page: { ref: "oxplow:oxplow/wiki?slug=<slug>", title, body, refs, updated_at, deleted? } }`.
-`refs` is the body's `[[…]]` interiors in oxplow's grammar (one with a `/`
+`{ page: { uri: "oxplow:oxplow/wiki?slug=<slug>", title, body, uris, updated_at, deleted? } }`.
+`uris` is the body's `[[…]]` interiors in oxplow's grammar (one with a `/`
 or a `.` is `oxplow:oxplow/file?path=<path>`, a bare one `oxplow:oxplow/wiki?slug=<slug>`); the title defaults to
-the slug; `verified_refs` and `removed_refs` are accepted and ignored (it
+the slug; `verified_files` and `removed_files` are accepted and ignored (it
 keeps no pins). `link` appends `[[target]]` under a `## Related` heading;
 `delete_page` answers the record with `deleted: true`, and a page that is
 absent or already deleted is `InvalidInput`. `read` of `knowledge_pages`
@@ -386,7 +386,7 @@ has none):
 
 ```yaml
 providers:
-  - id: fake                     # the ref segment and command namespace
+  - id: fake                     # the URI segment and command namespace
     capability: work_items       # one with a provider contract (below)
     entry: bin/provider          # a program in the extension folder
     args: [--stdio]
@@ -431,7 +431,7 @@ A capability a process may implement carries a **provider contract**
 The host enforces the contract, never a capability's name: the verbs it
 requires (each always, or when a feature is declared), the command family
 a verb runs as (so an inverse naming a verb undoes through it), the event
-types it may emit, what its collectors stream, the refs an instance owns,
+types it may emit, what its collectors stream, the URIs an instance owns,
 and whether it keeps items.
 
 | | `work_items` | `effort_policy` | `agent_harness` | `snapshots` | `knowledge` |
@@ -439,8 +439,8 @@ and whether it keeps items.
 | verbs | `create`, `update`, `transition`; `link` ← links, `comment` ← comments, `delete` ← delete, `reorder` ← ordering, `move` ← lists | `react` | `launch`, `tool_use`, `render`; `turns` ← transcript, `token_readings` ← telemetry, `refresh_text` ← runtime_text, `prompt` and `subagent` ← subagents | `mark`, `changed`; `read_at` ← contents | `write_page`, `delete_page`, `link` |
 | verbs run as | `oxplow.work_item.<verb>` | the dispatcher's call (nothing undoes it) | core's call: a session's launch, the hook route, the OTLP route, a transcript read, a text refresh | core's call: every take core makes (an effort's brackets, a turn's end, a measured run, an archive) | `oxplow.knowledge.<verb>`, after core checks the page against its record |
 | declares as `data` | nothing | nothing | `env_markers`, `settings` | nothing | nothing |
-| may emit | `work_item.recorded@2` | nothing | nothing | nothing | `knowledge.page.recorded@1` |
-| collectors stream | `work_item` rows, logged as `work_item.recorded@2` `{ item: row }` | nothing | nothing | nothing | `knowledge_page` rows, logged as `knowledge.page.recorded@1` `{ page: row }` |
+| may emit | `work_item.recorded@3` | nothing | nothing | nothing | `knowledge.page.recorded@2` |
+| collectors stream | `work_item` rows, logged as `work_item.recorded@3` `{ item: row }` | nothing | nothing | nothing | `knowledge_page` rows, logged as `knowledge.page.recorded@2` `{ page: row }` |
 | owns URIs | `oxplow/work_item` with `provider=<instance>` | none | none | none | `oxplow/wiki` (no `provider` param: the active store's) |
 | keeps items (`fields`, `idPattern`) | yes | no | no | no | no |
 
@@ -455,9 +455,9 @@ harness's (`agent_harness::HarnessHost`) registers an `ExternalHarness` in
 catalog reload keeps it); the snapshots' (`snapshots::SnapshotsHost`)
 registers an `ExternalSnapshots` in `Services.snapshots`; the
 knowledge's (`knowledge::KnowledgeHost`) registers an `ExternalKnowledge`
-in `Services.knowledge`. A record row carries its own `ref`; the host
+in `Services.knowledge`. A record row carries its own `uri`; the host
 logs it as the contract's event with the row under the contract's key,
-that ref the subject and the instance the source (`provider:<id>`: whose
+that URI the subject and the instance the source (`provider:<id>`: whose
 record it is). A URI of a resource with no `provider` param
 (`oxplow/wiki`) is the active implementation's, so any well-formed one is an
 instance's own (`registry::owns`).
@@ -476,13 +476,13 @@ maps/database rows. Process supervision starts after publication.
 **A knowledge provider** keeps pages (an Obsidian vault, a Confluence or
 MediaWiki space); core keeps the record (`.context/knowledge.md` "The
 capability"). The page commands check a write against core's record
-first — the slug, every link it adds, the refs it verifies or removes —
-then invoke the verb: `write_page { slug, title?, body, verified_refs,
-removed_refs }` (the body in oxplow's markdown, `title` also given), `link
+first — the slug, every link it adds, the URIs it verifies or removes —
+then invoke the verb: `write_page { slug, title?, body, verified_files,
+removed_files }` (the body in oxplow's markdown, `title` also given), `link
 { page, target }` (`target` a wikilink's inside), `delete_page { slug }`.
-Each answers the page's `knowledge.page.recorded@1 { page: { ref, title,
-body, refs, updated_at, deleted? } }`: `body` what it keeps (in its own
-grammar if it likes), `refs` what the page links **in oxplow's grammar**
+Each answers the page's `knowledge.page.recorded@2 { page: { uri, title,
+body, uris, updated_at, deleted? } }`: `body` what it keeps (in its own
+grammar if it likes), `uris` what the page links **in oxplow's grammar**
 (`oxplow:oxplow/file?path=src/lib.rs`, `oxplow:oxplow/wiki?slug=other`, a work item's URI) — core links and pins
 from those, never parsing a foreign body. A write answering no record of
 the page fails. Core records the row, the edges and the pins from it and
@@ -563,7 +563,7 @@ runs it with config `{}` and the kit environment's search path (its PATH,
 then the install dirs under its HOME — `kit_search_path`), so a harness
 provider's program must be findable where a person's would be; `ran`
 shows `agent_harness suite`. The MCP adapter
-(`oxplow-provider-mcp`) still maps work-item refs only.
+(`oxplow-provider-mcp`) still maps work-item URIs only.
 
 **A provider runs under its extension's permissions** (`.context/extensions.md`
 "Permissions"): its manifest declares `process` (an `entry` or an MCP
@@ -674,7 +674,7 @@ instance restarts on it) — RPCs `add_provider_instance`,
 provider's credential is its instance's: collectors keep the
 extension's `source:<project>:<ext>:<name>` accounts. An extension's
 command declared over its provider's operation runs on the instance its
-input names (`instance`, else its `ref`'s, else the default).
+input names (`instance`, else its `uri`'s, else the default).
 
 **Scope** (P9.B2). An instance is the **project's** (above: shared with
 the team in `project.yaml`) or the **person's** — global, in this
@@ -993,7 +993,7 @@ declaration's; its `op` is `{ scope: provider:<ext>/<provider>, op }`.
 A run goes through the bus's **provider router**
 (`CommandBus::set_provider_router`, `ProviderRouter for
 ProviderRegistry::run_op`) to the instance its input names — an
-`instance` field, else the instance its `ref` is of
+`instance` field, else the instance its `uri` is of
 (a work item URI's `provider` param), else the provider's default instance —
 `Unavailable` when that one isn't running; its inverse names an
 operation, made a call of the command declared over it (with the
@@ -1002,7 +1002,7 @@ instance), or `<family>.<verb>` for a capability verb (its contract's
 declared this way: core calls it. An instance registers only its
 capability's implementation (no bus namespace). **A provider emits only
 its capability's event types** (its contract's `events`: `work_items` →
-`work_item.recorded@2` — a published version's schema never changes,
+`work_item.recorded@3` — a published version's schema never changes,
 since declarations are compared to it exactly;
 tsk548): declaring any other type — another core one such as
 `contribution.enabled`, which would clear another contribution's disable — is
@@ -1012,7 +1012,7 @@ invokes the process and hands the bus its result, its inverse (as
 `<id>.<command>`, or for a verb `work_item.<verb>`) and its events —
 refused if a type isn't declared, a record names another provider's row
 (a `work_item.recorded` another's item), or a subject isn't one of its
-own refs (`check_subject`: its contract's resource with `provider=<id>`, or
+own URIs (`check_subject`: its contract's resource with `provider=<id>`, or
 the extension's URI `oxplow:oxplow/extension?name=<ext>`).
 
 **Calls are bounded** (tsk549): `check` and `invoke` time out after
@@ -1088,7 +1088,7 @@ instance** — a write counts once however often it is sent again under
 its idempotency key (an effect's automatic retries, a person's retry of
 the same composition: `Instance::failed_keys`, tsk913), so one outage
 that a reaction retries through doesn't halt it: it stops, and the row (`disabled`, its reason) and
-`contribution.disabled@1 { contribution, reason }` (`contribution` the provider's ref) commit
+`contribution.disabled@1 { contribution, reason }` (`contribution` the provider's URI) commit
 together (source `system:extensions`, subject `extension:<extension>`). So is
 a handshake that doesn't match the deployed declarations. The row is
 what keeps it off, across generations and restarts, and one whose row
@@ -1111,15 +1111,15 @@ runs one declared collector's `read` — **one at a time per collector**
 checkpoint it last stored
 (`provider_collector_state`, [data-model.md](./data-model.md)), through
 `start_streaming`. Each `$/record` must be the collector's entity — the
-one its contract streams — and a row of its own (its `ref`), valid as
-the contract's event; it is kept as that envelope (`work_item.recorded@2`
+one its contract streams — and a row of its own (its `uri`), valid as
+the contract's event; it is kept as that envelope (`work_item.recorded@3`
 `{ item }`, the actor's source) until the
 next `$/state`, which commits the batch **and** the checkpoint in one
 transaction, so a read that fails midway keeps exactly what its last
 checkpoint covered and the next read resumes there. A record equal to its
 item's last `work_item.recorded` (a write's or an earlier read's —
 looked up by the contract key's literal path, `json_extract(payload,
-'$.item.ref')`, the expression index `event_log_work_item_ref`) is
+'$.item.uri')`, the expression index `event_log_work_item_uri`) is
 **not logged**: it restates nothing, and logging it would echo a write
 back to whatever reacted to it — an effect that writes another
 provider's item would hear its own write again on every sync (tsk799).
@@ -1204,7 +1204,7 @@ reason logged, keeps it off across a reconcile, refuses an agent's
 conformance suite passes through the dispatching `work_item.*` over the
 fake; `work_item.*` writes the fake's items through its process with one
 audit row (and undo dispatches again), its verbs aren't on the bus but
-its extension's `tracker.item.estimate` is, run on the instance its `ref`
+its extension's `tracker.item.estimate` is, run on the instance its `uri`
 names; a verb's input is checked against its declared schema
 and a parent or link target of another provider is refused.
 The fake as an effort policy (`write_policy_extension`, a `steward`
@@ -1218,7 +1218,7 @@ runs nothing and the item's move stands; and once stopped the choice
 resolves to `none` and starting a task opens nothing.
 
 **Its commands appear in core menus** by their own `ui`: one about a
-ref's kind (`ui.about: work_item`) is on that ref's page menu and its
+URI's kind (`ui.about: work_item`) is on that URI's page menu and its
 rows' right-click menus (`refOffers`).
 
 **Its features are published** while it runs: publication writes the
@@ -1273,7 +1273,7 @@ approval is asked; credentials come from the environment (the declared
 names — for a signed-in credential, an access token the author got
 themselves: the kit never signs in — and never a client secret).
 The report's **`left`** lists what the run made in a provider's own
-system and didn't remove — the ref a work-items `create` example returned,
+system and didn't remove — the URI a work-items `create` example returned,
 and the items the conformance suite filed and couldn't delete
 (`work_items_conformance::SuiteRun.left`: everything, for a provider
 without `delete`); the text form prints each as `left in the provider:`.

@@ -327,7 +327,7 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
                 />
               ) : null}
               {tab.agentStatus ? <AgentStatusDot status={tab.agentStatus} question={tab.question} /> : null}
-              {kindForTabId(tab.id) === "agent_session" ? (
+              {kindForTabId(tab.id) === "oxplow/agent_session" ? (
                 <AgentIcon icon={tab.icon} size={13} style={{ color: "var(--text-secondary)", flexShrink: 0 }} />
               ) : (
                 <PageKindIcon

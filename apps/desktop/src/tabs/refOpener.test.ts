@@ -1,66 +1,27 @@
-import { afterEach, expect, test } from "bun:test";
+import { expect, test } from "bun:test";
 
-import { setResources, type Resource } from "../resources.js";
-import { commentUri, eventUri, fileUri, pageUri, resourceUri, threadUri, wikiUri, workItemUri } from "../uri/uri.js";
-import { extPageRef, fileRef, wikiPageRef, workItemTabRef } from "./pageRefs.js";
+import { commentUri, fileUri, resourceUri, streamUri, threadUri, wikiUri, workItemUri } from "../uri/uri.js";
+import { fileRef, wikiPageRef, workItemTabRef } from "./pageRefs.js";
 import { refTarget, refTargetNow } from "./refOpener.js";
 
-// oxplow's resources are oxplow-foundation's declarations: the URI's
-// extension segment (`oxplow`) isn't the declaring extension's name.
-const resource = (name: string, page: string | null, segment = "oxplow"): Resource => ({
-  resource: `${segment}/${name}`,
-  extension: segment === "oxplow" ? "oxplow-foundation" : segment,
-  label: name,
-  params: { id: { required: true, pattern: null } },
-  additional: false,
-  resolve: null,
-  title: null,
-  searchable: null,
-  icon: null,
-  wikilink: null,
-  page,
-});
-
-const RESOURCES: Resource[] = [
-  resource("work_item", null),
-  resource("wiki", null),
-  resource("file", null),
-  resource("thread", null),
-  // An oxplow resource that names a page opens there, with the URI as `ref`.
-  resource("comment", pageUri("comments")),
-  resource("event", null),
-  {
-    ...resource("pr", pageUri("acme/pr"), "acme"),
-    label: "Pull request",
-    resolve: "v_acme_prs",
-    icon: "git-pull-request",
-    wikilink: { prefix: "pr", param: "id" },
-  },
-  resource("issue", null, "acme"),
-];
-
-afterEach(() => setResources([]));
-
-// Every URI opens by one rule: an extension's resource opens its page with
-// the URI as `ref`; every other URI opens as itself, through `refFromTabId`
-// (a thread or a stream selects instead of opening a tab).
-test("a URI opens where its resource's page says, or as itself", () => {
-  setResources(RESOURCES);
+// Every URI opens by one rule: as itself (its tab's id is the URI, drawn by
+// the page that renders it, or by the fallback); a thread or a stream
+// selects instead of opening a tab. The registry plays no part.
+test("a URI opens as itself, a thread's or a stream's selects", () => {
   const item = workItemUri("oxplow", "tsk1");
   expect(refTargetNow(item)).toEqual({ tab: workItemTabRef(item) });
   expect(refTargetNow(wikiUri("home"))).toEqual({ tab: wikiPageRef("home") });
   expect(refTargetNow(fileUri("src/a.ts"))).toEqual({ tab: fileRef("src/a.ts") });
   expect(refTargetNow(threadUri("thr4"))).toEqual({ thread: "thr4" });
+  expect(refTargetNow(streamUri("s1"))).toEqual({ stream: "s1" });
   const pr = resourceUri("acme/pr", { id: 12 });
-  expect(refTargetNow(pr)).toEqual({ tab: extPageRef("acme", "pr", { ref: pr }) });
+  expect(refTargetNow(pr)).toEqual({ tab: { id: pr } });
 });
 
-test("an oxplow resource with a page opens it with the URI as its ref", () => {
-  setResources(RESOURCES);
+test("an oxplow resource with no declared page opens as itself too", () => {
+  // Intent moved: a resource no longer names a page that it opens with a `uri`.
   const comment = commentUri("cmt7");
-  expect(refTargetNow(comment)).toEqual({
-    tab: expect.objectContaining({ id: pageUri("comments", { ref: comment }), kind: "page" }),
-  });
+  expect(refTargetNow(comment)).toEqual({ tab: { id: comment } });
 });
 
 test("before the registry is read, a URI opens as itself", () => {
@@ -69,17 +30,12 @@ test("before the registry is read, a URI opens as itself", () => {
 });
 
 test("refTarget is refTargetNow, awaited", async () => {
-  setResources(RESOURCES);
   expect(await refTarget(threadUri("thr4"))).toEqual({ thread: "thr4" });
 });
 
-test("a resource with no page, or one nobody declares, opens nothing", async () => {
-  setResources(RESOURCES);
-  // An extension's resource with no page has nowhere to open.
-  expect("unopenable" in (await refTarget(resourceUri("acme/issue", { id: 3 })))).toBe(true);
-  // A resource the registry doesn't list, and text that isn't a URI.
-  expect("unopenable" in (await refTarget(resourceUri("gone/kind", { id: 1 })))).toBe(true);
+test("a resource nobody declares opens as itself; only what is no URI opens nothing", async () => {
+  // The fallback page shows a URI of an undeclared resource as a dead link.
+  const gone = resourceUri("gone/kind", { id: 1 });
+  expect(await refTarget(gone)).toEqual({ tab: { id: gone } });
   expect("unopenable" in (await refTarget("gone_kind:1"))).toBe(true);
-  // An oxplow resource that is no tab opens nothing either.
-  expect("unopenable" in (await refTarget(eventUri("00000000-0000-0000-0000-000000000000")))).toBe(true);
 });

@@ -1171,7 +1171,7 @@ summed every assistant line) and was Claude-only + format-fragile.
   exporter retry-storm).
 - **An event, then facts (P10.M2):** `otlp_ingest.rs` decodes the body
   (`otlp_tokens::decode_token_export`) and logs **one
-  `agent.tokens.reported@1 { thread, counts: [{model, kind, value}],
+  `agent.tokens.reported@2 { thread, counts: [{model, kind, value}],
   window_end? }`** in one transaction — deduped by a hash of the body, so an
   SDK retransmit logs nothing; an export for a thread that isn't there
   (deleted, or never) logs nothing, as a hook for one doesn't. The body is
@@ -1598,7 +1598,7 @@ panel can reconstruct full detail via `effort_observations_from_metrics`:
 | otel-tokens | `crates/oxplow-app/src/token_usage.rs` (the `token_usage.otlp` consumer of `agent.tokens.reported`, which the control-plane OTLP receiver logs through `otlp_ingest` — tsk22, tsk860) | per-model `agent.tokens.{input,output,total}` from Claude's `claude_code.token.usage` OTEL counter. The fact's subject is the model's ref, `ai_model:<name>` (`uri::build::ai_model_uri`; `subject_kind` is `ai_model`), read back with `id_of(.., AI_MODEL)`. Tokens only — no derived USD cost (rates move; a stale price table is worse than none). The transcript `on_stop` path now projects only `agent.turns` + the per-turn `agent_token_usage` prompt rows |
 | effort-lifecycle | `crates/oxplow-app/src/effort_service.rs` (`project_effort_lifecycle_metrics`, run by the effort-lifecycle consumer on `effort.closed`) | derived `effort.cycle_time_ms` (close − start, subject=effort) + `work_item.efforts` (efforts-so-far on its work item, the redo-rate signal) from `effort`; branch captured when the stream has a worktree |
 | nudges | `crates/oxplow-app/src/collection.rs` (`project_nudge_metric`, called from `persist_nudge` after a fired nudge records) | `agent.nudges.fired` (event kind, run-less; value 1, subject=the nudge `kind`) — an agent-activity signal |
-| fact collectors | `crates/oxplow-app/src/metrics_service.rs` (`MetricsService`) — the fact engine. Seeds a `metric_spec` per resolved `metrics:` entry; runs each **fact collector** (`fact_collectors()` = the enabled extensions' fact collectors (oxplow-foundation's and the project's own included); a collector that metrics name runs only while one of those metrics is on) on its trigger: `on:` from the `collector.triggers` pump consumer (`run_snapshot_collectors` for `snapshot.taken` that recorded files, `run_effort_collectors` over the effort's end snapshot for `effort.finished`, `run_event_collectors` over the stream's latest snapshot otherwise), `every:` from the scheduler, `manual` and any explicit run through `oxplow.collector.sync` → `run_collector_by_key(owner, id, stream, source)` | one `fact` per `CollectedFact` the script returns (bound to a defined measure in the collector's `facts`), version/branch/snapshot-stamped, under one `metric_capture` (a failed capture on error), plus a `collector_run` row and a `collector.synced@1` event carrying the `facts` count. `facts_of` refuses any output but `{"facts": [...]}` |
+| fact collectors | `crates/oxplow-app/src/metrics_service.rs` (`MetricsService`) — the fact engine. Seeds a `metric_spec` per resolved `metrics:` entry; runs each **fact collector** (`fact_collectors()` = the enabled extensions' fact collectors (oxplow-foundation's and the project's own included); a collector that metrics name runs only while one of those metrics is on) on its trigger: `on:` from the `collector.triggers` pump consumer (`run_snapshot_collectors` for `snapshot.taken` that recorded files, `run_effort_collectors` over the effort's end snapshot for `effort.finished`, `run_event_collectors` over the stream's latest snapshot otherwise), `every:` from the scheduler, `manual` and any explicit run through `oxplow.collector.sync` → `run_collector_by_key(owner, id, stream, source)` | one `fact` per `CollectedFact` the script returns (bound to a defined measure in the collector's `facts`), version/branch/snapshot-stamped, under one `metric_capture` (a failed capture on error), plus a `collector_run` row and a `collector.synced@2` event carrying the `facts` count. `facts_of` refuses any output but `{"facts": [...]}` |
 
 > Navigation / activity (`page_visit`, `usage_event`) are **deliberately not
 > projected** into the substrate: they're oxplow-usage telemetry (UI metadata),
@@ -1832,14 +1832,14 @@ The mechanics behind those controls (unchanged by tsk117):
   producers/extensions are default-ON unless an `enabled: false` marker
   disables them, and so are those four.
 - **Function facts are keyed by symbol ref.** `code_metrics(text, language,
-  path)` returns each function with its `id`, `ref` (`oxplow:oxplow/symbol?path=<path>&symbol=<id>`,
+  path)` returns each function with its `id`, `uri` (`oxplow:oxplow/symbol?path=<path>&symbol=<id>`,
   built by the host through `uri::build::symbol_uri`), `container` and
-  `kind`; `fn_count`, `high_complexity_fns` and `long_functions` use `ref`
+  `kind`; `fn_count`, `high_complexity_fns` and `long_functions` use `uri`
   as the fact's `subject`, so a function has the one identity `v_symbol`
   has. `v_function` is one row per ref and stream (overloads and
   same-named functions are separate rows): `symbol` is the whole ref, and
   `name`, `container` and `kind` are joined from `v_symbol` on
-  `(stream_id, ref)` — a function the symbol index doesn't hold isn't listed.
+  `(stream_id, uri)` — a function the symbol index doesn't hold isn't listed.
   Token-usage facts use `ai_model:<name>` subjects (`ai_model_ref`).
 - **Enable/disable** via the `oxplow.metric.enable { keys, enabled }` command
   (`commands/metric.rs`; the desktop's `enable_metrics` IPC runs it as the

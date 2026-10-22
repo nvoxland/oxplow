@@ -8,7 +8,7 @@ files AS (
 ),
 area AS (
   SELECT e.id AS effort_id, w.title || ' ' || coalesce(w.body, '') AS text
-  FROM ref('effort') e JOIN ref('work_item') w ON w.ref = e.work_item
+  FROM ref('effort') e JOIN ref('work_item') w ON w.uri = e.work_item
 ),
 -- Every directory prefix of every file (`a/`, `a/b/`, …).
 dirs(effort_id, path, prefix, rest) AS (

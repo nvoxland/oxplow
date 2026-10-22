@@ -1,17 +1,17 @@
 title: Thread sessions
 description: The agent sessions of a thread (every open thread's open sessions when none is named), each with its name, harness, status, how its conversation was bound, when it was last active, the efforts it worked in and its stream — and beneath each, the subagents that acted in it.
 params:
-  - { name: thread, label: Thread (`oxplow:oxplow/thread?id=thr3`), default: "" }
+  - { name: thread, label: Thread (`thr3`), default: "" }
 query: |
   WITH ss AS (
-    SELECT s.*, th.stream_id, th.ref AS thread_ref
+    SELECT s.*, th.stream_id, th.uri AS thread_uri
     FROM v_agent_session s
     JOIN v_thread th ON th.id = s.thread_id
     WHERE CASE WHEN :thread = ''
                THEN s.closed_at IS NULL AND th.closed_at IS NULL AND th.archived_at IS NULL
-               ELSE th.ref = :thread END
+               ELSE th.uri = uri('oxplow/thread', 'id', :thread) END
   )
-  SELECT ss.ref AS ref, ss.id AS sid, 0 AS sub, '' AS at_key,
+  SELECT ss.uri AS uri, ss.id AS sid, 0 AS sub, '' AS at_key,
          ss.display_name AS name, ss.harness AS harness, ss.kind AS kind,
          coalesce(st.state, CASE WHEN ss.closed_at IS NOT NULL THEN 'closed' ELSE 'idle' END) AS status,
          coalesce(ss.bound_origin, '') AS origin,
@@ -28,7 +28,7 @@ query: |
   FROM ss
   LEFT JOIN v_agent_session_status st ON st.agent_session_id = ss.id
   UNION ALL
-  SELECT sa.ref, sa.agent_session_id, 1, coalesce(sa.started_at, sa.last_activity_at),
+  SELECT sa.uri, sa.agent_session_id, 1, coalesce(sa.started_at, sa.last_activity_at),
          '    ' || coalesce(sa.kind, 'subagent') || ' ' || sa.id, 'subagent', '',
          sa.state, '', sa.last_activity_at, sa.calls || ' tool calls', ''
   FROM v_subagent sa

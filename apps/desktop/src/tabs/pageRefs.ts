@@ -8,7 +8,7 @@
  *   `metric:<key>`, `lens:<ext>/<slug>[?params]`.
  * - A **declared page** (a manifest's `pages:` entry, not a thing in the
  *   graph) is `page:<id>[?params]` for oxplow's own extension (core-named,
- *   as its commands are: `page:tasks`, `page:settings?area=agents`) and
+ *   as its commands are: `page:tasks`, `page:settings#area=agents`) and
  *   `page:<extension>/<id>[?params]` for any other. Its kind is `page`;
  *   what draws it comes from its declaration. Pages never appear in
  *   `page_ref`.
@@ -19,13 +19,15 @@
  * covers every constructor).
  */
 
-import type { PageKind, TabRef } from "./tabState.js";
+import type { TabRef } from "./tabState.js";
+import { classifyExternalUrl } from "../external-url-allowlist.js";
+import { renderedResourceOf } from "../pages/renderers.js";
 import {
   WORKING,
   type Revision,
   revisionSlot,
-  parseRevision,
   revisionFromSlot,
+  parseRevision,
   shortRevisionLabel,
 } from "../revision.js";
 import type { SqlCell } from "../tauri-bridge/generated/bindings.js";
@@ -38,16 +40,19 @@ import {
   extPageUri,
   fileUri,
   formatUri,
-  identityOf,
+  keyParamOf,
   lensUri,
+  paramOf,
+  viewParamsOfUri,
+  withUriView,
   metricUri,
   pageUri,
   parseUri,
+  resourceUri,
   snapshotUri,
   turnUri,
   typeOf,
   wikiUri,
-  workItemUri,
   type ParamValue,
 } from "../uri/uri.js";
 
@@ -65,9 +70,10 @@ export function withPageParams(tabId: string, params: Record<string, ParamValue>
 }
 
 /** What a page tab carries: whose page (`null` for oxplow's own, which are
- *  core-named), its id and the params its id carries. Nothing rides beside
- *  the id: what a page shows is in its params, what only one step of a tab
- *  keeps is that entry's history state. */
+ *  core-named), its id and the params that say what it shows (its id's
+ *  `?`). Nothing rides beside the id: how it shows it is the id's `#`
+ *  view (`viewParamsOf`), what only one step of a tab keeps is that entry's
+ *  history state. */
 export interface PagePayload {
   extension: string | null;
   page: string;
@@ -80,24 +86,35 @@ function cleanParams(params?: Record<string, ParamValue>): Record<string, string
   return out;
 }
 
-/** One of oxplow's own pages: `page:<id>[?params]`. */
-export function pageTabRef(page: string, params?: Record<string, ParamValue>): TabRef {
+/** One of oxplow's own pages: `oxplow:oxplow/page?page=<id>[&params][#view]`. */
+export function pageTabRef(page: string, params?: Record<string, ParamValue>, view?: Record<string, ParamValue>): TabRef {
   const clean = cleanParams(params);
-  const payload: PagePayload = { extension: null, page, params: clean };
-  return { id: pageUri(page, clean), kind: "page", payload };
+  return { id: pageUri(page, clean, view) };
 }
 
-/** An extension's page: `page:<extension>/<id>[?params]` — `ref`, when it
- *  opens one of the extension's refs (P8.D7). */
-export function extPageRef(extension: string, page: string, params?: Record<string, ParamValue>): TabRef {
+/** An extension's page (`page=<extension>/<id>`) — `uri`, when it opens one
+ *  of the extension's resources. */
+export function extPageRef(
+  extension: string,
+  page: string,
+  params?: Record<string, ParamValue>,
+  view?: Record<string, ParamValue>,
+): TabRef {
   const clean = cleanParams(params);
-  const payload: PagePayload = { extension, page, params: clean };
-  return { id: extPageUri(extension, page, clean), kind: "page", payload };
+  return { id: extPageUri(extension, page, clean, view) };
 }
 
-/** A page tab's payload; null for any other tab. */
+/** A route's page and params, read from its URI (`page=<id>` for oxplow's
+ *  own, `page=<extension>/<id>` for another's); null for any other tab. */
 export function pagePayload(ref: TabRef | null | undefined): PagePayload | null {
-  return ref?.kind === "page" ? (ref.payload as PagePayload) : null;
+  const u = ref ? parseUri(ref.id) : null;
+  if (!u || typeOf(ref!.id) !== "oxplow/page") return null;
+  const { page: head = "", ...params } = u.params;
+  const slash = head.indexOf("/");
+  if (slash === -1) return head ? { extension: null, page: head, params } : null;
+  const extension = head.slice(0, slash);
+  const page = head.slice(slash + 1);
+  return extension && page && !page.includes("/") ? { extension, page, params } : null;
 }
 
 /** Whether `ref` is the page `page` (oxplow's own unless `extension`). */
@@ -106,12 +123,13 @@ export function isPage(ref: TabRef | null | undefined, page: string, extension: 
   return p !== null && p.page === page && p.extension === extension;
 }
 
-/** What kind of page a tab shows, as visits and bookmarks record it: an
- *  entity ref's kind, or a declared page's id (`tasks`, `acme/pr`). */
+/** What a tab shows, as visits and bookmarks record it: a route's page
+ *  (`tasks`, `acme/pr`), else the resource its URI names (`oxplow/file`), a
+ *  web page's scheme. */
 export function recordedPageKind(ref: TabRef): string {
   const p = pagePayload(ref);
-  if (!p) return ref.kind;
-  return p.extension ? `${p.extension}/${p.page}` : p.page;
+  if (p) return p.extension ? `${p.extension}/${p.page}` : p.page;
+  return renderedResourceOf(ref.id) ?? "link";
 }
 
 
@@ -131,7 +149,18 @@ export function recordedPageKind(ref: TabRef): string {
  * `@snap:<id>`) so it is a distinct tab from the working-tree view.
  */
 export function fileRef(path: string, version: Revision = WORKING): TabRef {
-  return { id: fileUri(path, revisionSlot(version)), kind: "file", payload: { path, version } };
+  return { id: fileUri(path, revisionSlot(version)) };
+}
+
+/** A file tab's path and version, read from its URI; null for another. */
+export function fileOf(ref: TabRef): { path: string; version: Revision } | null {
+  const path = typeOf(ref.id) === "oxplow/file" ? paramOf(ref.id, "path") : null;
+  return path ? { path, version: revisionFromSlot(paramOf(ref.id, "rev")) } : null;
+}
+
+/** A file's tab landing on `line`: its `#lines=` view. */
+export function fileRefAt(path: string, line: number | null, version: Revision = WORKING): TabRef {
+  return withViewParams(fileRef(path, version), lineView(line));
 }
 
 /** The working-tree file a tab id shows, or `null` when the id is not a
@@ -145,81 +174,113 @@ export function directoryRef(path: string): TabRef {
   // Trailing slash is normalized away — `[[src/]]` and `[[src]]` (when
   // ever the parser admits the latter) collapse to one tab.
   const bare = path.replace(/\/+$/, "");
-  return { id: dirUri(bare), kind: "dir", payload: { path: bare } };
+  return { id: dirUri(bare) };
 }
 
 export function wikiPageRef(slug: string): TabRef {
-  return { id: wikiUri(slug), kind: "wiki", payload: { slug } };
+  return { id: wikiUri(slug) };
 }
 
 /** A work item's page, whichever list it's on: the tab id is its ref
  *  (`work_item:<provider>:<id>`). */
 export function workItemTabRef(ref: string): TabRef {
-  return { id: ref, kind: "work_item", payload: { ref } };
+  return { id: ref };
 }
 
 /** An agent session's tab (`agent_session:ses3`): its terminal.
  *  Pinned — it leads the strip and is never evicted; its tab follows
  *  the session's row (`reconcileSessionTabs`). */
 export function agentSessionRef(sessionId: string): TabRef {
-  return { id: agentSessionUri(sessionId), kind: "agent_session", payload: { sessionId }, pinned: true };
+  return { id: agentSessionUri(sessionId), pinned: true };
 }
 
 /** Single git commit page. */
 export function gitCommitRef(sha: string): TabRef {
-  return { id: commitUri(sha), kind: "commit", payload: { sha } };
+  return { id: commitUri(sha) };
 }
 
 /** Open one metric's detail page, optionally scoped to an effort's window —
  *  the task-page metrics-panel drill-in ("In this effort" before→after +
  *  further exploration). Its own page kind (`metric`); Metrics and the
  *  dashboard tiles both navigate into it. */
-export function metricRef(metricKey: string, params?: Record<string, SqlCell>): TabRef {
-  const keys = Object.keys(params ?? {});
-  if (!params || keys.length === 0) return { id: metricUri(metricKey), kind: "metric", payload: { metricKey } };
-  const id = metricUri(metricKey, Object.fromEntries(keys.map((k) => [k, params[k] === null ? "" : String(params[k])])));
-  return { id, kind: "metric", payload: { metricKey, params } };
+export function metricRef(metricKey: string, view?: Record<string, SqlCell>): TabRef {
+  return { id: metricUri(metricKey, {}, cellParams(view)) };
 }
 
-/** A lens page (`lens:<extension>/<slug>`): a user/agent-built query
- *  over the semantic layer from `.oxplow/extensions/`. `params` (e.g. a
- *  slot's `{ effort_id }`) ride in the id as a sorted query string, so
- *  the tab, its history and bookmarks reopen the lens with the same
- *  values. */
-export function lensRef(lensId: string, params?: Record<string, SqlCell>): TabRef {
-  const keys = Object.keys(params ?? {});
-  if (!params || keys.length === 0) return { id: lensUri(lensId), kind: "lens", payload: { lensId } };
-  const id = lensUri(lensId, Object.fromEntries(keys.map((k) => [k, params[k] === null ? "" : String(params[k])])));
-  return { id, kind: "lens", payload: { lensId, params } };
+/** A lens page (`oxplow:oxplow/lens?lens=<extension>/<slug>`): a query over
+ *  the semantic layer. `params` are its resource params (a slot's
+ *  `{ effort_id }`: what it shows, in the id's `?`); `view` its `filter`
+ *  and `selection` params (the id's `#`). Tabs, history and bookmarks
+ *  reopen it from the id alone. */
+export function lensRef(lensId: string, params?: Record<string, SqlCell>, view?: Record<string, SqlCell>): TabRef {
+  const own = { ...(params ?? {}) };
+  const id = lensUri(lensId, cellParams(own), cellParams(view));
+  return { id };
 }
 
-/** A page's view params: what its ref carries besides what it is (a
- *  lens's params, a declared page's). None for a page without a view. */
+/** A ref's resource params: its id's `?` params besides the one that names
+ *  it (a lens's `lens`), read as the params form reads them. */
+export function resourceParamsOf(ref: TabRef): Record<string, SqlCell> {
+  const u = parseUri(ref.id);
+  const resource = typeOf(ref.id);
+  return u && resource ? cellsOf(u.params, keyParamOf(resource)) : {};
+}
+
+/** A diff view's spec from its URI: a snapshot's, an effort's or a turn's
+ *  changes, or a `diff-view` route's pair of endpoints. */
+export function diffViewOf(ref: TabRef): DiffViewPayload | null {
+  const id = paramOf(ref.id, "id");
+  switch (typeOf(ref.id)) {
+    case "oxplow/snapshot": {
+      const n = Number(id);
+      return Number.isInteger(n) ? { mode: "snapshot", snapshotId: n } : null;
+    }
+    case "oxplow/effort":
+      return id ? { mode: "effort", effortId: id } : null;
+    case "oxplow/turn":
+      return id ? { mode: "turn", turnId: id } : null;
+    default:
+      return endpointsOf(ref);
+  }
+}
+
+/** A ref's view: its id's `#` params, read as the params form reads them
+ *  (an empty value is null, a number a number). */
 export function viewParamsOf(ref: TabRef): Record<string, SqlCell> {
-  if (ref.kind === "lens") return { ...((ref.payload as { params?: Record<string, SqlCell> } | null)?.params ?? {}) };
-  if (ref.kind === "page") return { ...(pagePayload(ref)?.params ?? {}) };
-  if (ref.kind === "metric") return { ...((ref.payload as { params?: Record<string, SqlCell> } | null)?.params ?? {}) };
-  return {};
+  return cellsOf(viewParamsOfUri(ref.id));
 }
 
-/** `ref` showing `params` as its view, in its own kind of ref: a lens's,
- *  a declared page's or a metric's. A ref without a view comes back as it
- *  is. */
-export function withViewParams(ref: TabRef, params: Record<string, SqlCell>): TabRef {
-  const values = params as Record<string, ParamValue>;
-  if (ref.kind === "lens") return lensRef((ref.payload as { lensId: string }).lensId, params);
-  if (ref.kind === "metric") return metricRef((ref.payload as { metricKey: string }).metricKey, params);
-  const page = pagePayload(ref);
-  if (!page) return ref;
-  return page.extension === null ? pageTabRef(page.page, values) : extPageRef(page.extension, page.page, values);
+/** `ref`'s page (a lens's, a declared page's) naming `params` instead —
+ *  another resource — in `view`: its key param kept, its payload rebuilt
+ *  from the new id. */
+export function withResourceParams(ref: TabRef, params: Record<string, SqlCell>, view: Record<string, SqlCell> = {}): TabRef {
+  const u = parseUri(ref.id);
+  const resource = typeOf(ref.id);
+  if (!u || !resource) return ref;
+  const key = keyParamOf(resource);
+  const id = formatUri({ resource: u.resource, params: { ...cellParams(params), [key]: u.params[key] ?? "" }, view: cellParams(view) });
+  return refFromTabId(id) ?? ref;
 }
 
-/** A view's params read back from a URI's: an empty value is null and a
- *  number is a number, as the params form reads them. */
-function viewParamsFrom(params: Record<string, string>, key: string): Record<string, SqlCell> {
+/** `ref` showing `view` (its id's `#`): the same page, whatever its kind. */
+export function withViewParams(ref: TabRef, view: Record<string, SqlCell>): TabRef {
+  return { ...ref, id: withUriView(ref.id, cellParams(view)) };
+}
+
+/** Values as a URI holds them: null as empty (a value set to nothing),
+ *  undefined left out. */
+function cellParams(values: Record<string, SqlCell | undefined> | undefined): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(values ?? {})) if (v !== undefined) out[k] = v === null ? "" : String(v);
+  return out;
+}
+
+/** A URI's params read back: an empty value is null and a number is a
+ *  number, as the params form reads them. */
+function cellsOf(params: Record<string, string>, skip?: string): Record<string, SqlCell> {
   const out: Record<string, SqlCell> = {};
   for (const [k, v] of Object.entries(params)) {
-    if (k === key) continue;
+    if (k === skip) continue;
     out[k] = v === "" ? null : /^-?\d+(\.\d+)?$/.test(v) ? Number(v) : v;
   }
   return out;
@@ -235,13 +296,13 @@ export function newSessionRef(): TabRef {
   return pageTabRef("new-session");
 }
 
-/** A Settings area's page (`page:settings?area=agents`); the overview is
+/** A Settings area's page (`page:settings#area=agents`); the overview is
  *  `page:settings`. `section` is where it lands: an area's section id or
  *  an anchor inside one. Both are view params: one Settings page shows
  *  them. */
 export function settingsRef(area: string | null = null, section: string | null = null): TabRef {
   const shown = area && area !== "overview" ? area : null;
-  return pageTabRef("settings", { area: shown, section });
+  return pageTabRef("settings", {}, { area: shown, section });
 }
 
 /** A diff page: its spec as params — `path`, `left`, `right`, `label`
@@ -251,31 +312,45 @@ export function settingsRef(area: string | null = null, section: string | null =
  *  compare) isn't an address: it rides as the entry's history state
  *  (`diffTextOf`). */
 export function diffRef(spec: DiffSpec): TabRef {
-  return pageTabRef("diff", {
-    path: spec.path,
-    left: spec.leftVersion,
-    right: spec.rightVersion,
-    label: spec.labelOverride ?? null,
-    base: spec.baseLabel && spec.baseLabel !== shortRevisionLabel(spec.leftVersion) ? spec.baseLabel : null,
-    line: spec.revealLine && spec.revealLine > 0 ? spec.revealLine : null,
-  });
+  return pageTabRef(
+    "diff",
+    {
+      path: spec.path,
+      left: spec.leftVersion,
+      right: spec.rightVersion,
+      label: spec.labelOverride ?? null,
+      base: spec.baseLabel && spec.baseLabel !== shortRevisionLabel(spec.leftVersion) ? spec.baseLabel : null,
+    },
+    lineView(spec.revealLine),
+  );
 }
 
-/** A diff page's spec, from its params; null when they don't name a path
- *  and two versions. */
-export function diffSpecOf(params: Record<string, string>): DiffSpec | null {
+/** A diff page's spec, from its ref (the line it lands on is its view);
+ *  null when its params don't name a path and two versions. */
+export function diffSpecOf(ref: TabRef): DiffSpec | null {
+  const params = pagePayload(ref)?.params ?? {};
   const left = parseRevision(params.left ?? "");
   const right = parseRevision(params.right ?? "");
   if (!params.path || !left || !right) return null;
-  const line = Number(params.line);
   return {
     path: params.path,
     leftVersion: left,
     rightVersion: right,
     baseLabel: params.base ?? shortRevisionLabel(left),
     labelOverride: params.label,
-    revealLine: Number.isInteger(line) && line > 0 ? line : undefined,
+    revealLine: lineOf(ref) ?? undefined,
   };
+}
+
+/** The view that lands on `line` (`#lines=12-12`); none without one. */
+export function lineView(line: number | null | undefined): Record<string, string> {
+  return line && line > 0 ? { lines: `${line}-${line}` } : {};
+}
+
+/** The line a ref's view lands on (the start of its `#lines=`), or null. */
+export function lineOf(ref: TabRef): number | null {
+  const start = Number((viewParamsOfUri(ref.id).lines ?? "").split("-")[0]);
+  return Number.isInteger(start) && start > 0 ? start : null;
 }
 
 /** The history state a diff of literal text opens with, and reads back:
@@ -343,18 +418,17 @@ export function duplicateBlockOf(params: Record<string, string>): DuplicateBlock
 /** A symbol (`symbol:<path>/<id>`, `v_symbol.ref`, optionally pinned
  *  `@snap:`/`@git:`): opening it opens its file at the symbol (`openSymbol`). */
 export function symbolRef(ref: string): TabRef {
-  return { id: ref, kind: "symbol", payload: { ref } };
+  return { id: ref };
 }
 
 export function wikiFreshnessRef(slug: string): TabRef {
   return pageTabRef("wiki-freshness", { slug });
 }
 
-/** One user-created dashboard. The dashboard id (`dsh<n>`) rides in
- *  both the id and the payload so a history-restored tab resolves via
- *  `refFromTabId`. */
+/** One user-created dashboard: its URI, drawn by the `custom-dashboard`
+ *  renderer. */
 export function customDashboardRef(id: string): TabRef {
-  return pageTabRef("custom-dashboard", { id });
+  return { id: resourceUri("oxplow/dashboard", { id }) };
 }
 
 /** The Dashboards index — the list of the user's custom dashboards: the
@@ -420,7 +494,7 @@ export function gitDashboardRef(): TabRef {
  *   bracket, carrying the task title + "in progress" state.
  * - **turn** (`turn:<trnN>`) — an agent turn's start/end snapshots:
  *   what the turn changed.
- * - **endpoints** (`page:diff-view?start=<rev>&end=<rev>`) — an explicit
+ * - **endpoints** (`page:diff-view#start=<rev>&end=<rev>`) — an explicit
  *   pair of revisions (`working`, `snap:<id>`, `git:<rev>`). `start =
  *   null` (`none`) diffs `end` against the empty tree (everything added).
  */
@@ -433,39 +507,32 @@ export type DiffViewPayload =
 /** A single captured snapshot's page. Drill-in from the Local History
  *  dashboard, file version history, and snapshot backlinks. */
 export function snapshotRef(snapshotId: number): TabRef {
-  return {
-    id: snapshotUri(snapshotId),
-    kind: "snapshot",
-    payload: { mode: "snapshot", snapshotId },
-  };
+  return { id: snapshotUri(snapshotId) };
 }
 
 /** An effort's page — its start/end snapshot bracket as a diff. The
  *  'View diff' button on a completed effort points here. */
 export function effortDiffRef(effortId: string): TabRef {
-  return {
-    id: effortUri(effortId),
-    kind: "effort",
-    payload: { mode: "effort", effortId },
-  };
+  return { id: effortUri(effortId) };
 }
 
 /** An agent turn's page (`trn<N>`) — what the turn changed. */
 export function turnRef(turnId: string): TabRef {
-  return { id: turnUri(turnId), kind: "turn", payload: { mode: "turn", turnId } };
+  return { id: turnUri(turnId) };
 }
 
 /** Diff view between two revisions. `start = null` diffs `end` against
  *  the empty tree. */
 export function endpointDiffRef(start: Revision | null, end: Revision): TabRef {
-  return pageTabRef("diff-view", { start: start ?? "none", end });
+  return pageTabRef("diff-view", {}, { start: start ?? "none", end });
 }
 
-/** A `diff-view` page's endpoints, from its params; null without an end. */
-export function endpointsOf(params: Record<string, string>): DiffViewPayload | null {
-  const end = parseRevision(params.end ?? "");
+/** A `diff-view` page's endpoints, from its view; null without an end. */
+export function endpointsOf(ref: TabRef): DiffViewPayload | null {
+  const view = viewParamsOfUri(ref.id);
+  const end = parseRevision(view.end ?? "");
   if (!end) return null;
-  const start = params.start ?? "none";
+  const start = view.start ?? "none";
   return { mode: "endpoints", start: start === "none" ? null : parseRevision(start), end };
 }
 
@@ -532,7 +599,7 @@ export interface ExternalUrlPayload {
  * the renderer trusts that the payload has already been gated.
  */
 export function externalUrlRef(url: string): TabRef {
-  return pageTabRef("external-url", { url });
+  return { id: url };
 }
 
 // ---------------------------------------------------------------------------
@@ -540,91 +607,14 @@ export function externalUrlRef(url: string): TabRef {
 // ---------------------------------------------------------------------------
 
 /**
- * Reconstruct a full `TabRef` (with payload) from a tab id alone.
- *
- * Page-visit history rows persist only the id (`page_id`) and kind, not
- * the ref payload — so a naive `{ id, kind, payload: null }` rebuild
- * leaves payload-bearing pages broken (a `file` ref with no `path`
- * never opens; `wiki`/`work_item`/etc. render empty). Entity kinds
- * parse through the canonical grammar (so `:` inside
- * `work_item:oxplow:tsk42` is fine); pages keep their query params.
- *
- * Returns `null` for text that is not a ref or an unknown kind — a dead
- * row the caller drops. A page id always rebuilds; a page no extension
- * declares renders as "No such page".
+ * The tab a URI is: every oxplow URI (what renders it is its renderer's
+ * business, `pages/renderers.ts`; one nothing renders opens on the
+ * fallback) and every web page the allowlist lets in. Null for anything
+ * else — text that isn't a URI, a scheme oxplow doesn't open. An agent
+ * session's tab is pinned.
  */
 export function refFromTabId(id: string): TabRef | null {
-  const u = parseUri(id);
-  if (!u) return null;
-  const p = u.params;
-  switch (typeOf(id)) {
-    case "oxplow/file":
-      return p.path ? fileRef(p.path, revisionFromSlot(p.rev ?? null)) : null;
-    case "oxplow/dir":
-      return p.path ? directoryRef(p.path) : null;
-    case "oxplow/wiki":
-      return p.slug ? wikiPageRef(p.slug) : null;
-    case "oxplow/work_item":
-      return p.provider && p.id ? workItemTabRef(workItemUri(p.provider, p.id)) : null;
-    case "oxplow/commit":
-      return p.sha ? gitCommitRef(p.sha) : null;
-    case "oxplow/metric":
-      return p.metric ? metricRef(p.metric, viewParamsFrom(p, "metric")) : null;
-    case "oxplow/snapshot": {
-      const n = Number(p.id);
-      return Number.isInteger(n) ? snapshotRef(n) : null;
-    }
-    case "oxplow/effort":
-      return p.id ? effortDiffRef(p.id) : null;
-    case "oxplow/turn":
-      return p.id ? turnRef(p.id) : null;
-    case "oxplow/symbol":
-      return symbolRef(identityOf(id) ?? id);
-    case "oxplow/agent_session":
-      return p.id ? agentSessionRef(p.id) : null;
-    case "oxplow/dashboard":
-      return p.id ? customDashboardRef(p.id) : null;
-    case "oxplow/lens":
-      return p.lens ? lensRef(p.lens, viewParamsFrom(p, "lens")) : null;
-    case "oxplow/page": {
-      // Oxplow's own pages are `page=<id>`, another extension's
-      // `page=<extension>/<id>`; what draws one comes from its declaration.
-      const head = p.page ?? "";
-      const { page: _page, ...values } = p;
-      const slash = head.indexOf("/");
-      if (slash === -1) return head ? pageTabRef(head, values) : null;
-      const extension = head.slice(0, slash);
-      const page = head.slice(slash + 1);
-      return extension && page && !page.includes("/") ? extPageRef(extension, page, values) : null;
-    }
-    default:
-      // Not a tab id: a URI of another resource opens where its resource's
-      // page says (`openRef`, `refOpener`), not here.
-      return null;
-  }
-}
-
-/** The `PageKind` a tab id renders as: an entity ref's kind, or `page`.
- *  `null` for text that is not a tab id. */
-export function pageKindOf(tabId: string): PageKind | null {
-  const resource = typeOf(tabId);
-  if (resource === null) return null;
-  if (resource === "oxplow/page") return "page";
-  // The resources that open as a page.
-  const entity: readonly string[] = [
-    "file",
-    "dir",
-    "wiki",
-    "work_item",
-    "commit",
-    "metric",
-    "lens",
-    "snapshot",
-    "effort",
-    "turn",
-    "symbol",
-    "agent_session",
-  ];
-  const name = resource.slice("oxplow/".length);
-  return resource.startsWith("oxplow/") && entity.includes(name) ? (name as PageKind) : null;
+  if (parseUri(id)) return typeOf(id) === "oxplow/agent_session" ? { id, pinned: true } : { id };
+  const web = classifyExternalUrl(id);
+  return web.ok ? { id: web.url } : null;
 }

@@ -19,7 +19,7 @@ use crate::database::{string_to_ts, ts_to_string};
 use crate::event_log_store::append_tx;
 use crate::page_ref_projections::finding_edges;
 use crate::snapshot_tree::{identities, manifest_hash, ContentHasher, SnapshotTree, TreeEntry};
-use oxplow_domain::events::schema::{SnapshotTaken, SnapshotTakenV2, VcsHeadMoved, VcsHeadMovedV1};
+use oxplow_domain::events::schema::{SnapshotTaken, SnapshotTakenV3, VcsHeadMoved, VcsHeadMovedV2};
 use oxplow_domain::events::{Anchors, Envelope};
 use oxplow_domain::snapshot::SnapshotTrigger;
 use oxplow_domain::uri::build::{commit_uri, snapshot_uri, stream_uri};
@@ -1214,10 +1214,10 @@ fn record_take_tx(
     let stream = stream_uri(take.stream_id);
     let env = Envelope::typed::<SnapshotTaken>(
         take.source.clone(),
-        &SnapshotTakenV2 {
-            stream: stream.clone(),
-            snapshot: snapshot_uri(snapshot_id),
-            parent: parent.map(snapshot_uri),
+        &SnapshotTakenV3 {
+            stream: take.stream_id.to_string(),
+            snapshot: snapshot_id,
+            parent,
             trigger: take.trigger,
             unchanged,
             file_count,
@@ -1286,13 +1286,13 @@ fn record_head_moved_tx(
     let stream = stream_uri(stream_id);
     let env = Envelope::typed::<VcsHeadMoved>(
         source.to_string(),
-        &VcsHeadMovedV1 {
-            stream: stream.clone(),
-            snapshot: snapshot_uri(sid),
+        &VcsHeadMovedV2 {
+            stream: stream_id.to_string(),
+            snapshot: sid,
             from: from
                 .and_then(|f| f.parse::<Revision>().ok())
-                .and_then(|f| f.vcs_rev().map(commit_uri)),
-            to: commit_uri(revision.vcs_rev().unwrap_or_default()),
+                .and_then(|f| f.vcs_rev().map(str::to_string)),
+            to: revision.vcs_rev().unwrap_or_default().to_string(),
         },
     )
     .with_anchors(Anchors {
@@ -3037,20 +3037,8 @@ mod tests {
         assert_eq!(ops[0].budget_ms, Some(2));
         let taken = events(&db, "snapshot.taken");
         assert_eq!(taken.len(), 2);
-        assert_eq!(
-            taken[1]["snapshot"],
-            oxplow_domain::uri::build::keyed(
-                oxplow_domain::uri::resources::SNAPSHOT,
-                &format!("{}", two.snapshot_id)
-            )
-        );
-        assert_eq!(
-            taken[1]["parent"],
-            oxplow_domain::uri::build::keyed(
-                oxplow_domain::uri::resources::SNAPSHOT,
-                &format!("{}", one.snapshot_id)
-            )
-        );
+        assert_eq!(taken[1]["snapshot"], serde_json::json!(two.snapshot_id));
+        assert_eq!(taken[1]["parent"], serde_json::json!(one.snapshot_id));
         assert_eq!(taken[1]["trigger"], "turn_end");
         assert_eq!(taken[1]["over_budget"], true);
         let turn_anchor: Option<i64> = db
@@ -3275,8 +3263,8 @@ mod tests {
         );
         let moved_events = events(&db, "vcs.head.moved");
         assert_eq!(moved_events.len(), 1);
-        assert_eq!(moved_events[0]["from"], "oxplow:oxplow/commit?sha=aaaaaaa");
-        assert_eq!(moved_events[0]["to"], "oxplow:oxplow/commit?sha=bbbbbbb");
+        assert_eq!(moved_events[0]["from"], "aaaaaaa");
+        assert_eq!(moved_events[0]["to"], "bbbbbbb");
     }
 
     #[tokio::test]

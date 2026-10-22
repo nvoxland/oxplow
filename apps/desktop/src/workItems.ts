@@ -22,13 +22,13 @@ export const CANONICAL_STATES: readonly CanonicalState[] = ["todo", "in_progress
 /** One item on the active work list, as `v_work_item` holds it. */
 export interface WorkItem {
   /** `work_item:<provider>:<id>`: its identity everywhere. */
-  ref: string;
+  uri: string;
   provider: string;
   title: string;
   body: string;
   state: CanonicalState;
   /** Its parent's ref (an epic), when the list nests. */
-  parentRef: string | null;
+  parentUri: string | null;
   /** The thread whose list it's on (`thr3`); null on the backlog. */
   threadId: string | null;
   /** Its place on its list (ascending); null orders by creation. */
@@ -60,9 +60,9 @@ export interface WorkList {
   reads: Reads;
 }
 
-const COLUMNS = `w.ref, w.provider, w.title, w.body, w.state, w.parent_ref, w.thread_id, w.rank, w.closed_at,
+const COLUMNS = `w.uri, w.provider, w.title, w.body, w.state, w.parent_uri, w.thread_id, w.rank, w.closed_at,
   w.created_at, w.updated_at, w.native,
-  (SELECT count(*) FROM v_work_item_comment c WHERE c.ref = w.ref) AS comment_count`;
+  (SELECT count(*) FROM v_work_item_comment c WHERE c.uri = w.uri) AS comment_count`;
 
 const ORDER = "ORDER BY w.rank IS NULL, w.rank, w.created_at";
 
@@ -105,12 +105,12 @@ export function itemsFromResult(result: SqlQueryResult): WorkItem[] {
     const thread = at(row, "thread_id");
     const rank = at(row, "rank");
     return {
-      ref: String(at(row, "ref")),
+      uri: String(at(row, "uri")),
       provider: String(at(row, "provider")),
       title: String(at(row, "title") ?? ""),
       body: String(at(row, "body") ?? ""),
       state: String(at(row, "state")) as CanonicalState,
-      parentRef: text(at(row, "parent_ref")),
+      parentUri: text(at(row, "parent_uri")),
       threadId: thread === null || thread === undefined ? null : threadIdOf(Number(thread)),
       rank: rank === null || rank === undefined ? null : Number(rank),
       closedAt: text(at(row, "closed_at")),
@@ -124,7 +124,7 @@ export function itemsFromResult(result: SqlQueryResult): WorkItem[] {
 
 /** One work item by ref, with what it read. */
 export async function readWorkItem(ref: string): Promise<{ item: WorkItem | null; reads: Reads }> {
-  const res = await querySql(`SELECT ${COLUMNS} FROM v_work_item w WHERE w.ref = ?1`, [ref], 1);
+  const res = await querySql(`SELECT ${COLUMNS} FROM v_work_item w WHERE w.uri = ?1`, [ref], 1);
   return { item: itemsFromResult(res)[0] ?? null, reads: res.reads };
 }
 
@@ -132,7 +132,7 @@ export async function readWorkItem(ref: string): Promise<{ item: WorkItem | null
 export async function readWorkItemsByRef(refs: string[]): Promise<{ items: WorkItem[]; reads: Reads }> {
   if (refs.length === 0) return { items: [], reads: NO_READS };
   const res = await querySql(
-    `SELECT ${COLUMNS} FROM v_work_item w WHERE w.ref IN (${refs.map((_, i) => `?${i + 1}`).join(", ")})`,
+    `SELECT ${COLUMNS} FROM v_work_item w WHERE w.uri IN (${refs.map((_, i) => `?${i + 1}`).join(", ")})`,
     refs,
     refs.length,
   );
@@ -152,10 +152,10 @@ export async function readWorkItems(opts: {
 /** Bucket a list's items (in list order) by state; an item with a child
  *  on the list is an epic. */
 export function bucketWorkList(threadId: string | null, all: WorkItem[], reads: Reads): WorkList {
-  const parents = new Set(all.map((i) => i.parentRef).filter((p): p is string => p !== null));
+  const parents = new Set(all.map((i) => i.parentUri).filter((p): p is string => p !== null));
   const list: WorkList = { threadId, all, epics: [], items: [], inProgress: [], waiting: [], done: [], reads };
   for (const i of all) {
-    if (parents.has(i.ref)) list.epics.push(i);
+    if (parents.has(i.uri)) list.epics.push(i);
     else if (i.state === "blocked") list.waiting.push(i);
     else if (i.state === "in_progress") list.inProgress.push(i);
     else if (i.state === "todo") list.items.push(i);
@@ -389,17 +389,17 @@ export async function readItemEfforts(ref: string): Promise<{ efforts: EffortDet
 export interface WorkItemChanges {
   title?: string;
   body?: string;
-  parentRef?: string | null;
+  parentUri?: string | null;
   native?: Record<string, unknown>;
 }
 
 /** Edit an item's fields. */
 export async function updateWorkItem(ref: string, changes: WorkItemChanges): Promise<void> {
   await runCommand("oxplow.work_item.update", {
-    ref,
+    uri: ref,
     ...(changes.title !== undefined ? { title: changes.title } : {}),
     ...(changes.body !== undefined ? { body: changes.body } : {}),
-    ...(changes.parentRef !== undefined ? { parent_ref: changes.parentRef ?? "" } : {}),
+    ...(changes.parentUri !== undefined ? { parent_uri: changes.parentUri ?? "" } : {}),
     ...(changes.native !== undefined ? { native: changes.native } : {}),
   });
 }
@@ -407,7 +407,7 @@ export async function updateWorkItem(ref: string, changes: WorkItemChanges): Pro
 /** Move an item to a canonical state: `oxplow.work_item.transition`, which the
  *  bus dispatches to the item's provider. */
 export function transitionWorkItem(ref: string, state: CanonicalState): Promise<CommandOutcome | null> {
-  return personCommands.run(`Move to ${STATE_LABEL[state]}`, "oxplow.work_item.transition", { ref, to: state });
+  return personCommands.run(`Move to ${STATE_LABEL[state]}`, "oxplow.work_item.transition", { uri: ref, to: state });
 }
 
 /** One edit from any surface: its fields (`oxplow.work_item.update`) and/or its
@@ -425,7 +425,7 @@ export async function applyItemChange(ref: string, change: ItemChange): Promise<
 /** Delete an item. The command asks first: call with `confirmed` once the
  *  person has (an inline confirm). */
 export async function deleteWorkItem(ref: string, confirmed: boolean): Promise<void> {
-  await runCommand("oxplow.work_item.delete", { ref }, confirmed);
+  await runCommand("oxplow.work_item.delete", { uri: ref }, confirmed);
 }
 
 /** The one item a drag moved, and its new neighbour: what
@@ -447,10 +447,10 @@ export function placementFromOrder(
 /** Apply a drag's new order (refs) to a list with `oxplow.work_item.reorder`. */
 export async function reorderWorkItems(before: string[], after: string[]): Promise<void> {
   const moved = placementFromOrder(before, after);
-  if (moved) await runCommand("oxplow.work_item.reorder", { ref: moved.id, ...moved.place });
+  if (moved) await runCommand("oxplow.work_item.reorder", { uri: moved.id, ...moved.place });
 }
 
 /** Take an item to a thread's list or the backlog (`null`), at its end. */
 export async function moveWorkItem(ref: string, threadId: string | null): Promise<void> {
-  await runCommand("oxplow.work_item.move", { ref, to: threadId ? { thread: threadId } : "backlog" });
+  await runCommand("oxplow.work_item.move", { uri: ref, to: threadId ? { thread: threadId } : "backlog" });
 }

@@ -95,7 +95,7 @@ copy-paste templates.
 2. `oxplow extension test <name>` — the collector runs over the fixture's
    files and must return the facts the example expects.
 3. Deploy it: `oxplow.extension.deploy { name: "<name>" }` (`run_command`). It returns once the extension is live. Then `oxplow.collector.sync { collector:
-   "collector:<name>/<ns>.scan" }` (`run_command`) runs the collector now and returns the
+   "<name>/<ns>.scan" }` (`run_command`) runs the collector now and returns the
    `facts` count.
 4. `oxplow_query_sql`: `SELECT bucket, MEASURE('<ns>.complex_functions') FROM
    metric_grid('day')` — confirm the value; slice it with `metric_grid('day',

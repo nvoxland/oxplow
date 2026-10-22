@@ -3,9 +3,9 @@ description: The standing instructions the person set for a thread's agent sessi
 params:
   - { name: thread, label: Thread }
 query: |
-  SELECT t.ref AS thread, coalesce(t.prompt, '') AS prompt
+  SELECT uri_param(t.uri, 'id') AS thread, coalesce(t.prompt, '') AS prompt
   FROM v_thread t
-  WHERE t.id = CAST(replace(:thread, 'thr', '') AS INTEGER)
+  WHERE t.uri = uri('oxplow/thread', 'id', :thread)
 viz: form
 form:
   command: oxplow.thread.set_prompt

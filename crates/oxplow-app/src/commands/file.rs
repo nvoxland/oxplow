@@ -22,14 +22,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::ops::Op;
-use super::util::{parse, ref_id, schema};
+use super::util::{bare_id, parse, schema};
 use super::{Handler, HandlerOutput, Invocation};
 use crate::workspace_files::{WorkspaceError, WorkspaceFiles};
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SaveInput {
-    /// The stream whose worktree it's in (`oxplow:oxplow/stream?id=str2`).
+    /// The stream whose worktree it's in (`str2`).
     pub stream: String,
     /// Its path in the worktree.
     pub path: String,
@@ -40,7 +40,7 @@ pub struct SaveInput {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CreateInput {
-    /// The stream whose worktree it's in (`oxplow:oxplow/stream?id=str2`).
+    /// The stream whose worktree it's in (`str2`).
     pub stream: String,
     /// Its path in the worktree; the folders above it are made.
     pub path: String,
@@ -52,7 +52,7 @@ pub struct CreateInput {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PathInput {
-    /// The stream whose worktree it's in (`oxplow:oxplow/stream?id=str2`).
+    /// The stream whose worktree it's in (`str2`).
     pub stream: String,
     /// Its path in the worktree.
     pub path: String,
@@ -61,7 +61,7 @@ pub struct PathInput {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RenameInput {
-    /// The stream whose worktree it's in (`oxplow:oxplow/stream?id=str2`).
+    /// The stream whose worktree it's in (`str2`).
     pub stream: String,
     /// The file or directory as it is.
     pub from: String,
@@ -73,7 +73,7 @@ pub struct RenameInput {
 /// person any; anyone else only their own — an agent's tools' rule (an
 /// effect has none).
 fn stream_of(invocation: &Invocation, named: &str) -> Result<StreamId, CommandError> {
-    let stream: StreamId = ref_id(named, oxplow_domain::uri::resources::STREAM, "/stream")?;
+    let stream: StreamId = bare_id(named, oxplow_domain::uri::resources::STREAM, "/stream")?;
     if !invocation.actor().may_confirm() && invocation.actor().stream_id() != Some(stream) {
         return Err(CommandError::Denied {
             reason: format!(
@@ -304,9 +304,9 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn save_writes_is_audited_without_its_content_and_logs_file_saved() {
         let fx = crate::test_fixtures::services_with_effort().await;
-        let stream = oxplow_domain::uri::build::stream_uri(
-            fx.svc.streams.list_streams().await.unwrap()[0].id,
-        );
+        let stream = fx.svc.streams.list_streams().await.unwrap()[0]
+            .id
+            .to_string();
         let out = fx
             .svc
             .commands
@@ -361,7 +361,9 @@ mod tests {
     }
 
     async fn stream_ref_of(fx: &crate::test_fixtures::EffortFixture) -> String {
-        oxplow_domain::uri::build::stream_uri(fx.svc.streams.list_streams().await.unwrap()[0].id)
+        fx.svc.streams.list_streams().await.unwrap()[0]
+            .id
+            .to_string()
     }
 
     async fn logged(
@@ -481,7 +483,7 @@ mod tests {
     }
 
     fn stream_str(stream_ref: &str) -> String {
-        oxplow_domain::uri::build::id_of(stream_ref, oxplow_domain::uri::resources::STREAM).unwrap()
+        stream_ref.to_string()
     }
 
     /// A person works in any stream; an agent only in its own — the rule
@@ -555,7 +557,7 @@ mod tests {
                         .run(
                             &actor,
                             "oxplow.file.save",
-                            json!({ "stream": oxplow_domain::uri::build::stream_uri(stream), "path": "notes.txt", "content": "hi" }),
+                            json!({ "stream": stream.to_string(), "path": "notes.txt", "content": "hi" }),
                             false,
                         )
                         .await
@@ -593,7 +595,7 @@ mod tests {
     async fn an_agent_saves_only_in_its_own_stream() {
         let fx = crate::test_fixtures::services_with_effort().await;
         let stream = fx.svc.streams.list_streams().await.unwrap()[0].id;
-        let input = json!({ "stream": oxplow_domain::uri::build::stream_uri(stream), "path": "n.txt", "content": "x" });
+        let input = json!({ "stream": stream.to_string(), "path": "n.txt", "content": "x" });
         let elsewhere = Actor::Agent {
             session_id: None,
             thread_id: Some(fx.thread),

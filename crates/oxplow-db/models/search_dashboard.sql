@@ -2,7 +2,7 @@
 -- the heading text of its text tiles and the titles of its query tiles.
 -- Dashboards belong to the project, not a stream. `version` is the newer of
 -- the dashboard's change and its tiles'.
-SELECT CAST(d.ref AS TEXT) AS ref,
+SELECT CAST(d.uri AS TEXT) AS uri,
        CAST(d.title AS TEXT) AS title,
        CAST(trim(coalesce((SELECT group_concat(char(10) || t.text, '')
                              FROM (SELECT CASE kind

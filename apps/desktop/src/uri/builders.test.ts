@@ -47,8 +47,8 @@ test("each record is named by its URI", () => {
 test("a contribution's key param is its own name, with the view's params beside it", () => {
   expect(pageUri("tasks")).toBe("oxplow:oxplow/page?page=tasks");
   expect(pageUri("diff-view", { effort: "eff9" })).toBe("oxplow:oxplow/page?effort=eff9&page=diff-view");
-  expect(extPageUri("acme", "board", { ref: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" })).toBe(
-    "oxplow:oxplow/page?page=acme/board&ref=oxplow:oxplow/work_item?id%3Dtsk1%26provider%3Doxplow",
+  expect(extPageUri("acme", "board", { uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" })).toBe(
+    "oxplow:oxplow/page?page=acme/board&uri=oxplow:oxplow/work_item?id%3Dtsk1%26provider%3Doxplow",
   );
   expect(lensUri("acme/blocked", { stream_id: 2 })).toBe("oxplow:oxplow/lens?lens=acme/blocked&stream_id=2");
   expect(metricUri("oxplow.todos")).toBe("oxplow:oxplow/metric?metric=oxplow.todos");

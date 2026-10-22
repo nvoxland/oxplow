@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`knowledge.page.written@2`: a knowledge page's row and edges were\nrestated from its body — by `oxplow.knowledge.write_page` / `link` /\n`resync`, or by the wiki watcher after a hand edit\n(`system:wiki_watch`).",
+  "properties": {
+    "outbound": {
+      "description": "Every ref the page now points at (`oxplow:oxplow/file?path=src/lib.rs`, `oxplow:oxplow/wiki?slug=x`, …).",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "page": {
+      "description": "The page's slug.",
+      "type": "string"
+    },
+    "snapshot": {
+      "description": "The snapshot its new refs are pinned to, when there is one.",
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "page",
+    "outbound"
+  ],
+  "title": "KnowledgePageWrittenV2",
+  "type": "object"
+}

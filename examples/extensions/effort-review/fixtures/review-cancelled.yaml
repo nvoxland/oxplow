@@ -2,13 +2,13 @@
 # it had written.
 input:
   job: review
-  intentKey: "review:oxplow:oxplow/effort?id=eff2"
+  intentKey: "review:eff2"
   cancel: true
   request:
     schemaVersion: 1
     role: summarize
     messages:
-      - { role: user, parts: [{ type: text, text: "Review oxplow:oxplow/effort?id=eff2 at length." }] }
+      - { role: user, parts: [{ type: text, text: "Review eff2 at length." }] }
   model:
     replies:
       - { text: "The tests the agent ran cover the parser change, but the diff coverage leaves the error path in src/parse.rs untested, and the riskiest change is parse_block.", chunkDelayMs: 100 }

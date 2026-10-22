@@ -268,7 +268,7 @@ impl SqliteChangeStore {
                 write_files(tx, id, &results.files, &at, events_to)?;
                 for f in &results.functions {
                     tx.execute(
-                        "INSERT OR REPLACE INTO change_function (change_id, path, ref, container, name, status, signature_changed,
+                        "INSERT OR REPLACE INTO change_function (change_id, path, uri, container, name, status, signature_changed,
                            body_changed, start_line, visibility, is_test, complexity, length, params_before, params_after,
                            complexity_delta, length_delta, added_lines, deleted_lines, modified_lines, churn_share)
                          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",

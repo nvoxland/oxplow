@@ -791,7 +791,7 @@ export async function keepLensSpec(
   streamId: string | null,
 ): Promise<KeptLens> {
   const input: Record<string, unknown> = { spec, extension, slug };
-  if (streamId) input.stream = streamUri(streamId);
+  if (streamId) input.stream = streamId;
   const outcome = await runCommand("oxplow.lens.keep", input);
   return keptLens(outcome.result);
 }
@@ -913,13 +913,13 @@ export async function switchStream(id: string): Promise<Stream> {
 }
 
 export async function renameStream(streamId: string, title: string): Promise<Stream> {
-  return (await runCommand("oxplow.stream.rename", { stream: streamUri(streamId), title })).result as Stream;
+  return (await runCommand("oxplow.stream.rename", { stream: streamId, title })).result as Stream;
 }
 
 /** Archive a stream. The Remove dialog is the person's confirmation
  *  (`oxplow.stream.archive` is destructive), so this runs it confirmed. */
 export async function archiveStream(streamId: string, deleteWorktree: boolean): Promise<void> {
-  await runCommand("oxplow.stream.archive", { stream: streamUri(streamId), delete_worktree: deleteWorktree }, true);
+  await runCommand("oxplow.stream.archive", { stream: streamId, delete_worktree: deleteWorktree }, true);
 }
 
 export async function renameCurrentStream(title: string): Promise<Stream> {
@@ -1080,27 +1080,27 @@ export async function runCommandInBackground(label: string, id: string, input: u
 
 export async function vcsMerge(streamId: string, rev: string, confirmed: boolean): Promise<GitOpKickoff> {
   return runAsBackgroundTask(`Merge ${rev}`, "vcs", `merge ${rev}`, () =>
-    runVcs("oxplow.vcs.merge", { stream: streamUri(streamId), rev }, confirmed),
+    runVcs("oxplow.vcs.merge", { stream: streamId, rev }, confirmed),
   );
 }
 
 export async function gitRebase(streamId: string, onto: string, confirmed: boolean): Promise<GitOpKickoff> {
   return runAsBackgroundTask(`Rebase onto ${onto}`, "vcs", `rebase ${onto}`, () =>
-    runVcs("oxplow.git.rebase", { stream: streamUri(streamId), rev: onto }, confirmed),
+    runVcs("oxplow.git.rebase", { stream: streamId, rev: onto }, confirmed),
   );
 }
 
 export async function gitCherryPick(streamId: string, rev: string): Promise<GitOpKickoff> {
   const short = rev.slice(0, 7);
   return runAsBackgroundTask(`Cherry-pick ${short}`, "vcs", `cherry-pick ${short}`, () =>
-    runVcs("oxplow.git.cherry_pick", { stream: streamUri(streamId), rev }),
+    runVcs("oxplow.git.cherry_pick", { stream: streamId, rev }),
   );
 }
 
 export async function gitRevert(streamId: string, rev: string, confirmed: boolean): Promise<GitOpKickoff> {
   const short = rev.slice(0, 7);
   return runAsBackgroundTask(`Revert ${short}`, "vcs", `revert ${short}`, () =>
-    runVcs("oxplow.git.revert", { stream: streamUri(streamId), rev }, confirmed),
+    runVcs("oxplow.git.revert", { stream: streamId, rev }, confirmed),
   );
 }
 
@@ -1150,11 +1150,11 @@ export async function abortSetup(): Promise<void> {
 /** Switch the stream's workspace to `branch` (`create` makes it at the
  *  head first). The branch reconciler records it on the stream. */
 export async function vcsCheckoutBranch(streamId: string, branch: string, create = false): Promise<OpOutcome> {
-  return runVcs("oxplow.vcs.checkout_branch", { stream: streamUri(streamId), name: branch, create });
+  return runVcs("oxplow.vcs.checkout_branch", { stream: streamId, name: branch, create });
 }
 
 export async function vcsRenameBranch(streamId: string, from: string, to: string): Promise<OpOutcome> {
-  return runVcs("oxplow.vcs.rename_branch", { stream: streamUri(streamId), from, to });
+  return runVcs("oxplow.vcs.rename_branch", { stream: streamId, from, to });
 }
 
 export async function vcsDeleteBranch(
@@ -1163,7 +1163,7 @@ export async function vcsDeleteBranch(
   force: boolean,
   confirmed: boolean,
 ): Promise<OpOutcome> {
-  return runVcs("oxplow.vcs.delete_branch", { stream: streamUri(streamId), name, force }, confirmed);
+  return runVcs("oxplow.vcs.delete_branch", { stream: streamId, name, force }, confirmed);
 }
 
 export async function getThreadState(streamId: string): Promise<ThreadState> {
@@ -1174,7 +1174,7 @@ export async function getThreadState(streamId: string): Promise<ThreadState> {
 /** A new thread on the stream: it has no agent session (open one with
  *  `openAgentSession`). The thread and the stream's state after. */
 export async function createThread(streamId: string, title: string): Promise<{ thread: Thread; state: ThreadState }> {
-  const thread = (await runCommand("oxplow.thread.create", { stream: streamUri(streamId), title })).result as Thread;
+  const thread = (await runCommand("oxplow.thread.create", { stream: streamId, title })).result as Thread;
   return { thread, state: await getThreadState(streamId) };
 }
 
@@ -1201,7 +1201,7 @@ export async function openAgentSession(
 ): Promise<AgentSessionRecord> {
   return (
     await runCommand("oxplow.agent_session.open", {
-      thread: threadUri(threadId),
+      thread: threadId,
       ...(harness ? { harness } : {}),
       ...(title ? { title } : {}),
       ...(resume ? { resume } : {}),
@@ -1212,18 +1212,18 @@ export async function openAgentSession(
 /** The person stops an agent: its process ends, the slot and saved
  *  conversation stay, and nothing spawns it again until `startAgentSession`. */
 export async function stopAgentSession(sessionId: string): Promise<void> {
-  await runCommand("oxplow.agent_session.stop", { session: agentSessionUri(sessionId) });
+  await runCommand("oxplow.agent_session.stop", { session: sessionId });
 }
 
 /** The person starts a stopped agent again (its tab then spawns it). */
 export async function startAgentSession(sessionId: string): Promise<void> {
-  await runCommand("oxplow.agent_session.start", { session: agentSessionUri(sessionId) });
+  await runCommand("oxplow.agent_session.start", { session: sessionId });
 }
 
 /** The person gives an agent a new conversation, dropping the saved one.
  *  Destructive: the caller confirms first. */
 export async function startAgentSessionFresh(sessionId: string, confirmed: boolean): Promise<void> {
-  await runCommand("oxplow.agent_session.start_fresh", { session: agentSessionUri(sessionId) }, confirmed);
+  await runCommand("oxplow.agent_session.start_fresh", { session: sessionId }, confirmed);
 }
 
 /// The saved conversations an agent session's harness keeps for its
@@ -1233,20 +1233,20 @@ export async function listNativeConversations(sessionId: string): Promise<Listed
 }
 /// Move an agent session to one of its harness's saved conversations.
 export async function resumeConversation(sessionId: string, conversation: string): Promise<void> {
-  await runCommand("oxplow.agent_session.resume_conversation", { session: agentSessionUri(sessionId), conversation });
+  await runCommand("oxplow.agent_session.resume_conversation", { session: sessionId, conversation });
 }
 
 /// Have an agent session's next launch fork a saved conversation (the one
 /// it is on, without `conversation`).
 export async function forkConversation(sessionId: string, conversation?: string): Promise<void> {
   await runCommand("oxplow.agent_session.fork_conversation", {
-    session: agentSessionUri(sessionId),
+    session: sessionId,
     ...(conversation ? { conversation } : {}),
   });
 }
 
 export async function renameAgentSession(sessionId: string, title: string): Promise<void> {
-  await runCommand("oxplow.agent_session.rename", { session: agentSessionUri(sessionId), title });
+  await runCommand("oxplow.agent_session.rename", { session: sessionId, title });
 }
 
 /** Name the session's conversation in its harness's own UI (Codex's thread
@@ -1266,21 +1266,21 @@ export async function markThread(
   threadId: string,
   mark: ThreadMark | null,
 ): Promise<ThreadState> {
-  await runCommand("oxplow.thread.mark", { thread: threadUri(threadId), ...(mark ? { mark } : {}) });
+  await runCommand("oxplow.thread.mark", { thread: threadId, ...(mark ? { mark } : {}) });
   return getThreadState(streamId);
 }
 
 export async function closeThread(streamId: string, threadId: string): Promise<ThreadState> {
-  await runCommand("oxplow.thread.close", { thread: threadUri(threadId) });
+  await runCommand("oxplow.thread.close", { thread: threadId });
   return getThreadState(streamId);
 }
 
 export async function renameThread(_streamId: string, threadId: string, title: string): Promise<Thread> {
-  return (await runCommand("oxplow.thread.rename", { thread: threadUri(threadId), title })).result as Thread;
+  return (await runCommand("oxplow.thread.rename", { thread: threadId, title })).result as Thread;
 }
 
 export async function setStreamPrompt(streamId: string, prompt: string | null): Promise<Stream[]> {
-  await runCommand("oxplow.stream.set_prompt", { stream: streamUri(streamId), ...(prompt ? { prompt } : {}) });
+  await runCommand("oxplow.stream.set_prompt", { stream: streamId, ...(prompt ? { prompt } : {}) });
   return listStreams();
 }
 
@@ -1289,7 +1289,7 @@ export async function setThreadPrompt(
   threadId: string,
   prompt: string | null,
 ): Promise<Thread[]> {
-  await runCommand("oxplow.thread.set_prompt", { thread: threadUri(threadId), ...(prompt ? { prompt } : {}) });
+  await runCommand("oxplow.thread.set_prompt", { thread: threadId, ...(prompt ? { prompt } : {}) });
   return [];
 }
 
@@ -1308,16 +1308,16 @@ export async function searchWorkspaceText(
 /** Throw away the workspace's changes to `paths` — destructive, so the
  *  person has confirmed. */
 export async function vcsDiscard(streamId: string, paths: string[], confirmed: boolean): Promise<OpOutcome> {
-  return runVcs("oxplow.vcs.discard", { stream: streamUri(streamId), paths }, confirmed);
+  return runVcs("oxplow.vcs.discard", { stream: streamId, paths }, confirmed);
 }
 
 export async function vcsStage(streamId: string, paths: string[]): Promise<OpOutcome> {
-  return runVcs("oxplow.vcs.stage", { stream: streamUri(streamId), paths });
+  return runVcs("oxplow.vcs.stage", { stream: streamId, paths });
 }
 
 /** Append a pattern to the workspace's `.gitignore`. */
 export async function gitIgnore(streamId: string, entry: string): Promise<OpOutcome> {
-  return runVcs("oxplow.git.ignore", { stream: streamUri(streamId), entry });
+  return runVcs("oxplow.git.ignore", { stream: streamId, entry });
 }
 
 /** A remote branch to push to or pull from; omitted = the upstream. */
@@ -1333,7 +1333,7 @@ export async function vcsPush(
 ): Promise<GitOpKickoff> {
   const where = to ? ` ${to.remote} ${to.branch}` : "";
   return runAsBackgroundTask(to ? `Push to ${to.remote}/${to.branch}` : "Push", "vcs", `push${where}`, () =>
-    runVcs("oxplow.vcs.push", { stream: streamUri(streamId), ...to }, confirmed),
+    runVcs("oxplow.vcs.push", { stream: streamId, ...to }, confirmed),
   );
 }
 
@@ -1344,13 +1344,13 @@ export async function vcsPull(
 ): Promise<GitOpKickoff> {
   const where = from ? ` ${from.remote} ${from.branch}` : "";
   return runAsBackgroundTask(from ? `Pull ${from.remote}/${from.branch}` : "Pull", "vcs", `pull${where}`, () =>
-    runVcs("oxplow.vcs.pull", { stream: streamUri(streamId), ...from }, confirmed),
+    runVcs("oxplow.vcs.pull", { stream: streamId, ...from }, confirmed),
   );
 }
 
 export async function vcsFetch(streamId: string, remote?: string): Promise<GitOpKickoff> {
   return runAsBackgroundTask("Fetch", "vcs", `fetch${remote ? ` ${remote}` : ""}`, () =>
-    runVcs("oxplow.vcs.fetch", { stream: streamUri(streamId), remote: remote ?? null }),
+    runVcs("oxplow.vcs.fetch", { stream: streamId, remote: remote ?? null }),
   );
 }
 
@@ -1361,7 +1361,7 @@ export async function vcsCommit(
   includeUntracked = true,
 ): Promise<{ success: boolean; revision: string }> {
   const outcome = await runCommand("oxplow.vcs.commit", {
-    stream: streamUri(streamId),
+    stream: streamId,
     message,
     include_untracked: includeUntracked,
   });
@@ -1377,17 +1377,17 @@ export async function listRecentRemoteBranches(
 
 /** Write a wiki page — the `oxplow.knowledge.write_page` command (P5.C3): the
  *  row, its links and the file, in one audited run. Every `[[link]]` must
- *  resolve (a dangling one is refused, named). `verifiedRefs` are files
+ *  resolve (a dangling one is refused, named). `verifiedFiles` are files
  *  re-checked against the page: their freshness pins move to now. */
 export async function writeWikiPage(
   slug: string,
   body: string,
-  options?: { verifiedRefs?: string[] },
+  options?: { verifiedFiles?: string[] },
 ): Promise<void> {
   await runCommand("oxplow.knowledge.write_page", {
     slug,
     body,
-    verified_refs: options?.verifiedRefs ?? [],
+    verified_files: options?.verifiedFiles ?? [],
   });
 }
 
@@ -1416,8 +1416,8 @@ export async function createComment(input: {
   body: string;
 }): Promise<CommentThread> {
   const outcome = await runCommand("oxplow.knowledge.add_comment", {
-    stream: streamUri(input.streamId),
-    ...(input.threadId ? { thread: threadUri(input.threadId) } : {}),
+    stream: input.streamId,
+    ...(input.threadId ? { thread: input.threadId } : {}),
     target: input.target,
     quote: input.quote,
     selectors_json: input.selectorsJson,
@@ -1430,7 +1430,7 @@ export async function createComment(input: {
 }
 
 export async function addCommentMessage(commentId: string, body: string): Promise<CommentMessage> {
-  return (await runCommand("oxplow.knowledge.reply_comment", { comment: commentUri(commentId), body })).result as CommentMessage;
+  return (await runCommand("oxplow.knowledge.reply_comment", { comment: commentId, body })).result as CommentMessage;
 }
 
 export async function listCommentsForTarget(target: string): Promise<CommentThread[]> {
@@ -1442,11 +1442,11 @@ export async function listCommentsForStream(streamId: string): Promise<CommentTh
 }
 
 export async function setCommentIntent(commentId: string, intent: CommentIntent): Promise<void> {
-  await runCommand("oxplow.knowledge.update_comment", { comment: commentUri(commentId), intent });
+  await runCommand("oxplow.knowledge.update_comment", { comment: commentId, intent });
 }
 
 export async function setCommentStatus(commentId: string, status: CommentStatus): Promise<void> {
-  await runCommand("oxplow.knowledge.update_comment", { comment: commentUri(commentId), status });
+  await runCommand("oxplow.knowledge.update_comment", { comment: commentId, status });
 }
 
 /// Store where the renderer re-found a comment's quote (or that it is
@@ -1456,7 +1456,7 @@ export async function relocateComment(
   selectorsJson: string,
   orphaned: boolean,
 ): Promise<void> {
-  await runCommand("oxplow.knowledge.relocate_comment", { comment: commentUri(commentId), selectors_json: selectorsJson, orphaned });
+  await runCommand("oxplow.knowledge.relocate_comment", { comment: commentId, selectors_json: selectorsJson, orphaned });
 }
 
 /// Re-attach an orphaned comment to a freshly-selected span: rewrites
@@ -1466,13 +1466,13 @@ export async function relinkComment(
   quote: string,
   selectorsJson: string,
 ): Promise<void> {
-  await runCommand("oxplow.knowledge.update_comment", { comment: commentUri(commentId), quote, selectors_json: selectorsJson });
+  await runCommand("oxplow.knowledge.update_comment", { comment: commentId, quote, selectors_json: selectorsJson });
 }
 
 /** The popover's delete sits behind an `InlineConfirm`, the person's
  *  confirmation (`oxplow.knowledge.delete_comment` is destructive). */
 export async function deleteComment(commentId: string): Promise<void> {
-  await runCommand("oxplow.knowledge.delete_comment", { comment: commentUri(commentId) }, true);
+  await runCommand("oxplow.knowledge.delete_comment", { comment: commentId }, true);
 }
 
 /// Subscribe to comment changes: a commit touched `v_comment` (a comment
@@ -1598,7 +1598,7 @@ export function awaitBackgroundTask(taskId: string): Promise<BackgroundTask | nu
 export type { MetricSpec, SeriesPoint, MetricCatalogEntry } from "./metricsSql.js";
 
 import type { Dashboard, DashboardWithItems } from "./tauri-bridge/index.js";
-import { agentSessionUri, commentUri, effortUri, idOf, streamUri, threadUri } from "./uri/uri.js";
+import { effortUri, idOf } from "./uri/uri.js";
 export type { Dashboard, DashboardItem, DashboardWithItems } from "./tauri-bridge/index.js";
 
 // User-created dashboards (tsk138) — project-global grids of metric tiles.
@@ -1994,7 +1994,7 @@ export async function listWikiSlugsForSnapshots(
 export async function effortTitles(effortIds: string[]): Promise<Map<string, string>> {
   if (effortIds.length === 0) return new Map();
   const res = await querySql(
-    `SELECT ref, title FROM v_effort WHERE ref IN (SELECT value FROM json_each(?1)) AND title IS NOT NULL`,
+    `SELECT uri, title FROM v_effort WHERE uri IN (SELECT value FROM json_each(?1)) AND title IS NOT NULL`,
     [JSON.stringify(effortIds.map(effortUri))],
     10_000,
   );
@@ -2161,7 +2161,7 @@ export async function writeWorkspaceFile(
   path: string,
   content: string,
 ): Promise<{ path: string; bytes: number }> {
-  const out = await runCommand("oxplow.file.save", { stream: streamUri(streamId), path, content });
+  const out = await runCommand("oxplow.file.save", { stream: streamId, path, content });
   return out.result as { path: string; bytes: number };
 }
 
@@ -2171,7 +2171,7 @@ export async function createWorkspaceFile(
   path: string,
   content = "",
 ): Promise<WorkspacePathChange> {
-  const out = await runCommand("oxplow.file.create", { stream: streamUri(streamId), path, content });
+  const out = await runCommand("oxplow.file.create", { stream: streamId, path, content });
   return out.result as WorkspacePathChange;
 }
 
@@ -2180,7 +2180,7 @@ export async function createWorkspaceDirectory(
   streamId: string,
   path: string,
 ): Promise<WorkspacePathChange> {
-  const out = await runCommand("oxplow.file.create_directory", { stream: streamUri(streamId), path });
+  const out = await runCommand("oxplow.file.create_directory", { stream: streamId, path });
   return out.result as WorkspacePathChange;
 }
 
@@ -2190,7 +2190,7 @@ export async function renameWorkspacePath(
   fromPath: string,
   toPath: string,
 ): Promise<WorkspaceRenameResult> {
-  const out = await runCommand("oxplow.file.rename", { stream: streamUri(streamId), from: fromPath, to: toPath });
+  const out = await runCommand("oxplow.file.rename", { stream: streamId, from: fromPath, to: toPath });
   const { from, to } = out.result as { from: string; to: string };
   return { fromPath: from, toPath: to };
 }
@@ -2201,7 +2201,7 @@ export async function deleteWorkspacePath(
   streamId: string,
   path: string,
 ): Promise<WorkspacePathChange> {
-  const out = await runCommand("oxplow.file.delete", { stream: streamUri(streamId), path }, true);
+  const out = await runCommand("oxplow.file.delete", { stream: streamId, path }, true);
   return out.result as WorkspacePathChange;
 }
 
@@ -2335,7 +2335,6 @@ export async function listAgentStatuses(_streamId?: string): Promise<AgentStatus
 export interface PageVisitInputApi {
   refKind: string;
   refId: string;
-  payload: unknown;
   label: string;
   streamId?: string | null;
   threadId?: string | null;
@@ -2349,7 +2348,6 @@ export interface PageVisitApi {
   threadId: string | null;
   refKind: string;
   refId: string;
-  payload: unknown;
   label: string;
   source: string | null;
 }
@@ -2409,7 +2407,6 @@ export async function listRecentPageVisits(opts: {
       threadId: null,
       refKind: v.page_kind,
       refId: v.page_id,
-      payload: null,
       label: v.label ?? v.page_id,
       source: null,
     });
@@ -2589,7 +2586,7 @@ export async function listLspServers(): Promise<LspServerListing[]> {
 }
 
 export async function restartLspServer(streamId: string, languageId: string): Promise<void> {
-  await runCommand("oxplow.lsp.restart_server", { stream: streamUri(streamId), language: languageId });
+  await runCommand("oxplow.lsp.restart_server", { stream: streamId, language: languageId });
 }
 
 export async function removeLspPackage(packageName: string): Promise<void> {

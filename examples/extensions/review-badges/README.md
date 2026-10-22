@@ -7,7 +7,7 @@ It reads effort-review's exported `reviews` model and writes nothing.
 | | |
 |---|---|
 | **Review Verdicts** (Work) | One row per work item: its latest review's effort, how it ended, when, and the first 120 characters. The work item links to its page. |
-| **Review** (the task page, below the body) | That work item's latest review in full, if there is one. Mounted on the `work_item.detail.body` slot, which passes the item's `ref`. |
+| **Review** (the task page, below the body) | That work item's latest review in full, if there is one. Mounted on the `work_item.detail.body` slot, which passes the item's `uri`. |
 
 ```yaml
 imports:

@@ -143,12 +143,12 @@ Every connection registers three scalar functions for URIs
 (`oxplow-db/src/sql_functions.rs`): `uri(resource, key1, value1, …)` builds
 a canonical URI — the params sorted and escaped, a NULL value left out —
 so a model or lens links to another lens
-(`uri('oxplow/lens', 'lens', 'oxplow-bundled/job-run-output', 'job_run', ref)`)
-or builds a record's URI (`uri('oxplow/effort', 'id', 'eff' || id)`) without
+(`uri('oxplow/lens', 'lens', 'oxplow-bundled/job-run-output', 'job_run', uri)`)
+or builds a record's URI (`uri('oxplow/effort', 'id', json_extract(e.payload, '$.effort'))`) without
 concatenating a prefix; `uri_param(uri, key)` reads one param back (NULL when
 the URI lacks it or isn't one) and `uri_resource(uri)` its resource
 (`oxplow/work_item`). Other URIs are selected from their owning model's
-`ref` column (`.context/resources.md` "Using URIs").
+`uri` column (`.context/resources.md` "Using URIs").
 
 Extension models and lenses may use `import_ref('binding')` for a model declared
 in the extension's explicit public `imports`. The host resolves the canonical
@@ -198,7 +198,8 @@ one transaction:
   `crates/oxplow-db/fixtures/model_contracts.json` (`{ name: { version:
   columns } }`, every version published): `every_core_model_contract_is_
   pinned_at_its_version` fails in CI on a change at a pinned version, and
-  `OXPLOW_BLESS=1` pins a new one (earlier versions stay). A sweeping
+  `OXPLOW_BLESS=1` pins a new one (earlier versions stay; it never
+  rewrites a pinned version, so a bless leaves such a change red). A sweeping
   rename never edits the golden: a published version's docs stay as they
   were, and the models whose docs the rename rewords take a bump;
 - records `model` (view, name, owner, version, description, compiled
@@ -673,8 +674,8 @@ and `v_model_test` are the catalog of all of them:
 | `v_thread` | threads within a stream |
 | `v_knowledge_touch` | which threads wrote which knowledge pages, and when each last did (`page`, `thread_id`, `last_seen_at`; the rail's Finished section, P6.E1b) |
 | `v_knowledge_page` / `v_knowledge_ref` | knowledge pages with their outbound refs and `stale_ref_count`, and each page's file refs with their pin and `stale` (P5.C4; knowledge.md) |
-| `v_work_item` | the active work list's items (`ref`, `provider`, `native_id`, canonical `state`, `native_state`, `native` JSON, `parent_ref`), excluding deleted; everything reads it — oxplow's tasks have no model of their own (`v_task` was removed) and keep their own fields in `native_state` / `native`; oxplow's tasks are `work_item:oxplow:tsk<n>` (V115, P5.C1; data-model.md) |
-| `v_effort` | spans of a thread's work, linked to a work item or not (`work_item` ref; join `v_work_item` for the item); `title` defaults to the item's or the first prompt's, `summary` (v3) to the last turn's final message, and `closed_by` says what closed it |
+| `v_work_item` | the active work list's items (`uri`, `provider`, `native_id`, canonical `state`, `native_state`, `native` JSON, `parent_uri`), excluding deleted; everything reads it — oxplow's tasks have no model of their own (`v_task` was removed) and keep their own fields in `native_state` / `native`; oxplow's tasks are `work_item:oxplow:tsk<n>` (V115, P5.C1; data-model.md) |
+| `v_effort` | spans of a thread's work, linked to a work item or not (`work_item` URI; join `v_work_item` for the item); `title` defaults to the item's or the first prompt's, `summary` (v3) to the last turn's final message, and `closed_by` says what closed it |
 | `v_comment` | comment threads, with first-message `body` and `message_count` |
 | `v_wiki_page` | wiki pages (excerpt; full body is on disk) |
 | `v_snapshot` | worktree snapshots, with `tree_hash` (whole-tree identity, V96) |
@@ -691,9 +692,9 @@ and `v_model_test` are the catalog of all of them:
 | `v_agent_turn` | human prompt → agent answer, per thread (V74), with the snapshots the turn started and ended at (`start_snapshot_id`, `snapshot_id`: what the turn changed; V98/V99) |
 | `v_token_usage` | model tokens per thread / effort / model, with each turn's prompt (V74, `prompt` V82) |
 | `v_page_visit` | pages the human opened, and for how long (V74) |
-| `v_event` | the event log: every activity and state change, oldest first by `seq`, with anchors, subject refs and payload (V94; see [data-model.md](./data-model.md) "event_log"); `payload_expired_at` since V102) |
+| `v_event` | the event log: every activity and state change, oldest first by `seq`, with anchors, subject URIs and payload (V94; see [data-model.md](./data-model.md) "event_log"); `payload_expired_at` since V102) |
 | `v_extension_run` | one row per finished run of extension code (V48; [data-model.md](./data-model.md) "extension_run"): `run_id`, `parent_run_id`, `extension`, `contribution`, `kind`, `version`, `generation`, `actor_kind`, `actor`, the anchors, `cause_event_id`, `mode`, `started_at`, `finished_at`, `outcome`, `error`, `wall_ms`, `cpu_ms`, `peak_bytes`, `ai_calls`, `scopes`, `decisions`, `latest` (1 on a contribution's most recent run). `v_effect_run`, `v_collector_run` and `v_ai_call` name theirs in `run_id`. Kept 90 days |
-| `v_job_run` | each job run — one execution of a job an extension declares (V56; [extensions.md](./extensions.md) "Jobs"): `id`, `job` (`job:<ext>/<id>`), `ref` (`job_run:<id>`), `extension`, `version`, `contract_version`, `operation`, `state`, `attempt`, `cancellation_requested`, `invoker`, `run_id`, `created_at`, `updated_at`, and its current attempt's `ai_calls`, `tool_calls`, `input_tokens`, `output_tokens`. Never its request or result |
+| `v_job_run` | each job run — one execution of a job an extension declares (V56; [extensions.md](./extensions.md) "Jobs"): `id`, `job` (`job:<ext>/<id>`), `uri` (`job_run:<id>`), `extension`, `version`, `contract_version`, `operation`, `state`, `attempt`, `cancellation_requested`, `invoker`, `run_id`, `created_at`, `updated_at`, and its current attempt's `ai_calls`, `tool_calls`, `input_tokens`, `output_tokens`. Never its request or result |
 | `v_job_run_output` | what a job produced as it ran, in order (`job_id`, `attempt`, `seq`): `kind` (`text`, `tool_call`, `tool_result`, `usage`), `at`, `text` (a text row's), `data` (the row as JSON). Written as it streams, so a lens over it follows a job live |
 | `v_job_run_observation` | what a job's worker said after its attempt was fenced (a lease recovered, a permission removed, a declaration changed): one row per late result (`id`, `job_id`, `attempt`, `fence`, `at`, `outcome`, `evidence`). Evidence only; it never changes the job |
 | `v_op_error` | operations that failed in front of the person in the app, one row per `ui.op_failed@1` event (`oxplow.ui.report_error`, tsk1072): `event_id`, `at`, `stream_id`, `thread`, `label`, `command`, `message`, `exit_code`, `signal`, `duration_ms`, `output_size`. The stderr / stdout are the event's `output` body (`oxplow_read` `event:<id>#output`). Kept 30 days, the output 14; an expired event keeps its row with its details NULL and `payload_expired_at` set |
@@ -701,11 +702,11 @@ and `v_model_test` are the catalog of all of them:
 | `v_event_dead_letter` | events a consumer failed on, parked with the error; `pending` ones need `oxplow.delivery.retry` / `oxplow.delivery.discard` (V94) |
 | `v_event_checkpoint` | how far each event consumer has read (V94) |
 | `v_decision` | forks the agent resolved (question, choice, alternatives, confidence, why). `provenance`: `recorded` via the `oxplow.effort.record_decision` command (V76; P8.A7), or `inferred` when the effort closed (V79) — a recorded `extract` computation on the `main` role (`AiCompute`, so an unchanged effort doesn't call again) — and a reviewer's verdict on an inferred one: `confirmed` or `dismissed` (V132, `oxplow.effort.confirm_decision` / `oxplow.effort.dismiss_decision`; a re-inference replaces only the still-`inferred` ones) |
-| `v_claim` | claims the agent made in its answers ("tests pass"), as a model read them when the effort finished (`oxplow.effort.replace_inferred_claims`), what each cites (`evidence_ref`; `reviewer` when a person verified it by looking) and a reviewer's verdict (`review`: `verified` or `dismissed`, V75). Whether anything else backs a claim is a review policy's: oxplow-bundled's `v_oxplow_bundled_claim_status` counts a `tests_pass` claim backed when its effort's **latest** `v_test_run` has `failed = 0 AND total > 0` |
+| `v_claim` | claims the agent made in its answers ("tests pass"), as a model read them when the effort finished (`oxplow.effort.replace_inferred_claims`), what each cites (`evidence`; `reviewer` when a person verified it by looking) and a reviewer's verdict (`review`: `verified` or `dismissed`, V75). Whether anything else backs a claim is a review policy's: oxplow-bundled's `v_oxplow_bundled_claim_status` counts a `tests_pass` claim backed when its effort's **latest** `v_test_run` has `failed = 0 AND total > 0` |
 | `v_tool_call` | every agent tool call: the `tool_call.project` pump consumer's projection of `agent.tool.finished` (one row per event; the call as its harness mapped it, `oxplow-app/src/tool_calls.rs`; paths worktree-relative; a shell call's `ok` is NULL when its harness reports no exit code). `tool` is the harness's own name, `kind` oxplow's (V42; v3) (V77; `turn_id`, `event_id` since V102) |
 | `v_context_read` | reads (`kind = 'read'`) of `.context/*.md` (V77) |
 | `v_oxplow_bundled_struggle` | oxplow-bundled's model (review policy, not core): per effort, a file edited 5+ times, or 3+ failed shell commands, by kind (`subject` `shell`), over `v_tool_call` |
-| `v_ai_call` | oxplow's own model calls: role, provider, model, caller, tokens, latency, ok/error, a recorded computation's `input_hash`, and its `ref` (`ai_call:<id>`, whose bodies `oxplow_read` gives) (V78, V118; see [ai-providers.md](./ai-providers.md)) |
+| `v_ai_call` | oxplow's own model calls: role, provider, model, caller, tokens, latency, ok/error, a recorded computation's `input_hash`, and its `uri` (`ai_call:<id>`, whose bodies `oxplow_read` gives) (V78, V118; see [ai-providers.md](./ai-providers.md)) |
 | `v_ai_result` | recorded AI computations (`classify` / `score` / `summarize` / `extract`), keyed by input hash, model and prompt version, with the output, tokens and the computing call (V118; [ai-providers.md](./ai-providers.md) "Recorded computations") |
 | `v_metric_spec` | metric definitions: aggregation, direction, target / warn / fail (enabled lives in project.yaml) (V80) |
 | `v_agent_nudge` | guidance oxplow sent the agent mid-effort (V80; `turn_id`, `delivered_at` since V102) |
@@ -717,9 +718,9 @@ and `v_model_test` are the catalog of all of them:
 | `v_commit`, `v_commit_file`, `v_commit_work_item`, `v_branch`, `v_tag` | history, branches and tags (V85, V113). The commit indexer (`commit_indexer.rs`, run at boot and on each ref move, `RefMoves`) stores the commits reachable from **every stream's** head — new history whole, up to a 5000-commit horizon (`IndexDepth`) — through the VCS capability (`Vcs::log`/`revision`, `.context/vcs.md`) — with their files (first-parent diff) as it projects them into `page_ref`; `v_commit.parents` (JSON, v2) lets a stream's history be a recursive read from its branch's head. `v_commit_work_item` reads the indexer's work-item mention edges and the work-item → commit links (declared impacts, held effort work), for the active work list's items. `refresh_refs` restates `v_branch` (`is_default`, v2) and `v_tag` from `Vcs::branches`/`tags` and maps each local branch to the stream checked out on it. The desktop's history panel, dashboard lists, branch picker and new-stream form read these models (`apps/desktop/src/vcsHistory.ts`) |
 | `v_test_case_stat` | each test's summary per stream, branch and producer (V139, tsk733): last status and duration, runs, failures, flips, last failed / passed, max and mean duration — updated with every run, the home of per-test history since a run writes change-only per-case facts |
 | `v_test_run`, `v_test_case` | test runs (V87), views only. A run IS its `metric_capture` (producer `tests`, or `test-run` for a run that measured nothing), and both views read its verbatim `test-detail` payload in `detail_json`: counts from the payload, cases by `json_each` over `suites[].cases[]`. Cases come from the payload, not the `oxplow.test_case` facts, because those are skipped while every tests metric is disabled. `effort_id` (v2) is the capture's own: the effort of the tool call that ran it. A run that only reported counts (`oxplow.test.record_run`) has no cases |
-| `v_thread_answer` | the lenses an agent showed on a thread (`oxplow_show_lens`, V124, P6.C1): `ref` `oxplow:oxplow/answer?id=<id>`, `thread_id`, `turn_id` / `effort_id` open when it was shown, `title`, either `lens` (an existing lens id) or `spec` (the `LensSpec` as JSON), `params`, `created_at`, and `kept_lens` once someone kept it (extensions.md → "Thread answers") |
-| `v_diagnostic` | what the language servers have published, right now (V86). `lsp_diagnostics.rs` subscribes to the LSP session broadcast and replaces a file's rows per `(stream, language, path)` on each `textDocument/publishDiagnostics` (paths repo-relative, positions 1-based, a URI outside the worktree dropped). Live state: the table is cleared at boot and a server's rows when it restarts, crashes or stops. Only files a server has published appear (usually the open ones, not the whole repo). A view re-runs on `ModelsChanged` when rows commit; at most every 500 ms per stream, from the first change (so a server that publishes continuously can't starve it), `code.diagnostics.changed@1` is logged per changed file (P5.C5) |
-| `v_symbol` / `v_symbol_capture` | the definitions oxplow's own tree-sitter extraction finds in each stream's files, in every supported language, no language server needed (V62) — the current tree, restated per changed file at each snapshot by the `symbols.collect` pump consumer (`ref` `oxplow:oxplow/symbol?path=<path>&symbol=<id>`, no revision, unique per stream; `kind` from one vocabulary; `container` `::`-joined; `signature` the parameter types in overloading languages; the name's `line`/`col` and the whole symbol's `start_*`..`end_*`), and what each snapshot's collection covered (`files_collected`, `files_failed`: content unreadable at the snapshot). Details: language-support.md "Symbols" |
+| `v_thread_answer` | the lenses an agent showed on a thread (`oxplow_show_lens`, V124, P6.C1): `uri` `oxplow:oxplow/answer?id=<id>`, `thread_id`, `turn_id` / `effort_id` open when it was shown, `title`, either `lens` (an existing lens id) or `spec` (the `LensSpec` as JSON), `params`, `created_at`, and `kept_lens` once someone kept it (extensions.md → "Thread answers") |
+| `v_diagnostic` | what the language servers have published, right now (V86). `lsp_diagnostics.rs` subscribes to the LSP session broadcast and replaces a file's rows per `(stream, language, path)` on each `textDocument/publishDiagnostics` (paths repo-relative, positions 1-based, a URI outside the worktree dropped). Live state: the table is cleared at boot and a server's rows when it restarts, crashes or stops. Only files a server has published appear (usually the open ones, not the whole repo). A view re-runs on `ModelsChanged` when rows commit; at most every 500 ms per stream, from the first change (so a server that publishes continuously can't starve it), `code.diagnostics.changed@2` is logged per changed file (P5.C5) |
+| `v_symbol` / `v_symbol_capture` | the definitions oxplow's own tree-sitter extraction finds in each stream's files, in every supported language, no language server needed (V62) — the current tree, restated per changed file at each snapshot by the `symbols.collect` pump consumer (`uri` `oxplow:oxplow/symbol?path=<path>&symbol=<id>`, no revision, unique per stream; `kind` from one vocabulary; `container` `::`-joined; `signature` the parameter types in overloading languages; the name's `line`/`col` and the whole symbol's `start_*`..`end_*`), and what each snapshot's collection covered (`files_collected`, `files_failed`: content unreadable at the snapshot). Details: language-support.md "Symbols" |
 
 **Column docs live with the model, not here.** `models.yaml` documents
 every column, and the registry is the catalog: `v_model` +
@@ -921,7 +922,7 @@ extension's own declared event types, logged with the run (P9.D2;
   value, subject?, path?, line?, rule?, num?, den?, dims?}]}` and nothing
   else (`facts_of`). A fact on a measure not in `facts:` or not defined is
   dropped. Each run records one metric capture (or a failed one) plus a
-  `collector_run` row and `collector.synced@1` with its `facts` count.
+  `collector_run` row and `collector.synced@2` with its `facts` count.
   Snapshot runs keep the delta / full-baseline machinery (pending-baseline
   queue, `scan_kind`, fingerprint, dominated-capture prune).
 - A **report collector** (`records: tests | coverage | analysis`,
@@ -934,7 +935,7 @@ extension's own declared event types, logged with the run (P9.D2;
   the run wrote the report — or by hand (`oxplow.collector.sync`, which records
   in a thread). The collection service runs it and merges its output into
   the run (`.context/collection.md`); its run and health are any
-  collector's (`collector_run`, `collector.synced@1`, `contribution_health`), and
+  collector's (`collector_run`, `collector.synced@2`, `contribution_health`), and
   its extension's permissions apply (`process` for an exec script).
 
 **Owners.** An extension (its name), always: the project's own collectors
@@ -980,7 +981,7 @@ whose types must be registered (`v_event_type`); `oxplow.` ids are
 oxplow's own.
 
 **An entity collector's run** (`collector_runner::run_collector`) commits its rows, its
-`collector_run` row and its `collector.synced@1` event in **one
+`collector_run` row and its `collector.synced@2` event in **one
 transaction**; a failed run commits the failure the same way (no rows,
 the last good counts and checkpoint kept). The event's subject is
 `oxplow:oxplow/collector?collector=<owner>/<id>` (resource `oxplow/collector`), its `trigger` is
@@ -1013,7 +1014,7 @@ type without a `trigger` field:
   seq; NULL when absent), and the script gets the event envelope as
   `input.event` ([extensions.md](./extensions.md) "The event envelope").
 - **Once per event.** The run's `collector_run.last_event_id` is the
-  event's seq, and its `collector.synced@1` is caused by the event with a
+  event's seq, and its `collector.synced@2` is caused by the event with a
   per-event dedupe key. They commit with what the run wrote — an entity
   collector's rows, or a fact collector's capture and facts
   (`RunLog::record_with`, tsk712) — so a redelivered event writes nothing,
@@ -1038,7 +1039,7 @@ entities from data already in the semantic layer:
   - id: hot
     runtime: starlark          # def transform(input): return {"entities": {...}}
     entry: sources/hot.star
-    input: "SELECT ref, title FROM v_work_item WHERE json_extract(native, '$.priority') = 'high'"
+    input: "SELECT uri, title FROM v_work_item WHERE json_extract(native, '$.priority') = 'high'"
     entities: [...]
 ```
 

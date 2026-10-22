@@ -3,10 +3,10 @@ description: The pages the stream's threads opened most over the last 30 days.
 params:
   - { name: thread_id }
 query: |
-  SELECT coalesce(nullif(trim(w.title), ''), nullif(trim(top.label), ''), top.ref) AS title,
-         top.page_kind, top.ref, top.visits
+  SELECT coalesce(nullif(trim(w.title), ''), nullif(trim(top.label), ''), top.uri) AS title,
+         top.page_kind, top.uri, top.visits
   FROM (
-    SELECT v.page_id AS ref,
+    SELECT v.page_id AS uri,
            max(v.page_kind) AS page_kind,
            max(v.label) AS label,
            count(*) AS visits,
@@ -18,11 +18,11 @@ query: |
       AND v.visited_at >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-30 days')
     GROUP BY v.page_id
   ) top
-  LEFT JOIN v_knowledge_page w ON w.ref = top.ref
+  LEFT JOIN v_knowledge_page w ON w.uri = top.uri
   ORDER BY top.visits DESC, top.last DESC
   LIMIT 25
 columns:
-  - { key: title, label: Page, icon: page_kind, link: { kind: page, from: ref } }
+  - { key: title, label: Page, icon: page_kind, link: { kind: page, from: uri } }
   - { key: visits, label: Visits, width: 80 }
 empty: No visits yet. The pages you open most over the last 30 days show up here.
 hidden: true

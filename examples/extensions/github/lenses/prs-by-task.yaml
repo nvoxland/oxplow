@@ -1,9 +1,9 @@
 title: Pull Requests by Work Item
 description: Recent PRs with the work item their title mentions by its id (tsk42, ENG-12), if any — whichever work list is active.
 params:
-  - { name: state, label: "State (open / closed / all)", default: all }
+  - { name: state, role: filter, label: "State (open / closed / all)", default: all }
 query: |
-  SELECT pr.number, pr.title, pr.state, pr.author, w.ref AS item_ref, w.title AS item
+  SELECT pr.number, pr.title, pr.state, pr.author, w.uri AS item_ref, w.title AS item
   FROM v_github_pr pr
   LEFT JOIN v_work_item w
     ON pr.title LIKE '%' || w.native_id || '%'
@@ -18,4 +18,4 @@ columns:
   - { key: item, label: Work item, link: { kind: page, from: item_ref } }
 empty: No pull requests synced yet. Sync the `github/prs` source in Settings → Data.
 actions:
-  - { id: sync, label: Sync PRs, command: oxplow.collector.sync, input: { collector: "oxplow:oxplow/collector?collector=github/prs" } }
+  - { id: sync, label: Sync PRs, command: oxplow.collector.sync, input: { collector: "github/prs" } }

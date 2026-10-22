@@ -1294,7 +1294,7 @@ impl Instance {
             .records
             .filter(|r| r.event == (draft.event_type.as_str(), draft.v))
         {
-            let row = draft.payload[record.key]["ref"]
+            let row = draft.payload[record.key]["uri"]
                 .as_str()
                 .unwrap_or_default();
             if !owns(contract, &self.id, row) {
@@ -2135,7 +2135,7 @@ impl ProviderRegistry {
         let id = named
             .or_else(|| {
                 input
-                    .get("ref")
+                    .get("uri")
                     .and_then(Value::as_str)
                     .and_then(instance_of_ref)
             })

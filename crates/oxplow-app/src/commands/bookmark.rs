@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::ops::Op;
-use super::util::{invalid, parse, ref_id, schema};
+use super::util::{bare_id, invalid, parse, schema};
 use super::{Handler, HandlerOutput, TxCtx};
 
 /// The capability its operations are of.
@@ -47,18 +47,17 @@ impl From<ScopeInput> for BookmarkScope {
 #[serde(deny_unknown_fields)]
 pub struct SetInput {
     /// The page's canonical ref (its tab id, `oxplow:oxplow/page?page=git-dashboard`).
-    #[serde(rename = "ref")]
-    pub page_ref: String,
+    pub uri: String,
     /// Its page kind, for the icon.
     pub page_kind: String,
     /// Its title.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
     pub scope: ScopeInput,
-    /// The thread the person is in (`oxplow:oxplow/thread?id=thr1`); its stream is the stream.
+    /// The thread the person is in (`thr1`); its stream is the stream.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thread: Option<String>,
-    /// The stream (`oxplow:oxplow/stream?id=str1`), when there's no thread.
+    /// The stream (`str1`), when there's no thread.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stream: Option<String>,
 }
@@ -67,12 +66,11 @@ pub struct SetInput {
 #[serde(deny_unknown_fields)]
 pub struct RemoveInput {
     /// The page's canonical ref.
-    #[serde(rename = "ref")]
-    pub page_ref: String,
-    /// The thread the person is in (`oxplow:oxplow/thread?id=thr1`).
+    pub uri: String,
+    /// The thread the person is in (`thr1`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thread: Option<String>,
-    /// The stream (`oxplow:oxplow/stream?id=str1`), when there's no thread.
+    /// The stream (`str1`), when there's no thread.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stream: Option<String>,
 }
@@ -84,7 +82,7 @@ fn viewer(
     stream: Option<&str>,
 ) -> Result<Viewer, CommandError> {
     let thread = thread
-        .map(|t| ref_id::<ThreadId>(t, oxplow_domain::uri::resources::THREAD, "/thread"))
+        .map(|t| bare_id::<ThreadId>(t, oxplow_domain::uri::resources::THREAD, "/thread"))
         .transpose()?;
     let stream = match (thread, stream) {
         (Some(t), _) => {
@@ -100,7 +98,11 @@ fn viewer(
                 invalid("/thread", format!("no thread `{t}`"))
             })?))
         }
-        (None, Some(s)) => Some(ref_id(s, oxplow_domain::uri::resources::STREAM, "/stream")?),
+        (None, Some(s)) => Some(bare_id(
+            s,
+            oxplow_domain::uri::resources::STREAM,
+            "/stream",
+        )?),
         (None, None) => None,
     };
     Ok(Viewer { thread, stream })
@@ -113,13 +115,13 @@ fn restore(before: Option<Bookmark>, page_ref: &str, at: &Value) -> CommandCall 
         Some(b) => CommandCall {
             name: SET.into(),
             input: json!({
-                "ref": b.page_ref, "page_kind": b.page_kind, "label": b.label,
+                "uri": b.page_ref, "page_kind": b.page_kind, "label": b.label,
                 "scope": b.scope, "thread": at["thread"], "stream": at["stream"],
             }),
         },
         None => CommandCall {
             name: REMOVE.into(),
-            input: json!({ "ref": page_ref, "thread": at["thread"], "stream": at["stream"] }),
+            input: json!({ "uri": page_ref, "thread": at["thread"], "stream": at["stream"] }),
         },
     }
 }
@@ -136,7 +138,7 @@ pub fn set_op() -> Op {
             let input: SetInput = parse(input)?;
             let viewer = viewer(ctx.conn, input.thread.as_deref(), input.stream.as_deref())?;
             let bookmark = Bookmark {
-                page_ref: input.page_ref.clone(),
+                page_ref: input.uri.clone(),
                 page_kind: input.page_kind,
                 label: input.label,
                 scope: input.scope.into(),
@@ -147,7 +149,7 @@ pub fn set_op() -> Op {
             })?;
             Ok(HandlerOutput {
                 result: serde_json::to_value(&bookmark).expect("a bookmark serializes"),
-                inverse: Some(restore(before, &input.page_ref, &at)),
+                inverse: Some(restore(before, &input.uri, &at)),
                 ..HandlerOutput::default()
             })
         })),
@@ -167,12 +169,10 @@ pub fn remove_op() -> Op {
             let at = json!({ "thread": input.get("thread"), "stream": input.get("stream") });
             let input: RemoveInput = parse(input)?;
             let viewer = viewer(ctx.conn, input.thread.as_deref(), input.stream.as_deref())?;
-            let removed = remove_tx(ctx.conn, viewer, &input.page_ref)?;
+            let removed = remove_tx(ctx.conn, viewer, &input.uri)?;
             Ok(HandlerOutput {
                 result: json!({ "removed": removed.is_some() }),
-                inverse: removed
-                    .is_some()
-                    .then(|| restore(removed, &input.page_ref, &at)),
+                inverse: removed.is_some().then(|| restore(removed, &input.uri, &at)),
                 ..HandlerOutput::default()
             })
         })),
@@ -197,7 +197,7 @@ mod tests {
             .db
             .read(move |conn| {
                 conn.query_row(
-                    "SELECT scope FROM bookmark WHERE ref = ?1",
+                    "SELECT scope FROM bookmark WHERE uri = ?1",
                     [page_ref],
                     |r| r.get(0),
                 )
@@ -213,9 +213,9 @@ mod tests {
     #[tokio::test]
     async fn set_moves_and_undo_walks_it_back() {
         let fx = services_with_effort().await;
-        let thread = oxplow_domain::uri::build::thread_uri(fx.thread);
+        let thread = fx.thread.to_string();
         let set = |scope: &str| {
-            json!({ "ref": "oxplow:oxplow/page?page=git-dashboard", "page_kind": "git-dashboard",
+            json!({ "uri": "oxplow:oxplow/page?page=git-dashboard", "page_kind": "git-dashboard",
                     "label": "Git", "scope": scope, "thread": thread })
         };
         let first = fx
@@ -262,8 +262,8 @@ mod tests {
     #[tokio::test]
     async fn remove_undoes_and_agents_cannot_bookmark() {
         let fx = services_with_effort().await;
-        let thread = oxplow_domain::uri::build::thread_uri(fx.thread);
-        let input = json!({ "ref": "oxplow:oxplow/file?path=src/a.rs", "page_kind": "file", "scope": "stream", "thread": thread });
+        let thread = fx.thread.to_string();
+        let input = json!({ "uri": "oxplow:oxplow/file?path=src/a.rs", "page_kind": "file", "scope": "stream", "thread": thread });
         let agent = Actor::Agent {
             session_id: None,
             thread_id: Some(fx.thread),
@@ -286,7 +286,7 @@ mod tests {
             .run(
                 &Actor::Human,
                 REMOVE,
-                json!({ "ref": "oxplow:oxplow/file?path=src/a.rs", "thread": thread }),
+                json!({ "uri": "oxplow:oxplow/file?path=src/a.rs", "thread": thread }),
                 false,
             )
             .await

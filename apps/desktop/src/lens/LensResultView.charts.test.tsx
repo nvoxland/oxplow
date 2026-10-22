@@ -157,7 +157,7 @@ test("timeline lenses list entries oldest first", () => {
   const { container } = render(
     <LensResultView
       run={run(
-        { viz: "timeline", timeline: { at: "at", label: "w", ref: null } },
+        { viz: "timeline", timeline: { at: "at", label: "w", uri: null } },
         ["at", "w"],
         [
           ["2026-09-30", "shipped"],

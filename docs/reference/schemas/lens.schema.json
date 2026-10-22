@@ -353,6 +353,18 @@
           ],
           "default": null
         },
+        "role": {
+          "description": "What it is to the page, and so where it rides in the page's URI:\na `resource` (the default) names what the page shows, in the URI's\n`?`; `filter` narrows how it shows it, in the URI's `#` view. A\n`selection` follows from the columns and is never written: a param\na column of the lens (or of a part of the page) selects, in the\nview too. A loaded lens always says.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ParamRole"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "presets": {
           "description": "A `date_range`'s quick picks, of `1d 2d 3d 7d 30d 90d all`; the\ndefault is `1d 7d 30d all`.",
           "type": "array",
@@ -438,6 +450,26 @@
           "description": "Text to look for, trimmed, NULL when empty; a box that applies as\nyou type.",
           "type": "string",
           "const": "search"
+        }
+      ]
+    },
+    "ParamRole": {
+      "description": "What a lens param is to its page.",
+      "oneOf": [
+        {
+          "description": "Names what the page shows (its URI's `?`); a control in the\npage's rail whose change opens another resource.",
+          "type": "string",
+          "const": "resource"
+        },
+        {
+          "description": "Narrows how the page shows it (its URI's `#` view); a control in\nthe page's rail whose change replaces the view.",
+          "type": "string",
+          "const": "filter"
+        },
+        {
+          "description": "The row a click picked; the rail shows that row, never an input.",
+          "type": "string",
+          "const": "selection"
         }
       ]
     },
@@ -756,8 +788,8 @@
             "null"
           ]
         },
-        "ref": {
-          "description": "A column holding a canonical ref each entry links to.",
+        "uri": {
+          "description": "A column holding the URI each entry links to.",
           "type": [
             "string",
             "null"

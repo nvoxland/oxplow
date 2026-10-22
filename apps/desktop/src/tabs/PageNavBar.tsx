@@ -1,3 +1,4 @@
+import { OpenWith, type OpenWithProps } from "./OpenWith.js";
 import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import { AskMenu, type AskTarget } from "../components/Prompts/AskMenu.js";
@@ -82,6 +83,8 @@ export interface PageNavBarProps {
   /** The page's canonical ref (and stream): the Ask menu — Ask About
    *  This and the prompts about its kind (P6.D1/D2). Omitted, no Ask. */
   ask?: AskTarget;
+  /** The pages that render the URI shown, when there are several. */
+  openWith?: OpenWithProps;
 }
 
 /**
@@ -107,6 +110,7 @@ export function PageNavBar({
   actions,
   pin,
   ask,
+  openWith,
 }: PageNavBarProps) {
   const [backlinksOpen, setBacklinksOpen] = useState(false);
   const [outboundOpen, setOutboundOpen] = useState(false);
@@ -372,6 +376,7 @@ export function PageNavBar({
         <div style={{ flex: 1 }} />
       )}
 
+      {openWith ? <OpenWith {...openWith} style={{ ...navButtonStyle(true), color: "var(--text-secondary)", fontSize: 11 }} /> : null}
       {ask ? <AskMenu ask={ask} buttonStyle={{ ...navButtonStyle(true), color: "var(--text-secondary)", fontSize: 11 }} /> : null}
       {ask ? (
         <RefCommandsMenu target={ask} buttonStyle={{ ...navButtonStyle(true), color: "var(--text-secondary)", fontSize: 11 }} />

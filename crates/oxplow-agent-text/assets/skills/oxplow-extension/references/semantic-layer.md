@@ -1,4 +1,4 @@
-# Finding the data, refs, and publishing models
+# Finding the data, URIs, and publishing models
 
 ## Find the data
 
@@ -33,16 +33,22 @@
 
 ## Refs in scripts and SQL
 
-Everything in oxplow has one identity, its ref (`oxplow:oxplow/effort?id=eff12`,
+Everything in oxplow has one identity, its URI (`oxplow:oxplow/effort?id=eff12`,
 `oxplow:oxplow/work_item?id=<id>&provider=oxplow`, `oxplow:oxplow/file?path=src/a.rs`, `oxplow:oxplow/collector?collector=triage/todos`).
-Carry refs; never assemble or dissect them:
+Carry URIs; never assemble or dissect them:
 
-- **In SQL**, select the model's `ref` column (`v_effort.ref`,
-  `v_decision.ref`, `v_thread.ref`, `v_work_item.ref`, …) — each an
+- **In SQL**, select the model's `uri` column (`v_effort.uri`,
+  `v_decision.uri`, `v_thread.uri`, `v_work_item.uri`, …) — each an
   oxplow URI (`oxplow:oxplow/effort?id=eff12`) — and compare URIs to URIs:
-  `WHERE ref = :ref`. To build one, `uri(resource, key1, value1, …)`:
-  `uri('oxplow/effort', 'id', 'eff' || id)`; to read a param back,
-  `uri_param(ref, 'id')`. Never `'oxplow:…' || id` or `substr(ref, …)`.
+  `WHERE uri = :uri`. To build one, `uri(resource, key1, value1, …)`:
+  `uri('oxplow/effort', 'id', json_extract(e.payload, '$.effort'))` (an event
+  payload field named for one resource holds a bare id); to read a param back,
+  `uri_param(uri, 'id')`. Never `'oxplow:…' || id`, `'eff' || id` or `substr(uri, …)`.
+- **A field named for one resource is a bare id, not a URI**: a command
+  input `thread` is `thr3`, `effort` is `eff12`, `claim` is the integer `7`.
+  Select `uri_param(t.uri, 'id')` to feed one; `{{param.x.id}}` does the
+  same in an action's input. A URI goes only where a field can name anything
+  (`uri`, `target`, `subject`) and for work items.
 - **To link one lens to another from SQL**, `uri('oxplow/lens', 'lens',
   'oxplow-bundled/thread-activity', 'thread_id', thread_id)` gives
   `oxplow:oxplow/lens?lens=oxplow-bundled/thread-activity&thread_id=7`
@@ -52,10 +58,10 @@ Carry refs; never assemble or dissect them:
   `uri.param(r, "path")` / `uri.id(r, resource = "oxplow/effort")` (which
   refuses a URI of another resource) / `uri.resource(r)` / `uri.is_uri(v)`.
   Never `"oxplow:oxplow/effort?id=" + id` or slicing a URI.
-- **In a lens action's input**, pass a row's ref column
-  (`{ ref: "{{row.ref}}" }`), not a ref rebuilt from an id.
-- **A ref may dangle.** The thing it names can be deleted, or its
-  extension removed; store the ref anyway, and expect a reader to show it
+- **In a lens action's input**, pass a row's uri column
+  (`{ uri: "{{row.uri}}" }`), not a URI rebuilt from an id.
+- **A URI may dangle.** The thing it names can be deleted, or its
+  extension removed; store the URI anyway, and expect a reader to show it
   as unresolved rather than fail.
 
 ## Publishing models
@@ -80,7 +86,7 @@ models:
 
 ```sql
 -- models/blocked.sql
-SELECT ref, title FROM ref('work_item') WHERE state = 'blocked'
+SELECT uri, title FROM ref('work_item') WHERE state = 'blocked'
 ```
 
 - It publishes as `v_<extension>_<name>` (dashes as underscores):

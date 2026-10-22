@@ -5,13 +5,13 @@
    `v_knowledge_ref` rows with `stale = 1`; `oxplow_wiki_ref_drift` shows what
    changed in one.
 2. Write the whole page with `run_command`:
-   `oxplow.knowledge.write_page { slug, body, verified_refs, removed_refs }`
+   `oxplow.knowledge.write_page { slug, body, verified_files, removed_files }`
    (`title` optionally sets the `# ` heading). That one run writes the row,
    the links and `.oxplow/wiki/<slug>.md`. Every `[[link]]` must resolve: a
    dangling one is refused and named, so fix or drop it and run again.
-   - `verified_refs`: files you re-read against this body; their freshness
+   - `verified_files`: files you re-read against this body; their freshness
      pins move to now. A file under a `[[dir:…]]` the page cites counts.
-   - `removed_refs`: files you took out of the body.
+   - `removed_files`: files you took out of the body.
    - Refs left in place without re-checking go in NEITHER list, keeping
      their pin. Never write `@disk` / `@HEAD` / `@<sha>`: they are stripped
      on parse; the pin is stamped at write time.

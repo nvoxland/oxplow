@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`effort.decision_reviewed@2` (P7.C4): a reviewer confirmed or\ndismissed an inferred decision, or reopened one they had reviewed.",
+  "properties": {
+    "decision": {
+      "description": "The decision's id.",
+      "format": "int64",
+      "type": "integer"
+    },
+    "effort": {
+      "description": "The effort it's on (`eff12`), when on one.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "outcome": {
+      "description": "`confirmed`, `dismissed` or `inferred` (reopened).",
+      "type": "string"
+    }
+  },
+  "required": [
+    "decision",
+    "outcome"
+  ],
+  "title": "EffortDecisionReviewedV2",
+  "type": "object"
+}

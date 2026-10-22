@@ -1,7 +1,7 @@
 # oxplow-bundled/store-reasoning: a `reasoning` job's answer becomes the
 # effort's inferred decisions and claims (replacing any it had; a claim a
 # reviewer acted on stays, core keeps it). The job's intent key
-# (`reasoning:<effort ref>`, `…@<n>` when asked again) says which effort.
+# (`reasoning:<effort id>`, as `reasoning:eff3`, `…@<n>` when asked again) says which effort.
 # A reply that isn't the JSON asked for (an object with a `decisions` or
 # a `claims` list) is skipped, saying so: a model that writes prose isn't
 # a failure of this effect. Both writers run even with an empty list, so a
@@ -71,9 +71,9 @@ def transform(x):
             continue
         kind = text_of(c.get("kind")).lower()
         claim = {"statement": statement[:1000], "kind": kind if kind in KINDS else "other"}
-        evidence = text_of(c.get("evidence_ref"))
+        evidence = text_of(c.get("evidence"))
         if evidence:
-            claim["evidence_ref"] = evidence[:400]
+            claim["evidence"] = evidence[:400]
         claims.append(claim)
         if len(claims) == MAX:
             break

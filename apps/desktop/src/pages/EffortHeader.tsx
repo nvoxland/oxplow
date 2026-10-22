@@ -13,7 +13,7 @@ import { workItemTabRef } from "../tabs/pageRefs.js";
 import { workItemLabel } from "../workItemRef.js";
 import { useWorkListProfile } from "../useWorkListProfile.js";
 import { workItemRefOfMention } from "../workItems.js";
-import { effortUri, identityOf, workItemOf } from "../uri/uri.js";
+import { identityOf, workItemOf } from "../uri/uri.js";
 
 /** An effort as its page shows it (`v_effort`). */
 export interface EffortRecord {
@@ -92,7 +92,7 @@ export function EffortHeader({
 }) {
   const profile = useWorkListProfile();
   const row = effortRowId(effortId);
-  const ref = effortUri(row === null ? effortId : `eff${row}`);
+  const effortBare = row === null ? effortId : `eff${row}`;
   const [effort, setEffort] = useState<EffortRecord | null>(null);
   const [linking, setLinking] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -136,7 +136,7 @@ export function EffortHeader({
           ariaLabel="Effort title"
           onCommit={(next) =>
             void run("Rename the effort", "oxplow.effort.update", {
-              effort: ref,
+              effort: effortBare,
               title: next.trim() === "" ? null : next.trim(),
             })
           }
@@ -159,7 +159,7 @@ export function EffortHeader({
               data-testid="effort-unlink"
               style={buttonStyle}
               disabled={busy}
-              onClick={() => void run("Unlink the effort", "oxplow.effort.link", { effort: ref, work_item: null })}
+              onClick={() => void run("Unlink the effort", "oxplow.effort.link", { effort: effortBare, work_item: null })}
             >
               Unlink
             </button>
@@ -187,7 +187,7 @@ export function EffortHeader({
             data-testid="effort-close"
             style={buttonStyle}
             disabled={busy}
-            onClick={() => void run("Close the effort", "oxplow.effort.close", { effort: ref })}
+            onClick={() => void run("Close the effort", "oxplow.effort.close", { effort: effortBare })}
           >
             Close effort
           </button>
@@ -211,7 +211,7 @@ export function EffortHeader({
               recordOpError({ label: "Link the effort", message: `\`${item}\` isn't a work item's id or ref` });
               return;
             }
-            if (await run("Link the effort", "oxplow.effort.link", { effort: ref, work_item: workItem })) {
+            if (await run("Link the effort", "oxplow.effort.link", { effort: effortBare, work_item: workItem })) {
               setLinking(false);
             }
           }}

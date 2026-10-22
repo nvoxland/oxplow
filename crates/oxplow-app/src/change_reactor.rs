@@ -295,7 +295,7 @@ async fn deep_now(svc: &Services, target: ChangeTarget, seq: i64) -> Result<(), 
 mod tests {
     use super::*;
     use oxplow_domain::events::schema::{
-        SnapshotTaken, SnapshotTakenV2, VcsHeadMoved, VcsHeadMovedV1,
+        SnapshotTaken, SnapshotTakenV3, VcsHeadMoved, VcsHeadMovedV2,
     };
     use oxplow_domain::events::Anchors;
     use oxplow_domain::{Envelope, StreamId};
@@ -327,9 +327,9 @@ mod tests {
     ) -> Envelope {
         Envelope::typed::<SnapshotTaken>(
             "system",
-            &SnapshotTakenV2 {
-                stream: "oxplow:oxplow/stream?id=str1".into(),
-                snapshot: "oxplow:oxplow/snapshot?id=1".into(),
+            &SnapshotTakenV3 {
+                stream: "str1".into(),
+                snapshot: 1,
                 parent: None,
                 trigger,
                 unchanged,
@@ -344,11 +344,11 @@ mod tests {
     fn head_moved() -> Envelope {
         Envelope::typed::<VcsHeadMoved>(
             "system",
-            &VcsHeadMovedV1 {
-                stream: "oxplow:oxplow/stream?id=str1".into(),
-                snapshot: "oxplow:oxplow/snapshot?id=1".into(),
+            &VcsHeadMovedV2 {
+                stream: "str1".into(),
+                snapshot: 1,
                 from: None,
-                to: "oxplow:oxplow/commit?sha=abc".into(),
+                to: "abc".into(),
             },
         )
     }
@@ -585,9 +585,7 @@ mod tests {
                 &oxplow_domain::Actor::Human,
                 "oxplow.vcs.stage",
                 serde_json::json!({
-                    "stream": oxplow_domain::uri::build::stream_uri(
-                        f.svc.streams.list_streams().await.unwrap()[0].id
-                    ),
+                    "stream": f.svc.streams.list_streams().await.unwrap()[0].id.to_string(),
                     "paths": ["src/new.rs"]
                 }),
                 false,
@@ -877,14 +875,10 @@ mod tests {
         assert!(reactor.handles("effort.finished"));
         let finished = Envelope::typed::<oxplow_domain::events::schema::EffortFinished>(
             "system",
-            &oxplow_domain::events::schema::EffortFinishedV2 {
-                // The ref, as `effort.lifecycle` logs it.
-                effort: oxplow_domain::uri::build::effort_uri(f.effort),
+            &oxplow_domain::events::schema::EffortFinishedV3 {
+                effort: f.effort.to_string(),
                 work_item: Some("oxplow:oxplow/work_item?id=tsk1&provider=oxplow".into()),
-                end_snapshot: Some(oxplow_domain::uri::build::keyed(
-                    oxplow_domain::uri::resources::SNAPSHOT,
-                    &end.to_string(),
-                )),
+                end_snapshot: Some(end),
             },
         );
         reactor.handle(&log(&f.svc, finished).await).await.unwrap();
@@ -918,8 +912,8 @@ mod tests {
         let reactor = ChangeReactor::new(Arc::downgrade(&f.svc));
         let finished = Envelope::typed::<oxplow_domain::events::schema::EffortFinished>(
             "system",
-            &oxplow_domain::events::schema::EffortFinishedV2 {
-                effort: oxplow_domain::uri::build::effort_uri(f.effort),
+            &oxplow_domain::events::schema::EffortFinishedV3 {
+                effort: f.effort.to_string(),
                 work_item: None,
                 end_snapshot: None,
             },

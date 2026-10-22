@@ -1956,7 +1956,7 @@ export type CommandUi = {
 	about?: string | null,
 	/**
 	 *  The input it runs with. A string that is exactly `{{stream}}`,
-	 *  `{{thread}}`, `{{ref}}` or `{{ref.id}}` is bound from where it runs;
+	 *  `{{thread}}`, `{{uri}}` or `{{uri.id}}` is bound from where it runs;
 	 *  a binding there's nothing for makes it unavailable there.
 	 */
 	input?: unknown | null,
@@ -1968,7 +1968,7 @@ export type CommandUi = {
 	form?: string | null,
 	/**
 	 *  The page to open once it ran: a tab id whose `{{result.<field>}}`
-	 *  takes the result's field (`oxplow:oxplow/page?id={{result.id}}&page=custom-dashboard`).
+	 *  takes the result's field (`oxplow:oxplow/dashboard?id={{result.id}}`).
 	 */
 	open_after?: string | null,
 	/**
@@ -2799,13 +2799,36 @@ export type ExtensionPage = {
 	category: LauncherCategory | null,
 	/**  More words the launcher matches it on. */
 	keywords: string | null,
-	/**  The params its id carries (`oxplow:oxplow/page?area=agents&page=settings`). */
+	/**
+	 *  The params naming what it shows, in its URI's `?`
+	 *  (`oxplow:oxplow/page?page=settings&stream=str1`); its lens's filters and
+	 *  selections ride in the `#` view.
+	 */
 	params: string[],
 	/**
 	 *  The lens whose value (a `number` lens) is the launcher's badge
 	 *  (`<extension>/<slug>`).
 	 */
 	count: string | null,
+	/**
+	 *  The resources it renders (`oxplow/file`, `acme/pr`; `https`, `http`
+	 *  for a web page): a URI of one opens on it, the URI its tab's id.
+	 *  Empty: a route, opened at `page_ref`.
+	 */
+	for: string[],
+	/**
+	 *  Which URIs of those it takes, by param: `present`, `absent`, or an
+	 *  anchored pattern the value matches (one form the desktop's JS and
+	 *  Rust read alike). Empty: every one.
+	 */
+	accepts: { [key in string]: string },
+	/**
+	 *  What its resource opens on when the URI's view names no renderer
+	 *  (`#oxplow.renderer=`): only a page of the extension declaring it.
+	 */
+	default: boolean,
+	/**  Its tab leads the strip and isn't evicted (an agent session's). */
+	pinned: boolean,
 	/**  What draws it. */
 	body: PageBody,
 };
@@ -4240,10 +4263,12 @@ export type LensParam = {
 	 */
 	type?: ParamType | null,
 	/**
-	 *  What it is to the page, which follows from the columns and is
-	 *  never written: a `selection` when a column of the lens (or of a
-	 *  part of the page) selects it, else a `filter`. A loaded lens
-	 *  always says.
+	 *  What it is to the page, and so where it rides in the page's URI:
+	 *  a `resource` (the default) names what the page shows, in the URI's
+	 *  `?`; `filter` narrows how it shows it, in the URI's `#` view. A
+	 *  `selection` follows from the columns and is never written: a param
+	 *  a column of the lens (or of a part of the page) selects, in the
+	 *  view too. A loaded lens always says.
 	 */
 	role?: ParamRole | null,
 	/**
@@ -4465,8 +4490,8 @@ export type LensSteps = {
 export type LensTimeline = {
 	at: string | null,
 	label: string | null,
-	/**  A column holding a canonical ref each entry links to. */
-	ref: string | null,
+	/**  A column holding the URI each entry links to. */
+	uri: string | null,
 };
 
 /**  `tree` viz: which columns nest the rows. */
@@ -5505,7 +5530,15 @@ export type ParamDecl = {
 
 /**  What a lens param is to its page. */
 export type ParamRole = 
-/**  Narrows what the page shows; a control in the page's rail. */
+/**
+ *  Names what the page shows (its URI's `?`); a control in the
+ *  page's rail whose change opens another resource.
+ */
+"resource" | 
+/**
+ *  Narrows how the page shows it (its URI's `#` view); a control in
+ *  the page's rail whose change replaces the view.
+ */
 "filter" | 
 /**  The row a click picked; the rail shows that row, never an input. */
 "selection";
@@ -5892,11 +5925,6 @@ export type ResourceDecl = {
 	searchable: string | null,
 	icon: string | null,
 	wikilink: WikilinkDecl | null,
-	/**
-	 *  The page one opens on (its page URI), given `ref=<uri>`: an
-	 *  extension's resource until a renderer opens a URI as itself.
-	 */
-	page: string | null,
 };
 
 /**  How long a namespace's event payloads and large content are kept. */

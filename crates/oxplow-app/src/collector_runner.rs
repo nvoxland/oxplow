@@ -38,7 +38,7 @@ use oxplow_config::collectors::{
 use oxplow_db::{
     CollectorRun, EntityTable, EntityWrite, SqlCell, SqliteCollectorStore, StoredType,
 };
-use oxplow_domain::events::schema::{CollectorSynced, CollectorSyncedV1};
+use oxplow_domain::events::schema::{CollectorSynced, CollectorSyncedV2};
 use oxplow_domain::{DomainError, Envelope, StoredEvent};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -345,7 +345,7 @@ pub async fn run_due_collectors(state: &crate::Services) -> Vec<(String, String)
     }
     for (owner, id) in &due {
         let input = serde_json::json!({
-            "collector": oxplow_domain::uri::build::collector_uri(owner, id),
+            "collector": format!("{owner}/{id}"),
         });
         if let Err(e) = state
             .commands
@@ -1113,7 +1113,7 @@ async fn run_collector_once(
         last_event_id,
         run_id: Some(run.run().to_string()),
     };
-    let collector = oxplow_domain::uri::build::collector_uri(owner, id);
+    let collector = format!("{owner}/{id}");
     let event = Synced {
         source: source.clone(),
         cause: trigger.event().map(|e| (e.envelope.id.clone(), e.seq)),
@@ -1269,7 +1269,7 @@ fn plan_events(
 #[derive(Clone)]
 struct Synced {
     source: String,
-    /// `oxplow:oxplow/collector?collector=<owner>/<id>`.
+    /// `<owner>/<id>`.
     collector: String,
     trigger: &'static str,
     /// The trigger event (`on:`): the envelope's cause, and its seq keys
@@ -1286,9 +1286,13 @@ impl Synced {
         elapsed_ms: i64,
         error: Option<String>,
     ) -> Envelope {
+        let uri = oxplow_domain::uri::build::keyed(
+            oxplow_domain::uri::resources::COLLECTOR,
+            &self.collector,
+        );
         let env = Envelope::typed::<CollectorSynced>(
             self.source.clone(),
-            &CollectorSyncedV1 {
+            &CollectorSyncedV2 {
                 collector: self.collector.clone(),
                 trigger: self.trigger.into(),
                 status: status.into(),
@@ -1298,11 +1302,11 @@ impl Synced {
                 error,
             },
         )
-        .with_subject([self.collector.clone()]);
+        .with_subject([uri.clone()]);
         match &self.cause {
             Some((id, seq)) => env
                 .with_cause(id.clone())
-                .with_dedupe_key(format!("collector.synced:{}:{seq}", self.collector)),
+                .with_dedupe_key(format!("collector.synced:{uri}:{seq}")),
             None => env,
         }
     }
@@ -1413,7 +1417,7 @@ impl RunLog {
         });
         let synced = Synced {
             source: r.source.to_string(),
-            collector: oxplow_domain::uri::build::collector_uri(r.owner, r.id),
+            collector: format!("{}/{}", r.owner, r.id),
             trigger: r.trigger,
             cause: r.cause,
         };
@@ -1858,34 +1862,23 @@ pub const SYNC: &str = "oxplow.collector.sync";
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SyncInput {
-    /// The collector's ref (`oxplow:oxplow/collector?collector=<extension>/<id>`).
+    /// The collector (`<extension>/<id>`).
     pub collector: String,
     /// For a report collector: the thread its run is recorded in
-    /// (`oxplow:oxplow/thread?id=thr3`); an agent's is always its own.
+    /// (`thr3`); an agent's is always its own.
     #[serde(default)]
     pub thread: Option<String>,
 }
 
-/// A collector ref's extension and `id` (`oxplow:oxplow/collector?collector=work/hot` → `work`,
-/// `hot`).
+/// A collector id's extension and `id` (`work/hot` → `work`, `hot`).
 fn collector_parts(collector: &str) -> Result<(String, String), oxplow_domain::CommandError> {
-    let invalid = |message: String| oxplow_domain::CommandError::Invalid {
-        field: Some("/collector".into()),
-        message,
-    };
-    let id = oxplow_domain::uri::build::id_of(collector, oxplow_domain::uri::resources::COLLECTOR)
-        .map_err(|e| {
-            invalid(format!(
-                "`{}` isn't a collector ref (collector:<extension>/<id>)",
-                e.text
-            ))
-        })?;
-    id.split_once('/')
+    collector
+        .split_once('/')
+        .filter(|(owner, id)| !owner.is_empty() && !id.is_empty() && !id.contains('/'))
         .map(|(owner, id)| (owner.to_string(), id.to_string()))
-        .ok_or_else(|| {
-            invalid(format!(
-                "`{collector}` isn't a collector ref (collector:<extension>/<id>)"
-            ))
+        .ok_or_else(|| oxplow_domain::CommandError::Invalid {
+            field: Some("/collector".into()),
+            message: format!("`{collector}` isn't a collector id (`<extension>/<id>`)"),
         })
 }
 
@@ -2670,7 +2663,7 @@ pub(crate) mod tests {
                  INSERT INTO threads (id, stream_id, title, created_at, updated_at)
                    VALUES (1, 1, 'T', '2026-01-01', '2026-01-01');
                  INSERT INTO capability_provider (capability, provider, active) VALUES ('work_items', 'oxplow', 1);
-                 INSERT INTO work_item (ref, provider, title, state, native_state, native, thread_id, created_at, updated_at) VALUES
+                 INSERT INTO work_item (uri, provider, title, state, native_state, native, thread_id, created_at, updated_at) VALUES
                    ('oxplow:oxplow/work_item?id=tsk1&provider=oxplow', 'oxplow', 'Fix login', 'todo', 'ready', '{\"priority\":\"high\"}', 1, '2026-01-01', '2026-01-01'),
                    ('oxplow:oxplow/work_item?id=tsk2&provider=oxplow', 'oxplow', 'Tidy docs', 'todo', 'ready', '{\"priority\":\"low\"}', 1, '2026-01-01', '2026-01-01'),
                    ('oxplow:oxplow/work_item?id=tsk3&provider=oxplow', 'oxplow', 'Ship it', 'done', 'done', '{\"priority\":\"high\"}', 1, '2026-01-01', '2026-01-01');",
@@ -2736,10 +2729,10 @@ pub(crate) mod tests {
                         extension(
                             &svc.layout.project_dir,
                             "work",
-                            "manifest: 2\nname: work\nintent:\n  purpose: test\npermissions: { ai: true }\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: kind.star\n    input: \"SELECT 'a' AS ref\"\n    entities:\n      - { name: kind, key: ref, columns: { ref: text, kind: text } }\n",
+                            "manifest: 2\nname: work\nintent:\n  purpose: test\npermissions: { ai: true }\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: kind.star\n    input: \"SELECT 'a' AS uri\"\n    entities:\n      - { name: kind, key: uri, columns: { uri: text, kind: text } }\n",
                             &[(
                                 "kind.star",
-                                "def transform(input):\n    rows = []\n    for r in input[\"rows\"]:\n        a = ai_classify(\"is this a bug?\", [\"bug\", \"feature\"])\n        rows.append({\"ref\": r[\"ref\"], \"kind\": a[\"label\"]})\n    return {\"entities\": {\"kind\": rows}}\n",
+                                "def transform(input):\n    rows = []\n    for r in input[\"rows\"]:\n        a = ai_classify(\"is this a bug?\", [\"bug\", \"feature\"])\n        rows.append({\"uri\": r[\"uri\"], \"kind\": a[\"label\"]})\n    return {\"entities\": {\"kind\": rows}}\n",
                             )],
                         );
                         crate::test_fixtures::activate_with_problems(svc).await;
@@ -2748,7 +2741,7 @@ pub(crate) mod tests {
                             .run(
                                 &oxplow_domain::Actor::Human,
                                 SYNC,
-                                json!({ "collector": "oxplow:oxplow/collector?collector=work/star" }),
+                                json!({ "collector": "work/star" }),
                                 false,
                             )
                             .await
@@ -2794,7 +2787,7 @@ pub(crate) mod tests {
             .run(
                 &oxplow_domain::Actor::Human,
                 SYNC,
-                json!({ "collector": "oxplow:oxplow/collector?collector=ghost/none" }),
+                json!({ "collector": "ghost/none" }),
                 false,
             )
             .await
@@ -2823,7 +2816,7 @@ pub(crate) mod tests {
             fx.svc.commands.run(
                 &oxplow_domain::Actor::Human,
                 SYNC,
-                json!({ "collector": "oxplow:oxplow/collector?collector=work/bad" }),
+                json!({ "collector": "work/bad" }),
                 false,
             )
         };
@@ -2890,10 +2883,10 @@ pub(crate) mod tests {
         extension(
             &root,
             "work",
-            "manifest: 2\nname: work\nintent:\n  purpose: test\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: hot.star\n    trigger: { every: 10m }\n    input: \"SELECT ref, title FROM v_work_item\"\n    entities:\n      - { name: hot, key: ref, columns: { ref: text, title: text } }\n",
+            "manifest: 2\nname: work\nintent:\n  purpose: test\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: hot.star\n    trigger: { every: 10m }\n    input: \"SELECT uri, title FROM v_work_item\"\n    entities:\n      - { name: hot, key: uri, columns: { uri: text, title: text } }\n",
             &[(
                 "hot.star",
-                "def transform(input):\n    return {\"entities\": {\"hot\": [{\"ref\": r[\"ref\"], \"title\": r[\"title\"]} for r in input[\"rows\"]]}}\n",
+                "def transform(input):\n    return {\"entities\": {\"hot\": [{\"uri\": r[\"uri\"], \"title\": r[\"title\"]} for r in input[\"rows\"]]}}\n",
             )],
         );
         crate::test_fixtures::activate_with_problems(&fx.svc).await;
@@ -3034,8 +3027,8 @@ pub(crate) mod tests {
         let ctx = Collectors::of(&fx.svc, &root);
         let event = serde_json::json!({
             "type": "thread.checkpoint",
-            "payload": { "thread": "oxplow:oxplow/thread?id=thr1", "turn": "oxplow:oxplow/turn?id=trn7", "reason": "turn_end",
-                         "snapshot": "oxplow:oxplow/snapshot?id=1", "changed": true, "writing_tools": 1 },
+            "payload": { "thread": "thr1", "turn": "trn7", "reason": "turn_end",
+                         "snapshot": 1, "changed": true, "writing_tools": 1 },
             "anchors": { "thread_id": "thr1", "turn_id": 7 },
         });
         let preview = preview_collector(&ctx, "work", "seen", Some(&event), None)
@@ -3045,7 +3038,7 @@ pub(crate) mod tests {
             preview.entities[0].rows,
             vec![vec![
                 SqlCell::Text("x".into()),
-                SqlCell::Int(1),
+                SqlCell::Int(2),
                 SqlCell::Text("fixture".into()),
                 SqlCell::Int(7),
             ]]
@@ -3063,21 +3056,21 @@ pub(crate) mod tests {
     async fn derived_sources_transform_their_input() {
         let root = tempfile::tempdir().unwrap();
         let entity =
-            "    entities:\n      - { name: hot, key: ref, columns: { ref: text, title: text } }\n";
+            "    entities:\n      - { name: hot, key: uri, columns: { uri: text, title: text } }\n";
         extension(
             root.path(),
             "work",
             &format!(
-                "manifest: 2\nname: work\nintent:\n  purpose: test\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: hot.star\n    input: \"SELECT ref, title, json_extract(native, '$.priority') AS priority FROM v_work_item WHERE state = 'todo'\"\n{entity}  - id: jq\n    runtime: jaq\n    entry: hot.jq\n    input: \"SELECT ref, title FROM v_work_item\"\n    entities:\n      - {{ name: upper, key: ref, columns: {{ ref: text, title: text }} }}\n"
+                "manifest: 2\nname: work\nintent:\n  purpose: test\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: hot.star\n    input: \"SELECT uri, title, json_extract(native, '$.priority') AS priority FROM v_work_item WHERE state = 'todo'\"\n{entity}  - id: jq\n    runtime: jaq\n    entry: hot.jq\n    input: \"SELECT uri, title FROM v_work_item\"\n    entities:\n      - {{ name: upper, key: uri, columns: {{ uri: text, title: text }} }}\n"
             ),
             &[
                 (
                     "hot.star",
-                    "def transform(input):\n    return {\"entities\": {\"hot\": [{\"ref\": r[\"ref\"], \"title\": r[\"title\"]} for r in input[\"rows\"] if r[\"priority\"] == \"high\"]}}\n",
+                    "def transform(input):\n    return {\"entities\": {\"hot\": [{\"uri\": r[\"uri\"], \"title\": r[\"title\"]} for r in input[\"rows\"] if r[\"priority\"] == \"high\"]}}\n",
                 ),
                 (
                     "hot.jq",
-                    "{entities: {upper: [.rows[] | {ref, title: (.title | ascii_upcase)}]}}",
+                    "{entities: {upper: [.rows[] | {uri, title: (.title | ascii_upcase)}]}}",
                 ),
             ],
         );
@@ -3142,10 +3135,10 @@ pub(crate) mod tests {
         extension(
             root.path(),
             "work",
-            "manifest: 2\nname: work\nintent:\n  purpose: test\npermissions: { ai: true }\nai_profiles:\n  - { id: sort, description: Sorts., fallback: decide }\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: kind.star\n    input: \"SELECT ref, title FROM v_work_item\"\n    entities:\n      - { name: kind, key: ref, columns: { ref: text, kind: text } }\n",
+            "manifest: 2\nname: work\nintent:\n  purpose: test\npermissions: { ai: true }\nai_profiles:\n  - { id: sort, description: Sorts., fallback: decide }\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: kind.star\n    input: \"SELECT uri, title FROM v_work_item\"\n    entities:\n      - { name: kind, key: uri, columns: { uri: text, kind: text } }\n",
             &[(
                 "kind.star",
-                "def transform(input):\n    rows = []\n    for r in input[\"rows\"]:\n        a = ai_classify(\"is this a bug?\", [\"bug\", \"feature\"], role = \"sort\")\n        b = ai_classify(\"is this a bug?\", [\"bug\", \"feature\"], role = \"sort\")\n        rows.append({\"ref\": r[\"ref\"], \"kind\": a[\"label\"] if a == b else \"differs\"})\n    return {\"entities\": {\"kind\": rows}}\n",
+                "def transform(input):\n    rows = []\n    for r in input[\"rows\"]:\n        a = ai_classify(\"is this a bug?\", [\"bug\", \"feature\"], role = \"sort\")\n        b = ai_classify(\"is this a bug?\", [\"bug\", \"feature\"], role = \"sort\")\n        rows.append({\"uri\": r[\"uri\"], \"kind\": a[\"label\"] if a == b else \"differs\"})\n    return {\"entities\": {\"kind\": rows}}\n",
             )],
         );
         let db = task_db().await;
@@ -3242,10 +3235,10 @@ pub(crate) mod tests {
         extension(
             root.path(),
             "work",
-            "manifest: 2\nname: work\nintent:\n  purpose: test\npermissions: { process: true }\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: hot.star\n    input: \"SELECT ref, title, json_extract(native, '$.priority') AS priority FROM v_work_item WHERE state = 'todo'\"\n    entities:\n      - { name: hot, key: ref, columns: { ref: text, title: text } }\n  - id: sh\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - { name: raw, key: id, columns: { id: int } }\n",
+            "manifest: 2\nname: work\nintent:\n  purpose: test\npermissions: { process: true }\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: hot.star\n    input: \"SELECT uri, title, json_extract(native, '$.priority') AS priority FROM v_work_item WHERE state = 'todo'\"\n    entities:\n      - { name: hot, key: uri, columns: { uri: text, title: text } }\n  - id: sh\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - { name: raw, key: id, columns: { id: int } }\n",
             &[(
                 "hot.star",
-                "def transform(input):\n    return {\"entities\": {\"hot\": [{\"ref\": r[\"ref\"], \"title\": r[\"title\"]} for r in input[\"rows\"] if r[\"priority\"] == \"high\"]}}\n",
+                "def transform(input):\n    return {\"entities\": {\"hot\": [{\"uri\": r[\"uri\"], \"title\": r[\"title\"]} for r in input[\"rows\"] if r[\"priority\"] == \"high\"]}}\n",
             )],
         );
         script(
@@ -3277,7 +3270,7 @@ pub(crate) mod tests {
             (hot.entity.as_str(), hot.view.as_str()),
             ("hot", "v_work_hot")
         );
-        assert_eq!(hot.columns, vec!["ref", "title"]);
+        assert_eq!(hot.columns, vec!["uri", "title"]);
         assert_eq!(
             serde_json::to_value(&hot.rows).unwrap(),
             json!([[

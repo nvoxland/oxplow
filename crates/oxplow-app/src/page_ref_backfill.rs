@@ -549,11 +549,11 @@ mod tests {
         // Another list's item, as its records left it in the interface.
         db.transaction(|tx| {
             for sql in [
-                "INSERT INTO work_item (ref, provider, title, body, state, native_state, created_at, updated_at)
+                "INSERT INTO work_item (uri, provider, title, body, state, native_state, created_at, updated_at)
                  VALUES ('oxplow:oxplow/work_item?id=ENG-12&provider=issues', 'issues', 'Theirs', '', 'todo', 'Todo', 't', 't')",
-                "INSERT INTO work_item_link (from_ref, to_ref, link_type, created_at)
+                "INSERT INTO work_item_link (from_uri, to_uri, link_type, created_at)
                  VALUES ('oxplow:oxplow/work_item?id=ENG-12&provider=issues', 'oxplow:oxplow/work_item?id=ENG-7&provider=issues', 'parent_of', 't')",
-                "INSERT INTO work_item_comment (id, ref, body, created_at)
+                "INSERT INTO work_item_comment (id, uri, body, created_at)
                  VALUES ('oxplow:oxplow/work_item?id=ENG-12&provider=issues#part=c1', 'oxplow:oxplow/work_item?id=ENG-12&provider=issues', 'see [[src/c.rs]]', 't')",
             ] {
                 tx.execute(sql, []).map_err(oxplow_db::map_sql_err)?;

@@ -77,7 +77,7 @@ fn extensions(root: &Path, with_v2: bool) {
     write(
         root,
         ".oxplow/extensions/acme/note.star",
-        "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.work_item.update\", \"input\": {\"ref\": \"work_item:oxplow:tsk1\", \"title\": json.encode(x[\"event\"])}}]}\n",
+        "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.work_item.update\", \"input\": {\"uri\": \"work_item:oxplow:tsk1\", \"title\": json.encode(x[\"event\"])}}]}\n",
     );
 }
 

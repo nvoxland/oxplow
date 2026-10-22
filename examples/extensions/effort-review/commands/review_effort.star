@@ -12,8 +12,8 @@ evidence you were not given."""
 
 def transform(x):
     effort = x["input"]["effort"]
-    if not uri.is_uri(effort) or uri.resource(effort) != "oxplow/effort":
-        return {"refuse": "`effort` is an effort ref, `oxplow:oxplow/effort?id=<id>`"}
+    if not effort.startswith("eff"):
+        return {"refuse": "`effort` is an effort's id, like `eff12`"}
     return {"commands": [{
         "name": "effort_review.review.ask",
         "input": {

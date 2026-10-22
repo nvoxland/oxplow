@@ -231,10 +231,13 @@ impl TerminalSessionRegistry {
         rows: u16,
         make_request: impl FnOnce(u16, u16) -> SpawnRequest,
     ) -> Result<AttachResult, TerminalSessionError> {
-        // Fast path: existing session for this key — replay its buffer.
+        // Fast path: existing session for this key — take the attaching
+        // pane's size (it may differ from the one the process last saw, e.g.
+        // after an app restart) and replay its buffer.
         if let Some(existing_id) = self.by_key.lock().await.get(&key).cloned() {
             let map = self.inner.lock().await;
             if let Some(entry) = map.get(&existing_id) {
+                self.pty.resize(&entry.pane_id, cols, rows).await?;
                 let replay = entry.ring.lock().await.snapshot();
                 return Ok(Self::build_attach_result(existing_id, replay));
             }
@@ -637,6 +640,54 @@ mod tests {
         // Once killed, the key reads as None again (no stale id leaks).
         let _ = reg.close(&result.session_id).await;
         assert_eq!(reg.session_id_for_key(&key).await, None);
+    }
+
+    /// Reattaching to a live session takes the new pane's size. A pane
+    /// reopened after an app restart measures its own cols/rows; a process
+    /// left at the old size draws its bottom lines past the pane and over
+    /// each other.
+    #[tokio::test]
+    async fn reattaching_resizes_the_live_session_to_the_new_pane() {
+        let reg = TerminalSessionRegistry::new(
+            PtyManager::spawn(),
+            crate::output_activity::OutputActivity::new(),
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let capture = dir.path().join("size.txt");
+        let spawn = |c, r| SpawnRequest {
+            command: "sh".into(),
+            args: vec![],
+            cwd: std::env::temp_dir(),
+            env: vec![],
+            env_remove: vec![],
+            cols: c,
+            rows: r,
+        };
+        let key = "session|ses1".to_string();
+        let first = reg
+            .attach_or_create(key.clone(), 80, 24, spawn)
+            .await
+            .expect("spawn session");
+        let again = reg
+            .attach_or_create(key, 132, 41, spawn)
+            .await
+            .expect("reattach");
+        assert_eq!(again.session_id, first.session_id);
+
+        let command = format!(
+            "stty size > {}; echo done >> {}\n",
+            capture.display(),
+            capture.display()
+        );
+        reg.send(&first.session_id, &input_message(command.as_bytes()))
+            .await
+            .unwrap();
+        let size = read_capture_until(&capture, &["done"]).await;
+        let _ = reg.close(&first.session_id).await;
+        assert!(
+            size.starts_with("41 132"),
+            "the pty kept its old size: {size:?}"
+        );
     }
 
     /// An agent's process exiting ends its session: the registry records a

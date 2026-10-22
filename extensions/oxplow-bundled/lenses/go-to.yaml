@@ -3,6 +3,7 @@ description: The pages you bookmarked — this thread's, its stream's and the pr
 params:
   - { name: thread_id, label: Thread }
   - name: mode
+    role: filter
     label: Show
     default: recent
     options:
@@ -12,8 +13,8 @@ query: |
   WITH
   -- What the thread sees: a page once, at the narrowest scope it's at.
   bookmark AS (
-    SELECT ref, page_kind, label, added_at, id FROM (
-      SELECT b.*, row_number() OVER (PARTITION BY b.ref ORDER BY
+    SELECT uri, page_kind, label, added_at, id FROM (
+      SELECT b.*, row_number() OVER (PARTITION BY b.uri ORDER BY
                CASE b.scope WHEN 'thread' THEN 0 WHEN 'stream' THEN 1 ELSE 2 END) AS n
       FROM v_bookmark b
       WHERE (b.scope = 'thread' AND b.thread_id = :thread_id)
@@ -22,44 +23,44 @@ query: |
     ) WHERE n = 1
   ),
   visit AS (
-    SELECT page_id AS ref, page_kind, label, visited_at,
+    SELECT page_id AS uri, page_kind, label, visited_at,
            row_number() OVER (PARTITION BY page_id ORDER BY visited_at DESC, id DESC) AS latest
     FROM v_page_visit
     WHERE thread_id = :thread_id AND page_kind <> 'agent_session'
   ),
   recent AS (
-    SELECT ref, page_kind, label, row_number() OVER (ORDER BY visited_at DESC) AS ord
+    SELECT uri, page_kind, label, row_number() OVER (ORDER BY visited_at DESC) AS ord
     FROM visit WHERE latest = 1
   ),
   top AS (
-    SELECT ref, page_kind, label, visits, row_number() OVER (ORDER BY visits DESC, last DESC) AS ord FROM (
-      SELECT ref, max(CASE latest WHEN 1 THEN page_kind END) AS page_kind,
+    SELECT uri, page_kind, label, visits, row_number() OVER (ORDER BY visits DESC, last DESC) AS ord FROM (
+      SELECT uri, max(CASE latest WHEN 1 THEN page_kind END) AS page_kind,
              max(CASE latest WHEN 1 THEN label END) AS label,
              count(*) AS visits, max(visited_at) AS last
       FROM visit
       WHERE visited_at >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-30 days')
-      GROUP BY ref
+      GROUP BY uri
     )
   ),
   row AS (
     SELECT 0 AS g, row_number() OVER (ORDER BY added_at DESC, id DESC) AS ord,
-           'Bookmarks' AS grp, ref, page_kind, label, NULL AS visits
+           'Bookmarks' AS grp, uri, page_kind, label, NULL AS visits
     FROM bookmark
     UNION ALL
-    SELECT 1, ord, 'History', ref, page_kind, label, NULL FROM recent
+    SELECT 1, ord, 'History', uri, page_kind, label, NULL FROM recent
     WHERE :mode = 'recent' AND ord <= 10
     UNION ALL
-    SELECT 1, ord, 'Most visited', ref, page_kind, label, visits FROM top
+    SELECT 1, ord, 'Most visited', uri, page_kind, label, visits FROM top
     WHERE :mode = 'top' AND ord <= 10
   )
   -- A wiki page shows its title now, not the one it had then.
-  SELECT r.grp, coalesce(nullif(trim(w.title), ''), nullif(trim(r.label), ''), r.ref) AS title,
-         r.page_kind, r.ref, r.visits
-  FROM row r LEFT JOIN v_knowledge_page w ON w.ref = r.ref
+  SELECT r.grp, coalesce(nullif(trim(w.title), ''), nullif(trim(r.label), ''), r.uri) AS title,
+         r.page_kind, r.uri, r.visits
+  FROM row r LEFT JOIN v_knowledge_page w ON w.uri = r.uri
   ORDER BY r.g, r.ord
 viz: list
 group: { by: grp }
 columns:
-  - { key: title, label: Page, icon: page_kind, link: { kind: page, from: ref } }
+  - { key: title, label: Page, icon: page_kind, link: { kind: page, from: uri } }
   - { key: visits, label: Visits }
 empty: No bookmarks or history yet

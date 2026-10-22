@@ -40,7 +40,7 @@ use super::comment::author_of;
 use super::compose::{Compose, Composer, Composing, Composition};
 use super::ops::Op;
 use super::thread::acting_thread;
-use super::util::{invalid, parse, ref_id, schema, sql};
+use super::util::{bare_id, invalid, parse, schema, sql};
 use super::work_item::with_loose_refs;
 use super::{Handler, HandlerOutput, TxCtx};
 use crate::link_check::LinkDeps;
@@ -52,7 +52,7 @@ pub const RESOLVE: &str = "oxplow.handoff.resolve";
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SendInput {
-    /// The thread it is for (`oxplow:oxplow/thread?id=thr3`): an open thread, not the
+    /// The thread it is for (`thr3`): an open thread, not the
     /// sender's own (a note is for that). Any stream's.
     pub to_thread: String,
     /// What is handed over and what the recipient needs to know (markdown;
@@ -92,7 +92,7 @@ impl From<SettleState> for HandoffState {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SettleInput {
-    /// The handoff (`oxplow:oxplow/handoff?id=hnd3`).
+    /// The handoff (`hnd3`).
     pub handoff: String,
     /// `taken` or `declined` (its recipient), `withdrawn` (its sender),
     /// `open` (undoing either).
@@ -112,7 +112,7 @@ pub enum Outcome {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ResolveInput {
-    /// The handoff to your thread (`oxplow:oxplow/handoff?id=hnd3`).
+    /// The handoff to your thread (`hnd3`).
     pub handoff: String,
     /// `taken` moves its work item onto your thread; `declined` leaves it.
     pub outcome: Outcome,
@@ -129,7 +129,7 @@ fn sending_thread(ctx: &TxCtx<'_>, named: Option<&str>) -> Result<ThreadId, Comm
             reason: "an effect whose event has no thread can't hand work off".into(),
         })?;
         if let Some(named) = named {
-            if ref_id::<ThreadId>(named, oxplow_domain::uri::resources::THREAD, "/from_thread")?
+            if bare_id::<ThreadId>(named, oxplow_domain::uri::resources::THREAD, "/from_thread")?
                 != own
             {
                 return Err(CommandError::Denied {
@@ -181,7 +181,7 @@ pub fn send_op(deps: LinkDeps, work_items: WorkItemsRegistry) -> Op {
         Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
             let input: SendInput = parse(with_loose_refs(&work_items, input)?)?;
             let from = sending_thread(ctx, input.from_thread.as_deref())?;
-            let to: ThreadId = ref_id(
+            let to: ThreadId = bare_id(
                 &input.to_thread,
                 oxplow_domain::uri::resources::THREAD,
                 "/to_thread",
@@ -204,7 +204,7 @@ pub fn send_op(deps: LinkDeps, work_items: WorkItemsRegistry) -> Op {
             if let Some(item) = &input.work_item {
                 let known = ctx
                     .conn
-                    .query_row("SELECT 1 FROM v_work_item WHERE ref = ?1", [item], |_| {
+                    .query_row("SELECT 1 FROM v_work_item WHERE uri = ?1", [item], |_| {
                         Ok(())
                     })
                     .optional()
@@ -289,7 +289,7 @@ pub fn settle_op() -> Op {
         true,
         Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
             let input: SettleInput = parse(input)?;
-            let id: HandoffId = ref_id(
+            let id: HandoffId = bare_id(
                 &input.handoff,
                 oxplow_domain::uri::resources::HANDOFF,
                 "/handoff",
@@ -307,7 +307,7 @@ pub fn settle_op() -> Op {
             )?;
             let after = handoff_tx(ctx.conn, id)?
                 .ok_or_else(|| invalid("/handoff", format!("no handoff `{}`", input.handoff)))?;
-            let mut undo = json!({ "handoff": handoff_uri(id), "state": before.state.as_str() });
+            let mut undo = json!({ "handoff": id.to_string(), "state": before.state.as_str() });
             if let Some(note) = &before.note {
                 undo["note"] = Value::String(note.clone());
             }
@@ -331,7 +331,7 @@ pub fn resolve_op() -> Op {
     let compose: Arc<Composer> = Arc::new(
         |composing: &Composing<'_>, run: &RunContext, input: &Value| {
             let input: ResolveInput = parse(input.clone())?;
-            let id: HandoffId = ref_id(
+            let id: HandoffId = bare_id(
                 &input.handoff,
                 oxplow_domain::uri::resources::HANDOFF,
                 "/handoff",
@@ -349,7 +349,7 @@ pub fn resolve_op() -> Op {
                                         EXISTS (SELECT 1 FROM v_capability_provider p
                                                  WHERE p.capability = 'work_items' AND p.active = 1
                                                    AND instr(p.features, '\"lists\"') > 0)
-                                   FROM v_work_item w WHERE w.ref = ?1",
+                                   FROM v_work_item w WHERE w.uri = ?1",
                                 [item],
                                 |r| Ok((r.get::<_, Option<i64>>(0)?, r.get::<_, bool>(1)?)),
                             )
@@ -374,11 +374,11 @@ pub fn resolve_op() -> Op {
                 if thread != Some(handoff.to_thread_id.value()) {
                     calls.push(CommandCall {
                         name: super::work_item::MOVE.into(),
-                        input: json!({ "ref": item, "to": { "thread": handoff.to_thread_id.to_string() } }),
+                        input: json!({ "uri": item, "to": { "thread": handoff.to_thread_id.to_string() } }),
                     });
                 }
             }
-            let mut settle = json!({ "handoff": handoff_uri(id), "state": to.as_str() });
+            let mut settle = json!({ "handoff": id.to_string(), "state": to.as_str() });
             if let Some(note) = &input.note {
                 settle["note"] = Value::String(note.clone());
             }
@@ -389,7 +389,7 @@ pub fn resolve_op() -> Op {
             Ok(Composition {
                 calls,
                 result: Some(json!({
-                    "handoff": handoff_uri(id),
+                    "handoff": id.to_string(),
                     "state": to.as_str(),
                     "work_item": handoff.work_item,
                 })),
@@ -406,12 +406,13 @@ pub fn resolve_op() -> Op {
     )
 }
 
-/// A handoff as a result shows it: by ref, its threads by ref.
+/// A handoff as a result shows it: its id and ref, its threads' ids.
 fn shown(h: &Handoff) -> Value {
     json!({
-        "ref": handoff_uri(h.id),
-        "from_thread": thread_uri(h.from_thread_id),
-        "to_thread": thread_uri(h.to_thread_id),
+        "id": h.id.to_string(),
+        "uri": handoff_uri(h.id),
+        "from_thread": h.from_thread_id.to_string(),
+        "to_thread": h.to_thread_id.to_string(),
         "work_item": h.work_item,
         "state": h.state.as_str(),
         "sent_at": h.sent_at,
@@ -428,6 +429,11 @@ pub fn ops(deps: LinkDeps, work_items: WorkItemsRegistry) -> Vec<Op> {
 
 #[cfg(test)]
 mod tests {
+    /// The bare id (`hnd1`) of the handoff a result shows by its URI.
+    fn handoff_id(result: &Value) -> String {
+        result["handoff"]["id"].as_str().unwrap().to_string()
+    }
+
     use super::*;
     use crate::test_fixtures::{new_thread, services_with_effort, services_with_task_effort};
     use oxplow_domain::{StreamId, Thread};
@@ -465,12 +471,12 @@ mod tests {
             &fx.svc,
             &agent_on(fx.thread),
             SEND,
-            json!({ "to_thread": thread_uri(to.id), "body": "see [[tsk999]]" }),
+            json!({ "to_thread": to.id.to_string(), "body": "see [[tsk999]]" }),
         )
         .await
         .unwrap();
-        assert_eq!(out.result["handoff"]["from_thread"], thread_uri(fx.thread));
-        assert_eq!(out.result["handoff"]["to_thread"], thread_uri(to.id));
+        assert_eq!(out.result["handoff"]["from_thread"], fx.thread.to_string());
+        assert_eq!(out.result["handoff"]["to_thread"], to.id.to_string());
         assert_eq!(out.result["handoff"]["state"], "open");
         assert_eq!(out.result["link_warnings"][0]["target"], "tsk999");
         let events = fx.svc.event_log_store.read_after(0, 500).await.unwrap();
@@ -498,7 +504,7 @@ mod tests {
         let fx = services_with_effort().await;
         let to = second_thread(&fx.svc).await;
         let agent = agent_on(fx.thread);
-        let to_ref = thread_uri(to.id);
+        let to_ref = to.id.to_string();
 
         let err = run(
             &fx.svc,
@@ -514,7 +520,7 @@ mod tests {
             &fx.svc,
             &agent,
             SEND,
-            json!({ "to_thread": thread_uri(fx.thread), "body": "x" }),
+            json!({ "to_thread": fx.thread.to_string(), "body": "x" }),
         )
         .await
         .unwrap_err();
@@ -596,11 +602,11 @@ mod tests {
             &fx.svc,
             &sender,
             SEND,
-            json!({ "to_thread": thread_uri(to.id), "body": "yours" }),
+            json!({ "to_thread": to.id.to_string(), "body": "yours" }),
         )
         .await
         .unwrap();
-        let h = sent.result["handoff"]["ref"].as_str().unwrap().to_string();
+        let h = handoff_id(&sent.result);
 
         let err = run(
             &fx.svc,
@@ -670,7 +676,7 @@ mod tests {
         let recipient = agent_on(to.id);
         let send = |body: &str| {
             json!({
-                "to_thread": thread_uri(to.id),
+                "to_thread": to.id.to_string(),
                 "work_item": work_item_ref(fx.task),
                 "body": body,
             })
@@ -678,9 +684,11 @@ mod tests {
         let state = |svc: Arc<crate::Services>, h: String| async move {
             svc.db
                 .read(move |tx| {
-                    tx.query_row("SELECT state FROM v_handoff WHERE ref = ?1", [&h], |r| {
-                        r.get::<_, String>(0)
-                    })
+                    tx.query_row(
+                        "SELECT state FROM v_handoff WHERE uri = uri('oxplow/handoff', 'id', ?1)",
+                        [&h],
+                        |r| r.get::<_, String>(0),
+                    )
                     .map_err(oxplow_db::map_sql_err)
                 })
                 .await
@@ -689,7 +697,7 @@ mod tests {
         let first = run(&fx.svc, &agent_on(fx.thread), SEND, send("decline me"))
             .await
             .unwrap();
-        let declined = first.result["handoff"]["ref"].as_str().unwrap().to_string();
+        let declined = handoff_id(&first.result);
         let out = run(
             &fx.svc,
             &recipient,
@@ -710,10 +718,7 @@ mod tests {
         let second = run(&fx.svc, &agent_on(fx.thread), SEND, send("take me"))
             .await
             .unwrap();
-        let h = second.result["handoff"]["ref"]
-            .as_str()
-            .unwrap()
-            .to_string();
+        let h = handoff_id(&second.result);
         let err = run(
             &fx.svc,
             &agent_on(fx.thread),

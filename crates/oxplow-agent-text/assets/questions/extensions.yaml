@@ -31,12 +31,12 @@
   skill: oxplow-extension
   reaches:
     command: oxplow.collector.sync
-    input: { collector: "collector:tracker/issues" }
+    input: { collector: "tracker/issues" }
 - question: Which lenses exist, and which extension declares each?
   skill: oxplow-extension
   reaches:
-    sql: SELECT ref, extension, title, viz, hidden FROM v_lens ORDER BY extension, slug
-  shape: { columns: [ref, extension, title, viz, hidden] }
+    sql: SELECT uri, extension, title, viz, hidden FROM v_lens ORDER BY extension, slug
+  shape: { columns: [uri, extension, title, viz, hidden] }
 - question: Which extensions are loaded, are they enabled, and did they load cleanly?
   skill: oxplow-extension
   reaches:

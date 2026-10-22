@@ -20,7 +20,7 @@ cancelled review is still commented, marked as cancelled.
 
 | | |
 |---|---|
-| `jobs: review` | One model conversation per effort (`ai.complete_typed`), keyed `review:<effort ref>`, so a second request for the same effort is the same job. Its one tool is `effort.evidence`; it may also query oxplow's models (`query_sql`). At most 3 tool rounds, 180 seconds. |
+| `jobs: review` | One model conversation per effort (`ai.complete_typed`), keyed `review:<effort id>`, so a second request for the same effort is the same job. Its one tool is `effort.evidence`; it may also query oxplow's models (`query_sql`). At most 3 tool rounds, 180 seconds. |
 | `effort.evidence` | The evidence above in one answer, every list capped (50 files, 50 functions, 50 findings, 20 test runs and metrics) with `truncated` naming what was cut. A person or an agent can run it too. |
 | `effort.review` | Asks for one effort's review: the one place the prompt lives. |
 | `review.ask` / `review.status` / `review.cancel` | The job's lifecycle, through oxplow's jobs service. |

@@ -52,17 +52,10 @@ impl AsyncEventConsumer for SymbolCollector {
         if payload["unchanged"].as_bool() == Some(true) {
             return Ok(());
         }
-        let stream = payload["stream"].as_str().and_then(|r| {
-            oxplow_domain::uri::build::parse_as::<StreamId>(
-                r,
-                oxplow_domain::uri::resources::STREAM,
-            )
-            .ok()
-        });
-        let snapshot = payload["snapshot"].as_str().and_then(|r| {
-            oxplow_domain::uri::build::parse_as::<i64>(r, oxplow_domain::uri::resources::SNAPSHOT)
-                .ok()
-        });
+        let stream = payload["stream"]
+            .as_str()
+            .and_then(|s| s.parse::<StreamId>().ok());
+        let snapshot = payload["snapshot"].as_i64();
         let (Some(stream), Some(snapshot)) = (stream, snapshot) else {
             return Ok(());
         };
@@ -197,7 +190,7 @@ fn file_symbols(path: &str, text: &str, language: oxplow_code_metrics::Language)
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oxplow_domain::events::schema::{SnapshotTaken, SnapshotTakenV2};
+    use oxplow_domain::events::schema::{SnapshotTaken, SnapshotTakenV3};
 
     /// Services over a repo, with the collector registered.
     async fn fixture() -> (Arc<Services>, tempfile::TempDir, StreamId) {
@@ -242,15 +235,9 @@ mod tests {
         svc.event_log_store
             .append(oxplow_domain::Envelope::typed::<SnapshotTaken>(
                 "system:test",
-                &SnapshotTakenV2 {
-                    stream: oxplow_domain::uri::build::keyed(
-                        oxplow_domain::uri::resources::STREAM,
-                        &stream.to_string(),
-                    ),
-                    snapshot: oxplow_domain::uri::build::keyed(
-                        oxplow_domain::uri::resources::SNAPSHOT,
-                        &snap.to_string(),
-                    ),
+                &SnapshotTakenV3 {
+                    stream: stream.to_string(),
+                    snapshot: snap,
                     parent: None,
                     trigger: oxplow_domain::snapshot::SnapshotTrigger::TurnEnd,
                     unchanged: false,
@@ -295,7 +282,7 @@ mod tests {
         assert_eq!(
             rows(
                 &svc,
-                "SELECT ref, kind, container, snapshot_id FROM v_symbol ORDER BY ref"
+                "SELECT uri, kind, container, snapshot_id FROM v_symbol ORDER BY uri"
             )
             .await,
             serde_json::json!([
@@ -341,7 +328,7 @@ mod tests {
         )
         .await;
         assert_eq!(
-            rows(&svc, "SELECT ref, snapshot_id FROM v_symbol ORDER BY ref").await,
+            rows(&svc, "SELECT uri, snapshot_id FROM v_symbol ORDER BY uri").await,
             serde_json::json!([["oxplow:oxplow/symbol?path=Lib/b.py&symbol=go", later]])
         );
     }
@@ -361,7 +348,7 @@ mod tests {
             .unwrap();
         assert_eq!(backfill(&svc).await.unwrap(), 1);
         assert_eq!(
-            rows(&svc, "SELECT ref, snapshot_id FROM v_symbol ORDER BY ref").await,
+            rows(&svc, "SELECT uri, snapshot_id FROM v_symbol ORDER BY uri").await,
             serde_json::json!([
                 ["oxplow:oxplow/symbol?path=a.py&symbol=Widget", snap],
                 ["oxplow:oxplow/symbol?path=a.py&symbol=Widget::spin", snap]

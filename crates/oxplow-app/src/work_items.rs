@@ -13,7 +13,7 @@
 
 use std::sync::Arc;
 
-use oxplow_domain::events::schema::{EventType, WorkItemRecorded, WorkItemRecordedV2};
+use oxplow_domain::events::schema::{EventType, WorkItemRecorded, WorkItemRecordedV3};
 use oxplow_domain::work_items::{
     provider_of, CanonicalState, List, WorkItemVerbs, WorkItemsFeatures, WorkItemsProvider,
 };
@@ -156,7 +156,7 @@ impl WorkItemVerbs for Sink {
 pub struct NewItem {
     pub title: String,
     pub body: String,
-    pub parent_ref: Option<String>,
+    pub parent_uri: Option<String>,
     pub state: Option<CanonicalState>,
     pub native_state: Option<String>,
     pub native: Option<Value>,
@@ -195,7 +195,7 @@ impl WorkItems {
         let input = serde_json::to_value(oxplow_domain::work_items::WorkItemCreateInput {
             title: item.title,
             body: (!item.body.is_empty()).then_some(item.body),
-            parent_ref: item.parent_ref,
+            parent_uri: item.parent_uri,
             state: item.state,
             native_state: item.native_state,
             native: item.native,
@@ -207,11 +207,11 @@ impl WorkItems {
         if out.result["tracked"] == serde_json::json!(false) {
             return Ok(None);
         }
-        out.result["ref"]
+        out.result["uri"]
             .as_str()
             .map(|r| Some(r.to_string()))
             .ok_or_else(|| CommandError::Failed {
-                message: "oxplow.work_item.create returned no ref".into(),
+                message: "oxplow.work_item.create returned no uri".into(),
             })
     }
 
@@ -231,7 +231,7 @@ impl WorkItems {
         to: CanonicalState,
         native_state: Option<&str>,
     ) -> Result<CommandOutcome, CommandError> {
-        let mut input = json!({ "ref": item_ref, "to": to });
+        let mut input = json!({ "uri": item_ref, "to": to });
         if let Some(n) = native_state {
             input["native_state"] = n.into();
         }
@@ -248,7 +248,7 @@ impl WorkItems {
         self.run(
             actor,
             work_item::LINK,
-            json!({ "ref": from, "target": to, "link_type": link_type }),
+            json!({ "uri": from, "target": to, "link_type": link_type }),
         )
         .await
     }
@@ -264,7 +264,7 @@ impl WorkItems {
         self.run(
             actor,
             work_item::UNLINK,
-            json!({ "ref": from, "target": to, "link_type": link_type }),
+            json!({ "uri": from, "target": to, "link_type": link_type }),
         )
         .await
     }
@@ -278,7 +278,7 @@ impl WorkItems {
         self.run(
             actor,
             work_item::COMMENT,
-            json!({ "ref": item_ref, "body": body }),
+            json!({ "uri": item_ref, "body": body }),
         )
         .await
     }
@@ -293,7 +293,7 @@ impl WorkItems {
         self.run(
             actor,
             work_item::REORDER,
-            json!({ "ref": item_ref, "before": before }),
+            json!({ "uri": item_ref, "before": before }),
         )
         .await
     }
@@ -307,7 +307,7 @@ impl WorkItems {
         self.run(
             actor,
             work_item::MOVE,
-            json!({ "ref": item_ref, "to": "backlog" }),
+            json!({ "uri": item_ref, "to": "backlog" }),
         )
         .await
     }
@@ -324,7 +324,7 @@ impl WorkItems {
             .run(
                 actor,
                 work_item::DELETE,
-                json!({ "ref": item_ref }),
+                json!({ "uri": item_ref }),
                 confirmed,
             )
             .await
@@ -355,35 +355,35 @@ impl EventConsumer for WorkItemsProjection {
     }
 
     fn handle(&self, conn: &rusqlite::Connection, event: &StoredEvent) -> Result<(), DomainError> {
-        let WorkItemRecordedV2 { item } = serde_json::from_value(event.envelope.payload.clone())
+        let WorkItemRecordedV3 { item } = serde_json::from_value(event.envelope.payload.clone())
             .map_err(|e| DomainError::Invalid(format!("work_item.recorded payload: {e}")))?;
-        let provider = provider_of(&item.item_ref)
+        let provider = provider_of(&item.uri)
             .map_err(|e| DomainError::Invalid(e.to_string()))?
             .to_string();
         let at = event.envelope.at.to_string();
         conn.execute(
-            "INSERT INTO work_item (ref, provider, title, body, state, native_state, native,
-                                    parent_ref, created_at, updated_at, deleted_at,
+            "INSERT INTO work_item (uri, provider, title, body, state, native_state, native,
+                                    parent_uri, created_at, updated_at, deleted_at,
                                     thread_id, closed_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9, CASE WHEN ?10 THEN ?9 END, ?11,
                      CASE WHEN ?5 IN ('done', 'canceled') THEN ?9 END)
-             ON CONFLICT(ref) DO UPDATE SET
+             ON CONFLICT(uri) DO UPDATE SET
                 title = excluded.title, body = excluded.body, state = excluded.state,
                 native_state = excluded.native_state, native = excluded.native,
-                parent_ref = excluded.parent_ref, updated_at = excluded.updated_at,
+                parent_uri = excluded.parent_uri, updated_at = excluded.updated_at,
                 -- When it first closed (as recorded); reopened, open again.
                 closed_at = CASE WHEN excluded.closed_at IS NULL THEN NULL
                                  ELSE coalesce(work_item.closed_at, excluded.closed_at) END,
                 deleted_at = CASE WHEN ?10 THEN coalesce(work_item.deleted_at, ?9) END",
             rusqlite::params![
-                item.item_ref,
+                item.uri,
                 provider,
                 item.title,
                 item.body,
                 item.state.as_str(),
                 item.native_state,
                 item.native.to_string(),
-                item.parent_ref,
+                item.parent_uri,
                 at,
                 item.deleted,
                 // The list it's on: the thread that filed it, at its
@@ -405,15 +405,15 @@ impl EventConsumer for WorkItemsProjection {
                 ),
             };
             conn.execute(
-                "UPDATE work_item SET thread_id = ?2 WHERE ref = ?1",
-                rusqlite::params![item.item_ref, thread],
+                "UPDATE work_item SET thread_id = ?2 WHERE uri = ?1",
+                rusqlite::params![item.uri, thread],
             )
             .map_err(storage)?;
         }
         if let Some(rank) = item.rank {
             conn.execute(
-                "UPDATE work_item SET rank = ?2 WHERE ref = ?1",
-                rusqlite::params![item.item_ref, rank],
+                "UPDATE work_item SET rank = ?2 WHERE uri = ?1",
+                rusqlite::params![item.uri, rank],
             )
             .map_err(storage)?;
         }
@@ -424,13 +424,13 @@ impl EventConsumer for WorkItemsProjection {
                 // The target's kind, read through the grammar: a link to
                 // what isn't a ref is the provider's mistake, and dropped.
                 let Some(kind) = oxplow_domain::uri::build::resource_of(&l.target) else {
-                    tracing::warn!(item = %item.item_ref, target = %l.target, "a link's target isn't a ref");
+                    tracing::warn!(item = %item.uri, target = %l.target, "a link's target isn't a ref");
                     continue;
                 };
                 conn.execute(
-                    "INSERT OR IGNORE INTO work_item_link (from_ref, to_ref, to_kind, link_type, created_at)
+                    "INSERT OR IGNORE INTO work_item_link (from_uri, to_uri, to_kind, link_type, created_at)
                      VALUES (?1, ?2, ?3, ?4, ?5)",
-                    rusqlite::params![item.item_ref, l.target, kind, l.link_type, at],
+                    rusqlite::params![item.uri, l.target, kind, l.link_type, at],
                 )
                 .map_err(|e| DomainError::Invalid(format!("link `{}`: {e}", l.link_type)))?;
             }
@@ -440,28 +440,22 @@ impl EventConsumer for WorkItemsProjection {
                 .collect();
             conn.execute(
                 "DELETE FROM work_item_link
-                 WHERE from_ref = ?1
-                   AND to_ref || char(10) || link_type NOT IN (SELECT value FROM json_each(?2))",
-                rusqlite::params![
-                    item.item_ref,
-                    serde_json::to_string(&kept).unwrap_or_default()
-                ],
+                 WHERE from_uri = ?1
+                   AND to_uri || char(10) || link_type NOT IN (SELECT value FROM json_each(?2))",
+                rusqlite::params![item.uri, serde_json::to_string(&kept).unwrap_or_default()],
             )
             .map_err(storage)?;
         }
         if let Some(comments) = &item.comments {
-            conn.execute(
-                "DELETE FROM work_item_comment WHERE ref = ?1",
-                [&item.item_ref],
-            )
-            .map_err(storage)?;
+            conn.execute("DELETE FROM work_item_comment WHERE uri = ?1", [&item.uri])
+                .map_err(storage)?;
             for c in comments {
                 conn.execute(
-                    "INSERT INTO work_item_comment (id, ref, body, author, created_at)
+                    "INSERT INTO work_item_comment (id, uri, body, author, created_at)
                      VALUES (?1, ?2, ?3, ?4, ?5)",
                     rusqlite::params![
-                        format!("{}#{}", item.item_ref, c.id),
-                        item.item_ref,
+                        format!("{}#{}", item.uri, c.id),
+                        item.uri,
                         c.body,
                         c.author,
                         c.created_at.as_deref().unwrap_or(&at),
@@ -508,26 +502,26 @@ mod tests {
         };
         let child = run(
             w::CREATE,
-            json!({ "title": "child", "parent_ref": task, "thread": oxplow_domain::uri::build::thread_uri(fx.thread) }),
+            json!({ "title": "child", "parent_uri": task, "thread": fx.thread.to_string() }),
         )
         .await
-        .result["ref"]
+        .result["uri"]
             .as_str()
             .unwrap()
             .to_string();
         run(
             w::LINK,
-            json!({ "ref": child, "target": task, "link_type": "blocks" }),
+            json!({ "uri": child, "target": task, "link_type": "blocks" }),
         )
         .await;
-        run(w::COMMENT, json!({ "ref": task, "body": "Looks right." })).await;
-        run(w::NAME, json!({ "ref": child, "to": "done" })).await;
+        run(w::COMMENT, json!({ "uri": task, "body": "Looks right." })).await;
+        run(w::NAME, json!({ "uri": child, "to": "done" })).await;
         assert_eq!(
             rows(
                 svc,
                 &format!(
-                "SELECT ref, thread_id, rank IS NOT NULL, closed_at IS NOT NULL FROM v_work_item
-                  WHERE ref IN ('{task}', '{child}') ORDER BY ref"
+                "SELECT uri, thread_id, rank IS NOT NULL, closed_at IS NOT NULL FROM v_work_item
+                  WHERE uri IN ('{task}', '{child}') ORDER BY uri"
             )
             )
             .await,
@@ -539,13 +533,13 @@ mod tests {
         assert_eq!(
             rows(
                 svc,
-                "SELECT from_ref, to_ref, link_type FROM v_work_item_link"
+                "SELECT from_uri, to_uri, link_type FROM v_work_item_link"
             )
             .await,
             json!([[child, task, "blocks"]])
         );
         assert_eq!(
-            rows(svc, "SELECT ref, body FROM v_work_item_comment").await,
+            rows(svc, "SELECT uri, body FROM v_work_item_comment").await,
             json!([[task, "Looks right."]])
         );
         svc.config
@@ -566,15 +560,15 @@ mod tests {
     fn recorded(item_ref: &str, title: &str, deleted: bool) -> Envelope {
         Envelope::typed::<WorkItemRecorded>(
             "provider:fake",
-            &WorkItemRecordedV2 {
+            &WorkItemRecordedV3 {
                 item: WorkItemRecord {
-                    item_ref: item_ref.into(),
+                    uri: item_ref.into(),
                     title: title.into(),
                     body: String::new(),
                     state: CanonicalState::InProgress,
                     native_state: "Doing".into(),
                     native: json!({ "points": 3 }),
-                    parent_ref: None,
+                    parent_uri: None,
                     deleted,
                     rank: None,
                     links: None,
@@ -592,7 +586,7 @@ mod tests {
             .read(move |c| {
                 use rusqlite::OptionalExtension;
                 c.query_row(
-                    "SELECT title, state, deleted_at IS NOT NULL FROM work_item WHERE ref = ?1",
+                    "SELECT title, state, deleted_at IS NOT NULL FROM work_item WHERE uri = ?1",
                     [item_ref],
                     |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
                 )
@@ -647,7 +641,7 @@ mod tests {
     /// lists it; a later restatement from elsewhere doesn't move it.
     fn recorded_with_links(item_ref: &str, links: &[(&str, &str)]) -> Envelope {
         let mut env = recorded(item_ref, "linked", false);
-        let mut payload: WorkItemRecordedV2 = serde_json::from_value(env.payload.clone()).unwrap();
+        let mut payload: WorkItemRecordedV3 = serde_json::from_value(env.payload.clone()).unwrap();
         payload.item.links = Some(
             links
                 .iter()
@@ -663,14 +657,14 @@ mod tests {
         env
     }
 
-    /// `oxplow:oxplow/work_item?id=W-1&provider=fake`'s links: `(to_ref, created_at)`.
+    /// `oxplow:oxplow/work_item?id=W-1&provider=fake`'s links: `(to_uri, created_at)`.
     async fn links(svc: &crate::Services) -> Vec<(String, String)> {
         svc.db
             .read(|tx| {
                 let mut stmt = tx
                     .prepare(
-                        "SELECT to_ref, created_at FROM work_item_link
-                         WHERE from_ref = 'oxplow:oxplow/work_item?id=W-1&provider=fake' ORDER BY to_ref",
+                        "SELECT to_uri, created_at FROM work_item_link
+                         WHERE from_uri = 'oxplow:oxplow/work_item?id=W-1&provider=fake' ORDER BY to_uri",
                     )
                     .map_err(oxplow_db::map_sql_err)?;
                 stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
@@ -749,7 +743,7 @@ mod tests {
         let thread: Option<i64> = svc
             .db
             .read(move |c| {
-                c.query_row("SELECT thread_id FROM work_item WHERE ref = ?1", [r], |r| {
+                c.query_row("SELECT thread_id FROM work_item WHERE uri = ?1", [r], |r| {
                     r.get(0)
                 })
                 .map_err(oxplow_db::map_sql_err)
@@ -762,7 +756,7 @@ mod tests {
         let out = svc
             .sql
             .query_sql(
-                "SELECT thread_id FROM v_work_item WHERE ref = ?1",
+                "SELECT thread_id FROM v_work_item WHERE uri = ?1",
                 vec![oxplow_db::SqlCell::Text(own)],
                 None,
             )

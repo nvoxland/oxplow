@@ -79,7 +79,7 @@ export function WorkBoard({ scope, onOpenPage }: { scope: WorkItemScope; onOpenP
             if (!drag) return;
             e.preventDefault();
             for (const ref of drag.refs) {
-              const item = items.find((i) => i.ref === ref);
+              const item = items.find((i) => i.uri === ref);
               if (item && item.state !== col.state) void move(ref, col.state);
             }
           }}
@@ -90,15 +90,15 @@ export function WorkBoard({ scope, onOpenPage }: { scope: WorkItemScope; onOpenP
           {col.items.map((item) => {
             return (
               <div
-                key={item.ref}
+                key={item.uri}
                 data-testid="board-card"
                 tabIndex={0}
                 draggable
                 style={cardStyle}
                 onDragStart={(e) =>
                   setWorkItemDrag(e, {
-                    refs: [item.ref],
-                    items: [{ ref: item.ref, title: item.title, state: item.state }],
+                    refs: [item.uri],
+                    items: [{ ref: item.uri, title: item.title, state: item.state }],
                     fromThreadId: item.threadId,
                   })
                 }
@@ -115,23 +115,23 @@ export function WorkBoard({ scope, onOpenPage }: { scope: WorkItemScope; onOpenP
                       enabled: true,
                       run: () =>
                         nav
-                          ? nav.navigate(workItemTabRef(item.ref), { newTab: true })
-                          : onOpenPage?.(workItemTabRef(item.ref)),
+                          ? nav.navigate(workItemTabRef(item.uri), { newTab: true })
+                          : onOpenPage?.(workItemTabRef(item.uri)),
                     },
                     ...CANONICAL_STATES.filter((s) => s !== item.state).map((s) => ({
                       id: `board-move-${s}`,
                       label: `Move to ${STATE_LABEL[s]}`,
                       enabled: true,
-                      run: () => void move(item.ref, s),
+                      run: () => void move(item.uri, s),
                     })),
                     // The commands about a work item (their `ui.about`).
-                    ...refCommandMenuItems(refOffersFor(item.ref)),
+                    ...refCommandMenuItems(refOffersFor(item.uri)),
                   ]);
                 }}
               >
                 <RouteLink
-                  to={workItemTabRef(item.ref)}
-                  onNavigate={onOpenPage ? () => onOpenPage(workItemTabRef(item.ref)) : undefined}
+                  to={workItemTabRef(item.uri)}
+                  onNavigate={onOpenPage ? () => onOpenPage(workItemTabRef(item.uri)) : undefined}
                   style={titleLinkStyle}
                 >
                   {item.title}

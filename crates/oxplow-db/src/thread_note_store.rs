@@ -22,27 +22,27 @@ pub struct SqliteThreadNoteStore {
 
 /// A thread note's `knowledge.note.written` / `deleted` (how the search
 /// index hears of it).
-fn note_event(id: i64, thread: i64, deleted: bool) -> oxplow_domain::Envelope {
+fn note_event(id: i64, thread_id: i64, deleted: bool) -> oxplow_domain::Envelope {
     use oxplow_domain::events::schema::{
-        KnowledgeNoteDeleted, KnowledgeNoteDeletedV2, KnowledgeNoteWritten, KnowledgeNoteWrittenV2,
+        KnowledgeNoteDeleted, KnowledgeNoteDeletedV3, KnowledgeNoteWritten, KnowledgeNoteWrittenV3,
     };
     let note = oxplow_domain::uri::build::thread_note_uri(NoteId::new(id));
-    let thread = oxplow_domain::uri::build::thread_uri(ThreadId::new(thread));
+    let thread = oxplow_domain::uri::build::thread_uri(ThreadId::new(thread_id));
     const SOURCE: &str = "system:notes";
     let env = if deleted {
         oxplow_domain::Envelope::typed::<KnowledgeNoteDeleted>(
             SOURCE,
-            &KnowledgeNoteDeletedV2 {
-                note: note.clone(),
-                thread: thread.clone(),
+            &KnowledgeNoteDeletedV3 {
+                note: NoteId::new(id).to_string(),
+                thread: ThreadId::new(thread_id).to_string(),
             },
         )
     } else {
         oxplow_domain::Envelope::typed::<KnowledgeNoteWritten>(
             SOURCE,
-            &KnowledgeNoteWrittenV2 {
-                note: note.clone(),
-                thread: thread.clone(),
+            &KnowledgeNoteWrittenV3 {
+                note: NoteId::new(id).to_string(),
+                thread: ThreadId::new(thread_id).to_string(),
             },
         )
     };
@@ -270,14 +270,8 @@ mod tests {
             .unwrap();
         assert_eq!(listed, vec![note.clone()]);
         assert_eq!(event.event_type, "knowledge.note.written");
-        assert_eq!(event.v, 2);
-        assert_eq!(
-            event.payload["note"],
-            oxplow_domain::uri::build::keyed(
-                oxplow_domain::uri::resources::THREAD_NOTE,
-                &format!("{}", note.id)
-            )
-        );
+        assert_eq!(event.v, 3);
+        assert_eq!(event.payload["note"], note.id.to_string());
     }
 
     /// Its links are `thread_note` edges, restated by an update and gone

@@ -389,11 +389,11 @@ async fn handoffs(svc: &Services, thread: ThreadId) -> Option<(String, Vec<Hando
     let labels: HashMap<String, (String, Option<String>, Option<String>)> = match svc
         .sql
         .query_sql(
-            "SELECT h.ref, t.title, s.display_name, w.title
+            "SELECT h.uri, t.title, s.display_name, w.title
                FROM v_handoff h
                JOIN v_thread t ON t.id = h.from_thread_id
                LEFT JOIN v_agent_session s ON s.id = h.from_session_id
-               LEFT JOIN v_work_item w ON w.ref = h.work_item
+               LEFT JOIN v_work_item w ON w.uri = h.work_item
               WHERE h.to_thread_id = ?1",
             vec![SqlCell::Int(thread.value())],
             None,
@@ -620,8 +620,8 @@ mod tests {
                 &Actor::Human,
                 crate::commands::handoff::SEND,
                 serde_json::json!({
-                    "from_thread": oxplow_domain::uri::build::thread_uri(fx.thread),
-                    "to_thread": oxplow_domain::uri::build::thread_uri(to.id),
+                    "from_thread": fx.thread.to_string(),
+                    "to_thread": to.id.to_string(),
                     "body": "the parser half is yours",
                 }),
                 false,
@@ -684,8 +684,8 @@ mod tests {
                 &Actor::Human,
                 crate::commands::handoff::SEND,
                 serde_json::json!({
-                    "from_thread": oxplow_domain::uri::build::thread_uri(fx.thread),
-                    "to_thread": oxplow_domain::uri::build::thread_uri(to.id),
+                    "from_thread": fx.thread.to_string(),
+                    "to_thread": to.id.to_string(),
                     "body": "yours",
                 }),
                 false,
@@ -713,8 +713,8 @@ mod tests {
                 &Actor::Human,
                 crate::commands::handoff::SEND,
                 serde_json::json!({
-                    "from_thread": oxplow_domain::uri::build::thread_uri(fx.thread),
-                    "to_thread": oxplow_domain::uri::build::thread_uri(to.id),
+                    "from_thread": fx.thread.to_string(),
+                    "to_thread": to.id.to_string(),
                     "body": body,
                 }),
                 false,

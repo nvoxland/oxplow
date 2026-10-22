@@ -5,7 +5,7 @@
 /// or run it and open what it made. Pure, given its deps.
 import type { CommandEntry } from "./components/quickOpenResults.js";
 import type { CommandOutcome, CommandSpec } from "./tauri-bridge/generated/bindings.js";
-import { keyOf, typeOf, streamUri, threadUri } from "./uri/uri.js";
+import { keyOf, typeOf } from "./uri/uri.js";
 import { withPageParams } from "./tabs/pageRefs.js";
 import { offeredWhen, type WhenContext } from "./when.js";
 
@@ -38,10 +38,10 @@ export interface OfferDeps {
 }
 
 const BINDINGS: Record<string, (ctx: OfferContext) => string | null | undefined> = {
-  "{{stream}}": (c) => (c.streamId ? streamUri(c.streamId) : null),
-  "{{thread}}": (c) => (c.threadId ? threadUri(c.threadId) : null),
-  "{{ref}}": (c) => c.ref,
-  "{{ref.id}}": (c) => (c.ref ? (keyOf(c.ref) ?? null) : null),
+  "{{stream}}": (c) => (c.streamId ? c.streamId : null),
+  "{{thread}}": (c) => (c.threadId ? c.threadId : null),
+  "{{uri}}": (c) => c.ref,
+  "{{uri.id}}": (c) => (c.ref ? (keyOf(c.ref) ?? null) : null),
 };
 
 /** `template` with each string that is exactly a binding replaced from
@@ -82,11 +82,11 @@ function offer(spec: CommandSpec, input: unknown, ctx: OfferContext, deps: Offer
     enabled: offeredWhen(ui.when, ctx.when ?? {}),
     run: () => {
       // A tab id (`page:new-task`) is a page — given the ref the offer is
-      // about, as `?ref=`, to prefill from; anything else one of the
+      // about, as `?uri=`, to prefill from; anything else one of the
       // window's own forms.
       if (ui.form) {
         if (!ui.form.includes(":")) return deps.openForm(ui.form);
-        return deps.openPage(ref ? withPageParams(ui.form, { ref }) : ui.form);
+        return deps.openPage(ref ? withPageParams(ui.form, { uri: ref }) : ui.form);
       }
       if (ui.background) return deps.runInBackground(ui.label, spec.id, input);
       void deps.run(ui.label, spec.id, input).then(async (out) => {
@@ -113,7 +113,7 @@ export function commandOffers(specs: CommandSpec[], ctx: OfferContext, deps: Off
 
 /** The commands of `specs` about `ref`'s kind (`ui.about`) — what a
  *  ref's page menu and its rows' right-click menus offer — with `ref`
- *  bound into their input (`{ ref: "{{ref}}" }` when they say none). */
+ *  bound into their input (`{ uri: "{{uri}}" }` when they say none). */
 export function refOffers(specs: CommandSpec[], ref: string, ctx: OfferContext, deps: OfferDeps): CommandEntry[] {
   // URI-SWITCH: `ui.about` names the resource (`oxplow/agent_session`).
   const kind = typeOf(ref);
@@ -122,7 +122,7 @@ export function refOffers(specs: CommandSpec[], ref: string, ctx: OfferContext, 
   for (const spec of specs) {
     const ui = spec.ui;
     if (!ui || ui.about !== kind) continue;
-    const bound = ui.form ? { input: null } : bindInput(ui.input ?? { ref: "{{ref}}" }, { ...ctx, ref });
+    const bound = ui.form ? { input: null } : bindInput(ui.input ?? { uri: "{{uri}}" }, { ...ctx, ref });
     if (bound) out.push(offer(spec, bound.input, ctx, deps, ref));
   }
   return out;

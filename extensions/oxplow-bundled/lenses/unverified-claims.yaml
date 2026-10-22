@@ -7,8 +7,8 @@ query: |
   SELECT c.statement, c.kind,
          CASE WHEN c.provenance = 'recorded' THEN 'Stated' ELSE 'Read' END AS source,
          CASE WHEN c.review = 'dismissed' THEN 'Dismissed' ELSE 'Unverified' END AS state,
-         c.evidence_ref, c.ref AS claim
-  FROM v_claim c LEFT JOIN v_oxplow_bundled_claim_status s ON s.ref = c.ref
+         c.evidence, c.id AS claim
+  FROM v_claim c LEFT JOIN v_oxplow_bundled_claim_status s ON s.uri = c.uri
   WHERE c.effort_id = :effort_id AND (s.verified = 0 OR c.review = 'dismissed')
   ORDER BY c.review IS NOT NULL, c.created_at
 viz: list
@@ -17,7 +17,7 @@ columns:
   - { key: kind, label: Kind }
   - { key: source, label: Source }
   - { key: state, label: Review }
-  - { key: evidence_ref, label: Cites }
+  - { key: evidence, label: Cites }
 actions:
   - { id: verify, label: Mark Verified, command: oxplow.effort.verify_claim, input: { claim: "{{row.claim}}" }, row: true }
   - { id: dismiss, label: Dismiss, command: oxplow.effort.dismiss_claim, input: { claim: "{{row.claim}}" }, row: true }

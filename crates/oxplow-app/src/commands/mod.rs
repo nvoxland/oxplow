@@ -67,8 +67,8 @@ use oxplow_db::{
     SqliteProposalStore, TxError,
 };
 use oxplow_domain::events::schema::{
-    CommandApproved, CommandApprovedV1, CommandDeclined, CommandDeclinedV1, CommandExecuted,
-    CommandExecutedV4, CommandOutcome as Outcome, CommandProposed, CommandProposedV2,
+    CommandApproved, CommandApprovedV2, CommandDeclined, CommandDeclinedV2, CommandExecuted,
+    CommandExecutedV4, CommandOutcome as Outcome, CommandProposed, CommandProposedV3,
 };
 use oxplow_domain::uri::build::{command_uri, proposal_uri};
 use oxplow_domain::{
@@ -232,7 +232,7 @@ pub struct ProviderCall {
     pub provider: String,
     /// The operation, as its declarations name it.
     pub op: String,
-    /// The command's input: a `ref` to one of an instance's items, or an
+    /// The command's input: a `uri` to one of an instance's items, or an
     /// `instance`, says which instance runs it.
     pub input: Value,
     pub invocation: Invocation,

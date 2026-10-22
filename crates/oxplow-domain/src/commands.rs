@@ -308,7 +308,7 @@ pub struct CommandUi {
     #[serde(default)]
     pub about: Option<String>,
     /// The input it runs with. A string that is exactly `{{stream}}`,
-    /// `{{thread}}`, `{{ref}}` or `{{ref.id}}` is bound from where it runs;
+    /// `{{thread}}`, `{{uri}}` or `{{uri.id}}` is bound from where it runs;
     /// a binding there's nothing for makes it unavailable there.
     #[serde(default)]
     #[specta(type = Option<crate::Json>)]
@@ -319,7 +319,7 @@ pub struct CommandUi {
     #[serde(default)]
     pub form: Option<String>,
     /// The page to open once it ran: a tab id whose `{{result.<field>}}`
-    /// takes the result's field (`oxplow:oxplow/page?id={{result.id}}&page=custom-dashboard`).
+    /// takes the result's field (`oxplow:oxplow/dashboard?id={{result.id}}`).
     #[serde(default)]
     pub open_after: Option<String>,
     /// It runs as a background task (a slow call out: pull, push) whose
@@ -346,8 +346,9 @@ pub struct CommandUi {
 }
 
 /// What a command's `ui.input` binds from where it runs: the stream and
-/// thread on screen, and the ref it is about (and that ref's id).
-pub const UI_INPUT_BINDINGS: &[&str] = &["stream", "thread", "ref", "ref.id"];
+/// thread on screen (their bare ids), and the URI it is about (and that
+/// URI's key).
+pub const UI_INPUT_BINDINGS: &[&str] = &["stream", "thread", "uri", "uri.id"];
 
 /// The window's own forms: a `ui.form` that isn't a page's ref
 /// (`App.tsx` `openForm`).
@@ -421,10 +422,10 @@ impl CommandUi {
                     ),
                 );
             }
-            if p.scope == "ref" && self.about.is_none() {
+            if p.scope == "uri" && self.about.is_none() {
                 return bad(
                     "input",
-                    format!("`{{{{{key}}}}}` binds the ref it is about: give it an `about`"),
+                    format!("`{{{{{key}}}}}` binds the URI it is about: give it an `about`"),
                 );
             }
         }
@@ -886,13 +887,13 @@ pub enum CommandError {
     /// error stays small on the hot `Result` paths.
     NeedsConfirmation { preview: Box<Preview> },
     /// An agent's run needed a person's confirmation, so it was kept as a
-    /// proposal (`oxplow:oxplow/proposal?id=<id>`) for a person to approve or decline.
+    /// proposal (its id, `proposal`) for a person to approve or decline.
     /// Nothing ran; nothing else was written.
     Proposed {
-        proposal: String,
+        proposal: i64,
         preview: Box<Preview>,
-        /// The pending proposals of the same call it replaced.
-        supersedes: Vec<String>,
+        /// The ids of the pending proposals of the same call it replaced.
+        supersedes: Vec<i64>,
     },
     /// The handler failed.
     Failed { message: String },
@@ -936,14 +937,15 @@ impl std::fmt::Display for CommandError {
             } => {
                 write!(
                     f,
-                    "`{}` needs a person's approval; it is recorded as {proposal}",
+                    "`{}` needs a person's approval; it is recorded as proposal {proposal}",
                     preview.command
                 )?;
                 if !preview.details.is_empty() {
                     write!(f, " ({})", preview.details.join("; "))?;
                 }
                 if !supersedes.is_empty() {
-                    write!(f, " (replaces {})", supersedes.join(", "))?;
+                    let ids: Vec<String> = supersedes.iter().map(i64::to_string).collect();
+                    write!(f, " (replaces proposals {})", ids.join(", "))?;
                 }
                 Ok(())
             }
@@ -1174,10 +1176,10 @@ mod tests {
     fn a_command_ui_is_checked_where_it_is_declared() {
         for good in [
             json!({ "label": "New", "input": { "thread": "{{thread}}", "n": 1 } }),
-            json!({ "label": "Finish", "about": "oxplow/work_item", "input": { "ref": "{{ref}}", "id": "{{ref.id}}" } }),
+            json!({ "label": "Finish", "about": "oxplow/work_item", "input": { "uri": "{{uri}}", "id": "{{uri.id}}" } }),
             json!({ "label": "New Task…", "form": "oxplow:oxplow/page?page=new-task" }),
             json!({ "label": "Commit…", "form": "commit" }),
-            json!({ "label": "New", "open_after": "oxplow:oxplow/page?id={{result.id}}&page=custom-dashboard" }),
+            json!({ "label": "New", "open_after": "oxplow:oxplow/dashboard?id={{result.id}}" }),
             json!({ "label": "New", "open_after": "oxplow:oxplow/agent_session?id={{result.id}}" }),
             // A result field that is itself the ref to open.
             json!({ "label": "New", "open_after": "{{result.page}}" }),
@@ -1193,7 +1195,7 @@ mod tests {
                 "`{{tread}}`",
             ),
             (
-                json!({ "label": "X", "input": { "r": "{{ref}}" } }),
+                json!({ "label": "X", "input": { "r": "{{uri}}" } }),
                 "/ui/input",
                 "`about`",
             ),
@@ -1244,14 +1246,11 @@ mod tests {
     /// id is empty.
     #[test]
     fn open_after_is_bound_from_the_result() {
-        let u = ui(
-            json!({ "label": "New", "open_after": "oxplow:oxplow/page?id={{result.id}}&page=custom-dashboard" }),
-        );
+        let u =
+            ui(json!({ "label": "New", "open_after": "oxplow:oxplow/dashboard?id={{result.id}}" }));
         assert_eq!(
             u.open_after_for(&json!({ "id": 7 })),
-            Ok(Some(
-                "oxplow:oxplow/page?id=7&page=custom-dashboard".to_string()
-            ))
+            Ok(Some("oxplow:oxplow/dashboard?id=7".to_string()))
         );
         let err = u.open_after_for(&json!({})).unwrap_err();
         assert!(err.contains("`id`"), "{err}");

@@ -3,14 +3,15 @@ description: The stream's closed threads, newest first, with the work each finis
 params:
   - { name: stream_id }
 query: |
-  SELECT t.ref, t.title, t.closed_at,
+  SELECT t.uri, t.title, t.closed_at,
          coalesce((SELECT group_concat(n || ' ' || label, ' · ')
                    FROM (SELECT count(*) AS n,
                                 CASE w.state WHEN 'todo' THEN 'To Do' WHEN 'in_progress' THEN 'In Progress'
                                              WHEN 'blocked' THEN 'Blocked' WHEN 'done' THEN 'Done' ELSE 'Canceled' END AS label,
                                 CASE w.state WHEN 'todo' THEN 0 WHEN 'in_progress' THEN 1 WHEN 'blocked' THEN 2
                                              WHEN 'done' THEN 3 ELSE 4 END AS rank
-                         FROM v_work_item w WHERE w.thread_id = t.id GROUP BY w.state ORDER BY rank)), '') AS work
+                         FROM v_work_item w WHERE w.thread_id = t.id GROUP BY w.state ORDER BY rank)), '') AS work,
+         uri_param(t.uri, 'id') AS thread
   FROM v_thread t
   WHERE t.stream_id = :stream_id AND t.closed_at IS NOT NULL AND t.archived_at IS NULL
   ORDER BY t.closed_at DESC, t.id DESC
@@ -19,6 +20,6 @@ columns:
   - { key: closed_at, label: Closed, format: relative, width: 120 }
   - { key: work, label: Work }
 actions:
-  - { id: reopen, label: Reopen, command: oxplow.thread.reopen, input: { thread: "{{row.ref}}" }, row: true }
+  - { id: reopen, label: Reopen, command: oxplow.thread.reopen, input: { thread: "{{row.thread}}" }, row: true }
 empty: No closed threads. Threads you close from the rail's menu show up here, with the work they finished.
 hidden: true

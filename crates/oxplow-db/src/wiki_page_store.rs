@@ -37,7 +37,7 @@ pub fn upsert_tx(
     conn.execute(
         "INSERT INTO wiki_page (
             slug, title, body_path, body_excerpt, body_size_bytes,
-            file_refs_json, related_notes_json, dir_refs_json,
+            files_json, related_notes_json, dirs_json,
             created_at, updated_at, body_hash, body
          ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
          ON CONFLICT(slug) DO UPDATE SET
@@ -45,9 +45,9 @@ pub fn upsert_tx(
             body_path = excluded.body_path,
             body_excerpt = excluded.body_excerpt,
             body_size_bytes = excluded.body_size_bytes,
-            file_refs_json = excluded.file_refs_json,
+            files_json = excluded.files_json,
             related_notes_json = excluded.related_notes_json,
-            dir_refs_json = excluded.dir_refs_json,
+            dirs_json = excluded.dirs_json,
             updated_at = excluded.updated_at,
             body_hash = excluded.body_hash,
             body = excluded.body",
@@ -110,11 +110,9 @@ fn row_to_note(row: &rusqlite::Row<'_>) -> rusqlite::Result<WikiPage> {
     let body_path: String = row.get("body_path")?;
     let body_excerpt: String = row.get("body_excerpt")?;
     let body_size_bytes: i64 = row.get("body_size_bytes")?;
-    let file_refs_json: String = row.get("file_refs_json")?;
+    let file_refs_json: String = row.get("files_json")?;
     let related_notes_json: String = row.get("related_notes_json")?;
-    let dir_refs_json: String = row
-        .get("dir_refs_json")
-        .unwrap_or_else(|_| "[]".to_string());
+    let dir_refs_json: String = row.get("dirs_json").unwrap_or_else(|_| "[]".to_string());
     let created_at: String = row.get("created_at")?;
     let updated_at: String = row.get("updated_at")?;
     let map_err = |e: DomainError| {

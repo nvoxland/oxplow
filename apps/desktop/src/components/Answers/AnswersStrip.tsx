@@ -49,7 +49,7 @@ export function AnswersStrip({ threadId, onOpenPage }: { threadId: string; onOpe
       {collapsed || answers.length === 0 ? null : (
         <div style={{ display: "flex", flexDirection: "column", gap: 8, overflow: "auto", minHeight: 0 }}>
           {answers.map((a) => (
-            <ThreadAnswer key={a.ref} answer={a} onOpenPage={onOpenPage} />
+            <ThreadAnswer key={a.uri} answer={a} onOpenPage={onOpenPage} />
           ))}
         </div>
       )}

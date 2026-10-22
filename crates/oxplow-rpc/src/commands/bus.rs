@@ -206,7 +206,7 @@ mod tests {
         };
         assert_eq!(
             open(json!({ "id": 7 })).await.unwrap(),
-            json!("oxplow:oxplow/page?id=7&page=custom-dashboard")
+            json!("oxplow:oxplow/dashboard?id=7")
         );
         let err = open(json!({})).await.unwrap_err();
         assert_eq!(err.code, "INVALID");
@@ -242,11 +242,11 @@ mod tests {
         assert_eq!(pull["ui"]["background"], true);
         let new_task = by_id("oxplow.work_item.create").expect("New Task is offered");
         assert_eq!(new_task["ui"]["form"], "oxplow:oxplow/page?page=new-task");
-        assert_eq!(new_task["ui"]["open_after"], "{{result.ref}}");
+        assert_eq!(new_task["ui"]["open_after"], "{{result.uri}}");
         let dashboard = by_id("oxplow.dashboard.create").expect("New Dashboard is offered");
         assert_eq!(
             dashboard["ui"]["open_after"],
-            "oxplow:oxplow/page?id={{result.id}}&page=custom-dashboard"
+            "oxplow:oxplow/dashboard?id={{result.id}}"
         );
         assert!(
             by_id("oxplow.config.get").is_none(),
@@ -345,11 +345,7 @@ mod tests {
                 let oxplow_domain::CommandError::Proposed { proposal, .. } = err else {
                     panic!("{err:?}");
                 };
-                oxplow_domain::uri::build::parse_as::<i64>(
-                    &proposal,
-                    oxplow_domain::uri::resources::PROPOSAL,
-                )
-                .unwrap()
+                proposal
             }
         };
         let decide = |id: i64, approve: bool| {

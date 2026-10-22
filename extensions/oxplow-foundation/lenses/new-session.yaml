@@ -3,7 +3,7 @@ description: Start a session on this thread with one of the project's agents, or
 params:
   - { name: stream_id }
   - { name: thread_id }
-  - { name: q, label: Find an earlier session, type: search }
+  - { name: q, role: filter, label: Find an earlier session, type: search }
 viz: document
 sections:
   - { id: start, title: Start a new session, lens: new-session-start }

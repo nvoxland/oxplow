@@ -35,8 +35,8 @@ test("a window's report lists every thread's tabs, selection and history", () =>
       {
         thread: "thr1",
         tabs: [
-          { id: "oxplow:oxplow/wiki?slug=start", kind: "wiki", title: "Start", back: ["oxplow:oxplow/wiki?slug=home"], forward: ["oxplow:oxplow/wiki?slug=next"], origin: null },
-          { id: "oxplow:oxplow/file?path=src/a.rs", kind: "file", title: "file", back: [], forward: [], origin: "Files in src" },
+          { id: "oxplow:oxplow/wiki?slug=start", kind: "oxplow/wiki", title: "Start", back: ["oxplow:oxplow/wiki?slug=home"], forward: ["oxplow:oxplow/wiki?slug=next"], origin: null },
+          { id: "oxplow:oxplow/file?path=src/a.rs", kind: "oxplow/file", title: "oxplow/file", back: [], forward: [], origin: "Files in src" },
         ],
         active: "oxplow:oxplow/file?path=src/a.rs",
       },

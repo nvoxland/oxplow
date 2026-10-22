@@ -231,7 +231,7 @@ function MetricsTable({
 export function MetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef) => void } = {}) {
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
-  // The page's filters are its view params (`metricsView.ts`): in its tab's
+  // The page's filters are its view params: in its tab's
   // address, so Back and a restart bring them back.
   const [rangeKey, setRangeKey] = useViewParam<string>("range", DEFAULT_RANGE_KEY);
   const [branchName, setBranch] = useViewParam<string>("branch", "");

@@ -1,0 +1,85 @@
+{
+  "$defs": {
+    "ContentRef": {
+      "additionalProperties": false,
+      "description": "Where a large or sensitive body lives: `event_content.hash` (xxh3-128\nhex) and its length. Retention may delete the body; the ref stays.",
+      "properties": {
+        "hash": {
+          "type": "string"
+        },
+        "size": {
+          "description": "The whole body's length, stored or not.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "truncated": {
+          "description": "Only the first part was stored (bodies are capped).",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "hash",
+        "size"
+      ],
+      "type": "object"
+    },
+    "SubagentRef": {
+      "additionalProperties": false,
+      "description": "A subagent inside an agent session, as a tool event or a subagent\nevent names it: not a session of its own, but who in the session acted.",
+      "properties": {
+        "id": {
+          "description": "The harness's id for the subagent, or the id of the call that\nstarted it when the harness gives none.",
+          "type": "string"
+        },
+        "kind": {
+          "description": "What kind of subagent the harness says it is, when it says.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`agent.subagent.finished@2`: a subagent of the session finished — it\nstopped, or handed its report back. One per subagent.",
+  "properties": {
+    "result": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ContentRef"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "What it said last (Claude's `SubagentStop.last_assistant_message`),\nstored in `event_content`; read as `subagent:<id>#result`."
+    },
+    "subagent": {
+      "$ref": "#/$defs/SubagentRef"
+    },
+    "thread": {
+      "description": "The thread (`thr3`).",
+      "type": "string"
+    },
+    "turn": {
+      "description": "The turn (`trn12`).",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "thread",
+    "subagent"
+  ],
+  "title": "AgentSubagentFinishedV2",
+  "type": "object"
+}

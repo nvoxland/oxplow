@@ -7,7 +7,7 @@ query: |
   SELECT c.statement, c.kind, t.title AS thread, c.work_item, c.created_at
   FROM v_claim c
   JOIN v_thread t ON t.id = c.thread_id
-  JOIN v_oxplow_bundled_claim_status s ON s.ref = c.ref
+  JOIN v_oxplow_bundled_claim_status s ON s.uri = c.uri
   WHERE t.stream_id = :stream_id AND s.verified = 0
   ORDER BY c.created_at DESC, c.id DESC
   LIMIT 100

@@ -370,8 +370,8 @@ fn declared(idempotent_writes: bool) -> InitializeResult {
     let mut transition = command(
         "transition",
         "Move a work item to a canonical state, optionally naming a fake state.",
-        json!({ "type": "object", "required": ["ref", "to"], "additionalProperties": false,
-                "properties": { "ref": string, "to": state, "native_state": string } }),
+        json!({ "type": "object", "required": ["uri", "to"], "additionalProperties": false,
+                "properties": { "uri": string, "to": state, "native_state": string } }),
     );
     transition.undoable = true;
     InitializeResult {
@@ -392,7 +392,7 @@ fn declared(idempotent_writes: bool) -> InitializeResult {
                 "create",
                 "Create a work item.",
                 json!({ "type": "object", "required": ["title"], "additionalProperties": false,
-                        "properties": { "title": string, "body": string, "parent_ref": string,
+                        "properties": { "title": string, "body": string, "parent_uri": string,
                                         "state": state, "native_state": string,
                                         "native": native,
                                         "links": { "type": "array", "items": {
@@ -405,45 +405,45 @@ fn declared(idempotent_writes: bool) -> InitializeResult {
             command(
                 "update",
                 "Edit a work item's title, body, parent, state or points.",
-                json!({ "type": "object", "required": ["ref"], "additionalProperties": false,
-                        "properties": { "ref": string, "title": string, "body": string,
-                                        "parent_ref": string, "state": state,
+                json!({ "type": "object", "required": ["uri"], "additionalProperties": false,
+                        "properties": { "uri": string, "title": string, "body": string,
+                                        "parent_uri": string, "state": state,
                                         "native_state": string, "native": native } }),
             ),
             transition,
             command(
                 "link",
                 "Link a work item to another, or to any ref it is about.",
-                json!({ "type": "object", "required": ["ref", "target", "link_type"],
+                json!({ "type": "object", "required": ["uri", "target", "link_type"],
                         "additionalProperties": false,
-                        "properties": { "ref": string, "target": string, "link_type": string } }),
+                        "properties": { "uri": string, "target": string, "link_type": string } }),
             ),
             command(
                 "unlink",
                 "Remove a work item's link.",
-                json!({ "type": "object", "required": ["ref", "target", "link_type"],
+                json!({ "type": "object", "required": ["uri", "target", "link_type"],
                         "additionalProperties": false,
-                        "properties": { "ref": string, "target": string, "link_type": string } }),
+                        "properties": { "uri": string, "target": string, "link_type": string } }),
             ),
             command(
                 "comment",
                 "Comment on a work item.",
-                json!({ "type": "object", "required": ["ref", "body"],
+                json!({ "type": "object", "required": ["uri", "body"],
                         "additionalProperties": false,
-                        "properties": { "ref": string, "body": string } }),
+                        "properties": { "uri": string, "body": string } }),
             ),
             command(
                 "delete",
                 "Delete a work item.",
-                json!({ "type": "object", "required": ["ref"], "additionalProperties": false,
-                        "properties": { "ref": string } }),
+                json!({ "type": "object", "required": ["uri"], "additionalProperties": false,
+                        "properties": { "uri": string } }),
             ),
             command(
                 "estimate",
                 "Set a work item's points (a fake-only command).",
-                json!({ "type": "object", "required": ["ref", "points"],
+                json!({ "type": "object", "required": ["uri", "points"],
                         "additionalProperties": false,
-                        "properties": { "ref": string, "points": { "type": "integer" } } }),
+                        "properties": { "uri": string, "points": { "type": "integer" } } }),
             ),
         ],
         event_types: vec![EventTypeDecl {
@@ -998,7 +998,7 @@ async fn handle(
                 let mut foreign = rows.first().map(|(_, r)| r.clone()).unwrap_or_else(
                     || json!({ "title": "x", "state": "todo", "native_state": "Backlog" }),
                 );
-                foreign["ref"] = json!(oxplow_domain::uri::build::work_item_uri("other", "X-1"));
+                foreign["uri"] = json!(oxplow_domain::uri::build::work_item_uri("other", "X-1"));
                 rows.insert(0, (after + 1, foreign));
             }
             if hooks.stale_read {
@@ -1050,7 +1050,7 @@ fn number_of(id: &str, item_ref: &str) -> Result<u64, ProtocolError> {
         .filter(|(provider, _)| provider == id)
         .and_then(|(_, item)| item.strip_prefix("W-")?.parse().ok())
         .ok_or_else(|| ProtocolError::InvalidInput {
-            field: "/ref".into(),
+            field: "/uri".into(),
             message: format!(
                 "`{item_ref}` isn't one of `{id}`'s work items (oxplow:oxplow/work_item?id=W-<n>&provider={id})"
             ),
@@ -1073,7 +1073,7 @@ fn recorded(record: &WorkItemRecord) -> EventDraft {
         event_type: WorkItemRecorded::TYPE.into(),
         v: WorkItemRecorded::V,
         payload: json!({ "item": record }),
-        subject: vec![record.item_ref.clone()],
+        subject: vec![record.uri.clone()],
     }
 }
 
@@ -1124,14 +1124,14 @@ async fn invoke(world: &Shared, command: &str, input: Value) -> Result<Value, Pr
         "create" => {
             let title = str_field(&input, "title")?;
             let parent_ref = input
-                .get("parent_ref")
+                .get("parent_uri")
                 .and_then(Value::as_str)
                 .map(str::to_string);
             if let Some(parent) = &parent_ref {
                 let n = number_of(&w.id, parent)?;
                 if !w.items.get(&n).is_some_and(|i| !i.record.deleted) {
                     return Err(ProtocolError::InvalidInput {
-                        field: "/parent_ref".into(),
+                        field: "/parent_uri".into(),
                         message: format!("no item `{parent}`"),
                     });
                 }
@@ -1144,7 +1144,7 @@ async fn invoke(world: &Shared, command: &str, input: Value) -> Result<Value, Pr
                 native["points"] = points.into();
             }
             let record = WorkItemRecord {
-                item_ref: oxplow_domain::uri::build::work_item_uri(&w.id, &format!("W-{n}")),
+                uri: oxplow_domain::uri::build::work_item_uri(&w.id, &format!("W-{n}")),
                 title,
                 body: input
                     .get("body")
@@ -1154,7 +1154,7 @@ async fn invoke(world: &Shared, command: &str, input: Value) -> Result<Value, Pr
                 state,
                 native_state: native_of(state).into(),
                 native,
-                parent_ref,
+                parent_uri: parent_ref,
                 deleted: false,
                 rank: None,
                 // It keeps its links and comments, so every record states
@@ -1171,14 +1171,14 @@ async fn invoke(world: &Shared, command: &str, input: Value) -> Result<Value, Pr
                 list: None,
             };
             let events = vec![recorded(&record)];
-            let result = json!({ "ref": record.item_ref });
+            let result = json!({ "uri": record.uri });
             w.rev += 1;
             let rev = w.rev;
             w.items.insert(n, Item { record, rev });
             (result, events)
         }
         "update" | "transition" | "link" | "unlink" | "comment" | "delete" | "estimate" => {
-            let item_ref = str_field(&input, "ref")?;
+            let item_ref = str_field(&input, "uri")?;
             let n = number_of(&w.id, &item_ref)?;
             w.rev += 1;
             let rev = w.rev;
@@ -1187,10 +1187,10 @@ async fn invoke(world: &Shared, command: &str, input: Value) -> Result<Value, Pr
                 .get_mut(&n)
                 .filter(|item| !item.record.deleted)
                 .ok_or_else(|| ProtocolError::InvalidInput {
-                    field: "/ref".into(),
+                    field: "/uri".into(),
                     message: format!("no item `{item_ref}`"),
                 })?;
-            let mut result = json!({ "ref": item_ref });
+            let mut result = json!({ "uri": item_ref });
             match command {
                 "update" => {
                     if let Some(t) = input.get("title").and_then(Value::as_str) {
@@ -1199,8 +1199,8 @@ async fn invoke(world: &Shared, command: &str, input: Value) -> Result<Value, Pr
                     if let Some(b) = input.get("body").and_then(Value::as_str) {
                         item.record.body = b.into();
                     }
-                    if let Some(p) = input.get("parent_ref").and_then(Value::as_str) {
-                        item.record.parent_ref = (!p.is_empty()).then(|| p.to_string());
+                    if let Some(p) = input.get("parent_uri").and_then(Value::as_str) {
+                        item.record.parent_uri = (!p.is_empty()).then(|| p.to_string());
                     }
                     if let Some(state) = requested_state(&input, "state")? {
                         item.record.state = state;
@@ -1220,7 +1220,7 @@ async fn invoke(world: &Shared, command: &str, input: Value) -> Result<Value, Pr
                     inverse = Some(CommandCall {
                         command: "transition".into(),
                         input: json!({
-                            "ref": item_ref,
+                            "uri": item_ref,
                             "to": item.record.state.as_str(),
                             "native_state": item.record.native_state,
                         }),

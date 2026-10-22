@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use rusqlite::{params, Connection, OptionalExtension};
 
 use oxplow_domain::events::schema::{
-    AgentStatusChanged, AgentTurnEnded, AgentTurnEndedV2, AgentTurnStarted, AgentTurnStartedV1,
+    AgentStatusChanged, AgentTurnEnded, AgentTurnEndedV3, AgentTurnStarted, AgentTurnStartedV2,
     EventType,
 };
 use oxplow_domain::events::Anchors;
@@ -316,9 +316,9 @@ pub fn open_turn_tx(
         .map_err(map_sql_err)?;
     }
     let env = ev
-        .typed::<AgentTurnStarted>(&AgentTurnStartedV1 {
-            turn: turn_uri(id),
-            thread: thread_uri(thread),
+        .typed::<AgentTurnStarted>(&AgentTurnStartedV2 {
+            turn: id.to_string(),
+            thread: thread.to_string(),
             session: session.map(str::to_string),
         })
         .with_anchors(Anchors {
@@ -399,9 +399,9 @@ pub fn close_turn_tx(
     };
     let (thread, session) = (ThreadId::new(thread), session.map(AgentSessionId::new));
     let env = ev
-        .typed::<AgentTurnEnded>(&AgentTurnEndedV2 {
-            turn: turn_uri(id),
-            thread: thread_uri(thread),
+        .typed::<AgentTurnEnded>(&AgentTurnEndedV3 {
+            turn: id.to_string(),
+            thread: thread.to_string(),
             outcome: end.outcome,
             transcript_path: end.transcript_path.map(str::to_string),
             usage: end.usage.clone(),
@@ -510,14 +510,14 @@ pub fn log_status_tx(
     state: oxplow_domain::AgentStatusState,
     detail: Option<String>,
 ) -> Result<(), DomainError> {
-    use oxplow_domain::events::schema::{AgentStatusChangedV1, LoggedAgentStatus};
+    use oxplow_domain::events::schema::{AgentStatusChangedV2, LoggedAgentStatus};
     let mut anchors = activity_anchors_tx(conn, thread, session)?;
     if let Some(turn) = turn {
         anchors.turn_id = Some(turn.value());
     }
     let env = ev
-        .typed::<AgentStatusChanged>(&AgentStatusChangedV1 {
-            thread: thread_uri(thread),
+        .typed::<AgentStatusChanged>(&AgentStatusChangedV2 {
+            thread: thread.to_string(),
             state: LoggedAgentStatus::of(state).ok_or_else(|| {
                 DomainError::Invalid(format!("{state:?} is derived, never logged"))
             })?,
@@ -827,12 +827,12 @@ mod tests {
         state: oxplow_domain::AgentStatusState,
         detail: Option<&str>,
     ) {
-        use oxplow_domain::events::schema::AgentStatusChangedV1;
+        use oxplow_domain::events::schema::AgentStatusChangedV2;
         let conn = db.conn().unwrap();
         let ev = EventCtx::system(vocabulary, "test");
         let env = ev
-            .typed::<AgentStatusChanged>(&AgentStatusChangedV1 {
-                thread: thread_uri(thread),
+            .typed::<AgentStatusChanged>(&AgentStatusChangedV2 {
+                thread: thread.to_string(),
                 state: oxplow_domain::events::schema::LoggedAgentStatus::of(state).unwrap(),
                 detail: detail.map(str::to_string),
             })
@@ -901,13 +901,13 @@ mod tests {
         };
         let (a, b, c) = (open(1).await, open(2).await, open(3).await);
         let log = |session, state| {
-            use oxplow_domain::events::schema::AgentStatusChangedV1;
+            use oxplow_domain::events::schema::AgentStatusChangedV2;
             let conn = db.conn().unwrap();
             let vocabulary = vocabulary.current();
             let ev = EventCtx::system(&vocabulary, "test");
             let env = ev
-                .typed::<AgentStatusChanged>(&AgentStatusChangedV1 {
-                    thread: thread_uri(tid),
+                .typed::<AgentStatusChanged>(&AgentStatusChangedV2 {
+                    thread: tid.to_string(),
                     state: oxplow_domain::events::schema::LoggedAgentStatus::of(state).unwrap(),
                     detail: None,
                 })
@@ -972,12 +972,12 @@ mod tests {
                     )
                     .unwrap()
                     .id;
-                    use oxplow_domain::events::schema::AgentStatusChangedV1;
+                    use oxplow_domain::events::schema::AgentStatusChangedV2;
                     let vocabulary = vocabulary.current();
                     let ev = EventCtx::system(&vocabulary, "test");
                     let env = ev
-                        .typed::<AgentStatusChanged>(&AgentStatusChangedV1 {
-                            thread: thread_uri(tid),
+                        .typed::<AgentStatusChanged>(&AgentStatusChangedV2 {
+                            thread: tid.to_string(),
                             state: oxplow_domain::events::schema::LoggedAgentStatus::of(state)
                                 .unwrap(),
                             detail: None,
@@ -1091,10 +1091,7 @@ mod tests {
             .unwrap();
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].ty, "agent.turn.started");
-        assert_eq!(
-            rows[0].payload["turn"],
-            oxplow_domain::uri::build::keyed(oxplow_domain::uri::resources::TURN, &id.to_string())
-        );
+        assert_eq!(rows[0].payload["turn"], id.to_string());
         assert_eq!(rows[0].payload["session"], "s1");
         assert_eq!(rows[1].ty, "agent.turn.ended");
         assert_eq!(rows[1].payload["outcome"], "completed");

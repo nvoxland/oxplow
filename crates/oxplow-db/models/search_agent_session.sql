@@ -4,7 +4,7 @@
 -- of its shell calls (up to 300 of each). Closed sessions, and sessions on
 -- archived threads, are included. `version` is the newest of the session's
 -- own change and its last tool call.
-SELECT CAST(s.ref AS TEXT) AS ref,
+SELECT CAST(s.uri AS TEXT) AS uri,
        CAST(s.display_name AS TEXT) AS title,
        CAST(trim(
          s.harness

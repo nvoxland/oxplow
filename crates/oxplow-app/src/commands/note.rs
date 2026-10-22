@@ -20,7 +20,7 @@ use serde_json::{json, Value};
 
 use super::comment::author_of;
 use super::thread::{acting_thread, agent_scope};
-use super::util::{invalid, parse, ref_id, schema};
+use super::util::{bare_id, invalid, parse, schema};
 use super::{Handler, HandlerOutput, TxCtx};
 use crate::link_check::LinkDeps;
 
@@ -30,7 +30,7 @@ pub const UPDATE: &str = "oxplow.knowledge.update_note";
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct AddInput {
-    /// The thread (`oxplow:oxplow/thread?id=thr3`); an agent's is always its own.
+    /// The thread (`thr3`); an agent's is always its own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thread: Option<String>,
     /// The note (markdown; `[[…]]` links are checked). May be empty: a
@@ -43,7 +43,7 @@ pub struct AddInput {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct UpdateInput {
-    /// The note (`oxplow:oxplow/thread_note?id=not12`).
+    /// The note (`not12`).
     pub note: String,
     pub body: String,
 }
@@ -95,7 +95,7 @@ pub fn update_op(deps: LinkDeps) -> Op {
         true,
         Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
             let input: UpdateInput = parse(input)?;
-            let id: NoteId = ref_id(
+            let id: NoteId = bare_id(
                 &input.note,
                 oxplow_domain::uri::resources::THREAD_NOTE,
                 "/note",
@@ -239,7 +239,7 @@ mod tests {
             .run(
                 &other,
                 ADD,
-                json!({ "thread": thread_uri(fx.thread), "body": "x" }),
+                json!({ "thread": fx.thread.to_string(), "body": "x" }),
                 false,
             )
             .await
@@ -258,10 +258,7 @@ mod tests {
             .run(&agent(&fx), ADD, json!({}), false)
             .await
             .unwrap();
-        let id = oxplow_domain::uri::build::keyed(
-            oxplow_domain::uri::resources::THREAD_NOTE,
-            out.result["note"]["id"].as_str().unwrap(),
-        );
+        let id = out.result["note"]["id"].as_str().unwrap().to_string();
         let filled = fx
             .svc
             .commands

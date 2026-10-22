@@ -38,7 +38,6 @@
 //! effort's (rule 2 opens it, adopting no further back than the close).
 
 use oxplow_domain::run::{Mode, Outcome as RunOutcome, RunContext};
-use oxplow_domain::uri::build::{effort_uri, thread_uri};
 use std::sync::{Arc, RwLock, Weak};
 
 use async_trait::async_trait;
@@ -46,8 +45,8 @@ use oxplow_config::OxplowConfig;
 use oxplow_db::SqlCell;
 use oxplow_domain::effort_policy::{EffortPolicy, EffortPolicyRegistry, EVENTS};
 use oxplow_domain::events::schema::{
-    CapabilitySwitched, CapabilitySwitchedV1, EffortLanded, EffortLandedV1, EffortLinked,
-    EffortLinkedV1, EffortOpenedV2, EventType as _, ThreadCheckpoint, ThreadCheckpointV1,
+    CapabilitySwitched, CapabilitySwitchedV1, EffortLanded, EffortLandedV2, EffortLinked,
+    EffortLinkedV2, EffortOpenedV3, EventType as _, ThreadCheckpoint, ThreadCheckpointV2,
     WorkItemStateChanged, WorkItemStateChangedV1,
 };
 use oxplow_domain::events::EventView;
@@ -146,7 +145,7 @@ impl CommitOrSwitch {
     ) -> Result<Option<(Option<CanonicalState>, Option<ThreadId>)>, DomainError> {
         let rows = self
             .rows(
-                "SELECT state, thread_id FROM v_work_item WHERE ref = ?1",
+                "SELECT state, thread_id FROM v_work_item WHERE uri = ?1",
                 vec![SqlCell::Text(item_ref.into())],
             )
             .await?;
@@ -169,7 +168,7 @@ impl CommitOrSwitch {
         for _ in 0..MAX_DEPTH {
             let rows = self
                 .rows(
-                    "SELECT parent_ref FROM v_work_item WHERE ref = ?1",
+                    "SELECT parent_uri FROM v_work_item WHERE uri = ?1",
                     vec![SqlCell::Text(at.clone())],
                 )
                 .await?;
@@ -197,7 +196,7 @@ impl CommitOrSwitch {
         let open_new = || {
             call(
                 crate::commands::effort::OPEN,
-                json!({ "thread": thread_uri(thread), "work_item": item_ref }),
+                json!({ "thread": thread.to_string(), "work_item": item_ref }),
             )
         };
         let Some(open) = self.open_on(thread).await? else {
@@ -209,13 +208,13 @@ impl CommitOrSwitch {
             Some(linked) if !self.is_under(item_ref, linked).await? => vec![
                 call(
                     crate::commands::effort::CLOSE,
-                    json!({ "effort": effort_uri(open.id), "reason": "switch" }),
+                    json!({ "effort": open.id.to_string(), "reason": "switch" }),
                 ),
                 open_new(),
             ],
             _ => vec![call(
                 crate::commands::effort::LINK,
-                json!({ "effort": effort_uri(open.id), "work_item": item_ref }),
+                json!({ "effort": open.id.to_string(), "work_item": item_ref }),
             )],
         })
     }
@@ -246,7 +245,7 @@ impl CommitOrSwitch {
         };
         Ok(vec![call(
             crate::commands::effort::OPEN,
-            json!({ "thread": thread_uri(thread), "adopt_since": started }),
+            json!({ "thread": thread.to_string(), "adopt_since": started }),
         )])
     }
 
@@ -255,7 +254,7 @@ impl CommitOrSwitch {
         Ok(match self.item(item_ref).await? {
             Some((Some(CanonicalState::Todo), _)) => vec![call(
                 crate::commands::work_item::NAME,
-                json!({ "ref": item_ref, "to": "in_progress" }),
+                json!({ "uri": item_ref, "to": "in_progress" }),
             )],
             _ => Vec::new(),
         })
@@ -287,27 +286,27 @@ impl EffortPolicy for CommitOrSwitch {
                 }
             }
             t if t == EffortLinked::TYPE => {
-                let linked: EffortLinkedV1 = serde_json::from_value(payload).map_err(storage)?;
+                let linked: EffortLinkedV2 = serde_json::from_value(payload).map_err(storage)?;
                 match linked.work_item {
                     Some(item) => self.linked(&item).await,
                     None => Ok(Vec::new()),
                 }
             }
             t if t == EffortLanded::TYPE => {
-                let landed: EffortLandedV1 = serde_json::from_value(payload).map_err(storage)?;
+                let landed: EffortLandedV2 = serde_json::from_value(payload).map_err(storage)?;
                 if !landed.complete {
                     return Ok(Vec::new());
                 }
                 match event.anchors.effort_id {
                     Some(effort) if self.is_open(effort).await? => Ok(vec![call(
                         crate::commands::effort::CLOSE,
-                        json!({ "effort": effort_uri(effort), "reason": "commit" }),
+                        json!({ "effort": effort.to_string(), "reason": "commit" }),
                     )]),
                     _ => Ok(Vec::new()),
                 }
             }
             t if t == ThreadCheckpoint::TYPE => {
-                let checkpoint: ThreadCheckpointV1 =
+                let checkpoint: ThreadCheckpointV2 =
                     serde_json::from_value(payload).map_err(storage)?;
                 if !checkpoint.changed || checkpoint.writing_tools == 0 {
                     return Ok(Vec::new());
@@ -318,7 +317,7 @@ impl EffortPolicy for CommitOrSwitch {
                 }
             }
             _ => {
-                let opened: EffortOpenedV2 = serde_json::from_value(payload).map_err(storage)?;
+                let opened: EffortOpenedV3 = serde_json::from_value(payload).map_err(storage)?;
                 match opened.work_item {
                     Some(item) => self.linked(&item).await,
                     None => Ok(Vec::new()),
@@ -342,7 +341,7 @@ async fn close_open(
         .filter_map(|row| match row.first() {
             Some(SqlCell::Int(id)) => Some(call(
                 crate::commands::effort::CLOSE,
-                json!({ "effort": effort_uri(EffortId::new(*id)), "reason": "switch" }),
+                json!({ "effort": EffortId::new(*id).to_string(), "reason": "switch" }),
             )),
             _ => None,
         })
@@ -595,10 +594,10 @@ mod tests {
     async fn item(fx: &EffortFixture, title: &str, parent: Option<&str>, thread: bool) -> String {
         let mut input = json!({ "title": title });
         if let Some(parent) = parent {
-            input["parent_ref"] = json!(parent);
+            input["parent_uri"] = json!(parent);
         }
         if thread {
-            input["thread"] = json!(oxplow_domain::uri::build::thread_uri(fx.thread));
+            input["thread"] = json!(fx.thread.to_string());
         }
         let out = fx
             .svc
@@ -611,7 +610,7 @@ mod tests {
             )
             .await
             .unwrap();
-        out.result["ref"].as_str().unwrap().to_string()
+        out.result["uri"].as_str().unwrap().to_string()
     }
 
     async fn transition(fx: &EffortFixture, actor: &Actor, item: &str, to: &str) {
@@ -620,7 +619,7 @@ mod tests {
             .run(
                 actor,
                 crate::commands::work_item::NAME,
-                json!({ "ref": item, "to": to }),
+                json!({ "uri": item, "to": to }),
                 false,
             )
             .await
@@ -661,7 +660,7 @@ mod tests {
             .svc
             .sql
             .query_sql(
-                "SELECT state FROM v_work_item WHERE ref = ?1",
+                "SELECT state FROM v_work_item WHERE uri = ?1",
                 vec![SqlCell::Text(item.into())],
                 None,
             )
@@ -677,7 +676,7 @@ mod tests {
             .run(
                 &Actor::Human,
                 crate::commands::effort::CLOSE,
-                json!({ "effort": effort_uri(fx.effort) }),
+                json!({ "effort": fx.effort.to_string() }),
                 false,
             )
             .await
@@ -755,7 +754,7 @@ mod tests {
             .run(
                 &Actor::Human,
                 crate::commands::effort::LINK,
-                json!({ "effort": effort_uri(fx.effort), "work_item": todo }),
+                json!({ "effort": fx.effort.to_string(), "work_item": todo }),
                 false,
             )
             .await

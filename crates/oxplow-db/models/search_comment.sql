@@ -1,6 +1,6 @@
 -- Archived work leaves search (tsk921): a comment in an archived stream
 -- isn't indexed.
-SELECT c.ref AS ref,
+SELECT c.uri AS uri,
        CAST(c.quote AS TEXT) AS title,
        CAST(c.quote || coalesce(
          (SELECT group_concat(char(10) || m.body, '')

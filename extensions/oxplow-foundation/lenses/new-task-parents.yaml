@@ -5,12 +5,12 @@ needs: [work_items]
 params:
   - { name: thread_id }
 query: |
-  SELECT w.ref AS value, w.title AS label
+  SELECT w.uri AS value, w.title AS label
   FROM v_work_item w
   WHERE w.thread_id = :thread_id
     AND w.state NOT IN ('done', 'canceled')
     AND EXISTS (SELECT 1 FROM v_capability_provider p
                 WHERE p.capability = 'work_items' AND p.active = 1
                   AND json_extract(p.features, '$.hierarchy') = 1)
-    AND EXISTS (SELECT 1 FROM v_work_item c WHERE c.parent_ref = w.ref)
+    AND EXISTS (SELECT 1 FROM v_work_item c WHERE c.parent_uri = w.uri)
   ORDER BY w.rank

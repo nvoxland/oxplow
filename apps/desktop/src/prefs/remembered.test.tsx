@@ -25,11 +25,12 @@ function backend(stored: UiPreference[] = []) {
   };
 }
 
-test("a page's memory is scoped by the page, whatever its params", () => {
-  expect(pageMemoryScope(pageTabRef("tasks", { state: "open" }))).toBe("oxplow:oxplow/page?page=tasks");
+test("a page's memory is scoped by the page, whatever it shows and however", () => {
+  expect(pageMemoryScope(pageTabRef("tasks", { stream: "str1" }, { state: "open" }))).toBe("oxplow:oxplow/page?page=tasks");
   expect(pageMemoryScope(extPageRef("acme", "pulls"))).toBe("oxplow:oxplow/page?page=acme/pulls");
-  expect(pageMemoryScope(lensRef("x/y", { range: "7d" }))).toBe("oxplow:oxplow/lens?lens=x/y");
-  expect(pageMemoryScope(wikiPageRef("home"))).toBe("kind:wiki");
+  expect(pageMemoryScope(lensRef("x/y", { stream_id: 2 }, { range: "7d" }))).toBe("oxplow:oxplow/lens?lens=x/y");
+  // An entity page's is its resource's: every wiki page shares one.
+  expect(pageMemoryScope(wikiPageRef("home"))).toBe("resource:oxplow/wiki");
 });
 
 test("the store reads what was kept, writes a change once after a pause, and ignores an unchanged one", async () => {

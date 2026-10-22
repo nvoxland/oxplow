@@ -82,11 +82,21 @@ async fn the_github_example_checks_tests_and_its_pr_opens() {
         }
     };
     assert_eq!(
-        row("SELECT page, resolve FROM v_resource WHERE resource = 'github/pr'").await,
-        serde_json::json!([["oxplow:oxplow/page?page=github/pr", "v_github_pull_request"]])
+        row("SELECT resolve FROM v_resource WHERE resource = 'github/pr'").await,
+        serde_json::json!([["v_github_pull_request"]])
     );
+    // A pull request's URI opens on the page that renders it.
+    let pr = svc
+        .extension_catalog
+        .get(root)
+        .iter()
+        .flat_map(|e| e.pages.iter())
+        .find(|p| p.renders.iter().any(|r| r == "github/pr"))
+        .cloned()
+        .expect("a page renders github/pr");
+    assert!(pr.default, "{pr:?}");
     assert_eq!(
-        row("SELECT title FROM v_github_pull_request WHERE ref = 'oxplow:github/pr?id=12'").await,
+        row("SELECT title FROM v_github_pull_request WHERE uri = 'oxplow:github/pr?id=12'").await,
         serde_json::json!([["Fix the hover state"]])
     );
     // tsk894: `[[pr:12]]` is a valid link; one to a pull request the
@@ -100,14 +110,14 @@ async fn the_github_example_checks_tests_and_its_pr_opens() {
         vec!["pr:99"],
         "{warnings:?}"
     );
-    // Its page is the `pr` lens, given `?ref=`.
+    // Its page is the `pr` lens, given `?uri=`.
     let run = oxplow_app::extensions::run_lens(
         &svc.sql,
         &svc.extension_catalog,
         root,
         "github/pr",
         [(
-            "ref".to_string(),
+            "uri".to_string(),
             oxplow_db::SqlCell::Text("oxplow:github/pr?id=12".into()),
         )]
         .into_iter()
@@ -590,7 +600,7 @@ async fn the_effort_review_example_reviews_evidence_and_can_be_cancelled() {
     // The model: a call to the evidence tool, the review, then a slow one
     // to cancel.
     let replies: Vec<oxplow_ai::fixture::FixtureReply> = serde_json::from_value(json!([
-        { "toolCalls": [{ "name": "effort_evidence", "arguments": { "effort": "oxplow:oxplow/effort?id=eff1" } }] },
+        { "toolCalls": [{ "name": "effort_evidence", "arguments": { "effort": "eff1" } }] },
         "The agent's 12 tests pass; diff coverage is 80%, leaving src/a.rs:3 untested.",
         { "text": "A long review that is still being written when it is cancelled, word by word.", "chunkDelayMs": 100 },
     ]))
@@ -636,11 +646,11 @@ async fn the_effort_review_example_reviews_evidence_and_can_be_cancelled() {
         json!({ "title": "Parse blocks" }),
     )
     .await;
-    let item = item["ref"].as_str().unwrap().to_string();
+    let item = item["uri"].as_str().unwrap().to_string();
     as_person(
         &svc,
         "oxplow.effort.open",
-        json!({ "thread": "oxplow:oxplow/thread?id=thr1", "work_item": item }),
+        json!({ "thread": "thr1", "work_item": item }),
     )
     .await;
     svc.commands
@@ -656,18 +666,13 @@ async fn the_effort_review_example_reviews_evidence_and_can_be_cancelled() {
         )
         .await
         .unwrap();
-    as_person(
-        &svc,
-        "oxplow.effort.close",
-        json!({ "effort": "oxplow:oxplow/effort?id=eff1" }),
-    )
-    .await;
+    as_person(&svc, "oxplow.effort.close", json!({ "effort": "eff1" })).await;
 
     // Its effect asked for the review; the scheduler isn't running yet, so
     // it waits while the coverage report arrives.
     let job = until_row(
         &svc,
-        "SELECT id FROM v_job_run WHERE intent_key = 'review:oxplow:oxplow/effort?id=eff1'",
+        "SELECT id FROM v_job_run WHERE intent_key = 'review:eff1'",
     )
     .await[0]
         .as_str()
@@ -723,7 +728,7 @@ async fn the_effort_review_example_reviews_evidence_and_can_be_cancelled() {
     // The review is commented on the work item, and published.
     let comment = until_row(
         &svc,
-        "SELECT body FROM v_work_item_comment WHERE body LIKE '**Review of oxplow:oxplow/effort?id=eff1**%'",
+        "SELECT body FROM v_work_item_comment WHERE body LIKE '**Review of eff1**%'",
     )
     .await;
     assert!(
@@ -753,19 +758,14 @@ async fn the_effort_review_example_reviews_evidence_and_can_be_cancelled() {
     as_person(
         &svc,
         "oxplow.effort.open",
-        json!({ "thread": "oxplow:oxplow/thread?id=thr1", "work_item": item }),
+        json!({ "thread": "thr1", "work_item": item }),
     )
     .await;
-    as_person(
-        &svc,
-        "oxplow.effort.close",
-        json!({ "effort": "oxplow:oxplow/effort?id=eff2" }),
-    )
-    .await;
+    as_person(&svc, "oxplow.effort.close", json!({ "effort": "eff2" })).await;
     let second = until_row(
         &svc,
         "SELECT job_id FROM v_job_run_output o JOIN v_job_run j ON j.id = o.job_id \
-          WHERE j.intent_key = 'review:oxplow:oxplow/effort?id=eff2' AND o.kind = 'text'",
+          WHERE j.intent_key = 'review:eff2' AND o.kind = 'text'",
     )
     .await[0]
         .as_str()
@@ -774,7 +774,7 @@ async fn the_effort_review_example_reviews_evidence_and_can_be_cancelled() {
     as_person(
         &svc,
         "oxplow.job_run.cancel",
-        json!({ "job_run": oxplow_domain::uri::build::job_run_uri(&second) }),
+        json!({ "job_run": &second.to_string() }),
     )
     .await;
     until_row(
@@ -784,7 +784,7 @@ async fn the_effort_review_example_reviews_evidence_and_can_be_cancelled() {
     .await;
     until_row(
         &svc,
-        "SELECT body FROM v_work_item_comment WHERE body LIKE '**Review of oxplow:oxplow/effort?id=eff2**%The review was cancelled after%'",
+        "SELECT body FROM v_work_item_comment WHERE body LIKE '**Review of eff2**%The review was cancelled after%'",
     )
     .await;
 }
@@ -815,7 +815,7 @@ async fn inferred_reasoning_run(
     let svc = common::booted(root).await;
     let model = std::sync::Arc::new(oxplow_ai::fixture::FixtureModel::new(
         serde_json::from_value::<Vec<oxplow_ai::fixture::FixtureReply>>(serde_json::json!([
-            "```json\n{\"decisions\": [{\"question\": \"Which CSV library?\", \"choice\": \"csv crate\", \"alternatives\": [\"hand-rolled\"], \"confidence\": \"medium\"}], \"claims\": [{\"statement\": \"The export tests pass.\", \"kind\": \"tests_pass\", \"evidence_ref\": \"oxplow:oxplow/run?id=12\"}]}\n```"
+            "```json\n{\"decisions\": [{\"question\": \"Which CSV library?\", \"choice\": \"csv crate\", \"alternatives\": [\"hand-rolled\"], \"confidence\": \"medium\"}], \"claims\": [{\"statement\": \"The export tests pass.\", \"kind\": \"tests_pass\", \"evidence\": \"oxplow:oxplow/run?id=12\"}]}\n```"
         ]))
         .unwrap(),
     ));
@@ -867,7 +867,7 @@ async fn inferred_reasoning_run(
     as_person(
         &svc,
         "oxplow.effort.open",
-        json!({ "thread": "oxplow:oxplow/thread?id=thr1", "work_item": item["ref"] }),
+        json!({ "thread": "thr1", "work_item": item["uri"] }),
     )
     .await;
     svc.tool_call_store
@@ -897,12 +897,7 @@ async fn inferred_reasoning_run(
         })
         .await
         .unwrap();
-    as_person(
-        &svc,
-        "oxplow.effort.close",
-        json!({ "effort": "oxplow:oxplow/effort?id=eff1" }),
-    )
-    .await;
+    as_person(&svc, "oxplow.effort.close", json!({ "effort": "eff1" })).await;
     (svc, dir, model)
 }
 
@@ -929,7 +924,7 @@ async fn the_bundled_extension_infers_an_efforts_decisions_and_claims_on_its_pro
     // what the answer named.
     let claim = until_row(
         &svc,
-        "SELECT statement, kind, evidence_ref, review FROM v_claim WHERE effort_id = 1",
+        "SELECT statement, kind, evidence, review FROM v_claim WHERE effort_id = 1",
     )
     .await;
     assert_eq!(
@@ -952,7 +947,7 @@ async fn the_bundled_extension_infers_an_efforts_decisions_and_claims_on_its_pro
     );
     let jobs = until_row(
         &svc,
-        "SELECT count(*) FROM v_job_run WHERE intent_key = 'reasoning:oxplow:oxplow/effort?id=eff1'",
+        "SELECT count(*) FROM v_job_run WHERE intent_key = 'reasoning:eff1'",
     )
     .await;
     assert_eq!(jobs, [json!(1)]);
@@ -961,12 +956,12 @@ async fn the_bundled_extension_infers_an_efforts_decisions_and_claims_on_its_pro
     as_person(
         &svc,
         "oxplow.effort.infer_reasoning",
-        json!({ "effort": "oxplow:oxplow/effort?id=eff1", "again": true }),
+        json!({ "effort": "eff1", "again": true }),
     )
     .await;
     until_row(
         &svc,
-        "SELECT 1 FROM v_job_run WHERE intent_key = 'reasoning:oxplow:oxplow/effort?id=eff1@2' AND state = 'succeeded'",
+        "SELECT 1 FROM v_job_run WHERE intent_key = 'reasoning:eff1@2' AND state = 'succeeded'",
     )
     .await;
     let calls = until_row(&svc, "SELECT count(*) FROM v_ai_call").await;
@@ -1319,32 +1314,27 @@ async fn a_review_effort_review_wrote_shows_in_review_badges() {
         "oxplow.work_item.create",
         json!({ "title": "Parse blocks" }),
     )
-    .await["ref"]
+    .await["uri"]
         .as_str()
         .unwrap()
         .to_string();
     as_person(
         &svc,
         "oxplow.effort.open",
-        json!({ "thread": "oxplow:oxplow/thread?id=thr1", "work_item": item }),
+        json!({ "thread": "thr1", "work_item": item }),
     )
     .await;
-    as_person(
-        &svc,
-        "oxplow.effort.close",
-        json!({ "effort": "oxplow:oxplow/effort?id=eff1" }),
-    )
-    .await;
+    as_person(&svc, "oxplow.effort.close", json!({ "effort": "eff1" })).await;
     as_person(
         &svc,
         "effort_review.review.ask",
         json!({
             "job": "review",
-            "intentKey": "review:oxplow:oxplow/effort?id=eff1",
+            "intentKey": "review:eff1",
             "request": {
                 "schemaVersion": 1,
                 "role": "summarize",
-                "messages": [{ "role": "user", "parts": [{ "type": "text", "text": "Review oxplow:oxplow/effort?id=eff1." }] }],
+                "messages": [{ "role": "user", "parts": [{ "type": "text", "text": "Review eff1." }] }],
             },
         }),
     )
@@ -1386,14 +1376,14 @@ async fn a_review_effort_review_wrote_shows_in_review_badges() {
         .starts_with("The tests pass and coverage is fine"));
     let here = lens(
         "review-badges/item-review",
-        vec![("ref", oxplow_db::SqlCell::Text(item.clone()))],
+        vec![("uri", oxplow_db::SqlCell::Text(item.clone()))],
     )
     .await;
     assert_eq!(here[0][0], json!("succeeded"), "{here}");
     let elsewhere = lens(
         "review-badges/item-review",
         vec![(
-            "ref",
+            "uri",
             oxplow_db::SqlCell::Text("oxplow:oxplow/work_item?id=tsk99&provider=oxplow".into()),
         )],
     )
@@ -1467,12 +1457,7 @@ async fn the_schema_review_example_joins_its_facts_with_core_evidence() {
             .unwrap();
     };
     take().await;
-    as_person(
-        &svc,
-        "oxplow.effort.open",
-        json!({ "thread": "oxplow:oxplow/thread?id=thr1" }),
-    )
-    .await;
+    as_person(&svc, "oxplow.effort.open", json!({ "thread": "thr1" })).await;
     until_row(
         &svc,
         "SELECT 1 FROM v_effort WHERE id = 1 AND start_snapshot_id IS NOT NULL",
@@ -1519,12 +1504,7 @@ async fn the_schema_review_example_joins_its_facts_with_core_evidence() {
         .unwrap();
     // Closing takes the effort's end snapshot of what changed.
     capture.enqueue_startup_diff().await.unwrap();
-    as_person(
-        &svc,
-        "oxplow.effort.close",
-        json!({ "effort": "oxplow:oxplow/effort?id=eff1" }),
-    )
-    .await;
+    as_person(&svc, "oxplow.effort.close", json!({ "effort": "eff1" })).await;
     until_row(
         &svc,
         "SELECT 1 FROM v_effort WHERE id = 1 AND end_snapshot_id IS NOT NULL",

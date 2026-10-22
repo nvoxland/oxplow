@@ -366,7 +366,7 @@ function ResolvedEndpointDiff({
     void readWorkItemsByRef([workItem])
       .then(({ items }) => {
         if (cancelled) return;
-        setTaskTitle(items.find((r) => r.ref === workItem)?.title ?? null);
+        setTaskTitle(items.find((r) => r.uri === workItem)?.title ?? null);
       })
       .catch(() => setTaskTitle(null));
     return () => {
@@ -395,8 +395,8 @@ function ResolvedEndpointDiff({
         const itemRefs = overlapping.flatMap((o) => (o.workItem ? [o.workItem] : []));
         const titles = await readWorkItemsByRef(Array.from(new Set(itemRefs)))
           .then((r) => r.items)
-          .catch(() => [] as Array<{ ref: string; title: string }>);
-        const titleByItem = new Map(titles.map((t) => [t.ref, t.title] as const));
+          .catch(() => [] as Array<{ uri: string; title: string }>);
+        const titleByItem = new Map(titles.map((t) => [t.uri, t.title] as const));
         // An unlinked effort is named by its own title (`v_effort.title`).
         const unlinked = overlapping
           .map((o) => (o.workItem ? null : effortRowId(o.effortId)))
@@ -720,7 +720,7 @@ function ResolvedEndpointDiff({
           params={
             effortRowId(primaryEffortId) === null
               ? null
-              : { effort: effortUri(primaryEffortId), effort_id: effortRowId(primaryEffortId), ...(effortChange ? { change_id: effortChange.id } : {}) }
+              : { effort: `eff${effortRowId(primaryEffortId)}`, effort_id: effortRowId(primaryEffortId), ...(effortChange ? { change_id: effortChange.id } : {}) }
           }
           streamId={stream?.id ?? null}
           onOpenPage={(ref) => onOpenPage(ref)}

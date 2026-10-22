@@ -1,6 +1,6 @@
 /// A declared page that a lens draws (or, with `component:`, a custom
 /// component: `CustomPageView`) (`pages:` with `lens:`), full-page,
-/// starting with the page id's params (`?ref=` when it opens one of the
+/// starting with the page id's params (`?uri=` when it opens one of the
 /// extension's refs). The page resolves from the extensions the app shows
 /// (the main worktree's), so a restored tab (its id alone) opens too.
 import { EmptyState } from "../components/Prompts/EmptyState.js";

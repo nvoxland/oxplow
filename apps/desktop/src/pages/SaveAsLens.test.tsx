@@ -49,7 +49,7 @@ test("Save as Lens keeps the spec with lens.keep and opens the lens", async () =
         spec: { title: "Busy Tasks", description: "", query: "SELECT title FROM v_work_item", viz: "table" },
         extension: "mine",
         slug: "busy-tasks",
-        stream: "oxplow:oxplow/stream?id=str2",
+        stream: "str2",
       },
     ],
   ]);

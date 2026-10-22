@@ -17,8 +17,8 @@ pub fn restate_tx(conn: &Connection, rows: &[(&ResourceDecl, &str)]) -> Result<(
         .prepare(
             "INSERT INTO resource
                  (resource, extension, label, params, additional, resolve, title, searchable, icon,
-                  wikilink, page)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                  wikilink)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         )
         .map_err(map_sql_err)?;
     for (d, extension) in rows {
@@ -35,7 +35,6 @@ pub fn restate_tx(conn: &Connection, rows: &[(&ResourceDecl, &str)]) -> Result<(
             d.wikilink
                 .as_ref()
                 .map(|w| serde_json::to_string(w).expect("a wikilink serializes")),
-            d.page,
         ])
         .map_err(map_sql_err)?;
     }

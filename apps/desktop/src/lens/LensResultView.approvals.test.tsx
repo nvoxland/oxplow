@@ -10,7 +10,7 @@ import type { Lens, LensRun } from "../tauri-bridge/generated/bindings.js";
 
 const realApi = await import("../api.js");
 const decided: [number, boolean][] = [];
-const columns = ["id", "ref", "created_at", "command", "input", "actor_kind", "actor_id", "thread_id", "thread_title", "key", "preview", "dry_run"];
+const columns = ["id", "uri", "created_at", "command", "input", "actor_kind", "actor_id", "thread_id", "thread_title", "key", "preview", "dry_run"];
 const row = (id: number, threadId: number, key: string) => [
   id,
   proposalUri(id),

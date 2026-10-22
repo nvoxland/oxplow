@@ -2110,7 +2110,7 @@ async fn propose(bus: &CommandBus, k: &str, v: &str) -> i64 {
     let CommandError::Proposed { proposal, .. } = err else {
         panic!("{err:?}");
     };
-    oxplow_domain::uri::build::parse_as(&proposal, oxplow_domain::uri::resources::PROPOSAL).unwrap()
+    proposal
 }
 
 /// A newer proposal of the same call replaces the pending one, and
@@ -2131,21 +2131,10 @@ async fn a_proposal_that_replaces_another_names_it() {
     let CommandError::Proposed { supersedes, .. } = &err else {
         panic!("{err:?}");
     };
-    assert_eq!(
-        supersedes,
-        &vec![oxplow_domain::uri::build::keyed(
-            oxplow_domain::uri::resources::PROPOSAL,
-            &first.to_string()
-        )]
-    );
+    assert_eq!(supersedes, &vec![first]);
     assert!(
-        err.to_string().contains(&format!(
-            "replaces {}",
-            oxplow_domain::uri::build::keyed(
-                oxplow_domain::uri::resources::PROPOSAL,
-                &first.to_string()
-            )
-        )),
+        err.to_string()
+            .contains(&format!("replaces proposals {first}")),
         "{err}"
     );
     let proposed: Vec<_> = logged(&bus)
@@ -2154,13 +2143,7 @@ async fn a_proposal_that_replaces_another_names_it() {
         .filter(|e| e.envelope.event_type == "command.proposed")
         .collect();
     assert_eq!(proposed[0].envelope.payload.get("supersedes"), None);
-    assert_eq!(
-        proposed[1].envelope.payload["supersedes"],
-        json!([oxplow_domain::uri::build::keyed(
-            oxplow_domain::uri::resources::PROPOSAL,
-            &first.to_string()
-        )])
-    );
+    assert_eq!(proposed[1].envelope.payload["supersedes"], json!([first]));
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -2180,13 +2163,7 @@ async fn an_agents_run_that_needs_confirmation_becomes_a_proposal() {
     let rows = pending(&db).await;
     assert_eq!(rows.len(), 1);
     let row = &rows[0];
-    assert_eq!(
-        proposal,
-        oxplow_domain::uri::build::keyed(
-            oxplow_domain::uri::resources::PROPOSAL,
-            &format!("{}", row.id)
-        )
-    );
+    assert_eq!(proposal, row.id);
     assert_eq!(row.command, "oxplow.kv.set");
     assert_eq!(row.actor_kind, ActorKind::Agent);
     assert_eq!(row.thread_id, Some(ThreadId::new(7)));
@@ -2208,7 +2185,10 @@ async fn an_agents_run_that_needs_confirmation_becomes_a_proposal() {
     );
     assert_eq!(events[0].envelope.payload["proposal"], proposal);
     assert_eq!(events[0].envelope.payload["destructive"], false);
-    assert!(events[0].envelope.subject.contains(&proposal));
+    assert!(events[0]
+        .envelope
+        .subject
+        .contains(&oxplow_domain::uri::build::proposal_uri(proposal)));
     // A dry run that fails is the run's failure, not a proposal.
     let err = bus
         .run(
@@ -2459,10 +2439,7 @@ async fn declining_writes_only_the_decision() {
         .into_iter()
         .find(|e| e.envelope.event_type == "command.declined")
         .expect("decline logged");
-    assert_eq!(
-        declined.envelope.payload["proposal"],
-        oxplow_domain::uri::build::keyed(oxplow_domain::uri::resources::PROPOSAL, &id.to_string())
-    );
+    assert_eq!(declined.envelope.payload["proposal"], json!(id));
     let err = bus.approve(&Actor::Human, id).await.unwrap_err();
     assert!(matches!(err, CommandError::Invalid { .. }), "{err:?}");
 }

@@ -3,7 +3,7 @@
 # answer is in the request.
 input:
   command: oxplow.effort.infer_reasoning
-  input: { effort: "oxplow:oxplow/effort?id=eff7" }
+  input: { effort: "eff7" }
   answers:
     sql.read:
       - [{ id: 7, work_item: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", title: Add CSV export }]

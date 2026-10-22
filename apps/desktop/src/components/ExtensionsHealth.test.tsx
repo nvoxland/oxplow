@@ -60,7 +60,7 @@ test("Repair with the Agent fills the agent input and runs nothing", () => {
   } finally {
     off();
   }
-  expect(inserted).toEqual(["Repair the extension described in [oxplow ref oxplow:oxplow/work_item?id=tsk9&provider=oxplow] — read it first."]);
+  expect(inserted).toEqual(["Repair the extension described in [oxplow uri oxplow:oxplow/work_item?id=tsk9&provider=oxplow] — read it first."]);
   expect(ran).toEqual([]);
 });
 

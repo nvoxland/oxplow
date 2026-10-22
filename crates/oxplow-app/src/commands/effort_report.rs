@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::reasoning::ClaimInput;
-use super::util::{failed, invalid, parse, ref_id, schema};
+use super::util::{bare_id, failed, invalid, parse, schema};
 use super::{Handler, HandlerOutput, Invocation};
 use crate::effort_service::EffortService;
 use crate::sql_gateway::SqlGateway;
@@ -32,7 +32,7 @@ pub const REPORT: &str = "oxplow.effort.report";
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ReportInput {
-    /// The thread whose effort it is (`oxplow:oxplow/thread?id=thr3`): an agent's is always
+    /// The thread whose effort it is (`thr3`): an agent's is always
     /// its own; a person names one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thread: Option<String>,
@@ -117,7 +117,7 @@ async fn report(
     let named = input
         .thread
         .as_deref()
-        .map(|t| ref_id(t, oxplow_domain::uri::resources::THREAD, "/thread"))
+        .map(|t| bare_id(t, oxplow_domain::uri::resources::THREAD, "/thread"))
         .transpose()?;
     let thread = match agents_thread(&actor, named)? {
         Some(own) => own,
@@ -160,7 +160,7 @@ async fn report(
                 effort_id: Some(effort.id.value()),
                 statement: c.statement,
                 kind: c.kind.as_str().into(),
-                evidence_ref: c.evidence_ref,
+                evidence: c.evidence,
                 agent_session_id: session,
             })
             .collect()
@@ -183,7 +183,7 @@ async fn report(
         None => Vec::new(),
     };
     Ok(json!({
-        "effort": oxplow_domain::uri::build::effort_uri(effort.id),
+        "effort": effort.id.to_string(),
         "link_warnings": link_warnings,
     }))
 }
@@ -246,7 +246,7 @@ mod tests {
                 crate::commands::compose::SEQUENCE,
                 json!({ "calls": [
                     { "name": crate::commands::work_item::NAME,
-                      "input": { "ref": item, "to": "done" } },
+                      "input": { "uri": item, "to": "done" } },
                     { "name": REPORT, "input": report },
                 ] }),
                 false,
@@ -268,10 +268,7 @@ mod tests {
         let before = audit.list_recent(50).await.unwrap().len();
         let (task, report) = complete(&fx, json!({ "summary": "shipped it" })).await;
         assert_eq!(task["state"], "done", "{task}");
-        assert_eq!(
-            report["effort"],
-            json!(oxplow_domain::uri::build::effort_uri(fx.effort))
-        );
+        assert_eq!(report["effort"], json!(fx.effort.to_string()));
 
         let rows = audit.list_recent(50).await.unwrap();
         assert_eq!(rows.len(), before + 1, "one audit row for the whole close");
@@ -300,7 +297,7 @@ mod tests {
             .finish(&fx.effort, None, None)
             .await
             .unwrap();
-        let thread = oxplow_domain::uri::build::thread_uri(fx.thread);
+        let thread = fx.thread.to_string();
         fx.svc
             .commands
             .run(
@@ -337,7 +334,7 @@ mod tests {
             .run(
                 &Actor::Human,
                 REPORT,
-                json!({ "thread": oxplow_domain::uri::build::thread_uri(other.id), "summary": "s" }),
+                json!({ "thread": other.id.to_string(), "summary": "s" }),
                 false,
             )
             .await
@@ -361,7 +358,7 @@ mod tests {
             .run(
                 &stranger,
                 REPORT,
-                json!({ "thread": oxplow_domain::uri::build::thread_uri(fx.thread), "summary": "mine" }),
+                json!({ "thread": fx.thread.to_string(), "summary": "mine" }),
                 false,
             )
             .await
@@ -470,7 +467,7 @@ mod tests {
     #[tokio::test]
     async fn reported_claims_are_recorded_beside_the_inferred_ones() {
         let fx = services_with_effort().await;
-        let effort = oxplow_domain::uri::build::effort_uri(fx.effort);
+        let effort = fx.effort.to_string();
         let report = |claims: Value| {
             let svc = fx.svc.clone();
             let actor = agent(&fx);
@@ -482,7 +479,7 @@ mod tests {
             }
         };
         report(json!([
-            { "statement": "the parser tests pass", "kind": "tests_pass", "evidence_ref": "oxplow:oxplow/run?id=1" },
+            { "statement": "the parser tests pass", "kind": "tests_pass", "evidence": "oxplow:oxplow/run?id=1" },
             { "statement": "no behavior change", "kind": "no_behavior_change" },
         ]))
         .await;
@@ -503,7 +500,7 @@ mod tests {
                 .svc
                 .sql
                 .query_sql(
-                    "SELECT statement, provenance, evidence_ref, review FROM v_claim
+                    "SELECT statement, provenance, evidence, review FROM v_claim
                      WHERE effort_id = ?1 ORDER BY statement",
                     vec![oxplow_db::SqlCell::Int(fx.effort.value())],
                     None,

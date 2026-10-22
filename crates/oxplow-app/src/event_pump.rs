@@ -1275,7 +1275,7 @@ mod tests {
         store.append(config_changed("a")).await.unwrap();
         let mut other = config_changed("x");
         other.event_type = "effect.result".into();
-        other.v = 4;
+        other.v = 5;
         other.payload = json!({"effect": "effect:notify/desktop", "outcome": "ok",
                                "detail": null, "attempt": 1, "origin": "live"});
         store.append(other).await.unwrap();

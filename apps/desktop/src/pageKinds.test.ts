@@ -6,15 +6,15 @@ import { declaredPageIcon, kindForTabId, pageKindIconComponent, pageKindLabel } 
 
 describe("kindForTabId", () => {
   test("scheme-prefixed ids return the prefix", () => {
-    expect(kindForTabId("oxplow:oxplow/file?path=src/foo.ts")).toBe("file");
-    expect(kindForTabId("oxplow:oxplow/wiki?slug=url-schemes")).toBe("wiki");
-    expect(kindForTabId("oxplow:oxplow/work_item?id=tsk42&provider=oxplow")).toBe("work_item");
-    expect(kindForTabId("oxplow:oxplow/lens?lens=acme/x&stream_id=2")).toBe("lens");
-    expect(kindForTabId("oxplow:oxplow/metric?metric=oxplow.todos")).toBe("metric");
-    expect(kindForTabId("oxplow:oxplow/dir?path=src/components")).toBe("dir");
-    expect(kindForTabId("oxplow:oxplow/commit?sha=abcdef0")).toBe("commit");
-    expect(kindForTabId("oxplow:oxplow/finding?id=fnd-1")).toBe("finding");
-    expect(kindForTabId("oxplow:oxplow/agent_session?id=ses3")).toBe("agent_session");
+    expect(kindForTabId("oxplow:oxplow/file?path=src/foo.ts")).toBe("oxplow/file");
+    expect(kindForTabId("oxplow:oxplow/wiki?slug=url-schemes")).toBe("oxplow/wiki");
+    expect(kindForTabId("oxplow:oxplow/work_item?id=tsk42&provider=oxplow")).toBe("oxplow/work_item");
+    expect(kindForTabId("oxplow:oxplow/lens?lens=acme/x&stream_id=2")).toBe("oxplow/lens");
+    expect(kindForTabId("oxplow:oxplow/metric?metric=oxplow.todos")).toBe("oxplow/metric");
+    expect(kindForTabId("oxplow:oxplow/dir?path=src/components")).toBe("oxplow/dir");
+    expect(kindForTabId("oxplow:oxplow/commit?sha=abcdef0")).toBe("oxplow/commit");
+    expect(kindForTabId("oxplow:oxplow/finding?id=fnd-1")).toBe("oxplow/finding");
+    expect(kindForTabId("oxplow:oxplow/agent_session?id=ses3")).toBe("oxplow/agent_session");
   });
 
   test("a declared page's id is its kind, with or without params", () => {

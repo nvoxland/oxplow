@@ -163,8 +163,7 @@ pub struct CommentRecord {
 #[serde(deny_unknown_fields)]
 pub struct WorkItemRecord {
     /// `oxplow:oxplow/work_item?id=<id>&provider=<provider>`.
-    #[serde(rename = "ref")]
-    pub item_ref: String,
+    pub uri: String,
     pub title: String,
     #[serde(default)]
     pub body: String,
@@ -174,7 +173,7 @@ pub struct WorkItemRecord {
     #[serde(default)]
     pub native: serde_json::Value,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub parent_ref: Option<String>,
+    pub parent_uri: Option<String>,
     /// Gone at the provider.
     #[serde(default)]
     pub deleted: bool,
@@ -530,13 +529,13 @@ mod tests {
     #[test]
     fn a_record_round_trips_under_its_wire_names() {
         let record = WorkItemRecord {
-            item_ref: "oxplow:oxplow/work_item?id=W-1&provider=fake".into(),
+            uri: "oxplow:oxplow/work_item?id=W-1&provider=fake".into(),
             title: "t".into(),
             body: String::new(),
             state: CanonicalState::InProgress,
             native_state: "doing".into(),
             native: serde_json::json!({ "points": 3 }),
-            parent_ref: None,
+            parent_uri: None,
             deleted: false,
             rank: None,
             links: None,
@@ -544,7 +543,7 @@ mod tests {
             list: Some(List::Thread("thr3".into())),
         };
         let json = serde_json::to_value(&record).unwrap();
-        assert_eq!(json["ref"], "oxplow:oxplow/work_item?id=W-1&provider=fake");
+        assert_eq!(json["uri"], "oxplow:oxplow/work_item?id=W-1&provider=fake");
         assert_eq!(json["list"], serde_json::json!({ "thread": "thr3" }));
         assert_eq!(json["state"], "in_progress");
         assert_eq!(
@@ -577,9 +576,8 @@ mod tests {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WorkItemTransitionInput {
-    /// The item's ref (`oxplow:oxplow/work_item?id=tsk42&provider=oxplow`, `oxplow:oxplow/work_item?id=ENG-12&provider=issues`).
-    #[serde(rename = "ref")]
-    pub item_ref: String,
+    /// The item's URI (`oxplow:oxplow/work_item?id=tsk42&provider=oxplow`, `oxplow:oxplow/work_item?id=ENG-12&provider=issues`).
+    pub uri: String,
     /// The canonical state: `todo`, `in_progress`, `blocked`, `done` or
     /// `canceled`. The list's own name for a state (oxplow's `ready`)
     /// goes in `native_state`.
@@ -598,9 +596,9 @@ pub struct WorkItemCreateInput {
     pub title: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub body: Option<String>,
-    /// The parent's ref, on the same provider (needs `hierarchy`).
+    /// The parent's URI, on the same provider (needs `hierarchy`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub parent_ref: Option<String>,
+    pub parent_uri: Option<String>,
     /// The canonical state, `todo` when absent: `todo`, `in_progress`,
     /// `blocked`, `done` or `canceled`. The list's own name for a state
     /// (oxplow's `ready`) goes in `native_state`.
@@ -629,15 +627,14 @@ pub struct WorkItemCreateInput {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WorkItemUpdateInput {
-    #[serde(rename = "ref")]
-    pub item_ref: String,
+    pub uri: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub body: Option<String>,
-    /// The parent's ref on the same provider, or `""` to detach.
+    /// The parent's URI on the same provider, or `""` to detach.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub parent_ref: Option<String>,
+    pub parent_uri: Option<String>,
     /// The canonical state: `todo`, `in_progress`, `blocked`, `done` or
     /// `canceled`. The list's own name for a state (oxplow's `ready`)
     /// goes in `native_state`.
@@ -653,14 +650,13 @@ pub struct WorkItemUpdateInput {
 }
 
 /// A typed link from an item to another item of the same provider, or to
-/// any ref (`about` it) — and, as `unlink`'s input, that link's removal.
+/// any URI (`about` it) — and, as `unlink`'s input, that link's removal.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WorkItemLinkInput {
     /// The item linked from.
-    #[serde(rename = "ref")]
-    pub item_ref: String,
-    /// What it links to: an item of the same provider, or any ref of a
+    pub uri: String,
+    /// What it links to: an item of the same provider, or any URI of a
     /// registered kind. Only an item is checked to exist; anything else
     /// may dangle.
     pub target: String,
@@ -673,8 +669,7 @@ pub struct WorkItemLinkInput {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WorkItemCommentInput {
-    #[serde(rename = "ref")]
-    pub item_ref: String,
+    pub uri: String,
     /// Markdown.
     pub body: String,
 }
@@ -683,8 +678,7 @@ pub struct WorkItemCommentInput {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WorkItemDeleteInput {
-    #[serde(rename = "ref")]
-    pub item_ref: String,
+    pub uri: String,
 }
 
 /// `oxplow.work_item.reorder`: put an item before or after another in its own
@@ -692,9 +686,8 @@ pub struct WorkItemDeleteInput {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WorkItemReorderInput {
-    /// The task's ref (`oxplow:oxplow/work_item?id=tsk42&provider=oxplow`).
-    #[serde(rename = "ref")]
-    pub item_ref: String,
+    /// The task's URI (`oxplow:oxplow/work_item?id=tsk42&provider=oxplow`).
+    pub uri: String,
     /// Put it just before this item of the same list.
     #[serde(default)]
     pub before: Option<String>,
@@ -719,8 +712,7 @@ pub enum List {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WorkItemMoveInput {
-    #[serde(rename = "ref")]
-    pub item_ref: String,
+    pub uri: String,
     pub to: List,
     #[serde(default)]
     pub before: Option<String>,

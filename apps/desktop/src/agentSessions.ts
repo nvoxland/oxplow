@@ -37,13 +37,13 @@ export interface AgentSessionRow {
 }
 
 const COLUMNS =
-  "s.ref, (SELECT t.ref FROM v_thread t WHERE t.id = s.thread_id) AS thread_ref, s.kind, s.harness, s.title, s.native_title, s.display_name, s.opened_at, s.stopped_by_user_at";
+  "s.uri, (SELECT t.uri FROM v_thread t WHERE t.id = s.thread_id) AS thread_uri, s.kind, s.harness, s.title, s.native_title, s.display_name, s.opened_at, s.stopped_by_user_at";
 
 export function agentSessionsFromResult(result: SqlQueryResult): AgentSessionRow[] {
   const at = (row: SqlCell[], name: string) => row[result.columns.indexOf(name)] ?? null;
   return result.rows.map((row) => ({
-    id: idOf(String(at(row, "ref")), "oxplow/agent_session") ?? "",
-    threadId: idOf(String(at(row, "thread_ref")), "oxplow/thread") ?? "",
+    id: idOf(String(at(row, "uri")), "oxplow/agent_session") ?? "",
+    threadId: idOf(String(at(row, "thread_uri")), "oxplow/thread") ?? "",
     kind: String(at(row, "kind")),
     harness: String(at(row, "harness")),
     title: String(at(row, "title") ?? ""),

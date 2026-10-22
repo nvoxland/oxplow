@@ -1,8 +1,8 @@
 input:
   implementation: prompt_efforts
-  event: { type: thread.checkpoint, payload: { thread: "oxplow:oxplow/thread?id=thr1", turn: "oxplow:oxplow/turn?id=trn9", reason: turn_end, snapshot: "oxplow:oxplow/snapshot?id=9", changed: true, writing_tools: 1 }, anchors: { thread_id: thr1, turn_id: 9 } }
+  event: { type: thread.checkpoint, payload: { thread: thr1, turn: trn9, reason: turn_end, snapshot: 9, changed: true, writing_tools: 1 }, anchors: { thread_id: thr1, turn_id: 9 } }
   answers:
     sql.read:
       - [{ started_at: "2026-10-09T10:00:00Z" }]
-      - [{ ref: "oxplow:oxplow/effort?id=eff4", work_item: null, started_at: "2026-10-09T10:00:05Z" }]
+      - [{ uri: "oxplow:oxplow/effort?id=eff4", work_item: null, started_at: "2026-10-09T10:00:05Z" }]
 expect: { skip: $any }

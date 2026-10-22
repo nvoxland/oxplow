@@ -203,11 +203,11 @@ fn scope_calls_are_answered_by_the_host_outside_the_budget() {
         std::thread::sleep(Duration::from_millis(300));
         Ok(json!([{ "n": asked.len() }]))
     };
-    let script = "def transform(x):\n    return {'rows': scope('sql.read', {'sql': 'SELECT 1'}), 'x': x['ref']}\n";
+    let script = "def transform(x):\n    return {'rows': scope('sql.read', {'sql': 'SELECT 1'}), 'x': x['uri']}\n";
     let ran = w
         .run(
             &budget(200),
-            ScriptRun::starlark(script, json!({ "ref": "oxplow:oxplow/effort?id=eff1" }))
+            ScriptRun::starlark(script, json!({ "uri": "oxplow:oxplow/effort?id=eff1" }))
                 .with_scope(&mut serve),
             None,
         )
@@ -222,7 +222,7 @@ fn scope_calls_are_answered_by_the_host_outside_the_budget() {
     let err = w
         .run(
             &budget(5_000),
-            ScriptRun::starlark(script, json!({ "ref": "x" })).with_scope(&mut refuse),
+            ScriptRun::starlark(script, json!({ "uri": "x" })).with_scope(&mut refuse),
             None,
         )
         .unwrap_err()

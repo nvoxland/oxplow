@@ -38,7 +38,7 @@ async fn subagents(fx: &EffortFixture) -> Vec<Vec<oxplow_db::SqlCell>> {
     fx.svc
         .sql
         .query_sql(
-            "SELECT ref, id, kind, state, calls, finished_event_id IS NOT NULL
+            "SELECT uri, id, kind, state, calls, finished_event_id IS NOT NULL
                FROM v_subagent ORDER BY id",
             vec![],
             None,

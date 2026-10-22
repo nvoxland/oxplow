@@ -35,9 +35,9 @@ import {
 import type { ComponentProps, ReactElement } from "react";
 import { RESOURCE_ICONS, resourceIcon, resourceInfo } from "./resources.js";
 import { useExtensions } from "./extensionsStore.js";
-import { pageKindOf, recordedPageKind, refFromTabId } from "./tabs/pageRefs.js";
+import { recordedPageKind, refFromTabId } from "./tabs/pageRefs.js";
 import type { Extension, ExtensionPage } from "./tauri-bridge/generated/bindings.js";
-import { extPageUri, pageUri as corePageRef, shortResource, typeOf } from "./uri/uri.js";
+import { extPageUri, pageUri as corePageRef } from "./uri/uri.js";
 
 /**
  * Map a page-kind string to its icon component. Returns `null`
@@ -188,11 +188,6 @@ export function pageKindLabel(kind: string, extensions: Extension[] | null = nul
  * label it. The chrome uses this for icons and kind chips.
  */
 export function kindForTabId(tabId: string): string {
-  const kind = pageKindOf(tabId);
-  if (kind === "page") return recordedPageKind(refFromTabId(tabId)!);
-  if (kind) return kind;
-  // A resource with no page of its own (a finding) still has an icon.
-  // URI-SWITCH: the icon table is keyed by resource name (`v_resource`).
-  const resource = typeOf(tabId);
-  return resource === null ? tabId : shortResource(resource);
+  const ref = refFromTabId(tabId);
+  return ref ? recordedPageKind(ref) : tabId;
 }

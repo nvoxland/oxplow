@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`handoff.sent@2`: work was handed from one thread to another\n(`oxplow.handoff.send`).",
+  "properties": {
+    "from_thread": {
+      "description": "The sending thread (`thr3`).",
+      "type": "string"
+    },
+    "handoff": {
+      "description": "The handoff (`hnd1`).",
+      "type": "string"
+    },
+    "to_thread": {
+      "description": "The receiving thread (`thr4`).",
+      "type": "string"
+    },
+    "work_item": {
+      "description": "The work item it hands over, when it names one.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "handoff",
+    "from_thread",
+    "to_thread"
+  ],
+  "title": "HandoffSentV2",
+  "type": "object"
+}

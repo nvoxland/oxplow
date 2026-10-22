@@ -752,7 +752,7 @@ def transform(input):
     facts = []
     for f in source_files():
         for m in code_metrics(f["text"], f["language"], f["path"]):
-            facts.append({"measure": "acme.params", "value": m["parameter_count"], "subject": m["ref"], "dims": {"acme.kind": m["kind"], "acme.container": m["container"] or "-", "acme.id": m["id"]}})
+            facts.append({"measure": "acme.params", "value": m["parameter_count"], "subject": m["uri"], "dims": {"acme.kind": m["kind"], "acme.container": m["container"] or "-", "acme.id": m["id"]}})
     return {"facts": facts}
 "#;
         let mut map = std::collections::HashMap::new();

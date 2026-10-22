@@ -18,13 +18,17 @@ test("frame messages parse into the three requests and ready; anything else is r
     type: "request",
     request: { id: "2", method: "invoke", command: "oxplow.work_item.transition", input: { to: "done" } },
   });
-  expect(parseFrameMessage({ id: "3", method: "navigate", ref: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" })).toEqual({
+  expect(parseFrameMessage({ id: "3", method: "navigate", uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" })).toEqual({
     type: "request",
-    request: { id: "3", method: "navigate", ref: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", newTab: false },
+    request: { id: "3", method: "navigate", uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", newTab: false, replace: false },
   });
-  expect(parseFrameMessage({ id: "4", method: "navigate", ref: "oxplow:oxplow/commit?sha=abc", newTab: true })).toEqual({
+  expect(parseFrameMessage({ id: "4", method: "navigate", uri: "oxplow:oxplow/commit?sha=abc", newTab: true })).toEqual({
     type: "request",
-    request: { id: "4", method: "navigate", ref: "oxplow:oxplow/commit?sha=abc", newTab: true },
+    request: { id: "4", method: "navigate", uri: "oxplow:oxplow/commit?sha=abc", newTab: true, replace: false },
+  });
+  expect(parseFrameMessage({ id: "5", method: "navigate", uri: "oxplow:oxplow/commit?sha=abc", replace: true })).toEqual({
+    type: "request",
+    request: { id: "5", method: "navigate", uri: "oxplow:oxplow/commit?sha=abc", newTab: false, replace: true },
   });
   for (const bad of [
     null,
@@ -69,12 +73,13 @@ test("theme tokens carry the root's color-scheme, so the frame paints no opaque 
 // links from the daemon. Dropping `kitCss` made the protocol 2;
 // `navigate`'s `newTab` made it 3; an error's `field`, 4; a component as a
 // page (`page`, a null `run`) and the calls a page makes, 5; a host's view
-// (`view`), apart from the page, 8.
-test("init carries the run, props and tokens, at protocol 8", () => {
+// (`view`), apart from the page, 8; the view as the URI's `#` and
+// `navigate`'s `replace`, 9.
+test("init carries the run, props and tokens, at protocol 9", () => {
   const r = { lens: { id: "x/b", custom: { component: "b", props: { a: 1 } } }, params: {}, result: { columns: [], rows: [], truncated: false } } as unknown as LensRun;
   expect(initMessage(r, { "--accent": "#08f" })).toEqual({
     type: "init",
-    protocol: 8,
+    protocol: 9,
     run: r,
     props: { a: 1 },
     page: null,
@@ -86,7 +91,7 @@ test("init carries the run, props and tokens, at protocol 8", () => {
 test("a component shown as a page gets its page and its view, and no run", () => {
   const page = { streamId: "str1", threadId: "thr2" };
   const view = { viewParams: { from: "2026-10-01" }, historyState: { scroll: 3 } };
-  expect(initMessage(null, {}, page, view)).toEqual({ type: "init", protocol: 8, run: null, props: null, page, view, tokens: {} });
+  expect(initMessage(null, {}, page, view)).toEqual({ type: "init", protocol: 9, run: null, props: null, page, view, tokens: {} });
 });
 
 // A replacement or a lens page's component: a lens's run, and its host's view.
@@ -186,13 +191,13 @@ test("an invoke that asks is confirmed in the host, then runs confirmed; decline
 
 test("navigate opens the ref; a malformed request is answered with an error when it has an id", async () => {
   const h = harness();
-  h.send({ id: "n1", method: "navigate", ref: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" });
-  h.send({ id: "n2", method: "navigate", ref: "oxplow:oxplow/commit?sha=abc", newTab: true });
+  h.send({ id: "n1", method: "navigate", uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" });
+  h.send({ id: "n2", method: "navigate", uri: "oxplow:oxplow/commit?sha=abc", newTab: true });
   h.send({ id: "b1", method: "exec" });
   await h.settle();
   expect(h.calls).toEqual([
-    ["navigate", "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", { newTab: false }],
-    ["navigate", "oxplow:oxplow/commit?sha=abc", { newTab: true }],
+    ["navigate", "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", { newTab: false, replace: false }],
+    ["navigate", "oxplow:oxplow/commit?sha=abc", { newTab: true, replace: false }],
   ]);
   expect(h.received).toEqual([
     { id: "n1", ok: true, result: null },
@@ -231,10 +236,10 @@ test("ready is heard once; an update posts only a result the frame hasn't seen",
 test("a component navigates to app pages only", async () => {
   expect(componentMayOpen("oxplow:oxplow/work_item?id=tsk1&provider=oxplow")).toBe(true);
   expect(componentMayOpen("oxplow:oxplow/handoff?id=hnd1")).toBe(true);
-  expect(componentMayOpen("oxplow:oxplow/page?page=external-url&url=https://evil.example/?d%3D1")).toBe(false);
+  expect(componentMayOpen("https://evil.example/?d=1")).toBe(false);
   expect(componentMayOpen("not a ref")).toBe(false);
   const h = harness({ navigate: (ref) => componentMayOpen(ref) });
-  h.send({ id: "n2", method: "navigate", ref: "oxplow:oxplow/page?page=external-url&url=https://evil.example/" });
+  h.send({ id: "n2", method: "navigate", uri: "https://evil.example/" });
   await h.settle();
   expect(h.received).toEqual([
     { id: "n2", ok: false, error: { code: "INVALID", message: "A component may open oxplow's pages only." } },

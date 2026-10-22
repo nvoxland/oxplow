@@ -71,7 +71,8 @@ test("a session's tab shows its alias, and its fallback once the alias is cleare
   await expect(tab).toBeVisible();
   await expect(tab).toContainText(/claude \d{4}-\d{2}-\d{2}/i);
   const id = ((await tab.getAttribute("data-testid")) ?? "").slice("center-tab-".length);
-  const rename = (title: string) => run(daemon, "oxplow.agent_session.rename", { session: id, title });
+  const session = new URL(id).searchParams.get("id");
+  const rename = (title: string) => run(daemon, "oxplow.agent_session.rename", { session, title });
   await rename("My review");
   await expect(tab).toContainText("My review");
   // Its page's bar names it too, beside its harness's logo, offers its

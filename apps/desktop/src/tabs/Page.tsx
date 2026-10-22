@@ -1,5 +1,7 @@
 import type { CSSProperties, ReactNode } from "react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useExtensions } from "../extensionsStore.js";
+import { RENDERER_VIEW_KEY, rendererFor, rendererName, renderersFor } from "../pages/renderers.js";
 import { PageNavBar } from "./PageNavBar.js";
 import { useOptionalPageNavigation } from "./PageNavigationContext.js";
 import type { BookmarkScope } from "./bookmarks.js";
@@ -51,6 +53,8 @@ export interface PageNavBarConfig {
   /** Optional comment navigator node (count + prev/next + orphaned
    *  list) for comment-bearing pages. */
   comments?: ReactNode;
+  /** The pages that render the URI shown, when there are several. */
+  openWith?: import("./OpenWith.js").OpenWithProps;
 }
 
 export interface PageChip {
@@ -185,6 +189,23 @@ export function Page({ title, titleIcon, kind, chips: ownChips, actions, pin, ch
     ? (backlinks as { count: number; body: ReactNode }).count
     : undefined;
   const effectiveTitle: ReactNode = title ?? ctxNav?.title ?? "";
+  // The pages that render this URI, to pick among.
+  const extensions = useExtensions();
+  const shownId = ctxNav?.ref?.id ?? null;
+  const shownView = ctxNav?.viewParams;
+  const patchView = ctxNav?.patchViewParams;
+  const openWith = useMemo(() => {
+    if (!shownId || !patchView) return undefined;
+    const pages = (extensions ?? []).filter((e) => e.enabled).flatMap((e) => e.pages);
+    const options = renderersFor(shownId, pages);
+    const current = rendererFor(shownId, pages, shownView ?? {});
+    if (options.length < 2 || !current) return undefined;
+    return {
+      options: options.map((p) => ({ name: rendererName(p), title: p.title })),
+      current: rendererName(current),
+      pick: (name: string) => patchView({ [RENDERER_VIEW_KEY]: name }),
+    };
+  }, [extensions, shownId, shownView, patchView]);
   const pinned = ctxNav?.pinned ?? false;
   const baseNavBar: PageNavBarConfig | undefined = navBar ?? (ctxNav ? {
     canBack: ctxNav.canGoBack,
@@ -211,6 +232,7 @@ export function Page({ title, titleIcon, kind, chips: ownChips, actions, pin, ch
         }
       : undefined,
     ask: ctxNav.ask,
+    openWith,
   } : undefined);
   // When a nav bar is present, promote backlinks into its dropdown
   // and suppress the footer. Pages that explicitly set
@@ -259,6 +281,7 @@ export function Page({ title, titleIcon, kind, chips: ownChips, actions, pin, ch
           actions={actions}
           pin={pin}
           ask={effectiveNavBar.ask}
+          openWith={effectiveNavBar.openWith}
         />
       ) : null}
       {!effectiveNavBar ? (

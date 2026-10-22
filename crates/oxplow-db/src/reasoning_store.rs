@@ -36,7 +36,7 @@ pub struct NewClaim {
     /// `tests_pass`, `no_behavior_change`, `handles_case` or `other`.
     pub kind: String,
     /// What backs it (`oxplow:oxplow/run?id=<id>`, a test name, a file); `None` = unbacked.
-    pub evidence_ref: Option<String>,
+    pub evidence: Option<String>,
     /// The agent session making it: it lands on that session's open turn.
     pub agent_session_id: Option<i64>,
 }
@@ -171,9 +171,9 @@ pub fn insert_claim_tx(
         return Err(DomainError::Invalid("a claim needs a statement".into()));
     }
     conn.execute(
-        "INSERT INTO claim (thread_id, work_item, effort_id, statement, kind, evidence_ref, created_at, agent_session_id, provenance)
+        "INSERT INTO claim (thread_id, work_item, effort_id, statement, kind, evidence, created_at, agent_session_id, provenance)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-        rusqlite::params![c.thread_id, c.work_item, c.effort_id, c.statement, c.kind, c.evidence_ref, now_string(), c.agent_session_id, provenance.as_str()],
+        rusqlite::params![c.thread_id, c.work_item, c.effort_id, c.statement, c.kind, c.evidence, now_string(), c.agent_session_id, provenance.as_str()],
     )
     .map_err(map_sql_err)?;
     Ok(conn.last_insert_rowid())
@@ -387,7 +387,7 @@ mod tests {
             effort_id: Some(1),
             statement: statement.into(),
             kind: "tests_pass".into(),
-            evidence_ref: None,
+            evidence: None,
             agent_session_id: None,
         }
     }

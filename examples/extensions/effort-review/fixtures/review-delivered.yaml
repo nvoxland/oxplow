@@ -3,12 +3,12 @@
 # none, so it comments nothing.
 input:
   job: review
-  intentKey: "review:oxplow:oxplow/effort?id=eff3"
+  intentKey: "review:eff3"
   request:
     schemaVersion: 1
     role: summarize
     messages:
-      - { role: user, parts: [{ type: text, text: "Review oxplow:oxplow/effort?id=eff3 in one line." }] }
+      - { role: user, parts: [{ type: text, text: "Review eff3 in one line." }] }
   model:
     replies: ["Tests pass; nothing measured."]
 expect:

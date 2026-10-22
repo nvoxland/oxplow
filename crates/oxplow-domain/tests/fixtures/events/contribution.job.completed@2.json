@@ -1,0 +1,8 @@
+{
+  "job_run": "01a1369e-b063-76f8-968f-902d392f882d",
+  "job": "example/nightly",
+  "version": 3,
+  "attempt": 1,
+  "fence": 1,
+  "outcome": "cancelled"
+}

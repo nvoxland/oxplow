@@ -35,7 +35,7 @@ Rules:
 - **A collector that runs a program needs `permissions.process`** (and the
   `network` hosts and `secrets` it uses), which a person approves when the
   extension is deployed; you can't approve. Once it is deployed,
-  `run_command` `oxplow.collector.sync { collector: "collector:<extension>/<id>" }`
+  `run_command` `oxplow.collector.sync { collector: "<extension>/<id>" }`
   re-runs it.
 - `v_collector_run` shows each collector's last run and error, and
   `v_collector_state` whether this OS enforces its `network` list

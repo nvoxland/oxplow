@@ -3,11 +3,11 @@ description: The commits reachable from the stream's HEAD, newest first, with th
 params:
   - { name: stream_id }
   - { name: head_sha, label: Head commit }
-  - { name: reveal_sha, label: Commit to reveal, default: "" }
-  - { name: limit, label: Commits, default: 500 }
-  - { name: q, label: Find, type: search }
-  - { name: author, label: Author, default: "" }
-  - { name: branch, label: Branch, type: branch }
+  - { name: reveal_sha, role: filter, label: Commit to reveal, default: "" }
+  - { name: limit, role: filter, label: Commits, default: 500 }
+  - { name: q, role: filter, label: Find, type: search }
+  - { name: author, role: filter, label: Author, default: "" }
+  - { name: branch, role: filter, label: Branch, type: branch }
 query: |
   WITH RECURSIVE reach(sha) AS (
     SELECT coalesce(:head_sha, (SELECT head_sha FROM v_stream WHERE id = :stream_id))

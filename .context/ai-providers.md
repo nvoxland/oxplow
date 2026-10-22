@@ -515,13 +515,13 @@ turn's prompt (`turn_kind`).
 - `oxplow_ai_summarize`: text through the `summarize` role, with an optional focus
   — a recorded computation (`AiCompute::summarize`), so the same text and
   focus is one call.
-- What a call was asked or answered is `read` of its `ai_call` ref (the
+- What a call was asked or answered is `read` of its `ai_call` URI (the
   caller's own calls).
 
 Each is paid with the person's key, so neither is a read-only tool (no
 `read_only_hint`: a harness doesn't auto-approve it), each takes at most
 `AI_TEXT_MAX` (100,000) characters of text, and each records as the
-asking thread (caller `oxplow:oxplow/thread?id=<id>`, from the session's bearer); a
+asking thread (caller its thread id, `thr3`, from the session's bearer); a
 connection with no thread identity is refused. Agents can't change
 providers, roles or keys: those IPC commands are UI-only in the
 surface-parity manifest.
@@ -558,13 +558,13 @@ its source; with no model bound, the recorded ones are all there is.
   the end), a tool's detail to 200, tool calls take at most a quarter of
   the 40,000-character digest, and the newest are kept. Nothing to read
   asks nothing. It enqueues the job with intent key
-  `reasoning:<effort ref>` (a redelivery is the same job); `again: true`
+  `reasoning:<effort URI>` (a redelivery is the same job); `again: true`
   (the lens's **Infer Again**) keys a new one, `…@<n>`. The system
   message asks for JSON only
   (`{"decisions": [...], "claims": [...]}`): a typed request has no JSON
   mode. A claim is what an answer states about the outcome of the work —
   tests pass, behavior unchanged, a case handled — in the agent's words,
-  with an `evidence_ref` only when the answer itself named a run or test;
+  with an `evidence` only when the answer itself named a run or test;
   the model is told to report only claims actually made, never to infer
   one.
 - The job's model call is a recorded computation keyed by its request,
@@ -585,7 +585,7 @@ its source; with no model bound, the recorded ones are all there is.
 - **Core** keeps `oxplow.effort.replace_inferred_decisions`
   (`commands/reasoning.rs`, the only writer of provenance `inferred`;
   thread and work item are the effort's; recorded, confirmed and
-  dismissed rows stay; logs `effort.decisions_inferred@1 { effort,
+  dismissed rows stay; logs `effort.decisions_inferred@2 { effort,
   work_item?, count }`) and `oxplow.effort.replace_inferred_claims` (the
   only writer of `inferred` claims; it replaces the effort's inferred
   claims whose `review` is NULL, so a verified or dismissed claim and the

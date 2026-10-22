@@ -20,7 +20,7 @@ def transform(input):
             c += len(regex_find(pat, s["text"]))
         if c > 0:
             facts.append({"measure": "repo.hardcoded_secrets", "value": c,
-                          "subject": ref.build("file", f["path"]), "path": f["path"],
+                          "subject": uri.build("oxplow/file", path = f["path"]), "path": f["path"],
                           "dims": {"oxplow.language": "rust"}})
     # TS/TSX strings.
     for tri in _ts_files():
@@ -29,6 +29,6 @@ def transform(input):
             c += len(regex_find(pat, s["text"]))
         if c > 0:
             facts.append({"measure": "repo.hardcoded_secrets", "value": c,
-                          "subject": ref.build("file", tri[0]), "path": tri[0],
+                          "subject": uri.build("oxplow/file", path = tri[0]), "path": tri[0],
                           "dims": {"oxplow.language": "typescript"}})
     return {"facts": facts}

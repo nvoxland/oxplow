@@ -666,14 +666,16 @@ async fn a_lens_joins_metric_facts_with_an_efforts_files() {
         .run(
             &oxplow_domain::Actor::Human,
             crate::commands::effort::OPEN,
-            serde_json::json!({ "thread": oxplow_domain::uri::build::thread_uri(oxplow_domain::ThreadId::new(1)) }),
+            serde_json::json!({ "thread": oxplow_domain::ThreadId::new(1).to_string() }),
             false,
         )
         .await
         .unwrap();
-    let effort =
-        oxplow_domain::uri::build::effort_of_uri(opened.result["effort"].as_str().unwrap())
-            .expect("an effort");
+    let effort = opened.result["effort"]
+        .as_str()
+        .unwrap()
+        .parse::<oxplow_domain::EffortId>()
+        .expect("an effort");
     let effort = effort.value();
     p.svc
         .db

@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`effort.claim_verified@2` (P7.C4): a reviewer verified one of an\neffort's claims (`oxplow.effort.verify_claim`), naming what backs it — or\ntook that back (`oxplow.effort.unverify_claim`, `evidence` absent).",
+  "properties": {
+    "claim": {
+      "description": "The claim's id.",
+      "format": "int64",
+      "type": "integer"
+    },
+    "effort": {
+      "description": "The effort it's on (`eff12`), when on one.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "evidence": {
+      "description": "What backs it now (`reviewer`, `oxplow:oxplow/run?id=12`); absent once unverified.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "claim"
+  ],
+  "title": "EffortClaimVerifiedV2",
+  "type": "object"
+}

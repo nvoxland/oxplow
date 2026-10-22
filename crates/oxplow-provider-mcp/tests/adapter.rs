@@ -202,7 +202,7 @@ async fn the_mapping_turns_verbs_into_tool_calls_and_output_into_outcomes() {
         .unwrap();
     assert_eq!(
         created.result,
-        json!({ "ref": "oxplow:oxplow/work_item?id=N-1&provider=notes" })
+        json!({ "uri": "oxplow:oxplow/work_item?id=N-1&provider=notes" })
     );
     let row = &created.events[0].payload["item"];
     assert_eq!(
@@ -218,12 +218,12 @@ async fn the_mapping_turns_verbs_into_tool_calls_and_output_into_outcomes() {
         &peer,
         &handle,
         "create",
-        json!({ "title": "Child", "parent_ref": "oxplow:oxplow/work_item?id=N-1&provider=notes" }),
+        json!({ "title": "Child", "parent_uri": "oxplow:oxplow/work_item?id=N-1&provider=notes" }),
     )
     .await
     .unwrap();
     assert_eq!(
-        child.events[0].payload["item"]["parent_ref"],
+        child.events[0].payload["item"]["parent_uri"],
         "oxplow:oxplow/work_item?id=N-1&provider=notes"
     );
 
@@ -231,7 +231,7 @@ async fn the_mapping_turns_verbs_into_tool_calls_and_output_into_outcomes() {
         &peer,
         &handle,
         "transition",
-        json!({ "ref": "oxplow:oxplow/work_item?id=N-1&provider=notes", "to": "blocked" }),
+        json!({ "uri": "oxplow:oxplow/work_item?id=N-1&provider=notes", "to": "blocked" }),
     )
     .await
     .unwrap();
@@ -240,7 +240,7 @@ async fn the_mapping_turns_verbs_into_tool_calls_and_output_into_outcomes() {
         &peer,
         &handle,
         "transition",
-        json!({ "ref": "oxplow:oxplow/work_item?id=N-1&provider=notes", "to": "done", "native_state": "dropped" }),
+        json!({ "uri": "oxplow:oxplow/work_item?id=N-1&provider=notes", "to": "done", "native_state": "dropped" }),
     )
     .await;
     assert!(
@@ -251,12 +251,12 @@ async fn the_mapping_turns_verbs_into_tool_calls_and_output_into_outcomes() {
         &peer,
         &handle,
         "update",
-        json!({ "ref": "oxplow:oxplow/work_item?id=N-9&provider=notes", "title": "x" }),
+        json!({ "uri": "oxplow:oxplow/work_item?id=N-9&provider=notes", "title": "x" }),
     )
     .await;
     assert!(
         matches!(&missing, Err(ProtocolError::InvalidInput { field, message })
-            if field == "/ref" && message.contains("no note `N-9`")),
+            if field == "/uri" && message.contains("no note `N-9`")),
         "a tool error reaches the mapping, which refuses it: {missing:?}"
     );
 
@@ -264,7 +264,7 @@ async fn the_mapping_turns_verbs_into_tool_calls_and_output_into_outcomes() {
     assert_eq!(result, json!({ "records": 2 }));
     let refs: Vec<&str> = streamed
         .iter()
-        .filter_map(|(_, p)| p["row"]["ref"].as_str())
+        .filter_map(|(_, p)| p["row"]["uri"].as_str())
         .collect();
     assert_eq!(
         refs,
@@ -303,7 +303,7 @@ async fn a_mapping_may_not_return_an_undeclared_event_or_a_foreign_ref() {
     .await;
     let undeclared = invoke(&peer, &handle, "create", json!({ "title": "x" })).await;
     assert!(
-        matches!(&undeclared, Err(ProtocolError::Internal(m)) if m.contains("`work_item.created@2`")),
+        matches!(&undeclared, Err(ProtocolError::Internal(m)) if m.contains("`work_item.created@3`")),
         "{undeclared:?}"
     );
 
@@ -346,7 +346,7 @@ async fn a_tool_error_the_mapping_passes_over_is_an_invalid_input() {
         &peer,
         &handle,
         "update",
-        json!({ "ref": "oxplow:oxplow/work_item?id=N-9&provider=notes", "title": "x" }),
+        json!({ "uri": "oxplow:oxplow/work_item?id=N-9&provider=notes", "title": "x" }),
     )
     .await;
     assert!(
@@ -595,13 +595,13 @@ async fn a_server_by_url_is_pinned_and_called() {
         .unwrap();
     assert_eq!(
         created.result,
-        json!({ "ref": "oxplow:oxplow/work_item?id=N-1&provider=notes" })
+        json!({ "uri": "oxplow:oxplow/work_item?id=N-1&provider=notes" })
     );
     let moved = invoke(
         &peer,
         &handle,
         "transition",
-        json!({ "ref": "oxplow:oxplow/work_item?id=N-1&provider=notes", "to": "blocked" }),
+        json!({ "uri": "oxplow:oxplow/work_item?id=N-1&provider=notes", "to": "blocked" }),
     )
     .await
     .unwrap();
@@ -609,7 +609,7 @@ async fn a_server_by_url_is_pinned_and_called() {
     let (streamed, result) = read(&peer, &handle, None).await;
     assert_eq!(result["records"], 1);
     assert_eq!(
-        streamed[0].1["row"]["ref"],
+        streamed[0].1["row"]["uri"],
         "oxplow:oxplow/work_item?id=N-1&provider=notes"
     );
 

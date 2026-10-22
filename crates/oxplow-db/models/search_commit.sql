@@ -3,7 +3,7 @@
 -- message body, the author and the paths it changed (up to 300). Commits
 -- belong to the project, not a stream. A commit never changes, so `version`
 -- is its sha.
-SELECT CAST(c.ref AS TEXT) AS ref,
+SELECT CAST(c.uri AS TEXT) AS uri,
        CAST(c.subject AS TEXT) AS title,
        CAST(coalesce(c.body, '') || char(10) || c.author
             || coalesce((SELECT group_concat(char(10) || f.path, '')

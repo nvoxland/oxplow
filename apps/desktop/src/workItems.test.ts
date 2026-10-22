@@ -50,7 +50,7 @@ test("effort rows join to their files: one detail per effort, counts by change k
 const result = (rows: SqlQueryResult["rows"]): SqlQueryResult =>
   ({
     columns: [
-      "ref", "provider", "title", "body", "state", "parent_ref", "thread_id", "rank", "closed_at",
+      "uri", "provider", "title", "body", "state", "parent_uri", "thread_id", "rank", "closed_at",
       "created_at", "updated_at", "native", "comment_count",
     ],
     rows,
@@ -69,12 +69,12 @@ test("rows read as work items: the interface's columns and the list's own fields
     ]),
   );
   expect(items[0]).toEqual({
-    ref: "oxplow:oxplow/work_item?id=tsk4&provider=oxplow",
+    uri: "oxplow:oxplow/work_item?id=tsk4&provider=oxplow",
     provider: "oxplow",
     title: "Fix it",
     body: "",
     state: "in_progress",
-    parentRef: null,
+    parentUri: null,
     threadId: "thr2",
     rank: 1.5,
     closedAt: null,
@@ -83,7 +83,7 @@ test("rows read as work items: the interface's columns and the list's own fields
     native: { priority: "high", author: "agent" },
     commentCount: 3,
   });
-  expect(items[1]).toMatchObject({ threadId: null, rank: null, closedAt: "t2", native: {}, parentRef: "oxplow:oxplow/work_item?id=ENG-0&provider=issues" });
+  expect(items[1]).toMatchObject({ threadId: null, rank: null, closedAt: "t2", native: {}, parentUri: "oxplow:oxplow/work_item?id=ENG-0&provider=issues" });
 });
 
 test("a query scoped to a thread, the backlog, or everything; states filter; list order", () => {
@@ -97,9 +97,9 @@ test("a query scoped to a thread, the backlog, or everything; states filter; lis
 });
 
 test("the Board groups by canonical state, in workflow order, each column in list order", () => {
-  const item = (ref: string, state: WorkItem["state"]): WorkItem => ({ ref, state, title: ref }) as unknown as WorkItem;
+  const item = (ref: string, state: WorkItem["state"]): WorkItem => ({ uri: ref, state, title: ref }) as unknown as WorkItem;
   const columns = boardColumns([item("a", "done"), item("b", "todo"), item("c", "todo"), item("d", "blocked")]);
-  expect(columns.map((c) => [c.state, c.items.map((i) => i.ref)])).toEqual([
+  expect(columns.map((c) => [c.state, c.items.map((i) => i.uri)])).toEqual([
     ["todo", ["b", "c"]],
     ["in_progress", []],
     ["blocked", ["d"]],
@@ -112,18 +112,18 @@ test("the Board groups by canonical state, in workflow order, each column in lis
 // and canceled together. `all` keeps the list order.
 test("a work list: an item with a child is an epic, the rest by state", () => {
   const item = (ref: string, state: WorkItem["state"], parentRef: string | null = null) =>
-    ({ ref, state, parentRef }) as unknown as WorkItem;
+    ({ uri: ref, state, parentUri: parentRef }) as unknown as WorkItem;
   const list = bucketWorkList(
     "thr2",
     [item("e", "todo"), item("c", "in_progress", "e"), item("b", "blocked"), item("d", "done"), item("x", "canceled"), item("n", "todo")],
     { models: [], tables: [], measures: [] },
   );
-  expect(list.epics.map((i) => i.ref)).toEqual(["e"]);
-  expect(list.inProgress.map((i) => i.ref)).toEqual(["c"]);
-  expect(list.waiting.map((i) => i.ref)).toEqual(["b"]);
-  expect(list.done.map((i) => i.ref)).toEqual(["d", "x"]);
-  expect(list.items.map((i) => i.ref)).toEqual(["n"]);
-  expect(list.all.map((i) => i.ref)).toEqual(["e", "c", "b", "d", "x", "n"]);
+  expect(list.epics.map((i) => i.uri)).toEqual(["e"]);
+  expect(list.inProgress.map((i) => i.uri)).toEqual(["c"]);
+  expect(list.waiting.map((i) => i.uri)).toEqual(["b"]);
+  expect(list.done.map((i) => i.uri)).toEqual(["d", "x"]);
+  expect(list.items.map((i) => i.uri)).toEqual(["n"]);
+  expect(list.all.map((i) => i.uri)).toEqual(["e", "c", "b", "d", "x", "n"]);
 });
 
 test("a reordered list is one item placed next to a neighbour", () => {

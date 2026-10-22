@@ -1726,20 +1726,20 @@ mod tests {
             ),
             (
                 crate::commands::work_item::NAME,
-                json!({ "ref": task, "to": "done" }),
+                json!({ "uri": task, "to": "done" }),
             ),
             (
                 crate::commands::work_item::NAME,
-                json!({ "ref": fx.task.to_string(), "to": "done" }),
+                json!({ "uri": fx.task.to_string(), "to": "done" }),
             ),
             (
                 crate::commands::work_item::COMMENT,
-                json!({ "ref": task, "body": "kept nowhere" }),
+                json!({ "uri": task, "body": "kept nowhere" }),
             ),
-            (crate::commands::work_item::REORDER, json!({ "ref": task })),
+            (crate::commands::work_item::REORDER, json!({ "uri": task })),
             (
                 crate::commands::work_item::MOVE,
-                json!({ "ref": task, "to": "backlog" }),
+                json!({ "uri": task, "to": "backlog" }),
             ),
         ] {
             assert_eq!(
@@ -2000,7 +2000,7 @@ mod contribution_tests {
             .svc
             .sql
             .query_sql(
-                "SELECT ref, kind, version, global_name FROM v_contribution WHERE extension = 'acme'",
+                "SELECT uri, kind, version, global_name FROM v_contribution WHERE extension = 'acme'",
                 Vec::new(),
                 None,
             )

@@ -2,8 +2,8 @@
 - question: What work is in progress, across every provider?
   skill: work-items
   reaches:
-    sql: SELECT ref, provider, title FROM v_work_item WHERE state = 'in_progress'
-  shape: { columns: [ref, provider, title] }
+    sql: SELECT uri, provider, title FROM v_work_item WHERE state = 'in_progress'
+  shape: { columns: [uri, provider, title] }
 - question: What has been done on this work item so far?
   about: oxplow/work_item
   skill: work-items
@@ -16,18 +16,18 @@
   reaches:
     sql: >-
       SELECT s.prompt AS stream_prompt, t.prompt AS thread_prompt FROM v_thread t
-      JOIN v_stream s ON s.id = t.stream_id WHERE t.ref = 'thread:thr1'
+      JOIN v_stream s ON s.id = t.stream_id WHERE t.uri = 'oxplow:oxplow/thread?id=thr1'
   shape: { columns: [stream_prompt, thread_prompt] }
 - question: Mark a work item done.
   skill: work-items
   reaches:
     command: oxplow.work_item.transition
-    input: { ref: "work_item:oxplow:tsk1", to: done }
+    input: { uri: "work_item:oxplow:tsk1", to: done }
 - question: Record that one work item blocks another.
   skill: work-items
   reaches:
     command: oxplow.work_item.link
-    input: { ref: "work_item:oxplow:tsk1", target: "work_item:oxplow:tsk2", link_type: blocks }
+    input: { uri: "work_item:oxplow:tsk1", target: "work_item:oxplow:tsk2", link_type: blocks }
 - question: Which files did this effort touch?
   about: oxplow/effort
   skill: oxplow-runtime
@@ -38,37 +38,37 @@
   skill: work-items
   reaches:
     tool: oxplow_work_next
-    input: { thread: "thread:thr1" }
+    input: { thread: "thr1" }
 - question: What is on this thread's list, by state?
   skill: work-items
   reaches:
     tool: oxplow_thread_work
-    input: { thread: "thread:thr1" }
+    input: { thread: "thr1" }
 - question: What notes were recorded on this thread?
   skill: work-items
   reaches:
     tool: oxplow_thread_notes
-    input: { thread: "thread:thr1" }
+    input: { thread: "thr1" }
 - question: Give me a summary of this effort.
   about: oxplow/effort
   skill: oxplow-runtime
   reaches:
     tool: oxplow_effort_summary
-    input: { effort: "effort:eff1" }
+    input: { effort: "eff1" }
 - question: List this effort's files without writing SQL.
   about: oxplow/effort
   skill: oxplow-runtime
   reaches:
     tool: oxplow_effort_files
-    input: { effort: "effort:eff1" }
+    input: { effort: "eff1" }
 - question: Which agent sessions are on this thread, and what are their subagents doing?
   about: oxplow/thread
   skill: oxplow-runtime
   reaches:
     tool: oxplow_thread_sessions
-    input: { thread: "thread:thr1" }
+    input: { thread: "thr1" }
 - question: What happened in this agent session, turn by turn?
   skill: oxplow-runtime
   reaches:
     tool: oxplow_session_transcript
-    input: { session: "agent_session:ses1" }
+    input: { session: "ses1" }

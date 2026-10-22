@@ -14,7 +14,7 @@
 use std::time::Duration;
 
 use oxplow_db::SqlCell;
-use oxplow_domain::uri::build::{effort_uri, thread_uri};
+use oxplow_domain::uri::build::thread_uri;
 use oxplow_domain::{Actor, EffortId, StreamId, ThreadId};
 use serde_json::json;
 
@@ -70,7 +70,7 @@ async fn run(
             .run(
                 &Actor::Human,
                 crate::commands::effort::CLOSE,
-                json!({ "effort": effort_uri(effort) }),
+                json!({ "effort": effort.to_string() }),
                 false,
             )
             .await
@@ -82,12 +82,12 @@ async fn run(
         .run(
             &Actor::Human,
             crate::commands::work_item::CREATE,
-            json!({ "title": "conformance: an item to start", "thread": oxplow_domain::uri::build::thread_uri(thread) }),
+            json!({ "title": "conformance: an item to start", "thread": thread.to_string() }),
             false,
         )
         .await
         .map_err(|e| format!("filing an item: {e}"))?
-        .result["ref"]
+        .result["uri"]
         .as_str()
         .ok_or("the work list filed no item")?
         .to_string();
@@ -157,7 +157,7 @@ async fn transition(
         .run(
             actor,
             crate::commands::work_item::NAME,
-            json!({ "ref": item, "to": to }),
+            json!({ "uri": item, "to": to }),
             false,
         )
         .await

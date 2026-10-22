@@ -484,8 +484,7 @@ async fn workspace_reads_and_file_round_trip() {
         .run(
             &oxplow_domain::Actor::Human,
             "oxplow.file.save",
-            serde_json::json!({ "stream": oxplow_domain::uri::build::stream_uri(
-                primary.parse().unwrap()), "path": "scratch.txt", "content": "hello" }),
+            serde_json::json!({ "stream": primary, "path": "scratch.txt", "content": "hello" }),
             false,
         )
         .await

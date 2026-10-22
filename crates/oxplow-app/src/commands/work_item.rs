@@ -45,9 +45,9 @@ use std::sync::Arc;
 use super::util::{parse, schema};
 use super::{Handler, HandlerOutput, Invocation};
 
-/// The thread a work-item command names, by its URI.
+/// The thread a work-item command names, by its id (`thr3`).
 fn parse_thread(raw: &str, field: &str) -> Result<ThreadId, CommandError> {
-    super::util::ref_id(raw, oxplow_domain::uri::resources::THREAD, field)
+    super::util::bare_id(raw, oxplow_domain::uri::resources::THREAD, field)
 }
 
 /// The thread a new item is filed on, whatever tracker holds it
@@ -64,9 +64,9 @@ pub fn filing_thread(
 }
 
 /// The fields that name a work item, in any command's input.
-const REF_FIELDS: [&str; 6] = [
-    "ref",
-    "parent_ref",
+const URI_FIELDS: [&str; 6] = [
+    "uri",
+    "parent_uri",
     "target",
     "work_item",
     "before",
@@ -82,12 +82,12 @@ pub(crate) fn with_loose_refs(
     registry: &WorkItemsRegistry,
     mut input: Value,
 ) -> Result<Value, CommandError> {
-    for key in REF_FIELDS {
+    for key in URI_FIELDS {
         let Some(raw) = input.get(key).and_then(Value::as_str) else {
             continue;
         };
         // A ref stays as it is (a link's target may be any ref);
-        // `parent_ref: ""` means no parent.
+        // `parent_uri: ""` means no parent.
         if raw.is_empty() || oxplow_domain::uri::build::resource_of(raw).is_some() {
             continue;
         }
@@ -204,14 +204,14 @@ fn create_target(
     // Always the work list the person and project chose — never another.
     // One that isn't available resolved to none, which files nowhere.
     let provider = active_provider(registry)?;
-    if let Some(parent) = &input.parent_ref {
+    if let Some(parent) = &input.parent_uri {
         supports(
             &provider,
             provider.features.hierarchy,
             "hierarchy",
-            "/parent_ref",
+            "/parent_uri",
         )?;
-        belongs(&provider, parent, "/parent_ref")?;
+        belongs(&provider, parent, "/parent_uri")?;
     }
     if !input.links.is_empty() {
         supports(&provider, provider.features.links, "links", "/links")?;
@@ -292,16 +292,16 @@ fn update_target(
     if let Some(title) = &input.title {
         not_blank(title)?;
     }
-    let provider = provider_of_ref(registry, &input.item_ref, "/ref")?;
-    if let Some(parent) = &input.parent_ref {
+    let provider = provider_of_ref(registry, &input.uri, "/uri")?;
+    if let Some(parent) = &input.parent_uri {
         supports(
             &provider,
             provider.features.hierarchy,
             "hierarchy",
-            "/parent_ref",
+            "/parent_uri",
         )?;
         if !parent.is_empty() {
-            belongs(&provider, parent, "/parent_ref")?;
+            belongs(&provider, parent, "/parent_uri")?;
         }
     }
     Ok(provider)
@@ -311,8 +311,8 @@ fn ref_target(
     registry: &WorkItemsRegistry,
     input: &Value,
 ) -> Result<WorkItemsProvider, CommandError> {
-    let item_ref = input["ref"].as_str().unwrap_or_default();
-    provider_of_ref(registry, item_ref, "/ref")
+    let item_ref = input["uri"].as_str().unwrap_or_default();
+    provider_of_ref(registry, item_ref, "/uri")
 }
 
 fn link_target(
@@ -320,8 +320,8 @@ fn link_target(
     input: &Value,
 ) -> Result<WorkItemsProvider, CommandError> {
     let input: WorkItemLinkInput = parse(input.clone())?;
-    let provider = provider_of_ref(registry, &input.item_ref, "/ref")?;
-    supports(&provider, provider.features.links, "links", "/ref")?;
+    let provider = provider_of_ref(registry, &input.uri, "/uri")?;
+    supports(&provider, provider.features.links, "links", "/uri")?;
     target_belongs(&provider, &input.target, "/target")?;
     Ok(provider)
 }
@@ -331,7 +331,7 @@ fn comment_target(
     input: &Value,
 ) -> Result<WorkItemsProvider, CommandError> {
     let provider = ref_target(registry, input)?;
-    supports(&provider, provider.features.comments, "comments", "/ref")?;
+    supports(&provider, provider.features.comments, "comments", "/uri")?;
     Ok(provider)
 }
 
@@ -340,7 +340,7 @@ fn delete_target(
     input: &Value,
 ) -> Result<WorkItemsProvider, CommandError> {
     let provider = ref_target(registry, input)?;
-    supports(&provider, provider.features.delete, "delete", "/ref")?;
+    supports(&provider, provider.features.delete, "delete", "/uri")?;
     Ok(provider)
 }
 
@@ -364,8 +364,8 @@ fn reorder_target(
     input: &Value,
 ) -> Result<WorkItemsProvider, CommandError> {
     let input: WorkItemReorderInput = parse(input.clone())?;
-    let provider = provider_of_ref(registry, &input.item_ref, "/ref")?;
-    supports(&provider, provider.features.ordering, "ordering", "/ref")?;
+    let provider = provider_of_ref(registry, &input.uri, "/uri")?;
+    supports(&provider, provider.features.ordering, "ordering", "/uri")?;
     place_belongs(&provider, &input.before, &input.after)?;
     Ok(provider)
 }
@@ -375,8 +375,8 @@ fn move_target(
     input: &Value,
 ) -> Result<WorkItemsProvider, CommandError> {
     let input: WorkItemMoveInput = parse(input.clone())?;
-    let provider = provider_of_ref(registry, &input.item_ref, "/ref")?;
-    supports(&provider, provider.features.lists, "lists", "/ref")?;
+    let provider = provider_of_ref(registry, &input.uri, "/uri")?;
+    supports(&provider, provider.features.lists, "lists", "/uri")?;
     place_belongs(&provider, &input.before, &input.after)?;
     Ok(provider)
 }
@@ -438,7 +438,7 @@ fn dispatching(
             }
             // The state it's in before the verb: a state verb that leaves
             // it there moved nothing.
-            let prior = match (&reads, input["ref"].as_str()) {
+            let prior = match (&reads, input["uri"].as_str()) {
                 (Some(db), Some(item)) if verb != "create" => prior_state(db, item).await?,
                 _ => None,
             };
@@ -531,7 +531,7 @@ async fn prior_state(
     let state: Option<String> = db
         .read(move |tx| {
             tx.query_row(
-                "SELECT state FROM v_work_item WHERE ref = ?1",
+                "SELECT state FROM v_work_item WHERE uri = ?1",
                 [&item],
                 |r| r.get(0),
             )
@@ -546,7 +546,7 @@ async fn prior_state(
 /// `ref`.
 fn written_ref(verb: &str, input: &Value, result: &Value) -> Option<String> {
     let source = if verb == "create" { result } else { input };
-    source["ref"].as_str().map(str::to_string)
+    source["uri"].as_str().map(str::to_string)
 }
 
 /// The state a state verb put its item in, from the item its answer
@@ -572,12 +572,12 @@ fn external_state(
         .iter()
         .filter(|e| e.event_type == WorkItemRecorded::TYPE)
         .filter_map(|e| {
-            serde_json::from_value::<oxplow_domain::events::schema::WorkItemRecordedV2>(
+            serde_json::from_value::<oxplow_domain::events::schema::WorkItemRecordedV3>(
                 e.payload.clone(),
             )
             .ok()
         })
-        .find(|r| r.item.item_ref == item_ref)
+        .find(|r| r.item.uri == item_ref)
         .map(|r| r.item.state);
     match verb {
         "create" => recorded.or_else(|| {
@@ -638,7 +638,7 @@ fn canonical_events(
             let mut fields: Vec<String> = [
                 ("title", "title"),
                 ("body", "body"),
-                ("parent_ref", "parent"),
+                ("parent_uri", "parent"),
             ]
             .into_iter()
             .filter(|(key, _)| input.get(key).is_some())
@@ -865,7 +865,7 @@ mod tests {
     /// out.
     async fn task_row(svc: &crate::Services, result: &Value) -> Value {
         use oxplow_tasks::TaskStore as _;
-        let id = oxplow_tasks::task_of_work_item_ref(result["ref"].as_str().unwrap()).unwrap();
+        let id = oxplow_tasks::task_of_work_item_ref(result["uri"].as_str().unwrap()).unwrap();
         serde_json::to_value(svc.task_store.get(id).await.unwrap().unwrap()).unwrap()
     }
 
@@ -910,14 +910,14 @@ mod tests {
                 .collect()
         };
         assert_eq!(targets(&filed.result), vec!["tsk99999", "#12"]);
-        let item = filed.result["ref"].as_str().unwrap().to_string();
+        let item = filed.result["uri"].as_str().unwrap().to_string();
         let edited = run(
             UPDATE,
-            json!({ "ref": item, "body": "now see [[tsk99998]]" }),
+            json!({ "uri": item, "body": "now see [[tsk99998]]" }),
         )
         .await;
         assert_eq!(targets(&edited.result), vec!["tsk99998"]);
-        let fixed = run(UPDATE, json!({ "ref": item, "body": "no links" })).await;
+        let fixed = run(UPDATE, json!({ "uri": item, "body": "no links" })).await;
         assert_eq!(targets(&fixed.result), Vec::<String>::new());
     }
 
@@ -931,10 +931,10 @@ mod tests {
             async move { commands.run(&Actor::Human, name, input, false).await }
         };
         let made = run(CREATE, json!({ "title": "Real" })).await.unwrap();
-        let item = made.result["ref"].as_str().unwrap().to_string();
+        let item = made.result["uri"].as_str().unwrap().to_string();
         for (name, input) in [
             (CREATE, json!({ "title": "  " })),
-            (UPDATE, json!({ "ref": item, "title": "" })),
+            (UPDATE, json!({ "uri": item, "title": "" })),
         ] {
             match run(name, input).await.unwrap_err() {
                 CommandError::Invalid { field, .. } => {
@@ -943,7 +943,7 @@ mod tests {
                 other => panic!("{name}: expected Invalid, got {other:?}"),
             }
         }
-        run(UPDATE, json!({ "ref": item, "body": "title untouched" }))
+        run(UPDATE, json!({ "uri": item, "body": "title untouched" }))
             .await
             .unwrap();
     }
@@ -956,15 +956,15 @@ mod tests {
         for (name, input) in [
             (
                 NAME,
-                json!({ "ref": "oxplow:oxplow/work_item?id=ENG-12&provider=issues", "to": "done" }),
+                json!({ "uri": "oxplow:oxplow/work_item?id=ENG-12&provider=issues", "to": "done" }),
             ),
             (
                 UPDATE,
-                json!({ "ref": "oxplow:oxplow/work_item?id=ENG-12&provider=issues", "title": "x" }),
+                json!({ "uri": "oxplow:oxplow/work_item?id=ENG-12&provider=issues", "title": "x" }),
             ),
             (
                 COMMENT,
-                json!({ "ref": "oxplow:oxplow/work_item?id=ENG-12&provider=issues", "body": "x" }),
+                json!({ "uri": "oxplow:oxplow/work_item?id=ENG-12&provider=issues", "body": "x" }),
             ),
         ] {
             let err = fx
@@ -975,7 +975,7 @@ mod tests {
                 .unwrap_err();
             match err {
                 CommandError::Invalid { field, message } => {
-                    assert_eq!(field.as_deref(), Some("/ref"), "{name}");
+                    assert_eq!(field.as_deref(), Some("/uri"), "{name}");
                     assert_eq!(
                         message,
                         "`oxplow:oxplow/work_item?id=ENG-12&provider=issues` is issues's, which isn't the active work list (`oxplow`)",
@@ -992,7 +992,7 @@ mod tests {
                 &Actor::Human,
                 NAME,
                 // Not a ref, nor an id the active list declares.
-                json!({ "ref": "ENG-12", "to": "done" }),
+                json!({ "uri": "ENG-12", "to": "done" }),
                 false,
             )
             .await
@@ -1019,7 +1019,7 @@ mod tests {
             .run(
                 &Actor::Human,
                 NAME,
-                json!({ "ref": t, "to": "in_progress", "native_state": "done" }),
+                json!({ "uri": t, "to": "in_progress", "native_state": "done" }),
                 false,
             )
             .await
@@ -1034,7 +1034,7 @@ mod tests {
             .run(
                 &Actor::Human,
                 NAME,
-                json!({ "ref": t, "to": "done", "native_state": "Shipped" }),
+                json!({ "uri": t, "to": "done", "native_state": "Shipped" }),
                 false,
             )
             .await
@@ -1047,7 +1047,7 @@ mod tests {
             .run(
                 &Actor::Human,
                 NAME,
-                json!({ "ref": t, "to": "done", "native_state": "archived" }),
+                json!({ "uri": t, "to": "done", "native_state": "archived" }),
                 false,
             )
             .await
@@ -1057,13 +1057,13 @@ mod tests {
         assert_eq!(inverse.name, NAME);
         assert_eq!(
             inverse.input,
-            json!({ "ref": t, "to": "in_progress", "native_state": "in_progress" })
+            json!({ "uri": t, "to": "in_progress", "native_state": "in_progress" })
         );
         let row = fx
             .svc
             .sql
             .query_sql(
-                "SELECT state, native_state FROM v_work_item WHERE ref = ?1",
+                "SELECT state, native_state FROM v_work_item WHERE uri = ?1",
                 vec![oxplow_db::SqlCell::Text(t.clone())],
                 None,
             )
@@ -1100,7 +1100,7 @@ mod tests {
                 json!({
                     "title": "filed",
                     "body": "the body",
-                    "thread": oxplow_domain::uri::build::thread_uri(fx.thread),
+                    "thread": fx.thread.to_string(),
                     "native": { "priority": "high" },
                 }),
                 false,
@@ -1165,7 +1165,7 @@ mod tests {
                 .run(
                     &actor,
                     COMMENT,
-                    json!({ "ref": item, "body": "noted" }),
+                    json!({ "uri": item, "body": "noted" }),
                     false,
                 )
                 .await
@@ -1197,7 +1197,7 @@ mod tests {
             .run(
                 &Actor::Human,
                 NAME,
-                json!({ "ref": loose, "to": "blocked" }),
+                json!({ "uri": loose, "to": "blocked" }),
                 false,
             )
             .await
@@ -1209,7 +1209,7 @@ mod tests {
             .run(
                 &Actor::Human,
                 CREATE,
-                json!({ "title": "child", "parent_ref": loose }),
+                json!({ "title": "child", "parent_uri": loose }),
                 false,
             )
             .await
@@ -1223,7 +1223,7 @@ mod tests {
             .run(
                 &Actor::Human,
                 crate::commands::effort::LINK,
-                json!({ "effort": oxplow_domain::uri::build::effort_uri(fx.effort), "work_item": loose }),
+                json!({ "effort": fx.effort.to_string(), "work_item": loose }),
                 false,
             )
             .await
@@ -1234,14 +1234,14 @@ mod tests {
             .run(
                 &Actor::Human,
                 NAME,
-                json!({ "ref": "ENG-1", "to": "done" }),
+                json!({ "uri": "ENG-1", "to": "done" }),
                 false,
             )
             .await
             .unwrap_err();
         match err {
             CommandError::Invalid { field, message } => {
-                assert_eq!(field.as_deref(), Some("/ref"));
+                assert_eq!(field.as_deref(), Some("/uri"));
                 assert!(message.contains("tsk"), "{message}");
             }
             other => panic!("{other:?}"),
@@ -1281,7 +1281,7 @@ mod tests {
             .run(&Actor::Human, CREATE, json!({ "title": "here" }), false)
             .await
             .unwrap();
-        assert!(filed.result["ref"]
+        assert!(filed.result["uri"]
             .as_str()
             .unwrap()
             .ends_with("&provider=oxplow"));
@@ -1345,7 +1345,7 @@ mod tests {
             .run(
                 &Actor::Human,
                 CREATE,
-                json!({ "title": "theirs", "thread": oxplow_domain::uri::build::thread_uri(fx.thread) }),
+                json!({ "title": "theirs", "thread": fx.thread.to_string() }),
                 false,
             )
             .await
@@ -1392,7 +1392,7 @@ mod tests {
             .run(
                 &Actor::Human,
                 LINK,
-                json!({ "ref": from, "target": other, "link_type": "blocks" }),
+                json!({ "uri": from, "target": other, "link_type": "blocks" }),
                 false,
             )
             .await
@@ -1403,7 +1403,7 @@ mod tests {
             .run(
                 &Actor::Human,
                 LINK,
-                json!({ "ref": other, "target": another, "link_type": "relates_to" }),
+                json!({ "uri": other, "target": another, "link_type": "relates_to" }),
                 false,
             )
             .await
@@ -1414,7 +1414,7 @@ mod tests {
             .run(
                 &Actor::Human,
                 LINK,
-                json!({ "ref": from, "target": other, "link_type": "caused_by" }),
+                json!({ "uri": from, "target": other, "link_type": "caused_by" }),
                 false,
             )
             .await
@@ -1436,17 +1436,17 @@ mod tests {
             .run(&Actor::Human, CREATE, json!({ "title": "other" }), false)
             .await
             .unwrap()
-            .result["ref"]
+            .result["uri"]
             .as_str()
             .unwrap()
             .to_string();
         fx.svc.task_store.soft_delete(fx.task).await.unwrap();
         let gone = work_item_ref(fx.task);
         for (name, input) in [
-            (COMMENT, json!({ "ref": gone, "body": "hello" })),
+            (COMMENT, json!({ "uri": gone, "body": "hello" })),
             (
                 LINK,
-                json!({ "ref": other, "target": gone, "link_type": "blocks" }),
+                json!({ "uri": other, "target": gone, "link_type": "blocks" }),
             ),
         ] {
             let err = fx
@@ -1488,7 +1488,7 @@ mod tests {
             stream_id: None,
         };
         let item = work_item_ref(fx.task);
-        let about = json!({ "ref": item, "target": "oxplow:oxplow/collector?collector=gone/hot", "link_type": "about" });
+        let about = json!({ "uri": item, "target": "oxplow:oxplow/collector?collector=gone/hot", "link_type": "about" });
         let linked = fx
             .svc
             .commands
@@ -1499,7 +1499,7 @@ mod tests {
             fx.svc
                 .sql
                 .query_sql(
-                    "SELECT to_ref, to_kind, link_type FROM v_work_item_link WHERE from_ref = ?1",
+                    "SELECT to_uri, to_kind, link_type FROM v_work_item_link WHERE from_uri = ?1",
                     vec![oxplow_db::SqlCell::Text(item.clone())],
                     None,
                 )
@@ -1573,7 +1573,7 @@ mod tests {
                 .run(
                     &agent,
                     LINK,
-                    json!({ "ref": item, "target": target, "link_type": "about" }),
+                    json!({ "uri": item, "target": target, "link_type": "about" }),
                     false,
                 )
                 .await
@@ -1609,12 +1609,12 @@ mod tests {
             .await
             .unwrap();
         fx.svc.event_pump.run_once().await.unwrap();
-        let item = created.result["ref"].as_str().unwrap().to_string();
+        let item = created.result["uri"].as_str().unwrap().to_string();
         let rows = fx
             .svc
             .sql
             .query_sql(
-                "SELECT to_ref, link_type FROM v_work_item_link WHERE from_ref = ?1",
+                "SELECT to_uri, link_type FROM v_work_item_link WHERE from_uri = ?1",
                 vec![oxplow_db::SqlCell::Text(item)],
                 None,
             )
@@ -1642,7 +1642,7 @@ mod tests {
             .run(&agent, CREATE, json!({ "title": "other" }), false)
             .await
             .unwrap()
-            .result["ref"]
+            .result["uri"]
             .as_str()
             .unwrap()
             .to_string();
@@ -1652,7 +1652,7 @@ mod tests {
             .run(
                 &agent,
                 LINK,
-                json!({ "ref": from, "target": other, "link_type": "blocks" }),
+                json!({ "uri": from, "target": other, "link_type": "blocks" }),
                 false,
             )
             .await
@@ -1677,7 +1677,7 @@ mod tests {
             .run(
                 &agent,
                 COMMENT,
-                json!({ "ref": from, "body": "see [[src/lib.rs]]" }),
+                json!({ "uri": from, "body": "see [[src/lib.rs]]" }),
                 false,
             )
             .await
@@ -1754,7 +1754,7 @@ mod tests {
         let err = fx
             .svc
             .commands
-            .run(&agent, COMMENT, json!({ "ref": from, "body": "  " }), false)
+            .run(&agent, COMMENT, json!({ "uri": from, "body": "  " }), false)
             .await
             .unwrap_err();
         assert!(err.to_string().contains("body"), "{err}");
@@ -1785,7 +1785,7 @@ mod tests {
             .run(
                 &Actor::Human,
                 NAME,
-                json!({ "ref": work_item_ref(fx.task), "to": "in_progress" }),
+                json!({ "uri": work_item_ref(fx.task), "to": "in_progress" }),
                 false,
             )
             .await
@@ -1796,7 +1796,7 @@ mod tests {
             .run(
                 &Actor::Human,
                 NAME,
-                json!({ "ref": work_item_ref(fx.task), "to": "done" }),
+                json!({ "uri": work_item_ref(fx.task), "to": "done" }),
                 false,
             )
             .await
@@ -1818,7 +1818,7 @@ mod tests {
             .run(
                 &agent,
                 NAME,
-                json!({ "ref": work_item_ref(fx.task), "to": "done" }),
+                json!({ "uri": work_item_ref(fx.task), "to": "done" }),
                 false,
             )
             .await
@@ -1877,7 +1877,7 @@ mod tests {
                 &agent,
                 UPDATE,
                 json!({
-                    "ref": work_item_ref(fx.task), "title": "renamed", "state": "blocked",
+                    "uri": work_item_ref(fx.task), "title": "renamed", "state": "blocked",
                     "native": { "priority": "urgent" }
                 }),
                 false,
@@ -1922,7 +1922,7 @@ mod tests {
             .run(
                 &agent,
                 UPDATE,
-                json!({ "ref": work_item_ref(fx.task), "native": { "thread": "thr2" } }),
+                json!({ "uri": work_item_ref(fx.task), "native": { "thread": "thr2" } }),
                 false,
             )
             .await
@@ -1947,7 +1947,7 @@ mod tests {
             .run(
                 &other,
                 UPDATE,
-                json!({ "ref": work_item_ref(fx.task), "title": "renamed", "state": "done" }),
+                json!({ "uri": work_item_ref(fx.task), "title": "renamed", "state": "done" }),
                 false,
             )
             .await
@@ -1973,7 +1973,7 @@ mod tests {
             .run(
                 &other,
                 NAME,
-                json!({ "ref": later, "to": "in_progress" }),
+                json!({ "uri": later, "to": "in_progress" }),
                 false,
             )
             .await
@@ -1984,7 +1984,7 @@ mod tests {
             .run(
                 &other,
                 CREATE,
-                json!({ "title": "mine now", "thread": "oxplow:oxplow/thread?id=thr9", "state": "in_progress" }),
+                json!({ "title": "mine now", "thread": "thr9", "state": "in_progress" }),
                 false,
             )
             .await
@@ -2016,7 +2016,7 @@ mod tests {
                     "title": "filed",
                     "body": "see [[tsk1]]",
                     "state": "in_progress",
-                    "thread": oxplow_domain::uri::build::thread_uri(fx.thread),
+                    "thread": fx.thread.to_string(),
                 }),
                 false,
             )
@@ -2028,7 +2028,7 @@ mod tests {
         );
         assert_eq!(task_row(&fx.svc, &out.result).await["author"], "agent");
         let id: TaskId =
-            oxplow_tasks::task_of_work_item_ref(out.result["ref"].as_str().unwrap()).unwrap();
+            oxplow_tasks::task_of_work_item_ref(out.result["uri"].as_str().unwrap()).unwrap();
         let executed = out.event_id.clone().unwrap();
         let events = fx.svc.event_log_store.read_after(0, 100).await.unwrap();
         let caused: Vec<&str> = events
@@ -2115,7 +2115,7 @@ mod tests {
             .run(
                 &Actor::Human,
                 NAME,
-                json!({ "ref": "oxplow:oxplow/work_item?id=tsk999&provider=oxplow", "to": "done" }),
+                json!({ "uri": "oxplow:oxplow/work_item?id=tsk999&provider=oxplow", "to": "done" }),
                 false,
             )
             .await
@@ -2140,7 +2140,7 @@ mod tests {
             .read(|c| {
                 c.query_row(
                     "SELECT count(*) FROM v_work_item w JOIN task t
-                       ON w.ref = 'oxplow:oxplow/work_item?id=tsk&provider=oxplow' || t.id
+                       ON w.uri = 'oxplow:oxplow/work_item?id=tsk&provider=oxplow' || t.id
                      WHERE w.rank IS NOT t.sort_index",
                     [],
                     |r| r.get(0),
@@ -2160,7 +2160,7 @@ mod tests {
             .svc
             .sql
             .query_sql(
-                "SELECT ref FROM v_work_item WHERE thread_id = ?1 OR (?1 IS NULL AND thread_id IS NULL) ORDER BY rank, created_at",
+                "SELECT uri FROM v_work_item WHERE thread_id = ?1 OR (?1 IS NULL AND thread_id IS NULL) ORDER BY rank, created_at",
                 vec![match thread {
                     Some(t) => oxplow_db::SqlCell::Int(t.value()),
                     None => oxplow_db::SqlCell::Null(()),
@@ -2185,20 +2185,20 @@ mod tests {
     ) -> String {
         let mut input = json!({ "title": title });
         if let Some(t) = thread {
-            input["thread"] = json!(oxplow_domain::uri::build::thread_uri(t));
+            input["thread"] = json!(t.to_string());
         }
         fx.svc
             .commands
             .run(&Actor::Human, CREATE, input, false)
             .await
             .unwrap()
-            .result["ref"]
+            .result["uri"]
             .as_str()
             .unwrap()
             .to_string()
     }
 
-    /// `parent_ref: ""` detaches an item from its parent, as the input
+    /// `parent_uri: ""` detaches an item from its parent, as the input
     /// documents; undo puts the parent back.
     #[tokio::test]
     async fn an_empty_parent_ref_detaches_and_undo_reattaches() {
@@ -2210,7 +2210,7 @@ mod tests {
             .run(
                 &Actor::Human,
                 CREATE,
-                json!({ "title": "child", "parent_ref": parent }),
+                json!({ "title": "child", "parent_uri": parent }),
                 false,
             )
             .await
@@ -2225,7 +2225,7 @@ mod tests {
             .run(
                 &Actor::Human,
                 UPDATE,
-                json!({ "ref": child.result["ref"], "parent_ref": "" }),
+                json!({ "uri": child.result["uri"], "parent_uri": "" }),
                 false,
             )
             .await
@@ -2262,7 +2262,7 @@ mod tests {
             .run(
                 &Actor::Human,
                 REORDER,
-                json!({ "ref": c, "before": a }),
+                json!({ "uri": c, "before": a }),
                 false,
             )
             .await
@@ -2278,7 +2278,7 @@ mod tests {
             .run(
                 &Actor::Human,
                 REORDER,
-                json!({ "ref": t, "after": b }),
+                json!({ "uri": t, "after": b }),
                 false,
             )
             .await
@@ -2303,8 +2303,8 @@ mod tests {
         // The anchor must be in the same list, and there's at most one.
         let other = file_on(&fx, "elsewhere", None).await;
         for input in [
-            json!({ "ref": a, "before": other }),
-            json!({ "ref": a, "before": b, "after": c }),
+            json!({ "uri": a, "before": other }),
+            json!({ "uri": a, "before": b, "after": c }),
         ] {
             let err = fx
                 .svc
@@ -2335,7 +2335,7 @@ mod tests {
             .run(
                 &Actor::Human,
                 MOVE,
-                json!({ "ref": t, "to": "backlog", "before": y }),
+                json!({ "uri": t, "to": "backlog", "before": y }),
                 false,
             )
             .await
@@ -2371,7 +2371,7 @@ mod tests {
             .run(
                 &Actor::Human,
                 MOVE,
-                json!({ "ref": x, "to": { "thread": fx.thread.to_string() } }),
+                json!({ "uri": x, "to": { "thread": fx.thread.to_string() } }),
                 false,
             )
             .await
@@ -2386,7 +2386,7 @@ mod tests {
             .run(
                 &Actor::Human,
                 MOVE,
-                json!({ "ref": y, "to": { "thread": "thr999" } }),
+                json!({ "uri": y, "to": { "thread": "thr999" } }),
                 false,
             )
             .await
@@ -2403,7 +2403,7 @@ mod tests {
         let err = fx
             .svc
             .commands
-            .run(&Actor::Human, DELETE, json!({ "ref": t }), false)
+            .run(&Actor::Human, DELETE, json!({ "uri": t }), false)
             .await
             .unwrap_err();
         assert!(
@@ -2413,7 +2413,7 @@ mod tests {
         let out = fx
             .svc
             .commands
-            .run(&Actor::Human, DELETE, json!({ "ref": t }), true)
+            .run(&Actor::Human, DELETE, json!({ "uri": t }), true)
             .await
             .unwrap();
         assert!(list_order(&fx, Some(fx.thread)).await.is_empty());
@@ -2428,7 +2428,7 @@ mod tests {
         let again = fx
             .svc
             .commands
-            .run(&Actor::Human, DELETE, json!({ "ref": t }), true)
+            .run(&Actor::Human, DELETE, json!({ "uri": t }), true)
             .await
             .unwrap_err();
         assert!(matches!(again, CommandError::Invalid { .. }), "{again:?}");

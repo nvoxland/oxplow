@@ -8,7 +8,7 @@ runs them all, some against a real in-memory oxplow too.
 
 | Example | What it shows |
 |---|---|
-| [github](github/) | An outside data source: an exec collector syncing pull requests with a credential kept in the keychain, a ref kind (`[[pr:12]]`), a page and a custom component. |
+| [github](github/) | An outside data source: an exec collector syncing pull requests with a credential kept in the keychain, a resource kind (`[[pr:12]]`), a page and a custom component. |
 | [prompt-efforts](prompt-efforts/) | Replacing a core policy: an effort policy script that opens one effort per prompt. |
 | [task-views](task-views/) | Replacing core views: the Board, the Tasks list and the work-item editor, for any work-items provider. |
 | [triage](triage/) | Data, AI and workflow state together: a collector that classifies TODO comments with a model, a durable per-TODO decision in private state, a custom board with forms, and a summary job. |

@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`effort.claim_dismissed@2`: a reviewer dismissed one of an effort's\nclaims (`oxplow.effort.dismiss_claim`: the agent didn't claim it, or\ndidn't mean it) — or took that back (`oxplow.effort.reopen_claim`,\n`dismissed: false`).",
+  "properties": {
+    "claim": {
+      "description": "The claim's id.",
+      "format": "int64",
+      "type": "integer"
+    },
+    "dismissed": {
+      "description": "Dismissed now; `false` once reopened.",
+      "type": "boolean"
+    },
+    "effort": {
+      "description": "The effort it's on (`eff12`), when on one.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "claim",
+    "dismissed"
+  ],
+  "title": "EffortClaimDismissedV2",
+  "type": "object"
+}

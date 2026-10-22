@@ -23,7 +23,7 @@ pub fn wiki_page_reason(raw_path: Option<&str>, project_dir: Option<&Path>) -> O
     is_inside(&abs, &project_dir.join(".oxplow").join("wiki")).then(|| {
         format!(
             "`{}` is a wiki page: write it with mcp__oxplow__run_command → \
-             `oxplow.knowledge.write_page {{ slug, body, verified_refs, removed_refs }}` \
+             `oxplow.knowledge.write_page {{ slug, body, verified_files, removed_files }}` \
              (it writes the file); `oxplow.knowledge.delete_page {{ slug }}` deletes one.",
             abs.display()
         )

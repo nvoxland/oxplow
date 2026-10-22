@@ -27,7 +27,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use super::util::{invalid, parse, ref_id, schema, sql};
+use super::util::{bare_id, invalid, parse, schema, sql};
 use super::{Handler, HandlerOutput, TxCtx};
 
 pub const CREATE: &str = "oxplow.thread.create";
@@ -40,10 +40,10 @@ pub const REOPEN: &str = "oxplow.thread.reopen";
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CreateInput {
-    /// The stream (`oxplow:oxplow/stream?id=str1`).
+    /// The stream (`str1`).
     pub stream: String,
     pub title: String,
-    /// Fork this thread (`oxplow:oxplow/thread?id=thr3`): the new one joins its stream.
+    /// Fork this thread (`thr3`): the new one joins its stream.
     /// Nothing agent-ish is copied — a thread's agents are its sessions.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub from: Option<String>,
@@ -52,7 +52,7 @@ pub struct CreateInput {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RenameInput {
-    /// The thread (`oxplow:oxplow/thread?id=thr12`).
+    /// The thread (`thr12`).
     pub thread: String,
     pub title: String,
 }
@@ -60,7 +60,7 @@ pub struct RenameInput {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SetPromptInput {
-    /// The thread (`oxplow:oxplow/thread?id=thr12`).
+    /// The thread (`thr12`).
     pub thread: String,
     /// Appended to the agent's prompt; empty (or only whitespace) or absent
     /// clears it.
@@ -72,7 +72,7 @@ pub struct SetPromptInput {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct MarkInput {
-    /// The thread (`oxplow:oxplow/thread?id=thr12`).
+    /// The thread (`thr12`).
     pub thread: String,
     /// The colour for its tab: `amber`, `red`, `green`, `blue` or
     /// `violet`; absent clears it.
@@ -83,7 +83,7 @@ pub struct MarkInput {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ThreadInput {
-    /// The thread (`oxplow:oxplow/thread?id=thr12`).
+    /// The thread (`thr12`).
     pub thread: String,
 }
 
@@ -124,7 +124,7 @@ fn record_thread(
     named: Option<&str>,
 ) -> Result<ThreadId, CommandError> {
     let named = named
-        .map(|t| ref_id(t, oxplow_domain::uri::resources::THREAD, "/thread"))
+        .map(|t| bare_id(t, oxplow_domain::uri::resources::THREAD, "/thread"))
         .transpose()?;
     match own {
         None => named.ok_or_else(|| invalid("/thread", "name the thread")),
@@ -220,7 +220,7 @@ pub fn create_op() -> Op {
         false,
         Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
             let input: CreateInput = parse(input)?;
-            let stream: StreamId = ref_id(
+            let stream: StreamId = bare_id(
                 &input.stream,
                 oxplow_domain::uri::resources::STREAM,
                 "/stream",
@@ -234,7 +234,7 @@ pub fn create_op() -> Op {
             if let Some(from) = &input.from {
                 let source = load(
                     ctx,
-                    ref_id(from, oxplow_domain::uri::resources::THREAD, "/from")?,
+                    bare_id(from, oxplow_domain::uri::resources::THREAD, "/from")?,
                     "/from",
                 )?;
                 if source.stream_id != stream {
@@ -281,7 +281,7 @@ pub fn rename_op() -> Op {
             let input: RenameInput = parse(input)?;
             let mut thread = load(
                 ctx,
-                ref_id(
+                bare_id(
                     &input.thread,
                     oxplow_domain::uri::resources::THREAD,
                     "/thread",
@@ -312,7 +312,7 @@ pub fn set_prompt_op() -> Op {
             let input: SetPromptInput = parse(input)?;
             let mut thread = load(
                 ctx,
-                ref_id(
+                bare_id(
                     &input.thread,
                     oxplow_domain::uri::resources::THREAD,
                     "/thread",
@@ -351,7 +351,7 @@ pub fn mark_op() -> Op {
             let input: MarkInput = parse(input)?;
             let mut thread = load(
                 ctx,
-                ref_id(
+                bare_id(
                     &input.thread,
                     oxplow_domain::uri::resources::THREAD,
                     "/thread",
@@ -385,7 +385,7 @@ pub fn close_op(processes: crate::agent_sessions::SessionProcesses) -> Op {
         true,
         Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
             let input: ThreadInput = parse(input)?;
-            let id = ref_id(
+            let id = bare_id(
                 &input.thread,
                 oxplow_domain::uri::resources::THREAD,
                 "/thread",
@@ -454,7 +454,7 @@ pub fn reopen_op() -> Op {
         true,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: ThreadInput = parse(input)?;
-            let id = ref_id(
+            let id = bare_id(
                 &input.thread,
                 oxplow_domain::uri::resources::THREAD,
                 "/thread",
@@ -504,7 +504,7 @@ mod tests {
             .run(
                 &Actor::Human,
                 CLOSE,
-                json!({ "thread": oxplow_domain::uri::build::thread_uri(fx.thread) }),
+                json!({ "thread": fx.thread.to_string() }),
                 false,
             )
             .await
@@ -547,7 +547,7 @@ mod tests {
             fx,
             &Actor::Human,
             CREATE,
-            json!({ "stream": stream_uri(stream), "title": title }),
+            json!({ "stream": stream.to_string(), "title": title }),
         )
         .await
         .unwrap();
@@ -582,8 +582,8 @@ mod tests {
             &fx,
             &agent(&fx),
             CREATE,
-            json!({ "stream": stream_uri(t.stream_id), "title": "fork",
-                    "from": thread_uri(fx.thread) }),
+            json!({ "stream": t.stream_id.to_string(), "title": "fork",
+                    "from": fx.thread.to_string() }),
         )
         .await
         .unwrap();
@@ -621,7 +621,7 @@ mod tests {
     #[tokio::test]
     async fn a_mark_is_a_persons_and_undoes_to_what_it_was() {
         let fx = services_with_effort().await;
-        let r = thread_uri(fx.thread);
+        let r = fx.thread.to_string();
         assert_eq!(thread(&fx, fx.thread).await.mark, None);
         run(
             &fx,
@@ -692,7 +692,7 @@ mod tests {
             &fx,
             &Actor::Human,
             CLOSE,
-            json!({ "thread": thread_uri(second) }),
+            json!({ "thread": second.to_string() }),
         )
         .await
         .unwrap();
@@ -711,7 +711,7 @@ mod tests {
     async fn a_move_to_the_state_a_thread_is_in_leaves_no_record() {
         let fx = services_with_effort().await;
         let second = create(&fx, "second").await;
-        let open = json!({ "thread": thread_uri(second) });
+        let open = json!({ "thread": second.to_string() });
         // An open thread reopened, an unmarked one unmarked.
         for (name, input) in [(REOPEN, &open), (MARK, &open)] {
             let out = run(&fx, &Actor::Human, name, input.clone()).await.unwrap();
@@ -733,7 +733,7 @@ mod tests {
             &fx,
             &agent(&fx),
             CLOSE,
-            json!({ "thread": thread_uri(second) }),
+            json!({ "thread": second.to_string() }),
         )
         .await
         .unwrap_err();
@@ -742,7 +742,7 @@ mod tests {
             &fx,
             &agent(&fx),
             CREATE,
-            json!({ "stream": "oxplow:oxplow/stream?id=str99", "title": "x" }),
+            json!({ "stream": "str99", "title": "x" }),
         )
         .await
         .unwrap_err();
@@ -752,7 +752,7 @@ mod tests {
             &fx,
             &Actor::Human,
             CLOSE,
-            json!({ "thread": thread_uri(second) }),
+            json!({ "thread": second.to_string() }),
         )
         .await
         .unwrap();
@@ -770,7 +770,7 @@ mod tests {
             &fx,
             &Actor::Human,
             CLOSE,
-            json!({ "thread": thread_uri(second) }),
+            json!({ "thread": second.to_string() }),
         )
         .await
         .unwrap();
@@ -778,7 +778,7 @@ mod tests {
             &fx,
             &agent(&fx),
             REOPEN,
-            json!({ "thread": thread_uri(second) }),
+            json!({ "thread": second.to_string() }),
         )
         .await
         .unwrap_err();
@@ -790,7 +790,7 @@ mod tests {
     #[tokio::test]
     async fn rename_and_prompt_undo_to_what_they_were() {
         let fx = services_with_effort().await;
-        let r = thread_uri(fx.thread);
+        let r = fx.thread.to_string();
         let out = run(
             &fx,
             &agent(&fx),

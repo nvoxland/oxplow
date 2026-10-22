@@ -9,7 +9,7 @@
 use rusqlite::{params, OptionalExtension};
 use serde::Serialize;
 
-use oxplow_domain::events::schema::{HandoffSent, HandoffSentV1, HandoffSettled, HandoffSettledV1};
+use oxplow_domain::events::schema::{HandoffSent, HandoffSentV2, HandoffSettled, HandoffSettledV2};
 use oxplow_domain::uri::build::{handoff_uri, thread_uri};
 use oxplow_domain::uri::resources::ResourceRegistry;
 use oxplow_domain::{AgentSessionId, DomainError, Envelope, HandoffId, ThreadId, Timestamp};
@@ -168,10 +168,10 @@ pub fn send_tx(
     })?;
     let event = Envelope::typed::<HandoffSent>(
         SOURCE,
-        &HandoffSentV1 {
-            handoff: handoff_uri(id),
-            from_thread: thread_uri(new.from_thread),
-            to_thread: thread_uri(new.to_thread),
+        &HandoffSentV2 {
+            handoff: id.to_string(),
+            from_thread: new.from_thread.to_string(),
+            to_thread: new.to_thread.to_string(),
             work_item: new.work_item.map(str::to_string),
         },
     )
@@ -208,11 +208,11 @@ pub fn settle_tx(
         handoff_tx(conn, id)?.ok_or_else(|| DomainError::Invalid(format!("no handoff `{id}`")))?;
     Ok(Envelope::typed::<HandoffSettled>(
         SOURCE,
-        &HandoffSettledV1 {
-            handoff: handoff_uri(id),
+        &HandoffSettledV2 {
+            handoff: id.to_string(),
             state: state.as_str().into(),
-            from_thread: thread_uri(handoff.from_thread_id),
-            to_thread: thread_uri(handoff.to_thread_id),
+            from_thread: handoff.from_thread_id.to_string(),
+            to_thread: handoff.to_thread_id.to_string(),
         },
     )
     .with_subject(subject(&handoff)))

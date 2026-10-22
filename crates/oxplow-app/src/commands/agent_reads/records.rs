@@ -20,13 +20,12 @@ pub const RECORDS_READ: &str = "oxplow.records.read";
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ReadInput {
-    /// What to read, by its ref: `oxplow:oxplow/file?path=src/a.rs&rev=git:HEAD#lines=10-40`,
+    /// What to read, by its URI: `oxplow:oxplow/file?path=src/a.rs&rev=git:HEAD#lines=10-40`,
     /// `oxplow:oxplow/work_item?id=tsk12&provider=oxplow`, `oxplow:oxplow/commit?sha=<sha>`, `oxplow:oxplow/event?id=<id>#part=output`,
     /// `oxplow:oxplow/lens?lens=<ext>/<slug>`.
-    #[serde(rename = "ref")]
-    pub reference: String,
+    pub uri: String,
     /// The stream whose worktree a `file:` or `lens:` ref is read in
-    /// (`oxplow:oxplow/stream?id=str2`); absent, your own.
+    /// (`str2`); absent, your own.
     #[serde(default)]
     pub stream: Option<String>,
 }
@@ -40,7 +39,7 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
         Handler::External(Arc::new(move |invocation: Invocation, input| {
             let services = services.clone();
             Box::pin(async move {
-                let ReadInput { reference, stream } = parse(input)?;
+                let ReadInput { uri, stream } = parse(input)?;
                 let svc = services.get()?;
                 let (thread, own_stream) = match invocation.actor() {
                     Actor::Agent {
@@ -52,18 +51,10 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
                 };
                 let at = match stream.as_deref() {
                     Some(stream) => Some(
-                        oxplow_domain::uri::build::id_of(
-                            stream,
-                            oxplow_domain::uri::resources::STREAM,
-                        )
-                        .ok()
-                        .and_then(|id| oxplow_domain::StreamId::try_from_str(&id))
-                        .ok_or_else(|| {
+                        oxplow_domain::StreamId::try_from_str(stream).ok_or_else(|| {
                             invalid(
                                 "/stream",
-                                format!(
-                                    "`stream` is a stream's ref (`oxplow:oxplow/stream?id=str2`), not `{stream}`"
-                                ),
+                                format!("`stream` is a stream's id (`str2`), not `{stream}`"),
                             )
                         })?,
                     ),
@@ -73,12 +64,10 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
                     thread,
                     stream: own_stream,
                 };
-                let out = read(&svc, &reference, &reader, at)
-                    .await
-                    .map_err(|e| match e {
-                        ReadError::Storage(e) => failed(e),
-                        other => invalid("/ref", other.to_string()),
-                    })?;
+                let out = read(&svc, &uri, &reader, at).await.map_err(|e| match e {
+                    ReadError::Storage(e) => failed(e),
+                    other => invalid("/uri", other.to_string()),
+                })?;
                 Ok(HandlerOutput {
                     result: serde_json::to_value(out).map_err(failed)?,
                     ..HandlerOutput::default()
@@ -112,7 +101,7 @@ mod tests {
             .run(
                 &actor,
                 RECORDS_READ,
-                json!({ "ref": "oxplow:oxplow/file?path=who.txt" }),
+                json!({ "uri": "oxplow:oxplow/file?path=who.txt" }),
                 false,
             )
             .await
@@ -126,7 +115,7 @@ mod tests {
             .run(
                 &actor,
                 RECORDS_READ,
-                json!({ "ref": "oxplow:oxplow/file?path=who.txt", "stream": "str2" }),
+                json!({ "uri": "oxplow:oxplow/file?path=who.txt", "stream": "oxplow:oxplow/stream?id=str2" }),
                 false,
             )
             .await

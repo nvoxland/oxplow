@@ -15,7 +15,7 @@ SELECT e.id, e.work_item,
        -- prompt of the thread's first turn in it.
        coalesce(
          nullif(trim(e.title), ''),
-         (SELECT w.title FROM source('work_item') w WHERE w.ref = e.work_item),
+         (SELECT w.title FROM source('work_item') w WHERE w.uri = e.work_item),
          (SELECT trim(CASE WHEN instr(t.prompt, char(10)) > 0
                            THEN substr(t.prompt, 1, instr(t.prompt, char(10)) - 1)
                            ELSE t.prompt END)
@@ -26,6 +26,6 @@ SELECT e.id, e.work_item,
            ORDER BY t.started_at LIMIT 1)
        ) AS title,
        e.closed_by,
-       CAST(uri('oxplow/effort', 'id', 'eff' || e.id) AS TEXT) AS ref
+       CAST(uri('oxplow/effort', 'id', 'eff' || e.id) AS TEXT) AS uri
 FROM source('effort') e
 LEFT JOIN source('threads') th ON th.id = e.thread_id

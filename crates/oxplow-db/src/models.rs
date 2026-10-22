@@ -303,7 +303,9 @@ pub fn contract_drift(golden: &serde_json::Value, decls: &[ModelDecl]) -> Vec<St
 }
 
 /// `golden` with every declared model's current contract pinned at its
-/// version — earlier versions kept, so the file is the publication
+/// version when that version isn't pinned yet — a pinned version is
+/// published and never rewritten, so a change to one still drifts (bump
+/// its version). Earlier versions are kept: the file is the publication
 /// history (what `OXPLOW_BLESS=1` writes).
 pub fn pin_contracts(golden: &serde_json::Value, decls: &[ModelDecl]) -> serde_json::Value {
     let mut golden = golden.as_object().cloned().unwrap_or_default();
@@ -312,7 +314,8 @@ pub fn pin_contracts(golden: &serde_json::Value, decls: &[ModelDecl]) -> serde_j
             .entry(d.name.clone())
             .or_insert_with(|| serde_json::Value::Object(Default::default()));
         if let Some(map) = versions.as_object_mut() {
-            map.insert(d.version.to_string(), contract_json(d));
+            map.entry(d.version.to_string())
+                .or_insert_with(|| contract_json(d));
         }
     }
     serde_json::Value::Object(golden)
@@ -2129,7 +2132,7 @@ mod tests {
                 "created_at",
                 "updated_at",
                 "archived_at",
-                "ref",
+                "uri",
                 "prompt",
                 "head_sha"
             ]
@@ -2141,7 +2144,7 @@ mod tests {
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .unwrap();
-        assert_eq!((owner.as_str(), version), ("core", 5));
+        assert_eq!((owner.as_str(), version), ("core", 6));
         let mut inputs: Vec<(String, String)> = conn
             .prepare("SELECT input, kind FROM model_input WHERE view = 'v_stream'")
             .unwrap()
@@ -2333,6 +2336,16 @@ mod tests {
         assert!(
             pinned["a"]["1"]["columns"].is_array(),
             "the earlier version stays pinned"
+        );
+        // Blessing never rewrites a published version: the reworded v1
+        // stays as it was pinned, and still drifts.
+        let mut reworded_again = decl.clone();
+        reworded_again.columns[0].doc = "The row's id.".into();
+        let reblessed = pin_contracts(&golden, std::slice::from_ref(&reworded_again));
+        assert_eq!(reblessed["a"]["1"], golden["a"]["1"]);
+        assert_eq!(
+            contract_drift(&reblessed, std::slice::from_ref(&reworded_again)).len(),
+            1
         );
     }
 
@@ -2621,12 +2634,16 @@ mod tests {
             .ok()
             .and_then(|t| serde_json::from_str(&t).ok())
             .unwrap_or_else(|| serde_json::json!({}));
-        if std::env::var_os("OXPLOW_BLESS").is_some() {
+        // A bless pins new versions only, then checks like any run: a
+        // changed published version stays red.
+        let golden = if std::env::var_os("OXPLOW_BLESS").is_some() {
             let pinned = pin_contracts(&golden, &decls);
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             std::fs::write(&path, serde_json::to_string_pretty(&pinned).unwrap() + "\n").unwrap();
-            return;
-        }
+            pinned
+        } else {
+            golden
+        };
         let drift = contract_drift(&golden, &decls);
         assert!(drift.is_empty(), "{}", drift.join("\n"));
     }
@@ -2749,8 +2766,8 @@ mod tests {
         let mut conn = fresh();
         let busy = on_change(source(
             "busy",
-            "SELECT ref, title FROM source('work_item') WHERE state = 'blocked'",
-            &["ref TEXT", "title TEXT"],
+            "SELECT uri, title FROM source('work_item') WHERE state = 'blocked'",
+            &["uri TEXT", "title TEXT"],
         ));
         compile(&mut conn, "t", std::slice::from_ref(&busy), &view).unwrap();
         let view_sql: String = conn
@@ -2764,7 +2781,7 @@ mod tests {
         assert_eq!(
             view_columns(&conn, "v_t_busy").unwrap(),
             vec![
-                ("ref".to_string(), "TEXT".to_string()),
+                ("uri".to_string(), "TEXT".to_string()),
                 ("title".to_string(), "TEXT".to_string())
             ]
         );
@@ -2802,8 +2819,8 @@ mod tests {
 
         let mut changed = on_change(source(
             "busy",
-            "SELECT ref FROM source('work_item') WHERE state = 'blocked'",
-            &["ref TEXT"],
+            "SELECT uri FROM source('work_item') WHERE state = 'blocked'",
+            &["uri TEXT"],
         ));
         changed.decl.version = 2;
         compile(&mut conn, "t", &[changed], &view).unwrap();
@@ -2823,8 +2840,8 @@ mod tests {
             "t",
             &[on_change(source(
                 "busy",
-                "SELECT ref FROM source('work_item')",
-                &["ref TEXT"],
+                "SELECT uri FROM source('work_item')",
+                &["uri TEXT"],
             ))],
             &view,
         )
@@ -2834,8 +2851,8 @@ mod tests {
             "t",
             &[on_change(source(
                 "busy",
-                "SELECT ref FROM source('m_v_t_busy')",
-                &["ref TEXT"],
+                "SELECT uri FROM source('m_v_t_busy')",
+                &["uri TEXT"],
             ))],
             &view,
         )
@@ -2874,8 +2891,8 @@ mod tests {
                 "acme",
                 vec![source(
                     "busy",
-                    "SELECT ref FROM ref('work_item')",
-                    &["ref TEXT"],
+                    "SELECT uri FROM ref('work_item')",
+                    &["uri TEXT"],
                 )],
             )])
             .await
@@ -2894,8 +2911,8 @@ mod tests {
             "acme",
             vec![on_change(source(
                 "busy",
-                "SELECT ref FROM ref('work_item')",
-                &["ref TEXT"],
+                "SELECT uri FROM ref('work_item')",
+                &["uri TEXT"],
             ))],
         )];
         let tx = conn.transaction().unwrap();
@@ -2925,8 +2942,8 @@ mod tests {
                     vec![
                         source(
                             "late",
-                            "SELECT ref, title FROM ref('work_item') WHERE state = 'blocked'",
-                            &["ref TEXT", "title TEXT"],
+                            "SELECT uri, title FROM ref('work_item') WHERE state = 'blocked'",
+                            &["uri TEXT", "title TEXT"],
                         ),
                         source(
                             "late_count",
@@ -2978,8 +2995,8 @@ mod tests {
                 "late-work",
                 vec![source(
                     "late",
-                    "SELECT ref, title FROM ref('work_item') WHERE state = 'blocked'",
-                    &["ref TEXT", "title TEXT"],
+                    "SELECT uri, title FROM ref('work_item') WHERE state = 'blocked'",
+                    &["uri TEXT", "title TEXT"],
                 )],
             )],
         )
@@ -3007,8 +3024,8 @@ mod tests {
                     "raw",
                     vec![source(
                         "items",
-                        "SELECT ref FROM\n  source('work_item')",
-                        &["ref TEXT"],
+                        "SELECT uri FROM\n  source('work_item')",
+                        &["uri TEXT"],
                     )],
                 ),
                 ext(
@@ -3016,7 +3033,7 @@ mod tests {
                     vec![
                         source("bad", "SELECT nope FROM ref('work_item')", &["nope"]),
                         source("on_bad", "SELECT * FROM ref('bad')", &["nope"]),
-                        source("fine", "SELECT ref FROM ref('work_item')", &["ref TEXT"]),
+                        source("fine", "SELECT uri FROM ref('work_item')", &["uri TEXT"]),
                         source("lost", "SELECT * FROM ref('missing')", &["x"]),
                     ],
                 ),
@@ -3107,14 +3124,14 @@ mod tests {
     #[test]
     fn a_deprecated_version_is_kept_beside_the_new_one_until_its_date() {
         let mut conn = fresh();
-        let v1 = source("late", "SELECT ref FROM ref('work_item')", &["ref TEXT"]);
+        let v1 = source("late", "SELECT uri FROM ref('work_item')", &["uri TEXT"]);
         publish(&mut conn, &[ext("late-work", vec![v1])]).unwrap();
 
         let twin = |until: &str, sql: &str| {
             let mut v2 = source(
                 "late",
-                "SELECT ref, title FROM ref('work_item')",
-                &["ref TEXT", "title TEXT"],
+                "SELECT uri, title FROM ref('work_item')",
+                &["uri TEXT", "title TEXT"],
             );
             v2.decl.version = 2;
             v2.decl.deprecated = vec![Deprecated {
@@ -3141,13 +3158,13 @@ mod tests {
         };
         let errors = publish(
             &mut conn,
-            &[twin("2999-01-01", "SELECT ref FROM ref('work_item')")],
+            &[twin("2999-01-01", "SELECT uri FROM ref('work_item')")],
         )
         .unwrap();
         assert!(errors["late-work"].is_empty(), "{errors:?}");
         assert_eq!(
             view_columns(&conn, "v_late_work_late_v1").unwrap(),
-            vec![("ref".to_string(), "TEXT".to_string())]
+            vec![("uri".to_string(), "TEXT".to_string())]
         );
         assert_eq!(view_columns(&conn, "v_late_work_late").unwrap().len(), 2);
 
@@ -3164,7 +3181,7 @@ mod tests {
         // Past its date: gone, and said so.
         let errors = publish(
             &mut conn,
-            &[twin("2020-01-01", "SELECT ref FROM ref('work_item')")],
+            &[twin("2020-01-01", "SELECT uri FROM ref('work_item')")],
         )
         .unwrap();
         assert!(
@@ -3175,7 +3192,7 @@ mod tests {
         );
         assert!(conn.prepare("SELECT * FROM v_late_work_late_v1").is_err());
         // A version that never published has no promise to keep.
-        let mut never = source("fresh", "SELECT ref FROM ref('work_item')", &["ref TEXT"]);
+        let mut never = source("fresh", "SELECT uri FROM ref('work_item')", &["uri TEXT"]);
         never.decl.version = 3;
         never.decl.deprecated = vec![Deprecated {
             version: 2,
@@ -3215,8 +3232,8 @@ mod tests {
         {
             let db = crate::Database::open(&path).unwrap();
             db.compile_extension_models(vec![late(
-                "SELECT ref FROM ref('work_item')",
-                &["ref TEXT"],
+                "SELECT uri FROM ref('work_item')",
+                &["uri TEXT"],
             )])
             .await
             .unwrap();
@@ -3225,8 +3242,8 @@ mod tests {
         let errors = ro
             .check_extension_models(
                 vec![late(
-                    "SELECT ref FROM ref('work_item') WHERE state = 'done'",
-                    &["ref TEXT"],
+                    "SELECT uri FROM ref('work_item') WHERE state = 'done'",
+                    &["uri TEXT"],
                 )],
                 vec![],
             )
@@ -3237,8 +3254,8 @@ mod tests {
         let errors = ro
             .check_extension_models(
                 vec![late(
-                    "SELECT ref, title FROM ref('work_item')",
-                    &["ref TEXT", "title TEXT"],
+                    "SELECT uri, title FROM ref('work_item')",
+                    &["uri TEXT", "title TEXT"],
                 )],
                 vec![],
             )

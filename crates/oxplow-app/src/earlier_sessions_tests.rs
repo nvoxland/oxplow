@@ -136,7 +136,7 @@ async fn list(f: &Fixture, harnesses: Vec<Arc<dyn AgentHarness>>) -> Vec<Row> {
             label: text(row, "label").unwrap_or_default(),
             note: text(row, "note").unwrap_or_default(),
             harness: text(row, "harness").unwrap_or_default(),
-            action: if text(row, "session_ref").is_some() {
+            action: if text(row, "session_uri").is_some() {
                 "show"
             } else if flag(row, "can_reopen") {
                 "reopen"

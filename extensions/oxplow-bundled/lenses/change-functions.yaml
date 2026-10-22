@@ -9,12 +9,12 @@ query: |
               WHEN fn.body_changed = 1 THEN 'body' END AS what,
          fn.complexity, fn.complexity_delta, fn.length_delta,
          fn.added_lines + fn.deleted_lines AS churn,
-         fn.start_line, c.base_revision, c.head_revision, fn.ref
+         fn.start_line, c.base_revision, c.head_revision, fn.uri
   FROM v_change_function fn JOIN v_change c ON c.id = fn.change_id
   WHERE fn.change_id = :change_id AND fn.is_test = 0
   ORDER BY churn DESC, fn.path, fn.start_line
 columns:
-  - { key: function, label: Function, link: { kind: page, from: ref } }
+  - { key: function, label: Function, link: { kind: page, from: uri } }
   - { key: path, label: File, link: { kind: diff-at, line: start_line, base: base_revision, head: head_revision } }
   - { key: status, label: Status }
   - { key: what, label: Changed }

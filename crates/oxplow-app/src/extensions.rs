@@ -294,9 +294,9 @@ pub struct LensTree {
 pub struct LensTimeline {
     pub at: Option<String>,
     pub label: Option<String>,
-    /// A column holding a canonical ref each entry links to.
-    #[serde(rename = "ref")]
-    pub ref_column: Option<String>,
+    /// A column holding the URI each entry links to.
+    #[serde(rename = "uri")]
+    pub uri_column: Option<String>,
 }
 
 /// `steps` viz: each step's text and status.
@@ -845,12 +845,13 @@ pub struct LensParam {
     /// says.
     #[serde(default, rename = "type")]
     pub kind: Option<ParamType>,
-    /// What it is to the page, which follows from the columns and is
-    /// never written: a `selection` when a column of the lens (or of a
-    /// part of the page) selects it, else a `filter`. A loaded lens
-    /// always says.
+    /// What it is to the page, and so where it rides in the page's URI:
+    /// a `resource` (the default) names what the page shows, in the URI's
+    /// `?`; `filter` narrows how it shows it, in the URI's `#` view. A
+    /// `selection` follows from the columns and is never written: a param
+    /// a column of the lens (or of a part of the page) selects, in the
+    /// view too. A loaded lens always says.
     #[serde(default)]
-    #[schemars(skip)]
     pub role: Option<ParamRole>,
     /// A `date_range`'s quick picks, of `1d 2d 3d 7d 30d 90d all`; the
     /// default is `1d 7d 30d all`.
@@ -889,7 +890,11 @@ pub enum ParamType {
 )]
 #[serde(rename_all = "lowercase")]
 pub enum ParamRole {
-    /// Narrows what the page shows; a control in the page's rail.
+    /// Names what the page shows (its URI's `?`); a control in the
+    /// page's rail whose change opens another resource.
+    Resource,
+    /// Narrows how the page shows it (its URI's `#` view); a control in
+    /// the page's rail whose change replaces the view.
     Filter,
     /// The row a click picked; the rail shows that row, never an input.
     Selection,
@@ -1022,10 +1027,10 @@ fn range_ends(value: &str, now: time::OffsetDateTime) -> Option<(Option<String>,
 fn param_problem(lens: &Lens) -> Option<String> {
     lens.params.iter().find_map(|p| {
         let kind = p.kind();
-        let problem = if p.role.is_some() {
+        let problem = if p.role == Some(ParamRole::Selection) {
             Some(
-                "`role` follows from the columns (a param a column `select`s is a selection); \
-                 leave it out"
+                "`role: selection` follows from the columns (a param a column `select`s is \
+                 one); leave it out"
                     .to_string(),
             )
         } else if kind == ParamType::Choice && p.options.is_empty() {
@@ -1331,7 +1336,10 @@ fn parse_actions(
         }
         for (scope, name) in action_templates(&input) {
             match scope.as_str() {
-                "param" if params.iter().any(|p| p.name == name) => {}
+                "param"
+                    if params.iter().any(|p| {
+                        p.name == name || name.strip_suffix(".id") == Some(p.name.as_str())
+                    }) => {}
                 "param" => {
                     return Err(format!(
                         "actions: `{}`: `{{{{param.{name}}}}}` names no param of this lens",
@@ -1489,9 +1497,9 @@ pub const SLOTS: &[SlotSpec] = &[
     // An effort's review (its diff view).
     SlotSpec::region("effort.review.details", &["effort_id", "change_id"]),
     // A work item's page, below its body: the item's ref, whichever list.
-    SlotSpec::region("work_item.detail.body", &["ref"]),
+    SlotSpec::region("work_item.detail.body", &["uri"]),
     // The same page's side rail.
-    SlotSpec::region("work_item.detail.sidebar", &["ref"]),
+    SlotSpec::region("work_item.detail.sidebar", &["uri"]),
     // A thread's plan, as a compact strip.
     SlotSpec::region("thread.plan.header", &["thread_id"]),
     SlotSpec::region("vcs.commit.details", &["change_id"]),
@@ -1778,14 +1786,33 @@ pub struct ExtensionPage {
     pub category: Option<LauncherCategory>,
     /// More words the launcher matches it on.
     pub keywords: Option<String>,
-    /// The params its id carries (`oxplow:oxplow/page?area=agents&page=settings`).
+    /// The params naming what it shows, in its URI's `?`
+    /// (`oxplow:oxplow/page?page=settings&stream=str1`); its lens's filters and
+    /// selections ride in the `#` view.
     pub params: Vec<String>,
     /// The lens whose value (a `number` lens) is the launcher's badge
     /// (`<extension>/<slug>`).
     pub count: Option<String>,
+    /// The resources it renders (`oxplow/file`, `acme/pr`; `https`, `http`
+    /// for a web page): a URI of one opens on it, the URI its tab's id.
+    /// Empty: a route, opened at `page_ref`.
+    #[serde(rename = "for")]
+    pub renders: Vec<String>,
+    /// Which URIs of those it takes, by param: `present`, `absent`, or an
+    /// anchored pattern the value matches (one form the desktop's JS and
+    /// Rust read alike). Empty: every one.
+    pub accepts: BTreeMap<String, String>,
+    /// What its resource opens on when the URI's view names no renderer
+    /// (`#oxplow.renderer=`): only a page of the extension declaring it.
+    pub default: bool,
+    /// Its tab leads the strip and isn't evicted (an agent session's).
+    pub pinned: bool,
     /// What draws it.
     pub body: PageBody,
 }
+
+/// The schemes a page may render besides oxplow's resources: a web page.
+pub const RENDERED_SCHEMES: &[&str] = &["https", "http"];
 
 /// The namespace oxplow's own extension declares (`namespace: oxplow`): its
 /// commands are `oxplow.<area>.<verb>` and its pages `oxplow:oxplow/page?page=<id>`.
@@ -1837,7 +1864,8 @@ struct PageFile {
     category: Option<LauncherCategory>,
     #[serde(default)]
     keywords: Option<String>,
-    /// The params its id carries.
+    /// The params naming what it shows, in its URI's `?`; its lens's filters
+    /// and selections ride in the `#` view.
     #[serde(default)]
     params: Vec<String>,
     /// A `number` lens of this extension whose value is the launcher badge.
@@ -1849,6 +1877,39 @@ struct PageFile {
     /// … or `oxplow:<name>`, a built-in (oxplow's own extension only).
     #[serde(default)]
     component: Option<String>,
+    /// The resources it renders — one or a list: `oxplow/file`, its own
+    /// `<extension>/<name>`, another extension's, or `https` / `http` (a
+    /// web page). A URI of one opens on it; without `for` it is a route.
+    #[serde(default, rename = "for")]
+    renders: Option<Renders>,
+    /// Which URIs of those it takes, by param: `present`, `absent`, or an
+    /// anchored pattern (`^git:`) the value matches.
+    #[serde(default)]
+    accepts: BTreeMap<String, String>,
+    /// What its resource opens on when the URI's view names no renderer:
+    /// only for a resource this extension declares, one per resource.
+    #[serde(default)]
+    default: bool,
+    /// Its tab leads the strip and isn't evicted (a renderer only).
+    #[serde(default)]
+    pinned: bool,
+}
+
+/// A page's `for`: one resource or several.
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
+#[serde(untagged)]
+enum Renders {
+    One(String),
+    Many(Vec<String>),
+}
+
+impl Renders {
+    fn into_vec(self) -> Vec<String> {
+        match self {
+            Renders::One(r) => vec![r],
+            Renders::Many(rs) => rs,
+        }
+    }
 }
 
 /// A `panels:` entry as the manifest holds it.
@@ -3870,7 +3931,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             p.role = Some(if names.contains(&p.name) {
                 ParamRole::Selection
             } else {
-                ParamRole::Filter
+                p.role.unwrap_or(ParamRole::Resource)
             });
         }
     }
@@ -3958,29 +4019,35 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         ext.ui.replacements = replaced;
         ext.errors.extend(errors);
     }
-    if let Some(v) = page_files {
-        let (pages, errors) =
-            parse_pages(name, &ext.namespace, &ext.lenses, &ext.custom_components, v);
-        ext.pages = pages;
-        let lines = item_lines(&manifest, "pages");
-        ext.errors.extend(errors.into_iter().map(|(i, e)| {
-            let line = i.and_then(|i| lines.get(i).copied());
-            at(&file, line.or(key_line(&manifest, "pages")), e)
-        }));
-    }
     // After models: a resource is titled by one.
     if let Some(v) = resource_files {
         let (resources, errors) = crate::extension_resources::parse_resources(
             name,
             &ext.namespace,
             &ext.models,
-            &ext.pages,
             &v,
             &file,
             &manifest,
         );
         ext.resources = resources;
         ext.errors.extend(errors);
+    }
+    // After resources: a page renders them.
+    if let Some(v) = page_files {
+        let (pages, errors) = parse_pages(
+            name,
+            &ext.namespace,
+            &ext.lenses,
+            &ext.custom_components,
+            &ext.resources,
+            v,
+        );
+        ext.pages = pages;
+        let lines = item_lines(&manifest, "pages");
+        ext.errors.extend(errors.into_iter().map(|(i, e)| {
+            let line = i.and_then(|i| lines.get(i).copied());
+            at(&file, line.or(key_line(&manifest, "pages")), e)
+        }));
     }
     if let Some(v) = panel_files {
         let (panels, errors) = parse_panels(name, &ext.lenses, v);
@@ -4228,6 +4295,7 @@ fn parse_pages(
     namespace: &str,
     lenses: &[Lens],
     components: &[custom_components::CustomComponent],
+    resources: &[crate::extension_resources::ExtensionResource],
     raw: serde_yaml::Value,
 ) -> (Vec<ExtensionPage>, Vec<(Option<usize>, String)>) {
     let mut pages: Vec<ExtensionPage> = Vec::new();
@@ -4242,7 +4310,7 @@ fn parse_pages(
             Ok(p) => p,
             Err(e) => {
                 errors.push((Some(i), format!(
-                    "pages: {e} (a page is `{{ id, title, icon?, category?, keywords?, params?, count?, lens | component }}`; a category is one of Work, Code, Git, Activity, Knowledge, Data, Lenses, System)"
+                    "pages: {e} (a page is `{{ id, title, icon?, category?, keywords?, params?, count?, for?, accepts?, default?, pinned?, lens | component }}`; a category is one of Work, Code, Git, Activity, Knowledge, Data, Lenses, System)"
                 )));
                 continue;
             }
@@ -4322,7 +4390,34 @@ fn parse_pages(
             errors.push(err(format!(
                 "param `{bad}` must be lowercase letters, digits and `_`"
             )));
+        } else if let Err(e) = renderer_problem(extension, namespace, resources, &p, &pages) {
+            errors.push(err(e));
+        } else if let Some(lens) = p
+            .lens
+            .as_ref()
+            .filter(|_| p.renders.is_some())
+            .and_then(|l| lenses.iter().find(|x| &x.slug == l))
+            .filter(|l| !l.params.iter().any(|q| q.name == "uri"))
+        {
+            // A renderer's lens is run with the URI it shows (`uri`).
+            errors.push(err(format!(
+                "its lens `{}` renders a resource, so it takes the URI: declare a `uri` param",
+                lens.slug
+            )));
         } else {
+            let renders = p.renders.clone().map(Renders::into_vec).unwrap_or_default();
+            let accepts = p
+                .accepts
+                .iter()
+                .map(|(k, v)| {
+                    let kept = match v.as_str() {
+                        "present" | "absent" => v.clone(),
+                        pattern => crate::param_pattern::param_pattern(pattern)
+                            .expect("checked by renderer_problem"),
+                    };
+                    (k.clone(), kept)
+                })
+                .collect();
             pages.push(ExtensionPage {
                 page_ref: if core_named {
                     oxplow_domain::uri::build::page_uri(&p.id, &[])
@@ -4337,11 +4432,102 @@ fn parse_pages(
                 keywords: p.keywords,
                 params: p.params,
                 count: p.count.map(|c| format!("{extension}/{c}")),
+                renders,
+                accepts,
+                default: p.default,
+                pinned: p.pinned,
                 body: body.expect("checked above"),
             });
         }
     }
     (pages, errors)
+}
+
+/// What's wrong with a page's `for`, `accepts`, `default` and `pinned`:
+/// each resource it renders is a scheme oxplow renders (`https`), one this
+/// extension declares, one of foundation's (`oxplow/*`) or another
+/// extension's (`<extension>/<name>`); `accepts` names a param of each
+/// (when they're known) with `present`, `absent` or an id pattern;
+/// `default` is for a resource of this extension's, one page per resource;
+/// `pinned` and `accepts` are a renderer's.
+fn renderer_problem(
+    extension: &str,
+    namespace: &str,
+    resources: &[crate::extension_resources::ExtensionResource],
+    p: &PageFile,
+    pages: &[ExtensionPage],
+) -> Result<(), String> {
+    let renders = p.renders.clone().map(Renders::into_vec).unwrap_or_default();
+    if renders.is_empty() {
+        if p.default || p.pinned || !p.accepts.is_empty() {
+            return Err(
+                "`default`, `pinned` and `accepts` are for a renderer: give it `for`".into(),
+            );
+        }
+        return Ok(());
+    }
+    let segment = crate::extension_resources::resource_extension(extension, namespace);
+    let foundation = oxplow_domain::uri::resources::foundation();
+    for r in &renders {
+        let scheme = RENDERED_SCHEMES.contains(&r.as_str());
+        let own = |name: &str| resources.iter().find(|x| x.decl.name.to_string() == name);
+        let decl = if scheme {
+            None
+        } else {
+            let Ok(name) = r.parse::<oxplow_domain::uri::oxplow_uri::ResourceName>() else {
+                return Err(format!(
+                    "`for: {r}` isn't a resource (`<extension>/<name>`) or a scheme oxplow renders ({})",
+                    RENDERED_SCHEMES.join(", ")
+                ));
+            };
+            match own(r) {
+                Some(x) => Some(&x.decl),
+                None if name.extension() == CORE_NAMESPACE => match foundation.get(&name) {
+                    Some(d) => Some(d),
+                    None => {
+                        return Err(format!(
+                            "`for: {r}` isn't a resource oxplow-foundation declares"
+                        ))
+                    }
+                },
+                None if name.extension() == segment => {
+                    return Err(format!(
+                        "`for: {r}` isn't one of this extension's `resources:`"
+                    ))
+                }
+                // Another extension's: checked when the vocabulary is.
+                None => None,
+            }
+        };
+        for (key, rule) in &p.accepts {
+            if let Some(d) = decl {
+                if !d.additional && !d.params.contains_key(key) {
+                    return Err(format!("`accepts: {key}` isn't a param of `{r}`"));
+                }
+            }
+            if !matches!(rule.as_str(), "present" | "absent") {
+                crate::param_pattern::param_pattern(rule).map_err(|e| {
+                    format!("`accepts: {key}: {rule}` is `present`, `absent` or an id pattern: {e}")
+                })?;
+            }
+        }
+        if p.default {
+            let ours = if scheme {
+                namespace == CORE_NAMESPACE
+            } else {
+                r.split('/').next() == Some(segment.as_str())
+            };
+            if !ours {
+                return Err(format!(
+                    "`default` is for a resource this extension declares; `{r}` is another's (a page of yours is one of its renderers to pick)"
+                ));
+            }
+            if pages.iter().any(|q| q.default && q.renders.contains(r)) {
+                return Err(format!("`{r}` has another default renderer"));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Check the manifest's `panels:` against the extension's lenses: a panel
@@ -4681,7 +4867,7 @@ fn layout_warnings(lens: &Lens, lenses: &[Lens]) -> Vec<String> {
     let filters = lens
         .params
         .iter()
-        .filter(|p| p.role == Some(ParamRole::Filter) && !contract.contains(&p.name.as_str()))
+        .filter(|p| p.role != Some(ParamRole::Selection) && !contract.contains(&p.name.as_str()))
         .count();
     if filters > MAX_FILTERS {
         out.push(format!(
@@ -4905,7 +5091,7 @@ impl Lens {
         }
         if let Some(t) = &self.timeline {
             out.extend(
-                [&t.at, &t.label, &t.ref_column]
+                [&t.at, &t.label, &t.uri_column]
                     .into_iter()
                     .flatten()
                     .map(|k| ("timeline", k)),
@@ -6567,10 +6753,10 @@ description: Every work item in a given state.
 params:
   - { name: state, label: State, default: in_progress }
 query: |
-  SELECT ref, title FROM v_work_item WHERE state = :state ORDER BY title
+  SELECT uri, title FROM v_work_item WHERE state = :state ORDER BY title
 viz: table
 columns:
-  - { key: title, label: Item, link: { kind: page, from: ref } }
+  - { key: title, label: Item, link: { kind: page, from: uri } }
 empty: No items.
 "#;
 
@@ -6627,7 +6813,7 @@ empty: No items.
             l.columns[0].link,
             Some(LensLink {
                 kind: LensLinkKind::Page,
-                from: Some("ref".into()),
+                from: Some("uri".into()),
                 line: None,
                 base: None,
                 head: None,
@@ -7076,7 +7262,7 @@ empty: No items.
         let project = tempfile::tempdir().unwrap();
         let spec = LensSpec {
             title: "Open Tasks".into(),
-            query: "SELECT ref, title FROM v_work_item".into(),
+            query: "SELECT uri, title FROM v_work_item".into(),
             ..spec_base()
         };
         save_lens(
@@ -7106,7 +7292,7 @@ empty: No items.
         let new = || LensSpec {
             title: "Open Tasks".into(),
             description: "From Explore Data".into(),
-            query: "SELECT ref, title FROM v_work_item".into(),
+            query: "SELECT uri, title FROM v_work_item".into(),
             ..spec_base()
         };
         let lens = save_lens(
@@ -7454,7 +7640,7 @@ collectors:
   - id: things
     runtime: starlark
     entry: collectors/things.star
-    input: \"SELECT ref FROM v_work_item\"
+    input: \"SELECT uri FROM v_work_item\"
     entities:
       - { name: thing, key: id, columns: { id: int, label: text } }
 models:
@@ -7982,7 +8168,7 @@ commands:
             &[
                 ("presets", "title: Presets\nquery: SELECT 1\n"),
                 ("stray", "title: Stray\nquery: SELECT 1\n"),
-                ("region", "title: R\nparams: [{ name: ref }]\nquery: SELECT 1\n"),
+                ("region", "title: R\nparams: [{ name: uri }]\nquery: SELECT 1\n"),
                 ("sized", "title: S\nquery: SELECT 1\n"),
             ],
             "ui:\n  slots:\n    - { slot: settings.agents.sections, lens: presets, title: Team presets, at: { after: agents } }\n    - { slot: settings.agents.sections, lens: stray, at: { before: gone } }\n    - { slot: work_item.detail.body, lens: region, at: start }\n    - { slot: settings.agents.sections, lens: sized, size: wide }\n",
@@ -8338,9 +8524,9 @@ commands:
             ("bad_range", "`soon`"),
             ("bad_bool", "`maybe`"),
             // A page draws every param in its rail; where is not the
-            // author's to say, and a role follows from the columns.
+            // author's to say, and a selection follows from the columns.
             ("placed", "unknown field `place`"),
-            ("roled", "`role` follows from the columns"),
+            ("roled", "`role: selection` follows from the columns"),
         ] {
             assert!(ext.lenses.iter().all(|l| l.slug != slug), "{slug} loaded");
             assert!(
@@ -8475,14 +8661,14 @@ commands:
     }
 
     /// A param a column selects is a selection, on the lens whose rows
-    /// set it and on the page that holds it for its parts; every other
-    /// param is a filter.
+    /// set it and on the page that holds it for its parts; one that says
+    /// `role: filter` is a filter; every other param names the resource.
     #[test]
-    fn a_param_a_column_selects_is_a_selection() {
+    fn a_params_role_is_resource_unless_it_filters_or_a_column_selects_it() {
         let (_d, ext) = load_x(
             &[
-                ("rows", "title: Rows\nquery: SELECT 'a' AS sha\nparams: [{ name: commit }, { name: q, type: search }]\ncolumns: [{ key: sha, select: commit }]\n"),
-                ("page", "title: Page\nviz: document\nparams: [{ name: q, type: search }, { name: commit }]\nsections: [{ lens: rows }]\n"),
+                ("rows", "title: Rows\nquery: SELECT 'a' AS sha\nparams: [{ name: commit }, { name: q, type: search, role: filter }, { name: stream_id }]\ncolumns: [{ key: sha, select: commit }]\n"),
+                ("page", "title: Page\nviz: document\nparams: [{ name: q, type: search, role: filter }, { name: commit }, { name: stream_id }]\nsections: [{ lens: rows }]\n"),
             ],
             "",
         );
@@ -8491,7 +8677,26 @@ commands:
             let role = |name: &str| lens.params.iter().find(|p| p.name == name).unwrap().role;
             assert_eq!(role("commit"), Some(ParamRole::Selection), "{slug}");
             assert_eq!(role("q"), Some(ParamRole::Filter), "{slug}");
+            assert_eq!(role("stream_id"), Some(ParamRole::Resource), "{slug}");
         }
+    }
+
+    /// A selection follows from the columns: a lens that writes one is
+    /// refused.
+    #[test]
+    fn a_written_selection_role_is_refused() {
+        let (_d, ext) = load_x(
+            &[(
+                "rows",
+                "title: Rows\nquery: SELECT 1 AS n\nparams: [{ name: commit, role: selection }]\n",
+            )],
+            "",
+        );
+        let errs = ext.errors.join("\n");
+        assert!(
+            errs.contains("`role: selection` follows from the columns"),
+            "{errs}"
+        );
     }
 
     /// A lens says where it comes from: the source file to edit, relative
@@ -8712,7 +8917,7 @@ commands:
                 ("doc", "title: D\nviz: document\nparams: [{ name: q }]\nsections: [{ lens: n }]\n"),
                 (
                     "act",
-                    "title: A\nparams: [{ name: k }]\nquery: SELECT 1 AS a\nactions:\n  - { id: go, label: Go, command: oxplow.work_item.transition, input: { ref: '{{param.k}}' } }\n",
+                    "title: A\nparams: [{ name: k }]\nquery: SELECT 1 AS a\nactions:\n  - { id: go, label: Go, command: oxplow.work_item.transition, input: { uri: '{{param.k}}' } }\n",
                 ),
             ],
             "",
@@ -8885,7 +9090,7 @@ commands:
 
     #[test]
     fn slots_bind_params_the_lens_must_declare() {
-        let task_lens = "title: T\nparams: [{ name: ref }]\nquery: SELECT :ref\n";
+        let task_lens = "title: T\nparams: [{ name: uri }]\nquery: SELECT :uri\n";
         let thread_lens = "title: Th\nparams: [{ name: thread_id }]\nquery: SELECT :thread_id\n";
         let (_d, ext) = load_x(
             &[("t", task_lens), ("th", thread_lens), ("plain", "title: P\nquery: SELECT 1\n")],
@@ -8905,7 +9110,7 @@ commands:
             ]
         );
         let errs = ext.errors.join("\n");
-        assert!(errs.contains("`ref`") && errs.contains("plain"), "{errs}");
+        assert!(errs.contains("`uri`") && errs.contains("plain"), "{errs}");
     }
 
     /// P9.A2: a file diff's header strip takes lenses about the file — its
@@ -9059,7 +9264,7 @@ commands:
             "    version: 1",
             "    description: Blocked work items.",
             "    columns:",
-            "      - { name: ref, type: TEXT, doc: Work item ref. }",
+            "      - { name: uri, type: TEXT, doc: Work item ref. }",
             "  - { name: gone, version: 1, description: No file., columns: [] }",
             "",
         ]
@@ -9068,7 +9273,7 @@ commands:
         write(
             dir.path(),
             ".oxplow/extensions/x/models/late.sql",
-            "SELECT ref FROM ref('work_item') WHERE state = 'blocked'",
+            "SELECT uri FROM ref('work_item') WHERE state = 'blocked'",
         );
         write(
             dir.path(),
@@ -9569,7 +9774,7 @@ commands:
             &[
                 (
                     "a",
-                    "title: A\nquery: SELECT 1 AS id\nparams: [{ name: item, default: '' }]\nactions:\n  - { id: finish, label: Finish, command: oxplow.work_item.transition, input: { ref: '{{param.item}}', to: done } }\n  - { id: row, label: Row, command: oxplow.work_item.transition, row: true, input: { ref: 'work_item:oxplow:tsk{{row.id}}', to: done } }\n",
+                    "title: A\nquery: SELECT 1 AS id\nparams: [{ name: item, default: '' }]\nactions:\n  - { id: finish, label: Finish, command: oxplow.work_item.transition, input: { uri: '{{param.item}}', to: done } }\n  - { id: row, label: Row, command: oxplow.work_item.transition, row: true, input: { uri: 'work_item:oxplow:tsk{{row.id}}', to: done } }\n",
                 ),
                 ("b", "title: B\nquery: SELECT 1\nactions: [copy]\n"),
                 ("c", "title: C\nquery: SELECT 1\nactions: [{ action: run-source, source: a/b }]\n"),
@@ -9928,6 +10133,87 @@ commands:
         );
     }
 
+    /// A page that renders resources says which (`for`), which of their
+    /// URIs it takes (`accepts`), and whether it is what they open on
+    /// (`default`) — only for the extension's own resources.
+    #[test]
+    fn a_page_renders_the_resources_it_is_for() {
+        let lenses = [
+            (
+                "pr",
+                "title: PR\nparams: [{ name: uri }]\nquery: SELECT 1\n",
+            ),
+            ("plain", "title: Plain\nquery: SELECT 1\n"),
+        ];
+        let resources =
+            "resources:\n  - { name: pr, label: PR, params: { id: { required: true } } }\n";
+        let (_d, ext) = load_x(
+            &lenses,
+            &format!("{resources}pages:\n  - {{ id: pr, title: PR, lens: pr, for: x/pr, default: true }}\n  - {{ id: pr-raw, title: Raw, lens: pr, for: x/pr, accepts: {{ id: '^\\d+$' }} }}\n  - {{ id: both, title: Both, lens: pr, for: [x/pr, oxplow/file] }}\n  - {{ id: web, title: Web, lens: pr, for: https, pinned: true }}\n"),
+        );
+        assert!(ext.errors.is_empty(), "{:?}", ext.errors);
+        let page = |id: &str| ext.pages.iter().find(|p| p.id == id).unwrap();
+        assert_eq!(page("pr").renders, vec!["x/pr".to_string()]);
+        assert!(page("pr").default);
+        assert_eq!(
+            page("both").renders,
+            vec!["x/pr".to_string(), "oxplow/file".to_string()]
+        );
+        assert_eq!(
+            page("pr-raw").accepts.get("id").map(String::as_str),
+            Some("^[0-9]+$")
+        );
+        assert!(page("web").pinned);
+
+        for (page, says) in [
+            (
+                "{ id: a, title: A, lens: pr, for: nope }",
+                "isn't a resource",
+            ),
+            (
+                "{ id: a, title: A, lens: pr, for: x/missing }",
+                "isn't one of this extension's",
+            ),
+            (
+                "{ id: a, title: A, lens: pr, for: oxplow/missing }",
+                "isn't a resource oxplow-foundation declares",
+            ),
+            (
+                "{ id: a, title: A, lens: pr, for: x/pr, accepts: { nope: present } }",
+                "isn't a param of `x/pr`",
+            ),
+            (
+                "{ id: a, title: A, lens: pr, for: x/pr, accepts: { id: '[0-9]+' } }",
+                "an id pattern",
+            ),
+            (
+                "{ id: a, title: A, lens: pr, for: oxplow/file, default: true }",
+                "is another's",
+            ),
+            (
+                "{ id: a, title: A, lens: pr, default: true }",
+                "are for a renderer",
+            ),
+            (
+                "{ id: a, title: A, lens: plain, for: x/pr }",
+                "declare a `uri` param",
+            ),
+        ] {
+            let (_d, ext) = load_x(&lenses, &format!("{resources}pages:\n  - {page}\n"));
+            let errs = ext.errors.join("\n");
+            assert!(errs.contains(says), "{page}: {errs}");
+        }
+        let (_d, ext) = load_x(
+            &lenses,
+            &format!("{resources}pages:\n  - {{ id: a, title: A, lens: pr, for: x/pr, default: true }}\n  - {{ id: b, title: B, lens: pr, for: x/pr, default: true }}\n"),
+        );
+        assert!(
+            ext.errors.join("\n").contains("another default renderer"),
+            "{:?}",
+            ext.errors
+        );
+    }
+
     /// An extension's page is a lens (or one of its custom components) at
     /// `oxplow:oxplow/page?page=<extension>/<page>`, in the launcher under its category when it
     /// has one.
@@ -9958,6 +10244,10 @@ commands:
                     keywords: Some("pull requests".into()),
                     params: vec!["author".into()],
                     count: Some("x/waiting".into()),
+                    renders: vec![],
+                    accepts: Default::default(),
+                    default: false,
+                    pinned: false,
                     body: PageBody::Lens {
                         lens: "x/open".into()
                     },
@@ -9972,6 +10262,10 @@ commands:
                     keywords: None,
                     params: vec![],
                     count: None,
+                    renders: vec![],
+                    accepts: Default::default(),
+                    default: false,
+                    pinned: false,
                     body: PageBody::Lens {
                         lens: "x/open".into()
                     },

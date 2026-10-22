@@ -285,9 +285,9 @@ describe("buildRecentEntries", () => {
     ]);
     expect(entries[0]!.id).toBe("recent:oxplow:oxplow/file?path=src/main.rs");
     expect(entries[0]!.label).toBe("main.rs");
-    expect(entries[0]!.ref.kind).toBe("file");
+    expect(entries[0]!.ref.id).toBe("oxplow:oxplow/file?path=src/main.rs");
     // Empty stored label falls back to the ref id.
     expect(entries[1]!.label).toBe("oxplow:oxplow/wiki?slug=architecture");
-    expect(entries[1]!.ref.kind).toBe("wiki");
+    expect(entries[1]!.ref.id).toBe("oxplow:oxplow/wiki?slug=architecture");
   });
 });

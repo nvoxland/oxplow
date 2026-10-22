@@ -485,7 +485,7 @@ pub(crate) fn announce_tx(
     job: &ExtensionJob,
 ) -> Result<(), oxplow_domain::DomainError> {
     use oxplow_domain::events::schema::{
-        ContributionJobCompleted, ContributionJobCompletedV1, JobOutcome,
+        ContributionJobCompleted, ContributionJobCompletedV2, JobOutcome,
     };
     let outcome = match job.state {
         JobState::Succeeded => JobOutcome::Succeeded,
@@ -496,9 +496,12 @@ pub(crate) fn announce_tx(
     };
     let context = extension_job_store::get_context_tx(conn, &job.id)
         .map_err(|e| oxplow_domain::DomainError::Invalid(e.to_string()))?;
-    let payload = ContributionJobCompletedV1 {
-        job_run: oxplow_domain::uri::build::job_run_uri(job.id.as_str()),
-        job: job.owner.contribution.to_string(),
+    let payload = ContributionJobCompletedV2 {
+        job_run: job.id.as_str().to_string(),
+        job: format!(
+            "{}/{}",
+            job.owner.contribution.extension, job.owner.contribution.local
+        ),
         version: job.owner.contract_version,
         attempt: job.attempt,
         fence: job.fence,
@@ -528,14 +531,13 @@ fn job_problem() -> crate::vocabulary_reactor::VocabularyErrors {
         vec!["job operation registry candidate is invalid".into()],
     )])
 }
-/// The run a `oxplow:oxplow/job_run?id=<id>` ref names.
+/// The run a job run's id names.
 fn job_id(job_run: &str) -> Result<JobId, CommandError> {
-    let id = oxplow_domain::uri::build::id_of(job_run, oxplow_domain::uri::resources::JOB_RUN)
-        .map_err(|e| invalid(&e.to_string()))?;
-    if id.len() > 64 {
+    if job_run.len() > 64 {
         return Err(invalid("invalid job run identity"));
     }
-    serde_json::from_value(Value::String(id)).map_err(|_| invalid("invalid job run identity"))
+    serde_json::from_value(Value::String(job_run.to_string()))
+        .map_err(|_| invalid("invalid job run identity"))
 }
 
 fn job_run_ref(id: &JobId) -> String {

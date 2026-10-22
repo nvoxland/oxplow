@@ -1,7 +1,7 @@
 //! `{{scope.name}}` placeholders: the one tokenizer for every template an
 //! extension or core writes — a lens action's input (`{{param.x}}`,
 //! `{{row.x}}`), a command's `ui.input` (`{{stream}}`, `{{thread}}`,
-//! `{{ref}}`, `{{ref.id}}`) and its `ui.open_after` (`{{result.x}}`).
+//! `{{uri}}`, `{{uri.id}}`) and its `ui.open_after` (`{{result.x}}`).
 //! What checks a template at load and what binds it at run read the same
 //! spans, so they can't disagree. See `.context/commands.md` "Offering a
 //! command to a person".

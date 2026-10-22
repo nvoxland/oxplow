@@ -271,12 +271,12 @@ async fn log_indexed(
     sha: &str,
     committed: oxplow_domain::Timestamp,
 ) {
-    use oxplow_domain::events::schema::{VcsCommitIndexed, VcsCommitIndexedV1};
+    use oxplow_domain::events::schema::{VcsCommitIndexed, VcsCommitIndexedV2};
     let env = oxplow_domain::Envelope::typed::<VcsCommitIndexed>(
         oxplow_domain::uri::build::system_source("commit_indexer"),
-        &VcsCommitIndexedV1 {
-            commit: oxplow_domain::uri::build::commit_uri(sha),
-            stream: oxplow_domain::uri::build::stream_uri(stream),
+        &VcsCommitIndexedV2 {
+            commit: sha.to_string(),
+            stream: stream.to_string(),
             committed_at: committed.to_text(),
         },
     )

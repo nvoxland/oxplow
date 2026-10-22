@@ -1,9 +1,9 @@
 title: Commits
 hidden: true
 params:
-  - { name: range, type: date_range, default: 30d }
-  - { name: q, type: search }
-  - { name: merges, type: bool, default: false }
+  - { name: range, role: filter, type: date_range, default: 30d }
+  - { name: q, role: filter, type: search }
+  - { name: merges, role: filter, type: bool, default: false }
   - { name: commit }
 query: |
   SELECT sha, subject, author, committed_at

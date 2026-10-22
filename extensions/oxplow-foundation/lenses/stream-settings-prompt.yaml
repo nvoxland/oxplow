@@ -3,9 +3,9 @@ description: The standing instructions the person set for every agent session in
 params:
   - { name: stream, label: Stream }
 query: |
-  SELECT s.ref AS stream, coalesce(s.prompt, '') AS prompt
+  SELECT uri_param(s.uri, 'id') AS stream, coalesce(s.prompt, '') AS prompt
   FROM v_stream s
-  WHERE s.id = CAST(replace(:stream, 'str', '') AS INTEGER)
+  WHERE s.uri = uri('oxplow/stream', 'id', :stream)
 viz: form
 form:
   command: oxplow.stream.set_prompt

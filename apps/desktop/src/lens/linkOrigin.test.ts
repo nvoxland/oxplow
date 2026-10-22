@@ -3,8 +3,8 @@ import { expect, test } from "bun:test";
 import { linkOrigins } from "./linkOrigin.js";
 import type { DisplayColumn } from "./lensModel.js";
 
-const column = { key: "subject", label: "Snapshot", index: 1, link: { kind: "page", from: "ref" } } as unknown as DisplayColumn;
-const columns = ["ref", "subject"];
+const column = { key: "subject", label: "Snapshot", index: 1, link: { kind: "page", from: "uri" } } as unknown as DisplayColumn;
+const columns = ["uri", "subject"];
 const rows = [
   ["oxplow:oxplow/snapshot?id=3", "third"],
   ["", "no page"],

@@ -629,20 +629,21 @@ fn command_error(err: oxplow_domain::CommandError) -> McpError {
 }
 
 /// What an agent is told when its run waits for a person (`oxplow:oxplow/proposal?id=N`).
-fn proposed_message(command: &str, proposal: &str, supersedes: &[String]) -> String {
+fn proposed_message(command: &str, proposal: &i64, supersedes: &[i64]) -> String {
     let replaces = if supersedes.is_empty() {
         String::new()
     } else {
+        let ids: Vec<String> = supersedes.iter().map(i64::to_string).collect();
         format!(
-            " It replaces {}, which no longer waits.",
-            supersedes.join(", ")
+            " It replaces proposals {}, which no longer wait.",
+            ids.join(", ")
         )
     };
     format!(
-        "`{command}` needs a person's approval; it is recorded as {proposal} and waits for \
-         them in this thread and in Alerts (and on the setting's row in Settings).{replaces} \
+        "`{command}` needs a person's approval; it is recorded as proposal {proposal} and waits \
+         for them in this thread and in Alerts (and on the setting's row in Settings).{replaces} \
          Tell the person; don't run it again. To see what they decided, read its `decision` \
-         from `v_command_proposal` (`WHERE ref = '{proposal}'`)."
+         from `v_command_proposal` (`WHERE id = {proposal}`)."
     )
 }
 
@@ -763,7 +764,7 @@ mod tests {
             )
             .await
             .unwrap();
-        oxplow_tasks::task_of_work_item_ref(out.result["ref"].as_str().unwrap()).unwrap()
+        oxplow_tasks::task_of_work_item_ref(out.result["uri"].as_str().unwrap()).unwrap()
     }
 
     #[tokio::test]
@@ -887,13 +888,13 @@ mod tests {
         );
         deploy_sources(&services).await;
 
-        // A lens's definition is what `read` gives for its ref.
+        // A lens's definition is what `read` gives for its URI.
         let read: serde_json::Value = serde_json::from_str(&text_payload(
             call(
                 &server,
                 &rmcp::model::Extensions::new(),
                 "oxplow_read",
-                serde_json::json!({ "ref": "oxplow:oxplow/lens?lens=demo/streams" }),
+                serde_json::json!({ "uri": "oxplow:oxplow/lens?lens=demo/streams" }),
             )
             .await
             .unwrap(),
@@ -941,7 +942,7 @@ mod tests {
             &server,
             &rmcp::model::Extensions::new(),
             "oxplow_read",
-            serde_json::json!({ "ref": "oxplow:oxplow/lens?lens=demo/nope" }),
+            serde_json::json!({ "uri": "oxplow:oxplow/lens?lens=demo/nope" }),
         )
         .await
         .unwrap_err();
@@ -1051,7 +1052,7 @@ mod tests {
                 &oxplow_domain::Actor::Human,
                 "oxplow.knowledge.add_comment",
                 serde_json::json!({
-                    "stream": oxplow_domain::uri::build::keyed(oxplow_domain::uri::resources::STREAM, &stream.to_string()),
+                    "stream": stream.to_string(),
                     "target": oxplow_domain::uri::build::work_item_uri("oxplow", &primary_task.to_string()),
                     "quote": "the highlighted text",
                     "selectors_json": "[]",
@@ -1295,7 +1296,7 @@ mod tests {
                     &server,
                     &rmcp::model::Extensions::new(),
                     "oxplow_read",
-                    serde_json::json!({ "ref": oxplow_domain::uri::build::work_item_uri("oxplow", &format!("{id}")) }),
+                    serde_json::json!({ "uri": oxplow_domain::uri::build::work_item_uri("oxplow", &format!("{id}")) }),
                 )
                 .await
                 .map(|r| serde_json::from_str::<serde_json::Value>(&text_payload(r)).unwrap())
@@ -1666,11 +1667,7 @@ mod tests {
         let text = out.content[0].as_text().unwrap().text.clone();
         let proposed: serde_json::Value = serde_json::from_str(&text).unwrap();
         assert_eq!(proposed["kind"], "proposed");
-        let proposal = proposed["proposal"].as_str().unwrap().to_string();
-        assert!(
-            proposal.starts_with("oxplow:oxplow/proposal?"),
-            "{proposed}"
-        );
+        let proposal = proposed["proposal"].as_i64().unwrap().to_string();
         let message = proposed["message"].as_str().unwrap();
         assert!(message.contains(&proposal), "{message}");
         assert!(message.contains("Alerts"), "{message}");
@@ -1701,7 +1698,7 @@ mod tests {
                 &oxplow_domain::Actor::Human,
                 oxplow_app::commands::thread::CREATE,
                 serde_json::json!({
-                    "stream": oxplow_domain::uri::build::stream_uri(stream),
+                    "stream": stream.to_string(),
                     "title": title,
                 }),
                 false,
@@ -1733,7 +1730,7 @@ mod tests {
             &server,
             &extensions_for(parts_as(thread.id, other_id, &[])),
             "oxplow_read",
-            serde_json::json!({ "ref": "oxplow:oxplow/file?path=who.txt" }),
+            serde_json::json!({ "uri": "oxplow:oxplow/file?path=who.txt" }),
         )
         .await
         .unwrap();
@@ -1745,8 +1742,8 @@ mod tests {
             &extensions_for(parts_as(thread.id, other_id, &[])),
             "oxplow_read",
             serde_json::json!({
-                "ref": "oxplow:oxplow/file?path=who.txt",
-                "stream": oxplow_domain::uri::build::stream_uri(primary.id),
+                "uri": "oxplow:oxplow/file?path=who.txt",
+                "stream": primary.id.to_string(),
             }),
         )
         .await
@@ -1757,12 +1754,12 @@ mod tests {
             &server,
             &extensions_for(parts_as(thread.id, other_id, &[])),
             "oxplow_read",
-            serde_json::json!({ "ref": "oxplow:oxplow/file?path=who.txt", "stream": "str1" }),
+            serde_json::json!({ "uri": "oxplow:oxplow/file?path=who.txt", "stream": "oxplow:oxplow/stream?id=str2" }),
         )
         .await
         .unwrap_err();
         assert!(
-            bad.message.contains("oxplow:oxplow/stream?id=str2"),
+            bad.message.contains("stream's id (`str2`)"),
             "{}",
             bad.message
         );
@@ -1824,13 +1821,7 @@ mod tests {
             .unwrap(),
         ))
         .unwrap();
-        assert!(
-            out["answer"]
-                .as_str()
-                .unwrap()
-                .starts_with("oxplow:oxplow/answer?"),
-            "{out}"
-        );
+        assert!(out["answer"].as_i64().is_some(), "{out}");
         assert!(
             out["text"].as_str().unwrap().contains("| primary |"),
             "{out}"

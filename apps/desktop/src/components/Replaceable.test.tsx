@@ -115,14 +115,14 @@ const stating = (name: string) => ({
       { id: `${name}/work_item.detail.state`, extension: name, target: "work_item.detail.state", capability: "work_items", boundToProvider: true, lensId: `${name}/state`, label: "state control", version: 1, view: [] },
     ],
   },
-  lenses: [{ id: `${name}/state`, params: [{ name: "ref", label: null, default: null }] }],
+  lenses: [{ id: `${name}/state`, params: [{ name: "uri", label: null, default: null }] }],
 });
 
 const PROPS = { scope: "all", thread_id: null };
 const board = () => (
   <Replaceable target="work_item.board" props={PROPS} streamId="str1" fallback={<div data-testid="core-board">oxplow's board</div>} />
 );
-const STATE_PROPS = { ref: "oxplow:oxplow/work_item?id=1&provider=fake" };
+const STATE_PROPS = { uri: "oxplow:oxplow/work_item?id=1&provider=fake" };
 const state = (provider: string) => (
   <Replaceable
     target="work_item.detail.state"

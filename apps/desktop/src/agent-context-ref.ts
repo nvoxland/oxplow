@@ -40,7 +40,7 @@ export function formatContextMention(ref: ContextRef): string {
     return `@.oxplow/wiki/${ref.slug}.md `;
   }
   if (ref.kind === "ref") {
-    return `[oxplow ref ${ref.ref}] `;
+    return `[oxplow uri ${ref.ref}] `;
   }
   if (ref.kind === "lens") {
     // `[oxplow lens <id> k=v …]` — the agent reads it with `get_lens` /

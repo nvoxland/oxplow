@@ -105,14 +105,14 @@ test("a healthy contribution says so, with its average, missed schedule and unde
 
 test("the repair mention names the repair item as a ref, on one line", () => {
   expect(repairMention("oxplow:oxplow/work_item?id=tsk9&provider=oxplow")).toBe(
-    "Repair the extension described in [oxplow ref oxplow:oxplow/work_item?id=tsk9&provider=oxplow] — read it first.",
+    "Repair the extension described in [oxplow uri oxplow:oxplow/work_item?id=tsk9&provider=oxplow] — read it first.",
   );
 });
 
 test("Repair with the Agent fills the agent input with the mention, and only that", () => {
   const inserted: string[] = [];
   repairWithAgent("oxplow:oxplow/work_item?id=ENG-12&provider=issues", (t) => inserted.push(t));
-  expect(inserted).toEqual(["Repair the extension described in [oxplow ref oxplow:oxplow/work_item?id=ENG-12&provider=issues] — read it first."]);
+  expect(inserted).toEqual(["Repair the extension described in [oxplow uri oxplow:oxplow/work_item?id=ENG-12&provider=issues] — read it first."]);
 });
 
 test("Enable Again runs oxplow.contribution.enable as the person", async () => {

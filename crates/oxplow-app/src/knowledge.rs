@@ -18,7 +18,7 @@ use oxplow_db::page_ref_projections::{stamp_file_versions, wiki_edges, RT_WIKI_F
 use oxplow_db::page_ref_store::{merge_source_tx, replace_source_tx, upsert_edge_tx};
 use oxplow_db::{EventCtx, FileRefVersion, PageRefEdge, WikiPage};
 use oxplow_domain::events::schema::{
-    KnowledgePageDeleted, KnowledgePageDeletedV1, KnowledgePageWritten, KnowledgePageWrittenV1,
+    KnowledgePageDeleted, KnowledgePageDeletedV2, KnowledgePageWritten, KnowledgePageWrittenV2,
 };
 use oxplow_domain::events::Envelope;
 use oxplow_domain::knowledge::{Kept, KnowledgeProvider, PageCall, PageDraft, RefFreshness};
@@ -47,7 +47,7 @@ pub const WRITE_PAGE: &str = "oxplow.knowledge.write_page";
 pub const DELETE_PAGE: &str = "oxplow.knowledge.delete_page";
 pub const LINK: &str = "oxplow.knowledge.link";
 pub const RESYNC: &str = "oxplow.knowledge.resync";
-pub const VERIFY_REFS: &str = "oxplow.knowledge.verify_refs";
+pub const VERIFY_FILES: &str = "oxplow.knowledge.verify_files";
 
 /// A page's ref: `oxplow:oxplow/wiki?slug=<slug>`.
 pub fn page_ref(slug: &str) -> String {
@@ -134,9 +134,11 @@ pub struct PageWrite<'a> {
 /// What a write left: the page's outbound refs and its pin.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Written {
+    /// The page's slug.
     pub page: String,
     pub outbound: Vec<String>,
-    pub snapshot: Option<String>,
+    /// The snapshot its new refs are pinned to.
+    pub snapshot: Option<i64>,
 }
 
 /// Refuse `verified` / `removed` refs the body doesn't bear out: a removed
@@ -154,9 +156,9 @@ pub fn refs_borne_out(
         .collect();
     if !still_cited.is_empty() {
         return Err(invalid(
-            "/removed_refs",
+            "/removed_files",
             format!(
-                "removed_refs still cited by the body: {}",
+                "removed_files still cited by the body: {}",
                 still_cited.join(", ")
             ),
         ));
@@ -168,9 +170,9 @@ pub fn refs_borne_out(
         .collect();
     if !unreferenced.is_empty() {
         return Err(invalid(
-            "/verified_refs",
+            "/verified_files",
             format!(
-                "verified_refs neither cited by the body nor under a cited directory: {}",
+                "verified_files neither cited by the body nor under a cited directory: {}",
                 unreferenced.join(", ")
             ),
         ));
@@ -260,15 +262,15 @@ pub fn write_page_tx(
 
     let page_ref = page_ref(slug);
     let written = Written {
-        page: page_ref.clone(),
+        page: slug.to_string(),
         outbound: outbound_tx(conn, slug)?,
-        snapshot: pin.snapshot_id.map(|id| format!("snap:{id}")),
+        snapshot: pin.snapshot_id,
     };
     let env = ev
-        .typed::<KnowledgePageWritten>(&KnowledgePageWrittenV1 {
-            page: page_ref.clone(),
+        .typed::<KnowledgePageWritten>(&KnowledgePageWrittenV2 {
+            page: written.page.clone(),
             outbound: written.outbound.clone(),
-            snapshot: written.snapshot.clone(),
+            snapshot: written.snapshot,
         })
         .with_anchors(Anchors {
             snapshot_id: pin.snapshot_id,
@@ -289,10 +291,11 @@ pub fn delete_page_tx(
     let existed = oxplow_db::wiki_page_store::delete_tx(conn, slug)?;
     replace_source_tx(conn, &wiki_uri(slug), Vec::new())?;
     Ok(existed.then(|| {
-        let page = page_ref(slug);
-        ev.typed::<KnowledgePageDeleted>(&KnowledgePageDeletedV1 { page: page.clone() })
-            .with_anchors(anchors)
-            .with_subject([page])
+        ev.typed::<KnowledgePageDeleted>(&KnowledgePageDeletedV2 {
+            page: slug.to_string(),
+        })
+        .with_anchors(anchors)
+        .with_subject([page_ref(slug)])
     }))
 }
 
@@ -685,16 +688,11 @@ impl crate::event_pump::EventConsumer for WikiAttribution {
         let Some(thread) = event.envelope.anchors.thread_id else {
             return Ok(());
         };
-        let written: KnowledgePageWrittenV1 =
+        let written: KnowledgePageWrittenV2 =
             serde_json::from_value(event.envelope.payload.clone()).map_err(|e| {
                 DomainError::Invalid(format!("knowledge.page.written payload: {e}"))
             })?;
-        let Ok(slug) =
-            oxplow_domain::uri::build::id_of(&written.page, oxplow_domain::uri::resources::WIKI)
-        else {
-            return Ok(());
-        };
-        let slug = slug.as_str();
+        let slug = written.page.as_str();
         // A page deleted since is no longer there to mark.
         if oxplow_db::wiki_page_store::get_tx(conn, slug)?.is_none() {
             return Ok(());
@@ -865,22 +863,22 @@ pub struct WritePageInput {
     /// Files you re-read against this body: their pins move to now. A
     /// file under a `[[dir:…]]` the body cites counts.
     #[serde(default)]
-    pub verified_refs: Vec<String>,
+    pub verified_files: Vec<String>,
     /// Files you took out of the body.
     #[serde(default)]
-    pub removed_refs: Vec<String>,
+    pub removed_files: Vec<String>,
 }
 
 /// Re-pin a page's refs.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct VerifyRefsInput {
+pub struct VerifyFilesInput {
     /// The page (its slug).
     pub slug: String,
     /// The files you re-read against the page as it stands: their pins move
     /// to now. Omit for every file the page cites.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub refs: Option<Vec<String>>,
+    pub files: Option<Vec<String>>,
 }
 
 /// Delete a page.
@@ -1020,7 +1018,7 @@ async fn write_page(
     }
     {
         let (t2, slug, body) = (t.clone(), slug.clone(), body.clone());
-        let (verified, removed) = (input.verified_refs.clone(), input.removed_refs.clone());
+        let (verified, removed) = (input.verified_files.clone(), input.removed_files.clone());
         check(t, move |conn, vocabulary| {
             links_resolve(&t2, conn, &vocabulary.resources, &slug, &body)?;
             refs_borne_out(&parse_refs(&body), &verified, &removed)
@@ -1031,8 +1029,8 @@ async fn write_page(
         slug: slug.clone(),
         title: input.title.clone(),
         body,
-        verified_refs: input.verified_refs.clone(),
-        removed_refs: input.removed_refs.clone(),
+        verified_files: input.verified_files.clone(),
+        removed_files: input.removed_files.clone(),
     };
     match store(t)?.write_page(&call(&invocation), &draft).await? {
         None => Ok(untracked(&slug)),
@@ -1042,8 +1040,8 @@ async fn write_page(
                 invocation.actor(),
                 &slug,
                 kept,
-                input.verified_refs,
-                input.removed_refs,
+                input.verified_files,
+                input.removed_files,
             )
             .await
         }
@@ -1066,10 +1064,10 @@ pub fn ops(target: KnowledgeTarget) -> Vec<Op> {
     }));
 
     let t = target.clone();
-    let verify_refs = Handler::External(Arc::new(move |invocation: Invocation, input| {
+    let verify_files = Handler::External(Arc::new(move |invocation: Invocation, input| {
         let t = t.clone();
         Box::pin(async move {
-            let input: VerifyRefsInput = parse(input)?;
+            let input: VerifyFilesInput = parse(input)?;
             let slug = slug_of(&input.slug)?.to_string();
             let page = page_ref(&slug);
             let (body, pinned) = {
@@ -1105,8 +1103,8 @@ pub fn ops(target: KnowledgeTarget) -> Vec<Op> {
                     slug,
                     title: None,
                     body,
-                    verified_refs: input.refs.unwrap_or(pinned),
-                    removed_refs: Vec::new(),
+                    verified_files: input.files.unwrap_or(pinned),
+                    removed_files: Vec::new(),
                 },
             )
             .await
@@ -1253,10 +1251,10 @@ pub fn ops(target: KnowledgeTarget) -> Vec<Op> {
         ),
         Op::new(
             "knowledge.write",
-            "verify_refs",
-            schema::<VerifyRefsInput>(),
+            "verify_files",
+            schema::<VerifyFilesInput>(),
             false,
-            verify_refs,
+            verify_files,
         ),
         Op::new(
             "knowledge.write",
@@ -1328,7 +1326,7 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(out.result["page"], "oxplow:oxplow/wiki?slug=vcs-notes");
+        assert_eq!(out.result["page"], "vcs-notes");
         let outbound: Vec<&str> = out.result["outbound"]
             .as_array()
             .unwrap()
@@ -1515,7 +1513,7 @@ mod tests {
         run(
             &fx,
             WRITE_PAGE,
-            json!({ "slug": "p", "body": body, "verified_refs": ["src/b.rs"] }),
+            json!({ "slug": "p", "body": body, "verified_files": ["src/b.rs"] }),
         )
         .await
         .unwrap();
@@ -1536,7 +1534,7 @@ mod tests {
     /// Verified refs must be cited (or under a cited directory, which
     /// makes an edge of their own); removed ones must be gone.
     #[tokio::test]
-    async fn verified_and_removed_refs_are_checked_against_the_body() {
+    async fn verified_and_removed_files_are_checked_against_the_body() {
         let fx = crate::test_fixtures::services_with_effort().await;
         std::fs::create_dir_all(dir(&fx).join("crates/cp/src")).unwrap();
         std::fs::write(dir(&fx).join("crates/cp/src/lib.rs"), "").unwrap();
@@ -1545,7 +1543,7 @@ mod tests {
         let err = run(
             &fx,
             WRITE_PAGE,
-            json!({ "slug": "intro", "body": body, "removed_refs": ["crates/foo.rs"] }),
+            json!({ "slug": "intro", "body": body, "removed_files": ["crates/foo.rs"] }),
         )
         .await
         .unwrap_err();
@@ -1553,7 +1551,7 @@ mod tests {
         let err = run(
             &fx,
             WRITE_PAGE,
-            json!({ "slug": "intro", "body": body, "verified_refs": ["crates/other/main.rs"] }),
+            json!({ "slug": "intro", "body": body, "verified_files": ["crates/other/main.rs"] }),
         )
         .await
         .unwrap_err();
@@ -1561,7 +1559,7 @@ mod tests {
         run(
             &fx,
             WRITE_PAGE,
-            json!({ "slug": "intro", "body": body, "verified_refs": ["crates/cp/src/lib.rs"] }),
+            json!({ "slug": "intro", "body": body, "verified_files": ["crates/cp/src/lib.rs"] }),
         )
         .await
         .unwrap();
@@ -1645,7 +1643,7 @@ mod tests {
             .svc
             .sql
             .query_sql(
-                "SELECT body FROM v_knowledge_body WHERE ref = ?1",
+                "SELECT body FROM v_knowledge_body WHERE uri = ?1",
                 vec![oxplow_db::SqlCell::Text(page.into())],
                 None,
             )
@@ -1701,7 +1699,7 @@ mod tests {
             .db
             .read(move |c| {
                 c.query_row(
-                    "SELECT stale_ref_count FROM v_knowledge_page WHERE ref = ?1",
+                    "SELECT stale_ref_count FROM v_knowledge_page WHERE uri = ?1",
                     [page],
                     |r| r.get(0),
                 )
@@ -1804,7 +1802,7 @@ mod tests {
         run(
             &fx,
             WRITE_PAGE,
-            json!({ "slug": "lib", "body": "# Lib\n\nsee [[src/lib.rs]]\n", "verified_refs": ["src/lib.rs"] }),
+            json!({ "slug": "lib", "body": "# Lib\n\nsee [[src/lib.rs]]\n", "verified_files": ["src/lib.rs"] }),
         )
         .await
         .unwrap();
@@ -1814,7 +1812,7 @@ mod tests {
             .db
             .read(|c| {
                 c.query_row(
-                    "SELECT outbound_refs FROM v_knowledge_page WHERE ref = 'oxplow:oxplow/wiki?slug=lib'",
+                    "SELECT outbound_uris FROM v_knowledge_page WHERE uri = 'oxplow:oxplow/wiki?slug=lib'",
                     [],
                     |r| r.get(0),
                 )
@@ -1839,10 +1837,10 @@ mod tests {
         assert_eq!(refs, ("src/lib.rs".to_string(), 0));
     }
 
-    /// `verify_refs` re-pins the refs it names — all of the page's when it
+    /// `verify_files` re-pins the refs it names — all of the page's when it
     /// names none — against the body the page already has.
     #[tokio::test]
-    async fn verify_refs_repins_the_named_refs_or_all_of_them() {
+    async fn verify_files_repins_the_named_refs_or_all_of_them() {
         let fx = crate::test_fixtures::services_with_effort().await;
         std::fs::create_dir_all(dir(&fx).join("src")).unwrap();
         for f in ["a.rs", "b.rs"] {
@@ -1863,27 +1861,27 @@ mod tests {
 
         run(
             &fx,
-            VERIFY_REFS,
-            json!({ "slug": "lib", "refs": ["src/a.rs"] }),
+            VERIFY_FILES,
+            json!({ "slug": "lib", "files": ["src/a.rs"] }),
         )
         .await
         .unwrap();
         assert_eq!(stale_ref_count(&fx, "oxplow:oxplow/wiki?slug=lib").await, 1);
 
-        run(&fx, VERIFY_REFS, json!({ "slug": "lib" }))
+        run(&fx, VERIFY_FILES, json!({ "slug": "lib" }))
             .await
             .unwrap();
         assert_eq!(stale_ref_count(&fx, "oxplow:oxplow/wiki?slug=lib").await, 0);
 
         let err = run(
             &fx,
-            VERIFY_REFS,
-            json!({ "slug": "lib", "refs": ["src/zzz.rs"] }),
+            VERIFY_FILES,
+            json!({ "slug": "lib", "files": ["src/zzz.rs"] }),
         )
         .await
         .unwrap_err();
-        assert!(err.to_string().contains("verified_refs"), "{err}");
-        let err = run(&fx, VERIFY_REFS, json!({ "slug": "nope" }))
+        assert!(err.to_string().contains("verified_files"), "{err}");
+        let err = run(&fx, VERIFY_FILES, json!({ "slug": "nope" }))
             .await
             .unwrap_err();
         assert!(err.to_string().contains("no page `nope`"), "{err}");

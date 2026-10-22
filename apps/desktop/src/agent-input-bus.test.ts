@@ -11,12 +11,12 @@ test("insertIntoAgent collapses line breaks so a paste can't submit", () => {
   const unsub = subscribeAgentInput((text) => got.push(text));
   try {
     insertIntoAgent("Why is the build slow?\nAnd since when?\r\nReally.");
-    insertIntoAgent("[oxplow ref file:src/a.ts] what does this do? ");
+    insertIntoAgent("[oxplow uri file:src/a.ts] what does this do? ");
   } finally {
     unsub();
   }
   expect(got).toEqual([
     "Why is the build slow? And since when? Really.",
-    "[oxplow ref file:src/a.ts] what does this do? ",
+    "[oxplow uri file:src/a.ts] what does this do? ",
   ]);
 });

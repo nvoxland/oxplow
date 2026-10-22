@@ -26,7 +26,7 @@ use oxplow_domain::agent_session::BindingOrigin;
 use oxplow_domain::agent_session::{
     AgentSession, NewAgentSession, SessionCloseReason, SessionKind,
 };
-use oxplow_domain::uri::build::{agent_session_uri, stream_uri, thread_uri};
+use oxplow_domain::uri::build::{stream_uri, thread_uri};
 use oxplow_domain::{
     AgentSessionId, CommandCall, CommandError, Confirm, Invokers, ThreadId, Timestamp,
 };
@@ -34,7 +34,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::json;
 
-use super::util::{invalid, parse, ref_id, schema, sql};
+use super::util::{bare_id, invalid, parse, schema, sql};
 use super::{Handler, HandlerOutput, TxCtx};
 
 pub const OPEN: &str = "oxplow.agent_session.open";
@@ -50,7 +50,7 @@ pub const FORK_CONVERSATION: &str = "oxplow.agent_session.fork_conversation";
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct OpenInput {
-    /// The thread (`oxplow:oxplow/thread?id=thr1`).
+    /// The thread (`thr1`).
     pub thread: String,
     /// `terminal` (the default); an `action` session isn't built yet.
     #[serde(default)]
@@ -76,14 +76,14 @@ pub struct OpenInput {
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SessionInput {
-    /// The session (`oxplow:oxplow/agent_session?id=ses3`).
+    /// The session (`ses3`).
     pub session: String,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RenameInput {
-    /// The session (`oxplow:oxplow/agent_session?id=ses3`).
+    /// The session (`ses3`).
     pub session: String,
     pub title: String,
 }
@@ -91,7 +91,7 @@ pub struct RenameInput {
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ConversationInput {
-    /// The session (`oxplow:oxplow/agent_session?id=ses3`).
+    /// The session (`ses3`).
     pub session: String,
     /// One of its harness's saved conversations (its id).
     pub conversation: String,
@@ -100,7 +100,7 @@ pub struct ConversationInput {
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ForkInput {
-    /// The session (`oxplow:oxplow/agent_session?id=ses3`).
+    /// The session (`ses3`).
     pub session: String,
     /// The saved conversation to fork (its id); default the one the
     /// session is on.
@@ -124,7 +124,7 @@ fn result(session: &AgentSession) -> HandlerOutput {
 
 /// The session an `oxplow:oxplow/agent_session?id=<id>` ref names.
 fn load(ctx: &TxCtx<'_>, value: &str) -> Result<AgentSession, CommandError> {
-    let id: AgentSessionId = ref_id(
+    let id: AgentSessionId = bare_id(
         value,
         oxplow_domain::uri::resources::AGENT_SESSION,
         "/session",
@@ -191,7 +191,7 @@ pub fn open_op(config: super::config_commands::ConfigTarget, harnesses: HarnessR
         true,
         Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
             let input: OpenInput = parse(input)?;
-            let thread = ref_id(
+            let thread = bare_id(
                 &input.thread,
                 oxplow_domain::uri::resources::THREAD,
                 "/thread",
@@ -262,7 +262,7 @@ pub fn open_op(config: super::config_commands::ConfigTarget, harnesses: HarnessR
                 }
             };
             let mut out = HandlerOutput {
-                inverse: call(CLOSE, json!({ "session": agent_session_uri(session.id) })),
+                inverse: call(CLOSE, json!({ "session": session.id.to_string() })),
                 ..result(&session)
             };
             // Remembering what new threads start with lands with the open
@@ -688,7 +688,7 @@ mod tests {
             &fx,
             &Actor::Human,
             OPEN,
-            json!({ "thread": thread_uri(fx.thread), "title": "review" }),
+            json!({ "thread": fx.thread.to_string(), "title": "review" }),
             false,
         )
         .await
@@ -722,7 +722,7 @@ mod tests {
         let s = open(
             &fx,
             &Actor::Human,
-            json!({ "thread": thread_uri(fx.thread), "harness": "claude", "remember": true }),
+            json!({ "thread": fx.thread.to_string(), "harness": "claude", "remember": true }),
         )
         .await;
         assert_eq!(s.harness, "claude");
@@ -743,7 +743,7 @@ mod tests {
             &fx,
             &agent(&fx),
             OPEN,
-            json!({ "thread": thread_uri(fx.thread), "remember": true }),
+            json!({ "thread": fx.thread.to_string(), "remember": true }),
             false,
         )
         .await
@@ -766,7 +766,7 @@ mod tests {
     #[tokio::test]
     async fn stopping_marks_the_session_and_starting_clears_it() {
         let fx = services_with_effort().await;
-        let me = serde_json::json!({ "session": agent_session_uri(fx.session) });
+        let me = serde_json::json!({ "session": fx.session.to_string() });
         let stopped = run(&fx, &Actor::Human, STOP, me.clone(), false)
             .await
             .unwrap();
@@ -802,7 +802,7 @@ mod tests {
     #[tokio::test]
     async fn starting_fresh_forgets_the_conversation_and_the_stop() {
         let fx = services_with_effort().await;
-        let me = serde_json::json!({ "session": agent_session_uri(fx.session) });
+        let me = serde_json::json!({ "session": fx.session.to_string() });
         let session = fx.session;
         fx.svc
             .db
@@ -834,11 +834,11 @@ mod tests {
     #[tokio::test]
     async fn a_person_resumes_a_chosen_conversation() {
         let fx = services_with_effort().await;
-        let me = agent_session_uri(fx.session);
+        let me = fx.session.to_string();
         let other = open(
             &fx,
             &Actor::Human,
-            serde_json::json!({ "thread": thread_uri(fx.thread), "harness": "claude" }),
+            serde_json::json!({ "thread": fx.thread.to_string(), "harness": "claude" }),
         )
         .await;
         let (session, other_id) = (fx.session, other.id);
@@ -884,7 +884,7 @@ mod tests {
         .await
         .unwrap_err();
         assert!(
-            matches!(&err, CommandError::Invalid { field: Some(f), message } if f == "/conversation" && message.contains(&agent_session_uri(other.id))),
+            matches!(&err, CommandError::Invalid { field: Some(f), message } if f == "/conversation" && message.contains(&oxplow_domain::uri::build::agent_session_uri(other.id))),
             "{err:?}"
         );
         for (name, input) in [
@@ -915,7 +915,7 @@ mod tests {
             .transaction(move |tx| bind_tx(tx, session, "taken", BindingOrigin::Started, now))
             .await
             .unwrap();
-        let thread = thread_uri(fx.thread);
+        let thread = fx.thread.to_string();
         let opened = open(
             &fx,
             &Actor::Human,
@@ -949,7 +949,7 @@ mod tests {
         .await
         .unwrap_err();
         assert!(
-            matches!(&err, CommandError::Invalid { field: Some(f), message } if f == "/resume" && message.contains(&agent_session_uri(fx.session))),
+            matches!(&err, CommandError::Invalid { field: Some(f), message } if f == "/resume" && message.contains(&oxplow_domain::uri::build::agent_session_uri(fx.session))),
             "{err:?}"
         );
         // Nothing was left behind by the refusal.
@@ -996,7 +996,7 @@ mod tests {
     #[tokio::test]
     async fn a_fork_marks_the_next_launch() {
         let fx = services_with_effort().await;
-        let me = agent_session_uri(fx.session);
+        let me = fx.session.to_string();
         let err = run(
             &fx,
             &Actor::Human,
@@ -1030,7 +1030,7 @@ mod tests {
     #[tokio::test]
     async fn the_input_is_checked() {
         let fx = services_with_effort().await;
-        let thread = thread_uri(fx.thread);
+        let thread = fx.thread.to_string();
         fx.svc.config.write().unwrap().agents = vec!["claude".into()];
         for (input, field) in [
             (json!({ "thread": thread, "kind": "action" }), "/kind"),
@@ -1038,10 +1038,7 @@ mod tests {
             (json!({ "thread": thread, "harness": "codex" }), "/harness"),
             (json!({ "thread": thread, "harness": "nope" }), "/harness"),
             (json!({ "thread": thread, "harness": "acp" }), "/harness"),
-            (
-                json!({ "thread": "oxplow:oxplow/thread?id=thr99" }),
-                "/thread",
-            ),
+            (json!({ "thread": "thr99" }), "/thread"),
         ] {
             let err = run(&fx, &Actor::Human, OPEN, input.clone(), false)
                 .await
@@ -1068,7 +1065,7 @@ mod tests {
     #[tokio::test]
     async fn an_agent_opens_and_closes_in_its_own_stream() {
         let fx = services_with_effort().await;
-        let mine = open(&fx, &agent(&fx), json!({ "thread": thread_uri(fx.thread) })).await;
+        let mine = open(&fx, &agent(&fx), json!({ "thread": fx.thread.to_string() })).await;
         let err = run(
             &fx,
             &Actor::Agent {
@@ -1077,13 +1074,13 @@ mod tests {
                 stream_id: None,
             },
             OPEN,
-            json!({ "thread": thread_uri(fx.thread) }),
+            json!({ "thread": fx.thread.to_string() }),
             false,
         )
         .await
         .unwrap_err();
         assert!(matches!(err, CommandError::Denied { .. }), "{err:?}");
-        let r = agent_session_uri(mine.id);
+        let r = mine.id.to_string();
         run(&fx, &agent(&fx), CLOSE, json!({ "session": r }), false)
             .await
             .unwrap();
@@ -1119,7 +1116,7 @@ mod tests {
             })
             .await
             .unwrap();
-        let r = agent_session_uri(s);
+        let r = s.to_string();
         let out = run(&fx, &Actor::Human, CLOSE, json!({ "session": r }), false)
             .await
             .unwrap();
@@ -1169,7 +1166,7 @@ mod tests {
             &fx,
             &Actor::Human,
             "oxplow.thread.close",
-            json!({ "thread": thread_uri(fx.thread) }),
+            json!({ "thread": fx.thread.to_string() }),
             true,
         )
         .await
@@ -1183,7 +1180,7 @@ mod tests {
     #[tokio::test]
     async fn renaming_undoes_to_the_old_title() {
         let fx = services_with_effort().await;
-        let r = agent_session_uri(fx.session);
+        let r = fx.session.to_string();
         let out = run(
             &fx,
             &Actor::Human,
@@ -1219,14 +1216,14 @@ mod tests {
         let s = open(
             &fx,
             &Actor::Human,
-            json!({ "thread": thread_uri(second.id) }),
+            json!({ "thread": second.id.to_string() }),
         )
         .await;
         run(
             &fx,
             &Actor::Human,
             crate::commands::thread::CLOSE,
-            json!({ "thread": thread_uri(second.id) }),
+            json!({ "thread": second.id.to_string() }),
             false,
         )
         .await
@@ -1266,7 +1263,7 @@ mod tests {
             &fx,
             &Actor::Human,
             CLOSE,
-            json!({ "session": agent_session_uri(session.id) }),
+            json!({ "session": session.id.to_string() }),
             true,
         )
         .await
@@ -1277,7 +1274,7 @@ mod tests {
         let s = open(
             &fx,
             &Actor::Human,
-            json!({ "thread": thread_uri(second.id) }),
+            json!({ "thread": second.id.to_string() }),
         )
         .await;
         let token = mint(&fx, &s, stream);
@@ -1285,7 +1282,7 @@ mod tests {
             &fx,
             &Actor::Human,
             crate::commands::thread::CLOSE,
-            json!({ "thread": thread_uri(second.id) }),
+            json!({ "thread": second.id.to_string() }),
             false,
         )
         .await

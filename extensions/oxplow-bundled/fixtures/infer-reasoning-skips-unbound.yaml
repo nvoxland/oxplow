@@ -4,7 +4,7 @@ input:
   effect: infer-reasoning
   event:
     type: effort.finished
-    payload: { effort: "oxplow:oxplow/effort?id=eff7", end_snapshot: "oxplow:oxplow/snapshot?id=3" }
+    payload: { effort: "eff7", end_snapshot: 3 }
   answers:
     ai.discover:
       - { role: oxplow-bundled/reasoning, model: null, problem: "no model is assigned to the `main` role" }

@@ -15,7 +15,7 @@ query: |
                                     json_extract(o.data, '$.outputTokens'))
          END AS content
   FROM v_job_run_output o
-  WHERE o.job_id = (SELECT id FROM v_job_run WHERE ref = :job_run)
+  WHERE o.job_id = (SELECT id FROM v_job_run WHERE uri = uri('oxplow/job_run', 'id', :job_run))
   ORDER BY o.attempt, o.seq
 viz: table
 columns:

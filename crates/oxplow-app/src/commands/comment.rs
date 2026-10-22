@@ -25,7 +25,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::thread::agent_scope;
-use super::util::{invalid, parse, ref_id, schema};
+use super::util::{bare_id, invalid, parse, schema};
 use super::{Handler, HandlerOutput, TxCtx};
 
 pub const ADD: &str = "oxplow.knowledge.add_comment";
@@ -37,9 +37,9 @@ pub const RELOCATE: &str = "oxplow.knowledge.relocate_comment";
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct AddInput {
-    /// The stream (`oxplow:oxplow/stream?id=str1`).
+    /// The stream (`str1`).
     pub stream: String,
-    /// The thread it was made in (`oxplow:oxplow/thread?id=thr3`); an agent's is its own.
+    /// The thread it was made in (`thr3`); an agent's is its own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thread: Option<String>,
     /// What it's anchored to: a page's URI
@@ -68,7 +68,7 @@ pub struct AddInput {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ReplyInput {
-    /// The comment (`oxplow:oxplow/comment?id=cmt12`).
+    /// The comment (`cmt12`).
     pub comment: String,
     pub body: String,
 }
@@ -76,7 +76,7 @@ pub struct ReplyInput {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct UpdateInput {
-    /// The comment (`oxplow:oxplow/comment?id=cmt12`).
+    /// The comment (`cmt12`).
     pub comment: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub intent: Option<CommentIntent>,
@@ -99,7 +99,7 @@ pub struct UpdateInput {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RelocateInput {
-    /// The comment (`oxplow:oxplow/comment?id=cmt12`).
+    /// The comment (`cmt12`).
     pub comment: String,
     /// Where its quote sits in the content as rendered now (the W3C
     /// selectors array, as JSON) — its last known place when `orphaned`.
@@ -111,7 +111,7 @@ pub struct RelocateInput {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CommentInput {
-    /// The comment (`oxplow:oxplow/comment?id=cmt12`).
+    /// The comment (`cmt12`).
     pub comment: String,
 }
 
@@ -156,7 +156,7 @@ pub fn add_op() -> Op {
         false,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: AddInput = parse(input)?;
-            let stream = ref_id(
+            let stream = bare_id(
                 &input.stream,
                 oxplow_domain::uri::resources::STREAM,
                 "/stream",
@@ -165,7 +165,7 @@ pub fn add_op() -> Op {
             let named = input
                 .thread
                 .as_deref()
-                .map(|t| ref_id(t, oxplow_domain::uri::resources::THREAD, "/thread"))
+                .map(|t| bare_id(t, oxplow_domain::uri::resources::THREAD, "/thread"))
                 .transpose()?;
             let thread = match agent_scope(ctx)? {
                 Some((own, _)) => {
@@ -235,7 +235,7 @@ pub fn reply_op() -> Op {
         false,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: ReplyInput = parse(input)?;
-            let id = ref_id::<CommentId>(
+            let id = bare_id::<CommentId>(
                 &input.comment,
                 oxplow_domain::uri::resources::COMMENT,
                 "/comment",
@@ -263,7 +263,7 @@ pub fn update_op() -> Op {
         true,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: UpdateInput = parse(input)?;
-            let id = ref_id::<CommentId>(
+            let id = bare_id::<CommentId>(
                 &input.comment,
                 oxplow_domain::uri::resources::COMMENT,
                 "/comment",
@@ -329,7 +329,7 @@ pub fn delete_op() -> Op {
         false,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: CommentInput = parse(input)?;
-            let id = ref_id::<CommentId>(
+            let id = bare_id::<CommentId>(
                 &input.comment,
                 oxplow_domain::uri::resources::COMMENT,
                 "/comment",
@@ -360,7 +360,7 @@ pub fn relocate_op() -> Op {
         false,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: RelocateInput = parse(input)?;
-            let id = ref_id::<CommentId>(
+            let id = bare_id::<CommentId>(
                 &input.comment,
                 oxplow_domain::uri::resources::COMMENT,
                 "/comment",
@@ -397,6 +397,11 @@ pub fn ops() -> Vec<Op> {
 
 #[cfg(test)]
 mod tests {
+    /// The bare id (`cmt1`) of the comment a result shows.
+    fn comment_id(result: &Value) -> String {
+        result["comment"]["id"].as_str().unwrap().to_string()
+    }
+
     use super::*;
     use crate::test_fixtures::{services_with_effort, EffortFixture};
     use oxplow_domain::stores::CommentStore as _;
@@ -432,19 +437,15 @@ mod tests {
     #[tokio::test]
     async fn the_author_is_the_actor_and_an_agent_comments_in_its_own_thread() {
         let fx = services_with_effort().await;
-        let stream = stream_uri(StreamId::new(1));
+        let stream = StreamId::new(1).to_string();
         let mine = add(&fx, &agent(&fx), comment_on(&stream, None))
             .await
             .unwrap();
         assert_eq!(mine["comment"]["author"], "agent");
         assert_eq!(mine["comment"]["thread_id"], json!(fx.thread));
-        let err = add(
-            &fx,
-            &agent(&fx),
-            comment_on(&stream, Some("oxplow:oxplow/thread?id=thr99")),
-        )
-        .await
-        .unwrap_err();
+        let err = add(&fx, &agent(&fx), comment_on(&stream, Some("thr99")))
+            .await
+            .unwrap_err();
         assert!(matches!(err, CommandError::Denied { .. }), "{err:?}");
         let theirs = add(&fx, &Actor::Human, comment_on(&stream, None))
             .await
@@ -457,7 +458,7 @@ mod tests {
             .run(
                 &Actor::Human,
                 REPLY,
-                json!({ "comment": oxplow_domain::uri::build::keyed(oxplow_domain::uri::resources::COMMENT, mine["comment"]["id"].as_str().unwrap()), "body": "ok" }),
+                json!({ "comment": comment_id(&mine), "body": "ok" }),
                 false,
             )
             .await
@@ -481,16 +482,12 @@ mod tests {
         let c = add(
             &fx,
             &Actor::Human,
-            comment_on(&stream_uri(StreamId::new(1)), None),
+            comment_on(&StreamId::new(1).to_string(), None),
         )
         .await
         .unwrap();
-        let id = c["comment"]["id"].as_str().unwrap().to_string();
+        let id = comment_id(&c);
         let cid = CommentId::try_from_str(&id).unwrap();
-        let id = oxplow_domain::uri::build::keyed(
-            oxplow_domain::uri::resources::COMMENT,
-            &id.to_string(),
-        );
         let before = fx
             .svc
             .comment_store
@@ -554,16 +551,12 @@ mod tests {
         let c = add(
             &fx,
             &Actor::Human,
-            comment_on(&stream_uri(StreamId::new(1)), None),
+            comment_on(&StreamId::new(1).to_string(), None),
         )
         .await
         .unwrap();
-        let id = c["comment"]["id"].as_str().unwrap().to_string();
+        let id = comment_id(&c);
         let cid = CommentId::try_from_str(&id).unwrap();
-        let id = oxplow_domain::uri::build::keyed(
-            oxplow_domain::uri::resources::COMMENT,
-            &id.to_string(),
-        );
         let relocate = |selectors: &str, orphaned: bool| json!({ "comment": id, "selectors_json": selectors, "orphaned": orphaned });
         let run = |actor: Actor, input: Value| {
             let bus = fx.svc.commands.clone();
@@ -648,16 +641,12 @@ mod tests {
         let c = add(
             &fx,
             &Actor::Human,
-            comment_on(&stream_uri(StreamId::new(1)), None),
+            comment_on(&StreamId::new(1).to_string(), None),
         )
         .await
         .unwrap();
-        let id = c["comment"]["id"].as_str().unwrap().to_string();
+        let id = comment_id(&c);
         let cid = CommentId::try_from_str(&id).unwrap();
-        let id = oxplow_domain::uri::build::keyed(
-            oxplow_domain::uri::resources::COMMENT,
-            &id.to_string(),
-        );
         let out = fx
             .svc
             .commands

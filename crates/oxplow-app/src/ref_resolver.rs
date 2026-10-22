@@ -99,7 +99,7 @@ async fn resolve_owned(
         .sql
         .query_sql(
             &format!(
-                "SELECT \"{}\" FROM \"{}\" WHERE ref = ?1 LIMIT 1",
+                "SELECT \"{}\" FROM \"{}\" WHERE uri = ?1 LIMIT 1",
                 title.replace('"', ""),
                 view.replace('"', "")
             ),
@@ -133,7 +133,7 @@ async fn resolve_work_item(services: &Services, mut summary: RefSummary, uri: &s
     let row = services
         .sql
         .query_sql(
-            "SELECT title, state, body FROM v_work_item WHERE ref = ?1",
+            "SELECT title, state, body FROM v_work_item WHERE uri = ?1",
             vec![oxplow_db::SqlCell::Text(uri.to_string())],
             None,
         )

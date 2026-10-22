@@ -38,7 +38,7 @@ mock.module("../api.js", () => ({
   querySql: async (sql: string, ...rest: unknown[]) => {
     if (sql.includes("FROM v_oxplow_bundled_verdict")) {
       return {
-        columns: ["ref", "label", "color"],
+        columns: ["uri", "label", "color"],
         rows: [["oxplow:oxplow/effort?id=eff7", "Changes requested", "red"]],
         truncated: false,
         reads: { models: ["v_oxplow_bundled_verdict"], tables: [], measures: [] },
@@ -48,7 +48,7 @@ mock.module("../api.js", () => ({
     if (!sql.includes("FROM v_flags_flags")) return (realQuerySql as (...a: unknown[]) => unknown)(sql, ...rest);
     queries.push(sql);
     return {
-      columns: ["ref", "label", "color"],
+      columns: ["uri", "label", "color"],
       rows: [["oxplow:oxplow/work_item?id=W-1&provider=fake", "urgent", "#ff0000"]],
       truncated: false,
       reads: { models: ["v_flags_flags"], tables: [], measures: [] },
