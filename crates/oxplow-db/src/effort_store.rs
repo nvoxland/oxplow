@@ -25,12 +25,10 @@ use crate::page_ref_projections::{
 };
 use crate::page_ref_store::SqlitePageRefStore;
 use oxplow_domain::events::schema::{
-    EffortClosed, EffortClosedV2, EffortLinked, EffortLinkedV1, EffortOpened, EffortOpenedV2,
-    EffortRetitled, EffortRetitledV1,
+    EffortClosed, EffortClosedV3, EffortLinked, EffortLinkedV2, EffortOpened, EffortOpenedV3,
+    EffortRetitled, EffortRetitledV2,
 };
-use oxplow_domain::uri::build::{
-    effort_uri, snapshot_uri, thread_uri, validate_work_item_uri, work_item_of_uri,
-};
+use oxplow_domain::uri::build::{effort_uri, validate_work_item_uri, work_item_of_uri};
 use oxplow_domain::{Anchors, StreamId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -279,11 +277,11 @@ pub fn start_tx(
         .map_err(map_sql_err)?;
     }
     let env = ev
-        .typed::<EffortOpened>(&EffortOpenedV2 {
-            effort: effort_uri(id),
+        .typed::<EffortOpened>(&EffortOpenedV3 {
+            effort: id.to_string(),
             work_item: work_item.map(str::to_string),
-            thread: thread_uri(thread),
-            start_snapshot: start_snapshot_id.map(snapshot_uri),
+            thread: thread.to_string(),
+            start_snapshot: start_snapshot_id,
         })
         .with_anchors(Anchors {
             effort_id: Some(id),
@@ -311,8 +309,8 @@ pub fn link_tx(
     )
     .map_err(map_sql_err)?;
     let env = ev
-        .typed::<EffortLinked>(&EffortLinkedV1 {
-            effort: effort_uri(id),
+        .typed::<EffortLinked>(&EffortLinkedV2 {
+            effort: id.to_string(),
             work_item: work_item.map(str::to_string),
         })
         .with_anchors(Anchors {
@@ -340,8 +338,8 @@ pub fn retitle_tx(
     )
     .map_err(map_sql_err)?;
     let env = ev
-        .typed::<EffortRetitled>(&EffortRetitledV1 {
-            effort: effort_uri(id),
+        .typed::<EffortRetitled>(&EffortRetitledV2 {
+            effort: id.to_string(),
             title: title.map(str::to_string),
         })
         .with_anchors(Anchors {
@@ -462,10 +460,10 @@ pub fn finish_tx(
         .map_err(map_sql_err)?;
     }
     let env = ev
-        .typed::<EffortClosed>(&EffortClosedV2 {
-            effort: effort_uri(id),
+        .typed::<EffortClosed>(&EffortClosedV3 {
+            effort: id.to_string(),
             work_item: work_item.clone(),
-            end_snapshot: end_snapshot_id.map(snapshot_uri),
+            end_snapshot: end_snapshot_id,
             closed_by: Some(closed_by.as_str().to_string()),
         })
         .with_anchors(Anchors {
@@ -2301,17 +2299,8 @@ mod tests {
         assert_eq!(opened.anchors.thread_id, Some(t));
         assert!(opened.anchors.stream_id.is_some());
         assert_eq!(opened.payload["work_item"], foreign);
-        assert_eq!(
-            opened.payload["thread"],
-            oxplow_domain::uri::build::keyed(oxplow_domain::uri::resources::THREAD, &t.to_string())
-        );
-        assert_eq!(
-            events[1].envelope.payload["effort"],
-            oxplow_domain::uri::build::keyed(
-                oxplow_domain::uri::resources::EFFORT,
-                &format!("{}", eff.id)
-            )
-        );
+        assert_eq!(opened.payload["thread"], t.to_string());
+        assert_eq!(events[1].envelope.payload["effort"], eff.id.to_string());
     }
 
     #[tokio::test]

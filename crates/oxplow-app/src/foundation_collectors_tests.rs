@@ -655,7 +655,7 @@ fn outcome_over(rows: &[(i64, i64, i64, i64, Option<&str>)]) -> Vec<(String, f64
         .map(|(run, failed, cases, at_ms, case)| {
             serde_json::json!({
                 "run": run, "failed": failed, "cases": cases, "at_ms": at_ms,
-                "case": case, "effort": "oxplow:oxplow/effort?id=eff1"
+                "case": case, "effort": "eff1"
             })
         })
         .collect();

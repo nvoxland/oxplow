@@ -179,7 +179,7 @@ empty: Nothing is waiting on you.
   e.g. `{ id: finish, label: Finish, command: oxplow.work_item.transition,
   row: true, input: { ref: "{{row.ref}}", to: done } }`,
   or `{ id: sync, label: Sync PRs, command: oxplow.collector.sync, input:
-  { collector: "collector:github/prs" } }`. With `group: <value>` (on a lens with
+  { collector: "github/prs" } }`. With `group: <value>` (on a lens with
   `group`), the action is a button in that group's heading instead — it
   shows in a compact panel too; it can't be a row action. Copy and Add
   to Agent Context are on every lens already — don't declare them.

@@ -51,17 +51,10 @@ impl crate::event_pump::AsyncEventConsumer for SearchIndexConsumer {
             ));
         };
         let payload = &event.envelope.payload;
-        let stream = payload["stream"].as_str().and_then(|r| {
-            oxplow_domain::uri::build::parse_as::<StreamId>(
-                r,
-                oxplow_domain::uri::resources::STREAM,
-            )
-            .ok()
-        });
-        let snapshot = payload["snapshot"].as_str().and_then(|r| {
-            oxplow_domain::uri::build::parse_as::<i64>(r, oxplow_domain::uri::resources::SNAPSHOT)
-                .ok()
-        });
+        let stream = payload["stream"]
+            .as_str()
+            .and_then(|s| s.parse::<StreamId>().ok());
+        let snapshot = payload["snapshot"].as_i64();
         let files = payload["file_count"].as_u64().unwrap_or(0);
         if let (Some(stream), Some(snapshot), true) = (stream, snapshot, files > 0) {
             Indexer::new(svc)

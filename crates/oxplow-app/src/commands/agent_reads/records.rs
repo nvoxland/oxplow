@@ -26,7 +26,7 @@ pub struct ReadInput {
     #[serde(rename = "ref")]
     pub reference: String,
     /// The stream whose worktree a `file:` or `lens:` ref is read in
-    /// (`oxplow:oxplow/stream?id=str2`); absent, your own.
+    /// (`str2`); absent, your own.
     #[serde(default)]
     pub stream: Option<String>,
 }
@@ -52,18 +52,10 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
                 };
                 let at = match stream.as_deref() {
                     Some(stream) => Some(
-                        oxplow_domain::uri::build::id_of(
-                            stream,
-                            oxplow_domain::uri::resources::STREAM,
-                        )
-                        .ok()
-                        .and_then(|id| oxplow_domain::StreamId::try_from_str(&id))
-                        .ok_or_else(|| {
+                        oxplow_domain::StreamId::try_from_str(stream).ok_or_else(|| {
                             invalid(
                                 "/stream",
-                                format!(
-                                    "`stream` is a stream's ref (`oxplow:oxplow/stream?id=str2`), not `{stream}`"
-                                ),
+                                format!("`stream` is a stream's id (`str2`), not `{stream}`"),
                             )
                         })?,
                     ),
@@ -126,7 +118,7 @@ mod tests {
             .run(
                 &actor,
                 RECORDS_READ,
-                json!({ "ref": "oxplow:oxplow/file?path=who.txt", "stream": "str2" }),
+                json!({ "ref": "oxplow:oxplow/file?path=who.txt", "stream": "oxplow:oxplow/stream?id=str2" }),
                 false,
             )
             .await

@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`agent.peer_message.received@2`: another agent session's message\nreached the thread's agent as a prompt (Claude Code's cross-session\nmessage). Observed only: oxplow never sends one.",
+  "properties": {
+    "from": {
+      "description": "The sender's own name for its session (its socket when it has no\nname).",
+      "type": "string"
+    },
+    "thread": {
+      "description": "The thread (`thr3`).",
+      "type": "string"
+    },
+    "turn": {
+      "description": "The turn it opened, or the one it arrived in (`trn12`).",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "thread",
+    "from"
+  ],
+  "title": "AgentPeerMessageReceivedV2",
+  "type": "object"
+}

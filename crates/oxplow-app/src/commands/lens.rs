@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use oxplow_db::thread_answer_store::{self as answers, AnswerShows};
 use oxplow_db::SqlCell;
-use oxplow_domain::events::schema::{LensKept, LensKeptV2, LensShown, LensShownV1};
+use oxplow_domain::events::schema::{LensKept, LensKeptV3, LensShown, LensShownV2};
 use oxplow_domain::events::Envelope;
 use oxplow_domain::uri::build::{answer_uri, lens_uri, thread_uri};
 use oxplow_domain::{CommandError, DomainError, ThreadId};
@@ -22,7 +22,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use super::util::{invalid, parse, ref_id, schema};
+use super::util::{bare_id, invalid, parse, schema};
 use super::{Handler, HandlerOutput, Invocation};
 use crate::extension_catalog::ExtensionCatalog;
 use crate::extensions::{self, LensContext, LensOrigin, LensSpec};
@@ -54,7 +54,7 @@ pub struct ShowInput {
     pub spec: Option<LensSpec>,
     /// Param values by name (the lens's declared params).
     pub params: Option<BTreeMap<String, Value>>,
-    /// The thread it's shown in (`oxplow:oxplow/thread?id=thr3`); the caller's when omitted.
+    /// The thread it's shown in (`thr3`); the caller's when omitted.
     pub thread: Option<String>,
 }
 
@@ -62,12 +62,12 @@ pub struct ShowInput {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct KeepInput {
-    /// The answer to keep (`oxplow:oxplow/answer?id=12`). Give this or `spec`.
-    pub answer: Option<String>,
+    /// The id of the answer to keep (`12`). Give this or `spec`.
+    pub answer: Option<i64>,
     /// A lens of its own to keep (title, query, viz and what its viz
     /// needs), checked as `oxplow.lens.show` checks one.
     pub spec: Option<LensSpec>,
-    /// The stream whose worktree a `spec` goes in (`oxplow:oxplow/stream?id=str2`): the caller's
+    /// The stream whose worktree a `spec` goes in (`str2`): the caller's
     /// thread's when omitted, else the primary's. An answer goes in its
     /// own thread's.
     pub stream: Option<String>,
@@ -127,7 +127,7 @@ fn stream_root_tx(
     raw: &str,
 ) -> Result<(i64, PathBuf), DomainError> {
     let stream: oxplow_domain::StreamId =
-        ref_id(raw, oxplow_domain::uri::resources::STREAM, "/stream").map_err(|e| {
+        bare_id(raw, oxplow_domain::uri::resources::STREAM, "/stream").map_err(|e| {
             DomainError::Invalid(match e {
                 CommandError::Invalid { message, .. } => message,
                 other => other.to_string(),
@@ -187,14 +187,6 @@ fn cells(params: &BTreeMap<String, Value>) -> BTreeMap<String, SqlCell> {
         .collect()
 }
 
-fn answer_id(raw: &str) -> Result<i64, CommandError> {
-    // A bare number is the answer too.
-    raw.parse().or_else(|_| {
-        oxplow_domain::uri::build::parse_as(raw, oxplow_domain::uri::resources::ANSWER)
-            .map_err(|e: oxplow_domain::uri::build::NotA| invalid("/answer", e.to_string()))
-    })
-}
-
 /// `oxplow.lens.show` returns the answer's text rendering — what an
 /// agent reads back — which needs the stored answer, so it's an `External`
 /// command: the answer is recorded in its own transaction, then rendered.
@@ -236,15 +228,15 @@ fn show(target: LensTarget) -> Op {
             let (_, text) = text_answer(&services, shown.id).await.map_err(domain)?;
             let event = Envelope::typed::<LensShown>(
                 source,
-                &LensShownV1 {
-                    answer: answer_uri(shown.id),
-                    thread: thread_uri(ThreadId::new(shown.thread)),
-                    lens: shown.lens.as_deref().map(lens_uri),
+                &LensShownV2 {
+                    answer: shown.id,
+                    thread: ThreadId::new(shown.thread).to_string(),
+                    lens: shown.lens.clone(),
                 },
             )
             .with_subject([answer_uri(shown.id)]);
             Ok(HandlerOutput {
-                result: json!({ "answer": answer_uri(shown.id), "title": shown.title, "text": text }),
+                result: json!({ "answer": shown.id, "title": shown.title, "text": text }),
                 events: vec![event],
                 ..HandlerOutput::default()
             })
@@ -273,7 +265,7 @@ fn record_answer_tx(
 ) -> Result<Shown, CommandError> {
     let thread: i64 = match input.thread.as_deref() {
         Some(raw) => {
-            let named: ThreadId = ref_id(raw, oxplow_domain::uri::resources::THREAD, "/thread")?;
+            let named: ThreadId = bare_id(raw, oxplow_domain::uri::resources::THREAD, "/thread")?;
             // An agent shows answers in its own thread only; a person
             // may name any.
             if actor.is_agent_driven() && actor.thread_id() != Some(named) {
@@ -370,9 +362,8 @@ struct Keeping {
     answer: Option<i64>,
 }
 
-/// What keeping the answer `raw` writes (see [`kept_lens_tx`]).
-async fn keeping_answer(target: &LensTarget, raw: &str) -> Result<Keeping, CommandError> {
-    let id = answer_id(raw)?;
+/// What keeping the answer `id` writes (see [`kept_lens_tx`]).
+async fn keeping_answer(target: &LensTarget, id: i64) -> Result<Keeping, CommandError> {
     let project_dir = target.project_dir.clone();
     let (spec, root, thread) = target
         .db
@@ -476,7 +467,7 @@ fn keep(target: LensTarget) -> Op {
                             "an answer is kept in its own thread's worktree; `stream` goes with a `spec`",
                         ));
                     }
-                    keeping_answer(&target, &raw).await?
+                    keeping_answer(&target, raw).await?
                 }
                 (None, Some(spec)) => keeping_spec(&target, spec, input.stream, &actor).await?,
                 _ => {
@@ -564,9 +555,9 @@ fn keep(target: LensTarget) -> Op {
                 .collect();
             let event = Envelope::typed::<LensKept>(
                 actor.source(),
-                &LensKeptV2 {
-                    answer: answer.map(answer_uri),
-                    lens: lens_uri(&lens.id),
+                &LensKeptV3 {
+                    answer,
+                    lens: lens.id.to_string(),
                 },
             )
             .with_subject(subject);
@@ -696,12 +687,11 @@ mod tests {
             .run(&agent(&fx), SHOW, json!({ "spec": spec() }), false)
             .await
             .unwrap();
-        let answer = out.result["answer"].as_str().unwrap().to_string();
-        let id = answer_id(&answer).unwrap();
+        let id = out.result["answer"].as_i64().unwrap();
         let shown = events_of(&fx, "lens.shown").await;
         assert_eq!(shown.len(), 1);
-        assert_eq!(shown[0]["answer"], answer.as_str());
-        assert_eq!(shown[0]["thread"], thread_uri(fx.thread).as_str());
+        assert_eq!(shown[0]["answer"], id);
+        assert_eq!(shown[0]["thread"], fx.thread.to_string());
         let row = fx.svc.thread_answer_store.get(id).await.unwrap().unwrap();
         assert_eq!(row.title, "Busy Tasks");
         assert_eq!(row.thread_id, fx.thread.value());
@@ -721,7 +711,7 @@ mod tests {
         // The run returns it: what an agent reads back from showing one.
         assert_eq!(
             out.result,
-            json!({ "answer": answer, "title": "Busy Tasks", "text": text })
+            json!({ "answer": id, "title": "Busy Tasks", "text": text })
         );
     }
 
@@ -763,7 +753,7 @@ mod tests {
             .run(&agent(&fx), SHOW, json!({ "lens": "demo/tasks" }), false)
             .await
             .unwrap();
-        let id = answer_id(out.result["answer"].as_str().unwrap()).unwrap();
+        let id = out.result["answer"].as_i64().unwrap();
         let (run, text) = text_answer(&fx.svc, id).await.unwrap();
         assert_eq!(run.lens.id, "demo/tasks");
         assert!(text.contains("| title |"), "{text}");
@@ -774,10 +764,7 @@ mod tests {
     #[tokio::test]
     async fn an_agent_shows_only_in_its_own_thread() {
         let fx = crate::test_fixtures::services_with_effort().await;
-        let other = oxplow_domain::uri::build::keyed(
-            oxplow_domain::uri::resources::THREAD,
-            &format!("thr{}", fx.thread.value() + 1000),
-        );
+        let other = format!("thr{}", fx.thread.value() + 1000);
         let err = fx
             .svc
             .commands
@@ -799,7 +786,7 @@ mod tests {
             .run(
                 &agent(&fx),
                 SHOW,
-                json!({ "spec": spec(), "thread": thread_uri(fx.thread) }),
+                json!({ "spec": spec(), "thread": fx.thread.to_string() }),
                 false,
             )
             .await
@@ -886,9 +873,8 @@ mod tests {
             .await
             .unwrap()
             .result["answer"]
-            .as_str()
-            .unwrap()
-            .to_string();
+            .as_i64()
+            .unwrap();
         let kept = fx
             .svc
             .commands
@@ -955,7 +941,7 @@ mod tests {
                 KEEP,
                 json!({
                     "spec": spec(),
-                    "stream": oxplow_domain::uri::build::stream_uri(stream),
+                    "stream": stream.to_string(),
                     "extension": "saved",
                     "slug": "busy-tasks"
                 }),
@@ -973,10 +959,7 @@ mod tests {
         assert_eq!(file("saved"), file("kept"));
         let kept = events_of(&fx, "lens.kept").await;
         assert_eq!(kept.len(), 2);
-        assert_eq!(
-            kept[1],
-            json!({ "lens": "oxplow:oxplow/lens?lens=saved/busy-tasks" })
-        );
+        assert_eq!(kept[1], json!({ "lens": "saved/busy-tasks" }));
     }
 
     /// A kept spec gets `oxplow.lens.show`'s check: a query over a physical table
@@ -1165,18 +1148,16 @@ mod tests {
                 json!({ "spec": spec(), "stream": stream, "extension": "kept", "slug": slug });
             async move { svc.commands.run(&actor, KEEP, input, false).await }
         };
-        let err = keep(agent(&fx), "oxplow:oxplow/stream?id=str2", "theirs")
-            .await
-            .unwrap_err();
+        let err = keep(agent(&fx), "str2", "theirs").await.unwrap_err();
         assert!(
             matches!(&err, CommandError::Invalid { field: Some(f), message }
                 if f == "/stream" && message.contains("its own thread's stream")),
             "{err:?}"
         );
         assert!(!wt.path().join(".oxplow/extensions/kept").exists());
-        let own = oxplow_domain::uri::build::stream_uri(
-            fx.svc.streams.list_streams().await.unwrap()[0].id,
-        );
+        let own = fx.svc.streams.list_streams().await.unwrap()[0]
+            .id
+            .to_string();
         // Kept, it is deployed: it shows now.
         keep(agent(&fx), &own, "mine").await.unwrap();
         let project = fx.svc.layout.project_dir.clone();
@@ -1185,9 +1166,7 @@ mod tests {
             .extension_catalog
             .find_lens(&project, "kept/mine")
             .is_ok());
-        keep(Actor::Human, "oxplow:oxplow/stream?id=str2", "theirs")
-            .await
-            .unwrap();
+        keep(Actor::Human, "str2", "theirs").await.unwrap();
         assert!(wt
             .path()
             .join(".oxplow/extensions/kept/lenses/theirs.yaml")
@@ -1202,8 +1181,8 @@ mod tests {
         let fx = crate::test_fixtures::services_with_effort().await;
         for input in [
             json!({}),
-            json!({ "answer": "oxplow:oxplow/answer?id=1", "spec": spec() }),
-            json!({ "answer": "oxplow:oxplow/answer?id=1", "stream": "oxplow:oxplow/stream?id=str1" }),
+            json!({ "answer": 1, "spec": spec() }),
+            json!({ "answer": 1, "stream": "str1" }),
         ] {
             let err = fx
                 .svc

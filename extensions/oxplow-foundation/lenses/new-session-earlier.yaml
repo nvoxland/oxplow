@@ -88,8 +88,9 @@ query: |
          s.label, s.note, s.harness, s.at, CASE WHEN s.turns > 0 THEN s.turns END AS turns, s.size_bytes,
          s.action = 'reopen' AS can_reopen, s.action = 'resume' AS can_resume,
          s.session, s.resume_native AS conversation,
-         (SELECT t.ref FROM v_thread t WHERE t.id = :thread_id) AS thread,
-         CASE WHEN s.action = 'none' THEN 'muted' END AS tone
+         (SELECT uri_param(t.ref, 'id') FROM v_thread t WHERE t.id = :thread_id) AS thread,
+         CASE WHEN s.action = 'none' THEN 'muted' END AS tone,
+         uri_param(s.session, 'id') AS session_id
   FROM shown s
   WHERE NOT EXISTS (SELECT 1 FROM words w WHERE w.word <> ''
                     AND instr(lower(s.label || ' ' || coalesce(s.note, '') || ' ' || s.harness || ' '
@@ -107,7 +108,7 @@ actions:
   - id: reopen
     label: Reopen
     command: oxplow.agent_session.reopen
-    input: { session: "{{row.session}}" }
+    input: { session: "{{row.session_id}}" }
     row: true
     when: can_reopen
     primary: true

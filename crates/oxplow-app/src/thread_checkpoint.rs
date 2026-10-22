@@ -13,11 +13,11 @@
 use async_trait::async_trait;
 use oxplow_db::{SqlCell, SqliteEventLogStore};
 use oxplow_domain::events::schema::{
-    CheckpointReason, EventType as _, SnapshotTaken, SnapshotTakenV2, ThreadCheckpoint,
-    ThreadCheckpointV1,
+    CheckpointReason, EventType as _, SnapshotTaken, SnapshotTakenV3, ThreadCheckpoint,
+    ThreadCheckpointV2,
 };
 use oxplow_domain::snapshot::SnapshotTrigger;
-use oxplow_domain::uri::build::{snapshot_uri, system_source, thread_uri, turn_uri};
+use oxplow_domain::uri::build::{system_source, thread_uri, turn_uri};
 use oxplow_domain::{AgentTurnId, DomainError, Envelope, StoredEvent, ThreadId};
 
 use oxplow_domain::agent::tool::ToolKind;
@@ -104,7 +104,7 @@ impl AsyncEventConsumer for ThreadCheckpointConsumer {
         let (Some(turn), Some(snapshot)) = (anchors.turn_id, anchors.snapshot_id) else {
             return Ok(());
         };
-        let take: SnapshotTakenV2 = serde_json::from_value(event.envelope.payload.clone())
+        let take: SnapshotTakenV3 = serde_json::from_value(event.envelope.payload.clone())
             .map_err(|e| DomainError::Invalid(format!("snapshot.taken seq {}: {e}", event.seq)))?;
         if take.trigger != SnapshotTrigger::TurnEnd {
             return Ok(());
@@ -115,11 +115,11 @@ impl AsyncEventConsumer for ThreadCheckpointConsumer {
         };
         let env = Envelope::typed::<ThreadCheckpoint>(
             system_source(NAME),
-            &ThreadCheckpointV1 {
-                thread: thread_uri(thread),
-                turn: turn_uri(turn),
+            &ThreadCheckpointV2 {
+                thread: thread.to_string(),
+                turn: turn.to_string(),
                 reason: CheckpointReason::TurnEnd,
-                snapshot: snapshot_uri(snapshot),
+                snapshot,
                 changed: start != Some(snapshot),
                 writing_tools: self.writing_tools(turn).await?,
             },
@@ -174,7 +174,7 @@ pub(crate) mod tests {
         f: &EffortFixture,
         edit: Option<(&str, &str)>,
         tools: &[&str],
-    ) -> ThreadCheckpointV1 {
+    ) -> ThreadCheckpointV2 {
         let svc = &f.svc;
         svc.hook_ingest
             .ingest(envelope(HookKind::UserPromptSubmit, f.thread))
@@ -251,7 +251,7 @@ pub(crate) mod tests {
         assert!(edited.changed);
         assert_eq!(edited.writing_tools, 2);
         assert_eq!(edited.reason, CheckpointReason::TurnEnd);
-        assert_eq!(edited.thread, thread_uri(f.thread));
+        assert_eq!(edited.thread, f.thread.to_string());
 
         let asked = turn(&f, None, &["read", "fetch"]).await;
         assert!(!asked.changed);

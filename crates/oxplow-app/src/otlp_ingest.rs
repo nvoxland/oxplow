@@ -12,7 +12,7 @@ use oxplow_db::agent_stores::{activity_anchors_tx, effort_during_turn_tx, turn_f
 use oxplow_db::event_log_store::{append_unique_tx, EventCtx};
 use oxplow_db::Database;
 use oxplow_domain::agent::registry::HarnessRegistry;
-use oxplow_domain::events::schema::{AgentTokensReported, AgentTokensReportedV1, TokenCount};
+use oxplow_domain::events::schema::{AgentTokensReported, AgentTokensReportedV2, TokenCount};
 use oxplow_domain::uri::build::{thread_uri, turn_uri};
 use oxplow_domain::vocabulary::VocabularyHandle;
 use oxplow_domain::{AgentSessionId, DomainError, EffortId, ThreadId};
@@ -65,8 +65,8 @@ impl OtlpIngestService {
             thread.value(),
             xxhash_rust::xxh3::xxh3_128(body)
         );
-        let payload = AgentTokensReportedV1 {
-            thread: thread_uri(thread),
+        let payload = AgentTokensReportedV2 {
+            thread: thread.to_string(),
             counts: export
                 .counts
                 .iter()

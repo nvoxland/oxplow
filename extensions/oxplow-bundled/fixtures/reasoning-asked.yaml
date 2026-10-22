@@ -2,7 +2,7 @@
 # that is the job's answer, for `store-reasoning` to store.
 input:
   job: reasoning
-  intentKey: "reasoning:oxplow:oxplow/effort?id=eff3"
+  intentKey: "reasoning:eff3"
   request:
     schemaVersion: 1
     role: reasoning

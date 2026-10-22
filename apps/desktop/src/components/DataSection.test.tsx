@@ -7,7 +7,7 @@ const decided: string[] = [];
 let collectorListings: unknown[] = [];
 const ran: Array<[string, unknown, boolean]> = [];
 /** What `oxplow.effect.retry` answers. */
-let retried: unknown = { effect: "acme/mark-done", event: "oxplow:oxplow/event?id=e1", attempt: 2, outcome: "ok" };
+let retried: unknown = { effect: "acme/mark-done", event: "e1", attempt: 2, outcome: "ok" };
 const letter = { id: 7, consumer: "change.analyze", event_seq: 41, error: "boom", attempts: 2, first_failed_at: "t", last_failed_at: "t" };
 /** The models Settings → Data lists, and what counting each answers (none: it times out). */
 let entities: Array<{ name: string; owner: string; kind: string; description: string }> = [];
@@ -120,7 +120,7 @@ test("Delivery lists a failed reaction and retries it only once confirmed", asyn
   fireEvent.click(view.getByTestId("reaction-retry-acme/mark-done-e1-trigger"));
   expect(ran).toEqual([]);
   fireEvent.click(view.getByTestId("reaction-retry-acme/mark-done-e1-confirm"));
-  await waitFor(() => expect(ran).toEqual([["oxplow.effect.retry", { effect: "acme/mark-done", event: "oxplow:oxplow/event?id=e1" }, true]]));
+  await waitFor(() => expect(ran).toEqual([["oxplow.effect.retry", { effect: "acme/mark-done", event: "e1" }, true]]));
 });
 
 // P9.D5: an effect's row offers Backfill…: it says how many past

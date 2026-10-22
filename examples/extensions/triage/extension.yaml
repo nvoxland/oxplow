@@ -153,7 +153,7 @@ effects:
   - id: publish-summary
     summary: When a summary job succeeds, write its answer to the wiki page `triage-summary`.
     on: [contribution.job.completed]
-    where: { job: "oxplow:oxplow/job?job=triage/summarize" }
+    where: { job: "triage/summarize" }
     entry: effects/publish_summary.star
     needs: [jobs.read]
 # The TODOs as a board, grouped by what the model said they ask for, each

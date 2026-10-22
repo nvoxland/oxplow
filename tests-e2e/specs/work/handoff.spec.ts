@@ -14,12 +14,12 @@ async function value(daemon: Daemon, sql: string, params: unknown[] = []): Promi
 test("work handed off is seen on the other thread, and taking it moves its item", async ({ fresh }) => {
   const { page, daemon } = fresh;
   const docs = await run<{ result: { id: string } }>(daemon, "oxplow.thread.create", {
-    stream: daemon.streamUri,
+    stream: daemon.stream,
     title: "Docs",
   });
   const docsId = docs.result.id;
   await waitForModels(daemon, ["v_work_item"], () =>
-    run(daemon, "oxplow.work_item.create", { title: "Write the guide", thread: daemon.threadUri }),
+    run(daemon, "oxplow.work_item.create", { title: "Write the guide", thread: daemon.thread }),
   );
   await page.goto("/");
 

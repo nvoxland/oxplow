@@ -1,4 +1,4 @@
-# oxplow.review.request_changes { ref, note? }: comment a checklist of
+# oxplow.review.request_changes { effort, note? }: comment a checklist of
 # what to fix on the effort's work item — each unverified claim, each
 # inferred decision, each file outside the item's area — and move it back
 # to todo (oxplow: ready). The verdict is logged as
@@ -17,7 +17,7 @@ SELECT e.work_item,
        (SELECT json_group_array(v.path)
           FROM v_oxplow_bundled_deviation v WHERE v.effort_id = e.id) AS deviated
 FROM v_effort e
-WHERE e.ref = :ref
+WHERE e.ref = uri('oxplow/effort', 'id', :effort)
 """
 
 def _list(text):
@@ -28,13 +28,14 @@ def _list(text):
 # to the reviewer's checklist. The note is the reviewer's own markdown.
 
 def transform(x):
-    ref = x["input"]["ref"]
-    rows = scope("sql.read", {"sql": _REVIEW, "params": {"ref": ref}})
+    effort = x["input"]["effort"]
+    ref = uri.build("oxplow/effort", id = effort)
+    rows = scope("sql.read", {"sql": _REVIEW, "params": {"effort": effort}})
     if not rows:
-        return {"refuse": "no effort `%s`" % ref}
+        return {"refuse": "no effort `%s`" % effort}
     row = rows[0]
     if not row["work_item"]:
-        return {"refuse": "effort `%s` has no work item to review" % ref}
+        return {"refuse": "effort `%s` has no work item to review" % effort}
     note = x["input"].get("note", "")
     checklist = (
         ["- [ ] Back up the claim: %s" % md_text(c["statement"]) for c in _list(row["unverified"])] +
@@ -43,7 +44,7 @@ def transform(x):
     )
     if not checklist and not note:
         return {"refuse": "nothing to ask for: every claim is backed, no decision is inferred and nothing deviated — add a `note`"}
-    lines = ["Changes requested (%s)." % ref]
+    lines = ["Changes requested (%s)." % effort]
     if note:
         lines.extend(["", note])
     if checklist:
@@ -51,7 +52,7 @@ def transform(x):
         lines.extend(checklist)
     item = row["work_item"]
     payload = {
-        "effort": ref,
+        "effort": effort,
         "work_item": item,
         "unverified": len(_list(row["unverified"])),
         "inferred": len(_list(row["inferred"])),

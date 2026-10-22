@@ -9,9 +9,10 @@ def read(sql, effort_id, limit):
 
 def transform(x):
     effort = x["input"]["effort"]
-    if not uri.is_uri(effort) or uri.resource(effort) != "oxplow/effort":
-        return {"refuse": "`effort` is an effort ref, `oxplow:oxplow/effort?id=<id>`"}
-    ids = scope("sql.read", {"sql": "SELECT id FROM v_effort WHERE ref = :ref", "params": {"ref": effort}})
+    if not effort.startswith("eff"):
+        return {"refuse": "`effort` is an effort's id, like `eff12`"}
+    ids = scope("sql.read", {"sql": "SELECT id FROM v_effort WHERE ref = :ref",
+                             "params": {"ref": uri.build("oxplow/effort", id = effort)}})
     if not ids:
         return {"refuse": "no effort " + effort}
     effort_id = ids[0]["id"]

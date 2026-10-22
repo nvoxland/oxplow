@@ -53,7 +53,10 @@ pub async fn suite(svc: &crate::Services, actor: &Actor) -> Vec<Finding> {
 
     // 1. A write lands the page, its body and its event.
     let page = match run(write(&body, &[]), crate::knowledge::WRITE_PAGE).await {
-        Ok(result) => result["page"].as_str().unwrap_or_default().to_string(),
+        // The result names the page by its slug; the record is keyed by its ref.
+        Ok(result) => {
+            oxplow_domain::uri::build::wiki_uri(result["page"].as_str().unwrap_or_default())
+        }
         Err(e) => {
             fail("write", format!("write failed: {e}"));
             return findings;

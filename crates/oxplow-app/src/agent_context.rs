@@ -620,8 +620,8 @@ mod tests {
                 &Actor::Human,
                 crate::commands::handoff::SEND,
                 serde_json::json!({
-                    "from_thread": oxplow_domain::uri::build::thread_uri(fx.thread),
-                    "to_thread": oxplow_domain::uri::build::thread_uri(to.id),
+                    "from_thread": fx.thread.to_string(),
+                    "to_thread": to.id.to_string(),
                     "body": "the parser half is yours",
                 }),
                 false,
@@ -684,8 +684,8 @@ mod tests {
                 &Actor::Human,
                 crate::commands::handoff::SEND,
                 serde_json::json!({
-                    "from_thread": oxplow_domain::uri::build::thread_uri(fx.thread),
-                    "to_thread": oxplow_domain::uri::build::thread_uri(to.id),
+                    "from_thread": fx.thread.to_string(),
+                    "to_thread": to.id.to_string(),
                     "body": "yours",
                 }),
                 false,
@@ -713,8 +713,8 @@ mod tests {
                 &Actor::Human,
                 crate::commands::handoff::SEND,
                 serde_json::json!({
-                    "from_thread": oxplow_domain::uri::build::thread_uri(fx.thread),
-                    "to_thread": oxplow_domain::uri::build::thread_uri(to.id),
+                    "from_thread": fx.thread.to_string(),
+                    "to_thread": to.id.to_string(),
                     "body": body,
                 }),
                 false,

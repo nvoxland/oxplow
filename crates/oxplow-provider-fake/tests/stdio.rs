@@ -632,7 +632,7 @@ async fn as_an_effort_policy_it_composes_efforts() {
     assert_eq!(
         started.result,
         json!({ "commands": [{ "name": "oxplow.effort.open",
-                               "input": { "thread": "oxplow:oxplow/thread?id=thr3", "work_item": "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" } }] })
+                               "input": { "thread": "thr3", "work_item": "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" } }] })
     );
     let done = keyed(
         &peer,
@@ -646,7 +646,7 @@ async fn as_an_effort_policy_it_composes_efforts() {
     assert_eq!(
         done.result,
         json!({ "commands": [{ "name": "oxplow.effort.close",
-                               "input": { "effort": "oxplow:oxplow/effort?id=eff7", "reason": "switch" } }] })
+                               "input": { "effort": "eff7", "reason": "switch" } }] })
     );
     let asked = asked.lock().unwrap().clone();
     assert_eq!(asked.len(), 1);
@@ -747,7 +747,7 @@ async fn as_a_snapshots_provider_it_marks_tells_what_changed_and_gives_bytes_bac
     initialize(&peer).await;
     let handle = check(&peer).await;
     let mark = |parent: Value| {
-        json!({ "stream": "oxplow:oxplow/stream?id=str1", "worktree": root, "trigger": "turn_end",
+        json!({ "stream": "str1", "worktree": root, "trigger": "turn_end",
                 "parent": parent })
     };
 
@@ -765,7 +765,7 @@ async fn as_a_snapshots_provider_it_marks_tells_what_changed_and_gives_bytes_bac
         &peer,
         &handle,
         "changed",
-        json!({ "stream": "oxplow:oxplow/stream?id=str1", "from": null, "to": "m1" }),
+        json!({ "stream": "str1", "from": null, "to": "m1" }),
     )
     .await
     .unwrap()
@@ -804,7 +804,7 @@ async fn as_a_snapshots_provider_it_marks_tells_what_changed_and_gives_bytes_bac
         &peer,
         &handle,
         "changed",
-        json!({ "stream": "oxplow:oxplow/stream?id=str1", "from": "m2", "to": "m3" }),
+        json!({ "stream": "str1", "from": "m2", "to": "m3" }),
     )
     .await
     .unwrap()
@@ -847,11 +847,11 @@ async fn as_a_snapshots_provider_it_marks_tells_what_changed_and_gives_bytes_bac
         ("read_at", json!({ "handle": "m1", "path": "nope.txt" })),
         (
             "changed",
-            json!({ "stream": "oxplow:oxplow/stream?id=str1", "from": "m9", "to": "m1" }),
+            json!({ "stream": "str1", "from": "m9", "to": "m1" }),
         ),
         (
             "changed",
-            json!({ "stream": "oxplow:oxplow/stream?id=str1", "from": null, "to": "m9" }),
+            json!({ "stream": "str1", "from": null, "to": "m9" }),
         ),
     ] {
         let refused = invoke(&peer, &handle, verb, input).await;
@@ -959,10 +959,7 @@ async fn as_a_knowledge_provider_a_write_answers_the_page_and_its_record() {
     )
     .await
     .unwrap();
-    assert_eq!(
-        wrote.result,
-        json!({ "page": "oxplow:oxplow/wiki?slug=design" })
-    );
+    assert_eq!(wrote.result, json!({ "page": "design" }));
     assert_eq!(wrote.events.len(), 1);
     let event = &wrote.events[0];
     assert_eq!(event.event_type, "knowledge.page.recorded");

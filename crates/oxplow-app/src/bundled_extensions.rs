@@ -1133,8 +1133,8 @@ mod tests {
                 &oxplow_domain::Actor::Human,
                 crate::commands::handoff::SEND,
                 serde_json::json!({
-                    "from_thread": oxplow_domain::uri::build::thread_uri(f.thread),
-                    "to_thread": oxplow_domain::uri::build::thread_uri(to.id),
+                    "from_thread": f.thread.to_string(),
+                    "to_thread": to.id.to_string(),
                     "body": "the docs half is yours",
                 }),
                 false,
@@ -1466,7 +1466,7 @@ mod tests {
             run(
                 crate::commands::comment::ADD,
                 serde_json::json!({
-                    "stream": "oxplow:oxplow/stream?id=str1",
+                    "stream": "str1",
                     "target": oxplow_domain::uri::build::wiki_uri("some-page"),
                     "intent": intent,
                     "body": "b",
@@ -1484,7 +1484,7 @@ mod tests {
         let last = serde_json::to_value(&last.rows[0][0]).unwrap();
         run(
             crate::commands::comment::UPDATE,
-            serde_json::json!({ "comment": oxplow_domain::uri::build::keyed(oxplow_domain::uri::resources::COMMENT, &format!("cmt{last}")), "status": "resolved" }),
+            serde_json::json!({ "comment": format!("cmt{last}").to_string(), "status": "resolved" }),
         )
         .await;
         let rows = run_bundled_lens(&f, "oxplow-bundled/comments", &[("stream_id", 1)]).await;
@@ -1568,7 +1568,7 @@ mod tests {
                     .unwrap_or_else(|e| panic!("{name}: {e:?}"))
             }
         };
-        let thread = oxplow_domain::uri::build::thread_uri(f.thread);
+        let thread = f.thread.to_string();
         for (title, state) in [("Next up", "todo"), ("Shipped", "done")] {
             run(
                 "oxplow.work_item.create",
@@ -1652,7 +1652,7 @@ mod tests {
     #[tokio::test]
     async fn work_lenses_show_only_the_active_work_list() {
         let f = crate::test_fixtures::services_with_effort().await;
-        let thread = oxplow_domain::uri::build::thread_uri(f.thread);
+        let thread = f.thread.to_string();
         for (title, state) in [("Next up", "todo"), ("Stuck", "blocked")] {
             f.svc
                 .commands
@@ -1770,17 +1770,11 @@ mod tests {
             .unwrap();
         crate::test_fixtures::file_item(
             &f.svc,
-            serde_json::json!({ "title": "ship it", "thread": oxplow_domain::uri::build::thread_uri(f.thread) }),
+            serde_json::json!({ "title": "ship it", "thread": f.thread.to_string() }),
         )
         .await;
-        let thread_ref = Text(oxplow_domain::uri::build::keyed(
-            oxplow_domain::uri::resources::THREAD,
-            &format!("thr{thread}"),
-        ));
-        let effort_ref = Text(oxplow_domain::uri::build::keyed(
-            oxplow_domain::uri::resources::EFFORT,
-            &format!("eff{effort}"),
-        ));
+        let thread_ref = Text(format!("thr{thread}"));
+        let effort_ref = Text(format!("eff{effort}"));
         let col = |rows: &serde_json::Value, i: usize| -> Vec<String> {
             rows.as_array()
                 .unwrap()
@@ -1893,10 +1887,7 @@ mod tests {
         let rows = run_bundled_lens_with(
             &f,
             "oxplow-foundation/thread-sessions",
-            &[(
-                "thread",
-                Text(oxplow_domain::uri::build::thread_uri(f.thread)),
-            )],
+            &[("thread", Text(f.thread.to_string()))],
         )
         .await;
         let col = |rows: &serde_json::Value, i: usize| -> Vec<String> {
@@ -1974,7 +1965,7 @@ mod tests {
             })
             .await
             .unwrap();
-        let session_ref = Text(oxplow_domain::uri::build::agent_session_uri(f.session));
+        let session_ref = Text(f.session.to_string());
         let col = |rows: &serde_json::Value, i: usize| -> Vec<String> {
             rows.as_array()
                 .unwrap()
@@ -2005,7 +1996,11 @@ mod tests {
         assert_eq!(col(&rows, 6), ["2", "0", "0", "0"]);
 
         // Starting at the hand-back's turn leaves it and what follows.
-        let handback = col(&rows, 0)[2].clone();
+        let handback = oxplow_domain::uri::build::id_of(
+            &col(&rows, 0)[2],
+            oxplow_domain::uri::resources::TURN,
+        )
+        .unwrap();
         let rows = run_bundled_lens_with(
             &f,
             "oxplow-foundation/session-transcript",
@@ -2373,7 +2368,7 @@ mod tests {
             .run(
                 &oxplow_domain::Actor::Human,
                 crate::commands::thread::CLOSE,
-                serde_json::json!({ "thread": oxplow_domain::uri::build::thread_uri(thread.id) }),
+                serde_json::json!({ "thread": thread.id.to_string() }),
                 false,
             )
             .await
@@ -2392,7 +2387,7 @@ mod tests {
     async fn the_done_work_lens_lists_closed_items_latest_first() {
         use oxplow_db::SqlCell::Int;
         let f = crate::test_fixtures::services_with_effort().await;
-        let thread = oxplow_domain::uri::build::thread_uri(f.thread);
+        let thread = f.thread.to_string();
         let mut refs = Vec::new();
         for title in ["older", "newer", "open"] {
             let item = crate::test_fixtures::file_item(
@@ -2766,7 +2761,7 @@ mod tests {
     async fn the_settings_lenses_start_from_the_saved_prompt() {
         use oxplow_db::SqlCell::Text;
         let f = crate::test_fixtures::services_with_effort().await;
-        let thread = oxplow_domain::uri::build::thread_uri(f.thread);
+        let thread = f.thread.to_string();
         f.svc
             .commands
             .run(
@@ -2797,7 +2792,7 @@ mod tests {
         assert_eq!(texts(&rows, 0), std::slice::from_ref(&thread), "{rows}");
         assert_eq!(texts(&rows, 1), ["Be brief."], "{rows}");
         let rows = lens("stream-settings-prompt", "stream", "str1".into()).await;
-        assert_eq!(texts(&rows, 0), ["oxplow:oxplow/stream?id=str1"], "{rows}");
+        assert_eq!(texts(&rows, 0), ["str1"], "{rows}");
         assert_eq!(texts(&rows, 1), [""], "{rows}");
         let rows = lens(
             "thread-settings-sessions",
@@ -2830,7 +2825,7 @@ mod tests {
                 &human,
                 crate::commands::bookmark::SET,
                 serde_json::json!({ "ref": "oxplow:oxplow/page?page=git-dashboard", "page_kind": "git-dashboard",
-                    "label": "Git", "scope": "thread", "thread": oxplow_domain::uri::build::keyed(oxplow_domain::uri::resources::THREAD, &thread.to_string()) }),
+                    "label": "Git", "scope": "thread", "thread": thread.to_string() }),
                 false,
             )
             .await
@@ -2980,7 +2975,7 @@ mod tests {
     async fn thread_work_lists_finished_items_newest_first() {
         use oxplow_db::SqlCell::Text;
         let f = crate::test_fixtures::services_with_effort().await;
-        let thread = oxplow_domain::uri::build::thread_uri(f.thread);
+        let thread = f.thread.to_string();
         let mut refs = Vec::new();
         for title in ["older done", "newer done", "still open"] {
             let item = crate::test_fixtures::file_item(
@@ -3023,10 +3018,7 @@ mod tests {
         let rows = run_bundled_lens_with(
             &f,
             "oxplow-foundation/thread-work",
-            &[(
-                "thread",
-                Text(oxplow_domain::uri::build::thread_uri(f.thread)),
-            )],
+            &[("thread", Text(f.thread.to_string()))],
         )
         .await;
         let titles: Vec<&str> = rows
@@ -3045,7 +3037,7 @@ mod tests {
     async fn work_next_offers_the_ready_items_or_the_first_epic_with_its_children() {
         use oxplow_domain::Actor;
         let f = crate::test_fixtures::services_with_effort().await;
-        let thread = oxplow_domain::uri::build::thread_uri(f.thread);
+        let thread = f.thread.to_string();
         let run = |id: &'static str, input: serde_json::Value| {
             let svc = f.svc.clone();
             async move {
@@ -3073,13 +3065,7 @@ mod tests {
             let rows = run_bundled_lens_with(
                 &f,
                 "oxplow-foundation/work-next",
-                &[(
-                    "thread",
-                    oxplow_db::SqlCell::Text(oxplow_domain::uri::build::keyed(
-                        oxplow_domain::uri::resources::THREAD,
-                        &format!("{}", f.thread),
-                    )),
-                )],
+                &[("thread", oxplow_db::SqlCell::Text(f.thread.to_string()))],
             )
             .await;
             rows.as_array()
@@ -3197,14 +3183,14 @@ mod tests {
             .run(
                 &oxplow_domain::Actor::Human,
                 crate::commands::effort::OPEN,
-                serde_json::json!({ "thread": oxplow_domain::uri::build::thread_uri(beta.id), "work_item": item }),
+                serde_json::json!({ "thread": beta.id.to_string(), "work_item": item }),
                 false,
             )
             .await
             .unwrap();
         let beta_effort = opened.result["effort"]
             .as_str()
-            .and_then(oxplow_domain::uri::build::effort_of_uri)
+            .and_then(|e| e.parse::<oxplow_domain::EffortId>().ok())
             .unwrap();
         for effort in [f.effort, beta_effort] {
             f.svc
@@ -3230,7 +3216,7 @@ mod tests {
             crate::test_fixtures::file_item(
                 &f.svc,
                 serde_json::json!({ "title": title, "parent_ref": epic_ref,
-                    "thread": oxplow_domain::uri::build::thread_uri(thread) }),
+                    "thread": thread.to_string() }),
             )
             .await;
         }
@@ -3567,7 +3553,7 @@ mod tests {
                     &oxplow_domain::Actor::Human,
                     crate::commands::bookmark::SET,
                     serde_json::json!({ "ref": r, "page_kind": kind, "label": label,
-                                        "scope": scope, "thread": oxplow_domain::uri::build::keyed(oxplow_domain::uri::resources::THREAD, &thread.to_string()) }),
+                                        "scope": scope, "thread": thread.to_string() }),
                     false,
                 )
                 .await
@@ -3853,6 +3839,11 @@ mod tests {
         oxplow_domain::uri::build::effort_uri(f.effort)
     }
 
+    /// The effort's bare id, as the verbs and the verdict's payload carry it.
+    fn effort_id(f: &crate::test_fixtures::EffortFixture) -> String {
+        f.effort.to_string()
+    }
+
     async fn review(
         f: &crate::test_fixtures::EffortFixture,
         actor: &oxplow_domain::Actor,
@@ -3937,7 +3928,7 @@ mod tests {
                 &f,
                 actor,
                 "oxplow.review.accept",
-                serde_json::json!({ "ref": effort_ref(&f), "force": true }),
+                serde_json::json!({ "effort": effort_id(&f), "force": true }),
             )
             .await
             .unwrap_err();
@@ -3960,7 +3951,7 @@ mod tests {
             &f,
             &human,
             "oxplow.review.accept",
-            serde_json::json!({ "ref": effort_ref(&f) }),
+            serde_json::json!({ "effort": effort_id(&f) }),
         )
         .await
         .unwrap_err();
@@ -3978,7 +3969,7 @@ mod tests {
             &f,
             &human,
             "oxplow.review.accept",
-            serde_json::json!({ "ref": effort_ref(&f), "force": true }),
+            serde_json::json!({ "effort": effort_id(&f), "force": true }),
         )
         .await
         .unwrap();
@@ -4022,7 +4013,7 @@ mod tests {
             &f,
             &human,
             "oxplow.effort.verify_claim",
-            serde_json::json!({ "claim": oxplow_domain::uri::build::keyed(oxplow_domain::uri::resources::CLAIM, &format!("{}", ids.0)) }),
+            serde_json::json!({ "claim": ids.0 }),
         )
         .await
         .unwrap();
@@ -4030,7 +4021,7 @@ mod tests {
             &f,
             &human,
             "oxplow.effort.confirm_decision",
-            serde_json::json!({ "decision": oxplow_domain::uri::build::keyed(oxplow_domain::uri::resources::DECISION, &format!("{}", ids.1)) }),
+            serde_json::json!({ "decision": ids.1 }),
         )
         .await
         .unwrap();
@@ -4038,14 +4029,14 @@ mod tests {
             &f,
             &human,
             "oxplow.review.accept",
-            serde_json::json!({ "ref": effort_ref(&f) }),
+            serde_json::json!({ "effort": effort_id(&f) }),
         )
         .await
         .unwrap();
         assert_eq!(task_status(&f).await, "done");
         assert_eq!(
             task_notes(&f).await,
-            vec![format!("Review accepted ({}).", effort_ref(&f))]
+            vec![format!("Review accepted ({}).", effort_id(&f))]
         );
     }
 
@@ -4069,12 +4060,12 @@ mod tests {
             })
             .await
             .unwrap();
-        let claim = serde_json::json!({ "claim": oxplow_domain::uri::build::keyed(oxplow_domain::uri::resources::CLAIM, &format!("{}", ids.0)) });
+        let claim = serde_json::json!({ "claim": ids.0 });
         review(
             &f,
             &human,
             "oxplow.effort.confirm_decision",
-            serde_json::json!({ "decision": oxplow_domain::uri::build::keyed(oxplow_domain::uri::resources::DECISION, &format!("{}", ids.1)) }),
+            serde_json::json!({ "decision": ids.1 }),
         )
         .await
         .unwrap();
@@ -4085,7 +4076,7 @@ mod tests {
         review(&f, &human, "oxplow.effort.reopen_claim", claim.clone())
             .await
             .unwrap();
-        let accept = serde_json::json!({ "ref": effort_ref(&f) });
+        let accept = serde_json::json!({ "effort": effort_id(&f) });
         let err = review(&f, &human, "oxplow.review.accept", accept.clone())
             .await
             .unwrap_err();
@@ -4292,7 +4283,7 @@ mod tests {
                 &f,
                 &oxplow_domain::Actor::Human,
                 "oxplow.review.accept",
-                serde_json::json!({ "ref": effort_ref(&f), "force": true }),
+                serde_json::json!({ "effort": effort_id(&f), "force": true }),
             )
         };
         accept().await.unwrap();
@@ -4304,7 +4295,7 @@ mod tests {
             title,
             &format!(
                 "Verify what the review of {} accepted unchecked",
-                effort_ref(&f)
+                effort_id(&f)
             )
         );
         assert!(body.contains("no behavior change"), "{body}");
@@ -4509,7 +4500,7 @@ mod tests {
             &f,
             &oxplow_domain::Actor::Human,
             "oxplow.review.accept",
-            serde_json::json!({ "ref": effort_ref(&f), "force": true }),
+            serde_json::json!({ "effort": effort_id(&f), "force": true }),
         )
         .await
         .unwrap();
@@ -4530,7 +4521,7 @@ mod tests {
                 &f,
                 &oxplow_domain::Actor::Human,
                 "oxplow.review.accept",
-                serde_json::json!({ "ref": effort_ref(&f), "force": true }),
+                serde_json::json!({ "effort": effort_id(&f), "force": true }),
             )
         };
         accept().await.unwrap();
@@ -4573,7 +4564,7 @@ mod tests {
             &f,
             &oxplow_domain::Actor::Human,
             "oxplow.review.accept",
-            serde_json::json!({ "ref": effort_ref(&f), "force": true }),
+            serde_json::json!({ "effort": effort_id(&f), "force": true }),
         )
         .await
         .unwrap();
@@ -4609,7 +4600,7 @@ mod tests {
             &f,
             &human,
             "oxplow.effort.verify_claim",
-            serde_json::json!({ "claim": oxplow_domain::uri::build::keyed(oxplow_domain::uri::resources::CLAIM, &format!("{}", ids.0)) }),
+            serde_json::json!({ "claim": ids.0 }),
         )
         .await
         .unwrap();
@@ -4617,7 +4608,7 @@ mod tests {
             &f,
             &human,
             "oxplow.effort.confirm_decision",
-            serde_json::json!({ "decision": oxplow_domain::uri::build::keyed(oxplow_domain::uri::resources::DECISION, &format!("{}", ids.1)) }),
+            serde_json::json!({ "decision": ids.1 }),
         )
         .await
         .unwrap();
@@ -4625,7 +4616,7 @@ mod tests {
             &f,
             &human,
             "oxplow.review.accept",
-            serde_json::json!({ "ref": effort_ref(&f) }),
+            serde_json::json!({ "effort": effort_id(&f) }),
         )
         .await
         .unwrap();
@@ -4653,7 +4644,7 @@ mod tests {
             &f,
             &oxplow_domain::Actor::Human,
             "oxplow.review.request_changes",
-            serde_json::json!({ "ref": effort_ref(&f), "note": "Keep it to the UI." }),
+            serde_json::json!({ "effort": effort_id(&f), "note": "Keep it to the UI." }),
         )
         .await
         .unwrap();
@@ -4704,7 +4695,7 @@ mod tests {
                 })
                 .await
                 .unwrap();
-            let mut input = serde_json::json!({ "ref": effort_ref(&f) });
+            let mut input = serde_json::json!({ "effort": effort_id(&f) });
             if force {
                 input["force"] = serde_json::json!(true);
             }
@@ -5058,7 +5049,9 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![
                 ("oxplow_bundled.accepted", 1),
+                ("oxplow_bundled.accepted", 2),
                 ("oxplow_bundled.changes_requested", 1),
+                ("oxplow_bundled.changes_requested", 2),
                 ("oxplow_bundled.finished_cleared", 1)
             ],
             "a shared extension's event types load"
@@ -5085,7 +5078,7 @@ mod tests {
             &f,
             &human,
             "oxplow.review.request_changes",
-            serde_json::json!({ "ref": effort_ref(&f), "note": "Keep it to the UI." }),
+            serde_json::json!({ "effort": effort_id(&f), "note": "Keep it to the UI." }),
         )
         .await
         .unwrap();
@@ -5094,7 +5087,7 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<serde_json::Value>(logged[0][0].as_str().unwrap()).unwrap(),
             serde_json::json!({
-                "effort": effort_ref(&f), "work_item": item,
+                "effort": effort_id(&f), "work_item": item,
                 "unverified": 1, "inferred": 1, "deviated": 1,
                 "note": "Keep it to the UI."
             })
@@ -5114,7 +5107,7 @@ mod tests {
             &f,
             &human,
             "oxplow.review.accept",
-            serde_json::json!({ "ref": effort_ref(&f), "force": true }),
+            serde_json::json!({ "effort": effort_id(&f), "force": true }),
         )
         .await
         .unwrap();
@@ -5122,7 +5115,7 @@ mod tests {
         assert_eq!(logged.as_array().unwrap().len(), 2, "{logged}");
         assert_eq!(
             serde_json::from_str::<serde_json::Value>(logged[1][0].as_str().unwrap()).unwrap(),
-            serde_json::json!({ "effort": effort_ref(&f), "work_item": item, "unverified": 1, "inferred": 1, "deviated": 1 })
+            serde_json::json!({ "effort": effort_id(&f), "work_item": item, "unverified": 1, "inferred": 1, "deviated": 1 })
         );
         assert_eq!(
             logged[1][1],
@@ -5147,7 +5140,7 @@ mod tests {
             &f,
             &human,
             "oxplow.review.accept",
-            serde_json::json!({ "ref": "oxplow:oxplow/effort?id=eff999" }),
+            serde_json::json!({ "effort": "eff999" }),
         )
         .await;
         assert!(again.is_err());
@@ -5231,7 +5224,7 @@ mod tests {
             &f,
             &human,
             "oxplow.review.request_changes",
-            serde_json::json!({ "ref": effort_ref(&f), "note": "Keep it to the UI." }),
+            serde_json::json!({ "effort": effort_id(&f), "note": "Keep it to the UI." }),
         )
         .await
         .unwrap();
@@ -5245,7 +5238,7 @@ mod tests {
             &f,
             &human,
             "oxplow.review.accept",
-            serde_json::json!({ "ref": effort_ref(&f), "force": true }),
+            serde_json::json!({ "effort": effort_id(&f), "force": true }),
         )
         .await
         .unwrap();

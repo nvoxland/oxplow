@@ -199,14 +199,14 @@ pub async fn services_with_effort_in(dir: tempfile::TempDir) -> EffortFixture {
         .run(
             &oxplow_domain::Actor::Human,
             crate::commands::effort::OPEN,
-            serde_json::json!({ "thread": oxplow_domain::uri::build::thread_uri(thread) }),
+            serde_json::json!({ "thread": thread.to_string() }),
             false,
         )
         .await
         .unwrap();
     let effort = opened.result["effort"]
         .as_str()
-        .and_then(oxplow_domain::uri::build::effort_of_uri)
+        .and_then(|e| e.parse::<oxplow_domain::EffortId>().ok())
         .expect("effort.open names the effort");
     EffortFixture {
         svc,
@@ -338,7 +338,7 @@ pub async fn new_thread(
             &oxplow_domain::Actor::Human,
             crate::commands::thread::CREATE,
             serde_json::json!({
-                "stream": oxplow_domain::uri::build::stream_uri(stream),
+                "stream": stream.to_string(),
                 "title": title,
             }),
             false,

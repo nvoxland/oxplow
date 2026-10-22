@@ -4,7 +4,8 @@
 #
 # Gets {"rows": [...]} — one row per (run, failed case) of the effort's
 # measured test runs, oldest first, a run with no failed case on a row of its
-# own: {run, failed, cases, at_ms, case, effort}. `case` is the failed test's
+# own: {run, failed, cases, at_ms, case, effort}
+# (`effort` the bare effort id, `eff3`; the facts' subject is its URI). `case` is the failed test's
 # subject (`oxplow:oxplow/test?class=<classname>&name=<name>`); `cases` how many cases the run's report
 # listed (0 for a run that only asserted counts, whose `failed` failures have
 # no identity); `at_ms` when it was recorded. Returns {"facts": [...]}.
@@ -15,7 +16,7 @@ def transform(x):
     by_run = {}
     effort = None
     for r in x["rows"]:
-        effort = r["effort"]
+        effort = uri.build("oxplow/effort", id = r["effort"])
         if r["run"] not in by_run:
             by_run[r["run"]] = {"at": r["at_ms"], "failed": r["failed"], "reported": r["cases"] > 0, "refs": []}
             runs.append(r["run"])

@@ -64,7 +64,7 @@ const SCAN_PAGE: usize = 1_000;
 pub struct RetryInput {
     /// The effect: `<extension>/<id>`.
     pub effect: String,
-    /// The event whose reaction failed: `oxplow:oxplow/event?id=<id>` (`v_effect_run`).
+    /// The id of the event whose reaction failed (`v_effect_run`).
     pub event: String,
 }
 
@@ -453,10 +453,7 @@ pub fn retry_op(services: ServicesSlot) -> Op {
                 let RetryInput { effect, event } = parse(input)?;
                 let svc = services.get()?;
                 let (ext, decl, health) = ready(&svc, &effect).await?;
-                let id =
-                    oxplow_domain::uri::build::id_of(&event, oxplow_domain::uri::resources::EVENT)
-                        .map_err(|e| invalid("/event", e.to_string()))?;
-                let id = id.as_str();
+                let id = event.as_str();
                 let stored = svc
                     .event_log_store
                     .get(oxplow_domain::EventId(id.to_string()))

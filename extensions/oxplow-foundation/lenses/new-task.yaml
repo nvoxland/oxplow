@@ -7,7 +7,7 @@ params:
   - { name: parent }
 query: |
   SELECT 'todo' AS state, :parent AS parent_ref,
-         (SELECT t.ref FROM v_thread t WHERE t.id = :thread_id) AS thread
+         (SELECT uri_param(t.ref, 'id') FROM v_thread t WHERE t.id = :thread_id) AS thread
 viz: form
 form:
   command: oxplow.work_item.create

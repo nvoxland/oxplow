@@ -38,7 +38,7 @@ _ITEMS = 50
 def transform(x):
     event = x["event"]
     subject = event["subject"]
-    effort = event["payload"].get("effort")
+    effort = event["payload"].get("effort")  # the bare id, `eff12`
     item = event["payload"].get("work_item")
     if not effort or not item:
         return {"skip": "an acceptance names an effort and its item"}
@@ -47,7 +47,7 @@ def transform(x):
         "params": {
             "subject": json.encode(subject),
             "event_seq": event["seq"],
-            "effort": effort,
+            "effort": uri.build("oxplow/effort", id = effort),
         },
     })
     if not rows:
@@ -69,7 +69,7 @@ def transform(x):
             "input": {
                 "title": "Verify what the review of %s accepted unchecked" % effort,
                 "body": "\n".join(lines),
-                "links": [{"target": effort, "link_type": "about"}],
+                "links": [{"target": uri.build("oxplow/effort", id = effort), "link_type": "about"}],
             },
         }],
     }

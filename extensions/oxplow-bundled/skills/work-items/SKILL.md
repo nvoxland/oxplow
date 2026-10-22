@@ -72,7 +72,7 @@ Link types:
 ## Reading items
 
 - `oxplow_read { ref }` — one item: its row, its links and its comments.
-- `oxplow_work_next { thread: "thread:thr3" }` — what to pick up next on a
+- `oxplow_work_next { thread: "thr3" }` — what to pick up next on a
   thread's list (an epic with its ready descendants, or the ready items).
 - `oxplow_thread_work { thread }` — a thread's items by state, with their
   efforts; `oxplow_thread_notes { thread }` — the notes recorded on it.

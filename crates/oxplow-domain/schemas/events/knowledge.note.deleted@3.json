@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`knowledge.note.deleted@3`: a thread note is gone.",
+  "properties": {
+    "note": {
+      "description": "The note (`not3`).",
+      "type": "string"
+    },
+    "thread": {
+      "description": "The thread it was on (`thr3`).",
+      "type": "string"
+    }
+  },
+  "required": [
+    "note",
+    "thread"
+  ],
+  "title": "KnowledgeNoteDeletedV3",
+  "type": "object"
+}

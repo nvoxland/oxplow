@@ -1331,7 +1331,10 @@ fn parse_actions(
         }
         for (scope, name) in action_templates(&input) {
             match scope.as_str() {
-                "param" if params.iter().any(|p| p.name == name) => {}
+                "param"
+                    if params.iter().any(|p| {
+                        p.name == name || name.strip_suffix(".id") == Some(p.name.as_str())
+                    }) => {}
                 "param" => {
                     return Err(format!(
                         "actions: `{}`: `{{{{param.{name}}}}}` names no param of this lens",

@@ -193,23 +193,23 @@ const SOURCE: &str = "system:comments";
 /// (how the search index hears of it).
 fn comment_event(id: i64, target: &str, deleted: bool) -> Envelope {
     use oxplow_domain::events::schema::{
-        KnowledgeCommentDeleted, KnowledgeCommentDeletedV2, KnowledgeCommentWritten,
-        KnowledgeCommentWrittenV2,
+        KnowledgeCommentDeleted, KnowledgeCommentDeletedV3, KnowledgeCommentWritten,
+        KnowledgeCommentWrittenV3,
     };
     let comment = oxplow_domain::uri::build::comment_uri(CommentId::new(id));
     let env = if deleted {
         Envelope::typed::<KnowledgeCommentDeleted>(
             SOURCE,
-            &KnowledgeCommentDeletedV2 {
-                comment: comment.clone(),
+            &KnowledgeCommentDeletedV3 {
+                comment: CommentId::new(id).to_string(),
                 target: target.into(),
             },
         )
     } else {
         Envelope::typed::<KnowledgeCommentWritten>(
             SOURCE,
-            &KnowledgeCommentWrittenV2 {
-                comment: comment.clone(),
+            &KnowledgeCommentWrittenV3 {
+                comment: CommentId::new(id).to_string(),
                 target: target.into(),
             },
         )

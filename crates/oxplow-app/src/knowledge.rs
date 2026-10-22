@@ -18,7 +18,7 @@ use oxplow_db::page_ref_projections::{stamp_file_versions, wiki_edges, RT_WIKI_F
 use oxplow_db::page_ref_store::{merge_source_tx, replace_source_tx, upsert_edge_tx};
 use oxplow_db::{EventCtx, FileRefVersion, PageRefEdge, WikiPage};
 use oxplow_domain::events::schema::{
-    KnowledgePageDeleted, KnowledgePageDeletedV1, KnowledgePageWritten, KnowledgePageWrittenV1,
+    KnowledgePageDeleted, KnowledgePageDeletedV2, KnowledgePageWritten, KnowledgePageWrittenV2,
 };
 use oxplow_domain::events::Envelope;
 use oxplow_domain::knowledge::{Kept, KnowledgeProvider, PageCall, PageDraft, RefFreshness};
@@ -134,9 +134,11 @@ pub struct PageWrite<'a> {
 /// What a write left: the page's outbound refs and its pin.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Written {
+    /// The page's slug.
     pub page: String,
     pub outbound: Vec<String>,
-    pub snapshot: Option<String>,
+    /// The snapshot its new refs are pinned to.
+    pub snapshot: Option<i64>,
 }
 
 /// Refuse `verified` / `removed` refs the body doesn't bear out: a removed
@@ -260,15 +262,15 @@ pub fn write_page_tx(
 
     let page_ref = page_ref(slug);
     let written = Written {
-        page: page_ref.clone(),
+        page: slug.to_string(),
         outbound: outbound_tx(conn, slug)?,
-        snapshot: pin.snapshot_id.map(|id| format!("snap:{id}")),
+        snapshot: pin.snapshot_id,
     };
     let env = ev
-        .typed::<KnowledgePageWritten>(&KnowledgePageWrittenV1 {
-            page: page_ref.clone(),
+        .typed::<KnowledgePageWritten>(&KnowledgePageWrittenV2 {
+            page: written.page.clone(),
             outbound: written.outbound.clone(),
-            snapshot: written.snapshot.clone(),
+            snapshot: written.snapshot,
         })
         .with_anchors(Anchors {
             snapshot_id: pin.snapshot_id,
@@ -289,10 +291,11 @@ pub fn delete_page_tx(
     let existed = oxplow_db::wiki_page_store::delete_tx(conn, slug)?;
     replace_source_tx(conn, &wiki_uri(slug), Vec::new())?;
     Ok(existed.then(|| {
-        let page = page_ref(slug);
-        ev.typed::<KnowledgePageDeleted>(&KnowledgePageDeletedV1 { page: page.clone() })
-            .with_anchors(anchors)
-            .with_subject([page])
+        ev.typed::<KnowledgePageDeleted>(&KnowledgePageDeletedV2 {
+            page: slug.to_string(),
+        })
+        .with_anchors(anchors)
+        .with_subject([page_ref(slug)])
     }))
 }
 
@@ -685,16 +688,11 @@ impl crate::event_pump::EventConsumer for WikiAttribution {
         let Some(thread) = event.envelope.anchors.thread_id else {
             return Ok(());
         };
-        let written: KnowledgePageWrittenV1 =
+        let written: KnowledgePageWrittenV2 =
             serde_json::from_value(event.envelope.payload.clone()).map_err(|e| {
                 DomainError::Invalid(format!("knowledge.page.written payload: {e}"))
             })?;
-        let Ok(slug) =
-            oxplow_domain::uri::build::id_of(&written.page, oxplow_domain::uri::resources::WIKI)
-        else {
-            return Ok(());
-        };
-        let slug = slug.as_str();
+        let slug = written.page.as_str();
         // A page deleted since is no longer there to mark.
         if oxplow_db::wiki_page_store::get_tx(conn, slug)?.is_none() {
             return Ok(());
@@ -1328,7 +1326,7 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(out.result["page"], "oxplow:oxplow/wiki?slug=vcs-notes");
+        assert_eq!(out.result["page"], "vcs-notes");
         let outbound: Vec<&str> = out.result["outbound"]
             .as_array()
             .unwrap()

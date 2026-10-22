@@ -5,6 +5,7 @@
  * `useRerunOnChange`; each answer re-runs itself through `runAnswer`.
  */
 import { keptLens, querySql, runCommand, type KeptLens, type SqlCell } from "./api.js";
+import { idOf } from "./uri/uri.js";
 import { threadRowId } from "./modelIds.js";
 import type { Reads } from "./tauri-bridge/generated/bindings.js";
 
@@ -40,7 +41,9 @@ export async function readAnswers(threadId: string): Promise<{ answers: AnswerRo
  *  thread's worktree; an empty slug lets the command take one from the
  *  title. Returns the lens id and whether the app shows it now. */
 export async function keepAnswer(answer: string, slug: string): Promise<KeptLens> {
-  const input: Record<string, string> = { answer };
+  const id = idOf(answer, "oxplow/answer");
+  if (id === null) throw new Error(`not an answer: ${answer}`);
+  const input: Record<string, string | number> = { answer: Number(id) };
   if (slug.trim() !== "") input.slug = slug.trim();
   const outcome = await runCommand("oxplow.lens.keep", input);
   return keptLens(outcome.result);

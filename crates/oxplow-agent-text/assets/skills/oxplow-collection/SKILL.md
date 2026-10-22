@@ -57,7 +57,7 @@ collectors in the project's own extension, `.oxplow/extensions/project/extension
   the project has none yet) → run oxplow's `configure` slash command, which wires
   **every** test stack in the repo.
 - **A report was written outside a run oxplow saw** → run its collector
-  by hand: `oxplow.collector.sync { collector: "collector:project/<id>" }`
+  by hand: `oxplow.collector.sync { collector: "project/<id>" }`
   (`run_command`); it reads the report now and records it
   in your thread, through the same deterministic parse.
 

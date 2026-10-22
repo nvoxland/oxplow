@@ -200,7 +200,7 @@ async fn every_run_is_recorded_once_as_itself() {
         .run(
             &Actor::Human,
             crate::collector_runner::SYNC,
-            json!({ "collector": "oxplow:oxplow/collector?collector=acme/star" }),
+            json!({ "collector": "acme/star" }),
             false,
         )
         .await

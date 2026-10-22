@@ -7,7 +7,7 @@ query: |
   SELECT c.statement, c.kind,
          CASE WHEN c.provenance = 'recorded' THEN 'Stated' ELSE 'Read' END AS source,
          CASE WHEN c.review = 'dismissed' THEN 'Dismissed' ELSE 'Unverified' END AS state,
-         c.evidence_ref, c.ref AS claim
+         c.evidence_ref, c.id AS claim
   FROM v_claim c LEFT JOIN v_oxplow_bundled_claim_status s ON s.ref = c.ref
   WHERE c.effort_id = :effort_id AND (s.verified = 0 OR c.review = 'dismissed')
   ORDER BY c.review IS NOT NULL, c.created_at

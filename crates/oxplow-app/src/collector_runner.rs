@@ -38,7 +38,7 @@ use oxplow_config::collectors::{
 use oxplow_db::{
     CollectorRun, EntityTable, EntityWrite, SqlCell, SqliteCollectorStore, StoredType,
 };
-use oxplow_domain::events::schema::{CollectorSynced, CollectorSyncedV1};
+use oxplow_domain::events::schema::{CollectorSynced, CollectorSyncedV2};
 use oxplow_domain::{DomainError, Envelope, StoredEvent};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -345,7 +345,7 @@ pub async fn run_due_collectors(state: &crate::Services) -> Vec<(String, String)
     }
     for (owner, id) in &due {
         let input = serde_json::json!({
-            "collector": oxplow_domain::uri::build::collector_uri(owner, id),
+            "collector": format!("{owner}/{id}"),
         });
         if let Err(e) = state
             .commands
@@ -1113,7 +1113,7 @@ async fn run_collector_once(
         last_event_id,
         run_id: Some(run.run().to_string()),
     };
-    let collector = oxplow_domain::uri::build::collector_uri(owner, id);
+    let collector = format!("{owner}/{id}");
     let event = Synced {
         source: source.clone(),
         cause: trigger.event().map(|e| (e.envelope.id.clone(), e.seq)),
@@ -1269,7 +1269,7 @@ fn plan_events(
 #[derive(Clone)]
 struct Synced {
     source: String,
-    /// `oxplow:oxplow/collector?collector=<owner>/<id>`.
+    /// `<owner>/<id>`.
     collector: String,
     trigger: &'static str,
     /// The trigger event (`on:`): the envelope's cause, and its seq keys
@@ -1286,9 +1286,13 @@ impl Synced {
         elapsed_ms: i64,
         error: Option<String>,
     ) -> Envelope {
+        let uri = oxplow_domain::uri::build::keyed(
+            oxplow_domain::uri::resources::COLLECTOR,
+            &self.collector,
+        );
         let env = Envelope::typed::<CollectorSynced>(
             self.source.clone(),
-            &CollectorSyncedV1 {
+            &CollectorSyncedV2 {
                 collector: self.collector.clone(),
                 trigger: self.trigger.into(),
                 status: status.into(),
@@ -1298,11 +1302,11 @@ impl Synced {
                 error,
             },
         )
-        .with_subject([self.collector.clone()]);
+        .with_subject([uri.clone()]);
         match &self.cause {
             Some((id, seq)) => env
                 .with_cause(id.clone())
-                .with_dedupe_key(format!("collector.synced:{}:{seq}", self.collector)),
+                .with_dedupe_key(format!("collector.synced:{uri}:{seq}")),
             None => env,
         }
     }
@@ -1413,7 +1417,7 @@ impl RunLog {
         });
         let synced = Synced {
             source: r.source.to_string(),
-            collector: oxplow_domain::uri::build::collector_uri(r.owner, r.id),
+            collector: format!("{}/{}", r.owner, r.id),
             trigger: r.trigger,
             cause: r.cause,
         };
@@ -1858,34 +1862,23 @@ pub const SYNC: &str = "oxplow.collector.sync";
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SyncInput {
-    /// The collector's ref (`oxplow:oxplow/collector?collector=<extension>/<id>`).
+    /// The collector (`<extension>/<id>`).
     pub collector: String,
     /// For a report collector: the thread its run is recorded in
-    /// (`oxplow:oxplow/thread?id=thr3`); an agent's is always its own.
+    /// (`thr3`); an agent's is always its own.
     #[serde(default)]
     pub thread: Option<String>,
 }
 
-/// A collector ref's extension and `id` (`oxplow:oxplow/collector?collector=work/hot` → `work`,
-/// `hot`).
+/// A collector id's extension and `id` (`work/hot` → `work`, `hot`).
 fn collector_parts(collector: &str) -> Result<(String, String), oxplow_domain::CommandError> {
-    let invalid = |message: String| oxplow_domain::CommandError::Invalid {
-        field: Some("/collector".into()),
-        message,
-    };
-    let id = oxplow_domain::uri::build::id_of(collector, oxplow_domain::uri::resources::COLLECTOR)
-        .map_err(|e| {
-            invalid(format!(
-                "`{}` isn't a collector ref (collector:<extension>/<id>)",
-                e.text
-            ))
-        })?;
-    id.split_once('/')
+    collector
+        .split_once('/')
+        .filter(|(owner, id)| !owner.is_empty() && !id.is_empty() && !id.contains('/'))
         .map(|(owner, id)| (owner.to_string(), id.to_string()))
-        .ok_or_else(|| {
-            invalid(format!(
-                "`{collector}` isn't a collector ref (collector:<extension>/<id>)"
-            ))
+        .ok_or_else(|| oxplow_domain::CommandError::Invalid {
+            field: Some("/collector".into()),
+            message: format!("`{collector}` isn't a collector id (`<extension>/<id>`)"),
         })
 }
 
@@ -2748,7 +2741,7 @@ pub(crate) mod tests {
                             .run(
                                 &oxplow_domain::Actor::Human,
                                 SYNC,
-                                json!({ "collector": "oxplow:oxplow/collector?collector=work/star" }),
+                                json!({ "collector": "work/star" }),
                                 false,
                             )
                             .await
@@ -2794,7 +2787,7 @@ pub(crate) mod tests {
             .run(
                 &oxplow_domain::Actor::Human,
                 SYNC,
-                json!({ "collector": "oxplow:oxplow/collector?collector=ghost/none" }),
+                json!({ "collector": "ghost/none" }),
                 false,
             )
             .await
@@ -2823,7 +2816,7 @@ pub(crate) mod tests {
             fx.svc.commands.run(
                 &oxplow_domain::Actor::Human,
                 SYNC,
-                json!({ "collector": "oxplow:oxplow/collector?collector=work/bad" }),
+                json!({ "collector": "work/bad" }),
                 false,
             )
         };
@@ -3034,8 +3027,8 @@ pub(crate) mod tests {
         let ctx = Collectors::of(&fx.svc, &root);
         let event = serde_json::json!({
             "type": "thread.checkpoint",
-            "payload": { "thread": "oxplow:oxplow/thread?id=thr1", "turn": "oxplow:oxplow/turn?id=trn7", "reason": "turn_end",
-                         "snapshot": "oxplow:oxplow/snapshot?id=1", "changed": true, "writing_tools": 1 },
+            "payload": { "thread": "thr1", "turn": "trn7", "reason": "turn_end",
+                         "snapshot": 1, "changed": true, "writing_tools": 1 },
             "anchors": { "thread_id": "thr1", "turn_id": 7 },
         });
         let preview = preview_collector(&ctx, "work", "seen", Some(&event), None)
@@ -3045,7 +3038,7 @@ pub(crate) mod tests {
             preview.entities[0].rows,
             vec![vec![
                 SqlCell::Text("x".into()),
-                SqlCell::Int(1),
+                SqlCell::Int(2),
                 SqlCell::Text("fixture".into()),
                 SqlCell::Int(7),
             ]]

@@ -508,7 +508,7 @@ mod tests {
         };
         let child = run(
             w::CREATE,
-            json!({ "title": "child", "parent_ref": task, "thread": oxplow_domain::uri::build::thread_uri(fx.thread) }),
+            json!({ "title": "child", "parent_ref": task, "thread": fx.thread.to_string() }),
         )
         .await
         .result["ref"]

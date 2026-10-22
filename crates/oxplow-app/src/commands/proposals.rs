@@ -104,15 +104,11 @@ impl CommandBus {
             .db
             .transaction(move |tx| {
                 let inserted = proposal_store::insert_tx(tx, &row)?;
-                let supersedes: Vec<String> = inserted
-                    .superseded
-                    .iter()
-                    .map(|id| proposal_uri(*id))
-                    .collect();
+                let supersedes = inserted.superseded.clone();
                 let proposed = Envelope::typed::<CommandProposed>(
                     actor_c.source(),
-                    &CommandProposedV2 {
-                        proposal: proposal_uri(inserted.id),
+                    &CommandProposedV3 {
+                        proposal: inserted.id,
                         command: row.command.clone(),
                         actor_kind: actor_c.kind().try_into()?,
                         actor_id: actor_c.id(),
@@ -145,7 +141,7 @@ impl CommandBus {
             Ok((id, supersedes)) => {
                 self.pump.wake();
                 CommandError::Proposed {
-                    proposal: proposal_uri(id),
+                    proposal: id,
                     preview: Box::new(preview),
                     supersedes,
                 }
@@ -223,8 +219,8 @@ impl CommandBus {
                 let declined = proposal_store::decline_tx(tx, id)?;
                 let event = Envelope::typed::<CommandDeclined>(
                     actor_c.source(),
-                    &CommandDeclinedV1 {
-                        proposal: proposal_uri(id),
+                    &CommandDeclinedV2 {
+                        proposal: id,
                         command: declined.command.clone(),
                     },
                 )
@@ -281,8 +277,8 @@ pub(super) fn log_approved_tx(
 ) -> Result<(), oxplow_domain::DomainError> {
     let approved = Envelope::typed::<CommandApproved>(
         actor.source(),
-        &CommandApprovedV1 {
-            proposal: proposal_uri(id),
+        &CommandApprovedV2 {
+            proposal: id,
             command: spec.id.clone(),
             audit_id: recorded.audit_id,
         },

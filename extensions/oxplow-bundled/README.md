@@ -55,19 +55,19 @@ materialized ones refilled), and the advisory reads it on its next run.
 
 On an effort's page, **Commands**:
 
-- **Accept Review** (`oxplow.review.accept { ref, force? }`) comments the
+- **Accept Review** (`oxplow.review.accept { effort, force? }`) comments the
   review on the effort's work item and marks it done. It refuses while a
   claim is unverified (a dismissed one doesn't count) or an inferred
   decision unreviewed; `force` accepts
   anyway and lists them in the comment.
-- **Request Changes** (`oxplow.review.request_changes { ref, note? }`)
+- **Request Changes** (`oxplow.review.request_changes { effort, note? }`)
   comments a checklist — each unverified claim, each inferred decision,
   each file outside the area, and the note — and moves the item back to
   todo.
 
 Each logs its verdict as an event (`event_types:` in the manifest):
-`oxplow_bundled.accepted { unverified, inferred, deviated }` or
-`oxplow_bundled.changes_requested { unverified, inferred, deviated, note? }`,
+`oxplow_bundled.accepted { effort, work_item, unverified, inferred, deviated }` or
+`oxplow_bundled.changes_requested { effort, work_item, unverified, inferred, deviated, note? }`,
 caused by the command's run. The counts are what stood at the verdict —
 claims unverified, inferred decisions unreviewed, files outside the area.
 The verdict itself is in the envelope, which is kept when the payload

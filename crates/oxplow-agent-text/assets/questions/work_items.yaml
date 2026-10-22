@@ -16,7 +16,7 @@
   reaches:
     sql: >-
       SELECT s.prompt AS stream_prompt, t.prompt AS thread_prompt FROM v_thread t
-      JOIN v_stream s ON s.id = t.stream_id WHERE t.ref = 'thread:thr1'
+      JOIN v_stream s ON s.id = t.stream_id WHERE t.ref = 'oxplow:oxplow/thread?id=thr1'
   shape: { columns: [stream_prompt, thread_prompt] }
 - question: Mark a work item done.
   skill: work-items
@@ -38,37 +38,37 @@
   skill: work-items
   reaches:
     tool: oxplow_work_next
-    input: { thread: "thread:thr1" }
+    input: { thread: "thr1" }
 - question: What is on this thread's list, by state?
   skill: work-items
   reaches:
     tool: oxplow_thread_work
-    input: { thread: "thread:thr1" }
+    input: { thread: "thr1" }
 - question: What notes were recorded on this thread?
   skill: work-items
   reaches:
     tool: oxplow_thread_notes
-    input: { thread: "thread:thr1" }
+    input: { thread: "thr1" }
 - question: Give me a summary of this effort.
   about: oxplow/effort
   skill: oxplow-runtime
   reaches:
     tool: oxplow_effort_summary
-    input: { effort: "effort:eff1" }
+    input: { effort: "eff1" }
 - question: List this effort's files without writing SQL.
   about: oxplow/effort
   skill: oxplow-runtime
   reaches:
     tool: oxplow_effort_files
-    input: { effort: "effort:eff1" }
+    input: { effort: "eff1" }
 - question: Which agent sessions are on this thread, and what are their subagents doing?
   about: oxplow/thread
   skill: oxplow-runtime
   reaches:
     tool: oxplow_thread_sessions
-    input: { thread: "thread:thr1" }
+    input: { thread: "thr1" }
 - question: What happened in this agent session, turn by turn?
   skill: oxplow-runtime
   reaches:
     tool: oxplow_session_transcript
-    input: { session: "agent_session:ses1" }
+    input: { session: "ses1" }

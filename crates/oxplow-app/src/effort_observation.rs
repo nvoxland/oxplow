@@ -20,7 +20,7 @@
 use async_trait::async_trait;
 use oxplow_db::effort_store::{EffortFileChange, EffortStore as _, OwnedFileRefVersion};
 use oxplow_db::{SqlCell, SqliteEffortStore, SqliteSnapshotStore};
-use oxplow_domain::events::schema::{EventType as _, ThreadCheckpoint, ThreadCheckpointV1};
+use oxplow_domain::events::schema::{EventType as _, ThreadCheckpoint, ThreadCheckpointV2};
 use oxplow_domain::tree_diff::ChangeStatus;
 use oxplow_domain::{DomainError, EffortId, StoredEvent};
 
@@ -122,7 +122,7 @@ impl AsyncEventConsumer for EffortObservationConsumer {
     }
 
     async fn handle(&self, event: &StoredEvent) -> Result<(), DomainError> {
-        let checkpoint: ThreadCheckpointV1 = serde_json::from_value(event.envelope.payload.clone())
+        let checkpoint: ThreadCheckpointV2 = serde_json::from_value(event.envelope.payload.clone())
             .map_err(|e| DomainError::Invalid(format!("thread.checkpoint: {e}")))?;
         let (Some(thread), Some(turn), Some(end)) = (
             event.envelope.anchors.thread_id,
@@ -263,7 +263,7 @@ mod tests {
             .run(
                 &oxplow_domain::Actor::Human,
                 crate::commands::effort::CLOSE,
-                serde_json::json!({ "effort": oxplow_domain::uri::build::effort_uri(f.effort) }),
+                serde_json::json!({ "effort": f.effort.to_string() }),
                 false,
             )
             .await

@@ -4,7 +4,7 @@ hidden: true
 params:
   - { name: ref, label: From thread }
 query: |
-  SELECT t.ref AS value, t.title AS label, s.title AS "group"
+  SELECT uri_param(t.ref, 'id') AS value, t.title AS label, s.title AS "group"
   FROM v_thread t
   JOIN v_stream s ON s.id = t.stream_id
   WHERE t.closed_at IS NULL AND t.archived_at IS NULL AND s.archived_at IS NULL

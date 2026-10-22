@@ -1,8 +1,0 @@
-{
-  "proposal": "proposal:12",
-  "command": "oxplow.config.set",
-  "actor_kind": "effect",
-  "actor_id": "acme/notify",
-  "destructive": false,
-  "supersedes": ["proposal:9"]
-}

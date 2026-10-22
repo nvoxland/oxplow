@@ -16,12 +16,12 @@ test("a closed session is listed on the New Session page and picking it reopens 
   const { page, daemon } = fresh;
   // A session that has run (it is bound to a conversation), then closed.
   const opened = await run<Opened>(daemon, "oxplow.agent_session.open", {
-    thread: daemon.threadUri,
+    thread: daemon.thread,
     resume: "conv-earlier",
     title: "Parser work",
   });
   const id = opened.result.id;
-  await run(daemon, "oxplow.agent_session.close", { session: `oxplow:oxplow/agent_session?id=${id}` });
+  await run(daemon, "oxplow.agent_session.close", { session: id });
 
   await page.goto("/");
   await expect(newSessionPage(page)).toBeVisible();
@@ -42,12 +42,12 @@ test("a closed session is listed on the New Session page and picking it reopens 
 test("a closed session found by search opens its transcript, which can reopen it", async ({ fresh }) => {
   const { page, daemon } = fresh;
   const opened = await run<Opened>(daemon, "oxplow.agent_session.open", {
-    thread: daemon.threadUri,
+    thread: daemon.thread,
     resume: "conv-found",
     title: "Zebrafinch review",
   });
   const id = opened.result.id;
-  await run(daemon, "oxplow.agent_session.close", { session: `oxplow:oxplow/agent_session?id=${id}` });
+  await run(daemon, "oxplow.agent_session.close", { session: id });
   await searchable(daemon, "Zebrafinch", "agent_session");
 
   await page.goto("/");
@@ -65,7 +65,7 @@ test("a closed session found by search opens its transcript, which can reopen it
 test("picking a session open here shows it and keeps the New Session page", async ({ fresh }) => {
   const { page, daemon } = fresh;
   const opened = await run<Opened>(daemon, "oxplow.agent_session.open", {
-    thread: daemon.threadUri,
+    thread: daemon.thread,
     resume: "conv-open",
     title: "Lexer work",
   });
@@ -94,12 +94,12 @@ test("an extension's section lands where its `at` says on the New Session page",
   // Sections with nothing to show fold into one line, so each has a row:
   // an earlier session and a note.
   const earlier = await run<Opened>(daemon, "oxplow.agent_session.open", {
-    thread: daemon.threadUri,
+    thread: daemon.thread,
     resume: "conv-placed",
     title: "Placed work",
   });
-  await run(daemon, "oxplow.agent_session.close", { session: `oxplow:oxplow/agent_session?id=${earlier.result.id}` });
-  await run(daemon, "oxplow.knowledge.add_note", { thread: daemon.threadUri, body: "Remember the lexer." });
+  await run(daemon, "oxplow.agent_session.close", { session: earlier.result.id });
+  await run(daemon, "oxplow.knowledge.add_note", { thread: daemon.thread, body: "Remember the lexer." });
 
   await page.goto("/");
   const doc = newSessionPage(page);

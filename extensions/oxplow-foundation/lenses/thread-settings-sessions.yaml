@@ -5,7 +5,7 @@ params:
 query: |
   SELECT coalesce(nullif(a.display_name, ''), nullif(a.title, ''), a.harness) AS name, a.harness, a.opened_at, a.ref
   FROM v_agent_session a
-  WHERE a.thread_id = CAST(replace(:thread, 'thr', '') AS INTEGER) AND a.closed_at IS NULL
+  WHERE a.thread_id = (SELECT id FROM v_thread WHERE ref = uri('oxplow/thread', 'id', :thread)) AND a.closed_at IS NULL
   ORDER BY a.opened_at, a.id
 columns:
   - { key: name, label: Session, link: { kind: page, from: ref } }

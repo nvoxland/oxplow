@@ -198,7 +198,7 @@ its own: `oxplow_query_sql` over `v_work_item` for a list in order (`WHERE
 thread_id = … ORDER BY rank IS NULL, rank, created_at`), `oxplow_read` on a
 work item's URI for one item with its `links` and `comments`, and the
 foundation lens `oxplow-foundation/work-next` (the tool `oxplow_work_next`,
-param `thread: "oxplow:oxplow/thread?id=thr3"`) for what to pick up next (an epic with its ready
+param `thread: "thr3"`) for what to pick up next (an epic with its ready
 descendants, or every ready non-epic item; open `blocks` links hold an
 item). None of them belongs to an implementation, so the tool list never
 changes with a switch; with none they read empty. A source

@@ -34,7 +34,7 @@ test("a failed reaction is in Delivery, and a person's Retry composes it afresh"
   const { page, daemon } = fresh;
   await page.goto("/");
   await openFromLauncher(page, "Settings: Data");
-  await run(daemon, "oxplow.work_item.create", { title: "Plum [fail]", thread: daemon.threadUri });
+  await run(daemon, "oxplow.work_item.create", { title: "Plum [fail]", thread: daemon.thread });
   const row = page.locator('[data-testid^="reaction-row-e2e/note-created-"]');
   await expect(row).toBeVisible();
   await expect(row).toContainText("tsk999999");
@@ -52,7 +52,7 @@ test("a person's Backfill reaches what was logged before the effect was deployed
   const { page, daemon } = fresh;
   // Logged first; then an extension whose effect comments on created
   // tasks is deployed: it starts after what was already logged.
-  await run(daemon, "oxplow.work_item.create", { title: "Fig", thread: daemon.threadUri });
+  await run(daemon, "oxplow.work_item.create", { title: "Fig", thread: daemon.thread });
   const dir = extensionSource(daemon, "late");
   mkdirSync(join(dir, "effects"), { recursive: true });
   writeFileSync(

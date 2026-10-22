@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`effort.linked@2`: an effort's work item was set, changed or cleared\n(`oxplow.effort.link`).",
+  "properties": {
+    "effort": {
+      "description": "The effort (`eff12`).",
+      "type": "string"
+    },
+    "work_item": {
+      "description": "The work item it's linked to now; absent when unlinked.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "effort"
+  ],
+  "title": "EffortLinkedV2",
+  "type": "object"
+}

@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`effort.finished@3`: a closed effort has its end snapshot\npinned and its lifecycle metrics projected. Logged once per effort by the\neffort-lifecycle consumer (dedupe key `effort.finished:<effort>`),\ncaused by the `effort.closed` it handled; what the effort reactors\n(evidence, inferred decisions) and the `effort.finished` collectors\nconsume.",
+  "properties": {
+    "effort": {
+      "description": "The effort (`eff12`).",
+      "type": "string"
+    },
+    "end_snapshot": {
+      "description": "The end snapshot.",
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "work_item": {
+      "description": "The linked work item, when there is one.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "effort"
+  ],
+  "title": "EffortFinishedV3",
+  "type": "object"
+}

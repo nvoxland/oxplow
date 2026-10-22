@@ -161,7 +161,7 @@ thread is the event's (the agent that moved the item), else the item's
 descendant of the linked item refines the link; an ancestor leaves it. A
 task's status no longer opens or closes an effort anywhere else.
 
-Rule 2 reads **`thread.checkpoint@1 { thread, turn, reason, snapshot,
+Rule 2 reads **`thread.checkpoint@2 { thread, turn, reason, snapshot,
 changed, writing_tools }`**, logged by the `thread.checkpoint` consumer
 (`crate::thread_checkpoint`) once a turn's end take lands. `changed`
 compares the turn's start snapshot with the take's (content-addressed:

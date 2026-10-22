@@ -1,0 +1,67 @@
+{
+  "$defs": {
+    "ContentRef": {
+      "additionalProperties": false,
+      "description": "Where a large or sensitive body lives: `event_content.hash` (xxh3-128\nhex) and its length. Retention may delete the body; the ref stays.",
+      "properties": {
+        "hash": {
+          "type": "string"
+        },
+        "size": {
+          "description": "The whole body's length, stored or not.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "truncated": {
+          "description": "Only the first part was stored (bodies are capped).",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "hash",
+        "size"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`agent.context.compacted@2`: the agent's context was summarized to make\nroom, so what it was told earlier is no longer in front of it.",
+  "properties": {
+    "summary": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ContentRef"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The summary the context was replaced with (Claude's\n`compact_summary`), stored in `event_content`; read as\n`oxplow:oxplow/event?id=<id>#part=summary`."
+    },
+    "thread": {
+      "description": "The thread (`thr3`).",
+      "type": "string"
+    },
+    "trigger": {
+      "description": "What started it, as the harness names it (Claude's `auto` or\n`manual`), when it says.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "turn": {
+      "description": "The turn (`trn12`).",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "thread"
+  ],
+  "title": "AgentContextCompactedV2",
+  "type": "object"
+}

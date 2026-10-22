@@ -56,24 +56,19 @@ pub struct ListTabsInput {
     /// Whose tabs: `thread` (default), `stream` or `project`.
     #[serde(default)]
     pub scope: TabScope,
-    /// The thread (`oxplow:oxplow/thread?id=thr3` or `thr3`); default your own.
+    /// The thread (`thr3`); default your own.
     #[serde(default)]
     pub thread: Option<String>,
 }
 
-/// `value` as a thread: its ref or its bare id.
+/// `value` as a thread: its bare id.
 fn thread_of(field: &str, value: &str) -> Result<ThreadId, CommandError> {
-    refs::parse_as::<ThreadId>(value, oxplow_domain::uri::resources::THREAD)
-        .ok()
-        .or_else(|| ThreadId::try_from_str(value))
-        .ok_or_else(|| {
-            invalid(
-                field,
-                format!(
-                    "expected a thread (`oxplow:oxplow/thread?id=thr3` or `thr3`), got `{value}`"
-                ),
-            )
-        })
+    ThreadId::try_from_str(value).ok_or_else(|| {
+        invalid(
+            field,
+            format!("expected a thread id (`thr3`), got `{value}`"),
+        )
+    })
 }
 
 /// Every thread with its stream.
@@ -277,13 +272,13 @@ async fn list_tabs(
                 "tab": t.tab,
                 "kind": t.kind,
                 "title": t.title,
-                "thread": refs::thread_uri(t.thread),
-                "stream": stream_of(t.thread).map(refs::stream_uri),
+                "thread": t.thread.to_string(),
+                "stream": stream_of(t.thread).map(|s| s.to_string()),
                 // A session's tab is its session: what the tab names, not
                 // what the window called its kind.
                 "session": (oxplow_domain::uri::build::resource_of(&t.tab).as_deref()
                     == Some(oxplow_domain::uri::resources::AGENT_SESSION))
-                .then(|| t.tab.clone()),
+                .then(|| oxplow_domain::uri::build::id_of(&t.tab, oxplow_domain::uri::resources::AGENT_SESSION).ok()).flatten(),
                 "selected": t.selected,
                 "visible": t.visible,
                 "client": t.client,
@@ -554,12 +549,12 @@ mod tests {
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0]["tab"], "oxplow:oxplow/wiki?slug=home");
         assert_eq!(rows[0]["title"], "oxplow:oxplow/wiki?slug=home title");
-        assert_eq!(rows[0]["thread"], refs::thread_uri(fx.thread));
+        assert_eq!(rows[0]["thread"], fx.thread.to_string());
         assert_eq!(
             (rows[0]["selected"].clone(), rows[0]["visible"].clone()),
             (json!(true), json!(true))
         );
-        assert_eq!(rows[1]["session"], "oxplow:oxplow/agent_session?id=ses1");
+        assert_eq!(rows[1]["session"], "ses1");
         assert_eq!(rows[1]["selected"], false);
         assert_eq!(listed["unreported"], json!([]));
         assert_eq!(
@@ -569,7 +564,7 @@ mod tests {
                 .len(),
             2
         );
-        let named = run(json!({ "thread": refs::thread_uri(fx.thread) })).await;
+        let named = run(json!({ "thread": fx.thread.to_string() })).await;
         assert_eq!(named["tabs"].as_array().unwrap().len(), 2);
     }
 }

@@ -4,7 +4,7 @@ params:
   - { name: thread_id }
 query: |
   SELECT coalesce(nullif(trim(w.title), ''), nullif(trim(b.label), ''), b.ref) AS title,
-         b.page_kind, b.ref, b.scope, t.ref AS thread
+         b.page_kind, b.ref, b.scope, uri_param(t.ref, 'id') AS thread
   FROM (
     SELECT bk.*, row_number() OVER (PARTITION BY bk.ref ORDER BY
              CASE bk.scope WHEN 'thread' THEN 0 WHEN 'stream' THEN 1 ELSE 2 END) AS n

@@ -217,8 +217,7 @@ pub fn scaffold_with(
     let provider_id = oxplow_domain::contribution::extension_namespace(name);
     // The intent example, and its fixture (what `extension test` runs).
     // The URIs the examples name, built like every other.
-    use oxplow_domain::uri::build::{keyed, work_item_uri};
-    use oxplow_domain::uri::resources as r;
+    use oxplow_domain::uri::build::work_item_uri;
     let work_item = work_item_uri("oxplow", "tsk1");
     let (example_input, example_expect, fixture_expect) = match kind {
         Kind::Lens | Kind::Component | Kind::Page | Kind::Panel => (
@@ -231,10 +230,7 @@ pub fn scaffold_with(
         }
         Kind::Policy => (
             format!(
-                "{{ implementation: {provider_id}, event: {{ type: thread.checkpoint, payload: {{ thread: \"{thread}\", turn: \"{turn}\", reason: turn_end, snapshot: \"{snapshot}\", changed: false, writing_tools: 0 }}, anchors: {{ thread_id: thr1, turn_id: 1 }} }} }}",
-                thread = keyed(r::THREAD, "thr1"),
-                turn = keyed(r::TURN, "trn1"),
-                snapshot = keyed(r::SNAPSHOT, "1"),
+                "{{ implementation: {provider_id}, event: {{ type: thread.checkpoint, payload: {{ thread: thr1, turn: trn1, reason: turn_end, snapshot: 1, changed: false, writing_tools: 0 }}, anchors: {{ thread_id: thr1, turn_id: 1 }} }} }}"
             ),
             "nothing to do: a checkpoint opens or closes no effort",
             Some("{ skip: $any }".to_string()),
@@ -669,12 +665,12 @@ def transform(x):
     thread = e["anchors"].get("thread_id")
     if to == "in_progress" and thread != None:
         return {"commands": [{"name": "oxplow.effort.open",
-                              "input": {"thread": uri.build("oxplow/thread", id = thread), "work_item": item}}]}
+                              "input": {"thread": thread, "work_item": item}}]}
     if to == "done" or to == "canceled":
         rows = scope("sql.read", {"sql": "SELECT id FROM v_effort WHERE work_item = :w AND ended_at IS NULL",
                                   "params": {"w": item}})
         return {"commands": [{"name": "oxplow.effort.close",
-                              "input": {"effort": uri.build("oxplow/effort", id = "eff" + str(r["id"])), "reason": "switch"}}
+                              "input": {"effort": "eff" + str(r["id"]), "reason": "switch"}}
                              for r in rows]}
     return {"skip": "a move that changes no effort"}
 "#
@@ -738,10 +734,8 @@ fn provider_starter(capability: &str) -> ProviderStarter {
         },
         "snapshots" => ProviderStarter {
             // A small tree beside the fixtures (`fixtures/tree`) stands in for a worktree.
-            input: format!(
-                "{{ command: mark, input: {{ stream: '{}', worktree: fixtures/tree, trigger: manual, parent: null }} }}",
-                oxplow_domain::uri::build::keyed(oxplow_domain::uri::resources::STREAM, "str1")
-            ),
+            input: "{ command: mark, input: { stream: str1, worktree: fixtures/tree, trigger: manual, parent: null } }"
+                .to_string(),
             expect: "a handle for the marked state",
             fixture: "{ handle: $any, unchanged: false, file_count: 1 }".to_string(),
             needs: None,
@@ -750,8 +744,8 @@ fn provider_starter(capability: &str) -> ProviderStarter {
         "knowledge" => ProviderStarter {
             input: "{ command: write_page, input: { slug: example, body: '# Example', verified_refs: [], removed_refs: [] } }"
                 .to_string(),
-            expect: "the page's ref",
-            fixture: format!("{{ page: '{}' }}", oxplow_domain::uri::build::wiki_uri("example")),
+            expect: "the page's slug",
+            fixture: "{ page: example }".to_string(),
             needs: None,
             data: serde_json::Value::Null,
         },
@@ -852,7 +846,7 @@ fn verb_input(capability: &str, verb: &str) -> (String, serde_json::Value) {
                     "properties": { "handle": str_prop, "path": str_prop } }),
         ),
         ("knowledge", "write_page") => (
-            "Write a page, creating it or replacing its body: { page } (`oxplow:oxplow/wiki?slug=<slug>`), and answer its \
+            "Write a page, creating it or replacing its body: { page } (the slug), and answer its \
              `knowledge.page.recorded` event with its `refs` (`oxplow:oxplow/file?path=…` / `oxplow:oxplow/wiki?slug=…`)."
                 .into(),
             json!({ "type": "object", "required": ["slug", "body", "verified_refs", "removed_refs"],

@@ -144,7 +144,7 @@ Every connection registers three scalar functions for URIs
 a canonical URI — the params sorted and escaped, a NULL value left out —
 so a model or lens links to another lens
 (`uri('oxplow/lens', 'lens', 'oxplow-bundled/job-run-output', 'job_run', ref)`)
-or builds a record's URI (`uri('oxplow/effort', 'id', 'eff' || id)`) without
+or builds a record's URI (`uri('oxplow/effort', 'id', json_extract(e.payload, '$.effort'))`) without
 concatenating a prefix; `uri_param(uri, key)` reads one param back (NULL when
 the URI lacks it or isn't one) and `uri_resource(uri)` its resource
 (`oxplow/work_item`). Other URIs are selected from their owning model's
@@ -719,7 +719,7 @@ and `v_model_test` are the catalog of all of them:
 | `v_test_case_stat` | each test's summary per stream, branch and producer (V139, tsk733): last status and duration, runs, failures, flips, last failed / passed, max and mean duration — updated with every run, the home of per-test history since a run writes change-only per-case facts |
 | `v_test_run`, `v_test_case` | test runs (V87), views only. A run IS its `metric_capture` (producer `tests`, or `test-run` for a run that measured nothing), and both views read its verbatim `test-detail` payload in `detail_json`: counts from the payload, cases by `json_each` over `suites[].cases[]`. Cases come from the payload, not the `oxplow.test_case` facts, because those are skipped while every tests metric is disabled. `effort_id` (v2) is the capture's own: the effort of the tool call that ran it. A run that only reported counts (`oxplow.test.record_run`) has no cases |
 | `v_thread_answer` | the lenses an agent showed on a thread (`oxplow_show_lens`, V124, P6.C1): `ref` `oxplow:oxplow/answer?id=<id>`, `thread_id`, `turn_id` / `effort_id` open when it was shown, `title`, either `lens` (an existing lens id) or `spec` (the `LensSpec` as JSON), `params`, `created_at`, and `kept_lens` once someone kept it (extensions.md → "Thread answers") |
-| `v_diagnostic` | what the language servers have published, right now (V86). `lsp_diagnostics.rs` subscribes to the LSP session broadcast and replaces a file's rows per `(stream, language, path)` on each `textDocument/publishDiagnostics` (paths repo-relative, positions 1-based, a URI outside the worktree dropped). Live state: the table is cleared at boot and a server's rows when it restarts, crashes or stops. Only files a server has published appear (usually the open ones, not the whole repo). A view re-runs on `ModelsChanged` when rows commit; at most every 500 ms per stream, from the first change (so a server that publishes continuously can't starve it), `code.diagnostics.changed@1` is logged per changed file (P5.C5) |
+| `v_diagnostic` | what the language servers have published, right now (V86). `lsp_diagnostics.rs` subscribes to the LSP session broadcast and replaces a file's rows per `(stream, language, path)` on each `textDocument/publishDiagnostics` (paths repo-relative, positions 1-based, a URI outside the worktree dropped). Live state: the table is cleared at boot and a server's rows when it restarts, crashes or stops. Only files a server has published appear (usually the open ones, not the whole repo). A view re-runs on `ModelsChanged` when rows commit; at most every 500 ms per stream, from the first change (so a server that publishes continuously can't starve it), `code.diagnostics.changed@2` is logged per changed file (P5.C5) |
 | `v_symbol` / `v_symbol_capture` | the definitions oxplow's own tree-sitter extraction finds in each stream's files, in every supported language, no language server needed (V62) — the current tree, restated per changed file at each snapshot by the `symbols.collect` pump consumer (`ref` `oxplow:oxplow/symbol?path=<path>&symbol=<id>`, no revision, unique per stream; `kind` from one vocabulary; `container` `::`-joined; `signature` the parameter types in overloading languages; the name's `line`/`col` and the whole symbol's `start_*`..`end_*`), and what each snapshot's collection covered (`files_collected`, `files_failed`: content unreadable at the snapshot). Details: language-support.md "Symbols" |
 
 **Column docs live with the model, not here.** `models.yaml` documents
@@ -922,7 +922,7 @@ extension's own declared event types, logged with the run (P9.D2;
   value, subject?, path?, line?, rule?, num?, den?, dims?}]}` and nothing
   else (`facts_of`). A fact on a measure not in `facts:` or not defined is
   dropped. Each run records one metric capture (or a failed one) plus a
-  `collector_run` row and `collector.synced@1` with its `facts` count.
+  `collector_run` row and `collector.synced@2` with its `facts` count.
   Snapshot runs keep the delta / full-baseline machinery (pending-baseline
   queue, `scan_kind`, fingerprint, dominated-capture prune).
 - A **report collector** (`records: tests | coverage | analysis`,
@@ -935,7 +935,7 @@ extension's own declared event types, logged with the run (P9.D2;
   the run wrote the report — or by hand (`oxplow.collector.sync`, which records
   in a thread). The collection service runs it and merges its output into
   the run (`.context/collection.md`); its run and health are any
-  collector's (`collector_run`, `collector.synced@1`, `contribution_health`), and
+  collector's (`collector_run`, `collector.synced@2`, `contribution_health`), and
   its extension's permissions apply (`process` for an exec script).
 
 **Owners.** An extension (its name), always: the project's own collectors
@@ -981,7 +981,7 @@ whose types must be registered (`v_event_type`); `oxplow.` ids are
 oxplow's own.
 
 **An entity collector's run** (`collector_runner::run_collector`) commits its rows, its
-`collector_run` row and its `collector.synced@1` event in **one
+`collector_run` row and its `collector.synced@2` event in **one
 transaction**; a failed run commits the failure the same way (no rows,
 the last good counts and checkpoint kept). The event's subject is
 `oxplow:oxplow/collector?collector=<owner>/<id>` (resource `oxplow/collector`), its `trigger` is
@@ -1014,7 +1014,7 @@ type without a `trigger` field:
   seq; NULL when absent), and the script gets the event envelope as
   `input.event` ([extensions.md](./extensions.md) "The event envelope").
 - **Once per event.** The run's `collector_run.last_event_id` is the
-  event's seq, and its `collector.synced@1` is caused by the event with a
+  event's seq, and its `collector.synced@2` is caused by the event with a
   per-event dedupe key. They commit with what the run wrote — an entity
   collector's rows, or a fact collector's capture and facts
   (`RunLog::record_with`, tsk712) — so a redelivered event writes nothing,

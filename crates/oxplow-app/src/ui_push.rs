@@ -41,23 +41,14 @@ impl EventConsumer for UiPush {
             return Ok(());
         }
         let stream = env.anchors.stream_id.or_else(|| {
-            payload["stream"].as_str().and_then(|r| {
-                oxplow_domain::uri::build::parse_as::<StreamId>(
-                    r,
-                    oxplow_domain::uri::resources::STREAM,
-                )
-                .ok()
-            })
+            payload["stream"]
+                .as_str()
+                .and_then(|s| s.parse::<StreamId>().ok())
         });
-        let snapshot = env.anchors.snapshot_id.or_else(|| {
-            payload["snapshot"].as_str().and_then(|r| {
-                oxplow_domain::uri::build::parse_as::<i64>(
-                    r,
-                    oxplow_domain::uri::resources::SNAPSHOT,
-                )
-                .ok()
-            })
-        });
+        let snapshot = env
+            .anchors
+            .snapshot_id
+            .or_else(|| payload["snapshot"].as_i64());
         let trigger = if head_moved {
             oxplow_domain::snapshot::SnapshotTrigger::HeadMoved
         } else {
@@ -82,7 +73,7 @@ impl EventConsumer for UiPush {
 #[cfg(test)]
 mod tests {
 
-    use oxplow_domain::events::schema::{SnapshotTaken, SnapshotTakenV2};
+    use oxplow_domain::events::schema::{SnapshotTaken, SnapshotTakenV3};
     use oxplow_domain::{Anchors, Envelope};
 
     use super::*;
@@ -90,15 +81,9 @@ mod tests {
     fn taken(stream: StreamId, snapshot: i64, unchanged: bool) -> Envelope {
         Envelope::typed::<SnapshotTaken>(
             "system:snapshots",
-            &SnapshotTakenV2 {
-                stream: oxplow_domain::uri::build::keyed(
-                    oxplow_domain::uri::resources::STREAM,
-                    &stream.to_string(),
-                ),
-                snapshot: oxplow_domain::uri::build::keyed(
-                    oxplow_domain::uri::resources::SNAPSHOT,
-                    &snapshot.to_string(),
-                ),
+            &SnapshotTakenV3 {
+                stream: stream.to_string(),
+                snapshot,
                 parent: None,
                 trigger: oxplow_domain::snapshot::SnapshotTrigger::Quiet,
                 unchanged,

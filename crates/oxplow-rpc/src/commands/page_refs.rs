@@ -136,7 +136,7 @@ mod tests {
                 "oxplow.work_item.create",
                 serde_json::json!({
                     "title": "Fix it",
-                    "thread": oxplow_domain::uri::build::thread_uri(thread),
+                    "thread": thread.to_string(),
                     "links": [{ "target": "oxplow:oxplow/collector?collector=ghost/none", "link_type": "about" }],
                 }),
                 false,

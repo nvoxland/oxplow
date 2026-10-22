@@ -1,7 +1,7 @@
 # oxplow-bundled/store-reasoning: a `reasoning` job's answer becomes the
 # effort's inferred decisions and claims (replacing any it had; a claim a
 # reviewer acted on stays, core keeps it). The job's intent key
-# (`reasoning:<effort ref>`, `…@<n>` when asked again) says which effort.
+# (`reasoning:<effort id>`, as `reasoning:eff3`, `…@<n>` when asked again) says which effort.
 # A reply that isn't the JSON asked for (an object with a `decisions` or
 # a `claims` list) is skipped, saying so: a model that writes prose isn't
 # a failure of this effect. Both writers run even with an empty list, so a

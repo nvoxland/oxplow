@@ -81,7 +81,7 @@ test("TODOs are sorted by the scripted model, and a decision from the board or t
       join(daemon.project, "src", "lib.rs"),
       "// TODO: fix the bug in the parser\nfn a() {}\n// TODO: tidy the module\nfn b() {}\n",
     );
-    await run(daemon, "oxplow.collector.sync", { collector: "oxplow:oxplow/collector?collector=triage/todos" });
+    await run(daemon, "oxplow.collector.sync", { collector: "triage/todos" });
     await until("the TODOs to be sorted", 60_000, async () => (await facts(daemon)).length === 2);
     expect(await facts(daemon)).toEqual([
       ["src/lib.rs", 1, "bug"],

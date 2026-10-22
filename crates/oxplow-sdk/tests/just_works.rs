@@ -109,7 +109,7 @@ async fn a_scaffolded_collector_checks_before_its_first_sync_and_runs() {
         .run(
             &oxplow_domain::Actor::Human,
             "oxplow.collector.sync",
-            serde_json::json!({ "collector": oxplow_domain::uri::build::keyed(oxplow_domain::uri::resources::COLLECTOR, &format!("open-items/{}", collector.id)) }),
+            serde_json::json!({ "collector": format!("open-items/{}", collector.id).to_string() }),
             true,
         )
         .await
@@ -663,7 +663,7 @@ async fn extension_test_runs_the_knowledge_suite_over_a_knowledge_provider() {
     .unwrap();
     std::fs::write(
         ext.join("fixtures/basic.yaml"),
-        format!("input: {write}\nexpect: {{ page: 'oxplow:oxplow/wiki?slug=example' }}\n"),
+        format!("input: {write}\nexpect: {{ page: example }}\n"),
     )
     .unwrap();
     std::fs::write(

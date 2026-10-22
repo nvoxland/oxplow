@@ -175,7 +175,7 @@ pub(super) async fn until(fx: &Fixture, id: &str, done: impl Fn(&Value) -> bool)
             fx,
             &Actor::Human,
             "triage.review.result",
-            json!({ "job_run": oxplow_domain::uri::build::job_run_uri(id) }),
+            json!({ "job_run": id.to_string() }),
         )
         .await;
         if done(&snapshot) {
@@ -221,7 +221,7 @@ pub(super) async fn completions(fx: &Fixture, id: &str) -> Vec<String> {
         fx,
         "SELECT json_extract(payload, '$.outcome') FROM v_event
           WHERE type = 'contribution.job.completed' AND json_extract(payload, '$.job_run') = ?1",
-        vec![json!(oxplow_domain::uri::build::job_run_uri(id))],
+        vec![json!(id)],
     )
     .await
     .into_iter()
@@ -300,7 +300,7 @@ async fn cancelling_a_running_job_stops_its_stream() {
         &fx,
         &Actor::Human,
         "triage.review.cancel",
-        json!({ "job_run": oxplow_domain::uri::build::job_run_uri(&id) }),
+        json!({ "job_run": &id.to_string() }),
     )
     .await;
     let done = until(&fx, &id, |s| s["state"] == json!("cancelled")).await;
@@ -395,7 +395,7 @@ async fn a_tool_call_runs_the_extensions_command_and_answers_the_model() {
     let output = lens(
         &fx,
         "oxplow-bundled/job-run-output",
-        vec![("job_run", oxplow_db::SqlCell::Text(run_ref.clone()))],
+        vec![("job_run", oxplow_db::SqlCell::Text(id.to_string()))],
     )
     .await;
     let content: Vec<_> = output
@@ -506,7 +506,7 @@ async fn a_person_cancels_any_job() {
         &fx,
         &Actor::Human,
         "oxplow.job_run.cancel",
-        json!({ "job_run": oxplow_domain::uri::build::job_run_uri(&id) }),
+        json!({ "job_run": &id.to_string() }),
     )
     .await;
     until(&fx, &id, |s| s["state"] == json!("cancelled")).await;
@@ -520,7 +520,7 @@ async fn a_person_cancels_any_job() {
                 stream_id: None,
             },
             "oxplow.job_run.cancel",
-            json!({ "job_run": oxplow_domain::uri::build::job_run_uri(&id) }),
+            json!({ "job_run": &id.to_string() }),
             false,
         )
         .await;

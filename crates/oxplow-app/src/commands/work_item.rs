@@ -45,9 +45,9 @@ use std::sync::Arc;
 use super::util::{parse, schema};
 use super::{Handler, HandlerOutput, Invocation};
 
-/// The thread a work-item command names, by its URI.
+/// The thread a work-item command names, by its id (`thr3`).
 fn parse_thread(raw: &str, field: &str) -> Result<ThreadId, CommandError> {
-    super::util::ref_id(raw, oxplow_domain::uri::resources::THREAD, field)
+    super::util::bare_id(raw, oxplow_domain::uri::resources::THREAD, field)
 }
 
 /// The thread a new item is filed on, whatever tracker holds it
@@ -1100,7 +1100,7 @@ mod tests {
                 json!({
                     "title": "filed",
                     "body": "the body",
-                    "thread": oxplow_domain::uri::build::thread_uri(fx.thread),
+                    "thread": fx.thread.to_string(),
                     "native": { "priority": "high" },
                 }),
                 false,
@@ -1223,7 +1223,7 @@ mod tests {
             .run(
                 &Actor::Human,
                 crate::commands::effort::LINK,
-                json!({ "effort": oxplow_domain::uri::build::effort_uri(fx.effort), "work_item": loose }),
+                json!({ "effort": fx.effort.to_string(), "work_item": loose }),
                 false,
             )
             .await
@@ -1345,7 +1345,7 @@ mod tests {
             .run(
                 &Actor::Human,
                 CREATE,
-                json!({ "title": "theirs", "thread": oxplow_domain::uri::build::thread_uri(fx.thread) }),
+                json!({ "title": "theirs", "thread": fx.thread.to_string() }),
                 false,
             )
             .await
@@ -1984,7 +1984,7 @@ mod tests {
             .run(
                 &other,
                 CREATE,
-                json!({ "title": "mine now", "thread": "oxplow:oxplow/thread?id=thr9", "state": "in_progress" }),
+                json!({ "title": "mine now", "thread": "thr9", "state": "in_progress" }),
                 false,
             )
             .await
@@ -2016,7 +2016,7 @@ mod tests {
                     "title": "filed",
                     "body": "see [[tsk1]]",
                     "state": "in_progress",
-                    "thread": oxplow_domain::uri::build::thread_uri(fx.thread),
+                    "thread": fx.thread.to_string(),
                 }),
                 false,
             )
@@ -2185,7 +2185,7 @@ mod tests {
     ) -> String {
         let mut input = json!({ "title": title });
         if let Some(t) = thread {
-            input["thread"] = json!(oxplow_domain::uri::build::thread_uri(t));
+            input["thread"] = json!(t.to_string());
         }
         fx.svc
             .commands

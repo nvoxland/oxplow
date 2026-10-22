@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`agent.session.ended@2`: the harness ended a session (`/clear`, exit).",
+  "properties": {
+    "reason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "session": {
+      "type": "string"
+    },
+    "thread": {
+      "description": "The thread (`thr3`).",
+      "type": "string"
+    }
+  },
+  "required": [
+    "session",
+    "thread"
+  ],
+  "title": "AgentSessionEndedV2",
+  "type": "object"
+}

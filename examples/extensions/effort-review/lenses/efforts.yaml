@@ -4,7 +4,8 @@ query: |
   SELECT ref AS effort,
          work_item,
          title,
-         ended_at
+         ended_at,
+         uri_param(ref, 'id') AS effort_id
   FROM v_effort
   WHERE ended_at IS NOT NULL
     AND ended_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-7 days')
@@ -15,6 +16,6 @@ columns:
   - { key: work_item, label: Work item, link: { kind: page, from: work_item } }
   - { key: ended_at, label: Finished }
 actions:
-  - { id: review, label: Review, command: effort_review.effort.review, input: { effort: "{{row.effort}}" }, row: true }
+  - { id: review, label: Review, command: effort_review.effort.review, input: { effort: "{{row.effort_id}}" }, row: true }
 empty: No effort finished in the last week.
 launcher: { category: Work }

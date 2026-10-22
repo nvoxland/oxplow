@@ -94,7 +94,7 @@ commands:
       required: [effort]
       additionalProperties: false
       properties:
-        effort: { type: string, description: "The effort (`oxplow:oxplow/effort?id=eff<id>`)." }
+        effort: { type: string, description: "The effort's id (`eff<id>`)." }
     invokers: { human: true, agent: true, lens: true }
   # The model's tool. Also a person's or an agent's read: it only reads.
   - name: effort.evidence
@@ -107,7 +107,7 @@ commands:
       required: [effort]
       additionalProperties: false
       properties:
-        effort: { type: string, description: "The effort (`oxplow:oxplow/effort?id=eff<id>`)." }
+        effort: { type: string, description: "The effort's id (`eff<id>`)." }
     invokers: { human: true, agent: true, lens: true, job: true }
 
 effects:
@@ -120,7 +120,7 @@ effects:
   - id: publish-review
     summary: When a review job ends, comment its review on the effort's work item.
     on: [contribution.job.completed]
-    where: { job: "oxplow:oxplow/job?job=effort-review/review" }
+    where: { job: "effort-review/review" }
     entry: effects/publish_review.star
     needs: [jobs.read, sql.read]
 

@@ -31,7 +31,7 @@
   skill: oxplow-extension
   reaches:
     command: oxplow.collector.sync
-    input: { collector: "collector:tracker/issues" }
+    input: { collector: "tracker/issues" }
 - question: Which lenses exist, and which extension declares each?
   skill: oxplow-extension
   reaches:

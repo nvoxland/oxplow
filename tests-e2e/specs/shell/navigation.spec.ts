@@ -6,10 +6,10 @@ import { expect, test } from "../../support/fixtures.js";
 import { openFromLauncher, searchLauncher, workItemIdOf } from "../../support/ui.js";
 
 /// A wiki page with a link to a task: the page, then the task in the same tab.
-async function wikiWithTask(daemon: Parameters<typeof run>[0] & { threadUri: string }, slug: string, task: string) {
+async function wikiWithTask(daemon: Parameters<typeof run>[0] & { thread: string }, slug: string, task: string) {
   const created = await run<{ result: { ref: string } }>(daemon, "oxplow.work_item.create", {
     title: task,
-    thread: daemon.threadUri,
+    thread: daemon.thread,
   });
   await run(daemon, "oxplow.knowledge.write_page", {
     slug,

@@ -32,8 +32,7 @@ SELECT (SELECT file || ':' || coalesce(line, 1) FROM v_contribution
        (SELECT json_group_array(error) FROM (
           SELECT json_extract(payload, '$.error') AS error FROM v_event
            WHERE :kind = 'collector' AND type = 'collector.synced'
-             AND json_extract(payload, '$.collector') = (SELECT ref FROM v_contribution
-                                                           WHERE extension = :extension AND kind = :kind AND local = :contribution)
+             AND json_extract(payload, '$.collector') = :extension || '/' || :contribution
              AND json_extract(payload, '$.status') = 'error'
              AND json_extract(payload, '$.error') IS NOT NULL
            ORDER BY seq DESC LIMIT 5)) AS collector_errors,

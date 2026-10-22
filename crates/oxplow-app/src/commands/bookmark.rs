@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::ops::Op;
-use super::util::{invalid, parse, ref_id, schema};
+use super::util::{bare_id, invalid, parse, schema};
 use super::{Handler, HandlerOutput, TxCtx};
 
 /// The capability its operations are of.
@@ -55,10 +55,10 @@ pub struct SetInput {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
     pub scope: ScopeInput,
-    /// The thread the person is in (`oxplow:oxplow/thread?id=thr1`); its stream is the stream.
+    /// The thread the person is in (`thr1`); its stream is the stream.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thread: Option<String>,
-    /// The stream (`oxplow:oxplow/stream?id=str1`), when there's no thread.
+    /// The stream (`str1`), when there's no thread.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stream: Option<String>,
 }
@@ -69,10 +69,10 @@ pub struct RemoveInput {
     /// The page's canonical ref.
     #[serde(rename = "ref")]
     pub page_ref: String,
-    /// The thread the person is in (`oxplow:oxplow/thread?id=thr1`).
+    /// The thread the person is in (`thr1`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thread: Option<String>,
-    /// The stream (`oxplow:oxplow/stream?id=str1`), when there's no thread.
+    /// The stream (`str1`), when there's no thread.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stream: Option<String>,
 }
@@ -84,7 +84,7 @@ fn viewer(
     stream: Option<&str>,
 ) -> Result<Viewer, CommandError> {
     let thread = thread
-        .map(|t| ref_id::<ThreadId>(t, oxplow_domain::uri::resources::THREAD, "/thread"))
+        .map(|t| bare_id::<ThreadId>(t, oxplow_domain::uri::resources::THREAD, "/thread"))
         .transpose()?;
     let stream = match (thread, stream) {
         (Some(t), _) => {
@@ -100,7 +100,11 @@ fn viewer(
                 invalid("/thread", format!("no thread `{t}`"))
             })?))
         }
-        (None, Some(s)) => Some(ref_id(s, oxplow_domain::uri::resources::STREAM, "/stream")?),
+        (None, Some(s)) => Some(bare_id(
+            s,
+            oxplow_domain::uri::resources::STREAM,
+            "/stream",
+        )?),
         (None, None) => None,
     };
     Ok(Viewer { thread, stream })
@@ -213,7 +217,7 @@ mod tests {
     #[tokio::test]
     async fn set_moves_and_undo_walks_it_back() {
         let fx = services_with_effort().await;
-        let thread = oxplow_domain::uri::build::thread_uri(fx.thread);
+        let thread = fx.thread.to_string();
         let set = |scope: &str| {
             json!({ "ref": "oxplow:oxplow/page?page=git-dashboard", "page_kind": "git-dashboard",
                     "label": "Git", "scope": scope, "thread": thread })
@@ -262,7 +266,7 @@ mod tests {
     #[tokio::test]
     async fn remove_undoes_and_agents_cannot_bookmark() {
         let fx = services_with_effort().await;
-        let thread = oxplow_domain::uri::build::thread_uri(fx.thread);
+        let thread = fx.thread.to_string();
         let input = json!({ "ref": "oxplow:oxplow/file?path=src/a.rs", "page_kind": "file", "scope": "stream", "thread": thread });
         let agent = Actor::Agent {
             session_id: None,

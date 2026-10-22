@@ -1637,9 +1637,7 @@ mod tests {
             panic!("{err:?}");
         };
         assert_eq!(lens_title(svc), None);
-        let id: i64 =
-            oxplow_domain::uri::build::parse_as(&proposal, oxplow_domain::uri::resources::PROPOSAL)
-                .unwrap();
+        let id = proposal;
         let kept = svc
             .commands
             .proposal_store()

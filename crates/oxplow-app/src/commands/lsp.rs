@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use super::ops::Op;
-use super::util::{failed, parse, ref_id, schema, ServicesSlot};
+use super::util::{bare_id, failed, parse, schema, ServicesSlot};
 use super::{Handler, HandlerOutput, Invocation};
 use crate::background_task::{BackgroundTaskKind, BackgroundTaskStore, StartInput};
 use crate::events::{EventBus, OxplowEvent};
@@ -125,7 +125,7 @@ pub fn restart_op(services: ServicesSlot) -> Op {
             let services = services.clone();
             Box::pin(async move {
                 let input = parse::<RestartInput>(input)?;
-                let stream: oxplow_domain::StreamId = ref_id(
+                let stream: oxplow_domain::StreamId = bare_id(
                     &input.stream,
                     oxplow_domain::uri::resources::STREAM,
                     "/stream",
@@ -152,7 +152,7 @@ pub fn restart_op(services: ServicesSlot) -> Op {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RestartInput {
-    /// The stream whose server it is (`oxplow:oxplow/stream?id=str2`).
+    /// The stream whose server it is (`str2`).
     pub stream: String,
     /// The language (`rust`, `typescript`).
     pub language: String,
@@ -196,9 +196,9 @@ mod tests {
     #[tokio::test]
     async fn restarting_a_server_is_a_persons() {
         let fx = services_with_effort().await;
-        let stream = oxplow_domain::uri::build::stream_uri(
-            fx.svc.streams.list_streams().await.unwrap()[0].id,
-        );
+        let stream = fx.svc.streams.list_streams().await.unwrap()[0]
+            .id
+            .to_string();
         let input = json!({ "stream": stream, "language": "no-such-language" });
         let agent = Actor::Agent {
             session_id: None,

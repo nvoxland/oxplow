@@ -720,7 +720,7 @@ function ResolvedEndpointDiff({
           params={
             effortRowId(primaryEffortId) === null
               ? null
-              : { effort: effortUri(primaryEffortId), effort_id: effortRowId(primaryEffortId), ...(effortChange ? { change_id: effortChange.id } : {}) }
+              : { effort: `eff${effortRowId(primaryEffortId)}`, effort_id: effortRowId(primaryEffortId), ...(effortChange ? { change_id: effortChange.id } : {}) }
           }
           streamId={stream?.id ?? null}
           onOpenPage={(ref) => onOpenPage(ref)}

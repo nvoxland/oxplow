@@ -76,7 +76,7 @@ import { TitleBar } from "./components/TitleBar.js";
 import { showToast } from "./components/toastStore.js";
 import { awaitGitOp, opErrorOf } from "./git-op.js";
 import { UndoToastStack } from "./components/UndoToast.js";
-import { parseUri } from "./uri/uri.js";
+import { keyOf, parseUri } from "./uri/uri.js";
 import { PersonCommandConfirm } from "./components/PersonCommandConfirm.js";
 import { RemoteConnectionBanner } from "./components/RemoteConnectionBanner.js";
 import { subscribeUiError } from "./ui-error.js";
@@ -182,7 +182,6 @@ import { openRef as openRefAt, setWindowRefOpener } from "./tabs/openRef.js";
 import { usePersonCommands } from "./personCommandsStore.js";
 import { personCommands } from "./personCommands.js";
 import { getUiClientId, logUi, setUiLogContext } from "./logger.js";
-import { agentSessionUri as agentSessionTarget, streamUri } from "./uri/uri.js";
 
 // Cap on concurrent file tabs in the center. Intellij uses ~10 by default;
 // when this is exceeded, the oldest-touched tab without unsaved changes is
@@ -663,7 +662,7 @@ export function App() {
       // An audited write that logs `file.saved` (its content isn't kept
       // in the record).
       const content = current.draftContent;
-      const input = { stream: streamUri(streamId), path, content };
+      const input = { stream: streamId, path, content };
       await (call ? runCommandForCall(call, "oxplow.file.save", input) : runCommand("oxplow.file.save", input));
       mutateFileSession(streamId, (s) => markFileSaved(s, path, content));
       logUi("info", "saved file", { streamId, path });
@@ -1624,6 +1623,11 @@ export function App() {
         // (`reconcileSessionTabs`). A closed session, or another thread's,
         // has none: its transcript opens instead, with Reopen on it.
         const sessionId = (ref.payload as { sessionId?: string } | null)?.sessionId;
+        // The transcript lens takes the session's bare id (`ses3`).
+        const transcript = () =>
+          handleOpenPageRef.current?.(
+            lensRef("oxplow-foundation/session-transcript", { session: sessionId ?? keyOf(ref.id) ?? ref.id }),
+          );
         if (sessionId && selectedThreadSessions?.some((candidate) => candidate.id === sessionId)) {
           setCenterActive(ref.id);
         } else if (sessionId && selectedThread) {
@@ -1635,10 +1639,10 @@ export function App() {
               pendingSessionRef.current = sessionId;
               setPendingSessionTick((tick) => tick + 1);
             }
-            else handleOpenPageRef.current?.(lensRef("oxplow-foundation/session-transcript", { session: ref.id }));
+            else transcript();
           });
         } else {
-          handleOpenPageRef.current?.(lensRef("oxplow-foundation/session-transcript", { session: ref.id }));
+          transcript();
         }
         return;
       }
@@ -2655,7 +2659,7 @@ export function App() {
                     const session = selectedThreadSessions?.find((c) => c.id === sessionId);
                     const name = session ? session.displayName || sessionLabel(harnesses, session) : "session";
                     void personCommands.run(`Close ${name}`, "oxplow.agent_session.close", {
-                      session: agentSessionTarget(sessionId),
+                      session: sessionId,
                     });
                   }
                 }

@@ -1,6 +1,6 @@
 input:
   implementation: prompt_efforts
-  event: { type: thread.checkpoint, payload: { thread: "oxplow:oxplow/thread?id=thr1", turn: "oxplow:oxplow/turn?id=trn7", reason: turn_end, snapshot: "oxplow:oxplow/snapshot?id=7", changed: true, writing_tools: 2 }, anchors: { thread_id: thr1, turn_id: 7 } }
+  event: { type: thread.checkpoint, payload: { thread: thr1, turn: trn7, reason: turn_end, snapshot: 7, changed: true, writing_tools: 2 }, anchors: { thread_id: thr1, turn_id: 7 } }
   answers:
     sql.read:
       - [{ started_at: "2026-10-09T10:00:00Z" }]

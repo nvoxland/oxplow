@@ -306,7 +306,7 @@ mod tests {
                 &Actor::Human,
                 "oxplow.knowledge.add_comment",
                 json!({
-                    "stream": oxplow_domain::uri::build::keyed(oxplow_domain::uri::resources::STREAM, &stream.to_string()),
+                    "stream": stream.to_string(),
                     "target": oxplow_domain::uri::build::file_uri("src/app.rs"),
                     "quote": "the highlighted text",
                     "selectors_json": "[]",

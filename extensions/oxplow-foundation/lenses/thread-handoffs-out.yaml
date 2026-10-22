@@ -3,7 +3,8 @@ description: Work this thread handed to others, and how each ended. Withdraw one
 params: [{ name: thread_id }]
 query: |
   SELECT h.ref, h.state, tt.title AS to_thread, w.title AS item, w.ref AS item_ref,
-         h.body, h.sent_at, h.delivered_at, h.note
+         h.body, h.sent_at, h.delivered_at, h.note,
+         uri_param(h.ref, 'id') AS handoff
   FROM v_handoff h
   JOIN v_thread tt ON tt.id = h.to_thread_id
   LEFT JOIN v_work_item w ON w.ref = h.work_item
@@ -19,6 +20,6 @@ columns:
   - { key: delivered_at, label: Agent saw it }
   - { key: note, label: Their note }
 actions:
-  - { id: withdraw, label: Withdraw, command: oxplow.handoff.settle, input: { handoff: "{{row.ref}}", state: withdrawn }, row: true }
+  - { id: withdraw, label: Withdraw, command: oxplow.handoff.settle, input: { handoff: "{{row.handoff}}", state: withdrawn }, row: true }
 empty: This thread handed no work to another.
 hidden: true

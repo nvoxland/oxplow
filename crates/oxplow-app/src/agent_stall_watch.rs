@@ -218,8 +218,8 @@ mod tests {
         let (ty, v, body) = match kind {
             HookKind::UserPromptSubmit => (
                 "agent.prompt.submitted",
-                1,
-                serde_json::json!({"thread": "oxplow:oxplow/thread?id=thr1", "reprompt": false}),
+                2,
+                serde_json::json!({"thread": "thr1", "reprompt": false}),
             ),
             HookKind::PreToolUse => (
                 "agent.tool.requested",
@@ -229,8 +229,8 @@ mod tests {
             HookKind::PostToolUse => ("agent.tool.finished", 1, serde_json::json!({"tool": tool})),
             HookKind::Stop => (
                 "agent.turn.ended",
-                2,
-                serde_json::json!({"turn": "oxplow:oxplow/turn?id=trn1", "thread": "oxplow:oxplow/thread?id=thr1", "outcome": "completed"}),
+                3,
+                serde_json::json!({"turn": "trn1", "thread": "thr1", "outcome": "completed"}),
             ),
             other => panic!("{other:?} is not logged in these tests"),
         };
@@ -255,8 +255,8 @@ mod tests {
         session: oxplow_domain::AgentSessionId,
         state: AgentStatusState,
     ) {
-        let body = serde_json::json!({"thread": "oxplow:oxplow/thread?id=thr1", "state": state});
-        let mut env = oxplow_domain::Envelope::new("agent.status.changed", 1, "test", body)
+        let body = serde_json::json!({"thread": "thr1", "state": state});
+        let mut env = oxplow_domain::Envelope::new("agent.status.changed", 2, "test", body)
             .unwrap()
             .with_anchors(oxplow_domain::Anchors {
                 thread_id: Some(f.thread),

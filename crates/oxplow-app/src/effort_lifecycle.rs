@@ -11,8 +11,8 @@
 
 use async_trait::async_trait;
 use oxplow_db::SqliteEventLogStore;
-use oxplow_domain::events::schema::{EffortFinished, EffortFinishedV2};
-use oxplow_domain::uri::build::{snapshot_uri, system_source};
+use oxplow_domain::events::schema::{EffortFinished, EffortFinishedV3};
+use oxplow_domain::uri::build::system_source;
 use oxplow_domain::{DomainError, EffortId, Envelope, StoredEvent};
 
 use crate::effort_service::EffortService;
@@ -56,13 +56,13 @@ impl EffortLifecycleConsumer {
     ) -> Result<(), DomainError> {
         let env = Envelope::typed::<EffortFinished>(
             system_source(NAME),
-            &EffortFinishedV2 {
+            &EffortFinishedV3 {
                 effort: closed.envelope.payload["effort"]
                     .as_str()
                     .unwrap_or_default()
                     .to_string(),
                 work_item: effort.work_item.clone(),
-                end_snapshot: effort.end_snapshot_id.map(snapshot_uri),
+                end_snapshot: effort.end_snapshot_id,
             },
         )
         .with_anchors(oxplow_domain::Anchors {
@@ -79,15 +79,15 @@ impl EffortLifecycleConsumer {
     }
 }
 
-/// The effort an `effort.*` event is about (its `effort` payload ref): what
+/// The effort an `effort.*` event is about (its `effort` payload id): what
 /// every consumer of `effort.closed` / `effort.finished` reads.
 pub(crate) fn effort_of(event: &StoredEvent) -> Result<EffortId, DomainError> {
     let r = event.envelope.payload["effort"]
         .as_str()
         .unwrap_or_default();
-    oxplow_domain::uri::build::effort_of_uri(r).ok_or_else(|| {
+    r.parse().map_err(|_| {
         DomainError::Invalid(format!(
-            "{} seq {}: `effort` is not an effort ref: `{r}`",
+            "{} seq {}: `effort` is not an effort id: `{r}`",
             event.envelope.event_type, event.seq
         ))
     })

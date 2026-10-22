@@ -981,7 +981,7 @@ mod core_tests {
         run(
             svc,
             crate::commands::work_item::CREATE,
-            serde_json::json!({ "title": title, "thread": oxplow_domain::uri::build::thread_uri(thread) }),
+            serde_json::json!({ "title": title, "thread": thread.to_string() }),
         )
         .await["ref"]
             .as_str()
@@ -1279,8 +1279,8 @@ mod core_tests {
             &svc,
             crate::commands::handoff::SEND,
             serde_json::json!({
-                "from_thread": oxplow_domain::uri::build::thread_uri(from.id),
-                "to_thread": oxplow_domain::uri::build::thread_uri(to.id),
+                "from_thread": from.id.to_string(),
+                "to_thread": to.id.to_string(),
                 "body": "the sprocket half is yours",
             }),
         )
@@ -1301,7 +1301,7 @@ mod core_tests {
         let out = run(
             &svc,
             crate::commands::note::ADD,
-            serde_json::json!({ "thread": oxplow_domain::uri::build::thread_uri(thread.id), "body": "a note about the gadget" }),
+            serde_json::json!({ "thread": thread.id.to_string(), "body": "a note about the gadget" }),
         )
         .await;
         let note: oxplow_domain::NoteId =
@@ -1329,17 +1329,14 @@ mod core_tests {
             &svc,
             crate::commands::comment::ADD,
             serde_json::json!({
-                "stream": oxplow_domain::uri::build::stream_uri(stream.id),
-                "thread": oxplow_domain::uri::build::thread_uri(thread.id),
+                "stream": stream.id.to_string(),
+                "thread": thread.id.to_string(),
                 "target": oxplow_domain::uri::build::file_uri("src/lib.rs"),
                 "quote": "quoted text", "body": "this mentions the doohickey",
             }),
         )
         .await;
-        let comment = oxplow_domain::uri::build::keyed(
-            oxplow_domain::uri::resources::COMMENT,
-            out["comment"]["id"].as_str().unwrap(),
-        );
+        let comment = out["comment"]["id"].as_str().unwrap().to_string();
         eventually("the comment is found", || {
             found(&svc, "doohickey", Some(stream.id), "oxplow/comment")
         })
@@ -1393,7 +1390,7 @@ mod core_tests {
             &svc,
             crate::commands::effort::OPEN,
             serde_json::json!({
-                "thread": oxplow_domain::uri::build::thread_uri(thread.id),
+                "thread": thread.id.to_string(),
                 "title": "Recalibrate the flux capacitor",
             }),
         )
@@ -1409,7 +1406,7 @@ mod core_tests {
         run(
             &svc,
             crate::commands::thread::CLOSE,
-            serde_json::json!({ "thread": oxplow_domain::uri::build::thread_uri(thread.id) }),
+            serde_json::json!({ "thread": thread.id.to_string() }),
         )
         .await;
         oxplow_domain::stores::ThreadStore::archive(&*svc.thread_store, &thread.id)
@@ -1533,7 +1530,7 @@ mod core_tests {
             &svc,
             crate::commands::effort::OPEN,
             serde_json::json!({
-                "thread": oxplow_domain::uri::build::thread_uri(thread.id),
+                "thread": thread.id.to_string(),
                 "title": "Reticulate splines",
                 "work_item": item,
             }),

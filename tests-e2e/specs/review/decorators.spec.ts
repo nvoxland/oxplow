@@ -9,7 +9,7 @@ test("an accepted effort's page carries the review's verdict chip", async ({ pag
   const created = await run<{ result: { ref: string } }>(daemon, "oxplow.work_item.create", {
     title: "Wombat fix",
     state: "in_progress",
-    thread: daemon.threadUri,
+    thread: daemon.thread,
   });
   // The effort opens in the background once the item is in progress.
   let effort = "";
@@ -21,7 +21,7 @@ test("an accepted effort's page carries the review's verdict chip", async ({ pag
     return effort !== "";
   });
   expect(effort).toMatch(/^oxplow:oxplow\/effort\?id=eff\d+$/);
-  await run(daemon, "oxplow.review.accept", { ref: effort });
+  await run(daemon, "oxplow.review.accept", { effort: new URL(effort).searchParams.get("id") });
   await searchable(daemon, "Wombat fix", "work_item");
   await page.goto("/");
   await searchLauncher(page, "Wombat fix");

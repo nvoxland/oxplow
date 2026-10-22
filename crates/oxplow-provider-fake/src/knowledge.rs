@@ -196,10 +196,7 @@ pub(crate) fn answer(
                 .unwrap_or(&slug)
                 .to_string();
             let recorded = keep(pages, rev, &slug, record_of(&slug, &title, &body, false));
-            Ok((
-                json!({ "page": oxplow_domain::uri::build::wiki_uri(&slug) }),
-                vec![recorded],
-            ))
+            Ok((json!({ "page": slug }), vec![recorded]))
         }
         "delete_page" => {
             let slug = str_field(input, "slug")?;

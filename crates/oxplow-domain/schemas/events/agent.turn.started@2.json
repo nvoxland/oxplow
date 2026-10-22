@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`agent.turn.started@2`: a person's prompt opened a turn.",
+  "properties": {
+    "session": {
+      "description": "The harness session id, when it reported one.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "thread": {
+      "description": "The thread (`thr3`).",
+      "type": "string"
+    },
+    "turn": {
+      "description": "The turn (`trn12`).",
+      "type": "string"
+    }
+  },
+  "required": [
+    "turn",
+    "thread"
+  ],
+  "title": "AgentTurnStartedV2",
+  "type": "object"
+}

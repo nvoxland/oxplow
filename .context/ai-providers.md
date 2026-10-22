@@ -521,7 +521,7 @@ turn's prompt (`turn_kind`).
 Each is paid with the person's key, so neither is a read-only tool (no
 `read_only_hint`: a harness doesn't auto-approve it), each takes at most
 `AI_TEXT_MAX` (100,000) characters of text, and each records as the
-asking thread (caller `oxplow:oxplow/thread?id=<id>`, from the session's bearer); a
+asking thread (caller its thread id, `thr3`, from the session's bearer); a
 connection with no thread identity is refused. Agents can't change
 providers, roles or keys: those IPC commands are UI-only in the
 surface-parity manifest.
@@ -585,7 +585,7 @@ its source; with no model bound, the recorded ones are all there is.
 - **Core** keeps `oxplow.effort.replace_inferred_decisions`
   (`commands/reasoning.rs`, the only writer of provenance `inferred`;
   thread and work item are the effort's; recorded, confirmed and
-  dismissed rows stay; logs `effort.decisions_inferred@1 { effort,
+  dismissed rows stay; logs `effort.decisions_inferred@2 { effort,
   work_item?, count }`) and `oxplow.effort.replace_inferred_claims` (the
   only writer of `inferred` claims; it replaces the effort's inferred
   claims whose `review` is NULL, so a verified or dismissed claim and the

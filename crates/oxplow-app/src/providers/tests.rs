@@ -687,7 +687,7 @@ async fn an_outside_item_is_filed_on_the_thread_named_or_the_agents() {
         .run(
             &Actor::Human,
             crate::commands::work_item::CREATE,
-            json!({ "title": "named", "thread": oxplow_domain::uri::build::thread_uri(fx.thread) }),
+            json!({ "title": "named", "thread": fx.thread.to_string() }),
             false,
         )
         .await
@@ -854,11 +854,7 @@ async fn an_external_verb_input_is_checked_and_stays_on_its_provider() {
     let oxplow_domain::CommandError::Proposed { proposal, .. } = err else {
         panic!("{err:?}");
     };
-    let id: i64 =
-        oxplow_domain::uri::build::id_of(&proposal, oxplow_domain::uri::resources::PROPOSAL)
-            .unwrap()
-            .parse()
-            .unwrap();
+    let id = proposal;
     let kept = fx
         .svc
         .commands
@@ -5437,7 +5433,7 @@ async fn a_retry_files_on_the_tracker_active_when_sent() {
         .run(
             &Actor::Human,
             crate::commands::effect::RETRY,
-            json!({ "effect": format!("{EXT}/file"), "event": oxplow_domain::uri::build::event_uri(&ev.envelope.id.to_string()) }),
+            json!({ "effect": format!("{EXT}/file"), "event": &ev.envelope.id.to_string().to_string() }),
             true,
         )
         .await
@@ -5536,7 +5532,7 @@ async fn a_persons_retry_takes_the_place_of_a_scheduled_one() {
         .run(
             &Actor::Human,
             crate::commands::effect::RETRY,
-            json!({ "effect": format!("{EXT}/file"), "event": oxplow_domain::uri::build::event_uri(&ev.envelope.id.to_string()) }),
+            json!({ "effect": format!("{EXT}/file"), "event": &ev.envelope.id.to_string().to_string() }),
             true,
         )
         .await
@@ -5953,7 +5949,7 @@ async fn running_policy(hooks: &str) -> (EffortFixture, Extension) {
         .run(
             &Actor::Human,
             crate::commands::effort::CLOSE,
-            json!({ "effort": oxplow_domain::uri::build::effort_uri(fx.effort) }),
+            json!({ "effort": fx.effort.to_string() }),
             false,
         )
         .await
@@ -6009,7 +6005,7 @@ async fn file_task(fx: &EffortFixture) -> String {
         .run(
             &Actor::Human,
             crate::commands::work_item::CREATE,
-            json!({ "title": "policy work", "thread": oxplow_domain::uri::build::thread_uri(fx.thread) }),
+            json!({ "title": "policy work", "thread": fx.thread.to_string() }),
             false,
         )
         .await
@@ -6731,7 +6727,7 @@ async fn a_knowledge_provider_keeps_pages_and_core_records_them() {
         )
         .await
         .unwrap();
-    assert_eq!(out.result["page"], "oxplow:oxplow/wiki?slug=design");
+    assert_eq!(out.result["page"], "design");
     assert!(!project.join(".oxplow/wiki/design.md").exists());
     let body: Option<String> = fx
         .svc

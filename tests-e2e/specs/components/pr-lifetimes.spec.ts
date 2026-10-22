@@ -16,7 +16,7 @@ import { openFromLauncher } from "../../support/ui.js";
 /** Run the example's sync as a person, until `count` pull requests are
  *  collected. */
 async function collect(daemon: Daemon, count: number) {
-  await run(daemon, "oxplow.collector.sync", { collector: "oxplow:oxplow/collector?collector=github/prs" });
+  await run(daemon, "oxplow.collector.sync", { collector: "github/prs" });
   await until(`${count} pull requests to be collected`, 30_000, async () => {
     const out = await ipc<{ rows: unknown[][] }>(daemon, "query_sql", { sql: "SELECT count(*) FROM v_github_pr" });
     return out.rows[0]?.[0] === count;

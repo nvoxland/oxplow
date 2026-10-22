@@ -3,11 +3,14 @@
 //!
 //! - `uri(resource, key, value, …)` is the one way SQL spells an oxplow
 //!   URI, canonical and escaped (`.context/resources.md`); `uri_param(uri,
-//!   key)` reads one param back, `uri_resource(uri)` its resource. A NULL
-//!   value leaves its param out.
+//!   key)` reads one param back, `uri_resource(uri)` its resource and
+//!   `uri_key(uri)` the param that names it (`thr3`; anything that isn't a
+//!   URI as it was). A NULL value leaves its param out.
 //! - `ref_to_uri(text[, extension])`, `ref_kind_of(text)` and
 //!   `ref_to_uri_in_json(json, field, …)` are the migration's: an old ref
 //!   as its URI (`uri_migration`), anything else as it was.
+//! - `uri_keys_in_json(json, field, …)` is too: the named fields' URIs as
+//!   their keys (bare ids).
 
 use rusqlite::functions::{Context, FunctionFlags};
 use rusqlite::types::ValueRef;
@@ -19,9 +22,11 @@ pub(crate) fn register(c: &Connection) -> rusqlite::Result<()> {
     c.create_scalar_function("uri", -1, flags, uri)?;
     c.create_scalar_function("uri_param", 2, flags, uri_param)?;
     c.create_scalar_function("uri_resource", 1, flags, uri_resource)?;
+    c.create_scalar_function("uri_key", 1, flags, uri_key)?;
     c.create_scalar_function("ref_to_uri", -1, flags, ref_to_uri)?;
     c.create_scalar_function("ref_kind_of", 1, flags, ref_kind_of)?;
-    c.create_scalar_function("ref_to_uri_in_json", -1, flags, ref_to_uri_in_json)
+    c.create_scalar_function("ref_to_uri_in_json", -1, flags, ref_to_uri_in_json)?;
+    c.create_scalar_function("uri_keys_in_json", -1, flags, uri_keys_in_json)
 }
 
 fn fail(message: &str) -> Error {
@@ -78,6 +83,22 @@ fn uri_param(ctx: &Context<'_>) -> rusqlite::Result<Option<String>> {
 /// NULL when it isn't an oxplow URI.
 fn uri_resource(ctx: &Context<'_>) -> rusqlite::Result<Option<String>> {
     Ok(text(ctx, 0)?.and_then(|t| oxplow_domain::uri::build::resource_of(&t)))
+}
+
+/// `uri_key(uri)`: the value of the param that names a URI's resource (its
+/// bare id: `thr3`, `3`, `triage/todos`); anything that isn't an oxplow URI
+/// as it was.
+fn uri_key(ctx: &Context<'_>) -> rusqlite::Result<Option<String>> {
+    let Some(t) = text(ctx, 0)? else {
+        return Ok(None);
+    };
+    let key = oxplow_domain::uri::oxplow_uri::OxplowUri::parse(&t)
+        .ok()
+        .and_then(|u| {
+            let key = oxplow_domain::uri::build::key_param(&u.resource().to_string())?;
+            u.param(&key).map(str::to_string)
+        });
+    Ok(Some(key.unwrap_or(t)))
 }
 
 /// `ref_to_uri(text[, extension])`: an old ref as its URI
@@ -140,6 +161,55 @@ fn ref_to_uri_in_json(ctx: &Context<'_>) -> rusqlite::Result<Option<String>> {
                 .ok_or_else(|| fail("ref_to_uri_in_json() field names can't be NULL"))?;
             if let Some(value) = map.get_mut(&field) {
                 rewrite(value);
+            }
+        }
+    }
+    Ok(Some(v.to_string()))
+}
+
+/// `uri_keys_in_json(json, field, …)`: each named top-level field (or
+/// each string of it, for an array) as its URI's key (`uri_key`), a
+/// number when the field is written `<name>:int`. Absent fields stay
+/// absent; anything that isn't JSON as it was.
+fn uri_keys_in_json(ctx: &Context<'_>) -> rusqlite::Result<Option<String>> {
+    use serde_json::Value;
+    let Some(t) = text(ctx, 0)? else {
+        return Ok(None);
+    };
+    let Ok(mut v) = serde_json::from_str::<Value>(&t) else {
+        return Ok(Some(t));
+    };
+    let key_of = |v: &Value, int: bool| -> Value {
+        let Value::String(s) = v else {
+            return v.clone();
+        };
+        let key = oxplow_domain::uri::oxplow_uri::OxplowUri::parse(s)
+            .ok()
+            .and_then(|u| {
+                let key = oxplow_domain::uri::build::key_param(&u.resource().to_string())?;
+                u.param(&key).map(str::to_string)
+            })
+            .unwrap_or_else(|| s.clone());
+        match key.parse::<i64>() {
+            Ok(n) if int => Value::from(n),
+            _ => Value::String(key),
+        }
+    };
+    if let Value::Object(map) = &mut v {
+        for i in 1..ctx.len() {
+            let spec = text(ctx, i)?
+                .ok_or_else(|| fail("uri_keys_in_json() field names can't be NULL"))?;
+            let (field, int) = match spec.strip_suffix(":int") {
+                Some(f) => (f.to_string(), true),
+                None => (spec, false),
+            };
+            if let Some(value) = map.get_mut(&field) {
+                *value = match &*value {
+                    Value::Array(items) => {
+                        Value::Array(items.iter().map(|x| key_of(x, int)).collect())
+                    }
+                    other => key_of(other, int),
+                };
             }
         }
     }
@@ -224,6 +294,34 @@ mod tests {
         assert_eq!(run("SELECT uri_resource(NULL)").unwrap(), None);
     }
 
+    #[test]
+    fn uri_key_reads_the_key_and_keeps_anything_else() {
+        for (sql, want) in [
+            (
+                "SELECT uri_key('oxplow:oxplow/thread?id=thr3')",
+                Some("thr3"),
+            ),
+            ("SELECT uri_key('oxplow:oxplow/snapshot?id=3')", Some("3")),
+            (
+                "SELECT uri_key('oxplow:oxplow/commit?sha=abc1234')",
+                Some("abc1234"),
+            ),
+            (
+                "SELECT uri_key('oxplow:oxplow/collector?collector=triage/todos')",
+                Some("triage/todos"),
+            ),
+            ("SELECT uri_key('thr3')", Some("thr3")),
+            // A file has no one key: it stays a URI.
+            (
+                "SELECT uri_key('oxplow:oxplow/file?path=a.rs')",
+                Some("oxplow:oxplow/file?path=a.rs"),
+            ),
+        ] {
+            assert_eq!(run(sql).unwrap().as_deref(), want, "{sql}");
+        }
+        assert_eq!(run("SELECT uri_key(NULL)").unwrap(), None);
+    }
+
     // The migration's: an old ref as a URI, anything else as it was.
     #[test]
     fn ref_to_uri_rewrites_an_old_ref_and_keeps_anything_else() {
@@ -279,5 +377,31 @@ mod tests {
             Some("not json")
         );
         assert_eq!(run("SELECT ref_to_uri_in_json(NULL, 'ref')").unwrap(), None);
+    }
+    #[test]
+    fn uri_keys_in_json_rewrites_named_fields_to_their_keys() {
+        let json = |sql: &str| -> serde_json::Value {
+            serde_json::from_str(&run(sql).unwrap().unwrap()).unwrap()
+        };
+        assert_eq!(
+            json(
+                r#"SELECT uri_keys_in_json('{"thread":"oxplow:oxplow/thread?id=thr1","snapshot":"oxplow:oxplow/snapshot?id=3","supersedes":["oxplow:oxplow/proposal?id=9"],"work_item":"oxplow:oxplow/work_item?id=tsk1&provider=oxplow","other":"oxplow:oxplow/effort?id=eff2"}', 'thread', 'snapshot:int', 'supersedes:int', 'work_item', 'absent')"#
+            ),
+            serde_json::json!({
+                "thread": "thr1",
+                "snapshot": 3,
+                "supersedes": [9],
+                "work_item": "oxplow:oxplow/work_item?id=tsk1&provider=oxplow",
+                "other": "oxplow:oxplow/effort?id=eff2",
+            })
+        );
+        // A value already bare stays; an `:int` one becomes a number.
+        assert_eq!(
+            json(
+                r#"SELECT uri_keys_in_json('{"thread":"thr1","claim":"7"}', 'thread', 'claim:int')"#
+            ),
+            serde_json::json!({ "thread": "thr1", "claim": 7 })
+        );
+        assert_eq!(run("SELECT uri_keys_in_json(NULL, 'ref')").unwrap(), None);
     }
 }

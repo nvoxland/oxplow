@@ -39,7 +39,8 @@ query: |
             FROM v_token_usage k WHERE k.turn_id = u.id) AS tokens,
          u.started_at AS at,
          u.ref AS turn_ref,
-         e.ref AS effort_ref
+         e.ref AS effort_ref,
+         uri_param(e.ref, 'id') AS effort
   FROM turns u
   LEFT JOIN v_effort e ON e.id = u.effort_id
   ORDER BY u.started_at DESC, u.id DESC
@@ -55,5 +56,5 @@ columns:
   - { key: tokens, label: Tokens }
   - { key: at, label: When }
 actions:
-  - { id: close, label: Close Effort, command: oxplow.effort.close, input: { effort: "{{row.effort_ref}}" }, row: true }
+  - { id: close, label: Close Effort, command: oxplow.effort.close, input: { effort: "{{row.effort}}" }, row: true }
 empty: No turns on this thread yet.

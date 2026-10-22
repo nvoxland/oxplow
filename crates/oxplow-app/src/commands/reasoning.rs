@@ -19,7 +19,7 @@ use oxplow_db::reasoning_store::{
     NewDecision,
 };
 use oxplow_db::thread_store::get_tx as thread_tx;
-use oxplow_domain::events::schema::{EffortDecisionsInferred, EffortDecisionsInferredV1};
+use oxplow_domain::events::schema::{EffortDecisionsInferred, EffortDecisionsInferredV2};
 use oxplow_domain::uri::build::validate_work_item_uri;
 use oxplow_domain::{CommandError, ThreadId};
 use rusqlite::OptionalExtension;
@@ -28,7 +28,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use super::thread::acting_thread;
-use super::util::{invalid, parse, ref_id, schema, sql};
+use super::util::{bare_id, invalid, parse, schema, sql};
 use super::{Handler, HandlerOutput, TxCtx};
 
 pub const RECORD_DECISION: &str = "oxplow.effort.record_decision";
@@ -38,7 +38,7 @@ pub const REPLACE_INFERRED_DECISIONS: &str = "oxplow.effort.replace_inferred_dec
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct DecisionInput {
-    /// The thread (`oxplow:oxplow/thread?id=thr3`); an agent's is always its own.
+    /// The thread (`thr3`); an agent's is always its own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thread: Option<String>,
     /// The work item it was made on (`oxplow:oxplow/work_item?id=tsk42&provider=oxplow`); absent,
@@ -64,7 +64,7 @@ pub struct DecisionInput {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct InferredClaimsInput {
-    /// The effort (`oxplow:oxplow/effort?id=eff12`).
+    /// The effort (`eff12`).
     pub effort: String,
     /// What it holds after: every claim no reviewer acted on is replaced.
     #[schemars(length(max = 8))]
@@ -116,7 +116,7 @@ impl ClaimKind {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct InferredDecisionsInput {
-    /// The effort (`oxplow:oxplow/effort?id=eff12`).
+    /// The effort (`eff12`).
     pub effort: String,
     /// What it holds after: every inferred decision it had is replaced.
     #[schemars(length(max = 8))]
@@ -278,7 +278,7 @@ pub fn replace_inferred_decisions_op() -> Op {
         false,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: InferredDecisionsInput = parse(input)?;
-            let effort: oxplow_domain::EffortId = ref_id(
+            let effort: oxplow_domain::EffortId = bare_id(
                 &input.effort,
                 oxplow_domain::uri::resources::EFFORT,
                 "/effort",
@@ -303,14 +303,14 @@ pub fn replace_inferred_decisions_op() -> Op {
             let effort_ref = oxplow_domain::uri::build::effort_uri(effort);
             let event = ctx
                 .events
-                .typed::<EffortDecisionsInferred>(&EffortDecisionsInferredV1 {
-                    effort: effort_ref.clone(),
+                .typed::<EffortDecisionsInferred>(&EffortDecisionsInferredV2 {
+                    effort: effort.to_string(),
                     work_item: work_item.clone(),
                     count: count as u32,
                 })
                 .with_subject(vec![effort_ref.clone()]);
             Ok(HandlerOutput {
-                result: json!({ "effort": effort_ref, "count": count }),
+                result: json!({ "effort": effort.to_string(), "count": count }),
                 events: vec![event],
                 ..HandlerOutput::default()
             })
@@ -333,7 +333,7 @@ pub fn replace_inferred_claims_op() -> Op {
         false,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: InferredClaimsInput = parse(input)?;
-            let effort: oxplow_domain::EffortId = ref_id(
+            let effort: oxplow_domain::EffortId = bare_id(
                 &input.effort,
                 oxplow_domain::uri::resources::EFFORT,
                 "/effort",
@@ -357,7 +357,7 @@ pub fn replace_inferred_claims_op() -> Op {
                     .map_err(CommandError::from)?;
             Ok(HandlerOutput {
                 result: json!({
-                    "effort": oxplow_domain::uri::build::effort_uri(effort),
+                    "effort": effort.to_string(),
                     "count": count,
                 }),
                 ..HandlerOutput::default()
@@ -494,7 +494,7 @@ mod tests {
                 &effect,
                 REPLACE_INFERRED_DECISIONS,
                 json!({
-                    "effort": oxplow_domain::uri::build::effort_uri(fx.effort),
+                    "effort": fx.effort.to_string(),
                     "decisions": [
                         { "question": "Which CSV library?", "choice": "csv crate",
                           "alternatives": ["hand-rolled"], "why": "quoting" },
@@ -635,7 +635,7 @@ mod tests {
                 &effect,
                 REPLACE_INFERRED_CLAIMS,
                 json!({
-                    "effort": oxplow_domain::uri::build::effort_uri(fx.effort),
+                    "effort": fx.effort.to_string(),
                     "claims": [
                         { "statement": "The parser tests pass.", "kind": "tests_pass" },
                     ],
@@ -706,7 +706,7 @@ mod tests {
                 &effect,
                 REPLACE_INFERRED_CLAIMS,
                 json!({
-                    "effort": oxplow_domain::uri::build::effort_uri(fx.effort),
+                    "effort": fx.effort.to_string(),
                     "claims": [{ "statement": "x", "kind": "vibes" }],
                 }),
                 false,
@@ -731,7 +731,7 @@ mod tests {
         let one = json!({ "question": "q", "choice": "c" });
         let effort = oxplow_domain::uri::build::effort_uri(fx.effort);
         for input in [
-            json!({ "effort": "oxplow:oxplow/effort?id=eff999", "decisions": [one] }),
+            json!({ "effort": "eff999", "decisions": [one] }),
             json!({ "effort": effort, "decisions": vec![one.clone(); 9] }),
             json!({ "effort": effort, "decisions": [{ "question": "q", "choice": "c", "confidence": "sure" }] }),
         ] {

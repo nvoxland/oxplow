@@ -25,10 +25,10 @@ describe("bookmarks", () => {
   test("set names the page, its kind and the thread before the stream", () => {
     const ref = { id: "oxplow:oxplow/page?page=git-dashboard", kind: "git-dashboard", payload: null } as never;
     expect(setBookmarkInput({ threadId: "thr3", streamId: "str2" }, ref, "Git", "project")).toEqual({
-      ref: "oxplow:oxplow/page?page=git-dashboard", page_kind: "git-dashboard", label: "Git", scope: "project", thread: "oxplow:oxplow/thread?id=thr3",
+      ref: "oxplow:oxplow/page?page=git-dashboard", page_kind: "git-dashboard", label: "Git", scope: "project", thread: "thr3",
     });
     expect(setBookmarkInput({ threadId: null, streamId: "str2" }, ref, null, "stream")).toEqual({
-      ref: "oxplow:oxplow/page?page=git-dashboard", page_kind: "git-dashboard", scope: "stream", stream: "oxplow:oxplow/stream?id=str2",
+      ref: "oxplow:oxplow/page?page=git-dashboard", page_kind: "git-dashboard", scope: "stream", stream: "str2",
     });
   });
 });

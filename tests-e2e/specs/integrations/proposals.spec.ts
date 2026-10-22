@@ -8,7 +8,7 @@ import { expect, test } from "../../support/fixtures.js";
 test("an effect's destructive step waits in Alerts until a person approves it", async ({ fresh }) => {
   const { page, daemon } = fresh;
   await page.goto("/");
-  await run(daemon, "oxplow.work_item.create", { title: "Pear [delete]", thread: daemon.threadUri });
+  await run(daemon, "oxplow.work_item.create", { title: "Pear [delete]", thread: daemon.thread });
   // The status bar's bell counts it once the effect has run (it runs in the
   // background, so wait for that), and opens the Alerts page, where it waits.
   const bell = page.getByTestId("alerts-indicator");

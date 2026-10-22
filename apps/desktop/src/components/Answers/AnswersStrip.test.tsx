@@ -146,7 +146,7 @@ test("Keep This asks for a slug inline; Enter keeps it with lens.keep, Escape ca
   fireEvent.click(view.getByTestId("thread-answer-keep"));
   fireEvent.change(view.getByTestId("thread-answer-slug"), { target: { value: "churn" } });
   fireEvent.submit(view.getByTestId("thread-answer-slug"));
-  await waitFor(() => expect(commands).toEqual([["oxplow.lens.keep", { answer: "oxplow:oxplow/answer?id=2", slug: "churn" }]]));
+  await waitFor(() => expect(commands).toEqual([["oxplow.lens.keep", { answer: 2, slug: "churn" }]]));
   // Kept: a link to the lens replaces Keep This.
   await waitFor(() => expect(view.getByTestId("thread-answer-lens").textContent).toContain("my-lenses/churn"));
   expect(view.queryByTestId("thread-answer-keep")).toBeNull();

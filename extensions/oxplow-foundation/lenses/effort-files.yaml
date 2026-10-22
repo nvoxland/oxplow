@@ -1,11 +1,11 @@
 title: Effort files
 description: The files an effort changed, with how.
 params:
-  - { name: effort, label: Effort (`oxplow:oxplow/effort?id=eff9`) }
+  - { name: effort, label: Effort (`eff9`) }
 query: |
   SELECT f.path, f.change_kind, f.source
   FROM v_effort_file f
-  WHERE f.effort_id = (SELECT id FROM v_effort WHERE ref = :effort)
+  WHERE f.effort_id = (SELECT id FROM v_effort WHERE ref = uri('oxplow/effort', 'id', :effort))
   ORDER BY f.path
 columns:
   - { key: path, label: File, link: { kind: file, from: path } }

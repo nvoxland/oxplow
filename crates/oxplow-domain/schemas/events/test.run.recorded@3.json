@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`test.run.recorded@3`: a test run was captured (`oxplow:oxplow/run?id=<capture>`).",
+  "properties": {
+    "command": {
+      "type": "string"
+    },
+    "exit_code": {
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "failed": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "passed": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "report_parsed": {
+      "description": "A test report was found and parsed (else the run is command-only).",
+      "type": "boolean"
+    },
+    "run": {
+      "description": "The run's id (its capture).",
+      "format": "int64",
+      "type": "integer"
+    },
+    "skipped": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "source": {
+      "description": "Who produced it: `post-tool-bash`, `exec:<collector ids>` (an `exec`\ncollector's program parsed its report), `mcp`.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "run",
+    "command",
+    "report_parsed",
+    "source"
+  ],
+  "title": "TestRunRecordedV3",
+  "type": "object"
+}

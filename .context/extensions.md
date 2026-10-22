@@ -687,7 +687,8 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     - `input` is the command's input. A string that is exactly
       `{{param.<name>}}` or `{{row.<column>}}` becomes that value, typed
       (a number stays a number); a string containing them has them spliced
-      in as text. The values go into the command's input, never into SQL.
+      in as text. `{{param.<name>.id}}` is the key of a URI param, for a
+      field that takes a bare id. The values go into the command's input, never into SQL.
       One tokenizer reads them (`oxplow_domain::template` — every
       template's, a command's `ui.input` and `open_after` too), for
       load-time validation and run-time binding alike, so the two can't
@@ -1004,12 +1005,12 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
 
   **Its verdicts (P7.C5, the first bundled `commands:`)**, on an
   effort's page under **Commands** (their `ui.about: effort`):
-  `oxplow.review.accept { ref, force? }` comments the review on the
+  `oxplow.review.accept { effort, force? }` comments the review on the
   effort's work item then transitions it to `done`, refusing (`{ refuse }`)
   while a claim is unverified (a dismissed one doesn't count) or an
   inferred decision unreviewed unless
   `force` (then it lists them in the comment);
-  `oxplow.review.request_changes { ref, note? }` comments a checklist —
+  `oxplow.review.request_changes { effort, note? }` comments a checklist —
   each unverified claim, inferred decision, file outside the area, and
   the note — then transitions to `todo`. A claim, decision or path is
   spliced in through `md_text` (one inert line: an agent's claim can't
@@ -2504,7 +2505,7 @@ ref: "{{ref}}" } }`) is offered on a URI of it: its page's nav-bar
 **Commands** menu (`RefCommandsMenu`, beside Ask) and a row's right-click
 menu for the row's ref (lens rows, by the first ref the row links to —
 `rowRef` — and Board cards), grouped by `ui.group`. Its input's strings
-may be exactly `{{ref}}` / `{{ref.id}}` (or `{{stream}}` / `{{thread}}`),
+may be exactly `{{ref}}` / `{{ref.id}}` (or `{{stream}}` / `{{thread}}`, which expand to bare ids; `{{ref.id}}` is the URI's key),
 and without an `input` it gets `{ ref: "{{ref}}" }`. The desktop builds
 them from the person's command listing (`refOffers`,
 `components/refCommands.ts`) and runs each as search does (App publishes
@@ -3266,9 +3267,9 @@ event_types:
 
 **Promoted to stable (P9.D6)** on the evidence rule every kind is held to
 — a first-party, shared extension depending on it: oxplow-bundled's
-`oxplow_bundled.accepted@1 { effort, work_item, unverified, inferred,
-deviated }` and `oxplow_bundled.changes_requested@1 { effort, work_item,
-unverified, inferred, deviated, note? }`, which `accept.star` and `request_changes.star` return in
+`oxplow_bundled.accepted@2 { effort, work_item, unverified, inferred,
+deviated }` and `oxplow_bundled.changes_requested@2 { effort, work_item,
+unverified, inferred, deviated, note? }` (`effort` is the bare id, `eff12`; v1 held its URI and an upcast reads it), which `accept.star` and `request_changes.star` return in
 `events:` (subjects: the effort, its work item and, for an acceptance, the
 claims and decisions it took unchecked; caused by the run's
 `command.executed`). They replaced a single `verdict@1` type, whose
@@ -3678,7 +3679,7 @@ schema, shared (`Command::with_handler`) — over what the script composed
 `CommandBus::run_effect` as `Actor::Effect` with
 `RunOrigin::Effect(key)`: its `command.executed@4` is caused by the
 triggering event, and the reaction's `effect_run` row and
-`effect.result@4 { effect, event, outcome, reason?, proposal?, attempt,
+`effect.result@5 { effect, event, outcome, reason?, proposal?, attempt,
 origin }` (caused by that run) land **in the run's transaction**; with a step outside it, a
 `started` claim commits first (`claim`) and the record finishes it; a
 command that asks becomes a proposal whose transaction records
@@ -3709,7 +3710,7 @@ attempt:
 - when the event was logged doesn't matter (`start_after_seq` is the live
   consumer's rule; the person named the event);
 - it counts toward the effect's health like any attempt, and is recorded
-  `effect.result@4 { …, attempt, origin: retry }` (v3 upcasts keeping its
+  `effect.result@5 { …, attempt, origin: retry }` (v3 upcasts keeping its
   attempt and origin; v2 as `attempt: 1, origin: live`).
 
 It asks every time because of what a failure can hide: an attempt
@@ -3749,7 +3750,7 @@ what the effect reads now — the person decides it should. A loop every 5 s (`s
 after the provider registry's first generation, so the providers the
 config names are up; tsk915 — one row's error logged and the rest
 going on, tsk932) runs what is
-due as the next attempt, `origin: auto` (`effect.result@4`), on the event
+due as the next attempt, `origin: auto` (`effect.result@5`), on the event
 at its newest version (`at_latest`, as every runner hands it over; one that
 no longer upcasts drops the retry — tsk911), when the effect is still
 there, enabled and running as deployed now and the retry is at most an hour
@@ -4394,8 +4395,7 @@ tool: open_work              # offered as <namespace>_open_work
   `file_history { path, limit }` and `recent_commits { limit }` (the indexed
   log; `oxplow_vcs_log` goes past it), `snapshots { stream?, limit }` (with
   parent, trigger and whether it ran over budget) and `thread_notes
-  { thread }`. Params take URIs (`oxplow:oxplow/thread?id=thr3`,
-  `oxplow:oxplow/effort?id=eff9`, `oxplow:oxplow/stream?id=str1`). Each reads published `v_*` models only, so it works with
+  { thread }`. Params take bare ids (`thr3`, `eff9`, `str1`). Each reads published `v_*` models only, so it works with
   the bundled extension off.
 - Every agent-invokable command stays reachable through `run_command`
   whether or not it's a tool: a tool is a named entry for the ones an
@@ -5094,7 +5094,7 @@ commands:
   Two dispatchers racing for a queued job: the revision check lets one
   claim it. A repeat of an intent is the same job; the same intent with
   other input is refused as a conflict, even when the queue is full.
-- **Its end** is the event `contribution.job.completed@1 { job_run, job,
+- **Its end** is the event `contribution.job.completed@2 { job_run, job,
   version, attempt, fence, outcome: succeeded | failed | cancelled |
   interrupted }` (`job_run` and `job` refs; an effect keeps to one job with
   `where: { job: "job:<extension>/<id>" }`), logged once, at the real end, in the

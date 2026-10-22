@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`command.approved@2`: a person approved a proposal and the command ran\nas them, audited as `audit_id`.",
+  "properties": {
+    "audit_id": {
+      "description": "The approving run's `command_audit` row.",
+      "format": "int64",
+      "type": "integer"
+    },
+    "command": {
+      "type": "string"
+    },
+    "proposal": {
+      "description": "The proposal's id.",
+      "format": "int64",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "proposal",
+    "command",
+    "audit_id"
+  ],
+  "title": "CommandApprovedV2",
+  "type": "object"
+}

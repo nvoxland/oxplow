@@ -31,7 +31,7 @@ use oxplow_domain::snapshot::{
     MarkRequest, Marked, SnapshotError, SnapshotProvider, SnapshotRegistry,
 };
 use oxplow_domain::tree_diff::FileChange;
-use oxplow_domain::uri::build::{effort_uri, stream_uri, thread_uri};
+use oxplow_domain::uri::build::{effort_uri, thread_uri};
 use oxplow_domain::vcs::Revision;
 use oxplow_domain::{InputValidator, StreamId, Timestamp};
 use serde::Deserialize;
@@ -371,7 +371,7 @@ impl SnapshotProvider for ExternalSnapshots {
             .next();
         let parent = newest.as_ref().and_then(|op| op.handle.clone());
         let mut input = json!({
-            "stream": stream_uri(request.stream),
+            "stream": request.stream.to_string(),
             "worktree": capture.project_dir().to_string_lossy(),
             "trigger": request.trigger.as_db_str(),
             "parent": parent,
@@ -410,7 +410,7 @@ impl SnapshotProvider for ExternalSnapshots {
                 .call(
                     "changed",
                     json!({
-                        "stream": stream_uri(request.stream),
+                        "stream": request.stream.to_string(),
                         "from": parent,
                         "to": marked.handle,
                     }),

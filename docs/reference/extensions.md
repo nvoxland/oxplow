@@ -396,13 +396,19 @@ commands:
   `uri.param(u, name)`, `uri.id(u, resource=)`, `uri.resource(u)` and
   `uri.is_uri(v)` read one. In SQL, select a model's `ref` column and
   compare URIs to URIs (`WHERE ref = :ref`); build one with
-  `uri('oxplow/effort', 'id', 'eff' || id)` and read a param with
-  `uri_param(ref, 'id')`. Don't concatenate `'oxplow:oxplow/effort?id=' || id`
-  or slice a URI. A URI can outlive what it names, so store it even when
+  `uri('oxplow/effort', 'id', json_extract(e.payload, '$.effort'))` and
+  read a param with `uri_param(ref, 'id')`. Don't concatenate
+  `'oxplow:oxplow/effort?id=' || id` or slice a URI. A field named for one
+  resource (a command input `thread`, `effort`, `session`, `claim`, an event
+  payload field) carries that resource's bare id, not a URI: a lens or form
+  that feeds one selects `uri_param(x.ref, 'id')` (or the model's integer
+  `id` for a claim or decision), and a script builds a URI with
+  `uri.build("oxplow/effort", id = e)` only where it becomes a link target
+  or is compared with a `ref`. A URI can outlive what it names, so store it even when
   the thing may go.
 - `ui` says how a person meets it. `about` names a resource
-  (`oxplow/work_item`, `acme/pr`) and offers the command on a URI of it, its page and rows. `input` binds `{{stream}}`, `{{thread}}`,
-  `{{ref}}` or `{{ref.id}}`, each as a whole string. `form` opens a
+  (`oxplow/work_item`, `acme/pr`) and offers the command on a URI of it, its page and rows. `input` binds `{{stream}}` and `{{thread}}` (bare ids),
+  `{{ref}}` (the page's URI) or `{{ref.id}}` (its key), each as a whole string. `form` opens a
   page to gather the input instead; offered on a URI (`about`), the page
   opens with `ref=<uri>`, which a `pages:` lens form prefills from with
   `defaults: { ref: "{{param.ref}}" }`. `open_after` opens a URI once it

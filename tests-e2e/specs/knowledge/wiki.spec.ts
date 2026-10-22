@@ -5,7 +5,7 @@ import { openFromLauncher, searchLauncher, workItemIdOf } from "../../support/ui
 test("a written page renders, and a task link in it opens the task", async ({ page, daemon }) => {
   const created = await run<{ result: { ref: string } }>(daemon, "oxplow.work_item.create", {
     title: "Wombat follow-up",
-    thread: daemon.threadUri,
+    thread: daemon.thread,
   });
   await run(daemon, "oxplow.knowledge.write_page", {
     slug: "wombat-plan",

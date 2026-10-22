@@ -41,8 +41,14 @@ Carry refs; never assemble or dissect them:
   `v_decision.ref`, `v_thread.ref`, `v_work_item.ref`, …) — each an
   oxplow URI (`oxplow:oxplow/effort?id=eff12`) — and compare URIs to URIs:
   `WHERE ref = :ref`. To build one, `uri(resource, key1, value1, …)`:
-  `uri('oxplow/effort', 'id', 'eff' || id)`; to read a param back,
-  `uri_param(ref, 'id')`. Never `'oxplow:…' || id` or `substr(ref, …)`.
+  `uri('oxplow/effort', 'id', json_extract(e.payload, '$.effort'))` (an event
+  payload field named for one resource holds a bare id); to read a param back,
+  `uri_param(ref, 'id')`. Never `'oxplow:…' || id`, `'eff' || id` or `substr(ref, …)`.
+- **A field named for one resource is a bare id, not a URI**: a command
+  input `thread` is `thr3`, `effort` is `eff12`, `claim` is the integer `7`.
+  Select `uri_param(t.ref, 'id')` to feed one; `{{param.x.id}}` does the
+  same in an action's input. A URI goes only where a field can name anything
+  (`ref`, `target`, `subject`) and for work items.
 - **To link one lens to another from SQL**, `uri('oxplow/lens', 'lens',
   'oxplow-bundled/thread-activity', 'thread_id', thread_id)` gives
   `oxplow:oxplow/lens?lens=oxplow-bundled/thread-activity&thread_id=7`

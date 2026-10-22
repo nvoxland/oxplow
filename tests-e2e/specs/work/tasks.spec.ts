@@ -43,7 +43,7 @@ test("a task made elsewhere appears without a reload", async ({ fresh }) => {
   await expandRailSection(page, "ext:oxplow-bundled/work");
   await expect(page.getByTestId("rail-section-ext:oxplow-bundled/work")).toBeVisible();
   await waitForModels(daemon, ["v_work_item"], () =>
-    run(daemon, "oxplow.work_item.create", { title: "Made elsewhere", thread: daemon.threadUri }),
+    run(daemon, "oxplow.work_item.create", { title: "Made elsewhere", thread: daemon.thread }),
   );
   await expect(page.getByTestId("rail-section-ext:oxplow-bundled/work")).toContainText("Made elsewhere");
 });

@@ -5,7 +5,7 @@ query: |
   SELECT h.ref, h.state, ft.title AS from_thread,
          coalesce(s.display_name, 'the person') AS sender,
          w.title AS item, w.ref AS item_ref,
-         h.body, h.sent_at, h.delivered_at, h.note
+         h.body, h.sent_at, h.delivered_at, h.note, uri_param(h.ref, 'id') AS handoff
   FROM v_handoff h
   JOIN v_thread ft ON ft.id = h.from_thread_id
   LEFT JOIN v_agent_session s ON s.id = h.from_session_id
@@ -23,11 +23,11 @@ columns:
   - { key: sent_at, label: Sent }
   - { key: delivered_at, label: Agent saw it }
 actions:
-  - { id: take, label: Take, command: oxplow.handoff.resolve, input: { handoff: "{{row.ref}}", outcome: taken }, row: true }
+  - { id: take, label: Take, command: oxplow.handoff.resolve, input: { handoff: "{{row.handoff}}", outcome: taken }, row: true }
   - id: decline
     label: Decline…
     command: oxplow.handoff.resolve
-    input: { handoff: "{{row.ref}}", outcome: declined }
+    input: { handoff: "{{row.handoff}}", outcome: declined }
     row: true
     form: true
     fixed: [handoff, outcome]

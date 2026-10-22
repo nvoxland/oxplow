@@ -200,7 +200,7 @@ pub fn spawn(svc: std::sync::Arc<Services>) {
 /// Announce a stream's changed diagnostics: `code.diagnostics.changed@1`
 /// per file with its counts now.
 async fn announce(svc: &Services, stream_id: i64, paths: BTreeSet<String>) {
-    use oxplow_domain::events::schema::{CodeDiagnosticsChanged, CodeDiagnosticsChangedV1};
+    use oxplow_domain::events::schema::{CodeDiagnosticsChanged, CodeDiagnosticsChangedV2};
     let stream = oxplow_domain::StreamId::new(stream_id);
     for path in paths {
         let counts = match svc.diagnostic_store.counts(stream_id, path.clone()).await {
@@ -212,8 +212,8 @@ async fn announce(svc: &Services, stream_id: i64, paths: BTreeSet<String>) {
         };
         let env = oxplow_domain::Envelope::typed::<CodeDiagnosticsChanged>(
             oxplow_domain::uri::build::system_source("lsp_diagnostics"),
-            &CodeDiagnosticsChangedV1 {
-                stream: oxplow_domain::uri::build::stream_uri(stream),
+            &CodeDiagnosticsChangedV2 {
+                stream: stream.to_string(),
                 path: path.clone(),
                 counts,
             },
@@ -438,13 +438,7 @@ mod tests {
         };
         let first = logged_n(1).await;
         assert_eq!(first[0]["path"], "src/a.rs");
-        assert_eq!(
-            first[0]["stream"],
-            oxplow_domain::uri::build::keyed(
-                oxplow_domain::uri::resources::STREAM,
-                &format!("{}", stream.id)
-            )
-        );
+        assert_eq!(first[0]["stream"], stream.id.to_string());
         assert_eq!(first[0]["counts"]["error"], 1);
 
         let wait = changed(&mut events);

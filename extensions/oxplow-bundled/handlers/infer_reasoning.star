@@ -6,7 +6,7 @@
 # record and the claims it stated — into one digest, newest kept when it's long, and asks the
 # `reasoning` job for both lists in one call: the forks the agent resolved
 # without recording them, and the claims its answers made about its work.
-# The intent key names the effort (`reasoning:<effort ref>`), so asking
+# The intent key names the effort (`reasoning:<effort id>`, as `reasoning:eff3`), so asking
 # twice returns the same job; `again` asks a new one (`…@<n>`), which a
 # changed binding or new activity answers afresh. The `store-reasoning`
 # effect stores what comes back.
@@ -54,12 +54,10 @@ def read(sql, effort_id):
 
 def transform(x):
     effort = x["input"]["effort"]
-    if not uri.is_uri(effort) or uri.resource(effort) != "oxplow/effort":
-        return {"refuse": "`effort` is an effort ref, `oxplow:oxplow/effort?id=<id>`"}
     found = scope("sql.read", {
         "sql": "SELECT e.id, e.work_item, coalesce(w.title, '') AS title FROM v_effort e "
-        + "LEFT JOIN v_work_item w ON w.ref = e.work_item WHERE e.ref = :ref",
-        "params": {"ref": effort},
+        + "LEFT JOIN v_work_item w ON w.ref = e.work_item WHERE e.ref = uri('oxplow/effort', 'id', :effort)",
+        "params": {"effort": effort},
     })
     if not found:
         return {"refuse": "no effort " + effort}

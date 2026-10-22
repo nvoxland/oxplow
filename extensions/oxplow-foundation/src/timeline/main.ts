@@ -51,7 +51,7 @@ const QUERIES: Record<string, string> = {
   thread: `SELECT 'thread', ref, title, created_at, closed_at
              FROM v_thread
             WHERE created_at < ?2 AND COALESCE(closed_at, ?2) > ?1
-              AND (?3 IS NULL OR ref = uri('oxplow/thread', 'id', 'thr' || ?3))
+              AND (?3 IS NULL OR id = ?3)
             ORDER BY created_at DESC`,
   commit: `SELECT 'commit', ref, subject, committed_at, NULL
              FROM v_commit

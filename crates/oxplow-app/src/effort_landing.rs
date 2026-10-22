@@ -17,7 +17,7 @@ use std::sync::{Arc, Weak};
 
 use async_trait::async_trait;
 use oxplow_domain::events::schema::{
-    EffortLanded, EffortLandedV1, EventType as _, VcsCommitIndexed, VcsCommitIndexedV1,
+    EffortLanded, EffortLandedV2, EventType as _, VcsCommitIndexed, VcsCommitIndexedV2,
 };
 use oxplow_domain::stores::AgentTurnStore as _;
 use oxplow_domain::uri::build::{effort_uri, system_source};
@@ -118,18 +118,12 @@ impl AsyncEventConsumer for EffortLandingConsumer {
         let Some(svc) = self.services.upgrade() else {
             return Err(DomainError::Busy("services are shutting down".into()));
         };
-        let indexed: VcsCommitIndexedV1 = serde_json::from_value(event.envelope.payload.clone())
+        let indexed: VcsCommitIndexedV2 = serde_json::from_value(event.envelope.payload.clone())
             .map_err(|e| DomainError::Invalid(format!("vcs.commit.indexed: {e}")))?;
         let Some(stream) = event.envelope.anchors.stream_id else {
             return Ok(());
         };
-        let Ok(sha) = oxplow_domain::uri::build::id_of(
-            &indexed.commit,
-            oxplow_domain::uri::resources::COMMIT,
-        ) else {
-            return Ok(());
-        };
-        let sha = sha.as_str();
+        let sha = indexed.commit.as_str();
         let ws = svc
             .worktrees
             .resolve(Some(&stream.to_string()))
@@ -143,8 +137,8 @@ impl AsyncEventConsumer for EffortLandingConsumer {
             crate::commit_links::link(&svc, sha, &effort).await?;
             let env = Envelope::typed::<EffortLanded>(
                 system_source(NAME),
-                &EffortLandedV1 {
-                    effort: effort_uri(effort.id),
+                &EffortLandedV2 {
+                    effort: effort.id.to_string(),
                     commit: indexed.commit.clone(),
                     complete,
                 },
@@ -155,7 +149,10 @@ impl AsyncEventConsumer for EffortLandingConsumer {
                 effort_id: Some(effort.id),
                 ..Default::default()
             })
-            .with_subject([effort_uri(effort.id), indexed.commit.clone()])
+            .with_subject([
+                effort_uri(effort.id),
+                oxplow_domain::uri::build::commit_uri(&indexed.commit),
+            ])
             .with_cause(event.envelope.id.clone())
             .with_dedupe_key(format!("effort.landed:{}:{sha}", effort.id));
             match svc.event_log_store.append(env).await {
@@ -217,6 +214,28 @@ mod tests {
     }
 
     async fn landed(f: &EffortFixture) -> Vec<(String, bool)> {
+        let dbg = f
+            .svc
+            .db
+            .read(|c| {
+                let mut st = c.prepare("SELECT * FROM event_dead_letter").unwrap();
+                let n = st.column_count();
+                let rows: Vec<String> = st
+                    .query_map([], |r| {
+                        let mut o = String::new();
+                        for i in 0..n {
+                            o += &format!("{:?}|", r.get_ref(i).unwrap());
+                        }
+                        Ok(o)
+                    })
+                    .unwrap()
+                    .map(|x| x.unwrap())
+                    .collect();
+                Ok(rows)
+            })
+            .await
+            .unwrap();
+        eprintln!("DBG {dbg:?}");
         f.svc
             .event_log_store
             .read_after(0, 10_000)
@@ -253,7 +272,7 @@ mod tests {
         claim(&f, "mine.rs").await;
         commit_all(&root, "mine");
         index(&f).await;
-        assert_eq!(landed(&f).await, vec![(effort_uri(f.effort), true)]);
+        assert_eq!(landed(&f).await, vec![(f.effort.to_string(), true)]);
         assert_eq!(closed_by(&f).await.as_deref(), Some("commit"));
     }
 
@@ -269,7 +288,7 @@ mod tests {
         claim(&f, "a.rs").await;
         claim(&f, "b.rs").await;
         index(&f).await;
-        assert_eq!(landed(&f).await, vec![(effort_uri(f.effort), false)]);
+        assert_eq!(landed(&f).await, vec![(f.effort.to_string(), false)]);
         assert_eq!(closed_by(&f).await, None);
 
         std::fs::write(root.join("b.rs"), "fn b() { 1 }\n").unwrap();
@@ -315,7 +334,7 @@ mod tests {
         std::fs::write(root.join("shell.rs"), "fn shell() {}\n").unwrap();
         commit_all(&root, "shell");
         index(&f).await;
-        assert_eq!(landed(&f).await, vec![(effort_uri(f.effort), true)]);
+        assert_eq!(landed(&f).await, vec![(f.effort.to_string(), true)]);
     }
 
     /// A commit, then more edits in the same turn: the commit closes the

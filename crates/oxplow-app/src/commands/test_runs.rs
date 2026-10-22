@@ -23,7 +23,7 @@ pub const RECORD_RUN: &str = "oxplow.test.record_run";
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RecordRunInput {
-    /// The thread (`oxplow:oxplow/thread?id=thr3`); an agent's is always its own.
+    /// The thread (`thr3`); an agent's is always its own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thread: Option<String>,
     /// The command that ran the tests.
@@ -126,7 +126,7 @@ mod tests {
         };
         let out = sync(
             agent.clone(),
-            json!({ "collector": "oxplow:oxplow/collector?collector=project/tests.coverage" }),
+            json!({ "collector": "project/tests.coverage" }),
         )
         .await
         .unwrap();
@@ -141,14 +141,14 @@ mod tests {
 
         let err = sync(
             Actor::Human,
-            json!({ "collector": "oxplow:oxplow/collector?collector=project/tests.coverage" }),
+            json!({ "collector": "project/tests.coverage" }),
         )
         .await
         .unwrap_err();
         assert!(matches!(err, CommandError::Invalid { .. }), "{err:?}");
         let err = sync(
             agent,
-            json!({ "collector": "oxplow:oxplow/collector?collector=project/other", "thread": "oxplow:oxplow/thread?id=thr1" }),
+            json!({ "collector": "project/other", "thread": "thr1" }),
         )
         .await
         .unwrap_err();
@@ -199,7 +199,7 @@ mod tests {
                 RECORD_RUN,
                 json!({
                     "command": "cargo test",
-                    "thread": oxplow_domain::uri::build::keyed(oxplow_domain::uri::resources::THREAD, &format!("{}", fx.thread)),
+                    "thread": format!("{}", fx.thread).to_string(),
                     "passed": 1, "failed": 0, "total": 1,
                 }),
                 false,

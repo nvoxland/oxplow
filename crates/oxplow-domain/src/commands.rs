@@ -886,13 +886,13 @@ pub enum CommandError {
     /// error stays small on the hot `Result` paths.
     NeedsConfirmation { preview: Box<Preview> },
     /// An agent's run needed a person's confirmation, so it was kept as a
-    /// proposal (`oxplow:oxplow/proposal?id=<id>`) for a person to approve or decline.
+    /// proposal (its id, `proposal`) for a person to approve or decline.
     /// Nothing ran; nothing else was written.
     Proposed {
-        proposal: String,
+        proposal: i64,
         preview: Box<Preview>,
-        /// The pending proposals of the same call it replaced.
-        supersedes: Vec<String>,
+        /// The ids of the pending proposals of the same call it replaced.
+        supersedes: Vec<i64>,
     },
     /// The handler failed.
     Failed { message: String },
@@ -936,14 +936,15 @@ impl std::fmt::Display for CommandError {
             } => {
                 write!(
                     f,
-                    "`{}` needs a person's approval; it is recorded as {proposal}",
+                    "`{}` needs a person's approval; it is recorded as proposal {proposal}",
                     preview.command
                 )?;
                 if !preview.details.is_empty() {
                     write!(f, " ({})", preview.details.join("; "))?;
                 }
                 if !supersedes.is_empty() {
-                    write!(f, " (replaces {})", supersedes.join(", "))?;
+                    let ids: Vec<String> = supersedes.iter().map(i64::to_string).collect();
+                    write!(f, " (replaces proposals {})", ids.join(", "))?;
                 }
                 Ok(())
             }

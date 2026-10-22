@@ -7,19 +7,19 @@
 input:
   setup:
     - { command: oxplow.work_item.create, input: { title: Parse blocks } }
-    - { command: oxplow.effort.open, input: { thread: "oxplow:oxplow/thread?id=thr1", work_item: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" } }
+    - { command: oxplow.effort.open, input: { thread: thr1, work_item: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" } }
     - { command: oxplow.test.record_run, as: agent, input: { command: cargo test, passed: 12, failed: 0, total: 12 } }
-    - { command: oxplow.effort.close, input: { effort: "oxplow:oxplow/effort?id=eff1" } }
+    - { command: oxplow.effort.close, input: { effort: "eff1" } }
   job: review
-  intentKey: "review:oxplow:oxplow/effort?id=eff1"
+  intentKey: "review:eff1"
   request:
     schemaVersion: 1
     role: summarize
     messages:
-      - { role: user, parts: [{ type: text, text: "Review oxplow:oxplow/effort?id=eff1." }] }
+      - { role: user, parts: [{ type: text, text: "Review eff1." }] }
   model:
     replies:
-      - { toolCalls: [{ name: effort_evidence, arguments: { effort: "oxplow:oxplow/effort?id=eff1" } }] }
+      - { toolCalls: [{ name: effort_evidence, arguments: { effort: "eff1" } }] }
       - { when: "cargo test", text: "All 12 tests of cargo test passed." }
 expect:
   state: succeeded

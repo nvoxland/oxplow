@@ -30,6 +30,8 @@ never part of the identity. Model columns and command inputs still say
 3. **Two things stay strict:** the grammar (a malformed URI is refused at
    every write) and the event log (a subject must be a URI of a declared
    resource whose params hold).
+4. **A field named for one resource carries its bare id, not a URI**
+   ("Bare ids" below). A URI is for a field that can name anything.
 
 | Where | Build | Read |
 |---|---|---|
@@ -44,6 +46,35 @@ never part of the identity. Model columns and command inputs still say
 (shipped `.star`, lens and model SQL, embedded Starlark templates) refuse
 a hand-built or hand-parsed URI outside the builders. When one fires, the
 fix is a builder or reader — never a string.
+
+## Bare ids
+
+A field whose name already fixes the resource — a command input, a
+command result, an event payload field — carries that resource's **bare
+id**, the id type's own spelling. A URI there adds only length, escaping,
+a parse step and a wrong-resource error. Rust parses one with
+`commands::util::bare_id::<T>(raw, resource, field)`, which refuses a URI
+saying the id it names.
+
+| Field | Bare id |
+|---|---|
+| `thread`, `from_thread`, `to_thread`, `stream`, `effort`, `turn`, `session` (an agent session), `note`, `handoff`, `comment` | the prefixed id: `thr3`, `str1`, `eff12`, `trn4`, `ses2`, `not3`, `hnd1`, `cmt5` |
+| `snapshot`, `parent`, `start_snapshot`, `end_snapshot`, `claim`, `decision`, `proposal`, `supersedes`, `answer`, `run` | a JSON integer |
+| `event`, `job_run` | the UUID |
+| `collector`, `lens`, `job` | the contribution id: `triage/todos` |
+| `commit`, vcs.head.moved `from` / `to` | the sha |
+| knowledge.page.* `page` | the slug |
+
+**What stays a URI:** a field that can name anything (`ref` when it isn't
+fixed, `target`, `subject`, `evidence`, comment `context_chain` /
+`referenced`, impacts, navigate / bookmark / page targets, a metric's
+`subject`, `open_after`), event subjects, and **work items everywhere**
+(`work_item`, an item's `ref`, `parent_ref`, `before`, `after`): an item's
+id is unique only with its provider. Models keep integer ids
+(`v_thread.id = 3`); SQL that feeds a fixed input reads the key from the
+row's URI (`uri_param(t.ref, 'id')`), never `'thr' || id`. In Starlark,
+build the URI (`uri.build("oxplow/effort", id = e)`) only where a bare id
+becomes a link or is compared with a model's `ref`.
 
 ## The grammar
 
@@ -240,6 +271,15 @@ fields (and `work_item.recorded`'s item); `command.executed` payloads and
 executed audit inputs stay as history. Tables restated at boot (the
 `contribution` table) are emptied; an extension kind's search entries go
 and rebuild from its view. On a 1.5 GB local database it takes about 30 s.
+
+## The bare-id migration (V100)
+
+`V100__bare_ids.sql` moved the fields of "Bare ids" off URIs, through
+`uri_keys_in_json(json, field, …)` (a field written `<name>:int` becomes
+a number): every event type whose payload changed, at its new version
+(no reader carries an upcast, as at V70); undo inverses; pending
+proposals, whose old refs V99 missed (it looked for a NULL decision, not
+`'pending'`). A job's `intent_key` is immutable and keeps an embedded URI.
 
 ## The desktop
 

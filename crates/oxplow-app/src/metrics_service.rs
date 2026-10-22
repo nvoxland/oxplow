@@ -3141,7 +3141,7 @@ mod tests {
                 c.query_row(
                     "SELECT (SELECT count(*) FROM metric_capture WHERE producer = 'repo.once'),
                             (SELECT count(*) FROM event_log WHERE type = 'collector.synced'
-                               AND json_extract(payload, '$.collector') = 'oxplow:oxplow/collector?collector=project/repo.once')",
+                               AND json_extract(payload, '$.collector') = 'project/repo.once')",
                     [],
                     |r| Ok((r.get(0)?, r.get(1)?)),
                 )
@@ -3287,12 +3287,9 @@ mod tests {
     ) -> oxplow_domain::StoredEvent {
         let env = oxplow_domain::Envelope::typed::<oxplow_domain::events::schema::SnapshotTaken>(
             "system",
-            &oxplow_domain::events::schema::SnapshotTakenV2 {
-                stream: "oxplow:oxplow/stream?id=1".into(),
-                snapshot: oxplow_domain::uri::build::keyed(
-                    oxplow_domain::uri::resources::SNAPSHOT,
-                    &snap.to_string(),
-                ),
+            &oxplow_domain::events::schema::SnapshotTakenV3 {
+                stream: "str1".into(),
+                snapshot: snap,
                 parent: None,
                 trigger,
                 unchanged,

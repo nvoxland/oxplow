@@ -1,7 +1,7 @@
 # An effort with no turns and no tool calls asks nothing.
 input:
   command: oxplow.effort.infer_reasoning
-  input: { effort: "oxplow:oxplow/effort?id=eff7" }
+  input: { effort: "eff7" }
   answers:
     sql.read:
       - [{ id: 7, work_item: null, title: "" }]

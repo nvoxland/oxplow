@@ -138,7 +138,7 @@ async fn until_on(svc: &crate::Services, id: &str, done: impl Fn(&Value) -> bool
         let snapshot = run_on(
             svc,
             "triage.summary.result",
-            json!({ "job_run": oxplow_domain::uri::build::job_run_uri(id) }),
+            json!({ "job_run": id.to_string() }),
         )
         .await;
         if done(&snapshot) {

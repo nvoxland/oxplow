@@ -952,7 +952,8 @@ pub async fn load_component_pinned(
 }
 
 /// `input` with its placeholders bound: a string that is exactly
-/// `{{param.x}}` / `{{row.x}}` becomes that value (typed), one that
+/// `{{param.x}}` / `{{row.x}}` becomes that value (typed), `{{param.x.id}}`
+/// the key of the URI param `x` (a bare id), and a string that
 /// contains them has them spliced in as text. The values are data — they
 /// go into the command's input, never into SQL.
 pub fn bind_input(
@@ -962,11 +963,19 @@ pub fn bind_input(
 ) -> Result<Value, CommandError> {
     let lookup = |scope: &str, name: &str| -> Result<SqlCell, CommandError> {
         let found = match scope {
-            "param" => params.get(name),
-            "row" => row.and_then(|r| r.get(name)),
+            "param" => params.get(name).cloned().or_else(|| {
+                // `x.id`: the key of the URI param `x`.
+                let SqlCell::Text(uri) = params.get(name.strip_suffix(".id")?)? else {
+                    return None;
+                };
+                let u = oxplow_domain::uri::oxplow_uri::OxplowUri::parse(uri).ok()?;
+                let key = oxplow_domain::uri::build::key_param(&u.resource().to_string())?;
+                u.param(&key).map(|k| SqlCell::Text(k.to_string()))
+            }),
+            "row" => row.and_then(|r| r.get(name)).cloned(),
             _ => None,
         };
-        found.cloned().ok_or_else(|| CommandError::Invalid {
+        found.ok_or_else(|| CommandError::Invalid {
             field: Some("/input".into()),
             message: format!("`{{{{{scope}.{name}}}}}` has no value here"),
         })
@@ -1308,7 +1317,7 @@ actions:
             .run(
                 &Actor::Human,
                 "oxplow.thread.close",
-                json!({ "thread": oxplow_domain::uri::build::thread_uri(closed.id) }),
+                json!({ "thread": closed.id.to_string() }),
                 false,
             )
             .await
@@ -1324,13 +1333,13 @@ actions:
         .await
         .unwrap();
         assert_eq!(start.command.id, "oxplow.handoff.send");
-        assert_eq!(start.values["from_thread"], json!(me));
+        assert_eq!(start.values["from_thread"], json!(fx.thread.to_string()));
         assert_eq!(start.fixed, vec!["from_thread".to_string()]);
         let recipients: Vec<(&str, &str)> = start.choices["to_thread"]
             .iter()
             .map(|c| (c.value.as_str(), c.label.as_str()))
             .collect();
-        let other_ref = oxplow_domain::uri::build::thread_uri(other.id);
+        let other_ref = other.id.to_string();
         assert_eq!(recipients, vec![(other_ref.as_str(), "Docs")]);
         assert!(start.choices["to_thread"][0].group.is_some());
         let items: Vec<&str> = start.choices["work_item"]
@@ -1536,6 +1545,23 @@ actions:
         assert_eq!(bound, json!({ "a": 3, "b": "tsk42", "c": [42], "d": 1 }));
         let err = bind_input(&json!({ "a": "{{row.id}}" }), &params, None).unwrap_err();
         assert!(err.to_string().contains("row.id"), "{err}");
+    }
+
+    /// `{{param.x.id}}` is the key of the URI param `x` — a fixed field's
+    /// bare id from a page's `ref`.
+    #[test]
+    fn a_params_id_is_the_key_of_its_uri() {
+        let params = BTreeMap::from([(
+            "ref".to_string(),
+            SqlCell::Text("oxplow:oxplow/thread?id=thr3".into()),
+        )]);
+        let bound = bind_input(
+            &json!({ "from_thread": "{{param.ref.id}}", "t": "on {{param.ref.id}}" }),
+            &params,
+            None,
+        )
+        .unwrap();
+        assert_eq!(bound, json!({ "from_thread": "thr3", "t": "on thr3" }));
     }
 
     /// P6.B2: a form lens submits its command as the lens, its defaults

@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use super::thread::agent_scope;
-use super::util::{invalid, parse, ref_id, schema, sql};
+use super::util::{bare_id, invalid, parse, schema, sql};
 use super::{Handler, HandlerOutput, Invocation, TxCtx};
 
 pub const CREATE: &str = "oxplow.stream.create";
@@ -64,7 +64,7 @@ pub struct CreateInput {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ArchiveInput {
-    /// The stream (`oxplow:oxplow/stream?id=str2`).
+    /// The stream (`str2`).
     pub stream: String,
     /// Also remove its working copy from disk.
     #[serde(default)]
@@ -74,7 +74,7 @@ pub struct ArchiveInput {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RenameInput {
-    /// The stream (`oxplow:oxplow/stream?id=str1`).
+    /// The stream (`str1`).
     pub stream: String,
     pub title: String,
 }
@@ -82,7 +82,7 @@ pub struct RenameInput {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SetPromptInput {
-    /// The stream (`oxplow:oxplow/stream?id=str1`).
+    /// The stream (`str1`).
     pub stream: String,
     /// Appended to every agent prompt in this stream; empty (or only
     /// whitespace) or absent clears it.
@@ -275,7 +275,7 @@ pub fn archive_op(deps: StreamDeps) -> Op {
                 use crate::agent_status_derive::{derive_session_status, recent_activity};
                 use oxplow_domain::stores::{AgentSessionStore as _, ThreadStore as _};
                 let input: ArchiveInput = parse(input)?;
-                let id = ref_id(&input.stream, oxplow_domain::uri::resources::STREAM, "/stream")?;
+                let id = bare_id(&input.stream, oxplow_domain::uri::resources::STREAM, "/stream")?;
                 // Refused before anything changes: nothing below runs for a
                 // stream that can't be archived.
                 deps.streams.archivable(&id).await.map_err(session)?;
@@ -373,7 +373,7 @@ pub fn rename_op() -> Op {
         true,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: RenameInput = parse(input)?;
-            let id = ref_id(
+            let id = bare_id(
                 &input.stream,
                 oxplow_domain::uri::resources::STREAM,
                 "/stream",
@@ -415,7 +415,7 @@ pub fn set_prompt_op() -> Op {
             let input: SetPromptInput = parse(input)?;
             let mut stream = load(
                 ctx,
-                ref_id(
+                bare_id(
                     &input.stream,
                     oxplow_domain::uri::resources::STREAM,
                     "/stream",
@@ -474,7 +474,7 @@ mod tests {
     async fn rename_undoes_and_the_prompt_is_a_persons() {
         let fx = services_with_effort().await;
         let s = primary(&fx).await;
-        let r = stream_uri(s.id);
+        let r = s.id.to_string();
         let out = fx
             .svc
             .commands
@@ -500,7 +500,7 @@ mod tests {
             .run(
                 &agent(&fx),
                 RENAME,
-                json!({ "stream": "oxplow:oxplow/stream?id=str99", "title": "x" }),
+                json!({ "stream": "str99", "title": "x" }),
                 false,
             )
             .await
@@ -551,7 +551,7 @@ mod tests {
     #[tokio::test]
     async fn archiving_asks_first_and_is_a_persons() {
         let fx = services_with_effort().await;
-        let r = stream_uri(primary(&fx).await.id);
+        let r = primary(&fx).await.id.to_string();
         let err = fx
             .svc
             .commands
@@ -764,7 +764,7 @@ mod tests {
             .run(
                 &Actor::Human,
                 ARCHIVE,
-                json!({ "stream": stream_uri(side) }),
+                json!({ "stream": side.to_string() }),
                 true,
             )
             .await
@@ -826,7 +826,7 @@ mod tests {
             .run(
                 &Actor::Human,
                 ARCHIVE,
-                json!({ "stream": stream_uri(side), "delete_worktree": true }),
+                json!({ "stream": side.to_string(), "delete_worktree": true }),
                 true,
             )
             .await

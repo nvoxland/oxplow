@@ -8,7 +8,7 @@ import { searchLauncher } from "../../support/ui.js";
 test("search finds a task and a wiki page, and opens them", async ({ page, daemon }) => {
   const created = await run<{ result: { ref: string } }>(daemon, "oxplow.work_item.create", {
     title: "Quokka migration",
-    thread: daemon.threadUri,
+    thread: daemon.thread,
   });
   await run(daemon, "oxplow.knowledge.write_page", { slug: "quokka-notes", title: "Quokka notes", body: "# Quokka notes\n\nWhat we know.\n" });
   await searchable(daemon, "quokka", "work_item");

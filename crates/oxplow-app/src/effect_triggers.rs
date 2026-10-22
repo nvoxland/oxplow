@@ -1131,7 +1131,7 @@ mod tests {
                 "SELECT json_extract(payload, '$.outcome'), json_extract(payload, '$.event'), cause FROM v_event WHERE type = 'effect.result'",
             )
             .await,
-            json!([["ok", oxplow_domain::uri::build::keyed(oxplow_domain::uri::resources::EVENT, &format!("{}", ev.envelope.id)), executed[0][0]]])
+            json!([["ok", ev.envelope.id.to_string(), executed[0][0]]])
         );
     }
 
@@ -1475,7 +1475,7 @@ mod tests {
             .run(
                 actor,
                 crate::commands::effect::RETRY,
-                json!({ "effect": "acme/mark-done", "event": oxplow_domain::uri::build::keyed(oxplow_domain::uri::resources::EVENT, &format!("{}", ev.envelope.id)) }),
+                json!({ "effect": "acme/mark-done", "event": format!("{}", ev.envelope.id).to_string() }),
                 confirmed,
             )
             .await
@@ -1524,7 +1524,7 @@ mod tests {
         let out = retry(svc, &human, &ev, true).await.unwrap();
         assert_eq!(
             out.result,
-            json!({ "effect": "acme/mark-done", "event": oxplow_domain::uri::build::keyed(oxplow_domain::uri::resources::EVENT, &format!("{}", ev.envelope.id)), "attempt": 2, "outcome": "ok" })
+            json!({ "effect": "acme/mark-done", "event": format!("{}", ev.envelope.id).to_string(), "attempt": 2, "outcome": "ok" })
         );
         assert_eq!(
             title(&fx).await,
@@ -1545,7 +1545,7 @@ mod tests {
                 "SELECT v, json_extract(payload, '$.attempt'), json_extract(payload, '$.origin'), json_extract(payload, '$.outcome') FROM v_event WHERE type = 'effect.result' ORDER BY seq"
             )
             .await,
-            json!([[4, 1, "live", "failed"], [4, 2, "retry", "ok"]])
+            json!([[5, 1, "live", "failed"], [5, 2, "retry", "ok"]])
         );
         // It succeeded: nothing left to retry, and a redelivery of the
         // event still runs nothing.
@@ -1598,7 +1598,7 @@ mod tests {
             .run(
                 &human,
                 crate::commands::effect::RETRY,
-                json!({ "effect": "acme/nope", "event": oxplow_domain::uri::build::keyed(oxplow_domain::uri::resources::EVENT, &format!("{}", ev.envelope.id)) }),
+                json!({ "effect": "acme/nope", "event": format!("{}", ev.envelope.id).to_string() }),
                 true,
             )
             .await

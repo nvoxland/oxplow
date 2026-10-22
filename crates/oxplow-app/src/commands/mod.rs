@@ -67,8 +67,8 @@ use oxplow_db::{
     SqliteProposalStore, TxError,
 };
 use oxplow_domain::events::schema::{
-    CommandApproved, CommandApprovedV1, CommandDeclined, CommandDeclinedV1, CommandExecuted,
-    CommandExecutedV4, CommandOutcome as Outcome, CommandProposed, CommandProposedV2,
+    CommandApproved, CommandApprovedV2, CommandDeclined, CommandDeclinedV2, CommandExecuted,
+    CommandExecutedV4, CommandOutcome as Outcome, CommandProposed, CommandProposedV3,
 };
 use oxplow_domain::uri::build::{command_uri, proposal_uri};
 use oxplow_domain::{

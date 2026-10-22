@@ -670,7 +670,7 @@ works (a finding, why it paused) and what an Explore subagent fills in
 row has `id`, `thread_id`, `body`, `author` (free-form: `agent`, `user`,
 `explore-subagent`) and `created_at`. Its ref is `thread_note:not<n>`;
 its `[[…]]` links are `page_ref` edges from `thread_note`, and each
-change logs `knowledge.note.written@2` / `deleted@2` (V31 rewrote the
+change logs `knowledge.note.written@3` / `deleted@3` (V31 rewrote the
 v1 rows, which named the note `task_note:not<n>`, and v1 went). `v_thread_note` reads it,
 `v_search_thread_note` indexes it (`thread_ref` on `v_thread_note`, v3, is
 where a note opens: its thread).
@@ -720,9 +720,9 @@ migrations then ran with foreign keys on, where rebuilding the table
 cascaded away the child rows. In Rust
 `Effort.work_item` is `Option<String>`; `start_tx(conn, ev,
 work_item: Option<&str>, …)` and `finish_tx(conn, ev, id, &EffortEnd)`;
-the events are `effort.opened@2` / `effort.closed@2` (with `closed_by`) /
-`effort.finished@2`, plus `effort.linked@1` and
-`effort.retitled@1`. Opening an effort on a thread that has one open
+the events are `effort.opened@3` / `effort.closed@3` (with `closed_by`) /
+`effort.finished@3`, plus `effort.linked@2` and
+`effort.retitled@2`. Opening an effort on a thread that has one open
 closes that one first (`switch`).
 
 **Adoption and as-of closes.** `start_tx(conn, ev, &EffortStart)` may
@@ -949,8 +949,8 @@ turn opened (set in the open transaction); `snapshot_id` is the snapshot
 the worktree was at when it ended — set in the `turn_end` take's
 transaction (`record_take` stamps it whenever the take carries a
 `turn_id`). The turn's changes are start → end, like an effort's. `agent_turn.task_id` is gone (nothing ever set
-it). `agent_turn` open/close log `agent.turn.started@1` /
-`agent.turn.ended@2` in the same transaction as the row change;
+it). `agent_turn` open/close log `agent.turn.started@2` /
+`agent.turn.ended@3` in the same transaction as the row change;
 `event_log` has a `turn_id` index. `SqliteAgentTurnStore::
 stream_has_open_turn` answers "is an agent mid-turn on this worktree?".
 
@@ -962,7 +962,7 @@ whose harness said nothing (opencode when the bridge can't read its last
 message), has NULLs. The `AgentTurn` struct doesn't carry them: SQL reads
 them.
 
-**Plans an agent proposed are events, not a table.** `agent.plan.proposed@1`
+**Plans an agent proposed are events, not a table.** `agent.plan.proposed@2`
 (`thread`, `turn?`, `text`, `path?`), logged by hook ingest when Claude's
 `ExitPlanMode` is requested or Codex completes a `plan` item, anchored to
 the turn and the open effort; `v_agent_plan` (a model over `event_log`, no
@@ -976,7 +976,7 @@ recorded. See `agent-model.md` "Plans".
 request, cache reads and writes included; `context_window` the model's
 window. Claude Code and opencode give no window, so it is NULL there; a
 turn open, or whose harness said nothing, has NULLs. A compaction is an
-event, `agent.context.compacted@1`, not a column.
+event, `agent.context.compacted@2`, not a column.
 
 **Effort↔snapshot linkage lives on the effort row.** There is no
 `effort_id` or `source` column on `snapshot` / `file_snapshot`
@@ -1010,7 +1010,7 @@ deleted. The sweep's reverse-deletion pass tombstones oversize files too
 the dirty set and hands the rows to `SqliteSnapshotStore::record_take`,
 which writes — in **one transaction** — the new `snapshot` row (with
 `branch`, `revision` when the tree is clean, and `tree_hash`), its
-`file_snapshot` rows, one `snapshot_op` row and a `snapshot.taken@2`
+`file_snapshot` rows, one `snapshot_op` row and a `snapshot.taken@3`
 event (anchors: stream, thread, turn, effort, snapshot). It is the only
 production write path; `create_snapshot` / `capture` / `capture_batch` /
 `set_snapshot_revision` / `set_snapshot_branch` remain as fixture
@@ -1046,14 +1046,14 @@ seeders for tests.
   manual, git_refs, head_moved, run_measured` (`oxplow_domain::snapshot::
   SnapshotTrigger`). The ops backfilled for snapshots taken before the op
   log existed read `manual` (V71). `run_measured`
-  (V161, `snapshot.taken@2`) is the take that pins a run's coverage and
+  (V161, `snapshot.taken@3`) is the take that pins a run's coverage and
   analysis to the code it measured (see [collection.md](./collection.md)).
 - **HEAD moved on a clean tree** is its own op: `record_head_moved`
   re-stamps the snapshot the caller saw the clean tree at — refusing if a
   take has moved the stream on since (tsk440), and the git-refs path
   holds the take lock from its drain through the stamp — with the new
   `revision` (and flips every
-  exact-pin file ref on it) with a `head_moved` op and `vcs.head.moved@1`,
+  exact-pin file ref on it) with a `head_moved` op and `vcs.head.moved@2`,
   in one transaction. The git-refs listener runs a `git_refs` take first
   (draining anything dirty), then this.
 - Takes are **serialized** per stream (`take_lock`) and each caller
@@ -1326,7 +1326,10 @@ Every stored `source_uri` / `target_uri` is a canonical URI (see
 - `oxplow/thread_note` — `?id=not<n>`
 
 V99 rewrote the stored rows from the old `(kind, id)` pairs; the boot
-backfill regenerates the derived ones.
+backfill regenerates the derived ones. `V100__bare_ids.sql` then moved the
+event payload fields named for one resource (and undo inverses, pending
+proposals) from URIs to bare ids, at new event versions; see
+[resources.md](./resources.md) "The bare-id migration (V100)".
 
 **Writers own slices by `ref_type`.** A single `source_uri`
 can have rows from multiple owners — a work item's body,
@@ -1613,7 +1616,7 @@ and are registered by `crate::boot` — a test that wants them calls their
 | `config.extensions` / `config.providers` / `config.metrics` | async | `config.changed` (`extensions`; `extensionInstances`, `activeProviders`; any key) | after the in-memory swap: the extension catalog's change signal; the provider registry reconciles; the metric catalog reseeds (P7.B6) | boot.rs |
 | `extension_models.entities` | async | `collector.synced` | the extension models compile again (a new entity may let one) (P7.B6) | boot.rs |
 | `change.analyze` | async | `snapshot.taken` (that recorded files), `vcs.head.moved` | re-analyzes the stream's working change and open efforts' changes, skipping an event a newer one supersedes; dead-letters a failure naming the stream (P7.B4) | boot.rs |
-| `collector.triggers` | async | what enabled collectors' `on:` name (never `collector.synced`) | runs each matching collector for the event, once per event (`collector_run.last_event_id`): an entity collector's rows, or a fact collector through the fact engine (`snapshot.taken`: a delta collector only when the take recorded files, a whole-tree one on every take; `effort.finished` over the effort's end snapshot; anything else over the stream's latest snapshot) — plus `collector_run` and `collector.synced@1` (P7.B3; replaced `effort.gauges` and the metrics bus `SnapshotTaken` arm) | boot.rs |
+| `collector.triggers` | async | what enabled collectors' `on:` name (never `collector.synced`) | runs each matching collector for the event, once per event (`collector_run.last_event_id`): an entity collector's rows, or a fact collector through the fact engine (`snapshot.taken`: a delta collector only when the take recorded files, a whole-tree one on every take; `effort.finished` over the effort's end snapshot; anything else over the stream's latest snapshot) — plus `collector_run` and `collector.synced@2` (P7.B3; replaced `effort.gauges` and the metrics bus `SnapshotTaken` arm) | boot.rs |
 
 **Async consumers (P2.6.2, tsk454).** `trait AsyncEventConsumer { name,
 after() -> Vec<String>, handles(type), async handle(&StoredEvent) }`
@@ -1658,12 +1661,11 @@ pins the stream's last snapshot at or before `started_at` instead
 effort's own work. `on_effort_closed` takes and pins the
 `effort_end` snapshot (falling back to the start pin), projects the
 lifecycle metrics, then logs
-**`effort.finished@2 { effort, work_item?, end_snapshot? }`**
+**`effort.finished@3 { effort, work_item?, end_snapshot? }`**
 (caused by the `effort.closed`, dedupe key `effort.finished:<effort>` so a
-re-delivery's second append is a no-op). `effort` is the URI
-(`oxplow:oxplow/effort?id=eff12`), never a bare id: every consumer reads it through
-`effort_lifecycle::effort_of` (over `uri::build::effort_of_uri`), so no
-consumer parses it its own way. Re-delivery is safe: pins are stamped only
+re-delivery's second append is a no-op). `effort` is the bare id
+(`eff12`): every consumer reads it through
+`effort_lifecycle::effort_of`, so no consumer parses it its own way. Re-delivery is safe: pins are stamped only
 while NULL (`set_start_snapshot` / `set_end_snapshot`), the lifecycle
 metrics stop when the effort already has its `effort-lifecycle` capture,
 `effort.finished` is deduped, and
@@ -1730,8 +1732,8 @@ body-mention edges on `work_item.created` and re-projects them on
 
 **Effort events.** `effort_store::start_tx` and `finish_tx` — the only
 cores that open or close an effort — append
-`effort.opened@2 { effort, work_item?, thread, start_snapshot? }` and
-`effort.closed@2 { effort, work_item?, end_snapshot?, closed_by? }`
+`effort.opened@3 { effort, work_item?, thread, start_snapshot? }` and
+`effort.closed@3 { effort, work_item?, end_snapshot?, closed_by? }`
 themselves, so every path logs: the `effort.*` commands, `oxplow.thread.close`,
 `oxplow.stream.archive`, and the async `start` / `finish` / `close`. They are
 v2 only (V8 moved logged v1 rows to v2 and stripped the old
@@ -2135,7 +2137,7 @@ entity after the last good run), `cursor_json` (its opaque checkpoint)
 and `last_event_id` (the last trigger event it ran for; it never moves
 back). A failed run keeps the last good counts and cursor.
 `record_run_in` runs in the transaction that writes the run's rows and
-logs its `collector.synced@1`. Read as `v_collector_run`; see
+logs its `collector.synced@2`. Read as `v_collector_run`; see
 [semantic-layer.md](./semantic-layer.md) "Collectors".
 
 ### `effect_run` — `crates/oxplow-db/src/effect_run_store.rs`
@@ -2242,7 +2244,7 @@ NULL when it can't be dry-run), and `decision` — `pending`, `approved`
 `oxplow.config.unset`, else the command and its input with keys sorted;
 `insert_tx` marks pending rows with the same key `superseded` (with
 `superseded_by`) and returns which (`Inserted { id, superseded }`, for
-`command.proposed@2.supersedes`). `approve_tx` / `decline_tx` decide a
+`command.proposed@3.supersedes`). `approve_tx` / `decline_tx` decide a
 pending row once — a decided one is `Invalid`, a missing one `NotFound`.
 An `External` command's approval is the claim trio instead: `claim_tx`
 marks it approved with no `audit_id` before the run, `finish_claim_tx`
@@ -2253,8 +2255,8 @@ before, after, changed }`, a composite `{ result, children: [{ name,
 input, result, inverse? }] }`, any other command its own result. No
 expiry. Written
 inside the bus's transactions; read as `v_command_proposal` (ref
-`proposal:<id>`). Events `command.proposed@2`, `command.approved@1`,
-`command.declined@1`.
+`proposal:<id>`). Events `command.proposed@3`, `command.approved@2`,
+`command.declined@2`.
 
 ### `page_visit` — `PageVisitStore` (`crates/oxplow-db/src/analytics_stores.rs`)
 
@@ -2547,7 +2549,7 @@ Draft V54 widens command_audit actor_kind to include `job`, retaining every
 column/row, proposal audit links, the refused-audit index and AUTOINCREMENT
 high-water. The rebuild uses the migration transaction and legacy rename mode;
 the runner turns foreign_keys off around migrations. It has not been executed.
-ActorKindV2 preserves command.proposed@2's actor kinds; command.executed@4
+ActorKindV2 preserves command.proposed@3's actor kinds; command.executed@4
 adds a custom component (`component`) to v3's (V93 rewrote v3 events, each
 a v4 one as is). command.proposed remains v2 because neither a job nor a
 component (which acts for a person) creates a confirmation proposal.

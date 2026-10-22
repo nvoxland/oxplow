@@ -718,10 +718,7 @@ mod tests {
         let written = dev(p, &["wiki", "write", "wombats", "--file", &body])
             .await
             .unwrap();
-        assert!(
-            written.contains("oxplow:oxplow/wiki?slug=wombats"),
-            "{written}"
-        );
+        assert!(written.contains(r#""page": "wombats""#), "{written}");
         assert!(p.join(".oxplow/wiki/wombats.md").is_file());
         assert!(dev(p, &["wiki", "list"])
             .await

@@ -642,7 +642,7 @@ async fn job_example(
                 .run(
                     &Actor::Human,
                     &snapshot,
-                    json!({ "job_run": oxplow_domain::uri::build::job_run_uri(&job) }),
+                    json!({ "job_run": &job.to_string() }),
                     false,
                 )
                 .await
@@ -665,7 +665,7 @@ async fn job_example(
             .run(
                 &asker,
                 &cancel,
-                json!({ "job_run": oxplow_domain::uri::build::job_run_uri(&job) }),
+                json!({ "job_run": &job.to_string() }),
                 false,
             )
             .await
@@ -684,7 +684,7 @@ async fn job_example(
             .run(
                 &Actor::Human,
                 &snapshot,
-                json!({ "job_run": oxplow_domain::uri::build::job_run_uri(&job) }),
+                json!({ "job_run": &job.to_string() }),
                 false,
             )
             .await
@@ -3043,12 +3043,12 @@ def transform(x):
     thread = e["anchors"].get("thread_id")
     if to == "in_progress" and thread != None:
         return {"commands": [{"name": "oxplow.effort.open",
-                              "input": {"thread": uri.build("oxplow/thread", id = thread), "work_item": item}}]}
+                              "input": {"thread": thread, "work_item": item}}]}
     if to == "done" or to == "canceled":
         rows = scope("sql.read", {"sql": "SELECT ref FROM v_effort WHERE work_item = :w AND ended_at IS NULL",
                                   "params": {"w": item}})
         return {"commands": [{"name": "oxplow.effort.close",
-                              "input": {"effort": r["ref"], "reason": "switch"}}
+                              "input": {"effort": uri.param(r["ref"], "id"), "reason": "switch"}}
                              for r in rows]}
     return {"skip": "a move that changes no effort"}
 "#;
@@ -3079,7 +3079,7 @@ implementations:
             root,
             ".oxplow/extensions/acme/fixtures/basic.yaml",
             &format!(
-                "input: {{ implementation: tidy, event: {{ type: thread.checkpoint, payload: {{ thread: \"oxplow:oxplow/thread?id=thr1\", turn: \"oxplow:oxplow/turn?id=trn1\", reason: turn_end, snapshot: \"oxplow:oxplow/snapshot?id=1\", changed: false, writing_tools: 0 }} }} }}\nexpect: {basic_expect}\n"
+                "input: {{ implementation: tidy, event: {{ type: thread.checkpoint, payload: {{ thread: thr1, turn: trn1, reason: turn_end, snapshot: 1, changed: false, writing_tools: 0 }} }} }}\nexpect: {basic_expect}\n"
             ),
         );
         write(
@@ -3090,7 +3090,7 @@ implementations:
         write(
             root,
             ".oxplow/extensions/acme/fixtures/finish.yaml",
-            "input: { implementation: tidy, event: { type: work_item.state_changed, payload: { work_item: \"work_item:oxplow:tsk1\", to: done } }, answers: { sql.read: [[{ ref: \"effort:eff3\" }]] } }\nexpect: { commands: [oxplow.effort.close] }\n",
+            "input: { implementation: tidy, event: { type: work_item.state_changed, payload: { work_item: \"work_item:oxplow:tsk1\", to: done } }, answers: { sql.read: [[{ ref: \"oxplow:oxplow/effort?id=eff3\" }]] } }\nexpect: { commands: [oxplow.effort.close] }\n",
         );
     }
 
@@ -3157,7 +3157,7 @@ implementations:
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         let shape = "def transform(x):\n    e = x[\"event\"]\n    return {\"skip\": \"%s %s %s %s %s\" % (e[\"v\"], e[\"source\"], e[\"id\"], e[\"seq\"], e[\"anchors\"][\"turn_id\"])}\n";
-        policy(root, shape, "{ skip: \"1 fixture None None None\" }");
+        policy(root, shape, "{ skip: \"2 fixture None None None\" }");
         // `start` and `finish` aren't this script's; only `basic` stays.
         for gone in ["start", "finish"] {
             std::fs::remove_file(
@@ -3186,7 +3186,7 @@ implementations:
             ),
             (
                 "{ type: thread.checkpoint, v: 9, payload: {} }",
-                "newer than the registered v1",
+                "newer than the registered v2",
             ),
             (
                 "{ type: thread.checkpoint, payload: {}, anchors: { turn_id: seven } }",

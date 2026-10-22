@@ -264,7 +264,7 @@ pub struct NavigateInput {
     /// `stream:` / `thread:` ref to select it.
     #[serde(rename = "ref")]
     pub target: String,
-    /// The stream to switch to first (`oxplow:oxplow/stream?id=str1`).
+    /// The stream to switch to first (`str1`).
     #[serde(default)]
     pub stream: Option<String>,
 }
@@ -479,7 +479,7 @@ mod tests {
             thread_id: Some(fx.thread),
             stream_id: None,
         };
-        let input = json!({ "ref": "oxplow:oxplow/file?path=src/auth.rs", "stream": "oxplow:oxplow/stream?id=str2" });
+        let input = json!({ "ref": "oxplow:oxplow/file?path=src/auth.rs", "stream": "str2" });
         let out = fx
             .svc
             .commands

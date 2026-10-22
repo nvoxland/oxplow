@@ -39,7 +39,7 @@ by the desktop editor, and by "Mark verified" on the Freshness page (`oxplow.kno
    that snapshot's own revision when it has one — and each verified ref
    is re-pinned (a file verified under a cited directory becomes an edge
    of its own, kept while the directory stays cited);
-5. answers `knowledge.page.written@1 { page: "wiki:<slug>", outbound,
+5. answers `knowledge.page.written@2 { page: "<slug>", outbound,
    snapshot }` (with the actor's anchors, after any events the store
    reported of its own) for the bus to log after `command.executed`,
    caused by the run. Were the record to fail after the store kept the
@@ -56,7 +56,7 @@ Beside it, dispatched the same way: `oxplow.knowledge.delete_page {
 slug }` (Destructive; refused for a page core doesn't record unless the
 store is a sink; the store deletes it — the wiki its file, a failure
 failing the run — then core drops the row and edges and answers
-`knowledge.page.deleted@1`), `oxplow.knowledge.link { page, target }`
+`knowledge.page.deleted@2`), `oxplow.knowledge.link { page, target }`
 (`target` a wikilink's inside; refused when the recorded page already
 links it, or when it doesn't resolve; the store adds `- [[target]]` at
 the end of the page's `## Related` section — the wiki before any section

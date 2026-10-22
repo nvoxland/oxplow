@@ -2510,7 +2510,7 @@ mod tests {
             .run(
                 &oxplow_domain::Actor::Human,
                 "acme.page.star",
-                json!({ "ref": "oxplow:oxplow/page?page=metrics", "page_kind": "metrics", "scope": "project", "thread": oxplow_domain::uri::build::thread_uri(fx.thread) }),
+                json!({ "ref": "oxplow:oxplow/page?page=metrics", "page_kind": "metrics", "scope": "project", "thread": fx.thread.to_string() }),
                 false,
             )
             .await

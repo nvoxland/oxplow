@@ -33,7 +33,7 @@ pub(super) async fn state(fx: &Fixture, id: &str) -> Value {
         fx,
         &Actor::Human,
         "triage.review.result",
-        json!({ "job_run": oxplow_domain::uri::build::job_run_uri(id) }),
+        json!({ "job_run": id.to_string() }),
     )
     .await
 }
@@ -369,7 +369,7 @@ async fn cancelling_a_queued_job_ends_it_at_once() {
         &fx,
         &Actor::Human,
         "oxplow.job_run.cancel",
-        json!({ "job_run": oxplow_domain::uri::build::job_run_uri(&id) }),
+        json!({ "job_run": &id.to_string() }),
     )
     .await;
     let after = state(&fx, &id).await;

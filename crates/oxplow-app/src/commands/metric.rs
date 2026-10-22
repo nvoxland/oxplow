@@ -35,7 +35,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use super::config_commands::{change, ConfigTarget};
-use super::util::{invalid, parse, ref_id, schema, sql};
+use super::util::{bare_id, invalid, parse, schema, sql};
 use super::{Handler, HandlerOutput, Invocation, TxCtx};
 use crate::metric_engine::FactFilter;
 use crate::metrics_service::MetricsService;
@@ -67,7 +67,7 @@ pub struct RecordInput {
     /// Extra dimensions, recorded on the fact.
     #[serde(default)]
     pub dims: Option<BTreeMap<String, String>>,
-    /// The stream (`oxplow:oxplow/stream?id=str1`); defaults to the caller's, else the primary.
+    /// The stream (`str1`); defaults to the caller's, else the primary.
     #[serde(default)]
     pub stream: Option<String>,
 }
@@ -129,7 +129,7 @@ fn stream_for(
     let Some(named) = named else {
         return Ok(own.unwrap_or(primary));
     };
-    let stream: StreamId = ref_id(named, oxplow_domain::uri::resources::STREAM, "/stream")?;
+    let stream: StreamId = bare_id(named, oxplow_domain::uri::resources::STREAM, "/stream")?;
     match own {
         Some(own) if actor.is_agent_driven() && own != stream => Err(invalid(
             "/stream",
@@ -600,7 +600,7 @@ mod tests {
             ),
             (json!({ "key": "ci.derived", "value": 1.0 }), "formula"),
             (
-                json!({ "key": "oxplow.rust.unsafe_blocks", "value": 1.0, "stream": "oxplow:oxplow/stream?id=str2" }),
+                json!({ "key": "oxplow.rust.unsafe_blocks", "value": 1.0, "stream": "str2" }),
                 "not the caller's stream",
             ),
         ] {
@@ -644,7 +644,7 @@ mod tests {
         let out = run(
             &svc,
             crate::collector_runner::SYNC,
-            json!({ "collector": "oxplow:oxplow/collector?collector=project/repo.answer" }),
+            json!({ "collector": "project/repo.answer" }),
         )
         .await
         .unwrap();
@@ -696,7 +696,7 @@ mod tests {
             run(
                 &svc,
                 crate::collector_runner::SYNC,
-                json!({ "collector": "oxplow:oxplow/collector?collector=project/repo.bad" }),
+                json!({ "collector": "project/repo.bad" }),
             )
         };
         for _ in 0..3 {

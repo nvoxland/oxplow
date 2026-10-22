@@ -539,7 +539,7 @@ async fn closing_an_acp_thread_stops_its_session() {
         .run(
             &oxplow_domain::Actor::Human,
             oxplow_app::commands::thread::CLOSE,
-            serde_json::json!({ "thread": oxplow_domain::uri::build::thread_uri(thread) }),
+            serde_json::json!({ "thread": thread.to_string() }),
             false,
         )
         .await

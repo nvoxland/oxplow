@@ -1666,13 +1666,7 @@ mod tests {
         let events = f.svc.event_log_store.read_after(0, 100).await.unwrap();
         let done = finished(&events);
         assert_eq!(done.len(), 1, "{done:#?}");
-        assert_eq!(
-            done[0].payload["effort"],
-            oxplow_domain::uri::build::keyed(
-                oxplow_domain::uri::resources::EFFORT,
-                &format!("{}", f.effort)
-            )
-        );
+        assert_eq!(done[0].payload["effort"], f.effort.to_string());
         assert_eq!(done[0].anchors.effort_id, Some(f.effort));
         let closed = events
             .iter()

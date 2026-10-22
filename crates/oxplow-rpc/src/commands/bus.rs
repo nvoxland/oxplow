@@ -345,11 +345,7 @@ mod tests {
                 let oxplow_domain::CommandError::Proposed { proposal, .. } = err else {
                     panic!("{err:?}");
                 };
-                oxplow_domain::uri::build::parse_as::<i64>(
-                    &proposal,
-                    oxplow_domain::uri::resources::PROPOSAL,
-                )
-                .unwrap()
+                proposal
             }
         };
         let decide = |id: i64, approve: bool| {

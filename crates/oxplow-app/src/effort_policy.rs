@@ -38,7 +38,6 @@
 //! effort's (rule 2 opens it, adopting no further back than the close).
 
 use oxplow_domain::run::{Mode, Outcome as RunOutcome, RunContext};
-use oxplow_domain::uri::build::{effort_uri, thread_uri};
 use std::sync::{Arc, RwLock, Weak};
 
 use async_trait::async_trait;
@@ -46,8 +45,8 @@ use oxplow_config::OxplowConfig;
 use oxplow_db::SqlCell;
 use oxplow_domain::effort_policy::{EffortPolicy, EffortPolicyRegistry, EVENTS};
 use oxplow_domain::events::schema::{
-    CapabilitySwitched, CapabilitySwitchedV1, EffortLanded, EffortLandedV1, EffortLinked,
-    EffortLinkedV1, EffortOpenedV2, EventType as _, ThreadCheckpoint, ThreadCheckpointV1,
+    CapabilitySwitched, CapabilitySwitchedV1, EffortLanded, EffortLandedV2, EffortLinked,
+    EffortLinkedV2, EffortOpenedV3, EventType as _, ThreadCheckpoint, ThreadCheckpointV2,
     WorkItemStateChanged, WorkItemStateChangedV1,
 };
 use oxplow_domain::events::EventView;
@@ -197,7 +196,7 @@ impl CommitOrSwitch {
         let open_new = || {
             call(
                 crate::commands::effort::OPEN,
-                json!({ "thread": thread_uri(thread), "work_item": item_ref }),
+                json!({ "thread": thread.to_string(), "work_item": item_ref }),
             )
         };
         let Some(open) = self.open_on(thread).await? else {
@@ -209,13 +208,13 @@ impl CommitOrSwitch {
             Some(linked) if !self.is_under(item_ref, linked).await? => vec![
                 call(
                     crate::commands::effort::CLOSE,
-                    json!({ "effort": effort_uri(open.id), "reason": "switch" }),
+                    json!({ "effort": open.id.to_string(), "reason": "switch" }),
                 ),
                 open_new(),
             ],
             _ => vec![call(
                 crate::commands::effort::LINK,
-                json!({ "effort": effort_uri(open.id), "work_item": item_ref }),
+                json!({ "effort": open.id.to_string(), "work_item": item_ref }),
             )],
         })
     }
@@ -246,7 +245,7 @@ impl CommitOrSwitch {
         };
         Ok(vec![call(
             crate::commands::effort::OPEN,
-            json!({ "thread": thread_uri(thread), "adopt_since": started }),
+            json!({ "thread": thread.to_string(), "adopt_since": started }),
         )])
     }
 
@@ -287,27 +286,27 @@ impl EffortPolicy for CommitOrSwitch {
                 }
             }
             t if t == EffortLinked::TYPE => {
-                let linked: EffortLinkedV1 = serde_json::from_value(payload).map_err(storage)?;
+                let linked: EffortLinkedV2 = serde_json::from_value(payload).map_err(storage)?;
                 match linked.work_item {
                     Some(item) => self.linked(&item).await,
                     None => Ok(Vec::new()),
                 }
             }
             t if t == EffortLanded::TYPE => {
-                let landed: EffortLandedV1 = serde_json::from_value(payload).map_err(storage)?;
+                let landed: EffortLandedV2 = serde_json::from_value(payload).map_err(storage)?;
                 if !landed.complete {
                     return Ok(Vec::new());
                 }
                 match event.anchors.effort_id {
                     Some(effort) if self.is_open(effort).await? => Ok(vec![call(
                         crate::commands::effort::CLOSE,
-                        json!({ "effort": effort_uri(effort), "reason": "commit" }),
+                        json!({ "effort": effort.to_string(), "reason": "commit" }),
                     )]),
                     _ => Ok(Vec::new()),
                 }
             }
             t if t == ThreadCheckpoint::TYPE => {
-                let checkpoint: ThreadCheckpointV1 =
+                let checkpoint: ThreadCheckpointV2 =
                     serde_json::from_value(payload).map_err(storage)?;
                 if !checkpoint.changed || checkpoint.writing_tools == 0 {
                     return Ok(Vec::new());
@@ -318,7 +317,7 @@ impl EffortPolicy for CommitOrSwitch {
                 }
             }
             _ => {
-                let opened: EffortOpenedV2 = serde_json::from_value(payload).map_err(storage)?;
+                let opened: EffortOpenedV3 = serde_json::from_value(payload).map_err(storage)?;
                 match opened.work_item {
                     Some(item) => self.linked(&item).await,
                     None => Ok(Vec::new()),
@@ -342,7 +341,7 @@ async fn close_open(
         .filter_map(|row| match row.first() {
             Some(SqlCell::Int(id)) => Some(call(
                 crate::commands::effort::CLOSE,
-                json!({ "effort": effort_uri(EffortId::new(*id)), "reason": "switch" }),
+                json!({ "effort": EffortId::new(*id).to_string(), "reason": "switch" }),
             )),
             _ => None,
         })
@@ -598,7 +597,7 @@ mod tests {
             input["parent_ref"] = json!(parent);
         }
         if thread {
-            input["thread"] = json!(oxplow_domain::uri::build::thread_uri(fx.thread));
+            input["thread"] = json!(fx.thread.to_string());
         }
         let out = fx
             .svc
@@ -677,7 +676,7 @@ mod tests {
             .run(
                 &Actor::Human,
                 crate::commands::effort::CLOSE,
-                json!({ "effort": effort_uri(fx.effort) }),
+                json!({ "effort": fx.effort.to_string() }),
                 false,
             )
             .await
@@ -755,7 +754,7 @@ mod tests {
             .run(
                 &Actor::Human,
                 crate::commands::effort::LINK,
-                json!({ "effort": effort_uri(fx.effort), "work_item": todo }),
+                json!({ "effort": fx.effort.to_string(), "work_item": todo }),
                 false,
             )
             .await
