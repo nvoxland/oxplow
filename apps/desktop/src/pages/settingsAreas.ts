@@ -62,7 +62,7 @@ export const SETTINGS_AREAS: readonly SettingsArea[] = [
     id: "ai",
     title: "AI",
     intro: "The models oxplow itself calls — for summaries, typed questions and extensions. Your coding agents are separate.",
-    sections: [{ id: "ai", title: "AI providers and roles" }],
+    sections: [],
   },
 ];
 

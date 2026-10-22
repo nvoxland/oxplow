@@ -1,0 +1,31 @@
+title: Roles
+description: "Oxplow and extensions ask for a role, never a model. An extension's own roles (its AI profiles) use the role they fall back to until you assign one. A role the project sets in `.oxplow/project.yaml` (`ai.roles`) is changed there."
+query: |
+  SELECT role, description,
+         CASE WHEN provider IS NULL THEN
+                CASE WHEN fallback IS NOT NULL THEN 'Falls back to ' || fallback || coalesce(' (' || effective_model || ')', '')
+                     ELSE 'Not assigned' END
+              ELSE provider || ' · ' || model END AS bound,
+         coalesce(problem, '') AS problem,
+         provider, coalesce(model, '') AS model, coalesce(restrict, '[]') AS restrict,
+         NOT overridden AS can_assign,
+         (NOT overridden) AND provider IS NOT NULL AS can_unassign
+  FROM v_ai_role
+viz: table
+columns:
+  - { key: role, label: Role, width: 160 }
+  - { key: description, label: Used for }
+  - { key: bound, label: Bound to }
+  - { key: problem, label: Problem }
+actions:
+  - id: assign
+    label: Assign…
+    command: oxplow.ai.set_role
+    form: true
+    row: true
+    when: can_assign
+    fixed: [role]
+    input: { role: "{{row.role}}", provider: "{{row.provider}}", model: "{{row.model}}", restrict: "{{row.restrict|json}}" }
+    choices: { provider: oxplow-foundation/ai-provider-choices }
+  - { id: unassign, label: Unassign, command: oxplow.ai.set_role, input: { role: "{{row.role}}" }, row: true, when: can_unassign }
+hidden: true

@@ -1,0 +1,5 @@
+title: AI provider choices
+description: The configured providers, for a role to be bound to.
+query: SELECT id AS value, id AS label FROM v_ai_provider ORDER BY id
+viz: table
+hidden: true

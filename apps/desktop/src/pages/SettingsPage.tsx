@@ -7,7 +7,6 @@ import { ExtensionsSection } from "../components/ExtensionsSection.js";
 import { DataSection } from "../components/DataSection.js";
 import { CapabilitiesSection } from "../components/CapabilitiesSection.js";
 import { IntegrationsSection } from "../components/IntegrationsSection.js";
-import { AiSection } from "../components/AiSection.js";
 import { settingsRef, viewParamsOf } from "../tabs/pageRefs.js";
 import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
 import type { TabRef } from "../tabs/tabState.js";
@@ -122,6 +121,7 @@ function useAreaContent(area: SettingsArea): { sections: DocSection[]; actions?:
     case "overview":
     case "agents":
     case "lsp":
+    case "ai":
       // Their sections are foundation lenses mounted in the area's slot.
       return { sections: [] };
     case "extensions":
@@ -159,16 +159,6 @@ function useAreaContent(area: SettingsArea): { sections: DocSection[]; actions?:
             "integrations",
             <IntegrationsSection />,
             "Outside systems that extensions connect through a program oxplow runs. Each instance's config is the team's; approving and running the program is per machine, and its credentials go to your OS keychain. Three failures in a row turn an instance off until you enable it again.",
-          ),
-        ],
-      };
-    case "ai":
-      return {
-        sections: [
-          section(
-            "ai",
-            <AiSection />,
-            "AI providers and roles are saved for all your projects; keys go to your OS keychain, never to a file. Changes apply at once.",
           ),
         ],
       };

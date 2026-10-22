@@ -1737,7 +1737,7 @@ pub const SLOTS: &[SlotSpec] = &[
         &[],
         &["capabilities", "integrations"],
     ),
-    SlotSpec::sections("settings.ai.sections", &[], &["ai"]),
+    SlotSpec::sections("settings.ai.sections", &[], &[]),
 ];
 
 /// A place in a core page a lens can be mounted ([`SLOTS`]).

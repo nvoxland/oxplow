@@ -1,7 +1,7 @@
 //! Foundation lenses that replaced core pages: Settings' Overview and Language
 //! Servers areas (mounted in each area's slot: what they list, how they group
 //! and search, what Ask puts in the agent's input, what the language-server
-//! rows offer), the Comments inbox, the commit and uncommitted pages, the Alerts page, and Settings → Agents.
+//! rows offer), the Comments inbox, the commit and uncommitted pages, the Alerts page, and Settings → Agents and AI.
 
 use oxplow_config::LspServerConfig;
 use oxplow_db::SqlCell;
@@ -622,4 +622,57 @@ async fn the_agents_area_hands_set_agents_each_new_order() {
         prompt.text(&prompt.rows[0], "text").as_deref(),
         Some("Prefer TDD.")
     );
+}
+
+/// Settings → AI: a provider lists with its kind and whether it has a key
+/// (never the key), a role bound to it shows its binding and hands
+/// `set_role` its current values, and the kinds and providers are the
+/// choices the forms offer.
+#[tokio::test]
+async fn the_ai_area_lists_providers_roles_and_choices() {
+    let fx = services_with_effort().await;
+    let kinds = run(&fx, "ai-provider-kinds", vec![]).await;
+    assert!(kinds.has("value", "openrouter"), "{:?}", kinds.rows);
+
+    command(
+        &fx,
+        "oxplow.ai.set_provider",
+        serde_json::json!({ "id": "or", "kind": "openrouter", "key": "sk-secret-123" }),
+    )
+    .await;
+    let providers = run(&fx, "ai-providers", vec![]).await;
+    let or = providers.keyed("id", "or");
+    assert_eq!(providers.text(or, "key").as_deref(), Some("Key saved"));
+    assert!(providers
+        .rows
+        .iter()
+        .all(|r| !format!("{r:?}").contains("sk-secret-123")));
+    assert!(run(&fx, "ai-provider-choices", vec![])
+        .await
+        .has("value", "or"));
+
+    command(
+        &fx,
+        "oxplow.ai.set_role",
+        serde_json::json!({ "role": "summarize", "provider": "or", "model": "m1", "restrict": ["tools"] }),
+    )
+    .await;
+    let roles = run(&fx, "ai-roles", vec![]).await;
+    let summarize = roles.keyed("role", "summarize");
+    assert_eq!(roles.text(summarize, "bound").as_deref(), Some("or · m1"));
+    assert_eq!(
+        roles.text(summarize, "restrict").as_deref(),
+        Some("[\"tools\"]")
+    );
+    assert!(roles.flag(summarize, "can_assign") && roles.flag(summarize, "can_unassign"));
+    // A role bound to nothing says what it falls back to or that it is free.
+    let decide = roles.keyed("role", "decide");
+    assert!(!roles.flag(decide, "can_unassign"));
+    // The test action starts from the model a role already uses on it.
+    let again = run(&fx, "ai-providers", vec![]).await;
+    assert_eq!(
+        again.text(again.keyed("id", "or"), "test_model").as_deref(),
+        Some("m1")
+    );
+    assert!(run(&fx, "ai-calls", vec![]).await.rows.is_empty());
 }

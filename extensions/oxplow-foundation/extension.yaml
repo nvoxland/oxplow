@@ -515,6 +515,11 @@ ui:
     - { slot: settings.agents.sections, lens: agents-settings }
     - { slot: settings.agents.sections, lens: agents-new-thread }
     - { slot: settings.agents.sections, lens: agents-prompt }
+    # Settings → AI: the whole area.
+    - { slot: settings.ai.sections, lens: ai-providers }
+    - { slot: settings.ai.sections, lens: ai-provider-form }
+    - { slot: settings.ai.sections, lens: ai-roles }
+    - { slot: settings.ai.sections, lens: ai-calls }
     - { slot: settings.lsp.sections, lens: lsp-servers }
     - { slot: settings.lsp.sections, lens: lsp-install }
     - { slot: settings.lsp.sections, lens: lsp-suggestions }
@@ -641,6 +646,7 @@ commands:
     scope: ai.settings
     op: remove_provider
     invokers: { human: true, agent: false, lens: true }
+    confirm: always
     example: {"id": "anthropic"}
   - name: ai.set_role
     summary: "Bind a role (`main`, `summarize`, `decide`, or an extension's profile `acme/review`) to a provider and model, or unbind it with neither. `restrict` forbids `tools`, `sql`, `streaming` or `images` for the binding. A person's alone."

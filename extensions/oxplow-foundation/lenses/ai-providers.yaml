@@ -1,0 +1,21 @@
+title: AI providers
+description: "The model services oxplow may call. A key goes to your OS keychain and never comes back; only whether one is set. Only you can add one, agents never see keys."
+query: |
+  SELECT p.id, coalesce(k.title, p.kind) AS kind,
+         coalesce(p.base_url, '') AS base_url,
+         CASE WHEN p.key_set THEN 'Key saved' ELSE 'No key' END AS key,
+         coalesce((SELECT r.model FROM v_ai_role r WHERE r.provider = p.id AND r.model IS NOT NULL LIMIT 1), '') AS test_model
+  FROM v_ai_provider p
+  LEFT JOIN v_capability_provider k ON k.capability = 'ai_provider' AND k.provider = p.kind
+  ORDER BY p.id
+viz: table
+columns:
+  - { key: id, label: Name }
+  - { key: kind, label: Kind }
+  - { key: base_url, label: Base URL }
+  - { key: key, label: Key, width: 100 }
+actions:
+  - { id: test, label: Test…, command: oxplow.ai.test_provider, form: true, row: true, fixed: [id], input: { id: "{{row.id}}", model: "{{row.test_model}}" } }
+  - { id: remove, label: Remove…, command: oxplow.ai.remove_provider, input: { id: "{{row.id}}" }, row: true }
+empty: No AI providers yet. Add one below — an API key for a hosted service, or the URL of a local server.
+hidden: true
