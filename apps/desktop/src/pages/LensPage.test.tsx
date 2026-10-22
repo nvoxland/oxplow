@@ -45,10 +45,30 @@ const lens = {
   origin: { extension: "x", source: null, running: "", deployment: null, bundled: false },
   tool: null,
 } as unknown as Lens;
+// A renderer's lens: run for the URI it shows (`uri`), the URI's `path`
+// filled in as the backend fills it.
+const dirLens = {
+  ...lens,
+  id: "x/dir",
+  slug: "dir",
+  title: "Directory",
+  params: [
+    { name: "uri", label: null, default: null, options: [], type: "text", role: "resource", presets: [] },
+    { name: "path", label: "Path", default: null, options: [], type: "text", role: "resource", presets: [] },
+  ],
+  columns: [{ key: "sha", label: "Name", link: null, unit: null, icon: null, tone: null, select: null }],
+} as unknown as Lens;
 mock.module("../api.js", () => ({
   ...realApi,
-  runLens: async (_id: string, params: Record<string, SqlCell>) => {
+  runLens: async (id: string, params: Record<string, SqlCell>) => {
     runs.push(params);
+    if (id === "x/dir") {
+      return {
+        lens: dirLens,
+        params: { path: "src", ...params },
+        result: { columns: ["sha"], rows: [["a.rs"]], truncated: false, reads: { models: [], tables: [], measures: [] }, freshness: {} },
+      } as unknown as LensRun;
+    }
     return {
       lens,
       params: { range: "30d", commit: null, ...params },
@@ -63,9 +83,9 @@ afterEach(() => {
   runs.length = 0;
 });
 
-function nav(ref: TabRef, replaced: { ref: TabRef; push: boolean }[], historyState?: Record<string, unknown>, states?: Record<string, unknown>[]): PageNavigation {
+function nav(ref: TabRef, replaced: { ref: TabRef; push: boolean }[], historyState?: Record<string, unknown>, states?: Record<string, unknown>[], navigated?: TabRef[]): PageNavigation {
   return {
-    navigate: () => {},
+    navigate: (to) => navigated?.push(to),
     goBack: () => {},
     goForward: () => {},
     canGoBack: false,
@@ -142,4 +162,24 @@ test("the picked row is written to, and read from, the entry's history state", a
     page(lensRef("x/y", {}, { commit: "def" }), replaced, { picked: { commit: { value: "def", facts: [{ label: "Subject", text: "Fix the thing" }] } } }),
   );
   await waitFor(() => expect(back.getByTestId("lens-selection-commit").textContent).toContain("Fix the thing"));
+});
+
+// A renderer's page is the URI it renders: its rail doesn't offer the URI
+// itself as a param, and another value of one of the URI's params opens
+// that resource (pushed), not this one with a param bolted on.
+test("a renderer's param change opens the URI with it changed", async () => {
+  const uri = "oxplow:oxplow/dir?path=src";
+  const navigated: TabRef[] = [];
+  const view = render(
+    <PageNavigationContext.Provider value={nav({ id: uri }, [], undefined, undefined, navigated)}>
+      <LensPage lensId="x/dir" params={{ uri }} renders={uri} stream={null} onOpenPage={() => {}} />
+    </PageNavigationContext.Provider>,
+  );
+  await waitFor(() => expect(view.getByTestId("lens-param-path-value").textContent).toBe("src"));
+  expect(view.queryByTestId("lens-param-uri")).toBeNull();
+  fireEvent.click(view.getByTestId("lens-param-path-value"));
+  const edit = view.getByTestId("lens-param-path-edit");
+  fireEvent.change(edit, { target: { value: "src/lib" } });
+  fireEvent.keyDown(edit, { key: "Enter" });
+  expect(navigated.map((r) => r.id)).toEqual(["oxplow:oxplow/dir?path=src/lib"]);
 });

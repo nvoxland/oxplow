@@ -678,7 +678,16 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     - `pinned: true` makes its tabs pinned.
     - `default`, `pinned` and `accepts` without `for` are a load error.
     - A lens renderer must declare a `uri` param, and is run with
-      `{ uri: <the URI's identity> }`.
+      `{ uri: <the URI's identity> }`. Each other param it declares that
+      the URI carries takes the URI's value (supplied → URI → context →
+      default; `extensions::with_uri_params`, only for a lens some page
+      renders with), so a `path` param of an `oxplow/dir` renderer is the
+      URI's `path`. Its resource params besides `uri`, `stream_id` and
+      `thread_id` must be params of each resource it renders (a load
+      error otherwise: it would never get them); its filters ride in the
+      `#` as any lens's. Its rail doesn't draw `uri` (the page is the
+      URI), and another value of a URI param opens that URI
+      (`withRenderedParams`, pushed).
   - **Panels** (P6.G1, target §11.3): `panels: [{ id, title, icon?,
     scope: project | stream | thread, body, badge?, open?, collapsed?,
     count? }]` put a lens in the

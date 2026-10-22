@@ -8,7 +8,7 @@
  * Nothing here knows a resource: the declarations say it all.
  */
 import type { ExtensionPage } from "../tauri-bridge/generated/bindings.js";
-import { parseUri, typeOf } from "../uri/uri.js";
+import { formatUri, parseUri, typeOf } from "../uri/uri.js";
 
 /** The view key that names a URI's renderer (`<extension>/<page>`). */
 export const RENDERER_VIEW_KEY = "oxplow.renderer";
@@ -74,4 +74,26 @@ export function rendererFor(
     candidates[0] ??
     null
   );
+}
+
+/** What a renderer's page is once its params change: the URI `uri` with
+ *  each of `params` set (one set to nothing dropped; its lens's own `uri`
+ *  param is the page, not one of them) and `view` as its `#`. A URI that
+ *  isn't an oxplow one has no params to change. */
+export function withRenderedParams(
+  uri: string,
+  params: Record<string, string | number | boolean | null>,
+  view: Record<string, string | number | boolean | null>,
+): string {
+  const u = parseUri(uri);
+  if (!u) return uri;
+  const next = { ...u.params };
+  for (const [k, v] of Object.entries(params)) {
+    if (k === "uri") continue;
+    if (v === null || v === "") delete next[k];
+    else next[k] = String(v);
+  }
+  const shown: Record<string, string> = {};
+  for (const [k, v] of Object.entries(view)) if (v !== null && v !== "") shown[k] = String(v);
+  return formatUri({ resource: u.resource, params: next, view: shown });
 }

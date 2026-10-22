@@ -578,7 +578,9 @@ pages:
   never its default: the person picks it with **Open with**.
 - `pinned: true` pins the tab the page opens in.
 - A lens page that renders must declare a `uri` param. It runs with the
-  URI of the thing.
+  URI of the thing. A param it declares with the same name as one of the
+  URI's params (`id`, `path`) gets that value, so the query can use it
+  directly. Any other param must be a filter (`role: filter`).
 - Nothing draws a URI? oxplow shows its label and params, or the raw URI
   in a muted style if the thing is gone. This is not an error.
 

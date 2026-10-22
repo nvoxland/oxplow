@@ -41,7 +41,9 @@
   pattern> }` limits it to URIs whose params fit; `default: true` (only
   for a resource your extension declares, one page per resource) makes
   it the page a plain open uses; `pinned: true` pins its tabs. Its lens
-  must declare a `uri` param and runs with the URI. A resource has no
+  must declare a `uri` param and runs with the URI; a param named like
+  one of the URI's params (`id`, `path`) gets its value, and any other
+  param must be a `role: filter`. A resource has no
   `page:` field; a URI nothing draws shows on a fallback page, not an
   error.
 - **Panels** put a lens in the left nav (`panels: [{ id, title, icon?,

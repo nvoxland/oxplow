@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import type { ExtensionPage } from "../tauri-bridge/generated/bindings.js";
-import { RENDERER_VIEW_KEY, pageView, renderedResourceOf, rendererFor, renderersFor, shellView } from "./renderers.js";
+import { RENDERER_VIEW_KEY, pageView, renderedResourceOf, rendererFor, renderersFor, shellView, withRenderedParams } from "./renderers.js";
 
 const page = (id: string, more: Partial<ExtensionPage> = {}): ExtensionPage => ({
   id,
@@ -63,4 +63,15 @@ test("a view splits into the shell's keys and the page's", () => {
   const view = { [RENDERER_VIEW_KEY]: "acme/blame", q: "x", lines: "3-3" };
   expect(shellView(view)).toEqual({ [RENDERER_VIEW_KEY]: "acme/blame" });
   expect(pageView(view)).toEqual({ q: "x", lines: "3-3" });
+});
+
+// A renderer's page is its URI: another value of one of its params is the
+// same resource with that param changed (its lens's own `uri` isn't one),
+// one set to nothing is dropped, and the view rides along.
+test("a renderer's params change the URI it renders", () => {
+  const uri = "oxplow:oxplow/dir?path=src";
+  expect(withRenderedParams(uri, { uri, path: "src/lib" }, {})).toBe("oxplow:oxplow/dir?path=src/lib");
+  expect(withRenderedParams("oxplow:acme/pr?id=1&repo=a", { id: 2 }, { tab: "files" })).toBe("oxplow:acme/pr?id=2&repo=a#tab=files");
+  expect(withRenderedParams("oxplow:acme/pr?id=1&repo=a", { repo: null }, {})).toBe("oxplow:acme/pr?id=1");
+  expect(withRenderedParams("https://example.com", { id: 2 }, {})).toBe("https://example.com");
 });

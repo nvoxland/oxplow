@@ -2423,7 +2423,7 @@ export function App() {
             closable: true,
             // A renderer's lens is run with the URI it shows.
             render: () => (
-              <LensPage lensId={lens} title={page.title} params={{ uri: identityOf(ref.id) ?? ref.id }} stream={stream} onOpenPage={nav.navOpen} />
+              <LensPage lensId={lens} title={page.title} params={{ uri: identityOf(ref.id) ?? ref.id }} renders={ref.id} stream={stream} onOpenPage={nav.navOpen} />
             ),
           };
         }

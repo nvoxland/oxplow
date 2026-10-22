@@ -1019,7 +1019,8 @@ renderer, with no desktop code:
 2. Add a `pages:` entry with `for: <extension>/<name>`, optional
    `accepts`, `default: true` (the extension's own resource, one page
    per resource) and `pinned`. A lens renderer declares a `uri` param
-   and is run with the URI. [extensions.md](./extensions.md) "Pages" has
+   and is run with the URI; its other params that the URI carries get
+   their values from it. [extensions.md](./extensions.md) "Pages" has
    the rules.
 3. Plumb any list rows that target the thing through
    `useRouteDispatch` / `RouteLink` so plain-click navigates in-tab.

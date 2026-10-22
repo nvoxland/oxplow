@@ -22,7 +22,7 @@ const lens = {
   origin: { extension: "commit-history", source: ".oxplow/extensions/commit-history/lenses/history.yaml", running: "x", deployment: "abc", bundled: false },
 } as unknown as Lens;
 
-function setup(values: Record<string, SqlCell>, picked: Record<string, PickedRow> = {}, over: { lens?: Lens; outOfDate?: boolean } = {}) {
+function setup(values: Record<string, SqlCell>, picked: Record<string, PickedRow> = {}, over: { lens?: Lens; outOfDate?: boolean; fixed?: string[] } = {}) {
   const applied: [string, SqlCell][] = [];
   const opened: TabRef[] = [];
   const view = render(
@@ -31,6 +31,7 @@ function setup(values: Record<string, SqlCell>, picked: Record<string, PickedRow
       values={values}
       picked={picked}
       outOfDate={over.outOfDate ?? false}
+      fixed={over.fixed}
       onApply={(n, v) => applied.push([n, v])}
       onOpenPage={(r) => opened.push(r)}
     />,
@@ -100,4 +101,11 @@ test("a lens with no filters has no Filters group, and none selected no Selectio
   expect(view.queryByTestId("lens-rail-filters")).toBeNull();
   expect(view.queryByTestId("lens-rail-selection")).toBeNull();
   expect(view.getByTestId("lens-rail-about")).not.toBeNull();
+});
+
+// What the page is (a renderer's URI) isn't a control.
+test("a fixed param isn't drawn", () => {
+  const { view } = setup({ range: "30d", q: null, commit: null }, {}, { fixed: ["q"] });
+  expect(view.queryByTestId("lens-param-q")).toBeNull();
+  expect(view.queryByTestId("lens-param-range")).not.toBeNull();
 });
