@@ -7,9 +7,7 @@ import { Pencil } from "lucide-react";
 import type { EffortDetail } from "../../api.js";
 import { CANONICAL_STATES, STATE_LABEL, type CanonicalState, type FieldDecl, type ItemChange, type WorkItem } from "../../workItems.js";
 import { FieldPill, PillSelect, stateColor } from "../WorkItemFields.js";
-import { MarkdownView } from "../Wiki/MarkdownView.js";
-import { RichTextField } from "../RichText/RichTextField.js";
-import type { RichTextCommentConfig } from "../RichText/RichTextField.js";
+import { Markdown, type MarkdownComments } from "../Markdown/Markdown.js";
 import { useOptionalPageNavigation } from "../../tabs/PageNavigationContext.js";
 import { fileRef } from "../../tabs/pageRefs.js";
 import { ChangedFilesTree } from "../ChangedFiles/ChangedFilesTree.js";
@@ -75,7 +73,7 @@ export function TaskDetail({
 }: {
   item: WorkItem;
   onUpdateTask: (ref: string, changes: TaskDetailChanges) => Promise<void>;
-  comments?: RichTextCommentConfig;
+  comments?: MarkdownComments;
 }) {
   return (
     <div
@@ -92,7 +90,7 @@ export function TaskDetail({
           void onUpdateTask(item.uri, { title: trimmed });
         }}
       />
-      <RichTextField
+      <Markdown
         key={`desc-${item.uri}`}
         value={item.body}
         placeholder="Add a description…"
@@ -626,7 +624,7 @@ function ActivityEffortSection({
       <div style={{ display: "flex", flexDirection: "column", gap: 10, padding: "12px 14px" }}>
       {detail.effort.summary && detail.effort.summary.length > 0 ? (
         <div data-testid={`tasks-effort-summary-${detail.effort.id}`}>
-          <MarkdownView body={detail.effort.summary} />
+          <Markdown value={detail.effort.summary} />
         </div>
       ) : (
         <div

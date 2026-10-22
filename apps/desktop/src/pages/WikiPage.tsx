@@ -24,12 +24,8 @@ export interface WikiPageProps {
   slug: string;
   threadWork: WorkList | null;
   onClosed(): void;
-  onOpenWikiPage(slug: string): void;
   onOpenFile(path: string): void;
-  onOpenDirectory?(path: string): void;
   onOpenPage(ref: TabRef): void;
-  onOpenCommit?(sha: string): void;
-  onOpenExternalUrl?(url: string): void;
 }
 
 /**
@@ -39,7 +35,7 @@ export interface WikiPageProps {
  * bookmark toggle. In-tab wikilink clicks route through the navigation
  * context so they participate in tab-level history.
  */
-export function WikiPage({ stream, slug, onClosed, onOpenWikiPage, onOpenFile, onOpenDirectory, onOpenPage, onOpenCommit, onOpenExternalUrl }: WikiPageProps) {
+export function WikiPage({ stream, slug, onClosed, onOpenFile, onOpenPage }: WikiPageProps) {
   const nav = useOptionalPageNavigation();
   const ref = wikiPageRef(slug);
   const backlinkEntries = useBacklinks(ref);
@@ -70,12 +66,8 @@ export function WikiPage({ stream, slug, onClosed, onOpenWikiPage, onOpenFile, o
       stream={stream}
       slug={slug}
       onClosed={onClosed}
-      onOpenWikiPage={onOpenWikiPage}
       onOpenFile={onOpenFile}
-      onOpenDirectory={onOpenDirectory}
       onOpenPage={onOpenPage}
-      onOpenCommit={onOpenCommit}
-      onOpenExternalUrl={onOpenExternalUrl}
       backlinks={backlinks}
       outbound={outbound}
       nav={nav}
@@ -87,11 +79,7 @@ function WikiPageBody({
   stream,
   slug,
   onClosed,
-  onOpenWikiPage,
   onOpenFile,
-  onOpenDirectory,
-  onOpenCommit,
-  onOpenExternalUrl,
   backlinks,
   outbound,
   nav,
@@ -99,12 +87,8 @@ function WikiPageBody({
   stream: Stream;
   slug: string;
   onClosed: () => void;
-  onOpenWikiPage: (slug: string) => void;
   onOpenFile: (path: string) => void;
-  onOpenDirectory?: (path: string) => void;
   onOpenPage: (ref: TabRef) => void;
-  onOpenCommit?: (sha: string) => void;
-  onOpenExternalUrl?: (url: string) => void;
   backlinks: { count: number; body: React.ReactNode };
   outbound: { count: number; body: React.ReactNode } | undefined;
   nav: ReturnType<typeof useOptionalPageNavigation>;
@@ -166,12 +150,7 @@ function WikiPageBody({
         controller={controller}
         freshnessRows={freshnessRows ?? undefined}
         onScrollHostMounted={setScrollHost}
-        onNavigateInternalWikiPage={(nextSlug) => nav ? nav.navigate(wikiPageRef(nextSlug)) : onOpenWikiPage(nextSlug)}
-        onOpenWikiPageInNewTab={onOpenWikiPage}
         onOpenFile={onOpenFile}
-        onOpenDirectory={onOpenDirectory}
-        onOpenCommit={onOpenCommit}
-        onOpenExternalUrl={onOpenExternalUrl}
       />
     </Page>
   );

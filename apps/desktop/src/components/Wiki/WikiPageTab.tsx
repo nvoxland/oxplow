@@ -1,5 +1,5 @@
 import type { PageChip } from "../../tabs/Page.js";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useRef } from "react";
 import {
   writeWikiPage,
   type Stream,
@@ -9,11 +9,8 @@ import {
   type WikiFreshnessLevel,
   type WikiFreshnessSummary,
 } from "./wikiFreshness.js";
-import { preprocessWikilinks, postprocessWikilinks } from "./MarkdownView.js";
-import { useWorkListProfile } from "../../useWorkListProfile.js";
-import { workItemRefOfMention } from "../../workItems.js";
 import { contextNodeProps } from "../Comments/contextNodes.js";
-import { RichTextField } from "../RichText/RichTextField.js";
+import { Markdown } from "../Markdown/Markdown.js";
 import { recordOpError } from "../../opErrors.js";
 import { useOptionalPageNavigation } from "../../tabs/PageNavigationContext.js";
 import { fileRef } from "../../tabs/pageRefs.js";
@@ -44,12 +41,8 @@ interface Props {
   /** Published on mount so the parent can render rail content (TOC) that
    *  needs to read scroll position from the same container. */
   onScrollHostMounted?: (el: HTMLElement | null) => void;
-  onNavigateInternalWikiPage: (slug: string) => void;
-  onOpenWikiPageInNewTab: (slug: string) => void;
+  /** The referenced-files footer's file links. */
   onOpenFile: (path: string) => void;
-  onOpenDirectory?: (path: string) => void;
-  onOpenCommit?: (sha: string) => void;
-  onOpenExternalUrl?: (url: string) => void;
 }
 
 export function WikiPageTab({
@@ -58,22 +51,9 @@ export function WikiPageTab({
   controller,
   freshnessRows,
   onScrollHostMounted,
-  onNavigateInternalWikiPage,
-  onOpenWikiPageInNewTab,
   onOpenFile,
-  onOpenDirectory,
-  onOpenCommit,
-  onOpenExternalUrl,
 }: Props) {
   const { body, setDraft, notFound, loadError } = controller;
-  // Pre-process `[[ ]]` wikilinks into standard markdown links before
-  // handing the body to Tiptap; post-process back to `[[ ]]` form on
-  // commit so the on-disk file keeps its authored shape.
-  const profile = useWorkListProfile();
-  const editorValue = useMemo(
-    () => preprocessWikilinks(body, (id) => workItemRefOfMention(profile, id)),
-    [body, profile],
-  );
 
   // Keep the scroll position with the tab's entry (Back, a restart). The
   // position lives in a ref while scrolling, so a wheel doesn't set state;
@@ -135,17 +115,16 @@ export function WikiPageTab({
         ) : loadError ? (
           <div style={{ color: "var(--severity-critical)" }}>Failed to load wiki page: {loadError}</div>
         ) : (
-          <RichTextField
+          <Markdown
             key={`wiki-${slug}`}
-            value={editorValue}
+            value={body}
             placeholder={`Start writing your wiki page (${slug})…`}
             comments={{
               streamId: stream.id,
               threadId: null,
               target: wikiUri(slug),
             }}
-            onCommit={(markdown) => {
-              const next = postprocessWikilinks(markdown);
+            onCommit={(next) => {
               if (next === body) return;
               setDraft(next);
               void writeWikiPage(slug, next).catch((error) => {

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { GitPullRequest } from "lucide-react";
 
-import { linkRef, parseMarkdownLink, preprocessWikilinks } from "./components/Wiki/MarkdownView.js";
+import { linkRef, parseMarkdownLink, preprocessWikilinks } from "./components/Markdown/MarkdownView.js";
 import { pageKindIconComponent, pageKindLabel } from "./pageKinds.js";
 import { extensionWikilinkRef, resourcesFromResult, setResources, type Resource } from "./resources.js";
 import { refFromTabId } from "./tabs/pageRefs.js";

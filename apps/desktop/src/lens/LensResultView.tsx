@@ -12,7 +12,7 @@ import { TrendChart } from "../components/charts/TrendChart.js";
 import { Sparkline } from "../components/Sparkline.js";
 import { squarify } from "../components/charts/squarify.js";
 import { formatFullDateTime, formatMetricValue, formatMetricValueExact } from "../components/format.js";
-import { MarkdownView } from "../components/Wiki/MarkdownView.js";
+import { Markdown } from "../components/Markdown/Markdown.js";
 import { DiffPane } from "../components/Diff/DiffPane.js";
 import { CommandConfirm } from "../components/CommandConfirm.js";
 import { ResultCompleteness } from "./ResultCompleteness.js";
@@ -1546,9 +1546,7 @@ function HunksViz({ rows, streamId, rowMenu }: { rows: ReturnType<typeof hunkRow
 
 function MarkdownViz({ body }: { body: string }) {
   return (
-    <div data-testid="lens-markdown">
-      <MarkdownView body={body} />
-    </div>
+    <Markdown value={body} testId="lens-markdown" />
   );
 }
 

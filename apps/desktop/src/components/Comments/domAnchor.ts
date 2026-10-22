@@ -8,7 +8,7 @@
 //! that span back into a DOM `Range` to paint, without mutating the DOM.
 
 import { commitUri, dirUri, fileUri, wikiUri } from "../../uri/uri.js";
-import { parseMarkdownLink } from "../Wiki/MarkdownView.js";
+import { parseMarkdownLink } from "../Markdown/MarkdownView.js";
 
 /// Convert a character span of `root.textContent` into a DOM `Range` by
 /// walking the element's text nodes in document order (the same order

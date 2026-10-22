@@ -1,35 +1,73 @@
-# Rich-text editor (shared WYSIWYG surface)
+# Markdown (one component, the viewer and the editor)
 
-What this doc covers: the Tiptap-based `RichTextField` editor used for
-inline-editable prose on task and (future) wiki pages, how mermaid +
-internal URL schemes survive round-trip, and the composition model
-("one page, many editors, mixed editability") it was built for.
+What this doc covers: `Markdown` (`apps/desktop/src/components/Markdown/`),
+the one component every surface draws or edits markdown with, its two
+modes and their one feature set, who owns saving, how wikilinks, mermaid
+and comments survive the editor's round-trip, and where it is used.
 
-## Composition model
+## One component, two modes
 
-Pages that read as a single document are composed at the React level
-from multiple independent blocks:
+`<Markdown value={text} />` is the viewer (`MarkdownView.tsx`,
+react-markdown + remark-gfm). Given `onChange` or `onCommit` it is the
+editor (`RichTextField.tsx`, Tiptap). **Both modes have the one feature
+set**, and a surface never builds its own:
 
-- **Editable blocks** — one `RichTextField` per field. On the task
-  page, title → `task.title` (via the simpler `TitleField` textarea)
-  and description → `task.description`. Each block runs its own
-  `onCommit` and saves to its own destination.
-- **Read-only blocks** — rendered with plain React + `MarkdownView`,
-  no editor instance. Effort cards in `ActivityTimeline` are the
-  current example; future "referenced files" footers on wiki pages
-  follow the same pattern.
+- **Links** (`links.ts`): a wikilink or ref link (a wiki page, a file at
+  a revision, a directory, a commit, a work item, an extension's
+  resource) opens through the page's navigation (`openRef`);
+  Cmd/Ctrl-click or middle-click opens it in a new tab; right-click
+  offers Open, Open in new tab and a Copy of what it names (path, SHA,
+  id, link). A web link opens in the app's web page when the allowlist
+  takes it (`classifyExternalUrl`), else in the browser. An in-page
+  anchor jumps. A broken `[[…]]` is inert and marked. The viewer also
+  swaps a bare ref's text for its title (the editor can't: the text is
+  what it stores).
+- **Mermaid** fences draw as diagrams, always (pan, zoom, the
+  lightbox; in the editor, the `MermaidBlock` node view, click to edit
+  its source).
+- **Code blocks** carry a Copy (`CopyCodeButton`, top-right on hover).
+- **GFM tables**, images with the lightbox, `.oxplow-md` typography.
+- **Headings** are `h2`/`h3` under `.oxplow-md`: a page's Contents rail
+  lists them (either mode).
+- **Comments**: the editor's own layer (`comments` prop, below); the
+  viewer's text through its page's DOM layer (`data-ref`).
 
-The visual continuity ("it feels like one document") comes from
-shared prose typography (`.oxplow-md` styles applied to both the
-editor surface and `MarkdownView`), not from a single underlying
-editor.
+The editor reads and writes markdown **as stored**: the component runs
+`preprocessWikilinks` on the way in and `postprocessWikilinks` on the
+way out, so no owner sees the editor's spelling; an owner's echo of the
+text it was handed maps back to the editor's own text, so typing is
+never reset.
 
-To telegraph editability, every editable block carries a faint
-`Pencil` icon (lucide-react, ~12px) in its top-right, opacity ~0.35
-by default and ~0.85 on hover/focus. Read-only blocks must **not**
-show the pencil — that's the consistent signal "this is for reading."
+## Who saves: two owners
 
-## What's in `apps/desktop/src/components/RichText/`
+- **`onCommit`**: the text 300 ms after typing stops, on blur and on
+  unmount (an edit is never lost to a closed tab). For an owner that
+  saves as the person types: the task body (`TaskDetail`), the React
+  wiki page. A value from outside is skipped while the editor has focus
+  (a late echo mustn't clobber typing).
+- **`onChange`**: every edit. For an owner that keeps a draft and saves
+  on a button: a form's markdown field (`SchemaForm`, a schema property
+  with `contentMediaType: text/markdown`), the comment composer, the
+  lens editor. A value from outside is applied even while focused: the
+  owner echoes exactly what it heard, so anything else is a reset it
+  means (Discard, Escape).
+- **Keys**: Cmd/Ctrl+Enter (`onSubmitShortcut`), Cmd/Ctrl+S
+  (`onSaveShortcut`) and Escape (`onEscape`, when none of the editor's
+  popovers is open) reach the owner with the text as it is now. Enter
+  adds a line.
+
+## Where it is used
+
+Every markdown surface: the lens `markdown` viz and document/dashboard
+markdown parts (`LensResultView`, `PartsViz`), effort summaries
+(`TaskDetail`, `DiffViewPage`), the wiki body (`WikiPageTab`), a work
+item's body (`TaskDetail`), comment messages (`CommentPopover`) and the
+comment composer (`CommentComposer`), a form's markdown field
+(`SchemaForm`: stream and thread prompts, a handoff's body). A
+dashboard's `TextTile` is plain text by its own decision (its file says
+why).
+
+## What's in `apps/desktop/src/components/Markdown/`
 
 - **`richTextExtensions.ts`** — the one extension list every field
   mounts (plus `getMarkdown(editor)` and the `Storage` type augmentation
@@ -52,7 +90,7 @@ show the pencil — that's the consistent signal "this is for reading."
   autosave. Editor-only table CSS (cell-selection overlay, column-resize
   handle, `table-layout: fixed`) lives in `index.html` next to the
   `.oxplow-md table` display styles (which the editor inherits via
-  `.oxplow-md`). Round-trip covered by `RichText/tableRoundTrip.test.ts`. Debounced 300ms save while typing,
+  `.oxplow-md`). Round-trip covered by `Markdown/tableRoundTrip.test.ts`. Debounced 300ms save while typing,
   immediate commit on blur. The editor's outer `<div>` wears
   `.oxplow-rt-field` (hover tint + pencil reveal) and the inner
   ProseMirror element wears `.oxplow-md .oxplow-rt-editor` so prose
@@ -93,7 +131,7 @@ show the pencil — that's the consistent signal "this is for reading."
   navigate; Cmd/Ctrl/middle/right click → new tab. Cursor placement
   inside link text is sacrificed — arrow in from adjacent text.
 
-## What's in `apps/desktop/src/components/Wiki/mermaidRender.ts`
+## `mermaidRender.ts`
 
 Shared mermaid rendering pipeline used by `MermaidBlock` (editor
 NodeView), `MarkdownView` (read-only bodies — it keeps its own
@@ -138,21 +176,22 @@ slugs use (bare `[[tsk42]]` shows the title; `[[tsk42|label]]` keeps the
 label). An item that isn't on the active list renders broken. Click
 routes through `workItemTabRef` via the page-nav chokepoint.
 
-`WikiPageTab` applies `preprocessWikilinks` to the body before
-handing it to `RichTextField`, and applies `postprocessWikilinks` to
-the markdown it gets back on `onCommit` before calling
-`writeWikiPageBody`. The on-disk shape is preserved across edits,
+The `Markdown` component applies `preprocessWikilinks` to the value it
+is given and `postprocessWikilinks` to the text it hands back. A wiki
+page's `[[slug]]` goes in as its URI (`oxplow:oxplow/wiki?slug=…`), as
+every other ref does, so the editor keeps it as a link and it comes back
+as `[[slug]]` (a bare slug as the href was once kept as a relative link
+and saved as `[slug](slug)`). The on-disk shape is preserved across edits,
 including the bare vs. labeled forms (`[[path]]` vs.
 `[[path|label]]`). Plain http/https links and image links are left
 alone — collapsing those into `[[ ]]` form would be lossy.
 
 ## What does NOT round-trip yet
 
-- **Per-link right-click menus / wiki title resolution.** `MarkdownView`
-  attaches a right-click menu to every link (copy URL, open in
-  new tab, etc.) and swaps bare `[[slug]]` text for the resolved
-  wiki page title via `useWikiTitle`. Neither is implemented in the
-  editor surface yet.
+- **Title resolution in the editor.** The viewer swaps a bare
+  `[[slug]]`'s text for the page's title; the editor shows the slug,
+  since its text is what it saves. (The right-click link menu is both
+  modes'.)
 
 ## CSS surfaces
 
@@ -169,23 +208,9 @@ In `apps/desktop/index.html`:
   `data-placeholder` attribute).
 - `.task-section-heading`, `.task-title-field` — task page specifics.
 
-## Where the editor is used today
-
-- `apps/desktop/src/components/Plan/TaskDetail.tsx` — description +
-  acceptance fields on the task details page. Title uses the simpler
-  `TitleField` (auto-sizing textarea, no rich formatting).
-- `apps/desktop/src/components/Wiki/WikiPageTab.tsx` — wiki page body.
-  Always-on editing (no view/edit toggle); the Edit / Save / Revert /
-  Done-editing buttons were removed from `WikiPageRail`. Save fires
-  via the RichTextField debounce + blur, calling `writeWikiPageBody`
-  directly (with `postprocessWikilinks` first). Errors surface via
-  `recordOpError`. The `useWikiPageController` hook still backs
-  page-summary loading, refresh-on-event, and notFound/loadError
-  state — it just no longer owns the editor's draft.
-
 ## Comments
 
-`RichTextField` becomes comment-enabled when given a `comments`
+The editor becomes comment-enabled when given a `comments`
 config (`{ streamId, threadId, target, author? }`, `target` a URI).
 WikiPageTab passes `{ target: wikiUri(slug), threadId:
 null }` (wiki pages aren't thread-bound) and additionally wraps the
@@ -249,7 +274,7 @@ item.threadId }`.
   mirroring the plain-DOM surfaces, which this contenteditable region
   is deliberately carved out of (`useDomAnnotations` skips
   contenteditable). Gating is the pure `selectionToolbarVisible`
-  (`RichText/selectionToolbar.ts`); the toolbar hides when the
+  (`Markdown/selectionToolbar.ts`); the toolbar hides when the
   selection collapses or a composer/popover is open. *Opening* an
   existing comment stays right-click-only (click-to-open would fight
   cursor placement). The wrapper's `onContextMenu` **always** fires and

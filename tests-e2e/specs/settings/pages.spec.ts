@@ -72,7 +72,8 @@ test("a stream's prompt is edited and saved on its Settings page", async ({ page
   await page.locator('[data-testid^="navigator-strip-stream-"]').first().click({ button: "right" });
   await page.getByTestId("menu-item-stream.settings").click();
   const prompt = page.locator('[data-testid="lens-part-prompt"]:visible');
-  const box = prompt.getByRole("textbox");
+  // The prompt is markdown: the Markdown editor's surface.
+  const box = prompt.locator('[contenteditable="true"]');
   const save = prompt.getByRole("button", { name: "Save" });
   await expect(save).toBeDisabled();
   await box.fill("Always answer in rhyme.");
@@ -80,7 +81,7 @@ test("a stream's prompt is edited and saved on its Settings page", async ({ page
   await save.click();
   await expect(save).toBeDisabled();
   await page.reload();
-  await expect(page.locator('[data-testid="lens-part-prompt"]:visible').getByRole("textbox")).toHaveValue("Always answer in rhyme.");
+  await expect(page.locator('[data-testid="lens-part-prompt"]:visible [contenteditable="true"]')).toHaveText("Always answer in rhyme.");
 });
 
 // New Stream is the foundation's form over `oxplow.stream.create`: a source

@@ -27,9 +27,11 @@ import { useWorkItemRef } from "../../workItemTitleCache.js";
 import { useWorkListProfile } from "../../useWorkListProfile.js";
 import { workItemRefOfMention } from "../../workItems.js";
 import { workItemId, workItemLabel } from "../../workItemRef.js";
-import { dirUri, fileLinesUri, fileUri, identityOf, isOxplowScheme, linkTarget, commitUri, parseUri, typeOf } from "../../uri/uri.js";
+import { dirUri, fileLinesUri, fileUri, identityOf, isOxplowScheme, linkTarget, commitUri, parseUri, typeOf, wikiUri } from "../../uri/uri.js";
 import { extensionWikilinkRef, resourceInfo, useExtensionRefTitle, useResources } from "../../resources.js";
 import { attachPanZoom, loadMermaid } from "./mermaidRender.js";
+import { CopyCodeButton } from "./CopyCodeButton.js";
+import { followLink, linkMenu, type OpenRef } from "./links.js";
 
 // Mermaid + svg-pan-zoom load lazily inside mermaidRender, so this module
 // stays safe to import in non-DOM test environments (parseMarkdownLink is
@@ -232,6 +234,10 @@ function collapseInternalLink(label: string, url: string): string | null {
         if (!p.path) return null;
         return label === p.path ? `[[dir:${p.path}]]` : `[[dir:${p.path}|${label}]]`;
       }
+      case "oxplow/wiki": {
+        if (!p.slug) return null;
+        return label === p.slug ? `[[${p.slug}]]` : `[[${p.slug}|${label}]]`;
+      }
       case "oxplow/commit": {
         const sha = p.sha;
         if (!sha) return null;
@@ -409,7 +415,10 @@ function rewriteWikilinksOutsideInlineCode(text: string, mentionRef: MentionRef)
       // renderer shows as non-clickable. Encode the target so an odd
       // interior can't break the markdown link.
       if (looksLikeSlug(target)) {
-        return `[${display}](${target})`;
+        // Its URI, as every other ref: the editor keeps it as a link and
+        // `postprocessWikilinks` gives the `[[slug]]` back.
+        const slug = target.endsWith(".md") ? target.slice(0, -3) : target;
+        return `[${display}](${linkTarget(wikiUri(slug))})`;
       }
       return `[${display}](${INVALID_LINK}${encodeURIComponent(target)})`;
     });
@@ -544,29 +553,6 @@ function flattenChildrenText(children: React.ReactNode): string {
 
 export interface MarkdownViewProps {
   body: string;
-  /** Optional internal link handler (WikiPageTab routes to wiki history). */
-  onNavigateInternal?: (slug: string) => void;
-  /** Optional new-tab handler (WikiPageTab opens slug in another tab). */
-  onOpenInNewTab?: (slug: string) => void;
-  /** Optional file-link handler — invoked for `[[path/to/file]]` wikilinks. */
-  onOpenFile?: (path: string, line?: number) => void;
-  /** Optional directory-link handler — invoked for `[[path/to/dir/]]` wikilinks. */
-  onOpenDirectory?: (path: string) => void;
-  /** Optional commit-link handler — invoked for `[[<sha>]]` / `[[git:<sha>]]` wikilinks. */
-  onOpenCommit?: (sha: string) => void;
-  /**
-   * Optional handler for external (http/https) link clicks. When present,
-   * left-click on an external link calls this instead of opening in the
-   * OS browser; the host wires it to "open as in-app external-url tab".
-   * Right-click "Open in browser" still goes to the OS browser regardless.
-   */
-  onOpenExternalUrl?: (url: string) => void;
-  /**
-   * Render mermaid code blocks as SVG diagrams. WikiPageTab uses this; the
-   * tasks modal disables it (default false) since tasks notes
-   * tend to be short and a stray code fence shouldn't trigger rendering.
-   */
-  renderMermaid?: boolean;
   /** Apply max-height + internal scroll instead of growing unbounded. */
   maxHeight?: number | string;
   /** Extra style overrides for the outer wrapper. */
@@ -575,31 +561,18 @@ export interface MarkdownViewProps {
 }
 
 /**
- * Generic safe-markdown renderer used by Notes (wiki) and the
- * Plan tasks modal. Sanitization is delegated to react-markdown +
- * remark-gfm, which strip raw HTML by default — no scripts, no
- * arbitrary external fetches beyond standard markdown links/images.
+ * The markdown viewer: the read mode of `Markdown` (`Markdown.tsx`), the
+ * one component every surface draws markdown with. Sanitization is
+ * react-markdown + remark-gfm's (raw HTML is stripped: no scripts, no
+ * fetches beyond links and images).
  *
- * Link behavior:
- * - external links open in the OS browser (Electron `_blank`).
- * - anchor (`#…`) links use default behavior (in-page jump).
- * - internal links route through `onNavigateInternal` / `onOpenInNewTab`
- *   when those handlers are supplied; otherwise they no-op (tasks
- *   notes don't have a wiki to navigate to).
+ * Links open as the editor's do (`links.ts`): through the page's
+ * navigation, Cmd/Ctrl-click or middle-click in a new tab, a web link in
+ * the app when the allowlist takes it; an in-page anchor jumps. Mermaid
+ * fences draw as diagrams (pan and zoom, the lightbox); other code blocks
+ * carry a Copy button.
  */
-export function MarkdownView({
-  body,
-  onNavigateInternal,
-  onOpenInNewTab,
-  onOpenFile,
-  onOpenDirectory,
-  onOpenCommit,
-  onOpenExternalUrl,
-  renderMermaid = false,
-  maxHeight,
-  style,
-  className,
-}: MarkdownViewProps) {
+export function MarkdownView({ body, maxHeight, style, className }: MarkdownViewProps) {
   // Extensions' ref kinds change what a `[[…]]` names.
   const refKinds = useResources();
   // …and the active work list's ids do too.
@@ -614,146 +587,24 @@ export function MarkdownView({
   // effect can read it without re-running on every render.
   const openLightboxRef = useRef<(content: LightboxContent) => void>(() => {});
   openLightboxRef.current = setLightbox;
-  // Page-context chokepoint: when this MarkdownView renders inside a
-  // page, plain-click follows browser-tab semantics (in-tab nav).
-  // Modifier-click + middle/right-click always escape to a new tab.
-  // Outside a page (e.g. tasks modal), the host callbacks own
-  // the click.
   const ctxNav = useOptionalPageNavigation();
+  const open: OpenRef = ctxNav?.openRef ? ctxNav.openRef.bind(ctxNav) : null;
 
   const handleLinkClick = useCallback((event: React.MouseEvent<HTMLAnchorElement>) => {
     const href = event.currentTarget.getAttribute("href") ?? "";
-    const parsed = parseMarkdownLink(href);
-    if (parsed.kind === "anchor") return;
-    event.preventDefault();
-    if (parsed.kind === "empty") return;
-    // Broken links render as inert text and never wire this handler;
-    // guard defensively (and to narrow the type below).
-    if (parsed.kind === "broken") return;
-    if (parsed.kind === "external") {
-      if (onOpenExternalUrl) onOpenExternalUrl(href);
-      else window.open(href, "_blank", "noopener,noreferrer");
-      return;
-    }
     // Cmd/Ctrl-click and middle-click mean "open it over there, keep
     // what I'm reading" — the browser convention.
     const newTab = event.metaKey || event.ctrlKey || event.button === 1;
-
-    // Every page-bearing link goes through the nav chokepoint, so
-    // `newTab` means the same thing for all of them.
-    const target = linkRef(parsed);
-    if (ctxNav?.openRef && target) {
-      ctxNav.openRef(target, { newTab });
-      return;
-    }
-
-    // No chokepoint (task notes, and other hosts that predate it): fall
-    // back to the single-tab callbacks. `newTab` can't be honoured here —
-    // these callbacks have no notion of a second tab.
-    if (parsed.kind === "file") {
-      onOpenFile?.(parsed.path, parsed.line);
-      return;
-    }
-    if (parsed.kind === "directory") {
-      onOpenDirectory?.(parsed.path);
-      return;
-    }
-    if (parsed.kind === "commit") {
-      onOpenCommit?.(parsed.sha);
-      return;
-    }
-    if (parsed.kind === "work_item" || parsed.kind === "ref") {
-      return; // only the chokepoint opens a task or an extension's ref
-    }
-    if (newTab && onOpenInNewTab) onOpenInNewTab(parsed.slug);
-    else if (onNavigateInternal) onNavigateInternal(parsed.slug);
-    // No handlers? Silently ignore — tasks notes don't have wiki nav.
-  }, [ctxNav, onNavigateInternal, onOpenInNewTab, onOpenFile, onOpenDirectory, onOpenCommit, onOpenExternalUrl]);
-
-  // Right-click parity for Cmd-click: the modifier is the fast path,
-  // the menu is the discoverable one. Both go through the same target.
-  const openItems = useCallback((parsed: ParsedLink): MenuItem[] => {
-    const target = linkRef(parsed);
-    if (!ctxNav?.openRef || !target) return [];
-    const open = ctxNav.openRef.bind(ctxNav);
-    return [
-      { id: "open", label: "Open", enabled: true, run: () => open(target, { newTab: false }) },
-      { id: "open-new", label: "Open in new tab", enabled: true, run: () => open(target, { newTab: true }) },
-    ];
+    if (followLink(href, open, newTab)) event.preventDefault();
+    // `open` is rebuilt per render from ctxNav.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ctxNav]);
 
-  const buildLinkMenu = useCallback((href: string): MenuItem[] => {
-    const parsed = parseMarkdownLink(href);
-    if (parsed.kind === "internal") {
-      const target = parsed.slug;
-      const items: MenuItem[] = [];
-      if (ctxNav) {
-        items.push(...openItems(parsed));
-      } else {
-        if (onNavigateInternal) {
-          items.push({ id: "open", label: "Open", enabled: true, run: () => onNavigateInternal(target) });
-        }
-        if (onOpenInNewTab) {
-          items.push({ id: "open-new", label: "Open in new tab", enabled: true, run: () => onOpenInNewTab(target) });
-        }
-      }
-      return items;
-    }
-    if (parsed.kind === "external") {
-      const items: MenuItem[] = [];
-      if (onOpenExternalUrl) {
-        items.push({ id: "open-in-app", label: "Open in app", enabled: true, run: () => onOpenExternalUrl(href) });
-      }
-      items.push({ id: "open-ext", label: "Open in browser", enabled: true, run: () => { window.open(href, "_blank", "noopener,noreferrer"); } });
-      items.push({ id: "copy", label: "Copy link", enabled: true, run: () => { void navigator.clipboard.writeText(href).catch(() => {}); } });
-      return items;
-    }
-    if (parsed.kind === "file") {
-      const items: MenuItem[] = [];
-      if (ctxNav) {
-        items.push(...openItems(parsed));
-      } else if (onOpenFile) {
-        items.push({ id: "open-file", label: "Open file", enabled: true, run: () => onOpenFile(parsed.path, parsed.line) });
-      }
-      items.push({ id: "copy-path", label: "Copy path", enabled: true, run: () => { void navigator.clipboard.writeText(parsed.path).catch(() => {}); } });
-      return items;
-    }
-    if (parsed.kind === "directory") {
-      const items: MenuItem[] = [];
-      if (ctxNav) {
-        items.push(...openItems(parsed));
-      } else if (onOpenDirectory) {
-        items.push({ id: "open-dir", label: "Open directory", enabled: true, run: () => onOpenDirectory(parsed.path) });
-      }
-      items.push({ id: "copy-path", label: "Copy path", enabled: true, run: () => { void navigator.clipboard.writeText(parsed.path).catch(() => {}); } });
-      return items;
-    }
-    if (parsed.kind === "commit") {
-      const items: MenuItem[] = [];
-      if (ctxNav) {
-        items.push(...openItems(parsed));
-      } else if (onOpenCommit) {
-        items.push({ id: "open-commit", label: "Open commit", enabled: true, run: () => onOpenCommit(parsed.sha) });
-      }
-      items.push({ id: "copy-sha", label: "Copy SHA", enabled: true, run: () => { void navigator.clipboard.writeText(parsed.sha).catch(() => {}); } });
-      return items;
-    }
-    if (parsed.kind === "work_item") {
-      const id = workItemLabel(parsed.ref);
-      const items: MenuItem[] = [];
-      items.push(...openItems(parsed));
-      items.push({ id: "copy-id", label: "Copy id", enabled: true, run: () => { void navigator.clipboard.writeText(id).catch(() => {}); } });
-      return items;
-    }
-    return [];
-  }, [openItems, ctxNav, onNavigateInternal, onOpenInNewTab, onOpenFile, onOpenDirectory, onOpenCommit, onOpenExternalUrl]);
-
-  // Mermaid rendering pass — opt-in via renderMermaid flag. Replaces
+  // Mermaid rendering pass. Replaces
   // <pre><code class="language-mermaid">…</code></pre> blocks with SVG.
   // Each rendered SVG is wrapped in svg-pan-zoom + a small overlay
   // toolbar (+ / − / Reset) so large diagrams aren't dead space.
   useEffect(() => {
-    if (!renderMermaid) return;
     const root = ref.current;
     if (!root) return;
     const cleanups: Array<() => void> = [];
@@ -841,7 +692,7 @@ export function MarkdownView({
         try { fn(); } catch { /* ignore destroy errors */ }
       }
     };
-  }, [body, renderMermaid]);
+  }, [processedBody]);
 
   const wrapperStyle: CSSProperties = {
     ...(maxHeight !== undefined ? { maxHeight, overflowY: "auto" } : {}),
@@ -856,6 +707,19 @@ export function MarkdownView({
         remarkPlugins={[remarkGfm]}
         urlTransform={urlTransform}
         components={{
+          pre: ({ node, children, ...props }) => {
+            // A mermaid fence becomes a diagram (the pass above); any
+            // other code block carries a Copy of its text.
+            const code = node?.children?.[0];
+            const classes = code && "properties" in code ? (code.properties?.className as string[] | undefined) : undefined;
+            if (classes?.includes("language-mermaid")) return <pre {...props}>{children}</pre>;
+            return (
+              <div className="oxplow-md-code">
+                <CopyCodeButton read={(button) => button.parentElement?.querySelector("pre")?.textContent ?? ""} />
+                <pre {...props}>{children}</pre>
+              </div>
+            );
+          },
           img: ({ node, ...props }) => {
             const src = (props.src as string | undefined) ?? "";
             if (!src) return <img {...props} />;
@@ -883,7 +747,7 @@ export function MarkdownView({
             if (parsed.kind === "anchor" || parsed.kind === "empty") {
               return <a {...props} onClick={handleLinkClick} onAuxClick={handleLinkClick} />;
             }
-            const items = buildLinkMenu(href);
+            const items = linkMenu(href, open);
             const iconKind = parsedLinkIconKind(parsed);
             // For internal wiki links written as bare `[[slug]]` (no
             // `|label`), swap the rendered text from the slug to the

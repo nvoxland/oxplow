@@ -28,7 +28,7 @@ import { SelectionCommentToolbar } from "../Comments/SelectionCommentToolbar.js"
 import { selectionToolbarVisible } from "./selectionToolbar.js";
 import { ContextMenu } from "../ContextMenu.js";
 import type { MenuItem } from "../../menu.js";
-import { linkRef, parseMarkdownLink } from "../Wiki/MarkdownView.js";
+import { followLink, linkMenu, type OpenRef } from "./links.js";
 import { useOptionalPageNavigation } from "../../tabs/PageNavigationContext.js";
 
 /// Comment integration bundle. When provided, the field highlights
@@ -85,8 +85,13 @@ interface PendingSelection {
  * over the editable fenced code, so users see the diagram unless they
  * click into it.
  *
- * Save model: debounced 300ms while typing, and immediate on blur. The
- * `onCommit` callback is responsible for the actual persistence.
+ * Two owners: `onCommit` hears the text 300ms after typing stops, on blur
+ * and on unmount (an owner that saves as the person types: the task
+ * body); `onChange` hears every edit (an owner that keeps a draft and
+ * saves on a button: a form, a composer, the lens editor). Either may be
+ * given, or both. Cmd/Ctrl+Enter, Cmd/Ctrl+S and Escape reach the owner
+ * with the text as it is now (`onSubmitShortcut`, `onSaveShortcut`,
+ * `onEscape`).
  *
  * Pencil affordance: a small `Pencil` icon sits in the top-right of
  * the editor surface, opacity ~0.4 by default, full opacity on hover
@@ -95,7 +100,20 @@ interface PendingSelection {
  */
 export interface RichTextFieldProps {
   value: string;
-  onCommit: (markdown: string) => void;
+  /** The text, 300ms after typing stops, on blur and on unmount. */
+  onCommit?: (markdown: string) => void;
+  /** The text, on every edit. */
+  onChange?: (markdown: string) => void;
+  /** Cmd/Ctrl+Enter, with the text as it is now. */
+  onSubmitShortcut?: (markdown: string) => void;
+  /** Cmd/Ctrl+S, with the text as it is now. */
+  onSaveShortcut?: (markdown: string) => void;
+  /** Escape, when no popover of the field's is open. */
+  onEscape?: () => void;
+  /** Focus the editor when it mounts. */
+  autofocus?: boolean;
+  /** `data-testid` on the editable surface. */
+  testId?: string;
   placeholder?: string;
   /** Disable headings/blocks for inline-only fields (e.g. a wiki page
    *  title). Default false. */
@@ -114,6 +132,12 @@ export interface RichTextFieldProps {
 export function RichTextField({
   value,
   onCommit,
+  onChange,
+  onSubmitShortcut,
+  onSaveShortcut,
+  onEscape,
+  autofocus = false,
+  testId,
   placeholder,
   inlineOnly = false,
   className,
@@ -122,7 +146,18 @@ export function RichTextField({
   comments,
 }: RichTextFieldProps) {
   const lastCommittedRef = useRef(value);
+  const lastChangedRef = useRef(value);
   const debounceRef = useRef<number | null>(null);
+  // The owner's latest callbacks: the editor is made once.
+  const owner = useRef({ onCommit, onChange, onSubmitShortcut, onSaveShortcut, onEscape });
+  owner.current = { onCommit, onChange, onSubmitShortcut, onSaveShortcut, onEscape };
+  // A popover of the field's is open: Escape is the popover's.
+  const popoverOpenRef = useRef(false);
+  const commit = (md: string) => {
+    if (md === lastCommittedRef.current) return;
+    lastCommittedRef.current = md;
+    owner.current.onCommit?.(md);
+  };
   // Re-found comment anchors waiting to be stored (tsk902): written when
   // the document settles — on blur, on leaving, or at once when the
   // person isn't typing — never per keystroke pause, since each is a
@@ -149,6 +184,7 @@ export function RichTextField({
   // Floating "Add comment" toolbar over a fresh selection (mouse-driven,
   // like the plain-DOM layer). Null when hidden.
   const [selToolbarRect, setSelToolbarRect] = useState<DOMRect | null>(null);
+  popoverOpenRef.current = pendingSel !== null || activeComment !== null || commentMenu !== null;
 
   const editor = useEditor({
     // Defer the first editor render out of React's render phase. With
@@ -160,19 +196,47 @@ export function RichTextField({
     immediatelyRender: false,
     extensions: richTextExtensions({ inlineOnly, placeholder }),
     content: value,
+    autofocus: autofocus ? "end" : false,
     editorProps: {
       attributes: {
         class: "oxplow-md oxplow-rt-editor",
+        ...(testId ? { "data-testid": testId } : {}),
+      },
+      handleKeyDown(view, event) {
+        const mod = event.metaKey || event.ctrlKey;
+        const md = () => getMarkdown(editorRef.current!);
+        if (mod && event.key === "Enter" && owner.current.onSubmitShortcut) {
+          event.preventDefault();
+          owner.current.onSubmitShortcut(md());
+          return true;
+        }
+        if (mod && event.key.toLowerCase() === "s" && owner.current.onSaveShortcut) {
+          event.preventDefault();
+          owner.current.onSaveShortcut(md());
+          return true;
+        }
+        if (event.key === "Escape" && owner.current.onEscape && !popoverOpenRef.current) {
+          event.preventDefault();
+          owner.current.onEscape();
+          return true;
+        }
+        void view;
+        return false;
       },
     },
     onUpdate({ editor }) {
+      if (owner.current.onChange) {
+        const md = getMarkdown(editor);
+        // A change the owner hears is the text the editor holds: a
+        // re-render with it as `value` is no change from outside.
+        lastChangedRef.current = md;
+        owner.current.onChange(md);
+      }
+      if (!owner.current.onCommit) return;
       if (debounceRef.current != null) window.clearTimeout(debounceRef.current);
       debounceRef.current = window.setTimeout(() => {
-        const md = getMarkdown(editor);
-        if (md !== lastCommittedRef.current) {
-          lastCommittedRef.current = md;
-          onCommit(md);
-        }
+        debounceRef.current = null;
+        commit(getMarkdown(editor));
       }, 300);
     },
     onBlur({ editor }) {
@@ -181,13 +245,11 @@ export function RichTextField({
         window.clearTimeout(debounceRef.current);
         debounceRef.current = null;
       }
-      const md = getMarkdown(editor);
-      if (md !== lastCommittedRef.current) {
-        lastCommittedRef.current = md;
-        onCommit(md);
-      }
+      if (owner.current.onCommit) commit(getMarkdown(editor));
     },
   });
+  const editorRef = useRef(editor);
+  editorRef.current = editor;
 
   // Keep the editor in sync when the upstream value changes from
   // outside (e.g. another tab edited the same task). Don't clobber
@@ -201,23 +263,31 @@ export function RichTextField({
   useEffect(() => {
     if (!editor) return;
     queueMicrotask(() => {
-      if (editor.isDestroyed || editor.isFocused) return;
-      if (value === lastCommittedRef.current) return;
+      if (editor.isDestroyed) return;
+      if (value === lastCommittedRef.current || value === lastChangedRef.current) return;
+      // While the person types, a value from outside is skipped for an
+      // owner that saves on commit (a late echo mustn't clobber typing);
+      // an owner that hears every change echoes exactly what it heard, so
+      // anything else is a reset it means (Discard, Escape).
+      if (editor.isFocused && !owner.current.onChange) return;
       lastCommittedRef.current = value;
+      lastChangedRef.current = value;
       editor.commands.setContent(value, { emitUpdate: false });
     });
   }, [editor, value]);
 
-  // On unmount, flush any pending debounce, and store the anchors the
-  // last edits moved.
+  // On unmount, commit what the last pause didn't reach (an edit is never
+  // lost to a closed tab), and store the anchors the last edits moved.
   useEffect(() => {
     return () => {
       if (debounceRef.current != null) {
         window.clearTimeout(debounceRef.current);
+        const ed = editorRef.current;
+        if (ed && !ed.isDestroyed) commit(getMarkdown(ed));
       }
       flushAnchors();
     };
-    // flushAnchors reads only refs.
+    // commit and flushAnchors read only refs.
   }, []);
 
   // Re-anchor each comment's quote against the current doc and push the
@@ -438,7 +508,10 @@ export function RichTextField({
       : null;
     const commentId = commentEl ? commentEl.getAttribute("data-comment-id") : null;
 
+    // On a link: the viewer's link menu first.
+    const href = targetEl?.closest?.("a")?.getAttribute("href") ?? null;
     const items: MenuItem[] = [
+      ...(href ? linkMenu(href, open) : []),
       {
         id: "cut",
         label: "Cut",
@@ -539,26 +612,17 @@ export function RichTextField({
   // in from adjacent text — which is fine for wikilinks since the
   // visible label is rarely the cursor target.
   const ctxNav = useOptionalPageNavigation();
+  const open: OpenRef = ctxNav?.openRef ? ctxNav.openRef.bind(ctxNav) : null;
   const handleAnchorIntent = (event: ReactMouseEvent<HTMLDivElement>, isAux: boolean): boolean => {
     const target = event.target as HTMLElement | null;
     const anchor = target?.closest?.("a");
     if (!anchor) return false;
     const href = anchor.getAttribute("href") ?? "";
-    const parsed = parseMarkdownLink(href);
-    if (parsed.kind === "anchor" || parsed.kind === "empty") return false;
+    const newTab = isAux || event.metaKey || event.ctrlKey || event.button === 1;
+    // The viewer's links, the viewer's way (`links.ts`).
+    if (!followLink(href, open, newTab)) return false;
     event.preventDefault();
     event.stopPropagation();
-    const newTab = isAux || event.metaKey || event.ctrlKey || event.button === 1;
-    if (parsed.kind === "external") {
-      window.open(href, "_blank", "noopener,noreferrer");
-      return true;
-    }
-    // Every page a link can name — a task, an extension's ref, a file —
-    // resolves through the one `linkRef` and `openRef`, as `MarkdownView`
-    // does (tsk976).
-    const page = linkRef(parsed);
-    if (!page) return false;
-    ctxNav?.openRef?.(page, { newTab });
     return true;
   };
 

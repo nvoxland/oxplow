@@ -11,6 +11,7 @@
 /// out.
 
 import type { CSSProperties } from "react";
+import { Markdown } from "../Markdown/Markdown.js";
 import { useEffect, useMemo, useState } from "react";
 
 import {
@@ -345,22 +346,17 @@ function FieldInput({
       );
       break;
     case "markdown":
+      // The one Markdown editor: Enter adds a line, Cmd/Ctrl+Enter
+      // submits (usability.md, Forms).
       input = (
-        <textarea
-          id={id}
-          data-testid={id}
+        <Markdown
           value={raw}
-          autoFocus={autoFocus}
-          rows={Math.min(12, Math.max(4, raw.split("\n").length))}
-          onChange={(e) => onEdit(f.path, e.target.value)}
-          onKeyDown={(e) => {
-            // Enter adds a line; Cmd/Ctrl+Enter submits (usability.md, Forms).
-            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-              e.preventDefault();
-              onSubmitShortcut?.();
-            }
-          }}
-          style={inputStyle}
+          testId={id}
+          autofocus={autoFocus}
+          hidePencil
+          onChange={(md) => onEdit(f.path, md)}
+          onSubmitShortcut={() => onSubmitShortcut?.()}
+          style={{ ...inputStyle, minHeight: 96, maxHeight: 360, overflowY: "auto" }}
         />
       );
       break;

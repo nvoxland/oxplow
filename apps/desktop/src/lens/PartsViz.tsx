@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import type { LensRun, SqlCell } from "../api.js";
 import type { LensPart } from "../tauri-bridge/generated/bindings.js";
 import { Replaceable } from "../components/Replaceable.js";
-import { MarkdownView } from "../components/Wiki/MarkdownView.js";
+import { Markdown } from "../components/Markdown/Markdown.js";
 import { Loading } from "../kit/Loading.js";
 import { Section } from "../kit/Section.js";
 import { Tile, TileGrid, TileSlot } from "../kit/Tiles.js";
@@ -71,7 +71,7 @@ function PartBody({
   params: Record<string, SqlCell>;
   onSetParam?(name: string, value: SqlCell, row?: PickedRow): void;
 }): ReactNode {
-  if (part.markdown !== null) return <MarkdownView body={part.markdown} />;
+  if (part.markdown !== null) return <Markdown value={part.markdown} />;
   if (!run) return <Loading what={part.title ?? "this part"} />;
   if (run.error) return <p className="ox-error">{run.error}</p>;
   if (!run.run) return null;

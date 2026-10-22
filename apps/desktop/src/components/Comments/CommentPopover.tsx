@@ -10,6 +10,7 @@ import {
 import type { CommentThread } from "../../tauri-bridge/generated/bindings.js";
 import { InlineConfirm } from "../InlineConfirm.js";
 import { CommentComposer } from "./CommentComposer.js";
+import { Markdown } from "../Markdown/Markdown.js";
 
 const CARD_WIDTH = 420;
 
@@ -204,15 +205,7 @@ export function CommentPopover({
                 {formatRelative(String(m.created_at))}
               </span>
             </div>
-            <div
-              style={{
-                fontSize: "var(--text-sm)",
-                color: "var(--text-primary)",
-                whiteSpace: "pre-wrap",
-              }}
-            >
-              {m.body}
-            </div>
+            <Markdown value={m.body} style={{ fontSize: "var(--text-sm)", margin: 0 }} />
           </div>
         ))}
       </div>
