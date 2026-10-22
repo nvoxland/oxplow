@@ -689,6 +689,7 @@ and `v_model_test` are the catalog of all of them:
 | `v_work_item` | the active work list's items (`uri`, `provider`, `native_id`, canonical `state`, `native_state`, `native` JSON, `parent_uri`), excluding deleted; everything reads it — oxplow's tasks have no model of their own (`v_task` was removed) and keep their own fields in `native_state` / `native`; oxplow's tasks are `work_item:oxplow:tsk<n>` (V115, P5.C1; data-model.md) |
 | `v_effort` | spans of a thread's work, linked to a work item or not (`work_item` URI; join `v_work_item` for the item); `title` defaults to the item's or the first prompt's, `summary` (v3) to the last turn's final message, and `closed_by` says what closed it |
 | `v_comment` | comment threads, with first-message `body` and `message_count` |
+| `v_comment_message` | each message of a thread, by `comment` (the thread's URI) and `position` from 1, with `author` and `body` |
 | `v_wiki_page` | wiki pages (excerpt; full body is on disk) |
 | `v_snapshot` | worktree snapshots, with `tree_hash` (whole-tree identity, V96) |
 | `v_snapshot_file` | every captured version of a file (`file_snapshot`): its snapshot, stream, path, storage class, size and `content_hash`. A snapshot records only what changed since the stream's previous one, so a file's history is its rows, and `kind` (v2) says what the snapshot did to the path: `added`, `modified`, `deleted`, or NULL when the row changed nothing (P11, tsk944) |

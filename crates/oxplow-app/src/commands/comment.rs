@@ -470,6 +470,46 @@ mod tests {
         }));
     }
 
+    /// A thread's messages are rows of `v_comment_message`, in the order
+    /// they were written, each with who wrote it, and the thread's URI to
+    /// join on `v_comment`.
+    #[tokio::test]
+    async fn a_threads_messages_are_read_in_order() {
+        let fx = services_with_effort().await;
+        let stream = StreamId::new(1).to_string();
+        let c = add(&fx, &agent(&fx), comment_on(&stream, None))
+            .await
+            .unwrap();
+        fx.svc
+            .commands
+            .run(
+                &Actor::Human,
+                REPLY,
+                json!({ "comment": comment_id(&c), "body": "looks fine" }),
+                false,
+            )
+            .await
+            .unwrap();
+        let out = fx
+            .svc
+            .sql
+            .query_sql(
+                "SELECT m.position, m.author, m.body, m.comment = c.uri FROM v_comment_message m \
+                 JOIN v_comment c ON c.uri = m.comment ORDER BY m.position",
+                vec![],
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(&out.rows).unwrap(),
+            json!([
+                [1, "agent", "what about this?", 1],
+                [2, "user", "looks fine", 1]
+            ])
+        );
+    }
+
     /// tsk861: a moved anchor is stored and recorded; one already where
     /// it was writes nothing — no audit row, no event — and an agent can't
     /// relocate (it is the renderer's).
