@@ -84,6 +84,7 @@ mock.module("../tauri-bridge/generated/bindings.js", () => ({
 const { PageNavigationContext } = await import("../tabs/PageNavigationContext.js");
 const { WorkItemPage } = await import("./WorkItemPage.js");
 const { DocumentViz } = await import("../lens/PartsViz.js");
+const { Replaceable } = await import("../components/Replaceable.js");
 const { DiffFileHeaderSlot } = await import("../components/Diff/DiffFileHeaderSlot.js");
 
 afterEach(() => {
@@ -247,19 +248,15 @@ const replacing = (name: string, target: string, lens: string, params: string[],
 // it without bringing a provider, given the Board's props and nothing else;
 // the page's own chrome stays oxplow's.
 test("an extension's view replaces the Board, whichever list is active", async () => {
-  extensions = [
-    replacing("views", "work_item.board", "board", ["scope", "thread_id"], "board"),
-    { name: "x", enabled: true, ui: { slots: [], commands: [], decorators: [], replacements: [] }, lenses: [{ id: "x/board-cards", params: ["scope", "thread_id"].map((name) => ({ name, label: null, default: null })) }] },
-  ];
-  // The Board's document has one replaceable part, given `scope` and `thread_id`.
-  const parts = [{ id: "board", title: "Board", lens: "x/board-cards", markdown: null, size: null, replaceable: "work_item.board", from: null }];
+  extensions = [replacing("views", "work_item.board", "board", ["scope", "thread_id"], "board")];
+  // What the Board's document places for its one replaceable part.
   const replaced = mount(
     "oxplow:oxplow/page?page=board",
-    <DocumentViz parts={parts} params={{ scope: "all", thread_id: null }} streamId="str1" />,
+    <Replaceable target="work_item.board" props={{ scope: "all", thread_id: null }} streamId="str1" onOpenPage={() => {}} fallback={<div data-testid="plain-board" />} />,
   );
   await waitFor(() => expect(replaced.getByTestId("replacement-work_item.board").textContent).toContain("replaced by views"));
-  // The extension's lens is given the Board's props and nothing else.
-  expect(lensRuns.filter(([id]) => id === "views/board")).toEqual([["views/board", { scope: "all", thread_id: null }]]);
+  expect(replaced.queryByTestId("plain-board")).toBeNull();
+  expect(lensRuns).toEqual([["views/board", { scope: "all", thread_id: null }]]);
 });
 
 // A work item's editor (its title and body) is replaceable; the rail — the
