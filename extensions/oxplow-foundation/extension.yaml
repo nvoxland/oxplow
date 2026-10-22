@@ -182,16 +182,30 @@ pages:
   - { id: extensions, title: Extensions, icon: package, category: System, keywords: deploy rollback permissions enable disable share, lens: extensions }
   # Opened from elsewhere
   - { id: alerts, title: Alerts, icon: bell, component: "oxplow:alerts" }
-  - { id: custom-dashboard, title: Dashboard, icon: layout-dashboard, params: [id], component: "oxplow:custom-dashboard" }
+  - { id: custom-dashboard, title: Dashboard, icon: layout-dashboard, params: [id], for: oxplow/dashboard, default: true, component: "oxplow:custom-dashboard" }
   - { id: new-session, title: New Session, icon: plus, lens: new-session }
   - { id: new-stream, title: New Stream, icon: plus, lens: new-stream }
   - { id: new-task, title: New Item, icon: plus, params: [parent], lens: new-task }
   - { id: stream-settings, title: Stream Settings, icon: settings, params: [stream], lens: stream-settings }
   - { id: thread-settings, title: Thread Settings, icon: settings, params: [thread], lens: thread-settings }
-  - { id: external-url, title: Web Page, icon: external-link, params: [url], component: "oxplow:external-url" }
+  - { id: external-url, title: Web Page, icon: external-link, for: [https, http], default: true, component: "oxplow:external-url" }
   - { id: diff, title: Diff, icon: git-compare, params: [path, left, right, label], component: "oxplow:diff" }
-  - { id: diff-view, title: Changes, icon: git-compare, params: [snapshot, effort, start, end], component: "oxplow:diff-view" }
+  - { id: diff-view, title: Changes, icon: git-compare, params: [snapshot, effort, start, end], for: [oxplow/snapshot, oxplow/effort, oxplow/turn], default: true, component: "oxplow:diff-view" }
   - { id: duplicate-block, title: Duplicate Block, icon: copy, params: [left, left_lines, left_at, right, right_lines, right_at], component: "oxplow:duplicate-block" }
+  # Renderers: what a URI of oxplow's resources opens on (its tab's id is
+  # the URI). A resource with several picks by `accepts`, then the URI's
+  # `#oxplow.renderer=`, then its default; one nothing renders opens on
+  # `resource`, which shows it (or, when nothing resolves it, its dead link).
+  - { id: editor, title: Editor, for: oxplow/file, accepts: { rev: absent }, default: true, component: "oxplow:editor" }
+  - { id: file-viewer, title: File at a Revision, for: oxplow/file, accepts: { rev: present }, component: "oxplow:file-viewer" }
+  - { id: directory, title: Directory, for: oxplow/dir, default: true, component: "oxplow:directory" }
+  - { id: wiki-page, title: Wiki Page, for: oxplow/wiki, default: true, component: "oxplow:wiki-page" }
+  - { id: work-item, title: Work Item, for: oxplow/work_item, default: true, component: "oxplow:work-item" }
+  - { id: commit, title: Commit, for: oxplow/commit, default: true, component: "oxplow:commit" }
+  - { id: metric-detail, title: Metric, for: oxplow/metric, default: true, component: "oxplow:metric-detail" }
+  - { id: lens, title: Lens, for: oxplow/lens, default: true, component: "oxplow:lens" }
+  - { id: agent-session, title: Agent Session, for: oxplow/agent_session, default: true, pinned: true, component: "oxplow:agent-session" }
+  - { id: resource, title: Resource, component: "oxplow:resource" }
 # What oxplow's URIs name (`oxplow:oxplow/<resource>?<params>`): declared
 # here like any extension's resources, so none is special
 # (.context/resources.md). A param's `pattern` matches its decoded value.
@@ -714,7 +728,7 @@ commands:
     scope: dashboards.write
     op: create
     invokers: { human: true, agent: true, lens: true }
-    ui: {"label": "New Dashboard…", "group": "Tasks", "input": {"title": "Untitled dashboard"}, "open_after": "oxplow:oxplow/page?id={{result.id}}&page=custom-dashboard"}
+    ui: {"label": "New Dashboard…", "group": "Tasks", "input": {"title": "Untitled dashboard"}, "open_after": "oxplow:oxplow/dashboard?id={{result.id}}"}
     example: {"title": "Build health"}
   - name: dashboard.delete
     summary: "Delete a dashboard and its tiles. A person's, confirmed."

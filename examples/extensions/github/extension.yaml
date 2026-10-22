@@ -63,7 +63,7 @@ models:
       - { name: title, type: TEXT, doc: "Its title." }
       - { name: body, type: TEXT, doc: "Its description ('' for none)." }
 pages:
-  - { id: pr, title: Pull request, category: Work, lens: pr }
+  - { id: pr, title: Pull request, for: github/pr, default: true, lens: pr }
 # Each pull request's lifetime as a bar from opened to merged — a range the
 # kit's charts don't draw, so the `pr-lifetimes` lens renders this bundle.
 # It may re-run that lens (its filters) and run the `prs` sync; it runs the
@@ -75,13 +75,12 @@ custom_components:
     assets: [pr-lifetimes]
     commands: [oxplow.collector.sync]
 # A pull request is a resource a URI can name: `oxplow:github/pr?id=12`, or
-# `[[pr:12]]` in any text oxplow renders. It links to its `pr` page.
+# `[[pr:12]]` in any text oxplow renders. It opens on its `pr` page (`for:`).
 resources:
   - name: pr
     label: Pull request
     params: { id: { required: true, pattern: '^\d+$' } }
     resolve: pull_request
     searchable: pull_request
-    page: pr
     wikilink: { prefix: pr, param: id }
     icon: git-pull-request

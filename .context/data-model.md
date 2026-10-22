@@ -1330,6 +1330,9 @@ backfill regenerates the derived ones. `V100__bare_ids.sql` then moved the
 event payload fields named for one resource (and undo inverses, pending
 proposals) from URIs to bare ids, at new event versions; see
 [resources.md](./resources.md) "The bare-id migration (V100)".
+`V103__resource_page_drop.sql` dropped `resource.page` (a resource opens
+as itself; the pages that render it declare `for`), and `v_resource` is
+at v4 without that column.
 `V101__uri_names.sql` then renamed the columns that held a URI under the
 name `ref` (`work_item.uri` / `parent_uri`, `work_item_link.from_uri` /
 `to_uri`, `search_entry.uri`, `claim.evidence`, …) and moved

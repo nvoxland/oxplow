@@ -236,10 +236,10 @@ test("ready is heard once; an update posts only a result the frame hasn't seen",
 test("a component navigates to app pages only", async () => {
   expect(componentMayOpen("oxplow:oxplow/work_item?id=tsk1&provider=oxplow")).toBe(true);
   expect(componentMayOpen("oxplow:oxplow/handoff?id=hnd1")).toBe(true);
-  expect(componentMayOpen("oxplow:oxplow/page?page=external-url&url=https://evil.example/?d%3D1")).toBe(false);
+  expect(componentMayOpen("https://evil.example/?d=1")).toBe(false);
   expect(componentMayOpen("not a ref")).toBe(false);
   const h = harness({ navigate: (ref) => componentMayOpen(ref) });
-  h.send({ id: "n2", method: "navigate", uri: "oxplow:oxplow/page?page=external-url&url=https://evil.example/" });
+  h.send({ id: "n2", method: "navigate", uri: "https://evil.example/" });
   await h.settle();
   expect(h.received).toEqual([
     { id: "n2", ok: false, error: { code: "INVALID", message: "A component may open oxplow's pages only." } },

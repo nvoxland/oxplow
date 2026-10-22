@@ -7,6 +7,27 @@ import type { Extension, ExtensionPage } from "../tauri-bridge/generated/binding
 import type { PagePayload } from "../tabs/pageRefs.js";
 import { extPageUri, pageUri as corePageRef } from "../uri/uri.js";
 
+/// The built-in renderers whose bodies draw on the window's own state
+/// (`App.tsx` `appRenderers`): the editor's buffers, the thread's sessions.
+export const APP_RENDERERS = [
+  "agent-session",
+  "commit",
+  "directory",
+  "editor",
+  "file-viewer",
+  "lens",
+  "metric-detail",
+  "wiki-page",
+  "work-item",
+] as const;
+
+export type AppRendererName = (typeof APP_RENDERERS)[number];
+
+export function isAppRenderer(name: string): name is AppRendererName {
+  return (APP_RENDERERS as readonly string[]).includes(name);
+}
+
+/// The rest of the built-ins (`builtInPages.tsx`).
 export const BUILT_IN_PAGES = [
   "alerts",
   "backlog",
@@ -21,6 +42,7 @@ export const BUILT_IN_PAGES = [
   "files",
   "git-dashboard",
   "metrics-recorded",
+  "resource",
   "settings",
   "terminal",
   "uncommitted-changes",

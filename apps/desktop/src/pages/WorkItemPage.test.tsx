@@ -76,7 +76,7 @@ beforeEach(() =>
   setResources(
     ["work_item", "collector"].map((name) => ({
       resource: `oxplow/${name}`, extension: "oxplow", label: name, params: {}, additional: false, resolve: null,
-      title: null, searchable: null, icon: null, wikilink: null, page: null,
+      title: null, searchable: null, icon: null, wikilink: null,
     })),
   ),
 );
@@ -189,7 +189,9 @@ const pageWithNav = () => {
 };
 
 // An edge names its ends by URI; one no resource claims is unresolved.
-const DEAD = resourceUri("oxplow/acme_pr", { id: 12 });
+// Every oxplow URI opens (an unresolved one on the fallback page), so a dead
+// link is what is no URI the window opens: raw text.
+const DEAD = "gone_kind:12";
 
 const aboutEdge = (target: string, resolved: boolean, label: string | null) => ({
   source: workItemUri("fake", "W-1"),
@@ -220,7 +222,7 @@ test("a link row's right-click menu has Unlink, which runs work_item.unlink with
   outbound = [aboutEdge(collectorUri("triage", "todos"), true, "Triage todos")];
   const view = pageWithNav();
   fireEvent.click(await waitFor(() => view.getByTestId("page-nav-outbound-toggle")));
-  const row = await waitFor(() => view.getByTestId(`backlinks-entry-${pageUri("settings")}`));
+  const row = await waitFor(() => view.getByTestId(`backlinks-entry-${collectorUri("triage", "todos")}`));
   expect(row.textContent).toContain("Triage todos");
   fireEvent.contextMenu(row, { clientX: 3, clientY: 3 });
   fireEvent.click(view.getByTestId("menu-item-unlink"));

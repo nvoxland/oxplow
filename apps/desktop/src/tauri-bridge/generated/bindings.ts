@@ -1968,7 +1968,7 @@ export type CommandUi = {
 	form?: string | null,
 	/**
 	 *  The page to open once it ran: a tab id whose `{{result.<field>}}`
-	 *  takes the result's field (`oxplow:oxplow/page?id={{result.id}}&page=custom-dashboard`).
+	 *  takes the result's field (`oxplow:oxplow/dashboard?id={{result.id}}`).
 	 */
 	open_after?: string | null,
 	/**
@@ -2810,6 +2810,25 @@ export type ExtensionPage = {
 	 *  (`<extension>/<slug>`).
 	 */
 	count: string | null,
+	/**
+	 *  The resources it renders (`oxplow/file`, `acme/pr`; `https`, `http`
+	 *  for a web page): a URI of one opens on it, the URI its tab's id.
+	 *  Empty: a route, opened at `page_ref`.
+	 */
+	for: string[],
+	/**
+	 *  Which URIs of those it takes, by param: `present`, `absent`, or an
+	 *  anchored pattern the value matches (one form the desktop's JS and
+	 *  Rust read alike). Empty: every one.
+	 */
+	accepts: { [key in string]: string },
+	/**
+	 *  What its resource opens on when the URI's view names no renderer
+	 *  (`#oxplow.renderer=`): only a page of the extension declaring it.
+	 */
+	default: boolean,
+	/**  Its tab leads the strip and isn't evicted (an agent session's). */
+	pinned: boolean,
 	/**  What draws it. */
 	body: PageBody,
 };
@@ -5906,11 +5925,6 @@ export type ResourceDecl = {
 	searchable: string | null,
 	icon: string | null,
 	wikilink: WikilinkDecl | null,
-	/**
-	 *  The page one opens on (its page URI), given `ref=<uri>`: an
-	 *  extension's resource until a renderer opens a URI as itself.
-	 */
-	page: string | null,
 };
 
 /**  How long a namespace's event payloads and large content are kept. */

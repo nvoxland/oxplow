@@ -2,10 +2,12 @@ import { expect, test } from "bun:test";
 
 import golden from "../../../../crates/oxplow-app/fixtures/built_in_pages.json";
 import type { Extension } from "../tauri-bridge/generated/bindings.js";
-import { BUILT_IN_PAGES, declaredPage, isBuiltInPage } from "./declaredPages.js";
+import { APP_RENDERERS, BUILT_IN_PAGES, declaredPage, isBuiltInPage } from "./declaredPages.js";
 
+// Intent kept: the Rust table is mirrored whole; the TS side splits it in two
+// (renderers needing window state, and the rest).
 test("the built-in pages are the Rust table's", () => {
-  expect([...BUILT_IN_PAGES].sort()).toEqual([...golden].sort());
+  expect([...APP_RENDERERS, ...BUILT_IN_PAGES].sort()).toEqual([...golden].sort());
 });
 
 test("a built-in page name is recognized, anything else isn't", () => {

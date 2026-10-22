@@ -2001,7 +2001,7 @@
           "default": null
         },
         "open_after": {
-          "description": "The page to open once it ran: a tab id whose `{{result.<field>}}`\ntakes the result's field (`oxplow:oxplow/page?id={{result.id}}&page=custom-dashboard`).",
+          "description": "The page to open once it ran: a tab id whose `{{result.<field>}}`\ntakes the result's field (`oxplow:oxplow/dashboard?id={{result.id}}`).",
           "type": [
             "string",
             "null"
@@ -2328,6 +2328,35 @@
             "null"
           ],
           "default": null
+        },
+        "for": {
+          "description": "The resources it renders — one or a list: `oxplow/file`, its own\n`<extension>/<name>`, another extension's, or `https` / `http` (a\nweb page). A URI of one opens on it; without `for` it is a route.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Renders"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "accepts": {
+          "description": "Which URIs of those it takes, by param: `present`, `absent`, or an\nanchored pattern (`^git:`) the value matches.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {}
+        },
+        "default": {
+          "description": "What its resource opens on when the URI's view names no renderer:\nonly for a resource this extension declares, one per resource.",
+          "type": "boolean",
+          "default": false
+        },
+        "pinned": {
+          "description": "Its tab leads the strip and isn't evicted (a renderer only).",
+          "type": "boolean",
+          "default": false
         }
       },
       "additionalProperties": false,
@@ -2348,6 +2377,20 @@
         "Data",
         "Lenses",
         "System"
+      ]
+    },
+    "Renders": {
+      "description": "A page's `for`: one resource or several.",
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
       ]
     },
     "PanelFile": {
@@ -2885,14 +2928,6 @@
             {
               "type": "null"
             }
-          ],
-          "default": null
-        },
-        "page": {
-          "description": "One of the extension's pages (its id), which opens one given\n`ref=<uri>`.",
-          "type": [
-            "string",
-            "null"
           ],
           "default": null
         }

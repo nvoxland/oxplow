@@ -148,8 +148,9 @@ export function useRememberedStore(): RememberedStore {
  *  its resource for an entity page (`resource:oxplow/file`: every file page
  *  shares one). */
 export function pageMemoryScope(ref: TabRef): string {
-  if (ref.kind === "page" || ref.kind === "lens" || ref.kind === "metric") return keyIdentityOf(ref.id) ?? ref.id;
-  return `resource:${typeOf(ref.id) ?? `oxplow/${ref.kind}`}`;
+  const resource = typeOf(ref.id);
+  if (resource === "oxplow/page" || resource === "oxplow/lens" || resource === "oxplow/metric") return keyIdentityOf(ref.id) ?? ref.id;
+  return `resource:${resource ?? "link"}`;
 }
 
 /** One remembered value under `scope` (null: none — kept in the caller). */

@@ -37,7 +37,7 @@
 /// (`/component-lib/oxplow-component.js`, `oxplow.connect()`); it checks
 /// `protocol` against the one it speaks.
 import { IpcCallError, needsConfirmation } from "../ipc-error.js";
-import { parseUri, typeOf } from "../uri/uri.js";
+import { parseUri } from "../uri/uri.js";
 import type { CommandOutcome, LensRun, SqlCell, SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
 
 /// The protocol above, by number: bumped when a message's shape changes,
@@ -255,13 +255,12 @@ export function componentRefusal(e: unknown): string | null {
   return e instanceof IpcCallError && e.code === "DENIED" ? e.message : null;
 }
 
-/** Whether a component's `navigate` may open `ref`: an oxplow ref, never
- *  an outside URL (the frame has no network, and an external-url tab would
- *  carry whatever it put in the URL out). It opens where its kind's page
- *  says (`openRef`). */
+/** Whether a component's `navigate` may open `ref`: one of oxplow's URIs,
+ *  never a web page (the frame has no network, and a web page's tab would
+ *  carry whatever it put in the URL out). It opens on the page that
+ *  renders it (`openRef`). */
 export function componentMayOpen(ref: string): boolean {
-  const parsed = parseUri(ref);
-  return parsed !== null && !(typeOf(ref) === "oxplow/page" && parsed.params.page === "external-url");
+  return parseUri(ref) !== null;
 }
 
 /** What a run shows the frame: an `update` repeats none of it. */

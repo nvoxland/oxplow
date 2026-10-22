@@ -319,7 +319,7 @@ pub struct CommandUi {
     #[serde(default)]
     pub form: Option<String>,
     /// The page to open once it ran: a tab id whose `{{result.<field>}}`
-    /// takes the result's field (`oxplow:oxplow/page?id={{result.id}}&page=custom-dashboard`).
+    /// takes the result's field (`oxplow:oxplow/dashboard?id={{result.id}}`).
     #[serde(default)]
     pub open_after: Option<String>,
     /// It runs as a background task (a slow call out: pull, push) whose
@@ -1179,7 +1179,7 @@ mod tests {
             json!({ "label": "Finish", "about": "oxplow/work_item", "input": { "uri": "{{uri}}", "id": "{{uri.id}}" } }),
             json!({ "label": "New Task…", "form": "oxplow:oxplow/page?page=new-task" }),
             json!({ "label": "Commit…", "form": "commit" }),
-            json!({ "label": "New", "open_after": "oxplow:oxplow/page?id={{result.id}}&page=custom-dashboard" }),
+            json!({ "label": "New", "open_after": "oxplow:oxplow/dashboard?id={{result.id}}" }),
             json!({ "label": "New", "open_after": "oxplow:oxplow/agent_session?id={{result.id}}" }),
             // A result field that is itself the ref to open.
             json!({ "label": "New", "open_after": "{{result.page}}" }),
@@ -1246,14 +1246,11 @@ mod tests {
     /// id is empty.
     #[test]
     fn open_after_is_bound_from_the_result() {
-        let u = ui(
-            json!({ "label": "New", "open_after": "oxplow:oxplow/page?id={{result.id}}&page=custom-dashboard" }),
-        );
+        let u =
+            ui(json!({ "label": "New", "open_after": "oxplow:oxplow/dashboard?id={{result.id}}" }));
         assert_eq!(
             u.open_after_for(&json!({ "id": 7 })),
-            Ok(Some(
-                "oxplow:oxplow/page?id=7&page=custom-dashboard".to_string()
-            ))
+            Ok(Some("oxplow:oxplow/dashboard?id=7".to_string()))
         );
         let err = u.open_after_for(&json!({})).unwrap_err();
         assert!(err.contains("`id`"), "{err}");

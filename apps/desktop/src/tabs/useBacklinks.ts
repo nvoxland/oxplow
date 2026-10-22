@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { listBacklinks, listPageOutbound, type BacklinkEdge } from "../api.js";
 import { lensRef } from "./pageRefs.js";
 import { refTargetNow } from "./refOpener.js";
-import { commitUri, contributionOf, dirUri, fileUri, idOf, identityOf, keyOf, typeOf, pageUri, wikiUri } from "../uri/uri.js";
+import { contributionOf, fileUri, idOf, identityOf, keyOf, pageUri, paramOf, typeOf, wikiUri } from "../uri/uri.js";
 import type { TabRef } from "./tabState.js";
 import type { BacklinkEntry } from "./backlinkTypes.js";
 
@@ -38,7 +38,7 @@ export function useBacklinks(target: TabRef): BacklinkEntry[] {
     return () => {
       cancelled = true;
     };
-  }, [target.kind, target.id]);
+  }, [target.id]);
 
   return entries;
 }
@@ -69,7 +69,7 @@ export function usePageOutbound(source: TabRef, version = 0): BacklinkEntry[] {
     return () => {
       cancelled = true;
     };
-  }, [source.kind, source.id, version]);
+  }, [source.id, version]);
 
   return entries;
 }
@@ -81,36 +81,17 @@ export function usePageOutbound(source: TabRef, version = 0): BacklinkEntry[] {
  * URI's (settings, dialogs, a declared page) so the hook short-circuits.
  */
 export function graphUriOf(ref: TabRef): string | null {
-  switch (ref.kind) {
-    case "wiki": {
-      const p = ref.payload as { slug?: string } | null;
-      return p?.slug ? wikiUri(p.slug) : null;
-    }
-    case "work_item": {
-      const p = ref.payload as { ref?: string } | null;
-      return p?.ref ?? null;
-    }
-    case "file": {
-      const p = ref.payload as { path?: string } | null;
-      return p?.path ? fileUri(p.path) : null;
-    }
-    case "dir": {
-      const p = ref.payload as { path?: string } | null;
-      return p?.path ? dirUri(p.path) : null;
-    }
-    case "commit": {
-      const p = ref.payload as { sha?: string } | null;
-      return p?.sha ? commitUri(p.sha) : null;
-    }
-    case "page":
-      // A shell route is not a URI of its own kind and has none.
-      return null;
-    default:
-      // Any other kind with a page is its own URI (a lens, an effort, a
-      // collector's page).
-      return identityOf(ref.id) ?? ref.id;
+  const resource = typeOf(ref.id);
+  // A route, or what isn't one of oxplow's URIs, has none.
+  if (resource === null || resource === "oxplow/page") return null;
+  // A file at a revision is the file.
+  if (resource === "oxplow/file") {
+    const path = paramOf(ref.id, "path");
+    return path ? fileUri(path) : null;
   }
+  return identityOf(ref.id) ?? ref.id;
 }
+
 
 /**
  * Exported for unit tests. Internal call sites all go through

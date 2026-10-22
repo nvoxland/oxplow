@@ -624,8 +624,8 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     (IPC and MCP `run_lens`) carries `alert: {firing, count, value,
     message}`; the message is `label: count`, `N rows`, or `label: value`.
   - **Pages** (P6.G2, target §11.3): `pages: [{ id, title, icon?,
-    category?, keywords?, params?, count?, lens | component }]` — every
-    page that isn't an entity's is one of these, oxplow's own included
+    category?, keywords?, params?, count?, for?, accepts?, default?,
+    pinned?, lens | component }]` — every page is one of these, oxplow's own included
     (`Extension.pages`, `ExtensionPage`; checked at load in
     `parse_pages`: a kebab-case, unique id; a lens that exists;
     lowercase `params`; a `count` lens that exists). Its tab id is
@@ -640,7 +640,10 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     names a **built-in page** (`built_in_pages::BUILT_IN_PAGES`) and only
     the required bundled extension may use it — a stepping stone for
     oxplow's pages the kit can't draw yet, pinned by
-    `fixtures/built_in_pages.json`, which may only shrink. Any other
+    `fixtures/built_in_pages.json`. The list grew once with the
+    renderers (`agent-session`, `commit`, `directory`, `editor`,
+    `file-viewer`, `lens`, `metric-detail`, `resource`, `wiki-page`,
+    `work-item`) and only shrinks again. Any other
     `component: <id>` names one of the extension's own
     `custom_components` (`PageBody::Component { component:
     "<ext>/<id>" }`): a **custom page**, the component filling the page
@@ -655,6 +658,27 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     icon when it declares none. A page whose lens or count lens is
     pruned (`public_contracts`) goes with it. How the desktop draws one:
     pages-and-tabs.md "Declared pages".
+    **A page with `for` is a renderer** of a resource; one without is a
+    route (`oxplow:oxplow/page?page=…`). A URI opens as itself and the
+    desktop picks among its renderers (pages-and-tabs.md "Renderers").
+    The rules, checked at load (`renderer_problem`, after `resources:` is
+    parsed):
+    - `for: <resource> | [<resource>, …]` names a resource of the
+      extension's own, one of oxplow-foundation's (`oxplow/*`), another
+      extension's, or the scheme `https` / `http` (a web page).
+    - `accepts: { <param>: present | absent | <pattern> }` keys are the
+      resource's params (any key when the resource takes `additional`
+      params); a value is `present`, `absent` or an anchored id pattern
+      (the `param_pattern` subset). A renderer shows a URI only when every
+      rule holds.
+    - `default: true` is only for a resource the extension declares (or,
+      for oxplow's namespace, a scheme), and one page per resource. An
+      extension that renders another's resource adds a renderer to pick
+      ("Open with"), never the default.
+    - `pinned: true` makes its tabs pinned.
+    - `default`, `pinned` and `accepts` without `for` are a load error.
+    - A lens renderer must declare a `uri` param, and is run with
+      `{ uri: <the URI's identity> }`.
   - **Panels** (P6.G1, target §11.3): `panels: [{ id, title, icon?,
     scope: project | stream | thread, body, badge?, open?, collapsed?,
     count? }]` put a lens in the
@@ -3462,7 +3486,6 @@ resources:
     resolve: prs              # one of its models, with `uri` and `title` columns
     title: title              # the column of `resolve` that titles one
     searchable: found         # optional: one of its models, with `uri`, `title` and `body`
-    page: pr                  # optional: one of its pages, opened with `uri=<uri>`
     icon: git-pull-request    # one of RESOURCE_ICONS
     wikilink: { prefix: pr, param: id }   # optional `[[pr:12]]` sugar
 ```
@@ -3485,7 +3508,7 @@ and no length needs capping. What is kept spells every set out — `\d` is
 engine reads as syntax), a `resolve` or `searchable` that isn't one of
 its models with the columns it needs, a `wikilink.param` that isn't one
 of its params, a `wikilink.prefix` that isn't lowercase letters, digits
-and `_`, a `page` that isn't one of its pages, and an icon not in
+and `_`, and an icon not in
 `RESOURCE_ICONS` (lucide names the desktop maps).
 
 **Registering** is the vocabulary reactor's: oxplow-foundation's
@@ -3494,8 +3517,8 @@ which refuses a second resource of a name and a second wikilink prefix
 (the later one's load error names both). `validate_ref` and `[[pr:12]]`
 know a resource while its extension is installed and not after. The pass
 restates the `resource` table, read as `v_resource` (resource, extension,
-label, params, additional, resolve, title, searchable, icon, wikilink,
-page); unlike event types, a removed extension's resources leave, and
+label, params, additional, resolve, title, searchable, icon, wikilink;
+model v4 — V103 dropped `page`); unlike event types, a removed extension's resources leave, and
 URIs to them dangle (they show as raw text).
 
 **The desktop** (`apps/desktop/src/resources.ts`) reads `v_resource`'s
@@ -3506,8 +3529,9 @@ and `useResources` subscribes to:
   (`RESOURCE_ICONS`, a lucide component per allowed name — a Rust test
   keeps the two lists equal) and label;
 - opening a URI of the resource (`openRef`, resources.md "The desktop")
-  opens the resource's `page` with `uri=<uri>` (`resourcePageTabId`);
-  `DeclaredPageView` hands the params to the lens as `initialParams`;
+  opens it as itself, drawn by the renderer the `pages[].for`
+  declarations pick (`pages/renderers.ts`); a lens renderer is run with
+  `{ uri }`, a URI nothing renders shows on the fallback `resource` page;
 - `preprocessWikilinks` turns `[[pr:12]]` into a link when the value
   matches the param's pattern (`extensionWikilinkRef`, as the backend's
   `canonical_wikilink` does), and the link's text becomes its title from

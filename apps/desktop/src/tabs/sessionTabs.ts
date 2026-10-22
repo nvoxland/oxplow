@@ -1,3 +1,4 @@
+import { typeOf } from "../uri/uri.js";
 /**
  * A thread's agent-session tabs follow its `agent_session` rows: every
  * open session's tab leads the thread's tabs, in the order the sessions
@@ -13,7 +14,7 @@ import type { TabRef } from "./tabState.js";
  *  (`newThreadTabs`) and stays closed once closed. The same array when
  *  nothing changed. */
 export function reconcileSessionTabs(tabs: TabRef[], openSessions: ReadonlyArray<{ id: string }>): TabRef[] {
-  const rest = tabs.filter((t) => t.kind !== "agent_session");
+  const rest = tabs.filter((t) => typeOf(t.id) !== "oxplow/agent_session");
   const leading = openSessions.map((s) => agentSessionRef(s.id));
   const next = [...leading, ...rest];
   const same = next.length === tabs.length && next.every((t, i) => t.id === tabs[i]!.id);

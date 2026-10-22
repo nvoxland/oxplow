@@ -55,7 +55,7 @@ pub const CONTEXT_KEYS: &[ContextKey] = &[
     ContextKey {
         name: "pageKind",
         kind: KeyKind::Str,
-        doc: "The kind of the page shown (`file`, `wiki`, `git-dashboard`, …); empty when none is.",
+        doc: "What the page shown is: a route's page (`git-dashboard`, `acme/prs`) or the resource its URI names (`oxplow/file`, `oxplow/wiki`); empty when none is.",
     },
     ContextKey {
         name: "shellAvailable",

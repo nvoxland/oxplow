@@ -33,7 +33,17 @@
   System; leave it out for a page only opened from elsewhere).
   `params` are what its id carries, handed to the lens; `count` names a
   `number` lens whose value is the launcher badge; `keywords` are more
-  words the launcher matches.
+  words the launcher matches. A page with `for: <resource>` (or a list;
+  your own `<extension>/<name>`, oxplow's `oxplow/*`, another
+  extension's, or `https` / `http`) is a **renderer**: it draws the URIs
+  of that resource, and has no launcher entry unless it has a
+  `category`. `accepts: { <param>: present | absent | <anchored
+  pattern> }` limits it to URIs whose params fit; `default: true` (only
+  for a resource your extension declares, one page per resource) makes
+  it the page a plain open uses; `pinned: true` pins its tabs. Its lens
+  must declare a `uri` param and runs with the URI. A resource has no
+  `page:` field; a URI nothing draws shows on a fallback page, not an
+  error.
 - **Panels** put a lens in the left nav (`panels: [{ id, title, icon?,
   scope, body, badge?, open?, collapsed?, count? }]`): `body` renders
   compact; `badge` (a lens with an `alert`) gives the panel's count and

@@ -1,0 +1,5 @@
+title: Item overview
+description: Every item — the extension's own route page.
+query: SELECT title FROM v_e2e_item ORDER BY title
+viz: table
+empty: No items.

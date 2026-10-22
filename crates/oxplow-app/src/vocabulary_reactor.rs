@@ -471,17 +471,17 @@ mod tests {
     /// is listed while its extension is installed, and is unrecognized
     /// once it's gone.
     /// Core's kinds are listed with what core declares of them, as an
-    /// extension's are: the model that holds one, where one opens, and
-    /// what search indexes it from; a kind no model holds has none.
+    /// extension's are: the model that holds one and what search indexes
+    /// it from; a kind no model holds has none.
     #[tokio::test]
-    async fn core_kinds_are_listed_with_their_model_page_and_search_feed() {
+    async fn core_kinds_are_listed_with_their_model_and_search_feed() {
         let f = crate::test_fixtures::services_with_effort().await;
         crate::test_fixtures::activate_with_problems(&f.svc).await;
         let rows = f
             .svc
             .sql
             .query_sql(
-                "SELECT resource, resolve, page, searchable FROM v_resource \
+                "SELECT resource, resolve, searchable FROM v_resource \
                  WHERE resource IN ('oxplow/work_item', 'oxplow/thread_note', 'oxplow/decision', 'oxplow/comment', 'oxplow/file', 'oxplow/event') \
                  ORDER BY resource",
                 vec![],
@@ -497,37 +497,23 @@ mod tests {
                 vec![
                     text("oxplow/comment"),
                     text("v_comment"),
-                    SqlCell::Null(()),
                     text("v_search_comment")
                 ],
                 vec![
                     text("oxplow/decision"),
                     text("v_decision"),
-                    SqlCell::Null(()),
                     text("v_search_decision")
                 ],
-                vec![
-                    text("oxplow/event"),
-                    text("v_event"),
-                    SqlCell::Null(()),
-                    SqlCell::Null(())
-                ],
-                vec![
-                    text("oxplow/file"),
-                    SqlCell::Null(()),
-                    SqlCell::Null(()),
-                    SqlCell::Null(())
-                ],
+                vec![text("oxplow/event"), text("v_event"), SqlCell::Null(())],
+                vec![text("oxplow/file"), SqlCell::Null(()), SqlCell::Null(())],
                 vec![
                     text("oxplow/thread_note"),
                     text("v_thread_note"),
-                    SqlCell::Null(()),
                     text("v_search_thread_note")
                 ],
                 vec![
                     text("oxplow/work_item"),
                     text("v_work_item"),
-                    SqlCell::Null(()),
                     text("v_search_work_item")
                 ],
             ]

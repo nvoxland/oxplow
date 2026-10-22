@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
 import type { Lens, LensRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
 import { PageNavigationContext, type PageNavigation } from "../tabs/PageNavigationContext.js";
-import { lensRef, viewParamsOf } from "../tabs/pageRefs.js";
+import { lensRef, resourceParamsOf, viewParamsOf } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
 
 // A lens page is a function of its entry: its filters and picks are its
@@ -79,7 +79,7 @@ function nav(ref: TabRef, replaced: { ref: TabRef; push: boolean }[], historySta
 }
 
 function page(ref: TabRef, replaced: { ref: TabRef; push: boolean }[], historyState?: Record<string, unknown>, states?: Record<string, unknown>[]) {
-  const params = (ref.payload as { params?: Record<string, SqlCell> }).params;
+  const params = resourceParamsOf(ref);
   return (
     <PageNavigationContext.Provider value={nav(ref, replaced, historyState, states)}>
       <LensPage lensId="x/y" params={params} stream={null} onOpenPage={() => {}} />

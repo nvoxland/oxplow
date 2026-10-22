@@ -167,7 +167,7 @@ describe("lensDirectoryEntries", () => {
     expect(entries[0]!.id).toBe("oxplow:oxplow/lens?lens=review/waiting");
     expect(entries[0]!.label).toBe("Waiting on me");
     expect(entries[0]!.category).toBe("Lenses");
-    expect(entries[0]!.ref.kind).toBe("lens");
+    expect(entries[0]!.ref.id).toBe("oxplow:oxplow/lens?lens=review/waiting");
     expect(entries[0]!.keywords).toContain("review");
     expect(entries[0]!.keywords).toContain("Blocked tasks");
   });
@@ -294,7 +294,7 @@ describe("links added for extraction", () => {
     expect(lineOf(ref as TabRef)).toBe(7);
   });
   test("commit and metric links", () => {
-    expect(cellLinkRef({ kind: "commit", from: "sha", line: null, base: null, head: null }, "sha", row, cols)?.kind).toBe("commit");
+    expect(cellLinkRef({ kind: "commit", from: "sha", line: null, base: null, head: null }, "sha", row, cols)?.id).toMatch(/^oxplow:oxplow\/commit\?/);
     expect(cellLinkRef({ kind: "metric", from: "key", line: null, base: null, head: null }, "key", row, cols)?.id).toBe(
       "oxplow:oxplow/metric?metric=oxplow.complexity",
     );

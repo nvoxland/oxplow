@@ -194,12 +194,12 @@ describe("edges to any ref", () => {
     ...over,
   });
 
-  test("an about link to a collector resolves and opens a page", () => {
+  test("an about link to a collector resolves and opens as itself", () => {
     const entry = edgeToOutboundEntry(
       edge({ target: collectorUri("triage", "todos"), source_label: "Triage todos" }),
     );
     expect(entry.dead).toBe(false);
-    expect(entry.open).toBe(pageUri("settings"));
+    expect(entry.open).toBe(collectorUri("triage", "todos"));
     expect(entry.label).toBe("Triage todos");
     expect(entry.subtitle).toBe("about");
     expect(entry.linkType).toBe("about");
@@ -211,7 +211,7 @@ describe("edges to any ref", () => {
     expect(entry.open).toBe(effortUri("eff12"));
   });
 
-  test("a link to an extension's resource opens the page its registry row names", () => {
+  test("a link to an extension's resource opens as itself, drawn by its renderer", () => {
     setResources([
       {
         resource: "acme/pr",
@@ -224,7 +224,6 @@ describe("edges to any ref", () => {
         searchable: null,
         icon: null,
         wikilink: null,
-        page: pageUri("acme/pr"),
       },
     ]);
     try {
@@ -236,13 +235,13 @@ describe("edges to any ref", () => {
     }
   });
 
-  test("a link to an uninstalled extension's resource is dead, with its raw text, and does not throw", () => {
-    const entry = edgeToOutboundEntry(
-      edge({ target: resourceUri("oxplow/acme_pr", { id: 12 }), resolved: false, source_label: null }),
-    );
+  test("a link to text that is no URI is dead, with its raw text, and does not throw", () => {
+    // Intent moved: an uninstalled extension's URI is a tab now (the fallback
+    // page shows it as a dead link), so the dead row is the non-URI one.
+    const entry = edgeToOutboundEntry(edge({ target: "gone_kind:12", resolved: false, source_label: null }));
     expect(entry.open).toBeNull();
     expect(entry.dead).toBe(true);
-    expect(entry.label).toBe(resourceUri("oxplow/acme_pr", { id: 12 }));
+    expect(entry.label).toBe("gone_kind:12");
     expect(dedupeEntriesByTarget([entry, entry])).toHaveLength(1);
   });
 

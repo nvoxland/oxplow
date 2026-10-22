@@ -496,7 +496,6 @@ resources:
     label: Pull request
     params: {{ id: {{ required: true, pattern: '^\\d+$' }} }}
     resolve: prs
-    page: pr
 {searchable}    icon: git-pull-request
 "
             ),

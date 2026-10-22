@@ -106,7 +106,8 @@ oxplow:github/pr?id=12
   `part=input|output|prompt|result|summary` (an event's body),
   `part=request|response` (a model call's), `part=result` (a subagent's
   last message). Keys core will read from now on are `oxplow.*`
-  (`#oxplow.renderer=…`, the renderer phase).
+  (`#oxplow.renderer=<extension>/<page>` is a view key the desktop reads:
+  it picks which renderer draws the URI when several declare it).
 - **A revision is a param.** `rev=git:HEAD`, `rev=snap:3`: the
   `Revision` strings (`revision.ts`), never `@…`. Only files, directories
   and symbols take one.
@@ -161,7 +162,6 @@ resources:
     resolve: pull_request       # one of its models, with `uri` and `title`
     title: title                # the column of `resolve` that titles one
     searchable: pull_request    # a model with `uri`, `title`, `body`
-    page: pr                    # one of its pages, opened with `uri=<uri>`
     icon: git-pull-request      # one of RESOURCE_ICONS
     wikilink: { prefix: pr, param: id }   # [[pr:12]]
 ```
@@ -175,9 +175,10 @@ resources:
 - **Loading.** `crates/oxplow-app/src/extension_resources.rs` parses the
   block (`ResourceEntry` → `ResourceDecl`); each resource is a contribution
   of kind `resource` (`oxplow:oxplow/resource?resource=<ext>/<name>`), so a
-  resource two extensions declare is the later one's load error. `page:`
-  is interim: an extension's resource opens that page with `uri=<uri>`
-  until renderers open a URI as itself.
+  resource two extensions declare is the later one's load error. A
+  resource has no `page:`: it opens as itself, and the pages that render
+  it say so with `pages[].for` ([extensions.md](./extensions.md)
+  "Pages"). `v_resource` is at v4 (V103 dropped the `page` column).
 - **The registry.** `oxplow_domain::uri::resources::ResourceRegistry`
   (`register` refuses a second resource of a name or a second wikilink
   prefix; `validate` checks a URI's resource, its required params, the
@@ -310,16 +311,26 @@ that sit on no wire (`resolve_ref`, `refOpener.ts`, `refFromTabId`).
 
 ## The desktop
 
-A tab's id is its URI (`TabRef.id`), and `TabRef.kind` the resource's
-short name for icons and labels. `apps/desktop/src/resources.ts` reads
-`v_resource` (icons, labels, `resourcePageTabId`, an extension's wikilink
-prefixes). **Where a URI opens is decided once**: `tabs/refOpener.ts` and
+A tab's id is its URI (`TabRef.id`; a web page's is its URL), and a
+`TabRef` is `{ id, pinned? }`: there is no kind and no payload, so the
+desktop reads a tab from its URI (`typeOf`, `paramOf`). `apps/desktop/src/resources.ts` reads
+`v_resource` (icons, labels, an extension's wikilink prefixes). **A page
+is a renderer of a resource**: which one draws a URI comes from the
+`pages[].for` declarations, then the `#oxplow.renderer=` view key, then
+the page marked `default`, then the first (`pages/renderers.ts`,
+[pages-and-tabs.md](./pages-and-tabs.md) "Renderers"). A URI nothing
+renders (no page, or no row in its model) opens on foundation's
+fallback `resource` page: its label and params, or the raw URI muted as
+a dead link. It is never an error and never logged or toasted.
+**Where a URI opens is decided once**: `tabs/refOpener.ts` and
 `tabs/openRef.ts` (`openRef`, `PageNavigation.openRef`) — a wikilink, a
 lens link, a backlink row, a search hit, a component's `navigate` and
 `oxplow_navigate` (`replace`, `new_tab`; by default the shown tab goes there) all hand it a URI. `refFromTabId` parses a tab id
-(history, bookmarks, a restored tab) and is not an opener. Comment anchors
+(history, bookmarks, a restored tab) and is not an opener: every oxplow
+URI and every allowlisted http(s) URL is a tab, else null. A stream's or
+thread's URI selects it; every other URI opens as itself. Comment anchors
 carry one `data-ref="<uri>"`. Tab sessions are stored under
-`oxplow.layout.v6.sessions`; old
+`oxplow.layout.v7.sessions`; old
 tabs aren't migrated.
 
 ## Strict vocabulary candidates

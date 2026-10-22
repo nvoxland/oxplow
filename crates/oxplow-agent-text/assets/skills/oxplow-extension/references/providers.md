@@ -15,7 +15,7 @@ An extension with an **external provider** (`providers:` — a program that
    intended — commit it), and its capability's conformance suite must pass.
    A `resources:` entry may add `searchable: <model>` (a model of yours
    with `uri`, `title`, `body`): its rows are then found by the launcher's
-   search and open the resource's page.
+   search and open on the resource's renderer.
    An effect's `on:` (and a collector's `trigger: { on: [...] }`) may
    name another extension's event type (`acme_pr.merged`): `check` warns,
    and the extension shows an error while no enabled extension registers

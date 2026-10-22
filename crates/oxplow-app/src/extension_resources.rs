@@ -11,7 +11,6 @@
 //!     searchable: prs             # …and `body`, which search indexes
 //!     icon: git-pull-request
 //!     wikilink: { prefix: pr, param: id }   # [[pr:12]]
-//!     page: pr                    # one of its pages, opened with `uri=<uri>`
 //! ```
 //!
 //! A resource is `<extension>/<name>`, where the extension segment is the
@@ -124,13 +123,12 @@ pub fn resource_extension(extension: &str, namespace: &str) -> String {
 }
 
 /// Parse a `resources:` block against the extension's models (core's,
-/// for oxplow's namespace) and pages: the valid resources, and an error
+/// for oxplow's namespace): the valid resources, and an error
 /// (`file:line: …`) for each broken one.
 pub fn parse_resources(
     extension: &str,
     namespace: &str,
     models: &[oxplow_db::models::ModelSource],
-    pages: &[crate::extensions::ExtensionPage],
     value: &serde_yaml::Value,
     file: &str,
     manifest: &str,
@@ -171,7 +169,7 @@ pub fn parse_resources(
             continue;
         }
         let declared_at = at(file, line, "").trim_end_matches(": ").to_string();
-        match decl_of(&segment, extension, core, models, pages, f) {
+        match decl_of(&segment, extension, core, models, f) {
             Ok(decl) => out.push(ExtensionResource { decl, declared_at }),
             Err(e) => errors.push(at(file, line, e)),
         }
@@ -184,7 +182,6 @@ fn decl_of(
     extension: &str,
     core: bool,
     models: &[oxplow_db::models::ModelSource],
-    pages: &[crate::extensions::ExtensionPage],
     f: ResourceFile,
 ) -> Result<ResourceDecl, String> {
     let declared = f.clone().into_decl(segment)?;
@@ -292,25 +289,10 @@ fn decl_of(
             )));
         }
     }
-    let page = match &f.page {
-        Some(id) => Some(
-            pages
-                .iter()
-                .find(|p| p.id == *id)
-                .map(|p| p.page_ref.clone())
-                .ok_or_else(|| {
-                    named(format!(
-                        "`page: {id}` isn't one of this extension's pages (`pages:`)"
-                    ))
-                })?,
-        ),
-        None => None,
-    };
     Ok(ResourceDecl {
         params,
         resolve,
         searchable,
-        page,
         ..declared
     })
 }
@@ -386,11 +368,6 @@ resources:
                 "isn't one oxplow draws",
             ),
             ("params: { id:", "params: { 'bad key':", "a key is a letter"),
-            (
-                "    label: Pull request\n",
-                "    label: Pull request\n    page: pr\n",
-                "isn't one of this extension's pages",
-            ),
         ] {
             let ext = acme(&MANIFEST.replace(from, to));
             let errors = ext.errors.join("\n");

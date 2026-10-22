@@ -529,7 +529,6 @@ resources:
     params: { id: { required: true, pattern: '^\d+$' } }
     resolve: pull_request     # a model with `uri` and `title` columns
     searchable: pull_request  # optional: a model with `uri`, `title`, `body`
-    page: pr                  # optional: one of your pages, opened with `uri=<uri>`
     icon: git-pull-request
     wikilink: { prefix: pr, param: id }   # [[pr:12]]
 ```
@@ -542,12 +541,46 @@ resources:
   resource is skipped.
 - A URI that nothing resolves (the extension is off, or the thing is
   gone) shows as its raw text. It never errors.
+- A resource has no page of its own to name. A URI opens as itself, and
+  a page you declare with `for:` draws it ("Showing a resource" below).
 - `about:` on a command or a prompt, and `resource:` on a decorator, take
   a resource name: `oxplow/work_item`, `github/pr`.
 
-`oxplow extension check` refuses an unknown model, an unknown page, a pattern
+`oxplow extension check` refuses an unknown model, a pattern
 outside that subset, an icon oxplow doesn't draw, and a resource or
 wikilink prefix that another extension already uses.
+
+#### Showing a resource
+
+A page with `for:` is a **renderer**: it draws the URIs of a resource.
+When a person opens `oxplow:github/pr?id=12`, oxplow picks one of the
+pages that name `github/pr` in `for:`.
+
+```yaml
+pages:
+  - id: pr
+    title: Pull request
+    icon: git-pull-request
+    for: github/pr          # a resource, or a list of them
+    default: true           # the page a plain open uses
+    accepts: { id: '^\d+$' }   # optional: only URIs whose params fit
+    params: { uri: {} }
+    lens: pr-detail         # must declare a `uri` param
+```
+
+- `for` names a resource of your own, one of oxplow's (`oxplow/file`),
+  another extension's, or `https` / `http` to draw web pages.
+- `accepts` has one entry per param of the resource. The value is
+  `present`, `absent` or an anchored pattern like the ones in `params`.
+  The page draws a URI only when every entry holds.
+- `default: true` is for the resources your extension declares, and one
+  page per resource. A page that draws another extension's resource is
+  never its default: the person picks it with **Open with**.
+- `pinned: true` pins the tab the page opens in.
+- A lens page that renders must declare a `uri` param. It runs with the
+  URI of the thing.
+- Nothing draws a URI? oxplow shows its label and params, or the raw URI
+  in a muted style if the thing is gone. This is not an error.
 
 ### Replacing a core view
 

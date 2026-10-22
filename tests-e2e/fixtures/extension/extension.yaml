@@ -54,12 +54,13 @@ models:
       - { name: uri, type: TEXT, doc: "`oxplow:e2e/item?id=<n>`." }
       - { name: title, type: TEXT, doc: "The item's title." }
 pages:
-  - { id: item, title: Item, category: Work, lens: item }
+  - { id: item, title: Item, for: e2e/item, default: true, lens: item }
+  - { id: item-raw, title: Item (raw), for: e2e/item, lens: item-raw }
+  - { id: overview, title: Item overview, category: Work, lens: overview }
 resources:
   - name: item
     label: Item
     params: { id: { required: true, pattern: '^[0-9]+$' } }
     resolve: item
-    page: item
     wikilink: { prefix: item, param: id }
     icon: box

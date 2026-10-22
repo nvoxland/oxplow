@@ -82,9 +82,19 @@ async fn the_github_example_checks_tests_and_its_pr_opens() {
         }
     };
     assert_eq!(
-        row("SELECT page, resolve FROM v_resource WHERE resource = 'github/pr'").await,
-        serde_json::json!([["oxplow:oxplow/page?page=github/pr", "v_github_pull_request"]])
+        row("SELECT resolve FROM v_resource WHERE resource = 'github/pr'").await,
+        serde_json::json!([["v_github_pull_request"]])
     );
+    // A pull request's URI opens on the page that renders it.
+    let pr = svc
+        .extension_catalog
+        .get(root)
+        .iter()
+        .flat_map(|e| e.pages.iter())
+        .find(|p| p.renders.iter().any(|r| r == "github/pr"))
+        .cloned()
+        .expect("a page renders github/pr");
+    assert!(pr.default, "{pr:?}");
     assert_eq!(
         row("SELECT title FROM v_github_pull_request WHERE uri = 'oxplow:github/pr?id=12'").await,
         serde_json::json!([["Fix the hover state"]])

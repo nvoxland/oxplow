@@ -1,3 +1,4 @@
+import { recordedPageKind } from "./pageRefs.js";
 /**
  * What a window tells the backend it shows (`report_tabs`): every
  * thread's tabs with their shown titles, where each one's history leads,
@@ -37,8 +38,8 @@ export function buildTabReport(input: TabReportInput): TabReport {
         const now = current(tab);
         return {
           id: now.ref.id,
-          kind: now.ref.kind,
-          title: input.titleOf(now.ref) || pageKindLabel(now.ref.kind),
+          kind: recordedPageKind(now.ref),
+          title: input.titleOf(now.ref) || pageKindLabel(recordedPageKind(now.ref)),
           back: tab.entries.slice(0, tab.at).map((e) => e.ref.id),
           forward: tab.entries.slice(tab.at + 1).map((e) => e.ref.id),
           origin: now.from?.title ?? null,

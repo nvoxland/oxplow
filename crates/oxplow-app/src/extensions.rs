@@ -1793,9 +1793,26 @@ pub struct ExtensionPage {
     /// The lens whose value (a `number` lens) is the launcher's badge
     /// (`<extension>/<slug>`).
     pub count: Option<String>,
+    /// The resources it renders (`oxplow/file`, `acme/pr`; `https`, `http`
+    /// for a web page): a URI of one opens on it, the URI its tab's id.
+    /// Empty: a route, opened at `page_ref`.
+    #[serde(rename = "for")]
+    pub renders: Vec<String>,
+    /// Which URIs of those it takes, by param: `present`, `absent`, or an
+    /// anchored pattern the value matches (one form the desktop's JS and
+    /// Rust read alike). Empty: every one.
+    pub accepts: BTreeMap<String, String>,
+    /// What its resource opens on when the URI's view names no renderer
+    /// (`#oxplow.renderer=`): only a page of the extension declaring it.
+    pub default: bool,
+    /// Its tab leads the strip and isn't evicted (an agent session's).
+    pub pinned: bool,
     /// What draws it.
     pub body: PageBody,
 }
+
+/// The schemes a page may render besides oxplow's resources: a web page.
+pub const RENDERED_SCHEMES: &[&str] = &["https", "http"];
 
 /// The namespace oxplow's own extension declares (`namespace: oxplow`): its
 /// commands are `oxplow.<area>.<verb>` and its pages `oxplow:oxplow/page?page=<id>`.
@@ -1860,6 +1877,39 @@ struct PageFile {
     /// … or `oxplow:<name>`, a built-in (oxplow's own extension only).
     #[serde(default)]
     component: Option<String>,
+    /// The resources it renders — one or a list: `oxplow/file`, its own
+    /// `<extension>/<name>`, another extension's, or `https` / `http` (a
+    /// web page). A URI of one opens on it; without `for` it is a route.
+    #[serde(default, rename = "for")]
+    renders: Option<Renders>,
+    /// Which URIs of those it takes, by param: `present`, `absent`, or an
+    /// anchored pattern (`^git:`) the value matches.
+    #[serde(default)]
+    accepts: BTreeMap<String, String>,
+    /// What its resource opens on when the URI's view names no renderer:
+    /// only for a resource this extension declares, one per resource.
+    #[serde(default)]
+    default: bool,
+    /// Its tab leads the strip and isn't evicted (a renderer only).
+    #[serde(default)]
+    pinned: bool,
+}
+
+/// A page's `for`: one resource or several.
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
+#[serde(untagged)]
+enum Renders {
+    One(String),
+    Many(Vec<String>),
+}
+
+impl Renders {
+    fn into_vec(self) -> Vec<String> {
+        match self {
+            Renders::One(r) => vec![r],
+            Renders::Many(rs) => rs,
+        }
+    }
 }
 
 /// A `panels:` entry as the manifest holds it.
@@ -3969,29 +4019,35 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         ext.ui.replacements = replaced;
         ext.errors.extend(errors);
     }
-    if let Some(v) = page_files {
-        let (pages, errors) =
-            parse_pages(name, &ext.namespace, &ext.lenses, &ext.custom_components, v);
-        ext.pages = pages;
-        let lines = item_lines(&manifest, "pages");
-        ext.errors.extend(errors.into_iter().map(|(i, e)| {
-            let line = i.and_then(|i| lines.get(i).copied());
-            at(&file, line.or(key_line(&manifest, "pages")), e)
-        }));
-    }
     // After models: a resource is titled by one.
     if let Some(v) = resource_files {
         let (resources, errors) = crate::extension_resources::parse_resources(
             name,
             &ext.namespace,
             &ext.models,
-            &ext.pages,
             &v,
             &file,
             &manifest,
         );
         ext.resources = resources;
         ext.errors.extend(errors);
+    }
+    // After resources: a page renders them.
+    if let Some(v) = page_files {
+        let (pages, errors) = parse_pages(
+            name,
+            &ext.namespace,
+            &ext.lenses,
+            &ext.custom_components,
+            &ext.resources,
+            v,
+        );
+        ext.pages = pages;
+        let lines = item_lines(&manifest, "pages");
+        ext.errors.extend(errors.into_iter().map(|(i, e)| {
+            let line = i.and_then(|i| lines.get(i).copied());
+            at(&file, line.or(key_line(&manifest, "pages")), e)
+        }));
     }
     if let Some(v) = panel_files {
         let (panels, errors) = parse_panels(name, &ext.lenses, v);
@@ -4239,6 +4295,7 @@ fn parse_pages(
     namespace: &str,
     lenses: &[Lens],
     components: &[custom_components::CustomComponent],
+    resources: &[crate::extension_resources::ExtensionResource],
     raw: serde_yaml::Value,
 ) -> (Vec<ExtensionPage>, Vec<(Option<usize>, String)>) {
     let mut pages: Vec<ExtensionPage> = Vec::new();
@@ -4253,7 +4310,7 @@ fn parse_pages(
             Ok(p) => p,
             Err(e) => {
                 errors.push((Some(i), format!(
-                    "pages: {e} (a page is `{{ id, title, icon?, category?, keywords?, params?, count?, lens | component }}`; a category is one of Work, Code, Git, Activity, Knowledge, Data, Lenses, System)"
+                    "pages: {e} (a page is `{{ id, title, icon?, category?, keywords?, params?, count?, for?, accepts?, default?, pinned?, lens | component }}`; a category is one of Work, Code, Git, Activity, Knowledge, Data, Lenses, System)"
                 )));
                 continue;
             }
@@ -4333,7 +4390,34 @@ fn parse_pages(
             errors.push(err(format!(
                 "param `{bad}` must be lowercase letters, digits and `_`"
             )));
+        } else if let Err(e) = renderer_problem(extension, namespace, resources, &p, &pages) {
+            errors.push(err(e));
+        } else if let Some(lens) = p
+            .lens
+            .as_ref()
+            .filter(|_| p.renders.is_some())
+            .and_then(|l| lenses.iter().find(|x| &x.slug == l))
+            .filter(|l| !l.params.iter().any(|q| q.name == "uri"))
+        {
+            // A renderer's lens is run with the URI it shows (`uri`).
+            errors.push(err(format!(
+                "its lens `{}` renders a resource, so it takes the URI: declare a `uri` param",
+                lens.slug
+            )));
         } else {
+            let renders = p.renders.clone().map(Renders::into_vec).unwrap_or_default();
+            let accepts = p
+                .accepts
+                .iter()
+                .map(|(k, v)| {
+                    let kept = match v.as_str() {
+                        "present" | "absent" => v.clone(),
+                        pattern => crate::param_pattern::param_pattern(pattern)
+                            .expect("checked by renderer_problem"),
+                    };
+                    (k.clone(), kept)
+                })
+                .collect();
             pages.push(ExtensionPage {
                 page_ref: if core_named {
                     oxplow_domain::uri::build::page_uri(&p.id, &[])
@@ -4348,11 +4432,102 @@ fn parse_pages(
                 keywords: p.keywords,
                 params: p.params,
                 count: p.count.map(|c| format!("{extension}/{c}")),
+                renders,
+                accepts,
+                default: p.default,
+                pinned: p.pinned,
                 body: body.expect("checked above"),
             });
         }
     }
     (pages, errors)
+}
+
+/// What's wrong with a page's `for`, `accepts`, `default` and `pinned`:
+/// each resource it renders is a scheme oxplow renders (`https`), one this
+/// extension declares, one of foundation's (`oxplow/*`) or another
+/// extension's (`<extension>/<name>`); `accepts` names a param of each
+/// (when they're known) with `present`, `absent` or an id pattern;
+/// `default` is for a resource of this extension's, one page per resource;
+/// `pinned` and `accepts` are a renderer's.
+fn renderer_problem(
+    extension: &str,
+    namespace: &str,
+    resources: &[crate::extension_resources::ExtensionResource],
+    p: &PageFile,
+    pages: &[ExtensionPage],
+) -> Result<(), String> {
+    let renders = p.renders.clone().map(Renders::into_vec).unwrap_or_default();
+    if renders.is_empty() {
+        if p.default || p.pinned || !p.accepts.is_empty() {
+            return Err(
+                "`default`, `pinned` and `accepts` are for a renderer: give it `for`".into(),
+            );
+        }
+        return Ok(());
+    }
+    let segment = crate::extension_resources::resource_extension(extension, namespace);
+    let foundation = oxplow_domain::uri::resources::foundation();
+    for r in &renders {
+        let scheme = RENDERED_SCHEMES.contains(&r.as_str());
+        let own = |name: &str| resources.iter().find(|x| x.decl.name.to_string() == name);
+        let decl = if scheme {
+            None
+        } else {
+            let Ok(name) = r.parse::<oxplow_domain::uri::oxplow_uri::ResourceName>() else {
+                return Err(format!(
+                    "`for: {r}` isn't a resource (`<extension>/<name>`) or a scheme oxplow renders ({})",
+                    RENDERED_SCHEMES.join(", ")
+                ));
+            };
+            match own(r) {
+                Some(x) => Some(&x.decl),
+                None if name.extension() == CORE_NAMESPACE => match foundation.get(&name) {
+                    Some(d) => Some(d),
+                    None => {
+                        return Err(format!(
+                            "`for: {r}` isn't a resource oxplow-foundation declares"
+                        ))
+                    }
+                },
+                None if name.extension() == segment => {
+                    return Err(format!(
+                        "`for: {r}` isn't one of this extension's `resources:`"
+                    ))
+                }
+                // Another extension's: checked when the vocabulary is.
+                None => None,
+            }
+        };
+        for (key, rule) in &p.accepts {
+            if let Some(d) = decl {
+                if !d.additional && !d.params.contains_key(key) {
+                    return Err(format!("`accepts: {key}` isn't a param of `{r}`"));
+                }
+            }
+            if !matches!(rule.as_str(), "present" | "absent") {
+                crate::param_pattern::param_pattern(rule).map_err(|e| {
+                    format!("`accepts: {key}: {rule}` is `present`, `absent` or an id pattern: {e}")
+                })?;
+            }
+        }
+        if p.default {
+            let ours = if scheme {
+                namespace == CORE_NAMESPACE
+            } else {
+                r.split('/').next() == Some(segment.as_str())
+            };
+            if !ours {
+                return Err(format!(
+                    "`default` is for a resource this extension declares; `{r}` is another's (a page of yours is one of its renderers to pick)"
+                ));
+            }
+            if pages.iter().any(|q| q.default && q.renders.contains(r)) {
+                return Err(format!("`{r}` has another default renderer"));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Check the manifest's `panels:` against the extension's lenses: a panel
@@ -9958,6 +10133,87 @@ commands:
         );
     }
 
+    /// A page that renders resources says which (`for`), which of their
+    /// URIs it takes (`accepts`), and whether it is what they open on
+    /// (`default`) — only for the extension's own resources.
+    #[test]
+    fn a_page_renders_the_resources_it_is_for() {
+        let lenses = [
+            (
+                "pr",
+                "title: PR\nparams: [{ name: uri }]\nquery: SELECT 1\n",
+            ),
+            ("plain", "title: Plain\nquery: SELECT 1\n"),
+        ];
+        let resources =
+            "resources:\n  - { name: pr, label: PR, params: { id: { required: true } } }\n";
+        let (_d, ext) = load_x(
+            &lenses,
+            &format!("{resources}pages:\n  - {{ id: pr, title: PR, lens: pr, for: x/pr, default: true }}\n  - {{ id: pr-raw, title: Raw, lens: pr, for: x/pr, accepts: {{ id: '^\\d+$' }} }}\n  - {{ id: both, title: Both, lens: pr, for: [x/pr, oxplow/file] }}\n  - {{ id: web, title: Web, lens: pr, for: https, pinned: true }}\n"),
+        );
+        assert!(ext.errors.is_empty(), "{:?}", ext.errors);
+        let page = |id: &str| ext.pages.iter().find(|p| p.id == id).unwrap();
+        assert_eq!(page("pr").renders, vec!["x/pr".to_string()]);
+        assert!(page("pr").default);
+        assert_eq!(
+            page("both").renders,
+            vec!["x/pr".to_string(), "oxplow/file".to_string()]
+        );
+        assert_eq!(
+            page("pr-raw").accepts.get("id").map(String::as_str),
+            Some("^[0-9]+$")
+        );
+        assert!(page("web").pinned);
+
+        for (page, says) in [
+            (
+                "{ id: a, title: A, lens: pr, for: nope }",
+                "isn't a resource",
+            ),
+            (
+                "{ id: a, title: A, lens: pr, for: x/missing }",
+                "isn't one of this extension's",
+            ),
+            (
+                "{ id: a, title: A, lens: pr, for: oxplow/missing }",
+                "isn't a resource oxplow-foundation declares",
+            ),
+            (
+                "{ id: a, title: A, lens: pr, for: x/pr, accepts: { nope: present } }",
+                "isn't a param of `x/pr`",
+            ),
+            (
+                "{ id: a, title: A, lens: pr, for: x/pr, accepts: { id: '[0-9]+' } }",
+                "an id pattern",
+            ),
+            (
+                "{ id: a, title: A, lens: pr, for: oxplow/file, default: true }",
+                "is another's",
+            ),
+            (
+                "{ id: a, title: A, lens: pr, default: true }",
+                "are for a renderer",
+            ),
+            (
+                "{ id: a, title: A, lens: plain, for: x/pr }",
+                "declare a `uri` param",
+            ),
+        ] {
+            let (_d, ext) = load_x(&lenses, &format!("{resources}pages:\n  - {page}\n"));
+            let errs = ext.errors.join("\n");
+            assert!(errs.contains(says), "{page}: {errs}");
+        }
+        let (_d, ext) = load_x(
+            &lenses,
+            &format!("{resources}pages:\n  - {{ id: a, title: A, lens: pr, for: x/pr, default: true }}\n  - {{ id: b, title: B, lens: pr, for: x/pr, default: true }}\n"),
+        );
+        assert!(
+            ext.errors.join("\n").contains("another default renderer"),
+            "{:?}",
+            ext.errors
+        );
+    }
+
     /// An extension's page is a lens (or one of its custom components) at
     /// `oxplow:oxplow/page?page=<extension>/<page>`, in the launcher under its category when it
     /// has one.
@@ -9988,6 +10244,10 @@ commands:
                     keywords: Some("pull requests".into()),
                     params: vec!["author".into()],
                     count: Some("x/waiting".into()),
+                    renders: vec![],
+                    accepts: Default::default(),
+                    default: false,
+                    pinned: false,
                     body: PageBody::Lens {
                         lens: "x/open".into()
                     },
@@ -10002,6 +10262,10 @@ commands:
                     keywords: None,
                     params: vec![],
                     count: None,
+                    renders: vec![],
+                    accepts: Default::default(),
+                    default: false,
+                    pinned: false,
                     body: PageBody::Lens {
                         lens: "x/open".into()
                     },

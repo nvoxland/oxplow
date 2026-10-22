@@ -206,7 +206,7 @@ mod tests {
         };
         assert_eq!(
             open(json!({ "id": 7 })).await.unwrap(),
-            json!("oxplow:oxplow/page?id=7&page=custom-dashboard")
+            json!("oxplow:oxplow/dashboard?id=7")
         );
         let err = open(json!({})).await.unwrap_err();
         assert_eq!(err.code, "INVALID");
@@ -246,7 +246,7 @@ mod tests {
         let dashboard = by_id("oxplow.dashboard.create").expect("New Dashboard is offered");
         assert_eq!(
             dashboard["ui"]["open_after"],
-            "oxplow:oxplow/page?id={{result.id}}&page=custom-dashboard"
+            "oxplow:oxplow/dashboard?id={{result.id}}"
         );
         assert!(
             by_id("oxplow.config.get").is_none(),

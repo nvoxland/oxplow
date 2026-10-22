@@ -2335,7 +2335,6 @@ export async function listAgentStatuses(_streamId?: string): Promise<AgentStatus
 export interface PageVisitInputApi {
   refKind: string;
   refId: string;
-  payload: unknown;
   label: string;
   streamId?: string | null;
   threadId?: string | null;
@@ -2349,7 +2348,6 @@ export interface PageVisitApi {
   threadId: string | null;
   refKind: string;
   refId: string;
-  payload: unknown;
   label: string;
   source: string | null;
 }
@@ -2409,7 +2407,6 @@ export async function listRecentPageVisits(opts: {
       threadId: null,
       refKind: v.page_kind,
       refId: v.page_id,
-      payload: null,
       label: v.label ?? v.page_id,
       source: null,
     });

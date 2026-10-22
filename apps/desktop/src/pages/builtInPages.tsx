@@ -1,4 +1,5 @@
-import { diffSpecOf, duplicateBlockOf, endpointsOf, fileRef, isPage, newTaskRef, viewParamsOf, workItemTabRef, type DiffViewPayload } from "../tabs/pageRefs.js";
+import { ResourcePage } from "./ResourcePage.js";
+import { diffSpecOf, diffViewOf, duplicateBlockOf, fileRef, isPage, newTaskRef, viewParamsOf, workItemTabRef, type DiffViewPayload } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
 import type { Stream } from "../api.js";
 import { openExternalUrl } from "../api.js";
@@ -154,7 +155,14 @@ export const builtInPages: Record<BuiltInPageName, BuiltInPage> = {
       render: () => <SettingsPage area={area.id} section={section} onOpenPage={nav.navOpen} />,
     };
   },
-  "diff-view": ({ ref, nav, scope }) => diffViewTab(ref, endpointsOf(ref), nav, scope.stream),
+  "diff-view": ({ ref, nav, scope }) => diffViewTab(ref, diffViewOf(ref), nav, scope.stream),
+  // What a URI no page renders opens on.
+  resource: ({ ref }) => ({
+    id: ref.id,
+    label: "",
+    closable: true,
+    render: () => <ResourcePage uri={ref.id} />,
+  }),
   "git-dashboard": ({ ref, nav, scope }) => {
     return {
       id: ref.id,
@@ -286,8 +294,9 @@ export const builtInPages: Record<BuiltInPageName, BuiltInPage> = {
   },
   tasks: workPage,
   backlog: workPage,
-  "external-url": ({ ref, params }) => {
-    const externalUrl = params.url ?? "";
+  // A web page: its tab's id is its URL.
+  "external-url": ({ ref }) => {
+    const externalUrl = ref.id;
     let label = externalUrl;
     try {
       const u = new URL(externalUrl);

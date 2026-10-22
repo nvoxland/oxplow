@@ -999,7 +999,7 @@
     - { not_null: target }
     - { unique: target }
 - name: resource
-  version: 3
+  version: 4
   key: [resource]
   description: "Every resource a URI may name (`oxplow:<extension>/<resource>?<params>`), as the extensions declare them in `resources:` — oxplow-foundation's included, so none is special. Says what each one's params are and which view names it."
   columns:
@@ -1013,7 +1013,6 @@
     - { name: "searchable", type: "TEXT", doc: "The view search indexes it from; NULL when search doesn't." }
     - { name: "icon", type: "TEXT", doc: "The icon it is drawn with." }
     - { name: "wikilink", type: "TEXT", doc: "JSON `{ prefix, param }`: `[[<prefix>:<value>]]` names it with that param set; NULL when it has no sugar." }
-    - { name: "page", type: "TEXT", doc: "The page URI one opens on, given `uri=<uri>` (v3; `ref=` before): an extension's resource with a page of its own; NULL for one that opens as itself." }
   tests:
     - { not_null: resource }
     - { unique: resource }

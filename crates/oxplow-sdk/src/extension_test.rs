@@ -3319,7 +3319,7 @@ models:
 pages:
   - { id: pr, title: Pull request, category: Work, lens: open }
 resources:
-  - { name: pr, label: Pull request, params: { id: { required: true, pattern: '^[0-9]+$' } }, resolve: prs, page: pr, wikilink: { prefix: pr, param: id }, icon: git-pull-request }
+  - { name: pr, label: Pull request, params: { id: { required: true, pattern: '^[0-9]+$' } }, resolve: prs, wikilink: { prefix: pr, param: id }, icon: git-pull-request }
 ",
         );
         write(

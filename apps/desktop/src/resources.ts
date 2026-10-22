@@ -1,8 +1,9 @@
 /**
  * Every resource the vocabulary knows (`.context/resources.md`), read
  * from `v_resource`: oxplow's and those extensions declare. How the chrome
- * draws one (an extension's icon and label), where one opens (its page,
- * `resourcePageTabId`), how a `[[…]]` names one, and which model holds it.
+ * draws one (an extension's icon and label), how a `[[…]]` names one, and
+ * which model holds it. What opens one is the page that renders it
+ * (`pages/renderers.ts`).
  *
  * One process-wide list, loaded by `useResourcesLoader` (mounted once, in
  * `App`) and re-read when `v_resource` changes; the pure helpers
@@ -61,7 +62,6 @@ import { querySql } from "./api.js";
 import { recordOpError } from "./components/opErrorsStore.js";
 import { NO_READS, useRerunOnChange } from "./lens/lensRerun.js";
 import { resourceUri, typeOf } from "./uri/uri.js";
-import { withPageParams } from "./tabs/pageRefs.js";
 import type { Reads, SqlQueryResult } from "./tauri-bridge/generated/bindings.js";
 
 /**
@@ -140,9 +140,6 @@ export interface Resource {
   icon: string | null;
   /** Its `[[prefix:value]]` sugar: the prefix and the param it sets. */
   wikilink: { prefix: string; param: string } | null;
-  /** The page that shows one, as a page URI (`oxplow:oxplow/page?page=acme/pr`);
-   *  one opens there with `uri=<its URI>` added. Null when it has none. */
-  page: string | null;
 }
 
 export function resourcesFromResult(result: SqlQueryResult): Resource[] {
@@ -177,7 +174,6 @@ export function resourcesFromResult(result: SqlQueryResult): Resource[] {
       searchable: maybe("searchable"),
       icon: maybe("icon"),
       wikilink: wikilink?.prefix && wikilink.param ? { prefix: wikilink.prefix, param: wikilink.param } : null,
-      page: maybe("page"),
     };
   });
 }
@@ -203,16 +199,7 @@ export function resourceInfo(resource: string): Resource | null {
   return current.get(resource) ?? null;
 }
 
-/**
- * The tab id `ref` opens as when its resource names a page: that page's
- * URI with `uri=<uri>` added. Null when its resource has no page (it opens
- * as itself, through `refFromTabId`, or has nowhere to open).
- */
-export function resourcePageTabId(ref: string): string | null {
-  const resource = typeOf(ref);
-  const page = resource ? current.get(resource)?.page : null;
-  return page ? withPageParams(page, { uri: ref }) : null;
-}
+
 
 /** The icon of a resource, or null. */
 export function resourceIcon(resource: string): LucideIcon | null {
@@ -280,7 +267,7 @@ export function useResources(): ReadonlyMap<string, Resource> {
 /** Every resource, and what was read. */
 export async function readResources(): Promise<{ resources: Resource[]; reads: Reads }> {
   const res = await querySql(
-    `SELECT resource, extension, label, params, additional, resolve, title, searchable, icon, wikilink, page
+    `SELECT resource, extension, label, params, additional, resolve, title, searchable, icon, wikilink
        FROM v_resource ORDER BY resource`,
     [],
     1_000,

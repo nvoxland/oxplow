@@ -1,16 +1,14 @@
 /**
  * Where a URI opens (`.context/pages-and-tabs.md` "Linking between tabs"):
- * the one place that decides it. An extension's resource names the page that
- * shows one (`v_resource.page`), which opens with the URI as its `uri`
- * param; every other URI opens through `refFromTabId`. It says what the
- * window does with the result: open a tab, select a thread or a stream, or
- * nothing.
+ * the one place that decides it. A URI opens as itself — its tab's id is
+ * the URI, drawn by the page that renders it — except a stream's or a
+ * thread's, which selects it. It says what the window does with the
+ * result: open a tab, select a thread or a stream, or nothing.
  *
  * What it decides is *what* opens; how (in this tab, a new one) stays the
  * click's (`RouteLink`, `useRouteDispatch`).
  */
-import { resourceInfo, resourcePageTabId } from "../resources.js";
-import { idOf, typeOf } from "../uri/uri.js";
+import { idOf } from "../uri/uri.js";
 import { refFromTabId } from "./pageRefs.js";
 import type { TabRef } from "./tabState.js";
 
@@ -27,22 +25,15 @@ function targetOf(tabId: string): RefTarget {
   const stream = idOf(tabId, "oxplow/stream");
   if (stream !== null) return { stream };
   const tab = refFromTabId(tabId);
-  return tab ? { tab } : { unopenable: `\`${tabId}\` isn't a page the window shows` };
+  return tab ? { tab } : { unopenable: `\`${tabId}\` isn't a URI the window opens` };
 }
 
-/** Where `ref` opens. Before the registry is read (a window starting) a
- *  URI opens as itself, which is where every core resource but a few
- *  opens. */
+/** Where `ref` opens: as itself — a tab whose page is the one that renders
+ *  it (`pages/renderers.ts`; one nothing renders opens on the fallback) —
+ *  or, for a stream's or a thread's URI, selecting it. Only text that
+ *  isn't a URI opens nothing. */
 export function refTargetNow(ref: string): RefTarget {
-  const resource = typeOf(ref);
-  if (resource === null) return { unopenable: noPage(ref) };
-  const info = resourceInfo(resource);
-  if (!info) return targetOf(ref);
-  const tabId = resourcePageTabId(ref);
-  if (tabId !== null) return targetOf(tabId);
-  // One of oxplow's own (`oxplow/…`, whoever declares it) opens as itself;
-  // an extension's with no page has nowhere to open.
-  return resource.startsWith("oxplow/") ? targetOf(ref) : { unopenable: noPage(ref) };
+  return targetOf(ref);
 }
 
 /** Where `ref` opens. */
@@ -50,6 +41,3 @@ export async function refTarget(ref: string): Promise<RefTarget> {
   return refTargetNow(ref);
 }
 
-function noPage(ref: string): string {
-  return `\`${ref}\` has no page`;
-}

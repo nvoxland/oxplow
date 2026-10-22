@@ -6,8 +6,7 @@ import { pageKindIconComponent, pageKindLabel } from "./pageKinds.js";
 import { extensionWikilinkRef, resourcesFromResult, setResources, type Resource } from "./resources.js";
 import { refFromTabId } from "./tabs/pageRefs.js";
 import { refTargetNow } from "./tabs/refOpener.js";
-import { extPageRef } from "./tabs/pageRefs.js";
-import { effortUri, pageUri, resourceUri } from "./uri/uri.js";
+import { effortUri, resourceUri } from "./uri/uri.js";
 
 const ACME_PR: Resource = {
   resource: "acme/pr",
@@ -20,7 +19,6 @@ const ACME_PR: Resource = {
   searchable: null,
   icon: "git-pull-request",
   wikilink: { prefix: "pr", param: "id" },
-  page: pageUri("acme/pr"),
 };
 
 const ACME_PR_URI = resourceUri("acme/pr", { id: 12 });
@@ -35,17 +33,13 @@ describe("an extension's ref kind (P8.D7)", () => {
     expect(pageKindLabel("acme/pr")).toBe("Pull request");
   });
 
-  test("opens its extension's page with the ref", () => {
-    // A ref of another kind is no tab id: the opener says where it opens.
-    expect(refFromTabId(ACME_PR_URI)).toBeNull();
+  test("opens as itself, whether or not it is installed", () => {
+    // Intent moved: the resource no longer names a page. Every oxplow URI is a
+    // tab whose id is the URI; the renderer picked for it draws it.
+    expect(refFromTabId(ACME_PR_URI)).toEqual({ id: ACME_PR_URI });
     setResources([ACME_PR]);
-    expect(refFromTabId(ACME_PR_URI)).toBeNull();
-    const target = refTargetNow(ACME_PR_URI);
-    const tab = target && "tab" in target ? target.tab : null;
-    expect(tab).toEqual(extPageRef("acme", "pr", { uri: ACME_PR_URI }));
-    expect(tab!.payload).toEqual({ extension: "acme", page: "pr", params: { uri: ACME_PR_URI } });
-    // The page id alone (a restored tab) carries the ref back.
-    expect(refFromTabId(tab!.id)).toEqual(tab);
+    expect(refFromTabId(ACME_PR_URI)).toEqual({ id: ACME_PR_URI });
+    expect(refTargetNow(ACME_PR_URI)).toEqual({ tab: { id: ACME_PR_URI } });
   });
 
   test("a wikilink names one by its prefix, while installed", () => {
@@ -69,7 +63,6 @@ describe("an extension's ref kind (P8.D7)", () => {
       extension: "oxplow",
       params: { id: { required: true, pattern: null } },
       wikilink: null,
-      page: null,
     };
     // Without a declared prefix, an oxplow resource with one required param
     // is named by its own name.
@@ -101,7 +94,7 @@ describe("an extension's ref kind (P8.D7)", () => {
 
   test("reads v_resource rows", () => {
     const kinds = resourcesFromResult({
-      columns: ["resource", "extension", "label", "params", "additional", "resolve", "title", "searchable", "icon", "wikilink", "page"],
+      columns: ["resource", "extension", "label", "params", "additional", "resolve", "title", "searchable", "icon", "wikilink"],
       rows: [
         [
           "acme/pr",
@@ -114,7 +107,6 @@ describe("an extension's ref kind (P8.D7)", () => {
           null,
           "git-pull-request",
           '{"prefix":"pr","param":"id"}',
-          pageUri("acme/pr"),
         ],
       ],
       truncated: false,
@@ -127,8 +119,8 @@ describe("an extension's ref kind (P8.D7)", () => {
 // oxplow's own resources come in the same list, with no wikilink or icon.
 test("a core resource's row reads as one", () => {
   const kinds = resourcesFromResult({
-    columns: ["resource", "extension", "label", "params", "additional", "resolve", "title", "searchable", "icon", "wikilink", "page"],
-    rows: [["oxplow/thread_note", "oxplow", "Thread note", '{"id":{"required":true,"pattern":"^not\\\\d+$"}}', 0, "v_thread_note", null, null, null, null, null]],
+    columns: ["resource", "extension", "label", "params", "additional", "resolve", "title", "searchable", "icon", "wikilink"],
+    rows: [["oxplow/thread_note", "oxplow", "Thread note", '{"id":{"required":true,"pattern":"^not\\\\d+$"}}', 0, "v_thread_note", null, null, null, null]],
     truncated: false,
     reads: { models: [], tables: [] },
   } as never);
@@ -140,6 +132,5 @@ test("a core resource's row reads as one", () => {
     additional: false,
     icon: null,
     wikilink: null,
-    page: null,
   });
 });

@@ -2957,7 +2957,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             opened,
-            oxplow_domain::uri::build::page_uri("custom-dashboard", &[("id", &dashboard)]),
+            oxplow_domain::uri::build::keyed(oxplow_domain::uri::resources::DASHBOARD, &dashboard),
             "{rows}"
         );
     }

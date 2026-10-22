@@ -18,7 +18,7 @@
 
 /** The shell's keys, and only these. */
 export type ShellKey =
-  | "oxplow.layout.v6.sessions"
+  | "oxplow.layout.v7.sessions"
   | "oxplow.layout.v2.fileSessions"
   | "oxplow.remoteBase"
   | "oxplow.remoteToken"

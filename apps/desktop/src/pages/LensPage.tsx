@@ -9,6 +9,7 @@ import { lensRef, withResourceParams } from "../tabs/pageRefs.js";
 import { getPageDetailStore } from "../tabs/openPageDetail.js";
 import { insertIntoAgent } from "../agent-input-bus.js";
 import { formatContextMention } from "../agent-context-ref.js";
+import { pageView } from "./renderers.js";
 import { changedParams, lensViewChange, misplacedViewParams } from "../lens/lensModel.js";
 import { useHostedView } from "../lens/hostedView.js";
 import { NO_READS, useRerunOnChange } from "../lens/lensRerun.js";
@@ -50,7 +51,9 @@ export function LensPage({ lensId, params, title: pageTitle, stream, onOpenPage 
   const inTab = !!nav?.setViewParams;
   const [own, setOwn] = useState<Record<string, SqlCell>>(params ?? {});
   const resource = params ?? NO_PARAMS;
-  const view = nav?.viewParams ?? NO_PARAMS;
+  // The shell's view keys (`#oxplow.renderer=`) are the tab's, never a
+  // lens param.
+  const view = pageView(nav?.viewParams ?? NO_PARAMS);
   const fromRef = useMemoObject({ ...resource, ...view });
   const overrides = inTab ? fromRef : own;
   const overridesRef = useRef(overrides);
