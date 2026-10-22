@@ -1035,7 +1035,7 @@ actions:
   - { id: finish, label: Finish, command: oxplow.work_item.transition, input: { uri: "{{param.item}}", to: done } }
   - { id: finish-row, label: Finish, command: oxplow.work_item.transition, row: true, input: { uri: "{{row.uri}}", to: done } }
   - { id: finish-open, label: Finish, command: oxplow.work_item.transition, row: true, when: open, input: { uri: "{{row.uri}}", to: done } }
-  - { id: commit, label: Commit, command: oxplow.vcs.commit, input: { stream: str1, message: "x" } }
+  - { id: push, label: Push, command: oxplow.vcs.push, input: { stream: str1 } }
   - { id: prompt, label: Prompt, command: oxplow.config.set, input: { key: agentPromptAppend, value: be brief } }
   - { id: retitle, label: Retitle…, command: oxplow.work_item.update, row: true, form: true, fixed: [uri], input: { uri: "{{row.uri}}", title: "{{row.title}}" } }
 "#,
@@ -1195,7 +1195,7 @@ actions:
         let err = run_lens_action(
             &fx.svc,
             &root,
-            call("commit", BTreeMap::new(), None, Actor::Human, true),
+            call("push", BTreeMap::new(), None, Actor::Human, true),
             &extensions::LensContext::default(),
         )
         .await

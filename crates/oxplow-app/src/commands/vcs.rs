@@ -139,10 +139,12 @@ where
             })
         })),
     )
+    // A lens may run one for the person (a page's Commit, Revert); which
+    // ones is each command's manifest entry (`invokers.lens`).
     .open_to(Invokers {
         human: true,
         agent: true,
-        lens: false,
+        lens: true,
         job: false,
     })
     .confirm_at_least(confirm)
@@ -597,6 +599,73 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(silent.contains("git reported a failure"), "{silent}");
+    }
+
+    /// A lens acting for a person runs what a page needs of git — stage,
+    /// commit, discard, ignore, cherry-pick, revert — as that person would,
+    /// a destructive one still asking; what moves branches (push, merge,
+    /// rebase, checkout, a branch's delete) is a person's own.
+    #[tokio::test]
+    async fn a_lens_runs_the_git_a_page_needs_and_never_moves_branches() {
+        let f = services_with_effort().await;
+        let svc = &f.svc;
+        let root = svc.layout.project_dir.clone();
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        commit_all(&root, "base");
+        let stream = svc.stream_store.list().await.unwrap()[0].id.to_string();
+        let lens = Actor::Lens {
+            lens_id: "oxplow-foundation/uncommitted".into(),
+            on_behalf_of: Box::new(Actor::Human),
+        };
+        std::fs::write(root.join("a.txt"), "two\n").unwrap();
+        svc.commands
+            .run(
+                &lens,
+                "oxplow.vcs.stage",
+                json!({ "stream": stream, "paths": ["a.txt"] }),
+                false,
+            )
+            .await
+            .expect("a lens stages for the person");
+        svc.commands
+            .run(
+                &lens,
+                "oxplow.vcs.commit",
+                json!({ "stream": stream, "message": "from a lens" }),
+                false,
+            )
+            .await
+            .expect("a lens commits for the person");
+        std::fs::write(root.join("a.txt"), "three\n").unwrap();
+        let discard = json!({ "stream": stream, "paths": ["a.txt"] });
+        let err = svc
+            .commands
+            .run(&lens, "oxplow.vcs.discard", discard.clone(), false)
+            .await
+            .unwrap_err();
+        assert!(format!("{err:?}").contains("NeedsConfirmation"), "{err:?}");
+        svc.commands
+            .run(&lens, "oxplow.vcs.discard", discard, true)
+            .await
+            .expect("confirmed, a lens discards for the person");
+        for name in [
+            "oxplow.git.cherry_pick",
+            "oxplow.git.revert",
+            "oxplow.git.ignore",
+        ] {
+            let spec = svc.commands.spec(name).expect(name);
+            assert!(spec.invokers.lens, "{name} is open to a lens");
+        }
+        for name in [
+            "oxplow.vcs.push",
+            "oxplow.vcs.merge",
+            "oxplow.git.rebase",
+            "oxplow.vcs.checkout_branch",
+            "oxplow.vcs.delete_branch",
+        ] {
+            let spec = svc.commands.spec(name).expect(name);
+            assert!(!spec.invokers.lens, "{name} is a person's own");
+        }
     }
 
     /// P5.B6 (tsk525): an agent runs VCS commands on its own stream only

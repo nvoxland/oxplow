@@ -1439,13 +1439,13 @@ commands:
     summary: "Apply one commit onto the stream's branch."
     scope: vcs.write
     op: cherry_pick
-    invokers: { human: true, agent: true, lens: false }
+    invokers: { human: true, agent: true, lens: true }
     example: {"stream": "str1", "rev": "3f9c2a1"}
   - name: git.ignore
     summary: "Add a pattern to the workspace's `.gitignore`."
     scope: vcs.write
     op: ignore
-    invokers: { human: true, agent: true, lens: false }
+    invokers: { human: true, agent: true, lens: true }
     example: {"stream": "str1", "entry": "target/"}
   - name: git.rebase
     summary: "Rebase the stream's branch onto a revision (rewrites its commits)."
@@ -1458,7 +1458,7 @@ commands:
     summary: "Commit the inverse of one commit onto the stream's branch."
     scope: vcs.write
     op: revert
-    invokers: { human: true, agent: true, lens: false }
+    invokers: { human: true, agent: true, lens: true }
     confirm: destructive
     example: {"stream": "str1", "rev": "3f9c2a1"}
   - name: vcs.checkout_branch
@@ -1471,7 +1471,7 @@ commands:
     summary: "Commit the stream's changes (untracked files too, unless `include_untracked: false`); returns the new revision."
     scope: vcs.write
     op: commit
-    invokers: { human: true, agent: true, lens: false }
+    invokers: { human: true, agent: true, lens: true }
     ui: { label: "Commit Changes…", group: Git, form: commit, when: "streamShown && vcsEnabled" }
     example: {"stream": "str1", "message": "fix: stop the login redirect loop"}
   - name: vcs.delete_branch
@@ -1485,7 +1485,7 @@ commands:
     summary: "Throw away the workspace's changes to paths, back to the head's version."
     scope: vcs.write
     op: discard
-    invokers: { human: true, agent: true, lens: false }
+    invokers: { human: true, agent: true, lens: true }
     confirm: destructive
     example: {"stream": "str1", "paths": ["src/auth.rs"]}
   - name: vcs.merge
@@ -1511,7 +1511,7 @@ commands:
     summary: "Stage paths for the next commit."
     scope: vcs.write
     op: stage
-    invokers: { human: true, agent: true, lens: false }
+    invokers: { human: true, agent: true, lens: true }
     example: {"stream": "str1", "paths": ["src/auth.rs"]}
   # window.show — the window's; a person's.
   - name: window.find
