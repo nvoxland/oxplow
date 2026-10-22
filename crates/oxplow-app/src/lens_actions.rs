@@ -1733,6 +1733,7 @@ actions:
             &json!({ "agents": "{{row.order|json}}" }),
             &BTreeMap::new(),
             Some(&row),
+            None,
         )
         .unwrap();
         assert_eq!(bound, json!({ "agents": ["claude", "codex"] }));
@@ -1741,6 +1742,7 @@ actions:
             &json!({ "agents": "{{row.order|json}}" }),
             &BTreeMap::new(),
             Some(&bad),
+            None,
         )
         .unwrap_err();
         assert!(err.to_string().contains("isn't JSON"), "{err}");
