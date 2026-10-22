@@ -334,7 +334,7 @@ actions:
 The `group`, `emphasis` and `depth` columns aren't shown as cells. An
 action with `group:` is a button in that group's heading. `icon` names a
 column whose value picks an icon: `ready`, `todo`, `in_progress`,
-`blocked`, `done`, `canceled`, `archived`, `epic`, `task`, `wiki`,
+`blocked`, `done`, `canceled`, `archived`, a file's status (`added`, `modified`, `deleted`, `renamed`, `untracked`, `conflicted`), `epic`, `task`, `wiki`,
 `file`, `folder`, `commit`, `diff`, `lens`, `metric`, `dashboard`,
 `comment`, or a resource icon such as `bug`. `tone` names a column whose
 value colours the cell: `accent`, `success`, `warning`, `danger` or

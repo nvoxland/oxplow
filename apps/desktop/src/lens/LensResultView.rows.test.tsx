@@ -153,6 +153,31 @@ test("a tree's labels follow their column's link, and its rows drag", () => {
   expect(nodes.some((n) => n.getAttribute("data-emphasis") === "true")).toBe(true);
 });
 
+// A tree's row picks like a table's: a click sets the param its column
+// selects, the picked row is marked, and a link in it still opens.
+test("a tree's row click sets the param its column selects and marks the picked row", () => {
+  const picked: [string, SqlCell][] = [];
+  const run = {
+    ...runOf({
+      viz: "tree",
+      tree: { id: "id", parent: "d", label: "title" },
+      params: [{ name: "pick", label: null, default: null, options: [], type: "text", role: "selection", presets: [] }],
+      columns: [{ key: "title", label: null, link: null, unit: null, icon: null, tone: null, select: "pick" }] as never,
+    }),
+    params: { pick: "Child" },
+  } as LensRun;
+  const view = render(<LensResultView run={run} onOpenPage={() => {}} onSetParam={(n, v) => picked.push([n, v])} />);
+  const nodes = view.getAllByTestId("lens-tree-row");
+  fireEvent.click(nodes[0]!);
+  expect(picked).toEqual([["pick", "Epic"]]);
+  expect(nodes[1]!.getAttribute("aria-selected")).toBe("true");
+  expect(nodes[1]!.className).toContain("ox-selected");
+  expect(nodes[0]!.getAttribute("aria-selected")).toBe("false");
+  expect(nodes[0]!.className).toContain("ox-clickable");
+  fireEvent.click(view.getAllByRole("button", { name: "Collapse" })[0]!);
+  expect(picked).toHaveLength(1);
+});
+
 test("a lens that needs a capability that isn't active says so instead of showing rows", () => {
   const run = {
     ...runOf(grouped),

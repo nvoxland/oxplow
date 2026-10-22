@@ -1024,7 +1024,8 @@ function TreeItem({ node, path, closed, ...rest }: TreeVizProps & { node: TreeNo
     <li data-testid="lens-tree-node">
       <div
         data-testid="lens-tree-row"
-        style={{ display: "flex", alignItems: "center", gap: 4, padding: "2px 0", ...(look.emphasized ? emphasisStyle : {}) }}
+        className={[look.picks ? "ox-clickable" : "", look.selected ? "ox-selected" : ""].filter(Boolean).join(" ") || undefined}
+        style={{ display: "flex", alignItems: "center", gap: 4, padding: "2px 0", ...(look.emphasized || look.selected ? emphasisStyle : {}) }}
         {...rowMenu(node.row)}
         {...look.props}
       >

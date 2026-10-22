@@ -161,7 +161,7 @@ empty: Nothing is waiting on you.
   row whose value is truthy (also on `tree`); `depth: level` indents a
   row by its whole-number value. On a column, `icon: status` draws an
   icon named by that column's value — `ready`, `todo`, `in_progress`,
-  `blocked`, `done`, `canceled`, `archived`, `epic`, `task`, `wiki`,
+  `blocked`, `done`, `canceled`, `archived`, a file's status (`added`, `modified`, `deleted`, `renamed`, `untracked`, `conflicted`), `epic`, `task`, `wiki`,
   `file`, `folder`, `commit`, `diff`, `lens`, `metric`, `dashboard`,
   `comment` or a resource icon name (`bug`, `git-pull-request`, …) — and
   `tone: hue` colours the cell: `accent`, `success`, `warning`, `danger`,

@@ -2009,7 +2009,7 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   column of the row. `icon`'s value names an icon drawn before the cell
   from a fixed vocabulary (`lens/lensIcons.tsx`): the work glyphs
   `ready` / `todo` ☐, `in_progress` ◐, `blocked` ⚠, `done` ✓,
-  `canceled` ✗, `archived` ▣ (each with its own tone); the kinds `epic`,
+  `canceled` ✗, `archived` ▣ (each with its own tone); a file's status, lettered as the file trees letter it — `added` A, `modified` M, `deleted` D, `renamed` R, `untracked` U, `conflicted` C (a `tree` row's label column takes one, and a `tree` row picks by a column's `select` like a table's: it is marked `ox-selected`); the kinds `epic`,
   `task`, `wiki`, `file`, `folder`, `commit`, `diff`, `lens`, `metric`,
   `dashboard`, `comment` (their pages' icons); and the resource icon
   names (`bug`, `git-pull-request`, … — `RESOURCE_ICONS`); past those,

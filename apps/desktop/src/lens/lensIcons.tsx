@@ -37,7 +37,8 @@ export type LensIconSpec =
   | { Icon: LucideIcon; tone: null; label: string };
 
 /** The work-status glyphs, matching the rail's Work rows (and the status
- *  states `v_work_item` uses, so a query can pass its state). */
+ *  states `v_work_item` uses, so a query can pass its state), and a file's
+ *  change status (`v_workspace_file.status`). */
 const STATUS: Record<string, { glyph: string; tone: LensTone | null; label: string }> = {
   ready: { glyph: "☐", tone: null, label: "Ready" },
   todo: { glyph: "☐", tone: null, label: "Ready" },
@@ -46,6 +47,13 @@ const STATUS: Record<string, { glyph: string; tone: LensTone | null; label: stri
   done: { glyph: "✓", tone: "success", label: "Done" },
   canceled: { glyph: "✗", tone: "muted", label: "Canceled" },
   archived: { glyph: "▣", tone: "muted", label: "Archived" },
+  // A file's status, lettered as the file trees letter it (`shortStatus`).
+  added: { glyph: "A", tone: "success", label: "Added" },
+  modified: { glyph: "M", tone: "warning", label: "Modified" },
+  deleted: { glyph: "D", tone: "danger", label: "Deleted" },
+  renamed: { glyph: "R", tone: "accent", label: "Renamed" },
+  untracked: { glyph: "U", tone: "muted", label: "Untracked" },
+  conflicted: { glyph: "C", tone: "danger", label: "Conflicted" },
 };
 
 /** Kinds of thing, drawn with the icon their pages use. */
