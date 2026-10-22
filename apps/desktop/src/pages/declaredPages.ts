@@ -12,7 +12,6 @@ import { extPageUri, pageUri as corePageRef } from "../uri/uri.js";
 export const APP_RENDERERS = [
   "agent-session",
   "editor",
-  "file-viewer",
   "lens",
   "metric-detail",
   "wiki-page",

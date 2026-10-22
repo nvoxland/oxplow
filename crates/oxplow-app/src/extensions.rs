@@ -566,6 +566,10 @@ pub struct LensDiff {
     /// newer side.
     #[serde(default)]
     pub lines: Option<String>,
+    /// A column naming the older side as the header says it (`vs HEAD`);
+    /// else the `from` revision, shortened.
+    #[serde(default)]
+    pub base: Option<String>,
 }
 
 /// `hunks` viz: the file and the two revisions each row diffs.
@@ -5383,7 +5387,7 @@ impl Lens {
         }
         if let Some(d) = &self.diff {
             out.extend(
-                [&d.path, &d.from, &d.to, &d.lines]
+                [&d.path, &d.from, &d.to, &d.lines, &d.base]
                     .into_iter()
                     .flatten()
                     .map(|k| ("diff", k)),

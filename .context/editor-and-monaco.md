@@ -218,9 +218,9 @@ A lens shows files through two kit vizes (`.context/extensions.md`
   working file.
 
 Open file navigates in the tab when there is one, else opens a page.
-`FileViewerPage` and `DuplicateBlockPage` still mount their own editors
-until they become lenses over these vizes; `DiffPane` stays (it is the
-`hunks` viz's and `diff`'s).
+`DuplicateBlockPage` still mounts its own editors until it becomes a lens
+over these vizes (the file-viewer page already is one); `DiffPane` stays
+(it is the `hunks` viz's and `diff`'s).
 
 ## Comment overlay
 
