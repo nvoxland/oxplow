@@ -17,7 +17,7 @@ import {
 } from "../components/format.js";
 import type { ColumnFormat, Extension, Lens, LensParam, SlotAt, LensChart, LensLink, LensRun, LensViz, SqlCell, SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
 import { PAGE_CATEGORY_ORDER, type PageDirectoryEntry } from "../components/RailHud/sections.js";
-import { diffRef, duplicateBlockRef, effortDiffRef, fileRef, gitCommitRef, lensRef, metricRef, wikiPageRef } from "../tabs/pageRefs.js";
+import { diffRef, duplicateBlockRef, effortDiffRef, fileRefAt, gitCommitRef, lensRef, metricRef, wikiPageRef } from "../tabs/pageRefs.js";
 import { WORKING, parseRevision, shortRevisionLabel } from "../revision.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { formatContextMention, type ContextRef } from "../agent-context-ref.js";
@@ -201,10 +201,8 @@ export function cellLinkRef(
   const s = String(v);
   switch (link.kind) {
     case "file": {
-      const ref = fileRef(s);
       const lineIdx = link.line ? resultColumns.indexOf(link.line) : -1;
-      const line = lineIdx === -1 ? null : Number(row[lineIdx]);
-      return line && line > 0 ? { ...ref, payload: { path: s, version: WORKING, line } } : ref;
+      return fileRefAt(s, lineIdx === -1 ? null : Number(row[lineIdx]));
     }
     case "commit":
       return gitCommitRef(s);
@@ -378,19 +376,36 @@ export function changedParams(lens: Lens, values: Record<string, SqlCell>): Reco
   return out;
 }
 
-/** A lens page's view after `patch` (its rail, a row's pick, its
- *  component): the params its ref carries, and whether the change is
- *  somewhere to come back from — a `selection` param set (pushed) — or
+/** A lens page after `patch` (its rail, a row's pick, its component): the
+ *  values that differ from the defaults, apart as its URI holds them — its
+ *  `resource` params (the `?`: what it shows) and its `view` (the `#`: its
+ *  `filter` and `selection` params) — and whether the change is somewhere
+ *  to come back from: another resource, or a `selection` set (pushed), not
  *  a filter (replaced). */
 export function lensViewChange(
   lens: Lens,
   current: Record<string, SqlCell>,
   patch: Record<string, SqlCell>,
-): { params: Record<string, SqlCell>; push: boolean } {
+): { resource: Record<string, SqlCell>; view: Record<string, SqlCell>; push: boolean } {
+  const role = (name: string) => lens.params.find((p) => p.name === name)?.role ?? "resource";
+  const resource: Record<string, SqlCell> = {};
+  const view: Record<string, SqlCell> = {};
+  for (const [name, value] of Object.entries(changedParams(lens, { ...current, ...patch }))) {
+    (role(name) === "resource" ? resource : view)[name] = value;
+  }
   const push = Object.entries(patch).some(
-    ([name, value]) => value !== null && lens.params.find((p) => p.name === name)?.role === "selection",
+    ([name, value]) => role(name) === "resource" || (value !== null && role(name) === "selection"),
   );
-  return { params: changedParams(lens, { ...current, ...patch }), push };
+  return { resource, view, push };
+}
+
+/** The params of `params` a lens doesn't take in its URI's `?` (its
+ *  filters and selections, which belong in the `#` view). */
+export function misplacedViewParams(lens: Lens, params: Record<string, SqlCell>): string[] {
+  return Object.keys(params).filter((name) => {
+    const role = lens.params.find((p) => p.name === name)?.role;
+    return role === "filter" || role === "selection";
+  });
 }
 
 /** Whether `value` is `param`'s default: a bool by truth (its echo is

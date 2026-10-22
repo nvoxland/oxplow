@@ -594,10 +594,12 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     and the whole-lens actions are handed to the nav bar
     (`toolbarTo`). **A lens page is a function of its tab entry**
     (`tabs/session.ts`): its params are its URI's
-    (`oxplow:oxplow/lens?lens=<ext>/<slug>&k=v`, a declared page's `oxplow:oxplow/page?page=…&k=v`), and a
-    change goes back through `PageNavigation.setViewParams` with the values
-    that differ from the defaults (`changedParams`, by type) — a filter
-    replaces the entry, a selection pushes one. So a reopened tab, a
+    (`oxplow:oxplow/lens?lens=<ext>/<slug>&k=v#f=v`, a declared page's `oxplow:oxplow/page?page=…&k=v`): the `?`
+    holds its `resource` params, the `#` its filters and picks. A change of
+    a filter or pick goes back through `PageNavigation.setViewParams` with
+    the values that differ from the defaults (`changedParams`, by type) — a
+    filter replaces the entry, a selection pushes one — and a change of a
+    `resource` param navigates to another resource (`withResourceParams`). So a reopened tab, a
     restart, a bookmark and Back show the same filters and the same
     pick. Outside a tab it keeps its params itself.
   - A run failure shows the error inline, with a nudge to use "Improve
@@ -1846,10 +1848,18 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   doesn't take (`param_problem`); a run supplying such a value is
   refused (`resolve_params`). There is no `place`: every param draws in
   the page's rail.
-- **A param's `role`** follows from the columns and is never written
-  (the loader refuses it): `selection` when a column of the lens, or of a
-  part of the document or dashboard, `select`s it — the page shows the
-  picked row, not an input — else `filter`. A loaded lens always says.
+- **A param's `role`** (`ParamRole`) says where its value rides in the
+  URI. `resource` (the default, nothing written) names what the page
+  shows, so it is in the `?` and a change opens another resource.
+  `filter` (authored: `role: filter`) narrows or re-views what is shown,
+  so it is in the `#` and a change replaces the entry. `selection` is
+  derived, never written (the loader refuses it): a column of the lens, or
+  of a part of the document or dashboard, `select`s the param — the page
+  shows the picked row, not an input — so it is in the `#` and a pick
+  pushes an entry. A loaded lens always says. A `filter` or `selection`
+  param found in a `?` is refused (a `lens-error` box), never read from
+  there. A declared page's `params:` list its `?` params; its lens's
+  filters and selections ride in the `#`.
 - **Page-layout warnings** (`layout_warnings`, run in `load_one` after the
   roles pass): load, validate, `v_extension.warnings` and a deploy's result
   carry them, each naming its lens file and the fix after the dash. A
@@ -2685,7 +2695,7 @@ title and its nav-bar actions, data core draws; a press posts
 `{ type: action, id }` to the frame). `openForm`, `setTitle` and
 `setActions` are a custom page's (`INVALID` elsewhere), and — each kind
 of page state by the name of its scope — `{ id, method: setViewParams,
-params }` (string values, null drops one: its tab entry's view, replaced;
+params }` (string values, null drops one: the `#` of its tab entry, replaced;
 a component has no selection role, so it never pushes, and going
 somewhere is `navigate`) and `{ id, method: setHistoryState, patch }`
 (this step of its tab). The host posts `{ type: viewParams, params }` and
@@ -2693,7 +2703,7 @@ somewhere is `navigate`) and `{ id, method: setHistoryState, patch }`
 an echo; `createBridgeHost` sends only what the frame hasn't seen);
 `init.view` carries both.
 
-**Whose view a component has** (protocol 8, `lens/hostedView.ts`
+**Whose view a component has** (protocol 9, `lens/hostedView.ts`
 `useHostedView`): its host's, where the host shares one, and only what
 the host's contract names. A custom page has the whole entry — all its
 params (`patchViewParams`) and its history state. A **replacement** has
@@ -2753,7 +2763,7 @@ which an opaque origin never passes and nothing served to a frame allows
 — the same reason a bundle's own scripts are classic. `oxplow.connect()`
 waits for `init`, answers `ready`, and resolves with `{ run (the latest),
 page, props, tokens, protocol, onUpdate(fn) → unsubscribe, query(asset,
-params), invoke(command, input), navigate(uri, { newTab }), querySql,
+params), invoke(command, input), navigate(uri, { newTab, replace }), querySql,
 openForm, setTitle, setActions, onAction, viewParams, setViewParams,
 onViewParams, historyState, setHistoryState, onHistoryState, pageMemory,
 applyTheme(doc?) }` (the `.d.ts` beside it is the reference;
@@ -4445,7 +4455,9 @@ tool: open_work              # offered as <namespace>_open_work
   lens's `empty` text. It's what `oxplow_run_lens`, `oxplow_get_open_page` and `copy`
   return, so an agent reads a lens the way the person sees it.
 - `oxplow_get_open_page(thread_id)` **(current)**: what the human has open in
-  that thread, for any page kind (a work item's, file's or lens's URI). For a
+  that thread, for any page kind (a work item's, file's or lens's URI):
+  `page` is its identity (the URI without its `#`) and `view` the `#`,
+  decoded. For a
   lens it adds `lens`, the lens re-run with the human's *current*
   params as its text rendering, so "look at what I'm looking at" works.
   - The UI reports the active page (`report_open_page`, UI-only) together
@@ -4658,7 +4670,7 @@ available to every extension:
 - Lens `actions:` as commands (P6.B1; the tsk329 registry retired).
 - Disabling extensions per project.
 - Advisories: the generic nudge primitive (see "Advisories").
-- Lens tabs carry params: `oxplow:oxplow/lens?lens=<ext>/<slug>&k=v` (`lensUri(id, params)`),
+- Lens tabs carry params: `oxplow:oxplow/lens?lens=<ext>/<slug>&k=v#view` (`lensUri(id, params, view)`),
   so a slot lens's heading opens its page with the slot's values, and
   history and bookmarks keep them.
 - Panel `collapsed:` — a lens shown as a collapsed panel's summary

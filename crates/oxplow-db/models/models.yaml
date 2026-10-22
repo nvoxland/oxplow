@@ -85,7 +85,7 @@
     - { unique: id }
     - { relationships: { column: agent_session_id, to: agent_session, field: id } }
 - name: agent_turn
-  version: 9
+  version: 10
   description: "Agent turns: each human prompt and the agent's answer, per thread and agent session. start_snapshot_id → snapshot_id is what the turn changed (the snapshot the worktree was at when it opened and when it ended)."
   columns:
     - { name: "id", type: "INTEGER", doc: "Turn id." }
@@ -99,7 +99,7 @@
     - { name: "start_snapshot_id", type: "INTEGER", doc: "Snapshot the worktree was at when the turn opened (v_snapshot.id); NULL if the stream had none yet." }
     - { name: "snapshot_id", type: "INTEGER", doc: "Snapshot the worktree was at when the turn ended (v_snapshot.id); NULL while running." }
     - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/turn?id=trn<id>`: its URI, the one place SQL spells it — select and join on this, never rebuild it. (v3)" }
-    - { name: "transcript_page", type: "TEXT", doc: "The session's transcript lens opened at this turn (`oxplow:oxplow/lens?lens=oxplow-foundation/session-transcript&session=…&turn=…`): where a turn opens. NULL for a turn no session claims. (v4)" }
+    - { name: "transcript_page", type: "TEXT", doc: "The session's transcript lens shown from this turn (`oxplow:oxplow/lens?lens=oxplow-foundation/session-transcript&session=ses2#turn=trn7`: the session in its `?`, the turn its view): where a turn opens. NULL for a turn no session claims. (v4; v10: bare ids, the turn in the view)" }
     - { name: "model", type: "TEXT", doc: "The model the turn ran on, as its harness reported it with the turn's end; NULL while running, or when the harness said nothing (opencode). (v5)" }
     - { name: "effort", type: "TEXT", doc: "The reasoning effort the turn ran at (`high`, `medium`, …), as its harness reported it with the turn's end; NULL while running, or when it said nothing. (v5)" }
     - { name: "context_tokens", type: "INTEGER", doc: "Tokens in the agent's context when the turn ended (input plus cache reads and writes of the turn's last request), as its harness reported it with the turn's end; NULL while running, or when the harness said nothing. (v6)" }

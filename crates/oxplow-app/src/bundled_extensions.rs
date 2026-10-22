@@ -2054,27 +2054,20 @@ mod tests {
             oxplow_db::SqlCell::Text(t) => t.clone(),
             other => panic!("{other:?}"),
         };
+        // The session is what it shows (bare, as the lens takes it); the
+        // turn it starts from is its view.
+        let shows = oxplow_domain::uri::oxplow_uri::OxplowUri::parse(
+            &oxplow_domain::uri::build::lens_uri_with(
+                "oxplow-foundation/session-transcript",
+                &[("session", Some(&format!("ses{session}")))],
+            ),
+        )
+        .unwrap();
         assert_eq!(
             page,
-            oxplow_domain::uri::build::lens_uri_with(
-                "oxplow-foundation/session-transcript",
-                &[
-                    (
-                        "session",
-                        Some(&oxplow_domain::uri::build::keyed(
-                            oxplow_domain::uri::resources::AGENT_SESSION,
-                            &format!("ses{session}")
-                        ))
-                    ),
-                    (
-                        "turn",
-                        Some(&oxplow_domain::uri::build::keyed(
-                            oxplow_domain::uri::resources::TURN,
-                            "trn1"
-                        ))
-                    ),
-                ]
-            )
+            shows
+                .with_view([("turn".to_string(), "trn1".to_string())].into())
+                .to_string()
         );
         assert_eq!(rows[1][1], oxplow_db::SqlCell::Null(()));
     }

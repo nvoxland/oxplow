@@ -2,7 +2,7 @@ title: Compact list
 description: The work items as a plain table, with Done and Edit… on each row. It stands in for oxplow's Tasks list.
 hidden: true
 params:
-  - { name: scope, label: "Scope (thread / stream / all)", default: all }
+  - { name: scope, role: filter, label: "Scope (thread / stream / all)", default: all }
   - { name: thread_id, label: Thread }
   - { name: stream_id, label: Stream }
 query: |

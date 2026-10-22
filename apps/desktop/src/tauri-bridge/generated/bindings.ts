@@ -2799,7 +2799,11 @@ export type ExtensionPage = {
 	category: LauncherCategory | null,
 	/**  More words the launcher matches it on. */
 	keywords: string | null,
-	/**  The params its id carries (`oxplow:oxplow/page?area=agents&page=settings`). */
+	/**
+	 *  The params naming what it shows, in its URI's `?`
+	 *  (`oxplow:oxplow/page?page=settings&stream=str1`); its lens's filters and
+	 *  selections ride in the `#` view.
+	 */
 	params: string[],
 	/**
 	 *  The lens whose value (a `number` lens) is the launcher's badge
@@ -4240,10 +4244,12 @@ export type LensParam = {
 	 */
 	type?: ParamType | null,
 	/**
-	 *  What it is to the page, which follows from the columns and is
-	 *  never written: a `selection` when a column of the lens (or of a
-	 *  part of the page) selects it, else a `filter`. A loaded lens
-	 *  always says.
+	 *  What it is to the page, and so where it rides in the page's URI:
+	 *  a `resource` (the default) names what the page shows, in the URI's
+	 *  `?`; `filter` narrows how it shows it, in the URI's `#` view. A
+	 *  `selection` follows from the columns and is never written: a param
+	 *  a column of the lens (or of a part of the page) selects, in the
+	 *  view too. A loaded lens always says.
 	 */
 	role?: ParamRole | null,
 	/**
@@ -5505,7 +5511,15 @@ export type ParamDecl = {
 
 /**  What a lens param is to its page. */
 export type ParamRole = 
-/**  Narrows what the page shows; a control in the page's rail. */
+/**
+ *  Names what the page shows (its URI's `?`); a control in the
+ *  page's rail whose change opens another resource.
+ */
+"resource" | 
+/**
+ *  Narrows how the page shows it (its URI's `#` view); a control in
+ *  the page's rail whose change replaces the view.
+ */
 "filter" | 
 /**  The row a click picked; the rail shows that row, never an input. */
 "selection";

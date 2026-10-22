@@ -109,8 +109,8 @@ test("navigate can ask for a new tab", async () => {
   await c.navigate("oxplow:oxplow/commit?sha=abc", { newTab: true });
   await c.navigate("oxplow:oxplow/commit?sha=def");
   expect(opened).toEqual([
-    ["oxplow:oxplow/commit?sha=abc", { newTab: true }],
-    ["oxplow:oxplow/commit?sha=def", { newTab: false }],
+    ["oxplow:oxplow/commit?sha=abc", { newTab: true, replace: false }],
+    ["oxplow:oxplow/commit?sha=def", { newTab: false, replace: false }],
   ]);
   h.close();
 });

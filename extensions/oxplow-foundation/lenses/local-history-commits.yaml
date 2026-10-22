@@ -3,12 +3,13 @@ description: The stream's newest snapshots under the commit each equals; the one
 params:
   - { name: stream_id }
   - name: mode
+    role: filter
     label: Group by
     default: recent
     options:
       - { value: recent, label: Recent snapshots }
       - { value: by-commit, label: By git commit }
-  - { name: all, label: Show every snapshot, type: bool, default: false }
+  - { name: all, role: filter, label: Show every snapshot, type: bool, default: false }
 query: |
   WITH snaps AS (
     SELECT s.id, s.uri, s.created_at, s.revision,

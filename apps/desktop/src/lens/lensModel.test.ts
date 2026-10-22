@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import type { Extension, Lens } from "../tauri-bridge/generated/bindings.js";
-import { markParts, treeNodes, timelineEntries, stepItems, hunkRows, slotRuns, mergeDirectory, barRows, childParams, lineSeries, numericRowId, treemapItems, cellLinkRef, changedParams, lensViewChange, foldEmpty, displayColumns, formatCell, lensDirectoryEntries, parseParamInput, limitRows, slugify, adHocLens, rowMention, rowAsk, effortRowId, slotExtensions, isTimestamp, rowGroups, rowEmphasized, rowDepth, rowContextRef } from "./lensModel.js";
+import { markParts, treeNodes, timelineEntries, stepItems, hunkRows, slotRuns, mergeDirectory, barRows, childParams, lineSeries, numericRowId, treemapItems, cellLinkRef, changedParams, lensViewChange, misplacedViewParams, foldEmpty, displayColumns, formatCell, lensDirectoryEntries, parseParamInput, limitRows, slugify, adHocLens, rowMention, rowAsk, effortRowId, slotExtensions, isTimestamp, rowGroups, rowEmphasized, rowDepth, rowContextRef } from "./lensModel.js";
 import { formatMetricValue, formatShortDateTime } from "../components/format.js";
-import { diffSpecOf, duplicateBlockOf, isPage, pagePayload } from "../tabs/pageRefs.js";
+import { diffSpecOf, duplicateBlockOf, isPage, lineOf, pagePayload } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
 
 const lens = (over: Partial<Lens> = {}): Lens => ({
@@ -183,22 +183,31 @@ describe("parseParamInput", () => {
   });
 });
 
-// A lens page's view is its params, set by its rail, a row's pick or its
-// component: a filter replaces the entry, a pick pushes one.
+// A lens page's params, set by its rail, a row's pick or its component,
+// apart as its URI holds them: its resource params name what it shows, its
+// filters and picks are its view. A filter replaces the entry; a pick, or
+// another resource, pushes one.
 describe("lensViewChange", () => {
   const l = lens({
     params: [
-      { name: "days", label: null, default: 7 },
+      { name: "days", label: null, default: 7, role: "filter" },
       { name: "task", label: null, default: null, role: "selection" },
+      { name: "stream_id", label: null, default: null, role: "resource" },
     ],
   } as never);
-  test("a filter replaces; values at their defaults leave the ref", () => {
-    expect(lensViewChange(l, { task: "tsk1" }, { days: 14 })).toEqual({ params: { days: 14, task: "tsk1" }, push: false });
-    expect(lensViewChange(l, { days: 14 }, { days: 7 })).toEqual({ params: {}, push: false });
+  test("a filter replaces; values at their defaults leave the URI", () => {
+    expect(lensViewChange(l, { task: "tsk1" }, { days: 14 })).toEqual({ resource: {}, view: { days: 14, task: "tsk1" }, push: false });
+    expect(lensViewChange(l, { days: 14 }, { days: 7 })).toEqual({ resource: {}, view: {}, push: false });
   });
   test("a pick pushes; a cleared one replaces", () => {
-    expect(lensViewChange(l, {}, { task: "tsk2" })).toEqual({ params: { task: "tsk2" }, push: true });
-    expect(lensViewChange(l, { task: "tsk2" }, { task: null })).toEqual({ params: {}, push: false });
+    expect(lensViewChange(l, {}, { task: "tsk2" })).toEqual({ resource: {}, view: { task: "tsk2" }, push: true });
+    expect(lensViewChange(l, { task: "tsk2" }, { task: null })).toEqual({ resource: {}, view: {}, push: false });
+  });
+  test("another resource is another page, pushed, keeping the view", () => {
+    expect(lensViewChange(l, { stream_id: 1, days: 14 }, { stream_id: 2 })).toEqual({ resource: { stream_id: 2 }, view: { days: 14 }, push: true });
+  });
+  test("a filter or a pick in the URI's `?` is misplaced", () => {
+    expect(misplacedViewParams(l, { stream_id: 1, days: 14, task: "t" })).toEqual(["days", "task"]);
   });
 });
 
@@ -281,8 +290,8 @@ describe("links added for extraction", () => {
   const row = [42, "src/a.rs", 7, "abc123", "oxplow.complexity"];
   test("file links can carry a line", () => {
     const ref = cellLinkRef({ kind: "file", from: "path", line: "ln", base: null, head: null }, "path", row, cols);
-    expect(ref?.id).toBe("oxplow:oxplow/file?path=src/a.rs");
-    expect((ref?.payload as { line?: number }).line).toBe(7);
+    expect(ref?.id).toBe("oxplow:oxplow/file?path=src/a.rs#lines=7-7");
+    expect(lineOf(ref as TabRef)).toBe(7);
   });
   test("commit and metric links", () => {
     expect(cellLinkRef({ kind: "commit", from: "sha", line: null, base: null, head: null }, "sha", row, cols)?.kind).toBe("commit");
@@ -385,7 +394,7 @@ describe("change links", () => {
       cols,
     )!;
     expect(isPage(ref, "diff")).toBe(true);
-    const spec = (r: TabRef) => diffSpecOf(pagePayload(r)!.params)!;
+    const spec = (r: TabRef) => diffSpecOf(r)!;
     const p = spec(ref);
     expect(p.path).toBe("src/a.rs");
     expect(p.leftVersion).toEqual("git:abc1234");

@@ -2298,7 +2298,7 @@
           "default": null
         },
         "params": {
-          "description": "The params its id carries.",
+          "description": "The params naming what it shows, in its URI's `?`; its lens's filters\nand selections ride in the `#` view.",
           "type": "array",
           "items": {
             "type": "string"

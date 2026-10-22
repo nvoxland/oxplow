@@ -21,7 +21,7 @@ import { getUiPreferences, setUiPreference } from "../api.js";
 import { logUi } from "../logger.js";
 import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
 import { panelUri } from "../uri/uri.js";
-import { identityOf } from "../tabs/session.js";
+import { keyIdentityOf, typeOf } from "../uri/uri.js";
 import type { TabRef } from "../tabs/tabState.js";
 import type { UiPreference } from "../tauri-bridge/generated/bindings.js";
 
@@ -143,11 +143,13 @@ export function useRememberedStore(): RememberedStore {
   return store;
 }
 
-/** The page-memory scope of a page: its own ref without its view params
- *  (`oxplow/page?page=tasks`, `oxplow/lens?lens=x/y`), or `kind:<kind>` for an
- *  entity page (every file page shares one). */
+/** The page-memory scope of a page: the page or lens itself, whatever it
+ *  shows and however (`oxplow/page?page=tasks`, `oxplow/lens?lens=x/y`), or
+ *  its resource for an entity page (`resource:oxplow/file`: every file page
+ *  shares one). */
 export function pageMemoryScope(ref: TabRef): string {
-  return ref.kind === "page" || ref.kind === "lens" ? identityOf(ref.id) : `kind:${ref.kind}`;
+  if (ref.kind === "page" || ref.kind === "lens" || ref.kind === "metric") return keyIdentityOf(ref.id) ?? ref.id;
+  return `resource:${typeOf(ref.id) ?? `oxplow/${ref.kind}`}`;
 }
 
 /** One remembered value under `scope` (null: none — kept in the caller). */

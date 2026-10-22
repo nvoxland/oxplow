@@ -234,9 +234,9 @@ export function keyParamOf(resource: string): string {
   return (extension === "oxplow" && name !== undefined ? KEY_PARAM[name] : undefined) ?? "id";
 }
 
-/** `text` with only its key param: the page or lens it names without the
- *  params it is viewed with (`oxplow/page?page=tasks`, whatever its
- *  `scope`). Null when `text` isn't a URI. */
+/** `text` with only its key param: the page or lens it names whatever it
+ *  shows and however (`oxplow/page?page=tasks`) — page memory's scope. Null
+ *  when `text` isn't a URI. */
 export function keyIdentityOf(text: string): string | null {
   const u = parseUri(text);
   if (!u) return null;
@@ -348,24 +348,38 @@ export function fileLinesUri(path: string, start: number, end: number, rev: stri
   return resourceUri("oxplow/file", { path, rev }, { lines: `${start}-${end}` });
 }
 
-/** A shell route: `oxplow/page?page=<name>` and its params. */
-export function pageUri(page: string, params: Params = {}): string {
-  return resourceUri("oxplow/page", { ...params, page });
+/** A shell route: `oxplow/page?page=<name>`, the params that say what it
+ *  shows and its view (`#`: a filter, a pick). */
+export function pageUri(page: string, params: Params = {}, view: Params = {}): string {
+  return resourceUri("oxplow/page", { ...params, page }, view);
 }
 
 /** An extension's page: the contribution `page=<extension>/<page>`. */
-export function extPageUri(extension: string, page: string, params: Params = {}): string {
-  return pageUri(`${extension}/${page}`, params);
+export function extPageUri(extension: string, page: string, params: Params = {}, view: Params = {}): string {
+  return pageUri(`${extension}/${page}`, params, view);
 }
 
-/** A lens (`acme/blocked`) and the params it is viewed with. */
-export function lensUri(lensId: string, params: Params = {}): string {
-  return resourceUri("oxplow/lens", { ...params, lens: lensId });
+/** A lens (`acme/blocked`): its resource params (`?`) and its view (`#`:
+ *  its `filter` and `selection` params). */
+export function lensUri(lensId: string, params: Params = {}, view: Params = {}): string {
+  return resourceUri("oxplow/lens", { ...params, lens: lensId }, view);
 }
 
 /** A metric's page (`oxplow.todos`) and its view (range, branch, …). */
-export function metricUri(key: string, params: Params = {}): string {
-  return resourceUri("oxplow/metric", { ...params, metric: key });
+export function metricUri(key: string, params: Params = {}, view: Params = {}): string {
+  return resourceUri("oxplow/metric", { metric: key, ...params }, view);
+}
+
+/** `text` showing `view` (its `#`), its identity unchanged; a null or
+ *  undefined value is left out. `text` as it is when it isn't a URI. */
+export function withUriView(text: string, view: Params): string {
+  const u = parseUri(text);
+  return u ? formatUri({ ...u, view: present(view) }) : text;
+}
+
+/** `text`'s view (its `#`'s params, decoded); empty when it has none. */
+export function viewParamsOfUri(text: string): Record<string, string> {
+  return { ...(parseUri(text)?.view ?? {}) };
 }
 
 /** An extension's collector (`<owner>/<id>`). */

@@ -1,4 +1,4 @@
-import { diffSpecOf, duplicateBlockOf, endpointsOf, fileRef, isPage, newTaskRef, workItemTabRef, type DiffViewPayload } from "../tabs/pageRefs.js";
+import { diffSpecOf, duplicateBlockOf, endpointsOf, fileRef, isPage, newTaskRef, viewParamsOf, workItemTabRef, type DiffViewPayload } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
 import type { Stream } from "../api.js";
 import { openExternalUrl } from "../api.js";
@@ -97,7 +97,7 @@ export const diffViewTab = (ref: TabRef, payload: DiffViewPayload | null, nav: S
 
 export const builtInPages: Record<BuiltInPageName, BuiltInPage> = {
   diff: ({ ref, params, nav, scope }) => {
-    const spec = diffSpecOf(params);
+    const spec = diffSpecOf(ref);
     if (!spec) return null;
     const label = spec.path.split("/").pop() ?? spec.path;
     const suffix = spec.labelOverride ?? "diff";
@@ -143,9 +143,10 @@ export const builtInPages: Record<BuiltInPageName, BuiltInPage> = {
       ) : null,
     };
   },
-  settings: ({ ref, params, nav }) => {
-    const area = settingsArea(params.area);
-    const section = params.section ?? null;
+  settings: ({ ref, nav }) => {
+    const view = viewParamsOf(ref);
+    const area = settingsArea(typeof view.area === "string" ? view.area : undefined);
+    const section = typeof view.section === "string" ? view.section : null;
     return {
       id: ref.id,
       label: area.id === "overview" ? "Settings" : `Settings: ${area.title}`,
@@ -153,7 +154,7 @@ export const builtInPages: Record<BuiltInPageName, BuiltInPage> = {
       render: () => <SettingsPage area={area.id} section={section} onOpenPage={nav.navOpen} />,
     };
   },
-  "diff-view": ({ ref, params, nav, scope }) => diffViewTab(ref, endpointsOf(params), nav, scope.stream),
+  "diff-view": ({ ref, nav, scope }) => diffViewTab(ref, endpointsOf(ref), nav, scope.stream),
   "git-dashboard": ({ ref, nav, scope }) => {
     return {
       id: ref.id,

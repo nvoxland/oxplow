@@ -3,7 +3,7 @@ description: The wiki pages opened most recently in the stream, newest first. Em
 needs: [knowledge]
 params:
   - { name: stream_id }
-  - { name: filter, label: Search titles + bodies, default: "" }
+  - { name: filter, role: filter, label: Search titles + bodies, default: "" }
 query: |
   SELECT p.slug, p.title, max(v.visited_at) AS visited_at
   FROM v_page_visit v

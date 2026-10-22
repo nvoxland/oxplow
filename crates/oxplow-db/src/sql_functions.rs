@@ -2,7 +2,8 @@
 //! lenses and migrations ship (`.context/semantic-layer.md`).
 //!
 //! - `uri(resource, key, value, …)` is the one way SQL spells an oxplow
-//!   URI, canonical and escaped (`.context/resources.md`); `uri_param(uri,
+//!   URI, canonical and escaped (`.context/resources.md`), and
+//!   `uri_view(uri, key, value, …)` the same URI in a view (its `#`); `uri_param(uri,
 //!   key)` reads one param back, `uri_resource(uri)` its resource and
 //!   `uri_key(uri)` the param that names it (`thr3`; anything that isn't a
 //!   URI as it was). A NULL value leaves its param out.
@@ -23,6 +24,7 @@ pub(crate) fn register(c: &Connection) -> rusqlite::Result<()> {
     c.create_scalar_function("uri_param", 2, flags, uri_param)?;
     c.create_scalar_function("uri_resource", 1, flags, uri_resource)?;
     c.create_scalar_function("uri_key", 1, flags, uri_key)?;
+    c.create_scalar_function("uri_view", -1, flags, uri_view)?;
     c.create_scalar_function("ref_to_uri", -1, flags, ref_to_uri)?;
     c.create_scalar_function("ref_kind_of", 1, flags, ref_kind_of)?;
     c.create_scalar_function("ref_to_uri_in_json", -1, flags, ref_to_uri_in_json)?;
@@ -50,22 +52,49 @@ fn uri(ctx: &Context<'_>) -> rusqlite::Result<Option<String>> {
     let resource: ResourceName = resource
         .parse()
         .map_err(|e: oxplow_domain::uri::oxplow_uri::UriParseError| fail(&e.to_string()))?;
-    let mut params = std::collections::BTreeMap::new();
-    for i in (1..n).step_by(2) {
-        let key = text(ctx, i)?.ok_or_else(|| fail("uri() param names can't be NULL"))?;
+    let params = pairs(ctx, "uri")?;
+    Ok(Some(
+        OxplowUri::new(resource, params, Default::default()).to_string(),
+    ))
+}
+
+/// The key/value pairs after a function's first argument; a NULL value
+/// leaves its key out.
+fn pairs(
+    ctx: &Context<'_>,
+    name: &str,
+) -> rusqlite::Result<std::collections::BTreeMap<String, String>> {
+    let mut out = std::collections::BTreeMap::new();
+    for i in (1..ctx.len()).step_by(2) {
+        let key = text(ctx, i)?.ok_or_else(|| fail(&format!("{name}() keys can't be NULL")))?;
         let mut k = key.chars();
         let is_key = k.next().is_some_and(|c| c.is_ascii_alphabetic())
             && k.all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'));
         if !is_key {
-            return Err(fail(&format!("uri(): `{key}` isn't a param key")));
+            return Err(fail(&format!("{name}(): `{key}` isn't a param key")));
         }
         if let Some(value) = text(ctx, i + 1)? {
-            params.insert(key, value);
+            out.insert(key, value);
         }
     }
-    Ok(Some(
-        OxplowUri::new(resource, params, Default::default()).to_string(),
-    ))
+    Ok(out)
+}
+
+/// `uri_view(uri, key, value, …)`: `uri` showing that view (its `#`: a
+/// filter, a pick, a line), its identity unchanged. A NULL value leaves its
+/// key out; a NULL `uri` gives NULL.
+fn uri_view(ctx: &Context<'_>) -> rusqlite::Result<Option<String>> {
+    use oxplow_domain::uri::oxplow_uri::OxplowUri;
+    if ctx.is_empty() || ctx.len().is_multiple_of(2) {
+        return Err(fail(
+            "uri_view(uri, key, value, …) takes a URI then key/value pairs",
+        ));
+    }
+    let Some(t) = text(ctx, 0)? else {
+        return Ok(None);
+    };
+    let u = OxplowUri::parse(&t).map_err(|e| fail(&format!("uri_view(): {e}")))?;
+    Ok(Some(u.with_view(pairs(ctx, "uri_view")?).to_string()))
 }
 
 /// `uri_param(uri, key)`: the (decoded) value of one of a URI's params;
@@ -264,6 +293,19 @@ mod tests {
         assert!(run("SELECT uri('oxplow/effort', 'id')").is_err());
         assert!(run("SELECT uri('Effort', 'id', 'x')").is_err());
         assert!(run("SELECT uri('oxplow/effort', 'bad key', 'x')").is_err());
+    }
+
+    #[test]
+    fn uri_view_sets_a_uris_view() {
+        assert_eq!(
+            run("SELECT uri_view(uri('oxplow/lens', 'lens', 'x/y', 'session', 'ses2'), 'turn', 'trn7', 'gone', NULL)")
+                .unwrap()
+                .as_deref(),
+            Some("oxplow:oxplow/lens?lens=x/y&session=ses2#turn=trn7")
+        );
+        assert_eq!(run("SELECT uri_view(NULL, 'turn', 'trn7')").unwrap(), None);
+        assert!(run("SELECT uri_view('not a uri', 'turn', 'trn7')").is_err());
+        assert!(run("SELECT uri_view('oxplow:oxplow/lens?lens=x/y', 'turn')").is_err());
     }
 
     #[test]

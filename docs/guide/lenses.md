@@ -98,6 +98,32 @@ query: |
   its last day.
 
 Every param shows in the page's side panel. You don't choose where.
+
+### Where a param lives in the address
+
+A page's address has two parts: the part after `?` says what the page
+shows, and the part after `#` says how it shows it. A param has a `role`
+that decides which part it goes in:
+
+- `resource` (the default) names what the page shows, such as
+  `effort_id`. It goes after `?`. A new value opens another thing, so Back
+  returns to the old one.
+- `filter` narrows what the page shows, such as a search or a range. Write
+  `role: filter` on the param. It goes after `#`. A new value replaces the
+  current step, so typing in a search does not fill Back.
+- `selection` is the row you picked. You do not write it. oxplow sets it
+  when a column has `select` for that param. It goes after `#`. Each pick
+  adds a step, so Back un-picks.
+
+```yaml
+params:
+  - { name: effort_id }                       # resource: after ?
+  - { name: q, type: search, role: filter }   # filter: after #
+```
+
+A page you declare with `pages:` lists its `?` params in `params:`. The
+filters and picks of its lens go after `#`. If a link puts a `filter` or
+`selection` param after `?`, the page shows an error and ignores it.
 The values you change are kept in the page's tab: a bookmark, a
 reopened tab or a restart shows the same filters and the same row
 picked. Changing a filter doesn't add a step to Back; picking a row
@@ -409,8 +435,9 @@ and on the Extensions page, each with what to do instead.
 - **Improve with Agent** puts `[oxplow lens <id>]` in the agent's input so you
   can ask for changes.
 - **Pin to Dashboard** adds it as a [dashboard](dashboards.md) tile.
-- The agent can see what you're looking at: `oxplow_get_open_page` returns the lens
-  with the exact rows on your screen.
+- The agent can see what you're looking at: `oxplow_get_open_page` returns the page
+  (what it shows), its view (your filters and picks) and, for a lens, the exact rows
+  on your screen.
 
 ## Custom components
 
@@ -466,6 +493,8 @@ oxplow.connect().then((component) => {
 //   await component.query("open-tasks", {})
 //   await component.invoke("oxplow.work_item.transition", { uri, to: "done" })
 //   await component.navigate("oxplow:oxplow/work_item?id=tsk42&provider=oxplow")   // oxplow pages only
+//   await component.navigate(uri, { newTab: true })    // open it in a new tab
+//   await component.navigate(uri, { replace: true })   // take the place of this step in Back
 ```
 
 `oxplow extension new component <name>` writes all of this for you.
@@ -558,7 +587,7 @@ all of its page's params; a replacement has the keys its view's contract
 lists (`v_replaceable.view`); a `viz: custom` lens on its own page has
 the lens's params. In a dashboard tile or a slot `viewParams` is null and
 the component keeps its filters itself. Each kind of state has a name that says how far
-it reaches: **view params** (the tab's address: what the page shows, kept
+it reaches: **view params** (the part of the address after `#`: how the page shows it, kept
 by Back, a bookmark and a reopened tab, seen by an agent), **history
 state** (this step of the tab: scroll, what's expanded) and **page
 memory** (yours, in every tab of the component; JSON, 64 KB a value and

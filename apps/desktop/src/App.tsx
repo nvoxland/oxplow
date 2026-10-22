@@ -112,7 +112,6 @@ import { LensPage } from "./pages/LensPage.js";
 import { insertIntoAgent } from "./agent-input-bus.js";
 import { getPageDetailStore } from "./tabs/openPageDetail.js";
 import { DeclaredPageView } from "./pages/DeclaredPageView.js";
-import { pageIdentity, withView } from "./pages/pageIdentity.js";
 import { kindForTabId } from "./pageKinds.js";
 import { declaredPage, isBuiltInPage } from "./pages/declaredPages.js";
 import { useExtensions } from "./extensionsStore.js";
@@ -123,7 +122,7 @@ import { PanelRunsProvider } from "./components/Panels/PanelRunsContext.js";
 import { useAlerts } from "./components/Alerts/useAlerts.js";
 import { useAlertToasts } from "./components/Alerts/useAlertToasts.js";
 import { DomCommentLayer } from "./components/Comments/DomCommentLayer.js";
-import { agentSessionRef, diskFilePath, lensRef, pageKindOf, refFromTabId, directoryRef, effortDiffRef, externalUrlRef, fileRef, gitCommitRef, pageTabRef, pagePayload, recordedPageKind, isPage, diffRef, newSessionRef, newStreamRef, alertsRef, wikiPageRef, streamSettingsRef, threadSettingsRef, workItemTabRef, viewParamsOf, type DiffViewPayload } from "./tabs/pageRefs.js";
+import { agentSessionRef, diskFilePath, lensRef, pageKindOf, refFromTabId, directoryRef, effortDiffRef, externalUrlRef, fileRef, gitCommitRef, pageTabRef, pagePayload, recordedPageKind, isPage, diffRef, newSessionRef, newStreamRef, alertsRef, wikiPageRef, streamSettingsRef, threadSettingsRef, workItemTabRef, viewParamsOf, withViewParams, lineOf, fileRefAt, type DiffViewPayload } from "./tabs/pageRefs.js";
 import { requestNewThread } from "./new-thread-bus.js";
 import { getOpErrorsStore, recordOpError } from "./components/opErrorsStore.js";
 import { classifyExternalUrl } from "./external-url-allowlist.js";
@@ -151,10 +150,10 @@ import {
   refsOf,
   reorder as sessionReorder,
   patchHistoryState as sessionPatchHistoryState,
-  setView as sessionSetView,
   setStrip,
   slotShowing,
   stepOrigin,
+  identityOf as pageIdentityOf,
   type Entry,
   type Origin,
   type Session,
@@ -250,9 +249,9 @@ function homeTabOf(tabs: TabRef[]): string {
   );
 }
 
-/** `slot`'s page shown at the view params `view` makes of its current
- *  ones (`setView`); a param the page doesn't declare as view is refused
- *  and reported (`withView`), and the tab stays as it was. */
+/** `slot`'s page in the view `view` makes of its current one (its id's
+ *  `#`): the same page, so a filter replaces the entry and a pick
+ *  (`push`) adds one Back returns from. */
 function changeView(
   session: Session,
   slot: string,
@@ -262,12 +261,7 @@ function changeView(
   const tab = session.tabs.find((t) => t.slot === slot);
   if (!tab) return session;
   const ref = currentEntry(tab).ref;
-  try {
-    return sessionSetView(session, slot, withView(ref, view(viewParamsOf(ref))), opts);
-  } catch (e) {
-    recordOpError({ label: "Change the page's view", message: e instanceof Error ? e.message : String(e) });
-    return session;
-  }
+  return sessionNavigate(session, slot, { ref: withViewParams(ref, view(viewParamsOf(ref))) }, { replace: !opts?.push });
 }
 
 export function App() {
@@ -527,7 +521,11 @@ export function App() {
     setStream(next);
   }
 
-  async function handleOpenFile(path: string) {
+  /** Open the working-tree file `path`, its tab showing `ref` (the file in
+   *  a view: `#lines=`; the plain file when none is given). With `ref`
+   *  null its buffer is read and no tab changes: the caller's navigation
+   *  places it. */
+  async function handleOpenFile(path: string, ref: TabRef | null = fileRef(path)) {
     if (!stream) return;
     // A path that resolves to a directory (e.g. a trailing-slash link from
     // terminal/agent output) opens the Files tree rooted there, not the
@@ -544,7 +542,7 @@ export function App() {
     // page kind; fileSessions owns content + dirty state, threadPageTabs owns
     // membership.
     const activateFileTab = () => {
-      openTab(fileRef(path));
+      if (ref) openTab(ref);
       setError(null);
       void recordUsage({
         kind: "editor-file",
@@ -636,10 +634,13 @@ export function App() {
     }
   }
 
-  async function handleNavigateToLocation(target: EditorNavigationTarget) {
-    await handleOpenFile(target.path);
+  /** Open `target`'s file at its line: its tab in that view (`ref`, else
+   *  `#lines=<line>`), its editor there. */
+  async function handleNavigateToLocation(target: EditorNavigationTarget, ref?: TabRef) {
+    const shown = ref ?? fileRefAt(target.path, target.line);
+    await handleOpenFile(target.path, shown);
     setEditorNavigationTarget(target);
-    setCenterActive(fileRef(target.path).id);
+    setCenterActive(shown.id);
   }
 
   function handleEditorChange(value: string) {
@@ -937,10 +938,10 @@ export function App() {
   /** Show `ref` in the shown thread: the tab showing it (its ref
    *  refreshed), else a new one; it becomes active. */
   const openTab = useCallback(
-    (ref: TabRef, opts: { historyState?: Record<string, unknown>; identity?: (ref: TabRef) => string } = {}) => {
+    (ref: TabRef, opts: { historyState?: Record<string, unknown> } = {}) => {
       if (!selectedThreadId) return;
       const entry = opts.historyState ? { ref, historyState: opts.historyState } : { ref };
-      updateSession(selectedThreadId, (session) => sessionOpen(session, entry, { pinned: !!ref.pinned, identity: opts.identity }));
+      updateSession(selectedThreadId, (session) => sessionOpen(session, entry, { pinned: !!ref.pinned }));
     },
     [selectedThreadId, updateSession],
   );
@@ -1414,7 +1415,7 @@ export function App() {
   const lastVisitRef = useRef<string | null>(null);
   useEffect(() => {
     const shownRef = visitContextRef.current.pageTabs.find((t) => t.id === effectiveCenterActive);
-    const visit = `${selectedThreadId}|${shownRef ? pageIdentity(shownRef) : effectiveCenterActive}`;
+    const visit = `${selectedThreadId}|${pageIdentityOf(shownRef?.id ?? effectiveCenterActive)}`;
     const same = lastVisitRef.current === visit;
     lastVisitRef.current = visit;
     if (!hydratedHistoryRef.current) {
@@ -1435,7 +1436,8 @@ export function App() {
       const label = tabLabelByIdRef.current[effectiveCenterActive] ?? ref.id;
       void recordPageVisit({
         refKind: recordedPageKind(ref),
-        refId: ref.id,
+        // A visit is of the page, whatever its view.
+        refId: pageIdentityOf(ref.id),
         payload: ref.payload,
         label,
         streamId: ctxAfter.streamId,
@@ -1653,14 +1655,14 @@ export function App() {
         const payload = ref.payload as {
           path?: string;
           version?: import("./revision.js").Revision;
-          /** Open at this line (lens `file` links with `line:`). */
-          line?: number;
         } | null;
         if (!payload?.path) return;
         const version = payload.version ?? WORKING;
+        // The line it lands on is its view (`#lines=`).
+        const line = lineOf(ref);
         if (version === WORKING) {
-          if (payload.line && payload.line > 0) {
-            void handleNavigateToLocation({ path: payload.path, line: payload.line, column: 1 });
+          if (line !== null) {
+            void handleNavigateToLocation({ path: payload.path, line, column: 1 }, ref);
           } else {
             void handleOpenFile(payload.path);
           }
@@ -1671,13 +1673,11 @@ export function App() {
         openTab(ref);
         return;
       }
-      case "page": {
-        // A diff is the same page at any line: opened again, the tab
-        // already showing it moves to the new line.
-        if (isPage(ref, "diff")) openTab(ref, { identity: pageIdentity });
-        else openAsPageTab();
+      case "page":
+        // A page opened again in another view (a diff at another line) is
+        // the tab already showing it, in that view.
+        openAsPageTab();
         return;
-      }
       default:
         openAsPageTab();
         return;
@@ -1767,13 +1767,15 @@ export function App() {
    *  file's buffer (and its line). */
   const prepareFor = (ref: TabRef) => {
     if (ref.kind !== "file") return;
-    const payload = ref.payload as { path?: string; version?: import("./revision.js").Revision; line?: number } | null;
+    const payload = ref.payload as { path?: string; version?: import("./revision.js").Revision } | null;
     // Only the working tree's version has a buffer (and LSP); another
     // version's page reads it itself.
     const isDisk = !payload?.version || payload.version === WORKING;
     if (!payload?.path || !isDisk) return;
-    void handleOpenFile(payload.path);
-    if (payload.line && payload.line > 0) setEditorNavigationTarget({ path: payload.path, line: payload.line, column: 1 });
+    // Its buffer only: the navigation itself places the entry.
+    void handleOpenFile(payload.path, null);
+    const line = lineOf(ref);
+    if (line !== null) setEditorNavigationTarget({ path: payload.path, line, column: 1 });
   };
 
   /**
@@ -1922,9 +1924,18 @@ export function App() {
         // switches to that stream and thread.
         navigate: async (input) => {
           const plan = await planNavigation(input, threadStates, stream?.id ?? null);
+          const { replace, new_tab: newTab } = (input ?? {}) as { replace?: unknown; new_tab?: unknown };
           if (plan.page) {
             if (!plan.threadId) throw new Error(`stream \`${plan.streamId}\` has no thread`);
-            await open({ uri: plan.page.id }, { threadId: plan.threadId, actor: "human", call: null }, true);
+            // As a browser follows a link: the shown tab goes there (Back
+            // returns, or not with `replace`); `new_tab` gives it a tab of
+            // its own.
+            const shownTab = activeRef(sessions[plan.threadId])?.id;
+            if (newTab !== true && shownTab && plan.threadId === selectedThreadId) {
+              handleNavigateInTab(shownTab, plan.page, undefined, replace === true);
+            } else {
+              await open({ uri: plan.page.id }, { threadId: plan.threadId, actor: "human", call: null }, true);
+            }
           }
           if (stream?.id !== plan.streamId) await handleSwitch(plan.streamId);
           if (plan.selectThread && plan.threadId) await handleSelectThread(plan.streamId, plan.threadId);
@@ -1975,7 +1986,7 @@ export function App() {
     // getFileSession / mutateFileSession are plain functions over the
     // session state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedThreadId, threadStates, closePageTab, updateSession, centerActive, sessions, selectedFilePath, stream, setCenterActive]);
+  }, [selectedThreadId, threadStates, closePageTab, updateSession, centerActive, sessions, selectedFilePath, stream, setCenterActive, handleNavigateInTab]);
   const windowHandlersRef = useRef(windowHandlers);
   windowHandlersRef.current = windowHandlers;
   useEffect(() => startClientHost(() => windowHandlersRef.current), []);
@@ -2391,7 +2402,7 @@ export function App() {
       const navOpenDiff = (spec: DiffSpec, origin?: Origin) => handleOpenDiffInTab(currentId, spec, origin);
       const navRevealCommit = (sha: string) => navOpen(gitCommitRef(sha));
       const slotNav: SlotNav = { slotId: currentId, navOpen, navOpenFile, navOpenDiff, navRevealCommit };
-      for (const body of bodies(sessionTab, pageIdentity)) {
+      for (const body of bodies(sessionTab)) {
         const ref = body.entry.ref;
         if (renderedTabIds.has(ref.id)) continue;
         renderedTabIds.add(ref.id);

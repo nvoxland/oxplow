@@ -3,7 +3,7 @@ description: The definitions oxplow finds in the stream's files, nested under th
 params:
   - { name: stream_id }
   - { name: path, label: File (empty for every file), default: "" }
-  - { name: filter, label: Name contains, default: "" }
+  - { name: filter, role: filter, label: Name contains, default: "" }
 query: |
   WITH matched AS (
     SELECT * FROM v_symbol

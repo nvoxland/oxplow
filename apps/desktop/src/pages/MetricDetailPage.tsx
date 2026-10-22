@@ -76,8 +76,7 @@ export function MetricDetailPage({
   const [configBusy, setConfigBusy] = useState(false);
   const [samples, setSamples] = useState<SeriesPoint[]>([]);
   const [loading, setLoading] = useState(true);
-  // Filters are the metric's view params (`metricsView.ts`): in its ref's
-  // query, so Back and a restart bring them back. Default to the last 7
+  // Filters are the metric's view params: in its address, so Back and a restart bring them back. Default to the last 7
   // days, all branches.
   const [rangeKey, setRangeKey] = useViewParam<string>("range", DEFAULT_RANGE_KEY);
   const [branchName, setBranch] = useViewParam<string>("branch", "");

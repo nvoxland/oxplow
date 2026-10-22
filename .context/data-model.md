@@ -2270,7 +2270,7 @@ recorded by `App.handleOpenPage` (skipping `agent`, `new-stream`,
 `new-task`).
 
 Rows carry canonical tab ids ([resources.md](./resources.md)); V93 wiped the
-pre-canonical ones. Columns: `id`, `page_kind`, `page_id`, `visited_at` (ISO),
+pre-canonical ones, and V102 emptied the table again when a visit became the page's identity (the id without its `#`), so no row holds a view. Columns: `id`, `page_kind`, `page_id`, `visited_at` (ISO),
 `duration_ms?`, `thread_id?` (added in v3 — nullable so legacy rows and
 boot-screen visits with no selected thread still record). Indexes on
 `visited_at DESC`, `(page_kind, page_id)`, and

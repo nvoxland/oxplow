@@ -3,7 +3,7 @@ description: A thread's closed sessions and every agent's saved conversations fo
 params:
   - { name: stream_id }
   - { name: thread_id }
-  - { name: q, label: Find, type: search }
+  - { name: q, role: filter, label: Find, type: search }
 query: |
   WITH RECURSIVE
   words(word, rest) AS (

@@ -253,18 +253,29 @@ pub struct OpenProjectInput {
     pub new_window: bool,
 }
 
-/// `window.show` `navigate`'s input: the ref to take the person to, and
-/// the stream to show it in (none: the ref's own, else the one shown).
+/// `window.show` `navigate`'s input: the URI to take the person to, as a
+/// browser follows a link (in the shown tab, Back returning), and the
+/// stream to show it in (none: the URI's own, else the one shown).
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct NavigateInput {
-    /// What to show: a page's ref (`oxplow:oxplow/file?path=src/a.rs`, `oxplow:oxplow/work_item?id=tsk3&provider=oxplow`,
-    /// `oxplow:oxplow/effort?id=…`, `oxplow:oxplow/lens?lens=…`, `oxplow:oxplow/wiki?slug=…`, `oxplow:oxplow/dir?path=…`, `oxplow:oxplow/page?page=<route>`), or a
-    /// `stream:` / `thread:` ref to select it.
+    /// What to show: a page's URI (`oxplow:oxplow/file?path=src/a.rs#lines=12`,
+    /// `oxplow:oxplow/work_item?id=tsk3&provider=oxplow`, `oxplow:oxplow/lens?lens=…`,
+    /// `oxplow:oxplow/wiki?slug=…`, `oxplow:oxplow/page?page=<route>`), or a stream's or a
+    /// thread's URI to select it. Its `#` is the page's view (a line, a
+    /// filter): the same page in another view keeps its tab.
     pub uri: String,
     /// The stream to switch to first (`str1`).
     #[serde(default)]
     pub stream: Option<String>,
+    /// In the shown tab, in place of its page (Back skips what it
+    /// replaced); without it, the shown tab goes there and Back returns.
+    #[serde(default)]
+    pub replace: bool,
+    /// In a tab of its own — the tab already showing the page, else a new
+    /// one — leaving the shown page as it is.
+    #[serde(default)]
+    pub new_tab: bool,
 }
 
 /// An operation that takes nothing.

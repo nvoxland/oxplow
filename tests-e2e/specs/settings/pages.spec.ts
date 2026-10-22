@@ -35,7 +35,7 @@ test("every Settings area renders, reached from the rail", async ({ page }) => {
 test("a Settings area is the page's view: the same page, and Back returns to the one before", async ({ page }) => {
   await page.goto("/");
   await openFromLauncher(page, "Settings");
-  const body = page.locator('[data-testid^="center-tab-body-oxplow:oxplow/page?"][data-testid$="page=settings"]:visible');
+  const body = page.locator('[data-testid^="center-tab-body-oxplow:oxplow/page?"][data-testid*="page=settings"]:visible');
   await expect(body).toHaveAttribute("data-testid", "center-tab-body-oxplow:oxplow/page?page=settings");
   // A mark on the page's own element (the rail inside it may redraw as
   // its layout settles; the page must not mount again).
@@ -43,7 +43,7 @@ test("a Settings area is the page's view: the same page, and Back returns to the
     el.setAttribute("data-mounted-once", "yes");
   });
   await body.getByTestId("settings-area-data").click();
-  await expect(body).toHaveAttribute("data-testid", "center-tab-body-oxplow:oxplow/page?area=data&page=settings");
+  await expect(body).toHaveAttribute("data-testid", "center-tab-body-oxplow:oxplow/page?page=settings#area=data");
   await expect(body.getByTestId("page-settings")).toHaveAttribute("data-mounted-once", "yes");
   await page.getByTestId("page-nav-back").filter({ visible: true }).click();
   await expect(body).toHaveAttribute("data-testid", "center-tab-body-oxplow:oxplow/page?page=settings");

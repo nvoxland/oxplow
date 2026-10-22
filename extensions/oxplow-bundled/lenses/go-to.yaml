@@ -3,6 +3,7 @@ description: The pages you bookmarked — this thread's, its stream's and the pr
 params:
   - { name: thread_id, label: Thread }
   - name: mode
+    role: filter
     label: Show
     default: recent
     options:

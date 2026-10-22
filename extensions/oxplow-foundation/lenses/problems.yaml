@@ -3,6 +3,7 @@ description: What the stream's language servers report now, by file (files with 
 params:
   - { name: stream_id }
   - name: severity
+    role: filter
     label: Severity
     default: all
     options:

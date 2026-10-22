@@ -82,11 +82,13 @@ the open page sees the same values. So:
 
 - **Declare what the page shows by as params**, with defaults. Only the
   values that differ from a default go into the page's ref.
-- **A filter replaces; a pick pushes.** You don't choose: a param a
-  column `select`s is the selection (Back un-selects it); every other
-  param is a filter (no history entry per change).
+- **A filter replaces; a pick pushes.** A param a column `select`s is
+  the selection (Back un-selects it); a param with `role: filter` is a
+  filter (no history entry per change); the default `resource` param
+  names what the page shows, so a change opens another resource. Filters
+  and picks ride in the URI's `#`, resource params in its `?`.
 - **Never keep view state anywhere else.** A custom component sets its
-  page's view params with `component.setViewParams({ k: v })` and draws
+  page's view params (the `#`) with `component.setViewParams({ k: v })` and draws
   from `component.onViewParams(cb)`; this step's own memory with
   `setHistoryState` / `onHistoryState`; its own memory for the person,
   in every tab, with `component.pageMemory.get/set`. It never uses `localStorage` or

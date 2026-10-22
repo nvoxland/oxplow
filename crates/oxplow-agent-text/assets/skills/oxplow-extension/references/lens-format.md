@@ -112,8 +112,14 @@ empty: Nothing is waiting on you.
        AND (:q IS NULL OR subject LIKE '%' || :q || '%')
        AND (:merges = 0 OR parent_count > 1)
   ```
-  You don't say where a param goes, and you never write its `role`: the
-  page puts every param in its rail. Read `references/page-layout.md`
+  You don't say where a param draws: the page puts every param in its
+  rail. A param's `role` says where its value rides in the URI. The
+  default, `resource`, names what the page shows (in the `?`; a change
+  opens another resource). Write `role: filter` on a param that only
+  narrows or re-views it (a search, a range): it rides in the `#` and a
+  change replaces the entry. Never write `role: selection`: a column's
+  `select` makes it (in the `#`; a pick pushes). A `filter` or
+  `selection` found in a `?` is refused. Read `references/page-layout.md`
   before you add params to a page.
 - **`columns[].select: <param>`** makes a row clickable: a click sets
   that param to the column's value, and the page shows the picked row as

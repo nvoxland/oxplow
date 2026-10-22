@@ -10,8 +10,10 @@ wiki page, an effort, a work item, an extension's pull request — named
 `<extension>/<name>` (`oxplow/file`, `github/pr`). A **URI** names one
 thing of a resource: `oxplow:oxplow/effort?id=eff12`. The direction is the
 web's: a URI names the thing, a page that shows it is one **renderer** of
-it, and how that renderer shows it (a line, a filter) is its **view**,
-never part of the identity. Model columns, command inputs and event
+it, and how that renderer shows it (a line, a filter, a pick, a mode, an
+open panel) is its **view**: the `#`, never part of the identity. A page's
+`?` params name what it shows; the `#` is how. `oxplow_get_open_page`
+returns both, `page` (identity) and `view`. Model columns, command inputs and event
 fields that hold a URI are named `uri` (V101); prose says URI.
 
 ## Using URIs (read this first)
@@ -38,7 +40,7 @@ fields that hold a URI are named `uri` (V101); prose says URI.
 | Rust | `oxplow_domain::uri::build::{effort_uri, file_uri, wiki_uri, work_item_uri, …}`; `keyed(resource, value)` for a resource named by its key param; `of(resource, &[(k, v)])` / `of_with_view` for one known only at run time | `parse_as::<T>(uri, resource)` (the key, typed), `id_of` (the key), `param_of(uri, resource, name)`, `parse_resource` (keeps the view), `resource_of`, `work_item_of_uri` → `(provider, id)`, `file_of_uri` → `(path, rev, lines)`; resource names are `uri::resources::{EFFORT, FILE, …}` |
 | SQL (models, lenses, scripts' queries) | the owning model's `uri` column; to build one, `uri('oxplow/effort', 'id', 'eff' \|\| id)` (a NULL value leaves its param out, so `uri()` is never NULL: over a `LEFT JOIN`, `CASE WHEN x.id IS NULL THEN NULL ELSE uri(…) END`) | `SELECT URI`, `WHERE uri = :uri`, `JOIN … ON x.uri = y.subject`; `uri_param(URI, 'id')`, `uri_resource(URI)` |
 | Starlark (commands, effects, collectors, policies, mappings) | `uri.build("oxplow/file", path = p, view = {"lines": "3-9"})` (a param a string or an int; `None` leaves it out) | `uri.parse(u)` → `{resource, params, view}`, `uri.param(u, name, resource=)`, `uri.id(u, resource=)`, `uri.resource(u)`, `uri.is_uri(v)`, `uri.contribution(u)` |
-| TS (desktop) | `uri/uri.ts` builders (`effortUri`, `wikiUri`, `workItemUri(provider, id)`, `fileUri(path, rev)`, `fileLinesUri`, `pageUri(page, params)`, `lensUri`, `resourceUri(resource, params, view)`, …) | `parseUri`, `identityOf`, `typeOf` (the resource), `paramOf`, `viewOf`, `idOf(uri, resource)`, `keyOf`, `workItemOf`, `isExternal` |
+| TS (desktop) | `uri/uri.ts` builders (`effortUri`, `wikiUri`, `workItemUri(provider, id)`, `fileUri(path, rev)`, `fileLinesUri`, `pageUri(page, params, view)`, `lensUri(lensId, params, view)`, `metricUri`, `withUriView`, `viewParamsOfUri`, `resourceUri(resource, params, view)`, …) | `parseUri`, `identityOf`, `typeOf` (the resource), `paramOf`, `viewOf`, `idOf(uri, resource)`, `keyOf`, `workItemOf`, `isExternal` |
 
 **Guards.** `apps/desktop/src/uri/uri.guard.test.ts` (TS),
 `source_guards::refs_are_built_and_parsed_through_the_grammar` (Rust) and
@@ -314,10 +316,10 @@ short name for icons and labels. `apps/desktop/src/resources.ts` reads
 prefixes). **Where a URI opens is decided once**: `tabs/refOpener.ts` and
 `tabs/openRef.ts` (`openRef`, `PageNavigation.openRef`) — a wikilink, a
 lens link, a backlink row, a search hit, a component's `navigate` and
-`oxplow_navigate` all hand it a URI. `refFromTabId` parses a tab id
+`oxplow_navigate` (`replace`, `new_tab`; by default the shown tab goes there) all hand it a URI. `refFromTabId` parses a tab id
 (history, bookmarks, a restored tab) and is not an opener. Comment anchors
 carry one `data-ref="<uri>"`. Tab sessions are stored under
-`oxplow.layout.v5.sessions`; old
+`oxplow.layout.v6.sessions`; old
 tabs aren't migrated.
 
 ## Strict vocabulary candidates

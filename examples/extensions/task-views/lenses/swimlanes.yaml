@@ -2,7 +2,7 @@ title: Swimlanes
 description: The work items as a column per state; drag a card to move it, click its title to rename it. It stands in for oxplow's Board.
 hidden: true
 params:
-  - { name: scope, label: "Scope (thread / backlog / all)", default: all }
+  - { name: scope, role: filter, label: "Scope (thread / backlog / all)", default: all }
   - { name: thread_id, label: Thread }
 query: |
   SELECT w.uri, w.title, w.state, w.rank

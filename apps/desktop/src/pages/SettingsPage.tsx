@@ -31,7 +31,7 @@ import type { TabRef } from "../tabs/tabState.js";
 import { SETTINGS_AREAS, settingsArea, settingsSlot, type SettingsArea, type SettingsAreaId } from "./settingsAreas.js";
 
 export interface SettingsPageProps {
-  /** Which area (`page:settings?area=…`); the overview when absent. */
+  /** Which area (`page:settings#area=…`); the overview when absent. */
   area?: string | null;
   /** Where to land: one of the area's section ids, or an anchor inside one. */
   section?: string | null;

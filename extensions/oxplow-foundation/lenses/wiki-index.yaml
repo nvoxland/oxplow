@@ -3,7 +3,7 @@ description: The project's wiki pages — the recently visited, then the rest by
 needs: [knowledge]
 params:
   - { name: stream_id }
-  - { name: filter, label: Search titles + bodies, default: "" }
+  - { name: filter, role: filter, label: Search titles + bodies, default: "" }
 viz: document
 sections:
   - { id: visited, title: Recently visited, lens: wiki-visited }

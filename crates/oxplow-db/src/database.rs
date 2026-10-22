@@ -2610,6 +2610,32 @@ mod tests {
         assert!(columns("wiki_page").contains(&"files_json".to_string()));
     }
 
+    /// V102: the page visits recorded with their view in the `?` go.
+    #[test]
+    fn v102_empties_the_page_visits() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::sql_functions::register(&conn).unwrap();
+        crate::models::drop_all(&conn).unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(101))
+            .run(&mut conn)
+            .unwrap();
+        conn.execute(
+            "INSERT INTO page_visit (page_kind, page_id, visited_at) \
+             VALUES ('page', 'oxplow:oxplow/page?f.state=todo&page=tasks', 't')",
+            [],
+        )
+        .unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(102))
+            .run(&mut conn)
+            .unwrap();
+        let n: i64 = conn
+            .query_row("SELECT count(*) FROM page_visit", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 0);
+    }
+
     /// V70: every event written at a version older than its type's newest
     /// is rewritten to the newest, so no reader carries an upcast: an old
     /// tool event gets its kind from the tool's name and its path as a list.

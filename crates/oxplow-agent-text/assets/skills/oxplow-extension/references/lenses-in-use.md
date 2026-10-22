@@ -35,7 +35,8 @@ ordinary project files, so they go through the normal task/effort flow
   `oxplow_validate_extension` says why.
 - When the user says "this lens", "what I'm looking at" or pastes
   `[oxplow lens <id>]`:
-  1. Call `oxplow_get_open_page(thread_id)`. Its `lens` is what is on their
+  1. Call `oxplow_get_open_page(thread_id)`. Its `page` is what they look at (the URI
+     without its `#`), `view` their filters and picks, and `lens` is what is on their
      screen as text, with their current params (`oxplow_run_lens` with
      `format: "json"` gives you the raw rows if you need them).
   2. Read the definition with `oxplow_read { uri: "oxplow:oxplow/lens?lens=<ext>/<slug>" }`.

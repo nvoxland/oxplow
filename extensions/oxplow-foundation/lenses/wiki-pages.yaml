@@ -3,7 +3,7 @@ description: The wiki pages, most recently modified first — those not in the r
 needs: [knowledge]
 params:
   - { name: stream_id }
-  - { name: filter, label: Search titles + bodies, default: "" }
+  - { name: filter, role: filter, label: Search titles + bodies, default: "" }
 query: |
   SELECT p.slug, p.title, p.updated_at,
          CASE WHEN :filter = '' THEN p.excerpt
