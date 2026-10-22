@@ -681,6 +681,13 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       extension that renders another's resource adds a renderer to pick
       ("Open with"), never the default.
     - `pinned: true` makes its tabs pinned.
+    - `comments: true` makes the page's text take comments: its URI (its
+      tab id) is their target, the nav bar gets the comment navigator, and
+      a selection in its text starts one — plain text and the markdown
+      viewer through the app's DOM layer (the body carries `data-ref`),
+      the markdown editor and a `code` viz through their own layers
+      (usability.md "Comments are a page's"). Comments name one URI, so
+      `true` is the whole declaration.
     - `default`, `pinned` and `accepts` without `for` are a load error.
     - A lens renderer must declare a `uri` param, and is run with
       `{ uri: <the URI's identity> }`. Each other param it declares that
@@ -764,6 +771,18 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       action on the cursor row, or on the marked rows when it is `bulk`. The
       marks themselves are the kit's (usability.md "Rows: marks, drags and
       keys"), kept per lens in the entry's history state.
+    - **Edit actions.** `edit: true` makes an action the Save of a
+      `markdown` viz's editor: a form over the viz's first row (`row` and
+      `form` implied). Its **edited field** is the one input field bound
+      exactly to a `{{row.<column>}}` and not `fixed`
+      (`LensAction.edit_field`, `extensions::edit_column`); Save runs it
+      with `{ <field>: <the text> }` as the form's input, laid over the
+      bound input as any form's is. The viz must name that column as its
+      text (`markdown: { text: <column> }`). Refused at load: no such
+      field or several ("fix all but one"), `edit` with `drag`, `bulk`,
+      `key`, `group` or `primary`, two edit actions in a lens, an edit
+      action off a `markdown` viz, a `markdown` text other than the one
+      it saves.
     - **`when: <column>`** (row actions only): the action is offered only on
       rows where that column is truthy (not null, 0, `""` or false) — the
       row menu leaves it out elsewhere (`actionOffered`), and a run on such
@@ -1988,7 +2007,12 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   context (defaults only).
 - `query`: SQL over `v_*` and the extension's entities, with `:param`
   binding.
-- `viz`: `table`, `list`, `number`, `markdown`, `bar`, `line`, `treemap`,
+- `viz`: `table`, `list`, `number`, `markdown` (the first row's
+  `markdown: { text: <column> }`, else its first column, drawn by the one
+  Markdown component — `.context/markdown.md`; with an `edit` action it is
+  that component's editor, saving through the action: a draft in the
+  tab's history state, Save only when changed, Discard, Cmd/Ctrl+S),
+  `bar`, `line`, `treemap`,
   `document`, `dashboard` (both below), `tree`, `timeline`, `detail`,
   `steps`, `hunks`, `board` (the groups as columns of cards, each card a
   list row; it needs `group`, whose `values: [..]` fix the columns' order

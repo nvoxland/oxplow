@@ -1123,6 +1123,17 @@ actions:
 "#,
         )
         .unwrap();
+        std::fs::write(
+            ext.join("lenses/note.yaml"),
+            r#"title: Note
+query: "SELECT uri, body FROM v_work_item"
+viz: markdown
+markdown: { text: body }
+actions:
+  - { id: save, label: Save, command: oxplow.work_item.update, edit: true, fixed: [uri], input: { uri: "{{row.uri}}", body: "{{row.body}}" } }
+"#,
+        )
+        .unwrap();
         crate::test_fixtures::activate(&fx.svc).await;
         (fx, root)
     }
@@ -1265,6 +1276,42 @@ actions:
         assert!(
             matches!(&err, CommandError::Invalid { field: Some(f), message } if f == "/drop" && message.contains("runs on a drop")),
             "{err:?}"
+        );
+    }
+
+    /// A markdown editor's Save is its edit action: the person's text
+    /// fills the edited field and the fixed `uri` keeps its row's value.
+    #[tokio::test]
+    async fn an_editors_save_runs_its_edit_action_with_the_text() {
+        let (fx, root) = fixture().await;
+        let item = oxplow_tasks::work_item_ref(fx.task);
+        let row = BTreeMap::from([
+            ("uri".to_string(), SqlCell::Text(item.clone())),
+            ("body".to_string(), SqlCell::Text("Old body".into())),
+        ]);
+        let mut press = call("save", BTreeMap::new(), Some(row), Actor::Human, false);
+        press.lens_id = "acme/note".into();
+        press.input = Some(json!({
+            "uri": "oxplow:oxplow/work_item?id=tsk999999&provider=oxplow",
+            "body": "## New\n\nThe saved text."
+        }));
+        run_lens_action(&fx.svc, &root, press, &extensions::LensContext::default())
+            .await
+            .unwrap();
+        let body: String = fx
+            .svc
+            .db
+            .read(move |c| {
+                c.query_row("SELECT body FROM v_work_item WHERE uri = ?1", [item], |r| {
+                    r.get(0)
+                })
+                .map_err(|e| oxplow_domain::DomainError::Storage(e.to_string()))
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            body, "## New\n\nThe saved text.",
+            "the fixed uri kept this item"
         );
     }
 

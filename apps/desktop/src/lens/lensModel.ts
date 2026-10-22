@@ -499,6 +499,7 @@ export function adHocLens(query: string, viz: LensViz, chart: LensChart | null =
     hunks: null,
     code: null,
     diff: null,
+    markdown: null,
     form: null,
     custom: null,
     group: null,

@@ -2840,6 +2840,12 @@ export type ExtensionPage = {
 	default: boolean,
 	/**  Its tab leads the strip and isn't evicted (an agent session's). */
 	pinned: boolean,
+	/**
+	 *  Its text takes comments: its URI (its tab id) is their target, the
+	 *  nav bar steps through them, and a selection in its text (a markdown
+	 *  viz, a code viz, plain text) starts one.
+	 */
+	comments: boolean,
 	/**  What draws it. */
 	body: PageBody,
 };
@@ -3970,6 +3976,16 @@ export type LensAction = {
 	 *  cursor row (or the marked rows, when `bulk`).
 	 */
 	key?: string | null,
+	/**
+	 *  The Save of a `markdown` viz's editor: a form over the first row,
+	 *  the person's text laid over `edit_field`.
+	 */
+	edit?: boolean,
+	/**
+	 *  An edit action's field the editor's text fills: the one input field
+	 *  bound exactly to a `{{row.<column>}}` and not `fixed`.
+	 */
+	editField?: string | null,
 };
 
 /**
@@ -4318,6 +4334,15 @@ export type LensLinkKind =
 "compare";
 
 /**
+ *  `markdown` viz: which column of the first row is the text. Without
+ *  it, the first column. A lens with an `edit` action names it: the text
+ *  is what the editor saves.
+ */
+export type LensMarkdown = {
+	text?: string | null,
+};
+
+/**
  *  A value the viewer (or an agent) can set when running the lens,
  *  bound into the query as `:name`.
  */
@@ -4524,6 +4549,7 @@ export type LensSpec_Deserialize = {
 	hunks?: LensHunks | null,
 	code?: LensCode | null,
 	diff?: LensDiff | null,
+	markdown?: LensMarkdown | null,
 	form?: LensForm_Deserialize | null,
 	group?: LensGroup | null,
 	emphasis?: string | null,
@@ -4556,6 +4582,7 @@ export type LensSpec_Serialize = {
 	hunks: LensHunks | null,
 	code: LensCode | null,
 	diff: LensDiff | null,
+	markdown: LensMarkdown | null,
 	form: LensForm_Serialize | null,
 	group: LensGroup | null,
 	emphasis: string | null,
@@ -4709,6 +4736,7 @@ export type Lens_Deserialize = {
 	hunks: LensHunks | null,
 	code: LensCode | null,
 	diff: LensDiff | null,
+	markdown: LensMarkdown | null,
 	form: LensForm_Deserialize | null,
 	/**  For `custom`: the component and its props. */
 	custom: LensCustom_Deserialize | null,
@@ -4773,6 +4801,7 @@ export type Lens_Serialize = {
 	hunks: LensHunks | null,
 	code: LensCode | null,
 	diff: LensDiff | null,
+	markdown: LensMarkdown | null,
 	form: LensForm_Serialize | null,
 	/**  For `custom`: the component and its props. */
 	custom: LensCustom_Serialize | null,

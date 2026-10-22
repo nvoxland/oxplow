@@ -350,7 +350,21 @@ pub fn render(run: &LensRun, resolved: &Resolved) -> String {
             .unwrap_or_else(|| "No rows.".to_string());
     }
     let body = match run.lens.viz {
-        LensViz::Markdown | LensViz::Number => rows
+        LensViz::Markdown => {
+            // Its `text` column (else the first) of the first row.
+            let at = run
+                .lens
+                .markdown
+                .as_ref()
+                .and_then(|m| m.text.as_deref())
+                .and_then(|t| run.result.columns.iter().position(|c| c == t))
+                .unwrap_or(0);
+            rows.first()
+                .and_then(|r| r.get(at))
+                .map(cell)
+                .unwrap_or_default()
+        }
+        LensViz::Number => rows
             .first()
             .and_then(|r| r.first())
             .map(cell)
@@ -901,6 +915,22 @@ mod tests {
     use crate::extensions::{Lens, LensChart};
     use oxplow_db::SqlQueryResult;
 
+    /// A markdown lens reads as its `text` column, not its first.
+    #[test]
+    fn a_markdown_lens_reads_as_its_text_column() {
+        let mut r = run(
+            LensViz::Markdown,
+            None,
+            &["slug", "body"],
+            vec![vec![t("a"), t("# Hello")]],
+        );
+        r.lens.markdown = Some(crate::extensions::LensMarkdown {
+            text: Some("body".into()),
+        });
+        let out = render(&r, &Resolved::default());
+        assert!(out.contains("# Hello") && !out.contains("\na\n"), "{out}");
+    }
+
     fn run(
         viz: LensViz,
         chart: Option<LensChart>,
@@ -926,6 +956,7 @@ mod tests {
                 hunks: None,
                 code: None,
                 diff: None,
+                markdown: None,
                 form: None,
                 custom: None,
                 group: None,

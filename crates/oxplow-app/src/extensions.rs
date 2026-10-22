@@ -576,6 +576,18 @@ pub struct LensDiff {
     pub base: Option<String>,
 }
 
+/// `markdown` viz: which column of the first row is the text. Without
+/// it, the first column. A lens with an `edit` action names it: the text
+/// is what the editor saves.
+#[derive(
+    Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
+)]
+#[serde(deny_unknown_fields)]
+pub struct LensMarkdown {
+    #[serde(default)]
+    pub text: Option<String>,
+}
+
 /// `hunks` viz: the file and the two revisions each row diffs.
 #[derive(
     Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
@@ -1196,6 +1208,8 @@ struct LensFile {
     #[serde(default)]
     diff: Option<LensDiff>,
     #[serde(default)]
+    markdown: Option<LensMarkdown>,
+    #[serde(default)]
     form: Option<LensForm>,
     #[serde(default)]
     custom: Option<LensCustom>,
@@ -1296,6 +1310,14 @@ pub struct LensAction {
     /// cursor row (or the marked rows, when `bulk`).
     #[serde(default)]
     pub key: Option<String>,
+    /// The Save of a `markdown` viz's editor: a form over the first row,
+    /// the person's text laid over `edit_field`.
+    #[serde(default)]
+    pub edit: bool,
+    /// An edit action's field the editor's text fills: the one input field
+    /// bound exactly to a `{{row.<column>}}` and not `fixed`.
+    #[serde(default)]
+    pub edit_field: Option<String>,
 }
 
 /// The `{{param.x}}` / `{{row.x}}` placeholders in `input`, as
@@ -1357,6 +1379,10 @@ struct ActionFile {
     /// The key that runs it on the cursor (or marked) rows.
     #[serde(default)]
     key: Option<String>,
+    /// The Save of a `markdown` viz's editor: the text fills the field
+    /// bound to `{{row.<the text column>}}`.
+    #[serde(default)]
+    edit: bool,
 }
 
 /// The keys a row list keeps for itself: an action can't take one.
@@ -1436,7 +1462,7 @@ fn parse_actions(
                 f.id
             ));
         }
-        if !f.fixed.is_empty() && !f.form {
+        if !f.fixed.is_empty() && !(f.form || f.edit) {
             return Err(format!(
                 "actions: `{}`: `fixed` is for a form action (`form: true`)",
                 f.id
@@ -1448,8 +1474,24 @@ fn parse_actions(
                 f.id
             ));
         }
-        // A drag action is a row action: its row is the dragged one.
-        let row = f.row || f.drag;
+        // A drag action is a row action: its row is the dragged one. An
+        // edit action is a form over the viz's row.
+        let row = f.row || f.drag || f.edit;
+        let form = f.form || f.edit;
+        if f.edit && (f.drag || f.bulk || f.key.is_some() || f.group.is_some() || f.primary) {
+            return Err(format!(
+                "actions: `{}`: an edit action is the editor's Save: it can't be `drag`, `bulk`, `key`, `group` or `primary`",
+                f.id
+            ));
+        }
+        if f.edit {
+            if let Some(other) = out.iter().find(|a| a.edit) {
+                return Err(format!(
+                    "actions: `{}`: the lens already saves with `{}`",
+                    f.id, other.id
+                ));
+            }
+        }
         if f.drag && f.form {
             return Err(format!(
                 "actions: `{}`: a drag action can't be a form",
@@ -1497,7 +1539,7 @@ fn parse_actions(
                 ));
             }
         }
-        if !f.choices.is_empty() && !f.form {
+        if !f.choices.is_empty() && !(f.form || f.edit) {
             return Err(format!(
                 "actions: `{}`: `choices` is for a form action (`form: true`)",
                 f.id
@@ -1563,6 +1605,11 @@ fn parse_actions(
                 }
             }
         }
+        let edit_field = if f.edit {
+            Some(edit_field(&f.id, &input, &f.fixed)?)
+        } else {
+            None
+        };
         out.push(LensAction {
             id: f.id,
             label: f.label,
@@ -1570,7 +1617,7 @@ fn parse_actions(
             input,
             row,
             group: f.group,
-            form: f.form,
+            form,
             fixed: f.fixed,
             choices: f.choices,
             then: f.then,
@@ -1579,9 +1626,49 @@ fn parse_actions(
             drag: f.drag,
             bulk: f.bulk,
             key: f.key,
+            edit: f.edit,
+            edit_field,
         });
     }
     Ok(out)
+}
+
+/// An edit action's edited field: the one input field that is exactly a
+/// `{{row.<column>}}` and isn't `fixed`.
+fn edit_field(id: &str, input: &serde_json::Value, fixed: &[String]) -> Result<String, String> {
+    let fields: Vec<&String> = input
+        .as_object()
+        .into_iter()
+        .flatten()
+        .filter(|(k, v)| {
+            !fixed.contains(k)
+                && v.as_str()
+                    .and_then(oxplow_domain::template::whole_placeholder)
+                    .is_some_and(|p| p.scope == "row")
+        })
+        .map(|(k, _)| k)
+        .collect();
+    match fields.as_slice() {
+        [one] => Ok((*one).clone()),
+        [] => Err(format!(
+            "actions: `{id}` edits nothing: bind one input field to `{{{{row.<the text column>}}}}`"
+        )),
+        many => Err(format!(
+            "actions: `{id}` edits {}: fix all but one",
+            many.iter()
+                .map(|k| format!("`{k}`"))
+                .collect::<Vec<_>>()
+                .join(" and ")
+        )),
+    }
+}
+
+/// The column a markdown editor saves: what its edit action's edited
+/// field is bound to (`{{row.<column>}}`).
+pub fn edit_column(action: &LensAction) -> Option<String> {
+    let field = action.edit_field.as_deref()?;
+    let value = action.input.get(field)?.as_str()?;
+    oxplow_domain::template::whole_placeholder(value).map(|p| p.name)
 }
 
 fn default_viz() -> LensViz {
@@ -2023,6 +2110,10 @@ pub struct ExtensionPage {
     pub default: bool,
     /// Its tab leads the strip and isn't evicted (an agent session's).
     pub pinned: bool,
+    /// Its text takes comments: its URI (its tab id) is their target, the
+    /// nav bar steps through them, and a selection in its text (a markdown
+    /// viz, a code viz, plain text) starts one.
+    pub comments: bool,
     /// What draws it.
     pub body: PageBody,
 }
@@ -2113,6 +2204,9 @@ struct PageFile {
     /// Its tab leads the strip and isn't evicted (a renderer only).
     #[serde(default)]
     pinned: bool,
+    /// Its text takes comments, anchored to its URI.
+    #[serde(default)]
+    comments: bool,
 }
 
 /// A page's `for`: one resource or several.
@@ -2223,6 +2317,7 @@ pub struct Lens {
     pub hunks: Option<LensHunks>,
     pub code: Option<LensCode>,
     pub diff: Option<LensDiff>,
+    pub markdown: Option<LensMarkdown>,
     pub form: Option<LensForm>,
     /// For `custom`: the component and its props.
     pub custom: Option<LensCustom>,
@@ -4101,6 +4196,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                 hunks: l.hunks,
                 code: l.code,
                 diff: l.diff,
+                markdown: l.markdown,
                 form: l.form,
                 custom: l.custom,
                 group: l.group,
@@ -4595,7 +4691,7 @@ fn parse_pages(
             Ok(p) => p,
             Err(e) => {
                 errors.push((Some(i), format!(
-                    "pages: {e} (a page is `{{ id, title, icon?, category?, keywords?, params?, count?, for?, accepts?, default?, pinned?, lens | component }}`; a category is one of Work, Code, Git, Activity, Knowledge, Data, Lenses, System)"
+                    "pages: {e} (a page is `{{ id, title, icon?, category?, keywords?, params?, count?, for?, accepts?, default?, pinned?, comments?, lens | component }}`; a category is one of Work, Code, Git, Activity, Knowledge, Data, Lenses, System)"
                 )));
                 continue;
             }
@@ -4731,6 +4827,7 @@ fn parse_pages(
                 accepts,
                 default: p.default,
                 pinned: p.pinned,
+                comments: p.comments,
                 body: body.expect("checked above"),
             });
         }
@@ -5132,6 +5229,7 @@ fn shape_problem(
     if let Some(problem) = row_style_problem(lens)
         .or_else(|| param_problem(lens))
         .or_else(|| highlight_problem(lens))
+        .or_else(|| markdown_problem(lens))
     {
         return Some(problem);
     }
@@ -5226,6 +5324,34 @@ fn shape_problem(
         | LensViz::Detail
         | LensViz::Board
         | LensViz::Approvals => None,
+    }
+}
+
+/// A `markdown` block off its viz, or an edit action that doesn't save the
+/// text the viz shows.
+fn markdown_problem(lens: &Lens) -> Option<String> {
+    let viz = format!("{:?}", lens.viz).to_lowercase();
+    if lens.markdown.is_some() && lens.viz != LensViz::Markdown {
+        return Some(format!("`markdown` is for viz `markdown`, not `{viz}`"));
+    }
+    let edit = lens.actions.iter().find(|a| a.edit)?;
+    if lens.viz != LensViz::Markdown {
+        return Some(format!(
+            "an edit action (`{}`) is a `markdown` viz's, not `{viz}`'s",
+            edit.id
+        ));
+    }
+    let saved = edit_column(edit)?;
+    match lens.markdown.as_ref().and_then(|m| m.text.as_deref()) {
+        None => Some(format!(
+            "`{}` saves the text: give the viz `markdown: {{ text: {saved} }}`",
+            edit.id
+        )),
+        Some(shown) if shown != saved => Some(format!(
+            "`{}` saves `{saved}`, but the viz shows `{shown}`",
+            edit.id
+        )),
+        Some(_) => None,
     }
 }
 
@@ -5537,6 +5663,9 @@ impl Lens {
                     .flatten()
                     .map(|k| ("diff", k)),
             );
+        }
+        if let Some(t) = self.markdown.as_ref().and_then(|m| m.text.as_ref()) {
+            out.push(("markdown", t));
         }
         if let Some(g) = &self.group {
             out.push(("group", &g.by));
@@ -6539,6 +6668,8 @@ pub struct LensSpec {
     #[serde(default)]
     pub diff: Option<LensDiff>,
     #[serde(default)]
+    pub markdown: Option<LensMarkdown>,
+    #[serde(default)]
     pub form: Option<LensForm>,
     #[serde(default)]
     pub group: Option<LensGroup>,
@@ -6571,6 +6702,7 @@ impl Lens {
             hunks: spec.hunks.clone(),
             code: spec.code.clone(),
             diff: spec.diff.clone(),
+            markdown: spec.markdown.clone(),
             form: spec.form.clone(),
             custom: None,
             group: spec.group.clone(),
@@ -6604,6 +6736,7 @@ impl Lens {
             hunks: self.hunks.clone(),
             code: self.code.clone(),
             diff: self.diff.clone(),
+            markdown: self.markdown.clone(),
             form: self.form.clone(),
             group: self.group.clone(),
             emphasis: self.emphasis.clone(),
@@ -7049,6 +7182,81 @@ mod tests {
         ] {
             let err = parse(&actions, grouped).unwrap_err();
             assert!(err.contains(says), "{actions:?}: {err}");
+        }
+    }
+
+    /// An edit action is the markdown viz's Save: a form over the first
+    /// row, its edited field the one bound exactly to a row column and
+    /// not fixed. It refuses what can't be an editor's save.
+    #[test]
+    fn an_edit_action_is_the_save_of_a_markdown_editor() {
+        let parse = |actions: &[&str]| {
+            parse_actions(
+                actions
+                    .iter()
+                    .map(|a| serde_yaml::from_str(a).unwrap())
+                    .collect(),
+                &[],
+                true,
+            )
+        };
+        let ok = parse(&["{ id: save, label: Save, command: x.y.z, edit: true, fixed: [uri], input: { uri: '{{row.uri}}', body: '{{row.body}}' } }"]).unwrap();
+        assert!(
+            ok[0].edit && ok[0].row && ok[0].form,
+            "an edit action is a form over a row"
+        );
+        assert_eq!(ok[0].edit_field.as_deref(), Some("body"));
+
+        for (actions, says) in [
+            (vec!["{ id: a, label: A, command: x.y.z, edit: true, fixed: [uri], input: { uri: '{{row.uri}}' } }"], "`a` edits nothing: bind one input field to `{{row.<the text column>}}`"),
+            (vec!["{ id: a, label: A, command: x.y.z, edit: true, input: { uri: '{{row.uri}}', body: '{{row.body}}' } }"], "`a` edits `uri` and `body`: fix all but one"),
+            (vec!["{ id: a, label: A, command: x.y.z, edit: true, drag: true, input: { body: '{{row.body}}' } }"], "an edit action is the editor's Save"),
+            (vec!["{ id: a, label: A, command: x.y.z, edit: true, bulk: true, input: { body: '{{row.body}}' } }"], "an edit action is the editor's Save"),
+            (vec!["{ id: a, label: A, command: x.y.z, edit: true, primary: true, input: { body: '{{row.body}}' } }"], "an edit action is the editor's Save"),
+            (
+                vec![
+                    "{ id: a, label: A, command: x.y.z, edit: true, input: { body: '{{row.body}}' } }",
+                    "{ id: b, label: B, command: x.y.z, edit: true, input: { body: '{{row.body}}' } }",
+                ],
+                "`b`: the lens already saves with `a`",
+            ),
+        ] {
+            let err = parse(&actions).unwrap_err();
+            assert!(err.contains(says), "{actions:?}: {err}");
+        }
+    }
+
+    /// A markdown viz names the column it shows; an edit action saves that
+    /// column, on a markdown viz only.
+    #[test]
+    fn a_markdown_editor_saves_the_column_it_shows() {
+        let save = "actions: [{ id: save, label: Save, command: x.y.z, edit: true, fixed: [slug], input: { slug: '{{row.slug}}', body: '{{row.body}}' } }]\n";
+        let (_d, ext) = load_x(
+            &[
+                ("ok", &format!("title: O\nquery: SELECT 'a' AS slug, 'hi' AS body\nviz: markdown\nmarkdown: {{ text: body }}\n{save}")),
+                ("view", "title: V\nquery: SELECT 'hi' AS body\nviz: markdown\nmarkdown: { text: body }\n"),
+                ("notext", &format!("title: N\nquery: SELECT 'a' AS slug, 'hi' AS body\nviz: markdown\n{save}")),
+                ("other", &format!("title: T\nquery: SELECT 'a' AS slug, 'hi' AS slug2\nviz: markdown\nmarkdown: {{ text: slug2 }}\n{save}")),
+                ("table", &format!("title: T\nquery: SELECT 'a' AS slug, 'hi' AS body\nviz: table\n{save}")),
+                ("block", "title: B\nquery: SELECT 'hi' AS body\nviz: table\nmarkdown: { text: body }\n"),
+            ],
+            "",
+        );
+        let lens = |slug: &str| ext.lenses.iter().find(|l| l.slug == slug);
+        let ok = lens("ok").expect("ok loads");
+        assert_eq!(ok.markdown.as_ref().unwrap().text.as_deref(), Some("body"));
+        assert!(lens("view").is_some());
+        for slug in ["notext", "other", "table", "block"] {
+            assert!(lens(slug).is_none(), "{slug} is refused");
+        }
+        let errs = ext.errors.join("\n");
+        for says in [
+            "`save` saves the text: give the viz `markdown: { text: body }`",
+            "`save` saves `body`, but the viz shows `slug2`",
+            "an edit action (`save`) is a `markdown` viz's",
+            "`markdown` is for viz `markdown`, not `table`",
+        ] {
+            assert!(errs.contains(says), "{says}\n{errs}");
         }
     }
 
@@ -7783,6 +7991,7 @@ empty: No items.
             hunks: None,
             code: None,
             diff: None,
+            markdown: None,
             form: None,
             group: None,
             emphasis: None,
@@ -11214,7 +11423,7 @@ commands:
         ];
         let (_d, ext) = load_x(
             &lenses,
-            "manifest: 2\nintent:\n  purpose: p\npages:\n  - { id: open-prs, title: Open PRs, icon: git-pull-request, category: Work, keywords: pull requests, params: [author], count: waiting, lens: open }\n  - { id: detail, title: Detail, lens: open }\n",
+            "manifest: 2\nintent:\n  purpose: p\npages:\n  - { id: open-prs, title: Open PRs, icon: git-pull-request, category: Work, keywords: pull requests, params: [author], count: waiting, lens: open }\n  - { id: detail, title: Detail, lens: open, comments: true }\n",
         );
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
         assert_eq!(
@@ -11235,6 +11444,7 @@ commands:
                     accepts: Default::default(),
                     default: false,
                     pinned: false,
+                    comments: false,
                     body: PageBody::Lens {
                         lens: "x/open".into()
                     },
@@ -11254,6 +11464,7 @@ commands:
                     accepts: Default::default(),
                     default: false,
                     pinned: false,
+                    comments: true,
                     body: PageBody::Lens {
                         lens: "x/open".into()
                     },
