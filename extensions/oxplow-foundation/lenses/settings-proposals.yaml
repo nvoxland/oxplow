@@ -1,0 +1,7 @@
+title: Waiting for you
+description: Changes the agent proposed to a setting only you may change. Approve or decline each, or change the setting yourself on its area's page.
+params:
+  - { name: q, type: search, role: filter, default: "" }
+query: SELECT 1
+viz: approvals
+hidden: true

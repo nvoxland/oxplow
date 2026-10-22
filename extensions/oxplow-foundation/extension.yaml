@@ -507,6 +507,12 @@ ui:
   slots:
     # Settings → Extensions: the Extensions page's list and deployments,
     # ahead of core's health and credentials.
+    # Settings → Overview and Language Servers: the whole area.
+    - { slot: settings.overview.sections, lens: settings-proposals }
+    - { slot: settings.overview.sections, lens: settings-values }
+    - { slot: settings.lsp.sections, lens: lsp-servers }
+    - { slot: settings.lsp.sections, lens: lsp-install }
+    - { slot: settings.lsp.sections, lens: lsp-suggestions }
     - { slot: settings.extensions.sections, lens: extensions-list, at: { before: health } }
     - { slot: settings.extensions.sections, lens: extensions-deployments, at: { before: health } }
     - { slot: thread.plan.header, lens: thread-handoffs-in }

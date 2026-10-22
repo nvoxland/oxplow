@@ -2023,7 +2023,7 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   column of the row. `icon`'s value names an icon drawn before the cell
   from a fixed vocabulary (`lens/lensIcons.tsx`): the work glyphs
   `ready` / `todo` ☐, `in_progress` ◐, `blocked` ⚠, `done` ✓,
-  `canceled` ✗, `archived` ▣ (each with its own tone); the kinds `epic`,
+  `canceled` ✗, `archived` ▣ (each with its own tone); a file's status, lettered as the file trees letter it — `added` A, `modified` M, `deleted` D, `renamed` R, `untracked` U, `conflicted` C (a `tree` row's label column takes one, and a `tree` row picks by a column's `select` like a table's: it is marked `ox-selected`); the kinds `epic`,
   `task`, `wiki`, `file`, `folder`, `commit`, `diff`, `lens`, `metric`,
   `dashboard`, `comment` (their pages' icons); and the resource icon
   names (`bug`, `git-pull-request`, … — `RESOURCE_ICONS`); past those,
@@ -2131,8 +2131,8 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   columns line up, and that column's cells are cut to one line with the
   whole text on hover — `DataTable` does it for every table, so a long
   value never runs into the next column) and `format` (`date`, `datetime`, `relative`, `bytes`,
-  `duration` in ms, `integer`, `percent` of a 0–1 fraction), read by
-  `formatCell` in the UI only; an agent reads the raw value. `highlight:
+  `duration` in ms, `integer`, `percent` of a 0–1 fraction, `sparkline` — a JSON array of numbers drawn as a small line with its latest value, `badge` — the value as a pill in the column's `tone`), read by
+  `formatCell` in the UI only; an agent reads the raw value. `expand: <lens>` (a slug of the extension or `<ext>/<slug>`, named whole at load; the loader refuses one the extension lacks or the lens itself: `expand_problem`) puts a ▸ in the cell that opens that lens under the row, run with the row's values (the params it declares; `RowExpansion`, the open rows are the step's history state). A `line` chart's `chart.targets: <column>` draws a target line on each series, its last non-null value of that column (`lineSeries`; the loader refuses it on another viz). A grouped list or table's headings fold their rows (▾ / ▸, history state) and show how many rows each holds. `highlight:
   <param>` draws the cell's text with every case-insensitive occurrence of
   that param's current value marked (`markParts` in `lensModel.ts`,
   `<mark class="ox-mark">` elements, never innerHTML; empty or missing:
@@ -2200,7 +2200,7 @@ they live under `ui:`.
 | `vcs.status.header` | UncommittedChangesPage, a strip above everything | `stream_id` |
 | `vcs.status.details` | UncommittedChangesPage | `change_id` |
 | `diff.file.header` | a file diff (`DiffPane`), a strip under its header (P9.A2; `DiffFileHeaderSlot`) | `path`, `left_revision`, `right_revision` (each a revision in its wire form: `working`, `snap:<id>`, `git:<sha>`), `stream_id` |
-| `settings.<area>.sections` (parts per area: `overview` `every`; `agents` `agents`, `new-threads`, `prompt`; `lsp` `servers`; `extensions` `installed`; `data` `data`; `integrations` `capabilities`, `integrations`; `ai` `ai`) | each Settings area's page (`pages/settingsAreas.ts` lists the same ids; a TS test checks they match): an extension's status or setup views go beside the area they belong to | none |
+| `settings.<area>.sections` (core's parts per area: `agents` `agents`, `new-threads`, `prompt`; `extensions` `health`; `data` `data`; `integrations` `capabilities`, `integrations`; `ai` `ai`; `overview` and `lsp` have none — their sections are oxplow-foundation's lenses) | each Settings area's page (`pages/settingsAreas.ts` lists the same ids; a TS test checks they match): an extension's status or setup views go beside the area they belong to | none (`overview`: `q`, the page's search) |
 
 The launcher isn't a slot: a lens lists itself with `launcher.category`.
 
@@ -4634,6 +4634,7 @@ What moves out of core, and what it becomes:
 | Git History's commit graph | **done:** the `history-graph` component, replacing core's plain `CommitList` (`vcs.history.graph`) |
 | Local history dashboard | stays core (snapshots are substrate); the `recent-snapshots` lens in `review` covers the at-a-glance view |
 | Effort metrics block, effort coverage page, tests-run and nudge blocks | **done:** `effort.review.details` slot lenses `effort-tests` (a document: coverage, untested files, test runs, failed tests, analysis findings), `effort-metric-deltas`, `effort-nudges` |
+| Settings → Overview and Language Servers | **done:** the areas have no React sections; oxplow-foundation mounts lenses in their slots. Overview: `settings-proposals` (the `approvals` viz) and `settings-values` (a grouped `list` over `v_config_value`: its source, value, doc, Ask the Agent to Change This through `oxplow.agent.draft`, and Change It Here — a link to the area that holds a person-only setting's control; the page's search is the slot param `q`, which the lens reads as `:q`). Language servers: `lsp-servers` (`v_lsp_server`, a row per stream a server runs in; Restart and Remove through `oxplow.lsp.restart_server` / `remove_server`), `lsp-install` (a form over `oxplow.lsp.install_server`) and `lsp-suggestions` (the curated Mason packages for languages with no server). The shell (`SettingsPage`, the rail, the other areas) stays until they convert |
 | Rail panels: Comments, Work, Uncommitted, Go To | **done:** Go To (`go-to`, the thread's bookmarks then its recent or most visited pages through the `mode` choice param, `go-to-bookmarks` collapsed — needing bookmarks as project data (`v_bookmark`), lens param `options` and page-kind icons; the rail has no core panels left); Comments (`comments`, a panel `open`ing the inbox) and Work (`work` grouped over the `thread_work` model, which also lists the thread's unlinked efforts — open under In progress, closed under Finished, whose header opens the `thread-activity` lens of the thread's turns by effort — `work-line` collapsed, `work-count`, the `clear_finished` command + `finished_cleared` model); and Uncommitted (`uncommitted`, a tree over the working change's stage-one file list, which change analysis now keeps current on every move). Only the UI moves: stores, commands and views stay core. What Work needed and lenses lacked became general features, listed under "Added for extraction" — the pattern for any panel an extension builds |
 | The effort-close inference of unrecorded decisions and of the claims an agent's answers made (the `effort.decisions` reactor) | **done:** the AI profile `reasoning` (fallback `main`), the job `reasoning`, the command `oxplow.effort.infer_reasoning` and the effects `infer-reasoning` / `store-reasoning`, writing through core's `oxplow.effort.replace_inferred_decisions` and `oxplow.effort.replace_inferred_claims`; review and storage stay core ([ai-providers.md](./ai-providers.md) "Inferred reasoning") |
 

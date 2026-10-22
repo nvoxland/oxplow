@@ -23,6 +23,17 @@ test("the icon vocabulary has the work glyphs, kinds and ref-kind icons; unknown
   expect(lensIcon(null)).toBeNull();
 });
 
+// A file's status draws the letter the file trees use (`shortStatus`).
+test("the icon vocabulary has the file statuses, as the file trees letter them", () => {
+  const letters = { added: "A", modified: "M", deleted: "D", renamed: "R", untracked: "U", conflicted: "C" };
+  for (const [name, glyph] of Object.entries(letters)) {
+    expect(lensIcon(name), name).toMatchObject({ glyph });
+    expect(LENS_ICON_NAMES).toContain(name);
+  }
+  expect(lensIcon("deleted")).toMatchObject({ tone: "danger", label: "Deleted" });
+  expect(lensIcon("added")).toMatchObject({ tone: "success" });
+});
+
 // A tone is a theme variable, never a raw colour.
 test("tones map to theme variables; anything else is plain", () => {
   expect(LENS_TONES).toEqual(["accent", "success", "warning", "danger", "muted"]);

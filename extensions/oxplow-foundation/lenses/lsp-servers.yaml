@@ -1,0 +1,27 @@
+title: Language servers
+description: Every language server oxplow knows — the ones in `.oxplow/project.yaml` (`lsp.servers`) and one-click installs from the Mason registry (in `.oxplow/lsp/`). Agents can configure these for you too. A server running in several streams has a row for each.
+query: |
+  SELECT s.language_id AS language,
+         replace(s.command, rtrim(s.command, replace(s.command, '/', '')), '') AS program,
+         CASE s.source WHEN 'yaml' THEN 'project.yaml'
+                       ELSE 'installed' || CASE WHEN s.version IS NULL THEN '' ELSE ' ' || s.version END END AS source,
+         CASE WHEN j.value IS NULL THEN '' ELSE 'running in ' || j.value END AS state,
+         CASE WHEN s.binary_exists THEN '' ELSE 'binary missing' END AS problem,
+         s.package_name AS package,
+         j.value AS stream,
+         (j.value IS NOT NULL) AS can_restart,
+         (s.source = 'installed' AND s.package_name IS NOT NULL AND (j.key IS NULL OR j.key = 0)) AS can_remove
+  FROM v_lsp_server s LEFT JOIN json_each(s.running_streams) j
+  ORDER BY s.language_id, j.key
+viz: table
+columns:
+  - { key: language, label: Language, width: 130 }
+  - { key: program, label: Program }
+  - { key: source, label: From, width: 140 }
+  - { key: state, label: Running, width: 150 }
+  - { key: problem, label: Problem, width: 110 }
+actions:
+  - { id: restart, label: Restart, command: oxplow.lsp.restart_server, input: { stream: "{{row.stream}}", language: "{{row.language}}" }, row: true, when: can_restart }
+  - { id: remove, label: Remove…, command: oxplow.lsp.remove_server, input: { package: "{{row.package}}" }, row: true, when: can_remove }
+empty: No language servers configured. Install one below, or add an `lsp.servers` entry to `.oxplow/project.yaml`.
+hidden: true

@@ -41,6 +41,8 @@ export interface DisplayColumn {
   format: ColumnFormat | null;
   /** The param whose current value is marked in the cell's text. */
   highlight: string | null;
+  /** The lens this column's cell opens under its row (`LensColumn.expand`). */
+  expand?: string | null;
 }
 
 /** `text` split around each case-insensitive occurrence of `needle`, the
@@ -96,6 +98,7 @@ export function displayColumns(lens: Lens, resultColumns: string[]): DisplayColu
       width: c.width ?? null,
       format: c.format ?? null,
       highlight: c.highlight ?? null,
+      ...(c.expand ? { expand: c.expand } : {}),
     });
   }
   return out;
@@ -297,9 +300,29 @@ export function formatCell(v: SqlCell, unit?: SqlCell, format?: ColumnFormat | n
   return v;
 }
 
+/** A `sparkline` cell's numbers: a JSON array's numbers (numeric text
+ *  too; anything else in it is dropped); null when the cell isn't an array. */
+export function sparklineValues(v: SqlCell | undefined): number[] | null {
+  if (typeof v !== "string") return null;
+  try {
+    const parsed: unknown = JSON.parse(v);
+    if (!Array.isArray(parsed)) return null;
+    return parsed.flatMap((x) => {
+      const n = typeof x === "number" ? x : typeof x === "string" && x.trim() !== "" ? Number(x) : Number.NaN;
+      return Number.isFinite(n) ? [n] : [];
+    });
+  } catch {
+    return null;
+  }
+}
+
 /** `v` read by `format`; null when it isn't the kind of value the format
  *  reads (the cell then shows as it would without one). */
 function byFormat(v: string | number, format: ColumnFormat): string | null {
+  if (format === "sparkline") {
+    const values = sparklineValues(v);
+    return values === null ? null : values.length === 0 ? "" : String(values[values.length - 1]);
+  }
   if (typeof v === "string") {
     if (Number.isNaN(Date.parse(v))) return null;
     if (format === "date") return formatDateOnly(v);
@@ -696,11 +719,13 @@ function toTime(v: SqlCell): number | null {
 export function lineSeries(
   lens: Lens,
   result: SqlQueryResult,
-): { name: string; points: { t: number; v: number }[] }[] {
+): { name: string; points: { t: number; v: number }[]; target: number | null }[] {
   const xs = columnValues(result, lens.chart?.x);
   const ys = columnValues(result, lens.chart?.y);
   if (!xs || !ys) return [];
   const names = columnValues(result, lens.chart?.series);
+  const goals = columnValues(result, lens.chart?.targets);
+  const targets = new Map<string, number>();
   const bySeries = new Map<string, { t: number; v: number }[]>();
   xs.forEach((x, i) => {
     const t = toTime(x);
@@ -710,8 +735,15 @@ export function lineSeries(
     const pts = bySeries.get(name) ?? [];
     pts.push({ t, v });
     bySeries.set(name, pts);
+    // A series' target is the last one its rows state.
+    const goal = goals?.[i];
+    if (goal !== null && goal !== undefined && goal !== "" && !Number.isNaN(Number(goal))) targets.set(name, Number(goal));
   });
-  return [...bySeries.entries()].map(([name, points]) => ({ name, points: points.sort((a, b) => a.t - b.t) }));
+  return [...bySeries.entries()].map(([name, points]) => ({
+    name,
+    points: points.sort((a, b) => a.t - b.t),
+    target: targets.get(name) ?? null,
+  }));
 }
 
 /** `treemap` viz items: label, positive size, optional group, and the row

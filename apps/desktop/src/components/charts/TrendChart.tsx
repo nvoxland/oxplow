@@ -210,7 +210,7 @@ export function TrendChart({
         );
       })}
       {target != null ? (
-        <line x1={padL} y1={y(target)} x2={w - padR} y2={y(target)} stroke="var(--ok, #3fb950)" strokeDasharray="4 3" opacity={0.7} />
+        <line data-testid="trend-target" x1={padL} y1={y(target)} x2={w - padR} y2={y(target)} stroke="var(--ok, #3fb950)" strokeDasharray="4 3" opacity={0.7} />
       ) : null}
       <path d={d} fill="none" stroke="var(--accent, #58a6ff)" strokeWidth={1.5} />
       {pts.map((p, i) => (

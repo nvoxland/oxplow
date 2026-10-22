@@ -1808,7 +1808,14 @@ export type ColumnFormat =
 /**  A whole number with separators (`12,345`). */
 "integer" | 
 /**  A fraction 0–1 as a percentage (`42%`). */
-"percent";
+"percent" | 
+/**
+ *  A series (a JSON array of numbers) as a small line, with its
+ *  latest value.
+ */
+"sparkline" | 
+/**  A short value as a pill, in the column's `tone`. */
+"badge";
 
 /**  Declared type of an entity column. */
 export type ColumnType = "text" | "int" | "real" | "bool" | 
@@ -3971,6 +3978,11 @@ export type LensChart = {
 	label?: string | null,
 	size?: string | null,
 	group?: string | null,
+	/**
+	 *  `line` only: a column whose values each draw a horizontal target
+	 *  line across the chart (a metric's target, a budget).
+	 */
+	targets?: string | null,
 };
 
 /**  How one result column is shown. */
@@ -4014,6 +4026,12 @@ export type LensColumn = {
 	 *  master and detail. The row whose value it holds is drawn selected.
 	 */
 	select?: string | null,
+	/**
+	 *  A lens (`<slug>` of this extension or `<extension>/<slug>`) the row
+	 *  opens into: run with the row's values (the params it declares), its
+	 *  result drawn under the row.
+	 */
+	expand?: string | null,
 };
 
 /**  A `custom` lens's component and the props it starts with. */

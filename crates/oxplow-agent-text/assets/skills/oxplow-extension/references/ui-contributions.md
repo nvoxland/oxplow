@@ -11,7 +11,7 @@
   - `work_item.detail.body` and `work_item.detail.sidebar` (a work item's
     page, whichever list) → `uri`;
   - `thread.plan.header` (the Work panel, compact) → `thread_id`;
-  - `settings.<area>.sections` → no params; a section on that Settings
+  - `settings.<area>.sections` → no params (`overview` passes `q`, its search); a section on that Settings
     area's page (`overview`, `agents`, `lsp`, `extensions`, `data`,
     `integrations`, `ai`), placed `at` the start, the end or beside one of
     the area's sections (`{ after: integrations }`): its status or setup

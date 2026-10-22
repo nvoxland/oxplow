@@ -39,12 +39,12 @@ export interface DocumentLayoutProps {
   streamId?: string | null;
   onOpenPage?(ref: TabRef): void;
   actions?: readonly PageAction[];
+  /** Controls under the intro (a search the page's slot params read). */
+  toolbar?: ReactNode;
   rail?: ReactNode;
   railTitle?: ReactNode;
 }
 
-/** Rows a mounted section shows. */
-const MOUNT_MAX_ROWS = 25;
 /** A document this long gets a contents list in its rail. */
 const CONTENTS_FROM = 4;
 
@@ -54,7 +54,7 @@ const CONTENTS_FROM = 4;
  * controls in its rail. Extensions add sections through the page's slot,
  * placed among the page's own by their `at`.
  */
-export function DocumentLayout({ testId, title, intro, sections, slot, slotParams = {}, streamId = null, onOpenPage, actions, rail, railTitle }: DocumentLayoutProps) {
+export function DocumentLayout({ testId, title, intro, sections, slot, slotParams = {}, streamId = null, onOpenPage, actions, toolbar, rail, railTitle }: DocumentLayoutProps) {
   const extensions = useExtensions() ?? [];
   const mounts = slot ? slotParts(extensions, slot) : [];
   const runs = useLensRuns(mounts.map((m) => ({ key: m.id, lensId: m.lensId })), slotParams, streamId);
@@ -90,6 +90,7 @@ export function DocumentLayout({ testId, title, intro, sections, slot, slotParam
     <Page testId={testId} title={title} titleInBody width="reading" actions={actions} rightRail={railBody} rightRailTitle={railTitle ?? (contents ? "Contents" : undefined)}>
       <h1 className="ox-title">{title}</h1>
       {intro ? <p className="ox-intro">{intro}</p> : null}
+      {toolbar}
       {placed.map(({ id, item }) => {
         if (item.kind === "own") {
           const s = item.section;
@@ -119,7 +120,7 @@ export function DocumentLayout({ testId, title, intro, sections, slot, slotParam
             ) : run.error ? (
               <p className="ox-error">{run.error}</p>
             ) : run.run ? (
-              <LensResultView run={run.run} onOpenPage={onOpenPage} streamId={streamId} maxRows={MOUNT_MAX_ROWS} toolbar={false} />
+              <LensResultView run={run.run} onOpenPage={onOpenPage} streamId={streamId} toolbar={false} />
             ) : null}
           </Section>
         );

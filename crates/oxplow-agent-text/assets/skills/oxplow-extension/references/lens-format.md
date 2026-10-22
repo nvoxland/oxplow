@@ -91,8 +91,15 @@ empty: Nothing is waiting on you.
 - **`columns[].width` and `format`**: `width` is in pixels. The columns
   without one share the rest. `format` is one of `date`, `datetime`,
   `relative` (how long ago), `bytes`, `duration` (milliseconds),
-  `integer` or `percent` (a 0-1 fraction). `format` changes only what
-  the person sees. Agents read the raw values.
+  `integer`, `percent` (a 0-1 fraction), `sparkline` (a JSON array of
+  numbers, drawn as a small line with its latest value) or `badge` (a
+  pill in the column's `tone`). `format` changes only what the person
+  sees. Agents read the raw values.
+- **`columns[].expand: <lens>`** opens that lens (a slug of the
+  extension, or `<extension>/<slug>`) under the row, run with the row's
+  values: the params it declares take the same-named columns.
+- **`chart.targets: <column>`** (`line` only) draws a target line on each
+  series, from that column's last value in it.
 - **Params have a `type`**, which picks their control on the page:
   `text` (the default), `choice` (`options: [{ value, label }]` and a
   `default` that is one of them), `bool` (bound 1 or 0), `search`
@@ -161,7 +168,7 @@ empty: Nothing is waiting on you.
   row whose value is truthy (also on `tree`); `depth: level` indents a
   row by its whole-number value. On a column, `icon: status` draws an
   icon named by that column's value — `ready`, `todo`, `in_progress`,
-  `blocked`, `done`, `canceled`, `archived`, `epic`, `task`, `wiki`,
+  `blocked`, `done`, `canceled`, `archived`, a file's status (`added`, `modified`, `deleted`, `renamed`, `untracked`, `conflicted`), `epic`, `task`, `wiki`,
   `file`, `folder`, `commit`, `diff`, `lens`, `metric`, `dashboard`,
   `comment` or a resource icon name (`bug`, `git-pull-request`, …) — and
   `tone: hue` colours the cell: `accent`, `success`, `warning`, `danger`,

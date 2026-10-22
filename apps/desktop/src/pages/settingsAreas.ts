@@ -13,6 +13,8 @@ export interface SettingsArea {
   intro: string;
   /** Its own sections, in order: stable ids (keep them in step with `SLOTS`). */
   sections: readonly { id: string; title: string }[];
+  /** What the area's slot binds, when it binds any (`SLOTS` lists the same). */
+  slotParams?: readonly string[];
 }
 
 export const SETTINGS_AREAS: readonly SettingsArea[] = [
@@ -20,7 +22,8 @@ export const SETTINGS_AREAS: readonly SettingsArea[] = [
     id: "overview",
     title: "Every Setting",
     intro: "What shapes this project, where each value comes from, and Ask the Agent to Change This.",
-    sections: [{ id: "every", title: "Every setting" }],
+    sections: [],
+    slotParams: ["q"],
   },
   {
     id: "agents",
@@ -36,7 +39,7 @@ export const SETTINGS_AREAS: readonly SettingsArea[] = [
     id: "lsp",
     title: "Language Servers",
     intro: "The language servers oxplow runs for code intelligence. Changes apply at once.",
-    sections: [{ id: "servers", title: "Language servers" }],
+    sections: [],
   },
   {
     id: "extensions",

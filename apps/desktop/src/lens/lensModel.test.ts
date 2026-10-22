@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Extension, Lens } from "../tauri-bridge/generated/bindings.js";
-import { markParts, treeNodes, timelineEntries, stepItems, hunkRows, slotRuns, mergeDirectory, barRows, childParams, lineSeries, numericRowId, treemapItems, cellLinkRef, changedParams, lensViewChange, misplacedViewParams, foldEmpty, displayColumns, formatCell, lensDirectoryEntries, parseParamInput, limitRows, slugify, adHocLens, rowMention, rowAsk, effortRowId, slotExtensions, isTimestamp, rowGroups, rowEmphasized, rowDepth, rowContextRef } from "./lensModel.js";
+import { markParts, treeNodes, timelineEntries, stepItems, hunkRows, slotRuns, mergeDirectory, barRows, childParams, lineSeries, sparklineValues, numericRowId, treemapItems, cellLinkRef, changedParams, lensViewChange, misplacedViewParams, foldEmpty, displayColumns, formatCell, lensDirectoryEntries, parseParamInput, limitRows, slugify, adHocLens, rowMention, rowAsk, effortRowId, slotExtensions, isTimestamp, rowGroups, rowEmphasized, rowDepth, rowContextRef } from "./lensModel.js";
 import { formatMetricValue, formatShortDateTime } from "../components/format.js";
 import { diffSpecOf, duplicateBlockOf, isPage, lineOf, pagePayload } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
@@ -355,6 +355,17 @@ describe("chart data", () => {
     ]);
     expect(out[1]!.points).toEqual([{ t: 5, v: 9 }]);
   });
+  test("a line's targets column gives each series its target: the last one it states", () => {
+    const l = lens({ viz: "line", chart: { x: "at", y: "v", series: "s", label: null, size: null, group: null, targets: "goal" } });
+    const out = lineSeries(
+      l,
+      result(["at", "v", "s", "goal"], [[1, 1, "a", 10], [2, 2, "a", 12], [3, 9, "b", null]]),
+    );
+    expect(out.map((s) => [s.name, s.target])).toEqual([["a", 12], ["b", null]]);
+    // Without the column, no series has one.
+    const plain = lineSeries(lens({ viz: "line", chart: { x: "at", y: "v", series: null, label: null, size: null, group: null } }), result(["at", "v"], [[1, 1]]));
+    expect(plain[0]!.target).toBeNull();
+  });
   test("treemap items drop non-positive sizes and keep their row", () => {
     const l = lens({ viz: "treemap", chart: { x: null, y: null, series: null, label: "p", size: "c", group: "z" } });
     const items = treemapItems(l, result(["p", "c", "z"], [["a.rs", 5, "core"], ["b.rs", 0, "ui"]]));
@@ -590,5 +601,26 @@ describe("foldEmpty", () => {
     const { shown, empty } = foldEmpty([part("form"), part("table")]);
     expect(shown.map((r) => r.run!.lens.viz)).toEqual(["form"]);
     expect(empty.map((r) => r.run!.lens.viz)).toEqual(["table"]);
+  });
+});
+
+describe("sparkline and badge formats", () => {
+  test("a series reads as its latest value; anything else as it is", () => {
+    expect(formatCell("[1,2,3.5]", undefined, "sparkline")).toBe("3.5");
+    expect(formatCell("[]", undefined, "sparkline")).toBe("");
+    expect(formatCell("not a series", undefined, "sparkline")).toBe("not a series");
+    expect(formatCell("ok", undefined, "badge")).toBe("ok");
+  });
+  test("sparklineValues are the numbers of a JSON array, else null", () => {
+    expect(sparklineValues("[1, 2, null, 3]")).toEqual([1, 2, 3]);
+    expect(sparklineValues('["4", 5]')).toEqual([4, 5]);
+    expect(sparklineValues("{}")).toBeNull();
+    expect(sparklineValues("nope")).toBeNull();
+    expect(sparklineValues(null)).toBeNull();
+    expect(sparklineValues(7)).toBeNull();
+  });
+  test("a column carries its expand lens", () => {
+    const l = lens({ columns: [{ key: "a", label: null, link: null, unit: null, icon: null, tone: null, expand: "x/detail" }] as never });
+    expect(displayColumns(l, ["a"])[0]!.expand).toBe("x/detail");
   });
 });
