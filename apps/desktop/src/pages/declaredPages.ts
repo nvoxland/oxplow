@@ -31,7 +31,6 @@ export const BUILT_IN_PAGES = [
   "alerts",
   "backlog",
   "board",
-  "comments",
   "custom-dashboard",
   "diff",
   "diff-view",

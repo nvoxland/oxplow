@@ -1,0 +1,25 @@
+title: Comments
+description: "Every comment thread in this stream, grouped by the page it is anchored to. Pick one to read its conversation; resolve it, reply, or change who should act on it. The agent reads the same threads with `oxplow_list_comments`."
+params:
+  - { name: stream_id }
+  - name: days
+    type: choice
+    role: filter
+    label: Show
+    default: "0"
+    options:
+      - { value: "0", label: Unresolved only }
+      - { value: "1", label: Resolved in the last day }
+      - { value: "3", label: Resolved in the last 3 days }
+      - { value: "7", label: Resolved in the last 7 days }
+      - { value: "14", label: Resolved in the last 2 weeks }
+      - { value: "28", label: Resolved in the last 4 weeks }
+      - { value: "60", label: Resolved in the last 2 months }
+      - { value: "90", label: Resolved in the last 3 months }
+      - { value: "365", label: Resolved in the last year }
+  - { name: comment }
+viz: document
+sections:
+  - { id: threads, lens: comments-threads }
+  - { id: conversation, lens: comments-conversation }
+hidden: true

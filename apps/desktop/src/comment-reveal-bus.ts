@@ -1,7 +1,7 @@
 // Cross-page "reveal this comment" channel.
 //
-// The Comments dashboard lists every comment in the stream. Its
-// "Go to location" button navigates to the comment's target page
+// The comment navigator steps through a page's comments. Its
+// button navigates to the comment's target page
 // (file / wiki / task) and then asks that page to scroll to — and open
 // — the specific anchored comment. Navigation is async (the target
 // surface mounts and fetches its threads after the click), so the

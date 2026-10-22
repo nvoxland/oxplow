@@ -17,7 +17,6 @@ import { TerminalPage } from "./TerminalPage.js";
 import { FilesPage } from "./FilesPage.js";
 import { TasksPage } from "./TasksPage.js";
 import { BacklogPage } from "./BacklogPage.js";
-import { CommentsInboxPage } from "./CommentsInboxPage.js";
 import { MetricsPage } from "./MetricsPage.js";
 import { CustomDashboardPage } from "./CustomDashboardPage.js";
 import { ExploreDataPage } from "./ExploreDataPage.js";
@@ -249,14 +248,6 @@ export const builtInPages: Record<BuiltInPageName, BuiltInPage> = {
           commitRequest={scope.commitFilesRequest}
         />
       ),
-    };
-  },
-  comments: ({ ref, nav, scope }) => {
-    return {
-      id: ref.id,
-      label: "Comments Dashboard",
-      closable: true,
-      render: () => <CommentsInboxPage stream={scope.stream} onOpenPage={nav.navOpen} />,
     };
   },
   "metrics-recorded": ({ ref, nav }) => {

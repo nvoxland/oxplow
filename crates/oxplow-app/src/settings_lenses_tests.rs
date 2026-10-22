@@ -1,6 +1,7 @@
-//! Settings' Overview and Language Servers areas are oxplow-foundation lenses
-//! mounted in each area's slot: what they list, how they group and search,
-//! what Ask puts in the agent's input, and what the language-server rows offer.
+//! Foundation lenses that replaced core pages: Settings' Overview and Language
+//! Servers areas (mounted in each area's slot: what they list, how they group
+//! and search, what Ask puts in the agent's input, what the language-server
+//! rows offer) and the Comments inbox.
 
 use oxplow_config::LspServerConfig;
 use oxplow_db::SqlCell;
@@ -157,4 +158,106 @@ async fn a_configured_language_server_is_listed_and_not_suggested_again() {
 
     let after = run(&fx, "lsp-suggestions", vec![]).await;
     assert!(!after.has("package", "rust-analyzer"));
+}
+
+async fn command(
+    fx: &crate::test_fixtures::EffortFixture,
+    name: &str,
+    input: serde_json::Value,
+) -> serde_json::Value {
+    fx.svc
+        .commands
+        .run(&oxplow_domain::Actor::Human, name, input, false)
+        .await
+        .unwrap()
+        .result
+}
+
+fn threads_params(stream: i64, days: &str) -> Vec<(&'static str, SqlCell)> {
+    vec![
+        ("stream_id", SqlCell::Int(stream)),
+        ("days", SqlCell::Text(days.into())),
+    ]
+}
+
+/// The inbox lists open threads grouped by what they're anchored to; a
+/// resolved one only when the filter reaches back to it; a picked thread
+/// reads as its messages in order.
+#[tokio::test]
+async fn the_comments_inbox_lists_threads_by_target_and_a_picked_one_reads_in_order() {
+    let fx = services_with_effort().await;
+    let stream = fx.svc.streams.ensure_primary().await.unwrap().id;
+    let add = |quote: &'static str, intent: &'static str| {
+        command(
+            &fx,
+            "oxplow.knowledge.add_comment",
+            serde_json::json!({
+                "stream": stream.to_string(),
+                "target": "oxplow:oxplow/wiki?slug=a-page",
+                "quote": quote,
+                "intent": intent,
+                "body": "first",
+            }),
+        )
+    };
+    let first = add("one", "note").await;
+    let second = add("two", "followup").await;
+    let id = |c: &serde_json::Value| c["comment"]["id"].as_str().unwrap().to_string();
+    let (first, second) = (id(&first), id(&second));
+
+    let open = run(&fx, "comments-threads", threads_params(stream.value(), "0")).await;
+    assert_eq!(open.rows.len(), 2);
+    assert!(open.has("quote", "one") && open.has("quote", "two"));
+    let row = open.keyed("quote", "two");
+    assert_eq!(open.text(row, "kind").as_deref(), Some("follow-up"));
+    assert_eq!(
+        open.text(row, "target_label").as_deref(),
+        Some("wiki/a-page")
+    );
+    assert_eq!(open.text(row, "go").as_deref(), Some("Go to location"));
+    assert_eq!(open.text(row, "latest").as_deref(), Some("user: first"));
+    assert!(open.flag(row, "is_open") && open.flag(row, "is_followup"));
+
+    // Resolving hides it until the filter reaches back to it.
+    command(
+        &fx,
+        "oxplow.knowledge.update_comment",
+        serde_json::json!({ "comment": first, "status": "resolved" }),
+    )
+    .await;
+    let after = run(&fx, "comments-threads", threads_params(stream.value(), "0")).await;
+    assert_eq!(after.rows.len(), 1);
+    let week = run(&fx, "comments-threads", threads_params(stream.value(), "7")).await;
+    assert_eq!(week.rows.len(), 2);
+    let resolved = week.keyed("quote", "one");
+    assert_eq!(week.text(resolved, "state").as_deref(), Some("resolved"));
+    assert!(week.flag(resolved, "is_resolved"));
+
+    // A picked thread: its messages in the order they were written.
+    command(
+        &fx,
+        "oxplow.knowledge.reply_comment",
+        serde_json::json!({ "comment": second, "body": "second" }),
+    )
+    .await;
+    let conversation = run(
+        &fx,
+        "comments-conversation",
+        vec![("comment", SqlCell::Text(second.clone()))],
+    )
+    .await;
+    let bodies: Vec<String> = conversation
+        .rows
+        .iter()
+        .map(|r| conversation.text(r, "body").unwrap())
+        .collect();
+    assert_eq!(bodies, vec!["first", "second"]);
+    // Nothing picked, nothing shown.
+    let none = run(
+        &fx,
+        "comments-conversation",
+        vec![("comment", SqlCell::Null(()))],
+    )
+    .await;
+    assert!(none.rows.is_empty());
 }

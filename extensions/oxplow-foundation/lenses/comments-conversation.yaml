@@ -1,0 +1,16 @@
+title: Conversation
+description: The messages of the picked thread, oldest first.
+params:
+  - { name: comment }
+query: |
+  SELECT m.position, m.author, m.body, m.created_at
+  FROM v_comment_message m
+  WHERE m.comment = CASE WHEN coalesce(:comment, '') = '' THEN NULL ELSE uri('oxplow/comment', 'id', :comment) END
+  ORDER BY m.position
+viz: list
+columns:
+  - { key: author, label: Who, width: 90 }
+  - { key: body, label: Says }
+  - { key: created_at, label: When, format: relative, width: 110 }
+empty: Pick a thread above to read its conversation.
+hidden: true

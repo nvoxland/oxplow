@@ -49,8 +49,9 @@ rather than quietly dropped or relocated to something wrong.
 
 - **Comments** pane in the rail — open threads at a glance.
 - **Comments dashboard** — defaults to unresolved, with resolved
-  revealed by date. Every comment has a **Go to location** jump back
-  to what it's anchored to.
+  revealed by date. Pick a comment to read its conversation, reply,
+  resolve it or change who should act on it. Every comment has a
+  **Go to location** link back to the page it's anchored to.
 - **In-page stepping** — move between comments on the page you're
   reading without leaving it.
 
