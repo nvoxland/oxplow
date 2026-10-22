@@ -479,8 +479,38 @@ async fn the_alerts_page_lists_failures_and_each_part_runs() {
         Some("git merge bugfixes")
     );
     assert_eq!(
-        detail.text(d, "output"),
-        Some(format!("oxplow:oxplow/event?id={event}#part=output"))
+        detail.text(d, "stderr").as_deref(),
+        Some("CONFLICT in a.txt")
+    );
+    assert_eq!(detail.text(d, "output_note").as_deref(), Some(""));
+
+    // A failure that captured nothing says so.
+    command(
+        &fx,
+        crate::commands::ui::REPORT_ERROR,
+        serde_json::json!({ "label": "Quiet", "message": "no output" }),
+    )
+    .await;
+    let all = run(&fx, "alerts-operations", vec![]).await;
+    let quiet = all
+        .rows
+        .iter()
+        .find(|r| all.text(r, "label").as_deref() == Some("Quiet"))
+        .unwrap();
+    let quiet_detail = run(
+        &fx,
+        "alerts-operation",
+        vec![(
+            "event_id",
+            SqlCell::Text(all.text(quiet, "event_id").unwrap()),
+        )],
+    )
+    .await;
+    assert_eq!(
+        quiet_detail
+            .text(&quiet_detail.rows[0], "output_note")
+            .as_deref(),
+        Some("No output was captured.")
     );
 
     command(
@@ -490,14 +520,17 @@ async fn the_alerts_page_lists_failures_and_each_part_runs() {
     )
     .await;
     let seen = run(&fx, "alerts-operations", vec![]).await;
-    assert_eq!(seen.text(&seen.rows[0], "tone").as_deref(), Some("muted"));
+    let merged = seen.keyed("label", "Merge bugfixes into current");
+    assert_eq!(seen.text(merged, "tone").as_deref(), Some("muted"));
     command(
         &fx,
         "oxplow.op_error.dismiss",
         serde_json::json!({ "event": event }),
     )
     .await;
-    assert!(run(&fx, "alerts-operations", vec![]).await.rows.is_empty());
+    let left = run(&fx, "alerts-operations", vec![]).await;
+    assert!(!left.has("label", "Merge bugfixes into current"));
+    assert!(left.has("label", "Quiet"));
 
     // The other parts run over a quiet project and list nothing.
     for lens in ["alerts-hints", "alerts-deliveries", "alerts-reactions"] {

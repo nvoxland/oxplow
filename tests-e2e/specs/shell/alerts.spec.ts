@@ -3,7 +3,7 @@ import { expect, test } from "../../support/fixtures.js";
 import { openFromLauncher } from "../../support/ui.js";
 
 // Alerts is the foundation's `alerts` document: a failed operation lists
-// red, opens into how it ended and a link to its output, and Dismiss takes
+// red, opens into how it ended and its output, and Dismiss takes
 // it off the list.
 test("a failed operation is listed, opens to its output, and dismisses", async ({ page, daemon }) => {
   await run(daemon, "oxplow.ui.report_error", {
@@ -21,6 +21,10 @@ test("a failed operation is listed, opens to its output, and dismisses", async (
   // Opening the row shows how it ended and where its output is.
   await part.getByRole("button", { name: "Expand" }).click();
   await expect(part).toContainText("git merge bugfixes");
-  await part.getByRole("button", { name: /part=output|oxplow:oxplow\/event/ }).click();
-  await expect(page.getByText("CONFLICT (content)").first()).toBeVisible();
+  await expect(part).toContainText("CONFLICT (content): Merge conflict in a.txt");
+
+  // Dismiss takes it off the list.
+  await part.getByTestId("lens-row-0").click({ button: "right" });
+  await page.getByTestId("menu-item-lens-action-dismiss").click();
+  await expect(part.getByTestId("lens-row-0")).toHaveCount(0);
 });
