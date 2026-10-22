@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import type { Extension, Lens } from "../tauri-bridge/generated/bindings.js";
-import { markParts, treeNodes, timelineEntries, stepItems, hunkRows, slotRuns, mergeDirectory, barRows, childParams, lineSeries, sparklineValues, numericRowId, treemapItems, cellLinkRef, changedParams, lensViewChange, misplacedViewParams, foldEmpty, displayColumns, formatCell, lensDirectoryEntries, parseParamInput, limitRows, slugify, adHocLens, rowMention, rowAsk, effortRowId, slotExtensions, isTimestamp, rowGroups, rowEmphasized, rowDepth, rowContextRef } from "./lensModel.js";
+import type { Extension, Lens, LensRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
+import { markParts, treeNodes, timelineEntries, stepItems, hunkRows, slotRuns, mergeDirectory, barRows, childParams, partParams, lineSeries, sparklineValues, numericRowId, treemapItems, cellLinkRef, changedParams, lensViewChange, misplacedViewParams, foldEmpty, displayColumns, formatCell, lensDirectoryEntries, parseParamInput, limitRows, slugify, adHocLens, rowMention, rowAsk, effortRowId, slotExtensions, isTimestamp, rowGroups, rowEmphasized, rowDepth, rowContextRef } from "./lensModel.js";
 import { formatMetricValue, formatShortDateTime } from "../components/format.js";
 import { diffSpecOf, duplicateBlockOf, isPage, lineOf, pagePayload } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
@@ -623,4 +623,12 @@ describe("sparkline and badge formats", () => {
     const l = lens({ columns: [{ key: "a", label: null, link: null, unit: null, icon: null, tone: null, expand: "x/detail" }] as never });
     expect(displayColumns(l, ["a"])[0]!.expand).toBe("x/detail");
   });
+});
+
+test("a composite's parts get its row under its params, a param holding a value winning", () => {
+  const run = (sha: SqlCell, rows: SqlCell[][]) =>
+    ({ params: { stream_id: 1, sha }, result: { columns: ["change_id", "sha"], rows } }) as unknown as LensRun;
+  expect(partParams(run("a", [[7, "b"]]))).toEqual({ stream_id: 1, sha: "a", change_id: 7 });
+  expect(partParams(run(null, [[7, "b"]]))).toEqual({ stream_id: 1, sha: "b", change_id: 7 });
+  expect(partParams(run(null, []))).toEqual({ stream_id: 1, sha: null });
 });

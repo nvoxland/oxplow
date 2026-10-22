@@ -796,7 +796,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     `lens_actions::submit_form`) runs the command as the lens acting for
     the person, the defaults under what they entered; a command that asks
     shows `CommandConfirm`. A form's text rendering names its command
-    (an agent runs the command itself). Only a form and a composite (`document` / `dashboard`, which renders its parts, never rows of its own) omit `query`. The loader drops a
+    (an agent runs the command itself). Only a form and a composite (`document` / `dashboard`, which renders its parts; its query, if any, is one row its parts are given) omit `query`. The loader drops a
     lens missing the column roles its viz needs, naming the block
     (`chart`, `tree`, `timeline`, `steps`, `hunks`), and
     `oxplow_validate_extension` checks every named column exists in the result
@@ -2111,7 +2111,14 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   to the lens's slug and a markdown part needs one; ids are unique; `size`
   (`small`, `wide`, `tall`, `full`) only on a tile. A lens part runs with
   the params it declares from the composite's (`childParams`). Neither
-  needs a `query`. A part lens of its own extension must exist at load
+  needs a `query`; one it has is **a row its parts are given**: the first
+  row's columns under the composite's params, a param holding a value
+  winning (`extensions::part_params`, desktop `partParams`), so a page
+  says what its sections read — a commit's document `SELECT id AS
+  change_id FROM v_change WHERE kind = 'commit' AND target = :sha`, which
+  also makes the change (`.context/semantic-layer.md` "Made on demand").
+  A row column no part takes warns at check (only when every part is the
+  extension's own, whose params are known). A part lens of its own extension must exist at load
   (`parts_problem`); another extension's resolves with the catalog, and a
   missing one drops the composite. `lens_text` renders a composite as a
   `###` section per part. A standalone spec can't be either

@@ -99,10 +99,10 @@ pub async fn resolve(
     let mut out = Resolved::default();
     match run.lens.viz {
         LensViz::Document | LensViz::Dashboard => {
+            let given = crate::extensions::part_params(run);
             for id in run.lens.part_lenses() {
                 let child = svc.extension_catalog.find_lens(root, id)?;
-                let params = run
-                    .params
+                let params = given
                     .iter()
                     .filter(|(k, _)| child.params.iter().any(|p| &p.name == *k))
                     .map(|(k, v)| (k.clone(), v.clone()))

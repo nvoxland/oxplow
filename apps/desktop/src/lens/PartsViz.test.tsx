@@ -41,6 +41,7 @@ const base: Lens = {
 const lenses: Record<string, Lens> = {
   "x/open": { ...base, id: "x/open", slug: "open", title: "Open", viz: "number", params: [{ name: "stream_id", label: null, default: null, options: [] }] } as Lens,
   "x/none": { ...base, id: "x/none", slug: "none", title: "Nothing", viz: "table" } as Lens,
+  "x/cards": { ...base, id: "x/cards", slug: "cards", title: "Cards", viz: "number", params: [{ name: "change_id", label: null, default: null, options: [] }] } as Lens,
   "x/pick": {
     ...base,
     id: "x/pick",
@@ -132,4 +133,17 @@ test("a click in one section sets the document's param, and the others re-run wi
   expect(picked).toEqual([["commit", 7]]);
   view.rerender(<LensResultView run={doc(7)} streamId="str1" onOpenPage={() => {}} onSetParam={() => {}} />);
   await waitFor(() => expect(runs.some((r) => r.id === "x/detail" && (r.params as { commit?: unknown }).commit === 7)).toBe(true));
+});
+
+/** A document's query is one row: its columns are what its sections are
+ *  run with, each taking the ones it declares. */
+test("a document's row is its sections' params", async () => {
+  const doc = {
+    lens: { ...base, viz: "document", parts: [part({ id: "cards", lens: "x/cards" })] },
+    params: { stream_id: 3 },
+    result: { columns: ["change_id", "stray"], rows: [[42, "x"]], truncated: false },
+  } as unknown as LensRun;
+  const view = render(<LensResultView run={doc} streamId="str1" onOpenPage={() => {}} />);
+  await waitFor(() => expect(view.getByTestId("lens-part-cards").textContent).toContain("7"));
+  expect(runs.find((r) => r.id === "x/cards")).toEqual({ id: "x/cards", params: { change_id: 42 }, stream: "str1" });
 });

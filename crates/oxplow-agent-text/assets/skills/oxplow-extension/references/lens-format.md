@@ -206,7 +206,9 @@ empty: Nothing is waiting on you.
 ## Document and dashboard lenses
 
 A `document` or `dashboard` lens needs no `query`. It shows other lenses
-(and prose) as parts.
+(and prose) as parts. A query it has is one row: each column is a param
+its parts are given (a value the page holds wins), e.g. `SELECT id AS
+change_id FROM v_change WHERE kind = 'commit' AND target = :sha`.
 
 ```yaml
 # lenses/overview.yaml: a document

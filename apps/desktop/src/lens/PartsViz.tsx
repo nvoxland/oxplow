@@ -22,7 +22,11 @@ const SECTION_MAX_ROWS = 25;
 
 interface PartsVizProps {
   parts: readonly LensPart[];
+  /** The page's params: what a part's row click may set. */
   params: Record<string, SqlCell>;
+  /** What its parts are run with (`partParams`: its row under `params`);
+   *  `params` when it has no row. */
+  given?: Record<string, SqlCell>;
   streamId: string | null;
   onOpenPage?(ref: TabRef): void;
   /** Set one of the page's params, from a part's row click. */
@@ -30,10 +34,10 @@ interface PartsVizProps {
 }
 
 /** The lens parts of `parts`, run. */
-function usePartRuns({ parts, params, streamId }: PartsVizProps) {
+function usePartRuns({ parts, params, given, streamId }: PartsVizProps) {
   return useLensRuns(
     parts.flatMap((p) => (p.lens ? [{ key: p.id, lensId: p.lens }] : [])),
-    params,
+    given ?? params,
     streamId,
   );
 }

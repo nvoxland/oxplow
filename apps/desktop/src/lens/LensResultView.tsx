@@ -50,6 +50,7 @@ import {
   timelineEntries,
   treeNodes,
   treemapItems,
+  partParams,
   type DisplayColumn,
   type RowGroup,
   type StepStatus,
@@ -311,14 +312,14 @@ function LensBody(props: LensResultViewProps & { actions?: LensActionsState }) {
       </p>
     );
   }
-  // A document or dashboard composes other lenses and has no rows of its
-  // own; each is its own component so the row views' hooks always run in
-  // the same order.
+  // A document or dashboard composes other lenses; its query, if any, is
+  // one row its parts are given (`partParams`). Each is its own component
+  // so the row views' hooks always run in the same order.
   if (run.lens.viz === "document") {
-    return <DocumentViz parts={run.lens.parts} params={run.params} streamId={streamId} onOpenPage={onOpenPage} onSetParam={props.onSetParam} />;
+    return <DocumentViz parts={run.lens.parts} params={run.params} given={partParams(run)} streamId={streamId} onOpenPage={onOpenPage} onSetParam={props.onSetParam} />;
   }
   if (run.lens.viz === "dashboard") {
-    return <DashboardViz parts={run.lens.parts} params={run.params} streamId={streamId} onOpenPage={onOpenPage} onSetParam={props.onSetParam} />;
+    return <DashboardViz parts={run.lens.parts} params={run.params} given={partParams(run)} streamId={streamId} onOpenPage={onOpenPage} onSetParam={props.onSetParam} />;
   }
   if (run.lens.viz === "form") return <FormViz run={run} streamId={streamId} />;
   return <RowsBody {...props} />;

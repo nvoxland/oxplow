@@ -291,6 +291,10 @@ tiles:
   are unique in the lens, so give one of two copies of a lens an `id`.
 - `title` defaults to the lens's title.
 - Each lens part gets the params it declares from the page's params.
+- A document or dashboard may have a `query`. Its first row's columns
+  are params for its parts too, so `SELECT id AS change_id FROM v_change
+  WHERE kind = 'commit' AND target = :sha` gives every section that
+  declares `change_id` the commit's change. A param the page holds wins.
 - A document folds sections with no rows into one line: "Nothing found:
   ...".
 - A tile has a `size`: `small` (default), `wide`, `tall` or `full`. A

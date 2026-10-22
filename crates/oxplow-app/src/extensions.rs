@@ -5618,6 +5618,24 @@ pub fn resolve_params(
     Ok(params)
 }
 
+/// The params a `document`'s or `dashboard`'s parts are given: its query's
+/// first row, column by column, under its own params — one of its own
+/// wins when it holds a value. Each part takes the ones it declares.
+pub fn part_params(run: &LensRun) -> BTreeMap<String, SqlCell> {
+    let mut out = run.params.clone();
+    if let Some(row) = run.result.rows.first() {
+        for (column, cell) in run.result.columns.iter().zip(row) {
+            match out.get(column) {
+                Some(v) if !matches!(v, SqlCell::Null(())) => {}
+                _ => {
+                    out.insert(column.clone(), cell.clone());
+                }
+            }
+        }
+    }
+    out
+}
+
 /// Run `lens` with its default params and no viewer context — how a
 /// review renders a lens it isn't showing anyone.
 pub async fn run_lens_spec(
@@ -6081,6 +6099,27 @@ async fn prepare(
             Err(e) => ext.errors.push(e.clone()),
             Ok(run) => {
                 let cols = &run.result.columns;
+                // A composite's row is its parts' params: a column none of
+                // them takes is read by nothing. Only said when every part
+                // is this extension's, whose params are known here.
+                if matches!(run.lens.viz, LensViz::Document | LensViz::Dashboard) {
+                    let parts: Option<Vec<&Lens>> = run
+                        .lens
+                        .part_lenses()
+                        .map(|p| ext.lenses.iter().find(|l| l.id == p))
+                        .collect();
+                    for c in cols {
+                        let taken = |parts: &[&Lens]| {
+                            parts.iter().any(|l| l.params.iter().any(|p| &p.name == c))
+                        };
+                        if parts.as_deref().is_some_and(|p| !taken(p)) {
+                            ext.warnings.push(format!(
+                                "lens {id}: column `{c}` of its query is a param of none of its \
+                                 parts — remove it, or declare it on the part that reads it"
+                            ));
+                        }
+                    }
+                }
                 for (block, k) in run.lens.role_columns() {
                     if !cols.contains(k) {
                         ext.errors.push(format!(
@@ -7254,6 +7293,86 @@ empty: No items.
         assert!(
             matches!(err, DomainError::Invalid(ref m) if m.contains("review/broken")),
             "{err:?}"
+        );
+    }
+
+    /// A document's query is one row whose columns its sections take as
+    /// params: under the document's own, which win when they hold a value.
+    #[test]
+    fn a_documents_row_is_its_sections_params() {
+        let (_d, ext) = load_x(
+            &[(
+                "doc",
+                "title: D\nparams: [{ name: stream_id }, { name: sha }]\nquery: SELECT 7 AS change_id, 'b' AS sha\nviz: document\nsections: [{ markdown: hi, id: m }]\n",
+            )],
+            "",
+        );
+        let lens = ext.lenses.into_iter().find(|l| l.slug == "doc").unwrap();
+        let run = |sha: SqlCell, rows: Vec<Vec<SqlCell>>| LensRun {
+            lens: lens.clone(),
+            params: BTreeMap::from([
+                ("stream_id".to_string(), SqlCell::Int(1)),
+                ("sha".to_string(), sha),
+            ]),
+            result: oxplow_db::SqlQueryResult {
+                columns: vec!["change_id".into(), "sha".into()],
+                rows,
+                truncated: false,
+                reads: oxplow_db::Reads::default(),
+                freshness: Vec::new(),
+                generation: None,
+                coverage: Vec::new(),
+            },
+            alert: None,
+            warnings: Vec::new(),
+            inactive: None,
+        };
+        let row = vec![vec![SqlCell::Int(7), SqlCell::Text("b".into())]];
+        assert_eq!(
+            part_params(&run(SqlCell::Text("a".into()), row.clone())),
+            BTreeMap::from([
+                ("change_id".to_string(), SqlCell::Int(7)),
+                ("sha".to_string(), SqlCell::Text("a".into())),
+                ("stream_id".to_string(), SqlCell::Int(1)),
+            ])
+        );
+        assert_eq!(
+            part_params(&run(SqlCell::Null(()), row))["sha"],
+            SqlCell::Text("b".into())
+        );
+        assert_eq!(
+            part_params(&run(SqlCell::Null(()), vec![])).get("change_id"),
+            None
+        );
+    }
+
+    /// A column of a document's row that no section takes is read by
+    /// nothing: a warning naming it.
+    #[tokio::test]
+    async fn a_documents_row_column_no_section_takes_warns() {
+        let dir = tempfile::tempdir().unwrap();
+        write(dir.path(), ".oxplow/extensions/review/extension.yaml", EXT);
+        write(
+            dir.path(),
+            ".oxplow/extensions/review/lenses/cards.yaml",
+            "title: Cards\nparams: [{ name: change_id }]\nquery: SELECT :change_id AS n\n",
+        );
+        write(
+            dir.path(),
+            ".oxplow/extensions/review/lenses/page.yaml",
+            "title: Page\nquery: SELECT 7 AS change_id, 1 AS stray\nviz: document\nsections: [{ lens: cards }]\n",
+        );
+        let e = validate_extension(&layer().await, &cat(), dir.path(), "review", None)
+            .await
+            .unwrap();
+        assert!(e.errors.is_empty(), "{:?}", e.errors);
+        let stray: Vec<&String> = e.warnings.iter().filter(|w| w.contains("stray")).collect();
+        assert_eq!(stray.len(), 1, "{:?}", e.warnings);
+        assert!(stray[0].contains("review/page"), "{stray:?}");
+        assert!(
+            !e.warnings.iter().any(|w| w.contains("`change_id`")),
+            "{:?}",
+            e.warnings
         );
     }
 
