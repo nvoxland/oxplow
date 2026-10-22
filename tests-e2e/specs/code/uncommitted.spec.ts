@@ -12,7 +12,10 @@ test("the uncommitted page lists the working tree and commits it", async ({ page
   await page.goto("/");
   await openFromLauncher(page, "Uncommitted");
   const body = page.locator('[data-testid="page-lens"]:visible');
-  await expect(body.getByRole("button", { name: "wallaby.txt" })).toBeVisible();
+  // The Files section's: the change analysis other extensions add lists
+  // the file too, once it lands.
+  const files = body.getByTestId("lens-part-files");
+  await expect(files.getByRole("button", { name: "wallaby.txt" })).toBeVisible();
 
   await body.getByTestId("lens-form-fields-message").fill("Add the wallaby file");
   await body.getByTestId("lens-form-fields-submit").click();
@@ -23,7 +26,7 @@ test("the uncommitted page lists the working tree and commits it", async ({ page
   await expect
     .poll(() => execFileSync("git", ["log", "--format=%s"], { cwd: daemon.project }).toString())
     .toContain("Add the wallaby file");
-  await expect(body.getByRole("button", { name: "wallaby.txt" })).toHaveCount(0);
+  await expect(files.getByRole("button", { name: "wallaby.txt" })).toHaveCount(0);
   await openFromLauncher(page, "Git History");
   await expect(
     page.frameLocator('[data-testid="custom-component-frame"]').locator(".row", { hasText: "Add the wallaby file" }),
