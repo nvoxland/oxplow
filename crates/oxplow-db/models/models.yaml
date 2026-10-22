@@ -378,6 +378,16 @@
     - { name: "body", type: "TEXT", doc: "Text of the first message." }
     - { name: "message_count", type: "", doc: "Number of messages in the thread." }
     - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/comment?id=cmt<id>`: its URI, the one place SQL spells it — select and join on this, never rebuild it. (v2)" }
+- name: comment_message
+  version: 1
+  description: "Each message of a comment thread (`v_comment`), the first one included, in the order they were written: a thread's conversation is `WHERE comment = <its uri> ORDER BY position`."
+  columns:
+    - { name: "comment", type: "TEXT", doc: "The thread's URI (`v_comment.uri`): join on it." }
+    - { name: "position", type: "", doc: "Its place in the thread, from 1 (the comment's first message)." }
+    - { name: "author", type: "TEXT", doc: "Who wrote it: `user`, `agent`, …" }
+    - { name: "body", type: "TEXT", doc: "What it says." }
+    - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
+  key: [comment, position]
 - name: commit
   version: 4
   description: "Commits the indexer has read: the last 500 reachable from every stream's head, kept as heads move. A stream's history is a recursive read over `parents` from its branch's `v_branch.head_sha`."

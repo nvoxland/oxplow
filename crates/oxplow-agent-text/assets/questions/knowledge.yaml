@@ -30,3 +30,10 @@
       SELECT target_uri, ref_type FROM v_page_ref
       WHERE source_uri = 'oxplow:oxplow/wiki?slug=auth-flow' ORDER BY target_uri
   shape: { columns: [target_uri, ref_type] }
+- question: What has been said in this comment thread?
+  skill: oxplow-extension
+  reaches:
+    sql: >-
+      SELECT position, author, body FROM v_comment_message
+      WHERE comment = 'oxplow:oxplow/comment?id=cmt1' ORDER BY position
+  shape: { columns: [position, author, body] }

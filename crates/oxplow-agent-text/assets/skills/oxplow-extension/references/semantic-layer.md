@@ -7,6 +7,9 @@
   `v_capture`, `v_fact`, …) with its doc, and `v_model_column` documents
   every column: `SELECT view, name, sql_type, doc FROM v_model_column WHERE
   view = 'v_work_item'`. **Read them first**; don't guess column names.
+- Comment threads on pages are `v_comment`, and each one's messages
+  `v_comment_message` (`WHERE comment = <the thread's uri> ORDER BY
+  position`).
 - Work items are `v_work_item` (with `v_work_item_link` and
   `v_work_item_comment`): the active work list's, whichever it is — never
   a particular list's own tables.

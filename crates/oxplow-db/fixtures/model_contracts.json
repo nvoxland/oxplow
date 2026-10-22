@@ -21881,5 +21881,40 @@
         "resource"
       ]
     }
+  },
+  "comment_message": {
+    "1": {
+      "columns": [
+        {
+          "name": "comment",
+          "type": "TEXT",
+          "doc": "The thread's URI (`v_comment.uri`): join on it."
+        },
+        {
+          "name": "position",
+          "type": "",
+          "doc": "Its place in the thread, from 1 (the comment's first message)."
+        },
+        {
+          "name": "author",
+          "type": "TEXT",
+          "doc": "Who wrote it: `user`, `agent`, …"
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "What it says."
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        }
+      ],
+      "key": [
+        "comment",
+        "position"
+      ]
+    }
   }
 }
