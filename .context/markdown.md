@@ -58,6 +58,14 @@ never reset.
 
 ## Where it is used
 
+The lens `markdown` viz (`lens/MarkdownViz.tsx`) is the owner a declared
+page uses: with an `edit: true` action it keeps a draft in the tab's
+history state (`markdown:<lens id>`, through `onChange`), enables Save
+only when the draft differs from the saved text, runs the action with the
+text laid over its edited field, and shows the text it saved until the
+re-read brings it; Discard clears the draft. The page's rail lists the
+headings (`lens/Contents.tsx`).
+
 Every markdown surface: the lens `markdown` viz and document/dashboard
 markdown parts (`LensResultView`, `PartsViz`), effort summaries
 (`TaskDetail`, `DiffViewPage`), the wiki body (`WikiPageTab`), a work

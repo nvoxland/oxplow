@@ -11,7 +11,7 @@ import { Page } from "../tabs/Page.js";
 import { CommentNavigator } from "../components/Comments/CommentNavigator.js";
 import { WikiPageTab, freshnessChip } from "../components/Wiki/WikiPageTab.js";
 import { useWikiPageController } from "../components/Wiki/useWikiPageController.js";
-import { WikiTableOfContents } from "../components/Wiki/WikiTableOfContents.js";
+import { Contents } from "../lens/Contents.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { wikiFreshnessRef, wikiPageRef } from "../tabs/pageRefs.js";
 import { BacklinksList } from "../tabs/BacklinksList.js";
@@ -163,7 +163,7 @@ function WikiPageRail({
   controller: ReturnType<typeof useWikiPageController>;
   scrollHost: HTMLElement | null;
 }) {
-  const { summary, body, notFound, loadError, create, remove } = controller;
+  const { summary, notFound, loadError, create, remove } = controller;
 
   return (
     <div style={{
@@ -174,7 +174,7 @@ function WikiPageRail({
       padding: "4px 0",
     }}>
       {!notFound && !loadError && (
-        <WikiTableOfContents bodyText={body} scrollHost={scrollHost} />
+        <Contents root={scrollHost} />
       )}
 
       {summary && (

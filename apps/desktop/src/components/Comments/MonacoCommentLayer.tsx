@@ -2,7 +2,6 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 
 import { createComment, relinkComment, relocateComment } from "../../api.js";
-import { fileUri } from "../../uri/uri.js";
 import {
   clearCommentReveal,
   peekPendingCommentReveal,
@@ -71,10 +70,12 @@ export const MonacoCommentLayer = forwardRef<
     ready: boolean;
     streamId: string;
     threadId: string | null;
-    filePath: string;
+    /** What its comments are on: the file's URI (the editor's, the
+     *  working file; a code viz's, the file at its revision). */
+    target: string;
   }
->(function MonacoCommentLayer({ editor, monaco, ready, streamId, threadId, filePath }, ref) {
-  const { threads } = useCommentsForTarget(fileUri(filePath));
+>(function MonacoCommentLayer({ editor, monaco, ready, streamId, threadId, target }, ref) {
+  const { threads } = useCommentsForTarget(target);
   const threadsRef = useRef(threads);
   threadsRef.current = threads;
   const decoIdsRef = useRef<string[]>([]);
@@ -171,7 +172,7 @@ export const MonacoCommentLayer = forwardRef<
     const ids: string[] = editor.deltaDecorations(decoIdsRef.current, decos);
     decoIdsRef.current = ids;
     decoMapRef.current = ids.map((decoId, i) => ({ decoId, commentId: map[i]?.commentId ?? "" }));
-  }, [ready, editor, monaco, threads, filePath, contentTick]);
+  }, [ready, editor, monaco, threads, target, contentTick]);
 
   // Build a viewport rect from a Monaco position (read model/editor live).
   const rectAtPosition = (position: any): DOMRect | null => {
@@ -300,7 +301,7 @@ export const MonacoCommentLayer = forwardRef<
     await createComment({
       streamId,
       threadId,
-      target: fileUri(filePath),
+      target,
       quote: pending.quote,
       selectorsJson: pending.anchorJson,
       intent: input.intent,

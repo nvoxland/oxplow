@@ -5,21 +5,21 @@ import type { PickedRow } from "./LensRail.js";
 import { Fragment, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { commandOpenAfter, lensActionForm, lensForm, lensText, runLensAction, submitLensForm, undoCommand, type LensRun, type SqlCell } from "../api.js";
 import { Slideover } from "../components/Slideover.js";
-import type { CommandOutcome, FormStart } from "../tauri-bridge/generated/bindings.js";
+import type { FormStart } from "../tauri-bridge/generated/bindings.js";
 import type { Drop, LensAction } from "../tauri-bridge/generated/bindings.js";
 import { DailyBarChart } from "../components/Analytics/DailyBarChart.js";
 import { TrendChart } from "../components/charts/TrendChart.js";
 import { Sparkline } from "../components/Sparkline.js";
 import { squarify } from "../components/charts/squarify.js";
 import { formatFullDateTime, formatMetricValue, formatMetricValueExact } from "../components/format.js";
-import { Markdown } from "../components/Markdown/Markdown.js";
+import { MarkdownViz } from "./MarkdownViz.js";
 import { DiffPane } from "../components/Diff/DiffPane.js";
 import { CommandConfirm } from "../components/CommandConfirm.js";
 import { ResultCompleteness } from "./ResultCompleteness.js";
+import { useFormSubmit } from "./useFormSubmit.js";
 import { SchemaForm } from "../components/SchemaForm/SchemaForm.js";
 import { withSubfields, type Drafts } from "../components/SchemaForm/schemaFormModel.js";
 import { NO_READS, useRerunOnChange } from "./lensRerun.js";
-import { fieldErrors, needsConfirmation } from "../ipc-error.js";
 import { RouteLink, routeDispatch } from "../tabs/RouteLink.js";
 import { linkOrigins } from "./linkOrigin.js";
 import { useListNav } from "../kit/useListNav.js";
@@ -506,7 +506,8 @@ function RowsBody({
   const origins = new Map(
     cols.filter((c) => c.link).map((c) => [c.key, linkOrigins(lens.title, c, result.rows, result.columns)] as const),
   );
-  const rowActions0 = lens.actions.filter((a) => a.row);
+  // An edit action is the markdown editor's Save, not a row's.
+  const rowActions0 = lens.actions.filter((a) => a.row && !a.edit);
   openRow = (row) => {
     const record = rowRecord(result.columns, row);
     const primary = rowActions0.find((a) => a.primary && actionOffered(a, record));
@@ -599,7 +600,7 @@ function RowsBody({
     );
   };
   const first = result.rows[0]?.[0] ?? null;
-  const rowActions = lens.actions.filter((a) => a.row);
+  const rowActions = lens.actions.filter((a) => a.row && !a.edit);
   const rowItems = (row: SqlCell[]) => [
     {
       id: "ask-about-row",
@@ -1047,7 +1048,7 @@ function LensViz({
     case "number":
       return <NumberViz value={first} compact={compact} />;
     case "markdown":
-      return <MarkdownViz body={first === null ? "" : String(first)} />;
+      return <MarkdownViz run={{ ...run, result }} streamId={streamId} />;
     case "tree":
       return (
         <TreeViz
@@ -1093,38 +1094,6 @@ function LensViz({
     default:
       return <TableViz rows={result.rows} cols={cols} cell={cell} rowMenu={rowMenu} view={rowsView} />;
   }
-}
-
-/** A form submitted, as `FormViz` and `ActionForm` both submit one: the
- *  person's input runs; a command that asks is held for them to confirm;
- *  an invalid field's message goes under that field; anything else is a
- *  recorded failure. */
-export function useFormSubmit(
-  label: string,
-  run: (input: Record<string, unknown>, confirmed: boolean) => Promise<CommandOutcome>,
-  onDone: (outcome: CommandOutcome) => void,
-) {
-  const [busy, setBusy] = useState(false);
-  const [pending, setPending] = useState<Record<string, unknown> | null>(null);
-  const [serverErrors, setServerErrors] = useState<Record<string, string> | undefined>(undefined);
-  const submit = async (input: Record<string, unknown>, confirmed: boolean) => {
-    setBusy(true);
-    try {
-      const outcome = await run(input, confirmed);
-      setPending(null);
-      setServerErrors(undefined);
-      showToast({ message: `${label}: done.` });
-      onDone(outcome);
-    } catch (e) {
-      const fields = fieldErrors(e);
-      if (!confirmed && needsConfirmation(e)) setPending(input);
-      else if (fields) setServerErrors(fields);
-      else recordOpError({ label, message: e instanceof Error ? e.message : String(e) });
-    } finally {
-      setBusy(false);
-    }
-  };
-  return { busy, pending, serverErrors, submit, cancel: () => setPending(null) };
 }
 
 /** `form`: the fields of its command's input, starting from the form's
@@ -1544,11 +1513,6 @@ function HunksViz({ rows, streamId, rowMenu }: { rows: ReturnType<typeof hunkRow
   );
 }
 
-function MarkdownViz({ body }: { body: string }) {
-  return (
-    <Markdown value={body} testId="lens-markdown" />
-  );
-}
 
 function LineViz({ run }: { run: LensRun }) {
   const series = lineSeries(run.lens, run.result);

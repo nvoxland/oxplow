@@ -48,6 +48,8 @@ export function DeclaredPageView({
       params={page.params}
       stream={stream}
       onOpenPage={onOpenPage}
+      comments={declared.comments}
+      threadId={threadId}
     />
   );
 }

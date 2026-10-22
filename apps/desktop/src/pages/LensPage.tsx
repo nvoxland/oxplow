@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Page } from "../tabs/Page.js";
 import { useHistoryState } from "../tabs/useHistoryState.js";
 import { useOptionalPageNavigation, usePageTitle } from "../tabs/PageNavigationContext.js";
@@ -17,6 +17,11 @@ import { useRequestGuard } from "../request-guard.js";
 import { LensResultView } from "../lens/LensResultView.js";
 import { LensRail, type PickedRow } from "../lens/LensRail.js";
 import type { PageAction } from "../kit/actions.js";
+import { CommentNavigator } from "../components/Comments/CommentNavigator.js";
+import { contextNodeProps } from "../components/Comments/contextNodes.js";
+import { Contents } from "../lens/Contents.js";
+import { PageCommentsContext, type PageComments } from "../lens/pageComments.js";
+import { identityOf } from "../uri/uri.js";
 
 export interface LensPageProps {
   /** `<extension>/<slug>`. */
@@ -34,6 +39,10 @@ export interface LensPageProps {
    *  the page is that URI, so another value of one of its params is that
    *  resource with the param changed (`withRenderedParams`). */
   renders?: string;
+  /** Its text takes comments (`comments: true` on its `pages:` entry):
+   *  on its URI, from this thread. */
+  comments?: boolean;
+  threadId?: string | null;
 }
 
 /**
@@ -47,7 +56,7 @@ export interface LensPageProps {
 /** What a renderer's lens is run with, never a control: the URI it shows. */
 const RENDERED = ["uri"];
 
-export function LensPage({ lensId, params, title: pageTitle, stream, onOpenPage, renders }: LensPageProps) {
+export function LensPage({ lensId, params, title: pageTitle, stream, onOpenPage, renders, comments = false, threadId = null }: LensPageProps) {
   const streamId = stream?.id ?? null;
   const [run, setRun] = useState<LensRun | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -168,6 +177,23 @@ export function LensPage({ lensId, params, title: pageTitle, stream, onOpenPage,
     <LensRail lens={lens} values={run?.params ?? {}} picked={picked} outOfDate={outOfDate} onApply={setParam} onOpenPage={onOpenPage} fixed={renders ? RENDERED : undefined} />
   ) : undefined;
 
+  // Comments are the page's when it declares them, on its URI (its tab's
+  // identity): the nav bar steps through them, its vizes anchor them, and
+  // the body is the context node plain-text selections resolve to.
+  const commentTarget = comments && nav?.ref ? (identityOf(nav.ref.id) ?? nav.ref.id) : null;
+  const pageComments: PageComments | null = useMemo(
+    () => (commentTarget && streamId ? { target: commentTarget, streamId, threadId } : null),
+    [commentTarget, streamId, threadId],
+  );
+  // The body, for the rail's Contents.
+  const [body, setBody] = useState<HTMLDivElement | null>(null);
+  const rail = rightRail ? (
+    <>
+      <Contents root={body} />
+      {rightRail}
+    </>
+  ) : undefined;
+
   // A file or a diff fills the page: its title is the chrome's, its body
   // every pixel the page has.
   const fills = lens?.viz === "code" || lens?.viz === "diff";
@@ -181,9 +207,15 @@ export function LensPage({ lensId, params, title: pageTitle, stream, onOpenPage,
       fill={fills}
       actions={actions}
       pin={{ tile: { kind: "lens", lensId, optionsJson: JSON.stringify({ size: "wide" }) }, onOpenPage }}
-      rightRail={rightRail}
+      rightRail={rail}
+      commentsNav={pageComments ? <CommentNavigator target={pageComments.target} /> : undefined}
     >
-      <div style={lens?.viz === "dashboard" ? { padding: "var(--space-5)" } : fills ? fillStyle : undefined}>
+      <PageCommentsContext.Provider value={pageComments}>
+      <div
+        ref={setBody}
+        style={lens?.viz === "dashboard" ? { padding: "var(--space-5)" } : fills ? fillStyle : undefined}
+        {...(pageComments ? contextNodeProps(pageComments.target) : {})}
+      >
       {fills ? null : <h1 className="ox-title">{title}</h1>}
       {lens?.description && !fills ? <p className="ox-intro">{lens.description}</p> : null}
       {misplaced.length > 0 ? (
@@ -207,6 +239,7 @@ export function LensPage({ lensId, params, title: pageTitle, stream, onOpenPage,
       ) : null}
       {run ? <LensResultView run={run} onOpenPage={onOpenPage} onSetParam={setParam} toolbarTo={setLensActions} componentView={componentView} /> : error ? null : <p>Loading…</p>}
       </div>
+      </PageCommentsContext.Provider>
     </Page>
   );
 }

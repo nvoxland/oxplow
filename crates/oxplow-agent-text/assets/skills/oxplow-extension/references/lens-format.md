@@ -72,7 +72,11 @@ empty: Nothing is waiting on you.
   - `table` shows rows.
   - `list` shows one line per row, headlined by the first column.
   - `number` shows the first cell as a big number.
-  - `markdown` renders the first cell as markdown.
+  - `markdown` renders the first row's text as markdown:
+    `markdown: { text: <column> }` (else the first column). An action
+    with `edit: true` makes it an editor whose Save that action is: bind
+    one input field exactly to `{{row.<text column>}}` (the text fills
+    it) and fix the rest (`fixed: [slug]`).
   - `bar` draws bars: `chart: { x: <label column>, y: <value column> }`.
   - `line` draws a trend: `chart: { x: <time or number>, y: <value>,
     series: <optional column, one line each> }`.

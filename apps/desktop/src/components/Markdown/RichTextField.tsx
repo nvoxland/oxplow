@@ -146,7 +146,6 @@ export function RichTextField({
   comments,
 }: RichTextFieldProps) {
   const lastCommittedRef = useRef(value);
-  const lastChangedRef = useRef(value);
   const debounceRef = useRef<number | null>(null);
   // The owner's latest callbacks: the editor is made once.
   const owner = useRef({ onCommit, onChange, onSubmitShortcut, onSaveShortcut, onEscape });
@@ -226,11 +225,7 @@ export function RichTextField({
     },
     onUpdate({ editor }) {
       if (owner.current.onChange) {
-        const md = getMarkdown(editor);
-        // A change the owner hears is the text the editor holds: a
-        // re-render with it as `value` is no change from outside.
-        lastChangedRef.current = md;
-        owner.current.onChange(md);
+        owner.current.onChange(getMarkdown(editor));
       }
       if (!owner.current.onCommit) return;
       if (debounceRef.current != null) window.clearTimeout(debounceRef.current);
@@ -264,14 +259,14 @@ export function RichTextField({
     if (!editor) return;
     queueMicrotask(() => {
       if (editor.isDestroyed) return;
-      if (value === lastCommittedRef.current || value === lastChangedRef.current) return;
+      // Already what the editor holds (an echo of its own text).
+      if (value === getMarkdown(editor)) return;
       // While the person types, a value from outside is skipped for an
       // owner that saves on commit (a late echo mustn't clobber typing);
       // an owner that hears every change echoes exactly what it heard, so
       // anything else is a reset it means (Discard, Escape).
       if (editor.isFocused && !owner.current.onChange) return;
       lastCommittedRef.current = value;
-      lastChangedRef.current = value;
       editor.commands.setContent(value, { emitUpdate: false });
     });
   }, [editor, value]);

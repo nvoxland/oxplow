@@ -22,6 +22,7 @@ import { insertIntoAgent } from "../agent-input-bus.js";
 import { MonacoCommentLayer, type MonacoCommentHandle } from "./Comments/MonacoCommentLayer.js";
 import { getPageDetailStore } from "../tabs/openPageDetail.js";
 import { fileRef } from "../tabs/pageRefs.js";
+import { fileUri } from "../uri/uri.js";
 
 interface Props {
   stream: Stream;
@@ -579,7 +580,7 @@ export function EditorPane({
             ready={monacoReady}
             streamId={stream.id}
             threadId={null}
-            filePath={filePath}
+            target={fileUri(filePath)}
           />
         ) : null}
         {showBlame ? (
