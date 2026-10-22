@@ -361,6 +361,8 @@ pub fn render(run: &LensRun, resolved: &Resolved) -> String {
         LensViz::Tree => tree(run),
         LensViz::Timeline => timeline(run),
         LensViz::Detail => detail(run),
+        // A board reads as its columns, each a section of its cards.
+        LensViz::Board => table(run),
         LensViz::Steps => steps(run),
         LensViz::Hunks => hunks(run, &resolved.diffs),
         LensViz::Code => code(run, &resolved.files),
@@ -469,7 +471,14 @@ fn table(run: &LensRun) -> String {
         let rows: Vec<Vec<String>> = run.result.rows.iter().map(line).collect();
         return markdown_table(&header, &rows);
     };
-    let mut groups: Vec<(String, Vec<Vec<String>>)> = Vec::new();
+    // The declared values first, in order (an empty one reads as none),
+    // then the rest as each first appears.
+    let mut groups: Vec<(String, Vec<Vec<String>>)> = run
+        .lens
+        .group
+        .as_ref()
+        .map(|g| g.values.iter().map(|v| (v.clone(), Vec::new())).collect())
+        .unwrap_or_default();
     for r in &run.result.rows {
         let name = r.get(by).map(cell).unwrap_or_default();
         match groups.iter_mut().find(|(g, _)| *g == name) {
@@ -479,7 +488,10 @@ fn table(run: &LensRun) -> String {
     }
     groups
         .iter()
-        .map(|(name, rows)| format!("### {name}\n\n{}", markdown_table(&header, rows)))
+        .map(|(name, rows)| match rows.is_empty() {
+            true => format!("### {name}\n\n(none)\n"),
+            false => format!("### {name}\n\n{}", markdown_table(&header, rows)),
+        })
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -1095,6 +1107,7 @@ mod tests {
                 l.group = Some(crate::extensions::LensGroup {
                     by: "bucket".into(),
                     link: None,
+                    values: Vec::new(),
                 });
                 l.depth = Some("d".into());
             },
@@ -1102,6 +1115,24 @@ mod tests {
         assert_eq!(
             render(&r, &Resolved::default()),
             "### Ready\n\n| title |\n| --- |\n| a |\n| c |\n\n### Done\n\n| title |\n| --- |\n| b |\n"
+        );
+    }
+
+    /// A board reads as its columns in `values` order, an empty one as
+    /// none, then the rest as each first appears.
+    #[test]
+    fn a_board_reads_as_its_columns_in_order() {
+        let rows = vec![vec![t("done"), t("a")], vec![t("later"), t("b")]];
+        let r = with(run(LensViz::Board, None, &["state", "title"], rows), |l| {
+            l.group = Some(crate::extensions::LensGroup {
+                by: "state".into(),
+                link: None,
+                values: vec!["todo".into(), "done".into()],
+            });
+        });
+        assert_eq!(
+            render(&r, &Resolved::default()),
+            "### todo\n\n(none)\n\n### done\n\n| title |\n| --- |\n| a |\n\n### later\n\n| title |\n| --- |\n| b |\n"
         );
     }
 

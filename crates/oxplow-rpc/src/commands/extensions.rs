@@ -339,6 +339,9 @@ pub struct LensPress {
     pub row: Option<BTreeMap<String, SqlCell>>,
     #[serde(default)]
     pub input: Option<oxplow_domain::Json>,
+    /// Where a dragged row landed (a drag action, `drag: true`).
+    #[serde(default)]
+    pub drop: Option<oxplow_app::lens_actions::Drop>,
 }
 
 impl LensPress {
@@ -349,6 +352,7 @@ impl LensPress {
             params: self.params.unwrap_or_default(),
             row: self.row,
             input: self.input.map(|i| i.0),
+            drop: self.drop,
             on_behalf_of: oxplow_domain::Actor::Human,
             confirmed,
         }

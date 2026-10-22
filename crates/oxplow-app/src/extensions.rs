@@ -99,6 +99,10 @@ pub enum LensViz {
     Timeline,
     /// The first row as label/value pairs (the displayed columns).
     Detail,
+    /// The rows as cards in columns, one column per `group` value (its
+    /// `values` first, in order, empty ones too); a card is drawn as a
+    /// list row. A drag action moves a card between columns.
+    Board,
     /// An ordered checklist: `steps.label`, with `steps.status` (`done`,
     /// `active`, `failed`, anything else pending).
     Steps,
@@ -881,6 +885,11 @@ pub struct LensGroup {
     /// The heading's link; `from` defaults to `by`.
     #[serde(default)]
     pub link: Option<LensLink>,
+    /// The groups in this order, shown even when no row has the value
+    /// (an empty board column is still somewhere to drop); values the
+    /// rows have beyond these follow, in the order each first appears.
+    #[serde(default)]
+    pub values: Vec<String>,
 }
 
 /// A value the viewer (or an agent) can set when running the lens,
@@ -1272,6 +1281,21 @@ pub struct LensAction {
     /// `primary` action a row is offered (`when`) is the one.
     #[serde(default)]
     pub primary: bool,
+    /// What a drop runs: the dragged row is `{{row.*}}` (a drag action is
+    /// a row action), and where it landed binds `{{before.*}}` (the row
+    /// below the drop), `{{after.*}}` (the row above), `{{onto.*}}` (the
+    /// row dropped on) and `{{group.value}}` (the group dropped in). A
+    /// field that is exactly one of these with nothing there is left out.
+    #[serde(default)]
+    pub drag: bool,
+    /// A row action offered for every marked row at once: it runs once per
+    /// row, in list order, asking once.
+    #[serde(default)]
+    pub bulk: bool,
+    /// A row action's key: pressed with the rows focused, it runs on the
+    /// cursor row (or the marked rows, when `bulk`).
+    #[serde(default)]
+    pub key: Option<String>,
 }
 
 /// The `{{param.x}}` / `{{row.x}}` placeholders in `input`, as
@@ -1324,6 +1348,51 @@ struct ActionFile {
     /// The row action a click on the row runs.
     #[serde(default)]
     primary: bool,
+    /// A row action a drop runs, binding where the row landed.
+    #[serde(default)]
+    drag: bool,
+    /// Offered for every marked row at once.
+    #[serde(default)]
+    bulk: bool,
+    /// The key that runs it on the cursor (or marked) rows.
+    #[serde(default)]
+    key: Option<String>,
+}
+
+/// The keys a row list keeps for itself: an action can't take one.
+const KIT_KEYS: &[&str] = &[
+    "Enter",
+    "Escape",
+    " ",
+    "Space",
+    "Tab",
+    "ArrowUp",
+    "ArrowDown",
+    "ArrowLeft",
+    "ArrowRight",
+    "Home",
+    "End",
+    "PageUp",
+    "PageDown",
+    "ContextMenu",
+    "F10",
+];
+
+/// The named keys an action may take besides one printable character.
+const NAMED_KEYS: &[&str] = &["Delete", "Backspace"];
+
+/// What's wrong with `key` as a row action's key, if anything.
+fn key_problem(key: &str) -> Option<String> {
+    if KIT_KEYS.contains(&key) {
+        return Some(format!("`{key}` is the kit's (moving, picking, the menu)"));
+    }
+    let one_char = key.chars().count() == 1 && !key.chars().all(char::is_whitespace);
+    (!one_char && !NAMED_KEYS.contains(&key)).then(|| {
+        format!(
+            "`{key}` isn't one key: give one character or one of {}",
+            NAMED_KEYS.join(", ")
+        )
+    })
 }
 
 /// Parse a lens's `actions:`: each `{ id, label, command, input?, row? }`.
@@ -1373,17 +1442,60 @@ fn parse_actions(
                 f.id
             ));
         }
-        if f.when.is_some() && !f.row {
+        if f.when.is_some() && !(f.row || f.drag) {
             return Err(format!(
                 "actions: `{}`: `when` is for a row action (`row: true`)",
                 f.id
             ));
         }
-        if f.primary && !f.row {
+        // A drag action is a row action: its row is the dragged one.
+        let row = f.row || f.drag;
+        if f.drag && f.form {
+            return Err(format!(
+                "actions: `{}`: a drag action can't be a form",
+                f.id
+            ));
+        }
+        if f.drag && f.primary {
+            return Err(format!(
+                "actions: `{}`: a drag action can't be `primary` (a click doesn't drop)",
+                f.id
+            ));
+        }
+        if f.drag && f.group.is_some() {
+            return Err(format!(
+                "actions: `{}`: a drag action binds `{{{{group.value}}}}`, it isn't a heading's button",
+                f.id
+            ));
+        }
+        if f.primary && !row {
             return Err(format!(
                 "actions: `{}`: `primary` is for a row action (`row: true`)",
                 f.id
             ));
+        }
+        if f.bulk && !row {
+            return Err(format!(
+                "actions: `{}`: `bulk` is for a row action (`row: true`)",
+                f.id
+            ));
+        }
+        if let Some(key) = &f.key {
+            if !row {
+                return Err(format!(
+                    "actions: `{}`: `key` is for a row action (`row: true`)",
+                    f.id
+                ));
+            }
+            if let Some(why) = key_problem(key) {
+                return Err(format!("actions: `{}`: key {why}", f.id));
+            }
+            if let Some(other) = out.iter().find(|a| a.key.as_deref() == Some(key)) {
+                return Err(format!(
+                    "actions: `{}`: key `{key}` is already `{}`'s",
+                    f.id, other.id
+                ));
+            }
         }
         if !f.choices.is_empty() && !f.form {
             return Err(format!(
@@ -1409,7 +1521,33 @@ fn parse_actions(
                         f.id
                     ))
                 }
-                "row" if f.row => {}
+                "row" if row => {}
+                "before" | "after" | "onto" if f.drag => {}
+                "before" | "after" | "onto" => {
+                    return Err(format!(
+                        "actions: `{}`: `{{{{{scope}.{name}}}}}` needs `drag: true` (it is where a drop landed)",
+                        f.id
+                    ))
+                }
+                "group" if name != "value" => {
+                    return Err(format!(
+                        "actions: `{}`: `{{{{group.{name}}}}}` isn't `{{{{group.value}}}}`",
+                        f.id
+                    ))
+                }
+                "group" if !grouped => {
+                    return Err(format!(
+                        "actions: `{}`: `{{{{group.value}}}}` needs the lens to have a `group`",
+                        f.id
+                    ))
+                }
+                "group" if f.drag => {}
+                "group" => {
+                    return Err(format!(
+                        "actions: `{}`: `{{{{group.value}}}}` needs `drag: true` (it is the group a drop landed in)",
+                        f.id
+                    ))
+                }
                 "row" => {
                     return Err(format!(
                         "actions: `{}`: `{{{{row.{name}}}}}` needs `row: true`",
@@ -1430,7 +1568,7 @@ fn parse_actions(
             label: f.label,
             command: f.command,
             input,
-            row: f.row,
+            row,
             group: f.group,
             form: f.form,
             fixed: f.fixed,
@@ -1438,6 +1576,9 @@ fn parse_actions(
             then: f.then,
             when: f.when,
             primary: f.primary,
+            drag: f.drag,
+            bulk: f.bulk,
+            key: f.key,
         });
     }
     Ok(out)
@@ -5075,11 +5216,15 @@ fn shape_problem(
             "viz `{}` needs a `query`",
             format!("{:?}", lens.viz).to_lowercase()
         )),
+        LensViz::Board if lens.group.is_none() => {
+            Some("`board` needs `group: { by: <column> }` (its columns)".to_string())
+        }
         LensViz::Table
         | LensViz::List
         | LensViz::Number
         | LensViz::Markdown
         | LensViz::Detail
+        | LensViz::Board
         | LensViz::Approvals => None,
     }
 }
@@ -5317,9 +5462,9 @@ fn selected(lens: &Lens, lenses: &[Lens]) -> Vec<String> {
 fn row_style_problem(lens: &Lens) -> Option<String> {
     let rows = matches!(lens.viz, LensViz::List | LensViz::Table);
     let viz = format!("{:?}", lens.viz).to_lowercase();
-    if lens.group.is_some() && !rows {
+    if lens.group.is_some() && !rows && lens.viz != LensViz::Board {
         return Some(format!(
-            "`group` is only for `list` and `table`, not `{viz}`"
+            "`group` is only for `list`, `table` and `board`, not `{viz}`"
         ));
     }
     if lens.depth.is_some() && !rows {
@@ -6291,9 +6436,11 @@ async fn prepare(
                         ));
                     }
                     for (scope, name) in action_templates(&a.input) {
-                        if scope == "row" && !cols.contains(&name) {
+                        // A drop's neighbours are rows of the same result.
+                        let a_row = matches!(scope.as_str(), "row" | "before" | "after" | "onto");
+                        if a_row && !cols.contains(&name) {
                             ext.errors.push(format!(
-                                "lens {id}: action `{}` uses `{{{{row.{name}}}}}`, which isn't in \
+                                "lens {id}: action `{}` uses `{{{{{scope}.{name}}}}}`, which isn't in \
                                  the query result (columns: {})",
                                 a.id,
                                 cols.join(", ")
@@ -6849,6 +6996,82 @@ mod tests {
         assert!(ok[0].primary);
         let err = parse(&["{ id: a, label: A, command: x.y.z, primary: true }"]).unwrap_err();
         assert!(err.contains("`primary` is for a row action"), "{err}");
+    }
+
+    /// A drag action is a row action a drop runs, binding where the row
+    /// landed (`{{before.*}}`, `{{after.*}}`, `{{onto.*}}`, `{{group.value}}`);
+    /// a bulk action runs per marked row; a key action from the keyboard.
+    /// Each refuses what it can't mean.
+    #[test]
+    fn drag_bulk_and_key_actions_say_what_they_mean() {
+        let parse = |actions: &[&str], grouped: bool| {
+            parse_actions(
+                actions
+                    .iter()
+                    .map(|a| serde_yaml::from_str(a).unwrap())
+                    .collect(),
+                &[],
+                grouped,
+            )
+        };
+        let ok = parse(
+            &[
+                "{ id: move, label: Move, command: x.y.z, drag: true, input: { uri: '{{row.uri}}', to: '{{group.value}}' } }",
+                "{ id: put, label: Put, command: x.y.z, drag: true, input: { uri: '{{row.uri}}', before: '{{before.uri}}', after: '{{after.uri}}', parent: '{{onto.uri}}' } }",
+                "{ id: done, label: Done, command: x.y.z, row: true, bulk: true, key: f, input: { uri: '{{row.uri}}' } }",
+                "{ id: del, label: Delete, command: x.y.z, row: true, key: Delete }",
+            ],
+            true,
+        )
+        .unwrap();
+        assert!(ok[0].drag && ok[0].row, "a drag action is a row action");
+        assert!(ok[2].bulk && ok[2].key.as_deref() == Some("f"));
+        assert_eq!(ok[3].key.as_deref(), Some("Delete"));
+
+        for (actions, grouped, says) in [
+            (vec!["{ id: a, label: A, command: x.y.z, drag: true, form: true }"], true, "a drag action can't be a form"),
+            (vec!["{ id: a, label: A, command: x.y.z, drag: true, primary: true }"], true, "a drag action can't be `primary`"),
+            (vec!["{ id: a, label: A, command: x.y.z, row: true, input: { b: '{{before.uri}}' } }"], true, "`{{before.uri}}` needs `drag: true`"),
+            (vec!["{ id: a, label: A, command: x.y.z, drag: true, input: { g: '{{group.value}}' } }"], false, "`{{group.value}}` needs the lens to have a `group`"),
+            (vec!["{ id: a, label: A, command: x.y.z, drag: true, input: { g: '{{group.by}}' } }"], true, "`{{group.by}}` isn't `{{group.value}}`"),
+            (vec!["{ id: a, label: A, command: x.y.z, bulk: true }"], true, "`bulk` is for a row action"),
+            (vec!["{ id: a, label: A, command: x.y.z, key: f }"], true, "`key` is for a row action"),
+            (vec!["{ id: a, label: A, command: x.y.z, row: true, key: Enter }"], true, "`Enter` is the kit's"),
+            (vec!["{ id: a, label: A, command: x.y.z, row: true, key: ff }"], true, "`ff` isn't one key"),
+            (
+                vec![
+                    "{ id: a, label: A, command: x.y.z, row: true, key: f }",
+                    "{ id: b, label: B, command: x.y.z, row: true, key: f }",
+                ],
+                true,
+                "key `f` is already `a`'s",
+            ),
+        ] {
+            let err = parse(&actions, grouped).unwrap_err();
+            assert!(err.contains(says), "{actions:?}: {err}");
+        }
+    }
+
+    /// A board draws its groups as columns, so it needs a `group`; its
+    /// `values` fix their order.
+    #[test]
+    fn a_board_needs_a_group_and_its_values_fix_the_order() {
+        let (_d, ext) = load_x(
+            &[
+                ("b", "title: B\nquery: SELECT 'a' AS uri, 'todo' AS state\nviz: board\ngroup: { by: state, values: [todo, done] }\n"),
+                ("nob", "title: N\nquery: SELECT 'a' AS uri\nviz: board\n"),
+            ],
+            "",
+        );
+        let lens = |slug: &str| ext.lenses.iter().find(|l| l.slug == slug);
+        let b = lens("b").expect("b loads");
+        assert_eq!(b.group.as_ref().unwrap().values, vec!["todo", "done"]);
+        assert!(lens("nob").is_none());
+        let errs = ext.errors.join("\n");
+        assert!(
+            errs.contains("`board` needs `group: { by: <column> }`"),
+            "{errs}"
+        );
     }
 
     /// `acme` at `dir` with `manifest` (and the files it names): loaded as
@@ -10335,6 +10558,7 @@ commands:
                     base: None,
                     head: None,
                 }),
+                values: Vec::new(),
             })
         );
         assert_eq!(a.emphasis.as_deref(), Some("current"));
@@ -10347,7 +10571,7 @@ commands:
             "a tree may emphasize"
         );
         for (slug, needle) in [
-            ("b", "`group` is only for `list` and `table`"),
+            ("b", "`group` is only for `list`, `table` and `board`"),
             ("c", "missing field `by`"),
             ("d", "`depth` is only for `list` and `table`"),
             ("e", "`group: Ready` needs the lens to have a `group`"),

@@ -225,6 +225,7 @@ fn run_action_op(services: ServicesSlot) -> Op {
                         params: cells(p.params),
                         row: p.row.map(|r| cells(Some(r))),
                         input: None,
+                        drop: None,
                         on_behalf_of: invocation.actor().clone(),
                         // An agent never confirms.
                         confirmed: false,

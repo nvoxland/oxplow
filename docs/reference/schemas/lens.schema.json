@@ -303,6 +303,11 @@
           "const": "detail"
         },
         {
+          "description": "The rows as cards in columns, one column per `group` value (its\n`values` first, in order, empty ones too); a card is drawn as a\nlist row. A drag action moves a card between columns.",
+          "type": "string",
+          "const": "board"
+        },
+        {
           "description": "An ordered checklist: `steps.label`, with `steps.status` (`done`,\n`active`, `failed`, anything else pending).",
           "type": "string",
           "const": "steps"
@@ -1209,6 +1214,14 @@
             }
           ],
           "default": null
+        },
+        "values": {
+          "description": "The groups in this order, shown even when no row has the value\n(an empty board column is still somewhere to drop); values the\nrows have beyond these follow, in the order each first appears.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
         }
       },
       "additionalProperties": false,
@@ -1383,6 +1396,24 @@
           "description": "The row action a click on the row runs.",
           "type": "boolean",
           "default": false
+        },
+        "drag": {
+          "description": "A row action a drop runs, binding where the row landed.",
+          "type": "boolean",
+          "default": false
+        },
+        "bulk": {
+          "description": "Offered for every marked row at once.",
+          "type": "boolean",
+          "default": false
+        },
+        "key": {
+          "description": "The key that runs it on the cursor (or marked) rows.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
         }
       },
       "additionalProperties": false,
