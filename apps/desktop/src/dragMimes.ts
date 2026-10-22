@@ -31,9 +31,16 @@ export const RAIL_SECTION_DRAG_MIME = "application/x-oxplow-rail-section";
  *  the refs carried and each one's title and state. */
 export const WORK_ITEM_DRAG_MIME = "application/x-oxplow-work-item";
 
+/** A lens's rows, dragged to where a drag action (`drag: true`) runs: the
+ *  payload is `{ token, keys }` — the lens view's token (a drop is taken
+ *  only by the view the rows came from) and the dragged rows' keys
+ *  (`rowInteract.rowKey`). */
+export const LENS_ROW_DRAG_MIME = "application/x-oxplow-lens-rows";
+
 /** Every MIME above, for invariant checks. Extend when adding one. */
 export const ALL_DRAG_MIMES = [
   WORK_ITEM_DRAG_MIME,
   CONTEXT_REF_MIME,
   RAIL_SECTION_DRAG_MIME,
+  LENS_ROW_DRAG_MIME,
 ] as const;

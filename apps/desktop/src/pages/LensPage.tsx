@@ -177,7 +177,7 @@ export function LensPage({ lensId, params, title: pageTitle, stream, onOpenPage,
       kind="lens"
       titleInBody={!fills}
       // A dashboard wants every pixel; everything else reads as a document.
-      width={lens?.viz === "dashboard" || fills ? "full" : "reading"}
+      width={lens?.viz === "dashboard" || lens?.viz === "board" || fills ? "full" : "reading"}
       fill={fills}
       actions={actions}
       pin={{ tile: { kind: "lens", lensId, optionsJson: JSON.stringify({ size: "wide" }) }, onOpenPage }}

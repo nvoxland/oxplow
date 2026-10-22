@@ -375,6 +375,7 @@ comment's time and the task panel use it, not their own copies.
 |---|---|---|---|
 | **Document** (the default) | reading, picking, small forms, lists | `DocumentLayout`: title + intro in a reading column, then `Section`s (a heading over a rule, no boxes) | `viz: document` + `sections:` |
 | **Dashboard** | many numbers and charts at a glance | `TileGrid` / `TileSlot` / `Tile` at full width | `viz: dashboard` + `tiles:` |
+| **Board** | cards by group, dragged across columns | (none) | `viz: board` + `group: { by, values }` and a `drag: true` action |
 | **Reader** | one file, two files side by side, or one diff, at the page's whole size | `Page` with `fill` (the body stretches to the page's height) | `viz: code` / `viz: diff` |
 | **Custom** | what the kit can't express: editors, terminals, boards, git flows | a React page on `Page`, using kit parts where they fit | `viz: custom` (the sandboxed component), or a whole custom page: `pages[].component: <id>` (`CustomPageView`) |
 

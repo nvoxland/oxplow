@@ -109,31 +109,40 @@ export function displayColumns(lens: Lens, resultColumns: string[]): DisplayColu
  *  action names), its heading, its rows, and where the heading links. */
 export interface RowGroup {
   key: string;
+  /** The `by` value it groups (what a drop in it binds as `{{group.value}}`). */
+  value: SqlCell;
   label: string;
   rows: SqlCell[][];
   ref: LinkTarget | null;
 }
 
-/** A grouped lens's rows under a heading per distinct `group.by` value,
- *  in the order each first appears; the heading links through
- *  `group.link`, read from the group's first row. Null when the lens isn't
- *  grouped or the result lacks the column. */
+/** A grouped lens's rows under a heading per distinct `group.by` value:
+ *  its `group.values` first, in order and shown even with no rows (an
+ *  empty board column is somewhere to drop), then the rest in the order
+ *  each first appears; the heading links through `group.link`, read from
+ *  the group's first row. Null when the lens isn't grouped or the result
+ *  lacks the column. */
 export function rowGroups(lens: Lens, result: SqlQueryResult): RowGroup[] | null {
   const by = lens.group?.by;
   const i = by ? result.columns.indexOf(by) : -1;
   if (!by || i === -1) return null;
   const groups = new Map<string, RowGroup>();
+  for (const v of lens.group?.values ?? []) {
+    groups.set(v, { key: v, value: v, label: formatCell(v), rows: [], ref: null });
+  }
   for (const row of result.rows) {
     const v = row[i] ?? null;
     const key = v === null ? "" : String(v);
+    const link = lens.group?.link ?? null;
     const g = groups.get(key);
     if (g) {
+      if (g.rows.length === 0 && link) g.ref = cellLinkRef(link, by, row, result.columns);
       g.rows.push(row);
       continue;
     }
-    const link = lens.group?.link ?? null;
     groups.set(key, {
       key,
+      value: v,
       label: formatCell(v),
       rows: [row],
       ref: link ? cellLinkRef(link, by, row, result.columns) : null,

@@ -27,11 +27,48 @@ pub struct LensActionCall {
     /// over the action's bound `input`, its `fixed` fields imposed again.
     /// Any other action runs as declared and takes none.
     pub input: Option<Value>,
+    /// For a drag action (`drag: true`), where the dragged row (`row`)
+    /// landed. Any other action takes none.
+    pub drop: Option<Drop>,
     /// Who pressed it: a person from the UI, the calling agent from MCP.
     pub on_behalf_of: Actor,
     /// The person confirmed a command that asks (an agent never can).
     pub confirmed: bool,
 }
+
+/// Where a dragged row landed: the rows on either side of the drop
+/// (`before`: the one below it, `after`: the one above), the row it was
+/// dropped on, and the value of the group it was dropped in. What isn't
+/// there is `None` (a drop at a list's end has no row below).
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize, specta::Type)]
+pub struct Drop {
+    #[serde(default)]
+    pub before: Option<BTreeMap<String, SqlCell>>,
+    #[serde(default)]
+    pub after: Option<BTreeMap<String, SqlCell>>,
+    #[serde(default)]
+    pub onto: Option<BTreeMap<String, SqlCell>>,
+    #[serde(default)]
+    pub group: Option<SqlCell>,
+}
+
+impl Drop {
+    /// The value `{{scope.name}}` names here, if any: a neighbour row's
+    /// column, or the group's value.
+    fn value(&self, scope: &str, name: &str) -> Option<SqlCell> {
+        let row = match scope {
+            "before" => self.before.as_ref(),
+            "after" => self.after.as_ref(),
+            "onto" => self.onto.as_ref(),
+            "group" if name == "value" => return self.group.clone(),
+            _ => return None,
+        };
+        row?.get(name).cloned()
+    }
+}
+
+/// The scopes a drop binds.
+const DROP_SCOPES: &[&str] = &["before", "after", "onto", "group"];
 
 /// Run `call`'s action, with the lens resolved in `lens_root` (the stream's
 /// worktree) and its params seen from `ctx`.
@@ -81,6 +118,7 @@ fn prepare_lens_action(
         params,
         row,
         input: given,
+        drop,
         on_behalf_of,
         confirmed,
     } = call;
@@ -120,6 +158,21 @@ fn prepare_lens_action(
         }
         _ => {}
     }
+    match (action.drag, &drop) {
+        (true, None) => {
+            return Err(invalid(
+                "/drop",
+                format!("`{action_id}` runs on a drop: say where the row landed"),
+            ))
+        }
+        (false, Some(_)) => {
+            return Err(invalid(
+                "/drop",
+                format!("`{action_id}` isn't a drag action (`drag: true`)"),
+            ))
+        }
+        _ => {}
+    }
     if let (Some(when), Some(row)) = (&action.when, &row) {
         let truthy = match row.get(when) {
             None | Some(SqlCell::Null(())) => false,
@@ -136,7 +189,7 @@ fn prepare_lens_action(
         }
     }
     let params = extensions::resolve_params(&lens, &params, ctx).map_err(CommandError::from)?;
-    let bound = bind_input(&action.input, &params, row)?;
+    let bound = bind_input(&action.input, &params, row, drop.as_ref())?;
     let input = match given {
         None => bound,
         Some(_) if !action.form => {
@@ -385,7 +438,7 @@ pub async fn action_form(
                 })?;
             let params =
                 extensions::resolve_params(&lens, &call.params, ctx).map_err(CommandError::from)?;
-            let values = bind_input(&action.input, &params, call.row.as_ref())?;
+            let values = bind_input(&action.input, &params, call.row.as_ref(), None)?;
             let choices = choices_for(svc, lens_root, &action.choices, &params, ctx).await?;
             let command =
                 svc.commands
@@ -452,7 +505,7 @@ async fn form_start_unpinned(
         .spec(&name)
         .ok_or_else(|| CommandError::Unknown { name: name.clone() })?;
     let mut values = match form.defaults.as_ref() {
-        Some(d) => match bind_input(d, &run.params, None)? {
+        Some(d) => match bind_input(d, &run.params, None, None)? {
             Value::Object(m) => m,
             _ => serde_json::Map::new(),
         },
@@ -561,7 +614,7 @@ fn prepare_form(
     };
     let params = extensions::resolve_params(&lens, &params, ctx).map_err(CommandError::from)?;
     let defaults = match form.defaults.as_ref() {
-        Some(d) => bind_input(d, &params, None)?,
+        Some(d) => bind_input(d, &params, None, None)?,
         None => Value::Object(serde_json::Map::new()),
     };
     let merged = filled(defaults, input, &form.fixed)?;
@@ -961,6 +1014,7 @@ pub fn bind_input(
     input: &Value,
     params: &BTreeMap<String, SqlCell>,
     row: Option<&BTreeMap<String, SqlCell>>,
+    drop: Option<&Drop>,
 ) -> Result<Value, CommandError> {
     let lookup = |scope: &str, name: &str| -> Result<SqlCell, CommandError> {
         let found = match scope {
@@ -974,6 +1028,7 @@ pub fn bind_input(
                 u.param(&key).map(|k| SqlCell::Text(k.to_string()))
             }),
             "row" => row.and_then(|r| r.get(name)).cloned(),
+            s if DROP_SCOPES.contains(&s) => drop.and_then(|d| d.value(s, name)),
             _ => None,
         };
         found.ok_or_else(|| CommandError::Invalid {
@@ -1007,14 +1062,28 @@ pub fn bind_input(
         Value::Array(items) => Value::Array(
             items
                 .iter()
-                .map(|i| bind_input(i, params, row))
+                .map(|i| bind_input(i, params, row, drop))
                 .collect::<Result<_, _>>()?,
         ),
-        Value::Object(map) => Value::Object(
-            map.iter()
-                .map(|(k, v)| Ok((k.clone(), bind_input(v, params, row)?)))
-                .collect::<Result<_, CommandError>>()?,
-        ),
+        Value::Object(map) => {
+            let mut out = serde_json::Map::new();
+            for (k, v) in map {
+                // A field that is exactly a drop's place with nothing there
+                // (no row below a drop at the end) is left out: the
+                // command's optional field stays absent.
+                let absent = v
+                    .as_str()
+                    .and_then(oxplow_domain::template::whole_placeholder)
+                    .is_some_and(|p| {
+                        DROP_SCOPES.contains(&p.scope.as_str())
+                            && drop.is_none_or(|d| d.value(&p.scope, &p.name).is_none())
+                    });
+                if !absent {
+                    out.insert(k.clone(), bind_input(v, params, row, drop)?);
+                }
+            }
+            Value::Object(out)
+        }
         other => other.clone(),
     })
 }
@@ -1051,6 +1120,19 @@ actions:
 "#,
         )
         .unwrap();
+        std::fs::write(
+            ext.join("lenses/board.yaml"),
+            r#"title: Board
+query: "SELECT uri, title, state FROM v_work_item"
+viz: board
+group: { by: state, values: [todo, in_progress, done] }
+actions:
+  - { id: move, label: Move, command: oxplow.work_item.transition, drag: true, input: { uri: "{{row.uri}}", to: "{{group.value}}" } }
+  - { id: reorder, label: Reorder, command: oxplow.work_item.reorder, drag: true, input: { uri: "{{row.uri}}", before: "{{before.uri}}", after: "{{after.uri}}" } }
+  - { id: finish, label: Finish, command: oxplow.work_item.transition, row: true, input: { uri: "{{row.uri}}", to: done } }
+"#,
+        )
+        .unwrap();
         crate::test_fixtures::activate(&fx.svc).await;
         (fx, root)
     }
@@ -1068,6 +1150,7 @@ actions:
             params,
             row,
             input: None,
+            drop: None,
             on_behalf_of,
             confirmed,
         }
@@ -1147,6 +1230,86 @@ actions:
         assert!(run("finish", Some(row.clone())).await.is_err());
         run("finish-row", Some(row)).await.unwrap();
         assert_eq!(state(&fx.svc, fx.task).await, "done");
+    }
+
+    /// A drop runs the drag action with where the row landed: the group's
+    /// value, and the neighbours — one that isn't there (a drop at the end)
+    /// is left out of the input, not sent empty. A drop on an action that
+    /// isn't a drag one, or a drag action without a drop, is refused.
+    #[tokio::test]
+    async fn a_drop_runs_the_drag_action_with_where_the_row_landed() {
+        let (fx, root) = fixture().await;
+        let row = BTreeMap::from([(
+            "uri".to_string(),
+            SqlCell::Text(oxplow_tasks::work_item_ref(fx.task)),
+        )]);
+        let run = |action: &'static str, drop: Option<Drop>| {
+            let (svc, root, row) = (fx.svc.clone(), root.clone(), row.clone());
+            async move {
+                let mut c = call(action, BTreeMap::new(), Some(row), Actor::Human, false);
+                c.lens_id = "acme/board".into();
+                c.drop = drop;
+                run_lens_action(&svc, &root, c, &extensions::LensContext::default()).await
+            }
+        };
+        run(
+            "move",
+            Some(Drop {
+                group: Some(SqlCell::Text("in_progress".into())),
+                ..Drop::default()
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(state(&fx.svc, fx.task).await, "in_progress");
+
+        // Dropped at the end of its list: no row below or above it.
+        run("reorder", Some(Drop::default())).await.unwrap();
+
+        let err = run("finish", Some(Drop::default())).await.unwrap_err();
+        assert!(
+            matches!(&err, CommandError::Invalid { field: Some(f), .. } if f == "/drop"),
+            "{err:?}"
+        );
+        let err = run("move", None).await.unwrap_err();
+        assert!(
+            matches!(&err, CommandError::Invalid { field: Some(f), message } if f == "/drop" && message.contains("runs on a drop")),
+            "{err:?}"
+        );
+    }
+
+    /// Where a drop landed binds `{{before.*}}`, `{{after.*}}`, `{{onto.*}}`
+    /// and `{{group.value}}`; a field that is exactly one of them with
+    /// nothing there is left out; anywhere else, it has no value.
+    #[test]
+    fn a_drops_bindings_fill_its_placeholders_and_leave_out_what_isnt_there() {
+        let near = |uri: &str| BTreeMap::from([("uri".to_string(), SqlCell::Text(uri.into()))]);
+        let drop = Drop {
+            before: Some(near("b")),
+            after: None,
+            onto: Some(near("o")),
+            group: Some(SqlCell::Text("done".into())),
+        };
+        let input = serde_json::json!({
+            "before": "{{before.uri}}",
+            "after": "{{after.uri}}",
+            "parent": "{{onto.uri}}",
+            "to": "{{group.value}}",
+            "note": "near {{before.uri}}"
+        });
+        assert_eq!(
+            bind_input(&input, &BTreeMap::new(), None, Some(&drop)).unwrap(),
+            serde_json::json!({ "before": "b", "parent": "o", "to": "done", "note": "near b" })
+        );
+        for bad in [
+            serde_json::json!({ "list": ["{{after.uri}}"] }),
+            serde_json::json!({ "note": "near {{after.uri}}" }),
+        ] {
+            assert!(
+                bind_input(&bad, &BTreeMap::new(), None, Some(&drop)).is_err(),
+                "{bad}"
+            );
+        }
     }
 
     /// A row action with `when` is offered only on rows whose column is
@@ -1550,10 +1713,11 @@ actions:
             &json!({ "a": "{{param.n}}", "b": "tsk{{row.id}}", "c": ["{{ row.id }}"], "d": 1 }),
             &params,
             Some(&row),
+            None,
         )
         .unwrap();
         assert_eq!(bound, json!({ "a": 3, "b": "tsk42", "c": [42], "d": 1 }));
-        let err = bind_input(&json!({ "a": "{{row.id}}" }), &params, None).unwrap_err();
+        let err = bind_input(&json!({ "a": "{{row.id}}" }), &params, None, None).unwrap_err();
         assert!(err.to_string().contains("row.id"), "{err}");
     }
 
@@ -1593,6 +1757,7 @@ actions:
         let bound = bind_input(
             &json!({ "from_thread": "{{param.uri.id}}", "t": "on {{param.uri.id}}" }),
             &params,
+            None,
             None,
         )
         .unwrap();

@@ -2902,6 +2902,7 @@ mod tests {
                         params: [("thread_id".to_string(), Int(f.thread.value()))].into(),
                         row: Some(row),
                         input: None,
+                        drop: None,
                         on_behalf_of: oxplow_domain::Actor::Human,
                         confirmed: false,
                     },

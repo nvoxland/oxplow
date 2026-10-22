@@ -1818,6 +1818,7 @@ mod tests {
                 .into(),
             ),
             input: None,
+            drop: None,
             on_behalf_of: oxplow_domain::Actor::Human,
             confirmed: true,
         };

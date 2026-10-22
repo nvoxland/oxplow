@@ -546,8 +546,9 @@ export async function runLensAction(
   streamId: string | null,
   confirmed: boolean,
   input: Record<string, unknown> | null = null,
+  drop: import("./tauri-bridge/generated/bindings.js").Drop | null = null,
 ): Promise<CommandOutcome> {
-  return unwrap(await commands.runLensAction({ id, action, params, row, input }, streamId, confirmed));
+  return unwrap(await commands.runLensAction({ id, action, params, row, input, drop }, streamId, confirmed));
 }
 
 /** The form a lens's form action (`form: true`) opens: its command, the

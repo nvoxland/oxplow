@@ -2447,6 +2447,19 @@ export type Divergence = {
 };
 
 /**
+ *  Where a dragged row landed: the rows on either side of the drop
+ *  (`before`: the one below it, `after`: the one above), the row it was
+ *  dropped on, and the value of the group it was dropped in. What isn't
+ *  there is `None` (a drop at a list's end has no row below).
+ */
+export type Drop = {
+	before?: { [key in string]: SqlCell } | null,
+	after?: { [key in string]: SqlCell } | null,
+	onto?: { [key in string]: SqlCell } | null,
+	group?: SqlCell | null,
+};
+
+/**
  *  The database a check dry-runs an extension's SQL on. It always has one
  *  (P7.C6): what it declares but hasn't published stands in either way.
  */
@@ -3939,6 +3952,24 @@ export type LensAction = {
 	 *  `primary` action a row is offered (`when`) is the one.
 	 */
 	primary?: boolean,
+	/**
+	 *  What a drop runs: the dragged row is `{{row.*}}` (a drag action is
+	 *  a row action), and where it landed binds `{{before.*}}` (the row
+	 *  below the drop), `{{after.*}}` (the row above), `{{onto.*}}` (the
+	 *  row dropped on) and `{{group.value}}` (the group dropped in). A
+	 *  field that is exactly one of these with nothing there is left out.
+	 */
+	drag?: boolean,
+	/**
+	 *  A row action offered for every marked row at once: it runs once per
+	 *  row, in list order, asking once.
+	 */
+	bulk?: boolean,
+	/**
+	 *  A row action's key: pressed with the rows focused, it runs on the
+	 *  cursor row (or the marked rows, when `bulk`).
+	 */
+	key?: string | null,
 };
 
 /**
@@ -4208,6 +4239,12 @@ export type LensGroup = {
 	by: string,
 	/**  The heading's link; `from` defaults to `by`. */
 	link?: LensLink | null,
+	/**
+	 *  The groups in this order, shown even when no row has the value
+	 *  (an empty board column is still somewhere to drop); values the
+	 *  rows have beyond these follow, in the order each first appears.
+	 */
+	values?: string[],
 };
 
 /**  `hunks` viz: the file and the two revisions each row diffs. */
@@ -4362,6 +4399,8 @@ export type LensPress = {
 	params?: { [key in string]: SqlCell } | null,
 	row?: { [key in string]: SqlCell } | null,
 	input?: unknown | null,
+	/**  Where a dragged row landed (a drag action, `drag: true`). */
+	drop?: Drop | null,
 };
 
 /**
@@ -4594,6 +4633,12 @@ export type LensViz =
 "timeline" | 
 /**  The first row as label/value pairs (the displayed columns). */
 "detail" | 
+/**
+ *  The rows as cards in columns, one column per `group` value (its
+ *  `values` first, in order, empty ones too); a card is drawn as a
+ *  list row. A drag action moves a card between columns.
+ */
+"board" | 
 /**
  *  An ordered checklist: `steps.label`, with `steps.status` (`done`,
  *  `active`, `failed`, anything else pending).

@@ -88,6 +88,13 @@
   running at once; `fixed` keeps fields to the bound values:
   `{ id: edit, label: Edit…, command: oxplow.work_item.update, row: true,
   form: true, fixed: [uri], input: { uri: "{{row.uri}}", title: "{{row.title}}" } }`.
+- **Drag, bulk and key actions** (row actions): `drag: true` runs on a
+  drop, binding `{{before.x}}` / `{{after.x}}` (the rows below / above
+  where it landed; a missing one is left out), `{{onto.x}}` and
+  `{{group.value}}` — `viz: board` with `group: { by, values }` drags
+  cards between columns; `bulk: true` runs once per marked row; `key: f`
+  runs on the cursor row. You run the command yourself; these are the
+  person's gestures.
 - **In a component**, a `<form>` is fine: handle `submit` in your script
   (`preventDefault`) and run the command with `invoke`. A refusal rejects
   with `{ code, message, field? }`; show `message` under the field it

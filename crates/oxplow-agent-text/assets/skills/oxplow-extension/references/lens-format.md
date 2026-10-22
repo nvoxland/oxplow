@@ -85,6 +85,8 @@ empty: Nothing is waiting on you.
   - `diff` shows the first row's file between two revisions, at full
     size: `diff: { path: <column>, from: <column>, to: <column>, lines:
     <optional>, base: <optional: the older side's name in the header> }`. Several files are `hunks`.
+  - `board` draws the groups as columns of cards: `group: { by:
+    <column>, values: [<the columns in order>] }`.
   - `document` is a wiki-style page of sections: `sections: [...]`. See
     "Document and dashboard lenses" below.
   - `dashboard` is a responsive grid of titled cards: `tiles: [...]`. See

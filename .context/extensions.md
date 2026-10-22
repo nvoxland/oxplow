@@ -737,6 +737,33 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       needs `row: true`; `oxplow_validate_extension` checks `{{row.x}}` against
       the result's columns; the command name must be well-formed. Any
       other shape is a field error.
+    - **Drag, bulk and key actions.** `drag: true` makes a row action
+      what a drop runs (`rowInteract.ts`, `RowsBody`): a row the action is
+      offered on (`when`) drags (`LENS_ROW_DRAG_MIME`, taken only by the view
+      it came from; a marked row carries every marked row), and where it
+      lands binds `{{before.*}}` (the row below the drop), `{{after.*}}`
+      (the row above), `{{onto.*}}` (the row dropped on: its middle third,
+      offered only when some drag action names it) and `{{group.value}}`
+      (the group a drop lands in: among its rows, on its heading, on a board
+      column). A field that is exactly one of these with nothing there is
+      **left out** of the input (a drop at a list's end has no row below),
+      so a command's optional field stays absent; one spliced into text, or
+      in a list, with nothing there is an error. Several drag actions may be
+      declared: a drop runs the first the row is offered whose places are
+      all there (one naming the group needs a group; one naming `onto` needs
+      a row dropped on). Rows dropped together run it once each, in drawing
+      order, each after the one before it. The press carries the `drop`
+      (`lens_actions::Drop`); a drop on another action, or a drag action
+      pressed without one, is `Invalid` at `/drop`. `bulk: true` puts a row
+      action in the **marks bar** (which stands in for the lens's buttons
+      while rows are marked, the page's nav-bar actions too): it runs once
+      per marked row it is offered, in order, asking once and toasting once.
+      `key: <k>` (one character, or `Delete` / `Backspace`; never one the
+      row list keeps — Enter, Escape, Space, Tab, the arrows, Home, End,
+      Page Up/Down, the menu key — nor one taken twice in a lens) runs a row
+      action on the cursor row, or on the marked rows when it is `bulk`. The
+      marks themselves are the kit's (usability.md "Rows: marks, drags and
+      keys"), kept per lens in the entry's history state.
     - **`when: <column>`** (row actions only): the action is offered only on
       rows where that column is truthy (not null, 0, `""` or false) — the
       row menu leaves it out elsewhere (`actionOffered`), and a run on such
@@ -1963,7 +1990,10 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   binding.
 - `viz`: `table`, `list`, `number`, `markdown`, `bar`, `line`, `treemap`,
   `document`, `dashboard` (both below), `tree`, `timeline`, `detail`,
-  `steps`, `hunks`, `code` and `diff` (the full-size readers: a file at a
+  `steps`, `hunks`, `board` (the groups as columns of cards, each card a
+  list row; it needs `group`, whose `values: [..]` fix the columns' order
+  and keep empty ones as drop targets — `values` orders any grouped viz),
+  `code` and `diff` (the full-size readers: a file at a
   revision, or one file's diff, read-only, filling a lens page —
   `LensPage`'s `fill`, no in-body title — `lens/CodeViz.tsx`,
   `lens/DiffViz.tsx`, `.context/editor-and-monaco.md` "Read-only code and
@@ -2075,7 +2105,7 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   (`columns` entry for `tree.label`), so its `link`, `icon` and `tone`
   apply.
 - `actions`: commands the lens offers, `{ id, label, command, input?,
-  row?, group?, form?, fixed?, choices?, then?, when?, primary? }`, with `{{param.x}}` / `{{row.x}}` placeholders (`{{row.x|json}}`: the JSON a text cell holds, typed — the one filter, checked at load, bound in `bind_input`); run as the lens
+  row?, group?, form?, fixed?, choices?, then?, when?, primary?, drag?, bulk?, key? }`, with `{{param.x}}` / `{{row.x}}` placeholders (`{{row.x|json}}`: the JSON a text cell holds, typed — the one filter, checked at load, bound in `bind_input`; and a drag action's `{{before.x}}`, `{{after.x}}`, `{{onto.x}}`, `{{group.value}}`, above); run as the lens
   for whoever pressed, so they grant no power. `form: true` opens the
   command's form instead of running (a slideover: `lens_action_form`
   gives the command and the bound `input` as starting values); what the
