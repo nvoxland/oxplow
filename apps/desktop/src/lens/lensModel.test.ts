@@ -88,6 +88,16 @@ describe("row groups and styling", () => {
     expect(groups[1]!.ref).toBeNull();
   });
 
+  test("a group's values come first, in order, empty ones too; the rest follow as they appear", () => {
+    const l = lens({ viz: "board", group: { by: "bucket", link: null, values: ["Done", "Later"] } });
+    const groups = rowGroups(l, res)!;
+    expect(groups.map((g) => [g.key, g.value, g.rows.length])).toEqual([
+      ["Done", "Done", 1],
+      ["Later", "Later", 0],
+      ["Ready", "Ready", 2],
+    ]);
+  });
+
   test("an ungrouped lens, or one whose group column isn't in the result, has no groups", () => {
     expect(rowGroups(lens({ viz: "list" }), res)).toBeNull();
     expect(rowGroups(lens({ viz: "list", group: { by: "gone", link: null } }), res)).toBeNull();

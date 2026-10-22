@@ -197,6 +197,33 @@ actions:
 `{{param.x}}` and `{{row.col}}` fill the input from the lens's params or
 the row. A command that asks for confirmation asks you before it runs.
 
+Three more ways to reach a row action:
+
+- **`drag: true`**: you drag the row, and the drop runs the action.
+  `{{before.col}}` is the row below where it landed, `{{after.col}}` the
+  row above, `{{onto.col}}` a row it was dropped on, and
+  `{{group.value}}` the group it landed in. A field whose row isn't there
+  (a drop at the end of the list) is left out.
+- **`bulk: true`**: mark rows with Cmd/Ctrl+click, Shift+click or Space,
+  and the action shows in the bar above them. It runs once for each
+  marked row.
+- **`key: f`**: the key runs the action on the row under the cursor (or
+  the marked rows, with `bulk`).
+
+```yaml
+viz: board
+group: { by: state, values: [todo, in_progress, done] }
+actions:
+  - id: move
+    label: Move
+    command: oxplow.work_item.transition
+    drag: true
+    input: { uri: "{{row.uri}}", to: "{{group.value}}" }
+```
+
+`viz: board` shows each group as a column of cards. `values` sets the
+columns and their order, and keeps an empty column to drop on.
+
 With `form: true` an action opens the command's form in a side panel
 instead of running at once, its fields starting from `input`; you edit
 them and submit (Enter). `fixed` lists the fields you see but can't

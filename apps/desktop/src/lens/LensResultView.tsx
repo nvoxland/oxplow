@@ -2,11 +2,11 @@ import { useCollapsedSet, useDraft, type CollapsedSet } from "../tabs/useViewPar
 import { Approvals } from "../kit/Approvals.js";
 import type { PageAction } from "../kit/actions.js";
 import type { PickedRow } from "./LensRail.js";
-import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { Fragment, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { commandOpenAfter, lensActionForm, lensForm, lensText, runLensAction, submitLensForm, undoCommand, type LensRun, type SqlCell } from "../api.js";
 import { Slideover } from "../components/Slideover.js";
 import type { CommandOutcome, FormStart } from "../tauri-bridge/generated/bindings.js";
-import type { LensAction } from "../tauri-bridge/generated/bindings.js";
+import type { Drop, LensAction } from "../tauri-bridge/generated/bindings.js";
 import { DailyBarChart } from "../components/Analytics/DailyBarChart.js";
 import { TrendChart } from "../components/charts/TrendChart.js";
 import { Sparkline } from "../components/Sparkline.js";
@@ -76,6 +76,21 @@ import { Stat } from "../kit/Stat.js";
 import { recordOpError } from "../opErrors.js";
 import { showToast } from "../components/toastStore.js";
 import { actionOffered, addLensToContext, copyLens, openAfterAction, performLensAction, rowRecord } from "./lensActions.js";
+import { useHistoryState } from "../tabs/useHistoryState.js";
+import {
+  chainedDrops,
+  dragActionFor,
+  dropBeside,
+  dropInGroup,
+  dropZone,
+  keyAction,
+  marksAfterClick,
+  rowKey,
+  shownMarks,
+  takesOnto,
+  type DropAt,
+} from "./rowInteract.js";
+import { LENS_ROW_DRAG_MIME } from "../dragMimes.js";
 import { LensIcon, lensIcon, toneColor } from "./lensIcons.js";
 import { useExtensions } from "../extensionsStore.js";
 import { setContextRefDrag } from "../agent-context-dnd.js";
@@ -92,6 +107,7 @@ type CellRenderer = (row: SqlCell[], col: DisplayColumn) => ReactNode;
 export function LensResultView(props: LensResultViewProps) {
   const { run, streamId = null, compact = false, toolbar = true } = props;
   const actions = useLensActions(run, streamId);
+  const marks = useMarks(run);
   // A command's confirmation shows wherever the row is — an answer in the
   // strip, a grid child, a dashboard tile — not only where the toolbar is.
   const confirm = actions.pending ? (
@@ -115,8 +131,9 @@ export function LensResultView(props: LensResultViewProps) {
       <>
         {confirm}
         {form}
-        {props.toolbarTo && !compact ? <HandToolbar run={run} streamId={streamId} actions={actions} to={props.toolbarTo} /> : null}
-        <LensBody {...props} actions={actions} />
+        {props.toolbarTo && !compact ? <HandToolbar run={run} streamId={streamId} actions={actions} marks={marks} to={props.toolbarTo} /> : null}
+        {!compact && !props.toolbarTo ? <MarksBar run={run} actions={actions} marks={marks} /> : null}
+        <LensBody {...props} actions={actions} marks={marks} />
       </>
     );
   }
@@ -124,8 +141,61 @@ export function LensResultView(props: LensResultViewProps) {
     <div>
       {confirm}
       {form}
-      <LensToolbar run={run} streamId={streamId} actions={actions} />
-      <LensBody {...props} actions={actions} />
+      <LensToolbar run={run} streamId={streamId} actions={actions} marks={marks} />
+      <LensBody {...props} actions={actions} marks={marks} />
+    </div>
+  );
+}
+
+/** The rows a person has marked (`rowInteract.ts`): their keys in the
+ *  entry's history state, per lens, so Back keeps them; and where a
+ *  Shift+click range starts. */
+interface Marks {
+  keys: string[];
+  anchor: number | null;
+  set(keys: string[], anchor: number | null): void;
+}
+
+const NO_MARKS: { keys: string[]; anchor: number | null } = { keys: [], anchor: null };
+
+function useMarks(run: LensRun): Marks {
+  const [state, setState] = useHistoryState(`marked:${run.lens.id}`, NO_MARKS);
+  return { keys: state.keys, anchor: state.anchor, set: (keys, anchor) => setState({ keys, anchor }) };
+}
+
+/** The marked rows of `run`, in its order, as records. */
+function markedRecords(run: LensRun, marks: Marks): Record<string, SqlCell>[] {
+  const set = new Set(marks.keys);
+  return run.result.rows.filter((r) => set.has(rowKey(r))).map((r) => rowRecord(run.result.columns, r));
+}
+
+/** The bulk actions (`bulk: true`) the marked rows are offered: an action
+ *  any of them is offered (`when`), run on those. */
+function bulkOffers(run: LensRun, marked: Record<string, SqlCell>[]): { action: LensAction; rows: Record<string, SqlCell>[] }[] {
+  return run.lens.actions
+    .filter((a) => a.bulk)
+    .map((action) => ({ action, rows: marked.filter((r) => actionOffered(action, r)) }))
+    .filter((o) => o.rows.length > 0);
+}
+
+/** While rows are marked: how many, the bulk actions, and Clear — in place
+ *  of the lens's own buttons. */
+function MarksBar({ run, actions, marks }: { run: LensRun; actions: LensActionsState; marks: Marks }) {
+  const marked = markedRecords(run, marks);
+  if (marked.length === 0) return null;
+  return (
+    <div data-testid="lens-marks" style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 6, marginBottom: 6 }}>
+      <span data-testid="lens-marks-count" style={{ color: "var(--text-secondary)" }}>
+        {marked.length} selected
+      </span>
+      {bulkOffers(run, marked).map(({ action, rows }) => (
+        <button key={action.id} type="button" data-testid={`lens-bulk-${action.id}`} disabled={actions.busy !== null} title={action.command} onClick={() => actions.runMany(action, rows)}>
+          {actions.busy === action.id ? `${action.label}…` : action.label}
+        </button>
+      ))}
+      <button type="button" data-testid="lens-marks-clear" onClick={() => marks.set([], null)}>
+        Clear
+      </button>
     </div>
   );
 }
@@ -172,28 +242,52 @@ function useOpenAfter() {
 
 /** Pressing a lens's actions, with the confirmation a command may ask
  *  for held until the person answers. */
+/** One run of an action: the row it runs on, and where a dragged row
+ *  landed. A bulk action or a drop of several rows is several. */
+interface Press {
+  row: Record<string, SqlCell> | null;
+  drop: Drop | null;
+}
+
 function useLensActions(run: LensRun, streamId: string | null) {
   const openAfter = useOpenAfter();
   const [busy, setBusy] = useState<string | null>(null);
-  const [pending, setPending] = useState<{
-    action: LensAction;
-    row: Record<string, SqlCell> | null;
-    details: string[];
-  } | null>(null);
+  // A command that asks: what it asks about, and the runs that wait on the
+  // answer (one confirmation for a bulk action's runs).
+  const [pending, setPending] = useState<{ action: LensAction; presses: Press[]; details: string[] } | null>(null);
   // A form action pressed: its form is open until it runs or is closed.
   const [form, setForm] = useState<{ action: LensAction; row: Record<string, SqlCell> | null } | null>(null);
   const deps = {
-    runLensAction,
+    runLensAction: (
+      id: string,
+      action: string,
+      params: Record<string, SqlCell>,
+      row: Record<string, SqlCell> | null,
+      stream: string | null,
+      confirmed: boolean,
+      drop?: Drop | null,
+    ) => runLensAction(id, action, params, row, stream, confirmed, null, drop ?? null),
     toast: (message: string, undo?: () => void) => showToast({ message, onUndo: undo }),
     // The person's click on Undo is their confirmation of it.
     undo: (auditId: number) => undoCommand(auditId, true),
     ...openAfter,
   };
-  const press = async (action: LensAction, row: Record<string, SqlCell> | null, confirmed: boolean) => {
+  // The runs in order; a run that asks stops them, the rest waiting on
+  // the person's answer. Only the last says it's done (one toast).
+  const press = async (action: LensAction, presses: Press[], confirmed: boolean) => {
     setBusy(action.id);
     try {
-      const outcome = await performLensAction(action, run, row, streamId, confirmed, deps);
-      setPending(typeof outcome === "object" ? { action, row, details: outcome.confirm } : null);
+      for (let i = 0; i < presses.length; i++) {
+        const p = presses[i]!;
+        const quiet = i < presses.length - 1 ? { ...deps, toast: () => {} } : deps;
+        const outcome = await performLensAction(action, run, p.row, streamId, confirmed, quiet, p.drop);
+        if (typeof outcome === "object") {
+          setPending({ action, presses: presses.slice(i), details: outcome.confirm });
+          return;
+        }
+        if (outcome === "failed") break;
+      }
+      setPending(null);
     } finally {
       setBusy(null);
     }
@@ -205,10 +299,14 @@ function useLensActions(run: LensRun, streamId: string | null) {
     closeForm: () => setForm(null),
     run: (action: LensAction, row: Record<string, SqlCell> | null) => {
       if (action.form) setForm({ action, row });
-      else void press(action, row, false);
+      else void press(action, [{ row, drop: null }], false);
     },
+    /** A bulk action on the marked rows, once each, in order. */
+    runMany: (action: LensAction, rows: Record<string, SqlCell>[]) => void press(action, rows.map((row) => ({ row, drop: null })), false),
+    /** A drag action for each dropped row, with where it landed. */
+    runDrops: (action: LensAction, presses: Press[]) => void press(action, presses, false),
     confirm: () => {
-      if (pending) void press(pending.action, pending.row, true);
+      if (pending) void press(pending.action, pending.presses, true);
     },
     cancel: () => setPending(null),
   };
@@ -218,14 +316,35 @@ type LensActionsState = ReturnType<typeof useLensActions>;
 
 /** The toolbar's actions as the page's: Copy, Add to Agent Context and
  *  the whole-lens actions, handed up whenever what they say changes. */
-function HandToolbar({ run, streamId, actions, to }: { run: LensRun; streamId: string | null; actions: LensActionsState; to(actions: PageAction[]): void }) {
+function HandToolbar({ run, streamId, actions, marks, to }: { run: LensRun; streamId: string | null; actions: LensActionsState; marks: Marks; to(actions: PageAction[]): void }) {
   const [copied, setCopied] = useState(false);
   const buttons = run.lens.actions.filter((a) => !a.row && !a.group);
   const toRef = useRef(to);
   toRef.current = to;
   const pressRef = useRef(actions.run);
   pressRef.current = actions.run;
+  const manyRef = useRef(actions.runMany);
+  manyRef.current = actions.runMany;
+  const marksRef = useRef(marks);
+  marksRef.current = marks;
+  const marked = markedRecords(run, marks);
+  const markedKey = marks.keys.join("\u0000");
   useEffect(() => {
+    // While rows are marked, the page's actions are what runs on them.
+    if (marked.length > 0) {
+      toRef.current([
+        ...bulkOffers(run, marked).map(({ action, rows }) => ({
+          id: `lens-bulk-${action.id}`,
+          label: `${action.label} (${rows.length})`,
+          title: action.command,
+          busy: actions.busy === action.id,
+          disabled: actions.busy !== null && actions.busy !== action.id,
+          run: () => manyRef.current(action, rows),
+        })),
+        { id: "lens-marks-clear", label: `Clear selection (${marked.length})`, run: () => marksRef.current.set([], null) },
+      ]);
+      return;
+    }
     toRef.current([
       {
         id: "lens-copy",
@@ -253,17 +372,18 @@ function HandToolbar({ run, streamId, actions, to }: { run: LensRun; streamId: s
         run: () => pressRef.current(a, null),
       })),
     ]);
-    // `buttons` follows `run`.
+    // `buttons` and `marked` follow `run` and `markedKey`.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [run, streamId, copied, actions.busy]);
+  }, [run, streamId, copied, actions.busy, markedKey]);
   return null;
 }
 
 /** Copy, Add to Agent Context, and the lens's whole-lens actions (a row's
  *  are in its menu, a group's in its heading). */
-function LensToolbar({ run, streamId, actions }: { run: LensRun; streamId: string | null; actions: LensActionsState }) {
+function LensToolbar({ run, streamId, actions, marks }: { run: LensRun; streamId: string | null; actions: LensActionsState; marks: Marks }) {
   const [copied, setCopied] = useState(false);
   const buttons = run.lens.actions.filter((a) => !a.row && !a.group);
+  if (markedRecords(run, marks).length > 0) return <MarksBar run={run} actions={actions} marks={marks} />;
   return (
     <>
     <div data-testid="lens-actions" style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 6, marginBottom: 6 }}>
@@ -305,7 +425,7 @@ function LensToolbar({ run, streamId, actions }: { run: LensRun; streamId: strin
   );
 }
 
-function LensBody(props: LensResultViewProps & { actions?: LensActionsState }) {
+function LensBody(props: LensResultViewProps & { actions?: LensActionsState; marks?: Marks }) {
   const { run, onOpenPage, streamId = null } = props;
   // It needs a capability that isn't active: it didn't run, and says what
   // it needs rather than showing nothing.
@@ -340,7 +460,8 @@ function RowsBody({
   onCustomReady,
   componentView = null,
   onSetParam,
-}: LensResultViewProps & { actions?: LensActionsState }) {
+  marks,
+}: LensResultViewProps & { actions?: LensActionsState; marks?: Marks }) {
   const lens = run.lens;
   const result = limitRows(run.result, maxRows);
   const picks = rowPicks(run, onSetParam);
@@ -352,6 +473,13 @@ function RowsBody({
   // (both this step's history state).
   const folded = useCollapsedSet("lens-groups.closed");
   const expanded = useCollapsedSet("lens-rows.expanded");
+  // A drag is taken only by the view its rows came from; where one would
+  // land shows on the row (or group) under it.
+  const dragToken = useId();
+  // Where a Shift+click range starts before anything is marked: the last
+  // row clicked (kept here, so a plain click writes no history).
+  const clickedRef = useRef<number | null>(null);
+  const [dropHint, setDropHint] = useState<{ key: string; zone: string } | null>(null);
   // The rows in drawing order and the cursor over them: ↑/↓ move it, Enter
   // opens the row's link or runs its first row action (`useListNav`).
   let drawn: SqlCell[][] = result.rows;
@@ -519,32 +647,146 @@ function RowsBody({
       }
       ctxMenu.openForKey(e, rowItems(row));
     },
-    ...(picks
-      ? {
-          onClick: (e: React.MouseEvent) => {
-            if ((e.target as Element).closest("a, button, input, select, textarea")) return;
-            picks.pick(row);
-          },
-          "aria-selected": picks.selected(row),
-        }
-      : primaryOf
-        ? {
-            onClick: (e: React.MouseEvent) => {
-              const primary = primaryOf(row);
-              if (!primary || (e.target as Element).closest("a, button, input, select, textarea")) return;
-              actions?.run(primary, rowRecord(result.columns, row));
-            },
-          }
-        : {}),
+    // Cmd/Ctrl+click marks the row, Shift+click the range to it; a plain
+    // click clears the marks, then picks or runs the primary action.
+    onClick: (e: React.MouseEvent) => {
+      const index = drawnKeys.indexOf(rowKey(row));
+      if (marks && (e.metaKey || e.ctrlKey || e.shiftKey)) {
+        e.preventDefault();
+        const anchor = marks.anchor ?? clickedRef.current;
+        const next = marksAfterClick(marks.keys, drawnKeys, index, anchor, { toggle: e.metaKey || e.ctrlKey, range: e.shiftKey });
+        marks.set(next.marks, next.anchor);
+        return;
+      }
+      if ((e.target as Element).closest("a, button, input, select, textarea")) return;
+      clickedRef.current = index;
+      if (marks && marks.keys.length > 0) marks.set([], null);
+      if (picks) {
+        picks.pick(row);
+        return;
+      }
+      const primary = primaryOf(row);
+      if (primary) actions?.run(primary, rowRecord(result.columns, row));
+    },
+    ...(picks ? { "aria-selected": picks.selected(row) } : {}),
   });
-  // A list, table or tree row: dragged into the agent's context when it
-  // links somewhere, highlighted by `emphasis`, indented by `depth`.
+  // A grouped list or table: its headings, each with its group's actions.
+  const groups = rowGroups(lens, result);
+  drawn = groups ? groups.filter((g) => !folded.has(g.key)).flatMap((g) => g.rows) : result.rows;
+  const drawnAt = new Map(drawn.map((r, i) => [r, i] as const));
+  // Marks, drags and keys (`rowInteract.ts`).
+  const drawnKeys = drawn.map(rowKey);
+  const marked = marks ? shownMarks(marks.keys, drawnKeys) : [];
+  const markedSet = new Set(marked);
+  const recordOf = (row: SqlCell[]) => rowRecord(result.columns, row);
+  const dragActions = lens.actions.filter((a) => a.drag);
+  const onto = takesOnto(dragActions);
+  const byIndex = lens.group ? result.columns.indexOf(lens.group.by) : -1;
+  const groupOf = (row: SqlCell[]): SqlCell => (byIndex === -1 ? null : (row[byIndex] ?? null));
+  const sameGroup = (a: SqlCell[], b: SqlCell[]) => byIndex === -1 || groupOf(a) === groupOf(b);
+  // A marked row drags every marked row with it.
+  const draggedWith = (row: SqlCell[]) => (markedSet.has(rowKey(row)) ? drawn.filter((r) => markedSet.has(rowKey(r))) : [row]);
+  const carriesRows = (e: React.DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes(LENS_ROW_DRAG_MIME);
+  const readDrag = (e: React.DragEvent): SqlCell[][] | null => {
+    try {
+      const p = JSON.parse(e.dataTransfer.getData(LENS_ROW_DRAG_MIME)) as { token?: unknown; keys?: unknown };
+      if (p.token !== dragToken || !Array.isArray(p.keys)) return null;
+      const keys = new Set(p.keys as string[]);
+      return drawn.filter((r) => keys.has(rowKey(r)));
+    } catch {
+      return null;
+    }
+  };
+  // The drag action the drop runs, once per dragged row, each landing
+  // after the one before it.
+  const dropRows = (dragged: SqlCell[][], at: DropAt) => {
+    const records = dragged.map(recordOf);
+    const first = records[0];
+    const action = first ? dragActionFor(dragActions, first, at) : null;
+    if (!action || !actions) return;
+    actions.runDrops(action, chainedDrops(at, records).map((drop, i) => ({ row: records[i]!, drop })));
+  };
+  const rowDrop = (row: SqlCell[]): Record<string, unknown> => {
+    if (dragActions.length === 0) return {};
+    const key = rowKey(row);
+    const zoneOf = (e: React.DragEvent) => {
+      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      return dropZone(e.clientY, rect.top, rect.height, onto);
+    };
+    return {
+      "data-drop": dropHint?.key === key ? dropHint.zone : undefined,
+      onDragOver: (e: React.DragEvent) => {
+        if (!carriesRows(e)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const zone = zoneOf(e);
+        if (dropHint?.key !== key || dropHint.zone !== zone) setDropHint({ key, zone });
+      },
+      onDragLeave: () => setDropHint((h) => (h?.key === key ? null : h)),
+      onDrop: (e: React.DragEvent) => {
+        if (!carriesRows(e)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        setDropHint(null);
+        const dragged = readDrag(e);
+        if (!dragged || dragged.some((r) => rowKey(r) === key)) return;
+        const away = new Set(dragged.map(rowKey));
+        const list = drawn.filter((r) => sameGroup(r, row) && !away.has(rowKey(r)));
+        dropRows(dragged, dropBeside(list.map(recordOf), list.indexOf(row), zoneOf(e), groupOf(row)));
+      },
+    };
+  };
+  // A group's heading, or a board column: a drop there lands at its end.
+  const groupDrop = (g: RowGroup): Record<string, unknown> => {
+    if (dragActions.length === 0) return {};
+    const key = `group:${g.key}`;
+    return {
+      "data-drop": dropHint?.key === key ? "in" : undefined,
+      onDragOver: (e: React.DragEvent) => {
+        if (!carriesRows(e)) return;
+        e.preventDefault();
+        if (dropHint?.key !== key) setDropHint({ key, zone: "in" });
+      },
+      onDragLeave: (e: React.DragEvent) => {
+        if ((e.currentTarget as HTMLElement).contains(e.relatedTarget as Node | null)) return;
+        setDropHint((h) => (h?.key === key ? null : h));
+      },
+      onDrop: (e: React.DragEvent) => {
+        if (!carriesRows(e)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        setDropHint(null);
+        const dragged = readDrag(e);
+        if (!dragged) return;
+        const away = new Set(dragged.map(rowKey));
+        dropRows(dragged, dropInGroup(g.rows.filter((r) => !away.has(rowKey(r))).map(recordOf), g.value));
+      },
+    };
+  };
+  // A list, table or tree row: dragged where a drag action runs, or into
+  // the agent's context when it links somewhere; marked; highlighted by
+  // `emphasis`, indented by `depth`.
   const rowLook: RowLook = (row) => {
     const ref = rowContextRef(lens, result.columns, row);
     const emphasized = rowEmphasized(lens, result.columns, row);
+    const drags = dragActions.some((a) => actionOffered(a, recordOf(row)));
     return {
       props: {
-        ...(ref ? { draggable: true, onDragStart: (e: React.DragEvent) => setContextRefDrag(e, ref) } : {}),
+        ...(ref || drags
+          ? {
+              draggable: true,
+              onDragStart: (e: React.DragEvent) => {
+                if (ref) setContextRefDrag(e, ref);
+                if (drags) {
+                  e.dataTransfer.setData(LENS_ROW_DRAG_MIME, JSON.stringify({ token: dragToken, keys: draggedWith(row).map(rowKey) }));
+                  e.dataTransfer.effectAllowed = ref ? "copyMove" : "move";
+                }
+              },
+              onDragEnd: () => setDropHint(null),
+            }
+          : {}),
+        ...rowDrop(row),
+        ...(markedSet.has(rowKey(row)) ? { "data-marked": "true" } : {}),
         ...(emphasized ? { "data-emphasis": "true" } : {}),
       },
       emphasized,
@@ -553,11 +795,8 @@ function RowsBody({
       selected: picks?.selected(row) ?? false,
     };
   };
-  // A grouped list or table: its headings, each with its group's actions.
-  const groups = rowGroups(lens, result);
-  drawn = groups ? groups.filter((g) => !folded.has(g.key)).flatMap((g) => g.rows) : result.rows;
-  const drawnAt = new Map(drawn.map((r, i) => [r, i] as const));
   const heading = (g: RowGroup) => (
+    <div {...groupDrop(g)}>
     <GroupHeading
       group={g}
       open={!folded.has(g.key)}
@@ -567,6 +806,7 @@ function RowsBody({
       onAction={(a) => actions?.run(a, null)}
       onOpenPage={onOpenPage}
     />
+    </div>
   );
   // Under a row: the lens each of its open `expand` columns names, run
   // with the row's values.
@@ -586,6 +826,7 @@ function RowsBody({
     folded: (g) => folded.has(g.key),
     detail,
     heading,
+    groupDrop,
     rowLook,
     cursor: {
       // The list takes the keys itself: a row's own (Enter that picks, the
@@ -594,6 +835,30 @@ function RowsBody({
         tabIndex: 0,
         onKeyDown: (e) => {
           if (e.defaultPrevented || (e.target as Element).closest("input, select, textarea")) return;
+          const at = drawn[rowNav.cursor];
+          // Space marks the cursor row; Escape clears the marks.
+          if (marks && e.key === " " && at) {
+            e.preventDefault();
+            const next = marksAfterClick(marks.keys, drawnKeys, rowNav.cursor, marks.anchor, { toggle: true, range: false });
+            marks.set(next.marks, next.anchor);
+            return;
+          }
+          if (marks && e.key === "Escape" && marked.length > 0) {
+            e.preventDefault();
+            e.stopPropagation();
+            marks.set([], marks.anchor);
+            return;
+          }
+          // A row action's key: on the marked rows when it is a bulk one
+          // and some are marked, else on the cursor row.
+          const keyed = e.metaKey || e.ctrlKey || e.altKey ? null : keyAction(lens.actions, e.key);
+          if (keyed && actions) {
+            e.preventDefault();
+            const targets = keyed.bulk && marked.length > 0 ? drawn.filter((r) => markedSet.has(rowKey(r))) : at ? [at] : [];
+            const records = targets.map(recordOf).filter((r) => actionOffered(keyed, r));
+            if (records.length > 0) actions.runMany(keyed, records);
+            return;
+          }
           rowNav.keyProps.onKeyDown(e);
         },
       },
@@ -650,6 +915,8 @@ interface RowsView {
   /** What a row opens under itself (its `expand` lenses), if anything. */
   detail(row: SqlCell[], index: number): ReactNode;
   heading(g: RowGroup): ReactNode;
+  /** A drop target for a whole group (a board column). */
+  groupDrop(g: RowGroup): Record<string, unknown>;
   rowLook: RowLook;
   /** The keyboard cursor over the drawn rows (list and table). */
   cursor: {
@@ -809,6 +1076,8 @@ function LensViz({
       return <DiffViz spec={diffRow(lens, result)} streamId={streamId} onOpenPage={onOpenPage} />;
     case "list":
       return <ListViz rows={result.rows} cols={cols} cell={cell} rowMenu={rowMenu} view={rowsView} />;
+    case "board":
+      return <BoardViz rows={result.rows} cols={cols} cell={cell} rowMenu={rowMenu} view={rowsView} />;
     case "custom":
       return (
         <CustomComponentViz
@@ -1458,6 +1727,54 @@ function ListViz({ rows, cols, cell, rowMenu, view }: RowsVizProps) {
         ))}
       </ul>
     </>
+  );
+}
+
+/** `board`: a column per group (its `values` first, empty ones too), its
+ *  heading over its cards; a card is a list row — the same marks, menu,
+ *  keys and drags — and a drop on a column's empty space lands at its
+ *  end. */
+function BoardViz({ rows, cols, cell, rowMenu, view }: RowsVizProps) {
+  const [head, ...rest] = cols;
+  const index = new Map(rows.map((r, i) => [r, i] as const));
+  return (
+    <div data-testid="lens-board" className="ox-board" {...(view?.cursor.listProps as React.HTMLAttributes<HTMLDivElement>)}>
+      {(view?.groups ?? []).map((g) => (
+        <section key={g.key} data-testid={`lens-board-column-${g.key}`} className="ox-board-column" {...view?.groupDrop(g)}>
+          {view?.heading(g)}
+          <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+            {(view?.folded(g) ? [] : g.rows).map((row) => {
+              const i = index.get(row) ?? 0;
+              const look = view?.rowLook(row) ?? noLook;
+              return (
+                <li
+                  key={i}
+                  data-testid={`lens-row-${i}`}
+                  className="ox-card"
+                  data-cursor={view?.cursor.isCursor(row) ? "true" : undefined}
+                  onMouseEnter={() => view?.cursor.point(row)}
+                  style={look.emphasized || look.selected ? emphasisStyle : undefined}
+                  {...rowMenu(row)}
+                  {...look.props}
+                >
+                  <div>{head ? cell(row, head) : null}</div>
+                  {rest.length > 0 ? (
+                    <div style={{ color: "var(--text-secondary)", fontSize: "var(--text-sm)" }}>
+                      {rest.map((c, j) => (
+                        <span key={c.key}>
+                          {j > 0 ? " · " : null}
+                          {cell(row, c)}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      ))}
+    </div>
   );
 }
 

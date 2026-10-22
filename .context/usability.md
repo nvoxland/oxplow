@@ -735,6 +735,18 @@ declaring *what it is* and mounting the generic layer.
 - **Common muscle memory:** Cmd/Ctrl+S save, Cmd/Ctrl+F find,
   Cmd/Ctrl+P quick open, Cmd/Ctrl+Shift+N new task. Don't
   collide with these.
+- **Rows: marks, drags and keys** (every lens row viz, `lens/rowInteract.ts`;
+  the Plan pane below follows the same rules by hand until Tasks is a
+  lens). Cmd/Ctrl+click toggles a row's mark, Shift+click marks the range
+  from the last row clicked, Space toggles the cursor row, Escape clears
+  the marks, a plain click clears them. A marked row has a stripe and a
+  tint (`[data-marked]`). While rows are marked the marks bar ("N
+  selected", the bulk actions, Clear) stands in for the lens's buttons.
+  Dragging a marked row drags every marked row. A drop's place shows as a
+  line above or below the row, or the row or group outlined
+  (`[data-drop]`). A row action's `key:` runs it on the cursor row (or
+  the marked rows). Marks are per lens and kept in the entry's history
+  state, so Back keeps them.
 - **Plan pane: single-click selects a task row (keyboard
   cursor); double-click opens the edit modal.** Enter also opens the
   modal for the selected row. Cmd/Ctrl+click toggles the mark set;
@@ -924,7 +936,8 @@ declaring *what it is* and mounting the generic layer.
   lives in `apps/desktop/src/dragMimes.ts`** — `WORK_ITEM_DRAG_MIME` (list
   rows and Board cards: reorder, restate, multi-select moves),
   `CONTEXT_REF_MIME` ("Add to agent
-  context"), `RAIL_SECTION_DRAG_MIME` (RailHud section reorder). Add a new
+  context"), `RAIL_SECTION_DRAG_MIME` (RailHud section reorder),
+  `LENS_ROW_DRAG_MIME` (a lens's rows, to where a drag action runs). Add a new
   MIME there rather than overloading an existing one, and rather than
   declaring a `const` next to the component that introduced it: that was
   the old shape, and one task MIME ended up defined twice

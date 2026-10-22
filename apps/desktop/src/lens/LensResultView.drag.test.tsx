@@ -1,0 +1,187 @@
+import { afterEach, expect, mock, test } from "bun:test";
+import { cleanup, createEvent, fireEvent, render, waitFor } from "@testing-library/react";
+
+import type { Lens, LensAction, LensRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
+import { LENS_ROW_DRAG_MIME } from "../dragMimes.js";
+
+// A lens's rows drag to where a drag action runs, mark for a bulk action,
+// and run a row action from its key; a board is columns of them.
+
+const realApi = await import("../api.js");
+const ran: { action: string; row: unknown; drop: unknown; confirmed: boolean }[] = [];
+mock.module("../api.js", () => ({
+  ...realApi,
+  runLensAction: async (_id: string, action: string, _params: unknown, row: unknown, _s: unknown, confirmed: boolean, _input: unknown, drop: unknown) => {
+    ran.push({ action, row, drop, confirmed });
+    return { result: null, audit_id: 1, event_id: null, inverse: null };
+  },
+  listExtensions: async () => [],
+  querySql: async () => ({ columns: [], rows: [], truncated: false, reads: { models: [], tables: [], measures: [] }, freshness: {} }),
+}));
+const { LensResultView } = await import("./LensResultView.js");
+
+afterEach(() => {
+  cleanup();
+  ran.length = 0;
+});
+
+const action = (over: Partial<LensAction>): LensAction =>
+  ({ id: "x", label: "X", command: "oxplow.work_item.transition", input: {}, row: true, group: null, form: false, fixed: [], choices: {}, then: "open", when: null, primary: false, drag: false, bulk: false, key: null, ...over }) as LensAction;
+
+const move = action({ id: "move", label: "Move", drag: true, input: { uri: "{{row.uri}}", to: "{{group.value}}" } });
+const reorder = action({ id: "reorder", label: "Reorder", command: "oxplow.work_item.reorder", drag: true, input: { uri: "{{row.uri}}", before: "{{before.uri}}", after: "{{after.uri}}" } });
+const finish = action({ id: "finish", label: "Finish", bulk: true, key: "f", input: { uri: "{{row.uri}}", to: "done" } });
+
+const base = {
+  id: "x/work",
+  extension: "x",
+  slug: "work",
+  title: "Work",
+  description: "",
+  query: "",
+  viz: "list",
+  params: [],
+  columns: [{ key: "title", label: null, link: null, unit: null, icon: null, tone: null }],
+  empty: null,
+  chart: null,
+  tree: null,
+  timeline: null,
+  steps: null,
+  hunks: null,
+  code: null,
+  diff: null,
+  form: null,
+  custom: null,
+  group: null,
+  emphasis: null,
+  depth: null,
+  parts: [],
+  launcherCategory: null,
+  hidden: false,
+  actions: [],
+  alert: null,
+  needs: [],
+  origin: { extension: "", source: null, running: "", deployment: null, bundled: false },
+};
+const columns = ["uri", "title", "state"];
+const rows: SqlCell[][] = [
+  ["u1", "One", "todo"],
+  ["u2", "Two", "todo"],
+  ["u3", "Three", "done"],
+];
+const runOf = (lens: Partial<Lens>): LensRun =>
+  ({ lens: { ...base, ...lens }, params: {}, result: { columns, rows, truncated: false, reads: { models: [], tables: [], measures: [] } } }) as unknown as LensRun;
+const record = (i: number) => ({ uri: rows[i]![0], title: rows[i]![1], state: rows[i]![2] });
+
+/** A drag that carries what each `setData` set, for the drop to read. */
+function drag(from: HTMLElement) {
+  const data: Record<string, string> = {};
+  const dataTransfer = {
+    setData: (k: string, v: string) => (data[k] = v),
+    getData: (k: string) => data[k] ?? "",
+    get types() {
+      return Object.keys(data);
+    },
+    effectAllowed: "",
+    dropEffect: "",
+  };
+  fireEvent.dragStart(from, { dataTransfer });
+  return {
+    data,
+    dropOn(to: HTMLElement, y = 0) {
+      // The DOM here keeps no `clientY` on a drag event: set it.
+      for (const make of [createEvent.dragOver, createEvent.drop]) {
+        const ev = make(to, { dataTransfer });
+        Object.defineProperty(ev, "clientY", { value: y });
+        fireEvent(to, ev);
+      }
+    },
+  };
+}
+
+/** `el` as a 30px-tall row at the top, so a drop's height picks its zone. */
+function tall(el: HTMLElement): HTMLElement {
+  el.getBoundingClientRect = () => ({ top: 0, height: 30, bottom: 30, left: 0, right: 100, width: 100, x: 0, y: 0, toJSON: () => ({}) });
+  return el;
+}
+
+test("a row with a drag action drags; dropped beside another, the action runs with its neighbours, a missing one left out", async () => {
+  const view = render(<LensResultView run={runOf({ actions: [reorder] })} onOpenPage={() => {}} />);
+  const first = view.getByTestId("lens-row-0");
+  expect(first.getAttribute("draggable")).toBe("true");
+  const d = drag(view.getByTestId("lens-row-2"));
+  expect(JSON.parse(d.data[LENS_ROW_DRAG_MIME]!).keys).toHaveLength(1);
+  // The top half of the first row: before it, nothing above.
+  d.dropOn(tall(first), 5);
+  await waitFor(() => expect(ran).toHaveLength(1));
+  expect(ran[0]).toEqual({ action: "reorder", row: record(2), drop: { before: record(0), after: null, onto: null, group: null }, confirmed: false });
+  // The bottom half of the second row: after it, before the one below (the dragged row left out).
+  ran.length = 0;
+  drag(view.getByTestId("lens-row-0")).dropOn(tall(view.getByTestId("lens-row-1")), 25);
+  await waitFor(() => expect(ran).toHaveLength(1));
+  expect(ran[0]!.drop).toEqual({ before: record(2), after: record(1), onto: null, group: null });
+});
+
+test("a row without a drag action isn't draggable, and a drop on it runs nothing", async () => {
+  const view = render(<LensResultView run={runOf({ actions: [finish] })} onOpenPage={() => {}} />);
+  expect(view.getByTestId("lens-row-0").getAttribute("draggable")).toBeNull();
+});
+
+test("a drop on a group's heading runs the action that binds the group, at its end", async () => {
+  const view = render(<LensResultView run={runOf({ group: { by: "state", link: null, values: [] }, actions: [move] })} onOpenPage={() => {}} />);
+  const headings = view.getAllByTestId("lens-group-heading");
+  drag(view.getByTestId("lens-row-0")).dropOn(headings[1]!.parentElement!);
+  await waitFor(() => expect(ran).toHaveLength(1));
+  expect(ran[0]).toMatchObject({ action: "move", row: record(0), drop: { group: "done", after: record(2) } });
+});
+
+test("Cmd+click and Shift+click mark rows; the marks bar runs a bulk action once per row, in order; Clear clears", async () => {
+  const view = render(<LensResultView run={runOf({ actions: [finish] })} onOpenPage={() => {}} />);
+  fireEvent.click(view.getByTestId("lens-row-0"), { metaKey: true });
+  fireEvent.click(view.getByTestId("lens-row-2"), { shiftKey: true });
+  expect(["lens-row-0", "lens-row-1", "lens-row-2"].map((id) => view.getByTestId(id).getAttribute("data-marked"))).toEqual(["true", "true", "true"]);
+  expect(view.getByTestId("lens-marks-count").textContent).toBe("3 selected");
+  fireEvent.click(view.getByTestId("lens-bulk-finish"));
+  await waitFor(() => expect(ran.map((r) => r.row)).toEqual([record(0), record(1), record(2)]));
+  fireEvent.click(view.getByTestId("lens-marks-clear"));
+  expect(view.queryByTestId("lens-marks")).toBeNull();
+  expect(view.getByTestId("lens-row-0").getAttribute("data-marked")).toBeNull();
+});
+
+test("dragging a marked row carries every marked row, and they land in order", async () => {
+  const view = render(<LensResultView run={runOf({ actions: [reorder] })} onOpenPage={() => {}} />);
+  fireEvent.click(view.getByTestId("lens-row-1"), { metaKey: true });
+  fireEvent.click(view.getByTestId("lens-row-2"), { metaKey: true });
+  const d = drag(view.getByTestId("lens-row-1"));
+  expect(JSON.parse(d.data[LENS_ROW_DRAG_MIME]!).keys).toHaveLength(2);
+  d.dropOn(tall(view.getByTestId("lens-row-0")), 5);
+  await waitFor(() => expect(ran).toHaveLength(2));
+  expect(ran.map((r) => [r.row, r.drop])).toEqual([
+    [record(1), { before: record(0), after: null, onto: null, group: null }],
+    [record(2), { before: record(0), after: record(1), onto: null, group: null }],
+  ]);
+});
+
+test("a row action's key runs it on the cursor row; Space marks it, Escape clears the marks", async () => {
+  const view = render(<LensResultView run={runOf({ actions: [finish] })} onOpenPage={() => {}} />);
+  const list = view.getByTestId("lens-list");
+  fireEvent.keyDown(list, { key: "ArrowDown" });
+  fireEvent.keyDown(list, { key: "f" });
+  await waitFor(() => expect(ran.map((r) => r.row)).toEqual([record(1)]));
+  fireEvent.keyDown(list, { key: " " });
+  expect(view.getByTestId("lens-row-1").getAttribute("data-marked")).toBe("true");
+  fireEvent.keyDown(list, { key: "Escape" });
+  expect(view.getByTestId("lens-row-1").getAttribute("data-marked")).toBeNull();
+});
+
+test("a board is a column per group, its values first and empty ones too; a drop on an empty column binds its value", async () => {
+  const view = render(
+    <LensResultView run={runOf({ viz: "board", group: { by: "state", link: null, values: ["todo", "doing", "done"] }, actions: [move] })} onOpenPage={() => {}} />,
+  );
+  const columnsShown = [...view.getByTestId("lens-board").querySelectorAll("section")].map((c) => c.getAttribute("data-testid"));
+  expect(columnsShown).toEqual(["lens-board-column-todo", "lens-board-column-doing", "lens-board-column-done"]);
+  expect(view.getByTestId("lens-board-column-todo").querySelectorAll(".ox-card")).toHaveLength(2);
+  drag(view.getByTestId("lens-row-0")).dropOn(view.getByTestId("lens-board-column-doing"));
+  await waitFor(() => expect(ran).toHaveLength(1));
+  expect(ran[0]).toMatchObject({ action: "move", row: record(0), drop: { group: "doing", after: null } });
+});

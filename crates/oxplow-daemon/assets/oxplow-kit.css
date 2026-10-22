@@ -95,6 +95,17 @@
 .ox-drag { cursor: grab; }
 .ox-dragging { opacity: 0.5; }
 .ox-drop-target { border: 1px dashed var(--accent); box-shadow: 0 0 0 2px var(--accent-soft-bg); }
+/* A lens's marked rows (Cmd/Ctrl+click, Shift+click, Space): a stripe and a tint. */
+[data-marked="true"] { box-shadow: inset 3px 0 0 var(--accent); background: var(--accent-soft-bg); }
+/* Where dragged rows would land: a line above or below a row, or the row or group itself. */
+[data-drop="before"] { box-shadow: inset 0 2px 0 var(--accent); }
+[data-drop="after"] { box-shadow: inset 0 -2px 0 var(--accent); }
+[data-drop="onto"], [data-drop="in"] { outline: 1px dashed var(--accent); outline-offset: -1px; background: var(--accent-soft-bg); }
+/* `board`: columns of cards. */
+.ox-board { display: flex; gap: var(--space-3); align-items: flex-start; overflow-x: auto; padding-bottom: var(--space-2); }
+.ox-board-column { flex: 0 0 260px; min-height: 120px; background: var(--surface-card); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: var(--space-2); }
+.ox-card { background: var(--surface-app); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: var(--space-2); margin-top: var(--space-2); cursor: grab; }
+.ox-board:focus-within .ox-card[data-cursor="true"] { border-color: var(--accent); }
 
 /* Tables: header in small secondary text, a rule under every row. A
    table with <col> widths is laid out fixed, so columns line up and a

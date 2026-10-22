@@ -5,7 +5,7 @@
 /// `.context/extensions.md`.
 import { formatContextMention } from "../agent-context-ref.js";
 import { IpcCallError, needsConfirmation } from "../ipc-error.js";
-import type { CommandOutcome, LensAction, LensRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
+import type { CommandOutcome, Drop, LensAction, LensRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
 
 export interface LensActionDeps {
   runLensAction(
@@ -15,6 +15,8 @@ export interface LensActionDeps {
     row: Record<string, SqlCell> | null,
     streamId: string | null,
     confirmed: boolean,
+    /** Where the dragged row landed, for a drag action. */
+    drop?: Drop | null,
   ): Promise<CommandOutcome>;
   /** A toast; with `undo`, it offers Undo. */
   toast(message: string, undo?: () => void): void;
@@ -60,9 +62,10 @@ export async function performLensAction(
   streamId: string | null,
   confirmed: boolean,
   deps: LensActionDeps,
+  drop: Drop | null = null,
 ): Promise<LensActionOutcome> {
   try {
-    const outcome = await deps.runLensAction(run.lens.id, action.id, run.params, row, streamId, confirmed);
+    const outcome = await deps.runLensAction(run.lens.id, action.id, run.params, row, streamId, confirmed, drop);
     // A run that came back undoable offers its Undo.
     const auditId = outcome.inverse && outcome.audit_id != null ? outcome.audit_id : null;
     deps.toast(`${action.label}: done.`, auditId === null ? undefined : () => void deps.undo(auditId).catch((e: unknown) => deps.recordError(`Undo ${action.label}`, e instanceof Error ? e.message : String(e))));
