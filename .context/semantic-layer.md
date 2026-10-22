@@ -532,6 +532,24 @@ rows are read when a query names the model.
   `parent`: `WHERE parent = :path` is one `read_dir`, not a walk. Both go
   through `workspace_files::list_workspace_paths`, so a folder's rows are
   the walk's rows for it (an ignored folder, or one under one, has none).
+- **Made on demand (stored models).** The stored-model twin of
+  "narrowed by the query" (`on_demand.rs`): a model names the columns
+  that, all pinned by a query's certain `<column> = <value>` conditions
+  (`sql_tokens::text_filters`, the same rule), ask for one thing; the
+  gateway has that thing stored before the query runs, when a run (not a
+  check) asks for it. `v_commit` and `v_commit_file` by `sha` (the full
+  id): `commit_indexer::ensure_commit` runs the workspace's scan first, so
+  a commit not yet reached is new history, indexed and logged
+  (`vcs.commit.indexed`, which lands efforts); one still missing is past
+  the horizon, stored and linked but not logged; one git doesn't know
+  reads no rows. `v_change` by `kind` and `target`
+  (`change_analysis::request`): the row is created now and its analysis
+  started in the background when the row is `pending` or its head moved,
+  so the query reads the change at once and what reads `v_change_*` reads
+  again when the analysis commits. A page names what it shows this way
+  (a commit document's `query:`), and so does an agent's `query_sql`. A
+  failure to make it is logged; the query reads what is stored. A gateway
+  with nothing bound (a check) makes nothing.
 - **Cheap, and current:** a read walks in-memory registries, a config file,
   the keychain, the stream store, a worktree's files (`v_zone`, and
   `v_workspace_file` unless the query names a folder, walk them on every
@@ -728,7 +746,7 @@ and `v_model_test` are the catalog of all of them:
 | `v_effort_metric_delta` | per effort, how each metric moved (baseline → current, `crossing`). **Stored, not a live query:** the metric engine computes it (`CollectionService::refresh_effort_evidence`) and `effort_evidence.rs` refreshes it on `effort.finished` (the `effort.evidence` pump consumer) and for every open effort as the **asset** `effort_evidence` (`OpenEffortEvidence`, P7.B6: its inputs `metric_capture`, `fact`, `effort_file` — not `agent_token_usage`, which it doesn't read: token counts reach it as facts; its own tables aren't, so it can't loop) — which also recomputes every **closed** effort whose runs or files moved since its rows were stored (`effort_evidence_state.attribution_sig`: a run collected late, an adoption's restamp); readers hear the rows move as `ModelsChanged` (V80). **A recompute reads what moved, not the effort's history** (`.context/performance.md` "Open-effort evidence"): it asks the effort's captures per producer and trigger (count, newest id), memoizes each spec on those of the producers it reads, folds a `sum` spec's new reports into a running total, and reads only the run captures for observations |
 | `v_effort_observation` | per effort, test runs / diff coverage / analysis rebuilt from its own run captures; refreshed the same way (V80). `seq` runs oldest first, so the highest is the latest — every reader takes `ORDER BY seq DESC` as newest. Diff coverage is start snapshot vs the capture's snapshot (collection.md). |
 | `v_change`, `v_change_file` (a `working` change's files say `staged` and `untracked`, restated by `change_reactor::watch_working_files` at boot and whenever the stream's refs or index move), `v_change_function`, `v_change_import`, `v_change_duplicate` | stored change analysis (see "Change analysis" below) (V81) |
-| `v_commit`, `v_commit_file`, `v_commit_work_item`, `v_branch`, `v_tag` | history, branches and tags (V85, V113). The commit indexer (`commit_indexer.rs`, run at boot and on each ref move, `RefMoves`) stores the commits reachable from **every stream's** head — new history whole, up to a 5000-commit horizon (`IndexDepth`) — through the VCS capability (`Vcs::log`/`revision`, `.context/vcs.md`) — with their files (first-parent diff) as it projects them into `page_ref`; `v_commit.parents` (JSON, v2) lets a stream's history be a recursive read from its branch's head. `v_commit_work_item` reads the indexer's work-item mention edges and the work-item → commit links (declared impacts, held effort work), for the active work list's items. `refresh_refs` restates `v_branch` (`is_default`, v2) and `v_tag` from `Vcs::branches`/`tags` and maps each local branch to the stream checked out on it. The desktop's history panel, dashboard lists, branch picker and new-stream form read these models (`apps/desktop/src/vcsHistory.ts`) |
+| `v_commit`, `v_commit_file`, `v_commit_work_item`, `v_branch`, `v_tag` | history, branches and tags (V85, V113). The commit indexer (`commit_indexer.rs`, run at boot and on each ref move, `RefMoves`) stores the commits reachable from **every stream's** head — new history whole, up to a 5000-commit horizon (`IndexDepth`), and any older commit a query names by `sha` ("Made on demand") — through the VCS capability (`Vcs::log`/`revision`, `.context/vcs.md`) — with their files (first-parent diff) as it projects them into `page_ref`; `v_commit.parents` (JSON, v2) lets a stream's history be a recursive read from its branch's head. `v_commit_work_item` reads the indexer's work-item mention edges and the work-item → commit links (declared impacts, held effort work), for the active work list's items. `refresh_refs` restates `v_branch` (`is_default`, v2) and `v_tag` from `Vcs::branches`/`tags` and maps each local branch to the stream checked out on it. The desktop's history panel, dashboard lists, branch picker and new-stream form read these models (`apps/desktop/src/vcsHistory.ts`) |
 | `v_test_case_stat` | each test's summary per stream, branch and producer (V139, tsk733): last status and duration, runs, failures, flips, last failed / passed, max and mean duration — updated with every run, the home of per-test history since a run writes change-only per-case facts |
 | `v_test_run`, `v_test_case` | test runs (V87), views only. A run IS its `metric_capture` (producer `tests`, or `test-run` for a run that measured nothing), and both views read its verbatim `test-detail` payload in `detail_json`: counts from the payload, cases by `json_each` over `suites[].cases[]`. Cases come from the payload, not the `oxplow.test_case` facts, because those are skipped while every tests metric is disabled. `effort_id` (v2) is the capture's own: the effort of the tool call that ran it. A run that only reported counts (`oxplow.test.record_run`) has no cases |
 | `v_thread_answer` | the lenses an agent showed on a thread (`oxplow_show_lens`, V124, P6.C1): `uri` `oxplow:oxplow/answer?id=<id>`, `thread_id`, `turn_id` / `effort_id` open when it was shown, `title`, either `lens` (an existing lens id) or `spec` (the `LensSpec` as JSON), `params`, `created_at`, and `kept_lens` once someone kept it (extensions.md → "Thread answers") |
@@ -1242,7 +1260,7 @@ demand). `crates/oxplow-app/src/change_analysis.rs`
 analyzes it and stores the rows behind `v_change*`; lenses (the
 oxplow-bundled change cards) only read them.
 
-- **Getting one.** `ensure_change(target)` (IPC and MCP; not hinted read-only, since it stores the analysis, tsk371) returns
+- **Getting one.** A query that names it, `SELECT id FROM v_change WHERE kind = 'commit' AND target = :sha` (or `kind = 'working' AND target = ''`, the query's stream), creates it and starts its analysis ("Made on demand" above): how a declared page gets its `change_id`. `ensure_change(target)` (IPC and MCP; not hinted read-only, since it stores the analysis) returns
   the `v_change` row, computing first if needed. It diffs its two
   revisions (`v_change.base_revision` → `head_revision`) through `Trees`
   (shared with the `diff` IPC, `.context/vcs.md`), reads the

@@ -309,6 +309,41 @@ pub enum Operand {
     Param(String),
 }
 
+/// [`equality_filters`] with each value as text: a literal's, or the text
+/// `params` binds its parameter to. A condition whose parameter is bound to
+/// something else, or to nothing, is left out: it narrows nothing.
+pub fn text_filters(
+    sql: &str,
+    view: &str,
+    columns: &[&str],
+    params: &crate::SqlParams,
+) -> Result<Vec<(String, String)>, DomainError> {
+    use crate::{SqlCell, SqlParams};
+    let value = |operand: Operand| -> Option<String> {
+        let cell = match operand {
+            Operand::Text(t) => return Some(t),
+            Operand::Param(p) => match params {
+                SqlParams::Positional(values) => {
+                    let n: usize = p.strip_prefix('?')?.parse().ok()?;
+                    values.get(n.checked_sub(1)?)?
+                }
+                SqlParams::Named(values) => {
+                    let bare = p.trim_start_matches([':', '@', '$']);
+                    &values.iter().find(|(n, _)| n == bare)?.1
+                }
+            },
+        };
+        match cell {
+            SqlCell::Text(t) => Some(t.clone()),
+            _ => None,
+        }
+    };
+    Ok(equality_filters(sql, view, columns)?
+        .into_iter()
+        .filter_map(|(column, operand)| Some((column, value(operand)?)))
+        .collect())
+}
+
 /// The `<column> = <value>` conditions every row `sql` reads of `view` must
 /// meet, for the `columns` asked about (the name as `columns` spells it) —
 /// so a reader of `view` may hand the query only the rows that meet them.
@@ -667,5 +702,43 @@ mod tests {
             filters("SELECT * FROM v_workspace_file WHERE kind = 'dir'"),
             vec![]
         );
+    }
+
+    /// A filter's value is its literal, or the text bound to its parameter;
+    /// one bound to something else, or to nothing, filters nothing.
+    #[test]
+    fn a_filters_value_is_its_literal_or_the_text_its_parameter_is_bound_to() {
+        use crate::{SqlCell, SqlParams};
+        let sql = "SELECT 1 FROM v_change WHERE kind = 'commit' AND target = :sha AND n = :n";
+        let named = SqlParams::Named(vec![
+            ("sha".into(), SqlCell::Text("abc".into())),
+            ("n".into(), SqlCell::Int(3)),
+        ]);
+        assert_eq!(
+            text_filters(sql, "v_change", &["kind", "target", "n"], &named).unwrap(),
+            vec![
+                ("kind".to_string(), "commit".to_string()),
+                ("target".to_string(), "abc".to_string())
+            ]
+        );
+        let positional = SqlParams::Positional(vec![SqlCell::Text("def".into())]);
+        assert_eq!(
+            text_filters(
+                "SELECT 1 FROM v_commit WHERE sha = ?1",
+                "v_commit",
+                &["sha"],
+                &positional
+            )
+            .unwrap(),
+            vec![("sha".to_string(), "def".to_string())]
+        );
+        assert!(text_filters(
+            "SELECT 1 FROM v_commit WHERE sha = ?2",
+            "v_commit",
+            &["sha"],
+            &positional
+        )
+        .unwrap()
+        .is_empty());
     }
 }

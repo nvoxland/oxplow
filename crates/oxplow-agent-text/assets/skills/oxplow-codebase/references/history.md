@@ -9,3 +9,7 @@ Quick answers about the repository's history, one tool each:
 
 History past the index (any revision, one path, paged) is `oxplow_vcs_log`;
 `v_commit` is for joins.
+
+One commit past the index needs no tool: a query that names it by its full
+sha (`v_commit` or `v_commit_file` `WHERE sha = '<sha>'`) has it indexed
+first.

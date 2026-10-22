@@ -434,6 +434,32 @@ pub async fn ensure_change(
     analyze(svc, target, false).await
 }
 
+/// `target`'s change, made now because a query named it
+/// (`crate::on_demand`): its row is stored before the query reads it, and
+/// its analysis runs in the background when it has none for its head yet.
+/// The analysis's commit announces `v_change*`, so what read the row reads
+/// again. Only a `pending` row (or one whose head moved) starts one, so a
+/// page re-reading on that announcement starts nothing more.
+pub async fn request(
+    svc: &std::sync::Arc<crate::Services>,
+    target: ChangeTarget,
+) -> Result<(), oxplow_domain::DomainError> {
+    let (stream, kind, key, base, head) = resolve(svc, target.clone()).await?;
+    let (row, moved) = svc
+        .change_store
+        .get_or_create(stream.value(), kind, &key, base.as_ref(), &head)
+        .await?;
+    if row.status == "pending" || moved {
+        let svc = svc.clone();
+        tokio::spawn(async move {
+            if let Err(e) = ensure_change(&svc, target).await {
+                tracing::warn!(?e, "analyzing a change a query named failed");
+            }
+        });
+    }
+    Ok(())
+}
+
 /// Recompute `target` now, however fresh it is (the `change.analyze`
 /// consumer, as its stream moves). `Busy` while another computation of it
 /// runs, so the consumer retries rather than losing the move.
@@ -1092,6 +1118,61 @@ mod tests {
     /// A forced rerun of a change whose inputs haven't moved — the same
     /// tree, base and own files, by the same build — keeps what's stored
     /// instead of recomputing; a changed tree recomputes.
+    /// A query that names a change by its kind and target has it made: the
+    /// row is there when the query reads it, and its analysis lands after.
+    #[tokio::test]
+    async fn a_query_that_names_a_change_makes_it() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let svc = &f.svc;
+        let root = svc.layout.project_dir.clone();
+        std::fs::write(root.join("a.rs"), "fn a() {}\n").unwrap();
+        let sha = crate::test_fixtures::commit_all(&root, "a");
+        let stream = svc.streams.ensure_primary().await.unwrap().id.value();
+        let run = |sql: &'static str, params: Vec<oxplow_db::SqlCell>| async move {
+            svc.sql
+                .run(
+                    oxplow_db::SqlQuery::new(sql)
+                        .positional(params)
+                        .stream(Some(stream)),
+                )
+                .await
+                .unwrap()
+                .rows
+        };
+        let rows = run(
+            "SELECT id FROM v_change WHERE kind = 'commit' AND target = ?1",
+            vec![oxplow_db::SqlCell::Text(sha.clone())],
+        )
+        .await;
+        let [row] = rows.as_slice() else {
+            panic!("one change: {rows:?}")
+        };
+        let id = row[0].clone();
+        let mut files = Vec::new();
+        for _ in 0..200 {
+            files = run(
+                "SELECT path FROM v_change_file WHERE change_id = ?1",
+                vec![id.clone()],
+            )
+            .await;
+            if !files.is_empty() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        assert!(
+            files.contains(&vec![oxplow_db::SqlCell::Text("a.rs".into())]),
+            "{files:?}"
+        );
+
+        let working = run(
+            "SELECT count(*) FROM v_change WHERE kind = 'working' AND target = ''",
+            vec![],
+        )
+        .await;
+        assert_eq!(working, vec![vec![oxplow_db::SqlCell::Int(1)]]);
+    }
+
     #[tokio::test]
     async fn a_forced_rerun_of_an_unchanged_tree_is_skipped() {
         let f = crate::thread_checkpoint::tests::with_baseline().await;

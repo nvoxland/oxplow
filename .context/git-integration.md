@@ -618,7 +618,13 @@ together and when each was last touched, and flags a change's files
 whose usual co-changers are missing or that were long dormant. The
 history is cached until the index changes (its size or newest commit).
 The index spans every stream's head, up to 5000 commits deep from a
-first boot (the depth the old primary-only walk had).
+first boot (the depth the old primary-only walk had). A query that names
+a commit by its full `sha` (`v_commit`, `v_commit_file`) has it indexed
+first when the index lacks it (`commit_indexer::ensure_commit`,
+`.context/semantic-layer.md` "Made on demand"): the workspace's scan runs
+(new history, logged as always), and a commit still missing is stored
+without `vcs.commit.indexed` — it is old history, and that event means
+new.
 
 The boot path runs the initial scan in a detached task. The same
 function is re-run on every ref move (`Services.ref_moves`, the VCS

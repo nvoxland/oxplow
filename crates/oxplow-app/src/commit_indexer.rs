@@ -161,6 +161,57 @@ pub async fn index_recent(
     }
 }
 
+/// Index commit `sha` when the index lacks it: a query named it
+/// (`crate::on_demand`), so it is read whatever the index's horizon. Read
+/// in `stream`'s workspace (none: the primary checkout). Whether it is
+/// indexed now: false when the workspace's VCS doesn't know it by that
+/// full id — a dead link, which the query answers with no rows.
+///
+/// A commit the scan hasn't reached yet is new history: the workspace's
+/// scan runs first, so it is indexed and logged as the scan always does
+/// (`vcs.commit.indexed`, which lands efforts). One still missing is old
+/// history, past the horizon: stored and linked, not logged.
+pub async fn ensure_commit(
+    svc: &crate::Services,
+    stream: Option<i64>,
+    sha: &str,
+) -> Result<bool, oxplow_domain::DomainError> {
+    if svc.git_store.has_commit(sha).await? {
+        return Ok(true);
+    }
+    let stream = stream.map(oxplow_domain::StreamId::new);
+    let ws = svc
+        .worktrees
+        .resolve(stream.map(|s| s.to_string()).as_deref())
+        .await
+        .into_local_path();
+    // A query compares the full id: another spelling of it reads no row
+    // however it is stored.
+    match svc.vcs.resolve(&ws, sha).await {
+        Ok(full) if full == sha => {}
+        _ => return Ok(false),
+    }
+    index_workspace(svc, &ws, stream).await;
+    if svc.git_store.has_commit(sha).await? {
+        return Ok(true);
+    }
+    let vocabulary = svc.vocabulary.current();
+    let Some(committed) = index_one(
+        &vocabulary.resources,
+        &*svc.vcs,
+        &ws,
+        &svc.page_ref_store,
+        &svc.git_store,
+        sha,
+    )
+    .await
+    else {
+        return Ok(false);
+    };
+    crate::commit_links::link_commit(svc, &ws, sha, committed).await?;
+    Ok(true)
+}
+
 /// Store and project one revision; when it was committed, if it was
 /// stored.
 async fn index_one(
@@ -215,29 +266,9 @@ pub async fn refresh(svc: &crate::Services) -> usize {
         workspaces.insert(0, primary.clone());
         stream_of.insert(0, None);
     }
-    let vocabulary = svc.vocabulary.current();
     let mut n = 0;
     for (ws, stream) in workspaces.iter().zip(&stream_of) {
-        let indexed = index_recent(
-            &vocabulary.resources,
-            &*svc.vcs,
-            ws,
-            &svc.page_ref_store,
-            &svc.git_store,
-            IndexDepth::DEFAULT,
-        )
-        .await;
-        n += indexed.len();
-        // Each new commit, to the tasks whose effort's work it holds
-        // (tsk1035).
-        for (sha, committed) in &indexed {
-            if let Err(e) = crate::commit_links::link_commit(svc, ws, sha, *committed).await {
-                tracing::warn!(?e, %sha, "linking a commit to its effort failed");
-            }
-            if let Some(stream) = stream {
-                log_indexed(svc, *stream, sha, *committed).await;
-            }
-        }
+        n += index_workspace(svc, ws, *stream).await;
     }
     // Which stream has a branch checked out is its workspace's head —
     // not the stream row, which the branch reconciler updates later. The
@@ -261,6 +292,35 @@ pub async fn refresh(svc: &crate::Services) -> usize {
     }
     refresh_refs(&*svc.vcs, &primary, &checkouts, &heads, &svc.git_store).await;
     n
+}
+
+/// Index the new history reachable from workspace `ws`'s head (found
+/// from `stream`, when it is one's): each new commit stored, linked to
+/// the tasks whose effort's work it holds, and logged. How many.
+async fn index_workspace(
+    svc: &crate::Services,
+    ws: &Path,
+    stream: Option<oxplow_domain::StreamId>,
+) -> usize {
+    let vocabulary = svc.vocabulary.current();
+    let indexed = index_recent(
+        &vocabulary.resources,
+        &*svc.vcs,
+        ws,
+        &svc.page_ref_store,
+        &svc.git_store,
+        IndexDepth::DEFAULT,
+    )
+    .await;
+    for (sha, committed) in &indexed {
+        if let Err(e) = crate::commit_links::link_commit(svc, ws, sha, *committed).await {
+            tracing::warn!(?e, %sha, "linking a commit to its effort failed");
+        }
+        if let Some(stream) = stream {
+            log_indexed(svc, stream, sha, *committed).await;
+        }
+    }
+    indexed.len()
 }
 
 /// `vcs.commit.indexed` for a commit found from `stream`'s workspace:
@@ -466,6 +526,74 @@ mod tests {
     /// made only on a worktree stream's branch reaches `v_commit` (with its
     /// parents), `v_branch` marks the default branch, and tags are in
     /// `v_tag`. A stream's history is a recursive read from its head.
+    /// A query that names a commit by its sha reads it whether or not the
+    /// index has reached it: a new one is indexed as the scan indexes it
+    /// (logged, so efforts land), one no head reaches is stored quietly,
+    /// and one git doesn't know reads no rows and no error.
+    #[tokio::test]
+    async fn a_commit_a_query_names_is_indexed_on_demand() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let svc = &f.svc;
+        let root = svc.layout.project_dir.clone();
+        std::fs::write(root.join("a.txt"), "a\n").unwrap();
+        let new = crate::test_fixtures::commit_all(&root, "new history");
+        std::fs::write(root.join("b.txt"), "b\n").unwrap();
+        let gone = crate::test_fixtures::commit_all(&root, "reset away");
+        let out = std::process::Command::new("git")
+            .args(["reset", "-q", "--hard", &new])
+            .current_dir(&root)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{out:?}");
+        let stream = svc.streams.ensure_primary().await.unwrap().id.value();
+        let read = |sql: &'static str, sha: String| async move {
+            svc.sql
+                .run(
+                    oxplow_db::SqlQuery::new(sql)
+                        .positional(vec![oxplow_db::SqlCell::Text(sha)])
+                        .stream(Some(stream)),
+                )
+                .await
+                .unwrap()
+                .rows
+        };
+        let subject = "SELECT subject FROM v_commit WHERE sha = ?1";
+        let logged = |sha: String| async move {
+            svc.sql
+                .query_sql(
+                    "SELECT count(*) FROM v_event WHERE type = 'vcs.commit.indexed' \
+                     AND json_extract(payload, '$.commit') = ?1",
+                    vec![oxplow_db::SqlCell::Text(sha)],
+                    None,
+                )
+                .await
+                .unwrap()
+                .rows[0][0]
+                .clone()
+        };
+
+        assert_eq!(
+            read(subject, new.clone()).await,
+            vec![vec![oxplow_db::SqlCell::Text("new history".into())]]
+        );
+        assert_eq!(logged(new.clone()).await, oxplow_db::SqlCell::Int(1));
+
+        assert_eq!(
+            read(
+                "SELECT path FROM v_commit_file WHERE sha = ?1",
+                gone.clone()
+            )
+            .await,
+            vec![vec![oxplow_db::SqlCell::Text("b.txt".into())]]
+        );
+        assert_eq!(logged(gone.clone()).await, oxplow_db::SqlCell::Int(0));
+
+        let unknown = "0".repeat(40);
+        assert!(read(subject, unknown).await.is_empty());
+        // Only the full id is a sha a query compares.
+        assert!(read(subject, new[..7].to_string()).await.is_empty());
+    }
+
     #[tokio::test]
     async fn every_stream_head_is_indexed_and_history_reads_from_its_head() {
         let f = crate::test_fixtures::services_with_effort().await;

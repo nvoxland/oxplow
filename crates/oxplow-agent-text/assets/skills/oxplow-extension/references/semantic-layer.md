@@ -30,6 +30,10 @@
   where it comes from) and `v_vcs_workspace` (the repository's working
   copies and the stream in each; `stream_id IS NULL` is adoptable). A lens
   over a live model re-runs when what it reads changes.
+- Made when a query names it: `v_commit` / `v_commit_file` `WHERE sha =
+  :sha` (the full sha) reads a commit however old, and `v_change WHERE
+  kind = 'commit' AND target = :sha` (or `kind = 'working' AND target =
+  ''`, the lens's stream) creates that change and starts its analysis.
 - Only `v_*` views can be read; a physical table is refused, naming the
   view to read instead. Metrics are read with `metric_grid()` and
   `MEASURE('<key>')` (see the `oxplow-metrics` skill).

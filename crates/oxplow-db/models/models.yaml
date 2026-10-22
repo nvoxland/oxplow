@@ -215,7 +215,7 @@
     - { name: "turn_id", type: "INTEGER", doc: "The agent turn it was measured in (v_agent_turn.id), when one produced it." }
 - name: change
   version: 3
-  description: "Analyzed changes: a commit (vs its parent), an effort (start → end snapshot, or → working tree while open), an agent turn (start → end snapshot: what the turn changed) or a stream's working tree (vs HEAD). Created on demand by `oxplow_ensure_change`; a working tree's and an open effort's are recomputed by the `change.analyze` consumer as the stream moves. The v_change_* views hold its analysis."
+  description: "Analyzed changes: a commit (vs its parent), an effort (start → end snapshot, or → working tree while open), an agent turn (start → end snapshot: what the turn changed) or a stream's working tree (vs HEAD). Created on demand by `oxplow_ensure_change`, or by a query that names one by `kind` and `target` (`kind = 'commit' AND target = <sha>`, `kind = 'working' AND target = ''` for the query's stream), its analysis then run in the background; a working tree's and an open effort's are recomputed by the `change.analyze` consumer as the stream moves. The v_change_* views hold its analysis."
   columns:
     - { name: "id", type: "INTEGER", doc: "Change id (the change_id in v_change_*)." }
     - { name: "stream_id", type: "INTEGER", doc: "Stream whose repo it's in." }
@@ -390,7 +390,7 @@
   key: [comment, position]
 - name: commit
   version: 4
-  description: "Commits the indexer has read: the last 500 reachable from every stream's head, kept as heads move. A stream's history is a recursive read over `parents` from its branch's `v_branch.head_sha`."
+  description: "Commits the indexer has read: those reachable from every stream's head (5000 deep), kept as heads move, and any commit a query names by its full `sha`, read when it asks (on demand). A stream's history is a recursive read over `parents` from its branch's `v_branch.head_sha`."
   columns:
     - { name: "sha", type: "TEXT", doc: "Full commit sha." }
     - { name: "author", type: "TEXT", doc: "Author name." }

@@ -34,6 +34,9 @@ pub struct SqlGateway {
     /// What the live models (`crate::live_models`) are read from; shared by
     /// every clone, bound once by the app.
     live: std::sync::Arc<crate::live_models::LiveModels>,
+    /// What makes the stored things a query names by their keys
+    /// (`crate::on_demand`); shared by every clone, bound once by the app.
+    on_demand: std::sync::Arc<crate::on_demand::OnDemand>,
 }
 
 /// What a query result says about the data behind it: which collectors
@@ -59,12 +62,18 @@ impl SqlGateway {
             activation: std::sync::Arc::new(crate::extension_activation::ExtensionActivation::new()),
             vocabulary: oxplow_domain::vocabulary::VocabularyHandle::core(),
             live: std::sync::Arc::new(crate::live_models::LiveModels::default()),
+            on_demand: std::sync::Arc::new(crate::on_demand::OnDemand::default()),
         }
     }
 
     /// The handle the app binds the live models' sources through.
     pub fn live_models(&self) -> &crate::live_models::LiveModels {
         &self.live
+    }
+
+    /// The handle the app binds what makes on-demand reads through.
+    pub fn on_demand(&self) -> &crate::on_demand::OnDemand {
+        &self.on_demand
     }
 
     /// A gateway over `db` that reads metrics too (`metric_grid()`,
@@ -314,6 +323,12 @@ impl SqlGateway {
                 "v_{} is read live, and this gateway has nothing to read it from",
                 live[0]
             )));
+        }
+        // What it names by its keys is stored first (`crate::on_demand`).
+        if let Some(params) = params {
+            for request in crate::on_demand::requests(&sql, params)? {
+                self.on_demand.ensure(&request, stream).await;
+            }
         }
         let (live_tables, live_views) = self.live.materialize(&live, stream, &sql, params).await?;
         temp.extend(live_tables);

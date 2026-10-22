@@ -129,41 +129,17 @@ pub fn pushdown(name: &str) -> &'static [&'static str] {
 }
 
 /// `sql`'s certain `<column> = <text>` conditions on `name`'s [`pushdown`]
-/// columns, its parameters' values filled in from `params`. One whose
-/// value isn't text, or is a parameter it can't find, narrows nothing.
+/// columns (`sql_tokens::text_filters`).
 fn filters(
     name: &str,
     sql: &str,
     params: &SqlParams,
 ) -> Result<Vec<(String, String)>, DomainError> {
-    use oxplow_db::sql_tokens::{equality_filters, Operand};
     let columns = pushdown(name);
     if columns.is_empty() {
         return Ok(Vec::new());
     }
-    let value = |operand: Operand| -> Option<String> {
-        let cell = match operand {
-            Operand::Text(t) => return Some(t),
-            Operand::Param(p) => match params {
-                SqlParams::Positional(values) => {
-                    let n: usize = p.strip_prefix('?')?.parse().ok()?;
-                    values.get(n.checked_sub(1)?)?
-                }
-                SqlParams::Named(values) => {
-                    let bare = p.trim_start_matches([':', '@', '$']);
-                    &values.iter().find(|(n, _)| n == bare)?.1
-                }
-            },
-        };
-        match cell {
-            SqlCell::Text(t) => Some(t.clone()),
-            _ => None,
-        }
-    };
-    Ok(equality_filters(sql, &format!("v_{name}"), columns)?
-        .into_iter()
-        .filter_map(|(column, operand)| Some((column, value(operand)?)))
-        .collect())
+    oxplow_db::sql_tokens::text_filters(sql, &format!("v_{name}"), columns, params)
 }
 
 /// What can change a live model's rows.

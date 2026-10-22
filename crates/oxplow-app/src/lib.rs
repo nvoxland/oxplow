@@ -167,6 +167,7 @@ pub mod metrics_service;
 pub mod models_changed;
 pub mod net_sandbox;
 pub mod observe_conformance;
+pub mod on_demand;
 pub mod otlp_ingest;
 pub mod otlp_tokens;
 pub mod output_activity;
@@ -1728,6 +1729,9 @@ impl Services {
             .add_op(collector_runner::sync_op(collector_runner.clone()))
             .expect("collector.sync's op registers");
         let services_slot = commands::util::ServicesSlot::default();
+        // A query that names a commit or a change by its keys has it made
+        // first (`on_demand`), through the services once they exist.
+        sql.on_demand().bind(services_slot.clone());
         for command in commands::lens::ops(commands::lens::LensTarget {
             project_dir: layout.project_dir.clone(),
             catalog: extension_catalog.clone(),
