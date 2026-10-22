@@ -62,9 +62,9 @@ without a screenshot:
   `dismissed` (the person opened / cleared it)). The latest:
   `SELECT event_id, at, label, command, message FROM v_op_error ORDER BY
   at DESC LIMIT 5`.
-- **The output itself** is the event's `output` body: call
-  `oxplow_read` with `oxplow:oxplow/event?id=<event_id>#part=output`. A
-  row with `output_size` NULL captured nothing; its `message` is all.
+- **The output itself** is `v_op_error_output` (`event_id`, `stderr`,
+  `stdout`). A row with `output_size` NULL captured nothing; its
+  `message` is all.
 - Rows are kept 30 days and their output 14; an older row keeps its label
   with the details NULL.
 - Failed *commands you ran* come back to you as the command's own error

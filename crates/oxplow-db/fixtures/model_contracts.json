@@ -21993,5 +21993,39 @@
         "position"
       ]
     }
+  },
+  "op_error_output": {
+    "1": {
+      "columns": [
+        {
+          "name": "event_id",
+          "type": "TEXT",
+          "doc": "The `ui.op_failed` event (`v_op_error.event_id`)."
+        },
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "The stream it happened in, if known."
+        },
+        {
+          "name": "stderr",
+          "type": "TEXT",
+          "doc": "Captured stderr, if any."
+        },
+        {
+          "name": "stdout",
+          "type": "TEXT",
+          "doc": "Captured stdout, if any."
+        },
+        {
+          "name": "truncated",
+          "type": "INT",
+          "doc": "1 when only the first part was kept (bodies are capped)."
+        }
+      ],
+      "key": [
+        "event_id"
+      ]
+    }
   }
 }

@@ -612,6 +612,16 @@
     - { name: "first_failed_at", type: "TEXT", doc: "RFC 3339 timestamp." }
     - { name: "last_failed_at", type: "TEXT", doc: "RFC 3339 timestamp." }
     - { name: "state", type: "TEXT", doc: "`pending`, `retried` or `discarded`." }
+- name: op_error_output
+  version: 1
+  key: [event_id]
+  description: "What a failed operation printed: the stderr and stdout the app captured for each `v_op_error` row (its event's `output` body). The one event body published to SQL — it is what the person saw on screen; tool input and output and prompts stay behind `read_event_content`. A failure that captured nothing, or whose output retention removed (14 days), has no row."
+  columns:
+    - { name: "event_id", type: "TEXT", doc: "The `ui.op_failed` event (`v_op_error.event_id`)." }
+    - { name: "stream_id", type: "INTEGER", doc: "The stream it happened in, if known." }
+    - { name: "stderr", type: "TEXT", doc: "Captured stderr, if any." }
+    - { name: "stdout", type: "TEXT", doc: "Captured stdout, if any." }
+    - { name: "truncated", type: "INT", doc: "1 when only the first part was kept (bodies are capped)." }
 - name: op_error
   version: 2
   key: [event_id]

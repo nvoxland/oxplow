@@ -7,8 +7,7 @@
   itself: oxplow shows your thread as waiting on them.
 - When the person mentions an error they saw in the app (a red toast, a row
   on the Alerts page), you can read it: `v_op_error` through `oxplow_query_sql`, its
-  output with `oxplow_read` on its event, `oxplow:oxplow/event?id=<id>#part=output` (the
-  `oxplow-codebase` skill).
+  output in `v_op_error_output` (the `oxplow-codebase` skill).
 - The person's message may carry references oxplow inserted: `@<path>`
   (a file), `[oxplow uri <uri>]` (what they're asking about, a URI such as
   `oxplow:oxplow/commit?sha=abc1234`),
