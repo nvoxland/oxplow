@@ -186,6 +186,11 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
+	runLensSpec: (spec: LensSpec_Deserialize, params: { [key in string]: SqlCell } | null, streamId: string | null) => typedError<LensRun_Serialize, IpcError_Serialize>(__TAURI_INVOKE("run_lens_spec", { spec, params, streamId })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	lensForm: (id: string, params: { [key in string]: SqlCell } | null, streamId: string | null) => typedError<FormStart_Serialize, IpcError_Serialize>(__TAURI_INVOKE("lens_form", { id, params, streamId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -2465,6 +2470,12 @@ export type ExtensionPage = {
 	comments: boolean,
 	/**  What draws it. */
 	body: PageBody,
+	/**
+	 *  A component page's rail: a lens of its extension (`<ext>/<slug>`)
+	 *  drawn beside the component, run with the page's view; a row's pick
+	 *  writes the view, which the component hears.
+	 */
+	rail: string | null,
 };
 
 /**

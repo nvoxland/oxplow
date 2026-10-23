@@ -2319,6 +2319,10 @@ pub struct ExtensionPage {
     pub comments: bool,
     /// What draws it.
     pub body: PageBody,
+    /// A component page's rail: a lens of its extension (`<ext>/<slug>`)
+    /// drawn beside the component, run with the page's view; a row's pick
+    /// writes the view, which the component hears.
+    pub rail: Option<String>,
 }
 
 /// The schemes a page may render besides oxplow's resources: a web page.
@@ -2391,6 +2395,10 @@ struct PageFile {
     /// … or `oxplow:<name>`, a built-in (oxplow's own extension only).
     #[serde(default)]
     component: Option<String>,
+    /// A component page's rail: a lens of this extension drawn beside the
+    /// component, run with the page's view.
+    #[serde(default)]
+    rail: Option<String>,
     /// The resources it renders — one or a list: `oxplow/file`, its own
     /// `<extension>/<name>`, another extension's, or `https` / `http` (a
     /// web page). A URI of one opens on it; without `for` it is a route.
@@ -5036,7 +5044,7 @@ fn parse_pages(
             Ok(p) => p,
             Err(e) => {
                 errors.push((Some(i), format!(
-                    "pages: {e} (a page is `{{ id, title, icon?, category?, keywords?, params?, count?, for?, accepts?, default?, pinned?, comments?, lens | component }}`; a category is one of Work, Code, Git, Activity, Knowledge, Data, Lenses, System)"
+                    "pages: {e} (a page is `{{ id, title, icon?, category?, keywords?, params?, count?, for?, accepts?, default?, pinned?, comments?, lens | component, rail? }}`; a category is one of Work, Code, Git, Activity, Knowledge, Data, Lenses, System)"
                 )));
                 continue;
             }
@@ -5097,6 +5105,16 @@ fn parse_pages(
             .filter(|c| !lenses.iter().any(|l| &l.slug == *c))
         {
             errors.push(err(format!("its count lens `{c}` isn't in lenses/")));
+        } else if p.rail.is_some() && p.component.is_none() {
+            errors.push(err(
+                "`rail` is a component page's; a lens page's rail is its own".into(),
+            ));
+        } else if let Some(r) = p
+            .rail
+            .as_ref()
+            .filter(|r| !lenses.iter().any(|l| &l.slug == *r))
+        {
+            errors.push(err(format!("its rail lens `{r}` isn't in lenses/")));
         } else if p
             .icon
             .as_deref()
@@ -5174,6 +5192,7 @@ fn parse_pages(
                 pinned: p.pinned,
                 comments: p.comments,
                 body: body.expect("checked above"),
+                rail: p.rail.map(|r| format!("{extension}/{r}")),
             });
         }
     }
@@ -12669,6 +12688,7 @@ commands:
                     body: PageBody::Lens {
                         lens: "x/open".into()
                     },
+                    rail: None,
                 },
                 ExtensionPage {
                     id: "detail".into(),
@@ -12689,6 +12709,7 @@ commands:
                     body: PageBody::Lens {
                         lens: "x/open".into()
                     },
+                    rail: None,
                 }
             ]
         );
@@ -12785,6 +12806,55 @@ commands:
             "{errs}"
         );
         assert!(ext.pages.is_empty());
+    }
+
+    /// A component page's rail is a lens of its extension, drawn beside
+    /// the component; a lens page has its own rail, and the lens must be
+    /// there.
+    #[test]
+    fn a_component_page_names_its_rail_lens() {
+        let load = |pages: &str| {
+            let dir = tempfile::tempdir().unwrap();
+            write(
+                dir.path(),
+                ".oxplow/extensions/x/extension.yaml",
+                &format!(
+                    "manifest: 2\nname: x\nintent:\n  purpose: p\ncustom_components:\n  - {{ id: board }}\npages:\n  - {pages}\n"
+                ),
+            );
+            write(
+                dir.path(),
+                ".oxplow/extensions/x/components/board/index.html",
+                "<!doctype html>",
+            );
+            write(
+                dir.path(),
+                ".oxplow/extensions/x/lenses/side.yaml",
+                "title: Side\nquery: SELECT 1 AS n\nhidden: true\n",
+            );
+            (project_extensions(dir.path()).remove(0), dir)
+        };
+        let (ext, _d) = load("{ id: board, title: Board, component: board, rail: side }");
+        assert!(ext.errors.is_empty(), "{:?}", ext.errors);
+        assert_eq!(ext.pages[0].rail.as_deref(), Some("x/side"));
+        let (ext, _d) = load("{ id: board, title: Board, lens: side, rail: side }");
+        assert!(ext.pages.is_empty());
+        assert!(
+            ext.errors
+                .join("\n")
+                .contains("`rail` is a component page's; a lens page's rail is its own"),
+            "{:?}",
+            ext.errors
+        );
+        let (ext, _d) = load("{ id: board, title: Board, component: board, rail: nope }");
+        assert!(ext.pages.is_empty());
+        assert!(
+            ext.errors
+                .join("\n")
+                .contains("its rail lens `nope` isn't in lenses/"),
+            "{:?}",
+            ext.errors
+        );
     }
 
     /// P8.C1: an extension loads from any revision — at `git:HEAD` of a

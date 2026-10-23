@@ -474,7 +474,7 @@ over a database file); adversarial and concurrency coverage is still to do.
 >   - sharing: `oxplow.extension.share` / `unshare` move a source in or out
 >     of git, and a teammate's checkout deploys it at startup ("Sources and
 >     deployments");
->   - the core explorer: the Explore Data page (with Save as Lens) and
+>   - Explore Data (oxplow-foundation's custom page, with Save as Lens) and
 >     lens tiles on dashboards;
 >   - **bundled extensions** (compiled in, read-only, reserved names) and
 >     the `oxplow-foundation/changes.sections` **slot**; the bundled `oxplow-bundled` extension
@@ -897,47 +897,50 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     deployment is immutable, so what runs is what was deployed (see
     [architecture.md](./architecture.md) → "A repo's config never runs a
     program without consent").
-- **Core explorer (stays in core, deliberately simple).**
-  - **Explore Data** (`explore-data` page, `ExploreDataPage.tsx`):
-    - Lists every model from `v_model`, with its columns from
-      `v_model_column` (SQL, like everything else; live as extensions
-      compile).
-    - A picked model shows its **lineage** (`ModelLineage.tsx`, from
-      `v_model_lineage`): the models it reads (links that open them), the
-      tables it reads (plain text), and the models that read it.
-    - Picking one runs `SELECT * … LIMIT 50`; the SQL box then accepts
-      any read-only query (Cmd/Ctrl+Enter runs it), metrics included —
-      `SELECT bucket, MEASURE('<key>') FROM metric_grid('week')` — and
-      re-runs when what it read changes.
-    - "Show as" switches the viz: `table`, `list`, `number`, `markdown`,
-      and the charts `bar`, `line`, `treemap` (P6.F1), whose columns are
-      picked from the result (`chartDefaults`, then a select per role;
-      a chart keeps its columns while a re-run still returns them).
-    - **Chart a metric** seeds the explorer's own metric query
-      (`metricTemplate`: `metricSeriesSql` as a line). While the SQL is
-      still that template, **Slice By** picks a dimension (`v_dimension`)
-      and regenerates it with `metric_grid`'s second argument
-      (`sliceTemplate`); edited SQL is free SQL and is never rewritten
-      (the line's series picker slices it instead).
-    - Pin to Dashboard and Save as Lens keep the chart (the tile's
-      `chart` option, the lens's `chart:`).
-    - **Raw tables** (a checkbox, in warning color) reads physical tables
-      too — the person's debugging switch, IPC `query_sql { raw }` only,
-      never an agent's. A raw result carries a banner, and **Save as
-      Lens** and **Pin to Dashboard** are disabled with the reason
-      (`keepBlockedReason`): a lens or a tile reads only models.
-    - **Pin to Dashboard** adds the query as a `query` tile shown with
-      the chosen viz (`PinToDashboard.tsx`, shared with the lens page).
-    - **Save as Lens** runs `oxplow.lens.keep` with the query as a `spec` (P11,
-      tsk943 — on the bus like Keep This, in the stream's worktree; its
-      shape checked as `oxplow.lens.show` checks one, its query through the SQL
-      gateway as the explorer runs it, so a `metric_grid()` chart is kept,
-      tsk987), deploys the extension, then opens the new lens (it is live when
-      the command returns). It creates the extension if missing
-      (with the same v2 manifest `oxplow extension new` writes —
-      `extensions::scaffold_manifest`, so a saved lens starts as a
-      checkable extension with an `intent` to fill in), refuses to
-      overwrite a lens.
+- **Explore Data: oxplow-foundation's data app.** Deliberately simple,
+  and the proof that an extension ships a data app: a **custom page**
+  (`pages: [{ id: explore-data, component: explore-data, rail:
+  explore-catalog }]`, the component in
+  `extensions/oxplow-foundation/src/explore-data/`, built with the
+  Timeline by foundation's `package.json`). Core draws what the kit
+  draws; the component holds only the editor and the pickers.
+  - **The catalog** is the page's **rail**, a declared lens
+    (`lenses/explore-catalog.yaml`: a `list` over `v_model`, oxplow's own
+    first, its `view` column selecting `model`, the picked row
+    emphasized). A pick pushes `#model=` (Back un-picks) and the
+    component hears it.
+  - **The component** (`main.ts`, its pure half `model.ts`, tested from
+    the desktop as `lens/exploreDataModel.test.ts`): the picked model's
+    documented columns (`v_model_column`) and lineage (`v_model_lineage`:
+    the models it reads, links that pick them, the tables it reads, the
+    models that read it); the SQL box (a pick writes `SELECT * … LIMIT
+    50`; any read-only query, metrics included — `SELECT bucket,
+    MEASURE('<key>') FROM metric_grid('week')` — Cmd/Ctrl+Enter runs
+    it); **Show as** (`table`, `list`, `number`, `markdown`, `bar`,
+    `line`, `treemap`), a chart's columns picked from the result
+    (`chartDefaults`, then a select per role); **Chart a metric** seeds
+    the explorer's metric query (`metricTemplate`: `metricSeriesSql` as a
+    line) and, while the SQL is still it, **Slice By** regenerates it with
+    a dimension (`v_dimension`, `sliceTemplate`); edited SQL is never
+    rewritten. Its view is the tab's `#` (`model`, `sql`, `viz`, `chart`,
+    `template`), the unrun draft its history state; it ignores the echoes
+    of its own writes, so only a real move (Back) redraws. "Ask your agent
+    to build one…" invokes `oxplow.lens.draft_with_agent`, the one command
+    it declares.
+  - **The result** is core's: the component hands the page a spec
+    (`showSpec`, protocol 10), the page runs it checked (`run_lens_spec`)
+    and draws it under the frame with `LensResultView`, live, with **Pin
+    to Dashboard** (a `query` tile with the chart) and **Save as Lens**
+    (`components/SaveAsLens.tsx`: `oxplow.lens.keep` with the spec, on the
+    bus like Keep This, in the stream's worktree — its shape and its query
+    checked as `oxplow.lens.show` checks one, so a `metric_grid()` chart
+    is kept; it deploys the extension, created when missing with the v2
+    manifest `oxplow extension new` writes, refuses to overwrite a lens,
+    then opens the lens). A refused spec answers the component `INVALID`
+    with its field, and it shows the reason under the SQL box.
+  - **No raw tables.** The React page's Raw tables switch read physical
+    tables over IPC; a component reads models only, as every lens does.
+    Raw reads stay the agent's `oxplow_query_sql`.
   - **Thread answers** (P6.C1, `commands/lens.rs`,
     `oxplow-db/src/thread_answer_store.rs`). An agent answers with a lens
     rather than pasting rows: MCP **`oxplow_show_lens { lens | spec, params? }`**
@@ -2949,8 +2952,18 @@ submission through `invoke_component_command`; closing it answers
 `CANCELLED`), `{ id, method: setTitle, title }` and `{ id, method:
 setActions, actions: [{ id, label, primary?, disabled? }] }` (the page's
 title and its nav-bar actions, data core draws; a press posts
-`{ type: action, id }` to the frame). `openForm`, `setTitle` and
-`setActions` are a custom page's (`INVALID` elsewhere), and — each kind
+`{ type: action, id }` to the frame), and `{ id, method: showSpec, spec }`
+(protocol 10: a lens spec, as `oxplow.lens.keep` takes one, that the page
+runs checked — IPC `run_lens_spec`, `commands::lens::run_checked_spec`:
+its shape at `/spec`, its query at `/spec/query`, metric functions
+resolved, in the stream's lens context — and draws under the frame with
+the kit, live, with Pin to Dashboard and Save as Lens; it answers the rows
+it drew, for the frame's own pickers, or `INVALID` with the field; null
+clears it). While a spec shows, the frame sits at its content's height:
+the library posts `{ type: size, height }` (a message, not a request,
+from a `ResizeObserver` on its root; a component leaves `html` and
+`body` at `height: auto`). `openForm`, `setTitle`, `setActions` and
+`showSpec` are a custom page's (`INVALID` elsewhere), and — each kind
 of page state by the name of its scope — `{ id, method: setViewParams,
 params }` (string values, null drops one: the `#` of its tab entry, replaced;
 a component has no selection role, so it never pushes, and going
@@ -2959,6 +2972,15 @@ somewhere is `navigate`) and `{ id, method: setHistoryState, patch }`
 `{ type: historyState, state }` when the entry's change (Back, Forward,
 an echo; `createBridgeHost` sends only what the frame hasn't seen);
 `init.view` carries both.
+
+**A custom page's rail** is a declared lens (`pages: [{ component, rail:
+<slug> }]`, a lens of the page's extension; refused on a lens page, whose
+rail is its own): `CustomPageView` runs it with the params it declares
+from the page's view, live, in the page's rail (`custom-page-rail`), and
+a row's pick writes the view by the rail's rule (`lensViewChange`: a
+selection pushes), which the frame hears. A filling page's rail stacked
+above its body (a narrow window) is capped and scrolls, so the body
+keeps the height.
 
 **Whose view a component has** (protocol 9, `lens/hostedView.ts`
 `useHostedView`): its host's, where the host shares one, and only what
@@ -3021,7 +3043,7 @@ which an opaque origin never passes and nothing served to a frame allows
 waits for `init`, answers `ready`, and resolves with `{ run (the latest),
 page, props, tokens, protocol, onUpdate(fn) → unsubscribe, query(asset,
 params), invoke(command, input), navigate(uri, { newTab, replace }), querySql,
-openForm, setTitle, setActions, onAction, viewParams, setViewParams,
+openForm, setTitle, setActions, showSpec, onAction, viewParams, setViewParams,
 onViewParams, historyState, setHistoryState, onHistoryState, pageMemory,
 applyTheme(doc?) }` (the `.d.ts` beside it is the reference;
 `viewParams` / `historyState` are null where the host gives no view); a
@@ -4895,7 +4917,7 @@ write. What needs two revisions' trees — files, functions, imports, test
 signals, per-function churn, the scoped duplicate scan — stays in core's
 change analysis.
 
-**Stays in core, deliberately simple:** a basic **metrics explorer** and
+**Deliberately simple** (Explore Data is now oxplow-foundation's custom page, "Explore Data: oxplow-foundation's data app"): a basic **metrics explorer** and
 **simple dashboards** (Nathan, 2026-09-27). The base version must let
 people see what metrics exist and pin a few to a dashboard as a starting
 point, a bit like Metabase. It doesn't need to be fancy. The explorer

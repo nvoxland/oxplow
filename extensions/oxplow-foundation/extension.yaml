@@ -18,6 +18,9 @@ custom_components:
   # Efforts, sessions, threads and commits on a zoomable time axis
   # (vis-timeline, which the kit has no viz for).
   - { id: timeline, title: Timeline, bundle: dist/timeline, sql: read }
+  # Explore Data: an SQL box and a viz picker over the models; oxplow draws
+  # the result under it with its own components (`showSpec`).
+  - { id: explore-data, title: Explore Data, bundle: dist/explore-data, sql: read, commands: [oxplow.lens.draft_with_agent] }
 intent:
   purpose: >-
     Declare oxplow's own commands — what a person, an agent and a lens can
@@ -171,7 +174,7 @@ pages:
   - { id: wiki-index, title: Wiki, icon: book-open, category: Knowledge, lens: wiki-index }
   - { id: wiki-freshness, title: Wiki Freshness, icon: book-open, category: Knowledge, lens: wiki-freshness }
   # Data
-  - { id: explore-data, title: Explore Data, icon: database, category: Data, keywords: sql query schema semantic layer lens, component: "oxplow:explore-data" }
+  - { id: explore-data, title: Explore Data, icon: database, category: Data, keywords: sql query schema semantic layer lens, component: explore-data, rail: explore-catalog }
   - { id: metrics-recorded, title: Metrics, icon: bar-chart-3, category: Data, keywords: recorded catalog, lens: metrics }
   - { id: dashboards, title: Dashboards, icon: layout-dashboard, category: Data, keywords: custom metric tiles lens, lens: dashboards }
   # System

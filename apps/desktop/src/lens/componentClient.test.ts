@@ -335,3 +335,27 @@ test("a component shown by a lens with no view has none", async () => {
   await expect(c.setViewParams({ q: "x" })).rejects.toMatchObject({ code: "INVALID" });
   h.close();
 });
+
+// Protocol 10: a page hands oxplow a spec to draw under it.
+test("showSpec resolves once the host drew it, and rejects with the host's refusal and its field", async () => {
+  const h = harness({
+    showSpec: async (spec) => {
+      if (spec && (spec as { query?: string }).query === "bad") {
+        throw Object.assign(new Error("no such table: nope"), { code: "INVALID", field: "/spec/query" });
+      }
+      return spec ? { columns: ["n"], rows: [[1]], truncated: false } : null;
+    },
+  });
+  const connecting = connect({ target: h.frame });
+  h.init();
+  const c = await connecting;
+  expect(await c.showSpec({ title: "Explore", query: "SELECT 1 AS n", viz: "number" })).toEqual({ columns: ["n"], rows: [[1]], truncated: false });
+  expect(await c.showSpec(null)).toBeNull();
+  const refused = await c.showSpec({ title: "Explore", query: "bad", viz: "table" }).catch((e: unknown) => e);
+  expect(refused).toEqual({
+    code: "INVALID",
+    message: "no such table: nope",
+    field: "/spec/query",
+  });
+  h.close();
+});

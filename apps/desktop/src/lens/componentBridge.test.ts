@@ -75,11 +75,11 @@ test("theme tokens carry the root's color-scheme, so the frame paints no opaque 
 // page (`page`, a null `run`) and the calls a page makes, 5; a host's view
 // (`view`), apart from the page, 8; the view as the URI's `#` and
 // `navigate`'s `replace`, 9.
-test("init carries the run, props and tokens, at protocol 9", () => {
+test("init carries the run, props and tokens, at protocol 10", () => {
   const r = { lens: { id: "x/b", custom: { component: "b", props: { a: 1 } } }, params: {}, result: { columns: [], rows: [], truncated: false } } as unknown as LensRun;
   expect(initMessage(r, { "--accent": "#08f" })).toEqual({
     type: "init",
-    protocol: 9,
+    protocol: 10,
     run: r,
     props: { a: 1 },
     page: null,
@@ -91,7 +91,7 @@ test("init carries the run, props and tokens, at protocol 9", () => {
 test("a component shown as a page gets its page and its view, and no run", () => {
   const page = { streamId: "str1", threadId: "thr2" };
   const view = { viewParams: { from: "2026-10-01" }, historyState: { scroll: 3 } };
-  expect(initMessage(null, {}, page, view)).toEqual({ type: "init", protocol: 9, run: null, props: null, page, view, tokens: {} });
+  expect(initMessage(null, {}, page, view)).toEqual({ type: "init", protocol: 10, run: null, props: null, page, view, tokens: {} });
 });
 
 // A replacement or a lens page's component: a lens's run, and its host's view.
@@ -337,11 +337,13 @@ test("shown by a lens, a component sets no page title, actions or form", async (
   h.send({ id: "t", method: "setTitle", title: "Oct" });
   h.send({ id: "a", method: "setActions", actions: [] });
   h.send({ id: "f", method: "openForm", command: "x.y.z" });
+  h.send({ id: "s", method: "showSpec", spec: null });
   await h.settle();
   expect(h.received.map((m) => (m as { error?: { message: string } }).error?.message)).toEqual([
-    "Only a component shown as a page sets its title, actions or forms.",
-    "Only a component shown as a page sets its title, actions or forms.",
-    "Only a component shown as a page sets its title, actions or forms.",
+    "Only a component shown as a page sets its title, actions, forms or the spec it shows.",
+    "Only a component shown as a page sets its title, actions, forms or the spec it shows.",
+    "Only a component shown as a page sets its title, actions, forms or the spec it shows.",
+    "Only a component shown as a page sets its title, actions, forms or the spec it shows.",
   ]);
   h.channel.port1.close();
 });
@@ -397,4 +399,44 @@ test("componentRefusal is a refused invoke's reason, and nothing else's", () => 
   expect(componentRefusal(new IpcCallError(reason, "DENIED"))).toBe(reason);
   expect(componentRefusal(new IpcCallError("bad input", "INVALID"))).toBeNull();
   expect(componentRefusal(new Error("boom"))).toBeNull();
+});
+
+// A page shows a lens spec the host draws (protocol 10), and says how
+// tall its content is.
+test("showSpec and size parse; anything else in their place doesn't", () => {
+  const spec = { title: "Explore", query: "SELECT 1 AS n", viz: "number" };
+  expect(parseFrameMessage({ id: "1", method: "showSpec", spec })).toEqual({ type: "request", request: { id: "1", method: "showSpec", spec } });
+  expect(parseFrameMessage({ id: "2", method: "showSpec", spec: null })).toEqual({ type: "request", request: { id: "2", method: "showSpec", spec: null } });
+  expect(parseFrameMessage({ id: "3", method: "showSpec", spec: [1] })).toBeNull();
+  expect(parseFrameMessage({ type: "size", height: 320 })).toEqual({ type: "size", height: 320 });
+  expect(parseFrameMessage({ type: "size", height: -1 })).toBeNull();
+  expect(parseFrameMessage({ type: "size", height: "tall" })).toBeNull();
+});
+
+test("a page's showSpec answers ok once drawn, or the host's refusal with its field; size reaches the host", async () => {
+  const shown: unknown[] = [];
+  const heights: number[] = [];
+  const h = harness({
+    showSpec: async (spec) => {
+      if (spec && (spec as { query?: string }).query === "bad") {
+        throw Object.assign(new Error("no such table: nope"), { code: "INVALID", field: "/spec/query" });
+      }
+      shown.push(spec);
+      return spec ? { columns: ["n"], rows: [[1]], truncated: false } : null;
+    },
+    size: (height) => heights.push(height),
+  });
+  h.send({ id: "a", method: "showSpec", spec: { title: "E", query: "SELECT 1", viz: "table" } });
+  h.send({ id: "b", method: "showSpec", spec: { title: "E", query: "bad", viz: "table" } });
+  h.send({ id: "c", method: "showSpec", spec: null });
+  h.send({ type: "size", height: 240 });
+  await h.settle();
+  expect(h.received).toEqual([
+    { id: "a", ok: true, result: { columns: ["n"], rows: [[1]], truncated: false } },
+    { id: "b", ok: false, error: { code: "INVALID", message: "no such table: nope", field: "/spec/query" } },
+    { id: "c", ok: true, result: null },
+  ]);
+  expect(shown).toEqual([{ title: "E", query: "SELECT 1", viz: "table" }, null]);
+  expect(heights).toEqual([240]);
+  h.channel.port1.close();
 });

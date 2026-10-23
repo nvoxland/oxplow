@@ -38,7 +38,7 @@
 /// `protocol` against the one it speaks.
 import { IpcCallError, needsConfirmation } from "../ipc-error.js";
 import { parseUri } from "../uri/uri.js";
-import type { CommandOutcome, LensRun, SqlCell, SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
+import type { CommandOutcome, LensRun, LensSpec, SqlCell, SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
 
 /// The protocol above, by number: bumped when a message's shape changes,
 /// with the served library (`crates/oxplow-daemon/assets/`). 2: `init`
@@ -57,8 +57,18 @@ import type { CommandOutcome, LensRun, SqlCell, SqlQueryResult } from "../tauri-
 /// the host's, not the page's — `init.view` beside `init.page` — so a
 /// replacement and a lens page's component have one too. 9: a page's view
 /// is its URI's `#` (`viewParams` are the fragment's), and `navigate`
-/// carries `replace` as a browser's does.
-export const BRIDGE_PROTOCOL = 9;
+/// carries `replace` as a browser's does. 10: a page shows a lens spec the
+/// host draws under it with the kit (`showSpec`, null clearing it), and
+/// the frame says its content's height (`size`), so the page lays the
+/// frame out above what the host draws.
+export const BRIDGE_PROTOCOL = 10;
+
+/** What a page's `showSpec` answers: the rows the host drew. */
+export interface ShownRows {
+  columns: string[];
+  rows: SqlCell[][];
+  truncated: boolean;
+}
 
 /** A page action a component declares; core draws it in the nav bar. */
 export interface FrameAction {
@@ -94,9 +104,10 @@ export type BridgeRequest =
   | { id: string; method: "setViewParams"; params: Record<string, string | null> }
   | { id: string; method: "setHistoryState"; patch: Record<string, unknown> }
   | { id: string; method: "pageMemoryGet"; key: string }
-  | { id: string; method: "pageMemorySet"; key: string; value: unknown };
+  | { id: string; method: "pageMemorySet"; key: string; value: unknown }
+  | { id: string; method: "showSpec"; spec: LensSpec | null };
 
-export type FrameMessage = { type: "ready" } | { type: "request"; request: BridgeRequest };
+export type FrameMessage = { type: "ready" } | { type: "size"; height: number } | { type: "request"; request: BridgeRequest };
 
 const isCell = (v: unknown): v is SqlCell =>
   v === null || typeof v === "string" || typeof v === "number" || typeof v === "boolean";
@@ -106,6 +117,9 @@ export function parseFrameMessage(data: unknown): FrameMessage | null {
   if (!data || typeof data !== "object") return null;
   const m = data as Record<string, unknown>;
   if (m.type === "ready") return { type: "ready" };
+  if (m.type === "size") {
+    return typeof m.height === "number" && Number.isFinite(m.height) && m.height >= 0 ? { type: "size", height: m.height } : null;
+  }
   if (typeof m.id !== "string" || !m.id) return null;
   switch (m.method) {
     case "query": {
@@ -163,6 +177,12 @@ export function parseFrameMessage(data: unknown): FrameMessage | null {
     case "pageMemorySet":
       if (typeof m.key !== "string" || !m.key) return null;
       return { type: "request", request: { id: m.id, method: "pageMemorySet", key: m.key, value: m.value ?? null } };
+    case "showSpec": {
+      // The host checks the spec itself; here only that it is one.
+      const spec = m.spec ?? null;
+      if (spec !== null && (typeof spec !== "object" || Array.isArray(spec))) return null;
+      return { type: "request", request: { id: m.id, method: "showSpec", spec: spec as LensSpec | null } };
+    }
     default:
       return null;
   }
@@ -246,6 +266,12 @@ export interface BridgeDeps {
   /** Keep `value` (JSON) as its page memory's `key`, null forgetting it;
    *  throws `{ code: "INVALID" }` past the size caps. */
   pageMemorySet?(key: string, value: unknown): void;
+  /** Run `spec` and draw it under the frame (null clears it): its rows,
+   *  for the frame's own controls (a chart's column pickers); rejects
+   *  `{ code: "INVALID", field? }` for a spec it refuses. A page only. */
+  showSpec?(spec: LensSpec | null): Promise<ShownRows | null>;
+  /** The frame's content height, as it changes. */
+  size?(height: number): void;
 }
 
 /** Why an invoke was refused (`DENIED`: the component isn't approved, or a
@@ -267,7 +293,7 @@ export function componentMayOpen(ref: string): boolean {
 const shown = (run: LensRun | null) => (run ? JSON.stringify([run.params, run.result]) : "");
 
 /** What a component shown by a lens may not do: the page is its host's. */
-const PAGE_ONLY = "Only a component shown as a page sets its title, actions or forms.";
+const PAGE_ONLY = "Only a component shown as a page sets its title, actions, forms or the spec it shows.";
 /** What a component in a host with no view may not do. */
 const NO_VIEW = "This host gives the component no view: only a page, a replacement or a lens's own page does.";
 
@@ -377,6 +403,14 @@ export function createBridgeHost(
           failWith(r.id, e);
         }
         return;
+      case "showSpec":
+        if (!deps.showSpec) return fail(r.id, "INVALID", PAGE_ONLY);
+        try {
+          reply(r.id, (await deps.showSpec(r.spec)) ?? null);
+        } catch (e) {
+          failWith(r.id, e);
+        }
+        return;
       case "pageMemoryGet":
         if (!deps.pageMemoryGet) return fail(r.id, "INVALID", "This host keeps no page memory.");
         try {
@@ -403,6 +437,7 @@ export function createBridgeHost(
       ready = true;
       return deps.onReady();
     }
+    if (m?.type === "size") return void deps.size?.(m.height);
     if (m?.type === "request") return void handle(m.request);
     const id = (e.data as { id?: unknown } | null)?.id;
     if (typeof id === "string" && id) fail(id, "BAD_REQUEST", "Not a request this host knows.");

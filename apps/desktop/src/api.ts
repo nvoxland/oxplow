@@ -420,6 +420,16 @@ export async function getLens(id: string): Promise<Lens> {
   return unwrap(await commands.getLens(id));
 }
 
+/// Run a lens spec a page shows without keeping it (a custom page's
+/// `showSpec`): checked first, a refusal naming its field (`/spec/query`).
+export async function runLensSpec(
+  spec: LensSpec,
+  params: Record<string, SqlCell>,
+  streamId: string | null,
+): Promise<LensRun> {
+  return unwrap(await commands.runLensSpec(spec as never, params, streamId));
+}
+
 /// Run a lens with param overrides (the rest use defaults).
 export async function runLens(
   id: string,

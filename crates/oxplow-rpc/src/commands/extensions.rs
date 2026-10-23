@@ -88,6 +88,28 @@ async fn context(svc: &Services, stream_id: Option<&str>) -> extensions::LensCon
     extensions::lens_context(svc, stream, None).await
 }
 
+/// Run a lens spec a page shows without keeping it (Explore Data's
+/// query), checked first; a refusal names its field (`/spec/query`).
+pub async fn run_lens_spec(
+    svc: &Services,
+    spec: extensions::LensSpec,
+    params: Option<BTreeMap<String, SqlCell>>,
+    stream_id: Option<String>,
+) -> Result<LensRun, IpcError> {
+    let stream = stream_id
+        .as_deref()
+        .and_then(oxplow_domain::StreamId::try_from_str);
+    Ok(
+        oxplow_app::commands::lens::run_checked_spec(
+            svc,
+            &spec,
+            params.unwrap_or_default(),
+            stream,
+        )
+        .await?,
+    )
+}
+
 /// Run an answer shown in a thread (`oxplow:oxplow/answer?id=<id>`) as the person sees it.
 pub async fn run_answer(svc: &Services, answer: String) -> Result<LensRun, IpcError> {
     let id: i64 =
@@ -385,6 +407,28 @@ mod tests {
             ".oxplow/extensions/demo/lenses/streams.yaml",
             "title: Streams\nparams:\n  - { name: kind, default: primary }\nquery: SELECT kind FROM v_stream WHERE kind = :kind\n",
         );
+    }
+
+    #[tokio::test]
+    async fn a_spec_runs_checked_and_a_refusal_names_its_field() {
+        let (svc, _dir) = crate::test_support::services().await;
+        let run = crate::dispatch(
+            "run_lens_spec",
+            json!({ "spec": { "title": "Explore", "query": "SELECT 1 AS n", "viz": "number" } }),
+            &svc,
+        )
+        .await
+        .unwrap();
+        assert_eq!(run["result"]["rows"], json!([[1]]));
+        let err = crate::dispatch(
+            "run_lens_spec",
+            json!({ "spec": { "title": "Explore", "query": "SELECT * FROM nope", "viz": "table" } }),
+            &svc,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.code, "INVALID");
+        assert_eq!(err.field.as_deref(), Some("/spec/query"));
     }
 
     #[tokio::test]

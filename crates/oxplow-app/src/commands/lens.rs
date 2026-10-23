@@ -588,6 +588,27 @@ pub fn ops(target: LensTarget) -> Vec<Op> {
 
 /// Run answer `id` as the person sees it: its lens, or its own spec (as
 /// lens `answer/<id>`), with the params it was shown with.
+/// A spec a page shows without keeping it (Explore Data's query): its
+/// shape checked as `show` checks one (`/spec`), its query as
+/// `oxplow_query_sql` checks it, metric functions resolved (`/spec/query`),
+/// then run in the stream's lens context (the primary's when none). A
+/// refusal names the field it is about, so the page marks it.
+pub async fn run_checked_spec(
+    svc: &crate::Services,
+    spec: &LensSpec,
+    params: BTreeMap<String, SqlCell>,
+    stream: Option<oxplow_domain::StreamId>,
+) -> Result<extensions::LensRun, CommandError> {
+    if let Some(problem) = extensions::spec_problem(spec) {
+        return Err(invalid("/spec", problem));
+    }
+    check_spec_query(&svc.sql, spec).await?;
+    let ctx = extensions::lens_context(svc, stream, None).await;
+    extensions::run_spec(&svc.sql, "spec/shown", spec, params, &ctx)
+        .await
+        .map_err(domain)
+}
+
 pub async fn run_answer(
     svc: &crate::Services,
     id: i64,
@@ -1022,6 +1043,53 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(saved.result["lens"], "saved/weekly-todos");
+    }
+
+    /// A spec a page shows is checked as one shown in a thread, and its
+    /// refusal names the field; a metric query runs.
+    #[tokio::test]
+    async fn a_shown_spec_is_checked_then_run() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        todos_metric(&fx).await;
+        let spec = |query: &str, viz: &str| -> LensSpec {
+            serde_json::from_value(json!({ "title": "Explore", "query": query, "viz": viz }))
+                .unwrap()
+        };
+        let field = |e: CommandError| match e {
+            CommandError::Invalid { field, .. } => field,
+            other => panic!("{other:?}"),
+        };
+        let bad_shape = run_checked_spec(
+            &fx.svc,
+            &spec("SELECT 1 AS n", "document"),
+            BTreeMap::new(),
+            None,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(field(bad_shape).as_deref(), Some("/spec"));
+        let bad_query = run_checked_spec(
+            &fx.svc,
+            &spec("SELECT * FROM nope", "table"),
+            BTreeMap::new(),
+            None,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(field(bad_query).as_deref(), Some("/spec/query"));
+        let run = run_checked_spec(
+            &fx.svc,
+            &spec(
+                "SELECT bucket, MEASURE('acme.todos') AS todos FROM metric_grid('week')",
+                "table",
+            ),
+            BTreeMap::new(),
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(run.result.columns, ["bucket", "todos"]);
+        assert_eq!(run.lens.id, "spec/shown");
     }
 
     /// A measure (`acme.todo`) and its metric (`acme.todos`).

@@ -33,6 +33,17 @@ export interface OxplowPage {
   threadId: string | null;
 }
 
+/** A lens spec a page shows (`showSpec`), as `oxplow.lens.keep` takes one. */
+export interface OxplowSpec {
+  title: string;
+  query: string;
+  /** `table`, `list`, `number`, `markdown`, `bar`, `line`, `treemap`, … */
+  viz: string;
+  /** A chart's columns: `x`, `y`, `series`, `label`, `size`, `group`. */
+  chart?: Record<string, string | null>;
+  description?: string;
+}
+
 /** An action drawn in the page's bar. */
 export interface OxplowAction {
   id: string;
@@ -75,6 +86,13 @@ export interface OxplowComponent {
   openForm(command: string, input?: unknown): Promise<unknown>;
   /** The page's title, in its tab and bar. A page only. */
   setTitle(title: string): Promise<null>;
+  /** Have oxplow draw a lens spec under the page with its own components,
+   *  live, with Save as Lens and Pin to Dashboard; null clears it.
+   *  Resolves with the rows it drew (null when cleared). Rejects
+   *  `INVALID` with the `field` it is about (`/spec/query`) for a spec
+   *  oxplow refuses. A page only. While one shows, the frame sits at its
+   *  content's height: leave `html` and `body` at `height: auto`. */
+  showSpec(spec: OxplowSpec | null): Promise<OxplowRows | null>;
   /** The page's actions, drawn by oxplow in its bar. A page only. */
   setActions(actions: OxplowAction[]): Promise<null>;
   /** Hear each press of a page action, by id; returns how to stop. */

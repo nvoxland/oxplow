@@ -17,9 +17,9 @@ mock.module("../api.js", () => ({
     return { result: { lens: "mine/busy-tasks", path: ".oxplow/extensions/mine/lenses/busy-tasks.yaml" } };
   },
 }));
-const { getToastStore } = await import("../components/toastStore.js");
+const { getToastStore } = await import("./toastStore.js");
 
-const { SaveAsLens } = await import("./ExploreDataPage.js");
+const { SaveAsLens } = await import("./SaveAsLens.js");
 
 afterEach(() => {
   cleanup();
@@ -35,7 +35,6 @@ test("Save as Lens keeps the spec with lens.keep and opens the lens", async () =
       viz="table"
       stream={{ id: "str2" } as Stream}
       onOpenPage={(ref) => opened.push(ref)}
-      disabledReason={null}
     />,
   );
   fireEvent.click(view.getByTestId("explore-save-open"));

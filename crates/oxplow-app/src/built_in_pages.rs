@@ -13,7 +13,6 @@
 pub const BUILT_IN_PAGES: &[&str] = &[
     "agent-session",
     "editor",
-    "explore-data",
     "external-url",
     "lens",
     "resource",

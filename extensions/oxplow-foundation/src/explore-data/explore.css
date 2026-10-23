@@ -1,0 +1,10 @@
+/* Explore Data's controls, in the theme's tokens. The page leaves `html`
+   and `body` at their content's height: oxplow sizes the frame to it and
+   draws the result under it. */
+body { padding: var(--space-3, 12px) var(--space-4, 16px); font-family: var(--font-ui); color: var(--text-primary); }
+#explore-sql, [data-testid="explore-sql"] { width: 100%; box-sizing: border-box; font-family: var(--font-mono, monospace); font-size: var(--text-sm, 12px); }
+[data-testid="explore-sql"][aria-invalid="true"] { border-color: var(--severity-critical); }
+.ox-toolbar { display: flex; gap: var(--space-2, 8px); align-items: center; flex-wrap: wrap; margin: var(--space-2, 8px) 0; }
+details[data-testid="explore-columns"] { margin-bottom: var(--space-2, 8px); }
+details[data-testid="explore-columns"] summary { cursor: pointer; }
+[data-testid="explore-error"] { font-family: var(--font-mono, monospace); font-size: var(--text-xs, 11px); white-space: pre-wrap; }

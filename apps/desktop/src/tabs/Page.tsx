@@ -445,7 +445,11 @@ function RailBody({ children, width, fill, rightRail, rightRailTitle }: { childr
               maxHeight: "calc(100vh - 48px)",
               overflow: "auto",
             }
-          : { marginBottom: 24 }),
+          : fill
+            ? // Stacked above a body that fills the page: a capped panel
+              // that scrolls, so the body keeps the rest of the height.
+              { marginBottom: 24, flex: "none", maxHeight: "35vh", overflow: "auto" }
+            : { marginBottom: 24 }),
         minWidth: 0,
         background: "var(--surface-card)",
         border: "1px solid var(--border-subtle)",

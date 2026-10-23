@@ -2307,6 +2307,14 @@
           ],
           "default": null
         },
+        "rail": {
+          "description": "A component page's rail: a lens of this extension drawn beside the\ncomponent, run with the page's view.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
         "for": {
           "description": "The resources it renders — one or a list: `oxplow/file`, its own\n`<extension>/<name>`, another extension's, or `https` / `http` (a\nweb page). A URI of one opens on it; without `for` it is a route.",
           "anyOf": [

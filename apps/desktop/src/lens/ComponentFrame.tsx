@@ -10,7 +10,7 @@ import { invokeComponentCommand, loadComponent, recordUsage, runComponentQuery, 
 import { CommandConfirm } from "../components/CommandConfirm.js";
 import { openRefInWindow } from "../tabs/openRef.js";
 import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
-import type { LensRun } from "../tauri-bridge/generated/bindings.js";
+import type { LensRun, LensSpec } from "../tauri-bridge/generated/bindings.js";
 import { lensDefinitionChanged } from "./lensRerun.js";
 import {
   componentMayOpen,
@@ -21,6 +21,7 @@ import {
   componentBundleUrl,
   type FrameAction,
   type PageInit,
+  type ShownRows,
 } from "./componentBridge.js";
 import type { HostedView } from "./hostedView.js";
 import { componentMemoryProblem, useRememberedStore } from "../prefs/remembered.js";
@@ -32,6 +33,10 @@ export interface PageDeps {
   setTitle(title: string): void;
   setActions(actions: FrameAction[]): void;
   openForm(command: string, input: unknown, version: string): Promise<{ result: unknown } | null>;
+  /** Run and draw a lens spec under the frame (null clears it). */
+  showSpec(spec: LensSpec | null): Promise<ShownRows | null>;
+  /** The frame's content height, as it changes. */
+  size(height: number): void;
 }
 
 /** The bundle a component's frame runs, loaded for `componentKey` (from
@@ -100,6 +105,7 @@ export function ComponentFrame({
   readyTimeoutMs,
   onFail,
   onReady,
+  height = null,
 }: {
   src: string;
   /** The bundle version it was loaded at: what it invokes with. */
@@ -119,6 +125,9 @@ export function ComponentFrame({
   readyTimeoutMs: number;
   onFail(reason: string): void;
   onReady?(): void;
+  /** A page's frame at its content's height (what it said with `size`),
+   *  when the page draws more under it; none fills the page. */
+  height?: number | null;
 }) {
   const nav = useOptionalPageNavigation();
   const [asking, setAsking] = useState<{ command: string; answer(ok: boolean): void } | null>(null);
@@ -220,6 +229,8 @@ export function ComponentFrame({
               setActions: (a: FrameAction[]) => pageDepsRef.current?.setActions(a),
               openForm: (command: string, input: unknown) =>
                 pageDepsRef.current ? pageDepsRef.current.openForm(command, input, version) : Promise.resolve(null),
+              showSpec: (spec: LensSpec | null) => pageDepsRef.current?.showSpec(spec) ?? Promise.resolve(null),
+              size: (h: number) => pageDepsRef.current?.size(h),
             }
           : {}),
         ...(hosted
@@ -257,7 +268,7 @@ export function ComponentFrame({
         referrerPolicy="no-referrer"
         src={src}
         onLoad={onLoad}
-        style={page ? pageFrameStyle : frameStyle}
+        style={page ? (height !== null ? { ...sizedFrameStyle, height } : pageFrameStyle) : frameStyle}
       />
       {refused ? (
         <div data-testid="custom-component-refused" style={noteStyle}>
@@ -296,4 +307,6 @@ export const badgeStyle: CSSProperties = {
 const frameStyle: CSSProperties = { width: "100%", flex: 1, minHeight: 240, border: "1px solid var(--border-subtle)", borderRadius: 4 };
 // A page's frame is the page: no card border.
 const pageFrameStyle: CSSProperties = { width: "100%", flex: 1, minHeight: 0, border: "none" };
+// A page's frame above what the page draws under it: its content's height.
+const sizedFrameStyle: CSSProperties = { width: "100%", flex: "none", minHeight: 120, border: "none" };
 export const noteStyle: CSSProperties = { color: "var(--text-secondary)", fontSize: "var(--text-xs)", marginBottom: 4 };

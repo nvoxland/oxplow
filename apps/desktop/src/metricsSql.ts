@@ -39,32 +39,6 @@ export type MetricSpec = {
   entity_json: string | null;
 };
 
-/** A string as a SQL literal. */
-function lit(s: string): string {
-  return `'${s.replace(/'/g, "''")}'`;
-}
-
-/** A name as a SQL identifier. */
-function ident(s: string): string {
-  return `"${s.replace(/"/g, '""')}"`;
-}
-
-/** One row per capture of metric `key`, newest first, optionally grouped
- *  by a dimension and bounded to `[?1, ?2]` (RFC 3339) when `ranged`. */
-export function metricSeriesSql(key: string, groupBy?: string | null, ranged = false): string {
-  const measure = `MEASURE(${lit(key)})`;
-  const grid = groupBy ? `metric_grid('capture', ${lit(groupBy)})` : "metric_grid('capture')";
-  const group = groupBy ? `g.${ident(groupBy)}` : "NULL";
-  const window = ranged ? " AND g.bucket >= ?1 AND g.bucket <= ?2" : "";
-  return [
-    `SELECT g.capture_id, g.bucket AS captured_at, ${measure} AS value, ${group} AS "group",`,
-    "       c.branch, c.provenance, c.closest_vcs_rev AS vcs_rev, c.source",
-    `FROM ${grid} g LEFT JOIN v_capture c ON c.id = g.capture_id`,
-    `WHERE ${measure} IS NOT NULL${window}`,
-    "ORDER BY g.bucket DESC",
-  ].join("\n");
-}
-
 export const METRIC_SPECS_SQL =
   "SELECT key, title, unit, source_measure, aggregation, direction, target, warn_at, fail_at, " +
   "description, category, language, scope, display_kind, extension, entity_json " +

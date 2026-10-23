@@ -1,32 +1,29 @@
-import { expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 
-import type { SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
-import { keepBlockedReason, lineage, LINEAGE_SQL, MODEL_COLUMNS_SQL, MODELS_SQL, metricTemplate, modelColumns, models, parseChart, parseTemplate, templateParam } from "./exploreData.js";
+// Explore Data is oxplow-foundation's component; its pure half is tested
+// here, where the desktop's tests run (the bundle has no test runner).
+import {
+  chartDefaults,
+  lineage,
+  LINEAGE_SQL,
+  metricSeriesSql,
+  metricTemplate,
+  MODEL_COLUMNS_SQL,
+  modelColumns,
+  parseChart,
+  parseTemplate,
+  readView,
+  sampleSql,
+  sliceTemplate,
+  specOf,
+  templateParam,
+  type Rows,
+} from "../../../../extensions/oxplow-foundation/src/explore-data/model.js";
 
-const result = (columns: string[], rows: (string | number | null)[][]): SqlQueryResult => ({
-  columns,
-  rows,
-  truncated: false,
-  reads: { models: [], tables: [], measures: [] },
-  freshness: [],
-});
+const result = (columns: string[], rows: (string | number | null)[][]): Rows => ({ columns, rows, truncated: false });
 
-test("the catalog is the model registry, core first", () => {
-  expect(MODELS_SQL).toContain("FROM v_model");
+test("a model's documented columns", () => {
   expect(MODEL_COLUMNS_SQL).toContain("FROM v_model_column WHERE view = ?1");
-  const rows = models(
-    result(
-      ["view", "owner", "kind", "description"],
-      [
-        ["v_work_item", "core", "sql", "Work items."],
-        ["v_gh_pr", "gh", "entity", "Pull requests."],
-      ],
-    ),
-  );
-  expect(rows).toEqual([
-    { view: "v_work_item", owner: "core", kind: "sql", description: "Work items." },
-    { view: "v_gh_pr", owner: "gh", kind: "entity", description: "Pull requests." },
-  ]);
   expect(modelColumns(result(["name", "sql_type", "doc"], [["id", "INTEGER", "Task id."], ["n", null, "Count."]]))).toEqual([
     { name: "id", sqlType: "INTEGER", doc: "Task id." },
     { name: "n", sqlType: "", doc: "Count." },
@@ -54,14 +51,7 @@ test("lineage splits what a model reads from what reads it", () => {
   expect(lineage("v_work_item", result(["view", "input", "kind"], []))).toEqual({ reads: [], readBy: [] });
 });
 
-test("a raw read can't be kept: saving and pinning say why", () => {
-  expect(keepBlockedReason(false)).toBeNull();
-  const why = keepBlockedReason(true);
-  expect(why).toContain("raw tables");
-  expect(why).toContain("models");
-});
 
-import { chartDefaults, metricTemplate, sliceTemplate } from "./exploreData.js";
 
 test("the explorer's metric template: a line over captures; Slice By regenerates it with a dimension", () => {
   const plain = metricTemplate("oxplow.todos", null);
@@ -94,4 +84,33 @@ test("a metric template and a chart ride in the address as text and read back", 
   expect(parseChart("")).toBeNull();
   expect(parseChart("{not json")).toBeNull();
   expect(parseChart("[1]")).toBeNull();
+});
+
+test("the view reads back from the tab's address, a chart viz only by name", () => {
+  expect(readView({})).toEqual({ model: "", sql: "", viz: "table", chart: null, template: null });
+  const v = readView({ model: "v_effort", sql: "SELECT 1", viz: "bar", chart: JSON.stringify({ x: "a", y: "b" }) });
+  expect(v).toMatchObject({ model: "v_effort", sql: "SELECT 1", viz: "bar", chart: { x: "a", y: "b" } });
+  expect(readView({ viz: "pie" }).viz).toBe("table");
+  expect(sampleSql("v_work_item")).toBe("SELECT * FROM v_work_item LIMIT 50");
+  expect(specOf("SELECT 1", "table", null)).toEqual({ title: "Explore", query: "SELECT 1", viz: "table" });
+});
+
+describe("metrics read through SQL", () => {
+  test("a metric's captures, grouped and bounded", () => {
+    expect(metricSeriesSql("oxplow.coverage.abs_pct")).toBe(
+      [
+        `SELECT g.capture_id, g.bucket AS captured_at, MEASURE('oxplow.coverage.abs_pct') AS value, NULL AS "group",`,
+        "       c.branch, c.provenance, c.closest_vcs_rev AS vcs_rev, c.source",
+        "FROM metric_grid('capture') g LEFT JOIN v_capture c ON c.id = g.capture_id",
+        "WHERE MEASURE('oxplow.coverage.abs_pct') IS NOT NULL",
+        "ORDER BY g.bucket DESC",
+      ].join("\n"),
+    );
+    const grouped = metricSeriesSql("it's", "zone", true);
+    expect(grouped).toContain("MEASURE('it''s')");
+    expect(grouped).toContain(`metric_grid('capture', 'zone')`);
+    expect(grouped).toContain(`g."zone" AS "group"`);
+    expect(grouped).toContain("AND g.bucket >= ?1 AND g.bucket <= ?2");
+  });
+
 });

@@ -13,9 +13,10 @@ Everything oxplow tracks is exposed as read-only SQL views: `v_work_item`
 (the active work list's items, whichever tracker holds them), `v_effort`, `v_thread`, `v_comment`, `v_wiki_page`, `v_effort_file`,
 `v_agent_turn`, `v_token_usage`, `v_fact`, and more.
 
-**Explore Data** (launcher → Data) lists every view with a description of each
-column. Pick one to see sample rows, edit the SQL (++cmd+enter++ runs it), and
-**Save as Lens** when it shows what you want.
+**Explore Data** (launcher → Data) lists every view in its rail. Pick one to
+see its columns and sample rows, edit the SQL (++cmd+enter++ runs it), and
+**Save as Lens** when it shows what you want. It is itself an extension's
+custom page: oxplow-foundation's.
 
 ## Writing one by hand
 
@@ -707,8 +708,17 @@ oxplow.connect().then(async (component) => {
 
 `querySql` needs `sql: read` on the component and `permissions: { sql:
 read }` on the extension; it reads oxplow's models only, never writes.
-`setTitle`, `setActions` and `openForm` are a page's: a component a lens
-shows can't use them. `viewParams`, `setViewParams` and `historyState`
+`setTitle`, `setActions`, `openForm` and `showSpec` are a page's: a
+component a lens shows can't use them. `showSpec({ title, query, viz,
+chart? })` hands oxplow a lens spec to draw under the page with its own
+components, live, with Save as Lens and Pin to Dashboard. It resolves with
+the rows drawn, and a query oxplow refuses rejects `INVALID` with `field:
+"/spec/query"`. While one shows, the frame takes its content's height:
+leave `html` and `body` at `height: auto`. A page can also name a `rail:`
+lens of its extension (`pages: [{ id, component, rail: <slug> }]`): oxplow
+draws it in the page's rail, and a row it picks sets the page's view
+param, which the component hears through `onViewParams`. Explore Data is
+built this way. `viewParams`, `setViewParams` and `historyState`
 are its host's view, where the host shares one: a page's component has
 all of its page's params; a replacement has the keys its view's contract
 lists (`v_replaceable.view`); a `viz: custom` lens on its own page has

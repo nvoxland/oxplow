@@ -21,7 +21,12 @@
 // its params, stream and thread, and it reads with `querySql` (when it
 // declares `sql: read`), titles its page with `setTitle`, puts actions in
 // the page's bar with `setActions` and hears them with `onAction`, and
-// opens a command's form in oxplow with `openForm`.
+// opens a command's form in oxplow with `openForm`. A page may also hand
+// oxplow a lens spec to draw under it with the kit (`showSpec`): oxplow
+// runs it, keeps it live and offers Save as Lens and Pin to Dashboard; the
+// library tells oxplow the page's content height, so the frame sits at
+// its content's height above what oxplow draws (leave `html` and `body`
+// at `height: auto` for that).
 //
 // A component keeps no state of its own (a frame has no storage); oxplow
 // keeps each kind, named by its scope:
@@ -46,7 +51,7 @@
   "use strict";
 
   // The protocol this library speaks; `init` says which one the host does.
-  const PROTOCOL = 9;
+  const PROTOCOL = 10;
 
   function component(port, init) {
     let next = 0;
@@ -100,6 +105,19 @@
 
     const tokens = init.tokens || {};
     port.postMessage({ type: "ready" });
+    // A page says how tall its content is, as it changes.
+    if (page && typeof global.ResizeObserver === "function" && global.document) {
+      const root = global.document.documentElement;
+      let last = -1;
+      const observer = new global.ResizeObserver((entries) => {
+        const box = entries[0] && entries[0].borderBoxSize && entries[0].borderBoxSize[0];
+        const height = Math.ceil(box ? box.blockSize : root.getBoundingClientRect().height);
+        if (height === last) return;
+        last = height;
+        port.postMessage({ type: "size", height });
+      });
+      observer.observe(root);
+    }
     return {
       // The lens's latest run: `{ lens, params, result: { columns, rows } }`;
       // null for a component that is a page.
@@ -155,6 +173,13 @@
       openForm: (command, input) => call({ method: "openForm", command, input: input === undefined ? {} : input }),
       // The page's title. A page only.
       setTitle: (title) => call({ method: "setTitle", title }),
+      // Have oxplow draw a lens spec under the page — `{ title, query, viz,
+      // chart? }`, as `oxplow.lens.keep` takes one — live, with Save as Lens
+      // and Pin to Dashboard; null clears it. Resolves with the rows it drew
+      // (`{ columns, rows, truncated }`; null when cleared), for the page's
+      // own controls. Rejects `INVALID` with the `field` it is about
+      // (`/spec/query`) for a spec oxplow refuses. A page only.
+      showSpec: (spec) => call({ method: "showSpec", spec: spec === undefined ? null : spec }),
       // The page's actions — `[{ id, label, primary?, disabled? }]` — drawn
       // by oxplow in the page's bar. A page only.
       setActions: (actions) => call({ method: "setActions", actions }),

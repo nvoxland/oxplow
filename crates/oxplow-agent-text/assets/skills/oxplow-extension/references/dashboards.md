@@ -188,4 +188,10 @@ what's expanded is its **history state** (`setHistoryState`,
 a bookmark and a reopened tab keep them. Never use `localStorage` or
 `sessionStorage` for it; `check` warns. Don't draw page-level buttons
 inside the frame: the bar is oxplow's. `extensions/oxplow-foundation/src/timeline/`
-is a working one.
+is a working one. To show a query's result, don't draw a table or a chart
+yourself: `showSpec({ title, query, viz, chart? })` has oxplow draw it
+under the page, live, with Save as Lens; it resolves with the rows and
+rejects `INVALID` (`field: "/spec/query"`) for a bad query. A list beside
+the page (a catalog, a picker) is a `rail: <lens slug>` on the page: its
+row's `select` sets the view param the component hears.
+`extensions/oxplow-foundation/src/explore-data/` does both.

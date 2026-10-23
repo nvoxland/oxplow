@@ -8,7 +8,6 @@ import type { AppScope, SlotNav } from "./appScope.js";
 import { SettingsPage } from "./SettingsPage.js";
 import { settingsArea } from "./settingsAreas.js";
 import { TerminalPage } from "./TerminalPage.js";
-import { ExploreDataPage } from "./ExploreDataPage.js";
 import { ExternalUrlPage } from "./ExternalUrlPage.js";
 
 /** What a built-in page body gets: its tab ref and the ref's payload, the slot's navigation, and core's scope. */
@@ -66,14 +65,6 @@ export const builtInPages: Record<BuiltInPageName, BuiltInPage> = {
           }}
         />
       ),
-    };
-  },
-  "explore-data": ({ ref, nav, scope }) => {
-    return {
-      id: ref.id,
-      label: "Explore Data",
-      closable: true,
-      render: () => <ExploreDataPage stream={scope.stream} onOpenPage={nav.navOpen} />,
     };
   },
   // A web page: its tab's id is its URL.

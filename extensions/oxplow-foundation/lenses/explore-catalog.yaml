@@ -1,0 +1,16 @@
+title: Data
+description: Every model (`v_*` view) oxplow's data holds, oxplow's own first. Picking one shows it in Explore Data.
+params:
+  - { name: model, label: Model, default: "" }
+query: |
+  SELECT view, owner, description, view = :model AS current
+  FROM v_model
+  ORDER BY owner <> 'core', owner, view
+viz: list
+columns:
+  - { key: view, label: Model, select: model }
+  - { key: owner, label: Owner }
+  - { key: description, label: Holds }
+emphasis: current
+empty: No models are published.
+hidden: true

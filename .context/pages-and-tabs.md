@@ -211,12 +211,15 @@ but the first, `<page>: <section>` at `#<view>=<id>`), `keywords`, the `params` 
 the launcher badge, and what draws it: a `lens:` (most pages) or, for
 oxplow's own until the kit can draw them, `component: oxplow:<name>`, a
 **built-in page**. A renderer also has `for`, `accepts`, `default` and
-`pinned`. The built-ins are pinned by
+`pinned`. A page whose body is a custom `component:` may name a `rail:`
+lens of its extension, drawn in its rail with the page's view (Explore
+Data's catalog: extensions.md "A custom page's rail"). The built-ins are pinned by
 `crates/oxplow-app/src/built_in_pages.rs` and its golden
 `fixtures/built_in_pages.json`. The list grew once with the renderers
 (`agent-session`, `commit`, `directory`, `editor`, `file-viewer`, `lens`,
 `resource`, `wiki-page`, `work-item`) and only shrinks
-again (a page leaves when it becomes a lens). It ends at six: `editor`,
+again (a page leaves when it becomes a lens or a custom page — Explore
+Data is oxplow-foundation's custom page now). It ends at six: `editor`,
 `terminal`, `agent-session` and `external-url` wait for an editor,
 terminal and embed viz; `lens` (the lens runtime, which draws every lens
 page) and `resource` (the fallback when nothing declares a URI) stay —
@@ -261,7 +264,7 @@ oxplow's pages and their params:
 - Lens pages (more): `diff-view` (the Changes page, the renderer of `oxplow/snapshot`, `oxplow/effort` and `oxplow/turn`; view params `start` and `end`, each `''` / `none` / `working` / `snap:<id>` / `git:<rev>`: a picked point is a pushed view change), `tasks` (a document: `tasks-list`, the `work_item.list` replaceable; `tasks-summary`; `tasks-backlog`; view params `show` and `priority`, plus `thread_id` and `stream_id`).
 - Built-in pages: `board`,
   `files`, `git-dashboard`, `uncommitted-changes`,
-  `comments`, `explore-data`, `metrics-recorded`,
+  `comments`, `metrics-recorded`,
   `terminal`, `alerts`, `settings` (view: `area`, `section`, and `q`, the overview's search — another
   area is a pushed view change, never a page opened over it; the shell and the rail are React, and the Overview and Language Servers areas are oxplow-foundation lenses mounted in their slots, `settings.overview.sections` / `settings.lsp.sections`; it becomes a foundation view document once Data and Integrations are lenses: extensions.md "A document with a view"),
   `new-task`
@@ -858,7 +861,8 @@ once is a bug.
 for every page, with no table: the `?` is identity, the `#` is view.
 `BUILT_IN_VIEW`, `pageIdentity` and `withView` are gone. A built-in page
 that has a filter (Tasks' scope and chips, Metrics' range, Git History's
-`q`, Files' `filter`, Explore Data's `model`) keeps it in the `#`; its
+`q`, Files' `filter`) keeps it in the `#` — and so does a custom page
+(Explore Data's `model`, `sql`, `viz`); its
 `?` is only what it shows (a diff's path and sides, a dashboard's id, a
 metric's key), so two diffs in a tab are two pages. A param written in
 the wrong place is not read from there: a lens whose `?` holds a
