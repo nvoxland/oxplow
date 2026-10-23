@@ -36,7 +36,8 @@ import {
   subscribeOxplowEvents,
   type ProviderInstanceView,
 } from "../api.js";
-import type { SignInCompletion, SignInState } from "../tauri-bridge/generated/bindings.js";
+import type { SignInState } from "../providerInstances.js";
+import type { SignInCompletion } from "../tauri-bridge/generated/bindings.js";
 import { readsOf, useRerunOnChange } from "../lens/lensRerun.js";
 import { CredentialRow } from "./CredentialRow.js";
 import { InlineConfirm } from "./InlineConfirm.js";

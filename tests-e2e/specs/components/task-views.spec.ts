@@ -102,14 +102,12 @@ test("the swimlanes work over another work list too (e2e/fake active)", async ({
   await install(daemon);
   // The fake tracker as the active work list, set up before any page is
   // open: Settings → Integrations does the same (see fake-provider.spec).
-  await ipc(daemon, "set_provider_instance", { instance: "e2e/fake", enabled: true, config: { team: "core" } });
+  await run(daemon, "oxplow.provider.set_instance", { instance: "e2e/fake", enabled: true, config: { team: "core" } });
   await until("the fake to be ready", 30_000, async () => {
-    const all = await ipc<Array<{ instance: string; enabled: boolean; health: { state: { state: string } } }>>(
-      daemon,
-      "list_provider_instances",
-    );
-    const fake = all.find((i) => i.instance === "e2e/fake");
-    return !!fake && fake.enabled && fake.health.state.state === "ready";
+    const out = await ipc<{ rows: unknown[][] }>(daemon, "query_sql", {
+      sql: "SELECT 1 FROM v_provider_instance WHERE instance = 'e2e/fake' AND enabled = 1 AND state = 'ready'",
+    });
+    return out.rows.length === 1;
   });
   await run(daemon, "oxplow.config.set", { key: "activeProviders", value: { work_items: "fake" } });
   await until("the fake to be the active work list", 30_000, async () => {

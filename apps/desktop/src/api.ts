@@ -3,17 +3,24 @@ import type {
   BackgroundTask,
   ListedConversation,
   TabReport,
-  BegunSignIn,
   HookEnvelope,
   OpOutcome,
   OxplowConfig,
   OxplowEvent,
   Reads,
   SymbolLocation,
-  Scope,
   SignInCompletion,
   SnapshotTrigger,
 } from "./tauri-bridge/generated/bindings.js";
+import {
+  assembleInstances,
+  COLLECTORS_SQL,
+  CREDENTIALS_SQL,
+  INSTANCES_SQL,
+  type BegunSignIn,
+  type ProviderInstanceView,
+  type Scope,
+} from "./providerInstances.js";
 import { listen, onRemoteReconnect, triggerRemoteResync } from "./tauri-bridge/transport.js";
 
 /** Whether this window is in the desktop shell — false in a plain browser
@@ -52,7 +59,6 @@ import type {
   CommandOutcome,
   CommandSpec,
   FormStart,
-  ProviderInstanceView,
   SearchHit,
   SqlCell,
   SqlQueryResult,
@@ -625,15 +631,27 @@ export async function keepLensSpec(
 }
 
 /// Extension providers' instances on this machine, with health
-/// (Settings → Integrations).
+/// (Settings → Integrations): the `v_provider_*` models.
 export async function listProviderInstances(): Promise<ProviderInstanceView[]> {
-  return unwrap(await commands.listProviderInstances());
+  const [instances, credentials, collectors] = await Promise.all([
+    querySql(INSTANCES_SQL),
+    querySql(CREDENTIALS_SQL),
+    querySql(COLLECTORS_SQL),
+  ]);
+  return assembleInstances(instances, credentials, collectors);
+}
+
+/// The command's own view of an instance, listed afresh.
+async function instances(name: string, input: unknown, confirmed = false): Promise<ProviderInstanceView[]> {
+  await runCommand(name, input, confirmed);
+  return listProviderInstances();
 }
 
 /// Check an instance against `config` without enabling or saving
 /// anything; the outcome is the returned view's state.
 export async function checkProviderInstance(instance: string, config: unknown): Promise<ProviderInstanceView> {
-  return unwrap(await commands.checkProviderInstance(instance, config));
+  const out = await runCommand("oxplow.provider.check_instance", { instance, config });
+  return out.result as ProviderInstanceView;
 }
 
 /// A person saves an instance's config and enables or disables it.
@@ -644,7 +662,7 @@ export async function setProviderInstance(
   enabled: boolean,
   config: unknown,
 ): Promise<ProviderInstanceView[]> {
-  return unwrap(await commands.setProviderInstance(instance, enabled, config));
+  return instances("oxplow.provider.set_instance", { instance, enabled, config });
 }
 
 /// A person adds another instance of an extension's provider
@@ -656,19 +674,19 @@ export async function addProviderInstance(
   provider: string,
   scope: Scope,
 ): Promise<ProviderInstanceView[]> {
-  return unwrap(await commands.addProviderInstance(instance, provider, scope));
+  return instances("oxplow.provider.add_instance", { instance, provider, scope });
 }
 
 /// A person turns their global instance off in this project only: the
 /// project gets its own entry, off, replacing it here.
 export async function turnOffProviderInstanceHere(instance: string): Promise<ProviderInstanceView[]> {
-  return unwrap(await commands.turnOffProviderInstanceHere(instance));
+  return instances("oxplow.provider.turn_off_here", { instance });
 }
 
 /// A person removes an instance: it stops; its config and its credentials
 /// on this machine go.
 export async function removeProviderInstance(instance: string): Promise<ProviderInstanceView[]> {
-  return unwrap(await commands.removeProviderInstance(instance));
+  return instances("oxplow.provider.remove_instance", { instance }, true);
 }
 
 /// Set (or, with null, forget) one of an instance's credentials in this
@@ -678,27 +696,28 @@ export async function setInstanceCredential(
   name: string,
   value: string | null,
 ): Promise<ProviderInstanceView[]> {
-  return unwrap(await commands.setInstanceCredential(instance, name, value));
+  return instances("oxplow.provider.set_credential", value === null ? { instance, name } : { instance, name, value });
 }
 
 /// Start signing in for one of an instance's credentials (one its provider
 /// declares with `oauth:`), its redirect coming back to `redirectPort`
 /// where the shell listens: the page to open in the person's browser.
 export async function beginOauthSignIn(instance: string, name: string, redirectPort: number): Promise<BegunSignIn> {
-  return unwrap(await commands.beginOauthSignIn(instance, name, redirectPort));
+  return (await runCommand("oxplow.provider.begin_sign_in", { instance, name, redirect_port: redirectPort }))
+    .result as BegunSignIn;
 }
 
 /// End sign-in `signIn` (its row was left, or the browser never opened):
 /// nothing of it is kept, and its news says it was cancelled.
 export async function cancelOauthSignIn(instance: string, name: string, signIn: number): Promise<void> {
-  unwrap(await commands.cancelOauthSignIn(instance, name, signIn));
+  await runCommand("oxplow.provider.cancel_sign_in", { instance, name, sign_in: signIn });
 }
 
 /// Hand the redirect the shell caught (its path and query) to the core:
 /// signed in, failed, or not this sign-in's (it waits on). The renderer
 /// also hears `credentialChanged` when it ends.
 export async function completeOauthSignIn(instance: string, name: string, redirect: string): Promise<SignInCompletion> {
-  return unwrap(await commands.completeOauthSignIn(instance, name, redirect));
+  return (await runCommand("oxplow.provider.complete_sign_in", { instance, name, redirect })).result as SignInCompletion;
 }
 
 export { openInSystemBrowser } from "./tauri-bridge/systemBrowser.js";

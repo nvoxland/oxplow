@@ -2,7 +2,7 @@
 //! §7.3) — the **desktop shell's**, never the core's (P10,
 //! `.context/providers.md` → "Signing in"). The shell listens where the
 //! person's browser is, hands what came back to the core
-//! (`complete_oauth_sign_in`, which checks it is that sign-in's and
+//! (`oxplow.provider.complete_sign_in`, which checks it is that sign-in's and
 //! exchanges the code), and answers the browser with how it went. So a
 //! sign-in works the same whether the core runs here or on a remote
 //! daemon. Guard (in the core): `the_core_never_binds_a_socket_for_a_sign_in`.

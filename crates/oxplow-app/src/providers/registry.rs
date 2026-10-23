@@ -254,7 +254,7 @@ struct SignInUnderWay {
     expiry: tokio::task::JoinHandle<()>,
 }
 
-/// How handing a redirect to a sign-in went (`complete_oauth_sign_in`).
+/// How handing a redirect to a sign-in went (`oxplow.provider.complete_sign_in`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(tag = "outcome", rename_all = "snake_case")]
 pub enum SignInCompletion {

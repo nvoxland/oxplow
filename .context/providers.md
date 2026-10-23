@@ -669,8 +669,9 @@ the start); its `contribution_health` row; and any `activeProviders` choice
 naming its id — except, for a project's replacement of a global
 instance, what the global one now showing through has),
 and sets a credential with `set_credential` (a declared name; the
-instance restarts on it) — RPCs `add_provider_instance`,
-`remove_provider_instance`, `set_instance_credential`, UI only. A
+instance restarts on it) — the commands `oxplow.provider.add_instance`,
+`remove_instance` and `set_credential` (`credentials.write`, a `writeOnly` value: the
+collector credential's unrecorded path). A
 provider's credential is its instance's: collectors keep the
 extension's `source:<project>:<ext>:<name>` accounts. An extension's
 command declared over its provider's operation runs on the instance its
@@ -687,8 +688,8 @@ config, provider? } }`, the same entries and the same validation):
 - a project's entry of the same name **replaces it there, whole**
   (`instances_config()` is the one merge: global, then project) — to turn
   it off or configure it differently in one project. A person makes one
-  from the global row's **Off in this project** (`off_here`, RPC
-  `turn_off_provider_instance_here`, tsk843): the project's own entry,
+  from the global row's **Off in this project** (`off_here`, command
+  `oxplow.provider.turn_off_here`): the project's own entry,
   off, with the global one's config and provider; Disable or a config
   edit on a global row with no project entry changes it everywhere, and
   Remove on the project's entry brings the global one back here. **A project's entry
@@ -842,8 +843,8 @@ form; sign-in is a provider's.
   all is the same state with "isn't signed in". A token endpoint that
   can't be reached is an ordinary failed start (backoff), and a token
   that's still good is used as it is.
-- **Signing in** is a person's: IPC `begin_oauth_sign_in { instance,
-  name, redirect_port }` (`ProviderRegistry::begin_sign_in`, UI-only)
+- **Signing in** is a person's: command `oxplow.provider.begin_sign_in { instance,
+  name, redirect_port }` (`ProviderRegistry::begin_sign_in`, `credentials.write`)
   returns the page to open — **only for a provider as its deployment declares it**: the
   endpoints, client id and client-secret name are part of the deployment,
   and a sign-in sends the code, the PKCE verifier and the client secret
@@ -855,8 +856,8 @@ form; sign-in is a provider's.
   (`listen_for_oauth_redirect { port? }` → `{ id, port }`, shell-only — on
   the credential's `redirectPort`, else any free port), the core begins on
   that port, the browser opens the page, and each redirect the shell
-  catches (`await_oauth_redirect { listener }`) goes to the core by IPC
-  `complete_oauth_sign_in { instance, name, redirect }` (UI-only), the
+  catches (`await_oauth_redirect { listener }`) goes to the core by the command
+  `oxplow.provider.complete_sign_in { instance, name, redirect }`, the
   shell answering the browser with the core's verdict
   (`answer_oauth_redirect { listener, outcome }`). A listener is known by
   its **id**, never its port (tsk905): a newer sign-in may listen on the
@@ -888,12 +889,12 @@ form; sign-in is a provider's.
   again; tsk904). A stop returns once the socket is closed. A second sign-in for the same credential
   abandons the first (its redirect is no longer the sign-in's; the row
   stops its listener), and the first's news says it was replaced. Every
-  sign-in has a **number** (`begin_oauth_sign_in` → `{ url, signIn }`,
+  sign-in has a **number** (`oxplow.provider.begin_sign_in` → `{ url, signIn }`,
   `SignInId`); `CredentialChanged { …, signIn }` names the sign-in it is
   about, so a row ignores news of another sign-in of the credential — its
   own replaced one, another window's (tsk929). A row that is left, or
-  whose browser never opened, cancels its sign-in (`cancel_oauth_sign_in
-  { instance, name, signIn }`, UI-only): nothing of it — verifier, client
+  whose browser never opened, cancels its sign-in (`oxplow.provider.cancel_sign_in
+  { instance, name, sign_in }`): nothing of it — verifier, client
   secret — is kept the five minutes, and its news says it was cancelled. Each `(instance, credential)` has its own gate
   (`sign_in_gate`), held while its sign-in begins, finishes — across the
   code exchange — expires or is abandoned, so two clicks at once leave one
@@ -904,7 +905,7 @@ form; sign-in is a provider's.
   (tsk910). The row's Sign in is off while one starts, and off
   without the desktop app (a plain browser can't catch the redirect),
   with the reason shown.
-  `set_instance_credential` refuses a value for a signed-in credential;
+  `oxplow.provider.set_credential` refuses a value for a signed-in credential;
   with no value it signs out.
 - **The view**: `ProviderInstanceView.credentials` is
   `InstanceCredential { name, set, sign_in?, redirect_port? }`
@@ -1149,12 +1150,10 @@ reconcile (tsk716). An external write whose
 reply was lost (it landed at the tracker but the call timed out) is
 restated by the next read.
 
-**Settings → Integrations** (`IntegrationsSection.tsx`, IPC UI-only in
-the parity table): `list_provider_instances` (every declared provider and
-configured instance, with health, credential status and the
-config schema), `check_provider_instance { instance, config }` (start
+**Settings → Integrations** (`IntegrationsSection.tsx`; its operations are commands, `commands/provider_instances.rs`, scope `providers.write` and `credentials.write`, all `External`): the instances are read as the live models `v_provider_instance` (every declared provider and
+configured instance, with its state, `detail`, config and config schema), `v_provider_credential` (each credential's presence and sign-in state, never a value) and `v_provider_collector` (each collector's reads), pushed down on `instance`, following `ConfigChanged`, `ExtensionsChanged`, `CredentialChanged` and the models `v_contribution_health` / `v_collector_state`. `api.ts` assembles a `ProviderInstanceView` from the three (`providerInstances.ts`) until Integrations is a foundation component. `oxplow.provider.check_instance { instance, config }` (start
 it with that config and `check`, enabling and saving nothing — the
-outcome is the view's state) and `set_provider_instance { instance,
+outcome is the view's state) and `oxplow.provider.set_instance { instance,
 enabled, config }` (`ProviderRegistry::set_instance`: enabling checks
 first and refuses an unconfigured instance, writing
 nothing, with the problem's field as `/config/<path>`; then `oxplow.config.set`
@@ -1162,7 +1161,7 @@ of `extensionInstances` — to enable, `oxplow.contribution.enable` runs **first
 a failed enable writes nothing and the config never says enabled for
 an instance that wasn't — then a reconcile). Each row
 shows its state, its credentials (each set into the keychain through
-`set_instance_credential`, or signed in for — "Credentials and sign-in"),
+`oxplow.provider.set_credential`, or signed in for — "Credentials and sign-in"),
 the config as a form from the provider's `config_schema`
 (`SchemaForm`, P6.B2: Escape resets an edit; a field's problem disables
 the actions), Check and Enable / Disable / Enable again, and each
@@ -1172,9 +1171,9 @@ runs. **Instances** (P9.B6): under the rows, "Add another instance of
 `<ext>/<provider>`" takes a name (the instance id: snake_case, not
 already an instance — `newInstanceProblem` says so before the core
 does) and a scope ("This project's" / "Mine, in every project") and calls
-`add_provider_instance`; Enter adds, Escape clears. A named instance, a
+`oxplow.provider.add_instance`; Enter adds, Escape clears. A named instance, a
 project's replacement of the person's own, and one whose provider is
-gone have **Remove** (`InlineConfirm`, `remove_provider_instance`:
+gone have **Remove** (`InlineConfirm`, `oxplow.provider.remove_instance`:
 `canRemoveInstance`) — a global one whose provider is gone included: a
 global instance is left out of the list only where the project doesn't
 have its extension enabled; a provider's own instance is turned off, not

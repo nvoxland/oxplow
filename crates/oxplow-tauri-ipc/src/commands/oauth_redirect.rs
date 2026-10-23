@@ -1,7 +1,7 @@
 //! The desktop shell catches a sign-in's redirect (P10,
 //! `.context/providers.md` → "Signing in"): it listens on the person's
 //! machine ([`oxplow_oauth_redirect`]), hands what came back to the
-//! renderer — which gives it to the core (`complete_oauth_sign_in`) — and
+//! renderer — which gives it to the core (`oxplow.provider.complete_sign_in`) — and
 //! answers the browser with how that went. So a sign-in works the same
 //! with the core here or on a remote daemon. Shell-only: no daemon serves
 //! these.

@@ -1280,6 +1280,54 @@ commands:
     op: sync
     lifecycle: experimental
     example: {"instance": "issues/issues"}
+  # providers.write
+  - name: provider.check_instance
+    summary: "Check a provider instance against a config without enabling it or writing anything: consent, start, handshake, `check`. Returns the instance's view (`v_provider_instance`), its health the outcome (runs the provider process, a system the bus doesn't own)."
+    scope: providers.write
+    op: check_instance
+    example: {"instance": "issues/issues", "config": {"team": "core"}}
+  - name: provider.set_instance
+    summary: "Save a provider instance's config and turn it on or off. Turning it on checks it first: an unapproved or unconfigured instance is refused and nothing is written (starts or stops the provider process, a system the bus doesn't own)."
+    scope: providers.write
+    op: set_instance
+    example: {"instance": "issues/issues", "enabled": true, "config": {"team": "core"}}
+  - name: provider.add_instance
+    summary: "Add another instance of an extension's provider (`instance` is `<extension>/<name>`), the project's or `scope: global` the person's own on this machine. It is off until configured and turned on."
+    scope: providers.write
+    op: add_instance
+    example: {"instance": "issues/work", "provider": "issues", "scope": "project"}
+  - name: provider.turn_off_here
+    summary: "Turn a global provider instance off in this project only: the project gets its own entry for it, off."
+    scope: providers.write
+    op: turn_off_here
+    example: {"instance": "issues/work"}
+  - name: provider.remove_instance
+    summary: "Remove a provider instance: it stops, and its config entry and its credentials on this machine go."
+    scope: providers.write
+    op: remove_instance
+    confirm: destructive
+    example: {"instance": "issues/work"}
+  # credentials.write
+  - name: provider.set_credential
+    summary: "Set (or, with no `value`, forget) a credential of a provider instance: the value goes to the OS keychain and is never read back, so `v_provider_instance` only says whether one is set. The instance restarts on it. A credential signed in for takes no value; forgetting it signs out."
+    scope: credentials.write
+    op: set_instance_credential
+    example: {"instance": "issues/issues", "name": "TOKEN", "value": "ghp_example"}
+  - name: provider.begin_sign_in
+    summary: "Start signing in for a provider instance's credential (one its provider declares with `oauth:`), its redirect coming back to `redirect_port` on the person's machine. Returns the page to open in the browser and the sign-in's number (`signIn`)."
+    scope: credentials.write
+    op: begin_sign_in
+    example: {"instance": "issues/issues", "name": "TOKEN", "redirect_port": 53682}
+  - name: provider.complete_sign_in
+    summary: "Hand a sign-in the redirect the browser was sent to (`redirect`: its path and query). Another sign-in's is refused and the sign-in waits on. Its own: the token goes to the OS keychain and the instance restarts on it. Returns `{ outcome }`: `signed_in`, `failed` or `not_this_sign_in`."
+    scope: credentials.write
+    op: complete_sign_in
+    example: {"instance": "issues/issues", "name": "TOKEN", "redirect": "/callback?code=abc&state=xyz"}
+  - name: provider.cancel_sign_in
+    summary: "End a sign-in (its number from `begin_sign_in`) the person left or whose browser never opened: nothing of it is kept."
+    scope: credentials.write
+    op: cancel_sign_in
+    example: {"instance": "issues/issues", "name": "TOKEN", "sign_in": 3}
   # records.read
   - name: records.read
     summary: "Read what a uri names. Its model's row (every column), what sits beside it (a work item's links and comments, a commit's or an effort's files) and, for a body no model holds, its content. `oxplow:oxplow/file?path=src/a.rs` reads the working tree; `oxplow:oxplow/file?path=src/a.rs&rev=git:HEAD#lines=10-40` a revision's lines (`@snap:<id>` a local-history snapshot); `oxplow:oxplow/event?id=<id>#part=output` (or `#input`, `#prompt`) one of your stream's events' stored bodies; `oxplow:oxplow/lens?lens=<ext>/<slug>` a lens's definition; `stream` reads a file or lens in another stream's worktree. `oxplow:oxplow/ai_call?id=<id>#part=request` (or `#response`) a recorded model call's bodies. Any `uri` a model's column holds reads the same way (`work_item:…`, `oxplow:oxplow/commit?sha=…`, `oxplow:oxplow/effort?id=…`, `oxplow:oxplow/thread?id=…`, `oxplow:oxplow/wiki?slug=…`). Content stops at 64 KB, saying so."

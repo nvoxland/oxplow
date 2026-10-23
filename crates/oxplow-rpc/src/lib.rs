@@ -260,17 +260,6 @@ macro_rules! oxplow_command_table {
                 // ai (Settings → AI)
                 ai_settings => $crate::commands::ai::ai_settings {} -> ::oxplow_app::ai_service::AiSettings,
                 read_ai_call => $crate::commands::ai::read_ai_call { id: ::oxplow_domain::AiCallId, body: ::oxplow_app::ai_calls::AiCallBody } -> Option<::oxplow_app::event_bodies::EventBody>,
-                // providers (Settings → Integrations)
-                list_provider_instances => $crate::commands::providers::list_provider_instances {} -> Vec<::oxplow_app::providers::ProviderInstanceView>,
-                check_provider_instance => $crate::commands::providers::check_provider_instance { instance: String, config: ::oxplow_domain::Json } -> ::oxplow_app::providers::ProviderInstanceView,
-                set_provider_instance => $crate::commands::providers::set_provider_instance { instance: String, enabled: bool, config: ::oxplow_domain::Json } -> Vec<::oxplow_app::providers::ProviderInstanceView>,
-                add_provider_instance => $crate::commands::providers::add_provider_instance { instance: String, provider: String, scope: ::oxplow_app::providers::Scope } -> Vec<::oxplow_app::providers::ProviderInstanceView>,
-                remove_provider_instance => $crate::commands::providers::remove_provider_instance { instance: String } -> Vec<::oxplow_app::providers::ProviderInstanceView>,
-                turn_off_provider_instance_here => $crate::commands::providers::turn_off_provider_instance_here { instance: String } -> Vec<::oxplow_app::providers::ProviderInstanceView>,
-                set_instance_credential => $crate::commands::providers::set_instance_credential { instance: String, name: String, value: Option<String> } -> Vec<::oxplow_app::providers::ProviderInstanceView>,
-                begin_oauth_sign_in => $crate::commands::providers::begin_oauth_sign_in { instance: String, name: String, redirect_port: u16 } -> ::oxplow_app::providers::BegunSignIn,
-                cancel_oauth_sign_in => $crate::commands::providers::cancel_oauth_sign_in { instance: String, name: String, sign_in: u32 } -> (),
-                complete_oauth_sign_in => $crate::commands::providers::complete_oauth_sign_in { instance: String, name: String, redirect: String } -> ::oxplow_app::providers::SignInCompletion,
                 report_tabs => $crate::commands::tabs::report_tabs { report: oxplow_app::client_reports::TabReport } -> (),
                 rename_native_conversation => $crate::commands::conversations::rename_native_conversation { session_id: String, name: String } -> (),
                 list_native_conversations => $crate::commands::conversations::list_native_conversations { session_id: String } -> Vec<$crate::commands::conversations::ListedConversation>,

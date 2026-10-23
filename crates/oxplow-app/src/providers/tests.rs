@@ -2432,6 +2432,120 @@ fn configure_named(
 
 const SECOND: &str = "tracker/fake_second";
 
+async fn instance_rows(fx: &EffortFixture) -> Vec<(String, String, i64, String)> {
+    let out = fx
+        .svc
+        .sql
+        .query_sql(
+            "SELECT instance, state, enabled, scope FROM v_provider_instance ORDER BY instance",
+            vec![],
+            None,
+        )
+        .await
+        .unwrap();
+    serde_json::to_value(&out.rows)
+        .unwrap()
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| {
+            let r = r.as_array().unwrap();
+            (
+                r[0].as_str().unwrap().to_string(),
+                r[1].as_str().unwrap().to_string(),
+                r[2].as_i64().unwrap(),
+                r[3].as_str().unwrap().to_string(),
+            )
+        })
+        .collect()
+}
+
+/// Settings → Integrations is commands over `v_provider_instance`: an
+/// instance is checked without being written, turned on with its config,
+/// another added and removed (a person confirms that), and a refusal names
+/// the field.
+#[tokio::test]
+async fn provider_instances_are_managed_by_commands_and_read_as_a_model() {
+    let (fx, _ext) = deployed("").await;
+    let run = |name: &'static str, input: serde_json::Value, confirmed: bool| {
+        let commands = fx.svc.commands.clone();
+        async move { commands.run(&Actor::Human, name, input, confirmed).await }
+    };
+    assert_eq!(
+        instance_rows(&fx).await,
+        vec![(INSTANCE.into(), "off".into(), 0, "project".into())]
+    );
+
+    // A check enables and writes nothing; its answer is the view.
+    let checked = run(
+        "oxplow.provider.check_instance",
+        json!({ "instance": INSTANCE, "config": { "team": "core" } }),
+        false,
+    )
+    .await
+    .unwrap();
+    assert_eq!(checked.result["health"]["state"]["state"], "ready");
+    assert!(fx.svc.config.read().unwrap().extension_instances.is_empty());
+
+    run(
+        "oxplow.provider.set_instance",
+        json!({ "instance": INSTANCE, "enabled": true, "config": { "team": "core" } }),
+        false,
+    )
+    .await
+    .unwrap();
+    crate::test_fixtures::activate_with_problems(&fx.svc).await;
+    assert_eq!(
+        instance_rows(&fx).await,
+        vec![(INSTANCE.into(), "ready".into(), 1, "project".into())]
+    );
+
+    run(
+        "oxplow.provider.add_instance",
+        json!({ "instance": SECOND, "provider": "fake", "scope": "project" }),
+        false,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        instance_rows(&fx).await,
+        vec![
+            (INSTANCE.into(), "ready".into(), 1, "project".into()),
+            (SECOND.into(), "off".into(), 0, "project".into()),
+        ]
+    );
+    let pinned = fx
+        .svc
+        .sql
+        .query_sql(
+            "SELECT instance FROM v_provider_instance WHERE instance = ?",
+            vec![oxplow_db::SqlCell::Text(SECOND.into())],
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(pinned.rows.len(), 1);
+
+    // A refusal is at the field, and nothing was written.
+    let refused = run(
+        "oxplow.provider.set_credential",
+        json!({ "instance": "tracker/nope", "name": "TOKEN", "value": "x" }),
+        false,
+    )
+    .await
+    .unwrap_err();
+    assert!(refused.to_string().contains("tracker/nope"), "{refused}");
+
+    run(
+        "oxplow.provider.remove_instance",
+        json!({ "instance": SECOND }),
+        true,
+    )
+    .await
+    .unwrap();
+    assert_eq!(instance_rows(&fx).await.len(), 1);
+}
+
 /// tsk841: removing an instance — here one whose provider is gone, which
 /// is when the row offers Remove — takes everything of it: its config,
 /// the active-provider choice naming it, its read checkpoints (an

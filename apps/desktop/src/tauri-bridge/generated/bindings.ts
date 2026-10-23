@@ -253,56 +253,6 @@ export const commands = {
 	 */
 	renameNativeConversation: (sessionId: string, name: string) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("rename_native_conversation", { sessionId, name })),
 	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	listProviderInstances: () => typedError<ProviderInstanceView[], IpcError_Serialize>(__TAURI_INVOKE("list_provider_instances")),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	checkProviderInstance: (instance: string, config: unknown) => typedError<ProviderInstanceView, IpcError_Serialize>(__TAURI_INVOKE("check_provider_instance", { instance, config })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	setProviderInstance: (instance: string, enabled: boolean, config: unknown) => typedError<ProviderInstanceView[], IpcError_Serialize>(__TAURI_INVOKE("set_provider_instance", { instance, enabled, config })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	addProviderInstance: (instance: string, provider: string, scope: Scope) => typedError<ProviderInstanceView[], IpcError_Serialize>(__TAURI_INVOKE("add_provider_instance", { instance, provider, scope })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	removeProviderInstance: (instance: string) => typedError<ProviderInstanceView[], IpcError_Serialize>(__TAURI_INVOKE("remove_provider_instance", { instance })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	turnOffProviderInstanceHere: (instance: string) => typedError<ProviderInstanceView[], IpcError_Serialize>(__TAURI_INVOKE("turn_off_provider_instance_here", { instance })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	setInstanceCredential: (instance: string, name: string, value: string | null) => typedError<ProviderInstanceView[], IpcError_Serialize>(__TAURI_INVOKE("set_instance_credential", { instance, name, value })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	beginOauthSignIn: (instance: string, name: string, redirectPort: number) => typedError<BegunSignIn, IpcError_Serialize>(__TAURI_INVOKE("begin_oauth_sign_in", { instance, name, redirectPort })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	cancelOauthSignIn: (instance: string, name: string, signIn: number) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("cancel_oauth_sign_in", { instance, name, signIn })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	completeOauthSignIn: (instance: string, name: string, redirect: string) => typedError<SignInCompletion, IpcError_Serialize>(__TAURI_INVOKE("complete_oauth_sign_in", { instance, name, redirect })),
-	/**
 	 *  Listen on loopback for a sign-in's redirect — on `port` when the
 	 *  service has one registered, any free port otherwise.
 	 */
@@ -1084,12 +1034,6 @@ export type BacklinkEdge = {
 	resolved: boolean,
 };
 
-/**  A sign-in begun: the page the person signs in on, and its number. */
-export type BegunSignIn = {
-	url: string,
-	signIn: number,
-};
-
 /**  Who last changed one line. */
 export type BlameLine = {
 	/**  1-based. */
@@ -1461,19 +1405,6 @@ export type CollectorSync =
  */
 "upsert";
 
-/**  A provider's collector as Settings → Integrations shows it. */
-export type CollectorView = {
-	name: string,
-	entity: string,
-	/**  `never`, `reading`, `ok` or `error`. */
-	status: string,
-	error: string | null,
-	/**  RFC 3339. */
-	lastReadAt: string | null,
-	/**  Records its reads have delivered. */
-	records: number,
-};
-
 /**  One promised column. */
 export type ColumnDecl = {
 	name: string,
@@ -1808,13 +1739,6 @@ export type ConfigMigration = {
 	from: number,
 	to: number,
 	entry: string,
-};
-
-/**  A config problem `check` reported. */
-export type ConfigProblem = {
-	/**  A JSON pointer into the config (`/team`), `""` for the whole. */
-	path: string,
-	message: string,
 };
 
 /**
@@ -3271,73 +3195,6 @@ export type InstalledLspPackage = {
 	language_ids: string[],
 	binary: string,
 };
-
-/**  One of an instance's credentials, as Settings → Integrations shows it. */
-export type InstanceCredential = {
-	name: string,
-	/**  This machine has a value for it (a signed-in one: a token). */
-	set: boolean,
-	/**
-	 *  For one the person signs in for, where that stands; none, its
-	 *  value is pasted.
-	 */
-	signIn: SignInState | null,
-	/**
-	 *  For one signed in for at a service with its redirect port
-	 *  registered (`redirect_port`): the loopback port the shell must
-	 *  catch the redirect on. Any free port otherwise.
-	 */
-	redirectPort: number | null,
-};
-
-export type InstanceHealth = {
-	state: InstanceState,
-	/**  Its failures in a row (`contribution_health`'s count, shown here). */
-	consecutiveFailures: number,
-	/**  RFC 3339. */
-	lastOkAt: string | null,
-	/**  A moving average of its successful calls. */
-	meanInvokeMs: number | null,
-	/**
-	 *  The provider's service said to wait until then (RFC 3339): a rate
-	 *  limit, which never counts as a failure. Cleared by the next
-	 *  success.
-	 */
-	rateLimitedUntil: string | null,
-	/**
-	 *  What a read in progress last said (`$/progress`); `None` between
-	 *  reads.
-	 */
-	activity: string | null,
-};
-
-/**  Where an instance stands on this machine. */
-export type InstanceState = 
-/**  Not enabled in the project's config. */
-{ state: "off" } | 
-/**
- *  Configured, but it names no provider an enabled extension
- *  declares; `reason` says what's wrong and how to fix it.
- */
-{ state: "missing"; reason: string } | 
-/**
- *  Enabled, but oxplow won't run it as configured: its id is a
- *  command namespace or provider something else already has, or it
- *  declares an event type oxplow doesn't know with that schema.
- *  `reason` says which (tsk840).
- */
-{ state: "refused"; reason: string } | 
-/**  Enabled, but its `check` found problems with its config. */
-{ state: "unconfigured"; problems: ConfigProblem[] } | 
-/**  Being checked or started. */
-{ state: "checking" } | { state: "ready" } | 
-/**  Its last start or call failed; it restarts with backoff. */
-{ state: "failing"; errors: string[] } | 
-/**
- *  Stopped after repeated failures (or a handshake that didn't match
- *  its deployment's declarations), until a person enables it again.
- */
-{ state: "disabled"; reason: string };
 
 /**
  *  Why the extension exists — what makes it regenerable, repairable and
@@ -5245,7 +5102,7 @@ actor: string; scope: string; op: string; input: unknown } |
  *  finished (P9.B3): its token is in the keychain and the instance
  *  restarted on it — or, with `error`, it came to nothing and why.
  *  The keychain is no model, so there is nothing to re-read but the
- *  instances themselves (`list_provider_instances`).
+ *  instances themselves (`v_provider_instance`).
  */
 { kind: "credentialChanged"; instance: string; name: string; 
 /**
@@ -5462,43 +5319,6 @@ export type ProviderImpact = {
 	 *  line shows the change.
 	 */
 	firstDifference: string | null,
-};
-
-/**  An instance as Settings → Integrations shows it. */
-export type ProviderInstanceView = {
-	/**  `<extension>/<instance id>`. */
-	instance: string,
-	/**
-	 *  The project's, or the person's on this machine (every project).
-	 *  A project's entry is the project's, config and credentials, even
-	 *  where it replaces a global one of the same name (tsk838).
-	 */
-	scope: Scope,
-	/**
-	 *  This project's own entry replaces a global instance of the same
-	 *  name here.
-	 */
-	overridden: boolean,
-	extension: string,
-	/**  The provider (its program) this is an instance of. */
-	provider: string,
-	/**
-	 *  Its id: its refs' segment, its commands' namespace, what
-	 *  `activeProviders` names. A provider's default instance has the
-	 *  provider's id.
-	 */
-	instanceId: string,
-	capability: string,
-	/**  The project's config enables it. */
-	enabled: boolean,
-	config: unknown,
-	/**  JSON Schema of `config`, from its declarations. */
-	configSchema: unknown,
-	/**  Each credential it declares and where it stands on this machine. */
-	credentials: InstanceCredential[],
-	health: InstanceHealth,
-	/**  Each collector it declares and where its reads stand (P7.A3). */
-	collectors: CollectorView[],
 };
 
 /**  A kind of provider, as the Settings form offers it. */
@@ -5820,19 +5640,6 @@ export type RunsOn =
 /**  Nothing invokes it: a vocabulary entry (an event type, a ref kind). */
 { on: "declared" };
 
-/**  Whose an instance is (P9.B2). */
-export type Scope = 
-/**
- *  The project's: in its `extensionInstances`, shared with the team;
- *  its credentials are this project's on this machine.
- */
-"project" | 
-/**
- *  The person's: in this machine's `instances.yaml`, running in every
- *  project that has its extension; its credentials are set once.
- */
-"global";
-
 /**
  *  One script of an extension and the services it uses or declares:
  *  what `oxplow extension check --services` prints.
@@ -5914,7 +5721,7 @@ export type ServiceUse = {
 	used: boolean,
 };
 
-/**  How handing a redirect to a sign-in went (`complete_oauth_sign_in`). */
+/**  How handing a redirect to a sign-in went (`oxplow.provider.complete_sign_in`). */
 export type SignInCompletion = 
 /**  Signed in: the token is kept and the instance restarts on it. */
 { outcome: "signed_in" } | 
@@ -5928,16 +5735,6 @@ export type SignInCompletion =
  *  nothing was done, and the sign-in still waits.
  */
 { outcome: "not_this_sign_in"; reason: string };
-
-/**  Where a signed-in credential stands on this machine. */
-export type SignInState = { state: "not_signed_in" } | 
-/**
- *  `until` (RFC 3339): when it lapses, for one that can't renew
- *  itself; none, it lasts until the service refuses it.
- */
-{ state: "signed_in"; until: string | null } | 
-/**  Its token lapsed or was revoked, and it can't renew itself. */
-{ state: "sign_in_again" };
 
 /**  One skill or command as the extension declares it. */
 export type SkillDecl = {

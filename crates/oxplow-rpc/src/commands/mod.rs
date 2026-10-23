@@ -33,7 +33,6 @@ pub mod lsp;
 pub mod notes;
 pub mod page_refs;
 pub mod page_visit;
-pub mod providers;
 pub mod search;
 pub mod semantic;
 pub mod snapshot;

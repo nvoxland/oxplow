@@ -1,0 +1,2 @@
+SELECT CAST(NULL AS TEXT) AS instance, CAST(NULL AS TEXT) AS name, CAST(NULL AS INTEGER) AS is_set, CAST(NULL AS INTEGER) AS signs_in, CAST(NULL AS TEXT) AS sign_in_state, CAST(NULL AS TEXT) AS signed_in_until, CAST(NULL AS INTEGER) AS redirect_port
+WHERE 0

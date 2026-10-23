@@ -59,6 +59,9 @@ pub const NAMES: &[&str] = &[
     "data_entity",
     "effect_backfill",
     "replacement",
+    "provider_instance",
+    "provider_credential",
+    "provider_collector",
 ];
 
 /// The columns a live model's rows have, in order.
@@ -166,6 +169,43 @@ pub fn columns(name: &str) -> &'static [&'static str] {
             "capability",
             "chosen",
         ],
+        "provider_instance" => &[
+            "instance",
+            "extension",
+            "provider",
+            "instance_id",
+            "capability",
+            "scope",
+            "overridden",
+            "enabled",
+            "state",
+            "detail",
+            "config",
+            "config_schema",
+            "consecutive_failures",
+            "last_ok_at",
+            "mean_invoke_ms",
+            "rate_limited_until",
+            "activity",
+        ],
+        "provider_credential" => &[
+            "instance",
+            "name",
+            "is_set",
+            "signs_in",
+            "sign_in_state",
+            "signed_in_until",
+            "redirect_port",
+        ],
+        "provider_collector" => &[
+            "instance",
+            "name",
+            "entity",
+            "status",
+            "error",
+            "last_read_at",
+            "records",
+        ],
         _ => &[],
     }
 }
@@ -185,6 +225,8 @@ pub fn pushdown(name: &str) -> &'static [&'static str] {
         // backfill reads the event log: each only for the one asked for.
         "data_entity" => &["name"],
         "effect_backfill" => &["effect"],
+        // One instance's rows; the list is every instance's.
+        "provider_instance" | "provider_credential" | "provider_collector" => &["instance"],
         _ => &[],
     }
 }
@@ -256,6 +298,12 @@ pub fn follows(name: &str, change: &Change<'_>) -> bool {
             "data_entity" | "effect_backfill" | "replacement" => {
                 matches!(event, E::ConfigChanged | E::ExtensionsChanged)
             }
+            // The instances are config and the extensions' providers; a
+            // sign-in or a pasted credential moves a credential.
+            "provider_instance" | "provider_credential" | "provider_collector" => matches!(
+                event,
+                E::ConfigChanged | E::ExtensionsChanged | E::CredentialChanged { .. }
+            ),
             // New captures, and the metrics a config or extension turns on.
             "metric_point" => matches!(
                 event,
@@ -274,6 +322,11 @@ pub fn follows(name: &str, change: &Change<'_>) -> bool {
                 "branch_divergence" | "commit_between" => reads("v_branch"),
                 // The metrics it lists: the catalog and the specs.
                 "metric_point" => reads("v_metric_catalog") || reads("v_metric_spec"),
+                // An instance's health and its collectors' reads are recorded
+                // there.
+                "provider_instance" | "provider_credential" | "provider_collector" => {
+                    reads("v_contribution_health") || reads("v_collector_state")
+                }
                 _ => false,
             }
         }
@@ -476,6 +529,9 @@ impl LiveModels {
             "data_entity" => sources.data_entities(filters).await,
             "effect_backfill" => sources.effect_backfill(filters).await,
             "replacement" => Ok(sources.replacements()),
+            "provider_instance" | "provider_credential" | "provider_collector" => {
+                sources.provider_instances(name, filters).await
+            }
             other => Err(DomainError::Invalid(format!(
                 "`v_{other}` isn't a live model"
             ))),
@@ -1266,6 +1322,124 @@ impl LiveSources {
         }
         rows.sort_by(|a, b| format!("{:?}{:?}", a[0], a[2]).cmp(&format!("{:?}{:?}", b[0], b[2])));
         rows
+    }
+
+    /// `v_provider_instance`, `v_provider_credential` and
+    /// `v_provider_collector`: the instances of the enabled extensions'
+    /// providers on this machine (`ProviderInstanceView`), one row each,
+    /// and the credentials and collectors each declares. A credential's
+    /// value is never here: whether one is set, and where a sign-in stands.
+    async fn provider_instances(
+        &self,
+        model: &str,
+        filters: &[(String, String)],
+    ) -> Result<Vec<Vec<SqlCell>>, DomainError> {
+        use crate::providers::InstanceState;
+        let svc = self
+            .services
+            .get()
+            .map_err(|e| DomainError::Invalid(e.to_string()))?;
+        let pinned = filters
+            .iter()
+            .find(|(c, _)| c == "instance")
+            .map(|(_, v)| v);
+        let mut rows = Vec::new();
+        for view in svc.providers.list().await {
+            if pinned.is_some_and(|p| *p != view.instance) {
+                continue;
+            }
+            match model {
+                "provider_instance" => {
+                    let detail = match &view.health.state {
+                        InstanceState::Missing { reason }
+                        | InstanceState::Refused { reason }
+                        | InstanceState::Disabled { reason } => Some(reason.clone()),
+                        InstanceState::Unconfigured { problems } => Some(
+                            problems
+                                .iter()
+                                .map(|p| {
+                                    if p.path.is_empty() {
+                                        p.message.clone()
+                                    } else {
+                                        format!("{}: {}", p.path, p.message)
+                                    }
+                                })
+                                .collect::<Vec<_>>()
+                                .join("; "),
+                        ),
+                        InstanceState::Failing { errors } => Some(errors.join("; ")),
+                        _ => None,
+                    };
+                    rows.push(vec![
+                        text(view.instance.clone()),
+                        text(view.extension.clone()),
+                        text(view.provider.clone()),
+                        text(view.instance_id.clone()),
+                        text(view.capability.clone()),
+                        text(wire_name(&view.scope)),
+                        flag(view.overridden),
+                        flag(view.enabled),
+                        text(
+                            serde_json::to_value(&view.health.state)
+                                .ok()
+                                .and_then(|v| {
+                                    v.get("state").and_then(|s| s.as_str().map(str::to_string))
+                                })
+                                .unwrap_or_default(),
+                        ),
+                        opt(detail),
+                        json(&view.config),
+                        json(&view.config_schema),
+                        SqlCell::Int(i64::from(view.health.consecutive_failures)),
+                        opt(view.health.last_ok_at.clone()),
+                        view.health
+                            .mean_invoke_ms
+                            .map_or(SqlCell::Null(()), SqlCell::Real),
+                        opt(view.health.rate_limited_until.clone()),
+                        opt(view.health.activity.clone()),
+                    ]);
+                }
+                "provider_credential" => {
+                    for c in &view.credentials {
+                        let state = c.sign_in.as_ref().and_then(|s| {
+                            serde_json::to_value(s).ok().and_then(|v| {
+                                v.get("state").and_then(|x| x.as_str().map(str::to_string))
+                            })
+                        });
+                        let until = match &c.sign_in {
+                            Some(crate::providers::SignInState::SignedIn { until }) => {
+                                until.clone()
+                            }
+                            _ => None,
+                        };
+                        rows.push(vec![
+                            text(view.instance.clone()),
+                            text(c.name.clone()),
+                            flag(c.set),
+                            flag(c.sign_in.is_some()),
+                            opt(state),
+                            opt(until),
+                            c.redirect_port
+                                .map_or(SqlCell::Null(()), |p| SqlCell::Int(i64::from(p))),
+                        ]);
+                    }
+                }
+                _ => {
+                    for c in &view.collectors {
+                        rows.push(vec![
+                            text(view.instance.clone()),
+                            text(c.name.clone()),
+                            text(c.entity.clone()),
+                            text(c.status.clone()),
+                            opt(c.error.clone()),
+                            opt(c.last_read_at.clone()),
+                            SqlCell::Int(c.records),
+                        ]);
+                    }
+                }
+            }
+        }
+        Ok(rows)
     }
 
     /// `v_effect_backfill`: what `oxplow.effect.backfill` would have the

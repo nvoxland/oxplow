@@ -191,6 +191,10 @@ pub const MANIFEST: &[Capability] = &[
     model("list_extensions", &["v_extension", "v_contribution"]),
     ui("get_lens", "the lens page's definition; an agent reads the lens's ref with `read`"),
     both_named("run_lens", "run_lens", "oxplow_run_lens"),
+    ui(
+        "run_lens_spec",
+        "a custom component's `showSpec`, drawn by the host; an agent shows a spec with `oxplow_show_lens`",
+    ),
     // A lens's actions: commands run as the lens, for whoever pressed.
     both_named("run_lens_action", "run_lens_action", "oxplow_run_lens_action"),
     ui(
@@ -243,48 +247,6 @@ pub const MANIFEST: &[Capability] = &[
     ui(
         "report_tabs",
         "the tabs a window shows, which an agent reads with `list_tabs` and `get_open_page`",
-    ),
-    // The `oxplow.collector.sync` command: the UI runs it through `run_command`,
-    // an agent through this tool (as itself, so it never approves).
-    ui(
-        "list_provider_instances",
-        "Settings → Integrations, where a person configures instances (P5.D4, P9.B1)",
-    ),
-    ui(
-        "check_provider_instance",
-        "enabling a provider instance runs a program: a person's (P5.D4)",
-    ),
-    ui(
-        "set_provider_instance",
-        "enabling a provider instance runs a program: a person's (P5.D4)",
-    ),
-    ui(
-        "add_provider_instance",
-        "instances and their credentials are a person's (P9.B1)",
-    ),
-    ui(
-        "remove_provider_instance",
-        "instances and their credentials are a person's (P9.B1)",
-    ),
-    ui(
-        "turn_off_provider_instance_here",
-        "instances and their credentials are a person's (P9.B1)",
-    ),
-    ui(
-        "set_instance_credential",
-        "instances and their credentials are a person's (P9.B1)",
-    ),
-    ui(
-        "begin_oauth_sign_in",
-        "signing in is a person's, in their browser (P9.B3)",
-    ),
-    ui(
-        "cancel_oauth_sign_in",
-        "signing in is a person's, in their browser (P9.B3)",
-    ),
-    ui(
-        "complete_oauth_sign_in",
-        "signing in is a person's: the shell hands the core the redirect it caught (P10)",
     ),
     ui(
         "listen_for_oauth_redirect",

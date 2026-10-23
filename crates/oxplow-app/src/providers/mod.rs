@@ -29,6 +29,7 @@ mod tests;
 
 pub use host::HostError;
 
+pub use oauth::SignInState;
 pub use registry::{BegunSignIn, SignInId};
 pub use registry::{
     CollectorView, ConfigProblem, HostDeps, Instance, InstanceHealth, InstanceState,

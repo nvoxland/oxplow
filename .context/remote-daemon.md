@@ -103,7 +103,7 @@ developer-facing mechanics.
   `await_oauth_redirect`, `answer_oauth_redirect`, `stop_oauth_redirect` —
   shell commands) and
   the renderer hands each redirect to the daemon
-  (`complete_oauth_sign_in`). The core never listens for one. A plain
+  (`oxplow.provider.complete_sign_in`). The core never listens for one. A plain
   browser on a daemon has no shell, so its Sign in is off with the
   reason (`.context/providers.md` → "Credentials and sign-in").
 

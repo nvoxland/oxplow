@@ -42,6 +42,7 @@ pub mod note;
 pub mod op_error;
 pub mod ops;
 mod proposals;
+pub mod provider_instances;
 pub mod reasoning;
 mod record;
 pub mod review;

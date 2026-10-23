@@ -411,6 +411,13 @@ pub const SCOPES: &[Scope] = &[
         summary: "Sync a provider's records into oxplow.",
     },
     Scope {
+        id: "providers.write",
+        access: Access::Write,
+        host: Host::Daemon,
+        spends: false,
+        summary: "Add, configure, check, turn on or off, and remove an instance of an extension's provider on this machine.",
+    },
+    Scope {
         id: "records.read",
         access: Access::Read,
         host: Host::Daemon,

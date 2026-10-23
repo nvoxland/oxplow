@@ -1814,6 +1814,7 @@ impl Services {
             .chain(commands::delivery::ops(services_slot.clone()))
             .chain(commands::ai_settings::ops(services_slot.clone()))
             .chain(commands::credentials::ops(services_slot.clone()))
+            .chain(commands::provider_instances::ops(services_slot.clone()))
             .chain([commands::lsp::restart_op(services_slot.clone())])
             .chain(commands::extension_deploy::ops(services_slot.clone()))
             .chain(commands::agent_reads::ops(services_slot.clone()))
@@ -2357,8 +2358,19 @@ mod tests {
                 // (`commands/agent_reads`): they change no record.
                 "oxplow.page.list_tabs",
                 "oxplow.page.open",
+                // Settings → Integrations: a provider's process starts, stops
+                // and is checked, and its credentials are in the OS keychain.
+                "oxplow.provider.add_instance",
+                "oxplow.provider.begin_sign_in",
+                "oxplow.provider.cancel_sign_in",
+                "oxplow.provider.check_instance",
+                "oxplow.provider.complete_sign_in",
+                "oxplow.provider.remove_instance",
+                "oxplow.provider.set_credential",
+                "oxplow.provider.set_instance",
                 // The provider process's collectors (P7.A3).
                 "oxplow.provider.sync",
+                "oxplow.provider.turn_off_here",
                 "oxplow.records.read",
                 "oxplow.search.find",
                 "oxplow.skill.read",

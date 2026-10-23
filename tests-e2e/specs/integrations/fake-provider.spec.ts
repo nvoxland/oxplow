@@ -26,12 +26,10 @@ test("a person configures, checks and enables the fake tracker, and an item reac
   await expect(page.getByTestId("integration-status-e2e/fake")).toContainText("Ready");
   await page.getByTestId("integration-toggle-e2e/fake").click();
   await until("the fake to be enabled and ready", 30_000, async () => {
-    const all = await ipc<Array<{ instance: string; enabled: boolean; health: { state: { state: string } } }>>(
-      daemon,
-      "list_provider_instances",
-    );
-    const fake = all.find((i) => i.instance === "e2e/fake");
-    return !!fake && fake.enabled && fake.health.state.state === "ready";
+    const out = await ipc<{ rows: unknown[][] }>(daemon, "query_sql", {
+      sql: "SELECT 1 FROM v_provider_instance WHERE instance = 'e2e/fake' AND enabled = 1 AND state = 'ready'",
+    });
+    return out.rows.length === 1;
   });
   await expect(page.getByTestId("integration-status-e2e/fake")).toContainText("Ready");
   const fakeRow = page.locator("tr", { hasText: "fake" }).filter({ hasText: /Fake|fake tracker/i }).first();

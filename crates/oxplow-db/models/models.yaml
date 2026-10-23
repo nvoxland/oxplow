@@ -2160,3 +2160,49 @@
     - { name: "bound_to_provider", type: "INT", doc: "1 when it renders only while that extension's provider decides, so the person chooses only between the default and oxplow's own." }
     - { name: "capability", type: "TEXT", doc: "The capability the target belongs to." }
     - { name: "chosen", type: "TEXT", doc: "The person's choice for the target: an extension, or `oxplow`; NULL for the default." }
+- name: provider_instance
+  version: 1
+  key: [instance]
+  description: "The instances of the enabled extensions' providers on this machine (Settings → Integrations): the project's and the person's own, each with where it stands. Read live. A credential's value is never here: `v_provider_credential` says whether one is set."
+  columns:
+    - { name: "instance", type: "TEXT", doc: "`<extension>/<instance id>`." }
+    - { name: "extension", type: "TEXT", doc: "The extension that declares the provider." }
+    - { name: "provider", type: "TEXT", doc: "The provider (its program) this is an instance of." }
+    - { name: "instance_id", type: "TEXT", doc: "Its id: its refs' segment, what `activeProviders` names." }
+    - { name: "capability", type: "TEXT", doc: "The capability the provider implements." }
+    - { name: "scope", type: "TEXT", doc: "`project` (shared with the team) or `global` (the person's own, every project)." }
+    - { name: "overridden", type: "INT", doc: "1 when this project's own entry replaces a global instance of the same name here." }
+    - { name: "enabled", type: "INT", doc: "1 when the project's config enables it." }
+    - { name: "state", type: "TEXT", doc: "`off`, `missing`, `refused`, `unconfigured`, `checking`, `ready`, `failing` or `disabled`." }
+    - { name: "detail", type: "TEXT", doc: "Why, for `missing`, `refused`, `unconfigured` (its problems), `failing` (its errors) and `disabled`; NULL otherwise." }
+    - { name: "config", type: "TEXT", doc: "Its config, JSON." }
+    - { name: "config_schema", type: "TEXT", doc: "JSON Schema of its config, from its declarations." }
+    - { name: "consecutive_failures", type: "INT", doc: "Its failures in a row." }
+    - { name: "last_ok_at", type: "TEXT", doc: "RFC 3339 time of its last success." }
+    - { name: "mean_invoke_ms", type: "REAL", doc: "A moving average of its successful calls." }
+    - { name: "rate_limited_until", type: "TEXT", doc: "RFC 3339 time its service said to wait until." }
+    - { name: "activity", type: "TEXT", doc: "What a read in progress last said; NULL between reads." }
+- name: provider_credential
+  version: 1
+  key: [instance, name]
+  description: "The credentials each provider instance declares and where they stand on this machine. Read live; presence only — a value is never read out."
+  columns:
+    - { name: "instance", type: "TEXT", doc: "`<extension>/<instance id>`." }
+    - { name: "name", type: "TEXT", doc: "The credential's name." }
+    - { name: "is_set", type: "INT", doc: "1 when this machine has a value for it (a signed-in one: a token)." }
+    - { name: "signs_in", type: "INT", doc: "1 when the person signs in for it (`oauth:`); 0 when its value is pasted." }
+    - { name: "sign_in_state", type: "TEXT", doc: "For one signed in for: `not_signed_in`, `signed_in` or `sign_in_again`; NULL otherwise." }
+    - { name: "signed_in_until", type: "TEXT", doc: "RFC 3339 time a signed-in token lapses, when it can't renew itself." }
+    - { name: "redirect_port", type: "INT", doc: "For one signed in for with its redirect port registered: the loopback port to catch the redirect on; NULL for any free port." }
+- name: provider_collector
+  version: 1
+  key: [instance, name]
+  description: "The collectors each provider instance declares and where their reads stand. Read live."
+  columns:
+    - { name: "instance", type: "TEXT", doc: "`<extension>/<instance id>`." }
+    - { name: "name", type: "TEXT", doc: "The collector's name." }
+    - { name: "entity", type: "TEXT", doc: "The entity it reads." }
+    - { name: "status", type: "TEXT", doc: "`never`, `reading`, `ok` or `error`." }
+    - { name: "error", type: "TEXT", doc: "Why its last read failed." }
+    - { name: "last_read_at", type: "TEXT", doc: "RFC 3339 time of its last read." }
+    - { name: "records", type: "INT", doc: "Records its reads have delivered." }

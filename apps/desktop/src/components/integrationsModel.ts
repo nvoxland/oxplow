@@ -2,7 +2,7 @@
 /// extension provider's instance on this machine — where it stands and
 /// what the person can do about it.
 
-import type { CollectorView, ProviderInstanceView, SignInState } from "../tauri-bridge/generated/bindings.js";
+import type { CollectorView, ProviderInstanceView, SignInState } from "../providerInstances.js";
 import { formatShortDateTime } from "./format.js";
 
 export interface IntegrationRowModel {

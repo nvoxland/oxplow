@@ -169,7 +169,7 @@ pub enum OxplowEvent {
     /// finished (P9.B3): its token is in the keychain and the instance
     /// restarted on it — or, with `error`, it came to nothing and why.
     /// The keychain is no model, so there is nothing to re-read but the
-    /// instances themselves (`list_provider_instances`).
+    /// instances themselves (`v_provider_instance`).
     CredentialChanged {
         instance: String,
         name: String,

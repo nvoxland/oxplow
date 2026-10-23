@@ -1149,7 +1149,7 @@ entities from data already in the semantic layer:
 | MCP `oxplow_preview_collector`; an agent syncs with `run_command oxplow.collector.sync`; standing and credentials read `v_collector_state` / `v_collector_credential` (the `oxplow.collector.sync` command as the agent) | `crates/oxplow-mcp/src/lib.rs` |
 | UI: Settings → Data (entities + counts, collector rows, Sync Now, effects, Backfill) | the foundation's `data-*` lenses (`extensions/oxplow-foundation/lenses/`) |
 | UI: credentials per extension | the foundation's `extensions-credentials` lens (`extensions/oxplow-foundation/lenses/`) |
-| `v_data_entity` (live: models + unsynced entities; `row_count` for the pinned one), `v_effect_backfill` (live: what a backfill would react to), `v_replacement` (live: each replaceable component with its candidates and the chosen one) | `crates/oxplow-app/src/live_models.rs` |
+| `v_data_entity` (live: models + unsynced entities; `row_count` for the pinned one), `v_effect_backfill` (live: what a backfill would react to), `v_replacement` (live: each replaceable component with its candidates and the chosen one), `v_provider_instance` / `v_provider_credential` / `v_provider_collector` (live: the provider instances, their credentials' presence and sign-in state, their collectors' reads) | `crates/oxplow-app/src/live_models.rs` |
 
 **Decisions (epic tsk289, 2026-09-27).**
 
