@@ -1,4 +1,4 @@
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { expect, test } from "../../support/fixtures.js";
@@ -34,4 +34,21 @@ test("New File… from a file's menu creates the file and opens it", async ({ pa
   await field.press("Enter");
   await expect(page.locator(".monaco-editor").first()).toBeVisible();
   expect(existsSync(join(daemon.project, "kiwi.txt"))).toBe(true);
+});
+
+// A folder opens in place: its children are read when it opens, nested
+// under it, and the page keeps no `..` row.
+test("a folder on the Files page opens in place and lists its children", async ({ page, daemon }) => {
+  mkdirSync(join(daemon.project, "sub"));
+  writeFileSync(join(daemon.project, "sub", "inner.txt"), "inner\n");
+  await page.goto("/");
+  await openFromLauncher(page, "Files");
+  await expect(page.getByRole("button", { name: "inner.txt" })).toHaveCount(0);
+  await page
+    .locator('[data-testid="lens-tree-row"]:visible')
+    .filter({ hasText: "sub" })
+    .getByRole("button", { name: "Expand" })
+    .click();
+  await expect(page.getByRole("button", { name: "inner.txt" }).filter({ visible: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: ".." })).toHaveCount(0);
 });

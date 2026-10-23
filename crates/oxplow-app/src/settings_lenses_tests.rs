@@ -1548,11 +1548,18 @@ async fn the_files_page_lists_a_folder_or_the_changed_files() {
         ),
     )
     .await;
+    // A folder's rows are the folder's children, parented on it, so they
+    // nest where the tree splices them in; only all-files folders open
+    // lazily (`opens`).
     assert!(
-        src.has("name", "new.rs") && src.has("name", ".."),
+        src.has("name", "new.rs") && !src.has("name", ".."),
         "{:?}",
         src.rows
     );
+    let child = src.keyed("name", "new.rs");
+    assert_eq!(src.text(child, "parent").as_deref(), Some("src"));
+    assert!(all.flag(all.keyed("name", "src"), "opens"));
+    assert!(!all.flag(all.keyed("name", "top.txt"), "opens"));
     let file = src
         .rows
         .iter()

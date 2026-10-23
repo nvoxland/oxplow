@@ -1,5 +1,5 @@
 title: Files
-description: "The files of the project: a folder at a time, or - when only what changed is shown - the changed files in their folders. A file opens (as a diff when changes are shown or a branch is compared); right-click for its actions."
+description: "The files of the project: a folder at a time (a folder opens in place), or - when only what changed is shown - the changed files in their folders. A file opens (as a diff when changes are shown or a branch is compared); right-click for its actions."
 params:
   - { name: stream_id }
   - { name: scope, default: all }
@@ -29,18 +29,14 @@ query: |
            substr(path, length(rtrim(path, replace(path, '/', ''))) + 1), 'file', status
     FROM f WHERE :scope <> 'all'
     UNION ALL
-    SELECT path, NULL, name, kind, status FROM listing WHERE :scope = 'all'
-    UNION ALL
-    SELECT CASE WHEN instr(:folder, '/') > 0 THEN substr(:folder, 1, length(rtrim(:folder, replace(:folder, '/', ''))) - 1) ELSE '' END,
-           NULL, '..', 'up', NULL
-    WHERE :scope = 'all' AND :folder <> ''
+    SELECT path, parent, name, kind, status FROM listing WHERE :scope = 'all'
   )
   SELECT r.path AS id, r.parent, r.name,
-         CASE WHEN r.kind IN ('dir', 'up') THEN 'folder' ELSE r.status END AS icon,
+         CASE WHEN r.kind = 'dir' THEN 'folder' ELSE r.status END AS icon,
          r.status, (r.kind = 'dir') AS is_dir,
-         CASE WHEN r.kind IN ('dir', 'up') THEN r.path ELSE :folder END AS go,
+         (r.kind = 'dir' AND :scope = 'all') AS opens,
          CASE
-           WHEN r.kind IN ('dir', 'up') THEN NULL
+           WHEN r.kind = 'dir' THEN NULL
            WHEN :compare <> 'none' THEN uri('oxplow/page', 'page', 'diff', 'path', r.path, 'left', 'git:' || :compare, 'right', 'working', 'label', :compare || '..working')
            WHEN :scope <> 'all' THEN uri('oxplow/page', 'page', 'diff', 'path', r.path, 'left', (SELECT base_revision FROM ch), 'right', 'working', 'label', 'changes')
            ELSE uri('oxplow/file', 'path', r.path)
@@ -56,12 +52,12 @@ query: |
          EXISTS (SELECT 1 FROM v_config_value g, json_each(json_extract(g.value, '$.exclude')) e
                  WHERE g.key = 'generated' AND e.value = r.name) AS marked,
          uri('oxplow/lens', 'lens', 'oxplow-foundation/file-history', 'path', r.path) AS history_uri
-  FROM rows r WHERE r.kind <> 'up' OR :folder <> ''
-  ORDER BY (r.kind IN ('dir', 'up')) DESC, r.path
+  FROM rows r
+  ORDER BY (r.kind = 'dir') DESC, r.path
 viz: tree
-tree: { id: id, parent: parent, label: name }
+tree: { id: id, parent: parent, label: name, lazy: folder, branch: opens }
 columns:
-  - { key: name, label: Name, icon: icon, link: { kind: page, from: target }, select: folder }
+  - { key: name, label: Name, icon: icon, link: { kind: page, from: target } }
 actions:
   - { id: new-file, label: New File…, command: oxplow.file.create, row: true, form: true, fixed: [stream, content], input: { stream: "str{{param.stream_id}}", path: "{{row.new_file_path}}", content: "" } }
   - { id: new-folder, label: New Directory…, command: oxplow.file.create_directory, row: true, form: true, fixed: [stream], input: { stream: "str{{param.stream_id}}", path: "{{row.new_folder_path}}" } }
@@ -74,5 +70,5 @@ actions:
   - { id: ignore, label: Add to .gitignore, command: oxplow.git.ignore, row: true, input: { stream: "str{{param.stream_id}}", entry: "{{row.id}}" } }
   - { id: mark-generated, label: Mark as Generated, command: oxplow.file.mark_generated, row: true, when: can_mark, input: { entry: "{{row.name}}" } }
   - { id: unmark-generated, label: Unmark as Generated, command: oxplow.file.mark_generated, row: true, when: marked, input: { entry: "{{row.name}}", generated: false } }
-empty: Nothing here. Pick a different folder or scope.
+empty: Nothing here. Pick a different scope.
 hidden: true

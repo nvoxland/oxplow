@@ -862,6 +862,22 @@
             "string",
             "null"
           ]
+        },
+        "lazy": {
+          "description": "A lazy tree: the lens param a branch's children are read with. The\nrun's rows are one level (the param's `default` is the top level);\na branch opens by running the lens again with the param set to the\nrow's `id`, its rows spliced under it. Needs `branch`.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "branch": {
+          "description": "A lazy tree's rows that open: the column that is truthy on them. A\nrow with children in the result nests them as an eager tree does.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
         }
       },
       "additionalProperties": false
