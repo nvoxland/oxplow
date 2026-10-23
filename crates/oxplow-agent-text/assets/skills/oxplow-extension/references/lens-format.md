@@ -269,6 +269,43 @@ Each entry is `{ id?, title?, lens?, markdown?, size? }`:
 - A standalone lens spec (an agent answer from `oxplow_show_lens`) can't
   be a `document` or `dashboard`.
 
+### A dashboard whose rows are its tiles
+
+A dashboard can draw a tile per row of its query. Name each role's column
+in `tile:`. A user dashboard's tiles, for example:
+
+```yaml
+title: Dashboard
+params: [{ name: id }]
+query: |
+  SELECT 'dti' || i.id AS id,
+         json_extract(i.options_json, '$.title') AS title,
+         json_extract(i.options_json, '$.size') AS size,
+         json_extract(i.options_json, '$.lensId') AS lens,
+         json_extract(i.options_json, '$.sql') AS sql,
+         json_extract(i.options_json, '$.display') AS display,
+         json_extract(i.options_json, '$.text') AS text
+  FROM v_dashboard_item i WHERE 'dsh' || i.dashboard_id = :id
+  ORDER BY i.sort_index
+viz: dashboard
+tile: { id: id, title: title, size: size, lens: lens, sql: sql, display: display, text: text }
+actions:
+  - { id: reorder, label: Reorder, command: oxplow.dashboard.reorder_items, drag: true, input: { dashboard: "{{param.id}}", order: "{{order.id}}" } }
+  - { id: remove, label: Remove, command: oxplow.dashboard.remove_item, row: true, key: Delete, input: { item: "{{row.id}}" } }
+  - { id: edit-text, label: Save, command: oxplow.dashboard.update_item, edit: true, fixed: [item], input: { item: "{{row.id}}", text: "{{row.text}}" } }
+```
+
+- Roles: `id` (required), `title`, `size`, and one of `lens`, `sql`
+  (shown as `display`; `chart` is its chart roles as JSON;
+  `display: metric` is the metric card over `metric` and `viz`) or
+  `text` (a heading band).
+- The rows draw after any static `tiles:`. The lens may not have
+  `columns:`; its static tiles get the page's params alone.
+- Each tile is a row: right-click offers the row actions, `key:`s run
+  them, and a drag action runs on a drop (`{{order.id}}` is every tile in
+  its new order). An `edit: true` action that saves the `text` column
+  edits a heading in place.
+
 ### Adding parts from another extension
 
 Another extension adds to a document or dashboard through a slot named

@@ -379,6 +379,15 @@ tiles:
 - A lens your agent shows as an answer can't be a document or a
   dashboard.
 
+A dashboard can also take its tiles from its query's rows: name the
+columns in `tile: { id, title?, size?, lens? | sql? | text? }` (a `sql`
+tile also takes `display`, `chart`, `metric` and `viz`). Each row is a
+tile, after any `tiles:`. The tiles act like rows: right-click a tile
+for its actions, press an action's key, or drag it where a drag action
+runs (`{{order.id}}` gives the command every tile in the new order). An
+`edit: true` action that saves the `text` column lets you edit a heading
+in place. A dashboard with `tile:` takes no `columns:`.
+
 Another extension can add to your document or dashboard. It mounts a lens
 in a slot named `<extension>/<slug>.sections` (document) or
 `<extension>/<slug>.tiles` (dashboard):

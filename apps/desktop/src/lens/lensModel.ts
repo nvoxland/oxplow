@@ -5,6 +5,7 @@
  * See `.context/extensions.md`.
  */
 import { humanize } from "../kit/humanize.js";
+import type { TileSize } from "../kit/Tiles.js";
 import {
   formatBytes,
   formatDateOnly,
@@ -850,6 +851,85 @@ export function treemapItems(
     out.push({ label: formatCell(l), size, group: groups ? formatCell(groups[i] ?? null) : null, row: result.rows[i]! });
   });
   return out;
+}
+
+/** What draws a dashboard's row tile: its lens, its SQL as a viz, its
+ *  SQL as the metric card, or its text (a heading band). */
+export type RowTileKind = "lens" | "sql" | "metric" | "text";
+
+/** One row of a dashboard whose rows are its tiles (`tile:`), its roles
+ *  read from the row. */
+export interface RowTile {
+  id: string;
+  kind: RowTileKind;
+  size: TileSize;
+  title: string | null;
+  lens: string | null;
+  sql: string | null;
+  display: string | null;
+  chart: LensChart | null;
+  metric: string | null;
+  viz: string | null;
+  text: string | null;
+  /** The row, column by column: what its actions bind as `{{row.*}}`. */
+  record: Record<string, SqlCell>;
+}
+
+const TILE_SIZES: readonly TileSize[] = ["small", "wide", "tall", "full"];
+
+/** A row tile's size: its `size` when it is one of the four, else its
+ *  kind's default (a heading band spans the row). */
+export function tileSizeOf(value: unknown, kind: RowTileKind): TileSize {
+  return TILE_SIZES.includes(value as TileSize) ? (value as TileSize) : kind === "text" ? "full" : "small";
+}
+
+/** A tile's `chart` column: the JSON of a chart display's roles. */
+function tileChart(value: string | null): LensChart | null {
+  if (!value) return null;
+  try {
+    const c = JSON.parse(value) as Record<string, unknown>;
+    if (typeof c !== "object" || c === null || Array.isArray(c)) return null;
+    const col = (k: string) => (typeof c[k] === "string" ? (c[k] as string) : null);
+    return { x: col("x"), y: col("y"), series: col("series"), label: col("label"), size: col("size"), group: col("group") } as LensChart;
+  } catch {
+    return null;
+  }
+}
+
+/** A dashboard's row tiles (`lens.tile`), one per result row in order:
+ *  drawn by its `lens`, else its `sql` (`display = metric`: the metric
+ *  card), else its text. None without `tile`. */
+export function rowTiles(run: Pick<LensRun, "lens" | "result">): RowTile[] {
+  const tile = run.lens.tile;
+  if (!tile) return [];
+  const { columns, rows } = run.result;
+  return rows.map((row) => {
+    const at = (role: string | null) => {
+      const i = role === null ? -1 : columns.indexOf(role);
+      const v = i === -1 ? null : (row[i] ?? null);
+      return v === null || v === "" ? null : String(v);
+    };
+    const lens = at(tile.lens);
+    const sql = at(tile.sql);
+    const display = at(tile.display);
+    const kind: RowTileKind = lens ? "lens" : sql ? (display === "metric" ? "metric" : "sql") : "text";
+    const record: Record<string, SqlCell> = {};
+    columns.forEach((c, i) => (record[c] = row[i] ?? null));
+    return {
+      id: at(tile.id) ?? "",
+      kind,
+      size: tileSizeOf(at(tile.size), kind),
+      title: at(tile.title),
+      lens,
+      sql,
+      display,
+      chart: tileChart(at(tile.chart)),
+      metric: at(tile.metric),
+      viz: at(tile.viz),
+      text: at(tile.text),
+      record,
+    };
+  });
 }
 
 /** What a `document`'s or `dashboard`'s parts are given: its query's first

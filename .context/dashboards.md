@@ -145,6 +145,17 @@ checklist:
   Dashboard** action on `oxplow.dashboard.create`, whose `ui.open_after`
   opens the new one. In the launcher under **Data**.
 
+**Dashboards as lenses.** A `dashboard` lens draws a user dashboard's
+tiles from its rows (`tile:`, `.context/extensions.md` "Rows as tiles"):
+a query over `v_dashboard_item` names each role (`json_extract` of the
+options), and the lens's actions are the editing — a drag action with
+`{{order.id}}` over `reorder_items`, row forms over `update_item`'s flat
+fields (rename, resize), an edit action saving a heading's `text`, a
+`remove_item` row action, whole-lens forms over `add_item` and `rename`.
+The tile bodies are the page's, props-driven: `QueryTileBody`,
+`MetricTileBody` (windowed by the lens's `range`/`branch` params when it
+has them) and `TextBand`; `CustomDashboardPage`'s tiles wrap them.
+
 **Query tiles (P4.7, tsk492).** A dashboard tile is `query` (pinned SQL
 plus how to show it), `lens` or `text`; the `metric` kind and its
 `metric_key` column are gone. `V108__dashboard_query_tiles.sql` rewrote each

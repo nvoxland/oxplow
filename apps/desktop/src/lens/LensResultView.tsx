@@ -319,7 +319,7 @@ function useLensActions(run: LensRun, streamId: string | null) {
   };
 }
 
-type LensActionsState = ReturnType<typeof useLensActions>;
+export type LensActionsState = ReturnType<typeof useLensActions>;
 
 /** The toolbar's actions as the page's: Copy, Add to Agent Context and
  *  the whole-lens actions, handed up whenever what they say changes. */
@@ -466,7 +466,7 @@ function LensBody(props: LensResultViewProps & { actions?: LensActionsState; mar
     return <DocumentViz parts={run.lens.parts} params={run.params} given={partParams(run)} streamId={streamId} onOpenPage={onOpenPage} onSetParam={props.onSetParam} />;
   }
   if (run.lens.viz === "dashboard") {
-    return <DashboardViz parts={run.lens.parts} params={run.params} given={partParams(run)} streamId={streamId} onOpenPage={onOpenPage} onSetParam={props.onSetParam} />;
+    return <DashboardViz run={run} actions={props.actions} parts={run.lens.parts} params={run.params} given={partParams(run)} streamId={streamId} onOpenPage={onOpenPage} onSetParam={props.onSetParam} />;
   }
   if (run.lens.viz === "form") return <FormViz run={run} streamId={streamId} />;
   return <RowsBody {...props} />;

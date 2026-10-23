@@ -2245,7 +2245,13 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   `sql` tile through an ad-hoc spec, a chart display without a parsable
   `chart` or `metric` as a table; one that can't run says why and the
   rest still run) and renders a `###` per row under its `title` column,
-  else its run's title. Its **edit action** (`edit: true`, the one
+  else its run's title. The UI (`DashboardViz`, `rowTiles` in
+  `lensModel.ts`) draws each row in a `TileSlot` (`lens-tile-<id>`) at its
+  size: a lens tile as a part (its run joins `useLensRuns` keyed by tile
+  id, sorted, so a reorder re-runs nothing), a `sql` tile as
+  `QueryTileBody`, the metric card as `MetricTileBody` (one
+  `listMetricDefinitions()` for the grid; windowed by the page's
+  `range`/`branch` params), a text tile as `TextBand`. Its **edit action** (`edit: true`, the one
   inline-edit mechanism) edits a text tile in place, so it must save the
   `tile.text` column (`markdown_problem`); tiles are rows, so the lens's
   row, drag (`{{order.id}}` for a whole new order) and key actions act on

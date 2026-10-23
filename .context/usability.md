@@ -764,7 +764,11 @@ declaring *what it is* and mounting the generic layer.
   line above or below the row, or the row or group outlined
   (`[data-drop]`). A row action's `key:` runs it on the cursor row (or
   the marked rows). Marks are per lens and kept in the entry's history
-  state, so Back keeps them.
+  state, so Back keeps them. A dashboard's row tiles (`tile:`) are rows
+  too: focusable, right-click and the Menu key open their row actions,
+  `key:`s run them, and they drag where a drag action runs, the place
+  shown as a bar in the grid gap beside the tile (a drop on the grid's
+  background puts it last). Tiles take no marks.
 - **A parent row folds its children (`depth` lenses).** A row the next row is deeper than shows ▾ / ▸; it folds every deeper row after it away until the next row as shallow as itself. Folds are per lens and kept in the entry's history state, like groups'.
 - **One launcher is the single discovery surface.** There is exactly
   one way to find pages, commands, files, and content: the launcher
