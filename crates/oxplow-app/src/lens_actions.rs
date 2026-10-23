@@ -94,6 +94,7 @@ pub async fn run_lens_action(
     call: LensActionCall,
     ctx: &extensions::LensContext,
 ) -> Result<CommandOutcome, CommandError> {
+    let call = bind_one_row(svc, lens_root, call, ctx).await?;
     svc.sql
         .read_generation(async { prepare_lens_action(svc, lens_root, call, ctx) })
         .await
@@ -120,6 +121,70 @@ impl Prepared {
             .run(&self.actor, &self.command, self.input, self.confirmed)
             .await
     }
+}
+
+/// A whole-lens action over a lens that holds one row, naming `when` or
+/// `{{row.*}}` (`LensAction::one_row`), runs on that row, which is read
+/// here from the lens itself — never taken from the caller, so a person's
+/// press and an agent's run bind the same row. A caller-supplied row is
+/// refused, and so is a lens that doesn't have exactly one.
+async fn bind_one_row(
+    svc: &crate::Services,
+    lens_root: &Path,
+    mut call: LensActionCall,
+    ctx: &extensions::LensContext,
+) -> Result<LensActionCall, CommandError> {
+    let lens = svc
+        .extension_catalog
+        .find_lens(lens_root, &call.lens_id)
+        .map_err(CommandError::from)?;
+    // An unknown action is `prepare_lens_action`'s to name.
+    let Some(action) = lens.actions.iter().find(|a| a.id == call.action_id) else {
+        return Ok(call);
+    };
+    if !action.one_row {
+        return Ok(call);
+    }
+    if call.row.is_some() {
+        return Err(CommandError::Invalid {
+            field: Some("/row".into()),
+            message: format!(
+                "`{}` runs on the whole lens, not a row (the server reads the lens's one row)",
+                call.action_id
+            ),
+        });
+    }
+    let run = svc
+        .sql
+        .read_generation(extensions::run_lens(
+            &svc.sql,
+            &svc.extension_catalog,
+            lens_root,
+            &call.lens_id,
+            call.params.clone(),
+            ctx,
+        ))
+        .await
+        .map_err(CommandError::from)?
+        .map_err(CommandError::from)?;
+    let [only] = run.result.rows.as_slice() else {
+        return Err(CommandError::Invalid {
+            field: Some("/lens".into()),
+            message: format!(
+                "the lens has {} rows; a whole-lens action needs one",
+                run.result.rows.len()
+            ),
+        });
+    };
+    call.row = Some(
+        run.result
+            .columns
+            .iter()
+            .cloned()
+            .zip(only.clone())
+            .collect(),
+    );
+    Ok(call)
 }
 
 fn prepare_lens_action(
@@ -159,7 +224,7 @@ fn prepare_lens_action(
                 format!("lens `{lens_id}` has no action `{action_id}` (it has {ids:?})"),
             )
         })?;
-    match (action.row, row) {
+    match (action.row || action.one_row, row) {
         (true, None) => {
             return Err(invalid(
                 "/row",
@@ -434,6 +499,7 @@ pub async fn action_form(
     call: LensActionCall,
     ctx: &extensions::LensContext,
 ) -> Result<FormStart, CommandError> {
+    let call = bind_one_row(svc, lens_root, call, ctx).await?;
     svc.sql
         .read_generation(async {
             let lens = svc
@@ -1209,6 +1275,22 @@ actions:
         )
         .unwrap();
         std::fs::write(
+            ext.join("lenses/one.yaml"),
+            r#"title: One
+params: [{ name: n, default: "1" }]
+query: |
+  SELECT 'Made' AS title, CAST(:n AS INTEGER) = 1 AS open WHERE CAST(:n AS INTEGER) <> 0
+  UNION ALL SELECT 'Twin', 1 WHERE CAST(:n AS INTEGER) = 2
+viz: detail
+columns: [{ key: title }, { key: open }]
+actions:
+  - { id: make, label: Make, command: oxplow.dashboard.create, when: open, input: { title: "{{row.title}}" } }
+  - { id: plain, label: Plain, command: oxplow.dashboard.create, input: { title: Plain } }
+  - { id: rename, label: Rename, command: oxplow.dashboard.rename, form: true, fixed: [dashboard], input: { dashboard: dsh1, title: "{{row.title}}" } }
+"#,
+        )
+        .unwrap();
+        std::fs::write(
             ext.join("lenses/board.yaml"),
             r#"title: Board
 query: "SELECT uri, title, state FROM v_work_item"
@@ -1411,6 +1493,86 @@ actions:
             body, "## New\n\nThe saved text.",
             "the fixed uri kept this item"
         );
+    }
+
+    /// A whole-lens action over a lens that holds one row binds
+    /// `{{row.*}}` from that row, which the server reads from the lens
+    /// itself: offered by `when`, refused unless the lens has exactly one
+    /// row, and refused a row the caller makes up.
+    #[tokio::test]
+    async fn a_whole_lens_action_over_a_one_row_lens_binds_that_row() {
+        let (fx, root) = fixture().await;
+        let svc = fx.svc.clone();
+        let press = |action: &str, n: &str, row: Option<BTreeMap<String, SqlCell>>| {
+            let (svc, root) = (svc.clone(), root.clone());
+            let call = LensActionCall {
+                lens_id: "acme/one".into(),
+                action_id: action.into(),
+                params: BTreeMap::from([("n".to_string(), SqlCell::Text(n.into()))]),
+                row,
+                input: None,
+                drop: None,
+                on_behalf_of: Actor::Human,
+                confirmed: false,
+            };
+            async move { run_lens_action(&svc, &root, call, &extensions::LensContext::default()).await }
+        };
+        let titles = || async {
+            svc.sql
+                .query_sql("SELECT title FROM v_dashboard ORDER BY id", vec![], None)
+                .await
+                .unwrap()
+                .rows
+                .into_iter()
+                .map(|r| r[0].clone())
+                .collect::<Vec<_>>()
+        };
+        press("make", "1", None).await.unwrap();
+        assert_eq!(titles().await, vec![SqlCell::Text("Made".into())]);
+
+        // Not offered: its `when` column is false on the one row.
+        let off = press("make", "3", None).await.unwrap_err().to_string();
+        assert!(off.contains("isn't offered"), "{off}");
+        // Not one row.
+        for (n, says) in [("0", "the lens has 0 rows"), ("2", "the lens has 2 rows")] {
+            let err = press("make", n, None).await.unwrap_err().to_string();
+            assert!(
+                err.contains(says) && err.contains("needs one"),
+                "{n}: {err}"
+            );
+        }
+        // A row the caller makes up is refused, not trusted.
+        let forged = BTreeMap::from([
+            ("title".to_string(), SqlCell::Text("Forged".into())),
+            ("open".to_string(), SqlCell::Int(1)),
+        ]);
+        let err = press("make", "1", Some(forged))
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("whole lens"), "{err}");
+        // A form over it starts from the row.
+        let form = action_form(
+            &svc,
+            &root,
+            LensActionCall {
+                lens_id: "acme/one".into(),
+                action_id: "rename".into(),
+                params: BTreeMap::new(),
+                row: None,
+                input: None,
+                drop: None,
+                on_behalf_of: Actor::Human,
+                confirmed: false,
+            },
+            &extensions::LensContext::default(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(form.values["title"], "Made");
+        // An ordinary button still runs on any lens.
+        press("plain", "2", None).await.unwrap();
+        assert_eq!(titles().await.len(), 2);
     }
 
     /// A dashboard lens whose rows are its tiles edits them through its

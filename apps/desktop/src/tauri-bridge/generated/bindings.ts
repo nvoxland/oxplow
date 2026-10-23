@@ -3642,6 +3642,14 @@ export type LensAction = {
 	 *  bound exactly to a `{{row.<column>}}` and not `fixed`.
 	 */
 	editField?: string | null,
+	/**
+	 *  A whole-lens action over a lens that holds one row, that names
+	 *  `when` or `{{row.*}}`: the lens's one row. Derived at load, not
+	 *  declared: an action without `row: true` that names `when:` or
+	 *  `{{row.*}}`. It runs on the row the server reads from the lens
+	 *  itself, and only while the lens has exactly one.
+	 */
+	oneRow?: boolean,
 };
 
 /**

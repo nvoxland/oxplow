@@ -77,7 +77,7 @@ import { Facts } from "../kit/Facts.js";
 import { Stat } from "../kit/Stat.js";
 import { recordOpError } from "../opErrors.js";
 import { showToast } from "../components/toastStore.js";
-import { actionOffered, addLensToContext, copyLens, openAfterAction, performLensAction, promptField, rowRecord } from "./lensActions.js";
+import { actionOffered, addLensToContext, copyLens, offeredWholeLens, openAfterAction, performLensAction, promptField, rowRecord } from "./lensActions.js";
 import { useHistoryState } from "../tabs/useHistoryState.js";
 import {
   chainedDrops,
@@ -327,7 +327,7 @@ export type LensActionsState = ReturnType<typeof useLensActions>;
  *  the whole-lens actions, handed up whenever what they say changes. */
 function HandToolbar({ run, streamId, actions, marks, to }: { run: LensRun; streamId: string | null; actions: LensActionsState; marks: Marks; to(actions: PageAction[]): void }) {
   const [copied, setCopied] = useState(false);
-  const buttons = run.lens.actions.filter((a) => !a.row && !a.group);
+  const buttons = run.lens.actions.filter((a) => offeredWholeLens(a, run.result));
   const toRef = useRef(to);
   toRef.current = to;
   const pressRef = useRef(actions.run);
@@ -390,7 +390,7 @@ function HandToolbar({ run, streamId, actions, marks, to }: { run: LensRun; stre
 /** A part's whole-lens actions as buttons: no Copy, no marks. An editor's
  *  Save is the editor's own. */
 function PartButtons({ run, actions }: { run: LensRun; actions: LensActionsState }) {
-  const buttons = run.lens.actions.filter((a) => !a.row && !a.group && !a.edit);
+  const buttons = run.lens.actions.filter((a) => offeredWholeLens(a, run.result));
   if (buttons.length === 0) return null;
   return (
     <div data-testid="lens-part-actions" style={{ display: "flex", gap: 6, marginBottom: 6 }}>
@@ -407,7 +407,7 @@ function PartButtons({ run, actions }: { run: LensRun; actions: LensActionsState
  *  are in its menu, a group's in its heading). */
 function LensToolbar({ run, streamId, actions, marks }: { run: LensRun; streamId: string | null; actions: LensActionsState; marks: Marks }) {
   const [copied, setCopied] = useState(false);
-  const buttons = run.lens.actions.filter((a) => !a.row && !a.group);
+  const buttons = run.lens.actions.filter((a) => offeredWholeLens(a, run.result));
   if (markedRecords(run, marks).length > 0) return <MarksBar run={run} actions={actions} marks={marks} />;
   return (
     <>

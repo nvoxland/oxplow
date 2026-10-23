@@ -1396,6 +1396,13 @@ pub struct LensAction {
     /// bound exactly to a `{{row.<column>}}` and not `fixed`.
     #[serde(default)]
     pub edit_field: Option<String>,
+    /// A whole-lens action over a lens that holds one row, that names
+    /// `when` or `{{row.*}}`: the lens's one row. Derived at load, not
+    /// declared: an action without `row: true` that names `when:` or
+    /// `{{row.*}}`. It runs on the row the server reads from the lens
+    /// itself, and only while the lens has exactly one.
+    #[serde(default)]
+    pub one_row: bool,
 }
 
 /// The `{{param.x}}` / `{{row.x}}` placeholders in `input`, as
@@ -1502,11 +1509,14 @@ fn key_problem(key: &str) -> Option<String> {
 /// Parse a lens's `actions:`: each `{ id, label, command, input?, row? }`.
 /// A placeholder must name a declared param (`{{param.x}}`) or, in a row
 /// action, a column (`{{row.x}}`, checked against the result when the
-/// extension is validated).
+/// extension is validated). A lens that `holds_one_row` (detail, form,
+/// markdown, a document's row) lets a whole-lens action name `when` and
+/// `{{row.*}}` too: that row.
 fn parse_actions(
     raw: Vec<serde_yaml::Value>,
     params: &[LensParam],
     grouped: bool,
+    holds_one_row: bool,
 ) -> Result<Vec<LensAction>, String> {
     let mut out: Vec<LensAction> = Vec::new();
     for v in raw {
@@ -1546,9 +1556,9 @@ fn parse_actions(
                 f.id
             ));
         }
-        if f.when.is_some() && !(f.row || f.drag) {
+        if f.when.is_some() && !(f.row || f.drag || holds_one_row) {
             return Err(format!(
-                "actions: `{}`: `when` is for a row action (`row: true`)",
+                "actions: `{}`: `when` is for a row action (`row: true`), or a lens that holds one row (detail, form, markdown, a document's row)",
                 f.id
             ));
         }
@@ -1556,6 +1566,13 @@ fn parse_actions(
         // edit action is a form over the viz's row.
         let row = f.row || f.drag || f.edit;
         let form = f.form || f.edit;
+        // Derived: a whole-lens action that names `when` or the row.
+        let one_row = !row
+            && holds_one_row
+            && (f.when.is_some()
+                || action_templates(&input)
+                    .iter()
+                    .any(|(scope, _)| scope == "row"));
         if f.edit && (f.drag || f.bulk || f.key.is_some() || f.group.is_some() || f.primary) {
             return Err(format!(
                 "actions: `{}`: an edit action is the editor's Save: it can't be `drag`, `bulk`, `key`, `group` or `primary`",
@@ -1652,7 +1669,7 @@ fn parse_actions(
                         f.id
                     ))
                 }
-                "row" if row => {}
+                "row" if row || one_row => {}
                 "before" | "after" | "onto" | "order" if f.drag => {}
                 "before" | "after" | "onto" | "order" => {
                     return Err(format!(
@@ -1681,7 +1698,7 @@ fn parse_actions(
                 }
                 "row" => {
                     return Err(format!(
-                        "actions: `{}`: `{{{{row.{name}}}}}` needs `row: true`",
+                        "actions: `{}`: `{{{{row.{name}}}}}` needs `row: true`, or a lens that holds one row (detail, form, markdown, a document's row)",
                         f.id
                     ))
                 }
@@ -1717,9 +1734,17 @@ fn parse_actions(
             key: f.key,
             edit: f.edit,
             edit_field,
+            one_row,
         });
     }
     Ok(out)
+}
+
+/// Whether a lens of this `viz` holds one row, so a whole-lens action can
+/// name it: a detail, a form, a markdown, or a document with a `query:`.
+fn holds_one_row(viz: LensViz, has_query: bool) -> bool {
+    matches!(viz, LensViz::Detail | LensViz::Form | LensViz::Markdown)
+        || (viz == LensViz::Document && has_query)
 }
 
 /// An edit action's edited field: the one input field that is exactly a
@@ -4240,8 +4265,12 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                 for need in &l.needs {
                     oxplow_domain::capability::check_need(need)?;
                 }
-                let actions =
-                    parse_actions(std::mem::take(&mut l.actions), &l.params, l.group.is_some())?;
+                let actions = parse_actions(
+                    std::mem::take(&mut l.actions),
+                    &l.params,
+                    l.group.is_some(),
+                    holds_one_row(l.viz, !l.query.trim().is_empty()),
+                )?;
                 let parts = parse_parts(
                     name,
                     l.viz,
@@ -7290,11 +7319,50 @@ mod tests {
     /// without `row: true`.
     #[test]
     fn when_needs_a_row_action() {
-        let parse =
-            |action: &str| parse_actions(vec![serde_yaml::from_str(action).unwrap()], &[], false);
+        let parse = |action: &str| {
+            parse_actions(
+                vec![serde_yaml::from_str(action).unwrap()],
+                &[],
+                false,
+                false,
+            )
+        };
         assert!(parse("{ id: a, label: A, command: x.y.z, row: true, when: open }").is_ok());
         let err = parse("{ id: a, label: A, command: x.y.z, when: open }").unwrap_err();
         assert!(err.contains("`when` is for a row action"), "{err}");
+    }
+
+    /// A lens that holds one row (detail, form, markdown, a document's row)
+    /// lets a whole-lens action name `when` and `{{row.*}}`: the lens's
+    /// one row. Derived at load as `one_row`, not declared; any other lens
+    /// refuses both.
+    #[test]
+    fn a_whole_lens_action_over_a_one_row_lens_may_name_when_and_the_row() {
+        let parse = |action: &str, holds_one_row: bool| {
+            parse_actions(
+                vec![serde_yaml::from_str(action).unwrap()],
+                &[],
+                false,
+                holds_one_row,
+            )
+        };
+        let named =
+            "{ id: a, label: A, command: x.y.z, when: open, input: { t: '{{row.title}}' } }";
+        let ok = parse(named, true).unwrap();
+        assert!(ok[0].one_row && !ok[0].row);
+        let plain = parse("{ id: a, label: A, command: x.y.z }", true).unwrap();
+        assert!(!plain[0].one_row, "naming neither is an ordinary button");
+        let only_when = parse("{ id: a, label: A, command: x.y.z, when: open }", true).unwrap();
+        assert!(only_when[0].one_row);
+        let err = parse(named, false).unwrap_err();
+        assert!(err.contains("holds one row"), "{err}");
+        // A row action stays what it was, on any lens.
+        let row = parse(
+            "{ id: a, label: A, command: x.y.z, row: true, when: open }",
+            false,
+        )
+        .unwrap();
+        assert!(row[0].row && !row[0].one_row);
     }
 
     /// `primary` marks a row action a click on the row (and Enter) runs: it
@@ -7308,6 +7376,7 @@ mod tests {
                     .map(|a| serde_yaml::from_str(a).unwrap())
                     .collect(),
                 &[],
+                false,
                 false,
             )
         };
@@ -7331,6 +7400,7 @@ mod tests {
                     .collect(),
                 &[],
                 grouped,
+                false,
             )
         };
         let ok = parse(
@@ -7386,6 +7456,7 @@ mod tests {
                     .collect(),
                 &[],
                 true,
+                false,
             )
         };
         let ok = parse(&["{ id: save, label: Save, command: x.y.z, edit: true, fixed: [uri], input: { uri: '{{row.uri}}', body: '{{row.body}}' } }"]).unwrap();

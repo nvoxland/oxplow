@@ -315,7 +315,7 @@ export function foldEmpty<T extends { run: LensRun | null; error: string | null 
   const isEmpty = (r: T) =>
     r.error === null && r.run !== null && !isComposite(r.run.lens.viz) && r.run.lens.viz !== "form" &&
     r.run.result.rows.length === 0 &&
-    !r.run.lens.actions.some((a) => !a.row && a.group === null);
+    !r.run.lens.actions.some((a) => !a.row && a.group === null && !a.oneRow);
   return { shown: runs.filter((r) => !isEmpty(r)), empty: runs.filter(isEmpty) };
 }
 

@@ -199,7 +199,9 @@ actions:
 ```
 
 `{{param.x}}` and `{{row.col}}` fill the input from the lens's params or
-the row. `{{row.col|json}}` is the JSON a text column holds, as the value
+the row. A lens that shows one row (a detail, a form, a markdown) can name
+`{{row.col}}` and `when:` in a button that is not a row action: it means
+that row, and the button shows only while there is exactly one. `{{row.col|json}}` is the JSON a text column holds, as the value
 it is (a list the row's query built, such as an order). A command that asks for confirmation asks you before it runs.
 
 Three more ways to reach a row action:

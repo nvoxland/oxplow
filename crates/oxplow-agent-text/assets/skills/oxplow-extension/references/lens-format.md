@@ -207,7 +207,10 @@ empty: Nothing is waiting on you.
   e.g. `{ id: finish, label: Finish, command: oxplow.work_item.transition,
   row: true, input: { uri: "{{row.uri}}", to: done } }`,
   or `{ id: sync, label: Sync PRs, command: oxplow.collector.sync, input:
-  { collector: "github/prs" } }`. `form: true` opens the command's form
+  { collector: "github/prs" } }`. On a lens that holds one row (`detail`,
+  `form`, `markdown`) a button without `row: true` may also name `when:
+  <column>` and `"{{row.col}}"`: that row, shown only while the lens has
+  exactly one. `form: true` opens the command's form
   instead of running (one text field: a strip above the rows; a Rename…
   is `fixed: [from], input: { from: "{{row.path}}", to: "{{row.path}}" }`;
   `commands-and-forms.md`). With `group: <value>` (on a lens with

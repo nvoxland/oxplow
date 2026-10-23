@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 
 import { IpcCallError } from "../ipc-error.js";
 import type { FormStart, LensAction, LensRun } from "../tauri-bridge/generated/bindings.js";
-import { actionOffered, addLensToContext, copyLens, openAfterAction, performLensAction, promptField, rowRecord, type LensActionDeps } from "./lensActions.js";
+import { actionOffered, addLensToContext, offeredWholeLens, copyLens, openAfterAction, performLensAction, promptField, rowRecord, type LensActionDeps } from "./lensActions.js";
 
 const run = { lens: { id: "acme/prs" }, params: { repo: "x" } } as unknown as LensRun;
 const action: LensAction = { id: "finish", label: "Finish", command: "oxplow.work_item.transition", input: {}, row: false };
@@ -180,4 +180,24 @@ test("promptField says when its field is a secret", () => {
   expect(promptField(start({ value: { type: "string", writeOnly: true } }))).toMatchObject({ key: "value", secret: true });
   expect(promptField(start({ value: { type: "string" } }, { fields: [{ name: "value", secret: true }] }))).toMatchObject({ key: "value", secret: true });
   expect(promptField(start({ to: { type: "string" } }))).toMatchObject({ key: "to", secret: false });
+});
+
+test("a whole-lens action is offered as a button; one over the lens's one row only while it has exactly one and `when` holds", () => {
+  const result = (rows: Array<Array<string | number | null>>) => ({ columns: ["title", "open"], rows }) as unknown as LensRun["result"];
+  const plain: LensAction = { ...action };
+  const oneRow: LensAction = { ...action, oneRow: true, when: "open" };
+  // A row, group or edit action is not a whole-lens button.
+  expect(offeredWholeLens({ ...action, row: true }, result([]))).toBe(false);
+  expect(offeredWholeLens({ ...action, group: "x" }, result([]))).toBe(false);
+  expect(offeredWholeLens({ ...action, edit: true }, result([]))).toBe(false);
+  // An ordinary button needs no rows.
+  expect(offeredWholeLens(plain, result([]))).toBe(true);
+  expect(offeredWholeLens(plain, result([["a", 1], ["b", 1]]))).toBe(true);
+  // The one-row action needs exactly one row, with its `when` truthy.
+  expect(offeredWholeLens(oneRow, result([["a", 1]]))).toBe(true);
+  expect(offeredWholeLens(oneRow, result([["a", 0]]))).toBe(false);
+  expect(offeredWholeLens(oneRow, result([]))).toBe(false);
+  expect(offeredWholeLens(oneRow, result([["a", 1], ["b", 1]]))).toBe(false);
+  // Without a `when` it is offered on any single row.
+  expect(offeredWholeLens({ ...oneRow, when: null }, result([["a", 0]]))).toBe(true);
 });

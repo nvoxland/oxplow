@@ -25,7 +25,7 @@ query: |
                      THEN 'Change: ' || (SELECT round((SELECT value FROM pts ORDER BY captured_at DESC LIMIT 1)
                                                        - (SELECT value FROM pts ORDER BY captured_at LIMIT 1), 2)) END
          END AS in_range,
-         c.key AS key
+         (c.enabled = 0) AS can_enable
   FROM v_metric_catalog c LEFT JOIN v_metric_spec s ON s.key = c.key
   WHERE c.key = :metric
 viz: detail
@@ -47,8 +47,8 @@ columns:
   - { key: fail_at, label: Fail at }
   - { key: enabled, label: Enabled }
 actions:
-  - { id: enable, label: Enable, command: oxplow.metric.enable, input: { keys: ["{{param.metric}}"], enabled: true } }
-  - { id: disable, label: Disable, command: oxplow.metric.enable, input: { keys: ["{{param.metric}}"], enabled: false } }
+  - { id: enable, label: Enable, command: oxplow.metric.enable, when: can_enable, input: { keys: ["{{param.metric}}"], enabled: true } }
+  - { id: disable, label: Disable, command: oxplow.metric.enable, when: enabled, input: { keys: ["{{param.metric}}"], enabled: false } }
   - { id: add-to-dashboard, label: Add to Dashboard…, command: oxplow.dashboard.add_item, form: true, fixed: [kind, display, metric, viz], choices: { dashboard: oxplow-foundation/metric-dashboards }, input: { kind: query, display: metric, metric: "{{param.metric}}", viz: line } }
 empty: That metric isn't known to this project.
 hidden: true

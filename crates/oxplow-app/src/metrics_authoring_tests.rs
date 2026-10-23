@@ -512,8 +512,7 @@ async fn the_metric_page_reads_the_definition_the_trend_and_the_recordings() {
             confirmed: false,
         };
     let ctx = crate::extensions::LensContext::default();
-    // Off writes the `metrics:` list (the catalog follows once the project
-    // reseeds); on again takes the entry back out.
+    // Off writes the `metrics:` list.
     let listed = || {
         crate::config_service::read_config(&p.svc.config)
             .metrics
@@ -524,10 +523,14 @@ async fn the_metric_page_reads_the_definition_the_trend_and_the_recordings() {
         .await
         .unwrap();
     assert_ne!(listed(), before, "disabling changed the metrics list");
-    run_lens_action(&p.svc, p.dir.path(), act("enable", None), &ctx)
+    // On is not offered while the catalog still says it's on (`when:
+    // can_enable`); the catalog follows the config only once the project
+    // reseeds, which a test project doesn't do.
+    let err = run_lens_action(&p.svc, p.dir.path(), act("enable", None), &ctx)
         .await
-        .unwrap();
-    assert_eq!(listed(), before);
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("isn't offered"), "{err}");
 }
 
 #[tokio::test(flavor = "multi_thread")]

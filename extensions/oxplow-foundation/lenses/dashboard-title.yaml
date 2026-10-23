@@ -10,7 +10,7 @@ columns:
 actions:
   - { id: add-metric, label: Add Metric…, command: oxplow.dashboard.add_item, form: true, fixed: [dashboard, kind, display, viz], choices: { metric: oxplow-foundation/dashboard-metrics }, input: { dashboard: "{{param.id}}", kind: query, display: metric, viz: line } }
   - { id: add-heading, label: Add Heading…, command: oxplow.dashboard.add_item, form: true, fixed: [dashboard, kind, size], input: { dashboard: "{{param.id}}", kind: text, size: full } }
-  - { id: rename, label: Rename…, command: oxplow.dashboard.rename, form: true, fixed: [dashboard], input: { dashboard: "{{param.id}}" } }
+  - { id: rename, label: Rename…, command: oxplow.dashboard.rename, form: true, fixed: [dashboard], input: { dashboard: "{{param.id}}", title: "{{row.title}}" } }
   - { id: delete, label: Delete, command: oxplow.dashboard.delete, then: close, input: { dashboard: "{{param.id}}" } }
 empty: This dashboard no longer exists.
 hidden: true

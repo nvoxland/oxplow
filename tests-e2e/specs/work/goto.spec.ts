@@ -55,7 +55,10 @@ test("a dashboard takes a heading tile, a new name, and is deleted from its page
   await page.keyboard.press("Enter");
   await expect(page.locator('[data-testid="lens-part-tiles"]:visible')).toContainText("Build health");
   await page.getByRole("button", { name: "Rename…" }).filter({ visible: true }).first().click();
-  await page.locator('[data-testid="lens-action-form-fields-title"]:visible').fill("Health");
+  const title = page.locator('[data-testid="lens-action-form-fields-title"]:visible');
+  // Rename… starts from the dashboard's name: the lens's one row.
+  await expect(title).toHaveValue("Untitled dashboard");
+  await title.fill("Health");
   await page.keyboard.press("Enter");
   await expect(page.locator('[data-testid="lens-part-title"]:visible')).toContainText("Health");
   await page.getByRole("button", { name: "Delete" }).filter({ visible: true }).first().click();

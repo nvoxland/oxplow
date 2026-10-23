@@ -741,9 +741,25 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       load-time validation and run-time binding alike, so the two can't
       disagree.
       At load, a `{{param.x}}` must name a declared param and `{{row.x}}`
-      needs `row: true`; `oxplow_validate_extension` checks `{{row.x}}` against
+      needs `row: true` — or a lens that holds one row (detail, form,
+      markdown, a document with a `query:`), where a whole-lens action may
+      name `{{row.x}}` and `when:` too and means that row;
+      `oxplow_validate_extension` checks `{{row.x}}` and `when` against
       the result's columns; the command name must be well-formed. Any
       other shape is a field error.
+    - **A whole-lens action over a one-row lens** (`LensAction::one_row`)
+      is derived at load, not declared: an action without `row: true`
+      that names `when:` or `{{row.*}}`, on a lens that holds one row.
+      The server reads the row itself (`lens_actions::bind_one_row`, before
+      `prepare_lens_action` and `action_form`): it runs the lens with the
+      call's params, refuses unless it has exactly one row ("the lens has N
+      rows; a whole-lens action needs one") and refuses a `row` the caller
+      passes, then binds and checks `when` as for a row action. A person's
+      press, a form's prefill (a Rename… starting from the name) and
+      `oxplow_run_lens_action` are the one path. The window shows such a
+      button only while the result has exactly one row and `when` holds
+      (`offeredWholeLens`, the one predicate the toolbar, a part's buttons
+      and the page's hand-up share).
     - **Drag, bulk and key actions.** `drag: true` makes a row action
       what a drop runs (`rowInteract.ts`, `RowsBody`): a row the action is
       offered on (`when`) drags (`LENS_ROW_DRAG_MIME`, taken only by the view

@@ -58,6 +58,19 @@ export function actionOffered(action: LensAction, row: Record<string, SqlCell>):
   return v !== null && v !== undefined && v !== 0 && v !== "" && v !== false;
 }
 
+/** Whether whole-lens action `action` is offered as a button over `result`:
+ *  not a row, group or edit action (those live on rows, headings and the
+ *  editor); an ordinary button always; one that names the lens's one row
+ *  (`oneRow`: `when` or `{{row.*}}`) only while the result has exactly one
+ *  row and, if it has a `when`, that column is truthy on it. The server
+ *  reads and checks the same row when it runs. */
+export function offeredWholeLens(action: LensAction, result: Pick<LensRun["result"], "columns" | "rows">): boolean {
+  if (action.row || action.group || action.edit) return false;
+  if (!action.oneRow) return true;
+  if (result.rows.length !== 1) return false;
+  return actionOffered(action, rowRecord(result.columns, result.rows[0]!));
+}
+
 export async function performLensAction(
   action: LensAction,
   run: LensRun,
