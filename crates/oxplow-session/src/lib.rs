@@ -31,6 +31,8 @@ pub enum SessionError {
     PrimaryExists,
     #[error("primary stream missing")]
     PrimaryMissing,
+    #[error("{0} isn't one of this repository's worktrees")]
+    NotAWorktree(PathBuf),
     #[error("worktree slug \"{0}\" already exists")]
     DuplicateWorktreeSlug(String),
     #[error("vcs: {0}")]
@@ -302,6 +304,20 @@ impl StreamService {
             if existing.worktree_path == path_str {
                 return Ok(existing);
             }
+        }
+
+        // Only one of this repository's own working copies (not its
+        // primary) is adopted: a path anyone names is checked, not trusted.
+        let canon = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+        let wanted = canon(&worktree_path);
+        let known = self
+            .vcs
+            .list_workspaces(&self.layout.project_dir)
+            .await?
+            .into_iter()
+            .any(|w| !w.is_main && canon(Path::new(&w.path)) == wanted);
+        if !known {
+            return Err(SessionError::NotAWorktree(worktree_path));
         }
 
         // Read the branch from the worktree's HEAD. If the worktree

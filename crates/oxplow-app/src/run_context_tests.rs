@@ -35,7 +35,7 @@ fn acme(root: &Path, task: &str) {
          effects:\n\
          \x20 - id: note\n    summary: Note a merge.\n    on: [acme.merged]\n    entry: note.star\n\
          commands:\n\
-         \x20 - name: note.write\n    summary: Note it.\n    input_schema: { type: object }\n    entry: write.star\n    invokers: { human: true, agent: true, lens: true }\n",
+         \x20 - name: note.write\n    summary: Note it.\n    input_schema: { type: object }\n    entry: write.star\n",
     );
     write(
         root,
@@ -258,7 +258,7 @@ async fn a_run_records_what_its_grant_decided() {
          collectors:\n\
          \x20 - id: gh\n    runtime: exec\n    entry: sync.sh\n    credentials: [GH_TOKEN]\n    network: [api.github.com]\n    entities:\n      - { name: pr, key: n, columns: { n: int } }\n\
          commands:\n\
-         \x20 - name: note.count\n    summary: Count.\n    input_schema: { type: object }\n    entry: count.star\n    needs: [sql.read]\n    invokers: { human: true, agent: true, lens: true }\n",
+         \x20 - name: note.count\n    summary: Count.\n    input_schema: { type: object }\n    entry: count.star\n    needs: [sql.read]\n",
     );
     write(
         &root,

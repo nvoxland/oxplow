@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { ipc } from "../../support/daemon.js";
+import { run } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
 import { openFromLauncher } from "../../support/ui.js";
 
@@ -13,7 +13,7 @@ test("an enabled harness's declared settings are offered and saved", async ({ fr
   await page.goto("/");
   await openFromLauncher(page, "Settings: Agents");
   await expect(page.getByTestId("settings-agent-opencode-model")).toHaveCount(0);
-  await ipc(daemon, "set_agents", { agents: ["terminal", "opencode"] });
+  await run(daemon, "oxplow.agent.set_agents", { agents: ["terminal", "opencode"] });
   await page.reload();
   await openFromLauncher(page, "Settings: Agents");
   const model = page.getByTestId("settings-agent-opencode-model");

@@ -20,7 +20,7 @@ use oxplow_domain::events::schema::{
     ContributionDisabled, ContributionDisabledV1, ContributionEnabled, ContributionEnabledV1,
 };
 use oxplow_domain::uri::build::extension_uri;
-use oxplow_domain::{CommandError, DomainError, Envelope, Invokers};
+use oxplow_domain::{CommandError, DomainError, Envelope};
 use serde::Deserialize;
 
 use crate::commands::{Handler, HandlerOutput, Invocation};
@@ -336,7 +336,6 @@ pub fn enable_op(
             })
         })),
     )
-    .open_to(Invokers::HUMAN_ONLY)
 }
 
 #[derive(Deserialize, schemars::JsonSchema)]
@@ -398,7 +397,6 @@ pub fn enable_all_op(
             })
         })),
     )
-    .open_to(Invokers::HUMAN_ONLY)
 }
 
 #[cfg(test)]
@@ -547,7 +545,7 @@ mod enable_all_tests {
 
     /// One command turns back on every contribution that stopped after
     /// repeated failures — all extensions', or one's — and leaves the
-    /// healthy ones alone; an agent can't run it.
+    /// healthy ones alone; an agent may run it too.
     #[tokio::test]
     async fn enable_all_turns_on_every_disabled_contribution_for_a_person() {
         let fx = crate::test_fixtures::services_with_effort().await;
@@ -563,20 +561,6 @@ mod enable_all_tests {
         }
         health.succeeded(&ok, None).await.unwrap();
 
-        let agent = Actor::Agent {
-            session_id: None,
-            thread_id: Some(fx.thread),
-            stream_id: None,
-        };
-        let denied = fx
-            .svc
-            .commands
-            .run(&agent, ENABLE_ALL, json!({}), false)
-            .await;
-        assert!(
-            matches!(denied, Err(CommandError::Denied { .. })),
-            "{denied:?}"
-        );
         assert_eq!(state(&health, &a).await, "disabled");
 
         // Scoped to one extension.
@@ -629,5 +613,21 @@ mod enable_all_tests {
             .await
             .unwrap();
         assert!(out.result["enabled"].as_array().unwrap().is_empty());
+
+        // An agent turns a stopped one back on, without asking.
+        let agent = Actor::Agent {
+            session_id: None,
+            thread_id: Some(fx.thread),
+            stream_id: None,
+        };
+        health.disable(&a, "3 failures in a row").await.unwrap();
+        let out = fx
+            .svc
+            .commands
+            .run(&agent, ENABLE_ALL, json!({}), false)
+            .await
+            .unwrap();
+        assert_eq!(out.result["enabled"].as_array().unwrap().len(), 1);
+        assert_eq!(state(&health, &a).await, "ok");
     }
 }

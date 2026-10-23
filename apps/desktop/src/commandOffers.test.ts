@@ -11,7 +11,7 @@ function spec(id: string, ui: Partial<CommandUi>): CommandSpec {
     id,
     summary: "",
     input_schema: {},
-    invokers: { human: true, agent: false, lens: false },
+    job: false,
     confirm: "never",
     undoable: false,
     lifecycle: "stable",

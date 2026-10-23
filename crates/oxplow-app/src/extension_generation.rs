@@ -133,7 +133,6 @@ impl PreparedExtensionDatabase {
                 schema_json: json_text(&k.schema),
                 key: k.key,
                 doc: k.doc,
-                human_only: k.human_only,
             })
             .collect();
         let configurations = snapshot

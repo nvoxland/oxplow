@@ -570,7 +570,7 @@ shows `agent_harness suite`. The MCP adapter
 `command`), the `network` hosts it reaches and the `secrets` its credentials
 name — the loader refuses it otherwise, naming what to declare — and a person
 approved them when they deployed the extension (a deploy that adds one asks
-first; an agent's becomes a proposal). There is no per-program approval.
+first; the deploy's consent check is a person's to approve). There is no per-program approval.
 
 **What runs is its deployment** (`host::deployment`). A start reads the
 provider's declarations from its extension's deployment
@@ -941,8 +941,7 @@ form; sign-in is a provider's.
   one through a normal or build edge of the resolved graph (`cargo
   metadata`), however its manifest spells the dependency.
 
-The key is human-only (`HUMAN_ONLY_KEYS`: enabling runs a program) and
-shared with the team; whether it *runs* is per machine (the
+The key is shared with the team; whether it *runs* is per machine (the
 deployment, credentials, health). The config object is the provider's
 `config_schema`'s; `check` validates it.
 
@@ -972,8 +971,7 @@ publication — for a work list,
 implements, oxplow's own tasks included (`oxplow_tasks::OxplowTasks`) — each verb's
 input checked against its declared schema first) in
 `Services.work_items` — and its **other** declared commands on the bus as
-`<id>.<name>` (`External`, `Experimental`; the manifest's `invokers`,
-required like any command's; confirm / access / undoable as declared). Its capability's verbs are never
+`<id>.<name>` (`External`, `Experimental`; confirm / access / undoable as declared). Its capability's verbs are never
 commands of their own: `work_item.<verb>` is the one write surface
 (P7.A1). A refusal —
 unconfigured, a handshake that doesn't match — registers
@@ -984,7 +982,7 @@ doubles from `MachineEnv.provider_backoff` (1 s in the app, 0 in
 kills the process. **Its commands are its extension's**: the manifest
 declares each once over an operation its declarations list
 (`commands:` → `{ name: item.estimate, provider: fake, op: estimate,
-invokers, ui, … }`, [extensions.md](./extensions.md) "Commands"), so it has one id
+ui, … }`, [extensions.md](./extensions.md) "Commands"), so it has one id
 for every instance (`tracker.item.estimate`), registered by the
 extension's generation whether or not an instance runs. Its spec takes the
 operation's input schema (plus an optional `instance`), effect and
@@ -1099,8 +1097,8 @@ flight** (tsk569): each disable bumps the instance's epoch under the
 `running` lock, and a generation publishes a started instance only if the
 epoch it began with still holds, so a concurrent generation can't bring back
 what was just disabled.
-Only a person turns it back on — **`oxplow.contribution.enable { extension, kind,
-contribution }`** (human-only, `External`, not undoable; it replaced
+It is turned back on by **`oxplow.contribution.enable { extension, kind,
+contribution }`** (`External`, not undoable; it replaced
 `provider.enable`), which marks the row `ok`, logs `contribution.enabled@1`,
 resets the backoff and asks for a generation. Settings → Integrations' Enable runs
 it before writing `extensionInstances`.

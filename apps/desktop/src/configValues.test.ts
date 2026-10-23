@@ -7,10 +7,10 @@ mock.module("./api.js", () => ({
   querySql: async (sql: string) => {
     asked.push(sql);
     return {
-      columns: ["key", "value", "origin", "extension", "human_only", "doc", "schema"],
+      columns: ["key", "value", "origin", "extension", "doc", "schema"],
       rows: [
-        ["snapshotRetentionDays", "3", "project", null, 0, "How long snapshots are kept.", '{"type":"integer"}'],
-        ["ai.roles.main", "null", "default", null, 1, "The main role.", null],
+        ["snapshotRetentionDays", "3", "project", null, "How long snapshots are kept.", '{"type":"integer"}'],
+        ["ai.roles.main", "null", "default", null, "The main role.", null],
       ],
       truncated: false,
       reads: { models: ["v_config_value"], tables: [], measures: [] },
@@ -30,11 +30,10 @@ test("every setting is read from v_config_value, its value and schema as JSON", 
       value: 3,
       origin: "project",
       extension: null,
-      humanOnly: false,
       doc: "How long snapshots are kept.",
       schema: { type: "integer" },
     },
-    { key: "ai.roles.main", value: null, origin: "default", extension: null, humanOnly: true, doc: "The main role.", schema: null },
+    { key: "ai.roles.main", value: null, origin: "default", extension: null, doc: "The main role.", schema: null },
   ]);
   expect(reads.models).toEqual(["v_config_value"]);
 });

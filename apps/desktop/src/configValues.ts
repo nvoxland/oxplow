@@ -15,27 +15,24 @@ export interface EffectiveSetting {
   origin: SettingOrigin;
   /** The extension a value comes from (`origin: extension`). */
   extension: string | null;
-  /** Only a person may set it; an agent's change asks them. */
-  humanOnly: boolean;
   doc: string;
   /** A project key's value schema; null for the rest. */
   schema: unknown;
 }
 
-const COLUMNS = "key, value, origin, extension, human_only, doc, schema";
+const COLUMNS = "key, value, origin, extension, doc, schema";
 
 function parsed(cell: SqlCell): unknown {
   return typeof cell === "string" ? JSON.parse(cell) : null;
 }
 
 function settingOf(row: SqlCell[]): EffectiveSetting {
-  const [key, value, origin, extension, humanOnly, doc, schema] = row;
+  const [key, value, origin, extension, doc, schema] = row;
   return {
     key: String(key),
     value: parsed(value),
     origin: origin as SettingOrigin,
     extension: typeof extension === "string" ? extension : null,
-    humanOnly: humanOnly === 1,
     doc: typeof doc === "string" ? doc : "",
     schema: parsed(schema),
   };

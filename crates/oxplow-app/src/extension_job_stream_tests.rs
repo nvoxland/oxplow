@@ -23,15 +23,15 @@ jobs:
     max_tool_rounds: 3
     timeout: 5
 commands:
-  - { name: review.ask, summary: Ask for a review., scope: jobs.write, op: enqueue, invokers: { human: true, agent: true, lens: true } }
-  - { name: review.cancel, summary: Stop it., scope: jobs.write, op: cancel, invokers: { human: true, agent: true, lens: true } }
-  - { name: review.result, summary: Read it., scope: jobs.read, op: snapshot, invokers: { human: true, agent: true, lens: true } }
+  - { name: review.ask, summary: Ask for a review., scope: jobs.write, op: enqueue }
+  - { name: review.cancel, summary: Stop it., scope: jobs.write, op: cancel }
+  - { name: review.result, summary: Read it., scope: jobs.read, op: snapshot }
   - name: todos.lookup
     summary: The TODOs in one file.
     entry: commands/lookup.star
     input_schema: { type: object, required: [path], properties: { path: { type: string } }, additionalProperties: false }
     access: read
-    invokers: { human: false, agent: false, lens: false, job: true }
+    job: true
 "#;
 
 /// [`MANIFEST`] with its job declared `replay: idempotent`.
@@ -537,7 +537,7 @@ async fn a_tool_that_does_not_admit_a_job_is_a_load_error() {
     std::fs::write(ext.join("commands/lookup.star"), LOOKUP).unwrap();
     for (manifest, says) in [
         (
-            MANIFEST.replace("lens: false, job: true", "lens: false, job: false"),
+            MANIFEST.replace("    job: true\n", ""),
             "doesn't admit a job",
         ),
         (

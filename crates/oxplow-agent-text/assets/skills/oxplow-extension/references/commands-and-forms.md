@@ -16,7 +16,7 @@
 - **`commands:`** register commands of your own, as
   `<namespace>.<area>.<verb>`: `{ name: area.verb, summary, input_schema,
   entry: handlers/x.star, needs?: [sql.read], confirm?, access?,
-  invokers?, examples? }`. The Starlark `transform(x)` gets `{ input }`,
+  job?, examples? }`. The Starlark `transform(x)` gets `{ input }`,
   reads with `scope("sql.read", { "sql": "SELECT … WHERE uri = :uri",
   "params": { "uri": x["input"]["uri"] } })` (a list of row dicts; it must
   list `sql.read` in `needs`) and returns `{ commands: [{ name, input }],
@@ -77,6 +77,8 @@
   masked, never kept, and blank leaves it out (the saved one stays). The
   command must keep it out of its record: a script command declares
   `unrecorded: [token]` on its `commands:` entry, or the form won't open.
+  A schema field with `writeOnly: true` is masked the same way and kept
+  out of the record by itself.
 - **Several forms on one page:** a document whose parts are form lenses;
   each submits its own command.
 - **After a submit**, a command with `ui.open_after` opens that page;

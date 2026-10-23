@@ -344,7 +344,7 @@ pub fn scaffold_with(
              \x20     additionalProperties: false\n\
              \x20   entry: handlers/note.star\n\
              \x20   # Who may run it: a person, an agent, a lens (each child command checks its own too).\n\
-             \x20   invokers: {{ human: true, agent: true, lens: true }}\n\
+             \x20   \
              \x20   # On a work item's page (Commands) and a row's right-click.\n\
              \x20   ui: {{ label: Add Note, about: oxplow/work_item, input: {{ uri: \"{{{{uri}}}}\" }} }}\n\
              \x20   examples:\n\

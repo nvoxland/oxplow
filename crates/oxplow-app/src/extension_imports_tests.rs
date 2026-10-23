@@ -229,7 +229,7 @@ fn put_in(dir: &Path, e: &Ext) {
 const HANDLER: &str = "def transform(x):\n    return {\"commands\": [], \"result\": {}}\n";
 
 fn command(local: &str) -> String {
-    format!("  - name: {local}\n    summary: A command.\n    input_schema: {{ type: object }}\n    entry: handlers/get.star\n    invokers: {{ human: true, agent: true, lens: true }}\n    access: read\n")
+    format!("  - name: {local}\n    summary: A command.\n    input_schema: {{ type: object }}\n    entry: handlers/get.star\n    access: read\n")
 }
 
 async fn project(exts: &[Ext<'_>]) -> (tempfile::TempDir, Arc<crate::Services>) {

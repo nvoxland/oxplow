@@ -283,7 +283,7 @@ read in the caller's stream's worktree, or another's named by `stream`
 (`str2`). Content stops at 64 KB with `truncated: true`; ask for
 lines to read further. A captured file's row comes from
 `v_snapshot_file`; restoring it is the destructive
-`oxplow.snapshot.restore_file` (an agent's is a proposal), which writes
+`oxplow.snapshot.restore_file`, which writes
 into that row's stream's worktree.
 
 **Commands.** Every write is a command through `run_command { id, input
@@ -291,15 +291,16 @@ into that row's stream's worktree.
 with `id` or `prefix` (`oxplow.work_item.`) it gives each command's
 `input_schema`, an `example` input, whether a person `confirm`s it and
 whether it's `undoable` ([commands.md](./commands.md) "Exposure to
-agents"). A command that needs a person's confirmation isn't run: it's
-kept as a proposal and `run_command` answers `{ proposal, message }`
-(the person decides in the thread and in Alerts; `v_command_proposal`;
-[commands.md](./commands.md) "Proposals"). Program- and model-choosing
-config keys (`agents`, `lsp`, `agentConfig`, `extensions`,
-`agentPromptAppend`, …) set with `oxplow.config.set` are proposals; keys
-like `zones` or `snapshotTurnBudgetMs` an agent sets itself. An anonymous
-connection may read and list but not run. Which commands an agent may run
-is each spec's (`check_command`, "Agent policy").
+agents"). A command's `confirm` asks only a person: an agent's run of
+it runs without asking and without a proposal. What stays a proposal is
+an effect's run that asks and a handler's consent check
+([commands.md](./commands.md) "Proposals"; the person decides in the
+thread and in Alerts; `v_command_proposal`). Every config key, including
+the program- and model-choosing ones (`agents`, `lsp`, `agentConfig`,
+`extensions`, `agentPromptAppend`, …), is set by `oxplow.config.set`
+without asking. An anonymous connection may read and list but not run.
+Which commands an agent may call is its harness's to decide (its
+permission mode); an agent changes only its own stream.
 
 **Lenses.** When the person asks to see, list, compare or track
 something, the agent answers with `oxplow_show_lens` (the `oxplow.lens.show`
@@ -337,8 +338,7 @@ never prompts for comments: the person runs the `review-comments`
 command.
 
 **Code tools.** With no server for a language the error names the Mason
-package and both fixes: `oxplow.lsp.install_server { package }` (a
-proposal: which binaries oxplow downloads and runs is the person's call)
+package and both fixes: `oxplow.lsp.install_server { package }`
 or an `lsp.servers` entry in `.oxplow/project.yaml`. `v_lsp_server` says
 what's configured, installed and running.
 
@@ -1196,8 +1196,8 @@ a `Write` command's thread be open; `Record` commands skip it
 ([commands.md](./commands.md) "The pipeline").
 **An agent may open a sibling agent session** in its own stream
 (`oxplow.agent_session.open`): the row makes the UI attach and start its
-process, and nothing types into it; its close is destructive and a
-proposal.
+process, and nothing types into it; its close is destructive (a
+person's run asks first).
 
 - **Pure rules** in `crates/oxplow-runtime/src/policy.rs`:
   `decide_tool(ToolIntent{label, kind, paths}, PolicyFacts)` returns

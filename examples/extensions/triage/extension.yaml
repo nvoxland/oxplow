@@ -98,17 +98,14 @@ commands:
     summary: Ask a model to summarize the TODO comments; returns the job.
     scope: jobs.write
     op: enqueue
-    invokers: { human: true, agent: true, lens: true }
   - name: summary.result
     summary: A summary job's state, what it has written so far and, once it ends, its answer.
     scope: jobs.read
     op: snapshot
-    invokers: { human: true, agent: true, lens: true }
   - name: summary.cancel
     summary: Stop a summary job; it keeps what it had written.
     scope: jobs.write
     op: cancel
-    invokers: { human: true, agent: true, lens: true }
   # A person's call on each TODO — keep it, fix it now, or won't fix —
   # kept in the extension's own private state (`state.write`), never in
   # SQL: `decide` reads the state and composes `state.set` with the stamp
@@ -119,7 +116,6 @@ commands:
     summary: Replace this extension's decisions (compare-and-swap on the stamp read).
     scope: state.write
     op: compare_exchange
-    invokers: { human: false, agent: false, lens: true }
   - name: todos.decide
     summary: Decide what to do about one TODO comment — keep it, fix it now, or won't fix.
     entry: commands/decide.star
@@ -133,14 +129,12 @@ commands:
         path: { type: string, description: "The file the TODO is in." }
         line: { type: integer, description: "Its line." }
         decision: { type: string, enum: [keep, fix-now, wontfix] }
-    invokers: { human: true, agent: true, lens: true }
   - name: todos.decisions
     summary: The TODO comments with the decision made on each, if any.
     entry: commands/decisions.star
     needs: [state.read, sql.read]
     access: read
     input_schema: { type: object, additionalProperties: false, properties: {} }
-    invokers: { human: true, agent: true, lens: true }
   # A tool for the summary's model, never a person's command: it only reads.
   - name: todos.in_file
     summary: The TODO comments in one file, with the line of each and what it asks for (bug, cleanup or feature).
@@ -148,7 +142,7 @@ commands:
     needs: [sql.read]
     input_schema: { type: object, required: [path], properties: { path: { type: string, description: "A repo-relative file." } }, additionalProperties: false }
     access: read
-    invokers: { human: false, agent: false, lens: false, job: true }
+    job: true
 effects:
   - id: publish-summary
     summary: When a summary job succeeds, write its answer to the wiki page `triage-summary`.

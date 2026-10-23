@@ -39,8 +39,6 @@ pub struct EffectiveSetting {
     pub origin: ConfigOrigin,
     /// The extension a value comes from (`origin: extension`).
     pub extension: Option<String>,
-    /// Only a person may set it; an agent's change asks them.
-    pub human_only: bool,
     /// A project key's value schema; null for the rest.
     #[specta(type = oxplow_domain::Json)]
     pub schema: Value,
@@ -95,7 +93,6 @@ pub fn effective_config(
                     ConfigOrigin::Default
                 },
                 extension: None,
-                human_only: key.is_some_and(|k| k.human_only),
                 schema: key.map(|k| k.schema.clone()).unwrap_or(Value::Null),
             }
         })
@@ -110,7 +107,6 @@ pub fn effective_config(
                 value,
                 origin: ConfigOrigin::Personal,
                 extension: None,
-                human_only: true,
                 schema: spec.map(|k| k.schema.clone()).unwrap_or(Value::Null),
             });
         }
@@ -142,7 +138,6 @@ pub fn effective_config(
                     (None, false) => ConfigOrigin::Default,
                 },
                 extension: r.extension.clone(),
-                human_only: true,
                 schema: Value::Null,
             });
         }
@@ -160,7 +155,6 @@ pub fn effective_config(
                 value,
                 origin,
                 extension,
-                human_only: false,
                 schema: Value::Null,
             });
         }
@@ -335,7 +329,6 @@ mod tests {
             ConfigOrigin::Project
         );
         assert_eq!(find(&all, "ai.roles.decide").origin, ConfigOrigin::Default);
-        assert!(find(&all, "ai.roles.main").human_only);
         let metric = find(&all, "metrics.gh.prs.open");
         assert_eq!(
             (metric.origin, metric.extension.as_deref()),

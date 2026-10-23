@@ -14,7 +14,7 @@ fn write_ext(root: &Path, name: &str, v: u32, extra: &str) {
     std::fs::write(
         dir.join("extension.yaml"),
         format!(
-            "manifest: 2\nname: {name}\nintent:\n  purpose: p\ncommands:\n  - name: answer.get\n    summary: Answer.\n    input_schema: {{ type: object }}\n    entry: handlers/get.star\n    invokers: {{ human: true, agent: true, lens: true }}\n    access: read\n{extra}"
+            "manifest: 2\nname: {name}\nintent:\n  purpose: p\ncommands:\n  - name: answer.get\n    summary: Answer.\n    input_schema: {{ type: object }}\n    entry: handlers/get.star\n    access: read\n{extra}"
         ),
     )
     .unwrap();

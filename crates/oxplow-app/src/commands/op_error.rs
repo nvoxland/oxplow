@@ -12,7 +12,7 @@ use std::sync::Arc;
 use oxplow_db::op_error_store::{is_op_failed_tx, state_tx, undismissed_tx};
 use oxplow_domain::events::schema::{UiOpErrorDismissed, UiOpErrorMarkV1, UiOpErrorSeen};
 use oxplow_domain::uri::build::event_uri;
-use oxplow_domain::{CommandError, Envelope, EventId, Invokers};
+use oxplow_domain::{CommandError, Envelope, EventId};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::json;
@@ -126,8 +126,7 @@ pub fn ops() -> Vec<Op> {
             Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
                 mark_seen(ctx, parse(input)?)
             })),
-        )
-        .open_to(Invokers::NO_AGENT),
+        ),
         Op::new(
             "diagnostics.write",
             "dismiss_op_error",
@@ -136,8 +135,7 @@ pub fn ops() -> Vec<Op> {
             Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
                 dismiss(ctx, parse(input)?)
             })),
-        )
-        .open_to(Invokers::NO_AGENT),
+        ),
         Op::new(
             "diagnostics.write",
             "dismiss_all_op_errors",
@@ -147,8 +145,7 @@ pub fn ops() -> Vec<Op> {
                 let _: AllInput = parse(input)?;
                 dismiss_all(ctx)
             })),
-        )
-        .open_to(Invokers::NO_AGENT),
+        ),
     ]
 }
 
@@ -269,10 +266,10 @@ mod tests {
             thread_id: Some(fx.thread),
             stream_id: None,
         };
-        let err = run(svc, &agent, MARK_SEEN, json!({ "event": push }))
+        // An agent may mark one seen too.
+        run(svc, &agent, MARK_SEEN, json!({ "event": push }))
             .await
-            .unwrap_err();
-        assert!(matches!(err, CommandError::Denied { .. }), "{err:?}");
+            .unwrap();
     }
 
     /// What a failed operation printed is `v_op_error_output`, a row per

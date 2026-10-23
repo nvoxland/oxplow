@@ -18,7 +18,7 @@ use oxplow_db::comment_store::{
 use oxplow_domain::uri::build::{stream_uri, thread_uri};
 use oxplow_domain::{
     Actor, CommandCall, CommandError, CommentId, CommentIntent, CommentStatus, CommentThread,
-    Confirm, Invokers, StreamId,
+    Confirm, StreamId,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -343,7 +343,6 @@ pub fn delete_op() -> Op {
             })
         })),
     )
-    .open_to(Invokers::NO_AGENT)
     .confirm_at_least(Confirm::Destructive)
 }
 
@@ -381,7 +380,6 @@ pub fn relocate_op() -> Op {
             })
         })),
     )
-    .open_to(Invokers::NO_AGENT)
 }
 
 /// The comment commands, for the bus.
@@ -668,15 +666,16 @@ mod tests {
                 .orphaned
         );
 
-        let err = run(agent(&fx), relocate("{\"from\":5}", false))
+        // An agent may relocate too.
+        run(agent(&fx), relocate("{\"from\":5}", false))
             .await
-            .unwrap_err();
-        assert!(matches!(err, CommandError::Denied { .. }), "{err:?}");
+            .unwrap();
     }
 
-    /// Resolving undoes to open; deleting is a person's and asks first.
+    /// Resolving undoes to open; deleting asks a person first and an agent's
+    /// delete runs without asking.
     #[tokio::test]
-    async fn resolve_undoes_and_delete_is_a_persons() {
+    async fn resolve_undoes_and_delete_asks_a_person() {
         let fx = services_with_effort().await;
         let c = add(
             &fx,
@@ -713,13 +712,6 @@ mod tests {
         let err = fx
             .svc
             .commands
-            .run(&agent(&fx), DELETE, json!({ "comment": id }), false)
-            .await
-            .unwrap_err();
-        assert!(matches!(err, CommandError::Denied { .. }), "{err:?}");
-        let err = fx
-            .svc
-            .commands
             .run(&Actor::Human, DELETE, json!({ "comment": id }), false)
             .await
             .unwrap_err();
@@ -727,5 +719,11 @@ mod tests {
             matches!(err, CommandError::NeedsConfirmation { .. }),
             "{err:?}"
         );
+        fx.svc
+            .commands
+            .run(&agent(&fx), DELETE, json!({ "comment": id }), false)
+            .await
+            .unwrap();
+        assert!(fx.svc.comment_store.get(cid).await.unwrap().is_none());
     }
 }

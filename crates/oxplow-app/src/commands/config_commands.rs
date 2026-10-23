@@ -28,7 +28,7 @@ use oxplow_config::{
     personal_value, with_personal_key, write_personal_key, write_project_key, OxplowConfig,
 };
 use oxplow_domain::events::schema::{ConfigChanged, ConfigChangedV2, ConfigLayer};
-use oxplow_domain::{Actor, CommandCall, CommandError, Confirm, Envelope, InputValidator};
+use oxplow_domain::{Actor, CommandCall, CommandError, Envelope, InputValidator};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -161,22 +161,6 @@ fn known_key(key: &str) -> Result<ConfigKey, CommandError> {
         field: Some("/key".into()),
         message: format!("`{key}` is not a project.yaml key; see oxplow.config.list_keys"),
     })
-}
-
-/// A human-only key, and anything in a person's own layer, needs a
-/// person's confirmation; the rest don't.
-fn confirm_for_key(input: &Value) -> Confirm {
-    if input.get("layer").and_then(|l| l.as_str()) == Some("personal") {
-        return Confirm::Always;
-    }
-    match input
-        .get("key")
-        .and_then(|k| k.as_str())
-        .and_then(config_key)
-    {
-        Some(k) if k.human_only => Confirm::Always,
-        _ => Confirm::Never,
-    }
 }
 
 fn report(target: &ConfigTarget, cfg: &OxplowConfig, key: ConfigKey) -> KeyReport {
@@ -374,7 +358,6 @@ pub fn ops(target: ConfigTarget) -> Vec<Op> {
                 change(&t, actor, &input.key, Some(input.value), input.layer)
             })),
         )
-        .with_confirm_for(Arc::new(confirm_for_key))
     };
     let unset = {
         let t = target;
@@ -389,7 +372,6 @@ pub fn ops(target: ConfigTarget) -> Vec<Op> {
                 change(&t, actor, &input.key, None, input.layer)
             })),
         )
-        .with_confirm_for(Arc::new(confirm_for_key))
     };
     vec![list, get, set, unset]
 }
@@ -554,11 +536,11 @@ mod tests {
             .is_err());
     }
 
-    /// What a new thread starts with is a person's own key, with no
-    /// project counterpart: a person sets and unsets it in their layer, an
-    /// agent's change to it waits for them, and an empty choice is refused.
+    /// What a new thread starts with is a key of a person's own layer,
+    /// with no project counterpart: set and unset in that layer, an empty
+    /// choice refused.
     #[tokio::test(flavor = "multi_thread")]
-    async fn a_new_thread_session_choice_is_a_persons_own() {
+    async fn a_new_thread_session_choice_is_in_a_persons_layer() {
         let (dir, target, bus) = setup(None);
         let human = Actor::Human;
         let set = |value: Value| json!({ "key": "newThreadSession", "value": value, "layer": "personal" });
@@ -575,17 +557,6 @@ mod tests {
                 .personal_new_thread_session
                 .as_deref(),
             Some("none")
-        );
-        let err = bus
-            .run(&agent(), SET, set(json!("claude")), false)
-            .await
-            .unwrap_err();
-        assert!(
-            matches!(
-                err,
-                CommandError::Proposed { .. } | CommandError::NeedsConfirmation { .. }
-            ),
-            "{err:?}"
         );
         assert!(bus.run(&human, SET, set(json!("")), true).await.is_err());
         assert!(bus
@@ -650,9 +621,7 @@ mod tests {
         let zones = keys.iter().find(|k| k["key"] == "zones").unwrap();
         assert_eq!(zones["set"], true);
         assert_eq!(zones["value"][0]["zone"], "core");
-        assert_eq!(zones["human_only"], false);
         let ai = keys.iter().find(|k| k["key"] == "ai").unwrap();
-        assert_eq!(ai["human_only"], true);
         assert_eq!(ai["set"], false);
         assert!(ai["schema"].get("$defs").is_some());
         let got = bus
@@ -730,47 +699,24 @@ mod tests {
         );
     }
 
-    /// A human-only key is a person's: an agent's change waits as a
-    /// proposal (with what it would change), nothing written, until a
-    /// person approves it; a person's own change asks first.
+    /// Any key is anyone's to set, a person's or their agent's, and
+    /// neither is asked: `ai` (which picks the model) included.
     #[tokio::test(flavor = "multi_thread")]
-    async fn a_human_only_key_needs_a_persons_confirmation() {
+    async fn any_key_is_anyones_to_set_unasked() {
         let (dir, target, bus) = setup(None).await_ready();
         let value = json!({"roles": {"main": {"provider": "anthropic", "model": "claude"}}});
-        let err = bus
-            .run(&agent(), SET, json!({"key": "ai", "value": value}), true)
+        bus.run(&agent(), SET, json!({"key": "ai", "value": value}), false)
             .await
-            .unwrap_err();
-        assert!(matches!(err, CommandError::Proposed { .. }), "{err:?}");
-        assert!(
-            !file(&dir).contains("ai"),
-            "nothing written: {}",
-            file(&dir)
-        );
-        assert!(target.config.read().unwrap().ai_roles.is_empty());
-        let proposal = bus.proposal_store().list_pending().await.unwrap().remove(0);
-        assert_eq!(proposal.key, "oxplow:oxplow/config?key=ai");
-        let dry_run = proposal.dry_run.unwrap();
-        assert_eq!(dry_run["before"], Value::Null);
-        assert_eq!(dry_run["after"]["roles"]["main"]["model"], "claude");
-        // A person's own change asks first.
-        let err = bus
-            .run(
-                &Actor::Human,
-                SET,
-                json!({"key": "ai", "value": value}),
-                false,
-            )
-            .await
-            .unwrap_err();
-        assert!(matches!(err, CommandError::NeedsConfirmation { .. }));
-        // Approving the agent's proposal is the person's confirmation.
-        bus.approve(&Actor::Human, proposal.id).await.unwrap();
+            .unwrap();
         assert_eq!(
             target.config.read().unwrap().ai_roles["main"].model,
             "claude"
         );
         assert!(file(&dir).contains("anthropic"));
+        bus.run(&Actor::Human, UNSET, json!({"key": "ai"}), false)
+            .await
+            .unwrap();
+        assert!(target.config.read().unwrap().ai_roles.is_empty());
     }
 
     /// The agent's thread (and its stream), which a proposal names.

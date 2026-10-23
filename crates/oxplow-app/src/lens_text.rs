@@ -1487,8 +1487,9 @@ mod tests {
             .unwrap();
         assert_eq!(none, "No proposals wait for a decision.");
 
-        let agent = oxplow_domain::Actor::Agent {
-            session_id: None,
+        // An effect's run that asks waits for a person.
+        let effect = oxplow_domain::Actor::Effect {
+            effect: "acme/notify".into(),
             thread_id: Some(fx.thread),
             stream_id: None,
         };
@@ -1496,7 +1497,7 @@ mod tests {
             .svc
             .commands
             .run(
-                &agent,
+                &effect,
                 "oxplow.lsp.install_server",
                 serde_json::json!({ "package": "rust-analyzer" }),
                 false,

@@ -3868,7 +3868,6 @@ mod tests {
         .unwrap();
         assert!(!yaml.contains("eventRetention"), "{yaml}");
         // How long a project keeps its agents' activity is a person's call.
-        assert!(crate::keys::HUMAN_ONLY_KEYS.contains(&"eventRetention"));
     }
 
     /// `replacements` says whose component shows, by target: an
@@ -3913,7 +3912,6 @@ mod tests {
             parse("replacementsOff: [work_item.board]\n").is_err(),
             "the old key is gone"
         );
-        assert!(crate::keys::HUMAN_ONLY_KEYS.contains(&"replacements"));
     }
 
     /// P9.B1: an instance is `<extension>/<instance id>`; a provider's
@@ -4752,7 +4750,6 @@ lsp:
         assert_eq!(settings.bundled_requested, Some(true));
         assert!(!settings.bundled_from_sources);
         assert_eq!(ExtensionSettings::of(&cfg), settings);
-        assert!(crate::keys::HUMAN_ONLY_KEYS.contains(&"enableBundledExtensions"));
     }
 
     #[test]

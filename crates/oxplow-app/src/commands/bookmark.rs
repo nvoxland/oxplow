@@ -155,7 +155,6 @@ pub fn set_op() -> Op {
         })),
     )
     // The person's navigation, through a lens too — never the agent's.
-    .open_to(oxplow_domain::Invokers::NO_AGENT)
 }
 
 /// `remove { ref, thread?, stream? }`.
@@ -177,7 +176,6 @@ pub fn remove_op() -> Op {
             })
         })),
     )
-    .open_to(oxplow_domain::Invokers::NO_AGENT)
 }
 
 /// The bookmark operations, for the bus.
@@ -258,23 +256,30 @@ mod tests {
         );
     }
 
-    /// Removing undoes to where it was; an agent can't bookmark.
+    /// An agent's bookmark runs.
     #[tokio::test]
-    async fn remove_undoes_and_agents_cannot_bookmark() {
+    async fn an_agent_may_bookmark() {
         let fx = services_with_effort().await;
         let thread = fx.thread.to_string();
-        let input = json!({ "uri": "oxplow:oxplow/file?path=src/a.rs", "page_kind": "file", "scope": "stream", "thread": thread });
+        let input = json!({ "uri": "oxplow:oxplow/file?path=src/b.rs", "page_kind": "file", "scope": "stream", "thread": thread });
         let agent = Actor::Agent {
             session_id: None,
             thread_id: Some(fx.thread),
             stream_id: None,
         };
-        assert!(fx
-            .svc
+        fx.svc
             .commands
-            .run(&agent, SET, input.clone(), false)
+            .run(&agent, SET, input, false)
             .await
-            .is_err());
+            .unwrap();
+    }
+
+    /// Removing undoes to where it was.
+    #[tokio::test]
+    async fn remove_undoes() {
+        let fx = services_with_effort().await;
+        let thread = fx.thread.to_string();
+        let input = json!({ "uri": "oxplow:oxplow/file?path=src/a.rs", "page_kind": "file", "scope": "stream", "thread": thread });
         fx.svc
             .commands
             .run(&Actor::Human, SET, input, false)

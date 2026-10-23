@@ -53,8 +53,8 @@ pub async fn command_open_after(
         .map_err(|e| IpcError::invalid(format!("`{id}`: {e}")))
 }
 
-/// The commands a person is offered: those they may run now (invokers,
-/// needs active) that say how a person meets them (`ui`) — what search,
+/// The commands a person is offered: those active now (their needs
+/// met) that say how a person meets them (`ui`) — what search,
 /// menus and pages list (`.context/commands.md` "Offering a command to a
 /// person").
 pub async fn list_person_commands(svc: &Services) -> Result<Vec<CommandSpec>, IpcError> {
@@ -280,9 +280,30 @@ mod tests {
                 .await
             }
         };
-        let err = set(false).await.unwrap_err();
+        // A command that asks asks the person over IPC: a dashboard's delete.
+        let made = crate::dispatch(
+            "run_command",
+            json!({ "id": "oxplow.dashboard.create", "input": { "title": "T" }, "confirmed": false }),
+            &svc,
+        )
+        .await
+        .unwrap();
+        let delete = |confirmed: bool| {
+            let (svc, id) = (svc.clone(), made["result"]["id"].clone());
+            async move {
+                crate::dispatch(
+                    "run_command",
+                    json!({ "id": "oxplow.dashboard.delete", "input": { "dashboard": id }, "confirmed": confirmed }),
+                    &svc,
+                )
+                .await
+            }
+        };
+        let err = delete(false).await.unwrap_err();
         assert_eq!(err.code, "NEEDS_CONFIRMATION", "{}", err.message);
-        let out = set(true).await.unwrap();
+        delete(true).await.unwrap();
+        // One that doesn't ask runs at once.
+        let out = set(false).await.unwrap();
         assert!(out["audit_id"].is_number(), "{out}");
         let file = std::fs::read_to_string(dir.path().join(".oxplow/project.yaml")).unwrap();
         assert!(file.contains("Be brief."), "{file}");
@@ -309,12 +330,12 @@ mod tests {
         assert!(!file.contains("Be brief."), "{file}");
     }
 
-    /// P6b.A3: an agent's change to a person-only key waits as a proposal;
-    /// the person approves it over IPC (it runs as them) or declines it.
+    /// P6b.A3: an effect's run that asks waits as a proposal; the person
+    /// approves it over IPC (it runs as them) or declines it.
     #[tokio::test]
-    async fn a_person_decides_an_agents_proposal() {
+    async fn a_person_decides_an_effects_proposal() {
         use oxplow_domain::stores::{StreamStore as _, ThreadStore as _};
-        let (svc, dir) = services().await;
+        let (svc, _dir) = services().await;
         let stream = svc.stream_store.list().await.unwrap().pop().unwrap();
         let thread = svc
             .thread_store
@@ -324,20 +345,31 @@ mod tests {
             .into_iter()
             .next()
             .unwrap();
-        let agent = oxplow_domain::Actor::Agent {
-            session_id: None,
+        let effect = oxplow_domain::Actor::Effect {
+            effect: "acme/notify".into(),
             thread_id: Some(thread.id),
             stream_id: Some(stream.id),
         };
-        let propose = |value: &'static str| {
-            let (svc, agent) = (svc.clone(), agent.clone());
+        let made = svc
+            .commands
+            .run(
+                &oxplow_domain::Actor::Human,
+                "oxplow.dashboard.create",
+                json!({ "title": "T" }),
+                false,
+            )
+            .await
+            .unwrap();
+        let propose = || {
+            let (svc, effect) = (svc.clone(), effect.clone());
+            let id = made.result["id"].clone();
             async move {
                 let err = svc
                     .commands
                     .run(
-                        &agent,
-                        "oxplow.config.set",
-                        json!({ "key": "agentPromptAppend", "value": value }),
+                        &effect,
+                        "oxplow.dashboard.delete",
+                        json!({ "dashboard": id }),
                         false,
                     )
                     .await
@@ -359,17 +391,31 @@ mod tests {
                 .await
             }
         };
-        let file =
-            || std::fs::read_to_string(dir.path().join(".oxplow/project.yaml")).unwrap_or_default();
+        let exists = || {
+            let svc = svc.clone();
+            async move {
+                svc.commands
+                    .run(
+                        &oxplow_domain::Actor::Human,
+                        "oxplow.sql.query",
+                        json!({ "sql": "SELECT count(*) FROM v_dashboard" }),
+                        false,
+                    )
+                    .await
+                    .unwrap()
+                    .result["rows"][0][0]
+                    .clone()
+            }
+        };
 
-        let declined = propose("No.").await;
+        let declined = propose().await;
         assert_eq!(decide(declined, false).await.unwrap(), json!(null));
-        assert!(!file().contains("No."), "{}", file());
+        assert_eq!(exists().await, json!(1), "declined: still there");
 
-        let approved = propose("Be brief.").await;
+        let approved = propose().await;
         let out = decide(approved, true).await.unwrap();
         assert!(out["audit_id"].is_number(), "{out}");
-        assert!(file().contains("Be brief."), "{}", file());
+        assert_eq!(exists().await, json!(0), "approved: deleted as the person");
         // Decided once.
         let err = decide(approved, false).await.unwrap_err();
         assert_eq!(err.code, "INVALID", "{}", err.message);

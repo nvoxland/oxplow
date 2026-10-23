@@ -641,7 +641,7 @@ fn proposed_message(command: &str, proposal: &i64, supersedes: &[i64]) -> String
     };
     format!(
         "`{command}` needs a person's approval; it is recorded as proposal {proposal} and waits \
-         for them in this thread and in Alerts (and on the setting's row in Settings).{replaces} \
+         for them in this thread and in Alerts.{replaces} \
          Tell the person; don't run it again. To see what they decided, read its `decision` \
          from `v_command_proposal` (`WHERE id = {proposal}`)."
     )
@@ -1465,8 +1465,9 @@ mod tests {
             assert_eq!(keys, ["id", "summary"], "{entry}");
         }
         let size = serde_json::to_string(&index).unwrap().len();
-        // Fetched on demand, not every turn: ~4K tokens (every full spec was 164 KB).
-        assert!(size < 18_000, "the index is {size} bytes");
+        // Fetched on demand, not every turn: ~7K tokens (every full spec was
+        // 164 KB). An agent is offered every command a person is.
+        assert!(size < 30_000, "the index is {size} bytes");
         // A summary is cut at its first sentence; the command shows it whole.
         assert_eq!(
             first_sentence(
@@ -1647,10 +1648,9 @@ mod tests {
         assert_eq!(executed.envelope.source, format!("agent:{}", thread.id));
         assert_eq!(executed.envelope.anchors.thread_id, Some(thread.id));
         assert_eq!(executed.envelope.payload["command"], "oxplow.config.set");
-        // A human-only key is not the agent's to set: the run is kept as a
-        // proposal for a person, and the agent is told so — a success,
-        // since the request is recorded and needs nothing more from it.
-        let out = server
+        // Any key is the agent's to set, unasked: what an agent may change
+        // is its harness's to decide.
+        server
             .run_command_as(
                 &McpCaller {
                     session_id: None,
@@ -1664,26 +1664,26 @@ mod tests {
             )
             .await
             .unwrap();
-        let text = out.content[0].as_text().unwrap().text.clone();
-        let proposed: serde_json::Value = serde_json::from_str(&text).unwrap();
-        assert_eq!(proposed["kind"], "proposed");
-        let proposal = proposed["proposal"].as_i64().unwrap().to_string();
-        let message = proposed["message"].as_str().unwrap();
-        assert!(message.contains(&proposal), "{message}");
-        assert!(message.contains("Alerts"), "{message}");
-        assert!(message.contains("in this thread"), "{message}");
-        assert!(message.contains("v_command_proposal"), "{message}");
-        assert!(message.contains("don't run it again"), "{message}");
-        let pending = services
-            .commands
-            .proposal_store()
-            .list_pending()
-            .await
-            .unwrap();
-        assert_eq!(pending.len(), 1);
-        assert_eq!(pending[0].dry_run.as_ref().unwrap()["after"], "be brief");
         let yaml = std::fs::read_to_string(proj.path().join(".oxplow/project.yaml")).unwrap();
-        assert!(!yaml.contains("be brief"), "nothing written: {yaml}");
+        assert!(yaml.contains("be brief"), "{yaml}");
+    }
+
+    /// What an agent is told when its run waits for a person (a deploy
+    /// that adds permissions): the proposal, where it waits, not to run it
+    /// again, and where to read the decision.
+    #[test]
+    fn a_proposal_tells_the_agent_where_it_waits() {
+        let message = proposed_message("oxplow.extension.deploy", &7, &[5]);
+        for says in [
+            "proposal 7",
+            "Alerts",
+            "in this thread",
+            "don't run it again",
+            "v_command_proposal",
+            "replaces proposals 5",
+        ] {
+            assert!(message.contains(says), "{says}: {message}");
+        }
     }
 
     /// A thread on `stream`, made as a person through `oxplow.thread.create`.

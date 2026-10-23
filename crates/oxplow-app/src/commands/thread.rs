@@ -20,9 +20,7 @@ use std::sync::Arc;
 
 use oxplow_db::thread_store::{get_tx, list_for_stream_tx, upsert_tx};
 use oxplow_domain::uri::build::{stream_uri, thread_uri};
-use oxplow_domain::{
-    CommandCall, CommandError, Invokers, StreamId, Thread, ThreadId, ThreadMark, Timestamp,
-};
+use oxplow_domain::{CommandCall, CommandError, StreamId, Thread, ThreadId, ThreadMark, Timestamp};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -334,7 +332,6 @@ pub fn set_prompt_op() -> Op {
             })
         })),
     )
-    .open_to(Invokers::NO_AGENT)
 }
 
 /// `thread.mark { thread, mark? }` — a person's: a colour on the thread's
@@ -370,7 +367,6 @@ pub fn mark_op() -> Op {
             })
         })),
     )
-    .open_to(Invokers::NO_AGENT)
 }
 
 /// `thread.close { thread }`: its open effort and its agent sessions close
@@ -616,10 +612,10 @@ mod tests {
         assert!(err.to_string().contains("agent"), "{err}");
     }
 
-    /// A mark is the person's colour for a thread's tab: set, changed,
-    /// cleared, and undone to what it was. An agent may not mark.
+    /// A mark is the colour of a thread's tab: set, changed, cleared, and
+    /// undone to what it was. An agent may mark too.
     #[tokio::test]
-    async fn a_mark_is_a_persons_and_undoes_to_what_it_was() {
+    async fn a_mark_undoes_to_what_it_was() {
         let fx = services_with_effort().await;
         let r = fx.thread.to_string();
         assert_eq!(thread(&fx, fx.thread).await.mark, None);
@@ -659,15 +655,15 @@ mod tests {
         .await
         .unwrap_err();
         assert!(matches!(err, CommandError::Invalid { .. }), "{err:?}");
-        let denied = run(
+        run(
             &fx,
             &agent(&fx),
             MARK,
             json!({ "thread": r, "mark": "red" }),
         )
         .await
-        .unwrap_err();
-        assert!(matches!(denied, CommandError::Denied { .. }), "{denied:?}");
+        .unwrap();
+        assert_eq!(thread(&fx, fx.thread).await.mark, Some(ThreadMark::Red));
     }
 
     /// Any open thread's agent may change the workspace — the stream's
@@ -786,7 +782,7 @@ mod tests {
         assert!(!thread(&fx, second).await.is_open());
     }
 
-    /// Rename and prompt undo to what they were; a prompt is a person's.
+    /// Rename and prompt undo to what they were; an agent may set a prompt.
     #[tokio::test]
     async fn rename_and_prompt_undo_to_what_they_were() {
         let fx = services_with_effort().await;
@@ -807,15 +803,18 @@ mod tests {
             .unwrap();
         assert_eq!(thread(&fx, fx.thread).await.title, "Thread");
 
-        let denied = run(
+        run(
             &fx,
             &agent(&fx),
             SET_PROMPT,
             json!({ "thread": r, "prompt": "x" }),
         )
         .await
-        .unwrap_err();
-        assert!(matches!(denied, CommandError::Denied { .. }), "{denied:?}");
+        .unwrap();
+        assert_eq!(
+            thread(&fx, fx.thread).await.custom_prompt.as_deref(),
+            Some("x")
+        );
         run(
             &fx,
             &Actor::Human,

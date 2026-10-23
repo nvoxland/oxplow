@@ -518,95 +518,90 @@ ui:
     - { slot: thread.plan.header, lens: thread-handoffs-in }
     - { slot: thread.plan.header, lens: thread-handoffs-out }
 commands:
-  # agent_input.write — the window's; a person's only (oxplow never types for the agent).
+  # agent_input.write — the window's agent input.
   - name: agent.draft
     summary: "Put text in the shown thread's agent input, unsent."
     scope: agent_input.write
     op: draft
-    invokers: { human: true, agent: false, lens: true }
+    example: {"text": "Also check the error paths."}
   - name: lens.draft_with_agent
     summary: "Start a prompt asking your agent to build a lens, in its input, unsent."
     scope: agent_input.write
     op: draft
-    invokers: { human: true, agent: false, lens: false }
     ui: { label: "New Lens with Your Agent…", group: Tasks, input: { text: "Build me an oxplow lens (a page I can open with Cmd+P) that shows " }, when: "threadShown" }
+    example: {"text": "Build me an oxplow lens (a page I can open with Cmd+P) that shows open tasks by thread"}
   # agent_sessions.write
   - name: agent_session.close
     summary: "Close an agent session (`ses3`): its open turn ends and its process stops. Its conversation is kept: `oxplow.agent_session.reopen` (its undo) opens it again."
     scope: agent_sessions.write
     op: close
-    invokers: { human: true, agent: true, lens: true }
     example: {"session": "ses3"}
   - name: agent_session.reopen
     summary: "Reopen an agent session a person closed (`ses3`): its tab returns and its agent resumes the saved conversation. Not one its thread's or stream's close took, and not on a closed thread."
     scope: agent_sessions.write
     op: reopen
-    invokers: { human: true, agent: true, lens: true }
     ui: { label: "Reopen Session", group: Tasks, about: oxplow/agent_session, input: { session: "{{uri.id}}" }, open_after: "oxplow:oxplow/agent_session?id={{result.id}}" }
     example: {"session": "ses3"}
   - name: agent_session.open
-    summary: "Open an agent session on a thread (`thr1`): a slot the person's UI starts an agent in. It only adds the slot — nothing is started or typed for it. `harness` (default: the project's first enabled agent), `acp_agent` for an ACP one, `title`, and a person's `resume`: a saved conversation of the harness to start on (refused when it is open in another session; an agent may not choose one). An agent opens one only in its own stream."
+    summary: "Open an agent session on a thread (`thr1`): a slot the person's UI starts an agent in. It only adds the slot — nothing is started or typed for it. `harness` (default: the project's first enabled agent), `acp_agent` for an ACP one, `title`, and `resume`: a saved conversation of the harness to start on (refused when it is open in another session). An agent opens one only in its own stream."
     scope: agent_sessions.write
     op: open
-    invokers: { human: true, agent: true, lens: true }
     ui: { label: "New Agent Session…", group: Tasks, keywords: [agent, session, start], form: "oxplow:oxplow/page?page=new-session", open_after: "oxplow:oxplow/agent_session?id={{result.id}}", when: "threadShown" }
     example: {"thread": "thr3", "title": "Review pass"}
   - name: agent_session.open_claude
     summary: "Open a Claude terminal session on the thread shown; its tab starts the agent."
     scope: agent_sessions.write
     op: open
-    invokers: { human: true, agent: false, lens: false }
     ui: { label: "New Claude Session", group: Tasks, keywords: [agent, session, start, claude], input: { thread: "{{thread}}", harness: claude }, open_after: "oxplow:oxplow/agent_session?id={{result.id}}", when: "threadShown && enabledAgents =~ /(^|,)claude(,|$)/" }
+    example: {"thread": "thr3", "harness": "claude"}
   - name: agent_session.open_codex
     summary: "Open a Codex terminal session on the thread shown; its tab starts the agent."
     scope: agent_sessions.write
     op: open
-    invokers: { human: true, agent: false, lens: false }
     ui: { label: "New Codex Session", group: Tasks, keywords: [agent, session, start, codex], input: { thread: "{{thread}}", harness: codex }, open_after: "oxplow:oxplow/agent_session?id={{result.id}}", when: "threadShown && enabledAgents =~ /(^|,)codex(,|$)/" }
+    example: {"thread": "thr3", "harness": "codex"}
   - name: agent_session.open_opencode
     summary: "Open an OpenCode terminal session on the thread shown; its tab starts the agent."
     scope: agent_sessions.write
     op: open
-    invokers: { human: true, agent: false, lens: false }
     ui: { label: "New OpenCode Session", group: Tasks, keywords: [agent, session, start, opencode], input: { thread: "{{thread}}", harness: opencode }, open_after: "oxplow:oxplow/agent_session?id={{result.id}}", when: "threadShown && enabledAgents =~ /(^|,)opencode(,|$)/" }
+    example: {"thread": "thr3", "harness": "opencode"}
   - name: agent_session.rename
     summary: "Rename an agent session (`ses3`)."
     scope: agent_sessions.write
     op: rename
-    invokers: { human: true, agent: true, lens: true }
     example: {"session": "ses3", "title": "Review pass"}
   - name: agent_session.start
-    summary: "Start a stopped agent session again (`ses3`): clears the person's stop so its tab spawns the agent, resuming its saved conversation. A person's only."
+    summary: "Start a stopped agent session again (`ses3`): clears the person's stop so its tab spawns the agent, resuming its saved conversation."
     scope: agent_sessions.write
     op: start
-    invokers: { human: true, agent: false, lens: false }
+    example: {"session": "ses3"}
   - name: agent_session.fork_conversation
-    summary: "Fork a saved conversation into an agent session (`ses3`): its next launch continues a copy of the conversation it is on, or of `conversation`, and keeps the original saved. Its running process stops. A person's only."
+    summary: "Fork a saved conversation into an agent session (`ses3`): its next launch continues a copy of the conversation it is on, or of `conversation`, and keeps the original saved. Its running process stops."
     scope: agent_sessions.write
     op: fork_conversation
-    invokers: { human: true, agent: false, lens: false }
+    example: {"session": "ses3"}
   - name: agent_session.resume_conversation
-    summary: "Move an agent session (`ses3`) to one of its harness's saved conversations (`conversation`, its id): its running process stops and the next launch resumes the chosen one. Refused when another open session is on it. The one it was on stays saved. A person's only."
+    summary: "Move an agent session (`ses3`) to one of its harness's saved conversations (`conversation`, its id): its running process stops and the next launch resumes the chosen one. Refused when another open session is on it. The one it was on stays saved."
     scope: agent_sessions.write
     op: resume_conversation
-    invokers: { human: true, agent: false, lens: false }
+    example: {"session": "ses3", "conversation": "7c1f0a52-3b1e-4d57-9a0e-5d2f6c8b9e11"}
   - name: agent_session.start_fresh
-    summary: "Give an agent session a new conversation (`ses3`): forgets its saved conversation and clears its stop. The only way a session gets a new conversation; resuming never does. A person's only."
+    summary: "Give an agent session a new conversation (`ses3`): forgets its saved conversation and clears its stop. The only way a session gets a new conversation; resuming never does."
     scope: agent_sessions.write
     op: start_fresh
     confirm: destructive
-    invokers: { human: true, agent: false, lens: false }
+    example: {"session": "ses3"}
   - name: agent_session.stop
-    summary: "Stop an agent session's process (`ses3`) and keep its slot and saved conversation. It stays stopped across tab changes, reconnects and reloads until a person starts it. A person's only."
+    summary: "Stop an agent session's process (`ses3`) and keep its slot and saved conversation. It stays stopped across tab changes, reconnects and reloads until a person starts it."
     scope: agent_sessions.write
     op: stop
-    invokers: { human: true, agent: false, lens: false }
+    example: {"session": "ses3"}
   # agent_text.read
   - name: skill.read
     summary: "Read one of oxplow's skills (its SKILL.md). It says how to do a kind of oxplow work, e.g. `oxplow-extension` for building lenses. A skill sends you to `references/<name>.md` for detail: pass that `<name>` as `reference`. For agents that don't load skill files themselves; your instructions list the names."
     scope: agent_text.read
     op: skill
-    invokers: { human: true, agent: true, lens: true }
     tool: get_skill
     example: {"name": "oxplow-extension", "reference": "lenses"}
   # ai.compute
@@ -614,58 +609,51 @@ commands:
     summary: "Ask a model a typed question about some text. Yes/no (`noul`, returns the probability of yes), `choice` among options, or `score` on ordered levels, each with probabilities, on the `decide` role. Good for second opinions like \"is this diff risky?\". Recorded (as the asking thread's call): the same questions on the same text are answered once (`cached`). Fails if the role has no model; the person assigns one in Settings → AI."
     scope: ai.compute
     op: decide
-    invokers: { human: true, agent: true, lens: true }
     tool: ai_decide
     example: {"state": "<a diff>", "questions": {"risky": {"type": "noul", "instructions": "Does this change alter public behavior?"}}}
   - name: ai.summarize
     summary: "Summarize text with the `summarize` role. A model the person configured in Settings → AI, optionally with a focus. Useful for long logs or documents you don't need verbatim. Recorded (as the asking thread's call): the same text and focus are summarized once."
     scope: ai.compute
     op: summarize
-    invokers: { human: true, agent: true, lens: true }
     tool: ai_summarize
     example: {"text": "<a long log>", "focus": "risks"}
-  # ai.settings, ai.test — Settings → AI, a person's alone (their keys and their money).
+  # ai.settings, ai.test — Settings → AI (a key is a secret: never read back or recorded).
   - name: ai.set_provider
-    summary: "Add or replace an AI provider: its kind and API base, and its key (kept in the OS keychain, never read back or recorded). Left out, the stored key stays. A person's alone."
+    summary: "Add or replace an AI provider: its kind and API base, and its key (kept in the OS keychain, never read back or recorded). Left out, the stored key stays."
     scope: ai.settings
     op: set_provider
-    invokers: { human: true, agent: false, lens: true }
     example: {"id": "anthropic", "kind": "anthropic", "key": "sk-ant-…"}
   - name: ai.remove_provider
-    summary: "Remove an AI provider and its key. Refused while a role uses it. A person's alone."
+    summary: "Remove an AI provider and its key. Refused while a role uses it."
     scope: ai.settings
     op: remove_provider
-    invokers: { human: true, agent: false, lens: true }
     example: {"id": "anthropic"}
   - name: ai.set_role
-    summary: "Bind a role (`main`, `summarize`, `decide`, or an extension's profile `acme/review`) to a provider and model, or unbind it with neither. `restrict` forbids `tools`, `sql`, `streaming` or `images` for the binding. A person's alone."
+    summary: "Bind a role (`main`, `summarize`, `decide`, or an extension's profile `acme/review`) to a provider and model, or unbind it with neither. `restrict` forbids `tools`, `sql`, `streaming` or `images` for the binding."
     scope: ai.settings
     op: set_role
-    invokers: { human: true, agent: false, lens: true }
     example: {"role": "summarize", "provider": "anthropic", "model": "claude-haiku-5-5"}
   - name: ai.test_provider
-    summary: "Make one small call to a provider's model to check its key, URL and model; returns the reply. Spends the person's key. A person's alone."
+    summary: "Make one small call to a provider's model to check its key, URL and model; returns the reply. Spends the person's key."
     scope: ai.test
     op: test_provider
-    invokers: { human: true, agent: false, lens: true }
     example: {"id": "anthropic", "model": "claude-haiku-5-5"}
-  # bookmarks.write — a person's navigation, not the agent's.
+  # bookmarks.write — the person's navigation.
   - name: bookmark.set
     summary: "Bookmark a page at a scope (`thread`, `stream` or `project`), moving it there if it's bookmarked at another."
     scope: bookmarks.write
     op: set
-    invokers: { human: true, agent: false, lens: true }
+    example: {"uri": "oxplow:oxplow/page?page=git-dashboard", "page_kind": "page", "label": "Git dashboard", "scope": "thread", "thread": "thr3"}
   - name: bookmark.remove
     summary: "Take a page's bookmark off, whichever scope it's at."
     scope: bookmarks.write
     op: remove
-    invokers: { human: true, agent: false, lens: true }
+    example: {"uri": "oxplow:oxplow/page?page=git-dashboard", "thread": "thr3"}
   # changes.read
   - name: change.ensure
     summary: "Analyze a change and return its row (`v_change`). A commit vs its parent, an effort (start → end), or a stream's uncommitted work vs HEAD. Then read the analysis with oxplow_query_sql: v_change_file (files, zones), v_oxplow_bundled_change_interest (look-here-first scores, when oxplow-bundled is on), v_change_function (added/deleted/modified functions, deltas, churn), v_change_import (cross-zone imports), v_oxplow_bundled_change_co_change (files whose usual partners are missing, or that were dormant; oxplow-bundled), v_change_duplicate (copied blocks; arrives a little later). Cached: commits and closed efforts are analyzed once. It fills a derived cache and changes no record."
     scope: changes.read
     op: ensure
-    invokers: { human: true, agent: true, lens: true }
     tool: ensure_change
     example: {"kind": "commit", "sha": "HEAD"}
   # collectors.preview
@@ -673,7 +661,6 @@ commands:
     summary: "Dry-run a collector, storing nothing. Returns what it would store from a stream's worktree: an entity collector's rows (first 50 per entity, coerced to the declared columns), or a fact collector's (`facts:`) facts as `{ owner, id, facts: [{ measure, value, subject, … }] }`, computed over the stream's latest snapshot (a collector that reads `input` rows is previewed through an example: `oxplow extension test`). Use it to check a collector you're writing, especially in a worktree stream: oxplow.collector.sync always runs the primary's copy, and collected data is project-wide. Pass `event` (`{ type, payload, anchors? }`) to preview an `on:` collector on the event it reacts to. An exec collector still needs a person's approval of that exact version; starlark/jaq collectors run without it."
     scope: collectors.preview
     op: preview
-    invokers: { human: true, agent: true, lens: true }
     tool: preview_collector
     example: {"owner": "work", "id": "hot"}
   # collectors.sync
@@ -681,128 +668,114 @@ commands:
     summary: "Run an approved collector now, refreshing what it collects (runs the collector's program or script, which the bus doesn't own). It never approves: an unapproved exec collector is refused. A project report collector (`records:`) reads its report now and records what it parses in `thread` (an agent's own): point at the report, never report numbers yourself."
     scope: collectors.sync
     op: sync
-    invokers: { human: true, agent: true, lens: true }
     example: {"collector": "work/hot"}
   # config.read
   - name: config.get
     summary: "One .oxplow/project.yaml key: its doc, value schema and current value."
     scope: config.read
     op: get
-    invokers: { human: true, agent: true, lens: true }
     example: {"key": "metricRetentionDays"}
   - name: config.list_keys
     summary: "Every .oxplow/project.yaml key with its doc, value schema, current value and whether only a person may set it."
     scope: config.read
     op: list_keys
-    invokers: { human: true, agent: true, lens: true }
     example: {}
   # config.write
   - name: config.set
-    summary: "Set one .oxplow/project.yaml key — or, with `layer: personal`, a person's own choice in .oxplow/personal.yaml (`activeProviders`, `newThreadSession`, `enableExtensions`, `disableExtensions`, `extensionSources`, `enableBundledExtensions`). The value is validated against the key's schema and the file's own rules, written to the file, and logged as config.changed; undo restores the prior value. Human-only keys need a person's confirmation."
+    summary: "Set one .oxplow/project.yaml key — or, with `layer: personal`, a person's own choice in .oxplow/personal.yaml (`activeProviders`, `newThreadSession`, `enableExtensions`, `disableExtensions`, `extensionSources`, `enableBundledExtensions`). The value is validated against the key's schema and the file's own rules, written to the file, and logged as config.changed; undo restores the prior value."
     scope: config.write
     op: set
-    invokers: { human: true, agent: true, lens: true }
     example: {"key": "metricRetentionDays", "value": 30}
   - name: agent.set_agents
-    summary: "Set which agent harnesses are on, by key, in priority order: the first is a new session's default. Each must be registered. Writes `agents` in .oxplow/project.yaml (logged as config.changed, undoable). A person's, or their lens's."
+    summary: "Set which agent harnesses are on, by key, in priority order: the first is a new session's default. Each must be registered. Writes `agents` in .oxplow/project.yaml (logged as config.changed, undoable)."
     scope: config.write
     op: set_agents
-    invokers: { human: true, agent: false, lens: true }
+    example: {"agents": ["claude", "codex"]}
   - name: agent.set_setting
-    summary: "Set one of an agent harness's declared settings (`agentConfig.<agent>.<key>`, what its launch reads); a blank value clears it. Logged as config.changed, undoable. A person's, or their lens's."
+    summary: "Set one of an agent harness's declared settings (`agentConfig.<agent>.<key>`, what its launch reads); a blank value clears it. Logged as config.changed, undoable."
     scope: config.write
     op: set_agent_setting
-    invokers: { human: true, agent: false, lens: true }
+    example: {"agent": "claude", "key": "model", "value": "opus"}
   - name: config.unset
     summary: "Remove one .oxplow/project.yaml key so it returns to its default (or, with `layer: personal`, a person's own choice); logged as config.changed, undo restores it."
     scope: config.write
     op: unset
-    invokers: { human: true, agent: true, lens: true }
     example: {"key": "metricRetentionDays"}
   # dashboards.write
   - name: dashboard.add_item
     summary: "Add a tile to a dashboard: `query` (pinned `sql`, checked like oxplow_query_sql, shown per `display` — a lens viz, or `metric` for the metric card with its key as `metric` in `options_json`), `lens` (`lens_id`) or `text` (`options_json` `{\"text\": …}`). `options_json` may also set its size and title; `position` where it goes."
     scope: dashboards.write
     op: add_item
-    invokers: { human: true, agent: true, lens: true }
     example: {"dashboard": "dsh3", "kind": "query", "sql": "SELECT count(*) AS open FROM v_work_item WHERE state = 'todo'", "display": "number"}
   - name: delivery.retry
-    summary: "Run an event a consumer couldn't take through that consumer again, now. A person's, or a lens for one. The letter is `retried`, or stays `pending` with the new error."
+    summary: "Run an event a consumer couldn't take through that consumer again, now. The letter is `retried`, or stays `pending` with the new error."
     scope: deliveries.write
     op: retry
-    invokers: { human: true, agent: false, lens: true }
     example: {"id": 3}
   - name: delivery.discard
-    summary: "Give up on an event a consumer couldn't take; it stays visible as `discarded`. A person's, confirmed."
+    summary: "Give up on an event a consumer couldn't take; it stays visible as `discarded`. A person is asked first."
     scope: deliveries.write
     op: discard
-    invokers: { human: true, agent: false, lens: true }
     confirm: destructive
     example: {"id": 3}
   - name: dashboard.create
     summary: "Create an empty dashboard (a grid of tiles); fill it with `oxplow.dashboard.add_item`."
     scope: dashboards.write
     op: create
-    invokers: { human: true, agent: true, lens: true }
     ui: {"label": "New Dashboard…", "group": "Tasks", "input": {"title": "Untitled dashboard"}, "open_after": "oxplow:oxplow/dashboard?id={{result.id}}"}
     example: {"title": "Build health"}
   - name: dashboard.delete
-    summary: "Delete a dashboard and its tiles. A person's, confirmed."
+    summary: "Delete a dashboard and its tiles. A person is asked first."
     scope: dashboards.write
     op: delete
-    invokers: { human: true, agent: false, lens: true }
     confirm: destructive
+    example: {"dashboard": "dsh1"}
   - name: dashboard.remove_item
     summary: "Remove a tile from its dashboard (`dti7`)."
     scope: dashboards.write
     op: remove_item
-    invokers: { human: true, agent: true, lens: true }
     example: {"item": "dti7"}
   - name: dashboard.rename
     summary: "Rename a dashboard (`dsh3`)."
     scope: dashboards.write
     op: rename
-    invokers: { human: true, agent: true, lens: true }
     example: {"dashboard": "dsh3", "title": "Release health"}
   - name: dashboard.reorder_items
     summary: "Reorder a dashboard's tiles (`order`: tile ids in their new order)."
     scope: dashboards.write
     op: reorder_items
-    invokers: { human: true, agent: true, lens: true }
     example: {"dashboard": "dsh3", "order": ["dti7", "dti5"]}
   - name: dashboard.update_item
     summary: "Change a tile's options (`dti7`); a query tile's `sql` is checked again."
     scope: dashboards.write
     op: update_item
-    invokers: { human: true, agent: true, lens: true }
     example: {"item": "dti7", "options_json": "{\"sql\":\"SELECT count(*) AS open FROM v_work_item WHERE state = 'todo'\",\"display\":\"number\",\"title\":\"Open tasks\"}"}
   # diagnostics.write
   - name: ui.report_error
-    summary: "Record an operation that failed in front of the person in the app, as the app showed it, so the agent can read it in `v_op_error`. The app's own: a person's only."
+    summary: "Record an operation that failed in front of the person in the app, as the app showed it, so the agent can read it in `v_op_error`. The app's own."
     scope: diagnostics.write
     op: report_error
-    invokers: { human: true, agent: false, lens: false }
+    example: {"label": "Merge bugfixes into current", "command": "git merge bugfixes", "message": "CONFLICT in src/auth.rs", "exit_code": 1, "thread": "thr3"}
   - name: op_error.mark_seen
     summary: "Mark a failed operation as seen: the person opened its output (`v_op_error.seen`)."
     scope: diagnostics.write
     op: mark_op_error_seen
-    invokers: { human: true, agent: false, lens: true }
+    example: {"event": "ev1042"}
   - name: op_error.dismiss
     summary: "Dismiss a failed operation: the app no longer lists it (`v_op_error.dismissed`). The agent can still read it."
     scope: diagnostics.write
     op: dismiss_op_error
-    invokers: { human: true, agent: false, lens: true }
+    example: {"event": "ev1042"}
   - name: op_error.dismiss_all
     summary: "Dismiss every failed operation the person hasn't dismissed."
     scope: diagnostics.write
     op: dismiss_all_op_errors
-    invokers: { human: true, agent: false, lens: true }
+    example: {}
   # editor.write — the window's; an agent saves in its own thread.
   - name: editor.save
     summary: "Save a file's unsaved changes (`uri`: its tab, `oxplow:oxplow/file?path=src/a.rs`; none saves the one your thread shows)."
     scope: editor.write
     op: save
-    invokers: { human: true, agent: true, lens: true }
     ui: { label: Save, group: File, shortcut: "Ctrl/Cmd+S", while_typing: true, menu: { bar: file, group: 2_save, order: 10 }, when: "fileDirty" }
     example: {"uri": "oxplow:oxplow/file?path=src/main.rs"}
   # efforts.write
@@ -810,124 +783,113 @@ commands:
     summary: "Close an effort (by id, or a thread's open one), optionally as of a past point and with a summary."
     scope: efforts.write
     op: close
-    invokers: { human: true, agent: true, lens: true }
     example: {"effort": "eff12", "summary": "Fixed the login redirect loop."}
   - name: effort.confirm_decision
-    summary: "Confirm a decision oxplow inferred from an effort (`<id>`): it was made, as stated. A person's review."
+    summary: "Confirm a decision oxplow inferred from an effort (`<id>`): it was made, as stated."
     scope: efforts.write
     op: confirm_decision
-    invokers: { human: true, agent: false, lens: true }
+    example: {"decision": 3}
   - name: effort.dismiss_claim
-    summary: "Dismiss a claim oxplow read in an effort's answers (`<id>`): the agent didn't claim it, or didn't mean it. It stays dismissed when the effort is read again. A person's review."
+    summary: "Dismiss a claim oxplow read in an effort's answers (`<id>`): the agent didn't claim it, or didn't mean it. It stays dismissed when the effort is read again."
     scope: efforts.write
     op: dismiss_claim
-    invokers: { human: true, agent: false, lens: true }
+    example: {"claim": 7}
   - name: effort.dismiss_decision
-    summary: "Dismiss a decision oxplow inferred from an effort (`<id>`): it wasn't made, or not like that. A person's review."
+    summary: "Dismiss a decision oxplow inferred from an effort (`<id>`): it wasn't made, or not like that."
     scope: efforts.write
     op: dismiss_decision
-    invokers: { human: true, agent: false, lens: true }
+    example: {"decision": 3}
   - name: effort.link
     summary: "Link an effort (by id, or a thread's open one) to a work item, or unlink it with `work_item: null`."
     scope: efforts.write
     op: link
-    invokers: { human: true, agent: true, lens: true }
     example: {"effort": "eff12", "work_item": "oxplow:oxplow/work_item?id=tsk42&provider=oxplow"}
   - name: effort.open
     summary: "Open an effort — a span of a thread's work — on a thread (yours by default), optionally linked to a work item. The thread's current effort closes first. oxplow opens efforts itself; this is for policies, people and corrections."
     scope: efforts.write
     op: open
-    invokers: { human: true, agent: true, lens: true }
     example: {"thread": "thr3", "work_item": "oxplow:oxplow/work_item?id=tsk42&provider=oxplow"}
   - name: effort.record_decision
     summary: "Record a DECISION you made while working: a fork where you picked one approach over others without asking (where to put something, which library, what to leave out, how to read an ambiguous ask). People review these first, so record the non-obvious ones as you make them — not trivia. Attaches to `work_item`'s open effort, else your thread's. Returns `{ id, effort }`."
     scope: efforts.write
     op: record_decision
-    invokers: { human: true, agent: true, lens: true }
     example: {"question": "Where should the redirect target be validated?", "choice": "In the callback handler", "alternatives": ["In the login page", "In a middleware"], "why": "It is the only place that sees both the session and the requested path.", "confidence": "medium"}
   - name: effort.reopen_claim
     summary: "Take back a claim's dismissal (`<id>`): it's unreviewed again."
     scope: efforts.write
     op: reopen_claim
-    invokers: { human: true, agent: false, lens: true }
+    example: {"claim": 7}
   - name: effort.reopen_decision
     summary: "Take back a review of an inferred decision (`<id>`): it is unconfirmed again."
     scope: efforts.write
     op: reopen_decision
-    invokers: { human: true, agent: false, lens: true }
+    example: {"decision": 3}
   - name: effort.replace_inferred_decisions
     summary: "Replace an effort's inferred decisions (`eff<id>`) with a model's proposals — at most 8 forks the agent seems to have resolved without recording them. Its recorded and reviewed decisions stay. They wait for a person's review and are never shown to the agent. Returns `{ effort, count }`."
     scope: efforts.write
     op: replace_inferred_decisions
-    invokers: { human: true, agent: true, lens: true }
     example: {"effort": "eff12", "decisions": [{"question": "Which CSV library?", "choice": "csv crate", "alternatives": ["hand-rolled writer"], "why": "Quoting rules are easy to get wrong.", "confidence": "medium"}]}
   - name: effort.replace_inferred_claims
     summary: "Replace an effort's claims (`eff<id>`) with the ones a model read in its answers — at most 8 statements like \"tests pass\" or \"no behavior change\", each with its kind and what it cites. Claims a reviewer dismissed or verified stay. Returns `{ effort, count }`."
     scope: efforts.write
     op: replace_inferred_claims
-    invokers: { human: true, agent: true, lens: true }
     example: {"effort": "eff12", "claims": [{"statement": "The parser tests pass.", "kind": "tests_pass", "evidence": "oxplow:oxplow/run?id=42"}]}
   - name: effort.report
     summary: "Optional: describe the thread's current (else latest) effort — a `summary` of what shipped, any `impacts` beyond the edits (a wiki page, a work item, a commit, a finding), and the `claims` you can back (each `{ statement, kind, evidence? }`; they replace the ones an earlier report stated that nobody reviewed). Without one, the summary is your last turn's final message; files and test runs are observed. Returns `{ effort, link_warnings }`."
     scope: efforts.write
     op: report
-    invokers: { human: true, agent: true, lens: true }
     example: {"summary": "Fixed the login redirect loop: the callback kept the stale `next` parameter.", "impacts": [{"kind": "file", "id": "src/auth.rs", "action": "updated"}, {"kind": "work_item", "id": "oxplow:oxplow/work_item?id=tsk42&provider=oxplow", "action": "completed"}], "claims": [{"statement": "the auth tests pass", "kind": "tests_pass", "evidence": "oxplow:oxplow/run?id=12"}]}
   - name: effort.unverify_claim
     summary: "Take back a claim's verification (`<id>`): it's unreviewed again, citing `evidence` (what it cited before) or nothing."
     scope: efforts.write
     op: unverify_claim
-    invokers: { human: true, agent: false, lens: true }
+    example: {"claim": 7, "evidence": "oxplow:oxplow/run?id=12"}
   - name: effort.update
     summary: "Set an effort's own title, or clear it back to its default with `title: null`."
     scope: efforts.write
     op: update
-    invokers: { human: true, agent: true, lens: true }
     example: {"effort": "eff12", "title": "Fix the login redirect loop"}
   - name: effort.verify_claim
-    summary: "Verify a claim oxplow read in an agent's answers (`<id>`), citing what backs it (what it already cites, else `reviewer` when you checked it yourself). A person's review."
+    summary: "Verify a claim oxplow read in an agent's answers (`<id>`), citing what backs it (what it already cites, else `reviewer` when you checked it yourself)."
     scope: efforts.write
     op: verify_claim
-    invokers: { human: true, agent: false, lens: true }
+    example: {"claim": 7, "evidence": "oxplow:oxplow/run?id=12"}
   # effects.read
   - name: effect.backfill_plan
     summary: "How many events an `oxplow.effect.backfill` would have an effect react to: the matching ones it never reacted to, the log positions they span (pass `to_seq` to the backfill to run on just these), and how many one run reacts to (`batch`)."
     scope: effects.read
     op: backfill_plan
-    invokers: { human: true, agent: true, lens: true }
     example: {"effect": "oxplow-bundled/infer-reasoning", "since": "2026-10-01T00:00:00Z"}
   # effects.run
   - name: effect.backfill
     summary: "Have an effect react to the matching events it never reacted to — those logged before its approval, or while it waited to be approved again — oldest first, once each. The effect may call outside oxplow for every one of them. It runs as it is now; `oxplow.effect.backfill_plan` says how many events that is."
     scope: effects.run
     op: backfill
-    invokers: { human: true, agent: false, lens: false }
     confirm: always
+    example: {"effect": "oxplow-bundled/infer-reasoning", "since": "2026-10-01T00:00:00Z"}
   - name: effect.retry
     summary: "Have an effect react again to an event its reaction to failed, as its next attempt. If the failed attempt was interrupted with a step outside oxplow under way, that step may already have run: retrying sends it again. It runs the effect as it is now, composing afresh from the event."
     scope: effects.run
     op: retry
-    invokers: { human: true, agent: false, lens: true }
     confirm: always
+    example: {"effect": "oxplow-bundled/infer-reasoning", "event": "ev1042"}
   # jobs.manage
   - name: job_run.cancel
     summary: "Stop a running or queued job run (`<id>`), whichever extension started it (`v_job_run`). A queued one ends at once; a running one drops its model call and ends `cancelled` with what it had written."
     scope: jobs.manage
     op: cancel
-    invokers: { human: true, agent: false, lens: true }
+    example: {"job_run": "01990000-0000-7000-8000-000000000000"}
   # extensions.check
   - name: extension.preview
     summary: "Preview a whole extension in a throwaway oxplow. What `oxplow extension test` runs, never touching this project's data. It checks the extension, activates it with the project's other extensions, and runs every intent example that has a fixture — lenses, collectors, commands, effects, events, jobs and components — with model calls answered by the fixture's replies, never a real provider. Returns `{ ok, errors, warnings, ran, … }`; run it after `oxplow.extension.validate` and before handing the extension over."
     scope: extensions.check
     op: preview
-    invokers: { human: true, agent: true, lens: true }
     tool: preview_extension
     example: {"name": "my-extension"}
   - name: extension.validate
     summary: "Check an extension after editing it. The same report as `oxplow extension check`: manifest and lifecycle errors with file:line, unresolved cross-references, plus a dry run of every lens and advisory (SQL errors, `columns` keys the query doesn't return). `ok: true` means it works; `warnings` are worth fixing but don't block."
     scope: extensions.check
     op: validate
-    invokers: { human: true, agent: true, lens: true }
     tool: validate_extension
     example: {"name": "my-extension"}
   # extensions.deploy
@@ -935,136 +897,118 @@ commands:
     summary: "Deploy an extension from its source: check it, copy it into the store (`.oxplow/runtime/extensions/<name>/<hash>/`) and make that deployment the one oxplow runs. The source is the stream's checkout (`stream`, else yours): `.oxplow/extensions/<name>/`, or where `extensionSources` points. Nothing runs an edit to a source until it is deployed. The same source again is `already: true`. A deployment that doesn't load or prepare changes nothing and its problems are the error. Turns the extension on for the person when nothing turns it on yet. A source whose `permissions:` add to what the extension runs with now asks a person first — an agent's deploy becomes a proposal naming each permission it adds, and runs once a person approves it. Returns `{ name, hash, already, warnings }` once the deployment runs."
     scope: extensions.deploy
     op: deploy
-    invokers: { human: true, agent: true, lens: true }
     example: {"name": "my-extension"}
   - name: extension.rollback
     summary: "Make an earlier deployment of an extension the one oxplow runs: `to` (a hash or its start, from `v_extension_deployment`), else the one before the active one. A bundled extension with nothing older returns to the deployment that ships with oxplow. Rolling back to one with more `permissions:` than what runs asks a person first, as a deploy does."
     scope: extensions.deploy
     op: rollback
-    invokers: { human: true, agent: true, lens: true }
     example: {"name": "my-extension"}
   - name: extension.enable
     summary: "Turn an extension on for you (`.oxplow/personal.yaml`), over the project's list. One with no deployment here is deployed from the main checkout's source (asking first when it declares `permissions:`)."
     scope: extensions.deploy
     op: enable
-    invokers: { human: true, agent: false, lens: true }
     example: {"name": "my-extension"}
   - name: extension.disable
     summary: "Turn an extension off for you (`.oxplow/personal.yaml`), whoever listed it. oxplow-foundation is always on."
     scope: extensions.deploy
     op: disable
-    invokers: { human: true, agent: false, lens: true }
     example: {"name": "my-extension"}
   - name: extension.remove
     summary: "Remove an extension: out of both lists, no longer run, its deployments, stored state and settings forgotten. Its source folder stays; delete it yourself if you want it gone."
     scope: extensions.deploy
     op: remove
-    invokers: { human: true, agent: false, lens: true }
     confirm: destructive
     example: {"name": "my-extension"}
   - name: extension.share
     summary: "Share an extension with the team: git sees its source (`.oxplow/.gitignore`) and it moves from your list to the project's (`.oxplow/project.yaml`). Commit both. Only a source in `.oxplow/extensions/` is shared this way."
     scope: extensions.deploy
     op: share
-    invokers: { human: true, agent: false, lens: true }
     example: {"name": "my-extension"}
   - name: extension.unshare
     summary: "Stop sharing an extension: git no longer sees its source and it moves back from the project's list to yours."
     scope: extensions.deploy
     op: unshare
-    invokers: { human: true, agent: false, lens: true }
     example: {"name": "my-extension"}
   # extensions.enable
   - name: contribution.enable
     summary: "Enable a disabled extension provider, collector or effect on this machine again, clearing an automatic disable (a provider's process restarts, a system the bus doesn't own)."
     scope: extensions.enable
     op: enable
-    invokers: { human: true, agent: false, lens: false }
     lifecycle: experimental
+    example: {"extension": "oxplow-bundled", "kind": "effect", "contribution": "infer-reasoning"}
   - name: contribution.enable_all
     summary: "Enable every extension contribution that stopped after repeated failures on this machine again — one extension's (`extension`) or all — each as `oxplow.contribution.enable` does it. Returns the rows it enabled."
     scope: extensions.enable
     op: enable_all
-    invokers: { human: true, agent: false, lens: false }
     lifecycle: experimental
+    example: {"extension": "oxplow-bundled"}
   # files.write
   - name: snapshot.restore_file
     summary: "Restore a captured file (a `file_snapshot` id) into its stream's worktree, overwriting what's at its path now. A person confirms it."
     scope: files.write
     op: restore_file
-    invokers: { human: true, agent: true, lens: true }
     confirm: destructive
     example: {"file_snapshot": 42}
   - name: file.create
     summary: "Make a file in a stream's worktree. The folders above it are made too; it is refused when the file exists. Logs `file.created`."
     scope: files.write
     op: create
-    invokers: { human: true, agent: true, lens: true }
     example: {"stream": "str1", "path": "docs/notes.md", "content": "# Notes\n"}
   - name: file.create_directory
     summary: "Make a directory in a stream's worktree. Those above it are made too. Logs `file.directory_created`."
     scope: files.write
     op: create_directory
-    invokers: { human: true, agent: true, lens: true }
     example: {"stream": "str1", "path": "docs/guide"}
   - name: file.rename
     summary: "Move a file or directory of a stream's worktree. It is refused when the target exists. Logs `file.renamed`, which the window follows with its open editors."
     scope: files.write
     op: rename
-    invokers: { human: true, agent: true, lens: true }
     example: {"stream": "str1", "from": "src/old.rs", "to": "src/new.rs"}
   - name: file.delete
-    summary: "Remove a file, or a directory with all it holds, from a stream's worktree. A person's, confirmed. Logs `file.deleted`, which the window follows by closing its editors."
+    summary: "Remove a file, or a directory with all it holds, from a stream's worktree. A person is asked first. Logs `file.deleted`, which the window follows by closing its editors."
     scope: files.write
     op: delete
-    invokers: { human: true, agent: true, lens: true }
     confirm: destructive
     example: {"stream": "str1", "path": "docs/obsolete.md"}
   - name: file.save
     summary: "Write a file of a stream's worktree with the content saved (what the editor's Save writes); logs `file.saved`. Its content isn't kept in the record, its size is."
     scope: files.write
     op: save
-    invokers: { human: true, agent: true, lens: true }
     example: {"stream": "str1", "path": "src/main.rs", "content": "fn main() {\n    println!(\"hello\");\n}\n"}
   # handoffs.write
   - name: handoff.send
     summary: "Hand work to another open thread (any stream's): what it is and what its agent needs to know, and the work item it hands over, if any. The thread's agent is given it at its next prompt; the person sees it at once. Nothing wakes an agent. Returns the handoff and `link_warnings`."
     scope: handoffs.write
     op: send
-    invokers: { human: true, agent: true, lens: true }
     ui: { label: "Hand Off Work…", group: Threads, keywords: [handoff, delegate, give], about: oxplow/thread, form: "oxplow:oxplow/lens?lens=oxplow-foundation/hand-off" }
     example: {"to_thread": "thr4", "work_item": "oxplow:oxplow/work_item?id=tsk12&provider=oxplow", "body": "The parser fix is in; the remaining failure is the timezone case in [[src/dates.rs]]."}
   - name: handoff.resolve
     summary: "Take or decline a handoff to your thread. Taking one moves its work item onto your thread. Its sender reads the note."
     scope: handoffs.write
     op: resolve
-    invokers: { human: true, agent: true, lens: true }
     example: {"handoff": "hnd3", "outcome": "taken"}
   - name: handoff.settle
     summary: "Record how a handoff ended: `taken` or `declined` (its recipient; `oxplow.handoff.resolve` also moves its work item), `withdrawn` (its sender), each only while open; `open` again undoes it."
     scope: handoffs.write
     op: settle
-    invokers: { human: true, agent: true, lens: true }
     example: {"handoff": "hnd3", "state": "withdrawn", "note": "Fixed it here after all."}
   # hints.write
   - name: hint.dismiss
     summary: "Dismiss a hint raised to the person (a `v_agent_nudge` row with audience `person`)."
     scope: hints.write
     op: dismiss
-    invokers: { human: true, agent: false, lens: true }
+    example: {"nudge": 12}
   # knowledge.read
   - name: knowledge.comments
     summary: "List comments. Threaded annotations the user anchored to a text selection in a page (wiki body, code file line, task detail). `id` is a thread (`thr…`) or stream (`str…`) id; `scope` is inferred from its prefix, so usually pass only `id`. `status` filters: \"all\" (default), \"open\", or \"needs_response\" (open follow-ups whose latest message isn't yours — what the user wants you to act on). Each result carries the anchored `quote`, the message thread, and `intent` (note vs followup). Reply with `oxplow.knowledge.reply_comment { comment, body }`; resolve with `oxplow.knowledge.update_comment { comment, status: \"resolved\" }`."
     scope: knowledge.read
     op: comments
-    invokers: { human: true, agent: true, lens: true }
     tool: list_comments
     example: {"id": "str1", "status": "needs_response"}
   - name: knowledge.drift
     summary: "What a wiki page's file drifted. The unified diff between the snapshot the file was pinned to and the file's CURRENT on-disk content — so you can read just what drifted instead of re-opening the whole file. Find the drifted files with `oxplow.sql.query` over `v_knowledge_ref` (`stale = 1`; per page, `v_knowledge_page.stale_ref_count`), then call this per file. Returns `{ slug, path, pinned_snapshot_id, status, unified_diff, truncated }`; `status` is one of drifted | unchanged | not_a_ref | no_pin | binary | no_contents (the pin was taken by 'Track changes only', which keeps no text)."
     scope: knowledge.read
     op: drift
-    invokers: { human: true, agent: true, lens: true }
     tool: wiki_ref_drift
     example: {"slug": "architecture", "path": "crates/oxplow-app/src/lib.rs"}
   # knowledge.write
@@ -1072,73 +1016,63 @@ commands:
     summary: "Comment on a span of a page (its `target`), with a first message. `intent`: `note` (the agent leaves it alone) or `followup` (the agent should act on it). An agent comments on its own stream, in its own thread."
     scope: knowledge.write
     op: add_comment
-    invokers: { human: true, agent: true, lens: true }
     example: {"stream": "str1", "target": "oxplow:oxplow/wiki?slug=vcs-capability", "quote": "Every provider implements Vcs", "intent": "followup", "body": "This is out of date: GitProvider also implements WorkspaceFiles."}
   - name: knowledge.add_note
     summary: "Add a note to a thread — an agent's own (a finding, why it paused, context for whoever picks it up). An empty body allocates one for a subagent to fill in with `oxplow.knowledge.update_note`. Returns the note and `link_warnings` for `[[…]]` links that don't resolve."
     scope: knowledge.write
     op: add_note
-    invokers: { human: true, agent: true, lens: true }
     example: {"body": "The redirect loop comes from the stale `next` parameter; see [[auth-flow]]."}
   - name: knowledge.delete_comment
-    summary: "Delete a comment and its messages (`cmt12`). A person's, confirmed."
+    summary: "Delete a comment and its messages (`cmt12`). A person is asked first."
     scope: knowledge.write
     op: delete_comment
-    invokers: { human: true, agent: false, lens: true }
     confirm: destructive
+    example: {"comment": "cmt12"}
   - name: knowledge.delete_page
     summary: "Delete a knowledge (wiki) page and its links."
     scope: knowledge.write
     op: delete_page
-    invokers: { human: true, agent: true, lens: true }
     confirm: destructive
     example: {"slug": "auth-flow"}
   - name: knowledge.link
     summary: "Link a knowledge page to a page, file, directory, task or commit (added under its Related heading)."
     scope: knowledge.write
     op: link
-    invokers: { human: true, agent: true, lens: true }
     example: {"page": "auth-flow", "target": "src/session.rs"}
   - name: knowledge.relocate_comment
     summary: "Store where a comment's quote (`cmt12`) sits in its page's content now (`selectors_json`), or that it is gone (`orphaned`). The renderer's, after it re-finds the quote."
     scope: knowledge.write
     op: relocate_comment
-    invokers: { human: true, agent: false, lens: true }
+    example: {"comment": "cmt12", "selectors_json": "[]", "orphaned": false}
   - name: knowledge.reply_comment
     summary: "Reply on a comment (`cmt12`)."
     scope: knowledge.write
     op: reply_comment
-    invokers: { human: true, agent: true, lens: true }
     example: {"comment": "cmt4", "body": "Fixed in the page."}
   - name: knowledge.resync
     summary: "Restate a knowledge page from its file on disk (the repair when a row and its file disagree); a missing file deletes the page."
     scope: knowledge.write
     op: resync
-    invokers: { human: true, agent: true, lens: true }
     example: {"slug": "auth-flow"}
   - name: knowledge.update_comment
     summary: "Change a comment (`cmt12`): its `intent`, its `status` (`open` / `resolved`), or re-attach it to a new span (`quote` and `selectors_json` together)."
     scope: knowledge.write
     op: update_comment
-    invokers: { human: true, agent: true, lens: true }
     example: {"comment": "cmt4", "status": "resolved"}
   - name: knowledge.update_note
     summary: "Replace a thread note's body (`not12`) — a subagent filling in the note it was given. An agent updates only its own thread's notes."
     scope: knowledge.write
     op: update_note
-    invokers: { human: true, agent: true, lens: true }
     example: {"note": "not7", "body": "The redirect loop comes from the stale `next` parameter; see [[auth-flow]]."}
   - name: knowledge.verify_files
     summary: "Re-pin a page's files to now without rewriting it: `files` are the files you re-read against the page as it stands (all of the page's files when omitted). The page is the one core records; a file the page does not cite is refused."
     scope: knowledge.write
     op: verify_files
-    invokers: { human: true, agent: true, lens: true }
     example: {"slug": "auth-flow", "files": ["src/auth.rs"]}
   - name: knowledge.write_page
     summary: "Write a knowledge (wiki) page: its body, every [[link]] resolving, and the files you re-read against it (verified_files) or took out (removed_files)."
     scope: knowledge.write
     op: write_page
-    invokers: { human: true, agent: true, lens: true }
     ui: { label: "New Wiki Page…", group: Knowledge, keywords: [wiki, page, note, write], form: "oxplow:oxplow/page?page=wiki-index", open_after: "oxplow:oxplow/wiki?slug={{result.page}}" }
     example: {"slug": "auth-flow", "title": "Auth flow", "body": "# Auth flow\n\nThe callback validates `next` before redirecting. See [[src/auth.rs]].", "verified_files": ["src/auth.rs"]}
   # lenses.read
@@ -1146,7 +1080,6 @@ commands:
     summary: "Run a lens and read what the human sees on its page. By default its text rendering (a table, a chart's series, a grid's children) plus the resolved params, columns, row count and alert; `format: \"json\"` returns the raw rows instead. Override params by name; the rest use defaults."
     scope: lenses.read
     op: run
-    invokers: { human: true, agent: true, lens: true }
     tool: run_lens
     example: {"id": "review/waiting", "params": {"state": "todo"}}
   # lenses.show
@@ -1154,7 +1087,6 @@ commands:
     summary: "Show the person an answer in their thread: an existing lens with params, or a lens of your own (title, query, viz). It renders beside the conversation, where they can keep it."
     scope: lenses.show
     op: show
-    invokers: { human: true, agent: true, lens: true }
     tool: show_lens
     example: {"spec": {"title": "Open tasks", "query": "SELECT uri, title, state FROM v_work_item WHERE state = 'todo' ORDER BY rank", "viz": "table"}}
   # lenses.write
@@ -1162,34 +1094,29 @@ commands:
     summary: "Keep an answer from a thread, or a lens spec of your own, as a lens (a page the person can reopen and pin), recording where it came from. It is written into the extension's source (`my-lenses` unless `extension` names another, created when missing) in the stream's checkout and that extension is deployed: it returns once the lens is live."
     scope: lenses.write
     op: keep
-    invokers: { human: true, agent: true, lens: true }
     example: {"spec": {"title": "Open tasks", "query": "SELECT uri, title, state FROM v_work_item WHERE state = 'todo' ORDER BY rank", "viz": "table"}, "extension": "my-lenses"}
   - name: lens.run_action
-    summary: "Run one of a lens's actions as the lens acting for you. Its actions are in `oxplow_read` of `oxplow:oxplow/lens?lens=<ext>/<slug>` → `actions`; the command it declares is run as the lens acting for you — so the same rules apply as if you ran the command yourself (a command you can't run, or one that needs a person's confirmation, is refused). A row action (`row: true`) needs the `row` it runs on. Returns the command's outcome."
+    summary: "Run one of a lens's actions as the lens acting for you. Its actions are in `oxplow_read` of `oxplow:oxplow/lens?lens=<ext>/<slug>` → `actions`; the command it declares is run as the lens acting for you — so the same rules apply as if you ran the command yourself. A row action (`row: true`) needs the `row` it runs on. Returns the command's outcome."
     scope: lenses.write
     op: run_action
-    invokers: { human: true, agent: true, lens: true }
     tool: run_lens_action
     example: {"id": "review/waiting", "action": "finish", "params": {"item": "oxplow:oxplow/work_item?id=tsk12&provider=oxplow"}}
   # lsp.install
   - name: lsp.restart_server
-    summary: "Restart a stream's language server for a language: the session is torn down and started again with the open documents replayed. A person's, or a lens for one."
+    summary: "Restart a stream's language server for a language: the session is torn down and started again with the open documents replayed."
     scope: lsp.control
     op: restart_server
-    invokers: { human: true, agent: false, lens: true }
     example: {"stream": "str1", "language": "rust"}
   - name: lsp.install_server
-    summary: "Download and install a language server (a Mason package) and register its binary. A person's decision: an agent's run becomes a proposal."
+    summary: "Download and install a language server (a Mason package) and register its binary. A person is asked first."
     scope: lsp.install
     op: install_server
-    invokers: { human: true, agent: true, lens: true }
     confirm: always
     example: {"package": "rust-analyzer"}
   - name: lsp.remove_server
-    summary: "Uninstall a language server: delete its files, manifest entry and registrations. A person's decision."
+    summary: "Uninstall a language server: delete its files, manifest entry and registrations."
     scope: lsp.install
     op: remove_server
-    invokers: { human: true, agent: true, lens: true }
     confirm: always
     example: {"package": "rust-analyzer"}
   # lsp.read
@@ -1197,42 +1124,36 @@ commands:
     summary: "Where a symbol is defined. Typed locations (`{ path, range: { start: { line, col }, end } }`, 1-based; paths workspace-relative, absolute outside it), from the file's language server. `v_lsp_server` says which languages have one."
     scope: lsp.read
     op: definition
-    invokers: { human: true, agent: true, lens: true }
     tool: code_definition
     example: {"stream_id": "str1", "path": "src/lib.rs", "line": 10, "col": 5}
   - name: code.references
     summary: "Every reference to a symbol. Typed locations (1-based) at a position, the declaration included unless `include_declaration` is false."
     scope: lsp.read
     op: references
-    invokers: { human: true, agent: true, lens: true }
     tool: code_references
     example: {"stream_id": "str1", "path": "src/lib.rs", "line": 10, "col": 5}
   - name: code.hover
     summary: "A position's hover. The symbol's type/signature and docs, as markdown (`{ contents, range }`), or null."
     scope: lsp.read
     op: hover
-    invokers: { human: true, agent: true, lens: true }
     tool: code_hover
     example: {"stream_id": "str1", "path": "src/lib.rs", "line": 10, "col": 5}
   - name: code.call_hierarchy
     summary: "A symbol's callers or callees. The callers (`direction: incoming`) or callees (`outgoing`): each `{ symbol, at }` — the caller/callee and where the calls are. [] when the position has no call-hierarchy item."
     scope: lsp.read
     op: call_hierarchy
-    invokers: { human: true, agent: true, lens: true }
     tool: code_call_hierarchy
     example: {"stream_id": "str1", "path": "src/lib.rs", "line": 10, "col": 5, "direction": "incoming"}
   - name: code.symbols
     summary: "The symbols a file declares. Functions, classes, methods, modules, …), nested ones naming their container, as `{ source, symbols }`. `source` says what answered: `language_server` (any configured language whose server runs; `{ name, kind, container, location }`) or `tree_sitter` (no server serves the file, so oxplow's own offline analysis reads the file's live content, the uncommitted edits included; `{ kind, name, containerPath, startLine, endLine }`, empty for an unsupported or unparseable file). `v_symbol` holds the stored symbols of captured files."
     scope: lsp.read
     op: symbols
-    invokers: { human: true, agent: true, lens: true }
     tool: code_symbols
     example: {"path": "src/lib.rs"}
   - name: code.workspace_symbols
     summary: "Find symbols by name across the workspace. Fuzzy, server-defined, from one language's running server: typed symbols with their locations. Use to find a definition by name without a file/position. Needs a running server (`v_lsp_server`); without one, search the stored symbols in `v_symbol`."
     scope: lsp.read
     op: workspace_symbols
-    invokers: { human: true, agent: true, lens: true }
     tool: code_workspace_symbols
     example: {"language": "rust", "query": "Services"}
   # metrics.read
@@ -1240,67 +1161,60 @@ commands:
     summary: "A starter for a new metric, as an extension of its own; writes nothing. Returns `name`, `dir` (`.oxplow/extensions/<name>`) and `files`, each with its project-relative path: the extension.yaml (a measure, a Starlark fact collector, the metric), the collector script, a lens and an example with its fixture. Write them with your own tools, check it (`oxplow_validate_extension`), then deploy it (`oxplow.extension.deploy`); its collector runs only once a person approves it. `oxplow.metric.enable` turns the metric on or off in .oxplow/project.yaml."
     scope: metrics.read
     op: scaffold
-    invokers: { human: true, agent: true, lens: true }
     example: {"name": "complex-fns", "language": "rust", "glob": "crates/**/*.rs"}
   # metrics.write
   - name: metric.enable
     summary: "Turn metrics on or off in this project (.oxplow/project.yaml `metrics:`); logged as config.changed, undo restores the previous list."
     scope: metrics.write
     op: enable
-    invokers: { human: true, agent: true, lens: true }
     example: {"keys": ["complex_fns.count"], "enabled": true}
   - name: metric.rebuild
     summary: "Rebuild code metrics over the whole tree: run every gauge that needs a baseline (every gauge with `force`) over the latest snapshot. Reports how many ran and which failed."
     scope: metrics.write
     op: rebuild
-    invokers: { human: true, agent: true, lens: true }
     example: {"force": true}
   - name: metric.record
     summary: "Record an asserted number for a metric (provenance `asserted`): a value oxplow didn't compute, like a CI import. The metric needs a source measure and must not be a `count`; the fact is stamped to match the metric's own filter."
     scope: metrics.write
     op: record
-    invokers: { human: true, agent: true, lens: true }
     example: {"key": "complex_fns.count", "value": 12, "subject": "oxplow:oxplow/file?path=src/auth.rs"}
   # pages.read
   - name: page.open
     summary: "What the person is looking at in a thread. It is the page the thread has open in the window they were in last (`pageId` such as `oxplow:oxplow/work_item?id=tsk42&provider=oxplow`, `oxplow:oxplow/file?path=src/a.rs`, `oxplow:oxplow/lens?lens=review/waiting`; its kind; the detail the page publishes; which window, whether it's on screen, how fresh), and `others`, the page each other window has open there. When it's a lens, `lens` is that lens re-run with the person's params, as text: what is on their screen. `tab` reads one of the thread's tabs instead (an id `oxplow_list_tabs` listed). Use it when the person says \"this\", \"what I'm looking at\" or \"this lens\". `open` is null when no window reported one."
     scope: pages.read
     op: open
-    invokers: { human: true, agent: true, lens: true }
     tool: get_open_page
     example: {"thread_id": "thr3"}
   - name: page.list_tabs
     summary: "The tabs the person's windows show. Each tab's id (a uri you can read or open), kind, title, thread, stream, agent session when it is one, whether it is selected in its thread and on screen, which window, and whether the report is stale. `scope` is `thread` (default: yours, or `thread`), `stream` (every thread in that thread's stream) or `project`. `unreported` lists threads in scope no window reported. Use it to resolve \"the other tab\" or \"the session in the other thread\". Read-only: it opens nothing."
     scope: pages.read
     op: list_tabs
-    invokers: { human: true, agent: true, lens: true }
     tool: list_tabs
     example: {"scope": "stream"}
-  # projects.write — the app shell's; a person's.
+  # projects.write — the app shell's.
   - name: project.create
     summary: "Pick a folder and create a project in it, opened in a new window. A folder that already is a project is refused."
     scope: projects.write
     op: create
-    invokers: { human: true, agent: false, lens: false }
     ui: { label: "New Project…", group: File, menu: { bar: file, group: 1_project, order: 10 }, when: "shellAvailable" }
+    example: {}
   - name: project.open
     summary: "Open a folder that is a project (`path`, else pick one), in this window or a new one (`new_window`)."
     scope: projects.write
     op: open
-    invokers: { human: true, agent: false, lens: false }
     ui: { label: "Open Project…", group: File, input: { new_window: false }, menu: { bar: file, group: 1_project, order: 20 }, when: "shellAvailable" }
+    example: {"path": "/Users/me/src/app", "new_window": false}
   - name: project.open_in_new_window
     summary: "Pick a folder that is a project and open it in a new window."
     scope: projects.write
     op: open
-    invokers: { human: true, agent: false, lens: false }
     ui: { label: "Open Project in New Window…", group: File, input: { new_window: true }, menu: { bar: file, group: 1_project, order: 30 }, when: "shellAvailable" }
+    example: {"path": "/Users/me/src/app", "new_window": true}
   # providers.sync
   - name: provider.sync
     summary: "Read a provider instance's collectors now (all, or one), restating the items it tracks (runs the provider process, a system the bus doesn't own)."
     scope: providers.sync
     op: sync
-    invokers: { human: true, agent: true, lens: true }
     lifecycle: experimental
     example: {"instance": "issues/issues"}
   # records.read
@@ -1308,7 +1222,6 @@ commands:
     summary: "Read what a uri names. Its model's row (every column), what sits beside it (a work item's links and comments, a commit's or an effort's files) and, for a body no model holds, its content. `oxplow:oxplow/file?path=src/a.rs` reads the working tree; `oxplow:oxplow/file?path=src/a.rs&rev=git:HEAD#lines=10-40` a revision's lines (`@snap:<id>` a local-history snapshot); `oxplow:oxplow/event?id=<id>#part=output` (or `#input`, `#prompt`) one of your stream's events' stored bodies; `oxplow:oxplow/lens?lens=<ext>/<slug>` a lens's definition; `stream` reads a file or lens in another stream's worktree. `oxplow:oxplow/ai_call?id=<id>#part=request` (or `#response`) a recorded model call's bodies. Any `uri` a model's column holds reads the same way (`work_item:…`, `oxplow:oxplow/commit?sha=…`, `oxplow:oxplow/effort?id=…`, `oxplow:oxplow/thread?id=…`, `oxplow:oxplow/wiki?slug=…`). Content stops at 64 KB, saying so."
     scope: records.read
     op: read
-    invokers: { human: true, agent: true, lens: true }
     tool: read
     example: {"uri": "oxplow:oxplow/file?path=src/auth.rs&rev=git:HEAD#lines=10-40"}
   # search.read
@@ -1316,7 +1229,6 @@ commands:
     summary: "Site-wide BM25 search across every searchable resource (`v_resource.searchable`: work items, wiki pages, comments, thread notes, an extension's) and file contents. Tokens match as stemmed prefixes. `stream_id` scopes file/stream-bound hits to one worktree (wiki etc. always included); omit it to search everything. `resources` optionally restricts to some of those (`oxplow/wiki`), or `oxplow/file`. Each hit names the `uri` it found and its `resource` (read it with `oxplow_read`, show it with `oxplow_navigate`); best first."
     scope: search.read
     op: search
-    invokers: { human: true, agent: true, lens: true }
     tool: search
     example: {"query": "oauth redirect", "resources": ["oxplow/wiki", "oxplow/work_item"], "limit": 10}
   # sql.read
@@ -1324,7 +1236,6 @@ commands:
     summary: "Run ONE read-only SQL statement over the published `v_*` models. It takes `SELECT`/`WITH` over the views lenses and the UI read (`v_model` lists them; physical tables are refused). Joins across views are fine. Metrics read as columns of a grid: `SELECT bucket, zone, MEASURE('<metric key>') FROM metric_grid('day'|'week'|'month'[, '<dimension>'])` (keys in v_metric_spec, dimensions in v_dimension). Positional params `?1`, `?2`, … bind from `params`. Returns `{columns, rows, truncated, reads, generation, coverage}`; rows are positional arrays; `truncated` means more rows existed than `limit`. `coverage` names the collector behind each collected model it read and how its last run stands (`current`, `stale`, `failed`, `disabled`, `needs_approval`, `never`): a complete result over a failed collector is still missing data. Writes, PRAGMA, ATTACH and multiple statements are rejected; queries time out after 5s. `v_model_column` documents every column."
     scope: sql.read
     op: query
-    invokers: { human: true, agent: true, lens: true }
     tool: query_sql
     example: {"sql": "SELECT uri, title, state FROM v_work_item WHERE state = ?1 LIMIT 20", "params": ["todo"]}
   # streams.write
@@ -1332,96 +1243,83 @@ commands:
     summary: "Rename a stream (`str1`)."
     scope: streams.write
     op: rename
-    invokers: { human: true, agent: true, lens: true }
     example: {"stream": "str1", "title": "Login fix"}
   - name: stream.set_prompt
-    summary: "Set (or clear) the text appended to every agent prompt in a stream. A person's: it steers the agents."
+    summary: "Set (or clear) the text appended to every agent prompt in a stream. It steers the stream's agents."
     scope: streams.write
     op: set_prompt
-    invokers: { human: true, agent: false, lens: true }
+    example: {"stream": "str1", "prompt": "Prefer small, reviewable commits."}
   # tabs.write — the window's; an agent's acts in its own thread's tabs.
   - name: tab.open
     summary: "Open a tab (`uri`: a page's uri — `oxplow:oxplow/file?path=src/a.rs`, `oxplow:oxplow/work_item?id=tsk3&provider=oxplow`) in your thread's tabs, without bringing it to the front."
     scope: tabs.write
     op: open
-    invokers: { human: true, agent: true, lens: true }
     example: {"uri": "oxplow:oxplow/file?path=src/main.rs"}
   - name: tab.focus
     summary: "Bring a tab (`uri`) to the front of your thread's tabs, opening it first if it isn't open."
     scope: tabs.write
     op: focus
-    invokers: { human: true, agent: true, lens: true }
     example: {"uri": "oxplow:oxplow/file?path=src/main.rs"}
   - name: tab.close
     summary: "Close a tab (`uri`) in your thread's tabs."
     scope: tabs.write
     op: close
-    invokers: { human: true, agent: true, lens: true }
     example: {"uri": "oxplow:oxplow/file?path=src/main.rs"}
   # test_runs.write
   - name: test.record_run
     summary: "Record a test run with pass/fail counts oxplow couldn't read from its output, marked `asserted`. oxplow records runs it sees in shell commands itself; this is for runs it couldn't parse. The run is the thread's open effort's. Returns `{ recorded, observationId }`."
     scope: test_runs.write
     op: record_run
-    invokers: { human: true, agent: true, lens: true }
     example: {"command": "cargo nextest run -p oxplow-app", "passed": 120, "failed": 0, "total": 120, "duration_ms": 41200}
   # threads.write
   - name: thread.close
     summary: "Close a thread (`thr12`) — history, reopenable. Its open effort and its agent sessions close, and their processes stop. An agent closes only its own thread."
     scope: threads.write
     op: close
-    invokers: { human: true, agent: true, lens: true }
     example: {"thread": "thr12"}
   - name: thread.create
     summary: "Start a thread on a stream (`str1`) — or fork one (`from: thr3`). It has no agent session yet (`oxplow.agent_session.open`). It shares the stream's worktree with the stream's other threads."
     scope: threads.write
     op: create
-    invokers: { human: true, agent: true, lens: true }
     ui: { label: "New Thread…", group: Tasks, form: new-thread, when: "streamShown" }
     example: {"stream": "str1", "title": "Fix the login redirect loop"}
   - name: thread.mark
-    summary: "Mark a thread's tab with a colour (`amber`, `red`, `green`, `blue` or `violet`) for grouping threads your way; no `mark` clears it. It changes nothing else. A person's."
+    summary: "Mark a thread's tab with a colour (`amber`, `red`, `green`, `blue` or `violet`) for grouping threads your way; no `mark` clears it. It changes nothing else."
     scope: threads.write
     op: mark
-    invokers: { human: true, agent: false, lens: true }
     example: {"thread": "thr12", "mark": "amber"}
   - name: thread.rename
     summary: "Rename a thread (`thr12`)."
     scope: threads.write
     op: rename
-    invokers: { human: true, agent: true, lens: true }
     example: {"thread": "thr12", "title": "Fix the login redirect loop"}
   - name: thread.reopen
     summary: "Reopen a closed thread (`thr12`). An agent reopens only its own thread."
     scope: threads.write
     op: reopen
-    invokers: { human: true, agent: true, lens: true }
     example: {"thread": "thr12"}
   - name: thread.set_prompt
-    summary: "Set (or clear) the text appended to a thread's agent prompt. A person's: it steers the agent."
+    summary: "Set (or clear) the text appended to a thread's agent prompt. It steers the thread's agent."
     scope: threads.write
     op: set_prompt
-    invokers: { human: true, agent: false, lens: true }
+    example: {"thread": "thr3", "prompt": "Work on the login flow only."}
   # vcs.read
   - name: vcs.blame
     summary: "Blame a file. The revision, author and time that last changed each line, at `revision` (default `working`; an uncommitted line names no revision)."
     scope: vcs.read
     op: blame
-    invokers: { human: true, agent: true, lens: true }
     tool: vcs_blame
     example: {"path": "src/lib.rs"}
   - name: vcs.branches
     summary: "A stream's branches: name, remote, head revision and whether it is the default."
     scope: vcs.read
     op: branches
-    invokers: { human: true, agent: true, lens: true }
     tool: vcs_branches
     example: {}
   - name: vcs.diff
     summary: "What changed between two versions of the tree. Per file with line counts; versions are `working`, `snap:<id>` or `git:<rev>`; `from` absent diffs against the empty tree. `since_fork: true` compares `to` with where it forked from `from` — a branch's own changes against `git:main`."
     scope: vcs.read
     op: diff
-    invokers: { human: true, agent: true, lens: true }
     tool: diff
     example: {"from": "git:main", "to": "working", "since_fork": true}
   # vcs.remote
@@ -1429,34 +1327,29 @@ commands:
     summary: "A stream's history from a revision, newest first, paged, with no horizon and any branch: `from` (a branch, tag or id; the head by default), `path` (only revisions that changed it), `limit` (50, at most 500), `cursor` (the previous page's `next_cursor`). Past what `v_commit` indexes, this is the way."
     scope: vcs.read
     op: log
-    invokers: { human: true, agent: true, lens: true }
     tool: vcs_log
     example: {"from": "main", "path": "src/lib.rs", "limit": 20}
   - name: vcs.status
     summary: "A stream's changed files against its head (added, modified, deleted, untracked, conflicted) and the operation in progress, if one is."
     scope: vcs.read
     op: status
-    invokers: { human: true, agent: true, lens: true }
     tool: vcs_status
     example: {}
   - name: vcs.fetch
     summary: "Fetch from a remote."
     scope: vcs.remote
     op: fetch
-    invokers: { human: true, agent: true, lens: false }
     example: {"stream": "str1", "remote": "origin"}
   - name: vcs.pull
     summary: "Pull into the stream's branch (its upstream, or a named remote branch)."
     scope: vcs.remote
     op: pull
-    invokers: { human: true, agent: true, lens: false }
     ui: {"label": "Pull Changes", "group": "Git", "input": {"stream": "{{stream}}"}, "background": true, "when": "vcsEnabled"}
     example: {"stream": "str1"}
   - name: vcs.push
     summary: "Push the stream's branch (to its upstream, or a named remote branch)."
     scope: vcs.remote
     op: push
-    invokers: { human: true, agent: true, lens: false }
     ui: {"label": "Push Changes", "group": "Git", "input": {"stream": "{{stream}}"}, "background": true, "when": "vcsEnabled"}
     example: {"stream": "str1"}
   # vcs.write
@@ -1464,98 +1357,85 @@ commands:
     summary: "Apply one commit onto the stream's branch."
     scope: vcs.write
     op: cherry_pick
-    invokers: { human: true, agent: true, lens: true }
     example: {"stream": "str1", "rev": "3f9c2a1"}
   - name: git.ignore
     summary: "Add a pattern to the workspace's `.gitignore`."
     scope: vcs.write
     op: ignore
-    invokers: { human: true, agent: true, lens: true }
     example: {"stream": "str1", "entry": "target/"}
   - name: git.rebase
     summary: "Rebase the stream's branch onto a revision (rewrites its commits)."
     scope: vcs.write
     op: rebase
-    invokers: { human: true, agent: true, lens: false }
     confirm: destructive
     example: {"stream": "str1", "rev": "main"}
   - name: git.revert
     summary: "Commit the inverse of one commit onto the stream's branch."
     scope: vcs.write
     op: revert
-    invokers: { human: true, agent: true, lens: true }
     confirm: destructive
     example: {"stream": "str1", "rev": "3f9c2a1"}
   - name: vcs.checkout_branch
     summary: "Switch the stream's workspace to a branch (creating it with `create`)."
     scope: vcs.write
     op: checkout_branch
-    invokers: { human: true, agent: true, lens: false }
     example: {"stream": "str1", "name": "login-fix", "create": true}
   - name: vcs.commit
     summary: "Commit the stream's changes (untracked files too, unless `include_untracked: false`); returns the new revision."
     scope: vcs.write
     op: commit
-    invokers: { human: true, agent: true, lens: true }
     ui: { label: "Commit Changes…", group: Git, form: commit, when: "streamShown && vcsEnabled" }
     example: {"stream": "str1", "message": "fix: stop the login redirect loop"}
   - name: vcs.delete_branch
     summary: "Delete a branch (`force` even when unmerged)."
     scope: vcs.write
     op: delete_branch
-    invokers: { human: true, agent: true, lens: false }
     confirm: destructive
     example: {"stream": "str1", "name": "login-fix"}
   - name: vcs.discard
     summary: "Throw away the workspace's changes to paths, back to the head's version."
     scope: vcs.write
     op: discard
-    invokers: { human: true, agent: true, lens: true }
     confirm: destructive
     example: {"stream": "str1", "paths": ["src/auth.rs"]}
   - name: vcs.merge
     summary: "Merge a revision into the stream's branch; the result lists any conflicts left after oxplow's smart merge."
     scope: vcs.write
     op: merge
-    invokers: { human: true, agent: true, lens: false }
     confirm: destructive
     example: {"stream": "str1", "rev": "main"}
   - name: vcs.rename_branch
     summary: "Rename a branch."
     scope: vcs.write
     op: rename_branch
-    invokers: { human: true, agent: true, lens: false }
     example: {"stream": "str1", "from": "login-fix", "to": "fix-login-loop"}
   - name: vcs.resolve_conflict
     summary: "Settle one conflicted path: take `ours`, `theirs`, or `auto` (smart merge)."
     scope: vcs.write
     op: resolve_conflict
-    invokers: { human: true, agent: true, lens: false }
     example: {"stream": "str1", "path": "src/auth.rs", "choice": "auto"}
   - name: vcs.stage
     summary: "Stage paths for the next commit."
     scope: vcs.write
     op: stage
-    invokers: { human: true, agent: true, lens: true }
     example: {"stream": "str1", "paths": ["src/auth.rs"]}
-  # window.show — the window's; a person's.
+  # window.show — the window's.
   - name: window.find
     summary: "Show the find bar in the file the window shows."
     scope: window.show
     op: find
-    invokers: { human: true, agent: false, lens: false }
     ui: { label: Find, group: Edit, shortcut: "Ctrl/Cmd+F", while_typing: true, menu: { bar: edit, group: 1_find, order: 10 }, when: "fileShown" }
+    example: {}
   - name: window.quick_open
     summary: "Show the search box (files, pages, commands)."
     scope: window.show
     op: quick_open
-    invokers: { human: true, agent: false, lens: false }
     ui: { label: "Quick Open…", group: File, shortcut: "Ctrl/Cmd+P", while_typing: true, menu: { bar: file, group: 3_go, order: 10 }, when: "streamShown" }
+    example: {}
   - name: window.navigate
     summary: "Take the person to a uri: opens and focuses its page (a file's editor, a work item, effort, lens, wiki page, directory or `oxplow:oxplow/page?page=<route>`), or selects a `stream:` / `thread:`. `stream` switches to that stream first. Changes what the person sees. Returns `{ opened, stream }`."
     scope: window.show
     op: navigate
-    invokers: { human: true, agent: true, lens: true }
     example: {"uri": "oxplow:oxplow/file?path=src/auth.rs"}
     tool: navigate
   # work_items.write
@@ -1563,21 +1443,18 @@ commands:
     summary: "Comment on a work item (oxplow: a note shown with the task)."
     scope: work_items.write
     op: comment
-    invokers: { human: true, agent: true, lens: true }
     needs: [work_items.comments]
     example: {"uri": "oxplow:oxplow/work_item?id=tsk12&provider=oxplow", "body": "Found the cause: the redirect keeps the stale `next` param."}
   - name: work_item.create
     summary: "File a work item on the active tracker (the one the person chose), optionally straight into a state. `thread` is the thread it's filed on: absent, an agent's own (a person's lands on the backlog). `native` is the tracker's own fields as its create declares them (oxplow: { priority }). On oxplow the result carries `link_warnings`: the `[[…]]` links in the body that don't resolve."
     scope: work_items.write
     op: create
-    invokers: { human: true, agent: true, lens: true }
     ui: {"label": "New Task…", "group": "Tasks", "keywords": ["work item"], "form": "oxplow:oxplow/page?page=new-task", "shortcut": "Ctrl/Cmd+Shift+N", "open_after": "{{result.uri}}"}
     example: {"title": "Fix the login redirect loop", "body": "Signing in from /settings bounces back to /login.", "state": "todo"}
   - name: work_item.delete
     summary: "Delete a work item."
     scope: work_items.write
     op: delete
-    invokers: { human: true, agent: true, lens: true }
     confirm: destructive
     needs: [work_items.delete]
     example: {"uri": "oxplow:oxplow/work_item?id=tsk12&provider=oxplow"}
@@ -1585,54 +1462,47 @@ commands:
     summary: "Link a work item to another of the same provider, or to any uri it is `about` (`oxplow:oxplow/collector?collector=triage/hot`, `oxplow:oxplow/effort?id=eff12`, `oxplow:oxplow/file?path=src/a.rs`), by a link type the provider names (oxplow: blocks, relates_to, discovered_from, duplicates, supersedes, replies_to, about). Only an item target must exist; a uri may name something since gone. Undone by work_item.unlink."
     scope: work_items.write
     op: link
-    invokers: { human: true, agent: true, lens: true }
     needs: [work_items.links]
     example: {"uri": "oxplow:oxplow/work_item?id=tsk12&provider=oxplow", "target": "oxplow:oxplow/work_item?id=tsk9&provider=oxplow", "link_type": "blocks"}
   - name: work_item.unlink
     summary: "Remove a work item's link (`uri`, `target`, `link_type`, as it was linked). Undone by work_item.link."
     scope: work_items.write
     op: unlink
-    invokers: { human: true, agent: true, lens: true }
     needs: [work_items.links]
     example: {"uri": "oxplow:oxplow/work_item?id=tsk12&provider=oxplow", "target": "oxplow:oxplow/work_item?id=tsk9&provider=oxplow", "link_type": "blocks"}
   - name: work_item.move
     summary: "Move a work item to a thread's list or the backlog (at the end, or before/after an item there)."
     scope: work_items.write
     op: move
-    invokers: { human: true, agent: true, lens: true }
     needs: [work_items.lists]
     example: {"uri": "oxplow:oxplow/work_item?id=tsk12&provider=oxplow", "to": {"thread": "thr3"}}
   - name: work_item.reorder
     summary: "Put a work item before or after another on its list (neither: at its end)."
     scope: work_items.write
     op: reorder
-    invokers: { human: true, agent: true, lens: true }
     needs: [work_items.ordering]
     example: {"uri": "oxplow:oxplow/work_item?id=tsk12&provider=oxplow", "before": "oxplow:oxplow/work_item?id=tsk9&provider=oxplow"}
   - name: work_item.transition
     summary: "Move a work item to a canonical state (todo, in_progress, blocked, done, canceled), optionally naming the provider's own state."
     scope: work_items.write
     op: transition
-    invokers: { human: true, agent: true, lens: true }
     example: {"uri": "oxplow:oxplow/work_item?id=tsk12&provider=oxplow", "to": "in_progress"}
   - name: work_item.update
     summary: "Edit a work item's title, body, parent or native fields and, optionally, move it to a state — all in one run (see oxplow.work_item.transition for the state's effects). On oxplow the result carries `link_warnings` for the body's `[[…]]` links."
     scope: work_items.write
     op: update
-    invokers: { human: true, agent: true, lens: true }
     example: {"uri": "oxplow:oxplow/work_item?id=tsk12&provider=oxplow", "title": "Fix the login redirect loop", "body": "Reproduces only with a stale session cookie."}
   # worktrees.write
   - name: stream.archive
-    summary: "Archive a stream and its threads (`delete_worktree` also removes its working copy from disk). Refused while an agent is running in it. A person's, confirmed."
+    summary: "Archive a stream and its threads (`delete_worktree` also removes its working copy from disk). Refused while an agent is running in it. A person is asked first."
     scope: worktrees.write
     op: archive
-    invokers: { human: true, agent: false, lens: false }
     confirm: destructive
+    example: {"stream": "str2", "delete_worktree": false}
   - name: stream.create
-    summary: "Create a stream on a worktree beside the project: of an existing branch (`existing_branch`), of a new one forked from `start_point` (`new_branch`), or adopted from one already on disk (`worktree`, a person's). The folder is made from the title."
+    summary: "Create a stream on a worktree beside the project: of an existing branch (`existing_branch`), of a new one forked from `start_point` (`new_branch`), or adopted from one already on disk (`worktree`). The folder is made from the title."
     scope: worktrees.write
     op: create
-    invokers: { human: true, agent: true, lens: true }
     ui: {"label": "New Stream…", "group": "Tasks", "keywords": ["worktree", "branch"], "form": "oxplow:oxplow/page?page=new-stream", "open_after": "oxplow:oxplow/stream?id={{result.id}}"}
     example: {"title": "Login fix", "source": "new", "new_branch": "login-fix", "start_point": "main"}
 

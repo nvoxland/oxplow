@@ -219,20 +219,16 @@ async fn prompts_and_config_keys_are_models() {
     .await;
     assert_eq!(first, vec![vec![json!("area")]]);
 
-    let keys = rows(
-        &fx,
-        "SELECT key, human_only, doc <> '' FROM v_config_key ORDER BY key",
-    )
-    .await;
-    let mut want: Vec<(String, i64)> = oxplow_config::keys::config_keys()
+    let keys = rows(&fx, "SELECT key, doc <> '' FROM v_config_key ORDER BY key").await;
+    let mut want: Vec<String> = oxplow_config::keys::config_keys()
         .into_iter()
-        .map(|k| (k.key, i64::from(k.human_only)))
+        .map(|k| k.key)
         .collect();
     want.sort();
     assert_eq!(
         keys,
         want.into_iter()
-            .map(|(k, h)| vec![json!(k), json!(h), json!(1)])
+            .map(|k| vec![json!(k), json!(1)])
             .collect::<Vec<_>>()
     );
 

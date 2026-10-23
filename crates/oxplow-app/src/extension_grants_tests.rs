@@ -16,12 +16,10 @@ fn write(root: &Path, rel: &str, body: &str) {
     std::fs::write(path, body).unwrap();
 }
 
-const HUMAN: &str = "invokers: { human: true, agent: false, lens: false }";
-
 /// A command `read.<name>` whose script is `<name>.star`.
 fn reader(name: &str, needs: &str) -> String {
     format!(
-        "  - name: read.{name}\n    summary: Reads.\n    input_schema: {{ type: object }}\n    entry: {name}.star\n    needs: [{needs}]\n    {HUMAN}\n"
+        "  - name: read.{name}\n    summary: Reads.\n    input_schema: {{ type: object }}\n    entry: {name}.star\n    needs: [{needs}]\n"
     )
 }
 
@@ -482,7 +480,7 @@ async fn a_script_composing_a_command_outside_its_namespace_needs_the_commands_p
     let item = oxplow_tasks::work_item_ref(fx.task);
     let manifest = |permissions: &str| {
         format!(
-            "manifest: 2\nname: acme\nintent:\n  purpose: p\n{permissions}commands:\n  - name: notes.add\n    summary: Comments.\n    input_schema: {{ type: object }}\n    entry: note.star\n    {HUMAN}\n"
+            "manifest: 2\nname: acme\nintent:\n  purpose: p\n{permissions}commands:\n  - name: notes.add\n    summary: Comments.\n    input_schema: {{ type: object }}\n    entry: note.star\n"
         )
     };
     write(

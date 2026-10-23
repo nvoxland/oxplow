@@ -16,8 +16,6 @@ pub(crate) fn write(root: &Path, rel: &str, body: &str) {
     std::fs::write(path, body).unwrap();
 }
 
-pub(crate) const HUMAN_ONLY: &str = "invokers: { human: true, agent: false, lens: false }";
-
 /// An extension whose commands read and write its own private state and
 /// configuration, plus a script that reads the state back.
 pub(crate) fn declare(root: &Path, name: &str, configuration: &str) {
@@ -27,39 +25,32 @@ pub(crate) fn declare(root: &Path, name: &str, configuration: &str) {
     summary: Replace the private state.
     scope: state.write
     op: compare_exchange
-    {HUMAN_ONLY}
   - name: state.read
     summary: Read the private state.
     scope: state.read
     op: snapshot
-    {HUMAN_ONLY}
   - name: state.peek
     summary: Read the private state from a script.
     input_schema: {{ type: object }}
     entry: handlers/peek.star
     needs: [state.read]
-    {HUMAN_ONLY}
   - name: config.peek
     summary: Read the configuration from a script.
     input_schema: {{ type: object }}
     entry: handlers/config_peek.star
     needs: [extension_config.read]
-    {HUMAN_ONLY}
   - name: config.read
     summary: The effective configuration.
     scope: extension_config.read
     op: snapshot
-    {HUMAN_ONLY}
   - name: config.inspect
     summary: The layer stamps.
     scope: extension_config.read
     op: inspect
-    {HUMAN_ONLY}
   - name: config.write
     summary: Replace configuration overrides.
     scope: extension_config.write
     op: compare_exchange
-    {HUMAN_ONLY}
 "
     );
     write(

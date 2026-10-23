@@ -110,7 +110,14 @@ export function SchemaForm({
     if (!specs) return fields;
     return specs.flatMap((spec) => fields.find((f) => f.path === spec.name) ?? []);
   }, [fields, specs]);
-  const secrets = useMemo(() => new Set((specs ?? []).filter((f) => f.secret).map((f) => f.name)), [specs]);
+  // A secret is a kind of value: the schema marks it `writeOnly` (a key,
+  // a token), or a lens form's field says `secret`.
+  const secrets = useMemo(() => {
+    const props = ((schema as { properties?: Record<string, { writeOnly?: unknown }> }).properties ?? {});
+    const marked = Object.entries(props).filter(([, p]) => p?.writeOnly === true).map(([k]) => k);
+    return new Set([...marked, ...(specs ?? []).filter((f) => f.secret).map((f) => f.name)]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the content
+  }, [specs, schemaText]);
   // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the content
   const fixedSet = useMemo(() => new Set(fixed ?? []), [fixedText]);
   // The fields edited since these server errors arrived: theirs are stale.

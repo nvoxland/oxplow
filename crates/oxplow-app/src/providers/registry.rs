@@ -2587,11 +2587,6 @@ impl ProviderRegistry {
                 .await?;
             }
             Scope::Global => {
-                if !matches!(actor, Actor::Human) {
-                    return Err(CommandError::Denied {
-                        reason: "this machine's global instances are a person's to change".into(),
-                    });
-                }
                 let dir = self
                     .deps
                     .global_dir

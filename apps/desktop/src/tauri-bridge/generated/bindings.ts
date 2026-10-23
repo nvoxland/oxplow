@@ -1897,7 +1897,15 @@ export type CommandSpec = {
 	 *  MCP client gets as structured content beside the text.
 	 */
 	output_schema?: unknown | null,
-	invokers: Invokers,
+	/**
+	 *  A model's tool call inside a durable job may run it: only a
+	 *  command its extension declared for that, and a job of the same
+	 *  extension names in its `tools`. Anyone else — a person, an agent, a
+	 *  lens acting for either — may run every command: oxplow puts no wall
+	 *  between a person and their agent (the agent's harness says what it
+	 *  may call).
+	 */
+	job?: boolean,
 	confirm: Confirm,
 	/**  The handler returns an inverse, so `commands.undo` can apply it. */
 	undoable: boolean,
@@ -2118,10 +2126,12 @@ export type ConfigurationFile = {
 };
 
 /**
- *  Whether a run must be confirmed by a person first. An agent can never
- *  confirm: it receives `NeedsConfirmation` and writes nothing. Ordered
- *  weakest first, so an operation's floor compares: a declaration may
- *  ask more than its operation's `confirm_at_least`, never less.
+ *  Whether a person's run must be confirmed by them first (the second
+ *  click). An agent's run doesn't ask: what an agent may call is its
+ *  harness's to decide. An effect's run is kept as a proposal, a job's or
+ *  oxplow's is refused. Ordered weakest first, so an operation's floor
+ *  compares: a declaration may ask more than its operation's
+ *  `confirm_at_least`, never less.
  */
 export type Confirm = "never" | "always" | 
 /**  Irreversible; presented as destructive and always confirmed. */
@@ -2730,7 +2740,11 @@ export type ExtensionCommand = {
 	handler: CommandHandler,
 	confirm: Confirm,
 	access: Access,
-	invokers: Invokers,
+	/**
+	 *  A durable job's model may call it (`job: true`, a handler of the
+	 *  extension's own). Anyone else may run every command.
+	 */
+	job: boolean,
 	/**
 	 *  The scopes its script calls, and the capabilities (or features)
 	 *  it needs active, as core's commands declare them
@@ -3758,19 +3772,6 @@ export type IntentExample = {
 export type IntentPrompt = {
 	prompt: string,
 	about?: string | null,
-};
-
-/**
- *  Which surfaces may invoke a command. `job` is a model's tool call
- *  inside a durable job: only a command its extension declared for that
- *  (`job: true`) and a job of the same extension names in its `tools`.
- *  No constant admits a job; core's commands never do.
- */
-export type Invokers = {
-	human: boolean,
-	agent: boolean,
-	lens: boolean,
-	job?: boolean,
 };
 
 /**

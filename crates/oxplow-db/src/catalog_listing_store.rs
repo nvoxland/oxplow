@@ -66,7 +66,6 @@ pub struct PromptRow {
 pub struct ConfigKeyRow {
     pub key: String,
     pub doc: String,
-    pub human_only: bool,
     pub schema_json: String,
 }
 
@@ -194,12 +193,12 @@ pub fn reset_tx(conn: &rusqlite::Connection, listing: &CatalogListing) -> Result
         .map_err(map_sql_err)?;
     let mut key = conn
         .prepare(
-            "INSERT OR REPLACE INTO config_key (key, doc, human_only, schema_json)
-             VALUES (?1, ?2, ?3, ?4)",
+            "INSERT OR REPLACE INTO config_key (key, doc, schema_json)
+             VALUES (?1, ?2, ?3)",
         )
         .map_err(map_sql_err)?;
     for k in &listing.config_keys {
-        key.execute(params![k.key, k.doc, k.human_only, k.schema_json])
+        key.execute(params![k.key, k.doc, k.schema_json])
             .map_err(map_sql_err)?;
     }
     Ok(())

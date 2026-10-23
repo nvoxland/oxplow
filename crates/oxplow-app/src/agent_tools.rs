@@ -294,9 +294,9 @@ mod tests {
             root.join("extension.yaml"),
             "manifest: 2\nname: acme\nintent:\n  purpose: p\ncommands:\n\
              \x20 - name: ask.model\n    summary: Ask the model.\n    scope: ai.compute\n    op: summarize\n\
-             \x20   invokers: { human: true, agent: true, lens: true }\n    tool: ask_model\n\
+             \x20   tool: ask_model\n\
              \x20 - name: work.count\n    summary: Count.\n    scope: sql.read\n    op: query\n\
-             \x20   invokers: { human: true, agent: true, lens: true }\n    tool: count\n",
+             \x20   tool: count\n",
         )
         .unwrap();
         let problems = activate_with_problems(&fx.svc).await;
@@ -308,8 +308,8 @@ mod tests {
     }
 
     /// Any extension declares tools the same way: a command offered to
-    /// the caller, and a lens whose params are its input. A command the
-    /// caller isn't offered isn't its tool.
+    /// the caller, and a lens whose params are its input. Every command is
+    /// offered to an agent, so each one that names a tool is one.
     #[tokio::test]
     async fn an_extensions_command_and_lens_are_tools() {
         let fx = services_with_task_effort().await;
@@ -319,9 +319,9 @@ mod tests {
             root.join("extension.yaml"),
             "manifest: 2\nname: acme\nintent:\n  purpose: p\ncommands:\n\
              \x20 - name: work.count\n    summary: Count the work items.\n    scope: sql.read\n    op: query\n\
-             \x20   invokers: { human: true, agent: true, lens: true }\n    example: { sql: \"SELECT 1\" }\n    tool: count\n\
-             \x20 - name: work.secret\n    summary: Not for agents.\n    scope: sql.read\n    op: query\n\
-             \x20   invokers: { human: true, agent: false, lens: true }\n    tool: secret\n",
+             \x20   example: { sql: \"SELECT 1\" }\n    tool: count\n\
+             \x20 - name: work.secret\n    summary: Also for agents.\n    scope: sql.read\n    op: query\n\
+             \x20   tool: secret\n",
         )
         .unwrap();
         std::fs::write(
@@ -339,7 +339,7 @@ mod tests {
             .collect();
         assert_eq!(
             acme.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(),
-            ["acme_count", "acme_open_work"]
+            ["acme_count", "acme_open_work", "acme_secret"]
         );
         let lens = acme[1];
         assert_eq!(

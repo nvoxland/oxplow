@@ -792,9 +792,9 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       command through the bus as `Actor::Lens { lens_id, on_behalf_of }`
       — `Human` from the UI (`run_lens_action` RPC), the calling agent from
       MCP `oxplow_run_lens_action` (which never confirms). The bus applies the
-      command's `invokers.lens`, and the agent policy through
-      `on_behalf_of`, so an agent can't reach a human-only command or
-      confirm one through a lens. The audit records the lens's URI.
+      agent policy through `on_behalf_of`. A command that asks
+      (`confirm`) asks only a person; a lens run an agent pressed runs
+      without asking. The audit records the lens's URI.
     - **The command runs after the read.** An action, a form submit and
       a component's invoke are resolved under one pinned catalog
       generation (`lens_actions::Prepared`: the lens, its `when`, the
@@ -813,7 +813,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       compact strip and a composite's parts (`toolbar={false}`) show no
       toolbar.
     - Running a collector is the command **`oxplow.collector.sync { collector }`**
-      (External, `Invokers::ALL`; `collector_runner::CollectorRunner::sync`,
+      (External; `collector_runner::CollectorRunner::sync`,
       which the scheduler uses too). It **never grants**: what a collector
       may reach is its extension's `permissions:`, approved at deploy
       ("Permissions"). An agent's `run_command oxplow.collector.sync` runs it as the
@@ -1241,7 +1241,7 @@ source directly: an edit changes nothing until it is deployed.
   accessor for the shipped files; `find`, `is_required`, `is_reserved`
   and `origin_of` stay name-based, so the `oxplow` namespace and the other
   rules for oxplow's own extensions still apply). Set in `project.yaml`
-  (this repo commits it), overridable in `personal.yaml`, human-only, read
+  (this repo commits it), overridable in `personal.yaml`, read
   once when the catalog is made (`ExtensionCatalog::settings`): changing
   it takes a restart. At startup a required extension with no shipped
   copy deploys from its source with nothing to approve (it is the
@@ -1463,7 +1463,7 @@ oxplow does not confine them", "network — may reach api.github.com", …).
 The command (`oxplow.extension.deploy`, `rollback`, `enable`) raises that
 as `NeedsConfirmation` with the lines in `Preview::details`: a person
 confirms inline (`CommandConfirm` lists them), an agent's call becomes a
-proposal naming them (an agent can't confirm), and the approval deploys it.
+proposal naming them (a deploy's consent check is a person's to approve), and the approval deploys it.
 There is no separate approval store: each deployment row records the
 permissions it was approved with (`v_extension_deployment.permissions`).
 Keep This (`oxplow.lens.keep`) never asks: it fails, saying why, when the
@@ -2022,11 +2022,11 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   `LensPage`'s `fill`, no in-body title — `lens/CodeViz.tsx`,
   `lens/DiffViz.tsx`, `.context/editor-and-monaco.md` "Read-only code and
   diff vizes"), `approvals` (core's consent component: it reads the
-  pending `v_command_proposal` itself and decides through the person-only
-  path, so the lens needs only `query: SELECT 1`; the lens's rows are
+  pending `v_command_proposal` itself and decides through the
+  approve and decline commands, so the lens needs only `query: SELECT 1`; the lens's rows are
   ignored; params `thread` (a thread URI) and `setting` (a config key)
-  narrow the list; an agent reads it as the pending proposals, and can't
-  decide them), `form` (`form: { command, defaults?, fixed?,
+  narrow the list; an agent reads it as the pending proposals, and a
+  person decides them), `form` (`form: { command, defaults?, fixed?,
   fields? }`; no `query` needed: one, if given, prefills from its first
   row; `fixed` fields show their `defaults` value and can't be changed —
   it's imposed again on submit, so an item's `uri` stays its own;
@@ -2042,7 +2042,9 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   `visible_if: { kind: [http, https] }` shows the field only while each
   named field holds one of the values — hidden, it is neither required
   nor submitted; `secret: true` masks it, keeps it out of any draft, and
-  leaves it out of the input when blank (the saved one stays). The form's
+  leaves it out of the input when blank (the saved one stays). A command
+  input field whose schema says `writeOnly: true` is masked in every
+  form without this flag ([commands.md](./commands.md) "Secrets"). The form's
   command must keep a secret out of its record (`unrecorded`), or the
   form refuses to open (`form_start`). The load checks: a `visible_if`
   names one of `fields` and not the field itself, a field isn't both
@@ -2342,7 +2344,7 @@ a view needs no provider. Choosing a presentation is separate from
 installing a work list.
 
 **Whose shows** is the person's: `replacements: { <target>: <extension> |
-oxplow }`, one person-only project key validated against the table. An
+oxplow }`, one project key validated against the table. An
 extension chosen shows (an unbound target only); `oxplow` keeps oxplow's
 own (any target); unlisted is the default — the only extension replacing
 it, several and no choice keeping oxplow's own, and for a bound target
@@ -2772,7 +2774,7 @@ component's `commands` at that version, as **`Actor::Component { component:
 id, on_behalf_of: Human }`** — the component acting for the person, so every
 policy applies as if they ran it, audited as kind `component` with source
 `custom_component:<ext>/<id>` (`command.executed@4`; a lens's invoker
-class, so `invokers.lens` decides). The input is literal (no
+class). The input is literal (no
 placeholders); a command that asks comes back `NEEDS_CONFIRMATION` and the
 **host** asks, never the frame. A component acts for a person, so it never
 proposes. All are UI RPCs (`ui` in surface parity).
@@ -3711,7 +3713,7 @@ to a logged event by composing commands, run as
 stream — an agent's rights and gates there (the open-thread gate, its own
 stream's VCS; an event with no thread, like a contribution's health, is
 an anchorless effect: no thread gate, since it writes into no worktree —
-its extension's permissions and each command's own invokers still apply), never a confirmation (commands.md "Only a person
+its extension's permissions still apply), never a confirmation (commands.md "Only a person
 confirms"):
 
 ```yaml
@@ -3821,7 +3823,7 @@ its latest attempt's (`v_effect_run.latest`). The live consumer makes one
 attempt and never another; a failed one is sent again **by itself** only
 when that is safe (below). Otherwise a failed reaction is attempted
 again only by a person: `oxplow.effect.retry { effect, event }` (`commands/effect.rs` —
-human-only, `Confirm::Always`, `External`; an `effects.run` operation
+`Confirm::Always`, `External`; an `effects.run` operation
 declared in `oxplow-foundation`, its services filled when the consumer
 registers at boot — `ServicesSlot`) runs `effect_triggers::run_reaction(…, ReactionOrigin::Retry)`,
 the same steps as a live reaction from the loop guard on, as the next
@@ -3895,8 +3897,8 @@ person may still retry it first.
 
 **Backfill** (P9.D5). The live consumer never reacts to what was logged
 before an effect started. A person has it react to that past with
-`oxplow.effect.backfill { effect, from_seq? | since?, to_seq? }` (human-only,
-`Confirm::Always`, `External`): the events in the range that match its
+`oxplow.effect.backfill { effect, from_seq? | since?, to_seq? }` (`Confirm::Always`,
+`External`): the events in the range that match its
 `on` and `where` — each read at its type's newest version, as the pump
 delivers it — and that it **never reacted to** (`unreacted_tx`: no
 `effect_run` row) and its own run didn't lead to (the loop guard's `own`,
@@ -3968,7 +3970,7 @@ commands:
     entry: handlers/finish_review.star # defines transform(x), x = { input }
     confirm: never                     # never (default) | always | destructive; children only add
     access: write                      # write (default) | record | read (composes nothing, returns a result)
-    invokers: { human: true, agent: true, lens: true }   # required: who may run it (within its operation's floor, for a scope command)
+    job: false                         # true: a durable job's model may call it (needs entry:, never over a scope's operation)
     needs: [sql.read, work_items.comments]   # scopes it calls; capabilities / features it needs active
     ui:                                # how a person meets it (`.context/commands.md` "Offering a command")
       label: Finish Review
@@ -4062,7 +4064,7 @@ retries the run), then the
 
 **Running** (`extension_command`): each is a composite
 (`Handler::Compose`, atomicity `Dispatch`) `<namespace>.<name>`
-(summary "… (extension `x`)", the declared invokers / confirm / access,
+(summary "… (extension `x`)", the declared confirm / access,
 `Lifecycle::Experimental`). Its composer runs `compose_calls` on the bus's routing thread,
 answering `sql.read` through the SQL gateway as an effect's script is
 answered (`SqlGateway::run_in`: the `query_sql` authorizer, row cap and
@@ -4072,9 +4074,8 @@ counting each call in the run's `ScopeTrace`. It runs once per run, when
 the bus routes it.
 The bus runs what it composes ([commands.md](./commands.md) →
 "Composition"): when every call stays in oxplow's records, as children
-in one transaction (`steps::run_composed`; the script runs once, when the bus routes the run) — each child's invokers, policy and
-confirmation apply (an agent's run whose child asks becomes a proposal
-with the children as its dry run), one audit row with `{ result,
+in one transaction (`steps::run_composed`; the script runs once, when the bus routes the run) — each child's policy and
+confirmation apply (a person's run whose child asks is asked first; an agent's run asks nothing), one audit row with `{ result,
 children }`, the children's events caused by the run, the reversed
 children as its undo; when one leaves it (`work_item.*` on another
 provider's item, tsk713), as **steps** — all checked first, then run in
@@ -4205,8 +4206,8 @@ Every contribution that runs — an external provider instance, a collector, an 
 - **The events** are `contribution.disabled@1 { contribution, reason }` and
   `contribution.enabled@1 { contribution }`, `contribution` the URI
   (`collector:triage/todos`, `effect:…`, `provider:…`).
-- **Enabling.** Only a person: `oxplow.contribution.enable { extension, kind,
-  contribution }` (human-only). It names the kind — a provider and a
+- **Enabling.** `oxplow.contribution.enable { extension, kind,
+  contribution }`. It names the kind — a provider and a
   collector may share an id; there must be a failed one of that kind (or
   a provider instance the registry knows).
 - **In the app (C3).** Settings → Extensions shows one health line per
@@ -4227,12 +4228,12 @@ Every contribution that runs — an external provider instance, a collector, an 
   runs `oxplow.contribution.enable_all { extension? }` as the person: every
   failure-disabled contribution, or one extension's, each enabled as the
   single command does (one `contribution.enabled@1` apiece; an `External`
-  command like it, so, like it, not undoable). Human-only.
+  command like it, so, like it, not undoable).
 - **For agents.** `questions/extensions.yaml` and the extension skill's
   "Health and repair" section: read `v_contribution_health`,
   `v_collector_run` and `v_event_dead_letter`, read the repair item
-  first, fix, check, test, `oxplow.collector.sync` — and ask the person to
-  Enable Again (an agent can't run `oxplow.contribution.enable` or `enable_all`).
+  first, fix, check, test, `oxplow.collector.sync` — and run
+  `oxplow.contribution.enable` (or `enable_all`) once the fix holds.
 
 ## Implementations
 
@@ -4400,7 +4401,7 @@ advisories:
   it has rows. Marks live in `once_mark`, per effort or thread.
 - **Audience.** `agent` hints go to the coding agent; `person` hints are
   raised in Alerts ("Hints for you", `apps/desktop/src/hints.ts`) until
-  the person dismisses one (`oxplow.hint.dismiss`, which an agent can't run).
+  the person dismisses one (`oxplow.hint.dismiss`).
 - **Delivery.** Every hit is recorded as a nudge (`v_agent_nudge`, kind
   `<extension>/<id>`, with its `audience`), undelivered. The thread's
   next prompt (`AgentContext::prompt_context`) or tool call
@@ -4479,7 +4480,6 @@ commands:
     summary: Run ONE read-only SQL statement over the published `v_*` models. …
     scope: sql.read
     op: query
-    invokers: { human: true, agent: true, lens: true }
     tool: query_sql          # offered as oxplow_query_sql
 # lenses/open-work.yaml
 tool: open_work              # offered as <namespace>_open_work
@@ -4499,7 +4499,7 @@ tool: open_work              # offered as <namespace>_open_work
 - A **command tool**'s description, schema and example are its command's,
   and a call runs it as the caller through the bus (validation, policy,
   proposals, audit). It's offered while its extension is enabled and the
-  command is offered to the caller (`invokers.agent`, `needs`), so the
+  command is offered to the caller (`needs`), so the
   list follows the active implementations as commands do. Its read-only
   hint is its command's access (`View`/`Read`), unless the command
   needs a scope that spends the person's money (`Scope::spends`; today
@@ -4602,7 +4602,7 @@ tool: open_work              # offered as <namespace>_open_work
     restates them as the model **`v_prompt`** (`catalog_prompt`, V85:
     `position`, `source_kind` `area` | `extension`, `source`, `prompt`,
     `about`), beside **`v_config_key`** (`config_key`: project.yaml's keys
-    with their doc, `human_only` and value schema). An agent reads both
+    with their doc and value schema). An agent reads both
     with `oxplow_query_sql`; there is no catalog RPC.
   - The UI: the **Catalog** page, a foundation document lens
     (the `catalog` page, `catalog-overview`: sections
@@ -4717,7 +4717,7 @@ What moves out of core, and what it becomes:
 | Git Commit and Uncommitted Changes pages | **done:** the `commit` and `uncommitted` documents (a `query` row for the change, declared in `columns:`; parts `commit-detail`, `commit-files`, `uncommitted-commit`, `uncommitted-files`); the analysis moves to the `oxplow-foundation/commit.sections` and `oxplow-foundation/uncommitted.sections` mounts (the old `vcs.commit.details`, `vcs.status.header` and `vcs.status.details` slots are gone); the commit tab is labelled by its sha, not its subject, and the file totals line and Cherry-pick's inline confirm are gone; `GitCommitPage` and `UncommittedChangesPage` are deleted |
 | Comments inbox | **done:** the `comments` document lens (`comments-threads`, a grouped table over `v_comment` with `select` on the `comment` param; `comments-conversation`, over `v_comment_message`); the resolved filter is a static `choice` ladder (the old one was cut to the oldest resolved comment) and "Go to location" is a plain link, so it no longer scrolls to the anchor; `CommentsInboxPage` and `comments-filter` are gone |
 | Directory page | **done:** the `directory` lens, the renderer of `oxplow/dir` (`pages:` entry `lens: directory`, `label: "{{param.path}}"`); `DirectoryPage` is gone |
-| Settings → Overview and Language Servers | **done:** the areas have no React sections; oxplow-foundation mounts lenses in their slots. Overview: `settings-proposals` (the `approvals` viz) and `settings-values` (a grouped `list` over `v_config_value`: its source, value, doc, Ask the Agent to Change This through `oxplow.agent.draft`, and Change It Here — a link to the area that holds a person-only setting's control; the page's search is the slot param `q`, which the lens reads as `:q`). Language servers: `lsp-servers` (`v_lsp_server`, a row per stream a server runs in; Restart and Remove through `oxplow.lsp.restart_server` / `remove_server`), `lsp-install` (a form over `oxplow.lsp.install_server`) and `lsp-suggestions` (the curated Mason packages for languages with no server). The shell (`SettingsPage`, the rail, the other areas) stays until they convert |
+| Settings → Overview and Language Servers | **done:** the areas have no React sections; oxplow-foundation mounts lenses in their slots. Overview: `settings-proposals` (the `approvals` viz) and `settings-values` (a grouped `list` over `v_config_value`: its source, value, doc, Ask the Agent to Change This through `oxplow.agent.draft`, and Change It Here — a link to the area that holds a setting's control; the page's search is the slot param `q`, which the lens reads as `:q`). Language servers: `lsp-servers` (`v_lsp_server`, a row per stream a server runs in; Restart and Remove through `oxplow.lsp.restart_server` / `remove_server`), `lsp-install` (a form over `oxplow.lsp.install_server`) and `lsp-suggestions` (the curated Mason packages for languages with no server). The shell (`SettingsPage`, the rail, the other areas) stays until they convert |
 | Rail panels: Comments, Work, Uncommitted, Go To | **done:** Go To (`go-to`, the thread's bookmarks then its recent or most visited pages through the `mode` choice param, `go-to-bookmarks` collapsed — needing bookmarks as project data (`v_bookmark`), lens param `options` and page-kind icons; the rail has no core panels left); Comments (`comments`, a panel `open`ing the inbox) and Work (`work` grouped over the `thread_work` model, which also lists the thread's unlinked efforts — open under In progress, closed under Finished, whose header opens the `thread-activity` lens of the thread's turns by effort — `work-line` collapsed, `work-count`, the `clear_finished` command + `finished_cleared` model); and Uncommitted (`uncommitted`, a tree over the working change's stage-one file list, which change analysis now keeps current on every move). Only the UI moves: stores, commands and views stay core. What Work needed and lenses lacked became general features, listed under "Added for extraction" — the pattern for any panel an extension builds |
 | The effort-close inference of unrecorded decisions and of the claims an agent's answers made (the `effort.decisions` reactor) | **done:** the AI profile `reasoning` (fallback `main`), the job `reasoning`, the command `oxplow.effort.infer_reasoning` and the effects `infer-reasoning` / `store-reasoning`, writing through core's `oxplow.effort.replace_inferred_decisions` and `oxplow.effort.replace_inferred_claims`; review and storage stay core ([ai-providers.md](./ai-providers.md) "Inferred reasoning") |
 
@@ -5073,20 +5073,20 @@ jobs:
     timeout: 300                      # seconds, 1–600 (default 120)
     replay: never                     # or idempotent: run again when cut off
 commands:
-  - { name: review.ask, summary: …, scope: jobs.write, op: enqueue, invokers: { human: true, agent: true, lens: true } }
-  - { name: review.cancel, summary: …, scope: jobs.write, op: cancel, invokers: { human: true, agent: true, lens: true } }
-  - { name: review.result, summary: …, scope: jobs.read, op: snapshot, invokers: { human: true, agent: true, lens: true } }
+  - { name: review.ask, summary: …, scope: jobs.write, op: enqueue }
+  - { name: review.cancel, summary: …, scope: jobs.write, op: cancel }
+  - { name: review.result, summary: …, scope: jobs.read, op: snapshot }
   - name: evidence.lookup             # a tool: reads, admits a job, says its input
     summary: The TODOs in one file.
     entry: commands/evidence_lookup.star
     needs: [sql.read]
     input_schema: { type: object, required: [path], properties: { path: { type: string } } }
     access: read
-    invokers: { human: false, agent: false, lens: false, job: true }
+    job: true
 ```
 
 - **A tool** is one of the extension's own commands that admits a job
-  (`invokers.job`), only reads (`access: read`) and has an
+  (`job: true`), only reads (`access: read`) and has an
   `input_schema`; anything else is a load error. The model calls it by
   its local name with `.` as `_` (`evidence_lookup`: model APIs allow no
   dots); its description is the command's `summary`, its parameters the
@@ -5144,7 +5144,7 @@ commands:
   run per key and job), so an effect on `contribution.job.completed` knows
   what the answer is about; `v_job_run.intent_key` publishes it.
 - **Cancel.** `jobs.write/cancel` (the extension's own jobs) or
-  `oxplow.job_run.cancel { job_run }` (a person's, any run: `invokers` human and lens).
+  `oxplow.job_run.cancel { job_run }` (any run).
   A queued job ends at once. A running one has its run cancelled: the
   model's connection is dropped within 100 ms
   (`oxplow_ai::client::unless_cancelled`), the attempt closes

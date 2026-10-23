@@ -1,10 +1,10 @@
 //! Running a lens's actions (P6.B1, `.context/extensions.md`): each is a
 //! command the lens offers, run through the bus as `Actor::Lens` acting for
 //! whoever pressed it — a person from the UI, the calling agent from MCP.
-//! The bus applies that actor's whole policy (the command's invokers, the
-//! agent policy, confirmation), so a lens can offer a button but never grant
-//! a power: an agent can't reach a human-only command through a lens, and a
-//! lens can't confirm on anyone's behalf.
+//! The bus applies that actor's whole policy (the agent policy,
+//! confirmation), so a lens offers a button and grants no power of its
+//! own: it runs as its presser would, and can't confirm on anyone's
+//! behalf.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -1397,37 +1397,39 @@ actions:
         assert_eq!(state(&fx.svc, fx.task).await, "done");
     }
 
-    /// A command that doesn't take lens invokers is denied, and a lens
-    /// acting for an agent can't reach what the agent can't.
+    /// A lens acts as its presser and no more: one an agent pressed may run
+    /// what the agent may, which is every command, and the audit names the
+    /// lens and the agent's thread that pressed it.
     #[tokio::test]
     async fn a_lens_grants_no_power() {
         let (fx, root) = fixture().await;
-        let err = run_lens_action(
-            &fx.svc,
-            &root,
-            call("push", BTreeMap::new(), None, Actor::Human, true),
-            &extensions::LensContext::default(),
-        )
-        .await
-        .unwrap_err();
-        assert!(matches!(err, CommandError::Denied { .. }), "{err:?}");
         let agent = Actor::Agent {
             session_id: None,
             thread_id: Some(fx.thread),
             stream_id: None,
         };
-        let err = run_lens_action(
+        let out = run_lens_action(
             &fx.svc,
             &root,
-            call("prompt", BTreeMap::new(), None, agent, true),
+            call("prompt", BTreeMap::new(), None, agent, false),
             &extensions::LensContext::default(),
         )
         .await
-        .unwrap_err();
-        assert!(
-            matches!(err, CommandError::Proposed { .. }),
-            "an agent's lens can't set a human-only key, only propose it: {err:?}"
+        .unwrap();
+        let audit = fx
+            .svc
+            .commands
+            .audit_store()
+            .get(out.audit_id.unwrap())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            audit.actor_kind,
+            oxplow_domain::events::schema::ActorKind::Lens
         );
+        assert_eq!(audit.actor_id.as_deref(), Some("acme/tasks"));
+        assert_eq!(audit.thread_id, Some(fx.thread));
     }
 
     /// A form action opens the command's form starting from its bound

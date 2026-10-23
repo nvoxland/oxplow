@@ -1,12 +1,10 @@
 //! Settings → AI as commands: `oxplow.ai.set_provider` adds or replaces a
 //! provider (and stores its key in the keychain), `remove_provider` takes
 //! one away, `set_role` binds a role to a provider and model (or unbinds
-//! it) and `test_provider` makes one small call to check a provider. They
-//! are a person's alone (`Invokers::NO_AGENT`): the keys and where the
-//! person's money goes are theirs to set. Their own lens (Settings → AI as
-//! a form) runs them; an agent can't, and neither can a lens an agent
-//! presses (the bus admits a lens only when its presser is admitted). `set_provider` keeps the `key` out of the
-//! audit (`with_unrecorded`: only that one was given is recorded).
+//! it) and `test_provider` makes one small call to check a provider.
+//! Anyone runs them: a person, their agent, Settings → AI as a form lens.
+//! `set_provider`'s `key` is a secret (`writeOnly`): never in a record,
+//! only that one was given is.
 //! `External`: the settings are the user-global `ai.yaml` and the OS
 //! keychain, outside oxplow's database. Reading them is
 //! `v_ai_provider` / `v_ai_role`.
@@ -15,7 +13,7 @@ use std::sync::Arc;
 
 use oxplow_ai::config::{ProviderConfig, Role, RoleBinding};
 use oxplow_domain::ai::AiRestriction;
-use oxplow_domain::{CommandError, Invokers};
+use oxplow_domain::CommandError;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::json;
@@ -43,8 +41,9 @@ pub struct SetProviderInput {
     #[serde(default)]
     pub base_url: Option<String>,
     /// Its API key, stored in the OS keychain and never read back. Left
-    /// out (or empty), the stored one stays.
+    /// out (or empty), the stored one stays. A secret (`writeOnly`).
     #[serde(default)]
+    #[schemars(extend("writeOnly" = true))]
     pub key: Option<String>,
 }
 
@@ -120,8 +119,6 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
                 })
             })),
         )
-        .open_to(Invokers::NO_AGENT)
-        .with_unrecorded(&["key"])
     };
     let remove_provider = {
         let services = services.clone();
@@ -145,7 +142,6 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
                 })
             })),
         )
-        .open_to(Invokers::NO_AGENT)
     };
     let set_role = {
         let services = services.clone();
@@ -190,7 +186,6 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
                 })
             })),
         )
-        .open_to(Invokers::NO_AGENT)
     };
     let test_provider = Op::new(
         "ai.test",
@@ -213,8 +208,7 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
                 })
             })
         })),
-    )
-    .open_to(Invokers::NO_AGENT);
+    );
     vec![set_provider, remove_provider, set_role, test_provider]
 }
 
@@ -342,16 +336,16 @@ mod tests {
             thread_id: Some(fx.thread),
             stream_id: None,
         };
-        let err = run(
+        // A lens an agent pressed may set one too.
+        run(
             &fx,
             &lens(agent),
             super::SET_PROVIDER,
             json!({ "id": "byagent", "kind": "openrouter", "key": "sk-x" }),
         )
         .await
-        .unwrap_err();
-        assert!(matches!(err, CommandError::Denied { .. }), "{err:?}");
-        assert!(!fx
+        .unwrap();
+        assert!(fx
             .svc
             .ai
             .settings()
@@ -407,9 +401,10 @@ mod tests {
         }
     }
 
-    /// Settings → AI is a person's alone: not an agent's.
+    /// An agent may change Settings → AI: set a provider and a role, then
+    /// remove the provider.
     #[tokio::test(flavor = "multi_thread")]
-    async fn an_agent_may_not_touch_ai_settings() {
+    async fn an_agent_may_change_ai_settings() {
         let fx = crate::test_fixtures::services_with_effort().await;
         let agent = Actor::Agent {
             session_id: None,
@@ -421,18 +416,16 @@ mod tests {
                 super::SET_PROVIDER,
                 json!({ "id": "or", "kind": "openrouter", "key": "k" }),
             ),
-            (super::REMOVE_PROVIDER, json!({ "id": "or" })),
+            (
+                super::SET_ROLE,
+                json!({ "role": "summarize", "provider": "or", "model": "m" }),
+            ),
             (super::SET_ROLE, json!({ "role": "summarize" })),
-            (super::TEST_PROVIDER, json!({ "id": "or", "model": "m" })),
+            (super::REMOVE_PROVIDER, json!({ "id": "or" })),
         ] {
-            let err = run(&fx, &agent, name, input).await.unwrap_err();
-            assert!(
-                matches!(
-                    err,
-                    CommandError::Denied { .. } | CommandError::Unknown { .. }
-                ),
-                "{name}: {err:?}"
-            );
+            run(&fx, &agent, name, input)
+                .await
+                .unwrap_or_else(|e| panic!("{name}: {e:?}"));
         }
     }
 

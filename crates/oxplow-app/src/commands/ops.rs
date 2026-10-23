@@ -7,7 +7,7 @@
 //! before the transaction.
 //!
 //! A manifest's command names one (`scope: work_items.write`, `op:
-//! transition`) and says the rest — summary, invokers, confirmation, ui —
+//! transition`) and says the rest — summary, confirmation, ui —
 //! so oxplow's own commands are declared like any extension's
 //! (`extensions/oxplow-foundation`), and any extension may declare one
 //! over the same operation.
@@ -15,7 +15,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use oxplow_domain::{Atomicity, CommandError, CommandSpec, Confirm, Invokers};
+use oxplow_domain::{Atomicity, CommandError, CommandSpec, Confirm};
 use serde_json::Value;
 
 use super::{Command, ConfirmFor, Handler, Precheck};
@@ -37,11 +37,6 @@ pub struct Op {
     precheck: Option<Arc<Precheck>>,
     /// Input fields its runs' records leave out (`CommandSpec::unrecorded`).
     unrecorded: Vec<String>,
-    /// Who may run a command over it, at most — its **floor**: a
-    /// declaration admits these or fewer (`Op::open_to`). Everyone until
-    /// the operation says otherwise; `Ops::fully_open` lists those, pinned
-    /// by a test, so leaving one open is a reviewed choice.
-    open_to: Invokers,
     /// The weakest confirmation a command over it may declare
     /// (`Op::confirm_at_least`): a declaration asks this much or more.
     confirm_at_least: Confirm,
@@ -65,7 +60,6 @@ impl Op {
             confirm_for: None,
             precheck: None,
             unrecorded: Vec::new(),
-            open_to: Invokers::ALL,
             confirm_at_least: Confirm::Never,
         }
     }
@@ -74,14 +68,6 @@ impl Op {
     /// so an MCP client gets the result as structured content.
     pub fn returns<T: schemars::JsonSchema>(mut self) -> Self {
         self.output_schema = Some(super::util::schema::<T>());
-        self
-    }
-
-    /// Who may run a command over it, at most (`Invokers::HUMAN_ONLY`: a
-    /// person's; `Invokers::NO_AGENT`: a person's, directly or through a
-    /// lens). A declaration that admits anyone else is refused.
-    pub fn open_to(mut self, floor: Invokers) -> Self {
-        self.open_to = floor;
         self
     }
 
@@ -97,23 +83,17 @@ impl Op {
         format!("{}/{}", self.scope, self.name)
     }
 
-    /// Whether anyone may run it with no confirmation — no floor at all.
-    pub fn is_fully_open(&self) -> bool {
-        self.open_to == Invokers::ALL && self.confirm_at_least == Confirm::Never
-    }
-
-    /// `spec` admits no more than this operation's floor, and asks at
-    /// least as much.
+    /// `spec` asks at least as much as this operation's floor, and isn't
+    /// a job's: a durable job's model calls only its extension's own
+    /// handlers.
     fn within_floor(&self, spec: &CommandSpec) -> Result<(), CommandError> {
-        if !spec.invokers.within(&self.open_to) {
+        if spec.job {
             return Err(CommandError::Invalid {
-                field: Some("/invokers".into()),
+                field: Some("/job".into()),
                 message: format!(
-                    "`{}` is open to {} at most; `{}` admits {}",
-                    self.id(),
-                    self.open_to.names(),
+                    "`{}` is over `{}`: a job calls only its extension's own handlers (`entry:`)",
                     spec.id,
-                    spec.invokers.names()
+                    self.id()
                 ),
             });
         }
@@ -156,7 +136,7 @@ impl Op {
     /// schema (with the declaration's example), undo and atomicity are the
     /// operation's, its access the
     /// scope's, and the scope is among its needs. Its
-    /// `invokers` and `confirm` stay within the operation's floor.
+    /// `confirm` stays within the operation's floor, and it isn't a job's.
     pub fn command(&self, mut spec: CommandSpec) -> Result<Command, CommandError> {
         let access = oxplow_domain::scope::scope(&self.scope)
             .ok_or_else(|| CommandError::Failed {
@@ -233,15 +213,6 @@ impl Ops {
     pub fn get(&self, scope: &str, op: &str) -> Option<Arc<Op>> {
         self.0.get(&(scope.to_string(), op.to_string())).cloned()
     }
-
-    /// The operations with no floor, as `scope/op`, sorted.
-    pub fn fully_open(&self) -> Vec<String> {
-        self.0
-            .values()
-            .filter(|op| op.is_fully_open())
-            .map(|op| op.id())
-            .collect()
-    }
 }
 
 #[cfg(test)]
@@ -262,13 +233,13 @@ mod tests {
         )
     }
 
-    fn spec(invokers: Invokers, confirm: Confirm) -> CommandSpec {
+    fn spec(job: bool, confirm: Confirm) -> CommandSpec {
         CommandSpec {
             output_schema: None,
             id: "acme.lsp.install".into(),
             summary: "Install.".into(),
             input_schema: json!({}),
-            invokers,
+            job,
             confirm,
             undoable: false,
             lifecycle: Lifecycle::Stable,
@@ -282,32 +253,15 @@ mod tests {
     }
 
     /// An operation's floor bounds every command declared over it, from
-    /// any extension: a declaration narrows who may run it and asks more,
-    /// never the reverse.
+    /// any extension: a declaration asks as much or more, never less, and
+    /// a job never calls one (a job calls its extension's own handlers).
     #[test]
-    fn a_declaration_narrows_an_ops_floor_and_never_widens_it() {
-        let floored = op()
-            .open_to(Invokers::HUMAN_ONLY)
-            .confirm_at_least(Confirm::Always);
-        floored
-            .command(spec(Invokers::HUMAN_ONLY, Confirm::Always))
-            .unwrap();
-        floored
-            .command(spec(Invokers::HUMAN_ONLY, Confirm::Destructive))
-            .unwrap();
+    fn a_declaration_asks_at_least_its_ops_floor_and_isnt_a_jobs() {
+        let floored = op().confirm_at_least(Confirm::Always);
+        floored.command(spec(false, Confirm::Always)).unwrap();
+        floored.command(spec(false, Confirm::Destructive)).unwrap();
         let err = floored
-            .command(spec(Invokers::ALL, Confirm::Always))
-            .map(|_| ())
-            .unwrap_err();
-        assert!(
-            matches!(&err, CommandError::Invalid { field: Some(f), message }
-                if f == "/invokers"
-                && message.contains("`lsp.install/install_server` is open to human at most")
-                && message.contains("`acme.lsp.install` admits human, agent, lens")),
-            "{err:?}"
-        );
-        let err = floored
-            .command(spec(Invokers::HUMAN_ONLY, Confirm::Never))
+            .command(spec(false, Confirm::Never))
             .map(|_| ())
             .unwrap_err();
         assert!(
@@ -317,28 +271,13 @@ mod tests {
                 && message.contains("declares `never`")),
             "{err:?}"
         );
-    }
-
-    /// Until an operation says otherwise it has no floor, and the
-    /// registry can name those.
-    #[test]
-    fn an_op_without_a_floor_is_fully_open_and_listed() {
-        assert!(op().is_fully_open());
-        assert!(!op().open_to(Invokers::NO_AGENT).is_fully_open());
-        assert!(!op().confirm_at_least(Confirm::Destructive).is_fully_open());
-        let mut ops = Ops::default();
-        ops.add(op()).unwrap();
-        ops.add(
-            Op::new(
-                "bookmarks.write",
-                "set",
-                json!({}),
-                true,
-                Handler::Tx(Arc::new(|_, _| Ok(super::super::HandlerOutput::default()))),
-            )
-            .open_to(Invokers::NO_AGENT),
-        )
-        .unwrap();
-        assert_eq!(ops.fully_open(), vec!["lsp.install/install_server"]);
+        let err = op()
+            .command(spec(true, Confirm::Never))
+            .map(|_| ())
+            .unwrap_err();
+        assert!(
+            matches!(&err, CommandError::Invalid { field: Some(f), .. } if f == "/job"),
+            "{err:?}"
+        );
     }
 }

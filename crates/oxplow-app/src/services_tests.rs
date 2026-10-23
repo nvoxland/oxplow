@@ -132,7 +132,7 @@ async fn a_commands_script_cant_ask_a_model_or_read_the_tree() {
             &format!(
                 "manifest: 2\nname: acme\nintent: {{ purpose: Asks., origin: null, examples: [] }}\n\
                  commands:\n\
-                 \x20 - name: note.sum\n    summary: Sum.\n    input_schema: {{ type: object }}\n    entry: sum.star\n    needs: [{needs}]\n    invokers: {{ human: true, agent: true, lens: true }}\n"
+                 \x20 - name: note.sum\n    summary: Sum.\n    input_schema: {{ type: object }}\n    entry: sum.star\n    needs: [{needs}]\n"
             ),
         );
         write(

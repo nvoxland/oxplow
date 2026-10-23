@@ -12,85 +12,6 @@ use crate::events::validate_type_name;
 use crate::ids::{AgentSessionId, StreamId, ThreadId};
 use crate::{DomainError, EventId};
 
-/// Which surfaces may invoke a command. `job` is a model's tool call
-/// inside a durable job: only a command its extension declared for that
-/// (`job: true`) and a job of the same extension names in its `tools`.
-/// No constant admits a job; core's commands never do.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type, JsonSchema)]
-pub struct Invokers {
-    pub human: bool,
-    pub agent: bool,
-    pub lens: bool,
-    #[serde(default)]
-    pub job: bool,
-}
-
-impl Invokers {
-    /// Every interactive surface: a person, an agent, a lens.
-    pub const ALL: Invokers = Invokers {
-        human: true,
-        agent: true,
-        lens: true,
-        job: false,
-    };
-    pub const HUMAN_ONLY: Invokers = Invokers {
-        human: true,
-        agent: false,
-        lens: false,
-        job: false,
-    };
-    /// A person, directly or through a lens — never an agent.
-    pub const NO_AGENT: Invokers = Invokers {
-        human: true,
-        agent: false,
-        lens: true,
-        job: false,
-    };
-
-    /// Whether `actor` may run it: its invoker is admitted, and for a lens
-    /// or a component, whoever pressed it is too — a lens grants no power,
-    /// so one an agent presses runs only what an agent may.
-    pub fn admits(&self, actor: &Actor) -> bool {
-        self.allows(actor.invoker()) && actor.presser().is_none_or(|presser| self.admits(presser))
-    }
-
-    pub fn allows(&self, invoker: Invoker) -> bool {
-        match invoker {
-            Invoker::Human => self.human,
-            Invoker::Agent => self.agent,
-            Invoker::Lens => self.lens,
-            Invoker::Job => self.job,
-        }
-    }
-
-    /// Whether this admits no one `floor` doesn't: a declaration narrows
-    /// an operation's floor, never widens it.
-    pub fn within(&self, floor: &Invokers) -> bool {
-        (!self.human || floor.human)
-            && (!self.agent || floor.agent)
-            && (!self.lens || floor.lens)
-            && (!self.job || floor.job)
-    }
-
-    /// Who it admits, for a message: `human, lens`; `no one`.
-    pub fn names(&self) -> String {
-        let names: Vec<&str> = [
-            (self.human, "human"),
-            (self.agent, "agent"),
-            (self.lens, "lens"),
-            (self.job, "job"),
-        ]
-        .into_iter()
-        .filter_map(|(on, name)| on.then_some(name))
-        .collect();
-        if names.is_empty() {
-            "no one".into()
-        } else {
-            names.join(", ")
-        }
-    }
-}
-
 /// The surface a run comes through.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
@@ -101,10 +22,12 @@ pub enum Invoker {
     Job,
 }
 
-/// Whether a run must be confirmed by a person first. An agent can never
-/// confirm: it receives `NeedsConfirmation` and writes nothing. Ordered
-/// weakest first, so an operation's floor compares: a declaration may
-/// ask more than its operation's `confirm_at_least`, never less.
+/// Whether a person's run must be confirmed by them first (the second
+/// click). An agent's run doesn't ask: what an agent may call is its
+/// harness's to decide. An effect's run is kept as a proposal, a job's or
+/// oxplow's is refused. Ordered weakest first, so an operation's floor
+/// compares: a declaration may ask more than its operation's
+/// `confirm_at_least`, never less.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Type, JsonSchema,
 )]
@@ -222,7 +145,14 @@ pub struct CommandSpec {
     #[serde(default)]
     #[specta(type = Option<crate::Json>)]
     pub output_schema: Option<Value>,
-    pub invokers: Invokers,
+    /// A model's tool call inside a durable job may run it: only a
+    /// command its extension declared for that, and a job of the same
+    /// extension names in its `tools`. Anyone else — a person, an agent, a
+    /// lens acting for either — may run every command: oxplow puts no wall
+    /// between a person and their agent (the agent's harness says what it
+    /// may call).
+    #[serde(default)]
+    pub job: bool,
     pub confirm: Confirm,
     /// The handler returns an inverse, so `commands.undo` can apply it.
     pub undoable: bool,
@@ -662,7 +592,7 @@ impl Actor {
     /// contribution's health, a config change). A write needs an open
     /// thread because it changes that thread's worktree; this one acts for
     /// no thread and writes into no worktree, so that rule doesn't apply to
-    /// it. Its approval, each command's invokers and its confirmation still
+    /// it. Its approval and its confirmation still
     /// do.
     pub fn is_anchorless_effect(&self) -> bool {
         matches!(

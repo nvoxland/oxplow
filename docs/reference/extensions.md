@@ -373,7 +373,6 @@ commands:
     input_schema: { type: object, required: [uri], properties: { uri: { type: string } } }
     entry: handlers/finish.star     # transform(x) → { commands: [...] } | { refuse: "why" }
     needs: [sql.read]               # the scopes its script calls
-    invokers: { human: true, agent: true, lens: true }
     ui: { label: Finish Review, group: Review, about: oxplow/work_item, input: { uri: "{{uri}}" } }
 ```
 
@@ -434,16 +433,16 @@ jobs:
     timeout: 120                    # seconds, 1–600, default 120
     replay: never                   # or idempotent: run again after a restart, up to 3 attempts
 commands:
-  - { name: summary.start, summary: Start a summary, scope: jobs.write, op: enqueue, invokers: { human: true, agent: true, lens: true } }
-  - { name: summary.cancel, summary: Cancel a summary, scope: jobs.write, op: cancel, invokers: { human: true, agent: true, lens: true } }
-  - { name: summary.status, summary: Read a summary, scope: jobs.read, op: snapshot, invokers: { human: true, agent: true, lens: true } }
+  - { name: summary.start, summary: Start a summary, scope: jobs.write, op: enqueue }
+  - { name: summary.cancel, summary: Cancel a summary, scope: jobs.write, op: cancel }
+  - { name: summary.status, summary: Read a summary, scope: jobs.read, op: snapshot }
   - name: todos.in_file
     summary: The TODO comments in one file.
     entry: commands/todos_in_file.star
     needs: [sql.read]
     input_schema: { type: object, required: [path], properties: { path: { type: string } } }
     access: read
-    invokers: { human: false, agent: false, lens: false, job: true }
+    job: true
 ```
 
 `enqueue` takes `{job, intentKey, request}`. For this operation, `request`
@@ -459,8 +458,7 @@ the extension must declare `permissions: { ai: true }` before a job can
 spend an AI provider key, and a person approves that when the extension is
 deployed.
 
-- **Tools.** Each is one of your commands that says `invokers: { job:
-  true }`, only reads (`access: read`) and has an `input_schema`. The
+- **Tools.** Each is one of your commands that says `job: true`, only reads (`access: read`) and has an `input_schema`. The
   model calls it by its name with `.` as `_` (`todos_in_file`) and sees
   its `summary` and schema. Its input is checked against the schema; a
   refusal or error is answered to the model as `{error}` and the job goes

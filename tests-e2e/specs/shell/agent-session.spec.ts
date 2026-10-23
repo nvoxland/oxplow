@@ -27,7 +27,7 @@ test("search offers a new agent session, which opens the picker", async ({ fresh
 /// shows "Session ended", and its tab still closes the session.
 test("an ended terminal session says so and its tab closes it", async ({ fresh }) => {
   const { page, daemon } = fresh;
-  await ipc(daemon, "set_agents", { agents: ["terminal", "claude"] });
+  await run(daemon, "oxplow.agent.set_agents", { agents: ["terminal", "claude"] });
   await page.goto("/");
   await expect(newSessionPage(page)).toBeVisible();
   await newSessionPage(page).getByTestId("lens-part-start").getByTestId("lens-form-fields-harness").selectOption("claude");
@@ -46,7 +46,7 @@ test("an ended terminal session says so and its tab closes it", async ({ fresh }
 /// a blank pane.
 test("a session that can't launch shows why and offers a retry", async ({ fresh }) => {
   const { page, daemon } = fresh;
-  await ipc(daemon, "set_agents", { agents: ["terminal", "codex"] });
+  await run(daemon, "oxplow.agent.set_agents", { agents: ["terminal", "codex"] });
   await page.goto("/");
   await expect(newSessionPage(page)).toBeVisible();
   await newSessionPage(page).getByTestId("lens-part-start").getByTestId("lens-form-fields-harness").selectOption("codex");
@@ -62,7 +62,7 @@ test("a session that can't launch shows why and offers a retry", async ({ fresh 
 /// Clearing the alias gives the fallback back.
 test("a session's tab shows its alias, and its fallback once the alias is cleared", async ({ fresh }) => {
   const { page, daemon } = fresh;
-  await ipc(daemon, "set_agents", { agents: ["terminal", "claude"] });
+  await run(daemon, "oxplow.agent.set_agents", { agents: ["terminal", "claude"] });
   await page.goto("/");
   await expect(newSessionPage(page)).toBeVisible();
   await newSessionPage(page).getByTestId("lens-part-start").getByTestId("lens-form-fields-harness").selectOption("claude");
@@ -90,7 +90,7 @@ test("a session's tab shows its alias, and its fallback once the alias is cleare
 /// project's agents decide which: Codex once enabled, never Claude here.
 test("search starts an enabled agent's session directly", async ({ fresh }) => {
   const { page, daemon } = fresh;
-  await ipc(daemon, "set_agents", { agents: ["terminal", "codex"] });
+  await run(daemon, "oxplow.agent.set_agents", { agents: ["terminal", "codex"] });
   await page.goto("/");
   await expect(newSessionPage(page)).toBeVisible();
   await searchLauncher(page, "new claude session");
@@ -130,7 +130,7 @@ test("the picker closes, and stays closed", async ({ fresh }) => {
 /// Remember This makes the agent chosen what new threads start with.
 test("a remembered choice is what new threads start with", async ({ fresh }) => {
   const { page, daemon } = fresh;
-  await ipc(daemon, "set_agents", { agents: ["terminal", "claude"] });
+  await run(daemon, "oxplow.agent.set_agents", { agents: ["terminal", "claude"] });
   await page.goto("/");
   await expect(newSessionPage(page)).toBeVisible();
   await newSessionPage(page).getByTestId("lens-part-start").getByTestId("lens-form-fields-harness").selectOption("claude");

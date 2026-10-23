@@ -8,8 +8,8 @@ export interface FakeSetting {
 
 export function configValueResult(settings: FakeSetting[]) {
   return {
-    columns: ["key", "value", "origin", "extension", "human_only", "doc", "schema"],
-    rows: settings.map((s) => [s.key, JSON.stringify(s.value ?? null), s.origin ?? "default", null, 1, "", null]),
+    columns: ["key", "value", "origin", "extension", "doc", "schema"],
+    rows: settings.map((s) => [s.key, JSON.stringify(s.value ?? null), s.origin ?? "default", null, "", null]),
     truncated: false,
     reads: { models: ["v_config_value"], tables: [], measures: [] },
     freshness: [],

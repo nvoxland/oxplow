@@ -2799,10 +2799,10 @@ pub(crate) mod tests {
     }
 
     /// P7.C2: three failed runs in a row disable a collector; then
-    /// `oxplow.collector.sync` refuses it naming the reason, and a person's
-    /// `oxplow.contribution.enable` lets it run again. An agent can't enable it.
+    /// `oxplow.collector.sync` refuses it naming the reason, and
+    /// `oxplow.contribution.enable` lets it run again. An agent may enable it.
     #[tokio::test]
-    async fn a_collector_failing_three_runs_is_disabled_until_a_person_enables_it() {
+    async fn a_collector_failing_three_runs_is_disabled_until_enabled() {
         let fx = crate::test_fixtures::services_with_effort().await;
         let root = fx.svc.layout.project_dir.clone();
         extension(
@@ -2843,28 +2843,10 @@ pub(crate) mod tests {
             thread_id: Some(fx.thread),
             stream_id: None,
         };
-        let denied = fx
-            .svc
-            .commands
-            .run(
-                &agent,
-                crate::contribution_health::ENABLE,
-                enable.clone(),
-                false,
-            )
-            .await;
-        assert!(
-            matches!(denied, Err(CommandError::Denied { .. })),
-            "{denied:?}"
-        );
+        // An agent may enable it too.
         fx.svc
             .commands
-            .run(
-                &oxplow_domain::Actor::Human,
-                crate::contribution_health::ENABLE,
-                enable,
-                false,
-            )
+            .run(&agent, crate::contribution_health::ENABLE, enable, false)
             .await
             .unwrap();
         // Enabled: it runs (and fails) again rather than being refused.
