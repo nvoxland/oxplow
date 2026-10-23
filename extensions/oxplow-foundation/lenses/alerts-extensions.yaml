@@ -5,7 +5,7 @@ query: |
          '`' || name || '` isn''t running as it should: ' || coalesce(json_extract(errors, '$[0]'), 'unknown error')
            || CASE WHEN json_array_length(errors) > 1 THEN ' (+' || (json_array_length(errors) - 1) || ' more)' ELSE '' END AS what,
          'Open Extensions' AS open,
-         'oxplow:oxplow/page?area=extensions&page=settings' AS settings
+         'oxplow:oxplow/page?page=settings#area=extensions' AS settings
   FROM v_extension WHERE json_array_length(errors) > 0 ORDER BY name
 viz: table
 columns:

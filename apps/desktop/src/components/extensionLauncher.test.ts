@@ -59,3 +59,27 @@ test("until the extensions load, the launcher lists no pages rather than some of
   // The declared page leads its category; the area entries follow it.
   expect(loaded.map((p) => p.label)).toEqual(["Settings", "Settings: Agents"]);
 });
+
+test("a page whose lens has a view lists each other section by name, opening on it", () => {
+  const settings = {
+    id: "oxplow-foundation/settings",
+    hidden: true,
+    view: "area",
+    params: [{ name: "area", default: "overview", options: [{ value: "overview", label: "Every Setting" }, { value: "agents", label: "Agents" }, { value: "ai", label: "AI" }] }],
+  };
+  const out = launcherPages([
+    ext({
+      name: "oxplow-foundation",
+      lenses: [settings],
+      pages: [page({ id: "settings", extension: "oxplow-foundation", pageRef: "oxplow:oxplow/page?page=settings", title: "Settings", category: "System", keywords: "config", body: { kind: "lens", lens: "oxplow-foundation/settings" } })],
+    } as never),
+  ]);
+  const rows = out.map((p) => [p.label, p.category, p.ref.id]);
+  expect(rows).toEqual([
+    ["Settings", "System", "oxplow:oxplow/page?page=settings"],
+    ["Settings: Agents", "System", "oxplow:oxplow/page?page=settings#area=agents"],
+    ["Settings: AI", "System", "oxplow:oxplow/page?page=settings#area=ai"],
+  ]);
+  expect(out[1]?.keywords).toContain("config");
+  expect(out[1]?.keywords).toContain("Agents");
+});

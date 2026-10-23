@@ -109,3 +109,18 @@ test("a fixed param isn't drawn", () => {
   expect(view.queryByTestId("lens-param-q")).toBeNull();
   expect(view.queryByTestId("lens-param-range")).not.toBeNull();
 });
+
+test("a view document's view param is its section rail, not a filter; the rest follow the section in view", () => {
+  const doc = {
+    ...lens,
+    view: "area",
+    params: [p({ name: "area", type: "choice", default: "overview" }), p({ name: "q", label: "Search settings", type: "search" })],
+  } as unknown as Lens;
+  const viewed = { params: [p({ name: "q", type: "search" })] } as unknown as Lens;
+  const shown = render(<LensRail lens={doc} viewed={viewed} values={{ area: "agents", q: "x" }} picked={{}} outOfDate={false} onApply={() => {}} onOpenPage={() => {}} />);
+  expect(shown.queryByTestId("lens-param-area")).toBeNull();
+  expect(shown.getByTestId("lens-param-q")).toBeTruthy();
+  cleanup();
+  const none = render(<LensRail lens={doc} viewed={{ params: [] } as unknown as Lens} values={{ area: "agents" }} picked={{}} outOfDate={false} onApply={() => {}} onOpenPage={() => {}} />);
+  expect(none.queryByTestId("lens-rail-filters")).toBeNull();
+});

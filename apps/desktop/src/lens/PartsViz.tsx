@@ -104,11 +104,29 @@ function PartBody({
  * `document`: its parts as sections, wiki style — a heading over a rule,
  * no boxes. What other extensions mounted is among them (placed by the
  * catalog) and says whose it is. Sections with nothing to show fold into
- * one closing line (tsk1036).
+ * one closing line. A view document (`viewed`) is given its one section
+ * in view and draws it as the page's body: no heading (the page's title
+ * is the section's), its lens's description as the intro.
  */
-export function DocumentViz(props: PartsVizProps) {
+export function DocumentViz(props: PartsVizProps & { viewed?: boolean }) {
   const runs = usePartRuns(props);
   const { parts, streamId, onOpenPage, params, onSetParam } = props;
+  if (props.viewed) {
+    return (
+      <div data-testid="lens-document">
+        {parts.map((part) => {
+          const run = runs?.get(part.id);
+          const intro = run?.run?.lens.description;
+          return (
+            <div key={part.id} data-testid={`lens-part-${part.id}`}>
+              {intro ? <p className="ox-intro">{intro}</p> : null}
+              <PartBody part={part} run={run} streamId={streamId} onOpenPage={onOpenPage} params={params} onSetParam={onSetParam} />
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
   // A part that needs what isn't active (a link, where the work list keeps
   // none) isn't offered at all, rather than saying what it needs.
   const inactive = new Set(parts.filter((p) => runs?.get(p.id)?.run?.inactive).map((p) => p.id));

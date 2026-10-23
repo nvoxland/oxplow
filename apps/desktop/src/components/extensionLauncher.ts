@@ -6,12 +6,13 @@
 import { useEffect, useState } from "react";
 import { runLens } from "../api.js";
 import type { Extension } from "../tauri-bridge/generated/bindings.js";
-import { lensDirectoryEntries, mergeDirectory } from "../lens/lensModel.js";
-import { refFromTabId } from "../tabs/pageRefs.js";
+import { lensDirectoryEntries, mergeDirectory, viewOptions, viewParam } from "../lens/lensModel.js";
+import { refFromTabId, withResourceParams } from "../tabs/pageRefs.js";
 import type { PageDirectoryEntry } from "./RailHud/sections.js";
 
 export function launcherPages(extensions: Extension[], counts: Record<string, number> = {}): PageDirectoryEntry[] {
   const pages: PageDirectoryEntry[] = [];
+  const lenses = new Map(extensions.flatMap((e) => e.lenses.map((l) => [l.id, l] as const)));
   for (const ext of extensions) {
     if (!ext.enabled) continue;
     for (const page of ext.pages) {
@@ -26,6 +27,22 @@ export function launcherPages(extensions: Extension[], counts: Record<string, nu
         keywords: [page.keywords, ext.name, page.id].filter(Boolean).join(" "),
         ...(badge ? { badge } : {}),
       });
+      // A view document's page lists each of its other sections too, by
+      // name ("Settings: Agents"), opening on it.
+      const lens = page.body.kind === "lens" ? lenses.get(page.body.lens) : undefined;
+      const view = lens ? viewParam(lens) : null;
+      if (!lens || !view) continue;
+      for (const section of viewOptions(lens)) {
+        if (section.id === view.default) continue;
+        const at = withResourceParams(ref, {}, { [view.name]: section.id });
+        pages.push({
+          id: at.id,
+          label: `${page.title}: ${section.label}`,
+          ref: at,
+          category: page.category,
+          keywords: [page.keywords, ext.name, page.id, section.label].filter(Boolean).join(" "),
+        });
+      }
     }
   }
   return [...pages, ...lensDirectoryEntries(extensions)];

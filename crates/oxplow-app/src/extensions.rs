@@ -968,7 +968,9 @@ pub struct LensGroup {
 
 /// A value the viewer (or an agent) can set when running the lens,
 /// bound into the query as `:name`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
+)]
 #[serde(deny_unknown_fields)]
 pub struct LensParam {
     pub name: String,
@@ -1187,7 +1189,17 @@ fn range_ends(value: &str, now: time::OffsetDateTime) -> Option<(Option<String>,
 fn param_problem(lens: &Lens) -> Option<String> {
     lens.params.iter().find_map(|p| {
         let kind = p.kind();
-        let problem = if p.role == Some(ParamRole::Selection) {
+        // A document's view param is a choice of its sections, checked by
+        // `view_problem`: its options aren't filled until mounts are placed.
+        if lens.view.as_deref() == Some(p.name.as_str()) {
+            return None;
+        }
+        let problem = if RESERVED_VIEW_KEYS.contains(&p.name.as_str()) {
+            Some(format!(
+                "`{0}` is the page's view key (`#{0}=`): rename the param",
+                p.name
+            ))
+        } else if p.role == Some(ParamRole::Selection) {
             Some(
                 "`role: selection` follows from the columns (a param a column `select`s is \
                  one); leave it out"
@@ -1221,6 +1233,80 @@ fn param_problem(lens: &Lens) -> Option<String> {
         };
         problem.map(|why| format!("param `{}`: {why}", p.name))
     })
+}
+
+/// The keys of a page's `#` view that are the page's, never a lens
+/// param's: `section`, the section a link lands on. (`comment` is the
+/// page's only on a page that takes comments; the Comments lenses pick a
+/// comment by that name.)
+pub const RESERVED_VIEW_KEYS: &[&str] = &["section"];
+
+/// What's wrong with a lens's `view`: it is a document's, names a declared
+/// param that rides in the `#` (a `filter`) as a choice of the sections
+/// (no `options` of its own), and starts on one of its own sections.
+fn view_problem(lens: &Lens) -> Option<String> {
+    let name = lens.view.as_deref()?;
+    if lens.viz != LensViz::Document {
+        return Some("`view` is for a document".into());
+    }
+    let Some(p) = lens.params.iter().find(|p| p.name == name) else {
+        return Some(format!(
+            "`view` names param `{name}`, which the lens doesn't declare"
+        ));
+    };
+    if p.role != Some(ParamRole::Filter) {
+        return Some(format!(
+            "`view` param `{name}` rides in the `#`: leave `role` out or say `filter`"
+        ));
+    }
+    if p.kind != Some(ParamType::Choice) {
+        return Some(format!(
+            "`view` param `{name}` is a choice of the sections: leave `type` out"
+        ));
+    }
+    if !p.options.is_empty() || p.options_from.is_some() || !p.presets.is_empty() {
+        return Some(format!(
+            "`view` param `{name}`: the sections are its choices, not `options`"
+        ));
+    }
+    let Some(default) = &p.default else {
+        return Some(format!(
+            "`view` param `{name}` needs a `default`: the section shown first"
+        ));
+    };
+    let shown = match default {
+        SqlCell::Text(t) => t.clone(),
+        other => format!("{other:?}"),
+    };
+    if !lens
+        .parts
+        .iter()
+        .any(|part| matches!(default, SqlCell::Text(t) if *t == part.id))
+    {
+        return Some(format!(
+            "`view` param `{name}`'s default `{shown}` isn't a section"
+        ));
+    }
+    None
+}
+
+/// `params` with a document's view param (`view: <name>`) a `filter`
+/// choice when it doesn't say otherwise: its choices are the sections,
+/// filled once mounts are placed ([`fill_view_options`]).
+fn view_param(params: Vec<LensParam>, view: Option<&str>) -> Vec<LensParam> {
+    params
+        .into_iter()
+        .map(|p| {
+            if Some(p.name.as_str()) != view {
+                return p;
+            }
+            LensParam {
+                kind: Some(p.kind.unwrap_or(ParamType::Choice)),
+                role: Some(p.role.unwrap_or(ParamRole::Filter)),
+                ..p
+            }
+        })
+        .collect()
 }
 
 /// `params` with each one's type written out, so a page never infers it.
@@ -1311,6 +1397,11 @@ struct LensFile {
     /// extension, or `<ext>/<slug>`) or markdown.
     #[serde(default)]
     sections: Vec<PartFile>,
+    /// For `document`: the param whose value names the one section in
+    /// view (a filter whose choices are the sections); the others are the
+    /// page's rail.
+    #[serde(default)]
+    view: Option<String>,
     /// For `dashboard`: its tiles.
     #[serde(default)]
     tiles: Vec<PartFile>,
@@ -2445,6 +2536,10 @@ pub struct Lens {
     /// For `document` its sections, for `dashboard` its tiles: its own,
     /// then what other extensions mount, placed by their `at`.
     pub parts: Vec<LensPart>,
+    /// For `document`: the param whose value names the one section in
+    /// view. It is a `filter` choice whose options are the sections (its
+    /// own and mounted ones, filled once mounts are placed).
+    pub view: Option<String>,
     /// Launcher section; `None` = "Lenses".
     pub launcher_category: Option<LauncherCategory>,
     /// Not listed in the launcher.
@@ -2469,6 +2564,26 @@ impl Lens {
     /// tiles).
     pub fn part_lenses(&self) -> impl Iterator<Item = &str> {
         self.parts.iter().filter_map(|p| p.lens.as_deref())
+    }
+
+    /// The parts a run with `params` shows: a view document's one section
+    /// in view (its view param's value, else its default), every part of
+    /// any other lens. What its text resolves and renders, so the two stay
+    /// in step; the desktop's `viewedParts` is the same rule.
+    pub fn viewed_parts(&self, params: &BTreeMap<String, SqlCell>) -> Vec<&LensPart> {
+        let Some(view) = &self.view else {
+            return self.parts.iter().collect();
+        };
+        let default = self
+            .params
+            .iter()
+            .find(|p| &p.name == view)
+            .and_then(|p| p.default.clone());
+        let id = match params.get(view).cloned().or(default) {
+            Some(SqlCell::Text(t)) => t,
+            _ => return Vec::new(),
+        };
+        self.parts.iter().filter(|p| p.id == id).collect()
     }
 }
 
@@ -2960,6 +3075,9 @@ pub(super) fn resolve_catalog(
             }
         }
         ext.lenses.retain(|l| !bad.contains(&l.id));
+    }
+    refuse_part_cycles(&mut out);
+    for ext in &mut out {
         ext.contributions.retain(|descriptor| {
             descriptor.id.kind != oxplow_domain::contribution::ContributionKind::Lens
                 || ext
@@ -3002,8 +3120,79 @@ pub(super) fn resolve_catalog(
         })
         .collect();
     place_lens_mounts(&mut out);
+    fill_view_options(&mut out);
     warn_unread_row_columns(&mut out);
     out
+}
+
+/// Refuse the lenses whose parts lead back to themselves (A's section is
+/// B, B's is A): a page would hold itself without end. Each lens on a
+/// cycle is an error of its extension and is dropped.
+fn refuse_part_cycles(out: &mut [Extension]) {
+    let parts: BTreeMap<String, Vec<String>> = out
+        .iter()
+        .flat_map(|e| e.lenses.iter())
+        .map(|l| (l.id.clone(), l.part_lenses().map(str::to_string).collect()))
+        .collect();
+    // Whether `from` reaches `to` through parts, never walking a lens twice.
+    let reaches = |from: &str, to: &str| -> bool {
+        let mut seen = std::collections::BTreeSet::new();
+        let mut stack = vec![from.to_string()];
+        while let Some(at) = stack.pop() {
+            for next in parts.get(&at).into_iter().flatten() {
+                if next == to {
+                    return true;
+                }
+                if seen.insert(next.clone()) {
+                    stack.push(next.clone());
+                }
+            }
+        }
+        false
+    };
+    let cyclic: Vec<String> = parts.keys().filter(|id| reaches(id, id)).cloned().collect();
+    for ext in out.iter_mut() {
+        for l in ext.lenses.iter().filter(|l| cyclic.contains(&l.id)) {
+            ext.errors.push(format!(
+                "{}: its parts lead back to `{}`; a page can't hold itself",
+                l.origin.running, l.id
+            ));
+        }
+        ext.lenses.retain(|l| !cyclic.contains(&l.id));
+    }
+}
+
+/// A view document's view param takes its sections as its choices, its
+/// own and the mounted ones: each part's id, labelled by its title, else
+/// its lens's title, else its id. Replaced, never added to: a catalog is
+/// resolved again from resolved extensions.
+fn fill_view_options(out: &mut [Extension]) {
+    let titles: BTreeMap<String, String> = out
+        .iter()
+        .flat_map(|e| e.lenses.iter())
+        .map(|l| (l.id.clone(), l.title.clone()))
+        .collect();
+    for lens in out.iter_mut().flat_map(|e| e.lenses.iter_mut()) {
+        let Some(view) = lens.view.clone() else {
+            continue;
+        };
+        let options: Vec<LensParamOption> = lens
+            .parts
+            .iter()
+            .map(|part| LensParamOption {
+                value: part.id.clone(),
+                label: part
+                    .title
+                    .clone()
+                    .filter(|t| !t.is_empty())
+                    .or_else(|| part.lens.as_ref().and_then(|l| titles.get(l).cloned()))
+                    .unwrap_or_else(|| part.id.clone()),
+            })
+            .collect();
+        if let Some(p) = lens.params.iter_mut().find(|p| p.name == view) {
+            p.options = options;
+        }
+    }
 }
 
 /// A composite's row names a value its parts take as params: one none of
@@ -3069,12 +3258,20 @@ fn warn_unread_row_columns(out: &mut [Extension]) {
 /// the lens's page, its text and `get_lens` all show it. A bad one is an
 /// error of the extension that mounts it, and goes.
 fn place_lens_mounts(out: &mut [Extension]) {
+    // A catalog resolved again from resolved extensions places its mounts
+    // afresh: the ones placed before go first.
+    for lens in out.iter_mut().flat_map(|e| e.lenses.iter_mut()) {
+        lens.parts.retain(|p| p.from.is_none());
+    }
     struct Target {
         params: Vec<String>,
         /// The names of its query's row (`columns:`), given to its parts.
         row: Vec<String>,
         kind: PartsKind,
         ids: Vec<String>,
+        /// A view document: each section is a page of its own, so a mount
+        /// needn't read any of the document's params.
+        view: bool,
     }
     let targets: BTreeMap<String, Target> = out
         .iter()
@@ -3092,6 +3289,7 @@ fn place_lens_mounts(out: &mut [Extension]) {
                     row: l.columns.iter().map(|c| c.key.clone()).collect(),
                     kind,
                     ids: l.parts.iter().map(|p| p.id.clone()).collect(),
+                    view: l.view.is_some(),
                 },
             ))
         })
@@ -3127,8 +3325,15 @@ fn place_lens_mounts(out: &mut [Extension]) {
                     },
                 )),
                 Some(t) => {
-                    let params: Vec<&str> = t.params.iter().map(String::as_str).collect();
-                    let row: Vec<&str> = t.row.iter().map(String::as_str).collect();
+                    fn offered(names: &[String], view: bool) -> Vec<&str> {
+                        if view {
+                            Vec::new()
+                        } else {
+                            names.iter().map(String::as_str).collect()
+                        }
+                    }
+                    let params = offered(&t.params, t.view);
+                    let row = offered(&t.row, t.view);
                     let ids: Vec<&str> = t.ids.iter().map(String::as_str).collect();
                     mount_problem(mount, lens, &params, &row, kind, &ids)
                 }
@@ -4318,7 +4523,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                 description: l.description,
                 query: l.query,
                 viz: l.viz,
-                params: typed(l.params),
+                params: typed(view_param(l.params, l.view.as_deref())),
                 columns: l.columns,
                 empty: l.empty,
                 chart: l.chart,
@@ -4336,6 +4541,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                 emphasis: l.emphasis,
                 depth: l.depth,
                 parts,
+                view: l.view,
                 launcher_category: l.launcher.map(|la| la.category),
                 hidden: l.hidden,
                 actions,
@@ -5381,6 +5587,9 @@ fn tile_problem(lens: &Lens) -> Option<String> {
 /// A document's or dashboard's part naming a lens of its own extension
 /// that isn't there (another extension's resolves with the catalog).
 fn parts_problem(lens: &Lens, ids_in_extension: &[String]) -> Option<String> {
+    if lens.part_lenses().any(|c| c == lens.id) {
+        return Some("a part names the lens itself; a page can't hold itself".into());
+    }
     lens.part_lenses()
         .find(|c| {
             c.split_once('/').map(|(e, _)| e) == Some(lens.extension.as_str())
@@ -5490,6 +5699,7 @@ fn shape_problem(
         })
     };
     if let Some(problem) = row_style_problem(lens)
+        .or_else(|| view_problem(lens))
         .or_else(|| param_problem(lens))
         .or_else(|| highlight_problem(lens))
         .or_else(|| markdown_problem(lens))
@@ -5675,6 +5885,8 @@ fn layout_warnings(lens: &Lens, lenses: &[Lens], renderer: bool) -> Vec<String> 
         .params
         .iter()
         .filter(|p| p.role != Some(ParamRole::Selection) && !contract.contains(&p.name.as_str()))
+        // A view document's view param is its section rail, not a filter.
+        .filter(|p| lens.view.as_deref() != Some(p.name.as_str()))
         .count();
     if filters > MAX_FILTERS {
         out.push(format!(
@@ -5696,13 +5908,24 @@ fn layout_warnings(lens: &Lens, lenses: &[Lens], renderer: bool) -> Vec<String> 
         lens.viz,
         LensViz::Custom | LensViz::Form | LensViz::Approvals
     ) {
-        let queries: Vec<&str> = std::iter::once(lens.query.as_str())
-            .chain(
-                lens.part_lenses()
-                    .filter_map(|id| lenses.iter().find(|l| l.id == id))
-                    .map(|l| l.query.as_str()),
-            )
-            .collect();
+        // Its own query and its parts', through parts that are composites
+        // themselves (a view document's section is often a document).
+        let mut queries: Vec<&str> = vec![lens.query.as_str()];
+        let mut seen: Vec<&str> = vec![lens.id.as_str()];
+        let mut stack: Vec<&Lens> = vec![lens];
+        while let Some(at) = stack.pop() {
+            for part in at
+                .part_lenses()
+                .filter_map(|id| lenses.iter().find(|l| l.id == id))
+            {
+                if seen.contains(&part.id.as_str()) {
+                    continue;
+                }
+                seen.push(part.id.as_str());
+                queries.push(part.query.as_str());
+                stack.push(part);
+            }
+        }
         let templated: Vec<String> = lens
             .actions
             .iter()
@@ -5729,6 +5952,7 @@ fn layout_warnings(lens: &Lens, lenses: &[Lens], renderer: bool) -> Vec<String> 
             let read = |token: &str| queries.iter().any(|q| reads_param(q, token));
             let range = p.kind == Some(ParamType::DateRange);
             if !(read(&p.name)
+                || lens.view.as_deref() == Some(p.name.as_str())
                 || contract.contains(&p.name.as_str())
                 || range && (read(&format!("{}_from", p.name)) || read(&format!("{}_to", p.name)))
                 || templated.contains(&p.name)
@@ -5751,7 +5975,8 @@ fn layout_warnings(lens: &Lens, lenses: &[Lens], renderer: bool) -> Vec<String> 
             "the description is {described} characters — keep it to a sentence or two; put the rest in a markdown section"
         ));
     }
-    if lens.viz == LensViz::Document && lens.parts.len() > MAX_SECTIONS {
+    // A view document shows one section at a time; the rest are its rail.
+    if lens.viz == LensViz::Document && lens.view.is_none() && lens.parts.len() > MAX_SECTIONS {
         out.push(format!(
             "{} sections — a page reads best with {MAX_SECTIONS} at most; split it",
             lens.parts.len()
@@ -7059,6 +7284,7 @@ impl Lens {
             emphasis: spec.emphasis.clone(),
             depth: spec.depth.clone(),
             parts: Vec::new(),
+            view: None,
             launcher_category: None,
             hidden: false,
             actions: Vec::new(),
@@ -10001,6 +10227,225 @@ commands:
         assert!(
             errs.contains("nohunks")
                 && errs.contains("`hunks: { path: <column>, from: <column>, to: <column> }`"),
+            "{errs}"
+        );
+    }
+
+    /// A settings-like document: `area` picks the section in view.
+    fn view_doc(extra: &str) -> String {
+        format!(
+            "title: Settings\nparams:\n  - {{ name: area, default: one }}\n{extra}viz: document\nview: area\nsections:\n  - {{ id: one, title: First, lens: a }}\n  - {{ id: two, lens: b }}\n"
+        )
+    }
+
+    /// A document's `view` param is a `filter` choice whose options are its
+    /// sections: each id, labelled by its title, else its lens's.
+    #[test]
+    fn a_view_document_names_a_filter_choice_whose_options_are_its_sections() {
+        let (_d, ext) = load_x(
+            &[
+                ("a", "title: A\nquery: SELECT 1 AS n\n"),
+                ("b", "title: Bee\nquery: SELECT 2 AS n\n"),
+                ("s", &view_doc("")),
+            ],
+            "",
+        );
+        let s = ext
+            .lenses
+            .iter()
+            .find(|l| l.slug == "s")
+            .unwrap_or_else(|| panic!("{:?}", ext.errors));
+        assert_eq!(s.view.as_deref(), Some("area"));
+        let area = s.params.iter().find(|p| p.name == "area").unwrap();
+        assert_eq!(area.role, Some(ParamRole::Filter));
+        assert_eq!(area.kind, Some(ParamType::Choice));
+        let options: Vec<(&str, &str)> = area
+            .options
+            .iter()
+            .map(|o| (o.value.as_str(), o.label.as_str()))
+            .collect();
+        assert_eq!(options, [("one", "First"), ("two", "Bee")]);
+        assert!(area.take(&SqlCell::Text("two".into())).is_ok());
+        assert!(area.take(&SqlCell::Text("nope".into())).is_err());
+    }
+
+    /// `view` is a document's, names a declared filter choice with no
+    /// options of its own, and starts on one of its sections.
+    #[test]
+    fn a_view_is_refused_off_a_document_or_mis_declared() {
+        let a = ("a", "title: A\nquery: SELECT 1 AS n\n");
+        let b = ("b", "title: B\nquery: SELECT 2 AS n\n");
+        let doc = |params: &str| {
+            format!(
+                "title: S\nparams:\n{params}viz: document\nview: area\nsections:\n  - {{ id: one, lens: a }}\n  - {{ id: two, lens: b }}\n"
+            )
+        };
+        let cases = [
+            ("table", "title: T\nparams: [{ name: area, default: x }]\nquery: SELECT :area AS a\nview: area\n".to_string(), "`view` is for a document"),
+            ("undeclared", doc("  - { name: q, default: \"\" }\n"), "`view` names param `area`, which the lens doesn't declare"),
+            ("resource", doc("  - { name: area, role: resource, default: one }\n"), "`view` param `area` rides in the `#`: leave `role` out or say `filter`"),
+            ("text", doc("  - { name: area, type: text, default: one }\n"), "`view` param `area` is a choice of the sections: leave `type` out"),
+            ("options", doc("  - { name: area, default: one, options: [{ value: one, label: One }] }\n"), "`view` param `area`: the sections are its choices, not `options`"),
+            ("nodefault", doc("  - { name: area }\n"), "`view` param `area` needs a `default`: the section shown first"),
+            ("baddefault", doc("  - { name: area, default: three }\n"), "`view` param `area`'s default `three` isn't a section"),
+        ];
+        let mut files = vec![a, b];
+        files.extend(cases.iter().map(|(slug, body, _)| (*slug, body.as_str())));
+        let (_d, ext) = load_x(&files, "");
+        let errs = ext.errors.join("\n");
+        for (slug, _, says) in &cases {
+            assert!(ext.lenses.iter().all(|l| l.slug != *slug), "{slug} loaded");
+            assert!(
+                errs.lines()
+                    .any(|l| l.contains(&format!("{slug}.yaml")) && l.contains(says)),
+                "{slug}: {errs}"
+            );
+        }
+    }
+
+    /// A section another extension mounts is one of the view's choices,
+    /// and it needn't read the document's params: each section of a view
+    /// document is a page of its own.
+    #[test]
+    fn a_view_documents_options_include_mounted_sections_and_take_parameterless_mounts() {
+        let (_d, ext) = load_x(
+            &[
+                ("a", "title: A\nquery: SELECT 1 AS n\n"),
+                ("b", "title: B\nquery: SELECT 2 AS n\n"),
+                ("more", "title: More Things\nquery: SELECT 3 AS n\n"),
+                (
+                    "s",
+                    &view_doc("  - { name: q, type: search, role: filter, default: \"\" }\n"),
+                ),
+            ],
+            "ui:\n  slots:\n    - { slot: x/s.sections, lens: more, at: { after: one } }\n",
+        );
+        assert!(ext.errors.is_empty(), "{:?}", ext.errors);
+        let s = ext.lenses.iter().find(|l| l.slug == "s").unwrap();
+        let area = s.params.iter().find(|p| p.name == "area").unwrap();
+        let options: Vec<(&str, &str)> = area
+            .options
+            .iter()
+            .map(|o| (o.value.as_str(), o.label.as_str()))
+            .collect();
+        assert_eq!(
+            options,
+            [("one", "First"), ("x/more", "More Things"), ("two", "B")]
+        );
+    }
+
+    /// Resolving a resolved catalog again (a setting turned off) places
+    /// its mounts once, and its view's choices stay the same.
+    #[test]
+    fn a_catalog_resolved_again_places_its_mounts_once() {
+        let (_d, ext) = load_x(
+            &[
+                ("a", "title: A\nquery: SELECT 1 AS n\n"),
+                ("b", "title: B\nquery: SELECT 2 AS n\n"),
+                ("more", "title: More\nquery: SELECT 3 AS n\n"),
+                ("s", &view_doc("")),
+            ],
+            "ui:\n  slots:\n    - { slot: x/s.sections, lens: more }\n",
+        );
+        let mut again = vec![ext.clone()];
+        place_lens_mounts(&mut again);
+        fill_view_options(&mut again);
+        let parts = |e: &Extension| {
+            let s = e.lenses.iter().find(|l| l.slug == "s").unwrap();
+            (
+                s.parts.len(),
+                s.params
+                    .iter()
+                    .find(|p| p.name == "area")
+                    .unwrap()
+                    .options
+                    .len(),
+            )
+        };
+        assert_eq!(parts(&ext), (3, 3));
+        assert_eq!(parts(&again[0]), (3, 3));
+    }
+
+    /// A view document doesn't warn for its view param (read by no query),
+    /// for its sections' count, or for a filter a section two levels down
+    /// reads.
+    #[test]
+    fn a_view_document_warns_for_neither_its_view_nor_its_section_count_and_sees_filters_read_below(
+    ) {
+        let mut files: Vec<(String, String)> = (0..9)
+            .map(|i| {
+                (
+                    format!("l{i}"),
+                    format!("title: L{i}\nquery: SELECT {i} AS n\n"),
+                )
+            })
+            .collect();
+        files.push(("leaf".into(), "title: Leaf\nparams: [{ name: q, type: search, role: filter, default: \"\" }]\nquery: SELECT :q AS n\n".into()));
+        files.push(("inner".into(), "title: Inner\nparams: [{ name: q, type: search, role: filter, default: \"\" }]\nviz: document\nsections: [{ lens: leaf }]\n".into()));
+        let sections: String = (0..9)
+            .map(|i| format!("  - {{ id: s{i}, lens: l{i} }}\n"))
+            .chain(std::iter::once(
+                "  - { id: inner, lens: inner }\n".to_string(),
+            ))
+            .collect();
+        files.push((
+            "s".into(),
+            format!("title: S\nparams:\n  - {{ name: area, default: s0 }}\n  - {{ name: q, type: search, role: filter, default: \"\" }}\nviz: document\nview: area\nsections:\n{sections}"),
+        ));
+        let refs: Vec<(&str, &str)> = files
+            .iter()
+            .map(|(a, b)| (a.as_str(), b.as_str()))
+            .collect();
+        let (_d, ext) = load_x(&refs, "");
+        assert!(ext.errors.is_empty(), "{:?}", ext.errors);
+        let warns: Vec<String> = layout_only(&ext.warnings)
+            .into_iter()
+            .filter(|w| w.contains("s.yaml"))
+            .collect();
+        assert!(warns.is_empty(), "{warns:?}");
+    }
+
+    /// A part that names its own lens, or parts that lead back round, would
+    /// make a page that holds itself: refused.
+    #[test]
+    fn a_part_that_names_its_own_lens_or_a_cycle_is_refused() {
+        let (_d, ext) = load_x(
+            &[
+                ("me", "title: Me\nviz: document\nsections: [{ lens: me }]\n"),
+                (
+                    "ping",
+                    "title: Ping\nviz: document\nsections: [{ lens: pong }]\n",
+                ),
+                (
+                    "pong",
+                    "title: Pong\nviz: document\nsections: [{ lens: ping }]\n",
+                ),
+                ("fine", "title: Fine\nquery: SELECT 1 AS n\n"),
+            ],
+            "",
+        );
+        let errs = ext.errors.join("\n");
+        assert!(errs.contains("a part names the lens itself"), "{errs}");
+        assert!(errs.contains("its parts lead back to `x/ping`"), "{errs}");
+        assert!(errs.contains("its parts lead back to `x/pong`"), "{errs}");
+        let slugs: Vec<&str> = ext.lenses.iter().map(|l| l.slug.as_str()).collect();
+        assert_eq!(slugs, ["fine"]);
+    }
+
+    /// `section` is the page's view key: no lens param may take it.
+    #[test]
+    fn section_is_the_pages_view_key_not_a_param() {
+        let (_d, ext) = load_x(
+            &[(
+                "a",
+                "title: A\nparams: [{ name: section, default: x }]\nquery: SELECT :section AS n\n",
+            )],
+            "",
+        );
+        assert!(ext.lenses.is_empty());
+        let errs = ext.errors.join("\n");
+        assert!(
+            errs.contains("`section` is the page's view key (`#section=`): rename the param"),
             "{errs}"
         );
     }

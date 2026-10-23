@@ -44,6 +44,18 @@ const lenses: Record<string, Lens> = {
   "x/open": { ...base, id: "x/open", slug: "open", title: "Open", viz: "number", params: [{ name: "stream_id", label: null, default: null, options: [] }] } as Lens,
   "x/none": { ...base, id: "x/none", slug: "none", title: "Nothing", viz: "table" } as Lens,
   "x/off": { ...base, id: "x/off", slug: "off", title: "Off", viz: "number" } as Lens,
+  "x/area": { ...base, id: "x/area", slug: "area", title: "Agents", description: "Who runs your threads.", viz: "number" } as Lens,
+  "x/inner": {
+    ...base,
+    id: "x/inner",
+    slug: "inner",
+    title: "Inner",
+    viz: "document",
+    parts: [
+      { id: "first", title: "First", lens: "x/open", markdown: null, size: null, replaceable: null, from: null },
+      { id: "second", title: "Second", lens: "x/area", markdown: null, size: null, replaceable: null, from: null },
+    ],
+  } as Lens,
   "x/cards": { ...base, id: "x/cards", slug: "cards", title: "Cards", viz: "number", params: [{ name: "change_id", label: null, default: null, options: [] }] } as Lens,
   "x/pick": {
     ...base,
@@ -328,4 +340,33 @@ test("a dashboard of row tiles with no rows says its empty line, unless it says 
   view.unmount();
   const quiet = render(<LensResultView run={none("")} streamId="str1" onOpenPage={() => {}} />);
   expect(quiet.queryByTestId("lens-empty")).toBeNull();
+});
+
+test("a section that is a document draws its own sections", async () => {
+  const { getByTestId } = render(<LensResultView run={page("document", [part({ id: "outer", title: "Outer", lens: "x/inner" })])} streamId="str1" onOpenPage={() => {}} />);
+  await waitFor(() => expect(getByTestId("lens-part-second").textContent).toContain("7"));
+  const outer = getByTestId("lens-part-outer");
+  expect(outer.querySelector("[data-section=first]")).toBeTruthy();
+  expect(outer.querySelector("[data-section=second] h2")!.textContent).toContain("Second");
+});
+
+test("a view document runs and draws only its section in view, bare, under its lens's description", async () => {
+  const doc = {
+    lens: {
+      ...base,
+      viz: "document",
+      view: "area",
+      params: [{ name: "area", label: null, default: "overview", options: [{ value: "overview", label: "Every Setting" }, { value: "agents", label: "Agents" }], type: "choice", role: "filter", presets: [] }],
+      parts: [part({ id: "overview", title: "Every Setting", lens: "x/open" }), part({ id: "agents", title: "Agents", lens: "x/area" })],
+    },
+    params: { area: "agents" },
+    result: { columns: [], rows: [], truncated: false },
+  } as unknown as LensRun;
+  const { getByTestId, queryByTestId } = render(<LensResultView run={doc} streamId="str1" onOpenPage={() => {}} />);
+  await waitFor(() => expect(getByTestId("lens-part-agents").textContent).toContain("7"));
+  const agents = getByTestId("lens-part-agents");
+  expect(agents.querySelector("h2")).toBeNull();
+  expect(agents.querySelector(".ox-intro")!.textContent).toBe("Who runs your threads.");
+  expect(queryByTestId("lens-part-overview")).toBeNull();
+  expect(runs.map((r) => r.id)).toEqual(["x/area"]);
 });

@@ -56,6 +56,7 @@ import {
   drawnTreeRows,
   treemapItems,
   partParams,
+  viewedParts,
   codeRows,
   diffRow,
   type DisplayColumn,
@@ -484,7 +485,18 @@ function LensBody(props: LensResultViewProps & { actions?: LensActionsState; mar
   // one row its parts are given (`partParams`). Each is its own component
   // so the row views' hooks always run in the same order.
   if (run.lens.viz === "document") {
-    return <DocumentViz parts={run.lens.parts} params={run.params} given={partParams(run)} streamId={streamId} onOpenPage={onOpenPage} onSetParam={props.onSetParam} />;
+    // A view document shows the one section in view (`viewedParts`).
+    return (
+      <DocumentViz
+        parts={viewedParts(run.lens, run.params)}
+        viewed={!!run.lens.view}
+        params={run.params}
+        given={partParams(run)}
+        streamId={streamId}
+        onOpenPage={onOpenPage}
+        onSetParam={props.onSetParam}
+      />
+    );
   }
   if (run.lens.viz === "dashboard") {
     return <DashboardViz run={run} actions={props.actions} parts={run.lens.parts} params={run.params} given={partParams(run)} streamId={streamId} onOpenPage={onOpenPage} onSetParam={props.onSetParam} />;

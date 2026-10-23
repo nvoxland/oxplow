@@ -72,12 +72,17 @@ markdown itself, nor edits it in a `<textarea>`.
 - **A long page splits into pages, and a link lands on its section.**
   Settings is a Document page per area (`pages/settingsAreas.ts`:
   overview, Agents, Language Servers, Extensions, Data, Integrations, AI),
-  each its own URI (`settingsRef(area, section)` → `oxplow:oxplow/page?page=settings&area=…`),
+  each its own URI (`settingsRef(area, section)` → `oxplow:oxplow/page?page=settings#area=…`),
   sharing a rail that lists the areas; the launcher lists each area by
   name ("Settings: Agents"). A link that means one place opens its area
   with `section` — one of the area's section ids or an anchor inside one
   (`settings-data-delivery`) — and the page scrolls there. A document of
-  four sections or more lists them in its rail (`DocumentLayout`). A page that shows state from outside any model
+  four sections or more lists them in its rail (`DocumentLayout`; on a
+  lens page, Contents). A declared document does the same with `view:
+  <param>`: the one section in view is the page, the others are its rail,
+  a change of section is pushed (Back returns), and the launcher lists
+  each section by name. On any lens page `#section=<id>` lands on that
+  section. A page that shows state from outside any model
   refreshes on the event that says it changed (Integrations on
   `configChanged` and `credentialChanged`, Data on `extensionsChanged`). Integrations
   also re-reads when an instance's health is recorded (`v_contribution_health`,

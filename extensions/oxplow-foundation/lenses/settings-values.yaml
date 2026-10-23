@@ -44,7 +44,7 @@ query: |
          shown AS value, doc,
          CASE WHEN area IS NULL THEN NULL ELSE 'Change It Here' END AS control,
          CASE WHEN area IS NULL THEN NULL
-              ELSE 'oxplow:oxplow/page?area=' || area || '&page=settings' END AS control_page,
+              ELSE 'oxplow:oxplow/page?page=settings#area=' || area END AS control_page,
          'Change the setting `' || key || '`'
            || CASE WHEN origin = 'extension' AND extension IS NOT NULL THEN ' from the `' || extension || '` extension' ELSE '' END
            || ' — ' || CASE WHEN doc IS NULL OR doc = '' THEN 'no description' ELSE doc END

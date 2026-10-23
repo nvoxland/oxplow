@@ -2245,12 +2245,52 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   names are not params of the resource. A part lens of its own extension must exist at load
   (`parts_problem`); another extension's resolves with the catalog, and a
   missing one drops the composite. `lens_text` renders a composite as a
-  `###` section per part. A standalone spec can't be either
+  `###` section per part (a view document: the section in view). A standalone spec can't be either
   (`spec_problem`). The UI draws a document as kit `Section`s (empty ones
   fold into one "Nothing found" line; a form part never does: it has no
   rows of its own) and a dashboard as a kit `TileGrid`
   (`lens/PartsViz.tsx`), running every part together and re-running all of
-  them on any part's reads (`useLensRuns`).
+  them on any part's reads (`useLensRuns`). A part may be a composite
+  itself (a document section that is a document): it draws, and its text
+  reads, as its own sections (`lens_text::Resolved.children` carry each
+  child's own resolution). A part that names its own lens, or parts that
+  lead back round (A's section is B, B's is A), are refused at load
+  (`parts_problem`, `refuse_part_cycles`).
+- **A document with a view: `view: <param>`.** A document whose param
+  names the one section in view (Settings: `view: area`, a section per
+  area). Only that section runs and draws, as the page's body: no heading,
+  its lens's `description` as the intro, the page's h1 the section's
+  title, its tab `<page>: <section>` off the first section. The other
+  sections are the page's rail (`lens-view-<id>` links, the one in view
+  `aria-current`); a change of section is pushed (Back returns), like a
+  pick. The param rides in the `#` and is a `choice` whose options are the
+  sections, its own and mounted ones: the loader makes it a `filter`
+  choice when it doesn't say otherwise (`view_param`), refuses `options` /
+  `options_from` on it, a `default` that isn't one of its own sections, a
+  `role` other than `filter` and a `type` other than `choice`
+  (`view_problem`), and fills its options once mounts are placed (value
+  the part id, label its title, else its lens's: `fill_view_options`,
+  replaced on each resolve). A run naming no section is refused as any
+  choice is. A mount at a view document's `.sections` slot is a section
+  of its own and needn't read the document's params (`mount_problem`
+  gets none to check); the view param isn't "read by any query", isn't
+  counted among the filters, and the section count doesn't warn
+  (`layout_warnings`, which also counts a filter a section reads two
+  levels down). Filters: the view document declares every filter its
+  sections take (`q` for Settings' overview); its rail offers one only
+  while the section in view declares a param of that name
+  (`offeredFilters`). Its page lists each section but the first in the
+  launcher as `<page>: <section>` at `#<view>=<id>` (`launcherPages`). Its
+  text is one line naming the sections (the one in view in bold) and how
+  to read another, then the section in view (`Lens::viewed_parts`, the
+  desktop's `viewedParts`: the same rule for what resolves and renders).
+- **`#section=<id>` lands on a section.** On any lens page, `section` is
+  the page's view key, never a lens param (`RESERVED_VIEW_KEYS`; a param
+  so named is refused): it is left out of the run, and once the body has
+  drawn the page scrolls to `[data-section="<id>"]` (kit `Section` sets
+  it, nested documents too). A page's Contents lists its sections'
+  headings once it has four or more, after and among its markdown
+  headings (`lens/Contents.tsx`).
 - **A lazy tree: `tree.lazy: <param>`, `tree.branch: <column>`.** A tree
   whose run is one level (a folder of `v_workspace_file`, which reads one
   folder for `parent = :folder` and walks the worktree otherwise): `lazy`
@@ -4830,7 +4870,7 @@ What moves out of core, and what it becomes:
 | Board page | **done:** the `board` document, one `replaceable: work_item.board` part `board-cards` (`viz: board` grouped by state, a `drag: true` move action and `Move to` row actions); `scope` comes from the page's `show` filter through the document's query row. Cards show the declared enum fields as text (no `FieldBadge` colours). `BoardPage` and `WorkBoard` are gone; a right-click anywhere on a lens row, a link in it included, opens the row's menu (`onContextMenuCapture`) |
 | Settings → AI | **done:** foundation lenses in `settings.ai.sections`: `ai-providers` (`v_ai_provider`; Test… and Remove… row actions, Remove asks first), `ai-provider-form` (a `form` lens over `oxplow.ai.set_provider`, its `key` a `secret: true` field, `kind` chosen from `v_capability_provider`), `ai-roles` (`v_ai_role`; Assign… / Unassign over `oxplow.ai.set_role`), `ai-calls` (the last 7 days of `v_ai_call`). `set_provider` and `remove_provider` now announce `ConfigChanged` so the lists follow. `AiSection`, `aiSettingsModel` and the AI `api.ts` wrappers are gone |
 | Settings → Agents | **done:** foundation lenses in `settings.agents.sections`: `agents-list` (the harnesses from `v_agent_harness`; Enable / Disable / Move Up / Move Down each hand `oxplow.agent.set_agents` the whole new order, built in SQL and bound with `{{row.x|json}}`), `agents-settings` (the declared settings, `v_agent_harness.settings` (v2) joined with `agentConfig`, a `Change…` form over `oxplow.agent.set_setting`), `agents-new-thread` (`personal.newThreadSession`, `Use This` on `oxplow.config.set` / `unset`, which ask first), `agents-prompt` (an edit form over the new `oxplow.agent.set_prompt_append`). No page-wide Save: each part saves itself. `AgentPicker`, `NewThreadSessionSetting` and the Agents form are gone |
-| Settings → Overview and Language Servers | **done:** the areas have no React sections; oxplow-foundation mounts lenses in their slots. Overview: `settings-proposals` (the `approvals` viz) and `settings-values` (a grouped `list` over `v_config_value`: its source, value, doc, Ask the Agent to Change This through `oxplow.agent.draft`, and Change It Here — a link to the area that holds a setting's control; the page's search is the slot param `q`, which the lens reads as `:q`). Language servers: `lsp-servers` (`v_lsp_server`, a row per stream a server runs in; Restart and Remove through `oxplow.lsp.restart_server` / `remove_server`), `lsp-install` (a form over `oxplow.lsp.install_server`) and `lsp-suggestions` (the curated Mason packages for languages with no server). The shell (`SettingsPage`, the rail, the other areas) stays until they convert |
+| Settings → Overview and Language Servers | **done:** the areas have no React sections; oxplow-foundation mounts lenses in their slots. Overview: `settings-proposals` (the `approvals` viz) and `settings-values` (a grouped `list` over `v_config_value`: its source, value, doc, Ask the Agent to Change This through `oxplow.agent.draft`, and Change It Here — a link to the area that holds a setting's control; the page's search is the slot param `q`, which the lens reads as `:q`). Language servers: `lsp-servers` (`v_lsp_server`, a row per stream a server runs in; Restart and Remove through `oxplow.lsp.restart_server` / `remove_server`), `lsp-install` (a form over `oxplow.lsp.install_server`) and `lsp-suggestions` (the curated Mason packages for languages with no server). The shell (`SettingsPage`, the rail, the other areas) stays until they convert. Then the page becomes a foundation view document (`view: area`, a document lens per area whose sections are the lenses mounted in these slots today, which then move to `oxplow-foundation/settings-<area>.sections`; a new area mounts at `oxplow-foundation/settings.sections`); the core it needs — the view, `#section=` landing, launcher entries per section, nested documents — has landed. Links to an area put it in the `#`: `oxplow:oxplow/page?page=settings#area=agents` |
 | Settings → Extensions health and credentials | **done:** foundation lenses in `settings.extensions.sections`: `extensions-health` (`v_contribution_health`, grouped by extension; Enable Again, Repair with the Agent through `oxplow.agent.draft`, Enable All Disabled), `extensions-credentials` (the credentials collectors declare, once per extension; Set… and Clear through `oxplow.collector.set_credential`) and `extensions-secrets` (`v_extension_secret`; Set… and Revoke). The per-extension Enable All button is gone (the all button stays); `ExtensionsSection`, `HealthRow`, `SecretRow` and the `save_extension_secret`, `extension_secret_is_set`, `revoke_extension_secret` and `set_credential` IPCs are deleted; `EnableAllButton` and `CredentialRow` (provider instances) moved to their own files for Settings → Data and Integrations |
 | Rail panels: Comments, Work, Uncommitted, Go To | **done:** Go To (`go-to`, the thread's bookmarks then its recent or most visited pages through the `mode` choice param, `go-to-bookmarks` collapsed — needing bookmarks as project data (`v_bookmark`), lens param `options` and page-kind icons; the rail has no core panels left); Comments (`comments`, a panel `open`ing the inbox) and Work (`work` grouped over the `thread_work` model, which also lists the thread's unlinked efforts — open under In progress, closed under Finished, whose header opens the `thread-activity` lens of the thread's turns by effort — `work-line` collapsed, `work-count`, the `clear_finished` command + `finished_cleared` model); and Uncommitted (`uncommitted`, a tree over the working change's stage-one file list, which change analysis now keeps current on every move). Only the UI moves: stores, commands and views stay core. What Work needed and lenses lacked became general features, listed under "Added for extraction" — the pattern for any panel an extension builds |
 | The effort-close inference of unrecorded decisions and of the claims an agent's answers made (the `effort.decisions` reactor) | **done:** the AI profile `reasoning` (fallback `main`), the job `reasoning`, the command `oxplow.effort.infer_reasoning` and the effects `infer-reasoning` / `store-reasoning`, writing through core's `oxplow.effort.replace_inferred_decisions` and `oxplow.effort.replace_inferred_claims`; review and storage stay core ([ai-providers.md](./ai-providers.md) "Inferred reasoning") |

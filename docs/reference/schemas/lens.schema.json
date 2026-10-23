@@ -200,6 +200,14 @@
         "$ref": "#/definitions/PartFile"
       }
     },
+    "view": {
+      "description": "For `document`: the param whose value names the one section in\nview (a filter whose choices are the sections); the others are the\npage's rail.",
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null
+    },
     "tiles": {
       "description": "For `dashboard`: its tiles.",
       "type": "array",
