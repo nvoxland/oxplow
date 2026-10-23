@@ -4,14 +4,16 @@ import { useHistoryState } from "../tabs/useHistoryState.js";
 import { useOptionalPageNavigation, usePageTitle } from "../tabs/PageNavigationContext.js";
 import type { TabRef } from "../tabs/tabState.js";
 import type { Stream } from "../tauri-bridge/index.js";
-import { querySql, runLens, type LensRun, type SqlCell } from "../api.js";
+import { getLens, querySql, runLens, type LensRun, type SqlCell } from "../api.js";
 import { lensRef, withResourceParams } from "../tabs/pageRefs.js";
 import { getPageDetailStore } from "../tabs/openPageDetail.js";
 import { insertIntoAgent } from "../agent-input-bus.js";
 import { formatContextMention } from "../agent-context-ref.js";
 import { pageView, shellView, withRenderedParams } from "./renderers.js";
 import { rowRecord } from "../lens/lensActions.js";
-import { changedParams, lensViewChange, misplacedViewParams } from "../lens/lensModel.js";
+import { changedParams, lensViewChange, misplacedViewParams, viewOptions, viewParam, viewedParts } from "../lens/lensModel.js";
+import { RailGroup } from "../kit/RailGroup.js";
+import type { Lens } from "../tauri-bridge/generated/bindings.js";
 import { useHostedView } from "../lens/hostedView.js";
 import { NO_READS, useRerunOnChange } from "../lens/lensRerun.js";
 import { useRequestGuard } from "../request-guard.js";
@@ -77,7 +79,9 @@ export function LensPage({ lensId, params, title: pageTitle, titleFrom, stream, 
   // lens param.
   // `#comment=<id>` on a page that takes comments asks them to reveal that
   // one (the Comments inbox's Go to); it is the page's, not a lens param.
-  const shown = pageView(nav?.viewParams ?? NO_PARAMS);
+  // `#section=<id>` is the page's on any lens page: the section a link
+  // lands on, scrolled to once the body has drawn — never a lens param.
+  const { section: landOn, ...shown } = pageView(nav?.viewParams ?? NO_PARAMS);
   const { comment: revealComment, ...withoutComment } = shown;
   const view = comments ? withoutComment : shown;
   const revealId = comments && typeof revealComment === "string" && revealComment !== "" ? revealComment : null;
@@ -118,8 +122,16 @@ export function LensPage({ lensId, params, title: pageTitle, titleFrom, stream, 
 
   const lens = run?.lens ?? null;
   const oneRow = run && run.result.rows.length === 1 ? rowRecord(run.result.columns, run.result.rows[0]!) : null;
-  const title = (oneRow && titleFrom ? titleFrom(oneRow) : null) || (pageTitle ?? lens?.title ?? lensId);
-  usePageTitle(title);
+  const named = (oneRow && titleFrom ? titleFrom(oneRow) : null) || (pageTitle ?? lens?.title ?? lensId);
+  // A view document's page is named for the section in view: its heading
+  // is the section's, its tab says "Page: Section" off the first one.
+  const sections = lens ? viewOptions(lens) : NO_SECTIONS;
+  const viewedPart = lens && run ? (viewedParts(lens, run.params)[0] ?? null) : null;
+  const viewedLens = useLensOf(viewedPart?.lens ?? null);
+  const viewing = viewedPart ? sections.find((o) => o.id === viewedPart.id) : undefined;
+  const firstSection = lens ? viewParam(lens)?.default : null;
+  const title = viewing?.label ?? named;
+  usePageTitle(viewing && viewing.id !== firstSection ? `${named}: ${viewing.label}` : named);
 
   // Publish this lens's live params, under the id its tab shows, so an
   // agent asking "what am I looking at" (`get_open_page`) re-runs it with
@@ -189,8 +201,29 @@ export function LensPage({ lensId, params, title: pageTitle, titleFrom, stream, 
   });
   const outOfDate = useOutOfDate(lens?.origin.extension ?? null, lens?.origin.deployment ?? null);
   const rightRail = lens ? (
-    <LensRail lens={lens} values={run?.params ?? {}} picked={picked} outOfDate={outOfDate} onApply={setParam} onOpenPage={onOpenPage} fixed={renders ? RENDERED : undefined} streamId={streamId} />
+    <LensRail lens={lens} values={run?.params ?? {}} picked={picked} outOfDate={outOfDate} onApply={setParam} onOpenPage={onOpenPage} fixed={renders ? RENDERED : undefined} streamId={streamId} viewed={viewedLens} />
   ) : undefined;
+  // A view document's sections, each a link to it; the one in view marked.
+  const sectionRail =
+    lens?.view && sections.length > 0 ? (
+      <RailGroup title={named} testId="lens-view-sections">
+        <nav aria-label={named} className="ox-contents">
+          {sections.map((o) => (
+            <button
+              key={o.id}
+              type="button"
+              className="ox-contents-item"
+              data-testid={`lens-view-${o.id}`}
+              aria-current={o.id === viewedPart?.id ? "page" : undefined}
+              data-active={o.id === viewedPart?.id ? "true" : undefined}
+              onClick={() => setParam(lens.view!, o.id)}
+            >
+              {o.label}
+            </button>
+          ))}
+        </nav>
+      </RailGroup>
+    ) : null;
 
   // Comments are the page's when it declares them, on its URI (its tab's
   // identity): the nav bar steps through them, its vizes anchor them, and
@@ -205,9 +238,26 @@ export function LensPage({ lensId, params, title: pageTitle, titleFrom, stream, 
   const rail = rightRail ? (
     <>
       <Contents root={body} />
+      {sectionRail}
       {rightRail}
     </>
   ) : undefined;
+  // A link's `#section=<id>`: scrolled to once the body holds it, and again
+  // when the page shows something else.
+  const landing = typeof landOn === "string" && landOn !== "" ? landOn : null;
+  useEffect(() => {
+    if (!landing || !body) return;
+    let frame = requestAnimationFrame(function find() {
+      const el = body.querySelector<HTMLElement>(`[data-section="${CSS.escape(landing)}"]`);
+      if (el) el.scrollIntoView({ block: "start" });
+      else frame = requestAnimationFrame(find);
+    });
+    const stop = setTimeout(() => cancelAnimationFrame(frame), 5000);
+    return () => {
+      cancelAnimationFrame(frame);
+      clearTimeout(stop);
+    };
+  }, [landing, body, run]);
 
   // A file or a diff fills the page: its title is the chrome's, its body
   // every pixel the page has.
@@ -232,7 +282,7 @@ export function LensPage({ lensId, params, title: pageTitle, titleFrom, stream, 
         {...(pageComments ? contextNodeProps(pageComments.target) : {})}
       >
       {fills ? null : <h1 className="ox-title">{title}</h1>}
-      {lens?.description && !fills ? <p className="ox-intro">{lens.description}</p> : null}
+      {lens?.description && !fills && !lens.view ? <p className="ox-intro">{lens.description}</p> : null}
       {misplaced.length > 0 ? (
         <div data-testid="lens-error" style={errorStyle}>
           <div style={{ fontWeight: 600, marginBottom: 4 }}>This link puts the lens's view in its address.</div>
@@ -260,6 +310,26 @@ export function LensPage({ lensId, params, title: pageTitle, titleFrom, stream, 
 }
 
 const NO_PARAMS: Record<string, SqlCell> = {};
+const NO_SECTIONS: { id: string; label: string }[] = [];
+
+/** Lens `id` as loaded, once it answers; null for no id or while loading. */
+function useLensOf(id: string | null): Lens | null {
+  const [lens, setLens] = useState<Lens | null>(null);
+  useEffect(() => {
+    setLens(null);
+    if (!id) return;
+    let live = true;
+    getLens(id)
+      .then((l) => {
+        if (live) setLens(l);
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [id]);
+  return lens;
+}
 const fillStyle: CSSProperties = { display: "flex", flexDirection: "column", flex: 1, minHeight: 0 };
 
 /** `values`' entries in key order: two sets compared by their text. */

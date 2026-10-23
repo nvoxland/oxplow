@@ -30,7 +30,9 @@ pub const MAX_HUNK_BYTES: usize = 8_000;
 /// [`MAX_HUNK_FILES`]) or a `diff` lens's one, a `code` lens's files.
 #[derive(Debug, Clone, Default)]
 pub struct Resolved {
-    pub children: Vec<LensRun>,
+    /// A composite's lens parts, run, each with what it needs in turn (a
+    /// section that is a document has its own parts).
+    pub children: Vec<(LensRun, Resolved)>,
     /// A dashboard's row tiles, one per row (up to [`MAX_ROWS`]): a lens or
     /// `sql` tile's run, or why it can't run; a text tile's none.
     pub row_tiles: Vec<Option<Result<LensRun, String>>>,
@@ -107,9 +109,11 @@ pub async fn resolve(
     match run.lens.viz {
         LensViz::Document | LensViz::Dashboard => {
             let given = crate::extensions::part_params(run);
-            for id in run.lens.part_lenses() {
-                out.children
-                    .push(run_part(svc, root, id, &given, ctx).await?);
+            let viewed = run.lens.viewed_parts(&run.params);
+            for id in viewed.iter().filter_map(|p| p.lens.as_deref()) {
+                let child = run_part(svc, root, id, &given, ctx).await?;
+                let inner = Box::pin(resolve(svc, root, &child, ctx)).await?;
+                out.children.push((child, inner));
             }
             if let Some(tile) = &run.lens.tile {
                 for row in run.result.rows.iter().take(MAX_ROWS) {
@@ -374,6 +378,40 @@ async fn file_diff(svc: &crate::Services, root: &Path, path: &str, from: &str, t
     }
 }
 
+/// A view document's sections, the one in view in bold, and how to read
+/// another; none for any other lens.
+fn sections_line(run: &LensRun) -> Option<String> {
+    let view = run.lens.view.as_deref()?;
+    let param = run.lens.params.iter().find(|p| p.name == view)?;
+    let shown: Vec<&str> = run
+        .lens
+        .viewed_parts(&run.params)
+        .iter()
+        .map(|p| p.id.as_str())
+        .collect();
+    let names: Vec<String> = param
+        .options
+        .iter()
+        .map(|o| {
+            if shown.contains(&o.value.as_str()) {
+                format!("**{}**", o.label)
+            } else {
+                o.label.clone()
+            }
+        })
+        .collect();
+    Some(format!(
+        "Sections: {} — run with `{view}=<id>` ({}) for another.",
+        names.join(", "),
+        param
+            .options
+            .iter()
+            .map(|o| o.value.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    ))
+}
+
 /// `run` as text. A document or dashboard renders its parts in order
 /// under their titles (a lens part its resolved run, a markdown part its
 /// prose), then a dashboard's row tiles; a `hunks` lens its resolved
@@ -384,14 +422,14 @@ pub fn render(run: &LensRun, resolved: &Resolved) -> String {
         let mut runs = resolved.children.iter();
         let parts = run
             .lens
-            .parts
-            .iter()
+            .viewed_parts(&run.params)
+            .into_iter()
             .filter_map(|part| match (&part.lens, &part.markdown) {
-                (Some(_), _) => runs.next().map(|c| {
+                (Some(_), _) => runs.next().map(|(c, inner)| {
                     format!(
                         "### {}\n\n{}",
                         part.title.as_deref().unwrap_or(&c.lens.title),
-                        render(c, &Resolved::default())
+                        render(c, inner)
                     )
                 }),
                 (None, Some(md)) => Some(match &part.title {
@@ -400,7 +438,9 @@ pub fn render(run: &LensRun, resolved: &Resolved) -> String {
                 }),
                 (None, None) => None,
             });
-        return parts
+        return sections_line(run)
+            .into_iter()
+            .chain(parts)
             .chain(row_tiles(run, resolved))
             .collect::<Vec<_>>()
             .join("\n\n");
@@ -1117,6 +1157,7 @@ mod tests {
                 emphasis: None,
                 depth: None,
                 parts: Vec::new(),
+                view: None,
                 launcher_category: None,
                 hidden: false,
                 actions: Vec::new(),
@@ -1262,7 +1303,7 @@ mod tests {
             render(
                 &grid,
                 &Resolved {
-                    children: vec![a, b],
+                    children: vec![(a, Resolved::default()), (b, Resolved::default())],
                     diffs: Vec::new(),
                     files: Vec::new(),
                     approvals: Vec::new(),
@@ -1270,6 +1311,94 @@ mod tests {
                 }
             ),
             "### Open\n\n5\n\n### About\n\nRead me.\n\n### Notes\n\n**ok**"
+        );
+    }
+
+    fn lens_part(id: &str, title: Option<&str>, lens: &str) -> crate::extensions::LensPart {
+        crate::extensions::LensPart {
+            id: id.into(),
+            title: title.map(Into::into),
+            lens: Some(lens.into()),
+            markdown: None,
+            size: None,
+            replaceable: None,
+            from: None,
+        }
+    }
+
+    fn number(title: &str, n: i64) -> LensRun {
+        let mut r = run(LensViz::Number, None, &["n"], vec![vec![SqlCell::Int(n)]]);
+        r.lens.title = title.into();
+        r
+    }
+
+    /// A section that is a document reads as its own sections.
+    #[test]
+    fn a_nested_document_renders_its_own_sections() {
+        let outer = with(run(LensViz::Document, None, &[], Vec::new()), |l| {
+            l.parts = vec![lens_part("inner", Some("Agents"), "x/inner")]
+        });
+        let inner = with(run(LensViz::Document, None, &[], Vec::new()), |l| {
+            l.parts = vec![
+                lens_part("list", None, "x/list"),
+                lens_part("prompt", None, "x/prompt"),
+            ]
+        });
+        let inner_resolved = Resolved {
+            children: vec![
+                (number("List", 2), Resolved::default()),
+                (number("Prompt", 3), Resolved::default()),
+            ],
+            ..Resolved::default()
+        };
+        assert_eq!(
+            render(
+                &outer,
+                &Resolved {
+                    children: vec![(inner, inner_resolved)],
+                    ..Resolved::default()
+                }
+            ),
+            "### Agents\n\n### List\n\n2\n\n### Prompt\n\n3"
+        );
+    }
+
+    /// A view document reads as the section in view, under a line that
+    /// names every section and how to read another.
+    #[test]
+    fn a_view_document_renders_only_the_viewed_section_naming_the_others() {
+        let mut doc = with(run(LensViz::Document, None, &[], Vec::new()), |l| {
+            l.parts = vec![
+                lens_part("overview", Some("Every Setting"), "x/overview"),
+                lens_part("agents", Some("Agents"), "x/agents"),
+            ];
+            l.view = Some("area".into());
+            l.params = vec![crate::extensions::LensParam {
+                name: "area".into(),
+                default: Some(t("overview")),
+                options: vec![
+                    crate::extensions::LensParamOption {
+                        value: "overview".into(),
+                        label: "Every Setting".into(),
+                    },
+                    crate::extensions::LensParamOption {
+                        value: "agents".into(),
+                        label: "Agents".into(),
+                    },
+                ],
+                ..Default::default()
+            }];
+        });
+        doc.params.insert("area".into(), t("agents"));
+        assert_eq!(
+            render(
+                &doc,
+                &Resolved {
+                    children: vec![(number("Agents", 4), Resolved::default())],
+                    ..Resolved::default()
+                }
+            ),
+            "Sections: Every Setting, **Agents** — run with `area=<id>` (overview, agents) for another.\n\n### Agents\n\n4"
         );
     }
 

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Extension, Lens, LensRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
-import { markParts, treeNodes, lazyTreeNodes, lazyTreeProblem, drawnTreeRows, wantedBranches, timelineEntries, stepItems, hunkRows, codeRows, diffRow, parseLines, slotRuns, mergeDirectory, barRows, childParams, partParams, lineSeries, sparklineValues, numericRowId, treemapItems, cellLinkRef, changedParams, lensViewChange, misplacedViewParams, foldEmpty, foldedAway, displayColumns, formatCell, lensDirectoryEntries, parseParamInput, limitRows, slugify, adHocLens, rowMention, rowAsk, effortRowId, slotExtensions, isTimestamp, rowGroups, rowEmphasized, rowDepth, rowContextRef, rowTiles, tileSizeOf } from "./lensModel.js";
+import { markParts, treeNodes, lazyTreeNodes, lazyTreeProblem, drawnTreeRows, wantedBranches, timelineEntries, stepItems, hunkRows, codeRows, diffRow, parseLines, slotRuns, mergeDirectory, barRows, childParams, partParams, lineSeries, sparklineValues, numericRowId, treemapItems, cellLinkRef, changedParams, lensViewChange, misplacedViewParams, viewedParts, viewOptions, offeredFilters, foldEmpty, foldedAway, displayColumns, formatCell, lensDirectoryEntries, parseParamInput, limitRows, slugify, adHocLens, rowMention, rowAsk, effortRowId, slotExtensions, isTimestamp, rowGroups, rowEmphasized, rowDepth, rowContextRef, rowTiles, tileSizeOf } from "./lensModel.js";
 import { formatMetricValue, formatShortDateTime } from "../components/format.js";
 import { diffSpecOf, duplicateBlockOf, isPage, lineOf, pagePayload } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
@@ -219,6 +219,49 @@ describe("lensViewChange", () => {
   });
   test("a filter or a pick in the URI's `?` is misplaced", () => {
     expect(misplacedViewParams(l, { stream_id: 1, days: 14, task: "t" })).toEqual(["days", "task"]);
+  });
+});
+
+// A view document: its `area` names the one section in view; the loader
+// fills `area`'s options from the sections.
+describe("a view document", () => {
+  const part = (id: string, title: string | null) => ({ id, title, lens: `x/${id}`, markdown: null, size: null, replaceable: null, from: null });
+  const settings = lens({
+    viz: "document",
+    view: "area",
+    params: [
+      { name: "area", label: null, default: "overview", role: "filter", type: "choice", options: [{ value: "overview", label: "Every Setting" }, { value: "agents", label: "Agents" }] },
+      { name: "q", label: null, default: "", role: "filter", type: "search" },
+      { name: "pick", label: null, default: null, role: "selection" },
+    ],
+    parts: [part("overview", "Every Setting"), part("agents", "Agents")],
+  } as never);
+  test("shows the viewed section, the default when unset", () => {
+    expect(viewedParts(settings, { area: "agents" }).map((p) => p.id)).toEqual(["agents"]);
+    expect(viewedParts(settings, {}).map((p) => p.id)).toEqual(["overview"]);
+    expect(viewedParts(settings, { area: "gone" })).toEqual([]);
+    const plain = lens({ viz: "document", parts: [part("a", null), part("b", null)] } as never);
+    expect(viewedParts(plain, {}).map((p) => p.id)).toEqual(["a", "b"]);
+  });
+  test("lists its sections from its view param", () => {
+    expect(viewOptions(settings)).toEqual([
+      { id: "overview", label: "Every Setting" },
+      { id: "agents", label: "Agents" },
+    ]);
+  });
+  test("the view param pushes, like a pick; the default leaves the URI", () => {
+    expect(lensViewChange(settings, {}, { area: "agents" })).toEqual({ resource: {}, view: { area: "agents" }, push: true });
+    expect(lensViewChange(settings, { area: "agents" }, { area: "overview" })).toEqual({ resource: {}, view: {}, push: true });
+    expect(lensViewChange(settings, { area: "agents" }, { q: "x" }).push).toBe(false);
+  });
+  test("its rail offers a filter only while the section in view declares it", () => {
+    const overview = lens({ params: [{ name: "q", label: null, default: "" }] } as never);
+    const agents = lens({ params: [] });
+    expect(offeredFilters(settings, overview).map((p) => p.name)).toEqual(["q"]);
+    expect(offeredFilters(settings, agents)).toEqual([]);
+    expect(offeredFilters(settings, null)).toEqual([]);
+    const plain = lens({ params: [{ name: "days", label: null, default: 7, role: "filter" }, { name: "t", label: null, default: null, role: "selection" }] } as never);
+    expect(offeredFilters(plain, null).map((p) => p.name)).toEqual(["days"]);
   });
 });
 

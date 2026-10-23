@@ -393,6 +393,12 @@ tiles:
   ...". A section with a button above it (an Add) stays. A part titled
   `""` is bare: its body with no heading, and it never folds. A lens
   whose `empty:` is `""` says nothing when it has no rows.
+- A document with `view: <param>` shows one section at a time, as
+  Settings shows one area. The param's value is a section's `id`; the
+  page's rail links to the others, and the launcher lists each one. Give
+  the param a `default` (the first section to show) and no `options`.
+  A link opens a section with `#area=agents`, and any page scrolls to a
+  section with `#section=<id>`. A section can be a document itself.
 - A part is left out of a page whose row names a column the part declares
   as a param and gives it no value: an effort's lens on a page that shows
   no effort. (A page param that is unset is not a row column: the part

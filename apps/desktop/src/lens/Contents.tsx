@@ -1,9 +1,11 @@
 /**
  * A page's Contents, in its rail: the markdown headings (`h2`, `h3`) in
- * the page's body, in order, the one on screen marked; a click scrolls
- * to it. Nothing is declared: a page whose body has markdown with
- * headings (a viewer or an editor, `.oxplow-md`) gets it, one without
- * shows nothing. It follows the body as it changes (an edit, a re-run).
+ * the page's body and, once there are four or more, its sections'
+ * headings, in order, the one on screen marked; a click scrolls to it.
+ * Nothing is declared: a page whose body has markdown with headings (a
+ * viewer or an editor, `.oxplow-md`) or a document of several sections
+ * gets it, one without shows nothing. It follows the body as it changes
+ * (an edit, a re-run).
  */
 import { useEffect, useState } from "react";
 
@@ -15,7 +17,10 @@ interface Heading {
   level: 2 | 3;
 }
 
-const HEADINGS = ".oxplow-md h2, .oxplow-md h3";
+const HEADINGS = ".oxplow-md h2, .oxplow-md h3, h2.ox-section-title";
+const SECTION_HEADING = "ox-section-title";
+/** Sections a page has before Contents lists them. */
+export const CONTENTS_FROM = 4;
 
 /** The element that scrolls `el`: itself or its nearest ancestor that does. */
 function scrollParent(el: HTMLElement): HTMLElement | null {
@@ -27,7 +32,10 @@ function scrollParent(el: HTMLElement): HTMLElement | null {
 }
 
 function headingsIn(root: HTMLElement): Heading[] {
-  return Array.from(root.querySelectorAll<HTMLElement>(HEADINGS))
+  const all = Array.from(root.querySelectorAll<HTMLElement>(HEADINGS));
+  const sections = all.filter((el) => el.classList.contains(SECTION_HEADING)).length;
+  return all
+    .filter((el) => sections >= CONTENTS_FROM || !el.classList.contains(SECTION_HEADING))
     .map((el): Heading => ({ el, text: el.textContent?.trim() ?? "", level: el.tagName === "H2" ? 2 : 3 }))
     .filter((h) => h.text.length > 0);
 }

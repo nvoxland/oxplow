@@ -146,7 +146,8 @@ all agree on one string. Two shapes:
   `oxplow:oxplow/page?page=<id>` plus its params for oxplow's own
   (oxplow-foundation has `namespace: oxplow`, so its pages are
   core-named as its commands are: `oxplow:oxplow/page?page=tasks`,
-  `oxplow:oxplow/page?page=settings&area=agents`) and
+  `oxplow:oxplow/page?page=settings#area=agents`, the area in the `#`
+  view) and
   `oxplow:oxplow/page?page=<extension>/<id>` plus its params for any other
   extension's. `pagePayload(ref)` reads it back as `{ extension, page,
   params }` (`extension` null for oxplow's). Nothing
@@ -205,7 +206,8 @@ oxplow-foundation's. A page with no `for` is a **route**
 a resource ("Renderers"). The declaration gives the title (its name), the `label` its tab says
 (`{{param.<name>}}` over what it shows, `{{row.<column>}}` over the one row of a document lens with a `query:` once it has run, filters `|short` and `|basename`; none: the title), icon, launcher
 `category` (none: not in the launcher — a page only opened from
-elsewhere), `keywords`, the `params` its id carries, a `count:` lens for
+elsewhere; a page whose lens is a view document also lists each section
+but the first, `<page>: <section>` at `#<view>=<id>`), `keywords`, the `params` its id carries, a `count:` lens for
 the launcher badge, and what draws it: a `lens:` (most pages) or, for
 oxplow's own until the kit can draw them, `component: oxplow:<name>`, a
 **built-in page**. A renderer also has `for`, `accepts`, `default` and
@@ -261,7 +263,7 @@ oxplow's pages and their params:
   `files`, `git-dashboard`, `uncommitted-changes`,
   `comments`, `explore-data`, `metrics-recorded`,
   `terminal`, `alerts`, `settings` (view: `area`, `section`, and `q`, the overview's search — another
-  area is a pushed view change, never a page opened over it; the shell and the rail are React, and the Overview and Language Servers areas are oxplow-foundation lenses mounted in their slots, `settings.overview.sections` / `settings.lsp.sections`),
+  area is a pushed view change, never a page opened over it; the shell and the rail are React, and the Overview and Language Servers areas are oxplow-foundation lenses mounted in their slots, `settings.overview.sections` / `settings.lsp.sections`; it becomes a foundation view document once Data and Integrations are lenses: extensions.md "A document with a view"),
   `new-task`
   (`parent`),
   `external-url` (a renderer for `https` / `http`; the tab id is the URL), `diff` (`path`, `left`, `right`, `label`,

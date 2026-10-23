@@ -4408,6 +4408,12 @@ export type Lens_Deserialize = {
 	 *  then what other extensions mount, placed by their `at`.
 	 */
 	parts: LensPart[],
+	/**
+	 *  For `document`: the param whose value names the one section in
+	 *  view. It is a `filter` choice whose options are the sections (its
+	 *  own and mounted ones, filled once mounts are placed).
+	 */
+	view: string | null,
 	/**  Launcher section; `None` = "Lenses". */
 	launcherCategory: LauncherCategory | null,
 	/**  Not listed in the launcher. */
@@ -4475,6 +4481,12 @@ export type Lens_Serialize = {
 	 *  then what other extensions mount, placed by their `at`.
 	 */
 	parts: LensPart[],
+	/**
+	 *  For `document`: the param whose value names the one section in
+	 *  view. It is a `filter` choice whose options are the sections (its
+	 *  own and mounted ones, filled once mounts are placed).
+	 */
+	view: string | null,
 	/**  Launcher section; `None` = "Lenses". */
 	launcherCategory: LauncherCategory | null,
 	/**  Not listed in the launcher. */

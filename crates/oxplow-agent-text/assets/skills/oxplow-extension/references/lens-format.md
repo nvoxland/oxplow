@@ -285,6 +285,12 @@ Each entry is `{ id?, title?, lens?, markdown?, size? }`:
 - `tiles` on a document, and `sections` on a dashboard, are refused.
 - A standalone lens spec (an agent answer from `oxplow_show_lens`) can't
   be a `document` or `dashboard`.
+- `view: <param>` on a document shows one section at a time: the param's
+  value is the section's `id`, and the other sections are links in the
+  page's rail. Declare the param with a `default` (one of the section
+  ids) and no `options`: its choices are the sections. A section can be a
+  document itself. A link opens a section with `#<param>=<id>`, and any
+  page lands on a section with `#section=<id>`.
 
 ### A dashboard whose rows are its tiles
 

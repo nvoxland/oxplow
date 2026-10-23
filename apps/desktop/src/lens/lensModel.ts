@@ -16,7 +16,7 @@ import {
   formatRelative,
   formatShortDateTime,
 } from "../components/format.js";
-import type { ColumnFormat, Extension, Lens, LensParam, SlotAt, LensChart, LensLink, LensRun, LensViz, SqlCell, SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
+import type { ColumnFormat, Extension, Lens, LensParam, LensPart, SlotAt, LensChart, LensLink, LensRun, LensViz, SqlCell, SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
 import { PAGE_CATEGORY_ORDER, type PageDirectoryEntry } from "../components/RailHud/sections.js";
 import { diffRef, duplicateBlockRef, effortDiffRef, fileRefAt, gitCommitRef, lensRef, metricRef, wikiPageRef } from "../tabs/pageRefs.js";
 import { WORKING, parseRevision, shortRevisionLabel } from "../revision.js";
@@ -457,10 +457,42 @@ export function lensViewChange(
   for (const [name, value] of Object.entries(changedParams(lens, { ...current, ...patch }))) {
     (role(name) === "resource" ? resource : view)[name] = value;
   }
+  // A view document's section is somewhere to come back from, like a pick.
   const push = Object.entries(patch).some(
-    ([name, value]) => role(name) === "resource" || (value !== null && role(name) === "selection"),
+    ([name, value]) => role(name) === "resource" || (value !== null && role(name) === "selection") || name === lens.view,
   );
   return { resource, view, push };
+}
+
+/** A view document's view param (`view: <name>`): the one whose value
+ *  names the section in view; null for any other lens. */
+export function viewParam(lens: Lens): LensParam | null {
+  return lens.view ? (lens.params.find((p) => p.name === lens.view) ?? null) : null;
+}
+
+/** The parts a page shows with `params`: a view document's one section
+ *  in view (its view param's value, else its default), every part of any
+ *  other lens. Rust's `Lens::viewed_parts` is the same rule. */
+export function viewedParts(lens: Lens, params: Record<string, SqlCell>): LensPart[] {
+  const view = viewParam(lens);
+  if (!view) return lens.parts;
+  const value = params[view.name] ?? view.default ?? null;
+  return lens.parts.filter((p) => p.id === value);
+}
+
+/** A view document's sections, as its view param lists them (the loader
+ *  fills its options from the parts, mounted ones too). */
+export function viewOptions(lens: Lens): { id: string; label: string }[] {
+  return (viewParam(lens)?.options ?? []).map((o) => ({ id: o.value, label: o.label }));
+}
+
+/** The filters a lens page's rail offers: every param but its picks; for
+ *  a view document, not its view param (the section rail) and only the
+ *  ones the section in view declares (`viewed`, none until it's known). */
+export function offeredFilters(lens: Lens, viewed: Lens | null): LensParam[] {
+  const filters = lens.params.filter((p) => p.role !== "selection");
+  if (!lens.view) return filters;
+  return filters.filter((p) => p.name !== lens.view && !!viewed?.params.some((q) => q.name === p.name));
 }
 
 /** The params of `params` a lens doesn't take in its URI's `?` (its
@@ -538,6 +570,7 @@ export function adHocLens(query: string, viz: LensViz, chart: LensChart | null =
     emphasis: null,
     depth: null,
     parts: [],
+    view: null,
     launcherCategory: null,
     hidden: false,
     actions: [],
