@@ -48,7 +48,7 @@ pub mod work_items;
 
 pub use commands::{
     namespace_of, Access, Actor, Atomicity, CommandCall, CommandError, CommandOutcome, CommandSpec,
-    CommandUi, Confirm, InputValidator, Invoker, Invokers, Lifecycle, MenuPlace, OpRef, Preview,
+    CommandUi, Confirm, InputValidator, Invoker, Lifecycle, MenuPlace, OpRef, Preview,
     OXPLOW_NAMESPACE,
 };
 pub use comment::{Comment, CommentIntent, CommentMessage, CommentStatus, CommentThread};

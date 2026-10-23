@@ -1250,7 +1250,7 @@ struct LensFile {
 
 /// A button on a lens: a command it runs (P6.B1, target §11.4). The
 /// command goes through the bus as `Actor::Lens` acting for whoever
-/// pressed it, so every policy — invokers, the agent policy, confirmation
+/// pressed it, so every policy — the agent policy, confirmation
 /// — applies as if they had run it themselves; a lens can offer a button
 /// but never grant a power. Copying the result and handing it to the
 /// agent are on every lens, not declared.
@@ -8536,7 +8536,6 @@ commands:
     summary: Note a thing.
     input_schema: { type: object, required: [id], properties: { id: { type: integer } } }
     entry: handlers/note.star
-    invokers: { human: true, agent: true, lens: true }
 ",
         );
         write(
@@ -8621,7 +8620,7 @@ commands:
         std::fs::create_dir_all(dir.join("commands")).unwrap();
         std::fs::write(
             dir.join("extension.yaml"),
-            "manifest: 2\nname: x\nintent:\n  purpose: p\npermissions: { ai: true }\neffects:\n  - { id: e, summary: s, on: [effort.finished], entry: effects/e.star, needs: [ai.discover] }\ncommands:\n  - { name: c.go, summary: s, entry: commands/c.star, needs: [ai.discover], invokers: { human: true, agent: false, lens: true }, input_schema: { type: object, additionalProperties: false } }\n",
+            "manifest: 2\nname: x\nintent:\n  purpose: p\npermissions: { ai: true }\neffects:\n  - { id: e, summary: s, on: [effort.finished], entry: effects/e.star, needs: [ai.discover] }\ncommands:\n  - { name: c.go, summary: s, entry: commands/c.star, needs: [ai.discover], input_schema: { type: object, additionalProperties: false } }\n",
         )
         .unwrap();
         let script = "def transform(x):\n    r = scope(\"ai.discover\", {\"role\": \"summarize\"})\n    if not r[\"model\"]:\n        return {\"skip\": r[\"problem\"]}\n    return {\"commands\": []}\n";
@@ -11790,7 +11789,7 @@ commands:
             }
         };
         let manifest = "manifest: 2\nname: acme\nintent:\n  purpose: Count.\n  origin: thread:thr1\n  examples: []\n";
-        let command = "commands:\n  - name: spin\n    summary: Spin.\n    input_schema: { type: object }\n    entry: handlers/spin.star\n    invokers: { human: true, agent: true, lens: true }\n    examples:\n      - { name: once, input: {}, expect_commands: [] }\n";
+        let command = "commands:\n  - name: spin\n    summary: Spin.\n    input_schema: { type: object }\n    entry: handlers/spin.star\n    examples:\n      - { name: once, input: {}, expect_commands: [] }\n";
         let start = snapshot(vec![
             (
                 ".oxplow/extensions/acme/extension.yaml",

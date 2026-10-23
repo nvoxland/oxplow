@@ -5,7 +5,7 @@
 //! proposal. Each pushes `LspServersChanged` so the settings list
 //! refreshes (the server list isn't a model).
 
-use oxplow_domain::{Confirm, Invokers};
+use oxplow_domain::Confirm;
 use std::sync::Arc;
 
 use schemars::JsonSchema;
@@ -146,7 +146,6 @@ pub fn restart_op(services: ServicesSlot) -> Op {
             })
         })),
     )
-    .open_to(Invokers::NO_AGENT)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -169,9 +168,11 @@ mod tests {
     use oxplow_domain::Actor;
     use oxplow_domain::CommandError;
 
-    /// What oxplow downloads and runs is a person's call.
+    /// An agent's install runs without asking. The package is one the
+    /// registry doesn't have, so nothing is installed: the run reaches the
+    /// installer and fails there (one registry lookup), not at a gate.
     #[tokio::test]
-    async fn an_agents_install_is_a_proposal() {
+    async fn an_agents_install_runs_without_asking() {
         let fx = services_with_effort().await;
         let err = fx
             .svc
@@ -183,18 +184,18 @@ mod tests {
                     stream_id: None,
                 },
                 INSTALL_SERVER,
-                json!({ "package": "rust-analyzer" }),
+                json!({ "package": "no-such-package-for-a-test" }),
                 false,
             )
             .await
             .unwrap_err();
-        assert!(matches!(err, CommandError::Proposed { .. }), "{err:?}");
+        assert!(matches!(err, CommandError::Failed { .. }), "{err:?}");
     }
 
-    /// Restarting is a person's (or a lens's); an agent is refused, and a
-    /// language with no server can't start one.
+    /// An agent may restart a server too; a language with no server can't
+    /// start one, for anyone.
     #[tokio::test]
-    async fn restarting_a_server_is_a_persons() {
+    async fn restarting_a_server_needs_a_server() {
         let fx = services_with_effort().await;
         let stream = fx.svc.streams.list_streams().await.unwrap()[0]
             .id
@@ -208,16 +209,10 @@ mod tests {
         let err = fx
             .svc
             .commands
-            .run(&agent, "oxplow.lsp.restart_server", input.clone(), true)
+            .run(&agent, "oxplow.lsp.restart_server", input.clone(), false)
             .await
             .unwrap_err();
-        assert!(
-            matches!(
-                err,
-                CommandError::Denied { .. } | CommandError::Unknown { .. }
-            ),
-            "{err:?}"
-        );
+        assert!(matches!(err, CommandError::Failed { .. }), "{err:?}");
         let err = fx
             .svc
             .commands

@@ -613,11 +613,8 @@ The foundation's lenses in `settings.ai.sections` (`ai-providers`,
 `ai-provider-form`, `ai-roles`, `ai-calls`; `ai-provider-kinds` and
 `ai-provider-choices` are the choices the forms offer). They read the live
 models `v_ai_provider` and `v_ai_role` and write with commands
-(`commands/ai_settings.rs`), each a person's or their
-own lens's (`Invokers::NO_AGENT`: the
-keys and where the person's money goes are theirs, and the bus denies a
-lens an agent presses, since a lens grants no power): `oxplow.ai.set_provider { id, kind,
-base_url?, key? }` (scope `ai.settings`; `key` is `with_unrecorded`, so a
+(`commands/ai_settings.rs`), anyone's — a person's, their agent's, or a form lens's: `oxplow.ai.set_provider { id, kind,
+base_url?, key? }` (scope `ai.settings`; `key` is a secret (`writeOnly`, commands.md "Secrets"), so a
 refusal that could quote it is recorded without its words, and it goes only to
 the keychain; it, `remove_provider` and `set_role` announce `ConfigChanged`,
 which re-reads the two models), `oxplow.ai.remove_provider { id }` (asks first,

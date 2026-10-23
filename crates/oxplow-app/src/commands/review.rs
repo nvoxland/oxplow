@@ -19,7 +19,7 @@ use oxplow_domain::events::schema::{
     EffortDecisionReviewed, EffortDecisionReviewedV2,
 };
 use oxplow_domain::uri::build::{claim_uri, decision_uri, effort_uri};
-use oxplow_domain::{CommandCall, CommandError, Invokers};
+use oxplow_domain::{CommandCall, CommandError};
 use rusqlite::OptionalExtension;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -183,7 +183,6 @@ pub fn verify_claim_op() -> Op {
             set_review(ctx, &row, Some("verified"), Some(backed_by), event, inverse)
         })),
     )
-    .open_to(Invokers::NO_AGENT)
 }
 
 /// `effort.unverify_claim { claim, evidence? }`: take a verification back;
@@ -212,7 +211,6 @@ pub fn unverify_claim_op() -> Op {
             set_review(ctx, &row, None, input.evidence, event, inverse)
         })),
     )
-    .open_to(Invokers::NO_AGENT)
 }
 
 /// `effort.dismiss_claim { claim }`: the agent didn't claim it, or didn't
@@ -258,7 +256,6 @@ fn claim_dismissal_op(op: &'static str, dismiss: bool) -> Op {
             )
         })),
     )
-    .open_to(Invokers::NO_AGENT)
 }
 
 /// Move a decision's provenance from `from` to `to`, logging the
@@ -339,7 +336,6 @@ fn decision_op(op: &'static str, from: &'static [&'static str], to: &'static str
     )
     // A person's review (through a lens too), never the agent's of its
     // own work.
-    .open_to(oxplow_domain::Invokers::NO_AGENT)
 }
 
 /// `effort.confirm_decision { decision }`: an inferred decision is right.
@@ -599,10 +595,10 @@ mod tests {
         assert!(err.to_string().contains("isn't dismissed"), "{err}");
     }
 
-    /// P7.C4: an agent can't review its own work — not directly, and not
+    /// An agent may verify a claim and review a decision, directly or
     /// through a lens acting for it.
     #[tokio::test]
-    async fn an_agent_may_not_verify_a_claim_or_review_a_decision() {
+    async fn an_agent_may_verify_a_claim_and_review_a_decision() {
         let (fx, claim, decision) = fixture().await;
         let agent = Actor::Agent {
             session_id: None,
@@ -613,24 +609,22 @@ mod tests {
             lens_id: "acme/review".into(),
             on_behalf_of: Box::new(agent.clone()),
         };
-        for actor in [agent, through_lens] {
-            for (name, input) in [
-                (VERIFY_CLAIM, json!({ "claim": claim })),
-                (CONFIRM_DECISION, json!({ "decision": decision })),
-            ] {
-                let err = fx
-                    .svc
-                    .commands
-                    .run(&actor, name, input, false)
-                    .await
-                    .unwrap_err();
-                assert!(
-                    matches!(err, CommandError::Denied { .. }),
-                    "{name}: {err:?}"
-                );
-            }
-        }
-        assert_eq!(claim_view(&fx, claim).await, None);
+        fx.svc
+            .commands
+            .run(&agent, VERIFY_CLAIM, json!({ "claim": claim }), false)
+            .await
+            .unwrap();
+        assert_eq!(claim_view(&fx, claim).await, Some("reviewer".into()));
+        fx.svc
+            .commands
+            .run(
+                &through_lens,
+                CONFIRM_DECISION,
+                json!({ "decision": decision }),
+                false,
+            )
+            .await
+            .unwrap();
     }
 
     async fn provenance(fx: &crate::test_fixtures::EffortFixture, id: i64) -> String {

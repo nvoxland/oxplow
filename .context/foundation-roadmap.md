@@ -262,7 +262,7 @@ Contain untrusted work and enforce scoped authority regardless of who authored o
 
 Status: done. Every Starlark and jaq run executes in a killable
 `oxplow-script-worker` process with a memory cap and host-wide
-concurrency bound (`scripts:`, person-only); timeout, cancel and memory
+concurrency bound (`scripts:`); timeout, cancel and memory
 overruns stop and reap it. Measured on realistic collectors
 (`.context/performance.md` "What running scripts in workers costs"):
 ~42 ms per run, so workers are spawned per run.
@@ -582,7 +582,7 @@ SSE through a script's `delta`, the whole reply at once from a provider
 that doesn't stream) into its attempt's output (`v_job_run_output`, `v_job_run`);
 cancelling drops the model's connection and the job ends `cancelled`
 with what it had, its call recorded as cancelled; a job's declared
-`tools` (its extension's read-only commands admitting `invokers.job`, and
+`tools` (its extension's read-only commands admitting `job: true`, and
 `query_sql` with `sql.read`) run under the job's run and answer the model,
 for at most `max_tool_rounds`; `timeout` fails it; its end is
 `contribution.job.completed` with every outcome. A person cancels any job

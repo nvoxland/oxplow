@@ -374,3 +374,21 @@ test("an object field with no children isn't shown", () => {
   );
   expect(queryByText("Native")).toBeNull();
 });
+
+test("a field the schema marks writeOnly is a secret: masked, never in the draft", () => {
+  const drafts: unknown[] = [];
+  const { getByTestId } = render(
+    <SchemaForm
+      schema={{ type: "object", properties: { id: { type: "string" }, key: { type: "string", writeOnly: true } } }}
+      initial={{ id: "or" }}
+      mode="edit"
+      onDraft={(d) => drafts.push(d)}
+      onSubmit={() => {}}
+      testIdPrefix="f"
+    />,
+  );
+  const key = getByTestId("f-key") as HTMLInputElement;
+  expect(key.type).toBe("password");
+  fireEvent.change(key, { target: { value: "sk-secret" } });
+  expect(JSON.stringify(drafts)).not.toContain("sk-secret");
+});

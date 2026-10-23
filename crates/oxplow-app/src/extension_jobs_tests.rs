@@ -18,9 +18,9 @@ jobs:
   - { id: summarize, description: Summarize an item., version: 1, operation: ai.complete_typed, needs: [ai.compute] }
   - { id: lookup, description: Look an item up in oxplow., version: 1, operation: ai.complete_typed, needs: [ai.compute, sql.read] }
 commands:
-  - { name: summary.ask, summary: Ask for a summary., scope: jobs.write, op: enqueue, invokers: { human: true, agent: true, lens: true } }
-  - { name: summary.cancel, summary: Stop asking., scope: jobs.write, op: cancel, invokers: { human: true, agent: true, lens: true } }
-  - { name: summary.result, summary: Read the answer., scope: jobs.read, op: snapshot, invokers: { human: true, agent: true, lens: true } }
+  - { name: summary.ask, summary: Ask for a summary., scope: jobs.write, op: enqueue }
+  - { name: summary.cancel, summary: Stop asking., scope: jobs.write, op: cancel }
+  - { name: summary.result, summary: Read the answer., scope: jobs.read, op: snapshot }
 ";
 
 struct Fixture {

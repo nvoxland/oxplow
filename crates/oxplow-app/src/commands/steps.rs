@@ -4,7 +4,7 @@
 //! all-or-nothing run. They run as steps instead:
 //!
 //! 1. **Checked first.** Every call is routed and checked before any runs
-//!    — its input, its invokers, the agent policy — and if any asks for a
+//!    — its input, a job's tools, the agent policy — and if any asks for a
 //!    confirmation the run asks once (an agent's run becomes a proposal,
 //!    with no dry run: nothing outside the transaction runs before a
 //!    person decides).
@@ -329,7 +329,7 @@ impl Router<'_> {
 }
 
 /// Every call of `calls`, and of the composites among them, as `actor`
-/// may run it (`may_write`: the write gate's answer): its own invokers and
+/// may run it (`may_write`: the write gate's answer): a job's tools and
 /// the agent policy — a composite never widens what its calls allow —
 /// and whether any asks for a confirmation (and is destructive).
 fn check_tree(
@@ -341,18 +341,18 @@ fn check_tree(
     let (mut asks, mut destructive) = (false, false);
     for c in calls {
         let spec = &c.command.spec;
-        if let Some(err) = super::invoker_refusal(spec, actor) {
+        if let Some(err) = super::job_refusal(spec, actor) {
             return Err(err);
         }
         if let Some(thread_id) = actor.gated_thread() {
             let gated = may_write.filter(|_| spec.access.needs_thread());
             if let PolicyDecision::Deny { reason, .. } =
-                policy.check_command(actor.invoker(), thread_id.as_ref(), spec, gated)
+                policy.check_command(thread_id.as_ref(), spec, gated)
             {
                 return Err(CommandError::Denied { reason });
             }
         }
-        let confirm = c.command.confirm(&c.call.input);
+        let confirm = super::asks(&c.command, actor, &c.call.input);
         asks |= confirm.required();
         destructive |= matches!(confirm, oxplow_domain::Confirm::Destructive);
         if let Some(nested) = &c.nested {
@@ -376,7 +376,7 @@ fn honest(out: HandlerOutput, name: &str) -> Result<HandlerOutput, CommandError>
 }
 
 /// Run composite `parent`'s `composed` calls in `ctx`'s transaction, as
-/// one: every call checked first (each one's own invokers, the agent
+/// one: every call checked first (each one's job tools, the agent
 /// policy, its confirmation — one that asks makes the run ask, unless it
 /// was confirmed), then each run one level deeper.
 pub(super) fn run_composed(
@@ -589,7 +589,7 @@ impl CommandBus {
         } = admitted;
         let actor = run.actor();
         // 1. Every step's — and every composite step's calls' — own
-        // invokers, policy and confirmation, before any runs.
+        // a job's tools, policy and confirmation, before any runs.
         let (asks, destructive) =
             match check_tree(&self.policy, actor, gates.may_write, &plan.calls) {
                 Ok(answer) => answer,

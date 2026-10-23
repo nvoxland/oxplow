@@ -90,15 +90,7 @@ pub fn columns(name: &str) -> &'static [&'static str] {
         "zone" => &["position", "zone", "patterns", "color", "files"],
         "zone_unmatched" => &["path"],
         "scope" => &["id", "access", "host", "spends", "summary"],
-        "config_value" => &[
-            "key",
-            "value",
-            "origin",
-            "extension",
-            "human_only",
-            "doc",
-            "schema",
-        ],
+        "config_value" => &["key", "value", "origin", "extension", "doc", "schema"],
         "agent_conversation" => &[
             "stream_id",
             "harness",
@@ -653,7 +645,6 @@ impl LiveSources {
                 json(&s.value),
                 text(wire_name(&s.origin)),
                 opt(s.extension.clone()),
-                flag(s.human_only),
                 text(s.doc.clone()),
                 if s.schema.is_null() {
                     SqlCell::Null(())

@@ -76,8 +76,9 @@ mod tests {
     use crate::test_fixtures::services_with_effort;
     use oxplow_domain::Actor;
 
-    /// A restore overwrites the worktree: unconfirmed, a person is asked
-    /// and an agent's run is a proposal.
+    /// A restore overwrites the worktree: unconfirmed, a person is asked;
+    /// an agent's run is not asked (here it reaches the handler and finds
+    /// no such snapshot).
     #[tokio::test]
     async fn a_restore_asks_first() {
         let fx = services_with_effort().await;
@@ -107,6 +108,14 @@ mod tests {
             )
             .await
             .unwrap_err();
-        assert!(matches!(err, CommandError::Proposed { .. }), "{err:?}");
+        assert!(
+            !matches!(
+                err,
+                CommandError::Proposed { .. }
+                    | CommandError::NeedsConfirmation { .. }
+                    | CommandError::Denied { .. }
+            ),
+            "{err:?}"
+        );
     }
 }

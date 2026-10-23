@@ -39,25 +39,16 @@ pub fn may_refuse(tool: &ToolUse) -> bool {
 
 impl AgentPolicy {
     /// May a thread-gated actor (an agent, an effect, a job) run `spec`?
-    /// The bus has already admitted the invoker; this is the layer on top:
-    /// an effect acts with an agent's rights, so its commands must be open
-    /// to agents (a job's were admitted as a job's), and a `Write` command
-    /// needs a thread that may write (`may_write`, from the bus's write
-    /// gate — an open thread; a closed one can read, not change). `None`
-    /// means the gate had nothing to say (a read, or no thread/gate).
+    /// A `Write` command needs a thread that may write (`may_write`, from
+    /// the bus's write gate — an open thread; a closed one can read, not
+    /// change). `None` means the gate had nothing to say (a read, or no
+    /// thread/gate).
     pub fn check_command(
         &self,
-        invoker: oxplow_domain::Invoker,
         thread_id: Option<&ThreadId>,
         spec: &oxplow_domain::CommandSpec,
         may_write: Option<bool>,
     ) -> PolicyDecision {
-        if invoker != oxplow_domain::Invoker::Job && !spec.invokers.agent {
-            return PolicyDecision::Deny {
-                layer: oxplow_runtime::policy::DenyLayer::Command,
-                reason: format!("`{}` is not open to agents", spec.id),
-            };
-        }
         if may_write == Some(false) {
             return PolicyDecision::Deny {
                 layer: oxplow_runtime::policy::DenyLayer::Command,

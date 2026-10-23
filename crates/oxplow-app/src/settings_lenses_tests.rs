@@ -80,8 +80,7 @@ async fn every_setting_is_listed_by_group_with_its_source_and_ask() {
 
     let agents = all.keyed("key", "agents");
     assert_eq!(all.text(agents, "grp").as_deref(), Some("Agents"));
-    // Only the person sets it, and its control is on the Agents area's page.
-    assert_eq!(all.text(agents, "who").as_deref(), Some("yours to set"));
+    // Its control is on the Agents area's page.
     assert_eq!(
         all.text(agents, "control_page").as_deref(),
         Some("oxplow:oxplow/page?area=agents&page=settings")

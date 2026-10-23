@@ -18,7 +18,7 @@ use oxplow_db::dashboard_store::{
     reorder_items_tx, update_item_tx,
 };
 use oxplow_db::Database;
-use oxplow_domain::{CommandCall, CommandError, Confirm, DashboardId, DashboardItemId, Invokers};
+use oxplow_domain::{CommandCall, CommandError, Confirm, DashboardId, DashboardItemId};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -199,7 +199,6 @@ pub fn delete_op() -> Op {
             })
         })),
     )
-    .open_to(Invokers::NO_AGENT)
     .confirm_at_least(Confirm::Destructive)
 }
 
@@ -639,15 +638,11 @@ mod tests {
         assert_eq!(field(err).as_deref(), Some("/item"));
     }
 
-    /// Deleting a dashboard is a person's, asked first.
+    /// Deleting a dashboard asks a person first; an agent's delete runs.
     #[tokio::test]
-    async fn deleting_a_dashboard_is_a_persons_and_asks_first() {
+    async fn deleting_a_dashboard_asks_a_person_first() {
         let fx = services_with_effort().await;
         let d = dashboard(&fx).await;
-        let err = run(&fx, &agent(&fx), DELETE, json!({ "dashboard": d }))
-            .await
-            .unwrap_err();
-        assert!(matches!(err, CommandError::Denied { .. }), "{err:?}");
         let err = run(&fx, &Actor::Human, DELETE, json!({ "dashboard": d }))
             .await
             .unwrap_err();
@@ -658,6 +653,12 @@ mod tests {
         fx.svc
             .commands
             .run(&Actor::Human, DELETE, json!({ "dashboard": d }), true)
+            .await
+            .unwrap();
+        assert!(fx.svc.dashboard_store.list().await.unwrap().is_empty());
+
+        let d = dashboard(&fx).await;
+        run(&fx, &agent(&fx), DELETE, json!({ "dashboard": d }))
             .await
             .unwrap();
         assert!(fx.svc.dashboard_store.list().await.unwrap().is_empty());

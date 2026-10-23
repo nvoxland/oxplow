@@ -22,11 +22,10 @@ const MANIFEST: &str = "manifest: 2\nname: acme\nversion: 2.1.0\nintent:\n  purp
     entities:
       - { name: seen, key: k, columns: { k: text } }
 commands:
-  - name: human.only
-    summary: Only a person.
+  - name: no.jobs
+    summary: Not a job's tool.
     input_schema: { type: object }
     entry: only.star
-    invokers: { human: true, agent: false, lens: false }
 ";
 
 fn write(root: &std::path::Path, rel: &str, body: &str) {
@@ -215,26 +214,29 @@ async fn a_cancelled_run_is_recorded_as_cancelled_and_publishes_nothing() {
     );
 }
 
-/// A caller the command doesn't admit is refused, and the refusal is a
-/// `denied` run of that command — not a failure — owned by the extension.
+/// A job's model calling a command that isn't `job: true` is refused, and
+/// the refusal is a `denied` run of that command — not a failure — owned
+/// by the extension.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_refused_caller_is_a_denied_run_not_a_failure() {
     let fx = services_with_task_effort().await;
     install(&fx, "#!/bin/sh\necho '{}'\n").await;
-    let agent = Actor::Agent {
-        session_id: None,
+    let job = Actor::Job {
+        job_id: "acme/sync".into(),
+        attempt: 1,
+        fence: 1,
         thread_id: Some(fx.thread),
         stream_id: None,
     };
     fx.svc
         .commands
-        .run(&agent, "acme.human.only", json!({}), false)
+        .run(&job, "acme.no.jobs", json!({}), false)
         .await
-        .expect_err("an agent may not run it");
+        .expect_err("a job may not run it");
     let runs = rows(
         &fx,
         "SELECT outcome, version, kind, error FROM v_extension_run
-          WHERE contribution = 'oxplow:oxplow/command?command=acme.human.only'",
+          WHERE contribution = 'oxplow:oxplow/command?command=acme.no.jobs'",
     )
     .await;
     assert_eq!(runs.len(), 1, "{runs:?}");

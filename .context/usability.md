@@ -127,7 +127,7 @@ markdown itself, nor edits it in a `<textarea>`.
 - **Async-op failures don't `alert`.** Record them:
   `recordOpError({ label, command?, stderr?, stdout?, exitCode?,
   message? })` (`opErrors.ts`) reports it to the daemon, fire-and-forget,
-  as the person-only `oxplow.ui.report_error`, and the record is the model,
+  as `oxplow.ui.report_error`, and the record is the model,
   `v_op_error` — the client keeps nothing, so the list survives a reload
   and the agent reads the same rows (the always-on agent text and the
   `oxplow-codebase` skill say so, so "can you see that error?" needs no
@@ -253,16 +253,15 @@ markdown itself, nor edits it in a `<textarea>`.
 
 ## Agent proposals
 
-- **Approving is the confirmation.** An agent's run that needs a person
-  (a person-only setting, a destructive command) waits as a proposal; its
+- **Approving is the confirmation.** An effect's run that asks, or a
+  handler's consent check (a deploy that adds permissions), waits as a
+  proposal; its
   `ProposalCard` (`components/Proposals/ProposalCard.tsx`) shows who
-  proposed it, what it would change (a setting's before → after; a
-  composite's commands) and Approve / Decline. Approve runs it as the
+  proposed it, what it would change (a composite's commands) and Approve / Decline. Approve runs it as the
   person with no modal; a destructive one is tinted and its Approve is an
   `InlineConfirm` (the per-row destructive rule: one click arms, the
   second runs). A failed decision shows its error on the card, next to
-  the buttons. Cards appear in the **Approvals** rail panel and, for a
-  setting, on that setting's row in Settings (the compact form). Testids:
+  the buttons. Cards appear in the **Approvals** rail panel. Testids:
   `proposal-<id>`, `proposal-approve-<id>` (a destructive one's:
   `proposal-approve-<id>-trigger` / `-confirm`), `proposal-decline-<id>`,
   `proposal-error-<id>`, `rail-alert-proposals`.
@@ -923,8 +922,8 @@ declaring *what it is* and mounting the generic layer.
   would be here, one sentence on how it gets here, and 1–3 prompts the
   person can hand the agent. Each prompt is an Ask — it fills the agent's
   input and never sends. `compact` is the one-line form (rail sections). A loading state isn't an empty one: "Starting the
-  agent…" is plain text, and only the empty transcript is an `EmptyState`. Don't offer prompts for what an agent can't do
-  (AI providers, keys, permissions): say who does it instead. The session
+  agent…" is plain text, and only the empty transcript is an `EmptyState`. Don't offer prompts for what needs the person's own hands
+  (typing an AI provider key, approving permissions): say who does it instead. The session
   picker (the New Session lens page, a thread with no agent session) offers **no**
   prompts — there is no agent here yet to hand one to — only the agent
   choice and Start, which opens the slot and nothing else. Its root

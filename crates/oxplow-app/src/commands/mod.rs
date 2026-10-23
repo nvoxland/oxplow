@@ -374,7 +374,7 @@ impl Command {
         Arc::ptr_eq(&self.validator, &other.validator)
     }
 
-    pub fn new(spec: CommandSpec, handler: Handler) -> Result<Self, CommandError> {
+    pub fn new(mut spec: CommandSpec, handler: Handler) -> Result<Self, CommandError> {
         CommandSpec::validate_id(&spec.id)?;
         if let Some((field, message)) = spec.ui.as_ref().and_then(|ui| ui.problem()) {
             return Err(CommandError::Invalid {
@@ -390,6 +390,13 @@ impl Command {
         }
         if spec.confirm.required() {
             Self::may_ask(&spec)?;
+        }
+        // A secret is a kind of value: a top-level input field its schema
+        // marks `writeOnly` is never in a record, whatever else declares.
+        for field in secret_fields(&spec.input_schema) {
+            if !spec.unrecorded.contains(&field) {
+                spec.unrecorded.push(field);
+            }
         }
         let validator = Arc::new(InputValidator::compile(&spec.input_schema)?);
         let command = Self {
@@ -1020,14 +1027,6 @@ impl CommandBus {
         self.ops.read().get(scope, op)
     }
 
-    /// The operations with no floor — anyone may declare a command over
-    /// one that runs with no confirmation (`cap/op`, sorted): pinned by a
-    /// test, like [`Self::external_commands`], so each is a reviewed
-    /// choice rather than a forgotten `open_to`.
-    pub fn open_ops(&self) -> Vec<String> {
-        self.ops.read().fully_open()
-    }
-
     /// Remove every command `source` registered (an extension disabled, a
     /// provider instance stopped); returns their ids. A namespace left
     /// with no commands is free again.
@@ -1067,7 +1066,7 @@ impl CommandBus {
             .read()
             .commands
             .values()
-            .filter(|c| c.spec.invokers.admits(actor))
+            .filter(|c| job_refusal(&c.spec, actor).is_none())
             .filter(|c| active.as_ref().is_none_or(|a| a.refusal(&c.spec).is_none()))
             .map(|c| c.spec.clone())
             .collect()
@@ -1335,14 +1334,15 @@ impl CommandBus {
                 return Err(err);
             }
         };
-        // 2. The invoker must be admitted…
-        if let Some(err) = invoker_refusal(spec, actor) {
+        // 2. A job runs only what its extension declared for jobs; anyone
+        // else may run every command…
+        if let Some(err) = job_refusal(spec, actor) {
             self.audit_only(run, spec, &input, Outcome::Denied, Some(err.to_string()))
                 .await;
             return Err(err);
         }
         // 3. …and an agent (or a lens acting for one) must also pass the
-        // agent policy.
+        // agent policy: its own stream, an open thread to write.
         // A `Record` command isn't refused here: any thread may change
         // oxplow's own records.
         let mut gates = Gates { may_write: None };
@@ -1363,8 +1363,7 @@ impl CommandBus {
             gates.may_write = may_write;
             let gated = may_write.filter(|_| spec.access.needs_thread());
             if let PolicyDecision::Deny { reason, .. } =
-                self.policy
-                    .check_command(actor.invoker(), thread_id.as_ref(), spec, gated)
+                self.policy.check_command(thread_id.as_ref(), spec, gated)
             {
                 let err = CommandError::Denied { reason };
                 self.audit_only(run, spec, &input, Outcome::Denied, Some(err.to_string()))
@@ -1423,11 +1422,13 @@ impl CommandBus {
                 return Err(err);
             }
         }
-        // 4. A person confirms; an agent or an effect never can. Nothing is
-        // written: a person is asked, an agent's or effect's run is kept as
-        // a proposal.
+        // 4. A person confirms what asks: nothing is written, they are
+        // asked. An agent's run doesn't ask (what it may call is its
+        // harness's to decide); an effect's is kept as a proposal.
+        // `confirmed` stays a person's word: a handler's own consent (a
+        // deploy that adds permissions) still asks for it.
         let confirmed = confirmed && actor.may_confirm();
-        let confirm = command.confirm(&input);
+        let confirm = asks(&command, actor, &input);
         if confirm.required() && !confirmed {
             let preview = Preview {
                 command: spec.id.clone(),
@@ -1857,23 +1858,42 @@ pub(super) fn offered(
     }
 }
 
-/// Why `actor` may not run `spec`, if it may not: its invoker isn't
-/// admitted, or it is a lens (or component) whose presser isn't — a lens
-/// grants no power.
-pub(crate) fn invoker_refusal(spec: &CommandSpec, actor: &Actor) -> Option<CommandError> {
-    if spec.invokers.admits(actor) {
-        return None;
-    }
-    let reason = match actor.presser() {
-        Some(presser) if spec.invokers.allows(actor.invoker()) => format!(
-            "`{}` is not open to {:?} callers acting for {:?}",
-            spec.id,
-            actor.invoker(),
-            presser.invoker()
+/// The top-level input fields `schema` marks secret (`writeOnly: true`): a
+/// key, a token, a credential. Written, never read back: kept out of every
+/// record (`CommandSpec::unrecorded`), masked in every form, never in a
+/// draft. See `.context/commands.md` "Secrets".
+pub fn secret_fields(schema: &Value) -> Vec<String> {
+    schema
+        .get("properties")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flatten()
+        .filter(|(_, p)| p.get("writeOnly").and_then(Value::as_bool) == Some(true))
+        .map(|(k, _)| k.clone())
+        .collect()
+}
+
+/// Why `actor` may not run `spec`, if it may not: it is a durable job's
+/// model (or a lens it pressed) and `spec` isn't declared for jobs
+/// (`job: true`). A person, an agent and a lens acting for either may run
+/// every command.
+pub(crate) fn job_refusal(spec: &CommandSpec, actor: &Actor) -> Option<CommandError> {
+    (actor.invoker() == oxplow_domain::Invoker::Job && !spec.job).then(|| CommandError::Denied {
+        reason: format!(
+            "`{}` isn't a job's tool: its command says `job: true`",
+            spec.id
         ),
-        _ => format!("`{}` is not open to {:?} callers", spec.id, actor.invoker()),
-    };
-    Some(CommandError::Denied { reason })
+    })
+}
+
+/// What a run of `command` by `actor` asks: the command's confirmation,
+/// except an agent's (or a lens it pressed), which never asks.
+pub(crate) fn asks(command: &Command, actor: &Actor, input: &Value) -> oxplow_domain::Confirm {
+    if actor.is_agent_driven() {
+        oxplow_domain::Confirm::Never
+    } else {
+        command.confirm(input)
+    }
 }
 
 #[cfg(test)]

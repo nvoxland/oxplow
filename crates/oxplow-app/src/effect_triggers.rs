@@ -1313,14 +1313,14 @@ mod tests {
         fail: Arc<std::sync::atomic::AtomicBool>,
     ) {
         use crate::commands::{Command, Handler, HandlerOutput, Invocation};
-        use oxplow_domain::{Access, Atomicity, CommandSpec, Confirm, Invokers, Lifecycle};
+        use oxplow_domain::{Access, Atomicity, CommandSpec, Confirm, Lifecycle};
         let command = Command::new(
             CommandSpec {
                 output_schema: None,
                 id: "oxplow.probe.write".into(),
                 summary: "Write outside oxplow (a test probe).".into(),
                 input_schema: json!({ "type": "object" }),
-                invokers: Invokers::ALL,
+                job: false,
                 confirm: Confirm::Never,
                 undoable: false,
                 lifecycle: Lifecycle::Stable,
@@ -1398,7 +1398,7 @@ mod tests {
     async fn a_landed_steps_events_are_logged_once_across_a_retry() {
         use crate::commands::{Command, Handler, HandlerOutput, Invocation};
         use oxplow_domain::events::schema::{ConfigChanged, ConfigChangedV2};
-        use oxplow_domain::{Access, Atomicity, CommandSpec, Confirm, Invokers, Lifecycle};
+        use oxplow_domain::{Access, Atomicity, CommandSpec, Confirm, Lifecycle};
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
         const TWO_STEPS: &str = "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.probe.note\", \"input\": {\"n\": 1}}, {\"name\": \"oxplow.probe.write\", \"input\": {\"n\": 2}}]}\n";
@@ -1415,7 +1415,7 @@ mod tests {
                 id: "oxplow.probe.note".into(),
                 summary: "Note something outside oxplow (a test probe).".into(),
                 input_schema: json!({ "type": "object" }),
-                invokers: Invokers::ALL,
+                job: false,
                 confirm: Confirm::Never,
                 undoable: false,
                 lifecycle: Lifecycle::Stable,
@@ -1484,8 +1484,8 @@ mod tests {
     /// P9.D4: a person retries a reaction that failed — here one
     /// interrupted with a step outside oxplow under way. It is asked
     /// first, runs the effect once more as the next attempt, and is
-    /// recorded with which attempt it was and what started it. An agent
-    /// can't; a reaction that didn't fail isn't retried.
+    /// recorded with which attempt it was and what started it. An agent's
+    /// retry is not asked; a reaction that didn't fail isn't retried.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_person_retries_an_interrupted_reaction() {
         let fx = crate::test_fixtures::services_with_task_effort().await;
@@ -1498,16 +1498,7 @@ mod tests {
         interrupt(svc, &ev).await;
         assert_eq!(title(&fx).await, before);
 
-        // An agent may not; a person is asked, and told why to think.
-        let agent = oxplow_domain::Actor::Agent {
-            session_id: None,
-            thread_id: Some(fx.thread),
-            stream_id: None,
-        };
-        assert!(matches!(
-            retry(svc, &agent, &ev, true).await,
-            Err(CommandError::Denied { .. })
-        ));
+        // A person is asked, and told why to think.
         let human = oxplow_domain::Actor::Human;
         match retry(svc, &human, &ev, false).await {
             Err(CommandError::NeedsConfirmation { preview }) => {
@@ -1560,6 +1551,16 @@ mod tests {
         let other = log(svc, state_changed(&fx, CanonicalState::Done)).await;
         let refused = retry(svc, &human, &other, true).await.unwrap_err();
         assert!(refused.to_string().contains("hasn't reacted"), "{refused}");
+        // An agent retries an interrupted one without being asked.
+        let agent = oxplow_domain::Actor::Agent {
+            session_id: None,
+            thread_id: Some(fx.thread),
+            stream_id: None,
+        };
+        let third = log(svc, state_changed(&fx, CanonicalState::Done)).await;
+        interrupt(svc, &third).await;
+        let out = retry(svc, &agent, &third, false).await.unwrap();
+        assert_eq!(out.result["outcome"], json!("ok"));
     }
 
     /// P9.D4: a retry runs the effect as it is now, so it needs what a
@@ -1609,11 +1610,11 @@ mod tests {
         );
     }
 
-    /// A retry is open to a lens (the Alerts page's failed reactions) and
-    /// to no agent: a lens a person presses runs it, only once the person
-    /// confirms; a lens an agent presses is refused, as the agent is.
+    /// A retry is open to a lens (the Alerts page's failed reactions): a
+    /// lens a person presses runs it, only once the person confirms; a lens
+    /// an agent presses runs it without asking.
     #[tokio::test(flavor = "multi_thread")]
-    async fn a_lens_a_person_presses_retries_with_confirmation_and_an_agents_is_denied() {
+    async fn a_lens_a_person_presses_retries_with_confirmation_and_an_agents_does_not_ask() {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
         let lens = |presser: oxplow_domain::Actor| oxplow_domain::Actor::Lens {
@@ -1626,17 +1627,22 @@ mod tests {
             stream_id: None,
         };
         let input = json!({ "effect": "acme/nope", "event": "0" });
-        let denied = svc
+        // Unconfirmed, it still runs: this one names no effect, so it is
+        // invalid, not a question.
+        let unasked = svc
             .commands
             .run(
                 &lens(agent),
                 crate::commands::effect::RETRY,
                 input.clone(),
-                true,
+                false,
             )
             .await
             .unwrap_err();
-        assert!(matches!(denied, CommandError::Denied { .. }), "{denied:?}");
+        assert!(
+            matches!(unasked, CommandError::Invalid { .. }),
+            "{unasked:?}"
+        );
         let asks = svc
             .commands
             .run(
@@ -2233,7 +2239,7 @@ mod tests {
     }
 
     /// P9.D5: an effect never reacts to what was logged before its
-    /// approval — until a person backfills it. A backfill reacts, once
+    /// approval — until someone backfills it. A backfill reacts, once
     /// each and oldest first, to the matching events the effect never
     /// reacted to; a second one has nothing left.
     #[tokio::test(flavor = "multi_thread")]
@@ -2279,13 +2285,7 @@ mod tests {
             plan,
             json!({ "effect": "acme/mark-done", "planned": 3, "from_seq": past[0].seq, "to_seq": past[2].seq, "batch": crate::commands::effect::BACKFILL_BATCH })
         );
-        // Running it is a person's, asked first.
-        assert!(matches!(
-            svc.commands
-                .run(&agent, BACKFILL, input.clone(), true)
-                .await,
-            Err(CommandError::Denied { .. })
-        ));
+        // Running it asks a person first.
         match svc
             .commands
             .run(&oxplow_domain::Actor::Human, BACKFILL, input.clone(), false)
@@ -2302,7 +2302,13 @@ mod tests {
         }
         assert_eq!(title(&fx).await, before, "asking ran nothing");
 
-        let ran = run_as_person(svc, BACKFILL, input.clone()).await.unwrap();
+        // An agent's run is not asked.
+        let ran = svc
+            .commands
+            .run(&agent, BACKFILL, input.clone(), false)
+            .await
+            .unwrap()
+            .result;
         assert_eq!(
             ran,
             json!({ "effect": "acme/mark-done", "planned": 3, "ran": 3, "skipped": 0, "proposed": 0, "failed": 0, "remaining": 0 })

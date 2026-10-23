@@ -182,6 +182,13 @@ impl From<SessionError> for IpcError {
                 field: None,
                 details: Vec::new(),
             },
+            SessionError::NotAWorktree(p) => Self {
+                code: "INVALID".into(),
+                message: format!("{} isn't one of this repository's worktrees", p.display()),
+                cause: None,
+                field: Some("/worktree".into()),
+                details: Vec::new(),
+            },
             SessionError::DuplicateWorktreeSlug(slug) => Self {
                 code: "DUPLICATE_WORKTREE_SLUG".into(),
                 message: format!("worktree slug \"{slug}\" already exists"),

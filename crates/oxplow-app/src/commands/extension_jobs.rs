@@ -50,8 +50,7 @@ pub fn ops(jobs: Arc<ExtensionJobs>) -> Vec<Op> {
                     ..Default::default()
                 })
             })),
-        )
-        .open_to(oxplow_domain::Invokers::NO_AGENT),
+        ),
         Op::new(
             "jobs.read",
             "snapshot",

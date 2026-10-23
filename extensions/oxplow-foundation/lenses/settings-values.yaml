@@ -1,10 +1,10 @@
 title: Every setting
-description: Every setting that shapes this project, its value and where the value comes from (the defaults, your global config, the project, just you, an extension). Ask the Agent to Change This puts a request in the agent's input; a setting only you may set has a control on its area's page.
+description: Every setting that shapes this project, its value and where the value comes from (the defaults, your global config, the project, just you, an extension). Ask the Agent to Change This puts a request in the agent's input; a setting with a page of its own links to it.
 params:
   - { name: q, type: search, role: filter, label: Search settings, default: "" }
 query: |
   WITH s AS (
-    SELECT c.key, c.doc, c.origin, c.extension, c.human_only,
+    SELECT c.key, c.doc, c.origin, c.extension,
            CASE
              WHEN c.value IS NULL OR c.value = 'null' THEN '—'
              WHEN json_type(c.value) = 'text' THEN
@@ -24,7 +24,6 @@ query: |
              ELSE 9
            END AS rank,
            CASE
-             WHEN NOT c.human_only THEN NULL
              WHEN c.key IN ('agents', 'agentConfig', 'agentPromptAppend', 'personal.newThreadSession') THEN 'agents'
              WHEN c.key = 'ai' OR c.key LIKE 'ai.%' THEN 'ai'
              WHEN c.key = 'lsp' THEN 'lsp'
@@ -43,7 +42,6 @@ query: |
                      ELSE 'extension' END
            || CASE WHEN extension IS NOT NULL THEN ': ' || extension ELSE '' END AS source,
          shown AS value, doc,
-         CASE WHEN human_only THEN 'yours to set' ELSE '' END AS who,
          CASE WHEN area IS NULL THEN NULL ELSE 'Change It Here' END AS control,
          CASE WHEN area IS NULL THEN NULL
               ELSE 'oxplow:oxplow/page?area=' || area || '&page=settings' END AS control_page,
@@ -69,7 +67,6 @@ columns:
   - { key: source, label: From, width: 170 }
   - { key: value, label: Value }
   - { key: doc, label: What it does }
-  - { key: who, label: Who, width: 100 }
   - { key: control, label: Change, width: 120, link: { kind: page, from: control_page } }
 actions:
   - { id: ask, label: Ask the Agent to Change This, command: oxplow.agent.draft, input: { text: "{{row.ask}}" }, row: true }

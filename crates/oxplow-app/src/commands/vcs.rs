@@ -13,7 +13,7 @@
 //! announced, the way the watchers would.
 
 use crate::commands::ops::Op;
-use oxplow_domain::{Confirm, Invokers};
+use oxplow_domain::Confirm;
 use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -75,17 +75,13 @@ macro_rules! stream_input {
 
 /// One VCS operation of `capability`: parse the input, resolve the
 /// stream's workspace strictly, run `op`, announce what it touched. A
-/// person's or an agent's — an agent's on its own stream only — and,
-/// with `lens`, a lens's for the person who pressed it (what a page
-/// needs: stage, commit, discard, ignore, cherry-pick, revert); what
-/// moves branches or reaches a remote has no `lens`, whatever a manifest
-/// says. `confirm` is the least a command over it asks.
+/// person's, an agent's (on its own stream only) or a lens's for either.
+/// `confirm` is the least a command over it asks.
 fn vcs_op<I, F, Fut>(
     capability: &str,
     name: &str,
     touched: Touched,
     confirm: Confirm,
-    lens: bool,
     target: &VcsTarget,
     op: F,
 ) -> Op
@@ -143,12 +139,6 @@ where
             })
         })),
     )
-    .open_to(Invokers {
-        human: true,
-        agent: true,
-        lens,
-        job: false,
-    })
     .confirm_at_least(confirm)
 }
 
@@ -349,7 +339,6 @@ pub fn ops(target: VcsTarget) -> Vec<Op> {
             "commit",
             Touched::Refs,
             Confirm::Never,
-            true,
             t,
             |t, ws, i: CommitInput| async move {
                 let rev = t
@@ -371,7 +360,6 @@ pub fn ops(target: VcsTarget) -> Vec<Op> {
             "stage",
             Touched::Workspace,
             Confirm::Never,
-            true,
             t,
             |t, ws, i: PathsInput| async move {
                 t.vcs.stage(&ws, &i.paths).await.map_err(vcs_err)?;
@@ -383,7 +371,6 @@ pub fn ops(target: VcsTarget) -> Vec<Op> {
             "discard",
             Touched::Workspace,
             Confirm::Destructive,
-            true,
             t,
             |t, ws, i: PathsInput| async move {
                 t.vcs.discard(&ws, &i.paths).await.map_err(vcs_err)?;
@@ -395,7 +382,6 @@ pub fn ops(target: VcsTarget) -> Vec<Op> {
             "fetch",
             Touched::AllRefs,
             Confirm::Never,
-            false,
             t,
             |t, ws, i: FetchInput| async move {
                 outcome(
@@ -411,7 +397,6 @@ pub fn ops(target: VcsTarget) -> Vec<Op> {
             "pull",
             Touched::Refs,
             Confirm::Never,
-            false,
             t,
             |t, ws, i: RemoteBranchInput| async move {
                 let from = i.remote_branch()?;
@@ -423,7 +408,6 @@ pub fn ops(target: VcsTarget) -> Vec<Op> {
             "push",
             Touched::AllRefs,
             Confirm::Never,
-            false,
             t,
             |t, ws, i: RemoteBranchInput| async move {
                 let to = i.remote_branch()?;
@@ -435,7 +419,6 @@ pub fn ops(target: VcsTarget) -> Vec<Op> {
             "merge",
             Touched::Refs,
             Confirm::Destructive,
-            false,
             t,
             |t, ws, i: RevInput| async move {
                 outcome(t.vcs.merge(&ws, &i.rev).await.map_err(vcs_err)?)
@@ -446,7 +429,6 @@ pub fn ops(target: VcsTarget) -> Vec<Op> {
             "checkout_branch",
             Touched::Refs,
             Confirm::Never,
-            false,
             t,
             |t, ws, i: CheckoutInput| async move {
                 t.vcs
@@ -461,7 +443,6 @@ pub fn ops(target: VcsTarget) -> Vec<Op> {
             "rename_branch",
             Touched::AllRefs,
             Confirm::Never,
-            false,
             t,
             |t, ws, i: RenameBranchInput| async move {
                 t.vcs
@@ -476,7 +457,6 @@ pub fn ops(target: VcsTarget) -> Vec<Op> {
             "delete_branch",
             Touched::AllRefs,
             Confirm::Destructive,
-            false,
             t,
             |t, ws, i: DeleteBranchInput| async move {
                 t.vcs
@@ -491,7 +471,6 @@ pub fn ops(target: VcsTarget) -> Vec<Op> {
             "resolve_conflict",
             Touched::Workspace,
             Confirm::Never,
-            false,
             t,
             |t, ws, i: ResolveConflictInput| async move {
                 t.vcs
@@ -506,7 +485,6 @@ pub fn ops(target: VcsTarget) -> Vec<Op> {
             "rebase",
             Touched::Refs,
             Confirm::Destructive,
-            false,
             t,
             |t, ws, i: RevInput| async move {
                 outcome(t.git.rebase(&ws, &i.rev).await.map_err(vcs_err)?)
@@ -517,7 +495,6 @@ pub fn ops(target: VcsTarget) -> Vec<Op> {
             "cherry_pick",
             Touched::Refs,
             Confirm::Never,
-            true,
             t,
             |t, ws, i: RevInput| async move {
                 outcome(t.git.cherry_pick(&ws, &i.rev).await.map_err(vcs_err)?)
@@ -528,7 +505,6 @@ pub fn ops(target: VcsTarget) -> Vec<Op> {
             "revert",
             Touched::Refs,
             Confirm::Destructive,
-            true,
             t,
             |t, ws, i: RevInput| async move {
                 outcome(t.git.revert(&ws, &i.rev).await.map_err(vcs_err)?)
@@ -539,7 +515,6 @@ pub fn ops(target: VcsTarget) -> Vec<Op> {
             "ignore",
             Touched::Workspace,
             Confirm::Never,
-            true,
             t,
             |t, ws, i: IgnoreInput| async move {
                 t.git.ignore(&ws, &i.entry).await.map_err(vcs_err)?;
@@ -618,12 +593,11 @@ mod tests {
         assert!(silent.contains("git reported a failure"), "{silent}");
     }
 
-    /// A lens acting for a person runs what a page needs of git — stage,
-    /// commit, discard, ignore, cherry-pick, revert — as that person would,
-    /// a destructive one still asking; what moves branches (push, merge,
-    /// rebase, checkout, a branch's delete) is a person's own.
+    /// A lens runs git for whoever pressed it: a person's destructive run
+    /// asks them (the second click); an agent's doesn't — what an agent
+    /// may call is its harness's to decide.
     #[tokio::test]
-    async fn a_lens_runs_the_git_a_page_needs_and_never_moves_branches() {
+    async fn a_lens_runs_git_for_its_presser_and_only_a_person_is_asked() {
         let f = services_with_effort().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
@@ -665,24 +639,28 @@ mod tests {
             .run(&lens, "oxplow.vcs.discard", discard, true)
             .await
             .expect("confirmed, a lens discards for the person");
-        for name in [
-            "oxplow.git.cherry_pick",
-            "oxplow.git.revert",
-            "oxplow.git.ignore",
-        ] {
-            let spec = svc.commands.spec(name).expect(name);
-            assert!(spec.invokers.lens, "{name} is open to a lens");
-        }
-        for name in [
-            "oxplow.vcs.push",
-            "oxplow.vcs.merge",
-            "oxplow.git.rebase",
-            "oxplow.vcs.checkout_branch",
-            "oxplow.vcs.delete_branch",
-        ] {
-            let spec = svc.commands.spec(name).expect(name);
-            assert!(!spec.invokers.lens, "{name} is a person's own");
-        }
+        std::fs::write(root.join("a.txt"), "four\n").unwrap();
+        let for_agent = Actor::Lens {
+            lens_id: "oxplow-foundation/uncommitted".into(),
+            on_behalf_of: Box::new(Actor::Agent {
+                session_id: None,
+                thread_id: Some(f.thread),
+                stream_id: None,
+            }),
+        };
+        svc.commands
+            .run(
+                &for_agent,
+                "oxplow.vcs.discard",
+                json!({ "stream": stream, "paths": ["a.txt"] }),
+                false,
+            )
+            .await
+            .expect("an agent's discard doesn't ask");
+        assert_eq!(
+            std::fs::read_to_string(root.join("a.txt")).unwrap(),
+            "two\n"
+        );
     }
 
     /// P5.B6 (tsk525): an agent runs VCS commands on its own stream only

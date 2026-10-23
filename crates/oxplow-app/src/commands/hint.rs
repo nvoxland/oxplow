@@ -5,7 +5,6 @@
 //! the person.
 
 use crate::commands::ops::Op;
-use oxplow_domain::Invokers;
 use std::sync::Arc;
 
 use oxplow_domain::CommandError;
@@ -55,7 +54,6 @@ pub fn dismiss_op() -> Op {
             })
         })),
     )
-    .open_to(Invokers::NO_AGENT)
 }
 
 /// The hint commands, for the bus.

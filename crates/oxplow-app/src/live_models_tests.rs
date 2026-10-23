@@ -392,8 +392,8 @@ async fn worktree_stream(fx: &EffortFixture, branch: &str) -> (i64, std::path::P
 #[tokio::test]
 async fn config_values_are_read_live_with_where_each_comes_from() {
     let fx = services_with_effort().await;
-    let key = "SELECT origin, human_only FROM v_config_value WHERE key = 'snapshotRetentionDays'";
-    assert_eq!(rows(&fx, key).await, vec![vec![json!("default"), json!(0)]]);
+    let key = "SELECT origin FROM v_config_value WHERE key = 'snapshotRetentionDays'";
+    assert_eq!(rows(&fx, key).await, vec![vec![json!("default")]]);
     std::fs::write(
         fx._dir.path().join(".oxplow/project.yaml"),
         "snapshotRetentionDays: 3\n",

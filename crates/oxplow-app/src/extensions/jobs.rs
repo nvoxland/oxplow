@@ -106,7 +106,7 @@ pub struct JobFile {
     #[serde(default)]
     replay: JobReplay,
     /// This extension's commands (their names as declared, without the
-    /// namespace) the model may call; each says `invokers: { job: true }`.
+    /// namespace) the model may call; each says `job: true`.
     #[serde(default)]
     tools: Vec<String>,
     /// Model rounds at most (1–16, default 4): a round that calls tools
@@ -218,9 +218,9 @@ fn tools(
                 "job tool `{local}` is none of this extension's commands"
             ));
         };
-        if !declared.invokers.job {
+        if !declared.job {
             return Err(format!(
-                "job tool `{local}` doesn't admit a job: its command says `invokers: {{ job: true }}`"
+                "job tool `{local}` doesn't admit a job: its command says `job: true`"
             ));
         }
         if !declared.access.reads_only() {

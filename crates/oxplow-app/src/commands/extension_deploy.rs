@@ -6,7 +6,7 @@
 
 use std::sync::Arc;
 
-use oxplow_domain::{CommandError, Confirm, Invokers, Preview};
+use oxplow_domain::{CommandError, Confirm, Preview};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -186,7 +186,6 @@ fn enable_op(services: ServicesSlot, op: &'static str, enabled: bool) -> Op {
             })
         })),
     )
-    .open_to(Invokers::NO_AGENT)
 }
 
 fn remove_op(services: ServicesSlot) -> Op {
@@ -207,7 +206,6 @@ fn remove_op(services: ServicesSlot) -> Op {
             })
         })),
     )
-    .open_to(Invokers::NO_AGENT)
     .confirm_at_least(Confirm::Destructive)
 }
 
@@ -235,5 +233,4 @@ fn share_op(services: ServicesSlot, op: &'static str) -> Op {
             })
         })),
     )
-    .open_to(Invokers::NO_AGENT)
 }

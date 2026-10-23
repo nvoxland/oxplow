@@ -11,16 +11,16 @@ jobs:
   - { id: review, description: Review the TODOs., version: 1, operation: ai.complete_typed,
       needs: [ai.compute, sql.read], tools: [todos.in_file], max_tool_rounds: 4, timeout: 120 }
 commands:
-  - { name: review.ask, summary: Ask for a review., scope: jobs.write, op: enqueue, invokers: { human: true, agent: true, lens: true } }
-  - { name: review.cancel, summary: Stop it., scope: jobs.write, op: cancel, invokers: { human: true, agent: true, lens: true } }
-  - { name: review.result, summary: Read it., scope: jobs.read, op: snapshot, invokers: { human: true, agent: true, lens: true } }
+  - { name: review.ask, summary: Ask for a review., scope: jobs.write, op: enqueue }
+  - { name: review.cancel, summary: Stop it., scope: jobs.write, op: cancel }
+  - { name: review.result, summary: Read it., scope: jobs.read, op: snapshot }
   - name: todos.in_file              # a tool: reads, admits a job, says its input
     summary: The TODO comments in one file.
     entry: commands/todos_in_file.star
     needs: [sql.read]
     input_schema: { type: object, required: [path], properties: { path: { type: string } } }
     access: read
-    invokers: { human: false, agent: false, lens: false, job: true }
+    job: true
 effects:
   - { id: publish, on: [contribution.job.completed], entry: effects/publish.star, needs: [jobs.read] }
 ```
@@ -30,8 +30,7 @@ effects:
   the job's **subject**, one job per key: put what it's about in it
   (`review:eff12`), and read it back as the snapshot's `intentKey`
   (or `v_job_run.intent_key`) in the effect that publishes the answer.
-- To start one on an event, an effect composes your own `ask` command
-  (give it `invokers.agent: true`: an effect acts as an agent). Keep the
+- To start one on an event, an effect composes your own `ask` command. Keep the
   prompt in one script command that composes `ask`, so the effect and a
   lens button share it.
 - A tool only reads; the model calls it as `todos_in_file`, and with

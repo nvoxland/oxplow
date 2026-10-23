@@ -27,9 +27,7 @@ use oxplow_domain::agent_session::{
     AgentSession, NewAgentSession, SessionCloseReason, SessionKind,
 };
 use oxplow_domain::uri::build::{stream_uri, thread_uri};
-use oxplow_domain::{
-    AgentSessionId, CommandCall, CommandError, Confirm, Invokers, ThreadId, Timestamp,
-};
+use oxplow_domain::{AgentSessionId, CommandCall, CommandError, Confirm, ThreadId, Timestamp};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::json;
@@ -210,11 +208,6 @@ pub fn open_op(config: super::config_commands::ConfigTarget, harnesses: HarnessR
             let cfg = crate::config_service::read_config(&config.config);
             let (harness, kind) = choose_agent(&cfg, &harnesses, &input)?;
             let remembered = if input.remember {
-                if ctx.actor().is_agent_driven() {
-                    return Err(CommandError::Denied {
-                        reason: "what new threads start with is a person's to choose".into(),
-                    });
-                }
                 Some(super::config_commands::change(
                     &config,
                     ctx.actor(),
@@ -225,13 +218,6 @@ pub fn open_op(config: super::config_commands::ConfigTarget, harnesses: HarnessR
             } else {
                 None
             };
-            if input.resume.is_some() && ctx.actor().is_agent_driven() {
-                return Err(CommandError::Denied {
-                    reason:
-                        "an agent may open a session but not choose the conversation it resumes"
-                            .into(),
-                });
-            }
             let now = Timestamp::now();
             let session = insert_tx(
                 ctx.conn,
@@ -421,7 +407,6 @@ pub fn stop_op(processes: crate::agent_sessions::SessionProcesses) -> Op {
             })
         })),
     )
-    .open_to(Invokers::HUMAN_ONLY)
 }
 
 /// `agent_session.start { session }`: a person starts a stopped agent
@@ -454,7 +439,6 @@ pub fn start_op() -> Op {
             })
         })),
     )
-    .open_to(Invokers::HUMAN_ONLY)
 }
 
 /// `agent_session.start_fresh { session }`: the one way a session gets a
@@ -483,7 +467,6 @@ pub fn start_fresh_op() -> Op {
             Ok(result(&after))
         })),
     )
-    .open_to(Invokers::HUMAN_ONLY)
     .confirm_at_least(Confirm::Destructive)
 }
 
@@ -572,7 +555,6 @@ pub fn resume_conversation_op(processes: crate::agent_sessions::SessionProcesses
             })
         })),
     )
-    .open_to(Invokers::HUMAN_ONLY)
 }
 
 /// `agent_session.fork_conversation { session, conversation? }`: the
@@ -623,7 +605,6 @@ pub fn fork_conversation_op(processes: crate::agent_sessions::SessionProcesses) 
             })
         })),
     )
-    .open_to(Invokers::HUMAN_ONLY)
 }
 
 /// The agent-session commands, for the bus.
@@ -739,7 +720,8 @@ mod tests {
             .await
             .unwrap()
             .len();
-        let err = run(
+        // An agent may choose `remember` too.
+        run(
             &fx,
             &agent(&fx),
             OPEN,
@@ -747,8 +729,7 @@ mod tests {
             false,
         )
         .await
-        .unwrap_err();
-        assert!(matches!(err, CommandError::Denied { .. }), "{err:?}");
+        .unwrap();
         assert_eq!(
             fx.svc
                 .agent_session_store
@@ -756,13 +737,13 @@ mod tests {
                 .await
                 .unwrap()
                 .len(),
-            before
+            before + 1
         );
     }
 
     /// A person's stop marks the session and keeps the slot; start clears
     /// it; start_fresh also forgets the saved conversation. An agent may
-    /// do none of them.
+    /// do all of them.
     #[tokio::test]
     async fn stopping_marks_the_session_and_starting_clears_it() {
         let fx = services_with_effort().await;
@@ -789,13 +770,9 @@ mod tests {
         assert!(get(&fx, fx.session).await.stopped_by_user_at.is_none());
 
         for name in [STOP, START, START_FRESH] {
-            let err = run(&fx, &agent(&fx), name, me.clone(), true)
+            run(&fx, &agent(&fx), name, me.clone(), true)
                 .await
-                .unwrap_err();
-            assert!(
-                matches!(err, CommandError::Denied { .. }),
-                "{name}: {err:?}"
-            );
+                .unwrap_or_else(|e| panic!("{name}: {e:?}"));
         }
     }
 
@@ -894,18 +871,16 @@ mod tests {
             ),
             (FORK_CONVERSATION, serde_json::json!({ "session": me })),
         ] {
-            let err = run(&fx, &agent(&fx), name, input, true).await.unwrap_err();
-            assert!(
-                matches!(err, CommandError::Denied { .. }),
-                "{name}: {err:?}"
-            );
+            run(&fx, &agent(&fx), name, input, true)
+                .await
+                .unwrap_or_else(|e| panic!("{name}: {e:?}"));
         }
     }
 
     /// A person opens a session on a saved conversation: it is bound
     /// `chosen` in the same transaction (undo closes the slot). One open in
     /// another session is refused, naming it. An agent may open a session
-    /// but not pick the conversation for it.
+    /// and pick the conversation for it too.
     #[tokio::test]
     async fn a_person_opens_a_session_on_a_chosen_conversation() {
         let fx = services_with_effort().await;
@@ -963,8 +938,8 @@ mod tests {
             2
         );
 
-        // An agent may open a session, not choose its conversation.
-        let err = run(
+        // An agent may choose the conversation too.
+        run(
             &fx,
             &agent(&fx),
             OPEN,
@@ -972,14 +947,7 @@ mod tests {
             true,
         )
         .await
-        .unwrap_err();
-        assert!(
-            matches!(
-                &err,
-                CommandError::Denied { .. } | CommandError::Invalid { .. }
-            ),
-            "{err:?}"
-        );
+        .unwrap();
         run(
             &fx,
             &agent(&fx),

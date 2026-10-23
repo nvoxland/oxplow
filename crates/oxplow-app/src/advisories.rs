@@ -916,7 +916,7 @@ mod tests {
     }
 
     /// A person's hint never reaches the agent: it waits in the ledger
-    /// until the person dismisses it (`oxplow.hint.dismiss`), which an agent can't.
+    /// until someone dismisses it (`oxplow.hint.dismiss`); an agent may too.
     #[tokio::test]
     async fn a_person_hint_waits_for_the_person() {
         let f = crate::test_fixtures::services_with_effort().await;
@@ -944,17 +944,6 @@ mod tests {
             thread_id: Some(f.thread),
             stream_id: Some(f.svc.streams.list_streams().await.unwrap()[0].id),
         };
-        assert!(f
-            .svc
-            .commands
-            .run(
-                &agent,
-                crate::commands::hint::DISMISS,
-                serde_json::json!({ "nudge": id }),
-                false
-            )
-            .await
-            .is_err());
         f.svc
             .commands
             .run(
@@ -969,13 +958,13 @@ mod tests {
             nudges(&f.svc).await,
             serde_json::json!([["guide/tell", "person", 1]])
         );
-        // Dismissing it again (a double click) changes nothing and leaves
-        // no record; a hint that was never raised is still refused.
+        // Dismissing it again (an agent may dismiss too) changes nothing and
+        // leaves no record; a hint that was never raised is still refused.
         let again = f
             .svc
             .commands
             .run(
-                &oxplow_domain::Actor::Human,
+                &agent,
                 crate::commands::hint::DISMISS,
                 serde_json::json!({ "nudge": id }),
                 false,

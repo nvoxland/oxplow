@@ -53,7 +53,7 @@ fn write_extension(project: &Path, hooks: &str) {
     std::fs::create_dir_all(dir.join("bin")).unwrap();
     std::fs::write(
         dir.join("extension.yaml"),
-        "manifest: 2\nname: tracker\nintent:\n  purpose: the fake tracker\n  examples: [{ name: a }]\ncommands:\n  - name: item.estimate\n    summary: Set a work item's points.\n    provider: fake\n    op: estimate\n    invokers: { human: true, agent: true, lens: true }\n    ui: { label: \"Estimate in Fake…\", group: Tracker, about: oxplow/work_item, input: { uri: \"{{uri}}\", points: 3 } }\npermissions: { process: true }\nproviders:\n  - id: fake\n    capability: work_items\n    entry: bin/provider\n    declarations: provider.json\n",
+        "manifest: 2\nname: tracker\nintent:\n  purpose: the fake tracker\n  examples: [{ name: a }]\ncommands:\n  - name: item.estimate\n    summary: Set a work item's points.\n    provider: fake\n    op: estimate\n    ui: { label: \"Estimate in Fake…\", group: Tracker, about: oxplow/work_item, input: { uri: \"{{uri}}\", points: 3 } }\npermissions: { process: true }\nproviders:\n  - id: fake\n    capability: work_items\n    entry: bin/provider\n    declarations: provider.json\n",
     )
     .unwrap();
     let script = dir.join("bin/provider");
@@ -295,10 +295,10 @@ async fn an_unconfigured_instance_cannot_be_enabled() {
 }
 
 /// P5.D4's red: three failures in a row disable the instance, logged
-/// with the reason; it stays off across reconciles until a person runs
-/// `oxplow.contribution.enable`.
+/// with the reason; it stays off across reconciles until
+/// `oxplow.contribution.enable` runs, by a person or an agent.
 #[tokio::test]
-async fn three_failures_in_a_row_disable_an_instance_until_a_person_enables_it() {
+async fn three_failures_in_a_row_disable_an_instance_until_it_is_enabled() {
     let (fx, _ext) = deployed("fail-next:3").await;
     let providers = &fx.svc.providers;
     configure(&fx, true, json!({ "team": "core" }));
@@ -345,8 +345,10 @@ async fn three_failures_in_a_row_disable_an_instance_until_a_person_enables_it()
         InstanceState::Disabled { .. }
     ));
 
-    // Only a person enables it again.
-    let denied = fx
+    // An agent may enable it again.
+    write_extension(&fx.svc.layout.project_dir, "");
+    deploy(&fx, &extension(&fx.svc.layout.project_dir)).await;
+    let enabled = fx
         .svc
         .commands
         .run(
@@ -355,22 +357,6 @@ async fn three_failures_in_a_row_disable_an_instance_until_a_person_enables_it()
                 thread_id: Some(ThreadId::new(fx.thread.value())),
                 stream_id: None,
             },
-            "oxplow.contribution.enable",
-            json!({ "extension": "tracker", "kind": "provider", "contribution": "fake" }),
-            false,
-        )
-        .await;
-    assert!(matches!(
-        denied,
-        Err(oxplow_domain::CommandError::Denied { .. })
-    ));
-    write_extension(&fx.svc.layout.project_dir, "");
-    deploy(&fx, &extension(&fx.svc.layout.project_dir)).await;
-    let enabled = fx
-        .svc
-        .commands
-        .run(
-            &Actor::Human,
             "oxplow.contribution.enable",
             json!({ "extension": "tracker", "kind": "provider", "contribution": "fake" }),
             false,
@@ -773,7 +759,7 @@ async fn a_composite_writes_another_providers_item_as_steps() {
 /// P7.A1: a provider's verb input is checked against what it declares
 /// (its `native` fields included) before the process is called; another
 /// provider's parent or link target is refused at its field; an agent's
-/// external run that needs a person is proposed with no dry run.
+/// delete runs without asking.
 #[tokio::test]
 async fn an_external_verb_input_is_checked_and_stays_on_its_provider() {
     let (fx, ext) = deployed("").await;
@@ -833,15 +819,20 @@ async fn an_external_verb_input_is_checked_and_stays_on_its_provider() {
     .unwrap_err();
     assert!(err.to_string().contains("native_state"), "{err}");
 
-    // Delete is destructive: an agent's run is proposed, never dry-run
-    // through the process.
+    // Delete is destructive: a person is asked, an agent's run is not.
     let agent = Actor::Agent {
         session_id: None,
         thread_id: Some(ThreadId::new(fx.thread.value())),
         stream_id: None,
     };
-    let err = fx
-        .svc
+    let err = run(json!({ "uri": item }), "oxplow.work_item.delete")
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, oxplow_domain::CommandError::NeedsConfirmation { .. }),
+        "{err:?}"
+    );
+    fx.svc
         .commands
         .run(
             &agent,
@@ -850,22 +841,9 @@ async fn an_external_verb_input_is_checked_and_stays_on_its_provider() {
             false,
         )
         .await
-        .unwrap_err();
-    let oxplow_domain::CommandError::Proposed { proposal, .. } = err else {
-        panic!("{err:?}");
-    };
-    let id = proposal;
-    let kept = fx
-        .svc
-        .commands
-        .proposal_store()
-        .get(id)
-        .await
-        .unwrap()
         .unwrap();
-    assert_eq!(kept.dry_run, None);
     fx.svc.event_pump.run_once().await.unwrap();
-    assert!(ServicesProbe(&fx.svc).record(&item).await.is_some());
+    assert!(ServicesProbe(&fx.svc).record(&item).await.is_none());
 }
 
 /// P6b.C2: a running instance's capability and features are a model row
@@ -1121,11 +1099,11 @@ async fn a_provider_command_is_declared_over_an_operation_it_lists() {
     let base = std::fs::read_to_string(&manifest).unwrap();
     for (entry, says) in [
         (
-            "  - { name: item.comment, summary: S., provider: fake, op: comment, invokers: { human: true, agent: true, lens: true } }\n",
+            "  - { name: item.comment, summary: S., provider: fake, op: comment }\n",
             "`comment` is a work_items verb",
         ),
         (
-            "  - { name: item.nope, summary: S., provider: fake, op: nope, invokers: { human: true, agent: true, lens: true } }\n",
+            "  - { name: item.nope, summary: S., provider: fake, op: nope }\n",
             "its declarations have no command `nope`",
         ),
         (
@@ -1135,7 +1113,7 @@ async fn a_provider_command_is_declared_over_an_operation_it_lists() {
         // A provider's inverse names its operation: one command per
         // operation, so the undo is the command that ran.
         (
-            "  - { name: item.guess, summary: S., provider: fake, op: estimate, invokers: { human: true, agent: true, lens: true } }\n",
+            "  - { name: item.guess, summary: S., provider: fake, op: estimate }\n",
             "`fake`'s `estimate` already backs `tracker.item.estimate`",
         ),
     ] {
@@ -2822,7 +2800,7 @@ async fn a_named_instance_says_which_provider_it_is() {
     }
     assert!(!running(&fx.svc, "fake_second"));
 
-    // A person adds one by naming the provider; a provider the extension
+    // One is added by naming the provider; a provider the extension
     // doesn't declare, or an id already taken, is refused.
     let providers = &fx.svc.providers;
     let refused = providers
@@ -2850,16 +2828,16 @@ async fn a_named_instance_says_which_provider_it_is() {
         .await
         .unwrap_err();
     assert!(taken.to_string().contains("already"), "{taken}");
-    // An agent can't: instances are a person's (`extensionInstances`).
+    // An agent may add one too.
     let agent = Actor::Agent {
         session_id: None,
         thread_id: Some(fx.thread),
         stream_id: None,
     };
-    assert!(providers
+    providers
         .add_instance(&agent, "tracker/other", "fake", Scope::Project)
         .await
-        .is_err());
+        .unwrap();
     providers
         .remove_instance(&Actor::Human, "tracker/acme")
         .await
@@ -3035,16 +3013,20 @@ async fn a_global_instance_runs_in_every_project_with_the_extension() {
         "no such extension there"
     );
 
-    // An agent has no path to the machine's file.
+    // An agent may write the machine's file too.
     let agent = Actor::Agent {
         session_id: None,
         thread_id: Some(fx.thread),
         stream_id: None,
     };
-    assert!(providers
+    providers
         .add_instance(&agent, "tracker/fake_other", "fake", Scope::Global)
         .await
-        .is_err());
+        .unwrap();
+    providers
+        .remove_instance(&Actor::Human, "tracker/fake_other")
+        .await
+        .unwrap();
     // Removing it stops it everywhere it is read.
     providers
         .remove_instance(&Actor::Human, SHARED)
@@ -3085,12 +3067,8 @@ async fn a_global_instance_is_turned_off_in_one_project() {
         thread_id: Some(fx.thread),
         stream_id: None,
     };
-    assert!(other.providers.off_here(&agent, SHARED).await.is_err());
-    let view = other
-        .providers
-        .off_here(&Actor::Human, SHARED)
-        .await
-        .unwrap();
+    // An agent may turn it off here too.
+    let view = other.providers.off_here(&agent, SHARED).await.unwrap();
     crate::test_fixtures::activate_with_problems(&other).await;
     assert_eq!(
         (view.scope, view.overridden, view.enabled),

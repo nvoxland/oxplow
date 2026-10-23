@@ -13,48 +13,12 @@ use crate::{
     basename, parse_project_config, render_project_config, ConfigError, OxplowConfig, RawConfig,
 };
 
-/// Keys only a person may set. Each either runs a program (`lsp`,
-/// `extensionInstances`, `agents`), chooses the model that
-/// reads the project (`ai`, `agentConfig`), enables code (`extensions`),
-/// chooses where the project's work goes and how it is tracked
-/// (`activeProviders`: an agent moving filing to another tracker, or
-/// turning the effort policy off), decides how long its agents'
-/// activity is kept (`eventRetention`), bounds the scripts extensions run
-/// (`scripts`: an agent mustn't raise its own scripts' memory or
-/// concurrency), or steers every agent (`agentPromptAppend`, `testing` — its agent hint —
-/// where an agent setting it could persist instructions into all threads): an agent asking to change one
-/// gets a proposal the person approves or declines. Everything else is the
-/// agent's to set through `oxplow.config.set`. A key whose doc says it runs
-/// programs or steers agents must be listed here (a test enforces it).
-///
-/// The gate is `oxplow.config.set`'s: an edit to `.oxplow/project.yaml` on disk
-/// is reloaded whole, person-only keys included — a known gap, left as is
-/// (tsk997; `.context/commands.md`).
-pub const HUMAN_ONLY_KEYS: &[&str] = &[
-    "agents",
-    "agentConfig",
-    "extensionInstances",
-    "activeProviders",
-    "replacements",
-    "eventRetention",
-    "scripts",
-    "ai",
-    "lsp",
-    "testing",
-    "extensions",
-    "extensionSources",
-    "enableBundledExtensions",
-    "agentPromptAppend",
-];
-
 /// One key of `.oxplow/project.yaml`.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, specta::Type)]
 pub struct ConfigKey {
     pub key: String,
     /// What the key is for, from the schema's field doc.
     pub doc: String,
-    /// Only a person may set it (see [`HUMAN_ONLY_KEYS`]).
-    pub human_only: bool,
     /// JSON Schema for the key's value (with the document's `$defs`).
     pub schema: Value,
 }
@@ -64,8 +28,7 @@ pub fn project_config_schema() -> Value {
     serde_json::to_value(schemars::schema_for!(RawConfig)).expect("schema serializes")
 }
 
-/// Every key, in the schema's order, with its doc, schema and whether it
-/// is human-only.
+/// Every key, in the schema's order, with its doc and schema.
 pub fn config_keys() -> Vec<ConfigKey> {
     let root = project_config_schema();
     let defs = root.get("$defs").cloned();
@@ -86,7 +49,6 @@ pub fn config_keys() -> Vec<ConfigKey> {
                 obj.remove("description");
             }
             ConfigKey {
-                human_only: HUMAN_ONLY_KEYS.contains(&key.as_str()),
                 key: key.clone(),
                 doc,
                 schema,
@@ -184,7 +146,7 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn every_file_key_is_registered_documented_and_the_human_only_list_is_real() {
+    fn every_file_key_is_registered_and_documented() {
         let keys = config_keys();
         let names: Vec<&str> = keys.iter().map(|k| k.key.as_str()).collect();
         for expected in [
@@ -212,27 +174,7 @@ mod tests {
                 k.key
             );
         }
-        for h in HUMAN_ONLY_KEYS {
-            assert!(names.contains(h), "human-only key `{h}` is not a file key");
-        }
-        assert!(config_key("ai").unwrap().human_only);
-        assert!(!config_key("zones").unwrap().human_only);
         assert!(!is_config_key("nope"));
-    }
-
-    #[test]
-    fn every_key_that_runs_programs_or_steers_agents_is_human_only() {
-        for k in config_keys() {
-            let dangerous = k.doc.contains("Runs programs") || k.doc.contains("Steers every agent");
-            if dangerous {
-                assert!(
-                    k.human_only,
-                    "`{}` runs programs or steers agents: {}",
-                    k.key, k.doc
-                );
-            }
-        }
-        assert!(config_key("agentPromptAppend").unwrap().human_only);
     }
 
     #[test]

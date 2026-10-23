@@ -10,7 +10,7 @@
 
 use std::sync::Arc;
 
-use oxplow_domain::{CommandError, Confirm, DomainError, Invokers};
+use oxplow_domain::{CommandError, Confirm, DomainError};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::json;
@@ -67,8 +67,7 @@ fn op(name: &'static str, services: ServicesSlot, discard: bool) -> Op {
                 })
             })
         })),
-    )
-    .open_to(Invokers::NO_AGENT);
+    );
     if discard {
         op.confirm_at_least(Confirm::Destructive)
     } else {
@@ -141,30 +140,34 @@ mod tests {
         assert!(matches!(gone, CommandError::Invalid { .. }), "{gone:?}");
     }
 
-    /// An agent doesn't touch delivery: it is a person's, or a lens for one.
+    /// An agent may retry or discard a parked delivery.
     #[tokio::test(flavor = "multi_thread")]
-    async fn an_agent_may_not_retry_or_discard() {
+    async fn an_agent_may_retry_and_discard() {
         let fx = crate::test_fixtures::services_with_effort().await;
-        let id = park(&fx, "x").await;
         let agent = Actor::Agent {
             session_id: None,
             thread_id: Some(fx.thread),
             stream_id: None,
         };
-        for name in [super::RETRY, super::DISCARD] {
-            let err = fx
-                .svc
-                .commands
-                .run(&agent, name, json!({ "id": id }), true)
-                .await
-                .unwrap_err();
-            assert!(
-                matches!(
-                    err,
-                    CommandError::Denied { .. } | CommandError::Unknown { .. }
-                ),
-                "{name}: {err:?}"
-            );
-        }
+        // A retry reaches the handler, which names the missing consumer.
+        let id = park(&fx, "no.such.consumer").await;
+        let err = fx
+            .svc
+            .commands
+            .run(&agent, super::RETRY, json!({ "id": id }), false)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&err, CommandError::Invalid { message, .. } if message.contains("no.such.consumer")),
+            "{err:?}"
+        );
+        // A discard runs without asking.
+        let out = fx
+            .svc
+            .commands
+            .run(&agent, super::DISCARD, json!({ "id": id }), false)
+            .await
+            .unwrap();
+        assert_eq!(out.result["state"], json!("discarded"));
     }
 }

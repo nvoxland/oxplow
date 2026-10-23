@@ -2,7 +2,7 @@
 
 use super::*;
 use oxplow_domain::events::schema::{ActorKind, ConfigChanged, ConfigChangedV2};
-use oxplow_domain::{Access, Confirm, Invokers, Lifecycle, ThreadId};
+use oxplow_domain::{Access, Confirm, Lifecycle, ThreadId};
 use serde_json::json;
 
 fn bus() -> (Database, CommandBus) {
@@ -67,14 +67,8 @@ async fn a_busy_tx_handler_is_retried_then_reported_as_busy() {
             unchanged: false,
         })
     }));
-    bus.register(
-        Command::new(
-            kv_spec("oxplow.kv.flaky", Invokers::ALL, Confirm::Never),
-            flaky,
-        )
-        .unwrap(),
-    )
-    .unwrap();
+    bus.register(Command::new(kv_spec("oxplow.kv.flaky", Confirm::Never), flaky).unwrap())
+        .unwrap();
     let out = bus
         .run(
             &Actor::Human,
@@ -100,7 +94,7 @@ async fn a_busy_tx_handler_is_retried_then_reported_as_busy() {
     assert!(matches!(err, CommandError::Busy { .. }), "{err:?}");
 }
 
-fn kv_spec(name: &str, invokers: Invokers, confirm: Confirm) -> CommandSpec {
+fn kv_spec(name: &str, confirm: Confirm) -> CommandSpec {
     CommandSpec {
         output_schema: None,
         id: name.into(),
@@ -111,7 +105,7 @@ fn kv_spec(name: &str, invokers: Invokers, confirm: Confirm) -> CommandSpec {
             "properties": { "k": { "type": "string" }, "v": { "type": "string" } },
             "additionalProperties": false
         }),
-        invokers,
+        job: false,
         confirm,
         undoable: true,
         lifecycle: Lifecycle::Stable,
@@ -199,7 +193,7 @@ fn agent() -> Actor {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_read_commands_write_never_lands() {
     let (db, bus) = bus();
-    let mut spec = kv_spec("oxplow.kv.sneaky", Invokers::ALL, Confirm::Never);
+    let mut spec = kv_spec("oxplow.kv.sneaky", Confirm::Never);
     spec.access = Access::Read;
     bus.register(Command::new(spec, kv_set()).unwrap()).unwrap();
     bus.run(
@@ -218,7 +212,7 @@ async fn a_read_commands_write_never_lands() {
 async fn a_read_command_is_not_recorded() {
     for access in [Access::View, Access::Read] {
         let (_db, bus) = bus();
-        let mut spec = kv_spec("oxplow.kv.get", Invokers::ALL, Confirm::Never);
+        let mut spec = kv_spec("oxplow.kv.get", Confirm::Never);
         spec.access = access;
         bus.register(
             Command::new(
@@ -255,14 +249,8 @@ async fn an_agent_thread_that_may_not_write_is_refused_writes_not_reads() {
     let bus = bus.with_write_gate(Arc::new(|thread| {
         Box::pin(async move { thread != ThreadId::new(7) })
     }));
-    bus.register(
-        Command::new(
-            kv_spec("oxplow.kv.set", Invokers::ALL, Confirm::Never),
-            kv_set(),
-        )
-        .unwrap(),
-    )
-    .unwrap();
+    bus.register(Command::new(kv_spec("oxplow.kv.set", Confirm::Never), kv_set()).unwrap())
+        .unwrap();
     let err = bus
         .run(
             &agent(),
@@ -302,14 +290,8 @@ async fn an_effect_is_held_to_its_events_threads_write_gate() {
     let bus = bus.with_write_gate(Arc::new(|thread| {
         Box::pin(async move { thread != ThreadId::new(7) })
     }));
-    bus.register(
-        Command::new(
-            kv_spec("oxplow.kv.set", Invokers::ALL, Confirm::Never),
-            kv_set(),
-        )
-        .unwrap(),
-    )
-    .unwrap();
+    bus.register(Command::new(kv_spec("oxplow.kv.set", Confirm::Never), kv_set()).unwrap())
+        .unwrap();
     let on = |thread: Option<i64>| Actor::Effect {
         effect: "acme/notify".into(),
         thread_id: thread.map(ThreadId::new),
@@ -354,14 +336,8 @@ async fn an_effect_is_held_to_its_events_threads_write_gate() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_job_without_a_thread_is_denied_a_thread_bound_command() {
     let (db, bus) = bus();
-    bus.register(
-        Command::new(
-            kv_spec("oxplow.kv.set", Invokers::ALL, Confirm::Never),
-            kv_set(),
-        )
-        .unwrap(),
-    )
-    .unwrap();
+    bus.register(Command::new(kv_spec("oxplow.kv.set", Confirm::Never), kv_set()).unwrap())
+        .unwrap();
     let job = Actor::Job {
         job_id: "acme/sync".into(),
         attempt: 1,
@@ -385,17 +361,11 @@ async fn a_thread_that_may_not_write_cant_write_through_a_composite() {
     let bus = Arc::new(bus.with_write_gate(Arc::new(|thread| {
         Box::pin(async move { thread != ThreadId::new(7) })
     })));
-    bus.register(
-        Command::new(
-            kv_spec("oxplow.kv.set", Invokers::ALL, Confirm::Never),
-            kv_set(),
-        )
-        .unwrap(),
-    )
-    .unwrap();
+    bus.register(Command::new(kv_spec("oxplow.kv.set", Confirm::Never), kv_set()).unwrap())
+        .unwrap();
     // A `Record` composite isn't gated itself (it may only record), so
     // what refuses the run is its `Write` child seeing the answer.
-    let mut spec = kv_spec("oxplow.kv.compose", Invokers::ALL, Confirm::Never);
+    let mut spec = kv_spec("oxplow.kv.compose", Confirm::Never);
     spec.access = Access::Record;
     spec.input_schema = json!({ "type": "object" });
     use super::compose::{Compose, Composer, Composition};
@@ -430,14 +400,8 @@ async fn a_thread_that_may_not_write_cant_write_through_a_composite() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_tx_command_writes_its_state_audit_and_events_together() {
     let (db, bus) = bus();
-    bus.register(
-        Command::new(
-            kv_spec("oxplow.kv.set", Invokers::ALL, Confirm::Never),
-            kv_set(),
-        )
-        .unwrap(),
-    )
-    .unwrap();
+    bus.register(Command::new(kv_spec("oxplow.kv.set", Confirm::Never), kv_set()).unwrap())
+        .unwrap();
     let out = bus
         .run(
             &agent(),
@@ -486,14 +450,8 @@ async fn a_tx_command_writes_its_state_audit_and_events_together() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_failing_tx_handler_rolls_everything_back_and_is_audited_as_error() {
     let (db, bus) = bus();
-    bus.register(
-        Command::new(
-            kv_spec("oxplow.kv.set", Invokers::ALL, Confirm::Never),
-            kv_set(),
-        )
-        .unwrap(),
-    )
-    .unwrap();
+    bus.register(Command::new(kv_spec("oxplow.kv.set", Confirm::Never), kv_set()).unwrap())
+        .unwrap();
     let err = bus
         .run(
             &Actor::Human,
@@ -523,14 +481,8 @@ async fn a_failing_tx_handler_rolls_everything_back_and_is_audited_as_error() {
 #[tokio::test(flavor = "multi_thread")]
 async fn schema_rejection_names_the_field_and_is_audited_invalid() {
     let (_db, bus) = bus();
-    bus.register(
-        Command::new(
-            kv_spec("oxplow.kv.set", Invokers::ALL, Confirm::Never),
-            kv_set(),
-        )
-        .unwrap(),
-    )
-    .unwrap();
+    bus.register(Command::new(kv_spec("oxplow.kv.set", Confirm::Never), kv_set()).unwrap())
+        .unwrap();
     let err = bus
         .run(
             &Actor::Human,
@@ -556,56 +508,53 @@ async fn schema_rejection_names_the_field_and_is_audited_invalid() {
     ));
 }
 
+/// A person, an agent and a lens acting for either run every command; a
+/// durable job's model runs only one declared for jobs (`job: true`),
+/// refused before anything runs, and `list` shows it only those.
 #[tokio::test(flavor = "multi_thread")]
-async fn invokers_and_agent_policy_deny_before_anything_runs() {
+async fn anyone_runs_a_command_and_a_job_only_its_own() {
     let (db, bus) = bus();
-    bus.register(
-        Command::new(
-            kv_spec("oxplow.kv.set", Invokers::HUMAN_ONLY, Confirm::Never),
-            kv_set(),
-        )
-        .unwrap(),
-    )
-    .unwrap();
-    let lens = Actor::Lens {
+    bus.register(Command::new(kv_spec("oxplow.kv.set", Confirm::Never), kv_set()).unwrap())
+        .unwrap();
+    let lens = |presser: Actor| Actor::Lens {
         lens_id: "acme/x".into(),
-        on_behalf_of: Box::new(Actor::Human),
+        on_behalf_of: Box::new(presser),
     };
-    let err = bus
-        .run(&lens, "oxplow.kv.set", json!({"k": "a", "v": "1"}), false)
-        .await
-        .unwrap_err();
-    assert!(matches!(err, CommandError::Denied { .. }), "{err:?}");
-    let err = bus
-        .run(
-            &agent(),
+    for (i, actor) in [Actor::Human, agent(), lens(Actor::Human), lens(agent())]
+        .into_iter()
+        .enumerate()
+    {
+        bus.run(
+            &actor,
             "oxplow.kv.set",
-            json!({"k": "a", "v": "1"}),
+            json!({"k": format!("k{i}"), "v": "1"}),
             false,
         )
         .await
+        .unwrap_or_else(|e| panic!("{actor:?}: {e:?}"));
+    }
+    let job = Actor::Job {
+        job_id: "acme/triage".into(),
+        attempt: 1,
+        fence: 1,
+        thread_id: Some(ThreadId::new(7)),
+        stream_id: None,
+    };
+    let err = bus
+        .run(&job, "oxplow.kv.set", json!({"k": "j", "v": "1"}), false)
+        .await
         .unwrap_err();
     assert!(matches!(err, CommandError::Denied { .. }), "{err:?}");
-    assert_eq!(kv_value(&db, "a").await, None);
-    let recent = bus.audit_store().list_recent(5).await.unwrap();
-    assert_eq!(recent.len(), 2);
-    assert!(recent.iter().all(|r| r.outcome == Outcome::Denied));
-    // `list` shows each actor only what it may run.
-    assert!(bus.list(&lens).is_empty());
-    assert_eq!(bus.list(&Actor::Human).len(), 1);
+    assert_eq!(kv_value(&db, "j").await, None);
+    assert!(bus.list(&job).is_empty());
+    assert_eq!(bus.list(&agent()).len(), 1);
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn confirmation_is_a_persons_move_and_an_agent_never_gets_past_it() {
+async fn confirmation_is_a_persons_move_and_an_agents_run_doesnt_ask() {
     let (db, bus) = bus();
-    bus.register(
-        Command::new(
-            kv_spec("oxplow.kv.set", Invokers::ALL, Confirm::Always),
-            kv_set(),
-        )
-        .unwrap(),
-    )
-    .unwrap();
+    bus.register(Command::new(kv_spec("oxplow.kv.set", Confirm::Always), kv_set()).unwrap())
+        .unwrap();
     // A person: asked first, then confirmed.
     let err = bus
         .run(
@@ -635,14 +584,17 @@ async fn confirmation_is_a_persons_move_and_an_agent_never_gets_past_it() {
     .await
     .unwrap();
     assert_eq!(kv_value(&db, "a").await.as_deref(), Some("1"));
-    // An agent: `confirmed` is ignored; nothing is written — the run
-    // waits as a proposal for a person.
-    let err = bus
-        .run(&agent(), "oxplow.kv.set", json!({"k": "b", "v": "2"}), true)
-        .await
-        .unwrap_err();
-    assert!(matches!(err, CommandError::Proposed { .. }), "{err:?}");
-    assert_eq!(kv_value(&db, "b").await, None);
+    // An agent's run doesn't ask: what it may call is its harness's to
+    // decide.
+    bus.run(
+        &agent(),
+        "oxplow.kv.set",
+        json!({"k": "b", "v": "2"}),
+        false,
+    )
+    .await
+    .unwrap();
+    assert_eq!(kv_value(&db, "b").await.as_deref(), Some("2"));
 }
 
 /// A `Tx` handler that writes `k = v` and says it changed nothing —
@@ -710,14 +662,8 @@ fn kv_undone_by_noop() -> Handler {
 #[tokio::test(flavor = "multi_thread")]
 async fn an_unchanged_call_keeps_nothing_and_cant_carry_events() {
     let (db, bus) = bus();
-    bus.register(
-        Command::new(
-            kv_spec("oxplow.kv.noop", Invokers::ALL, Confirm::Never),
-            kv_unchanged(),
-        )
-        .unwrap(),
-    )
-    .unwrap();
+    bus.register(Command::new(kv_spec("oxplow.kv.noop", Confirm::Never), kv_unchanged()).unwrap())
+        .unwrap();
     let out = bus
         .run(
             &Actor::Human,
@@ -755,17 +701,11 @@ async fn an_unchanged_call_keeps_nothing_and_cant_carry_events() {
 #[tokio::test(flavor = "multi_thread")]
 async fn an_undo_or_approval_that_changes_nothing_is_still_recorded() {
     let (db, bus) = bus();
+    bus.register(Command::new(kv_spec("oxplow.kv.noop", Confirm::Always), kv_unchanged()).unwrap())
+        .unwrap();
     bus.register(
         Command::new(
-            kv_spec("oxplow.kv.noop", Invokers::ALL, Confirm::Always),
-            kv_unchanged(),
-        )
-        .unwrap(),
-    )
-    .unwrap();
-    bus.register(
-        Command::new(
-            kv_spec("oxplow.kv.mark", Invokers::ALL, Confirm::Never),
+            kv_spec("oxplow.kv.mark", Confirm::Never),
             kv_undone_by_noop(),
         )
         .unwrap(),
@@ -795,7 +735,7 @@ async fn an_undo_or_approval_that_changes_nothing_is_still_recorded() {
 
     let err = bus
         .run(
-            &agent(),
+            &effect(),
             "oxplow.kv.noop",
             json!({"k": "c", "v": "1"}),
             false,
@@ -813,14 +753,8 @@ async fn an_undo_or_approval_that_changes_nothing_is_still_recorded() {
 #[tokio::test(flavor = "multi_thread")]
 async fn undo_applies_the_inverse_and_marks_the_row_once() {
     let (db, bus) = bus();
-    bus.register(
-        Command::new(
-            kv_spec("oxplow.kv.set", Invokers::ALL, Confirm::Never),
-            kv_set(),
-        )
-        .unwrap(),
-    )
-    .unwrap();
+    bus.register(Command::new(kv_spec("oxplow.kv.set", Confirm::Never), kv_set()).unwrap())
+        .unwrap();
     bus.run(
         &Actor::Human,
         "oxplow.kv.set",
@@ -866,14 +800,8 @@ async fn undo_applies_the_inverse_and_marks_the_row_once() {
 async fn concurrent_undos_apply_the_inverse_once() {
     let (db, bus) = bus();
     let bus = Arc::new(bus);
-    bus.register(
-        Command::new(
-            kv_spec("oxplow.kv.set", Invokers::ALL, Confirm::Never),
-            kv_set(),
-        )
-        .unwrap(),
-    )
-    .unwrap();
+    bus.register(Command::new(kv_spec("oxplow.kv.set", Confirm::Never), kv_set()).unwrap())
+        .unwrap();
     bus.run(
         &Actor::Human,
         "oxplow.kv.set",
@@ -916,84 +844,39 @@ async fn concurrent_undos_apply_the_inverse_once() {
     assert_eq!(ok_runs, 3, "two sets and one undo");
 }
 
-/// A lens grants no power: a command closed to agents is closed to a lens
-/// an agent presses, not only to the agent. A person's lens runs it, and
-/// only theirs is offered it.
+/// A lens acting for an agent is the agent's: its run of a command that
+/// asks doesn't ask; a person's lens asks the person.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_command_closed_to_agents_is_closed_to_a_lens_an_agent_presses() {
-    let (_db, bus) = bus();
-    bus.register(
-        Command::new(
-            kv_spec("oxplow.kv.set", Invokers::NO_AGENT, Confirm::Never),
-            kv_set(),
-        )
-        .unwrap(),
-    )
-    .unwrap();
+async fn a_lens_acting_for_an_agent_is_treated_as_the_agent() {
+    let (db, bus) = bus();
+    bus.register(Command::new(kv_spec("oxplow.kv.set", Confirm::Always), kv_set()).unwrap())
+        .unwrap();
     let lens = |presser: Actor| Actor::Lens {
         lens_id: "acme/x".into(),
         on_behalf_of: Box::new(presser),
     };
-    let err = bus
-        .run(
-            &lens(agent()),
-            "oxplow.kv.set",
-            json!({"k": "a", "v": "1"}),
-            true,
-        )
-        .await
-        .unwrap_err();
-    assert!(
-        matches!(&err, CommandError::Denied { reason } if reason.contains("acting for Agent")),
-        "{err:?}"
-    );
     bus.run(
-        &lens(Actor::Human),
+        &lens(agent()),
         "oxplow.kv.set",
         json!({"k": "a", "v": "1"}),
         false,
     )
     .await
     .unwrap();
-    let offered = |actor: &Actor| bus.list(actor).iter().any(|s| s.id == "oxplow.kv.set");
-    assert!(offered(&lens(Actor::Human)));
-    assert!(!offered(&lens(agent())));
-}
-
-/// A lens acting for an agent is held to the agent rules: it can't
-/// confirm (its run is proposed), and the agent policy applies.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_lens_acting_for_an_agent_is_treated_as_the_agent() {
-    let (_db, bus) = bus();
-    bus.register(
-        Command::new(
-            kv_spec("oxplow.kv.set", Invokers::ALL, Confirm::Always),
-            kv_set(),
-        )
-        .unwrap(),
-    )
-    .unwrap();
-    let lens = Actor::Lens {
-        lens_id: "acme/x".into(),
-        on_behalf_of: Box::new(agent()),
-    };
+    assert_eq!(kv_value(&db, "a").await.as_deref(), Some("1"));
     let err = bus
-        .run(&lens, "oxplow.kv.set", json!({"k": "a", "v": "1"}), true)
+        .run(
+            &lens(Actor::Human),
+            "oxplow.kv.set",
+            json!({"k": "b", "v": "1"}),
+            false,
+        )
         .await
         .unwrap_err();
-    assert!(matches!(err, CommandError::Proposed { .. }), "{err:?}");
-    let for_person = Actor::Lens {
-        lens_id: "acme/x".into(),
-        on_behalf_of: Box::new(Actor::Human),
-    };
-    bus.run(
-        &for_person,
-        "oxplow.kv.set",
-        json!({"k": "a", "v": "1"}),
-        true,
-    )
-    .await
-    .unwrap();
+    assert!(
+        matches!(err, CommandError::NeedsConfirmation { .. }),
+        "{err:?}"
+    );
 }
 
 /// An `External` handler's effects have happened by the time the bus
@@ -1002,7 +885,7 @@ async fn a_lens_acting_for_an_agent_is_treated_as_the_agent() {
 #[tokio::test(flavor = "multi_thread")]
 async fn an_external_run_whose_record_fails_still_reports_success() {
     let (db, bus) = bus();
-    let mut spec = kv_spec("oxplow.kv.effort", Invokers::ALL, Confirm::Never);
+    let mut spec = kv_spec("oxplow.kv.effort", Confirm::Never);
     spec.atomicity = Atomicity::External;
     let writes = db.clone();
     bus.register(
@@ -1049,36 +932,24 @@ async fn an_external_run_whose_record_fails_still_reports_success() {
 #[tokio::test(flavor = "multi_thread")]
 async fn registration_checks_names_atomicity_and_collisions() {
     let (_db, bus) = bus();
-    let mut wrong = kv_spec("oxplow.kv.set", Invokers::ALL, Confirm::Never);
+    let mut wrong = kv_spec("oxplow.kv.set", Confirm::Never);
     wrong.atomicity = Atomicity::External;
     assert!(Command::new(wrong, kv_set()).is_err());
-    assert!(Command::new(kv_spec("set", Invokers::ALL, Confirm::Never), kv_set()).is_err());
-    bus.register(
-        Command::new(
-            kv_spec("oxplow.kv.set", Invokers::ALL, Confirm::Never),
-            kv_set(),
-        )
-        .unwrap(),
-    )
-    .unwrap();
+    assert!(Command::new(kv_spec("set", Confirm::Never), kv_set()).is_err());
+    bus.register(Command::new(kv_spec("oxplow.kv.set", Confirm::Never), kv_set()).unwrap())
+        .unwrap();
     assert!(bus
-        .register(
-            Command::new(
-                kv_spec("oxplow.kv.set", Invokers::ALL, Confirm::Never),
-                kv_set()
-            )
-            .unwrap()
-        )
+        .register(Command::new(kv_spec("oxplow.kv.set", Confirm::Never), kv_set()).unwrap())
         .is_err());
     assert!(bus.external_commands().is_empty());
     // A read (or a view) is never asked about: nothing would resolve its
     // proposal.
     for access in [Access::View, Access::Read] {
-        let mut asking_read = kv_spec("oxplow.kv.peek", Invokers::ALL, Confirm::Always);
+        let mut asking_read = kv_spec("oxplow.kv.peek", Confirm::Always);
         asking_read.access = access;
         let err = Command::new(asking_read, kv_set()).err().unwrap();
         assert!(err.to_string().contains("only reads"), "{err}");
-        let mut read = kv_spec("oxplow.kv.peek", Invokers::ALL, Confirm::Never);
+        let mut read = kv_spec("oxplow.kv.peek", Confirm::Never);
         read.access = access;
         let err = Command::new(read, kv_set())
             .unwrap()
@@ -1097,7 +968,7 @@ async fn registration_checks_names_atomicity_and_collisions() {
 async fn a_shortcut_is_held_once_per_when() {
     let (_db, bus) = bus();
     let keyed = |id: &str, when: Option<&str>| {
-        let mut spec = kv_spec(id, Invokers::ALL, Confirm::Never);
+        let mut spec = kv_spec(id, Confirm::Never);
         spec.ui = Some(oxplow_domain::CommandUi {
             label: id.into(),
             shortcut: Some("Ctrl/Cmd+K".into()),
@@ -1126,19 +997,12 @@ async fn a_shortcut_is_held_once_per_when() {
     );
 }
 
-/// An agent's undo or approval that needs a person is refused, not
-/// proposed as a plain call that would lose what it undoes.
+/// An agent's undo of a command that asks runs unasked, as its runs do.
 #[tokio::test(flavor = "multi_thread")]
-async fn an_agents_undo_that_asks_is_denied_not_proposed() {
+async fn an_agents_undo_doesnt_ask() {
     let (db, bus) = bus();
-    bus.register(
-        Command::new(
-            kv_spec("oxplow.kv.set", Invokers::ALL, Confirm::Always),
-            kv_set(),
-        )
-        .unwrap(),
-    )
-    .unwrap();
+    bus.register(Command::new(kv_spec("oxplow.kv.set", Confirm::Always), kv_set()).unwrap())
+        .unwrap();
     let done = bus
         .run(
             &Actor::Human,
@@ -1148,13 +1012,12 @@ async fn an_agents_undo_that_asks_is_denied_not_proposed() {
         )
         .await
         .unwrap();
-    let err = bus
-        .undo(&agent(), done.audit_id.unwrap(), false)
+    bus.undo(&agent(), done.audit_id.unwrap(), false)
         .await
-        .unwrap_err();
-    assert!(matches!(err, CommandError::Denied { .. }), "{err}");
+        .unwrap();
     assert!(pending(&db).await.is_empty());
-    assert_eq!(kv_value(&db, "a").await.as_deref(), Some("1"));
+    // Its inverse set it back to what it was before (nothing: "").
+    assert_eq!(kv_value(&db, "a").await.as_deref(), Some(""));
 }
 
 /// A namespace is registered whole or not at all, by one owner; core
@@ -1162,8 +1025,7 @@ async fn an_agents_undo_that_asks_is_denied_not_proposed() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_namespace_is_one_owners_and_oxplow_is_oxplows() {
     let (_db, bus) = bus();
-    let cmd =
-        |name: &str| Command::new(kv_spec(name, Invokers::ALL, Confirm::Never), kv_set()).unwrap();
+    let cmd = |name: &str| Command::new(kv_spec(name, Confirm::Never), kv_set()).unwrap();
     bus.register(cmd("oxplow.kv.set")).unwrap();
     assert_eq!(bus.namespace_owner("oxplow").as_deref(), Some("oxplow"));
     assert_eq!(bus.source_of("oxplow.kv.set").as_deref(), Some(CORE_SOURCE));
@@ -1171,7 +1033,7 @@ async fn a_namespace_is_one_owners_and_oxplow_is_oxplows() {
 
     // An id that isn't `<namespace>.<area>.<verb>` is no command at
     // all; one outside the namespace: nothing is registered.
-    let err = Command::new(kv_spec("ext.a", Invokers::ALL, Confirm::Never), kv_set())
+    let err = Command::new(kv_spec("ext.a", Confirm::Never), kv_set())
         .err()
         .expect("a two-part id is refused");
     assert!(
@@ -1290,7 +1152,7 @@ async fn a_tx_handler_sees_whether_the_run_was_confirmed() {
     let (db, bus) = bus();
     bus.register(
         Command::new(
-            kv_spec("oxplow.kv.careful", Invokers::ALL, Confirm::Never),
+            kv_spec("oxplow.kv.careful", Confirm::Never),
             kv_set_if_confirmed(),
         )
         .unwrap(),
@@ -1326,7 +1188,7 @@ async fn a_tx_handler_sees_whether_the_run_was_confirmed() {
 }
 
 /// `oxplow.command.sequence` composes Tx commands in one run: each child's
-/// own invokers, policy and confirmation apply; the children share the
+/// own job tools, policy and confirmation apply; the children share the
 /// parent's transaction and audit row; the inverse is the children's
 /// inverses, reversed.
 fn composing_bus() -> (Database, Arc<CommandBus>) {
@@ -1337,37 +1199,21 @@ fn composing_bus() -> (Database, Arc<CommandBus>) {
 /// [`composing_bus`]'s commands on `bus` (one with capabilities, say).
 fn composing_bus_on(db: Database, bus: CommandBus) -> (Database, Arc<CommandBus>) {
     let bus = Arc::new(bus);
+    bus.register(Command::new(kv_spec("oxplow.kv.set", Confirm::Never), kv_set()).unwrap())
+        .unwrap();
+    bus.register(Command::new(kv_spec("oxplow.kv.secret", Confirm::Never), kv_set()).unwrap())
+        .unwrap();
     bus.register(
-        Command::new(
-            kv_spec("oxplow.kv.set", Invokers::ALL, Confirm::Never),
-            kv_set(),
-        )
-        .unwrap(),
+        Command::new(kv_spec("oxplow.kv.danger", Confirm::Destructive), kv_set()).unwrap(),
     )
     .unwrap();
-    bus.register(
-        Command::new(
-            kv_spec("oxplow.kv.secret", Invokers::HUMAN_ONLY, Confirm::Never),
-            kv_set(),
-        )
-        .unwrap(),
-    )
-    .unwrap();
-    bus.register(
-        Command::new(
-            kv_spec("oxplow.kv.danger", Invokers::ALL, Confirm::Destructive),
-            kv_set(),
-        )
-        .unwrap(),
-    )
-    .unwrap();
-    let mut plain = kv_spec("oxplow.kv.plain", Invokers::ALL, Confirm::Never);
+    let mut plain = kv_spec("oxplow.kv.plain", Confirm::Never);
     plain.undoable = false;
     bus.register(Command::new(plain, kv_set()).unwrap())
         .unwrap();
     // A system outside the bus's transaction: it writes `kv` in its own
     // transaction, and refuses the value `fail`.
-    let mut ext = kv_spec("oxplow.kv.external", Invokers::ALL, Confirm::Never);
+    let mut ext = kv_spec("oxplow.kv.external", Confirm::Never);
     ext.atomicity = Atomicity::External;
     let outside = db.clone();
     bus.register(
@@ -1428,7 +1274,7 @@ async fn a_composed_call_needs_what_a_direct_one_does() {
         oxplow_config::load_project_config(tempfile::tempdir().unwrap().path()).unwrap(),
     ));
     let (db, bus) = composing_bus_on(db, bus.with_capabilities(registry, config));
-    let mut needy = kv_spec("oxplow.kv.needy", Invokers::ALL, Confirm::Never);
+    let mut needy = kv_spec("oxplow.kv.needy", Confirm::Never);
     needy.needs = vec!["work_items".into()];
     bus.register(Command::new(needy, kv_set()).unwrap())
         .unwrap();
@@ -1474,7 +1320,7 @@ async fn a_composed_call_needs_what_a_direct_one_does() {
 #[tokio::test(flavor = "multi_thread")]
 async fn an_agents_stream_is_its_threads() {
     let (_db, bus) = bus();
-    let mut spec = kv_spec("oxplow.kv.whoami", Invokers::ALL, Confirm::Never);
+    let mut spec = kv_spec("oxplow.kv.whoami", Confirm::Never);
     spec.access = Access::Read;
     spec.input_schema = json!({ "type": "object" });
     bus.register(
@@ -1544,7 +1390,7 @@ async fn a_composite_runs_the_calls_it_was_routed_with() {
             ..Composition::default()
         })
     });
-    let mut spec = kv_spec("oxplow.kv.once", Invokers::ALL, Confirm::Never);
+    let mut spec = kv_spec("oxplow.kv.once", Confirm::Never);
     spec.atomicity = Atomicity::Dispatch;
     spec.input_schema = json!({ "type": "object" });
     bus.register(Command::new(spec, Compose::handler(compose)).unwrap())
@@ -1615,14 +1461,8 @@ async fn a_nested_composites_confirmation_is_asked_before_any_step_lands() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_child_that_changed_nothing_doesnt_keep_the_composite_from_undoing() {
     let (db, bus) = composing_bus();
-    bus.register(
-        Command::new(
-            kv_spec("oxplow.kv.same", Invokers::ALL, Confirm::Never),
-            kv_unchanged(),
-        )
-        .unwrap(),
-    )
-    .unwrap();
+    bus.register(Command::new(kv_spec("oxplow.kv.same", Confirm::Never), kv_unchanged()).unwrap())
+        .unwrap();
     let out = bus
         .run(
             &Actor::Human,
@@ -1663,21 +1503,16 @@ async fn a_nested_run_applies_each_childs_own_checks() {
         thread_id: Some(oxplow_domain::ThreadId::new(7)),
         stream_id: None,
     };
-    let err = bus
-        .run(
-            &agent,
-            "oxplow.command.sequence",
-            calls(&[("oxplow.kv.set", "a", "1"), ("oxplow.kv.secret", "b", "2")]),
-            false,
-        )
-        .await
-        .unwrap_err();
-    assert!(matches!(err, CommandError::Denied { .. }), "{err:?}");
-    assert_eq!(
-        kv_value(&db, "a").await,
-        None,
-        "nothing ran: the pre-pass refused first"
-    );
+    // An agent's sequence runs every child.
+    bus.run(
+        &agent,
+        "oxplow.command.sequence",
+        calls(&[("oxplow.kv.set", "z", "1"), ("oxplow.kv.secret", "y", "2")]),
+        false,
+    )
+    .await
+    .unwrap();
+    assert_eq!(kv_value(&db, "y").await.as_deref(), Some("2"));
 
     let err = bus
         .run(
@@ -1786,7 +1621,7 @@ async fn a_composites_own_events_land_with_its_steps_only_when_all_landed() {
         id: "oxplow.kv.announce".into(),
         summary: "Set over an external step and announce it.".into(),
         input_schema: json!({ "type": "object" }),
-        invokers: Invokers::ALL,
+        job: false,
         confirm: Confirm::Never,
         undoable: true,
         lifecycle: oxplow_domain::Lifecycle::Experimental,
@@ -1889,7 +1724,7 @@ async fn a_failed_step_stops_the_run_and_what_landed_stands() {
 }
 
 /// P7 review (tsk713): every step is checked before any runs — its
-/// input, its invokers, the agent policy — and a step that asks makes
+/// input, a job's tools, the agent policy — and a step that asks makes
 /// the run ask once; an agent's run is a proposal (with no dry run:
 /// nothing outside the transaction runs before a person decides).
 #[tokio::test(flavor = "multi_thread")]
@@ -1908,21 +1743,6 @@ async fn an_external_composite_is_checked_and_confirmed_before_any_step_runs() {
         matches!(&err, CommandError::Invalid { field: Some(f), .. } if f.starts_with("/calls/1/input")),
         "{err:?}"
     );
-    let err = bus
-        .run(
-            &agent(),
-            "oxplow.command.sequence",
-            calls(&[
-                ("oxplow.kv.external", "a", "1"),
-                ("oxplow.kv.secret", "b", "2"),
-            ]),
-            false,
-        )
-        .await
-        .unwrap_err();
-    assert!(matches!(err, CommandError::Denied { .. }), "{err:?}");
-    assert_eq!(kv_value(&db, "a").await, None, "nothing ran");
-
     let asks = calls(&[
         ("oxplow.kv.external", "a", "1"),
         ("oxplow.kv.danger", "b", "2"),
@@ -1941,7 +1761,7 @@ async fn an_external_composite_is_checked_and_confirmed_before_any_step_runs() {
         "{err:?}"
     );
     let err = bus
-        .run(&agent(), "oxplow.command.sequence", asks.clone(), false)
+        .run(&effect(), "oxplow.command.sequence", asks.clone(), false)
         .await
         .unwrap_err();
     assert!(matches!(err, CommandError::Proposed { .. }), "{err:?}");
@@ -1963,7 +1783,7 @@ async fn an_external_composite_is_checked_and_confirmed_before_any_step_runs() {
 async fn a_nested_run_refuses_a_read_child() {
     for access in [Access::View, Access::Read] {
         let (db, bus) = composing_bus();
-        let mut read = kv_spec("oxplow.kv.peek", Invokers::ALL, Confirm::Never);
+        let mut read = kv_spec("oxplow.kv.peek", Confirm::Never);
         read.access = access;
         bus.register(Command::new(read, kv_set()).unwrap()).unwrap();
         let err = bus
@@ -2134,21 +1954,15 @@ async fn logged(bus: &CommandBus) -> Vec<oxplow_domain::events::StoredEvent> {
 
 fn confirming_bus() -> (Database, CommandBus) {
     let (db, bus) = bus();
-    bus.register(
-        Command::new(
-            kv_spec("oxplow.kv.set", Invokers::ALL, Confirm::Always),
-            kv_set(),
-        )
-        .unwrap(),
-    )
-    .unwrap();
+    bus.register(Command::new(kv_spec("oxplow.kv.set", Confirm::Always), kv_set()).unwrap())
+        .unwrap();
     (db, bus)
 }
 
-/// Propose `oxplow.kv.set k=v` as the agent; the proposal's id.
+/// Propose `oxplow.kv.set k=v` as an effect; the proposal's id.
 async fn propose(bus: &CommandBus, k: &str, v: &str) -> i64 {
     let err = bus
-        .run(&agent(), "oxplow.kv.set", json!({ "k": k, "v": v }), false)
+        .run(&effect(), "oxplow.kv.set", json!({ "k": k, "v": v }), false)
         .await
         .unwrap_err();
     let CommandError::Proposed { proposal, .. } = err else {
@@ -2165,7 +1979,7 @@ async fn a_proposal_that_replaces_another_names_it() {
     let first = propose(&bus, "a", "1").await;
     let err = bus
         .run(
-            &agent(),
+            &effect(),
             "oxplow.kv.set",
             json!({ "k": "a", "v": "1" }),
             false,
@@ -2191,10 +2005,15 @@ async fn a_proposal_that_replaces_another_names_it() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn an_agents_run_that_needs_confirmation_becomes_a_proposal() {
+async fn an_effects_run_that_needs_confirmation_becomes_a_proposal() {
     let (db, bus) = confirming_bus();
     let err = bus
-        .run(&agent(), "oxplow.kv.set", json!({"k": "a", "v": "1"}), true)
+        .run(
+            &effect(),
+            "oxplow.kv.set",
+            json!({"k": "a", "v": "1"}),
+            true,
+        )
         .await
         .unwrap_err();
     let CommandError::Proposed {
@@ -2209,8 +2028,8 @@ async fn an_agents_run_that_needs_confirmation_becomes_a_proposal() {
     let row = &rows[0];
     assert_eq!(proposal, row.id);
     assert_eq!(row.command, "oxplow.kv.set");
-    assert_eq!(row.actor_kind, ActorKind::Agent);
-    assert_eq!(row.thread_id, Some(ThreadId::new(7)));
+    assert_eq!(row.actor_kind, ActorKind::Effect);
+    assert_eq!(row.thread_id, Some(ThreadId::new(8)));
     assert_eq!(
         row.dry_run,
         Some(json!({"k": "a", "v": "1"})),
@@ -2236,7 +2055,7 @@ async fn an_agents_run_that_needs_confirmation_becomes_a_proposal() {
     // A dry run that fails is the run's failure, not a proposal.
     let err = bus
         .run(
-            &agent(),
+            &effect(),
             "oxplow.kv.set",
             json!({"k": "a", "v": "boom"}),
             false,
@@ -2252,7 +2071,7 @@ async fn a_composite_an_agent_runs_is_proposed_with_its_children() {
     let (db, bus) = composing_bus();
     let err = bus
         .run(
-            &agent(),
+            &effect(),
             "oxplow.command.sequence",
             calls(&[("oxplow.kv.set", "a", "1"), ("oxplow.kv.danger", "b", "2")]),
             false,
@@ -2319,7 +2138,7 @@ async fn concurrent_approvals_run_it_once() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_failed_external_approval_leaves_the_proposal_pending() {
     let (db, bus) = bus();
-    let mut spec = kv_spec("oxplow.kv.remote", Invokers::ALL, Confirm::Always);
+    let mut spec = kv_spec("oxplow.kv.remote", Confirm::Always);
     spec.atomicity = Atomicity::External;
     bus.register(
         Command::new(
@@ -2336,7 +2155,7 @@ async fn a_failed_external_approval_leaves_the_proposal_pending() {
     )
     .unwrap();
     bus.run(
-        &agent(),
+        &effect(),
         "oxplow.kv.remote",
         json!({"k": "a", "v": "1"}),
         false,
@@ -2360,7 +2179,7 @@ async fn a_dry_run_never_runs_after_commit() {
     let fired_c = fired.clone();
     bus.register(
         Command::new(
-            kv_spec("oxplow.kv.set", Invokers::ALL, Confirm::Always),
+            kv_spec("oxplow.kv.set", Confirm::Always),
             Handler::Tx(Arc::new(move |_ctx: &TxCtx<'_>, input| {
                 let fired = fired_c.clone();
                 Ok(HandlerOutput {
@@ -2432,7 +2251,7 @@ async fn an_approval_whose_run_fails_leaves_the_proposal_pending() {
 #[tokio::test(flavor = "multi_thread")]
 async fn an_external_command_is_proposed_without_a_dry_run_and_approved_after_it_runs() {
     let (db, bus) = bus();
-    let mut spec = kv_spec("oxplow.kv.remote", Invokers::ALL, Confirm::Always);
+    let mut spec = kv_spec("oxplow.kv.remote", Confirm::Always);
     spec.atomicity = Atomicity::External;
     bus.register(
         Command::new(
@@ -2451,7 +2270,7 @@ async fn an_external_command_is_proposed_without_a_dry_run_and_approved_after_it
     .unwrap();
     let err = bus
         .run(
-            &agent(),
+            &effect(),
             "oxplow.kv.remote",
             json!({"k": "a", "v": "1"}),
             false,
@@ -2496,11 +2315,12 @@ fn effect() -> Actor {
     }
 }
 
-/// P8.D8: an effect runs with an agent's rights — a command that asks
-/// becomes a proposal (even when it says it confirmed), and a
-/// person-only command is denied; the audit says it was the effect.
+/// P8.D8: an effect's run of a command that asks becomes a proposal for a
+/// person (even when it says it confirmed: an effect is code reacting,
+/// not a person); one that doesn't ask runs; the audit says it was the
+/// effect.
 #[tokio::test(flavor = "multi_thread")]
-async fn an_effect_runs_with_an_agents_rights_and_never_confirms() {
+async fn an_effects_run_that_asks_is_proposed_and_never_confirmed() {
     let (db, bus) = confirming_bus();
     for confirmed in [false, true] {
         let err = bus
@@ -2515,24 +2335,17 @@ async fn an_effect_runs_with_an_agents_rights_and_never_confirms() {
         assert!(matches!(err, CommandError::Proposed { .. }), "{err:?}");
     }
     assert_eq!(kv_value(&db, "a").await, None);
-    bus.register(
-        Command::new(
-            kv_spec("oxplow.kv.mine", Invokers::HUMAN_ONLY, Confirm::Never),
-            kv_set(),
-        )
-        .unwrap(),
+    bus.register(Command::new(kv_spec("oxplow.kv.mine", Confirm::Never), kv_set()).unwrap())
+        .unwrap();
+    bus.run(
+        &effect(),
+        "oxplow.kv.mine",
+        json!({ "k": "b", "v": "1" }),
+        false,
     )
+    .await
     .unwrap();
-    let err = bus
-        .run(
-            &effect(),
-            "oxplow.kv.mine",
-            json!({ "k": "b", "v": "1" }),
-            false,
-        )
-        .await
-        .unwrap_err();
-    assert!(matches!(err, CommandError::Denied { .. }), "{err:?}");
+    assert_eq!(kv_value(&db, "b").await.as_deref(), Some("1"));
     let rows = audits_of(&db, "oxplow.kv.mine").await;
     assert_eq!(
         rows[0].actor_kind,

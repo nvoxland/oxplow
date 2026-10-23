@@ -1925,8 +1925,7 @@ export function App() {
           return { opened: plan.page?.id ?? null, stream: plan.streamId };
         },
       },
-      // A person's only (the command's invokers): oxplow never types for
-      // the agent. It fills the shown thread's agent input, unsent.
+      // It fills the shown thread's agent input, unsent.
       "agent_input.write": {
         draft: (input) => {
           const text = (input as { text?: unknown } | null)?.text;

@@ -3876,8 +3876,8 @@ mod tests {
     }
 
     /// P7.C5: oxplow-bundled loads with no errors, its examples dry-run
-    /// clean against the running registry, and its verbs register at boot
-    /// as a person's (and a lens's), never an agent's, each confirmed.
+    /// clean against the running registry, and its verbs register at boot,
+    /// each confirmed when a person runs it.
     #[tokio::test(flavor = "multi_thread")]
     async fn the_review_extension_registers_its_verbs_and_its_examples_check() {
         let f = review_fixture().await;
@@ -3899,39 +3899,27 @@ mod tests {
                 .spec(name)
                 .unwrap_or_else(|| panic!("{name}"));
             assert_eq!(spec.confirm, oxplow_domain::Confirm::Always, "{name}");
-            assert_eq!(
-                (spec.invokers.human, spec.invokers.agent, spec.invokers.lens),
-                (true, false, true),
-                "{name}"
-            );
         }
         let agent = oxplow_domain::Actor::Agent {
             session_id: None,
             thread_id: Some(f.thread),
             stream_id: None,
         };
-        // Nor a lens acting for one (P7 review, tsk729): the agent policy
-        // closes a command closed to agents to an agent through a lens
-        // too — denied, not turned into a proposal for a person.
+        // An agent may run it too, through a lens or not: oxplow puts no
+        // wall between a person and their agent. It doesn't ask.
         let through_lens = oxplow_domain::Actor::Lens {
             lens_id: "oxplow-bundled/packet".into(),
             on_behalf_of: Box::new(agent.clone()),
         };
-        for actor in [&agent, &through_lens] {
-            let err = review(
-                &f,
-                actor,
-                "oxplow.review.accept",
-                serde_json::json!({ "effort": effort_id(&f), "force": true }),
-            )
-            .await
-            .unwrap_err();
-            assert!(
-                matches!(err, oxplow_domain::CommandError::Denied { .. }),
-                "{actor:?}: {err:?}"
-            );
-        }
-        assert_eq!(task_status(&f).await, "in_progress");
+        review(
+            &f,
+            &through_lens,
+            "oxplow.review.accept",
+            serde_json::json!({ "effort": effort_id(&f), "force": true }),
+        )
+        .await
+        .expect("an agent accepts through a lens, unasked");
+        assert_eq!(task_status(&f).await, "done");
     }
 
     /// Accept refuses while a claim is unverified or an inferred decision

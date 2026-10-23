@@ -72,17 +72,14 @@ commands:
     summary: Ask a model to review one effort; returns the job. The intent key `review:<effort uri>` makes it one job per effort.
     scope: jobs.write
     op: enqueue
-    invokers: { human: true, agent: true, lens: true }
   - name: review.status
     summary: A review job's state, what it has written so far and, once it ends, its answer.
     scope: jobs.read
     op: snapshot
-    invokers: { human: true, agent: true, lens: true }
   - name: review.cancel
     summary: Stop a review job; it keeps what it had written.
     scope: jobs.write
     op: cancel
-    invokers: { human: true, agent: true, lens: true }
   # Ask for one effort's review: builds the job's request (the prompt) and
   # composes `review.ask`. The effect and the Efforts lens both use it.
   - name: effort.review
@@ -95,7 +92,6 @@ commands:
       additionalProperties: false
       properties:
         effort: { type: string, description: "The effort's id (`eff<id>`)." }
-    invokers: { human: true, agent: true, lens: true }
   # The model's tool. Also a person's or an agent's read: it only reads.
   - name: effort.evidence
     summary: What oxplow collected about one effort — its work item, test runs, latest observations (tests, diff coverage, static analysis), changed files and functions, metric movement and findings on its files — capped so it fits one answer.
@@ -108,7 +104,7 @@ commands:
       additionalProperties: false
       properties:
         effort: { type: string, description: "The effort's id (`eff<id>`)." }
-    invokers: { human: true, agent: true, lens: true, job: true }
+    job: true
 
 effects:
   # `effort.finished`, not `effort.closed`: the evidence (observations,

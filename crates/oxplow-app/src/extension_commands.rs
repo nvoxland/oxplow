@@ -11,7 +11,6 @@
 //!     needs: [sql.read]                  # the scopes it calls
 //!     confirm: never                     # never | always | destructive
 //!     access: write                      # write | record | read
-//!     invokers: { human: true, agent: true, lens: true }
 //!     examples:
 //!       - { name: happy, input: { uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" }, expect_commands: [oxplow.work_item.transition] }
 //!       - { name: gone, input: { uri: "oxplow:oxplow/work_item?id=tsk9&provider=oxplow" }, answers: { sql.read: [[]] }, refuses: no such task }
@@ -25,7 +24,7 @@
 
 use std::collections::BTreeMap;
 
-use oxplow_domain::{Access, CommandCall, CommandSpec, Confirm, InputValidator, Invokers};
+use oxplow_domain::{Access, CommandCall, CommandSpec, Confirm, InputValidator};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -67,7 +66,9 @@ pub struct ExtensionCommand {
     pub handler: CommandHandler,
     pub confirm: Confirm,
     pub access: Access,
-    pub invokers: Invokers,
+    /// A durable job's model may call it (`job: true`, a handler of the
+    /// extension's own). Anyone else may run every command.
+    pub job: bool,
     /// The scopes its script calls, and the capabilities (or features)
     /// it needs active, as core's commands declare them
     /// (`oxplow_domain::capability::check_need`).
@@ -165,8 +166,9 @@ pub(crate) struct CommandFile {
     confirm: Option<String>,
     #[serde(default)]
     access: Option<String>,
+    /// A durable job's model may call it.
     #[serde(default)]
-    invokers: Option<Invokers>,
+    job: bool,
     #[serde(default)]
     needs: Vec<String>,
     #[serde(default)]
@@ -596,14 +598,7 @@ fn command_of(
         handler,
         confirm,
         access,
-        // Who may run it is said, never assumed: an omitted `invokers`
-        // once meant everyone, agents included.
-        invokers: f.invokers.ok_or_else(|| {
-            at_name(
-                "`invokers` says who may run it: `{ human: true, agent: false, lens: true }`"
-                    .into(),
-            )
-        })?,
+        job: f.job,
         needs: f.needs,
         ui: f.ui,
         stable,
@@ -929,7 +924,7 @@ pub fn compose_calls(
 /// (`commands/compose.rs`) whose composer reads its `input` rows on the
 /// run's connection, runs the script and returns what it composes. The bus
 /// runs that in one transaction when every call can (each child's
-/// invokers, policy and confirmation; one audit row; the reversed children
+/// a job's tools, policy and confirmation; one audit row; the reversed children
 /// undo it), or as steps when one leaves it — a `work_item.*` call on
 /// another provider's item (P7 review, tsk713). Pure, so the bus may
 /// compose more than once.
@@ -958,7 +953,7 @@ pub fn extension_command(
         id: decl.name.clone(),
         summary,
         input_schema,
-        invokers: decl.invokers,
+        job: decl.job,
         confirm: decl.confirm,
         undoable: true,
         lifecycle: if decl.stable {
@@ -1614,7 +1609,6 @@ mod tests {
     summary: Mark the task done.
     input_schema: { type: object, required: [uri], properties: { uri: { type: string } }, additionalProperties: false }
     entry: handlers/finish_review.star
-    invokers: { human: true, agent: true, lens: true }
     examples:
       - { name: happy, input: { uri: \"oxplow:oxplow/work_item?id=tsk1&provider=oxplow\" }, expect_commands: [oxplow.work_item.transition] }
 ";
@@ -1752,7 +1746,7 @@ mod tests {
         assert!(c.needs.is_empty());
         assert_eq!(c.confirm, Confirm::Never);
         assert_eq!(c.access, Access::Write);
-        assert_eq!(c.invokers, Invokers::ALL);
+        assert!(!c.job);
         assert_eq!(c.examples.len(), 1);
         assert_eq!(
             c.examples[0].expect_commands,
@@ -1878,7 +1872,7 @@ mod tests {
     fn a_broken_command_is_an_error_at_its_line() {
         let entry = |name: &str, tail: &str| {
             format!(
-                "  - name: {name}\n    summary: S.\n    input_schema: {{ type: object }}\n    entry: handlers/h.star\n    invokers: {{ human: true, agent: true, lens: true }}\n{tail}"
+                "  - name: {name}\n    summary: S.\n    input_schema: {{ type: object }}\n    entry: handlers/h.star\n{tail}"
             )
         };
         for (block, files, says) in [
@@ -1959,11 +1953,11 @@ mod tests {
                 vec![("handlers/h.star", HANDLER)],
                 "input_schema",
             ),
-            // Who may run it is said, never assumed.
+            // Who may run it isn't a command's to say: anyone may.
             (
-                "  - name: a.b\n    summary: S.\n    input_schema: { type: object }\n    entry: handlers/h.star\n".into(),
+                entry("a.b", "    invokers: { human: true, agent: false, lens: true }\n"),
                 vec![("handlers/h.star", HANDLER)],
-                "`invokers` says who may run it",
+                "unknown field `invokers`",
             ),
             (
                 format!("{}{}", entry("a.b", ""), entry("a.b", "")),
@@ -2089,7 +2083,7 @@ mod tests {
                         id: "held.review.held".into(),
                         summary: "A provider's.".into(),
                         input_schema: json!({ "type": "object" }),
-                        invokers: Invokers::ALL,
+                        job: false,
                         confirm: Confirm::Never,
                         undoable: false,
                         lifecycle: oxplow_domain::Lifecycle::Experimental,
@@ -2268,7 +2262,6 @@ mod tests {
     summary: Finish the task.
     input_schema: { type: object, required: [uri], properties: { uri: { type: string } }, additionalProperties: false }
     entry: handlers/finish.star
-    invokers: { human: true, agent: true, lens: true }
     needs: [sql.read]
 ",
             &[("handlers/finish.star", script)],
@@ -2311,7 +2304,7 @@ mod tests {
         write(
             root,
             ".oxplow/extensions/my-review/extension.yaml",
-            "manifest: 2\nname: my-review\nintent:\n  purpose: p\nevent_types:\n  types:\n    - { type: my_review.finished, v: 1, schema: finished.json, summary: A review finished. }\ncommands:\n  - name: review.finish\n    summary: Finish the review.\n    input_schema: { type: object, required: [uri], properties: { uri: { type: string } } }\n    entry: finish.star\n    invokers: { human: true, agent: true, lens: true }\n",
+            "manifest: 2\nname: my-review\nintent:\n  purpose: p\nevent_types:\n  types:\n    - { type: my_review.finished, v: 1, schema: finished.json, summary: A review finished. }\ncommands:\n  - name: review.finish\n    summary: Finish the review.\n    input_schema: { type: object, required: [uri], properties: { uri: { type: string } } }\n    entry: finish.star\n",
         );
         write(
             root,
@@ -2436,9 +2429,9 @@ mod tests {
     }
 
     /// An operation's floor holds for any extension's declaration over
-    /// it: one that opens `bookmarks.write/set` (a person's, through a
-    /// lens too) to agents, or asks less than `vcs.write/discard`'s
-    /// `destructive`, isn't registered, and the problem says the floor.
+    /// it: one that asks less than `vcs.write/discard`'s `destructive`, or
+    /// says a job may call it (a job calls only its extension's own
+    /// handlers), isn't registered, and the problem says why.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_declaration_over_an_operation_stays_within_its_floor() {
         let fx = crate::test_fixtures::services_with_effort().await;
@@ -2446,19 +2439,7 @@ mod tests {
             write_ext(fx._dir.path(), "acme", block, &[]);
         };
         declare(
-            "  - name: page.star\n    summary: Star the page.\n    scope: bookmarks.write\n    op: set\n    invokers: { human: true, agent: true, lens: true }\n",
-        );
-        crate::test_fixtures::activate_with_problems(&fx.svc).await;
-        assert!(fx.svc.commands.spec("acme.page.star").is_none());
-        let problem = held_problem(&fx, "acme").unwrap();
-        assert!(
-            problem.contains("`bookmarks.write/set` is open to human, lens at most")
-                && problem.contains("`acme.page.star` admits human, agent, lens"),
-            "{problem}"
-        );
-
-        declare(
-            "  - name: files.drop\n    summary: Discard.\n    scope: vcs.write\n    op: discard\n    invokers: { human: true, agent: false, lens: false }\n",
+            "  - name: files.drop\n    summary: Discard.\n    scope: vcs.write\n    op: discard\n",
         );
         crate::test_fixtures::activate_with_problems(&fx.svc).await;
         assert!(fx.svc.commands.spec("acme.files.drop").is_none());
@@ -2469,9 +2450,19 @@ mod tests {
             "{problem}"
         );
 
-        // Narrowing is fine: a person-only star over a person-or-lens op.
         declare(
-            "  - name: page.star\n    summary: Star the page.\n    scope: bookmarks.write\n    op: set\n    invokers: { human: true, agent: false, lens: false }\n",
+            "  - name: page.star\n    summary: Star the page.\n    scope: bookmarks.write\n    op: set\n    job: true\n",
+        );
+        crate::test_fixtures::activate_with_problems(&fx.svc).await;
+        assert!(fx.svc.commands.spec("acme.page.star").is_none());
+        let problem = held_problem(&fx, "acme").unwrap();
+        assert!(
+            problem.contains("a job calls only its extension's own handlers"),
+            "{problem}"
+        );
+
+        declare(
+            "  - name: page.star\n    summary: Star the page.\n    scope: bookmarks.write\n    op: set\n",
         );
         crate::test_fixtures::activate_with_problems(&fx.svc).await;
         assert!(fx.svc.commands.spec("acme.page.star").is_some());
@@ -2491,7 +2482,7 @@ mod tests {
                 fx._dir.path(),
                 "acme",
                 &format!(
-                    "  - name: page.star\n    summary: Star the page for the project.\n    scope: bookmarks.write\n    op: {op}\n    invokers: {{ human: true, agent: false, lens: false }}\n"
+                    "  - name: page.star\n    summary: Star the page for the project.\n    scope: bookmarks.write\n    op: {op}\n"
                 ),
                 &[],
             );
@@ -2500,7 +2491,15 @@ mod tests {
         crate::test_fixtures::activate_with_problems(&fx.svc).await;
         let spec = fx.svc.commands.spec("acme.page.star").expect("registered");
         let oxplows = fx.svc.commands.spec("oxplow.bookmark.set").unwrap();
-        assert_eq!(spec.input_schema, oxplows.input_schema);
+        // The operation's schema; each declaration keeps its own example.
+        let without_examples = |mut schema: serde_json::Value| {
+            schema.as_object_mut().unwrap().remove("examples");
+            schema
+        };
+        assert_eq!(
+            without_examples(spec.input_schema.clone()),
+            without_examples(oxplows.input_schema.clone())
+        );
         assert_eq!(spec.access, Access::Record);
         assert!(spec.undoable);
         assert_eq!(spec.needs, vec!["bookmarks.write".to_string()]);
@@ -2535,7 +2534,7 @@ mod tests {
         write_ext(
             fx._dir.path(),
             "my-review",
-            "  - name: review.finish\n    summary: Finish the task.\n    input_schema: { type: object }\n    entry: handlers/finish.star\n    invokers: { human: true, agent: true, lens: true }\n",
+            "  - name: review.finish\n    summary: Finish the task.\n    input_schema: { type: object }\n    entry: handlers/finish.star\n",
             &[("handlers/finish.star", FINISH)],
         );
         crate::test_fixtures::activate_with_problems(&fx.svc).await;
@@ -2614,7 +2613,7 @@ mod tests {
             write_ext(
                 fx._dir.path(),
                 "my-review",
-                "  - name: work.count\n    summary: Count the work items.\n    input_schema: { type: object }\n    entry: handlers/count.star\n    invokers: { human: true, agent: true, lens: true }\n    access: read\n    needs: [sql.read]\n",
+                "  - name: work.count\n    summary: Count the work items.\n    input_schema: { type: object }\n    entry: handlers/count.star\n    access: read\n    needs: [sql.read]\n",
                 &[("handlers/count.star", script)],
             );
         };
@@ -2643,7 +2642,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn a_destructive_child_makes_the_agents_run_a_proposal_with_its_children() {
+    async fn a_destructive_child_makes_a_persons_run_ask_first() {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         with_finish(
             &fx,
@@ -2655,27 +2654,19 @@ mod tests {
             .svc
             .commands
             .run(
-                &agent(&fx),
+                &oxplow_domain::Actor::Human,
                 "my_review.review.finish",
                 json!({ "uri": r }),
                 false,
             )
             .await
             .unwrap_err();
-        let oxplow_domain::CommandError::Proposed { preview, .. } = err else {
+        let oxplow_domain::CommandError::NeedsConfirmation { preview } = err else {
             panic!("{err:?}");
         };
         assert!(preview.destructive);
-        let pending = fx
-            .svc
-            .commands
-            .proposal_store()
-            .list_pending()
-            .await
-            .unwrap();
         // A work list's verb runs outside the transaction: nothing of it
-        // runs, dry or not, before a person decides.
-        assert!(pending[0].dry_run.is_none());
+        // runs before the person confirms.
         assert!(task(&fx).await.deleted_at.is_none(), "nothing ran");
     }
 
@@ -2813,7 +2804,7 @@ mod tests {
                     id: "my_review.review.held".into(),
                     summary: "A provider's.".into(),
                     input_schema: json!({ "type": "object" }),
-                    invokers: Invokers::ALL,
+                    job: false,
                     confirm: Confirm::Never,
                     undoable: false,
                     lifecycle: oxplow_domain::Lifecycle::Experimental,
@@ -2911,7 +2902,6 @@ mod tests {
     summary: Mark the task done.
     input_schema: {{ type: object, required: [uri], properties: {{ uri: {{ type: string }} }} }}
     entry: handlers/finish_review.star
-    invokers: {{ human: true, agent: true, lens: true }}
     needs: [sql.read]
     examples:
 {examples}"

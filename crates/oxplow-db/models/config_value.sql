@@ -1,4 +1,4 @@
 SELECT CAST(NULL AS TEXT) AS key, CAST(NULL AS TEXT) AS value, CAST(NULL AS TEXT) AS origin,
-       CAST(NULL AS TEXT) AS extension, CAST(NULL AS INTEGER) AS human_only, CAST(NULL AS TEXT) AS doc,
+       CAST(NULL AS TEXT) AS extension, CAST(NULL AS TEXT) AS doc,
        CAST(NULL AS TEXT) AS schema
 WHERE 0

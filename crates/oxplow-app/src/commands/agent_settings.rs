@@ -4,14 +4,13 @@
 //! knows — a key is registered, a setting is declared — then writes its
 //! key through the one config write (`config_commands::change`): validated
 //! against the key's schema, logged as `config.changed`, undoable, applied
-//! after commit. A person's or their own lens's (`Invokers::NO_AGENT`):
-//! which agents run, and how, is theirs. The prompt addition is one key,
+//! after commit. The prompt addition is one key,
 //! `agentPromptAppend`, written with `oxplow.config.set`.
 
 use std::sync::Arc;
 
 use oxplow_domain::agent::registry::HarnessRegistry;
-use oxplow_domain::{CommandError, Invokers};
+use oxplow_domain::CommandError;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -131,7 +130,6 @@ pub fn ops(target: ConfigTarget, harnesses: HarnessRegistry) -> Vec<Op> {
                 change(&t, ctx.actor(), "agents", Some(value), Layer::Project)
             })),
         )
-        .open_to(Invokers::NO_AGENT)
     };
     let prompt_target = target.clone();
     let set_setting = {
@@ -153,7 +151,6 @@ pub fn ops(target: ConfigTarget, harnesses: HarnessRegistry) -> Vec<Op> {
                 change(&t, ctx.actor(), "agentConfig", value, Layer::Project)
             })),
         )
-        .open_to(Invokers::NO_AGENT)
     };
     let set_prompt_append = Op::new(
         "config.write",
@@ -232,12 +229,12 @@ mod tests {
             on_behalf_of: Box::new(presser),
         };
         for actor in [agent.clone(), lens(agent)] {
-            let err = svc
-                .commands
-                .run(&actor, SET_AGENTS, json!({ "agents": [ids[0]] }), true)
+            // An agent, or a lens it pressed, may set the order too.
+            svc.commands
+                .run(&actor, SET_AGENTS, json!({ "agents": [ids[0]] }), false)
                 .await
-                .unwrap_err();
-            assert!(matches!(err, CommandError::Denied { .. }), "{err:?}");
+                .unwrap();
+            assert_eq!(agents_of(svc), vec![ids[0].clone()]);
         }
         svc.commands
             .run(

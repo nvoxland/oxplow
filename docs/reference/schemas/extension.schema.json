@@ -1862,16 +1862,10 @@
           ],
           "default": null
         },
-        "invokers": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/Invokers"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
+        "job": {
+          "description": "A durable job's model may call it.",
+          "type": "boolean",
+          "default": false
         },
         "needs": {
           "type": "array",
@@ -1930,30 +1924,6 @@
       "required": [
         "name",
         "summary"
-      ]
-    },
-    "Invokers": {
-      "description": "Which surfaces may invoke a command. `job` is a model's tool call\ninside a durable job: only a command its extension declared for that\n(`job: true`) and a job of the same extension names in its `tools`.\nNo constant admits a job; core's commands never do.",
-      "type": "object",
-      "properties": {
-        "human": {
-          "type": "boolean"
-        },
-        "agent": {
-          "type": "boolean"
-        },
-        "lens": {
-          "type": "boolean"
-        },
-        "job": {
-          "type": "boolean",
-          "default": false
-        }
-      },
-      "required": [
-        "human",
-        "agent",
-        "lens"
       ]
     },
     "CommandUi": {
@@ -2150,7 +2120,7 @@
           ]
         },
         "tools": {
-          "description": "This extension's commands (their names as declared, without the\nnamespace) the model may call; each says `invokers: { job: true }`.",
+          "description": "This extension's commands (their names as declared, without the\nnamespace) the model may call; each says `job: true`.",
           "type": "array",
           "items": {
             "type": "string"

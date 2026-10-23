@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use oxplow_db::stream_store::{get_tx, upsert_tx};
 use oxplow_domain::uri::build::stream_uri;
-use oxplow_domain::{CommandCall, CommandError, Confirm, Invokers, Stream, StreamId, Timestamp};
+use oxplow_domain::{CommandCall, CommandError, Confirm, Stream, StreamId, Timestamp};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -178,8 +178,7 @@ fn slug_of(title: &str) -> String {
 /// `stream.create { title, source, … }` — a stream on a worktree: of an
 /// existing branch, of a new one forked from a start point, or adopted
 /// from disk. Each source names the fields it needs. The worktree's folder
-/// comes from the title. A person's or an agent's (agents set up parallel
-/// work), except adopting a worktree that is already on disk: a person's.
+/// comes from the title. Anyone's: agents set up parallel work too.
 /// It reaches the VCS and starts the stream's capture service.
 pub fn create_op(deps: StreamDeps) -> Op {
     Op::new(
@@ -187,7 +186,7 @@ pub fn create_op(deps: StreamDeps) -> Op {
         "create",
         schema::<CreateInput>(),
         false,
-        Handler::External(Arc::new(move |invocation: Invocation, input| {
+        Handler::External(Arc::new(move |_: Invocation, input| {
             let deps = deps.clone();
             Box::pin(async move {
                 let input: CreateInput = parse(input)?;
@@ -224,12 +223,6 @@ pub fn create_op(deps: StreamDeps) -> Op {
                     }
                     StreamSource::Worktree => {
                         let path = need(&input.worktree, "worktree")?;
-                        if invocation.actor().agent_thread().is_some() {
-                            return Err(CommandError::Denied {
-                                reason: "adopting a worktree that is already on disk is a person's"
-                                    .into(),
-                            });
-                        }
                         deps.streams
                             .adopt_worktree(std::path::PathBuf::from(path), title)
                             .await
@@ -241,12 +234,6 @@ pub fn create_op(deps: StreamDeps) -> Op {
             })
         })),
     )
-    .open_to(Invokers {
-        human: true,
-        agent: true,
-        lens: true,
-        job: false,
-    })
 }
 
 fn source_name(source: StreamSource) -> &'static str {
@@ -359,7 +346,6 @@ pub fn archive_op(deps: StreamDeps) -> Op {
             })
         })),
     )
-    .open_to(Invokers::HUMAN_ONLY)
     .confirm_at_least(Confirm::Destructive)
 }
 
@@ -436,7 +422,6 @@ pub fn set_prompt_op() -> Op {
             })
         })),
     )
-    .open_to(Invokers::NO_AGENT)
 }
 
 /// The stream commands, for the bus.
@@ -468,10 +453,10 @@ mod tests {
         }
     }
 
-    /// Renaming undoes to the old title; an agent renames only its own
-    /// stream; the prompt is a person's.
+    /// Renaming undoes to the old title; an agent renames and sets the
+    /// prompt too.
     #[tokio::test]
-    async fn rename_undoes_and_the_prompt_is_a_persons() {
+    async fn rename_undoes_and_the_prompt_is_set() {
         let fx = services_with_effort().await;
         let s = primary(&fx).await;
         let r = s.id.to_string();
@@ -494,20 +479,7 @@ mod tests {
             .unwrap();
         assert_eq!(primary(&fx).await.title, s.title);
 
-        let err = fx
-            .svc
-            .commands
-            .run(
-                &agent(&fx),
-                RENAME,
-                json!({ "stream": "str99", "title": "x" }),
-                false,
-            )
-            .await
-            .unwrap_err();
-        assert!(matches!(err, CommandError::Denied { .. }), "{err:?}");
-        let err = fx
-            .svc
+        fx.svc
             .commands
             .run(
                 &agent(&fx),
@@ -516,8 +488,8 @@ mod tests {
                 false,
             )
             .await
-            .unwrap_err();
-        assert!(matches!(err, CommandError::Denied { .. }), "{err:?}");
+            .unwrap();
+        assert_eq!(primary(&fx).await.custom_prompt.as_deref(), Some("x"));
         fx.svc
             .commands
             .run(
@@ -546,10 +518,10 @@ mod tests {
         assert_eq!(primary(&fx).await.custom_prompt, None);
     }
 
-    /// Archiving is destructive: a person is asked first, and an agent
-    /// can't archive at all. The primary stream can't be archived.
+    /// Archiving is destructive: a person is asked first; an agent is not
+    /// asked. The primary stream can't be archived by either.
     #[tokio::test]
-    async fn archiving_asks_first_and_is_a_persons() {
+    async fn archiving_asks_a_person_first() {
         let fx = services_with_effort().await;
         let r = primary(&fx).await.id.to_string();
         let err = fx
@@ -568,7 +540,7 @@ mod tests {
             .run(&agent(&fx), ARCHIVE, json!({ "stream": r }), false)
             .await
             .unwrap_err();
-        assert!(matches!(err, CommandError::Denied { .. }), "{err:?}");
+        assert!(err.to_string().contains("primary"), "{err}");
         let err = fx
             .svc
             .commands
@@ -677,10 +649,11 @@ mod tests {
         }
     }
 
-    /// An agent sets up parallel work on a branch; adopting a worktree
-    /// that is already on disk is a person's.
+    /// An agent sets up parallel work on a branch, and may adopt a worktree
+    /// on disk as a person may (one that isn't a worktree fails as theirs
+    /// would, not as a refusal).
     #[tokio::test]
-    async fn an_agent_creates_from_a_branch_but_adopts_nothing() {
+    async fn an_agent_creates_from_a_branch_and_may_adopt() {
         let fx = services_with_effort().await;
         let main = main_branch(&fx).await;
         fx.svc
@@ -704,7 +677,7 @@ mod tests {
             )
             .await
             .unwrap_err();
-        assert!(matches!(err, CommandError::Denied { .. }), "{err:?}");
+        assert!(!matches!(err, CommandError::Denied { .. }), "{err:?}");
     }
 
     /// An agent running in any of a thread's sessions — not only its first

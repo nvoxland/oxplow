@@ -21108,6 +21108,28 @@
       "key": [
         "key"
       ]
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "key",
+          "type": "TEXT",
+          "doc": "The key, as project.yaml spells it."
+        },
+        {
+          "name": "doc",
+          "type": "TEXT",
+          "doc": "What it is for."
+        },
+        {
+          "name": "schema",
+          "type": "TEXT",
+          "doc": "The JSON Schema its value must match."
+        }
+      ],
+      "key": [
+        "key"
+      ]
     }
   },
   "config_value": {
@@ -21137,6 +21159,43 @@
           "name": "human_only",
           "type": "INT",
           "doc": "1 when only a person may set it; an agent's change waits for their approval."
+        },
+        {
+          "name": "doc",
+          "type": "TEXT",
+          "doc": "What it is for."
+        },
+        {
+          "name": "schema",
+          "type": "TEXT",
+          "doc": "A project key's value schema, as JSON; NULL for the rest."
+        }
+      ],
+      "key": [
+        "key"
+      ]
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "key",
+          "type": "TEXT",
+          "doc": "A project key (`snapshotRetentionDays`), or a scoped name (`ai.roles.main`, `personal.activeProviders`, `metrics.<key>`, `dimensions.<key>`)."
+        },
+        {
+          "name": "value",
+          "type": "TEXT",
+          "doc": "Its value now, as JSON."
+        },
+        {
+          "name": "origin",
+          "type": "TEXT",
+          "doc": "Where the value comes from: `default`, `global`, `project`, `personal` or `extension`."
+        },
+        {
+          "name": "extension",
+          "type": "TEXT",
+          "doc": "The extension it comes from, when `origin` is `extension`."
         },
         {
           "name": "doc",

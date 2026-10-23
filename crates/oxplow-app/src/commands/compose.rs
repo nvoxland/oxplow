@@ -14,13 +14,13 @@
 //!
 //! Either way it is composed once, before any transaction, its reads
 //! through the SQL gateway (as an effect's are), and each child's own
-//! needs, invokers, policy and confirmation — a composite child's
+//! needs, policy and confirmation — a composite child's
 //! children's too — are checked before anything runs.
 
 use std::sync::Arc;
 
 use oxplow_domain::{
-    Access, Atomicity, CommandCall, CommandError, CommandSpec, Confirm, Invokers, Lifecycle,
+    Access, Atomicity, CommandCall, CommandError, CommandSpec, Confirm, Lifecycle,
 };
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -129,7 +129,7 @@ pub fn sequence_spec() -> CommandSpec {
                   an external system they run in order, each landing as it runs, with no undo."
             .into(),
         input_schema: sequence_schema(),
-        invokers: Invokers::ALL,
+        job: false,
         // The children decide: one that asks makes the sequence ask.
         confirm: Confirm::Never,
         undoable: true,

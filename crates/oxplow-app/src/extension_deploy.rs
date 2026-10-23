@@ -2048,7 +2048,7 @@ mod tests {
             std::fs::read_to_string(source("oxplow-foundation").join("extension.yaml")).unwrap();
         std::fs::write(
             source("oxplow-foundation").join("extension.yaml"),
-            manifest.replacen("\ncommands:\n", "\ncommands:\n  - name: test.draft_again\n    summary: \"A second draft command.\"\n    scope: agent_input.write\n    op: draft\n    invokers: { human: true, agent: false, lens: true }\n", 1),
+            manifest.replacen("\ncommands:\n", "\ncommands:\n  - name: test.draft_again\n    summary: \"A second draft command.\"\n    scope: agent_input.write\n    op: draft\n", 1),
         )
         .unwrap();
         let edited = deploy(svc, "oxplow-foundation", &root, None, false)
@@ -2088,7 +2088,7 @@ mod tests {
             std::fs::write(to, bytes).unwrap();
         }
         let manifest = std::fs::read_to_string(dir.join("extension.yaml")).unwrap();
-        let added = "commands:\n  - name: test.draft_again\n    summary: \"A second draft command.\"\n    scope: agent_input.write\n    op: draft\n    invokers: { human: true, agent: false, lens: true }\n";
+        let added = "commands:\n  - name: test.draft_again\n    summary: \"A second draft command.\"\n    scope: agent_input.write\n    op: draft\n";
         assert!(manifest.contains("\ncommands:\n"));
         std::fs::write(
             dir.join("extension.yaml"),
@@ -2278,7 +2278,7 @@ mod tests {
         let files = shipped_with("oxplow-foundation", |m| {
             m.replacen(
                 "\ncommands:\n",
-                "\ncommands:\n  - name: test.nothing\n    summary: \"Over no operation.\"\n    scope: agent_input.write\n    op: nothing_here\n    invokers: { human: true, agent: false, lens: true }\n",
+                "\ncommands:\n  - name: test.nothing\n    summary: \"Over no operation.\"\n    scope: agent_input.write\n    op: nothing_here\n",
                 1,
             )
         });

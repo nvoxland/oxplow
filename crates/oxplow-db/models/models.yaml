@@ -1430,13 +1430,12 @@
     - { not_null: position }
     - { unique: position }
 - name: config_key
-  version: 1
+  version: 2
   key: [key]
-  description: "What can be configured in the project's `.oxplow/project.yaml`: each key, what it is for, and whether only a person may set it. Read or change a value with `oxplow.config.get` / `oxplow.config.set`; Settings shows where each value comes from."
+  description: "What can be configured in the project's `.oxplow/project.yaml`: each key and what it is for (v2: no key is a person's alone). Read or change a value with `oxplow.config.get` / `oxplow.config.set`; Settings shows where each value comes from."
   columns:
     - { name: "key", type: "TEXT", doc: "The key, as project.yaml spells it." }
     - { name: "doc", type: "TEXT", doc: "What it is for." }
-    - { name: "human_only", type: "INTEGER", doc: "1 when only a person may set it; an agent's change waits for their approval." }
     - { name: "schema", type: "TEXT", doc: "The JSON Schema its value must match." }
   tests:
     - { not_null: key }
@@ -1505,15 +1504,14 @@
     - { name: "color", type: "TEXT", doc: "The rule's display colour, if it gave one." }
     - { name: "files", type: "INT", doc: "Files in the worktree this rule claims (none of its earlier siblings did); on `other`, the files no rule matched." }
 - name: config_value
-  version: 1
+  version: 2
   key: [key]
-  description: "Every setting with its value now and where that comes from: the project keys (`.oxplow/project.yaml`, else their default), a person's own layer (`personal.*`, `.oxplow/personal.yaml`), the AI roles (`ai.roles.*`), and the metrics and dimensions extensions declare. Read live when a query names it; what Settings shows. `v_config_key` says what a project key is for; change a value with `oxplow.config.set`."
+  description: "Every setting with its value now and where that comes from: the project keys (`.oxplow/project.yaml`, else their default), a person's own layer (`personal.*`, `.oxplow/personal.yaml`), the AI roles (`ai.roles.*`), and the metrics and dimensions extensions declare. Read live when a query names it; what Settings shows (v2: no key is a person's alone). `v_config_key` says what a project key is for; change a value with `oxplow.config.set`."
   columns:
     - { name: "key", type: "TEXT", doc: "A project key (`snapshotRetentionDays`), or a scoped name (`ai.roles.main`, `personal.activeProviders`, `metrics.<key>`, `dimensions.<key>`)." }
     - { name: "value", type: "TEXT", doc: "Its value now, as JSON." }
     - { name: "origin", type: "TEXT", doc: "Where the value comes from: `default`, `global`, `project`, `personal` or `extension`." }
     - { name: "extension", type: "TEXT", doc: "The extension it comes from, when `origin` is `extension`." }
-    - { name: "human_only", type: "INT", doc: "1 when only a person may set it; an agent's change waits for their approval." }
     - { name: "doc", type: "TEXT", doc: "What it is for." }
     - { name: "schema", type: "TEXT", doc: "A project key's value schema, as JSON; NULL for the rest." }
   tests:

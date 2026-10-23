@@ -2649,7 +2649,6 @@ commands:
     summary: Note a work item.
     input_schema: {{ type: object, required: [uri], properties: {{ uri: {{ type: string }} }} }}
     entry: handlers/note.star
-    invokers: {{ human: true, agent: true, lens: true }}
     examples:
       - {{ name: happy, input: {{ uri: \"work_item:oxplow:tsk1\" }}, expect_commands: {command_expect} }}
 "
@@ -2888,7 +2887,7 @@ commands:
             let yaml = std::fs::read_to_string(&manifest).unwrap().replace(
                 "    - {{ name: shell,".replace("{{", "{").as_str(),
                 "    - { name: counted, input: { command: tally.things.count }, expect: the things counted }\n    - { name: shell,",
-            ) + "  - name: things.count\n    summary: How many things there are.\n    entry: handlers/count.star\n    needs: [sql.read]\n    access: read\n    input_schema: { type: object }\n    invokers: { human: true, agent: true, lens: true }\n";
+            ) + "  - name: things.count\n    summary: How many things there are.\n    entry: handlers/count.star\n    needs: [sql.read]\n    access: read\n    input_schema: { type: object }\n";
             std::fs::write(&manifest, yaml).unwrap();
             write(
                 dir.path(),

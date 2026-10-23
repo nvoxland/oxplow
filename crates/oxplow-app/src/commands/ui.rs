@@ -12,7 +12,7 @@ use oxplow_db::event_content_store::put_json_tx;
 use oxplow_db::event_log_store::anchors_for_thread_tx;
 use oxplow_domain::events::schema::{UiOpFailed, UiOpFailedV1};
 use oxplow_domain::uri::build::thread_uri;
-use oxplow_domain::{Anchors, CommandError, Invokers, StreamId, ThreadId};
+use oxplow_domain::{Anchors, CommandError, StreamId, ThreadId};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
@@ -135,8 +135,7 @@ pub fn ops() -> Vec<Op> {
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             report(ctx, parse::<ReportErrorInput>(input)?)
         })),
-    )
-    .open_to(Invokers::HUMAN_ONLY)]
+    )]
 }
 
 #[cfg(test)]
@@ -347,10 +346,10 @@ mod tests {
         assert!(row["payload_expired_at"].is_string());
     }
 
-    /// tsk1072: only the person's app reports what it showed — an agent, or
-    /// a lens (acting for anyone), is refused and nothing is logged.
+    /// An agent, or a lens acting for a person, may report a UI error; each
+    /// run logs one.
     #[tokio::test]
-    async fn an_agent_may_not_report_a_ui_error() {
+    async fn an_agent_may_report_a_ui_error() {
         let fx = crate::test_fixtures::services_with_effort().await;
         let agent = Actor::Agent {
             session_id: None,
@@ -362,20 +361,18 @@ mod tests {
             on_behalf_of: Box::new(Actor::Human),
         };
         for actor in [agent, lens] {
-            let err = fx
-                .svc
+            fx.svc
                 .commands
                 .run(
                     &actor,
                     REPORT_ERROR,
-                    json!({ "label": "forged", "stderr": "x" }),
+                    json!({ "label": "reported", "stderr": "x" }),
                     false,
                 )
                 .await
-                .unwrap_err();
-            assert!(matches!(err, CommandError::Denied { .. }), "{err:?}");
+                .unwrap();
         }
-        assert!(op_errors(&fx.svc).await.is_empty());
+        assert_eq!(op_errors(&fx.svc).await.len(), 2);
         let agent_can_list = fx
             .svc
             .commands
@@ -386,6 +383,6 @@ mod tests {
             })
             .into_iter()
             .any(|spec| spec.id == REPORT_ERROR);
-        assert!(!agent_can_list, "not offered to an agent");
+        assert!(agent_can_list, "offered to an agent");
     }
 }
