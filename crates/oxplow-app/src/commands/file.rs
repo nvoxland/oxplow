@@ -171,7 +171,10 @@ pub fn create_op(files: Arc<WorkspaceFiles>) -> Op {
                     &made.path,
                 );
                 Ok(HandlerOutput {
-                    result: json!({ "path": made.path }),
+                    result: json!({
+                        "path": made.path,
+                        "uri": oxplow_domain::uri::build::file_uri(&made.path),
+                    }),
                     events: vec![event],
                     ..HandlerOutput::default()
                 })
@@ -399,7 +402,10 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(out.result, json!({ "path": "a/new.txt" }));
+        assert_eq!(
+            out.result,
+            json!({ "path": "a/new.txt", "uri": "oxplow:oxplow/file?path=a/new.txt" })
+        );
         assert_eq!(
             std::fs::read_to_string(root.join("a/new.txt")).unwrap(),
             "hi"

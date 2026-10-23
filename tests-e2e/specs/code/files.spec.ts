@@ -21,3 +21,17 @@ test("the Files page lists the project and renames a file from its menu", async 
   expect(existsSync(join(daemon.project, "owl.txt"))).toBe(true);
   expect(existsSync(join(daemon.project, "emu.txt"))).toBe(false);
 });
+
+// New File… creates the file and opens it, as the command's open_after says.
+test("New File… from a file's menu creates the file and opens it", async ({ page, daemon }) => {
+  writeFileSync(join(daemon.project, "emu.txt"), "emu\n");
+  await page.goto("/");
+  await openFromLauncher(page, "Files");
+  await page.getByRole("button", { name: "emu.txt" }).filter({ visible: true }).click({ button: "right" });
+  await page.getByTestId("menu-item-lens-action-new-file").click();
+  const field = page.getByTestId("lens-action-form-fields-path");
+  await field.fill("kiwi.txt");
+  await field.press("Enter");
+  await expect(page.locator(".monaco-editor").first()).toBeVisible();
+  expect(existsSync(join(daemon.project, "kiwi.txt"))).toBe(true);
+});

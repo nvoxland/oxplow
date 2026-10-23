@@ -994,6 +994,8 @@ commands:
     summary: "Make a file in a stream's worktree. The folders above it are made too; it is refused when the file exists. Logs `file.created`."
     scope: files.write
     op: create
+    # Never offered by itself (it needs a path): a lens form action runs it and opens the file.
+    ui: { label: "New File…", group: File, open_after: "{{result.uri}}", when: "streamShown && !streamShown" }
     example: {"stream": "str1", "path": "docs/notes.md", "content": "# Notes\n"}
   - name: file.create_directory
     summary: "Make a directory in a stream's worktree. Those above it are made too. Logs `file.directory_created`."
