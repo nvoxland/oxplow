@@ -67,7 +67,7 @@ harness with skill files, or `oxplow_get_skill { name: "oxplow-metrics", referen
   report-derived and `exec` patterns.
 - `references/verify-and-read.md` (`verify-and-read`) — **proving it and
   reading it.** `extension check` / `test`, `oxplow.collector.sync`,
-  `metric_grid` / `metric_findings` and the `v_metric_*` views,
+  `metric_grid`, `metric_findings`, `v_metric_point`, `v_metric_*`,
   `oxplow.metric.record`, and the gotchas when a fact doesn't appear.
 - `references/entity-metrics.md` (`entity-metrics`) — **a number about
   records oxplow already has** (work items, commits, test runs): no

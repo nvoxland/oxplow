@@ -186,13 +186,13 @@ welded to collection.
 > fixes, cheapest read to root cause:
 > - **Reads-based refresh** (P4.7, replacing tsk197's `subscribeMetricRefresh`).
 >   Each metric reader in `api.ts` returns its rows with the query's `reads`,
->   and every metric view (`MetricTile`, `MetricDetailPage`, `MetricsPage`,
+>   and every metric view (`MetricTile`, `MetricDetailPage`, the Metrics lens,
 >   the dashboard's spec and catalog load) re-runs through
 >   `useRerunOnChange`, so a view refreshes only when a model or measure it
 >   read changed. An enable toggle or a `project.yaml` edit arrives as
->   `modelsChanged` for `v_metric_catalog` / `v_metric_spec`. `MetricsPage`
->   reads every metric, so its refresh sits behind `coalescedRefresh`
->   (single-flight): a refresh never overlaps the one before it.
+>   `modelsChanged` for `v_metric_catalog` / `v_metric_spec`. The Metrics
+>   lens reads every metric's points in one live model, `v_metric_point`,
+>   which follows `MetricSamplesChanged` (below).
 > - **Cube read cache** (`cube_rows_for_measure`, tsk196). The read is memoized on
 >   a new **`metric_cube_epoch.version`** counter — distinct from the `epoch`
 >   fence below, which deliberately does NOT move on a fold. `version` is bumped
@@ -1662,7 +1662,7 @@ the change loop announces `OxplowEvent::MetricSamplesChanged` for what landed.
 
 The metric UI is **three pages**, each with one job, all reading the one
 fact table — no per-metric UI code. Recorded Metrics is a declared page (the `metrics-recorded` page, oxplow-foundation's
-`pages:`, a built-in until the kit can draw it); Metric Detail is the `oxplow/metric` entity page and cross-links to the others in its header. (History: the
+`pages:`, `lens: metrics`); Metric Detail is the `oxplow/metric` entity page and cross-links to the others in its header. (History: the
 configure surface was split off as a fourth "Metric Settings" page in
 tsk282/tsk80, then **folded back in by tsk117** — per-metric configuration now
 lives on the Metric Detail page; see "The configure surface" below.) Explorer
@@ -1697,60 +1697,52 @@ just carries a Help blurb pointing there.
 > that matches no files yields no point at all. Nothing auto-detects a project's
 > languages.
 
-- **Metrics** (`MetricsPage.tsx`, `PageKind` `"metrics-recorded"` /
+- **Metrics** (the `metrics` lens, the `metrics-recorded` page,
   `metricsIndexRef()`) — every **catalogued** metric as a `title · trend
-  sparkline · latest value` row (row set = `list_metric_catalog`, the only
-  source that knows `use:`; the seeded spec joins in by key for unit /
-  direction / thresholds and is null only for an explicitly-disabled metric
-  whose spec was pruned). The rail has **Search**, **Show** (`Enabled`,
-  default, / `All` — see the box above for why that distinction isn't free;
-  pure filtering in `metricsRows.ts`), **Range** and **Branch**. The value
-  sits after the sparkline because it *is* that sparkline's last point —
-  both read the same range+branch-filtered samples — colored by
-  `metricStatusColor` (the shared `metricStatus` classifier:
-  target/`fail_at`/direction). Each `<tr>` adopts browser-style click via
-  `useRouteDispatch(metricRef(key))`, passing the **sibling chain**
-  (`metricSiblings`) so the detail page gets up/down nav (tsk119). A Help
-  blurb (`recorded-new-metric-help`) points at the agent for new metrics
-  (`oxplow.metric.scaffold` + `/oxplow:new-metric`). Re-runs when a model or measure
-  its reads read changed (`useRerunOnChange`, single-flight). **Simplified (tsk309):** the Line value
-  stat picker, the Off target mode and the saved-view presets are gone.
+  sparkline · latest value` row of a grouped list (row set =
+  `v_metric_catalog`, the only source that knows `use:`; `v_metric_spec`
+  joins in by key for unit / direction / thresholds and is empty only for
+  an explicitly-disabled metric whose spec was pruned). The rail has
+  **Search**, **Show** (`Enabled`, default, / `All` — see the box above
+  for why that distinction isn't free), **Range** (a `date_range`, 7 days
+  by default), **Branch** and **Slice by**. The trend is
+  `json_group_array(value)` over a subquery of `v_metric_point` ordered by
+  `captured_at`, filtered by the range and branch; the latest value is that
+  series' last point, so the two always agree, with the metric's unit
+  and a tone from its target (`success` meets the target or warn
+  threshold, `danger` is past `fail_at`, `warning` is any other miss: the
+  same line as `metric_engine::threshold_state`). A row links to the
+  metric's page; the list's Up/Down on that page walk the rows in the
+  order shown. **Sections are a `section` column**: the category's label
+  (`custom` is Code metrics, `testing` Tests, `coverage` Coverage,
+  `operational` Operational), except `static-quality`, which has no
+  section of its own — each language is one (the language-agnostic
+  analysers fall under "General"). Sections and rows sort alphabetically.
+  With **Slice by** set, a row's ▸ opens `metrics-slices`: that metric's
+  three biggest groups under the dimension, each with its trend and latest
+  value, the rest counted as "+ N more"; a metric with nothing on that
+  dimension says it is not sliced. New metrics are the agent's work
+  (`oxplow.metric.scaffold` + `/oxplow:new-metric`).
 
-> ### Sectioning — one rule, both pages (`buildMetricSections`, tsk81)
+> ### `v_metric_point` — a series per metric, one model (live)
 >
-> Recorded Metrics renders those sections through the shared
-> `CollapsibleSections` provider and the kit `Section` with `collapsible` — a chevron on
-> each section header, with the **Expand all / Collapse all pair living in the
-> details rail** beside the filters (`SectionCollapseControls`, tsk86). Collapsed
-> state is kept in the tab entry. The provider wraps the whole
-> `<Page>` so its context reaches the rail as well as the body. See
-> `.context/usability.md` → "Collapsible page sections".
->
-> The section list is built by the pure
-> `buildMetricSections(rows, getCategory, getLanguage, getLabel)` in
-> `metricCategories.ts`: sections sorted **alphabetically by label**, and rows
-> sorted alphabetically within each section (tsk116/tsk118 —
-> no hand-kept `CATEGORY_ORDER`, so plugged-in languages/categories slot in
-> automatically), **except `static-quality`**, which gets no section of its
-> own — its real top-level division is by language, so each language is
-> promoted to a top-level section (a peer of Tests / Coverage / Operational)
-> and the language-agnostic analysers (`oxplow.analysis.*`) fall under
-> **"General"**. (The helper had two callers until tsk117 retired the Metric
-> Settings page; it stays the single sectioning rule so any future second
-> caller can't drift.)
->
-> **Grouping keys off `MetricCatalogEntry.language`** (tsk87). For a foundation
-> code metric the catalog takes that slug from the metric's `language:` in
-> `extension.yaml`, and the spec carries the same value, so catalog and spec
-> agree by construction. `MetricSpec.language`
-> is still real read surface: `v_metric_spec.language` is how a query
-> filters by language, which silently matches nothing when the column is
-> null. Keep it populated.
->
-> Note the key segment is **not** the slug: `oxplow.ts.*` is language
-> `typescript`. A foundation metric with no `language:` (the language-agnostic code metrics) maps
-> to spec `None` — `""` is not a language, and `groupByLanguage` reads null/`""`
-> as its "General" bucket.
+> One row per capture of a metric (and per group when sliced), newest
+> first: what `MEASURE('<key>')` over `metric_grid('capture')` reads, for
+> every metric at once, so a list's sparkline, a metric's chart and a
+> dashboard tile read the same rows. Columns: `metric`, `dimension`,
+> `capture_id`, `captured_at`, `value`, `group_value`, `branch`,
+> `stream_id`. It is a **live model** (`live_models.rs`; it follows
+> `MetricSamplesChanged`, a config or extension change, and the catalog
+> and spec models) because the engine computes the series, not a table:
+> unpinned it lists every metric with a spec, each one's newest 200
+> captures; `WHERE metric = :key` lists one metric's newest 5000;
+> `AND dimension = 'oxplow.language'` slices it (a metric the dimension
+> cannot slice has no rows). `metric` and `dimension` are its pushdown
+> columns, so pin them with `=` in the one `SELECT` that reads it (a CTE
+> body or subquery counts: `sql_tokens::equality_filters`). Window and
+> branch are the query's own `WHERE` on `captured_at` and `branch`
+> (the point's capture time sorts as text).
+
 - **Metric Detail** (`MetricDetailPage.tsx` + the pieces in `MetricDetail.tsx`
   and pure `metricDetailData.ts`, `PageKind` `"metric"`, routed by
   `metricRef(key)`). The metric name is the H1 and its `description` the
@@ -2113,8 +2105,7 @@ oxplow-bundled's effort verdict judges diff coverage against its `warnAt`.
 **One rule for crossing.** A value *past* a threshold has crossed it; a value
 *at* it has not (`target: 80, warnAt: 80` means 80 is fine). The server's
 `metric_engine::threshold_state` (findings' severity, `v_effort_metric_delta.crossing`,
-the effort panel) and the Metrics page's `metricsRows.ts::metricStatus` (rows
-and dashboard tiles, three tiers) draw that same line. See
+the effort panel) and the Metrics lens's `tone` (three tiers) draw that same line. See
 [theming.md](./theming.md).
 
 Feedback is **advisory — oxplow never blocks**. It lives in the bundled
@@ -2215,15 +2206,14 @@ one that deletes facts, `db.memo().invalidate_all()`.
 dimension value (`seriesByGroup`, the same small multiples as a lens line
 chart).
 
-The **Metrics list** has the same select in its Filters rail ("Slice by",
-`MetricsPage`). Sliced, every metric keeps its row (its overall sparkline and
-latest value) and lists its **top three groups beneath it** — each group's
-latest value and trend, ranked by latest value (`sliceGroups`,
-`metricsRows.ts`), the rest counted as "+ N more". A metric with nothing on
-that dimension says "Not sliced by <dimension>". The groups follow the page's
-range and branch filters; a group is a value of the dimension, not a metric,
-so it opens no page (the detail page, sliced the same way, is where one
-group's chart lives). It costs a second read per metric while a slice is on.
+The **Metrics list** has the same select in its Filters rail ("Slice by").
+Sliced, each metric's ▸ opens its **top three groups** — each group's latest
+value and trend, ranked by latest value, the rest counted as "+ N more"
+(`metrics-slices` over `v_metric_point WHERE dimension = …`). A metric with
+nothing on that dimension says so. The groups follow the page's range and
+branch filters; a group is a value of the dimension, not a metric, so it opens
+no page (the detail page, sliced the same way, is where one group's chart
+lives).
 
 
 ## Coherent extension metric publication

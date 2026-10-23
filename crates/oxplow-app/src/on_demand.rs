@@ -233,11 +233,19 @@ mod tests {
             .unwrap(),
             vec![]
         );
+        // The one read, inside a subquery, is narrowed by its own `SELECT`.
+        assert_eq!(
+            requests(
+                "SELECT 1 FROM v_stream WHERE id IN (SELECT 1 FROM v_commit WHERE sha = :sha)",
+                &p
+            )
+            .unwrap(),
+            vec![request("commit", &[("sha", "abc")])]
+        );
         for sql in [
             "SELECT id FROM v_change WHERE kind = 'commit'",
             "SELECT id FROM v_change WHERE kind = 'commit' OR target = :sha",
             "SELECT c.subject FROM v_commit c JOIN v_commit_file f ON f.sha = c.sha WHERE c.sha = :sha",
-            "SELECT 1 FROM v_stream WHERE id IN (SELECT 1 FROM v_commit WHERE sha = :sha)",
             "SELECT subject FROM v_commit WHERE sha = :missing",
         ] {
             assert_eq!(requests(sql, &p).unwrap(), vec![], "{sql}");

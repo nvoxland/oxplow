@@ -55,6 +55,7 @@ pub const NAMES: &[&str] = &[
     "branch_divergence",
     "commit_between",
     "extension_change",
+    "metric_point",
 ];
 
 /// The columns a live model's rows have, in order.
@@ -142,6 +143,16 @@ pub fn columns(name: &str) -> &'static [&'static str] {
             "lens_changes",
             "stream_id",
         ],
+        "metric_point" => &[
+            "metric",
+            "dimension",
+            "capture_id",
+            "captured_at",
+            "value",
+            "group_value",
+            "branch",
+            "stream_id",
+        ],
         _ => &[],
     }
 }
@@ -155,6 +166,8 @@ pub fn pushdown(name: &str) -> &'static [&'static str] {
         // One pair is one graph walk; a side left open ranges over the
         // branches (`LiveSources::branch_pairs`).
         "branch_divergence" | "commit_between" | "extension_change" => &["base", "head"],
+        // One metric is one series read; the dimension is how it is sliced.
+        "metric_point" => &["metric", "dimension"],
         _ => &[],
     }
 }
@@ -221,6 +234,11 @@ pub fn follows(name: &str, change: &Change<'_>) -> bool {
                 event,
                 E::WorkspaceChanged { .. } | E::VcsRefsChanged { .. } | E::ConfigChanged
             ),
+            // New captures, and the metrics a config or extension turns on.
+            "metric_point" => matches!(
+                event,
+                E::MetricSamplesChanged { .. } | E::ConfigChanged | E::ExtensionsChanged
+            ),
             _ => false,
         },
         Change::Models(models) => {
@@ -232,6 +250,8 @@ pub fn follows(name: &str, change: &Change<'_>) -> bool {
                 "vcs_workspace" => reads("v_stream"),
                 // The branches an unpinned side ranges over.
                 "branch_divergence" | "commit_between" => reads("v_branch"),
+                // The metrics it lists: the catalog and the specs.
+                "metric_point" => reads("v_metric_catalog") || reads("v_metric_spec"),
                 _ => false,
             }
         }
@@ -285,6 +305,11 @@ const UNMATCHED_SAMPLE: usize = 20;
 /// The most commits `v_commit_between` lists per pair: it answers what is
 /// unpushed or unmerged, not a history (`v_commit` is that).
 const BETWEEN_LIMIT: u32 = 100;
+
+/// The most captures `v_metric_point` lists per metric when no metric is
+/// pinned (a list's sparklines), and when one is (its chart).
+const POINTS_UNPINNED: usize = 200;
+const POINTS_PINNED: usize = 5000;
 
 /// The gateway's handle on the live models: shared by every clone of it,
 /// bound once.
@@ -425,6 +450,7 @@ impl LiveModels {
             "branch_divergence" => sources.branch_divergence(stream, filters).await,
             "commit_between" => sources.commits_between(stream, filters).await,
             "extension_change" => sources.extension_changes(stream, filters).await,
+            "metric_point" => sources.metric_points(stream, filters).await,
             other => Err(DomainError::Invalid(format!(
                 "`v_{other}` isn't a live model"
             ))),
@@ -1057,6 +1083,76 @@ impl LiveSources {
                 ]
             })
             .collect())
+    }
+
+    /// `v_metric_point`: one row per capture of a metric, newest first, the
+    /// metric's series as the engine reads it (`series_for_spec_read`):
+    /// every metric with a spec, or the one the query pins as `metric`,
+    /// sliced by the `dimension` it pins (one row per capture and group;
+    /// a metric the dimension can't slice has no rows). Unpinned, each
+    /// metric's newest [`POINTS_UNPINNED`] captures; pinned, [`POINTS_PINNED`].
+    async fn metric_points(
+        &self,
+        stream: Option<StreamId>,
+        filters: &[(String, String)],
+    ) -> Result<Vec<Vec<SqlCell>>, DomainError> {
+        let pinned = |column: &str| {
+            filters
+                .iter()
+                .find(|(c, _)| c == column)
+                .map(|(_, v)| v.clone())
+        };
+        let (metric, dimension) = (pinned("metric"), pinned("dimension"));
+        let svc = self
+            .services
+            .get()
+            .map_err(|e| DomainError::Invalid(e.to_string()))?;
+        let keys = match &metric {
+            Some(key) => vec![key.clone()],
+            None => svc
+                .fact_store
+                .list_specs()
+                .await?
+                .into_iter()
+                .map(|s| s.key)
+                .collect(),
+        };
+        let cap = if metric.is_some() {
+            POINTS_PINNED
+        } else {
+            POINTS_UNPINNED
+        };
+        let stream = self.stream(stream).await?.id.value();
+        let mut rows = Vec::new();
+        for key in keys {
+            let Some(spec) = svc.metric_engine.spec(&key).await? else {
+                continue;
+            };
+            let read = crate::metric_engine::SeriesRead {
+                group_by: dimension.clone().filter(|d| !d.is_empty()),
+                stream: Some(stream),
+                ..Default::default()
+            };
+            // A formula, or a metric the dimension can't slice, has no
+            // points here rather than failing the others.
+            let Ok(mut points) = svc.metric_engine.series_for_spec_read(&spec, &read).await else {
+                continue;
+            };
+            points.sort_by_key(|p| std::cmp::Reverse(p.captured_at.to_text()));
+            for p in points.into_iter().take(cap) {
+                rows.push(vec![
+                    text(key.clone()),
+                    opt(dimension.clone()),
+                    SqlCell::Int(p.capture_id),
+                    text(p.captured_at.to_text()),
+                    SqlCell::Real(p.value),
+                    opt(p.group),
+                    opt(p.branch),
+                    SqlCell::Int(stream),
+                ]);
+            }
+        }
+        Ok(rows)
     }
 
     /// The files and folders the stream's worktree's filter keeps: in

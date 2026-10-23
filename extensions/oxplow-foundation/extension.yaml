@@ -172,7 +172,7 @@ pages:
   - { id: wiki-freshness, title: Wiki Freshness, icon: book-open, category: Knowledge, lens: wiki-freshness }
   # Data
   - { id: explore-data, title: Explore Data, icon: database, category: Data, keywords: sql query schema semantic layer lens, component: "oxplow:explore-data" }
-  - { id: metrics-recorded, title: Metrics, icon: bar-chart-3, category: Data, keywords: recorded catalog, component: "oxplow:metrics-recorded" }
+  - { id: metrics-recorded, title: Metrics, icon: bar-chart-3, category: Data, keywords: recorded catalog, lens: metrics }
   - { id: dashboards, title: Dashboards, icon: layout-dashboard, category: Data, keywords: custom metric tiles lens, lens: dashboards }
   # System
   - { id: terminal, title: Terminal, icon: terminal, category: System, component: "oxplow:terminal" }

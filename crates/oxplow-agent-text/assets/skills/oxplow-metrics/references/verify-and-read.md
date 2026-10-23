@@ -60,6 +60,19 @@ For a CI-imported or agent-asserted number oxplow can't compute itself, use
 the `oxplow.metric.record` command, `{ key, value, subject?, dims? }` (stored
 `asserted`, lower-trust).
 
+## Reading a metric's values: `v_metric_point`
+
+`SELECT captured_at, value, branch FROM v_metric_point WHERE metric = 'oxplow.todos'
+ORDER BY captured_at DESC LIMIT 20` is a metric's series, one row per capture, newest
+first: what `MEASURE('<key>')` over `metric_grid('capture')` reads, without naming the
+key in the function. `WHERE dimension = 'oxplow.language'` slices it (`group_value` is
+the dimension's value; a metric that dimension cannot slice has no rows). With no
+`metric` it lists every metric with a spec (each one's newest 200 captures), which is
+what a list's sparkline reads (`json_group_array(value)` over a subquery ordered by
+`captured_at`); pinned it lists the newest 5000. Join `v_capture` on `capture_id` for
+provenance and the git version. It is read live, so pin `metric` and `dimension` with
+`=` in the `SELECT` (or the one `SELECT` of a CTE) that reads it.
+
 ## Gotchas
 
 - **Collectors record facts, metrics aggregate them.** The trio splits producer

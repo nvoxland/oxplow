@@ -18,7 +18,6 @@ pub const BUILT_IN_PAGES: &[&str] = &[
     "files",
     "lens",
     "metric-detail",
-    "metrics-recorded",
     "resource",
     "settings",
     "terminal",

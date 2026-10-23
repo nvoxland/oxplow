@@ -9,7 +9,6 @@ import { SettingsPage } from "./SettingsPage.js";
 import { settingsArea } from "./settingsAreas.js";
 import { TerminalPage } from "./TerminalPage.js";
 import { FilesPage } from "./FilesPage.js";
-import { MetricsPage } from "./MetricsPage.js";
 import { ExploreDataPage } from "./ExploreDataPage.js";
 import { ExternalUrlPage } from "./ExternalUrlPage.js";
 
@@ -91,14 +90,6 @@ export const builtInPages: Record<BuiltInPageName, BuiltInPage> = {
           commitRequest={scope.commitFilesRequest}
         />
       ),
-    };
-  },
-  "metrics-recorded": ({ ref, nav }) => {
-    return {
-      id: ref.id,
-      label: "Metrics",
-      closable: true,
-      render: () => <MetricsPage onOpenPage={nav.navOpen} />,
     };
   },
   "explore-data": ({ ref, nav, scope }) => {

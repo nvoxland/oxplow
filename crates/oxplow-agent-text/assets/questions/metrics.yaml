@@ -1,0 +1,22 @@
+# What an agent should be able to answer about the numbers oxplow tracks
+# over time, and how (checked by `oxplow_sdk::answerability`, see
+# `.context/extensions.md` "Answerability").
+- question: How has this metric moved, newest capture first?
+  about: oxplow/metric
+  skill: oxplow-metrics
+  reaches:
+    sql: >-
+      SELECT captured_at, value, branch FROM v_metric_point
+      WHERE metric = 'oxplow.todos' ORDER BY captured_at DESC LIMIT 20
+  shape: { columns: [captured_at, value, branch] }
+- question: What is this metric's latest value in each group of a dimension?
+  about: oxplow/metric
+  skill: oxplow-metrics
+  reaches:
+    sql: >-
+      SELECT group_value, value FROM v_metric_point
+      WHERE metric = 'oxplow.todos' AND dimension = 'oxplow.language'
+      AND captured_at = (SELECT max(captured_at) FROM v_metric_point
+        WHERE metric = 'oxplow.todos' AND dimension = 'oxplow.language')
+      ORDER BY value DESC
+  shape: { columns: [group_value, value] }

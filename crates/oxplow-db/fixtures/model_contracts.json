@@ -22471,5 +22471,56 @@
         "name"
       ]
     }
+  },
+  "metric_point": {
+    "1": {
+      "columns": [
+        {
+          "name": "metric",
+          "type": "TEXT",
+          "doc": "The metric key (`v_metric_catalog.key`)."
+        },
+        {
+          "name": "dimension",
+          "type": "TEXT",
+          "doc": "The dimension the query sliced by, as it spelled it; NULL when it did not slice."
+        },
+        {
+          "name": "capture_id",
+          "type": "INT",
+          "doc": "The capture the point comes from (`v_capture.id`)."
+        },
+        {
+          "name": "captured_at",
+          "type": "TEXT",
+          "doc": "When the capture was taken (RFC 3339); sorts as time."
+        },
+        {
+          "name": "value",
+          "type": "REAL",
+          "doc": "The metric's value as the capture shows it, rolled up the way the metric's spec says."
+        },
+        {
+          "name": "group_value",
+          "type": "TEXT",
+          "doc": "The dimension's value for this point; NULL when the series is not sliced."
+        },
+        {
+          "name": "branch",
+          "type": "TEXT",
+          "doc": "The capture's branch; NULL for operational facts with no worktree."
+        },
+        {
+          "name": "stream_id",
+          "type": "INT",
+          "doc": "The stream whose captures were read."
+        }
+      ],
+      "key": [
+        "metric",
+        "capture_id",
+        "group_value"
+      ]
+    }
   }
 }

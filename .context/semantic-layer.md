@@ -500,7 +500,9 @@ repository's working copies (`v_vcs_workspace`) and how far two revisions
 have parted and the commits between them (`v_branch_divergence`,
 `v_commit_between`: a graph walk over refs a fetch can move, narrowed to
 the pair the query pins — one side pinned, the other ranges over every
-branch; neither, every local branch against the default). A restated table (as `v_lens` and `v_extension` are, in the
+branch; neither, every local branch against the default) and every
+metric's series (`v_metric_point`: the engine computes it, one row per
+capture, narrowed to the `metric` and `dimension` the query pins). A restated table (as `v_lens` and `v_extension` are, in the
 extension-generation transaction) would be wrong between the change and the
 next restatement, and nothing says when that is. So these are **live
 models** (`crates/oxplow-app/src/live_models.rs`, `LiveModels::NAMES`): the
@@ -531,7 +533,9 @@ rows are read when a query names the model.
   rows with `<column> = <value>` (`sql_tokens::equality_filters`: one plain
   `SELECT` reading the model once as its only source, the condition a
   top-level `AND` term, a literal or a parameter — an `OR`, `BETWEEN`,
-  `CASE`, join, compound, `WITH` or second read of the model gives none),
+  `CASE`, join, compound, top-level `WITH` or second read of the model gives
+  none; a model read once inside a parenthesised `SELECT`, a CTE body or
+  a subquery, is narrowed by that `SELECT`'s own conditions),
   the read gets the value and returns only those rows; anything else reads
   them all, which is always correct. `v_workspace_file` narrows by
   `parent`: `WHERE parent = :path` is one `read_dir`, not a walk. Both go

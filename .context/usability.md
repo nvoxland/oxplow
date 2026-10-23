@@ -579,7 +579,7 @@ mounts the kit's, so a page moving to a lens (`viz: approvals`, params
   pair); the section itself is the kit `Section` with `collapsible` (and
   `defaultCollapsed`), which reads the provider through `useSectionCollapse`.
   Pure state + persistence live in the sibling `sectionCollapse.ts`
-  (unit-tested). Adopters: `MetricsPage`.
+  (unit-tested). Adopters: none now the Metrics page is a lens (a grouped lens list folds its headings itself).
 - **The page places the controls; they are not pinned above the sections
   (tsk86).** `SectionCollapseControls` reads state off context, so it can render
   anywhere under the provider. Recorded Metrics puts it in the **details rail**

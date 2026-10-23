@@ -2116,3 +2116,16 @@
     - { name: "collector", type: "TEXT", doc: "The collector's URI (`v_collector_state.uri`)." }
     - { name: "name", type: "TEXT", doc: "The credential's name, as the collector reads it (`env: [NAME]`)." }
     - { name: "is_set", type: "INT", doc: "1 when the keychain holds a value for it." }
+- name: metric_point
+  version: 1
+  key: [metric, capture_id, group_value]
+  description: "A metric's series, one row per capture (and per group when sliced), newest first: what `MEASURE('<key>')` over `metric_grid('capture')` reads, for every metric at once. Read live. Unpinned, every metric with a spec gets its newest 200 captures; `WHERE metric = :key` lists one metric's newest 5000. `WHERE dimension = 'oxplow.language'` slices by a dimension (`group_value` is its value; a metric it can't slice has no rows). Join `v_capture` on `capture_id` for provenance and the git version."
+  columns:
+    - { name: "metric", type: "TEXT", doc: "The metric key (`v_metric_catalog.key`)." }
+    - { name: "dimension", type: "TEXT", doc: "The dimension the query sliced by, as it spelled it; NULL when it did not slice." }
+    - { name: "capture_id", type: "INT", doc: "The capture the point comes from (`v_capture.id`)." }
+    - { name: "captured_at", type: "TEXT", doc: "When the capture was taken (RFC 3339); sorts as time." }
+    - { name: "value", type: "REAL", doc: "The metric's value as the capture shows it, rolled up the way the metric's spec says." }
+    - { name: "group_value", type: "TEXT", doc: "The dimension's value for this point; NULL when the series is not sliced." }
+    - { name: "branch", type: "TEXT", doc: "The capture's branch; NULL for operational facts with no worktree." }
+    - { name: "stream_id", type: "INT", doc: "The stream whose captures were read." }

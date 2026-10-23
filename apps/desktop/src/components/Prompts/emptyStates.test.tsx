@@ -15,13 +15,9 @@ mock.module("../../api.js", () => ({
   listRecentPageVisits: async () => [],
   topVisitedPages: async () => [],
   subscribePageVisitEvents: () => () => {},
-  listMetricCatalog: async () => ({ rows: [], reads: { models: [], tables: [], measures: [] } }),
-  listMetricDefinitions: async () => ({ rows: [], reads: { models: [], tables: [], measures: [] } }),
-  listMetricSamples: async () => ({ rows: [], reads: { models: [], tables: [], measures: [] } }),
 }));
 
 const { BacklinksList } = await import("../../tabs/BacklinksList.js");
-const { MetricsPage } = await import("../../pages/MetricsPage.js");
 
 afterEach(cleanup);
 
@@ -32,10 +28,4 @@ test("an empty backlinks list is an EmptyState", () => {
   const { container } = render(<BacklinksList entries={[]} onOpenPage={() => {}} />);
   const empty = container.querySelector('[data-testid="backlinks-list-empty"]');
   expect(empty?.hasAttribute("data-empty-state")).toBe(true);
-});
-
-test("no metrics recorded is an EmptyState", async () => {
-  const { container } = render(<MetricsPage />);
-  await waitFor(() => expect(container.textContent).toContain("No metrics recorded"));
-  expect(emptyStates(container).length).toBe(1);
 });

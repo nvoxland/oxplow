@@ -104,7 +104,7 @@ text, lifts to a 4%-white wash on hover).
 ### Metric status (data-driven — NO hardcoded ramps)
 
 Metric red/green is computed **from the metric definition's data**, not from
-magic numbers in the renderer. `MetricsPage.statusColor(def, value)` reads
+magic numbers in the renderer. the Metrics lens's `tone` column reads
 `def.target` / `def.fail_at` / `def.direction` and returns three tiers — meets
 target → `--ok` (green), past the fail floor → `--err` (red), in-between →
 `--warn` (amber); `neutral` / threshold-less metrics are uncolored. The former

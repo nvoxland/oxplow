@@ -27,7 +27,6 @@ export const BUILT_IN_PAGES = [
   "explore-data",
   "external-url",
   "files",
-  "metrics-recorded",
   "resource",
   "settings",
   "terminal",

@@ -363,20 +363,62 @@ pub fn text_filters(
 /// each condition is a top-level conjunct of exactly `[q.]column = value`
 /// (either way round; `value` a string literal, a parameter, or parts of
 /// those joined by `||`). An `OR`,
-/// `BETWEEN` or `CASE` in the `WHERE`, a join, a compound, a `WITH` or a
-/// second read of `view` gives none.
+/// `BETWEEN` or `CASE` in the `WHERE`, a join, a compound, a top-level `WITH`
+/// or a second read of `view` gives none. A view read once, inside a
+/// parenthesised `SELECT` (a CTE body, a subquery), is that `SELECT`'s alone,
+/// which is read the same way.
 pub fn equality_filters(
     sql: &str,
     view: &str,
     columns: &[&str],
 ) -> Result<Vec<(String, Operand)>, DomainError> {
     let tokens = tokenize(sql)?;
-    let sig: Vec<&Token<'_>> = significant(&tokens).collect();
+    let mut sig: Vec<&Token<'_>> = significant(&tokens).collect();
     let names_view = |t: &Token<'_>| match t.kind {
         TokenKind::Word => t.text.eq_ignore_ascii_case(view),
         TokenKind::QuotedIdent => t.text[1..t.text.len() - 1].eq_ignore_ascii_case(view),
         _ => false,
     };
+    // The one read of the view inside parentheses (a CTE body, a subquery)
+    // is that `SELECT`'s alone: read it as the statement.
+    loop {
+        let reads: Vec<usize> = (0..sig.len())
+            .filter(|&j| names_view(sig[j]) && !sig.get(j + 1).is_some_and(|n| n.is_punct('.')))
+            .collect();
+        let [at] = reads.as_slice() else { break };
+        // The innermost group around it.
+        let mut depth = 0usize;
+        let mut lparen = None;
+        for j in (0..*at).rev() {
+            if sig[j].is_punct(')') {
+                depth += 1;
+            } else if sig[j].is_punct('(') {
+                if depth == 0 {
+                    lparen = Some(j);
+                    break;
+                }
+                depth -= 1;
+            }
+        }
+        let Some(lparen) = lparen else { break };
+        let mut depth = 0usize;
+        let rparen = (*at..sig.len()).find(|&j| {
+            if sig[j].is_punct('(') {
+                depth += 1;
+            } else if sig[j].is_punct(')') {
+                if depth == 0 {
+                    return true;
+                }
+                depth -= 1;
+            }
+            false
+        });
+        let Some(rparen) = rparen else { break };
+        if !sig.get(lparen + 1).is_some_and(|t| t.is_word("SELECT")) {
+            break;
+        }
+        sig = sig[lparen + 1..rparen].to_vec();
+    }
     // Depth of each token: 0 outside every parenthesis.
     let mut depths = Vec::with_capacity(sig.len());
     let mut depth = 0usize;
@@ -701,6 +743,38 @@ mod tests {
         );
     }
 
+    /// A view read once, inside a parenthesised `SELECT` (a CTE body, a
+    /// subquery), is narrowed by that `SELECT`'s own conditions: no row it
+    /// would not keep is ever used.
+    #[test]
+    fn the_one_read_of_a_view_inside_a_subquery_or_cte_is_narrowed_by_its_select() {
+        assert_eq!(
+            filters(
+                "WITH w AS (SELECT * FROM v_workspace_file f WHERE f.parent = 'a' AND f.kind <> 'x') \
+                 SELECT count(*) FROM w"
+            ),
+            vec![text("parent", "a")]
+        );
+        assert_eq!(
+            filters(
+                "SELECT * FROM v_stream WHERE id IN (SELECT stream_id FROM v_workspace_file WHERE parent = 'a')"
+            ),
+            vec![text("parent", "a")]
+        );
+        // Two reads, or a read the nested SELECT does not narrow, stay whole.
+        assert_eq!(
+            filters(
+                "WITH w AS (SELECT * FROM v_workspace_file WHERE parent = 'a') \
+                 SELECT (SELECT count(*) FROM v_workspace_file) FROM w"
+            ),
+            vec![]
+        );
+        assert_eq!(
+            filters("SELECT * FROM v_stream WHERE id IN (SELECT 1 FROM v_workspace_file WHERE parent = 'a' OR 1)"),
+            vec![]
+        );
+    }
+
     /// Only a condition every row read must meet narrows the read: an `OR`,
     /// a `BETWEEN` or `CASE` whose `AND` isn't a conjunction, a join, a
     /// second read of the view, a compound or a `WITH`, a comparison that
@@ -714,7 +788,6 @@ mod tests {
             "SELECT * FROM v_workspace_file WHERE CASE WHEN 1 THEN 1 END AND parent = 'b'",
             "SELECT * FROM v_workspace_file f JOIN v_change_file c ON c.path = f.path WHERE f.parent = 'a'",
             "SELECT * FROM v_workspace_file, v_stream WHERE parent = 'a'",
-            "SELECT * FROM v_stream WHERE id IN (SELECT stream_id FROM v_workspace_file WHERE parent = 'a')",
             "SELECT * FROM v_workspace_file WHERE parent = 'a' UNION SELECT * FROM v_workspace_file",
             "SELECT (SELECT count(*) FROM v_workspace_file) FROM v_workspace_file WHERE parent = 'a'",
             "WITH x AS (SELECT 1) SELECT * FROM v_workspace_file WHERE parent = 'a'",

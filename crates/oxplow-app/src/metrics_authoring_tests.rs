@@ -288,6 +288,131 @@ async fn a_delta_capture_carries_forward_the_files_it_did_not_touch() {
     assert_eq!(series, [4, 5]);
 }
 
+/// `v_metric_point` is the metric grid's capture rows for every metric at
+/// once: the same series, one metric when pinned, sliced when it pins a
+/// dimension.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_metric_points_are_the_series_for_every_metric_pinned_or_sliced() {
+    let (p, _) = project(|_| {}).await;
+    p.baseline().await;
+    let (plan, _) = rust(&[("calm", 0)]);
+    let (theme, _) = rust(&[("calm", 0), ("a", 11), ("b", 11), ("c", 13)]);
+    write(p.dir.path(), "engine/plan.rs", &plan);
+    write(p.dir.path(), "ui/theme.rs", &theme);
+    p.delta().await;
+
+    let pinned: Vec<i64> = p
+        .rows(&format!(
+            "SELECT CAST(value AS INTEGER) FROM v_metric_point WHERE metric = '{MEASURE}' ORDER BY captured_at"
+        ))
+        .await
+        .iter()
+        .map(|r| int(&r[0]))
+        .collect();
+    assert_eq!(pinned, [4, 5]);
+    // Unpinned, every metric with a spec is listed, this one among them.
+    let metrics = p.rows("SELECT DISTINCT metric FROM v_metric_point").await;
+    assert!(
+        metrics.iter().any(|r| text(&r[0]) == MEASURE),
+        "{metrics:?}"
+    );
+    // Sliced by area: one row per capture and area.
+    let sliced = p
+        .rows(&format!(
+            "SELECT capture_id, group_value, CAST(value AS INTEGER) FROM v_metric_point \
+             WHERE metric = '{MEASURE}' AND dimension = '{AREA}' ORDER BY capture_id, group_value"
+        ))
+        .await;
+    let latest: Vec<(String, i64)> = sliced
+        .iter()
+        .filter(|r| int(&r[0]) == int(&sliced.last().unwrap()[0]))
+        .map(|r| (text(&r[1]), int(&r[2])))
+        .collect();
+    assert_eq!(latest, [("engine".to_string(), 1), ("ui".to_string(), 4)]);
+}
+
+/// The Metrics page: each metric a row with its trend (the recent values,
+/// oldest first, as JSON), its latest value and its section; expanding a
+/// row gives its biggest groups under the dimension picked.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_metrics_list_has_each_metrics_trend_and_its_groups_when_sliced() {
+    let (p, _) = project(|_| {}).await;
+    p.baseline().await;
+    let (plan, _) = rust(&[("calm", 0)]);
+    let (theme, _) = rust(&[("calm", 0), ("a", 11), ("b", 11), ("c", 13)]);
+    write(p.dir.path(), "engine/plan.rs", &plan);
+    write(p.dir.path(), "ui/theme.rs", &theme);
+    p.delta().await;
+
+    let run = |lens: &str, params: Vec<(&str, SqlCell)>| {
+        let svc = p.svc.clone();
+        let root = p.dir.path().to_path_buf();
+        let lens = format!("oxplow-foundation/{lens}");
+        let params: std::collections::BTreeMap<String, SqlCell> = params
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v))
+            .collect();
+        async move {
+            let run = crate::extensions::run_lens(
+                &svc.sql,
+                &svc.extension_catalog,
+                &root,
+                &lens,
+                params,
+                &crate::extensions::LensContext::default(),
+            )
+            .await
+            .unwrap();
+            let cols = run.result.columns.clone();
+            run.result
+                .rows
+                .into_iter()
+                .map(|r| {
+                    cols.iter()
+                        .cloned()
+                        .zip(r)
+                        .collect::<std::collections::BTreeMap<String, SqlCell>>()
+                })
+                .collect::<Vec<_>>()
+        }
+    };
+    let rows = run("metrics", vec![]).await;
+    let mine = rows
+        .iter()
+        .find(|r| r["key"] == SqlCell::Text(MEASURE.into()))
+        .unwrap_or_else(|| panic!("{rows:?}"));
+    assert_eq!(text_of(&mine["trend"]), "[4.0,5.0]");
+    assert_eq!(mine["latest"], SqlCell::Real(5.0));
+    assert!(!text_of(&mine["section"]).is_empty());
+    // Expanded under a slice: the latest value per area, biggest first.
+    let groups = run(
+        "metrics-slices",
+        vec![
+            ("key", SqlCell::Text(MEASURE.into())),
+            ("slice", SqlCell::Text(AREA.into())),
+        ],
+    )
+    .await;
+    let groups: Vec<(String, SqlCell)> = groups
+        .iter()
+        .map(|r| (text_of(&r["title"]), r["latest"].clone()))
+        .collect();
+    assert_eq!(
+        groups,
+        [
+            ("ui".to_string(), SqlCell::Real(4.0)),
+            ("engine".to_string(), SqlCell::Real(1.0))
+        ]
+    );
+}
+
+fn text_of(cell: &SqlCell) -> String {
+    match cell {
+        SqlCell::Text(t) => t.clone(),
+        other => panic!("not text: {other:?}"),
+    }
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn the_metric_slices_by_area_and_filters_by_a_dimension() {
     let (p, _) = project(|_| {}).await;
