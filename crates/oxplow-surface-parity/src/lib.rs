@@ -255,7 +255,12 @@ pub const MANIFEST: &[Capability] = &[
     ),
     model(
         "list_collectors",
-        &["v_collector_state", "v_collector_credential", "v_collector_run"],
+        &[
+            "v_collector",
+            "v_collector_state",
+            "v_collector_credential",
+            "v_collector_run",
+        ],
     ),
     // The `oxplow.collector.sync` command: the UI runs it through `run_command`,
     // an agent through this tool (as itself, so it never approves).

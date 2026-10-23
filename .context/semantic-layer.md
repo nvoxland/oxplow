@@ -118,6 +118,7 @@ What core publishes, by where it comes from. Each row names its models
 | Source | Models | Facts |
 |---|---|---|
 | work | `stream`, `thread`, `thread_note`, `task`, `task_note`, `task_link`, `effort`, `effort_file`, `decision`, `claim`, `context_read` | cycle time, steering, lifecycle |
+| collectors | `collector` (each enabled extension's collectors with their trigger, enabled flag, state and last run: a plain view over `contribution`, `collector_run` and `contribution_health`; the machine's network and credential standing are the live `collector_state` / `collector_credential`) | — |
 | knowledge | `wiki_page`, `comment` | freshness |
 | git | `commit`, `commit_file`, `commit_work_item`, `branch`, and change analysis (`change`, `change_file`, `change_function`, `change_import`, `change_duplicate`, `change_test_file`) | churn |
 | snapshots | `snapshot`, `snapshot_op` | — |

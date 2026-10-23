@@ -20,6 +20,13 @@
   reaches:
     sql: SELECT owner, id, status, last_run_at, error FROM v_collector_run
   shape: { columns: [owner, id, status, last_run_at, error] }
+- question: Which collectors are enabled, how do they run, and what state are they in?
+  skill: oxplow-extension
+  reaches:
+    sql: >-
+      SELECT extension, id, trigger, enabled, state, last_run_at, error
+      FROM v_collector ORDER BY extension, id
+  shape: { columns: [extension, id, trigger, enabled, state, last_run_at, error] }
 - question: Which events couldn't be delivered to their consumer?
   skill: oxplow-extension
   reaches:

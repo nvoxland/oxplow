@@ -80,6 +80,9 @@ section for the column.
   `oxplow:` entry file). An own extension's `exec` program needs
   `permissions.process` (the loader refuses it otherwise) and runs from
   the extension's deployment; its own jaq/starlark parser needs nothing.
+  Every collector is readable as `v_collector` (trigger, `enabled`, `state`
+  `disabled`/`failing`/`never_run`/`ok`, last run and its error; a plain view over
+  `contribution`, `collector_run` and `contribution_health`).
   `CollectionService` reads report collectors from the extension
   catalog (`with_extensions`, `report_collectors(root)`,
   `is_report_collector(owner, id)`).

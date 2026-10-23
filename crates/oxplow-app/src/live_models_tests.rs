@@ -791,3 +791,64 @@ async fn agent_harnesses_are_the_registered_ones_enabled_ones_first() {
         assert!(claude[1].as_i64().unwrap() > 0, "{settings:?}");
     }
 }
+
+/// A collector is readable as one `v_collector` row: declared, enabled and
+/// never run; then with its last run.
+#[tokio::test]
+async fn a_collector_is_a_v_collector_row_with_its_standing() {
+    let fx = services_with_effort().await;
+    let dir = fx.svc.layout.project_dir.join(".oxplow/extensions/acme");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("extension.yaml"), MANIFEST).unwrap();
+    std::fs::write(
+        dir.join("sync.sh"),
+        "#!/bin/sh\necho '{\"entities\":{\"item\":[]}}'\n",
+    )
+    .unwrap();
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(dir.join("sync.sh"), std::fs::Permissions::from_mode(0o755))
+            .unwrap();
+    }
+    crate::test_fixtures::activate(&fx.svc).await;
+
+    let sql = "SELECT uri, extension, id, trigger, enabled, state, last_run_at, last_status \
+               FROM v_collector WHERE extension = 'acme'";
+    assert_eq!(
+        rows(&fx, sql).await,
+        vec![vec![
+            json!("oxplow:oxplow/collector?collector=acme/pull"),
+            json!("acme"),
+            json!("pull"),
+            json!("call"),
+            json!(1),
+            json!("never_run"),
+            Value::Null,
+            Value::Null,
+        ]]
+    );
+
+    // After a run it has a last run and stands `ok`.
+    let root = fx.svc.layout.project_dir.clone();
+    crate::collector_runner::run_collector(
+        &crate::collector_runner::Collectors::of(&fx.svc, &root),
+        &oxplow_domain::run::RunContext::core(
+            oxplow_domain::Actor::Human,
+            oxplow_domain::run::Mode::External,
+        ),
+        "acme",
+        "pull",
+        crate::collector_runner::RunTrigger::Manual,
+    )
+    .await
+    .unwrap();
+    let after = rows(
+        &fx,
+        "SELECT state, last_status, last_run_at IS NOT NULL, error FROM v_collector WHERE id = 'pull'",
+    )
+    .await;
+    assert_eq!(
+        after,
+        vec![vec![json!("ok"), json!("ok"), json!(1), Value::Null]]
+    );
+}
