@@ -1,0 +1,10 @@
+title: Data
+description: "What oxplow can query, the programs the project would run, and how events reach their reactions."
+viz: document
+sections:
+  - { lens: data-entities, title: Entities }
+  - { lens: data-sources, title: Collectors }
+  - { lens: data-effects, title: Effects }
+  - { lens: alerts-reactions, title: Failed reactions }
+  - { lens: alerts-deliveries, title: Undelivered events }
+hidden: true

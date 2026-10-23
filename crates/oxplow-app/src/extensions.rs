@@ -2042,9 +2042,8 @@ struct AdvisoryFile {
 /// the ones it declares and must declare at least one.
 /// Slot names are one dotted namespace, `<capability>.<page>.<region>`
 /// (P6b): what a page shows a lens is named by what the page is about.
-/// A page's own parts are slots too (`<page>.sections`, `<page>.tiles`):
-/// a mount there goes `at:` the start, the end, or beside one of the
-/// page's parts, named by the stable ids listed here.
+/// A composite lens's own parts are slots too (`<extension>/<lens>.sections`,
+/// `.tiles`: `place_lens_mounts`), so core lists only the regions of its pages.
 pub const SLOTS: &[SlotSpec] = &[
     // Uncommitted changes: a strip above them, and below the files.
     // A file diff's header strip, above the editor: the file and the two
@@ -2053,16 +2052,6 @@ pub const SLOTS: &[SlotSpec] = &[
         "diff.file.header",
         &["path", "left_revision", "right_revision", "stream_id"],
     ),
-    // Settings: each area's page and its sections (`pages/settingsAreas.ts`
-    // lists the same ids). An extension's own status or configuration
-    // views go beside the area they belong to. No params.
-    SlotSpec::sections("settings.overview.sections", &["q"], &[]),
-    SlotSpec::sections("settings.agents.sections", &[], &[]),
-    SlotSpec::sections("settings.lsp.sections", &[], &[]),
-    SlotSpec::sections("settings.extensions.sections", &[], &[]),
-    SlotSpec::sections("settings.data.sections", &[], &[]),
-    SlotSpec::sections("settings.integrations.sections", &[], &[]),
-    SlotSpec::sections("settings.ai.sections", &[], &[]),
 ];
 
 /// A place in a core page a lens can be mounted ([`SLOTS`]).
@@ -2071,44 +2060,17 @@ pub struct SlotSpec {
     pub name: &'static str,
     /// The params the page binds; a mounted lens takes the ones it declares.
     pub params: &'static [&'static str],
-    pub parts: SlotParts,
 }
 
 impl SlotSpec {
     const fn region(name: &'static str, params: &'static [&'static str]) -> Self {
-        Self {
-            name,
-            params,
-            parts: SlotParts::Region,
-        }
-    }
-
-    const fn sections(
-        name: &'static str,
-        params: &'static [&'static str],
-        ids: &'static [&'static str],
-    ) -> Self {
-        Self {
-            name,
-            params,
-            parts: SlotParts::Sections(ids),
-        }
+        Self { name, params }
     }
 
     /// The core slot named `name`.
     pub fn core(name: &str) -> Option<&'static SlotSpec> {
         SLOTS.iter().find(|s| s.name == name)
     }
-}
-
-/// What a slot holds: a fixed region of the page, or the page's own list
-/// of parts (a document's sections, a dashboard's tiles), among which a
-/// mount is placed by `at:` relative to the parts' stable ids.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SlotParts {
-    Region,
-    Sections(&'static [&'static str]),
-    Tiles(&'static [&'static str]),
 }
 
 /// Where a mount goes among a page's parts: `start`, `end` (the default),
@@ -4790,12 +4752,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             ));
             continue;
         };
-        let (kind, ids) = match spec.parts {
-            SlotParts::Region => (PartsKind::Region, Vec::new()),
-            SlotParts::Sections(ids) => (PartsKind::Sections, ids.to_vec()),
-            SlotParts::Tiles(ids) => (PartsKind::Tiles, ids.to_vec()),
-        };
-        match mount_problem(&mount, lens, spec.params, &[], kind, &ids) {
+        match mount_problem(&mount, lens, spec.params, &[], PartsKind::Region, &[]) {
             Err(problem) => ext.errors.push(at(&file, mount_line, problem)),
             Ok(warning) => {
                 ext.warnings
@@ -9668,34 +9625,6 @@ commands:
         assert!(e.errors.iter().any(|m| m.contains("sidebar")));
     }
 
-    /// A Settings area's sections take an extension's parameterless lens,
-    /// placed beside one of the area's own sections.
-    #[test]
-    fn a_settings_area_takes_parameterless_lenses() {
-        let dir = tempfile::tempdir().unwrap();
-        write(
-            dir.path(),
-            ".oxplow/extensions/mine/extension.yaml",
-            "manifest: 2\nname: mine\nintent:\n  purpose: test\nui:\n  slots:\n    - { slot: settings.integrations.sections, lens: status, at: start }\n",
-        );
-        write(
-            dir.path(),
-            ".oxplow/extensions/mine/lenses/status.yaml",
-            "title: Status\nquery: SELECT 1\n",
-        );
-        let e = load_extensions(dir.path())
-            .into_iter()
-            .find(|e| e.name == "mine")
-            .unwrap();
-        assert!(e.errors.is_empty(), "{:?}", e.errors);
-        assert!(
-            e.warnings.iter().all(|w| !w.contains("has no part")),
-            "{:?}",
-            e.warnings
-        );
-        assert_eq!(e.ui.slots[0].slot, "settings.integrations.sections");
-    }
-
     /// A document's sections are lenses or markdown: an id defaults to the
     /// lens's slug (a lens shown twice needs an `id`), markdown needs one,
     /// ids are unique, a section has no
@@ -9793,53 +9722,20 @@ commands:
         }
     }
 
-    /// A page's sections are a slot: a mount says where among them it
-    /// goes; a region takes no `at`, only tiles take a `size`, and an `at`
-    /// beside a part the page doesn't have is a warning (it goes last).
+    /// A core region (a strip of a page) takes no `at`: it is one place.
+    /// (A composite's parts are the other kind of slot, below.)
     #[test]
-    fn a_parts_slot_places_its_mounts() {
+    fn a_region_takes_no_placement() {
         let (_d, ext) = load_x(
-            &[
-                ("presets", "title: Presets\nquery: SELECT 1\n"),
-                ("stray", "title: Stray\nquery: SELECT 1\n"),
-                ("region", "title: R\nparams: [{ name: path }]\nquery: SELECT 1\n"),
-                ("sized", "title: S\nquery: SELECT 1\n"),
-            ],
-            "ui:\n  slots:\n    - { slot: settings.integrations.sections, lens: presets, title: Team presets, at: { after: integrations } }\n    - { slot: settings.integrations.sections, lens: stray, at: { before: gone } }\n    - { slot: diff.file.header, lens: region, at: start }\n    - { slot: settings.integrations.sections, lens: sized, size: wide }\n",
+            &[(
+                "region",
+                "title: R\nparams: [{ name: path }]\nquery: SELECT 1\n",
+            )],
+            "ui:\n  slots:\n    - { slot: diff.file.header, lens: region, at: start }\n",
         );
-        let mounts: Vec<_> = ext
-            .ui
-            .slots
-            .iter()
-            .map(|m| (m.lens_id.as_str(), m.at.clone(), m.title.as_deref()))
-            .collect();
-        assert_eq!(
-            mounts,
-            vec![
-                (
-                    "x/presets",
-                    Some(SlotAt::After {
-                        after: "integrations".into()
-                    }),
-                    Some("Team presets")
-                ),
-                (
-                    "x/stray",
-                    Some(SlotAt::Before {
-                        before: "gone".into()
-                    }),
-                    None
-                ),
-            ]
-        );
+        assert!(ext.ui.slots.is_empty(), "the bad mount goes");
         let errs = ext.errors.join("\n");
         assert!(errs.contains("is one region of its page"), "{errs}");
-        assert!(errs.contains("`size` is a dashboard tile's"), "{errs}");
-        let warns = ext.warnings.join("\n");
-        assert!(
-            warns.contains("has no part `gone` (it has none)"),
-            "{warns}"
-        );
     }
 
     /// Another extension adds to a document lens through its sections slot;

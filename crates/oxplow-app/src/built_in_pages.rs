@@ -1,6 +1,6 @@
 //! The pages the required bundled extension declares as built-in
 //! components (`pages: [{ component: "oxplow:<name>" }]`): core React the
-//! kit can't express yet — routes (Settings, the Terminal) and the
+//! kit can't express yet — routes (the Terminal) and the
 //! renderers of oxplow's resources (an agent session, a web page: `for:`). A
 //! stepping stone, not a kind of page: each one leaves this table when its
 //! page becomes a lens or a custom page, and nothing joins it (the
@@ -15,7 +15,6 @@ pub const BUILT_IN_PAGES: &[&str] = &[
     "external-url",
     "lens",
     "resource",
-    "settings",
     "terminal",
 ];
 
@@ -58,8 +57,8 @@ mod tests {
 
     #[test]
     fn a_component_names_a_built_in_by_its_oxplow_prefix() {
-        assert_eq!(built_in("oxplow:settings"), Some("settings"));
-        assert_eq!(built_in("settings"), None);
+        assert_eq!(built_in("oxplow:terminal"), Some("terminal"));
+        assert_eq!(built_in("terminal"), None);
         assert_eq!(built_in("oxplow:nope"), None);
     }
 }

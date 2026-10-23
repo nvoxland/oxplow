@@ -1,17 +1,48 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterAll, afterEach, expect, mock, test } from "bun:test";
 import { cleanup, fireEvent, render } from "@testing-library/react";
 
 import type { Stream } from "../api.js";
-import { QuickOpenOverlay } from "./QuickOpenOverlay.js";
-import type { PageDirectoryEntry } from "./RailHud/sections.js";
+
+// The launcher's pages are the extensions' declared ones: one extension
+// declares Tasks.
+const realApi = await import("../api.js");
+const pristineApi = { ...realApi };
+mock.module("../api.js", () => ({
+  ...realApi,
+  listExtensions: async () => [
+    {
+      name: "oxplow-foundation",
+      enabled: true,
+      ui: { slots: [], commands: [], decorators: [] },
+      lenses: [],
+      panels: [],
+      pages: [
+        {
+          id: "tasks",
+          extension: "oxplow-foundation",
+          pageRef: "oxplow:oxplow/page?page=tasks",
+          title: "Tasks",
+          category: "Work",
+          keywords: null,
+          params: [],
+          count: null,
+          body: { kind: "lens", lens: "oxplow-foundation/tasks" },
+        },
+      ],
+    },
+  ],
+}));
+const { QuickOpenOverlay } = await import("./QuickOpenOverlay.js");
+
+// `mock.module` is process-wide: the files after this one get the real module.
+afterAll(() => {
+  mock.module("../api.js", () => pristineApi);
+});
 
 afterEach(cleanup);
 
 const stream = { id: "str1", title: "oxplow" } as unknown as Stream;
 
-const pages: PageDirectoryEntry[] = [
-  { id: "tasks", label: "Tasks", category: "Work", ref: { id: "tasks", kind: "tasks", payload: null } as PageDirectoryEntry["ref"] },
-];
 
 function renderOverlay() {
   return render(
@@ -20,7 +51,6 @@ function renderOverlay() {
       stream={stream}
       threadId="thr1"
       selectedFilePath={null}
-      pages={pages}
       offers={[]}
       onClose={() => {}}
       onOpenFile={() => {}}
@@ -48,7 +78,6 @@ test("the launcher focuses when its stream arrives and keeps what was typed", ()
     open: true,
     threadId: "thr1",
     selectedFilePath: null,
-    pages,
     offers: [],
     onClose: () => {},
     onOpenFile: () => {},
@@ -98,7 +127,6 @@ test("a closed launcher gives focus back to whatever has it", async () => {
     stream,
     threadId: "thr1",
     selectedFilePath: null,
-    pages,
     offers: [],
     onClose: () => {},
     onOpenFile: () => {},
@@ -127,7 +155,6 @@ test("↑/↓ and Enter work from the input, and the input names the row under t
       stream={stream}
       threadId="thr1"
       selectedFilePath={null}
-      pages={pages}
       offers={[]}
       onClose={() => closed++}
       onOpenFile={() => {}}
@@ -139,13 +166,13 @@ test("↑/↓ and Enter work from the input, and the input names the row under t
   await view.findByTestId("launcher-category-Work");
   // Enter on the collapsed section opens it; the page row appears.
   fireEvent.keyDown(input, { key: "Enter" });
-  expect(view.getByTestId("launcher-page-tasks")).toBeTruthy();
+  expect(view.getByTestId("launcher-page-oxplow:oxplow/page?page=tasks")).toBeTruthy();
   fireEvent.keyDown(input, { key: "ArrowDown" });
   fireEvent.keyDown(input, { key: "ArrowDown" });
   const active = input.getAttribute("aria-activedescendant");
-  expect(document.getElementById(active!)?.getAttribute("data-testid")).toBe("launcher-page-tasks");
+  expect(document.getElementById(active!)?.getAttribute("data-testid")).toBe("launcher-page-oxplow:oxplow/page?page=tasks");
   fireEvent.keyDown(input, { key: "Enter" });
-  expect(opened).toEqual(["tasks"]);
+  expect(opened).toEqual(["oxplow:oxplow/page?page=tasks"]);
   // Taking a page closes the launcher; so does Escape.
   const afterPick = closed;
   fireEvent.keyDown(input, { key: "Escape" });
@@ -161,7 +188,6 @@ test("a launcher opened with a query starts on it", () => {
       stream={stream}
       threadId="thr1"
       selectedFilePath={null}
-      pages={pages}
       offers={[]}
       onClose={() => {}}
       onOpenFile={() => {}}

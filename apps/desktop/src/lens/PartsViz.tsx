@@ -94,7 +94,7 @@ function PartBody({
   // part selects that the page doesn't declare stays plain.
   const selects = run.run.lens.columns.find((c) => c.select)?.select;
   const set = selects && selects in params ? onSetParam : undefined;
-  const own = <LensResultView run={run.run} onOpenPage={onOpenPage} streamId={streamId} maxRows={maxRows} toolbar={false} partButtons onSetParam={set} />;
+  const own = <LensResultView run={run.run} onOpenPage={onOpenPage} streamId={streamId} maxRows={maxRows} toolbar={false} partButtons onSetParam={set} fitCustom={maxRows === undefined} />;
   // A part standing in for a core component: its lens is oxplow's own,
   // shown unless an extension replaces the target; the replacement is given
   // the part's resolved params (the contract the loader checked it declares).

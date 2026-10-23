@@ -24,7 +24,6 @@ export function isAppRenderer(name: string): name is AppRendererName {
 export const BUILT_IN_PAGES = [
   "external-url",
   "resource",
-  "settings",
   "terminal",
 ] as const;
 

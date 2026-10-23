@@ -7,10 +7,11 @@ import { openFromLauncher } from "../../support/ui.js";
 test("a provider is added, a role bound to it, and the provider removed", async ({ page }) => {
   await page.goto("/");
   await openFromLauncher(page, "Settings: AI");
-  const providers = page.getByTestId("settings.ai.sections-oxplow-foundation/ai-providers");
-  const form = page.getByTestId("settings.ai.sections-oxplow-foundation/ai-provider-form");
-  const roles = page.getByTestId("settings.ai.sections-oxplow-foundation/ai-roles");
-  await expect(providers).toContainText("No AI providers yet");
+  // With no provider the list has nothing to show: it folds into the "Nothing found" line.
+  const providers = page.getByTestId("lens-part-ai-providers");
+  const form = page.getByTestId("lens-part-ai-provider-form");
+  const roles = page.getByTestId("lens-part-ai-roles");
+  await expect(page.getByTestId("lens-document-nothing-found")).toContainText("AI providers");
 
   await form.getByTestId("lens-form-fields-id").fill("or");
   await form.getByTestId("lens-form-fields-kind").selectOption("openrouter");
@@ -38,5 +39,5 @@ test("a provider is added, a role bound to it, and the provider removed", async 
   await providers.getByRole("row", { name: /or\b/ }).click({ button: "right" });
   await page.getByTestId("menu-item-lens-action-remove").click();
   await page.getByTestId("lens-action-confirm-run").click();
-  await expect(providers).toContainText("No AI providers yet");
+  await expect(page.getByTestId("lens-document-nothing-found")).toContainText("AI providers");
 });

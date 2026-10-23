@@ -2,7 +2,6 @@ import { expect, test } from "bun:test";
 
 import type { Extension } from "../tauri-bridge/generated/bindings.js";
 import { launcherDirectory, launcherPages } from "./extensionLauncher.js";
-import { settingsRef } from "../tabs/pageRefs.js";
 
 const page = (over: Record<string, unknown>) => ({
   icon: null,
@@ -49,15 +48,12 @@ test("a page's count lens is its badge, and zero shows none", () => {
 });
 
 test("until the extensions load, the launcher lists no pages rather than some of them", () => {
-  const settingsArea = { id: "settings-agents", label: "Settings: Agents", ref: settingsRef("agents"), category: "System" as const };
-  expect(launcherDirectory(null, {}, [settingsArea])).toEqual([]);
+  expect(launcherDirectory(null, {})).toEqual([]);
   const loaded = launcherDirectory(
     [ext({ name: "oxplow-foundation", pages: [page({ id: "settings", extension: "oxplow-foundation", pageRef: "oxplow:oxplow/page?page=settings", title: "Settings", category: "System" })] } as never)],
     {},
-    [settingsArea],
   );
-  // The declared page leads its category; the area entries follow it.
-  expect(loaded.map((p) => p.label)).toEqual(["Settings", "Settings: Agents"]);
+  expect(loaded.map((p) => p.label)).toEqual(["Settings"]);
 });
 
 test("a page whose lens has a view lists each other section by name, opening on it", () => {

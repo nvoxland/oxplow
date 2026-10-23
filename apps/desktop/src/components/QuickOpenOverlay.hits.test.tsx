@@ -44,7 +44,6 @@ test("each hit row shows its kind's icon and label", async () => {
       stream={{ id: "str1", title: "oxplow" } as unknown as Stream}
       threadId="thr1"
       selectedFilePath={null}
-      pages={[]}
       offers={[]}
       onClose={() => {}}
       onOpenFile={() => {}}

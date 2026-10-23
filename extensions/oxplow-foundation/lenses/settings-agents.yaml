@@ -1,0 +1,9 @@
+title: Agents
+description: "The coding agents this project runs, what new threads start with, and what every agent is told."
+viz: document
+sections:
+  - { lens: agents-list }
+  - { lens: agents-settings }
+  - { lens: agents-new-thread }
+  - { lens: agents-prompt }
+hidden: true

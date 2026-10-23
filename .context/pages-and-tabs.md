@@ -74,7 +74,7 @@ pages are THE shell.
 | `apps/desktop/src/components/Navigator.tsx` | Far-left combined **stream + thread navigator** (each stream's open threads — `get_thread_state` leaves closed ones out; they're on the Closed Threads page): a 40px always-visible strip of letter glyphs (`navigator-strip-stream-<id>` / `navigator-strip-thread-<id>`) — a stream is a tab in the guide line's grey (`--text-muted`) with dark text (`--text-on-stream-tile`), coming out of the window's left edge and rounded on the right only, with its threads as tabs under it, all flush with the left edge and butted up against each other, each filling its shorter row and stopping short of the right (in the centre tab strip's header tint, `--panel-header-bg` over `--surface-card`, like a regular tab; the selected thread's accent bar is inside its tab, down its left, not beside it; a marked thread shows its mark as a corner fold on its top-left in `var(--thread-mark-<colour>)` (`navigator-thread-mark`, title "Marked <colour>"), not an outline; stacked tabs are set apart by a 1px divider along each one's bottom but the last's, in the guide line's grey (`--text-muted`), so none falls under the stream's tab, and the strip's column is `--surface-app`); a grey guide line runs down the column's right, flush with the stream tab's right edge, from under the stream's tab, with a tick from each thread's tab into it, ending at the last, each thread's agent status dot a node where the tick meets the tab; a stack's corners are rounded only where no tab sits next to it (the stream's top, the last tab's bottom), the rest flat; the strip draws no line against the HUD rail; in the expanded panel each row's tab runs on across the row carrying the title, set off from its abbreviation by a divider line through every row and a gap (`IconColumn wide`, `IconCell label`), so the tab's colour flows into the label, the glyph kept at its strip width so the two line up; the panel's rows draw the same icon column (`IconColumn`) so the two line up; clicking a glyph navigates directly — a thread glyph selects that thread, a stream glyph switches streams via `onSwitchStream`. **Hovering a glyph shows its full title as a native tooltip and nothing else (tsk269).** The `navigator-overlay` panel (~280px, covering the strip *and* the rail HUD to its right) expands only on an explicit click: the bottom-pinned `navigator-expand` chevron, dead space in the strip (`navigator-strip-empty`, `e.target === e.currentTarget`), a stream glyph (which also switches to that stream, then shows its threads), or the already-selected thread's glyph (selecting it again would do nothing). The chevron is pinned *outside* the scroll container and is the load-bearing affordance — once the list scrolls there is no dead space left, and `+ Add stream` lives only in the panel. The open/close state machine — click-to-open, geometric pointer-leave, Escape, outside-press, background-click, and the passive-vs-explicit guard — lives in the shared `apps/desktop/src/components/useSlideoutStrip.ts` hook (chevron in `SlideoutChevron.tsx`), which the Terminal page's `TerminalTabStrip` also runs on; a new slide-out strip adopts the hook rather than re-deriving it. It dismisses on a click in its own **dead background** (anything resolving to `button/input/select/textarea/a/label/[role=button]` is left alone so controls behave normally), on the pointer leaving its bounds (180ms grace), on Escape, and on any pointerdown outside it. The last two are *explicit* dismissals and beat the mid-rename / mid-new-thread form guard; the first two don't. **Pointer departure is measured geometrically** (document `pointermove` vs. the panel's rect), never `mouseleave` — the panel covers the rail and sits in the same DOM subtree as the strip, so the pointer never "leaves" the wrapper while parked over the covered region, which is what used to strand it open on top of the rail and swallow clicks meant for it (tsk131). Each overlay row (`navigator-stream-row-<id>` / `navigator-thread-row-<id>`) — and each strip glyph, with the same menu — opens its action menu on **right-click** (Menu key / Shift+F10 for keyboard), headed by the stream's or thread's name (`context-menu-header`); Rename and Add thread open the panel for their inline field. **Thread menu:** **"Mark with…"** (`menu-item-thread.mark`) opens a submenu headed by the line "A colour on the thread's tab, for grouping threads your way. It changes nothing else." (`context-submenu-header`, the generic `MenuItem.submenuHeader`) and lists `amber`, `red`, `green`, `blue`, `violet` (each with a colour chip, `MenuItem.swatch`) and None as `menu-item-thread.mark.<colour|none>`, the current one checked; picking one runs `oxplow.thread.mark` (via `onMarkThread` → `App.handleMarkThread`). Then Rename / Settings / Close. A mark only groups threads the person's way; every open thread of a stream shares its worktree. |
 | `apps/desktop/src/tabs/bookmarks.ts` | The person's bookmarks, project data (data-model.md "bookmark"): `useBookmarks(threadId, streamId)` reads `v_bookmark` — a page once, at the narrowest scope the thread sees (thread / stream / project) — and `setBookmark` / `removeBookmark` run `oxplow.bookmark.set` / `oxplow.bookmark.remove`. Pages bookmark via the `PageNavigationContext.bookmark` binding (one `scope`; the star's menu moves it or, on its current scope, takes it off); the Go To lens page's bookmark row actions re-scope and remove. |
 | ~~`apps/desktop/src/tabs/appPageBacklinks.ts`~~ | **Deleted.** Per-kind in-memory backlinks providers used to live here. Cross-page backlinks now come from the persisted `page_ref` graph (`crates/oxplow-db/src/page_ref_store.rs`) via the `list_backlinks` IPC; every page kind goes through the same code path. App pages that need their own provider would register a new `source_resource` writer in the backend instead. |
-| `apps/desktop/src/components/RailHud/sections.ts` | The launcher's categories (`PAGE_CATEGORY_ORDER`, `PageDirectoryEntry`) and `settingsAreaEntries` (the Settings areas as launcher entries); every other launcher page is a declared page (`components/extensionLauncher.ts`). |
+| `apps/desktop/src/components/RailHud/sections.ts` | The launcher's categories (`PAGE_CATEGORY_ORDER`, `PageDirectoryEntry`) ; every launcher page is a declared page (`components/extensionLauncher.ts`). |
 | `apps/desktop/src/components/History/CommitGraphTable.tsx` | Pure presentation of the git-log graph (branch/merge dots + lines + sha + ref badges + subject + author + relative date). `indexRefsBySha(log)` exported alongside groups branch heads + tags by sha so callers feed identical maps. |
 | (change analysis) | No page of its own: `crates/oxplow-app/src/change_analysis.rs` stores each change behind `v_change*`, and the oxplow-bundled `change-review` lens grid shows it in the `vcs.commit.details`, `vcs.status.details` and `oxplow-foundation/changes.sections` slots. The old per-page scope drilldown is gone; scoped tab ids reopen the unscoped page. |
 | ~~`apps/desktop/src/tabs/backlinksIndex.ts`~~ | **Deleted.** The in-memory cross-kind indexer is replaced by the persisted `page_ref` table; see `data-model.md`. The `BacklinkEntry` type that renderers consume now lives in `apps/desktop/src/tabs/backlinkTypes.ts`. |
@@ -252,7 +252,7 @@ which is also what visits and bookmarks record (`recordedPageKind`),
 and `PageKindIcon` / `lensIcon` / `pageKindLabel` resolve it to the
 page's icon and title. The launcher lists the declared pages with a
 category (`launcherPages`), each `count:` lens run when it opens
-(`useLauncherCounts`), plus the Settings areas (`settingsAreaEntries`).
+(`useLauncherCounts`); a view document's page also lists each of its other sections.
 
 oxplow's pages and their params:
 
@@ -263,11 +263,11 @@ oxplow's pages and their params:
   the caps — the rail's, so no "View all" step to go Back from).
 - Lens pages (more): `backlog` (badge: `backlog-count`; a document of `backlog-add`, a quick-add form over `oxplow.work_item.create`, and `backlog-list`, a state-grouped `list` of the items on no thread: params `q`, the search over title and fields, and `thread_id`; drag to reorder, mark rows for bulk state, priority, Bring to this thread and Delete, `r` `i` `b` `d` keys for the states).
 - Lens pages (more): `diff-view` (the Changes page, the renderer of `oxplow/snapshot`, `oxplow/effort` and `oxplow/turn`; view params `start` and `end`, each `''` / `none` / `working` / `snap:<id>` / `git:<rev>`: a picked point is a pushed view change), `tasks` (a document: `tasks-list`, the `work_item.list` replaceable; `tasks-summary`; `tasks-backlog`; view params `show` and `priority`, plus `thread_id` and `stream_id`).
+- Lens page `settings` (a view document: view `area`, the overview's search `q`; `#section=<id>` lands inside an area; extensions.md "A document with a view"): a section per area, each a document lens `settings-<area>`.
 - Built-in pages: `board`,
   `files`, `git-dashboard`, `uncommitted-changes`,
   `comments`, `metrics-recorded`,
-  `terminal`, `alerts`, `settings` (view: `area`, `section`, and `q`, the overview's search — another
-  area is a pushed view change, never a page opened over it; the shell and the rail are React, and the Overview and Language Servers areas are oxplow-foundation lenses mounted in their slots, `settings.overview.sections` / `settings.lsp.sections`; it becomes a foundation view document once Data and Integrations are lenses: extensions.md "A document with a view"),
+  `terminal`, `alerts`,
   `new-task`
   (`parent`),
   `external-url` (a renderer for `https` / `http`; the tab id is the URL), `diff` (`path`, `left`, `right`, `label`,
@@ -375,7 +375,7 @@ comment's time and the task panel use it, not their own copies.
 
 | Archetype | When | Core form | Extension form |
 |---|---|---|---|
-| **Document** (the default) | reading, picking, small forms, lists | `DocumentLayout`: title + intro in a reading column, then `Section`s (a heading over a rule, no boxes) | `viz: document` + `sections:` |
+| **Document** (the default) | reading, picking, small forms, lists | `lens/PartsViz.tsx` (`DocumentViz`): title + intro in a reading column, then `Section`s (a heading over a rule, no boxes) | `viz: document` + `sections:` |
 | **Dashboard** | many numbers and charts at a glance | `TileGrid` / `TileSlot` / `Tile` at full width | `viz: dashboard` + `tiles:` |
 | **Board** | cards by group, dragged across columns | (none) | `viz: board` + `group: { by, values }` and a `drag: true` action |
 | **Document with an edited body** | a wiki page, a work item's body: markdown read and written, with a Contents rail and comments | the `Markdown` component (`.context/markdown.md`) | `viz: markdown` + `markdown: { text }` and an `edit: true` action (its Save), the page `comments: true` |
@@ -385,9 +385,7 @@ comment's time and the task panel use it, not their own copies.
 A cell's match is drawn with the kit class `.ox-mark` (a lens column's `highlight`, extensions.md "Lenses").
 
 The kit: `Section` (`id`, `title`, `description`, `actions`, `collapsible` / `defaultCollapsed` — a toggle in the heading, remembered per page, see usability.md "Collapsible page sections" — `source` —
-the extension that added it), `DocumentLayout` (its own sections plus what
-extensions mount in its parts slot, placed by `placeParts`; a contents list
-in the rail from four sections), `DataTable` (fixed `<col>` widths,
+the extension that added it), `DataTable` (fixed `<col>` widths,
 `numeric` and `truncate` columns, groups, per-row props — the lens `table`
 viz draws through it), `Toolbar` (a core list's filter and actions; a
 lens page has none; `useSearchFilter(key, …)` builds its `filter` on the `key` view
@@ -400,11 +398,10 @@ values — the lens `detail` viz, a metric's definition),
 `EmptyState` (re-exported; it lives beside the agent prompts it offers).
 Lengths come from the spacing and radius tokens (theming.md).
 
-**Extensions add to a page through its parts slot** (`<page>.sections`,
-`<extension>/<slug>.sections` of a document lens, `.tiles` of a dashboard),
+**Extensions add to a page through its parts slot**
+(`<extension>/<slug>.sections` of a document lens, `.tiles` of a dashboard),
 placed `at` the start, the end, or beside a part by its stable id —
-extensions.md "Slots". A core Document page lists its section ids with its
-slot in `SLOTS` and passes the slot to `DocumentLayout`.
+extensions.md "Slots".
 
 ## Body layouts
 
