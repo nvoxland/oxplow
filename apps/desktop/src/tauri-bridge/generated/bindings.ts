@@ -136,11 +136,6 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listDataEntities: () => typedError<DataEntity[], IpcError_Serialize>(__TAURI_INVOKE("list_data_entities")),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	getPanelLayout: () => typedError<PanelPlacement[], IpcError_Serialize>(__TAURI_INVOKE("get_panel_layout")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -252,11 +247,6 @@ export const commands = {
 	 *  implementation and its docs live on the core.
 	 */
 	renameNativeConversation: (sessionId: string, name: string) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("rename_native_conversation", { sessionId, name })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	listCollectors: () => typedError<CollectorListing[], IpcError_Serialize>(__TAURI_INVOKE("list_collectors")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -1356,20 +1346,6 @@ export type CollectorInput = {
 	limit: number | null,
 };
 
-/**  A declared collector with its last run. */
-export type CollectorListing = {
-	/**  The extension that declares it. */
-	owner: string,
-	spec: CollectorSpec,
-	run: CollectorRun | null,
-	/**  Whether this OS enforces the collector's `network` list. */
-	networkEnforced: boolean,
-	/**  Each declared credential and whether it has a value (never the value). */
-	credentials: CredentialStatus[],
-	/**  Why failures disabled it on this machine, when they did (P7.C2). */
-	disabled: string | null,
-};
-
 /**  One input, run on each version. */
 export type CollectorOutput = {
 	/**  `fixture <name>`, `event #<seq>` or `input query`. */
@@ -1377,28 +1353,6 @@ export type CollectorOutput = {
 	change: Change,
 	before: Ran | null,
 	after: Ran | null,
-};
-
-/**  Last run of one collector (`collector_run`). */
-export type CollectorRun = {
-	/**  The declaring extension, or `project`. */
-	owner: string,
-	id: string,
-	/**  `ok`, `error` or `skipped` (the loop guard). */
-	status: string,
-	lastRunAt: string,
-	error: string | null,
-	/**  Row counts per entity from the last successful run. */
-	rowCounts: { [key in string]: number },
-	/**  The checkpoint the last successful run returned (opaque). */
-	cursor: unknown | null,
-	/**  The seq of the last trigger event it ran for. */
-	lastEventId: number | null,
-	/**
-	 *  The last run (`extension_run.run_id`); `None` for one before runs
-	 *  were recorded.
-	 */
-	runId?: string | null,
 };
 
 /**  Outcome of one run, as reported to the UI / agent. */
@@ -1936,11 +1890,6 @@ export type CredentialDecl = {
 	secretRef: SecretRef | null,
 };
 
-export type CredentialStatus = {
-	name: string,
-	set: boolean,
-};
-
 /**
  *  A declared component (valid ones; invalid ones are in the extension's
  *  `errors`).
@@ -2015,20 +1964,6 @@ export type Dashboard = {
 };
 
 export type DashboardId = string;
-
-/**  One row of Settings → Data. */
-export type DataEntity = {
-	/**  The view to query (`v_work_item`, `v_my_gh_pr`). */
-	name: string,
-	/**  `core`, or the extension that provides it. */
-	owner: string,
-	/**
-	 *  `sql` (a model file), `entity` (an extension's synced data), or
-	 *  `declared` (an entity whose source hasn't synced: no view yet).
-	 */
-	kind: string,
-	description: string,
-};
 
 export type Declared = "declared" | "implied" | "undeclared";
 

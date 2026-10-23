@@ -28,22 +28,6 @@ pub async fn query_sql(
         .await?)
 }
 
-/// Settings → Data: every published model, and the entities extensions
-/// declare that haven't synced. No row counts: the UI counts each model
-/// with `query_sql`, so one too big to count costs only its own row.
-/// UI-only: an agent reads `v_model` and counts with `query_sql`.
-pub async fn list_data_entities(
-    svc: &Services,
-) -> Result<Vec<oxplow_app::semantic_catalog::DataEntity>, IpcError> {
-    // Extension-declared entities come from the primary worktree (their
-    // data is project-global).
-    let root = svc.worktrees.resolve(None).await.into_local_path();
-    Ok(
-        oxplow_app::semantic_catalog::data_entities(&svc.sql, &svc.extension_catalog, &root)
-            .await?,
-    )
-}
-
 /// The person's left-nav layout (P6.G1): each panel's order, and whether
 /// it's hidden or collapsed. UI-only.
 pub async fn get_panel_layout(svc: &Services) -> Result<Vec<oxplow_db::PanelPlacement>, IpcError> {
@@ -85,24 +69,6 @@ pub async fn set_panel_layout(
 
 #[cfg(test)]
 mod tests {
-    #[tokio::test]
-    async fn list_data_entities_dispatches() {
-        let (svc, _dir) = crate::test_support::services().await;
-        let out = crate::dispatch("list_data_entities", serde_json::json!({}), &svc)
-            .await
-            .unwrap();
-        let task = out
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|e| e["name"] == "v_work_item")
-            .unwrap();
-        assert_eq!(task["kind"], "sql");
-        // tsk1065: the listing counts nothing: a model too big to count in
-        // the query timeout failed the whole list. The UI counts per row.
-        assert!(task.get("rows").is_none(), "{task}");
-    }
-
     use serde_json::json;
 
     #[tokio::test]

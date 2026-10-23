@@ -149,7 +149,7 @@ export function LensResultView(props: LensResultViewProps) {
         {form}
         {props.toolbarTo && !compact ? <HandToolbar run={shown} streamId={streamId} actions={actions} marks={marks} to={props.toolbarTo} /> : null}
         {!compact && !props.toolbarTo ? <MarksBar run={shown} actions={actions} marks={marks} /> : null}
-        {!compact && !props.toolbarTo && props.partButtons ? <PartButtons run={shown} actions={actions} /> : null}
+        {!props.toolbarTo && props.partButtons ? <PartButtons run={shown} actions={actions} /> : null}
         <LensBody {...props} run={shown} tree={tree} actions={actions} marks={marks} />
       </>
     );
@@ -1566,7 +1566,7 @@ function RowExpansion({
   const part = runs?.get("expansion");
   if (!part) return <p className="ox-muted ox-small">Loading…</p>;
   if (part.error) return <p className="ox-error">{part.error}</p>;
-  return part.run ? <LensResultView run={part.run} compact toolbar={false} streamId={streamId} onOpenPage={onOpenPage} /> : null;
+  return part.run ? <LensResultView run={part.run} compact toolbar={false} partButtons streamId={streamId} onOpenPage={onOpenPage} /> : null;
 }
 
 /** What a link's `onNavigate` is: a page built from the row goes to the

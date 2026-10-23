@@ -184,11 +184,6 @@ pub const MANIFEST: &[Capability] = &[
     ),
     both_named("search", "search", "oxplow_search"),
     both_named("query_sql", "query_sql", "oxplow_query_sql"),
-    // Settings → Data: the models, and entities not yet synced.
-    ui(
-        "list_data_entities",
-        "the Data settings list, which joins the extensions' manifests: an agent reads published entities in `v_model` and one declared but not synced yet in its extension's `extension.yaml`",
-    ),
     ui("get_panel_layout", "the person's left-nav layout (P6.G1)"),
     ui("set_panel_layout", "the person's left-nav layout (P6.G1)"),
     model("get_ui_preferences", &["v_ui_preference"]),
@@ -248,15 +243,6 @@ pub const MANIFEST: &[Capability] = &[
     ui(
         "report_tabs",
         "the tabs a window shows, which an agent reads with `list_tabs` and `get_open_page`",
-    ),
-    model(
-        "list_collectors",
-        &[
-            "v_collector",
-            "v_collector_state",
-            "v_collector_credential",
-            "v_collector_run",
-        ],
     ),
     // The `oxplow.collector.sync` command: the UI runs it through `run_command`,
     // an agent through this tool (as itself, so it never approves).

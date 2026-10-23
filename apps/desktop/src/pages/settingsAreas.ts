@@ -47,7 +47,7 @@ export const SETTINGS_AREAS: readonly SettingsArea[] = [
     id: "data",
     title: "Data",
     intro: "What oxplow can query, the programs the project would run, and how events reach their reactions.",
-    sections: [{ id: "data", title: "Data, programs and delivery" }],
+    sections: [],
   },
   {
     id: "integrations",

@@ -22522,5 +22522,73 @@
         "group_value"
       ]
     }
+  },
+  "data_entity": {
+    "1": {
+      "columns": [
+        {
+          "name": "name",
+          "type": "TEXT",
+          "doc": "The view to query (`v_work_item`, `v_my_gh_pr`)."
+        },
+        {
+          "name": "owner",
+          "type": "TEXT",
+          "doc": "`core`, or the extension that provides it."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "`sql` (a model file), `entity` (an extension's synced data) or `declared` (an entity whose source hasn't synced: no view yet)."
+        },
+        {
+          "name": "description",
+          "type": "TEXT",
+          "doc": "What it holds."
+        },
+        {
+          "name": "row_count",
+          "type": "INT",
+          "doc": "Its row count, when the query pins `name`; else NULL."
+        }
+      ],
+      "key": [
+        "name"
+      ]
+    }
+  },
+  "effect_backfill": {
+    "1": {
+      "columns": [
+        {
+          "name": "effect",
+          "type": "TEXT",
+          "doc": "The effect, `<extension>/<id>`."
+        },
+        {
+          "name": "planned",
+          "type": "INT",
+          "doc": "How many events it would react to."
+        },
+        {
+          "name": "from_seq",
+          "type": "INT",
+          "doc": "The log position of the first; NULL when none."
+        },
+        {
+          "name": "to_seq",
+          "type": "INT",
+          "doc": "The log position of the last; NULL when none."
+        },
+        {
+          "name": "batch",
+          "type": "INT",
+          "doc": "The most one backfill run reacts to; the rest wait for another run."
+        }
+      ],
+      "key": [
+        "effect"
+      ]
+    }
   }
 }

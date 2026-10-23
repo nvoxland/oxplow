@@ -43,11 +43,6 @@ export function lettersFromResult(result: SqlQueryResult): UndeliveredEvent[] {
   });
 }
 
-/** What a Delivery row says. */
-export function letterLine(l: UndeliveredEvent): string {
-  return `${l.consumer} couldn't take ${l.eventType} (event ${l.eventSeq}), ${l.attempts === 1 ? "once" : `${l.attempts} times`}`;
-}
-
 /** The Alerts row, while any event waits. */
 export function deliveryAlert(count: number): string | null {
   if (count === 0) return null;
@@ -111,13 +106,6 @@ export function reactionsFromResult(result: SqlQueryResult): FailedReaction[] {
       retryAt: at("retry_at") === null ? null : String(at("retry_at")),
     };
   });
-}
-
-/** What a failed reaction's row says. */
-export function reactionLine(r: FailedReaction): string {
-  const failed = `${r.effect} failed on ${r.eventType} (event ${r.eventSeq})`;
-  const line = r.attempt > 1 ? `${failed}, attempt ${r.attempt}` : failed;
-  return r.retryAt === null ? line : `${line}; sent again by itself shortly`;
 }
 
 /** The reactions whose latest attempt failed, newest first, and what was read. */

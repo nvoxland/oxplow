@@ -1,0 +1,10 @@
+title: Effects
+description: What reacts to what happens. Open a row to see what a backfill would have it react to.
+query: |
+  SELECT extension || '/' || local AS effect, extension FROM v_contribution WHERE kind = 'effect' ORDER BY 1
+viz: table
+columns:
+  - { key: effect, label: Effect, expand: data-effect-backfill }
+  - { key: extension, label: From, width: 160 }
+empty: No effects. An extension can declare one to react to what happens.
+hidden: true

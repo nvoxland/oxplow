@@ -1923,7 +1923,7 @@ pub const SLOTS: &[SlotSpec] = &[
     SlotSpec::sections("settings.agents.sections", &[], &[]),
     SlotSpec::sections("settings.lsp.sections", &[], &[]),
     SlotSpec::sections("settings.extensions.sections", &[], &[]),
-    SlotSpec::sections("settings.data.sections", &[], &["data"]),
+    SlotSpec::sections("settings.data.sections", &[], &[]),
     SlotSpec::sections(
         "settings.integrations.sections",
         &[],
