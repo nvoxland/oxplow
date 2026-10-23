@@ -1154,7 +1154,7 @@ restated by the next read.
 **Settings → Integrations** is oxplow-foundation's own component
 (`extensions/oxplow-foundation/components/integrations/`: `index.html`,
 `app.js`, `app.css`, hand-written, no build), mounted by the lens
-`integrations` in `settings.integrations.sections` after Capabilities and
+`integrations` in `oxplow-foundation/settings-integrations.sections` after Capabilities and
 Replaced components. Its operations are commands
 (`commands/provider_instances.rs`, scopes `providers.write` and
 `credentials.write`, all `External`) and the instances are read as the live

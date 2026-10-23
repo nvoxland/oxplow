@@ -45,19 +45,14 @@ export function launcherPages(extensions: Extension[], counts: Record<string, nu
       }
     }
   }
-  return [...pages, ...lensDirectoryEntries(extensions)];
+  return mergeDirectory(pages, lensDirectoryEntries(extensions));
 }
 
-/** The launcher's whole page list: the declared pages and lenses, then
- *  `more` (the Settings areas) placed by category. Empty until the
- *  extensions load — a partial list would let a quick query pick the wrong
- *  page ("Settings" finding an area before the Settings page). */
-export function launcherDirectory(
-  extensions: Extension[] | null,
-  counts: Record<string, number>,
-  more: PageDirectoryEntry[],
-): PageDirectoryEntry[] {
-  return extensions === null ? [] : mergeDirectory(launcherPages(extensions, counts), more);
+/** The launcher's whole page list: the declared pages and lenses. Empty
+ *  until the extensions load — a partial list would let a quick query pick
+ *  the wrong page. */
+export function launcherDirectory(extensions: Extension[] | null, counts: Record<string, number>): PageDirectoryEntry[] {
+  return extensions === null ? [] : launcherPages(extensions, counts);
 }
 
 /** The declared pages' badges, by count lens: each `count:` lens run

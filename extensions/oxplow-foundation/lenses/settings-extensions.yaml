@@ -1,0 +1,10 @@
+title: Extensions
+description: "Extensions add lenses, pages and data. What runs is each one's deployment, with the permissions you approved. Right-click a row to deploy, roll back, enable, share or remove it."
+viz: document
+sections:
+  - { lens: extensions-list }
+  - { lens: extensions-deployments }
+  - { lens: extensions-health }
+  - { lens: extensions-credentials }
+  - { lens: extensions-secrets }
+hidden: true

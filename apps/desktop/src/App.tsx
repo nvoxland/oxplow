@@ -109,7 +109,6 @@ import { classifyExternalUrl } from "./external-url-allowlist.js";
 import { installContextMenuSuppressor } from "./context-menu.js";
 import { FilePage } from "./pages/FilePage.js";
 import { QuickOpenOverlay } from "./components/QuickOpenOverlay.js";
-import { settingsAreaEntries } from "./components/RailHud/sections.js";
 import { NON_TRACKED_KINDS } from "./components/RailHud/history.js";
 import { buildTabReport } from "./tabs/tabReport.js";
 import type { PickerMode } from "./components/conversationRows.js";
@@ -2432,7 +2431,6 @@ export function App() {
         stream={stream}
         threadId={selectedThreadId}
         selectedFilePath={selectedFilePath}
-        pages={settingsAreaEntries()}
         offers={offers}
         onClose={() => setQuickOpenVisible(false)}
         onOpenFile={(path) => {

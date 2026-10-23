@@ -1,12 +1,9 @@
 import { ResourcePage } from "./ResourcePage.js";
-import { viewParamsOf } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { openExternalUrl } from "../api.js";
 import type { CenterTab } from "../components/CenterTabs/CenterTabs.js";
 import type { BuiltInPageName } from "./declaredPages.js";
 import type { AppScope, SlotNav } from "./appScope.js";
-import { SettingsPage } from "./SettingsPage.js";
-import { settingsArea } from "./settingsAreas.js";
 import { TerminalPage } from "./TerminalPage.js";
 import { ExternalUrlPage } from "./ExternalUrlPage.js";
 
@@ -22,17 +19,6 @@ export interface BuiltInPageContext {
 export type BuiltInPage = (ctx: BuiltInPageContext) => CenterTab | null;
 
 export const builtInPages: Record<BuiltInPageName, BuiltInPage> = {
-  settings: ({ ref, nav }) => {
-    const view = viewParamsOf(ref);
-    const area = settingsArea(typeof view.area === "string" ? view.area : undefined);
-    const section = typeof view.section === "string" ? view.section : null;
-    return {
-      id: ref.id,
-      label: area.id === "overview" ? "Settings" : `Settings: ${area.title}`,
-      closable: true,
-      render: () => <SettingsPage area={area.id} section={section} onOpenPage={nav.navOpen} />,
-    };
-  },
   // What a URI no page renders opens on.
   resource: ({ ref }) => ({
     id: ref.id,

@@ -182,7 +182,7 @@ pages:
   - { id: dashboards, title: Dashboards, icon: layout-dashboard, category: Data, keywords: custom metric tiles lens, lens: dashboards }
   # System
   - { id: terminal, title: Terminal, icon: terminal, category: System, component: "oxplow:terminal" }
-  - { id: settings, title: Settings, icon: settings, category: System, keywords: every setting config preferences, params: [area], component: "oxplow:settings" }
+  - { id: settings, title: Settings, icon: settings, category: System, keywords: every setting config preferences, lens: settings }
   - { id: catalog, title: Catalog, icon: book-open, category: System, keywords: ask prompts questions what can i help data config, lens: catalog-overview }
   - { id: closed-threads, title: Closed Threads, icon: archive, category: System, lens: closed-threads }
   - { id: extensions, title: Extensions, icon: package, category: System, keywords: deploy rollback permissions enable disable share, lens: extensions }
@@ -511,37 +511,6 @@ resources:
     icon: box
 ui:
   slots:
-    # Settings → Extensions: the Extensions page's list and deployments,
-    # ahead of core's health and credentials.
-    # Settings → Overview and Language Servers: the whole area.
-    - { slot: settings.overview.sections, lens: settings-proposals }
-    - { slot: settings.overview.sections, lens: settings-values }
-    # Settings → Agents: the whole area.
-    - { slot: settings.agents.sections, lens: agents-list }
-    - { slot: settings.agents.sections, lens: agents-settings }
-    - { slot: settings.agents.sections, lens: agents-new-thread }
-    - { slot: settings.agents.sections, lens: agents-prompt }
-    # Settings → AI: the whole area.
-    - { slot: settings.ai.sections, lens: ai-providers }
-    - { slot: settings.ai.sections, lens: ai-provider-form }
-    - { slot: settings.ai.sections, lens: ai-roles }
-    - { slot: settings.ai.sections, lens: ai-calls }
-    - { slot: settings.lsp.sections, lens: lsp-servers }
-    - { slot: settings.lsp.sections, lens: lsp-install }
-    - { slot: settings.lsp.sections, lens: lsp-suggestions }
-    - { slot: settings.extensions.sections, lens: extensions-list }
-    - { slot: settings.extensions.sections, lens: extensions-deployments }
-    - { slot: settings.extensions.sections, lens: extensions-health }
-    - { slot: settings.extensions.sections, lens: extensions-credentials }
-    - { slot: settings.extensions.sections, lens: extensions-secrets }
-    - { slot: settings.integrations.sections, lens: capabilities, title: Capabilities }
-    - { slot: settings.integrations.sections, lens: replacements, title: Replaced components }
-    - { slot: settings.integrations.sections, lens: integrations, title: Integrations }
-    - { slot: settings.data.sections, lens: data-entities, title: Entities }
-    - { slot: settings.data.sections, lens: data-sources, title: Collectors }
-    - { slot: settings.data.sections, lens: data-effects, title: Effects }
-    - { slot: settings.data.sections, lens: alerts-reactions, title: Failed reactions }
-    - { slot: settings.data.sections, lens: alerts-deliveries, title: Undelivered events }
     - { slot: oxplow-foundation/tasks.sections, lens: thread-handoffs-in, at: { before: list } }
     - { slot: oxplow-foundation/tasks.sections, lens: thread-handoffs-out, at: { before: list } }
 commands:

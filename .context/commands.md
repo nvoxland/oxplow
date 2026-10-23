@@ -822,7 +822,7 @@ sets it, else `default` with the default's value), per AI role
 (`ai.roles.<role>`: `project` when the project overrides it, `global`
 from `ai.yaml`, `default` when unbound), and per metric and
 dimension from the global manifests (`global`) and enabled extensions
-(`extension`). `SettingsPage` lists them grouped and searchable
+(`extension`). Settings → Overview lists them grouped and searchable
 (`pages/settingsModel.ts`), each with **Ask the Agent to Change This**
 (a prompt naming the key, its doc and its value, inserted, never sent) —
 which the agent sets with `oxplow.config.set`, unasked: **no key is a

@@ -31,7 +31,7 @@ import {
 import { kindForTabId, PageKindIcon, pageKindLabel } from "../pageKinds.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { RAIL_HISTORY_EXCLUDE_KINDS } from "./RailHud/history.js";
-import type { PageCategory, PageDirectoryEntry } from "./RailHud/sections.js";
+import type { PageCategory } from "./RailHud/sections.js";
 import { insertIntoAgent } from "../agent-input-bus.js";
 import { launcherDirectory, useLauncherCounts } from "./extensionLauncher.js";
 
@@ -44,9 +44,6 @@ interface Props {
    *  matching the rail History block. */
   threadId: string | null;
   selectedFilePath: string | null;
-  /** Top-level pages/apps surfaced as launcher entries when the input
-   *  is empty, and mixed into search results when the user types. */
-  pages: PageDirectoryEntry[];
   /** Menu commands flattened into the launcher so actions (Commit,
    *  New Task, …) are discoverable here too — this is the only palette. */
   /** What the command bus offers a person here (`commandOffers`). */
@@ -86,7 +83,7 @@ const RECENT_LIMIT = 10;
  *  the pointer would fight the wheel. */
 const rowA11y = ({ onMouseEnter: _hover, ...rest }: ReturnType<ReturnType<typeof useListNav>["optionProps"]>) => rest;
 
-export function QuickOpenOverlay({ open, initialQuery, stream, threadId, selectedFilePath, pages: staticPages, offers, onClose, onOpenFile, onOpenPage, onOpenSearchHit }: Props) {
+export function QuickOpenOverlay({ open, initialQuery, stream, threadId, selectedFilePath, offers, onClose, onOpenFile, onOpenPage, onOpenSearchHit }: Props) {
   const [query, setQuery] = useState("");
   const [files, setFiles] = useState<WorkspaceIndexedFile[]>([]);
   const [siteHits, setSiteHits] = useState<SearchHit[]>([]);
@@ -238,7 +235,7 @@ export function QuickOpenOverlay({ open, initialQuery, stream, threadId, selecte
   // command or prompt as an action (P6.D1).
   const exts = useExtensions();
   const counts = useLauncherCounts(exts, stream?.id ?? null, open);
-  const pages = useMemo(() => launcherDirectory(exts, counts, staticPages), [exts, counts, staticPages]);
+  const pages = useMemo(() => launcherDirectory(exts, counts), [exts, counts]);
 
   // Recent pages for the "Recent" start-menu section: the 10 most recent
   // visits (deduped by ref), reusing the rail History source + exclude set.

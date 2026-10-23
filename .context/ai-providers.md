@@ -609,7 +609,7 @@ its source; with no model bound, the recorded ones are all there is.
 
 ## Settings → AI (current)
 
-The foundation's lenses in `settings.ai.sections` (`ai-providers`,
+The foundation's lenses in `oxplow-foundation/settings-ai.sections` (`ai-providers`,
 `ai-provider-form`, `ai-roles`, `ai-calls`; `ai-provider-kinds` and
 `ai-provider-choices` are the choices the forms offer). They read the live
 models `v_ai_provider` and `v_ai_role` and write with commands

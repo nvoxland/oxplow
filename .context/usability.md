@@ -68,17 +68,17 @@ markdown itself, nor edits it in a `<textarea>`.
   branch rename, file commit) ship as Slideovers. Do not
   add new modal call sites; route new flows through pages or
   slideovers. The page pattern to copy is
-  `apps/desktop/src/pages/SettingsPage.tsx` — full Page tab, no backdrop.
+  `apps/desktop/src/pages/LensPage.tsx` (a view document: Settings) — full Page tab, no backdrop.
 - **A long page splits into pages, and a link lands on its section.**
-  Settings is a Document page per area (`pages/settingsAreas.ts`:
-  overview, Agents, Language Servers, Extensions, Data, Integrations, AI),
+  Settings is one view document (`lenses/settings.yaml`: overview, Agents,
+  Language Servers, Extensions, Data, Integrations, AI), an area the section
+  in view,
   each its own URI (`settingsRef(area, section)` → `oxplow:oxplow/page?page=settings#area=…`),
   sharing a rail that lists the areas; the launcher lists each area by
   name ("Settings: Agents"). A link that means one place opens its area
   with `section` — one of the area's section ids or an anchor inside one
-  (`settings-data-delivery`) — and the page scrolls there. A document of
-  four sections or more lists them in its rail (`DocumentLayout`; on a
-  lens page, Contents). A declared document does the same with `view:
+  (`settings-data-delivery`) — and the page scrolls there. A page of
+  four sections or more lists them in its rail (Contents). A declared document does the same with `view:
   <param>`: the one section in view is the page, the others are its rail,
   a change of section is pushed (Back returns), and the launcher lists
   each section by name. On any lens page `#section=<id>` lands on that
