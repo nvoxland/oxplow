@@ -199,7 +199,7 @@ pages:
   - { id: editor, title: Editor, for: oxplow/file, accepts: { rev: absent }, default: true, component: "oxplow:editor" }
   - { id: file-viewer, title: File at a Revision, label: "{{param.path}} ({{param.rev}})", for: oxplow/file, accepts: { rev: present }, lens: file-viewer, comments: true }
   - { id: directory, title: Directory, label: "{{param.path}}", for: oxplow/dir, accepts: { rev: absent }, default: true, lens: directory }
-  - { id: wiki-page, title: Wiki Page, for: oxplow/wiki, default: true, component: "oxplow:wiki-page" }
+  - { id: wiki-page, title: Wiki Page, label: "{{param.slug}}", for: oxplow/wiki, default: true, comments: true, lens: wiki-page }
   - { id: work-item, title: Work Item, for: oxplow/work_item, default: true, component: "oxplow:work-item" }
   - { id: commit, title: Commit, label: "{{param.sha}}", for: oxplow/commit, default: true, lens: commit }
   - { id: metric-detail, title: Metric, for: oxplow/metric, default: true, component: "oxplow:metric-detail" }

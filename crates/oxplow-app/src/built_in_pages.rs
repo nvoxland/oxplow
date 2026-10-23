@@ -27,7 +27,6 @@ pub const BUILT_IN_PAGES: &[&str] = &[
     "settings",
     "tasks",
     "terminal",
-    "wiki-page",
     "work-item",
 ];
 

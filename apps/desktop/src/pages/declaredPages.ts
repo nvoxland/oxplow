@@ -14,7 +14,6 @@ export const APP_RENDERERS = [
   "editor",
   "lens",
   "metric-detail",
-  "wiki-page",
   "work-item",
 ] as const;
 

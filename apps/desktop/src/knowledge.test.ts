@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 
 import type { SearchHit, SqlQueryResult } from "./tauri-bridge/generated/bindings.js";
-import { freshnessFromResult, knowledgeIsNone, NO_KNOWLEDGE_STORE, pagesFromResult } from "./knowledge.js";
+import { knowledgeIsNone, NO_KNOWLEDGE_STORE, pagesFromResult } from "./knowledge.js";
 
 const result = (columns: string[], rows: SqlQueryResult["rows"]): SqlQueryResult =>
   ({ columns, rows, truncated: false, reads: { models: [], tables: [], measures: [] }, freshness: {} }) as unknown as SqlQueryResult;
@@ -23,20 +23,6 @@ test("the index reads v_knowledge_page rows", () => {
       stale_ref_count: 2,
       outbound_uris: ["oxplow:oxplow/file?path=src/a.rs", "oxplow:oxplow/wiki?slug=other"],
     },
-  ]);
-});
-
-test("freshness reads v_knowledge_ref rows", () => {
-  expect(
-    freshnessFromResult(
-      result(
-        ["path", "pinned_snapshot_id", "pinned_vcs_rev", "pinned_vcs_rev_exact", "latest_snapshot_id", "stale"],
-        [["src/a.rs", 3, "abc", 1, 5, 1], ["src/b.rs", null, null, 0, null, 0]],
-      ),
-    ),
-  ).toEqual([
-    { path: "src/a.rs", pinned_snapshot_id: 3, pinned_vcs_rev: "abc", pinned_vcs_rev_exact: true, latest_snapshot_id: 5, stale: true },
-    { path: "src/b.rs", pinned_snapshot_id: null, pinned_vcs_rev: null, pinned_vcs_rev_exact: false, latest_snapshot_id: null, stale: false },
   ]);
 });
 

@@ -1,0 +1,20 @@
+title: About this page
+description: When it was last edited and whether the files it cites have changed since.
+params:
+  - { name: slug }
+query: |
+  SELECT p.updated_at,
+         CASE WHEN p.stale_ref_count = 0 THEN 'fresh'
+              WHEN p.stale_ref_count = (SELECT count(*) FROM v_knowledge_ref r WHERE r.page = p.uri) THEN 'very stale'
+              ELSE 'stale' END AS freshness,
+         (SELECT count(*) FROM v_knowledge_ref r WHERE r.page = p.uri) AS cited_files,
+         p.stale_ref_count AS stale_files
+  FROM v_knowledge_page p WHERE p.slug = :slug
+viz: detail
+columns:
+  - { key: updated_at, label: Last edited, format: datetime }
+  - { key: freshness, label: Freshness }
+  - { key: cited_files, label: Files it cites }
+  - { key: stale_files, label: Changed since }
+empty: This page isn't written yet.
+hidden: true

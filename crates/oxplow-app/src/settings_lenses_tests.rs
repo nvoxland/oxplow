@@ -1,7 +1,7 @@
 //! Foundation lenses that replaced core pages: Settings' Overview and Language
 //! Servers areas (mounted in each area's slot: what they list, how they group
 //! and search, what Ask puts in the agent's input, what the language-server
-//! rows offer), the Comments inbox, the commit and uncommitted pages, the Alerts page, Settings → Agents and AI, and the Board.
+//! rows offer), the Comments inbox, the commit and uncommitted pages, the Alerts page, Settings → Agents and AI, the Board, and the wiki page.
 
 use oxplow_config::LspServerConfig;
 use oxplow_db::SqlCell;
@@ -764,4 +764,45 @@ async fn run_task(
         columns: run.result.columns,
         rows: run.result.rows,
     }
+}
+
+/// A wiki page: its body is the stored markdown (empty for a page not yet
+/// written, so the first Save creates it), with when it was edited and
+/// whether the files it cites have drifted.
+#[tokio::test]
+async fn the_wiki_page_reads_its_body_even_before_it_is_written() {
+    let fx = services_with_effort().await;
+    let slug = |s: &str| vec![("slug", SqlCell::Text(s.to_string()))];
+    command(
+        &fx,
+        "oxplow.knowledge.write_page",
+        serde_json::json!({ "slug": "otters", "title": "Otters", "body": "# Otters\n\nThey hold hands.\n" }),
+    )
+    .await;
+    let body = run(&fx, "wiki-page-body", slug("otters")).await;
+    assert_eq!(body.rows.len(), 1);
+    assert!(body
+        .text(&body.rows[0], "body")
+        .unwrap()
+        .contains("They hold hands."));
+    assert_eq!(body.text(&body.rows[0], "slug").as_deref(), Some("otters"));
+
+    let new = run(&fx, "wiki-page-body", slug("not-yet")).await;
+    assert_eq!(new.rows.len(), 1);
+    assert_eq!(new.text(&new.rows[0], "body").as_deref(), Some(""));
+    assert_eq!(new.text(&new.rows[0], "slug").as_deref(), Some("not-yet"));
+
+    let info = run(&fx, "wiki-page-info", slug("otters")).await;
+    assert_eq!(
+        info.text(&info.rows[0], "freshness").as_deref(),
+        Some("fresh")
+    );
+    assert!(run(&fx, "wiki-page-info", slug("not-yet"))
+        .await
+        .rows
+        .is_empty());
+    assert!(run(&fx, "wiki-page-refs", slug("otters"))
+        .await
+        .rows
+        .is_empty());
 }

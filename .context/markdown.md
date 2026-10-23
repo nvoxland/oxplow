@@ -68,7 +68,7 @@ headings (`lens/Contents.tsx`).
 
 Every markdown surface: the lens `markdown` viz and document/dashboard
 markdown parts (`LensResultView`, `PartsViz`), effort summaries
-(`TaskDetail`, `DiffViewPage`), the wiki body (`WikiPageTab`), a work
+(`TaskDetail`, `DiffViewPage`), the wiki body (the `wiki-page-body` lens's `markdown` viz), a work
 item's body (`TaskDetail`), comment messages (`CommentPopover`) and the
 comment composer (`CommentComposer`), a form's markdown field
 (`SchemaForm`: stream and thread prompts, a handoff's body). A
@@ -220,9 +220,7 @@ In `apps/desktop/index.html`:
 
 The editor becomes comment-enabled when given a `comments`
 config (`{ streamId, threadId, target, author? }`, `target` a URI).
-WikiPageTab passes `{ target: wikiUri(slug), threadId:
-null }` (wiki pages aren't thread-bound) and additionally wraps the
-body scroll host in the page's URI as a context node
+The `wiki-page` page entry says `comments: true`, so the page's URI is the comment target (a wiki page isn't thread-bound) and the page wraps its body in the URI as a context node
 (`contextNodeProps`), so plain-DOM selections around the editor
 resolve to the page too; WorkItemPage passes
 `{ target: <the item's URI>, threadId:

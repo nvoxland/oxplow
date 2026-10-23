@@ -115,7 +115,6 @@ import { kindForTabId } from "./pageKinds.js";
 import { declaredPage, isAppRenderer, isBuiltInPage, type AppRendererName } from "./pages/declaredPages.js";
 import { useExtensions } from "./extensionsStore.js";
 import { WorkItemPage } from "./pages/WorkItemPage.js";
-import { WikiPage } from "./pages/WikiPage.js";
 import { PanelRunsProvider } from "./components/Panels/PanelRunsContext.js";
 import { useAlerts } from "./components/Alerts/useAlerts.js";
 import { useAlertToasts } from "./components/Alerts/useAlertToasts.js";
@@ -2248,25 +2247,6 @@ export function App() {
           render: () => (
             <LensPage lensId={lensId} params={resourceParamsOf(ref)} stream={stream} onOpenPage={nav.navOpen} />
           ),
-        };
-      },
-      "wiki-page": (ref, nav) => {
-        const slug = paramOf(ref.id, "slug") ?? "";
-        const wikiNavOpen = (newRef: TabRef) => handleNavigateInTab(ref.id, newRef);
-        return {
-          id: ref.id,
-          label: slug,
-          closable: true,
-          render: () => stream ? (
-            <WikiPage
-              stream={stream}
-              slug={slug}
-              threadWork={selectedThreadWork}
-              onClosed={() => closeOrGoBackPageTab(ref.id)}
-              onOpenFile={nav.navOpenFile}
-              onOpenPage={wikiNavOpen}
-            />
-          ) : null,
         };
       },
       "work-item": (ref, nav) => {
