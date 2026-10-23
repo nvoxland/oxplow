@@ -257,7 +257,8 @@ oxplow's pages and their params:
   `hook-events`, `done-work`, `catalog`, `new-stream` (a form: `visible_if` on its `source`, `oxplow.stream.create`), `stream-settings` (`stream`) and `thread-settings` (`thread`) (documents: a hint, the thread's open sessions, and the prompt as an edit form over `v_stream` / `v_thread` with `oxplow.*.set_prompt`), `git-history` (a document with one replaceable part: the commit list, or the history graph; params `q`, `author`, `branch`), `local-history` (a document of
   two lenses; params `mode` `recent` | `by-commit` and `all`, which lifts
   the caps — the rail's, so no "View all" step to go Back from).
-- Built-in pages: `tasks`, `backlog` (badge: `backlog-count`), `board`,
+- Lens pages (more): `backlog` (badge: `backlog-count`; a document of `backlog-add`, a quick-add form over `oxplow.work_item.create`, and `backlog-list`, a state-grouped `list` of the items on no thread: params `q`, the search over title and fields, and `thread_id`; drag to reorder, mark rows for bulk state, priority, Bring to this thread and Delete, `r` `i` `b` `d` keys for the states).
+- Built-in pages: `tasks`, `board`,
   `files`, `git-dashboard`, `uncommitted-changes`,
   `comments`, `explore-data`, `metrics-recorded`,
   `terminal`, `alerts`, `settings` (view: `area`, `section`, and `q`, the overview's search — another
@@ -628,20 +629,19 @@ replaced by four focused pages so each has one job:
   entry. The route page is `tasks`; ref helper is `tasksRef()`.
 - **Done work** (the `done-work` page, a foundation lens page) —
   full descending list of the current thread's closed items (done and canceled).
-- **Backlog** (`page-backlog`) — the active list's items on no thread
-  (`v_work_item.thread_id IS NULL`), for a list with the `lists`
-  feature; `oxplow.work_item.move` takes one to a thread and back. The
-  `backlogReadyCount` badge in the rail directory hangs off this entry.
+- **Backlog** (the `backlog` page, a foundation lens page) — the active list's items on no thread
+  (`v_work_item.thread_id IS NULL`); `oxplow.work_item.move` takes one to a thread and back (its
+  Bring to this thread action needs the `lists` feature).
 
-Tasks and Backlog read the work-item interface (`workItems.readWorkList`) and
-wrap `PlanPane`, which takes the active list's profile
+Tasks reads the work-item interface (`workItems.readWorkList`) and
+wraps `PlanPane`, which takes the active list's profile
 (`useWorkListProfile`: its features and declared fields) and offers only
 what the list can do: drag reordering with `ordering`, the backlog with
 `lists`, epics with `hierarchy`, Delete with `delete`. Its rows show the
 list's editable enum fields (oxplow's priority), and the Tasks page's
 filter bar a chip row per declared enum field. They pass filter props
 (`visibleSections`, `sectionItemLimit`, `onlyStates`, `excludeStates`,
-`extraSectionLinks`, `forceMode`). There's no
+`extraSectionLinks`). There's no
 Archived page: oxplow's archived tasks are done or canceled, as the
 interface states them.
 

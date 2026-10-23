@@ -30,7 +30,6 @@ import { SectionHeaderMenu, TaskGroupList } from "./TaskGroupList.js";
 import type { TaskDetailChanges } from "./TaskDetail.js";
 import {
   applyStateFilter,
-  buildBacklogGroups,
   buildGroups,
   classifyState,
   statusLabel,
@@ -67,7 +66,6 @@ interface Props {
   /** Live agent status for the displayed thread. Drives the In Progress
    *  empty-state placeholder ("Thinking..." vs "Waiting"). */
   agentStatus?: AgentStatus;
-  backlog: WorkList | null;
   /** The active list: what it can do (each action shows only when it
    *  can) and its own fields. */
   profile: WorkListProfile;
@@ -77,7 +75,6 @@ interface Props {
   onDeleteTask(ref: string): Promise<void>;
   /** Apply a drag's new order to the thread's list (refs). */
   onReorderTasks(orderedRefs: string[]): Promise<void>;
-  onReorderBacklog(orderedRefs: string[]): Promise<void>;
   openNewRequest?: number;
   /** Open the page for the given item. Change the token to request again
    *  even if the ref repeats. */
@@ -108,9 +105,6 @@ interface Props {
    *  Used by Plan Work for "View all done →" links pointing at the
    *  dedicated Done Work / Archived pages. */
   extraSectionLinks?: Partial<Record<TaskSectionKind, React.ReactNode>>;
-  /** Pin the pane mode. The Backlog page passes `"backlog"` so the pane
-   *  renders the stream-global backlog full-pane. */
-  forceMode?: "thread" | "backlog";
 }
 
 interface ContextMenuState {
@@ -125,13 +119,11 @@ export function PlanPane({
   thread,
   threadWork,
   agentStatus,
-  backlog,
   profile,
   fields,
   onUpdateTask,
   onDeleteTask,
   onReorderTasks,
-  onReorderBacklog,
   openNewRequest,
   editRequest,
   registerOpenCreate,
@@ -142,12 +134,10 @@ export function PlanPane({
   onlyStates,
   excludeStates,
   extraSectionLinks,
-  forceMode,
 }: Props) {
   const features = profile.features;
   const editableEnums = fields.filter((f) => f.kind === "enum" && !f.read_only);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
-  const mode = forceMode ?? "thread";
   const { isCollapsed: isSectionCollapsed, toggle: onToggleSectionCollapsed } = useCollapsedSections();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // Extra "marked" ids for multi-select beyond the primary `selectedId`. Driven
@@ -193,9 +183,9 @@ export function PlanPane({
   }, [threadId]);
 
   const groups = useMemo(() => {
-    const raw = mode === "backlog" ? buildBacklogGroups(backlog) : buildGroups(threadWork);
+    const raw = buildGroups(threadWork);
     return onlyStates || excludeStates ? applyStateFilter(raw, { only: onlyStates, exclude: excludeStates }) : raw;
-  }, [mode, threadWork, backlog, onlyStates, excludeStates]);
+  }, [threadWork, onlyStates, excludeStates]);
 
   // Flat top-to-bottom list of refs in the order they appear on screen.
   // Rebuilt whenever the groups change so ↑/↓ navigation stays in sync
@@ -287,8 +277,8 @@ export function PlanPane({
 
   const activeUpdate = onUpdateTask;
   const activeDelete = features.delete ? onDeleteTask : null;
-  const activeReorder = features.ordering ? (mode === "backlog" ? onReorderBacklog : onReorderTasks) : null;
-  const currentScopeThreadId = mode === "backlog" ? null : thread?.id ?? null;
+  const activeReorder = features.ordering ? onReorderTasks : null;
+  const currentScopeThreadId = thread?.id ?? null;
 
   useEffect(() => {
     // Listen at the pane level (not window) so the Agent pane / editor don't
@@ -408,7 +398,7 @@ export function PlanPane({
   }, [editRequest?.token]);
 
 
-  if (mode === "thread" && !thread) {
+  if (!thread) {
     return <div style={{ padding: 12, color: "var(--muted)" }}>No thread selected.</div>;
   }
 
@@ -421,7 +411,7 @@ export function PlanPane({
       style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", outline: "none" }}
     >
       <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
-        {mode === "thread" && threadId ? (
+        {threadId ? (
           <LensSlots
             slot="thread.plan.header"
             params={numericRowId(threadId) === null ? null : { thread_id: numericRowId(threadId) }}
@@ -487,7 +477,7 @@ export function PlanPane({
           </>
         ) : (
           groups.map((group) => {
-            const isRootThread = mode === "thread";
+            const isRootThread = true;
             // The thread's own list: its in-progress rows are live work.
             const isActive = isRootThread;
             const readyMenuItems: MenuItem[] = [
@@ -542,7 +532,7 @@ export function PlanPane({
                 agentStatus={agentStatus}
                 isSectionCollapsed={isSectionCollapsed}
                 onToggleSectionCollapsed={onToggleSectionCollapsed}
-                openTurns={mode === "thread" && !group.epic ? openTurns : []}
+                openTurns={!group.epic ? openTurns : []}
                 visibleSections={visibleSections}
                 sectionItemLimit={sectionItemLimit}
               />

@@ -2,7 +2,6 @@ import { expect, test } from "bun:test";
 import { bucketWorkList, emptyWorkList, type CanonicalState, type WorkItem } from "../../workItems.js";
 import {
   applyStateFilter,
-  buildBacklogGroups,
   buildGroups,
   classifyEpic,
   classifyRow,
@@ -87,13 +86,6 @@ test("finalizeReorderRefs reverses the done/canceled run — Done renders newest
 
 // The backlog renders like any list: section headers and "New item" even
 // when it's empty or still loading.
-test("buildBacklogGroups returns a single group, empty or not", () => {
-  expect(buildBacklogGroups(null)).toEqual([{ epic: null, items: [], epicChildren: new Map() }]);
-  expect(buildBacklogGroups(emptyWorkList(null))[0]?.items).toEqual([]);
-  const backlog = bucketWorkList(null, [item("r1", "todo"), item("b1", "blocked"), item("r2", "todo")], [], NO_READS);
-  expect(buildBacklogGroups(backlog)[0]?.items.map((i) => i.uri)).toEqual(["r1", "b1", "r2"]);
-});
-
 test("openBacklogCount counts ready + blocked + in progress, not done", () => {
   const backlog = bucketWorkList(
     null,

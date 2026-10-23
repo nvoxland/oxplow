@@ -1,0 +1,11 @@
+title: Backlog
+description: "The work items on no thread, to pick from or file into. Drag to reorder, mark rows for a bulk change, and right-click for the rest; the search matches a title or any of the work list's own fields."
+needs: [work_items]
+params:
+  - { name: q, role: filter, label: Search, default: "" }
+  - { name: thread_id }
+viz: document
+sections:
+  - { id: add, lens: backlog-add }
+  - { id: items, lens: backlog-list }
+hidden: true

@@ -69,5 +69,4 @@ export interface AppScope {
   handleUpdateTask: (ref: string, change: ItemChange) => Promise<void>;
   handleDeleteTask: (ref: string) => Promise<void>;
   handleReorderTasks: (orderedRefs: string[]) => Promise<void>;
-  handleReorderBacklog: (orderedRefs: string[]) => Promise<void>;
 }

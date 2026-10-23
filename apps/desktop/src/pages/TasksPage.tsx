@@ -34,6 +34,8 @@ export type TasksPageProps =
     onOpenPage(ref: TabRef): void;
     streams: Stream[];
     currentStreamId: string | null;
+    /** The backlog's items, for the drawer's count. */
+    backlog: WorkList | null;
   };
 
 const PREVIEW_LIMIT = 5;

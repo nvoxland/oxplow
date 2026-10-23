@@ -160,14 +160,6 @@ export function openBacklogCount(backlog: WorkList | null): number {
   return backlog.items.length + backlog.waiting.length + backlog.inProgress.length;
 }
 
-/**
- * The backlog as one group. Always exactly one, even empty or loading:
- * the Plan renders its section chrome (and "New item") through a group.
- */
-export function buildBacklogGroups(backlog: WorkList | null): TaskGroup[] {
-  return [{ epic: null, items: backlog ? [...backlog.all] : [], epicChildren: new Map() }];
-}
-
 /** The chosen values per declared field (`{ priority: ["high"] }`); a
  *  field with none chosen doesn't filter. */
 export type FieldFilter = Record<string, readonly string[]>;

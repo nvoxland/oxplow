@@ -876,10 +876,6 @@ export function App() {
     await reorderList(threadWorkStates[selectedThread.id], orderedRefs);
   }
 
-  async function handleReorderBacklog(orderedRefs: string[]) {
-    await reorderList(backlogState, orderedRefs);
-  }
-
   const currentSession = useMemo(
     () => (stream ? getFileSession(stream.id) : createEmptyFileSession()),
     [fileSessions, stream],
@@ -2106,7 +2102,6 @@ export function App() {
       handleUpdateTask,
       handleDeleteTask,
       handleReorderTasks,
-      handleReorderBacklog,
     };
     // The built-in renderers whose bodies draw on the window's own state;
     // the rest are `builtInPages`. Each reads what it shows from its URI.
