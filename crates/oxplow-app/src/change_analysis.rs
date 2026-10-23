@@ -338,6 +338,32 @@ pub enum ChangeTarget {
         #[serde(rename = "turnId")]
         turn_id: String,
     },
+    /// Any two revisions, each spelled as a `rev` is (`working`,
+    /// `snap:<id>`, `git:<rev>`); no base is the whole tree at `head`.
+    /// Keyed `<base>..<head>` by the sides as resolved (a git side by its
+    /// full sha). `stream_id` picks the repo (default: the primary
+    /// stream's).
+    Range {
+        #[serde(rename = "streamId", default)]
+        stream_id: Option<String>,
+        #[serde(default)]
+        base: Option<String>,
+        head: String,
+    },
+}
+
+/// The range a stored `range` change is of, for the consumer that keeps
+/// those headed at the working tree current. `None` for any other kind.
+pub fn range_target(row: &oxplow_db::ChangeRow) -> Option<ChangeTarget> {
+    if row.kind != "range" {
+        return None;
+    }
+    let (base, head) = row.target.split_once("..")?;
+    Some(ChangeTarget::Range {
+        stream_id: Some(oxplow_domain::StreamId::new(row.stream_id).to_string()),
+        base: (!base.is_empty()).then(|| base.to_string()),
+        head: head.to_string(),
+    })
 }
 
 /// Which changes are being computed and the duplicate-scan queue.
@@ -602,6 +628,16 @@ async fn resolve(
         kind: svc.vcs.rev_kind().into(),
         rev,
     };
+    // The stream named, else the primary's.
+    let stream_of = |stream_id: Option<String>| async move {
+        match stream_id.as_deref() {
+            Some(s) => oxplow_domain::StreamId::try_from_str(s)
+                .ok_or_else(|| invalid(format!("not a stream id: {s}"))),
+            None => primary_stream()
+                .await
+                .ok_or_else(|| invalid("no primary stream".into())),
+        }
+    };
     Ok(match target {
         ChangeTarget::Working { stream_id } => {
             let sid = oxplow_domain::StreamId::try_from_str(&stream_id)
@@ -621,13 +657,7 @@ async fn resolve(
             )
         }
         ChangeTarget::Commit { sha, stream_id } => {
-            let sid = match stream_id.as_deref() {
-                Some(s) => oxplow_domain::StreamId::try_from_str(s)
-                    .ok_or_else(|| invalid(format!("not a stream id: {s}")))?,
-                None => primary_stream()
-                    .await
-                    .ok_or_else(|| invalid("no primary stream".into()))?,
-            };
+            let sid = stream_of(stream_id).await?;
             let root = svc
                 .worktrees
                 .resolve(Some(&sid.to_string()))
@@ -646,6 +676,28 @@ async fn resolve(
                 parent.map(vcs_rev),
                 vcs_rev(full),
             )
+        }
+        ChangeTarget::Range {
+            stream_id,
+            base,
+            head,
+        } => {
+            let sid = stream_of(stream_id).await?;
+            let root = svc
+                .worktrees
+                .resolve(Some(&sid.to_string()))
+                .await
+                .into_local_path();
+            let base = match base.as_deref().filter(|b| !b.is_empty()) {
+                Some(b) => Some(resolve_side(svc, &root, b).await?),
+                None => None,
+            };
+            let head = resolve_side(svc, &root, &head).await?;
+            let key = format!(
+                "{}..{head}",
+                base.as_ref().map(ToString::to_string).unwrap_or_default()
+            );
+            (sid, "range", key, base, head)
         }
         ChangeTarget::Turn { turn_id } => {
             use oxplow_domain::stores::AgentTurnStore as _;
@@ -705,6 +757,31 @@ async fn resolve(
                 head,
             )
         }
+    })
+}
+
+/// One side of a range as a revision: a VCS side (`git:HEAD`, a branch,
+/// a short sha) resolved in `root` to its full id, so every spelling of a
+/// commit names the same change; a snapshot or the working tree as is.
+async fn resolve_side(
+    svc: &crate::Services,
+    root: &std::path::Path,
+    spelled: &str,
+) -> Result<Revision, oxplow_domain::DomainError> {
+    use oxplow_domain::DomainError;
+    let rev: Revision = spelled.parse().map_err(DomainError::Invalid)?;
+    Ok(match rev {
+        Revision::Vcs { kind, rev } if kind == svc.vcs.rev_kind() => Revision::Vcs {
+            kind,
+            rev: svc.vcs.resolve(root, &rev).await?,
+        },
+        Revision::Vcs { kind, rev } => {
+            return Err(DomainError::Invalid(format!(
+                "`{kind}:{rev}` isn't a {} revision",
+                svc.vcs.rev_kind()
+            )))
+        }
+        other => other,
     })
 }
 
@@ -1207,6 +1284,102 @@ mod tests {
         )
         .await;
         assert_eq!(working, vec![vec![oxplow_db::SqlCell::Int(1)]]);
+
+        // A range names its two sides in its target, built in SQL: the
+        // query reads the row it just asked for.
+        let ranged = run(
+            "SELECT kind, target FROM v_change WHERE kind = 'range' AND target = '' || '..' || ?1",
+            vec![oxplow_db::SqlCell::Text(format!("git:{sha}"))],
+        )
+        .await;
+        assert_eq!(
+            ranged,
+            vec![vec![
+                oxplow_db::SqlCell::Text("range".into()),
+                oxplow_db::SqlCell::Text(format!("..git:{sha}"))
+            ]]
+        );
+    }
+
+    /// A change between any two revisions is a `range`, keyed by its two
+    /// sides as resolved (a git side by its full sha, so `HEAD` and the sha
+    /// share a row), analyzed as a commit is; one with no base is the whole
+    /// tree at its head. A side that isn't a revision is refused, saying so.
+    #[tokio::test]
+    async fn a_range_between_any_two_revisions_is_analyzed() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let root = f.svc.layout.project_dir.clone();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/lib.rs"), BEFORE).unwrap();
+        let base = crate::test_fixtures::commit_all(&root, "base");
+        std::fs::write(root.join("src/lib.rs"), AFTER).unwrap();
+        let head = crate::test_fixtures::commit_all(&root, "change");
+        let range = |base: Option<&str>, head: &str| ChangeTarget::Range {
+            stream_id: None,
+            base: base.map(str::to_string),
+            head: head.to_string(),
+        };
+
+        let c = ensure_change(&f.svc, range(Some(&format!("git:{base}")), "git:HEAD"))
+            .await
+            .unwrap();
+        assert_eq!(
+            (c.kind.as_str(), c.target.as_str(), c.status.as_str()),
+            ("range", format!("git:{base}..git:{head}").as_str(), "done")
+        );
+        assert_eq!(
+            (c.base_revision, c.head_revision),
+            (Some(Revision::git(&base)), Some(Revision::git(&head)))
+        );
+        assert_eq!(
+            rows(
+                &f.svc,
+                "SELECT path, status, additions > 0 FROM v_change_file WHERE change_id = ?1",
+                c.id
+            )
+            .await,
+            serde_json::json!([["src/lib.rs", "modified", 1]])
+        );
+        assert_eq!(
+            rows(
+                &f.svc,
+                "SELECT name, status FROM v_change_function WHERE change_id = ?1 ORDER BY name",
+                c.id
+            )
+            .await,
+            serde_json::json!([["fresh", "added"], ["grow", "modified"]])
+        );
+        let again = ensure_change(
+            &f.svc,
+            range(Some(&format!("git:{base}")), &format!("git:{head}")),
+        )
+        .await
+        .unwrap();
+        assert_eq!(again.id, c.id);
+
+        let whole = ensure_change(&f.svc, range(None, &format!("git:{head}")))
+            .await
+            .unwrap();
+        assert_eq!(whole.target, format!("..git:{head}"));
+        assert_eq!(whole.base_revision, None);
+        assert_eq!(
+            rows(
+                &f.svc,
+                "SELECT path, status FROM v_change_file WHERE change_id = ?1 AND path = 'src/lib.rs'",
+                whole.id
+            )
+            .await,
+            serde_json::json!([["src/lib.rs", "added"]])
+        );
+
+        let err = ensure_change(&f.svc, range(Some("git:HEAD"), "yesterday"))
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("yesterday") && err.contains("revision"),
+            "{err}"
+        );
     }
 
     #[tokio::test]

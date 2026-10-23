@@ -1490,7 +1490,15 @@ export type ChangeTarget =
  *  An agent turn: its start snapshot → its end snapshot, "what changed
  *  this turn" (P2.10). A turn still running has no end: `NotFound`.
  */
-{ kind: "turn"; turnId: string };
+{ kind: "turn"; turnId: string } | 
+/**
+ *  Any two revisions, each spelled as a `rev` is (`working`,
+ *  `snap:<id>`, `git:<rev>`); no base is the whole tree at `head`.
+ *  Keyed `<base>..<head>` by the sides as resolved (a git side by its
+ *  full sha). `stream_id` picks the repo (default: the primary
+ *  stream's).
+ */
+{ kind: "range"; streamId?: string | null; base?: string | null; head: string };
 
 /**
  *  One path that differs between two revisions, without line counts:
@@ -3899,7 +3907,7 @@ export type Lens = Lens_Serialize | Lens_Deserialize;
 /**
  *  A button on a lens: a command it runs (P6.B1, target §11.4). The
  *  command goes through the bus as `Actor::Lens` acting for whoever
- *  pressed it, so every policy — invokers, the agent policy, confirmation
+ *  pressed it, so every policy — the agent policy, confirmation
  *  — applies as if they had run it themselves; a lens can offer a button
  *  but never grant a power. Copying the result and handing it to the
  *  agent are on every lens, not declared.

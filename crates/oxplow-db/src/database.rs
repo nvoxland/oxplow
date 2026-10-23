@@ -2295,6 +2295,68 @@ mod tests {
         assert!(conn.execute("DELETE FROM work_item", []).is_err());
     }
 
+    /// V105 widens `change.kind` to take `range`, rebuilding the table: a
+    /// V104 database keeps its changes, their ids (the analysis tables
+    /// point at them) and the id sequence, and then takes a range.
+    #[test]
+    fn v105_keeps_changes_and_takes_a_range() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::sql_functions::register(&conn).unwrap();
+        crate::models::drop_all(&conn).unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(104))
+            .run(&mut conn)
+            .unwrap();
+        conn.execute_batch(
+            "INSERT INTO change (id, stream_id, kind, target, base_revision, head_revision, status, analyzed_from)
+               VALUES (7, 1, 'commit', 'abc', 'git:aaa', 'git:abc', 'done', '{}');
+             INSERT INTO change_file (change_id, path, status, additions, deletions, is_test)
+               VALUES (7, 'src/a.rs', 'modified', 1, 0, 0);
+             DELETE FROM sqlite_sequence WHERE name = 'change';
+             INSERT INTO sqlite_sequence (name, seq) VALUES ('change', 12);",
+        )
+        .unwrap();
+        assert!(conn
+            .execute(
+                "INSERT INTO change (stream_id, kind, target, status) VALUES (1, 'range', 'git:a..working', 'pending')",
+                [],
+            )
+            .is_err());
+        // As the open runs them: a rebuild drops a parent table, which with
+        // foreign keys on would delete the analysis rows under it.
+        with_foreign_keys_off(&mut conn, |c| {
+            embedded::migrations::runner()
+                .run(c)
+                .map(|_| true)
+                .map_err(|e| DbInitError::Migration(e.to_string()))
+        })
+        .unwrap();
+        let kept: (i64, String, String, Option<String>) = conn
+            .query_row(
+                "SELECT c.id, c.target, f.path, c.analyzed_from FROM change c
+                   JOIN change_file f ON f.change_id = c.id",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            kept,
+            (7, "abc".into(), "src/a.rs".into(), Some("{}".into()))
+        );
+        conn.execute(
+            "INSERT INTO change (stream_id, kind, target, status) VALUES (1, 'range', 'git:a..working', 'pending')",
+            [],
+        )
+        .unwrap();
+        assert_eq!(conn.last_insert_rowid(), 13, "the id sequence is kept");
+        assert!(conn
+            .execute(
+                "INSERT INTO change (stream_id, kind, target, status) VALUES (1, 'other', 'x', 'pending')",
+                [],
+            )
+            .is_err());
+    }
+
     /// V5: an effort's work item becomes optional and at most one effort
     /// is open per thread. A V4 database with two open efforts on one
     /// thread (and an unlinked one stored as `''`) keeps every effort and
