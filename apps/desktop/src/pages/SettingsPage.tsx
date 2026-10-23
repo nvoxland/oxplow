@@ -1,9 +1,8 @@
-import { useEffect, type ReactNode } from "react";
+import { useEffect } from "react";
 import { DocumentLayout, type DocSection } from "../kit/DocumentLayout.js";
 import { useSearchFilter } from "../kit/SearchFilter.js";
 import { Toolbar } from "../kit/Toolbar.js";
 import type { PageAction } from "../kit/actions.js";
-import { IntegrationsSection } from "../components/IntegrationsSection.js";
 import { settingsRef, viewParamsOf } from "../tabs/pageRefs.js";
 import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
 import type { TabRef } from "../tabs/tabState.js";
@@ -106,14 +105,6 @@ function SettingsAreasNav({ current, onOpen }: { current: SettingsAreaId; onOpen
 /** An area's own sections (titled as the area model titles them) and its
  *  page actions. */
 function useAreaContent(area: SettingsArea): { sections: DocSection[]; actions?: PageAction[] } {
-  const title = (id: string) => area.sections.find((s) => s.id === id)?.title ?? id;
-  const section = (id: string, body: ReactNode, description?: ReactNode): DocSection => ({
-    id,
-    title: title(id),
-    description,
-    testId: `settings-section-${id}`,
-    body,
-  });
   switch (area.id) {
     case "overview":
     case "agents":
@@ -121,18 +112,9 @@ function useAreaContent(area: SettingsArea): { sections: DocSection[]; actions?:
     case "ai":
     case "extensions":
     case "data":
+    case "integrations":
       // Their sections are foundation lenses mounted in the area's slot.
       return { sections: [] };
-    case "integrations":
-      return {
-        sections: [
-          section(
-            "integrations",
-            <IntegrationsSection />,
-            "Outside systems that extensions connect through a program oxplow runs. Each instance's config is the team's; approving and running the program is per machine, and its credentials go to your OS keychain. Three failures in a row turn an instance off until you enable it again.",
-          ),
-        ],
-      };
   }
 }
 

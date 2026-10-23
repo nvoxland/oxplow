@@ -18,20 +18,26 @@ test("a person configures, checks and enables the fake tracker, and an item reac
   const { page, daemon } = fresh;
   await page.goto("/");
   await openFromLauncher(page, "Settings: Integrations");
-  await page.getByTestId("integration-config-e2e/fake-team").fill("core");
+  // Integrations is oxplow-foundation's own component, in a frame; the
+  // config form, like every form it opens, is oxplow's (`openForm`).
+  const integrations = page.frameLocator('iframe[aria-label="Integrations"]');
+  await expect(integrations.getByTestId("integration-status-e2e/fake")).toContainText("Off");
+  await integrations.getByTestId("integration-configure-e2e/fake").click();
+  await page.getByTestId("custom-page-own-form-fields-team").fill("core");
+  await page.getByTestId("custom-page-own-form-fields-submit").click();
   // Check starts it with this config, asks it, and shows what it said —
   // before anything is saved or enabled.
-  await expect(page.getByTestId("integration-status-e2e/fake")).toContainText("Off");
-  await page.getByTestId("integration-check-e2e/fake").click();
-  await expect(page.getByTestId("integration-status-e2e/fake")).toContainText("Ready");
-  await page.getByTestId("integration-toggle-e2e/fake").click();
+  await expect(integrations.getByTestId("integration-status-e2e/fake")).toContainText("Off");
+  await integrations.getByTestId("integration-check-e2e/fake").click();
+  await expect(integrations.getByTestId("integration-status-e2e/fake")).toContainText("Ready");
+  await integrations.getByTestId("integration-toggle-e2e/fake").click();
   await until("the fake to be enabled and ready", 30_000, async () => {
     const out = await ipc<{ rows: unknown[][] }>(daemon, "query_sql", {
       sql: "SELECT 1 FROM v_provider_instance WHERE instance = 'e2e/fake' AND enabled = 1 AND state = 'ready'",
     });
     return out.rows.length === 1;
   });
-  await expect(page.getByTestId("integration-status-e2e/fake")).toContainText("Ready");
+  await expect(integrations.getByTestId("integration-status-e2e/fake")).toContainText("Ready");
   const fakeRow = page.locator("tr", { hasText: "fake" }).filter({ hasText: /Fake|fake tracker/i }).first();
   await fakeRow.click({ button: "right" });
   await page.getByTestId("menu-item-lens-action-use-project").click();
@@ -47,8 +53,8 @@ test("a person configures, checks and enables the fake tracker, and an item reac
   await run(daemon, "oxplow.work_item.create", { title: "Kiwi from oxplow" });
   await expect.poll(() => fakeState(daemon.project)).toContain("Kiwi from oxplow");
   // An external item reaches oxplow's models through its collector's read.
-  await page.getByTestId("integration-sync-e2e/fake-work_items").click();
-  await expect(page.getByTestId("integration-collector-e2e/fake-work_items")).toContainText(/1 record/);
+  await integrations.getByTestId("integration-sync-e2e/fake-work_items").click();
+  await expect(integrations.getByTestId("integration-collector-e2e/fake-work_items")).toContainText(/1 record/);
   await openFromLauncher(page, "Board");
   // A tracker's item is on no thread.
   await page.getByTestId("lens-param-show-value").filter({ visible: true }).click();

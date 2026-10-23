@@ -291,16 +291,16 @@ export interface BridgeDeps {
   /** Run its own read-only SQL (`run_component_sql`). */
   querySql?(sql: string, params: SqlCell[]): Promise<SqlQueryResult>;
   /** Show a declared command's form in the host and run it as submitted:
-   *  `{ result }`, or null when the person closed it. A page only. */
+   *  `{ result }`, or null when the person closed it. A host that draws a slideover only. */
   openForm?(command: string, input: unknown): Promise<{ result: unknown } | null>;
   /** Show a form of the component's own in the host: the values as
-   *  submitted, or null when the person closed it. A page only. */
+   *  submitted, or null when the person closed it. A host that draws a slideover only. */
   askForm?(form: OwnForm): Promise<Record<string, unknown> | null>;
   /** Sign in for a provider instance's credential, the host running the
    *  whole redirect flow (the person's browser, the shell's listener, the
-   *  core); resolves how it ended. A page only. */
+   *  core); resolves how it ended. A host that draws a slideover only. */
   signIn?(instance: string, name: string): Promise<SignInResult>;
-  /** End that sign-in under way (it resolves `cancelled`). A page only. */
+  /** End that sign-in under way (it resolves `cancelled`). A host that draws a slideover only. */
   cancelSignIn?(instance: string, name: string): Promise<void>;
   /** The bridge closed: the host ends what it ran for the frame. */
   onClose?(): void;
@@ -345,7 +345,9 @@ export function componentMayOpen(ref: string): boolean {
 const shown = (run: LensRun | null) => (run ? JSON.stringify([run.params, run.result]) : "");
 
 /** What a component shown by a lens may not do: the page is its host's. */
-const PAGE_ONLY = "Only a component shown as a page sets its title, actions, forms or the spec it shows, or signs in.";
+const PAGE_ONLY = "Only a component shown as a page sets its title, actions or the spec it shows.";
+/** What a component in a host that draws no slideover may not do. */
+const NO_FORMS = "This host shows no forms and signs in for no component.";
 /** What a component in a host with no view may not do. */
 const NO_VIEW = "This host gives the component no view: only a page, a replacement or a lens's own page does.";
 
@@ -420,7 +422,7 @@ export function createBridgeHost(
         return;
       case "openForm": {
         if ("form" in r) {
-          if (!deps.askForm) return fail(r.id, "INVALID", PAGE_ONLY);
+          if (!deps.askForm) return fail(r.id, "INVALID", NO_FORMS);
           try {
             const values = await deps.askForm(r.form);
             if (values === null) return fail(r.id, "CANCELLED", "The person closed the form.");
@@ -430,7 +432,7 @@ export function createBridgeHost(
           }
           return;
         }
-        if (!deps.openForm) return fail(r.id, "INVALID", PAGE_ONLY);
+        if (!deps.openForm) return fail(r.id, "INVALID", NO_FORMS);
         try {
           const out = await deps.openForm(r.command, r.input);
           if (out === null) return fail(r.id, "CANCELLED", `The person closed the form for \`${r.command}\`.`);
@@ -441,7 +443,7 @@ export function createBridgeHost(
         return;
       }
       case "signIn":
-        if (!deps.signIn) return fail(r.id, "INVALID", PAGE_ONLY);
+        if (!deps.signIn) return fail(r.id, "INVALID", NO_FORMS);
         try {
           reply(r.id, await deps.signIn(r.instance, r.name));
         } catch (e) {
@@ -449,7 +451,7 @@ export function createBridgeHost(
         }
         return;
       case "cancelSignIn":
-        if (!deps.cancelSignIn) return fail(r.id, "INVALID", PAGE_ONLY);
+        if (!deps.cancelSignIn) return fail(r.id, "INVALID", NO_FORMS);
         try {
           await deps.cancelSignIn(r.instance, r.name);
           reply(r.id, null);

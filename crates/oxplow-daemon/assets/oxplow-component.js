@@ -106,8 +106,9 @@
 
     const tokens = init.tokens || {};
     port.postMessage({ type: "ready" });
-    // A page says how tall its content is, as it changes.
-    if (page && typeof global.ResizeObserver === "function" && global.document) {
+    // The frame says how tall its content is, as it changes: a page's host
+    // sits it above what it draws, a section's fits it to its content.
+    if (typeof global.ResizeObserver === "function" && global.document) {
       const root = global.document.documentElement;
       let last = -1;
       const observer = new global.ResizeObserver((entries) => {

@@ -44,13 +44,19 @@ import { componentMemoryProblem, useRememberedStore } from "../prefs/remembered.
 
 export type BridgeHost = ReturnType<typeof createBridgeHost>;
 
+/** What a host that draws a slideover gives its frame: a declared command's
+ *  form, and a form of the frame's own schema. With them the frame may also
+ *  ask the host to sign in. */
+export interface FormDeps {
+  openForm(command: string, input: unknown, version: string): Promise<{ result: unknown } | null>;
+  /** Show a form of the frame's own and answer the values submitted. */
+  askForm(form: OwnForm): Promise<Record<string, unknown> | null>;
+}
+
 /** The page-only calls a frame shown as a page may make. */
 export interface PageDeps {
   setTitle(title: string): void;
   setActions(actions: FrameAction[]): void;
-  openForm(command: string, input: unknown, version: string): Promise<{ result: unknown } | null>;
-  /** Show a form of the frame's own and answer the values submitted. */
-  askForm(form: OwnForm): Promise<Record<string, unknown> | null>;
   /** Run and draw a lens spec under the frame (null clears it). */
   showSpec(spec: LensSpec | null): Promise<ShownRows | null>;
   /** The frame's content height, as it changes. */
@@ -118,12 +124,14 @@ export function ComponentFrame({
   title,
   page = null,
   pageDeps,
+  formDeps,
   view = null,
   hostRef: hostRefProp,
   readyTimeoutMs,
   onFail,
   onReady,
   height = null,
+  fit = false,
 }: {
   src: string;
   /** The bundle version it was loaded at: what it invokes with. */
@@ -136,6 +144,8 @@ export function ComponentFrame({
   title: string;
   page?: PageInit | null;
   pageDeps?: PageDeps;
+  /** Forms and signing in, where the host can draw them (a page, a lens's own component). */
+  formDeps?: FormDeps;
   /** Its host's view, or none (a tile, a slot). */
   view?: HostedView | null;
   /** Receives the bridge host (a page presses its actions through it). */
@@ -146,11 +156,16 @@ export function ComponentFrame({
   /** A page's frame at its content's height (what it said with `size`),
    *  when the page draws more under it; none fills the page. */
   height?: number | null;
+  /** The frame is as tall as its content says (`size`): a section of a
+   *  document, which has no height to fill. */
+  fit?: boolean;
 }) {
   const nav = useOptionalPageNavigation();
   const [asking, setAsking] = useState<{ command: string; answer(ok: boolean): void } | null>(null);
   // Why its last invoke was refused: shown here, not left to the frame.
   const [refused, setRefused] = useState<string | null>(null);
+  // Its content's height, when the host fits the frame to it.
+  const [fitHeight, setFitHeight] = useState<number | null>(null);
   const frameRef = useRef<HTMLIFrameElement | null>(null);
   const ownHostRef = useRef<BridgeHost | null>(null);
   const hostRef = hostRefProp ?? ownHostRef;
@@ -159,6 +174,8 @@ export function ComponentFrame({
   runRef.current = run;
   const pageDepsRef = useRef(pageDeps);
   pageDepsRef.current = pageDeps;
+  const formDepsRef = useRef(formDeps);
+  formDepsRef.current = formDeps;
   const viewRef = useRef(view);
   viewRef.current = view;
 
@@ -273,16 +290,22 @@ export function ComponentFrame({
           ? {
               setTitle: (t: string) => pageDepsRef.current?.setTitle(t),
               setActions: (a: FrameAction[]) => pageDepsRef.current?.setActions(a),
-              openForm: (command: string, input: unknown) =>
-                pageDepsRef.current ? pageDepsRef.current.openForm(command, input, version) : Promise.resolve(null),
-              askForm: (form: OwnForm) => pageDepsRef.current?.askForm(form) ?? Promise.resolve(null),
-              signIn: (instance: string, name: string) => signIns.signIn(instance, name),
-              cancelSignIn: (instance: string, name: string) => signIns.cancel(instance, name),
-              onClose: () => void signIns.closeAll(),
               showSpec: (spec: LensSpec | null) => pageDepsRef.current?.showSpec(spec) ?? Promise.resolve(null),
               size: (h: number) => pageDepsRef.current?.size(h),
             }
+          : fit
+            ? { size: (h: number) => setFitHeight(h) }
+            : {}),
+        ...(formDeps
+          ? {
+              openForm: (command: string, input: unknown) =>
+                formDepsRef.current ? formDepsRef.current.openForm(command, input, version) : Promise.resolve(null),
+              askForm: (form: OwnForm) => formDepsRef.current?.askForm(form) ?? Promise.resolve(null),
+              signIn: (instance: string, name: string) => signIns.signIn(instance, name),
+              cancelSignIn: (instance: string, name: string) => signIns.cancel(instance, name),
+            }
           : {}),
+        onClose: () => void signIns.closeAll(),
         ...(hosted
           ? {
               setViewParams: (params: Record<string, string | null>) => viewRef.current?.setViewParams(params),
@@ -318,7 +341,7 @@ export function ComponentFrame({
         referrerPolicy="no-referrer"
         src={src}
         onLoad={onLoad}
-        style={page ? (height !== null ? { ...sizedFrameStyle, height } : pageFrameStyle) : frameStyle}
+        style={page ? (height !== null ? { ...sizedFrameStyle, height } : pageFrameStyle) : fit ? { ...fitFrameStyle, height: fitHeight ?? 80 } : frameStyle}
       />
       {refused ? (
         <div data-testid="custom-component-refused" style={noteStyle}>
@@ -357,6 +380,8 @@ export const badgeStyle: CSSProperties = {
 const frameStyle: CSSProperties = { width: "100%", flex: 1, minHeight: 240, border: "1px solid var(--border-subtle)", borderRadius: 4 };
 // A page's frame is the page: no card border.
 const pageFrameStyle: CSSProperties = { width: "100%", flex: 1, minHeight: 0, border: "none" };
+// A section's frame: its content's height, no card border.
+const fitFrameStyle: CSSProperties = { width: "100%", flex: "none", minHeight: 40, border: "none" };
 // A page's frame above what the page draws under it: its content's height.
 const sizedFrameStyle: CSSProperties = { width: "100%", flex: "none", minHeight: 120, border: "none" };
 export const noteStyle: CSSProperties = { color: "var(--text-secondary)", fontSize: "var(--text-xs)", marginBottom: 4 };

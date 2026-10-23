@@ -120,7 +120,7 @@ export function DocumentLayout({ testId, title, intro, sections, slot, slotParam
             ) : run.error ? (
               <p className="ox-error">{run.error}</p>
             ) : run.run ? (
-              <LensResultView run={run.run} onOpenPage={onOpenPage} streamId={streamId} toolbar={false} />
+              <LensResultView run={run.run} onOpenPage={onOpenPage} streamId={streamId} toolbar={false} fitCustom />
             ) : null}
           </Section>
         );

@@ -245,6 +245,8 @@ interface LensResultViewProps {
   /** For a `viz: custom` lens: its host's view, where the host shares
    *  one with its component (a replacement, a lens's own page). */
   componentView?: HostedView | null;
+  /** A `viz: custom` component's frame fits its content's height: a section of a document. */
+  fitCustom?: boolean;
   /** Set one of the lens's params (a row click on a column that
    *  `select`s it, with the row it picked); without it, rows are no
    *  picks. */
@@ -515,6 +517,7 @@ function RowsBody({
   onCustomFailure,
   onCustomReady,
   componentView = null,
+  fitCustom = false,
   onSetParam,
   marks,
   tree = null,
@@ -947,7 +950,7 @@ function RowsBody({
   return (
     <>
       {compact ? null : <ResultCompleteness result={result} />}
-      <LensViz {...{ run, result, lens, cols, cell, first, compact, streamId, onOpenPage, rowMenu, rowsView, onCustomFailure, onCustomReady, componentView }} tree={treeNodesDrawn ? { nodes: treeNodesDrawn, open: tree?.open ?? null } : null} />
+      <LensViz {...{ run, result, lens, cols, cell, first, compact, streamId, onOpenPage, rowMenu, rowsView, onCustomFailure, onCustomReady, componentView, fitCustom }} tree={treeNodesDrawn ? { nodes: treeNodesDrawn, open: tree?.open ?? null } : null} />
       {ctxMenu.menu}
     </>
   );
@@ -1098,6 +1101,7 @@ function LensViz({
   onCustomFailure,
   onCustomReady,
   componentView,
+  fitCustom,
   tree,
 }: {
   run: LensRun;
@@ -1116,6 +1120,7 @@ function LensViz({
   onCustomFailure?(reason: string): void;
   onCustomReady?(): void;
   componentView: HostedView | null;
+  fitCustom: boolean;
 }) {
   switch (lens.viz) {
     case "bar":
@@ -1173,6 +1178,7 @@ function LensViz({
           onFailure={onCustomFailure}
           onReady={onCustomReady}
           view={componentView}
+          fit={fitCustom}
         />
       );
     case "table":

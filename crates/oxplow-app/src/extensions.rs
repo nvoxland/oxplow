@@ -2015,7 +2015,7 @@ pub const SLOTS: &[SlotSpec] = &[
     SlotSpec::sections("settings.lsp.sections", &[], &[]),
     SlotSpec::sections("settings.extensions.sections", &[], &[]),
     SlotSpec::sections("settings.data.sections", &[], &[]),
-    SlotSpec::sections("settings.integrations.sections", &[], &["integrations"]),
+    SlotSpec::sections("settings.integrations.sections", &[], &[]),
     SlotSpec::sections("settings.ai.sections", &[], &[]),
 ];
 
@@ -9551,7 +9551,7 @@ commands:
         write(
             dir.path(),
             ".oxplow/extensions/mine/extension.yaml",
-            "manifest: 2\nname: mine\nintent:\n  purpose: test\nui:\n  slots:\n    - { slot: settings.integrations.sections, lens: status, at: { after: integrations } }\n",
+            "manifest: 2\nname: mine\nintent:\n  purpose: test\nui:\n  slots:\n    - { slot: settings.integrations.sections, lens: status, at: start }\n",
         );
         write(
             dir.path(),
@@ -9712,7 +9712,7 @@ commands:
         assert!(errs.contains("`size` is a dashboard tile's"), "{errs}");
         let warns = ext.warnings.join("\n");
         assert!(
-            warns.contains("has no part `gone` (it has `integrations`)"),
+            warns.contains("has no part `gone` (it has none)"),
             "{warns}"
         );
     }
