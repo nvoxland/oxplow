@@ -857,11 +857,8 @@ impl LiveSources {
         filters: &[(String, String)],
     ) -> Result<(Stream, std::path::PathBuf, Vec<(String, String)>), DomainError> {
         let stream = self.stream(stream).await?;
-        let ws = self
-            .worktrees
-            .resolve(Some(&stream.id.to_string()))
-            .await
-            .into_local_path();
+        let ws =
+            crate::worktrees::workspace_path(self.worktrees.project_dir(), &stream.worktree_path);
         let pinned = |column: &str| {
             filters
                 .iter()
