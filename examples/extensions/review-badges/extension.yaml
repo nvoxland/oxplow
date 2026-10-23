@@ -25,4 +25,4 @@ imports:
   - { id: reviews, contribution: oxplow:oxplow/model?model=effort-review/reviews, version: 2, optional: true }
 ui:
   slots:
-    - { slot: work_item.detail.body, lens: item-review }
+    - { slot: oxplow-foundation/work-item.sections, lens: item-review }

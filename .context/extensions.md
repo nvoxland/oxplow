@@ -2271,8 +2271,7 @@ they live under `ui:`.
 | Slot | Core page | Params |
 |---|---|---|
 | `effort.review.details` | diff-view for an effort | `effort_id`, `effort`, `change_id` |
-| `work_item.detail.body` | WorkItemPage, below the body | `uri` | — |
-| `work_item.detail.sidebar` | WorkItemPage, in the side rail | `uri` | — |
+| `oxplow-foundation/work-item.sections` | the Work Item page (a document: parts `state`, `fields`, `body`, `info`, `links`, `comments`, `activity`) | its params (`uri`, `thread_id`, `stream_id`) |
 | `thread.plan.header` | PlanPane (compact strip) | `thread_id` |
 | `oxplow-foundation/commit.sections` | the commit page (a document: parts `detail`, `files`) | its params (`uri`, `sha`, `stream_id`) and its row (`change_id`, `base_revision`, `head_revision`) |
 | `oxplow-foundation/uncommitted.sections` | the Uncommitted Changes page (a document: parts `commit`, `files`) | its params (`stream_id`) and its row (`change_id`, `base_revision`, `head_revision`) |
@@ -2313,8 +2312,8 @@ it props it doesn't know.
 |---|---|---|---|---|---|
 | `work_item.board` | the Board's columns of cards (the `board-cards` part of the `board` document) | `work_items` | no | `scope` (`thread` / `backlog` / `all`), `thread_id` (the viewed thread; it applies when `scope` is `thread`) | — |
 | `work_item.list` | the Tasks page's list (`TasksList`, `TasksPage`): the scope picker, detail pane and backlog drawer stay oxplow's; the lens's `stream_id` is the scope's stream | `work_items` | no | `scope` (`thread` / `stream` / `all`), `thread_id` (the thread when `scope` is `thread`, else null) | — |
-| `work_item.detail` | a work item's editor, its title and body (`TaskDetail`, `WorkItemPage`): the rail (state pill, Move To, fields, Delete), Comment / Link, slots and activity stay oxplow's | `work_items` | no | `uri` (the item) | — |
-| `work_item.detail.state` | a work item's State (`WorkItemPage`'s rail; P10) — never its Move To, which stays oxplow's canonical states, so a replacement can't strand an item (tsk919) | `work_items` | yes | `uri` (the item) | — |
+| `work_item.detail` | a work item's description editor (the `body` part of the `work-item` document): the state, fields, About, links, comments, activity and the mounts stay oxplow's | `work_items` | no | `uri` (the item) | — |
+| `work_item.detail.state` | a work item's State (the `state` part of the `work-item` document) — never its Move To (the About part's menu), so a replacement can't strand an item | `work_items` | yes | `uri` (the item) | — |
 | `effort.verdict` | an effort's verdict, the first line of its page (`DiffViewPage`). Core has **none of its own**: with no replacement, or `oxplow` chosen, the page shows nothing. oxplow-bundled's `effort-verdict` is the default | `effort_policy` | no | `effort_id` (the effort's row id) | — |
 | `vcs.history.graph` | Git History's commits (a part of the `git-history` document): oxplow's own is a plain list, the part's lens (`git-history-commits`) | `vcs` | no | `head_sha` (the stream's head), `reveal_sha` (a commit to scroll to and mark, or null), `limit` | `q`, `author`, `branch` (Git History's filters; v2) |
 
@@ -2375,7 +2374,7 @@ fallback={…}>` (a core page that still places one). `useReplacement` reads the
 enabled extensions' replacements of the target and, only when one
 exists, what decides it:
 - **bound**: the host passes the provider of the thing it shows
-  (`<Replaceable provider={item.provider}>` on `work_item.detail.state`):
+  (`<Replaceable provider={item.provider}>` on `work_item.detail.state`, as the document's `state` part):
   the **item's own provider** decides, whichever is active, so another
   provider's item never gets a lens that sends this one's states
   (tsk918). Which extension brings it is read from
@@ -4717,6 +4716,7 @@ What moves out of core, and what it becomes:
 | Git Commit and Uncommitted Changes pages | **done:** the `commit` and `uncommitted` documents (a `query` row for the change, declared in `columns:`; parts `commit-detail`, `commit-files`, `uncommitted-commit`, `uncommitted-files`); the analysis moves to the `oxplow-foundation/commit.sections` and `oxplow-foundation/uncommitted.sections` mounts (the old `vcs.commit.details`, `vcs.status.header` and `vcs.status.details` slots are gone); the commit tab is labelled by its sha, not its subject, and the file totals line and Cherry-pick's inline confirm are gone; `GitCommitPage` and `UncommittedChangesPage` are deleted |
 | Comments inbox | **done:** the `comments` document lens (`comments-threads`, a grouped table over `v_comment` with `select` on the `comment` param; `comments-conversation`, over `v_comment_message`); the resolved filter is a static `choice` ladder (the old one was cut to the oldest resolved comment) and "Go to location" is a plain link, so it no longer scrolls to the anchor; `CommentsInboxPage` and `comments-filter` are gone |
 | Directory page | **done:** the `directory` lens, the renderer of `oxplow/dir` (`pages:` entry `lens: directory`, `label: "{{param.path}}"`); `DirectoryPage` is gone |
+| Work Item page | **done:** the `work-item` document (parts `state`, `fields`, `body`, `info`, `links`, `comments`, `activity`) with `comments: true`; `state` and `body` are the `work_item.detail.state` and `work_item.detail` replaceables, a part whose list lacks the feature (`needs: [work_items.links]`, `[work_items.comments]`) is left out, and `info` offers Bring to this thread, Send to backlog and Delete from its right-click menu by what the list declares. The `work_item.detail.body` / `.sidebar` slots became `oxplow-foundation/work-item.sections`; the tab is labelled by the item's id, not its title; `WorkItemPage` is deleted |
 | Wiki page | **done:** the `wiki-page` document (parts `body`, `info`, `refs`) with `comments: true`; the editor is the `markdown` viz, so saving, drafts, comments and Contents come from the one component. The freshness chip moved into the `info` section; `WikiPage`, `WikiPageTab`, `useWikiPageController` and `wikiFreshness` are gone |
 | Board page | **done:** the `board` document, one `replaceable: work_item.board` part `board-cards` (`viz: board` grouped by state, a `drag: true` move action and `Move to` row actions); `scope` comes from the page's `show` filter through the document's query row. Cards show the declared enum fields as text (no `FieldBadge` colours). `BoardPage` and `WorkBoard` are gone; a right-click anywhere on a lens row, a link in it included, opens the row's menu (`onContextMenuCapture`) |
 | Settings → AI | **done:** foundation lenses in `settings.ai.sections`: `ai-providers` (`v_ai_provider`; Test… and Remove… row actions, Remove asks first), `ai-provider-form` (a `form` lens over `oxplow.ai.set_provider`, its `key` a `secret: true` field, `kind` chosen from `v_capability_provider`), `ai-roles` (`v_ai_role`; Assign… / Unassign over `oxplow.ai.set_role`), `ai-calls` (the last 7 days of `v_ai_call`). `set_provider` and `remove_provider` now announce `ConfigChanged` so the lists follow. `AiSection`, `aiSettingsModel` and the AI `api.ts` wrappers are gone |

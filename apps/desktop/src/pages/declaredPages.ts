@@ -14,7 +14,6 @@ export const APP_RENDERERS = [
   "editor",
   "lens",
   "metric-detail",
-  "work-item",
 ] as const;
 
 export type AppRendererName = (typeof APP_RENDERERS)[number];

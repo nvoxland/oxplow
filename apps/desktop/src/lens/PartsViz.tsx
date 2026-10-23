@@ -79,7 +79,7 @@ function PartBody({
   // part selects that the page doesn't declare stays plain.
   const selects = run.run.lens.columns.find((c) => c.select)?.select;
   const set = selects && selects in params ? onSetParam : undefined;
-  const own = <LensResultView run={run.run} onOpenPage={onOpenPage} streamId={streamId} maxRows={maxRows} toolbar={false} onSetParam={set} />;
+  const own = <LensResultView run={run.run} onOpenPage={onOpenPage} streamId={streamId} maxRows={maxRows} toolbar={false} partButtons onSetParam={set} />;
   // A part standing in for a core component: its lens is oxplow's own,
   // shown unless an extension replaces the target; the replacement is given
   // the part's resolved params (the contract the loader checked it declares).
@@ -96,13 +96,16 @@ function PartBody({
 export function DocumentViz(props: PartsVizProps) {
   const runs = usePartRuns(props);
   const { parts, streamId, onOpenPage, params, onSetParam } = props;
-  const lensParts = parts.filter((p) => p.lens).map((p) => ({ part: p, run: runs?.get(p.id)?.run ?? null, error: runs?.get(p.id)?.error ?? null }));
+  // A part that needs what isn't active (a link, where the work list keeps
+  // none) isn't offered at all, rather than saying what it needs.
+  const inactive = new Set(parts.filter((p) => runs?.get(p.id)?.run?.inactive).map((p) => p.id));
+  const lensParts = parts.filter((p) => p.lens && !inactive.has(p.id)).map((p) => ({ part: p, run: runs?.get(p.id)?.run ?? null, error: runs?.get(p.id)?.error ?? null }));
   const empty = new Set(runs ? foldEmpty(lensParts).empty.map((e) => e.part.id) : []);
   const folded = parts.filter((p) => empty.has(p.id));
   return (
     <div data-testid="lens-document">
       {parts
-        .filter((p) => !empty.has(p.id))
+        .filter((p) => !empty.has(p.id) && !inactive.has(p.id))
         .map((part) => {
           const run = runs?.get(part.id);
           return (

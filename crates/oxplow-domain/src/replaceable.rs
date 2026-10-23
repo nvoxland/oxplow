@@ -68,9 +68,9 @@ pub const REPLACEABLE: &[Replaceable] = &[
         view: &[],
         label: "list",
     },
-    // A work item's editor (`TaskDetail`: its title and body): `uri` is
-    // the item. The page's rail (the state pill and Move To, fields,
-    // Delete), its Comment and Link, slots and activity stay oxplow's.
+    // A work item's description editor (the `body` part of the `work-item`
+    // document): `uri` is the item. Its state, fields, About, links,
+    // comments, activity and mounts stay oxplow's.
     Replaceable {
         target: "work_item.detail",
         capability: "work_items",
@@ -78,12 +78,13 @@ pub const REPLACEABLE: &[Replaceable] = &[
         version: 1,
         props: &["uri"],
         view: &[],
-        label: "detail editor",
+        label: "description editor",
     },
-    // A work item's state control (`WorkItemPage`'s State; its Move To is
-    // never replaced, so an item can always move — tsk919): `uri` is the
-    // item (P10). The item's own provider's extension replaces it,
-    // whichever is active (tsk918): it shows that provider's own states.
+    // A work item's state control (the `state` part of the `work-item`
+    // document; its Move To is never replaced, so an item can always
+    // move): `uri` is the item. The item's own provider's extension
+    // replaces it, whichever is active: it shows that provider's own
+    // states.
     Replaceable {
         target: "work_item.detail.state",
         capability: "work_items",

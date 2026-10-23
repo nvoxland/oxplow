@@ -38,10 +38,11 @@ test("deleting an item asks first, then it's gone from the board", async ({ page
   await page.goto("/");
   await openFromLauncher(page, "Board");
   await page.getByTestId("lens-board").getByText("Card to delete").click();
-  await page.getByTestId("task-rail-delete-trigger").click();
+  await page.getByTestId("lens-part-info").getByTestId("lens-detail").click({ button: "right" });
+  await page.getByTestId("menu-item-lens-action-delete").click();
   // Asked, and nothing is gone until the person confirms.
-  await expect(page.getByTestId("task-rail-delete-confirm")).toBeVisible();
-  await page.getByTestId("task-rail-delete-confirm").click();
+  await expect(page.getByTestId("lens-action-confirm-run")).toBeVisible();
+  await page.getByTestId("lens-action-confirm-run").click();
   await openFromLauncher(page, "Board");
   // The board has loaded its cards: what's absent is gone, not unloaded.
   await expect(page.getByTestId("lens-board")).toContainText("Card to keep");

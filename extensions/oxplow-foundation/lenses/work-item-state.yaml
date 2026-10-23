@@ -1,0 +1,12 @@
+title: State
+description: Where the item is. Save moves it; whatever its effects are (an effort opening or closing) follow from the move.
+params:
+  - { name: uri }
+query: |
+  SELECT w.uri, w.state AS "to" FROM v_work_item w WHERE w.uri = :uri
+viz: form
+form:
+  command: oxplow.work_item.transition
+  mode: edit
+  fields: ["to"]
+hidden: true

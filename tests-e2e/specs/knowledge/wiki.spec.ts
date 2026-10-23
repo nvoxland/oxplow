@@ -19,7 +19,7 @@ test("a written page renders, and a task link in it opens the task", async ({ pa
   const wiki = page.locator('[data-testid="page-lens"]:visible');
   await expect(wiki).toContainText("First do");
   await wiki.locator(`a[href="${created.result.uri}"]`).click();
-  await expect(page.getByTestId("task-rail-delete-trigger")).toBeVisible();
+  await expect(page.getByTestId("lens-part-state")).toBeVisible();
   await expect(page.locator("body")).toContainText("Wombat follow-up");
 });
 

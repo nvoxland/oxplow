@@ -52,7 +52,6 @@ import {
   type WorkList,
 } from "./workItems.js";
 import { useWorkListProfile } from "./useWorkListProfile.js";
-import { workItemLabel } from "./workItemRef.js";
 import {
   closeOpenFile,
   createEmptyFileSession,
@@ -114,12 +113,11 @@ import { DeclaredPageView } from "./pages/DeclaredPageView.js";
 import { kindForTabId } from "./pageKinds.js";
 import { declaredPage, isAppRenderer, isBuiltInPage, type AppRendererName } from "./pages/declaredPages.js";
 import { useExtensions } from "./extensionsStore.js";
-import { WorkItemPage } from "./pages/WorkItemPage.js";
 import { PanelRunsProvider } from "./components/Panels/PanelRunsContext.js";
 import { useAlerts } from "./components/Alerts/useAlerts.js";
 import { useAlertToasts } from "./components/Alerts/useAlertToasts.js";
 import { DomCommentLayer } from "./components/Comments/DomCommentLayer.js";
-import { agentSessionRef, diskFilePath, fileOf, lensRef, refFromTabId, directoryRef, effortDiffRef, externalUrlRef, fileRef, gitCommitRef, pageTabRef, pagePayload, recordedPageKind, isPage, diffRef, newSessionRef, newStreamRef, alertsRef, wikiPageRef, streamSettingsRef, threadSettingsRef, workItemTabRef, viewParamsOf, withViewParams, lineOf, fileRefAt, resourceParamsOf, type PagePayload } from "./tabs/pageRefs.js";
+import { agentSessionRef, diskFilePath, fileOf, lensRef, refFromTabId, directoryRef, externalUrlRef, fileRef, gitCommitRef, pageTabRef, pagePayload, recordedPageKind, isPage, diffRef, newSessionRef, newStreamRef, alertsRef, wikiPageRef, streamSettingsRef, threadSettingsRef, workItemTabRef, viewParamsOf, withViewParams, lineOf, fileRefAt, resourceParamsOf, type PagePayload } from "./tabs/pageRefs.js";
 import { requestNewThread } from "./new-thread-bus.js";
 import { recordOpError, setOpErrorContext } from "./opErrors.js";
 import { classifyExternalUrl } from "./external-url-allowlist.js";
@@ -2246,28 +2244,6 @@ export function App() {
           closable: true,
           render: () => (
             <LensPage lensId={lensId} params={resourceParamsOf(ref)} stream={stream} onOpenPage={nav.navOpen} />
-          ),
-        };
-      },
-      "work-item": (ref, nav) => {
-        // Every work item, whichever list it's on, has one page.
-        const itemRef = identityOf(ref.id) ?? ref.id;
-        const loaded = selectedThreadWork?.all.find((i) => i.uri === itemRef);
-        return {
-          id: ref.id,
-          label: loaded ? loaded.title : workItemLabel(itemRef),
-          closable: true,
-          render: () => (
-            <WorkItemPage
-              workItemRef={itemRef}
-              stream={stream}
-              thread={selectedThread}
-              onOpenPage={nav.navOpen}
-              onOpenFile={(p) => nav.navOpenFile(p)}
-              onShowEffortDiff={(effortId) => nav.navOpen(effortDiffRef(effortId))}
-              onOpenDiff={nav.navOpenDiff}
-              onDeleted={(deleted) => closeOrGoBackPageTab(workItemTabRef(deleted).id)}
-            />
           ),
         };
       },

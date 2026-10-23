@@ -138,7 +138,7 @@ lenses, collectors, commands, effects, advisories, skills or providers. Their
 exports and dependent mounts are withheld too. Each unavailable optional
 import is one warning naming why and everything it withheld:
 `` optional import `items` for `oxplow:oxplow/model?model=maker/items` v1 is unavailable: maker
-is disabled; withheld: `oxplow:oxplow/lens?lens=review-ui/items`, `oxplow:oxplow/slot?slot=review-ui/work_item.detail.body-0` ``.
+is disabled; withheld: `oxplow:oxplow/lens?lens=review-ui/items`, `oxplow:oxplow/slot?slot=review-ui/oxplow-foundation.work-item.sections-0` ``.
 Missing required imports and
 dependency cycles block the extension with source-located errors.
 
@@ -605,7 +605,7 @@ The same table is the `v_replaceable` model.
 |---|---|---|---|---|---|
 | `work_item.board` | board | no | 1 | `scope`, `thread_id` | — |
 | `work_item.list` | list | no | 1 | `scope`, `thread_id` | — |
-| `work_item.detail` | detail editor | no | 1 | `uri` | — |
+| `work_item.detail` | description editor | no | 1 | `uri` | — |
 | `work_item.detail.state` | state control | yes | 1 | `uri` | — |
 | `vcs.history.graph` | history graph | no | 2 | `head_sha`, `reveal_sha`, `limit` | `q`, `author`, `branch` |
 | `effort.verdict` | effort verdict | no | 1 | `effort_id` | — |

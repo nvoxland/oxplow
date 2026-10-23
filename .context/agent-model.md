@@ -1805,7 +1805,7 @@ row keyed by the event (`agent_token_usage.cause`).
 transcript the agent wrote — what the person typed into the real CLI.
 There is no second input box and no "send prompt" tool. Everything reads
 the rows through `v_token_usage`: the bundled `task-tokens` lens
-(`work_item.detail.body` slot), `thread-tokens` (`thread.plan.header`)
+(`oxplow-foundation/work-item.sections` slot), `thread-tokens` (`thread.plan.header`)
 and the usage lenses. Tables: [data-model.md](./data-model.md).
 
 ### Collection command and skill

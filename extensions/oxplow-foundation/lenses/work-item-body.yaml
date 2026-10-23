@@ -1,0 +1,11 @@
+title: Description
+description: The item's text. Edit it here and Save.
+params:
+  - { name: uri }
+query: |
+  SELECT w.uri, coalesce(w.body, '') AS body FROM v_work_item w WHERE w.uri = :uri
+viz: markdown
+markdown: { text: body }
+actions:
+  - { id: save, label: Save, command: oxplow.work_item.update, edit: true, fixed: [uri], input: { uri: "{{row.uri}}", body: "{{row.body}}" } }
+hidden: true

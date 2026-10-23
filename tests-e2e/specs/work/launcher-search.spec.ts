@@ -16,7 +16,7 @@ test("search finds a task and a wiki page, and opens them", async ({ page, daemo
   await page.goto("/");
   await searchLauncher(page, "quokka");
   await page.getByTestId(`launcher-hit-${created.result.uri}`).click();
-  await expect(page.getByTestId("task-rail-delete-trigger")).toBeVisible();
+  await expect(page.getByTestId("lens-part-state")).toBeVisible();
   await expect(page.locator("body")).toContainText("Quokka migration");
   await searchLauncher(page, "quokka");
   await page.getByTestId("launcher-hit-oxplow:oxplow/wiki?slug=quokka-notes").click();

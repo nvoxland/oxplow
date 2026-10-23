@@ -566,6 +566,15 @@ async fn form_start_unpinned(
             }
         }
     }
+    // An object field's column holds JSON text (a work item's `native`):
+    // the form starts from the object.
+    for field in form.fields.iter().flatten().filter(|f| f.from().is_some()) {
+        if let Some(Value::String(text)) = values.get(field.name()) {
+            if let Ok(object @ Value::Object(_)) = serde_json::from_str::<Value>(text) {
+                values.insert(field.name().to_string(), object);
+            }
+        }
+    }
     // A secret is the command's to keep out of its record, and never
     // starts with a value.
     for field in form.fields.iter().flatten().filter(|f| f.secret()) {

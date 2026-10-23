@@ -82,7 +82,6 @@ mock.module("../tauri-bridge/generated/bindings.js", () => ({
 }));
 
 const { PageNavigationContext } = await import("../tabs/PageNavigationContext.js");
-const { WorkItemPage } = await import("./WorkItemPage.js");
 const { DocumentViz } = await import("../lens/PartsViz.js");
 const { Replaceable } = await import("../components/Replaceable.js");
 const { DiffFileHeaderSlot } = await import("../components/Diff/DiffFileHeaderSlot.js");
@@ -119,17 +118,6 @@ async function expectPlain(view: ReturnType<typeof render>) {
   expect(view.queryByTestId("page-nav-commands") === null).toBe(true);
   expect(view.container.querySelector('[title^="from "]') === null).toBe(true);
 }
-
-test("another provider's item, with every flag off, is its core content and no more", async () => {
-  const view = mount("oxplow:oxplow/work_item?id=W-1&provider=fake", <WorkItemPage workItemRef="oxplow:oxplow/work_item?id=W-1&provider=fake" stream={null} thread={null} onOpenPage={() => {}} />);
-  await waitFor(() => expect(view.getByTestId("work-item-page").textContent).toContain("It breaks."));
-  expect(view.queryByTestId("work-item-comment-open")).toBeNull();
-  expect(view.queryByTestId("work-item-link-open")).toBeNull();
-  expect(view.queryByTestId("work-item-parent")).toBeNull();
-  expect(view.queryByTestId("task-rail-delete-trigger")).toBeNull();
-  expect(view.getByLabelText("State")).toBeTruthy();
-  await expectPlain(view);
-});
 
 test("history renders plain", async () => {
   const history = mount("oxplow:oxplow/page?page=git-history", historyPage());
@@ -259,19 +247,16 @@ test("an extension's view replaces the Board, whichever list is active", async (
   expect(lensRuns).toEqual([["views/board", { scope: "all", thread_id: null }]]);
 });
 
-// A work item's editor (its title and body) is replaceable; the rail — the
-// state pill and Move To — and the rest of the page stay oxplow's, so an
-// item can always move whatever the editor offers.
-test("an extension's editor replaces a work item's title and body, and the rail stays", async () => {
+// A work item's description editor is replaceable (the `body` part of the
+// Work Item document); the document's other parts stay oxplow's.
+test("an extension's editor replaces a work item's description", async () => {
   extensions = [replacing("views", "work_item.detail", "edit", ["uri"], "detail editor")];
-  const page = mount("oxplow:oxplow/work_item?id=W-1&provider=fake", <WorkItemPage workItemRef="oxplow:oxplow/work_item?id=W-1&provider=fake" stream={null} thread={null} onOpenPage={() => {}} />);
+  const uri = "oxplow:oxplow/work_item?id=W-1&provider=fake";
+  const page = mount(uri, <Replaceable target="work_item.detail" props={{ uri }} streamId="str1" onOpenPage={() => {}} fallback={<div data-testid="plain-body" />} />);
   const replaced = await waitFor(() => page.getByTestId("replacement-work_item.detail"));
   expect(replaced.textContent).toContain("replaced by views");
-  expect(lensRuns).toEqual([["views/edit", { uri: "oxplow:oxplow/work_item?id=W-1&provider=fake" }]]);
-  expect(page.getByLabelText("State")).toBeTruthy();
-  expect(replaced.contains(page.getByLabelText("State"))).toBe(false);
-  // Oxplow's own title field isn't there; the lens is.
-  expect(page.queryByPlaceholderText("Untitled")).toBeNull();
+  expect(lensRuns).toEqual([["views/edit", { uri }]]);
+  expect(page.queryByTestId("plain-body")).toBeNull();
 });
 
 // provider's states (tsk918).
@@ -307,24 +292,20 @@ test("a work item's own provider's extension replaces its state control, not the
       freshness: [],
     });
   };
-  const page = () => mount("oxplow:oxplow/work_item?id=W-1&provider=fake", <WorkItemPage workItemRef="oxplow:oxplow/work_item?id=W-1&provider=fake" stream={null} thread={null} onOpenPage={() => {}} />);
+  const uri = "oxplow:oxplow/work_item?id=W-1&provider=fake";
+  const page = () =>
+    mount(uri, <Replaceable target="work_item.detail.state" props={{ uri }} provider="fake" streamId="str1" onOpenPage={() => {}} fallback={<div data-testid="plain-state" />} />);
   try {
     const replaced = page();
     await waitFor(() => expect(replaced.getByTestId("replacement-work_item.detail.state").textContent).toContain("replaced by y"));
-    // Oxplow's state control isn't the replacement's to take: whatever
-    // states the lens offers, the item can always move.
-    expect(replaced.getByLabelText("State")).toBeTruthy();
-    expect(replaced.getByTestId("replacement-work_item.detail.state").contains(replaced.getByLabelText("State"))).toBe(false);
-    expect(lensRuns).toEqual([["y/state", { uri: "oxplow:oxplow/work_item?id=W-1&provider=fake" }]]);
-    // The rest of the page is still oxplow's.
-    expect(replaced.getByTestId("work-item-page").textContent).toContain("It breaks.");
+    expect(lensRuns).toEqual([["y/state", { uri }]]);
     cleanup();
     lensRuns.length = 0;
 
     // A provider no extension brings: oxplow's own state control alone.
     fakeExtension = null;
     const own = page();
-    await waitFor(() => expect(own.getByLabelText("State")).toBeTruthy());
+    await waitFor(() => expect(own.getByTestId("plain-state")).toBeTruthy());
     expect(own.container.querySelector('[data-testid^="replacement-"]')).toBeNull();
     expect(lensRuns).toEqual([]);
   } finally {

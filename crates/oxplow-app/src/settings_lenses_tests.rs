@@ -806,3 +806,112 @@ async fn the_wiki_page_reads_its_body_even_before_it_is_written() {
         .rows
         .is_empty());
 }
+
+/// A work item's page: the parts read the item by its uri, its list's
+/// features switch the gated buttons, and links show from both ends.
+#[tokio::test]
+async fn the_work_item_page_reads_the_item_its_links_and_its_comments() {
+    let fx = crate::test_fixtures::services_with_task_effort().await;
+    let thread = fx.thread.to_string();
+    for title in ["The item", "Its blocker"] {
+        command_task(
+            &fx,
+            "oxplow.work_item.create",
+            serde_json::json!({ "title": title, "body": "Some words.", "thread": thread }),
+        )
+        .await;
+    }
+    let all = run_task(
+        &fx,
+        "board-cards",
+        vec![
+            ("scope", SqlCell::Text("all".into())),
+            ("thread_id", SqlCell::Int(fx.thread.value())),
+        ],
+    )
+    .await;
+    let uri = all.text(all.keyed("title", "The item"), "uri").unwrap();
+    let blocker = all.text(all.keyed("title", "Its blocker"), "uri").unwrap();
+    command_task(
+        &fx,
+        "oxplow.work_item.link",
+        serde_json::json!({ "uri": uri, "target": blocker, "link_type": "blocks" }),
+    )
+    .await;
+    command_task(
+        &fx,
+        "oxplow.work_item.comment",
+        serde_json::json!({ "uri": uri, "body": "A note." }),
+    )
+    .await;
+    let item = |lens: &'static str, uri: &str| {
+        let mut params = vec![("uri", SqlCell::Text(uri.to_string()))];
+        if lens == "work-item-info" {
+            params.push(("thread_id", SqlCell::Int(fx.thread.value())));
+        }
+        let fx = &fx;
+        async move { run_task(fx, lens, params).await }
+    };
+
+    let state = item("work-item-state", &uri).await;
+    assert_eq!(state.text(&state.rows[0], "to").as_deref(), Some("todo"));
+    let fields = item("work-item-fields-form", &uri).await;
+    assert_eq!(
+        fields.text(&fields.rows[0], "title").as_deref(),
+        Some("The item")
+    );
+    assert!(fields
+        .text(&fields.rows[0], "native")
+        .unwrap()
+        .starts_with('{'));
+    let body = item("work-item-body", &uri).await;
+    assert_eq!(
+        body.text(&body.rows[0], "body").as_deref(),
+        Some("Some words.")
+    );
+
+    // On the viewed thread: it can be sent to the backlog and deleted, not brought.
+    let info = item("work-item-info", &uri).await;
+    assert!(info.flag(&info.rows[0], "can_send"));
+    assert!(!info.flag(&info.rows[0], "can_bring"));
+    assert!(info.flag(&info.rows[0], "can_delete"));
+
+    // Both ends of the link show it; only the item's own end can be unlinked.
+    let links = item("work-item-links", &uri).await;
+    assert_eq!(links.rows.len(), 1);
+    assert!(links.flag(&links.rows[0], "outbound"));
+    let theirs = item("work-item-links", &blocker).await;
+    assert_eq!(theirs.rows.len(), 1);
+    assert!(!theirs.flag(&theirs.rows[0], "outbound"));
+    assert_eq!(
+        theirs.text(&theirs.rows[0], "other").as_deref(),
+        Some(uri.as_str())
+    );
+
+    let comments = item("work-item-comments", &uri).await;
+    assert_eq!(
+        comments.text(&comments.rows[0], "body").as_deref(),
+        Some("A note.")
+    );
+    assert!(item("work-item-activity", &uri).await.rows.is_empty());
+    assert!(item(
+        "work-item-state",
+        "oxplow:oxplow/work_item?id=nope&provider=oxplow"
+    )
+    .await
+    .rows
+    .is_empty());
+}
+
+async fn command_task(
+    fx: &crate::test_fixtures::TaskEffortFixture,
+    name: &str,
+    input: serde_json::Value,
+) -> serde_json::Value {
+    fx.svc
+        .commands
+        .run(&oxplow_domain::Actor::Human, name, input, false)
+        .await
+        .unwrap()
+        .result
+}

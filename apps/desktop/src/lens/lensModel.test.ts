@@ -640,11 +640,20 @@ describe("a column that highlights a param", () => {
 
 // A form has no rows of its own: it is never "nothing found".
 describe("foldEmpty", () => {
-  const part = (viz: string) => ({ run: { lens: { viz }, result: { rows: [] } } as unknown as import("../tauri-bridge/generated/bindings.js").LensRun, error: null });
+  const part = (viz: string) => ({ run: { lens: { viz, actions: [] }, result: { rows: [] } } as unknown as import("../tauri-bridge/generated/bindings.js").LensRun, error: null });
   test("a form part is shown with no rows; an empty table folds", () => {
     const { shown, empty } = foldEmpty([part("form"), part("table")]);
     expect(shown.map((r) => r.run!.lens.viz)).toEqual(["form"]);
     expect(empty.map((r) => r.run!.lens.viz)).toEqual(["table"]);
+  });
+  test("an empty list with a button above it (an Add) is shown; one with only row actions folds", () => {
+    const withActions = (actions: Array<{ row: boolean; group: string | null }>) => ({
+      run: { lens: { viz: "table", actions }, result: { rows: [] } } as unknown as import("../tauri-bridge/generated/bindings.js").LensRun,
+      error: null,
+    });
+    const { shown, empty } = foldEmpty([withActions([{ row: false, group: null }]), withActions([{ row: true, group: null }])]);
+    expect(shown).toHaveLength(1);
+    expect(empty).toHaveLength(1);
   });
 });
 

@@ -133,6 +133,7 @@ export function LensResultView(props: LensResultViewProps) {
         {form}
         {props.toolbarTo && !compact ? <HandToolbar run={run} streamId={streamId} actions={actions} marks={marks} to={props.toolbarTo} /> : null}
         {!compact && !props.toolbarTo ? <MarksBar run={run} actions={actions} marks={marks} /> : null}
+        {!compact && !props.toolbarTo && props.partButtons ? <PartButtons run={run} actions={actions} /> : null}
         <LensBody {...props} actions={actions} marks={marks} />
       </>
     );
@@ -227,6 +228,9 @@ interface LensResultViewProps {
   /** Hand Copy, Add to Agent Context and the whole-lens actions to the
    *  page (its nav bar) instead of drawing them above the body. */
   toolbarTo?(actions: PageAction[]): void;
+  /** A document's part or a tile has no toolbar, but its whole-lens
+   *  actions (an Add…) show as buttons above its body. */
+  partButtons?: boolean;
 }
 
 /** Where a command's `ui.open_after` page opens from a lens: in the page
@@ -376,6 +380,22 @@ function HandToolbar({ run, streamId, actions, marks, to }: { run: LensRun; stre
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [run, streamId, copied, actions.busy, markedKey]);
   return null;
+}
+
+/** A part's whole-lens actions as buttons: no Copy, no marks. An editor's
+ *  Save is the editor's own. */
+function PartButtons({ run, actions }: { run: LensRun; actions: LensActionsState }) {
+  const buttons = run.lens.actions.filter((a) => !a.row && !a.group && !a.edit);
+  if (buttons.length === 0) return null;
+  return (
+    <div data-testid="lens-part-actions" style={{ display: "flex", gap: 6, marginBottom: 6 }}>
+      {buttons.map((a) => (
+        <button key={a.id} type="button" data-testid={`lens-action-${a.id}`} disabled={actions.busy !== null} title={a.command} onClick={() => actions.run(a, null)}>
+          {actions.busy === a.id ? `${a.label}…` : a.label}
+        </button>
+      ))}
+    </div>
+  );
 }
 
 /** Copy, Add to Agent Context, and the lens's whole-lens actions (a row's

@@ -31,7 +31,7 @@ intent:                 # required: what it is for, and how to know it works
     - { prompt: "Who should review this effort?", about: oxplow/effort }  # also on effort pages
 ui:                     # optional: what it adds to core pages
   slots:                #   mount a lens into a core page
-    - { slot: work_item.detail.body, lens: task-history }
+    - { slot: oxplow-foundation/work-item.sections, lens: task-history }
 panels:                 # optional: a left-nav panel (body lens compact, badge = an alert lens's count)
   - { id: waiting, title: Waiting on Me, icon: bell, scope: stream, body: waiting-on-me, badge: waiting-on-me }
 ```
@@ -292,5 +292,5 @@ ui:
 - Foundation pages are document lenses, so they have parts slots like any:
   `oxplow-foundation/new-session.sections` (part ids `start` and
   `earlier`; binds `thread_id`).
-- `at` is refused on a core region slot, such as `work_item.detail.body`.
+- `at` is refused on a core region slot, such as `thread.plan.header`.
   `size` is allowed only on a `.tiles` slot.

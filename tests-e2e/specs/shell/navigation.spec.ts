@@ -31,14 +31,14 @@ test("Cmd+[ goes back through the tab's pages and Cmd+] goes forward", async ({ 
   await page.goto("/");
   await openWiki(page, "kestrel");
   await page.locator('[data-testid="page-lens"]:visible').locator(`a[href="${ref}"]`).click();
-  await expect(page.getByTestId("task-rail-delete-trigger")).toBeVisible();
+  await expect(page.getByTestId("lens-part-state")).toBeVisible();
 
   await page.keyboard.press("Meta+[");
   await expect(page.locator('[data-testid="page-lens"]:visible')).toContainText("First do");
-  await expect(page.getByTestId("task-rail-delete-trigger")).toBeHidden();
+  await expect(page.getByTestId("lens-part-state")).toBeHidden();
 
   await page.keyboard.press("Meta+]");
-  await expect(page.getByTestId("task-rail-delete-trigger")).toBeVisible();
+  await expect(page.getByTestId("lens-part-state")).toBeVisible();
 });
 
 test("the active tab and its history survive a reload", async ({ page, daemon }) => {
@@ -46,10 +46,10 @@ test("the active tab and its history survive a reload", async ({ page, daemon })
   await page.goto("/");
   await openWiki(page, "osprey");
   await page.locator('[data-testid="page-lens"]:visible').locator(`a[href="${ref}"]`).click();
-  await expect(page.getByTestId("task-rail-delete-trigger")).toBeVisible();
+  await expect(page.getByTestId("lens-part-state")).toBeVisible();
 
   await page.reload();
-  await expect(page.getByTestId("task-rail-delete-trigger")).toBeVisible();
+  await expect(page.getByTestId("lens-part-state")).toBeVisible();
   await page.keyboard.press("Meta+[");
   await expect(page.locator('[data-testid="page-lens"]:visible')).toContainText("First do");
 });

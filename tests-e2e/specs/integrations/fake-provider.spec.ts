@@ -51,8 +51,9 @@ test("a person configures, checks and enables the fake tracker, and an item reac
   await expect(page.getByTestId("integration-collector-e2e/fake-work_items")).toContainText(/1 record/);
   await openFromLauncher(page, "Board");
   // A tracker's item is on no thread.
-  await page.getByTestId("board-scope").selectOption("all");
-  await expect(page.getByTestId("work-board")).toContainText("Kiwi from oxplow");
+  await page.getByTestId("lens-param-show-value").filter({ visible: true }).click();
+  await page.getByTestId("lens-param-show-edit").filter({ visible: true }).selectOption("all");
+  await expect(page.getByTestId("lens-board")).toContainText("Kiwi from oxplow");
   // The New Task page files on the active tracker too, on this thread
   // (tsk1059): it offers what any tracker takes, not oxplow's priority.
   await openNewTask(page);
@@ -64,6 +65,7 @@ test("a person configures, checks and enables the fake tracker, and an item reac
   await run(daemon, "oxplow.provider.sync", { instance: "e2e/fake", collector: "work_items" });
   // The Board at its default view is another page beside the filtered one.
   await openFromLauncher(page, "Board");
-  await page.getByTestId("board-scope").filter({ visible: true }).selectOption("thread");
-  await expect(page.getByTestId("work-board").filter({ visible: true })).toContainText("Kiwi from the page");
+  await page.getByTestId("lens-param-show-value").filter({ visible: true }).click();
+  await page.getByTestId("lens-param-show-edit").filter({ visible: true }).selectOption("thread");
+  await expect(page.getByTestId("lens-board").filter({ visible: true })).toContainText("Kiwi from the page");
 });

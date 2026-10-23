@@ -10,8 +10,8 @@
     row, declared in its `columns:`). `at: { before: commit }` puts a
     strip above the uncommitted page;
   - `vcs.history.sidebar` (beside Git History) → `stream_id`;
-  - `work_item.detail.body` and `work_item.detail.sidebar` (a work item's
-    page, whichever list) → `uri`;
+  - `oxplow-foundation/work-item.sections` (a work item's page, whichever
+    list) → `uri`;
   - `thread.plan.header` (the Work panel, compact) → `thread_id`;
   - `settings.<area>.sections` → no params (`overview` passes `q`, its search); a section on that Settings
     area's page (`overview`, `agents`, `lsp`, `extensions`, `data`,
