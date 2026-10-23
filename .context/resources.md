@@ -321,7 +321,9 @@ the page marked `default`, then the first (`pages/renderers.ts`,
 [pages-and-tabs.md](./pages-and-tabs.md) "Renderers"). A URI nothing
 renders (no page, or no row in its model) opens on foundation's
 fallback `resource` page: its label and params, or the raw URI muted as
-a dead link. It is never an error and never logged or toasted.
+a dead link. It is never an error and never logged or toasted. The
+row is looked up by the URI's identity: its view (`#part=output`) is for
+the page, not the model.
 **Where a URI opens is decided once**: `tabs/refOpener.ts` and
 `tabs/openRef.ts` (`openRef`, `PageNavigation.openRef`) — a wikilink, a
 lens link, a backlink row, a search hit, a component's `navigate` and

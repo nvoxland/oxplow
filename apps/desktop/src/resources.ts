@@ -61,7 +61,7 @@ import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { querySql } from "./api.js";
 import { recordOpError } from "./opErrors.js";
 import { NO_READS, useRerunOnChange } from "./lens/lensRerun.js";
-import { resourceUri, typeOf } from "./uri/uri.js";
+import { identityOf, resourceUri, typeOf } from "./uri/uri.js";
 import type { Reads, SqlQueryResult } from "./tauri-bridge/generated/bindings.js";
 
 /**
@@ -312,7 +312,8 @@ export function useExtensionRefTitle(ref: string | null): string | null {
       return;
     }
     // URI-SWITCH: the model's key column becomes `uri`.
-    void querySql(`SELECT ${column} FROM ${view} WHERE uri = ?1 LIMIT 1`, [ref], 1)
+    // A model's `uri` is the identity: the ref's view (`#part=…`) is the page's.
+    void querySql(`SELECT ${column} FROM ${view} WHERE uri = ?1 LIMIT 1`, [identityOf(ref) ?? ref], 1)
       .then((res) => {
         const cell = res.rows[0]?.[0];
         setTitle(cell == null ? null : String(cell));

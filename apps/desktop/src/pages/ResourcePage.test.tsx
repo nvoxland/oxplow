@@ -64,3 +64,10 @@ test("a URI its model resolves shows its title and params", async () => {
   expect(view.queryByTestId("resource-dead-link")).toBeNull();
   expect(view.container.textContent).toContain("Fix the thing");
 });
+
+test("a URI with a view (#part=output) resolves as the resource it names", async () => {
+  setResources([PR]);
+  const view = render(<ResourcePage uri="oxplow:acme/pr?id=12#part=output" />);
+  await waitFor(() => expect(view.getByTestId("resource-params").textContent).toContain("12"));
+  expect(view.queryByTestId("resource-dead-link")).toBeNull();
+});
