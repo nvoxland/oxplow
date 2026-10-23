@@ -845,6 +845,12 @@ async fn the_work_item_page_reads_the_item_its_links_and_its_comments() {
         serde_json::json!({ "uri": uri, "body": "A note." }),
     )
     .await;
+    // The page's row names its tab: the item's title.
+    let page = run_task(&fx, "work-item", vec![("uri", SqlCell::Text(uri.clone()))]).await;
+    assert_eq!(
+        page.text(&page.rows[0], "title").as_deref(),
+        Some("The item")
+    );
     let item = |lens: &'static str, uri: &str| {
         let mut params = vec![("uri", SqlCell::Text(uri.to_string()))];
         if lens == "work-item-info" {
@@ -1370,6 +1376,8 @@ async fn the_dashboard_page_adds_a_metric_tile_and_edits_its_tiles() {
     )
     .await;
     assert_eq!(page.text(&page.rows[0], "id").as_deref(), Some(id.as_str()));
+    assert_eq!(page.text(&page.rows[0], "title").as_deref(), Some("Health"));
+
     let title = run(&fx, "dashboard-title", by_id.clone()).await;
     assert_eq!(
         title.text(&title.rows[0], "title").as_deref(),
@@ -1583,4 +1591,28 @@ async fn the_files_page_lists_a_folder_or_the_changed_files() {
     assert_eq!(changed.text(new, "parent").as_deref(), Some("src"));
     assert!(changed.text(new, "target").unwrap().contains("page=diff"));
     assert!(changed.has("id", "src"));
+}
+
+/// A page's tab is named by the one row of its lens (`label: {{row.title}}`):
+/// a thread's and a stream's settings, by their titles.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_settings_pages_row_names_the_thread_and_the_stream() {
+    let fx = crate::test_fixtures::services_with_task_effort().await;
+    let thread = run_task(
+        &fx,
+        "thread-settings",
+        vec![("thread", SqlCell::Text(format!("thr{}", fx.thread.value())))],
+    )
+    .await;
+    assert_eq!(thread.rows.len(), 1, "{:?}", thread.rows);
+    assert!(thread
+        .text(&thread.rows[0], "title")
+        .is_some_and(|t| !t.is_empty()));
+    let stream = run_task(
+        &fx,
+        "stream-settings",
+        vec![("stream", SqlCell::Text("str1".into()))],
+    )
+    .await;
+    assert_eq!(stream.rows.len(), 1, "{:?}", stream.rows);
 }

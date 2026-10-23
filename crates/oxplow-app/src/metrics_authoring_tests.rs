@@ -462,6 +462,12 @@ async fn the_metric_page_reads_the_definition_the_trend_and_the_recordings() {
     let metric = || vec![("metric", SqlCell::Text(MEASURE.into()))];
     let header = run("metric-header", metric()).await;
     assert_eq!(header.len(), 1, "{header:?}");
+    // The page's row names its tab: the metric's title.
+    let page = run("metric", vec![("metric", SqlCell::Text(MEASURE.into()))]).await;
+    assert!(
+        matches!(&page[0]["title"], SqlCell::Text(t) if !t.is_empty()),
+        "{page:?}"
+    );
     assert_eq!(header[0]["id"], SqlCell::Text(MEASURE.into()));
     assert_eq!(header[0]["enabled"], SqlCell::Int(1));
     assert!(

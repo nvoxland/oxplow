@@ -639,8 +639,15 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     launcher's, Open with's); `label` is what its tab says when that
     isn't the name, `{{param.<name>}}` filled from what it shows
     (`label: "{{param.path}}"`; `pages/renderers.ts` `tabLabel`; filled
-    to nothing, the title). A renderer's label names params of what it
-    renders, a route's its `params` (else a load error). `body` is what draws it:
+    to nothing, the title) and `{{row.<column>}}` from the one row of the
+    page's lens, which must be a document with a `query:` and name that
+    column in its `columns:` (`label_refs`; a dashboard's `{{row.title}}`).
+    The tab says the page's title until the lens has run and its row
+    answers (`LensPage` `titleFrom` → `usePageTitle`), then the filled
+    label; a lens that fails keeps the title. Either may take filters:
+    `{{param.sha|short}}` (the first 7 characters) and `|basename` (the
+    last path segment), refused if unknown. A renderer's label names
+    params of what it renders, a route's its `params` (else a load error). `body` is what draws it:
     exactly one of `lens:` or `component:`. `component: oxplow:<name>`
     names a **built-in page** (`built_in_pages::BUILT_IN_PAGES`) and only
     the required bundled extension may use it — a stepping stone for

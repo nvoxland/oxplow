@@ -86,3 +86,19 @@ test("a page's tab label is its label filled from its params, else its title", (
   expect(tabLabel(page("pr", { title: "PR", label: "PR #{{ param.id }}" }), { id: "12" })).toBe("PR #12");
   expect(tabLabel(page("tasks", { title: "Tasks" }), { id: "12" })).toBe("Tasks");
 });
+
+// A label may also name a column of its lens's row, and filter what it
+// fills: `short` (7 characters), `basename` (the last path segment).
+test("a label fills row columns and applies its filters; with no row yet it says the title", () => {
+  const dash = page("dash", { title: "Dashboard", label: "{{row.title}}" });
+  expect(tabLabel(dash, {}, { title: "Build health" })).toBe("Build health");
+  // The run hasn't answered: the static label, never a half-filled one.
+  expect(tabLabel(dash, {})).toBe("Dashboard");
+  expect(tabLabel(dash, {}, null)).toBe("Dashboard");
+  const commit = page("commit", { title: "Commit", label: "{{param.sha|short}}" });
+  expect(tabLabel(commit, { sha: "0123456789abcdef" })).toBe("0123456");
+  const file = page("file", { title: "File", label: "{{ param.path | basename }} ({{param.rev|short}})" });
+  expect(tabLabel(file, { path: "src/lib/a.rs", rev: "git:abcdef0123" })).toBe("a.rs (git:abc)");
+  const both = page("both", { title: "Both", label: "{{row.title|basename}} · {{param.id}}" });
+  expect(tabLabel(both, { id: "7" }, { title: "x/y" })).toBe("y · 7");
+});

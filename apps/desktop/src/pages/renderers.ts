@@ -98,13 +98,38 @@ export function withRenderedParams(
   return formatUri({ resource: u.resource, params: next, view: shown });
 }
 
+/** The filters a label applies (`{{param.sha|short}}`): `short` is the first
+ *  7 characters (a sha), `basename` the last path segment. */
+const LABEL_FILTERS: Record<string, (v: string) => string> = {
+  short: (v) => v.slice(0, 7),
+  basename: (v) => v.replace(/\/+$/, "").split("/").pop() ?? v,
+};
+
 /** What a tab of `page` says: its `label` with each `{{param.<name>}}`
  *  filled from `params` (what it shows: a renderer's URI params, a
- *  route's), else — no label, or one that fills to nothing — its title. */
-export function tabLabel(page: ExtensionPage, params: Record<string, unknown>): string {
-  const filled = (page.label ?? "").replace(/\{\{\s*param\.([a-z0-9_]+)\s*\}\}/g, (_, name: string) => {
-    const v = params[name];
-    return v === null || v === undefined ? "" : String(v);
+ *  route's) and each `{{row.<column>}}` from `row` (the one row of the
+ *  page's lens, once its run has answered), each through its filters, else
+ *  — no label, one that fills to nothing, or one that names the row before
+ *  there is one — its title. */
+export function tabLabel(
+  page: ExtensionPage,
+  params: Record<string, unknown>,
+  row?: Record<string, unknown> | null,
+): string {
+  const label = page.label ?? "";
+  const reads = /\{\{\s*row\./.test(label);
+  if (reads && !row) return page.title;
+  const filled = label.replace(/\{\{\s*(param|row)\.([a-z0-9_]+)((?:\s*\|\s*[a-z]+)*)\s*\}\}/g, (_, scope: string, name: string, filters: string) => {
+    const v = (scope === "row" ? row : params)?.[name];
+    let text = v === null || v === undefined ? "" : String(v);
+    for (const f of filters.split("|").map((x) => x.trim()).filter(Boolean)) text = LABEL_FILTERS[f]?.(text) ?? text;
+    return text;
   });
   return filled.trim() || page.title;
+}
+
+/** Whether `page`'s label names a column of its lens's row, so its tab is
+ *  named once the lens has run. */
+export function labelReadsRow(page: ExtensionPage): boolean {
+  return /\{\{\s*row\./.test(page.label ?? "");
 }

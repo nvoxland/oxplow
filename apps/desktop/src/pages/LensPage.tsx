@@ -10,6 +10,7 @@ import { getPageDetailStore } from "../tabs/openPageDetail.js";
 import { insertIntoAgent } from "../agent-input-bus.js";
 import { formatContextMention } from "../agent-context-ref.js";
 import { pageView, shellView, withRenderedParams } from "./renderers.js";
+import { rowRecord } from "../lens/lensActions.js";
 import { changedParams, lensViewChange, misplacedViewParams } from "../lens/lensModel.js";
 import { useHostedView } from "../lens/hostedView.js";
 import { NO_READS, useRerunOnChange } from "../lens/lensRerun.js";
@@ -34,6 +35,10 @@ export interface LensPageProps {
   /** The page's name as its host knows it (an extension page's manifest
    *  title); the lens's own title otherwise. */
   title?: string;
+  /** The page's name from the one row its lens returns (a document with a
+   *  `query:`), used once the run has answered: the dashboard's own title.
+   *  `title` is what it says until then. */
+  titleFrom?: (row: Record<string, SqlCell>) => string;
   stream: Stream | null;
   onOpenPage(ref: TabRef): void;
   /** The URI it renders, when it is a renderer's lens (run with `{ uri }`):
@@ -57,7 +62,7 @@ export interface LensPageProps {
 /** What a renderer's lens is run with, never a control: the URI it shows. */
 const RENDERED = ["uri"];
 
-export function LensPage({ lensId, params, title: pageTitle, stream, onOpenPage, renders, comments = false, threadId = null }: LensPageProps) {
+export function LensPage({ lensId, params, title: pageTitle, titleFrom, stream, onOpenPage, renders, comments = false, threadId = null }: LensPageProps) {
   const streamId = stream?.id ?? null;
   const [run, setRun] = useState<LensRun | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -112,7 +117,8 @@ export function LensPage({ lensId, params, title: pageTitle, stream, onOpenPage,
   useRerunOnChange(run?.result.reads ?? NO_READS, () => void refresh());
 
   const lens = run?.lens ?? null;
-  const title = pageTitle ?? lens?.title ?? lensId;
+  const oneRow = run && run.result.rows.length === 1 ? rowRecord(run.result.columns, run.result.rows[0]!) : null;
+  const title = (oneRow && titleFrom ? titleFrom(oneRow) : null) || (pageTitle ?? lens?.title ?? lensId);
   usePageTitle(title);
 
   // Publish this lens's live params, under the id its tab shows, so an

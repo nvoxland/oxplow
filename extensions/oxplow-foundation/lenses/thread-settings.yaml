@@ -2,6 +2,8 @@ title: Thread Settings
 description: A thread's settings — its open agent sessions and its custom prompt.
 params:
   - { name: thread, label: Thread }
+query: SELECT t.title AS title FROM v_thread t WHERE t.uri = uri('oxplow/thread', 'id', :thread)
+columns: [{ key: title }]
 viz: document
 sections:
   - { id: sessions, lens: thread-settings-sessions }

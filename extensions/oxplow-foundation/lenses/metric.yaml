@@ -6,6 +6,8 @@ params:
   - { name: range, type: date_range, role: filter, label: Range, default: 7d, presets: [1d, 2d, 3d, 7d, 30d, all] }
   - { name: branch, type: branch, role: filter, label: Branch }
   - { name: slice, type: choice, role: filter, label: Slice by, options_from: metrics-dimensions, default: "" }
+query: SELECT c.title AS title FROM v_metric_catalog c WHERE c.key = :metric
+columns: [{ key: title }]
 viz: document
 sections:
   - { id: header, title: "", lens: metric-header }

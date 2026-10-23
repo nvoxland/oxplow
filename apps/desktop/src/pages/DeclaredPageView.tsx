@@ -10,7 +10,7 @@ import type { TabRef } from "../tabs/tabState.js";
 import type { ExtensionPage, Stream } from "../tauri-bridge/generated/bindings.js";
 import { LensPage } from "./LensPage.js";
 import { CustomPageView } from "./CustomPageView.js";
-import { tabLabel } from "./renderers.js";
+import { labelReadsRow, tabLabel } from "./renderers.js";
 
 export function DeclaredPageView({
   page,
@@ -45,6 +45,7 @@ export function DeclaredPageView({
     <LensPage
       lensId={declared.body.lens}
       title={tabLabel(declared, page.params)}
+      titleFrom={labelReadsRow(declared) ? (row) => tabLabel(declared, page.params, row) : undefined}
       params={page.params}
       stream={stream}
       onOpenPage={onOpenPage}

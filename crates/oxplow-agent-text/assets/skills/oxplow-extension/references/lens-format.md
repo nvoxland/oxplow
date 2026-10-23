@@ -174,7 +174,12 @@ empty: Nothing is waiting on you.
   (a `scope:` + `op:` over the same operation, or a script composing
   it), or put a prompt in the agent's input (`scope:
   agent_input.write`, `op: draft`, `ui.input: { text: "…" }`). A page is a
-  `pages:` entry or a lens.
+  `pages:` entry or a lens. A page's `label:` names its tab:
+  `{{param.<name>}}` from the URI or route params, `{{row.<column>}}` from
+  the one row of its lens when that is a `document` with a `query:` (name
+  the column in `columns:`), each optionally filtered: `|short` (first 7
+  characters) or `|basename` (last path segment). The tab says the page's
+  `title` until the lens has run.
 
 - **Row styling** on `list` / `table` (each names a result column):
   `group: { by: bucket, link?: { kind, from } }` puts the rows under a

@@ -203,7 +203,7 @@ Every page is a `pages:` entry in an extension's manifest
 oxplow-foundation's. A page with no `for` is a **route**
 (`oxplow:oxplow/page?page=<id>`); a page with `for` is a **renderer** of
 a resource ("Renderers"). The declaration gives the title (its name), the `label` its tab says
-(`{{param.<name>}}` over what it shows; none: the title), icon, launcher
+(`{{param.<name>}}` over what it shows, `{{row.<column>}}` over the one row of a document lens with a `query:` once it has run, filters `|short` and `|basename`; none: the title), icon, launcher
 `category` (none: not in the launcher — a page only opened from
 elsewhere), `keywords`, the `params` its id carries, a `count:` lens for
 the launcher badge, and what draws it: a `lens:` (most pages) or, for

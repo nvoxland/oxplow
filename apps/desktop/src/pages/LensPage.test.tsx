@@ -59,10 +59,20 @@ const dirLens = {
   ],
   columns: [{ key: "sha", label: "Name", link: null, unit: null, icon: null, tone: null, select: null }],
 } as unknown as Lens;
+// A document with a query: its one row names the page (a dashboard's
+// title), once its run has answered.
+const docLens = { ...lens, id: "x/doc", slug: "doc", title: "Doc", query: "SELECT 1", viz: "document", params: [], columns: [{ key: "title" }] } as unknown as Lens;
 mock.module("../api.js", () => ({
   ...realApi,
   runLens: async (id: string, params: Record<string, SqlCell>) => {
     runs.push(params);
+    if (id === "x/doc") {
+      return {
+        lens: docLens,
+        params,
+        result: { columns: ["title"], rows: [["Build health"]], truncated: false, reads: { models: [], tables: [], measures: [] }, freshness: {} },
+      } as unknown as LensRun;
+    }
     if (id === "x/dir") {
       return {
         lens: dirLens,
@@ -183,4 +193,16 @@ test("a renderer's param change opens the URI with it changed", async () => {
   fireEvent.change(edit, { target: { value: "src/lib" } });
   fireEvent.keyDown(edit, { key: "Enter" });
   expect(navigated.map((r) => r.id)).toEqual(["oxplow:oxplow/dir?path=src/lib"]);
+});
+
+test("a page named by its lens's row says its static title, then the row's once the run answers", async () => {
+  const titles: string[] = [];
+  const nav = { navigate: () => {}, goBack: () => {}, goForward: () => {}, canGoBack: false, canGoForward: false, setTitle: (t: string) => titles.push(t) } as unknown as PageNavigation;
+  render(
+    <PageNavigationContext.Provider value={nav}>
+      <LensPage lensId="x/doc" title="Dashboard" titleFrom={(row) => String(row.title)} stream={null} onOpenPage={() => {}} />
+    </PageNavigationContext.Provider>,
+  );
+  await waitFor(() => expect(titles[titles.length - 1]).toBe("Build health"));
+  expect(titles[0]).toBe("Dashboard");
 });

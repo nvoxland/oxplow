@@ -132,6 +132,10 @@ params:
   - { name: q, type: search, role: filter }   # filter: after #
 ```
 
+A page's `label:` is what its tab says: `{{param.x}}` fills from the page's
+params and `{{row.col}}` from the one row of its lens (a document with a
+`query:`; the tab says the page's title until the lens has run). Add
+`|short` (first 7 characters) or `|basename` (last path segment) to either.
 A page you declare with `pages:` lists its `?` params in `params:`. The
 filters and picks of its lens go after `#`. If a link puts a `filter` or
 `selection` param after `?`, the page shows an error and ignores it.

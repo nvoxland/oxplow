@@ -5,6 +5,8 @@ params:
   - { name: uri }
   - { name: thread_id }
   - { name: stream_id }
+query: SELECT w.title AS title FROM v_work_item w WHERE w.uri = :uri
+columns: [{ key: title }]
 viz: document
 sections:
   - { id: state, lens: work-item-state, replaceable: work_item.detail.state }

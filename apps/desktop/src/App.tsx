@@ -62,7 +62,7 @@ import { showToast } from "./components/toastStore.js";
 import { awaitGitOp, opErrorOf } from "./git-op.js";
 import { UndoToastStack } from "./components/UndoToast.js";
 import { identityOf, keyOf, paramOf, parseUri, typeOf } from "./uri/uri.js";
-import { rendererFor, shellView, tabLabel } from "./pages/renderers.js";
+import { labelReadsRow, rendererFor, shellView, tabLabel } from "./pages/renderers.js";
 import { PersonCommandConfirm } from "./components/PersonCommandConfirm.js";
 import { RemoteConnectionBanner } from "./components/RemoteConnectionBanner.js";
 import { subscribeUiError } from "./ui-error.js";
@@ -2051,7 +2051,7 @@ export function App() {
             closable: true,
             // A renderer's lens is run with the URI it shows.
             render: () => (
-              <LensPage lensId={lens} title={tabLabel(page, parseUri(ref.id)?.params ?? {})} params={{ uri: identityOf(ref.id) ?? ref.id }} renders={ref.id} stream={stream} onOpenPage={nav.navOpen} comments={page.comments} threadId={selectedThread?.id ?? null} />
+              <LensPage lensId={lens} title={tabLabel(page, parseUri(ref.id)?.params ?? {})} titleFrom={labelReadsRow(page) ? (row) => tabLabel(page, parseUri(ref.id)?.params ?? {}, row) : undefined} params={{ uri: identityOf(ref.id) ?? ref.id }} renders={ref.id} stream={stream} onOpenPage={nav.navOpen} comments={page.comments} threadId={selectedThread?.id ?? null} />
             ),
           };
         }

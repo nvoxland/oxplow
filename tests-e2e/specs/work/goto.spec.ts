@@ -61,6 +61,8 @@ test("a dashboard takes a heading tile, a new name, and is deleted from its page
   await title.fill("Health");
   await page.keyboard.press("Enter");
   await expect(page.locator('[data-testid="lens-part-title"]:visible')).toContainText("Health");
+  // The tab is named by the dashboard's own title, and follows the rename.
+  await expect(page.locator('[data-testid^="center-tab-oxplow:oxplow/dashboard"]')).toContainText("Health");
   await page.getByRole("button", { name: "Delete" }).filter({ visible: true }).first().click();
   // Deleting asks first; confirmed, the dashboard is gone and its page closes.
   await page.getByTestId("lens-action-confirm-run").click();

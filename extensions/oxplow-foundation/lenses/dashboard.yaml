@@ -4,8 +4,10 @@ params:
   - { name: uri }
   - { name: range, type: date_range, role: filter, label: Range, default: all, presets: [1d, 2d, 3d, 7d, 30d, all] }
   - { name: branch, type: branch, role: filter, label: Branch }
-query: SELECT uri_param(:uri, 'id') AS id
-columns: [{ key: id }]
+query: |
+  SELECT uri_param(:uri, 'id') AS id,
+         (SELECT d.title FROM v_dashboard d WHERE 'dsh' || d.id = uri_param(:uri, 'id')) AS title
+columns: [{ key: id }, { key: title }]
 viz: document
 sections:
   - { id: title, title: "", lens: dashboard-title }

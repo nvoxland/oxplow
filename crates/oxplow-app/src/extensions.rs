@@ -3011,6 +3011,17 @@ fn warn_unread_row_columns(out: &mut [Extension]) {
         })
         .collect();
     for ext in out.iter_mut() {
+        // The columns a page's label reads off a lens's row.
+        let labelled: BTreeMap<String, Vec<String>> = ext
+            .pages
+            .iter()
+            .filter_map(|p| match &p.body {
+                PageBody::Lens { lens } => {
+                    Some((lens.clone(), label_row_columns(p.label.as_deref())))
+                }
+                _ => None,
+            })
+            .collect();
         let warnings: Vec<String> = ext
             .lenses
             .iter()
@@ -3018,10 +3029,12 @@ fn warn_unread_row_columns(out: &mut [Extension]) {
             .flat_map(|l| {
                 let parts: Option<Vec<&Vec<String>>> =
                     l.part_lenses().map(|p| params.get(p)).collect();
-                let taken = |name: &str| {
-                    parts
-                        .as_deref()
-                        .is_none_or(|p| p.iter().any(|ps| ps.iter().any(|x| x == name)))
+                let read_by_label = labelled.get(&l.id).cloned().unwrap_or_default();
+                let taken = move |name: &str| {
+                    read_by_label.iter().any(|x| x == name)
+                        || parts
+                            .as_deref()
+                            .is_none_or(|p| p.iter().any(|ps| ps.iter().any(|x| x == name)))
                 };
                 l.columns
                     .iter()
@@ -4981,7 +4994,29 @@ fn renderer_problem(
                 .collect()
         })
         .unwrap_or_default();
-    let named = label_params(p.label.as_deref())?;
+    let refs = label_refs(p.label.as_deref())?;
+    let named: Vec<String> = refs
+        .iter()
+        .filter(|(from, _)| *from == LabelFrom::Param)
+        .map(|(_, n)| n.clone())
+        .collect();
+    // A row column is read from the one row of a document with a query.
+    for (from, name) in &refs {
+        if *from != LabelFrom::Row {
+            continue;
+        }
+        let Some(l) = lens.filter(|l| l.viz == LensViz::Document && !l.query.trim().is_empty())
+        else {
+            return Err(format!(
+                "`label` names `row.{name}`, which only a document with a `query:` has"
+            ));
+        };
+        if !l.columns.iter().any(|c| &c.key == name) {
+            return Err(format!(
+                "`label` names `row.{name}`, which isn't a column of its lens's row (its `columns:`)"
+            ));
+        }
+    }
     if renders.is_empty() {
         if p.default || p.pinned || !p.accepts.is_empty() {
             return Err(
@@ -6092,34 +6127,75 @@ async fn run_lens_unpinned(
     Ok(run)
 }
 
-/// The params a page's `label` names (`{{param.<name>}}`, spaces allowed
-/// inside the braces); any other `{{…}}` is refused.
-fn label_params(label: Option<&str>) -> Result<Vec<String>, String> {
-    let mut names = Vec::new();
+/// What a page's `label` fills from: its URI's params, or a column of the
+/// one row its lens returns.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum LabelFrom {
+    Param,
+    Row,
+}
+
+/// The label filters: `short` is the first 7 characters (a sha),
+/// `basename` the last path segment.
+const LABEL_FILTERS: &[&str] = &["short", "basename"];
+
+/// What a page's `label` names: each `{{param.<name>}}` or
+/// `{{row.<column>}}`, optionally filtered (`{{param.sha|short}}`), spaces
+/// allowed inside the braces; any other `{{…}}` is refused.
+fn label_refs(label: Option<&str>) -> Result<Vec<(LabelFrom, String)>, String> {
+    let mut refs = Vec::new();
     let mut rest = label.unwrap_or_default();
     while let Some(at) = rest.find("{{") {
         let Some(end) = rest[at..].find("}}") else {
             return Err("`label` has a `{{` without its `}}`".into());
         };
         let inner = rest[at + 2..at + end].trim();
-        match inner.strip_prefix("param.") {
-            Some(name)
+        let mut parts = inner.split('|').map(str::trim);
+        let head = parts.next().unwrap_or_default();
+        for filter in parts {
+            if !LABEL_FILTERS.contains(&filter) {
+                return Err(format!(
+                    "`label` filter `{filter}`: the filters are {}",
+                    LABEL_FILTERS
+                        .iter()
+                        .map(|f| format!("`{f}`"))
+                        .collect::<Vec<_>>()
+                        .join(" and ")
+                ));
+            }
+        }
+        let named = head
+            .strip_prefix("param.")
+            .map(|n| (LabelFrom::Param, n))
+            .or_else(|| head.strip_prefix("row.").map(|n| (LabelFrom::Row, n)));
+        match named {
+            Some((from, name))
                 if !name.is_empty()
                     && name
                         .chars()
                         .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_') =>
             {
-                names.push(name.to_string())
+                refs.push((from, name.to_string()))
             }
             _ => {
                 return Err(format!(
-                    "`label` fills only `{{{{param.<name>}}}}`, not `{{{{{inner}}}}}`"
+                    "`label` fills only `{{{{param.<name>}}}}` or `{{{{row.<column>}}}}`, not `{{{{{inner}}}}}`"
                 ))
             }
         }
         rest = &rest[at + end + 2..];
     }
-    Ok(names)
+    Ok(refs)
+}
+
+/// The columns of its lens's row a page's `label` reads.
+fn label_row_columns(label: Option<&str>) -> Vec<String> {
+    label_refs(label)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|(from, _)| *from == LabelFrom::Row)
+        .map(|(_, name)| name)
+        .collect()
 }
 
 /// Whether `lens` draws one of `ext`'s renderers (a page with `for:`): it
@@ -11776,13 +11852,65 @@ commands:
                 "`label` names `nope`, which isn't one of its `params`",
             ),
             (
-                "{ id: a, title: A, label: '{{row.id}}', params: [id], lens: pr }",
+                "{ id: a, title: A, label: '{{nope.id}}', params: [id], lens: pr }",
                 "`label` fills only `{{param.<name>}}`",
             ),
         ] {
             let (_d, ext) = load_x(&lenses, &format!("{resources}pages:\n  - {page}\n"));
             let errs = ext.errors.join("\n");
             assert!(errs.contains(says), "{page}: {errs}");
+        }
+    }
+
+    /// A page's `label` may also name a column of its lens's row
+    /// (`{{row.<col>}}`) when that lens is a document with a `query:` (the
+    /// row its `columns:` name), and apply a filter (`short`, `basename`);
+    /// anything else is refused, and the column the label reads is not
+    /// "unread" in the document's row.
+    #[test]
+    fn a_pages_label_may_name_the_row_of_a_document_and_filters() {
+        let doc = "title: D\nparams: [{ name: uri }, { name: id }]\nquery: SELECT :id AS id, 'T' AS title\ncolumns: [{ key: id }, { key: title }]\nviz: document\nsections: [{ id: p, lens: part }]\n";
+        let lenses = [
+            ("doc", doc),
+            (
+                "part",
+                "title: P\nparams: [{ name: id }]\nquery: SELECT :id\n",
+            ),
+            (
+                "table",
+                "title: T\nparams: [{ name: uri }, { name: id }]\nquery: SELECT :id AS title\n",
+            ),
+        ];
+        let resources =
+            "resources:\n  - { name: pr, label: PR, params: { id: { required: true } } }\n";
+        let page = |p: &str| format!("{resources}pages:\n  - {p}\n");
+        let (_d, ext) = load_x(
+            &lenses,
+            &page("{ id: a, title: A, label: '{{row.title}} {{param.id|short}}', lens: doc, for: x/pr, default: true }"),
+        );
+        assert!(ext.errors.is_empty(), "{:?}", ext.errors);
+        assert!(
+            !ext.warnings.iter().any(|w| w.contains("`title`")),
+            "a column the label reads is read: {:?}",
+            ext.warnings
+        );
+        for (p, says) in [
+            (
+                "{ id: a, title: A, label: '{{row.title}}', lens: table, for: x/pr }",
+                "`row.title`, which only a document with a `query:` has",
+            ),
+            (
+                "{ id: a, title: A, label: '{{row.nope}}', lens: doc, for: x/pr }",
+                "`label` names `row.nope`, which isn't a column of its lens's row",
+            ),
+            (
+                "{ id: a, title: A, label: '{{param.id|loud}}', lens: doc, for: x/pr }",
+                "`label` filter `loud`",
+            ),
+        ] {
+            let (_d, ext) = load_x(&lenses, &page(p));
+            let errs = ext.errors.join("\n");
+            assert!(errs.contains(says), "{p}: {errs}");
         }
     }
 

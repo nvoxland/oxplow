@@ -2,6 +2,8 @@ title: Stream Settings
 description: A stream's settings — today its custom prompt.
 params:
   - { name: stream, label: Stream }
+query: SELECT s.title AS title FROM v_stream s WHERE s.uri = uri('oxplow/stream', 'id', :stream)
+columns: [{ key: title }]
 viz: document
 sections:
   - id: hint

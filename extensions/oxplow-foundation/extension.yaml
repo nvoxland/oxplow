@@ -182,12 +182,12 @@ pages:
   - { id: extensions, title: Extensions, icon: package, category: System, keywords: deploy rollback permissions enable disable share, lens: extensions }
   # Opened from elsewhere
   - { id: alerts, title: Alerts, icon: bell, lens: alerts }
-  - { id: custom-dashboard, title: Dashboard, icon: layout-dashboard, for: oxplow/dashboard, default: true, lens: dashboard }
+  - { id: custom-dashboard, title: Dashboard, icon: layout-dashboard, label: "{{row.title}}", for: oxplow/dashboard, default: true, lens: dashboard }
   - { id: new-session, title: New Session, icon: plus, lens: new-session }
   - { id: new-stream, title: New Stream, icon: plus, lens: new-stream }
   - { id: new-task, title: New Item, icon: plus, params: [parent], lens: new-task }
-  - { id: stream-settings, title: Stream Settings, icon: settings, params: [stream], lens: stream-settings }
-  - { id: thread-settings, title: Thread Settings, icon: settings, params: [thread], lens: thread-settings }
+  - { id: stream-settings, title: Stream Settings, icon: settings, label: "{{row.title}} settings", params: [stream], lens: stream-settings }
+  - { id: thread-settings, title: Thread Settings, icon: settings, label: "{{row.title}} settings", params: [thread], lens: thread-settings }
   - { id: external-url, title: Web Page, icon: external-link, for: [https, http], default: true, component: "oxplow:external-url" }
   - { id: diff, title: Diff, icon: git-compare, label: "{{param.path}} ({{param.label}})", params: [path, left, right, label, base], lens: diff }
   - { id: diff-view, title: Changes, icon: git-compare, for: [oxplow/snapshot, oxplow/effort, oxplow/turn], default: true, lens: changes }
@@ -197,12 +197,12 @@ pages:
   # `#oxplow.renderer=`, then its default; one nothing renders opens on
   # `resource`, which shows it (or, when nothing resolves it, its dead link).
   - { id: editor, title: Editor, for: oxplow/file, accepts: { rev: absent }, default: true, component: "oxplow:editor" }
-  - { id: file-viewer, title: File at a Revision, label: "{{param.path}} ({{param.rev}})", for: oxplow/file, accepts: { rev: present }, lens: file-viewer, comments: true }
-  - { id: directory, title: Directory, label: "{{param.path}}", for: oxplow/dir, accepts: { rev: absent }, default: true, lens: directory }
+  - { id: file-viewer, title: File at a Revision, label: "{{param.path|basename}} ({{param.rev}})", for: oxplow/file, accepts: { rev: present }, lens: file-viewer, comments: true }
+  - { id: directory, title: Directory, label: "{{param.path|basename}}", for: oxplow/dir, accepts: { rev: absent }, default: true, lens: directory }
   - { id: wiki-page, title: Wiki Page, label: "{{param.slug}}", for: oxplow/wiki, default: true, comments: true, lens: wiki-page }
-  - { id: work-item, title: Work Item, label: "{{param.id}}", for: oxplow/work_item, default: true, comments: true, lens: work-item }
-  - { id: commit, title: Commit, label: "{{param.sha}}", for: oxplow/commit, default: true, lens: commit }
-  - { id: metric-detail, title: Metric, for: oxplow/metric, default: true, lens: metric }
+  - { id: work-item, title: Work Item, label: "{{row.title}}", for: oxplow/work_item, default: true, comments: true, lens: work-item }
+  - { id: commit, title: Commit, label: "{{param.sha|short}}", for: oxplow/commit, default: true, lens: commit }
+  - { id: metric-detail, title: Metric, label: "{{row.title}}", for: oxplow/metric, default: true, lens: metric }
   - { id: lens, title: Lens, for: oxplow/lens, default: true, component: "oxplow:lens" }
   - { id: agent-session, title: Agent Session, for: oxplow/agent_session, default: true, pinned: true, component: "oxplow:agent-session" }
   - { id: resource, title: Resource, component: "oxplow:resource" }
