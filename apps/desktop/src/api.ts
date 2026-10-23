@@ -267,7 +267,7 @@ export interface ThreadState {
 
 // Work items are read through the work-item interface by `workItems.ts`,
 // which owns their shape.
-export type { WorkItem, WorkList } from "./workItems.js";
+export type { WorkItem } from "./workItems.js";
 
 
 /** Why a snapshot take ran (`snapshot_op.trigger`). */

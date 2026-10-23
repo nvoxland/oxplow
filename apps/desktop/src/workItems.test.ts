@@ -3,11 +3,9 @@ import { expect, test } from "bun:test";
 import type { SqlQueryResult } from "./tauri-bridge/generated/bindings.js";
 import {
   activeProviderOf,
-  bucketWorkList,
   capabilityProvidersFromResult,
   featuresFor,
   itemsFromResult,
-  workItemsQuery,
   workItemRefOfMention,
   workListProfileOf,
   NO_FEATURES,
@@ -52,34 +50,6 @@ test("rows read as work items: the interface's columns and the list's own fields
     commentCount: 3,
   });
   expect(items[1]).toMatchObject({ threadId: null, rank: null, closedAt: "t2", native: {}, parentUri: "oxplow:oxplow/work_item?id=ENG-0&provider=issues" });
-});
-
-test("a query scoped to a thread, the backlog, or everything; states filter; list order", () => {
-  expect(workItemsQuery({ scope: { thread: "thr2" } }).params).toEqual([2]);
-  expect(workItemsQuery({ scope: { thread: "thr2" } }).sql).toContain("w.thread_id = ?1");
-  // The backlog is any list's: no thread.
-  expect(workItemsQuery({ scope: "backlog" }).sql).toContain("w.thread_id IS NULL");
-  const all = workItemsQuery({ scope: "all", states: ["todo", "blocked"] });
-  expect(all.sql).toContain("w.state IN ('todo', 'blocked')");
-  expect(all.sql).toContain("ORDER BY w.rank IS NULL, w.rank, w.created_at");
-});
-
-// A list: an item with a child on it is an epic; the rest by state, done
-// and canceled together. `all` keeps the list order.
-test("a work list: an item with a child is an epic, the rest by state", () => {
-  const item = (ref: string, state: WorkItem["state"], parentRef: string | null = null) =>
-    ({ uri: ref, state, parentUri: parentRef }) as unknown as WorkItem;
-  const list = bucketWorkList(
-    "thr2",
-    [item("e", "todo"), item("c", "in_progress", "e"), item("b", "blocked"), item("d", "done"), item("x", "canceled"), item("n", "todo")],
-    { models: [], tables: [], measures: [] },
-  );
-  expect(list.epics.map((i) => i.uri)).toEqual(["e"]);
-  expect(list.inProgress.map((i) => i.uri)).toEqual(["c"]);
-  expect(list.waiting.map((i) => i.uri)).toEqual(["b"]);
-  expect(list.done.map((i) => i.uri)).toEqual(["d", "x"]);
-  expect(list.items.map((i) => i.uri)).toEqual(["n"]);
-  expect(list.all.map((i) => i.uri)).toEqual(["e", "c", "b", "d", "x", "n"]);
 });
 
 // A provider's flags and fields come from v_capability_provider; a

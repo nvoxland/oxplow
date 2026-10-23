@@ -129,8 +129,8 @@ developer-facing mechanics.
 - **Auto-resync on reconnect.** Recovery re-hydrates the client stores
   in place — *no* manual full-page reload. The top-level loader
   (`loadInitialAppState` in `App.tsx`: streams, current stream + its
-  threads, workspace context, selected-thread work), the core-store
-  subscriptions (`useBackendSubscriptions`: backlog, config, agent
+  threads, workspace context), the core-store
+  subscriptions (`useBackendSubscriptions`: config, agent
   statuses), and comment threads (`useCommentsForTarget`) all register
   `onRemoteReconnect` handlers. The daemon health probe (App.tsx, 2s
   `/ipc/ping` poll) used to `window.location.reload()` on recovery;

@@ -43,7 +43,6 @@ import {
   type Stream,
   type WorkspaceContext,
 } from "./api.js";
-import { readWorkList, type WorkList } from "./workItems.js";
 import {
   closeOpenFile,
   createEmptyFileSession,
@@ -260,10 +259,6 @@ export function App() {
   const threadStatesRef = useRef(threadStates);
   threadStatesRef.current = threadStates;
 
-  const [threadWorkStates, setThreadWorkStates] = useState<Record<string, WorkList>>({});
-  const threadWorkStatesRef = useRef(threadWorkStates);
-  threadWorkStatesRef.current = threadWorkStates;
-  const [backlogState, setBacklogState] = useState<WorkList | null>(null);
   // Each agent session's status (`sessionStatusKey`). A thread's dot is its
   // sessions' roll-up, and its question (the rail dot's tooltip) the one
   // the awaiting session asks.
@@ -336,11 +331,6 @@ export function App() {
     return Promise.all([listStreams(), getCurrentStream(), getWorkspaceContext()])
       .then(async ([allStreams, current, context]) => {
         const initialThreadState = await getThreadState(current.id);
-        const initialThread = initialThreadState.threads.find((thread) => thread.id === initialThreadState.selectedThreadId);
-        if (initialThread) {
-          const initialWork = await readWorkList(initialThread.id);
-          setThreadWorkStates((prev) => ({ ...prev, [initialThread.id]: initialWork }));
-        }
         setStreams(allStreams);
         setStream(current);
         setThreadStates((prev) => ({ ...prev, [current.id]: initialThreadState }));
@@ -432,11 +422,6 @@ export function App() {
       if (!nextThreadState.selectedThreadId && nextThreadState.threads.length > 0) {
         nextThreadState = await selectThread(next.id, nextThreadState.threads[0].id);
       }
-      const nextThread = nextThreadState.threads.find((thread) => thread.id === nextThreadState.selectedThreadId);
-      if (nextThread && !threadWorkStates[nextThread.id]) {
-        const nextWork = await readWorkList(nextThread.id);
-        setThreadWorkStates((prev) => ({ ...prev, [nextThread.id]: nextWork }));
-      }
       setThreadStates((prev) => ({ ...prev, [next.id]: nextThreadState }));
       setStream(next);
       setError(null);
@@ -492,12 +477,6 @@ export function App() {
     try {
       const state = await getThreadState(next.id);
       setThreadStates((prev) => ({ ...prev, [next.id]: state }));
-      const thread = state.threads.find((candidate) => candidate.id === state.selectedThreadId);
-      if (thread) {
-        void readWorkList(thread.id).then((work) => {
-          setThreadWorkStates((prev) => ({ ...prev, [thread.id]: work }));
-        });
-      }
     } catch (e) {
       setError(String(e));
     }
@@ -773,11 +752,6 @@ export function App() {
       }
       const next = await selectThread(streamId, threadId);
       setThreadStates((prev) => ({ ...prev, [streamId]: next }));
-      const thread = next.threads.find((candidate) => candidate.id === threadId);
-      if (thread) {
-        const work = await readWorkList(thread.id);
-        setThreadWorkStates((prev) => ({ ...prev, [thread.id]: work }));
-      }
       setError(null);
     } catch (e) {
       setError(String(e));
@@ -790,11 +764,6 @@ export function App() {
       // It opens on the session picker: a thread names no agent.
       const { state: next } = await createThread(stream.id, title);
       setThreadStates((prev) => ({ ...prev, [stream.id]: next }));
-      const thread = next.threads.find((candidate) => candidate.id === next.selectedThreadId);
-      if (thread) {
-        const work = await readWorkList(thread.id);
-        setThreadWorkStates((prev) => ({ ...prev, [thread.id]: work }));
-      }
       setError(null);
     } catch (e) {
       setError(String(e));
@@ -886,7 +855,6 @@ export function App() {
     [selectedThreadId, updateSession],
   );
 
-  const selectedThreadWork = selectedThread ? threadWorkStates[selectedThread.id] ?? null : null;
   // A failed operation from no named thread is the one on screen's.
   useEffect(() => {
     setOpErrorContext({ thread: selectedThreadId, stream: stream?.id ?? null });
@@ -959,70 +927,20 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stream?.id]);
 
-  useEffect(() => {
-    if (!stream || !selectedThread || threadWorkStates[selectedThread.id]) return;
-    void readWorkList(selectedThread.id)
-      .then((next) => {
-        setThreadWorkStates((prev) => ({ ...prev, [selectedThread.id]: next }));
-      })
-      .catch((e) => {
-        setError(String(e));
-      });
-  }, [threadWorkStates, selectedThread, stream]);
-
-  useEffect(() => {
-    if (!stream) return;
-    const missing = currentThreadState.threads.filter((thread) => !threadWorkStates[thread.id]);
-    if (missing.length === 0) return;
-    let cancelled = false;
-    void Promise.all(
-      missing.map(async (thread) => [thread.id, await readWorkList(thread.id)] as const),
-    )
-      .then((results) => {
-        if (cancelled) return;
-        setThreadWorkStates((prev) => {
-          const next = { ...prev };
-          for (const [threadId, work] of results) next[threadId] = work;
-          return next;
-        });
-      })
-      .catch((e) => {
-        if (!cancelled) setError(String(e));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [threadWorkStates, currentThreadState.threads, stream]);
-
-
   // Backend-event subscription wiring (workspace context, backlog, task
   // events, followup/thread/stream changes, config, agent status) lives
   // in this hook so App doesn't carry ~10 inline subscription effects.
   // Extensions' ref kinds (P8.D7): icons, labels, routes and wikilinks.
   useResourcesLoader();
   useBackendSubscriptions({
-    threadWorkStatesRef,
     threadStatesRef,
     setWorkspaceContext,
-    setBacklogState,
-    setThreadWorkStates,
     setThreadStates,
     setStreams,
     setStream,
     setSessionStatuses,
     setGeneratedState,
   });
-
-  useEffect(() => {
-    for (const [streamId, state] of Object.entries(threadStates)) {
-      for (const thread of state.threads) {
-        if (threadWorkStates[thread.id]) continue;
-        void readWorkList(thread.id)
-          .then((work) => setThreadWorkStates((prev) => (prev[thread.id] ? prev : { ...prev, [thread.id]: work })))
-          .catch((error) => logUi("warn", "failed to preload thread work state", { streamId, threadId: thread.id, error: String(error) }));
-      }
-    }
-  }, [threadStates]);
 
   const handleToggleGenerated = async (entry: string, mark: boolean) => {
     // The "mark as generated" toggle edits the `exclude` list (extra
@@ -1610,7 +1528,7 @@ export function App() {
         return;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [handleOpenFile, handleOpenWiki, openTab, selectedThreadId, selectedThreadSessions, selectedThreadWork, setCenterActive, stream?.id]);
+  }, [handleOpenFile, handleOpenWiki, openTab, selectedThreadId, selectedThreadSessions, setCenterActive, stream?.id]);
 
   /**
    * Open the ref `ref` (of any kind) where its kind's page says
@@ -2396,8 +2314,6 @@ export function App() {
     generated,
     commitFilesRequest,
     centerActive,
-    selectedThreadWork,
-    backlogState,
     extensions,
   ]);
 

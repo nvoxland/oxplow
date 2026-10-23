@@ -120,12 +120,10 @@ name, a built `oxplow/work_item` URI or `tsk` id parsing in desktop code.
   `body`, `state`, `parentRef`, `threadId` (null = the backlog), `rank`,
   `closedAt`, the list's own fields as `native`, and `commentCount`
   (`v_work_item_comment`).
-- **`readWorkList(thread | null)`** reads a thread's list or the backlog
-  in list order (`rank`, then `created_at`) and buckets it into a
-  **`WorkList`** by state (an item with a child on the list is an epic;
-  done and canceled share `done`).
-  `readWorkItem`, `readWorkItemsByRef` and `readWorkItems` (the Board's
-  scopes: a thread, the backlog, everything) read the rest;
+- **`readWorkItem`** and **`readWorkItemsByRef`** read the rest (the Tasks,
+  Backlog and Board pages are lenses over `v_work_item`: a thread's list or
+  the backlog in list order (`rank`, then `created_at`), an item with a
+  child an epic);
   `readItemEfforts(ref)` an item's activity.
 - **Writes** are `work_item.*` commands by uri: `createWorkItem` (no
   list named — it files on the active one; `native` carries the list's

@@ -9,7 +9,7 @@
  */
 import { querySql, type SqlCell } from "./api.js";
 import { NO_READS } from "./lens/lensRerun.js";
-import { threadIdOf, threadRowId } from "./modelIds.js";
+import { threadIdOf } from "./modelIds.js";
 import { workItemUri } from "./uri/uri.js";
 import type { FieldDecl, Reads, SqlQueryResult, WorkItemsFeatures } from "./tauri-bridge/generated/bindings.js";
 
@@ -40,49 +40,9 @@ export interface WorkItem {
   commentCount: number;
 }
 
-/** A list — a thread's, or the backlog's (`threadId` null) — in list
- *  order, and by state: an item with a child on the list is an epic;
- *  `done` holds done and canceled. */
-export interface WorkList {
-  threadId: string | null;
-  /** Every item, in list order. */
-  all: WorkItem[];
-  epics: WorkItem[];
-  /** Ready to start (`todo`). */
-  items: WorkItem[];
-  inProgress: WorkItem[];
-  /** Blocked. */
-  waiting: WorkItem[];
-  done: WorkItem[];
-  /** What the read read: a change to one of these models re-reads it. */
-  reads: Reads;
-}
-
 const COLUMNS = `w.uri, w.provider, w.title, w.body, w.state, w.parent_uri, w.thread_id, w.rank, w.closed_at,
   w.created_at, w.updated_at, w.native,
   (SELECT count(*) FROM v_work_item_comment c WHERE c.uri = w.uri) AS comment_count`;
-
-const ORDER = "ORDER BY w.rank IS NULL, w.rank, w.created_at";
-
-export type WorkItemScope = { thread: string } | "backlog" | "all";
-
-/** The SQL for a list: a thread's, the backlog's, or every item; in list
- *  order (rank, then oldest first). */
-export function workItemsQuery(opts: { scope: WorkItemScope; states?: CanonicalState[] }): { sql: string; params: SqlCell[] } {
-  const where: string[] = [];
-  const params: SqlCell[] = [];
-  if (opts.scope === "backlog") where.push("w.thread_id IS NULL");
-  else if (opts.scope !== "all") {
-    params.push(threadRowId(opts.scope.thread));
-    where.push("w.thread_id = ?1");
-  }
-  if (opts.states && opts.states.length > 0) {
-    where.push(`w.state IN (${opts.states.map((s) => `'${s}'`).join(", ")})`);
-  }
-  const sql = `SELECT ${COLUMNS} FROM v_work_item w${where.length ? ` WHERE ${where.join(" AND ")}` : ""}
-    ${ORDER}`;
-  return { sql, params };
-}
 
 const text = (c: SqlCell | undefined): string | null => (c === null || c === undefined ? null : String(c));
 
@@ -135,37 +95,6 @@ export async function readWorkItemsByRef(refs: string[]): Promise<{ items: WorkI
     refs.length,
   );
   return { items: itemsFromResult(res), reads: res.reads };
-}
-
-/** A list of work items, with what it read. */
-export async function readWorkItems(opts: {
-  scope: WorkItemScope;
-  states?: CanonicalState[];
-}): Promise<{ items: WorkItem[]; reads: Reads }> {
-  const q = workItemsQuery(opts);
-  const res = await querySql(q.sql, q.params, 10_000);
-  return { items: itemsFromResult(res), reads: res.reads };
-}
-
-/** Bucket a list's items (in list order) by state; an item with a child
- *  on the list is an epic. */
-export function bucketWorkList(threadId: string | null, all: WorkItem[], reads: Reads): WorkList {
-  const parents = new Set(all.map((i) => i.parentUri).filter((p): p is string => p !== null));
-  const list: WorkList = { threadId, all, epics: [], items: [], inProgress: [], waiting: [], done: [], reads };
-  for (const i of all) {
-    if (parents.has(i.uri)) list.epics.push(i);
-    else if (i.state === "blocked") list.waiting.push(i);
-    else if (i.state === "in_progress") list.inProgress.push(i);
-    else if (i.state === "todo") list.items.push(i);
-    else list.done.push(i);
-  }
-  return list;
-}
-
-/** A thread's list (or the backlog's, `null`). */
-export async function readWorkList(threadId: string | null): Promise<WorkList> {
-  const { items, reads } = await readWorkItems({ scope: threadId ? { thread: threadId } : "backlog" });
-  return bucketWorkList(threadId, items, reads);
 }
 
 // ---- the active list: what it can do and its own fields (v_capability_provider) ----

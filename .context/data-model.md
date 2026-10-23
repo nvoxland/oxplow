@@ -541,8 +541,7 @@ AUTOINCREMENT` — stored as a plain integer, surfaced as `tsk<int>` (see
 discriminator any more. An **epic is any task that has children** —
 i.e. any row that's a `parent_id` target. The UI reads it through the
 interface — an item that is some item's `parent_uri`
-(`workItems.bucketWorkList`, `WorkList.epics`); there's no flag on the
-row itself.
+(a lens's `depth` column); there's no flag on the row itself.
 
 Statuses: `ready`, `in_progress`, `blocked`, `done`, `canceled`,
 `archived`. `archived` is a terminal state that hides the item from
