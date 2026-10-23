@@ -59,8 +59,8 @@ pub use events::{Anchors, Envelope, EventId, StoredEvent};
 pub use hook::{AgentStatus, AgentStatusState, AgentTurn, HookKind};
 pub use ids::{
     AgentSessionId, AgentTurnId, AnyId, CommentId, CommentMessageId, DashboardId, DashboardItemId,
-    EffortId, EntityKind, HandoffId, IdParseError, NoteId, PageVisitId, StreamId, ThreadId,
-    UsageEventId,
+    EffortId, EntityKind, HandoffId, IdParseError, NoteId, PageVisitId, StreamId, TerminalId,
+    ThreadId, UsageEventId,
 };
 pub use json::{JsNumber, Json};
 pub use row_ids::{

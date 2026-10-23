@@ -2206,3 +2206,16 @@
     - { name: "error", type: "TEXT", doc: "Why its last read failed." }
     - { name: "last_read_at", type: "TEXT", doc: "RFC 3339 time of its last read." }
     - { name: "records", type: "INT", doc: "Records its reads have delivered." }
+- name: terminal
+  version: 1
+  description: "A stream's terminals: shells in its worktree, in order. Opened, renamed and closed by the `oxplow.terminal.*` commands; the shell's process is the daemon's, keyed by the row's URI."
+  columns:
+    - { name: "id", type: "INTEGER", doc: "Terminal id (`trm<id>` in its URI)." }
+    - { name: "stream_id", type: "INTEGER", doc: "The stream whose worktree the shell runs in." }
+    - { name: "title", type: "TEXT", doc: "Its title: \"Terminal N\" unless it was named." }
+    - { name: "position", type: "INTEGER", doc: "Order among the stream's terminals." }
+    - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
+    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/terminal?id=trm<id>`: its URI, the one place SQL spells it — select and join on this, never rebuild it." }
+  tests:
+    - { not_null: id }
+    - { unique: id }

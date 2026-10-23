@@ -598,9 +598,9 @@ person's configuration and pass.
 **The PTY.** The command runs as `sh -lc 'cd <worktree> && exec …'`
 (`shared::in_shell`, `resume_or_fresh`), so the agent is the PTY's
 process and its exit ends it. `open_terminal_session` keys it by the
-agent session (the pane target is its id, `ses3`), so a re-attach shows
+agent session (the URI is the session's, `oxplow:oxplow/agent_session?id=ses3`), so a re-attach shows
 the live process and two sessions in a thread are two processes; a
-`shell` / `shell:<id>` target is a plain `$SHELL -l` in the worktree.
+terminal's URI is a plain `$SHELL -l` in its stream's worktree.
 Switching streams or threads doesn't kill sessions: the daemon keeps them
 and a re-attach replays the buffer. They end with the daemon; the next
 open resumes. There is no terminal multiplexer.

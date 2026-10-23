@@ -1,3 +1,4 @@
+import { ipc, run, until } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
 import { openFromLauncher } from "../../support/ui.js";
 
@@ -64,4 +65,26 @@ test("an exited shell says so, and Start Again opens a new one", async ({ page }
   await page.keyboard.type("echo again-$((6*7))");
   await page.keyboard.press("Enter");
   await expect(page.locator(".xterm-rows")).toContainText("again-42");
+});
+
+// Terminals are rows: opening the page gives the stream its first, closing
+// it ends the shell and deletes the row, and the page then offers New.
+test("a terminal is a row: closed with its shell, and New opens another", async ({ fresh }) => {
+  const { page, daemon } = fresh;
+  const rows = async () =>
+    (await ipc<{ rows: unknown[][] }>(daemon, "query_sql", { sql: "SELECT id, uri, title FROM v_terminal" })).rows;
+  await page.goto("/");
+  await openFromLauncher(page, "Terminal");
+  await expect(page.locator(".xterm")).toBeVisible();
+  await until("the first terminal's row", 15_000, async () => (await rows()).length === 1);
+  const [id, uri, title] = (await rows())[0] as [number, string, string];
+  expect(title).toBe("Terminal 1");
+  expect(uri).toBe(`oxplow:oxplow/terminal?id=trm${id}`);
+
+  await run(daemon, "oxplow.terminal.close", { terminal: `trm${id}` });
+  await until("the row to go", 15_000, async () => (await rows()).length === 0);
+  await expect(page.getByTestId("terminal-new")).toBeVisible();
+  await page.getByTestId("terminal-new").click();
+  await until("a new row", 15_000, async () => (await rows()).length === 1);
+  await expect(page.locator(".xterm")).toBeVisible();
 });

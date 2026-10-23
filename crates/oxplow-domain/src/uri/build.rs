@@ -381,6 +381,11 @@ pub fn dashboard_uri(id: crate::DashboardId) -> String {
     keyed(r::DASHBOARD, &id.to_string())
 }
 
+/// A terminal (`terminal.id`).
+pub fn terminal_uri(id: crate::TerminalId) -> String {
+    keyed(r::TERMINAL, &id.to_string())
+}
+
 /// A test or analysis run (`metric_capture.id`).
 pub fn run_uri(id: i64) -> String {
     keyed(r::RUN, &id.to_string())

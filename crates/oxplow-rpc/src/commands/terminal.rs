@@ -11,7 +11,7 @@ use oxplow_app::chat::codex::CodexOpen;
 use oxplow_app::chat::host::ServicesChatHost;
 use oxplow_app::chat::session::SessionSpec;
 use oxplow_app::config_service::read_config;
-use oxplow_app::terminal_sessions::{agent_pane_key, AttachResult, SpawnRequest};
+use oxplow_app::terminal_sessions::{agent_pane_key, terminal_key, AttachResult, SpawnRequest};
 use oxplow_app::Services;
 use oxplow_domain::agent::harness::{
     AgentHarness, Endpoints, Launch, LaunchInput, LaunchSpec, SessionIds,
@@ -22,21 +22,6 @@ use oxplow_domain::{AgentSessionId, Stream, StreamId, Thread, ThreadId};
 
 use crate::error::IpcError;
 use crate::RpcContext;
-
-/// Build the PTY session key for a shell terminal, or `None` for a
-/// non-shell `pane_target`.
-///
-/// `pane_target` is either the bare `"shell"` (the default Terminal-page
-/// terminal) or `"shell:<id>"` for an additional terminal. The full
-/// `pane_target` rides inside the key (`{stream}|{pane_target}`), so each
-/// terminal id resolves to its own PTY.
-fn shell_session_key(stream_id: &str, pane_target: &str) -> Option<String> {
-    if pane_target == "shell" || pane_target.starts_with("shell:") {
-        Some(format!("{stream_id}|{pane_target}"))
-    } else {
-        None
-    }
-}
 
 /// Whether `session` runs in a terminal oxplow may start: it is open, and
 /// a terminal one.
@@ -127,55 +112,74 @@ pub(crate) fn session_endpoints(
     })
 }
 
-/// Open a renderer-attached terminal session: the agent CLI, or a shell,
-/// run directly in a PTY (`sh -lc <command>`). There is no terminal
-/// multiplexer (tsk1018): the session lives as long as the daemon, and a
-/// re-attach replays its buffer.
+/// What a URI names a PTY for: a terminal (a shell in its stream's
+/// worktree) or an agent session (its agent CLI). The URI is the key the
+/// registry keeps the process under; nothing else names one.
+enum Target {
+    Terminal(oxplow_domain::TerminalId),
+    AgentSession(AgentSessionId),
+}
+
+fn target_of(uri: &str) -> Result<Target, IpcError> {
+    use oxplow_domain::uri::{build::parse_as, resources};
+    if let Ok(id) = parse_as(uri, resources::TERMINAL) {
+        return Ok(Target::Terminal(id));
+    }
+    if let Ok(id) = parse_as(uri, resources::AGENT_SESSION) {
+        return Ok(Target::AgentSession(id));
+    }
+    Err(IpcError::invalid(format!(
+        "`{uri}` names neither a terminal nor an agent session"
+    )))
+}
+
+/// Open a renderer-attached terminal session for `uri`: a terminal's shell
+/// or an agent session's agent CLI, run directly in a PTY. There is no
+/// terminal multiplexer (tsk1018): the process lives as long as the daemon,
+/// and a re-attach replays its buffer. The URI is the key — opening it
+/// again, from another window or a browser client, resumes the one process.
 pub async fn open_terminal_session(
     ctx: &RpcContext,
-    pane_target: String,
+    uri: String,
     cols: u16,
     rows: u16,
 ) -> Result<AttachResult, IpcError> {
-    // The "shell" pane is a plain interactive terminal (the Terminal
-    // page), not the agent: spawn the user's $SHELL rooted at the
-    // worktree dir with no agent command, plugin, or system prompt.
-    // `shell:<id>` is an additional terminal in the same page — each id
-    // gets its own PTY. No plugin runtime needed on this path.
-    if pane_target == "shell" || pane_target.starts_with("shell:") {
-        let stream = match ctx.streams.current().await? {
-            Some(s) => s,
-            None => ctx.streams.ensure_primary().await?,
-        };
-        let cols = cols.max(20);
-        let rows = rows.max(5);
-        // One persistent shell per (stream, terminal id); re-attach resumes it.
-        let session_key = shell_session_key(&stream.id.to_string(), &pane_target)
-            .expect("pane_target was verified to be a shell target above");
-        let cwd = std::path::PathBuf::from(&stream.worktree_path);
-        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
-        let result = ctx
-            .terminal_sessions
-            .attach_or_create(session_key, cols, rows, |c, r| SpawnRequest {
-                command: shell,
-                args: vec!["-l".into()],
-                cwd,
-                env: oxplow_app::agent_path::base_pty_env(),
-                env_remove: oxplow_app::agent_path::not_inherited(&ctx.harnesses),
-                cols: c,
-                rows: r,
-            })
-            .await?;
-        return Ok(result);
-    }
-
-    // Anything else is an agent session's pane: its id (`ses3`). The
-    // session names its thread, the thread its stream — what the person
-    // has selected doesn't matter.
-    let Some(session_id) = AgentSessionId::try_from_str(&pane_target) else {
-        return Err(IpcError::invalid(format!(
-            "unknown pane target: {pane_target}"
-        )));
+    let session_id = match target_of(&uri)? {
+        // A plain interactive shell: the user's $SHELL rooted at the
+        // terminal's stream's worktree, with no agent command, plugin or
+        // system prompt. No plugin runtime needed on this path.
+        Target::Terminal(id) => {
+            let row = ctx
+                .terminal_store
+                .get(id)
+                .await?
+                .ok_or_else(|| IpcError::invalid(format!("no terminal {id}")))?;
+            let stream = ctx
+                .stream_store
+                .get(&row.stream_id)
+                .await?
+                .filter(|s| s.archived_at.is_none())
+                .ok_or_else(|| IpcError::invalid(format!("terminal {id}'s stream is gone")))?;
+            let cwd = std::path::PathBuf::from(&stream.worktree_path);
+            let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
+            return Ok(ctx
+                .terminal_sessions
+                .attach_or_create(terminal_key(id), cols.max(20), rows.max(5), |c, r| {
+                    SpawnRequest {
+                        command: shell,
+                        args: vec!["-l".into()],
+                        cwd,
+                        env: oxplow_app::agent_path::base_pty_env(),
+                        env_remove: oxplow_app::agent_path::not_inherited(&ctx.harnesses),
+                        cols: c,
+                        rows: r,
+                    }
+                })
+                .await?);
+        }
+        // An agent session's pane. The session names its thread, the thread
+        // its stream — what the person has selected doesn't matter.
+        Target::AgentSession(id) => id,
     };
 
     let session = ctx
@@ -387,7 +391,7 @@ pub async fn forward_terminal_input(
     Ok(())
 }
 
-/// Read-only lookup of the live PTY of agent session `session_id`,
+/// Read-only lookup of the live PTY of `uri` (a terminal or an agent session),
 /// **without any spawn side effect**: the registry index under the key
 /// `open_terminal_session` registers, `None` when no live PTY exists (never
 /// opened, or terminated; an unknown session likewise).
@@ -398,12 +402,13 @@ pub async fn forward_terminal_input(
 /// `open_terminal_session`.
 pub async fn lookup_terminal_session(
     svc: &Services,
-    session_id: AgentSessionId,
+    uri: String,
 ) -> Result<Option<String>, IpcError> {
-    Ok(svc
-        .terminal_sessions
-        .session_id_for_key(&agent_pane_key(session_id))
-        .await)
+    let key = match target_of(&uri)? {
+        Target::Terminal(id) => terminal_key(id),
+        Target::AgentSession(id) => agent_pane_key(id),
+    };
+    Ok(svc.terminal_sessions.session_id_for_key(&key).await)
 }
 
 /// Detach the renderer from `session_id` without killing the PTY —
@@ -445,9 +450,10 @@ pub async fn terminate_terminal_session(
 mod tests {
     use serde_json::json;
 
-    use super::{identity_env, session_endpoints, shell_session_key};
+    use super::{identity_env, session_endpoints};
     use crate::error::IpcError;
     use crate::test_support::services;
+    use oxplow_domain::uri::build::agent_session_uri;
 
     #[test]
     fn the_identity_env_names_the_session() {
@@ -526,10 +532,15 @@ mod tests {
         serde_json::from_value(out["result"].clone()).unwrap()
     }
 
-    async fn open(ctx: &crate::RpcContext, pane: &str) -> Result<serde_json::Value, IpcError> {
+    /// Open the PTY of agent session `session` (`ses3`).
+    async fn open(ctx: &crate::RpcContext, session: &str) -> Result<serde_json::Value, IpcError> {
+        open_uri(ctx, &agent_session_uri(session.parse().unwrap())).await
+    }
+
+    async fn open_uri(ctx: &crate::RpcContext, uri: &str) -> Result<serde_json::Value, IpcError> {
         crate::dispatch(
             "open_terminal_session",
-            json!({ "paneTarget": pane, "cols": 80, "rows": 24 }),
+            json!({ "uri": uri, "cols": 80, "rows": 24 }),
             ctx,
         )
         .await
@@ -617,22 +628,56 @@ mod tests {
         assert_eq!(super::not_stopped(&s).unwrap_err().code, super::STOPPED);
     }
 
-    #[test]
-    fn each_shell_terminal_has_its_own_key() {
+    /// A terminal's URI opens its shell in its stream's worktree, keyed by
+    /// the URI: opening it again resumes the same PTY, another terminal is
+    /// another PTY, and a closed terminal's URI is refused.
+    #[tokio::test]
+    async fn a_terminal_uri_opens_its_one_shell() {
+        let (ctx, _dir) = services().await;
+        let stream = ctx.streams.ensure_primary().await.unwrap();
+        let open_terminal = |title: &'static str| {
+            let ctx = &ctx;
+            let stream = stream.id.to_string();
+            async move {
+                let out = crate::dispatch(
+                    "run_command",
+                    json!({ "id": "oxplow.terminal.open", "input": { "stream": stream, "title": title }, "confirmed": false }),
+                    ctx,
+                )
+                .await
+                .unwrap();
+                out["result"]["uri"].as_str().unwrap().to_string()
+            }
+        };
+        let (one, two) = (open_terminal("one").await, open_terminal("two").await);
+        let a = open_uri(&ctx, &one).await.unwrap();
+        let again = open_uri(&ctx, &one).await.unwrap();
+        let b = open_uri(&ctx, &two).await.unwrap();
         assert_eq!(
-            shell_session_key("s-1", "shell").as_deref(),
-            Some("s-1|shell")
+            a["sessionId"], again["sessionId"],
+            "the same URI is the same shell"
         );
-        assert_eq!(
-            shell_session_key("s-1", "shell:t2").as_deref(),
-            Some("s-1|shell:t2"),
+        assert_ne!(
+            a["sessionId"], b["sessionId"],
+            "another terminal, another shell"
         );
-    }
-
-    #[test]
-    fn non_shell_target_is_none() {
-        assert_eq!(shell_session_key("s-1", "working"), None);
-        assert_eq!(shell_session_key("s-1", "talking"), None);
+        // A second client finds it without spawning.
+        let found = crate::dispatch("lookup_terminal_session", json!({ "uri": one }), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(found, a["sessionId"]);
+        for session in [&a, &b] {
+            let _ = ctx
+                .terminal_sessions
+                .close(session["sessionId"].as_str().unwrap())
+                .await;
+        }
+        // A terminal that was never opened is refused at its id.
+        let missing = open_uri(&ctx, "oxplow:oxplow/terminal?id=trm9999")
+            .await
+            .unwrap_err();
+        assert_eq!(missing.code, "INVALID");
+        assert!(missing.message.contains("trm9999"), "{}", missing.message);
     }
 
     #[tokio::test]
@@ -850,22 +895,27 @@ mod tests {
         .expect("the restart scenario finishes within a minute");
     }
 
+    /// A URI of neither a terminal nor an agent session is refused, and so
+    /// are the old pane-target strings.
     #[tokio::test]
-    async fn open_terminal_session_rejects_unknown_pane_target() {
+    async fn open_terminal_session_refuses_what_is_no_terminal_or_session() {
         let (svc, _dir) = services().await;
-        let err = crate::dispatch(
-            "open_terminal_session",
-            json!({ "paneTarget": "bogus", "cols": 80, "rows": 24 }),
-            &svc,
-        )
-        .await
-        .unwrap_err();
-        assert_eq!(err.code, "INVALID");
-        assert!(
-            err.message.contains("unknown pane target"),
-            "msg: {}",
-            err.message
-        );
+        for uri in [
+            "bogus",
+            "shell",
+            "ses3",
+            "oxplow:oxplow/stream?id=str1",
+            "oxplow:oxplow/file?path=src/a.rs",
+        ] {
+            let err = open_uri(&svc, uri).await.unwrap_err();
+            assert_eq!(err.code, "INVALID", "{uri}");
+            assert!(
+                err.message
+                    .contains("neither a terminal nor an agent session"),
+                "{uri}: {}",
+                err.message
+            );
+        }
     }
 
     #[tokio::test]
@@ -935,7 +985,7 @@ mod tests {
         let session = first_session(&ctx).await.id;
         let out = crate::dispatch(
             "lookup_terminal_session",
-            json!({ "sessionId": session.to_string() }),
+            json!({ "uri": agent_session_uri(session) }),
             &ctx,
         )
         .await
@@ -954,7 +1004,7 @@ mod tests {
         let opened_id = opened["sessionId"].as_str().expect("opened sessionId");
         let out = crate::dispatch(
             "lookup_terminal_session",
-            json!({ "sessionId": session }),
+            json!({ "uri": agent_session_uri(session.parse().unwrap()) }),
             &ctx,
         )
         .await

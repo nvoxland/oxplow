@@ -5,7 +5,7 @@ import { useContextMenu } from "../useRowContextMenu.js";
 import { useSlideoutStrip } from "../useSlideoutStrip.js";
 import { SlideoutChevron } from "../SlideoutChevron.js";
 import type { MenuItem } from "../../menu.js";
-import type { TerminalTab } from "./terminalTabs.js";
+import type { TerminalRow } from "../../terminals.js";
 
 /**
  * Vertical tab strip for the Terminal page, sharing its open/close state
@@ -26,7 +26,7 @@ import type { TerminalTab } from "./terminalTabs.js";
  * - Per-row actions live on the right-click menu (Menu key / Shift+F10
  *   for keyboard): Rename… opens an inline input in the panel row (Enter
  *   commits, Escape cancels, blur commits unless Escape was pressed);
- *   Close terminal kills the shell (disabled when only one remains).
+ *   Close terminal ends the shell (the last may close; the page then offers New).
  * - "+ New" appends a terminal.
  *
  * An open rename passes `guard`, so drifting the pointer off the panel
@@ -40,7 +40,7 @@ export function TerminalTabStrip({
   onClose,
   onRename,
 }: {
-  tabs: TerminalTab[];
+  tabs: Pick<TerminalRow, "id" | "title">[];
   activeId: string;
   onActivate(id: string): void;
   onNew(): void;
@@ -48,7 +48,6 @@ export function TerminalTabStrip({
   onRename(id: string, title: string): void;
 }) {
   const [renamingId, setRenamingId] = useState<string | null>(null);
-  const canClose = tabs.length > 1;
   const cm = useContextMenu();
   const strip = useSlideoutStrip({
     guard: renamingId !== null,
@@ -126,7 +125,7 @@ export function TerminalTabStrip({
                 {
                   id: "terminal.close",
                   label: "Close terminal",
-                  enabled: canClose,
+                  enabled: true,
                   run: () => onClose(tab.id),
                 },
               ];

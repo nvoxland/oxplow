@@ -50,6 +50,7 @@ pub const CORE_NAMESPACES: &[&str] = &[
     "contribution",
     "ui",
     "file",
+    "terminal",
     // No events: the request and response bodies of oxplow's own model
     // calls (`ai_call`) are kept under it in `event_content`.
     "ai",
@@ -139,6 +140,10 @@ impl EventSchemaRegistry {
             .expect("core type registers");
         r.register::<FileRenamed>().expect("core type registers");
         r.register::<FileDeleted>().expect("core type registers");
+        r.register::<TerminalOpened>().expect("core type registers");
+        r.register::<TerminalRenamed>()
+            .expect("core type registers");
+        r.register::<TerminalClosed>().expect("core type registers");
         r.register::<EffectResult>().expect("core type registers");
         r.register::<SnapshotTaken>().expect("core type registers");
         r.register::<VcsHeadMoved>().expect("core type registers");
@@ -720,6 +725,61 @@ impl EventType for FileCreated {
     const TYPE: &'static str = "file.created";
     const V: u32 = 1;
     type Payload = FileCreatedV1;
+}
+
+/// `terminal.opened@1`: a terminal was opened in a stream
+/// (`oxplow.terminal.open`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TerminalOpenedV1 {
+    /// The stream (`str2`) whose worktree it runs in.
+    pub stream: String,
+    /// The terminal (`trm3`).
+    pub terminal: String,
+    pub title: String,
+}
+
+pub struct TerminalOpened;
+impl EventType for TerminalOpened {
+    const TYPE: &'static str = "terminal.opened";
+    const V: u32 = 1;
+    type Payload = TerminalOpenedV1;
+}
+
+/// `terminal.renamed@1`: a terminal got another title
+/// (`oxplow.terminal.rename`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TerminalRenamedV1 {
+    pub stream: String,
+    /// The terminal (`trm3`).
+    pub terminal: String,
+    pub title: String,
+}
+
+pub struct TerminalRenamed;
+impl EventType for TerminalRenamed {
+    const TYPE: &'static str = "terminal.renamed";
+    const V: u32 = 1;
+    type Payload = TerminalRenamedV1;
+}
+
+/// `terminal.closed@1`: a terminal was closed: its shell ended and its row
+/// went (`oxplow.terminal.close`, or its stream's archive).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TerminalClosedV1 {
+    pub stream: String,
+    /// The terminal (`trm3`).
+    pub terminal: String,
+    pub title: String,
+}
+
+pub struct TerminalClosed;
+impl EventType for TerminalClosed {
+    const TYPE: &'static str = "terminal.closed";
+    const V: u32 = 1;
+    type Payload = TerminalClosedV1;
 }
 
 /// `file.directory_created@1`: a directory was made in a stream's worktree
@@ -2369,6 +2429,9 @@ mod tests {
                 ("lens.kept", 3),
                 ("lens.shown", 2),
                 ("snapshot.taken", 3),
+                ("terminal.closed", 1),
+                ("terminal.opened", 1),
+                ("terminal.renamed", 1),
                 ("test.coverage.recorded", 1),
                 ("test.run.recorded", 3),
                 ("thread.checkpoint", 2),

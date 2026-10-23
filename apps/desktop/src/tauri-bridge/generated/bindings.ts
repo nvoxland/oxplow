@@ -655,9 +655,9 @@ export const commands = {
 	respondLspApplyEdit: (token: number, applied: boolean, failureReason: string | null) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("respond_lsp_apply_edit", { token, applied, failureReason })),
 	/**
 	 *  Open a renderer-attached terminal session: the agent CLI or a shell,
-	 *  run directly in a PTY (`oxplow_rpc::commands::terminal`).
+	 *  run directly in a PTY, named by its URI (`oxplow_rpc::commands::terminal`).
 	 */
-	openTerminalSession: (paneTarget: string, cols: number, rows: number) => typedError<AttachResult, IpcError_Serialize>(__TAURI_INVOKE("open_terminal_session", { paneTarget, cols, rows })),
+	openTerminalSession: (uri: string, cols: number, rows: number) => typedError<AttachResult, IpcError_Serialize>(__TAURI_INVOKE("open_terminal_session", { uri, cols, rows })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -682,7 +682,7 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	lookupTerminalSession: (sessionId: AgentSessionId) => typedError<string | null, IpcError_Serialize>(__TAURI_INVOKE("lookup_terminal_session", { sessionId })),
+	lookupTerminalSession: (uri: string) => typedError<string | null, IpcError_Serialize>(__TAURI_INVOKE("lookup_terminal_session", { uri })),
 	/**
 	 *  Replace the native menu with the calling window's snapshot. Each
 	 *  activation fires `menu:command` with `{ id: "<command-id>" }` back

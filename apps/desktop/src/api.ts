@@ -150,18 +150,20 @@ function buildBridge() {
         void unlistenPromise.then((u) => u?.());
       };
     },
+    /// The process behind `uri` (a terminal's shell, an agent session's CLI),
+    /// started if it isn't running; opening it again resumes the one.
     openTerminalSession: async (
-      paneTarget: string,
+      uri: string,
       cols: number,
       rows: number,
     ): Promise<{ sessionId: string; replayB64: string }> => {
-      const result = unwrap(await commands.openTerminalSession(paneTarget, cols, rows));
+      const result = unwrap(await commands.openTerminalSession(uri, cols, rows));
       return { sessionId: result.sessionId, replayB64: result.replayB64 };
     },
-    /// The live terminal of an agent session, without starting one: `null`
-    /// when none runs.
-    lookupTerminalSession: async (agentSessionId: string): Promise<string | null> =>
-      unwrap(await commands.lookupTerminalSession(agentSessionId)),
+    /// The live process of `uri` (a terminal or an agent session), without
+    /// starting one: `null` when none runs.
+    lookupTerminalSession: async (uri: string): Promise<string | null> =>
+      unwrap(await commands.lookupTerminalSession(uri)),
     closeTerminalSession: async (sessionId: string): Promise<void> => {
       try {
         unwrap(await commands.closeTerminalSession(sessionId));

@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`terminal.closed@1`: a terminal was closed: its shell ended and its row\nwent (`oxplow.terminal.close`, or its stream's archive).",
+  "properties": {
+    "stream": {
+      "type": "string"
+    },
+    "terminal": {
+      "description": "The terminal (`trm3`).",
+      "type": "string"
+    },
+    "title": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "stream",
+    "terminal",
+    "title"
+  ],
+  "title": "TerminalClosedV1",
+  "type": "object"
+}

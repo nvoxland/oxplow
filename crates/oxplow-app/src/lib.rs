@@ -669,6 +669,8 @@ pub struct Services {
     pub nudge_store: Arc<SqliteAgentNudgeStore>,
     /// User-created dashboards (grids of metric tiles) — project-global (tsk138).
     pub dashboard_store: Arc<oxplow_db::SqliteDashboardStore>,
+    /// A stream's terminals: shells in its worktree, as rows.
+    pub terminal_store: Arc<oxplow_db::SqliteTerminalStore>,
     /// Extension-source entity data + run state (see `collector_runner`).
     pub collector_store: Arc<oxplow_db::SqliteCollectorStore>,
     /// Runs collectors (the `oxplow.collector.sync` command and the scheduler).
@@ -1092,6 +1094,7 @@ impl Services {
             .with_watermarks(model_watermarks.clone());
         let nudge_store = Arc::new(SqliteAgentNudgeStore::new(db.clone()));
         let dashboard_store = Arc::new(oxplow_db::SqliteDashboardStore::new(db.clone()));
+        let terminal_store = Arc::new(oxplow_db::SqliteTerminalStore::new(db.clone()));
         let collector_store = Arc::new(oxplow_db::SqliteCollectorStore::new(db.clone()));
         let reasoning_store = Arc::new(oxplow_db::SqliteReasoningStore::new(db.clone()));
         let tool_call_store = Arc::new(oxplow_db::SqliteToolCallStore::new(db.clone()));
@@ -1566,6 +1569,11 @@ impl Services {
         .chain(commands::effort::ops(work_items.clone()))
         .chain(commands::hint::ops())
         .chain(commands::dashboard::ops(db.clone(), sql.clone()))
+        .chain(commands::terminal::ops(
+            db.clone(),
+            terminal_store.clone(),
+            terminal_sessions.clone(),
+        ))
         .chain(commands::comment::ops())
         .chain(commands::reasoning::ops())
         .chain(commands::ui::ops())
@@ -1598,6 +1606,9 @@ impl Services {
             search: search_store.clone(),
             worktrees: worktrees.clone(),
             efforts: effort_store.clone(),
+            db: db.clone(),
+            terminals: terminal_store.clone(),
+            terminal_sessions: terminal_sessions.clone(),
         })) {
             commands.add_op(command).expect("core ops register");
         }
@@ -1951,6 +1962,7 @@ impl Services {
             metrics,
             nudge_store,
             dashboard_store,
+            terminal_store,
             collector_store,
             collector_runner,
             thread_answer_store,
@@ -2381,6 +2393,7 @@ mod tests {
                 "oxplow.stream.archive",
                 "oxplow.stream.create",
                 // A run's capture, through the collection service (P8.A8).
+                "oxplow.terminal.close",
                 "oxplow.test.record_run",
                 "oxplow.vcs.blame",
                 "oxplow.vcs.branches",

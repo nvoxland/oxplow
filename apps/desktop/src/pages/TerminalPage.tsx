@@ -1,19 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useRef } from "react";
 import { Page } from "../tabs/Page.js";
 import { TerminalPane } from "../components/TerminalPane.js";
 import { TerminalTabStrip } from "../components/Terminal/TerminalTabStrip.js";
-import {
-  addTerminal,
-  closeTerminal,
-  commentTargetFor,
-  defaultTerminalList,
-  normalizeTerminalList,
-  paneTargetFor,
-  renameTerminal,
-} from "../components/Terminal/terminalTabs.js";
 import { usePageTitle } from "../tabs/PageNavigationContext.js";
-import { usePageMemory } from "../prefs/remembered.js";
 import { useHistoryState } from "../tabs/useHistoryState.js";
+import { recordOpError } from "../opErrors.js";
+import { closeTerminal, openTerminal, renameTerminal, useTerminals } from "../terminals.js";
 import type { Stream } from "../api.js";
 
 interface TerminalPageProps {
@@ -23,72 +15,56 @@ interface TerminalPageProps {
   onOpenFile?(absPath: string, line?: number, column?: number): void;
 }
 
+const fail = (label: string) => (e: unknown) =>
+  recordOpError({ label, message: e instanceof Error ? e.message : String(e) });
+
 /**
- * The Terminal Page hosts one or more plain interactive shells rooted at
- * the stream's worktree dir. A left strip selects between them; each is a
- * `TerminalPane` with a `shell:<id>` pane target (the default terminal
- * keeps the bare `"shell"` target — see `terminalTabs.ts`). Panes are
- * kept warm via `display:none` so switching terminals preserves
- * scrollback; closing a terminal kills its shell (`terminateOnUnmount`).
+ * The Terminal Page hosts the stream's terminals: rows (`v_terminal`), each
+ * a plain interactive shell rooted at the worktree and keyed by its URI. A
+ * left strip selects between them; each is a `TerminalPane` on the row's
+ * URI. Panes are kept warm via `display:none` so switching terminals
+ * preserves scrollback. Closing one is a command that ends its shell; the
+ * last may close, and the page offers New. A stream that has none when the
+ * page first opens gets one.
  */
 export function TerminalPage({ stream, visible, onOpenFile }: TerminalPageProps) {
   usePageTitle("Terminal");
 
   const streamId = stream?.id ?? null;
-  // The terminals are this page's memory (every tab of it, each stream its
-  // own); which one is open is this step of this tab's history.
-  const [storedTabs, setStoredTabs] = usePageMemory<unknown>(`tabs.${streamId ?? ""}`, null);
+  const terminals = useTerminals(streamId);
+  // Which one is shown is this step of this tab's history.
   const [activeByStream, setActiveByStream] = useHistoryState<Record<string, string>>("terminalActive", {});
-  // Ids the user has asked to close. A pane renders with
-  // `terminateOnUnmount` while its id is here, so when the effect below
-  // removes it from the list the unmount kills the PTY (vs the detach
-  // that a stream-switch / page-close unmount performs).
-  const [closingIds, setClosingIds] = useState<Set<string>>(() => new Set());
-
-  const tabs = useMemo(
-    () => (streamId && storedTabs ? normalizeTerminalList(storedTabs) : defaultTerminalList()),
-    [streamId, storedTabs],
-  );
-  const rawActive = streamId ? activeByStream[streamId] : undefined;
-  const activeId = tabs.some((t) => t.id === rawActive) ? (rawActive as string) : tabs[0].id;
-
-  // Apply queued closes: run the reducer for each closing id, then clear
-  // the queue. Runs after the render in which the closing panes saw
-  // `terminateOnUnmount`, so their unmount kills the shell.
+  // A stream the page has seeded a first terminal for: never again, so
+  // closing the last one leaves the page empty with New.
+  const seeded = useRef<Set<string>>(new Set());
   useEffect(() => {
-    if (!streamId || closingIds.size === 0) return;
-    let nextTabs = tabs;
-    let nextActive = activeId;
-    for (const id of closingIds) {
-      const r = closeTerminal(nextTabs, nextActive, id);
-      nextTabs = r.list;
-      nextActive = r.activeId;
-    }
-    setStoredTabs(nextTabs);
-    setActiveByStream({ ...activeByStream, [streamId]: nextActive });
-    setClosingIds(new Set());
-  }, [closingIds, streamId, tabs, activeId, activeByStream, setStoredTabs, setActiveByStream]);
+    if (!streamId || terminals === null || terminals.length > 0 || seeded.current.has(streamId)) return;
+    seeded.current.add(streamId);
+    void openTerminal(streamId)
+      .then((t) => setActiveByStream({ ...activeByStream, [streamId]: t.id }))
+      .catch(fail("Open terminal"));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [streamId, terminals]);
+
+  const list = terminals ?? [];
+  const rawActive = streamId ? activeByStream[streamId] : undefined;
+  const active = list.find((t) => t.id === rawActive) ?? list[0] ?? null;
 
   function handleNew() {
     if (!streamId) return;
-    const id = `t${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
-    const r = addTerminal(tabs, id);
-    setStoredTabs(r.list);
-    setActiveByStream({ ...activeByStream, [streamId]: r.activeId });
-  }
-
-  function handleActivate(id: string) {
-    if (!streamId) return;
-    setActiveByStream({ ...activeByStream, [streamId]: id });
-  }
-
-  function handleRename(id: string, title: string) {
-    if (!streamId) return;
-    setStoredTabs(renameTerminal(tabs, id, title));
+    void openTerminal(streamId)
+      .then((t) => setActiveByStream({ ...activeByStream, [streamId]: t.id }))
+      .catch(fail("Open terminal"));
   }
 
   function handleClose(id: string) {
-    setClosingIds((prev) => new Set(prev).add(id));
+    // The neighbour (previous, else next) takes over the shown place.
+    const i = list.findIndex((t) => t.id === id);
+    const next = list.filter((t) => t.id !== id);
+    if (streamId && active?.id === id && next.length > 0) {
+      setActiveByStream({ ...activeByStream, [streamId]: (next[Math.max(0, i - 1)] ?? next[0])!.id });
+    }
+    void closeTerminal(id).catch(fail("Close terminal"));
   }
 
   if (!stream || !streamId) {
@@ -103,19 +79,27 @@ export function TerminalPage({ stream, visible, onOpenFile }: TerminalPageProps)
     <Page testId="page-terminal" title="Terminal" kind="terminal">
       <div style={{ display: "flex", flexDirection: "row", height: "100%", minHeight: 0 }}>
         <TerminalTabStrip
-          tabs={tabs}
-          activeId={activeId}
-          onActivate={handleActivate}
+          tabs={list}
+          activeId={active?.id ?? ""}
+          onActivate={(id) => setActiveByStream({ ...activeByStream, [streamId]: id })}
           onNew={handleNew}
           onClose={handleClose}
-          onRename={handleRename}
+          onRename={(id, title) => void renameTerminal(id, title).catch(fail("Rename terminal"))}
         />
         <div style={{ position: "relative", flex: 1, minWidth: 0, minHeight: 0 }}>
-          {tabs.map((tab) => {
-            const isActive = tab.id === activeId;
+          {terminals !== null && list.length === 0 ? (
+            <div style={{ padding: 12, color: "var(--muted)" }}>
+              No terminal is open.{" "}
+              <button type="button" className="ox-link" data-testid="terminal-new" onClick={handleNew}>
+                New Terminal
+              </button>
+            </div>
+          ) : null}
+          {list.map((tab) => {
+            const isActive = tab.id === active?.id;
             return (
               <div
-                key={`${stream.id}:${tab.id}`}
+                key={tab.uri}
                 style={{
                   position: "absolute",
                   inset: 0,
@@ -125,17 +109,11 @@ export function TerminalPage({ stream, visible, onOpenFile }: TerminalPageProps)
                 }}
               >
                 <TerminalPane
-                  paneTarget={paneTargetFor(tab.id)}
+                  uri={tab.uri}
                   visible={visible && isActive}
                   worktreePath={stream.worktree_path}
                   onOpenFile={onOpenFile}
-                  terminateOnUnmount={closingIds.has(tab.id)}
-                  comments={{
-                    streamId: stream.id,
-                    threadId: null,
-                    // URI-SWITCH: a terminal has no resource of its own yet.
-                    target: commentTargetFor(stream.id, tab.id),
-                  }}
+                  comments={{ streamId: stream.id, threadId: null, target: tab.uri }}
                 />
               </div>
             );

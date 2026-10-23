@@ -2,7 +2,9 @@ import { afterEach, expect, test } from "bun:test";
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
 import { TerminalTabStrip } from "./TerminalTabStrip.js";
-import type { TerminalTab } from "./terminalTabs.js";
+import type { TerminalRow } from "../../terminals.js";
+
+type TerminalTab = Pick<TerminalRow, "id" | "title">;
 
 afterEach(cleanup);
 
@@ -145,12 +147,12 @@ test("an overshoot mid-rename does not discard the rename", async () => {
   expect(renames).toEqual([["t2", "Renamed"]]);
 });
 
-test("the rename menu item is reachable and close is disabled for a lone terminal", () => {
+test("the rename and close menu items are reachable even for a lone terminal: the last may close", () => {
   const { getByTestId } = renderStrip({ tabs: [TABS[0]!] });
 
   openOverlay(getByTestId);
   fireEvent.contextMenu(getByTestId("terminal-tab-row-default"));
 
-  expect((getByTestId("menu-item-terminal.close") as HTMLButtonElement).disabled).toBe(true);
+  expect((getByTestId("menu-item-terminal.close") as HTMLButtonElement).disabled).toBe(false);
   expect((getByTestId("menu-item-terminal.rename") as HTMLButtonElement).disabled).toBe(false);
 });

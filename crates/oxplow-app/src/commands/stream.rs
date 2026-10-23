@@ -108,6 +108,10 @@ pub struct StreamDeps {
     pub search: Arc<oxplow_db::SqliteSearchStore>,
     pub worktrees: Arc<crate::worktrees::WorktreeRouter>,
     pub efforts: Arc<oxplow_db::SqliteEffortStore>,
+    pub db: oxplow_db::Database,
+    /// A stream's terminals close with it: their shells end, their rows go.
+    pub terminals: Arc<oxplow_db::SqliteTerminalStore>,
+    pub terminal_sessions: crate::terminal_sessions::TerminalSessionRegistry,
 }
 
 fn session(e: oxplow_session::SessionError) -> CommandError {
@@ -329,6 +333,21 @@ pub fn archive_op(deps: StreamDeps) -> Op {
                         deps.processes.kill(session);
                     }
                 }
+                // Its terminals' shells end with their rows, before the
+                // working copy they run in goes.
+                for terminal in deps.terminals.for_stream(id).await? {
+                    deps.terminal_sessions
+                        .close_key(&crate::terminal_sessions::terminal_key(terminal.id))
+                        .await;
+                }
+                deps.db
+                    .transaction(move |tx| {
+                        for terminal in oxplow_db::terminal_store::for_stream_tx(tx, id)? {
+                            oxplow_db::terminal_store::delete_tx(tx, terminal.id)?;
+                        }
+                        Ok(())
+                    })
+                    .await?;
                 deps.streams
                     .archive_stream(&id, input.delete_worktree)
                     .await
@@ -743,6 +762,82 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.to_string().contains("still running"), "{err}");
+    }
+
+    /// Archiving a stream closes its terminals: their shells end and their
+    /// rows go with it.
+    #[tokio::test]
+    async fn archiving_closes_its_terminals() {
+        let fx = services_with_effort().await;
+        let root = fx.svc.layout.project_dir.clone();
+        std::fs::write(root.join("base.txt"), "b\n").unwrap();
+        crate::test_fixtures::commit_all(&root, "base");
+        let main = fx.svc.vcs.head(&root).await.unwrap().branch.unwrap();
+        let out = fx
+            .svc
+            .commands
+            .run(
+                &Actor::Human,
+                CREATE,
+                json!({ "title": "Term", "source": "new", "new_branch": "term", "start_point": main }),
+                false,
+            )
+            .await
+            .unwrap();
+        let side = serde_json::from_value::<oxplow_domain::Stream>(out.result)
+            .unwrap()
+            .id;
+        let opened = fx
+            .svc
+            .commands
+            .run(
+                &Actor::Human,
+                crate::commands::terminal::OPEN,
+                json!({ "stream": side.to_string() }),
+                false,
+            )
+            .await
+            .unwrap();
+        let id: oxplow_domain::TerminalId = opened.result["id"].as_str().unwrap().parse().unwrap();
+        let key = crate::terminal_sessions::terminal_key(id);
+        fx.svc
+            .terminal_sessions
+            .attach_or_create(key.clone(), 80, 24, |c, r| {
+                crate::terminal_sessions::SpawnRequest {
+                    command: "sh".into(),
+                    args: vec!["-c".into(), "sleep 30".into()],
+                    cwd: std::env::temp_dir(),
+                    env: Vec::new(),
+                    env_remove: Vec::new(),
+                    cols: c,
+                    rows: r,
+                }
+            })
+            .await
+            .unwrap();
+        assert!(fx
+            .svc
+            .terminal_sessions
+            .session_id_for_key(&key)
+            .await
+            .is_some());
+        fx.svc
+            .commands
+            .run(
+                &Actor::Human,
+                ARCHIVE,
+                json!({ "stream": side.to_string(), "delete_worktree": true }),
+                true,
+            )
+            .await
+            .unwrap();
+        assert!(fx
+            .svc
+            .terminal_sessions
+            .session_id_for_key(&key)
+            .await
+            .is_none());
+        assert!(fx.svc.terminal_store.get(id).await.unwrap().is_none());
     }
 
     /// Archiving a stream closes its threads' open efforts with an end

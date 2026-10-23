@@ -36,11 +36,12 @@ pub enum EntityKind {
     DashboardItem,
     AgentSession,
     Handoff,
+    Terminal,
 }
 
 impl EntityKind {
     /// Every kind, for reverse lookups.
-    pub const ALL: [EntityKind; 13] = [
+    pub const ALL: [EntityKind; 14] = [
         EntityKind::Stream,
         EntityKind::Thread,
         EntityKind::Note,
@@ -54,6 +55,7 @@ impl EntityKind {
         EntityKind::DashboardItem,
         EntityKind::AgentSession,
         EntityKind::Handoff,
+        EntityKind::Terminal,
     ];
 
     /// The fixed 3-letter prefix that opens every id of this kind.
@@ -72,6 +74,7 @@ impl EntityKind {
             EntityKind::DashboardItem => "dti",
             EntityKind::AgentSession => "ses",
             EntityKind::Handoff => "hnd",
+            EntityKind::Terminal => "trm",
         }
     }
 
@@ -92,6 +95,7 @@ impl EntityKind {
             EntityKind::DashboardItem => "dashboard-item id (dti…)",
             EntityKind::AgentSession => "agent-session id (ses…)",
             EntityKind::Handoff => "handoff id (hnd…)",
+            EntityKind::Terminal => "terminal id (trm…)",
         }
     }
 
@@ -306,6 +310,7 @@ id_type!(DashboardId, Dashboard);
 id_type!(DashboardItemId, DashboardItem);
 id_type!(AgentSessionId, AgentSession);
 id_type!(HandoffId, Handoff);
+id_type!(TerminalId, Terminal);
 
 #[cfg(test)]
 mod tests {

@@ -132,6 +132,13 @@ pub fn agent_pane_key(session: oxplow_domain::AgentSessionId) -> SessionKey {
     format!("session|{session}")
 }
 
+/// The registry key of terminal `terminal`'s shell: its URI, so a
+/// re-attach — another window, a browser client — resumes the one live
+/// shell, and closing the terminal ends it.
+pub fn terminal_key(terminal: oxplow_domain::TerminalId) -> SessionKey {
+    oxplow_domain::uri::build::terminal_uri(terminal)
+}
+
 /// The agent a PTY runs: its thread and agent session. Its output stamps
 /// the session's liveness, and its exit ends the session's harness session
 /// (`HookIngestService` records a `SessionEnd` for it).

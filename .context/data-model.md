@@ -273,7 +273,8 @@ the same with no reason of their own.
 Every externally-visible entity id is a SQLite **autoincrement INTEGER**
 rendered with a fixed **3-letter type prefix** at the application boundary,
 e.g. `str5` (stream), `thr21` (thread), `tsk38` (task), `eff7` (effort),
-`not3` (note), `trn9` (agent-turn), `ses4` (agent session), `cmt2` (comment).
+`not3` (note), `trn9` (agent-turn), `ses4` (agent session), `cmt2` (comment),
+`trm3` (terminal).
 The prefix lives only in Rust (`Display`/serde) and in the TypeScript
 bindings (each id type is a `string`); **DB columns and the FKs that point
 at them are plain `INTEGER`**. The single source of truth is
@@ -702,6 +703,17 @@ injected context that carries it), `state` (CHECK `open` / `taken` / `declined` 
 are `ON DELETE SET NULL`, threads `CASCADE`. Its ref is `handoff:hnd<n>`;
 its body's `[[…]]` links are `page_ref` edges from `handoff`, restated
 by the boot repair like a note's. Read as `v_handoff`.
+
+### `terminal` (`terminal_store.rs`, V106)
+
+A stream's terminals, one row per shell: `stream_id` (`ON DELETE CASCADE`;
+an archive deletes the rows itself and ends the shells), `title`, `position`
+(dense order within the stream) and `created_at`. Written only by the
+`oxplow.terminal.*` commands through the store's `_tx` cores (`open_tx`
+titles "Terminal N" — one past the highest numbered title, never below the
+count — `rename_tx`, `delete_tx`); read as `v_terminal` (with its `uri`,
+`oxplow:oxplow/terminal?id=trm<n>`, the key the shell's PTY is registered
+under: [terminal.md](./terminal.md) "Terminals are rows").
 
 ### `effort` — `EffortStore` (`crates/oxplow-db/src/effort_store.rs`)
 

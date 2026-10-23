@@ -41,6 +41,7 @@ pub const THREAD_NOTE: &str = "oxplow/thread_note";
 pub const AGENT_SESSION: &str = "oxplow/agent_session";
 pub const HANDOFF: &str = "oxplow/handoff";
 pub const DASHBOARD: &str = "oxplow/dashboard";
+pub const TERMINAL: &str = "oxplow/terminal";
 pub const SUBAGENT: &str = "oxplow/subagent";
 pub const RUN: &str = "oxplow/run";
 pub const PROPOSAL: &str = "oxplow/proposal";

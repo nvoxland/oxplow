@@ -11,7 +11,7 @@ type Thread = { id: string };
 /** The stream and the thread its pages open on: the one a fresh stream is
  *  seeded with. It has no agent session; one opened on it runs the
  *  project's default agent — here the fake terminal harness (`agents:
- *  [terminal]`), so the suite never starts a real agent CLI. */
+ *  [scripted]`), so the suite never starts a real agent CLI. */
 async function seededThread(daemon: Daemon): Promise<{ stream: string; thread: string }> {
   const [stream] = await ipc<Stream[]>(daemon, "list_streams");
   if (!stream) throw new Error("the daemon has no stream");
@@ -49,7 +49,7 @@ async function workspace(): Promise<Workspace> {
     // Its pages open on the fake harness, a provider from the project.
     await until("the fake harness to be registered", 60_000, async () => {
       const harnesses = await ipc<Array<{ id: string; enabled: boolean }>>(daemon, "list_agent_harnesses");
-      return harnesses.some((h) => h.id === "terminal" && h.enabled);
+      return harnesses.some((h) => h.id === "scripted" && h.enabled);
     });
     return { ...daemon, ...(await seededThread(daemon)) };
   } catch (e) {

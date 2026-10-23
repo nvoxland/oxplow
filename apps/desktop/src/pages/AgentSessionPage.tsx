@@ -102,7 +102,7 @@ export function AgentSessionPage({
             *  agent, so React must not reuse this xterm for it. */}
           <TerminalPane
             key={session.id}
-            paneTarget={session.id}
+            uri={agentSessionUri(session.id)}
             visible={visible}
             startOnActivate
             stopped={session.stoppedByUser}

@@ -116,14 +116,13 @@ async function readClipboard(): Promise<string> {
 }
 
 export function TerminalPane({
-  paneTarget,
+  uri,
   visible,
   onUserInterrupt,
   worktreePath,
   onOpenFile,
   isLinkablePath,
   comments,
-  terminateOnUnmount,
   startOnActivate,
   stopped,
   onStart,
@@ -131,7 +130,7 @@ export function TerminalPane({
   onChooseAnother,
   restartKey,
 }: {
-  paneTarget: string;
+  uri: string;
   visible: boolean;
   /// Agent session tabs: a restored tab spawns nothing until it is shown
   /// (or its agent is already running, which it attaches to without
@@ -174,11 +173,6 @@ export function TerminalPane({
   /// output can be commented, anchored to the buffer text and targeted at
   /// this page ref. `threadId` is null for the shell terminal.
   comments?: { streamId: string; threadId: string | null; target: string };
-  /// When set, unmounting kills the PTY (`terminateTerminalSession`)
-  /// instead of merely detaching (`closeTerminalSession`). The Terminal
-  /// page sets this so removing a terminal tab terminates its shell;
-  /// tab-switches keep the default detach so the shell survives.
-  terminateOnUnmount?: boolean;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
@@ -262,15 +256,10 @@ export function TerminalPane({
   worktreePathRef.current = worktreePath;
   onOpenFileRef.current = onOpenFile;
   isLinkablePathRef.current = isLinkablePath;
-  // Mirror so the session-open effect's cleanup (which captures values at
-  // mount, deps `[paneTarget]`) sees the latest flag.
-  const terminateOnUnmountRef = useRef<boolean>(!!terminateOnUnmount);
-  terminateOnUnmountRef.current = !!terminateOnUnmount;
-
   useEffect(() => {
     if (!visible) return;
     termRef.current?.focus();
-  }, [paneTarget, visible]);
+  }, [uri, visible]);
 
   // Subscribe to the "Add to agent context" bus only while this pane is
   // visible — `insertIntoAgent` from a drag-drop or right-click anywhere
@@ -535,8 +524,8 @@ export function TerminalPane({
       const openSession = (again: boolean) => {
         if (opening || disposed) return;
         opening = true;
-        logUi("info", "opening terminal session", { paneTarget, cols: term.cols, rows: term.rows, again });
-        void desktopBridge().openTerminalSession(paneTarget, term.cols, term.rows).then(({ sessionId, replayB64 }) => {
+        logUi("info", "opening terminal session", { uri, cols: term.cols, rows: term.rows, again });
+        void desktopBridge().openTerminalSession(uri, term.cols, term.rows).then(({ sessionId, replayB64 }) => {
           if (disposed) {
             void desktopBridge().closeTerminalSession(sessionId);
             return;
@@ -568,13 +557,13 @@ export function TerminalPane({
           }
           pendingEvents.length = 0;
           term.focus();
-          logUi("info", "terminal session opened", { paneTarget, sessionId, again });
+          logUi("info", "terminal session opened", { uri, sessionId, again });
         }).catch((error) => {
           if (isStopped(error)) {
             setStoppedHere(true);
             return;
           }
-          logUi("error", "terminal session open failed", { paneTarget, error: String(error) });
+          logUi("error", "terminal session open failed", { uri, error: String(error) });
           // No process exists: say why where "Session ended" shows, with
           // Retry (the same reopen), instead of leaving the pane blank.
           endedRef.current = true;
@@ -597,7 +586,7 @@ export function TerminalPane({
         // Hidden and not started: attach to an agent that already runs
         // (a lookup spawns nothing); otherwise wait to be shown.
         void desktopBridge()
-          .lookupTerminalSession(paneTarget)
+          .lookupTerminalSession(uri)
           .then((live) => {
             if (live && !disposed) activate();
           })
@@ -667,15 +656,13 @@ export function TerminalPane({
       termRef.current = null;
       setTerm(null);
       if (sessionId) {
-        if (terminateOnUnmountRef.current) {
-          void desktopBridge().terminateTerminalSession(sessionId);
-        } else {
-          void desktopBridge().closeTerminalSession(sessionId);
-        }
+        // Detach only: the shell is the terminal's, and ends when the
+        // terminal is closed (`oxplow.terminal.close`).
+        void desktopBridge().closeTerminalSession(sessionId);
       }
       term.dispose();
     };
-  }, [paneTarget]);
+  }, [uri]);
 
   return (
     <div

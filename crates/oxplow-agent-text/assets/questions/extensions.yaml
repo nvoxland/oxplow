@@ -114,3 +114,8 @@
   reaches:
     sql: SELECT name, kind, status FROM v_workspace_file WHERE parent = 'src' ORDER BY kind, name
   shape: { columns: [name, kind, status] }
+- question: Which terminals are open in this stream?
+  skill: oxplow-extension
+  reaches:
+    sql: SELECT title, uri FROM v_terminal WHERE stream_id = 1 ORDER BY position
+  shape: { columns: [title, uri] }

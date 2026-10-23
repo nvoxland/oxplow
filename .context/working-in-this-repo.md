@@ -309,7 +309,7 @@ command's UI path, a testid — and add or extend a spec under
 - a spec whose state no other may touch first (nothing deployed, a
   provider configured) takes the `fresh` fixture, its own daemon.
 - every thread runs the fake terminal harness (the test extension's
-  `terminal` provider, `agents: [terminal]`); a spec that needs an agent
+  `scripted` provider, `agents: [scripted]`); a spec that needs an agent
   whose process ends enables Claude, which the daemon's PATH (the person's
   own bin dirs left out) can't find on any machine, so its launch shell
   exits at once. (Codex, with no program to find, fails its launch before a

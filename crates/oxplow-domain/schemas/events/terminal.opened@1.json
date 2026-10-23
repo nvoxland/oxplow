@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`terminal.opened@1`: a terminal was opened in a stream\n(`oxplow.terminal.open`).",
+  "properties": {
+    "stream": {
+      "description": "The stream (`str2`) whose worktree it runs in.",
+      "type": "string"
+    },
+    "terminal": {
+      "description": "The terminal (`trm3`).",
+      "type": "string"
+    },
+    "title": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "stream",
+    "terminal",
+    "title"
+  ],
+  "title": "TerminalOpenedV1",
+  "type": "object"
+}

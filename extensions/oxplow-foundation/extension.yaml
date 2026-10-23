@@ -358,6 +358,12 @@ resources:
     resolve: dashboard
     searchable: search_dashboard
     icon: layout-dashboard
+  - name: terminal
+    label: Terminal
+    params: { id: { required: true, pattern: '^trm[0-9]+$' } }
+    resolve: terminal
+    title: title
+    icon: terminal
   - name: subagent
     label: Subagent
     params: { session: { required: true, pattern: '^ses[0-9]+$' }, agent: { required: true, pattern: '^[!-.0-~]+$' } }
@@ -1349,6 +1355,23 @@ commands:
     scope: tabs.write
     op: close
     example: {"uri": "oxplow:oxplow/file?path=src/main.rs"}
+  # terminals.write
+  - name: terminal.open
+    summary: "Open a terminal: a shell (`$SHELL -l`) in a stream's worktree, at the end of its terminals. `title` defaults to the next \"Terminal N\". Answers `{ id, uri, title }`; the shell starts when a page attaches to the URI."
+    scope: terminals.write
+    op: open
+    example: {"stream": "str2", "title": "build"}
+  - name: terminal.rename
+    summary: "Give a terminal another title (`trm3`)."
+    scope: terminals.write
+    op: rename
+    example: {"terminal": "trm3", "title": "server"}
+  - name: terminal.close
+    summary: "Close a terminal (`trm3`): its shell ends and its row goes. A person is asked first, since the shell may hold work (ends a process, a system the bus doesn't own)."
+    scope: terminals.write
+    op: close
+    confirm: destructive
+    example: {"terminal": "trm3"}
   # test_runs.write
   - name: test.record_run
     summary: "Record a test run with pass/fail counts oxplow couldn't read from its output, marked `asserted`. oxplow records runs it sees in shell commands itself; this is for runs it couldn't parse. The run is the thread's open effort's. Returns `{ recorded, observationId }`."

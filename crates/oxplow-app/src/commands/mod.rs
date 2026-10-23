@@ -49,6 +49,7 @@ pub mod review;
 pub mod snapshot;
 mod steps;
 pub mod stream;
+pub mod terminal;
 pub mod test_runs;
 pub mod thread;
 pub mod ui;

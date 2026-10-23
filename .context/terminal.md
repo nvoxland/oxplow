@@ -49,9 +49,9 @@ and an xterm font-metrics race at mount (a resize changes nothing).
 `apps/desktop/src/components/TerminalPane.tsx` is the **only** xterm.js
 consumer. It's mounted by two page renderers:
 
-- `apps/desktop/src/pages/AgentPage.tsx` — an agent session's tab,
-  `paneTarget` the session id (`ses3`). The backend spawns the session's
-  harness CLI (Claude, opencode, or Codex's TUI on the thread oxplow
+- `apps/desktop/src/pages/AgentSessionPage.tsx` — an agent session's tab,
+  `uri` the session's (`oxplow:oxplow/agent_session?id=ses3`). The backend spawns
+  the session's harness CLI (Claude, opencode, or Codex's TUI on the thread oxplow
   opened on its daemon).
 - `apps/desktop/src/pages/TerminalPage.tsx` — the "Terminal" Page (the `terminal` page,
   a built-in page oxplow-foundation declares). Hosts **multiple** shells: it mounts
@@ -61,30 +61,28 @@ consumer. It's mounted by two page renderers:
   between them. The strip **shares its open/close state machine with the
   far-left `Navigator`** via `components/useSlideoutStrip.ts`: a thin
   always-visible glyph column, and a panel that slides out with full
-  titles + a per-row right-click menu (Rename… / Close terminal). Each pane's `paneTarget` is `"shell"` for the first
-  (default) terminal and `shell:<id>` for the rest. The backend
-  (`commands/terminal.rs`) early-branches on `pane_target == "shell" ||
-  starts_with("shell:")` to spawn the user's `$SHELL -l` (fallback
-  `/bin/sh`) rooted at `stream.worktree_path` — no agent command,
-  Claude Code plugin, or system prompt. One persistent shell per (stream, terminal
-  id) (session key `<stream>|<pane_target>|<mode>`, so the bare-`shell`
-  default reproduces the old `<stream>|shell|<mode>` key and reattaches
-  its existing PTY). No `onUserInterrupt`: Escape is an ordinary shell
-  keystroke here. See "Multiple terminals" below.
+  titles + a per-row right-click menu (Rename… / Close terminal). Each pane's `uri` is
+  its terminal's (`oxplow:oxplow/terminal?id=trm3`). The backend
+  (`commands/terminal.rs`, `open_terminal_session { uri, cols, rows }`) resolves
+  the URI — a terminal, or an agent session; anything else is refused —
+  and for a terminal spawns the user's `$SHELL -l` (fallback `/bin/sh`)
+  rooted at the terminal's stream's `worktree_path` — no agent command,
+  Claude Code plugin, or system prompt. One persistent shell per terminal:
+  the registry key is the URI, so a re-attach (another window, a browser
+  client) resumes it. No `onUserInterrupt`: Escape is an ordinary shell
+  keystroke here. See "Terminals are rows" below.
 
-Both go through the same component; only the `paneTarget` (and thus the
+Both go through the same component; only the `uri` (and thus the
 server-side spawn) differs.
 
-An agent PTY is keyed by its **agent session** only (`agent_session_key`
-in `commands/terminal.rs`, `session|ses3`): `open_terminal_session` reads
+An agent PTY is keyed by its **agent session** only (`agent_pane_key`,
+`session|ses3`; the URI names the session): `open_terminal_session` reads
 the session, then its thread and stream (never the person's selection),
 refuses a closed session,
 resumes from the session's resume id and passes `OXPLOW_SESSION`. Two
 sessions in one thread are two PTYs; a re-attach from another window or
 transport resumes the one live agent PTY, never a duplicate `claude` in
-the same worktree. (The shell path keeps transport in its key via
-`shell_session_key` — shell sessions may legitimately differ by
-transport.) The spawn binds the PTY to its `AgentPane { thread, session }`:
+the same worktree. The spawn binds the PTY to its `AgentPane { thread, session }`:
 its output stamps the session's liveness and its exit ingests a
 `SessionEnd` for the session. Agent-specific runtime files are generated
 under `.oxplow/runtime/` by the session's harness (`oxplow-harnesses`: the Claude MCP config and the
@@ -186,12 +184,12 @@ Nothing is adopted until a person picks it. The page filters in the client
 A closed session's ref no longer opens nothing: it opens the
 `session-transcript` lens, which has a **Reopen** action.
 
-**Read-only session lookup (tsk139).** `lookup_terminal_session({ sessionId })`
+**Read-only session lookup (tsk139).** `lookup_terminal_session({ uri })`
 (core in `crates/oxplow-rpc/src/commands/terminal.rs`; Tauri shim +
 `bindings.ts` `lookupTerminalSession`) returns the live PTY `sessionId` of
-an agent session **without spawning**: the registry's read-only
-`TerminalSessionRegistry::session_id_for_key` under the same
-`agent_session_key` (reads `by_key`, validates the id still lives in
+a terminal or an agent session **without spawning**: the registry's read-only
+`TerminalSessionRegistry::session_id_for_key` under the same key
+(`terminal_key`, or `agent_pane_key`) (reads `by_key`, validates the id still lives in
 `inner`; a killed-but-stale entry reads as `None`). Returns `None` when no
 live PTY exists. This is the spawn-free path a second client uses to
 resolve a session's agent PTY before `forward_terminal_input` (the human-keystroke transport), instead
@@ -319,15 +317,31 @@ reset and the new session's replay is written under a dim "the previous
 session ended; this one was started again" line. Helpers in
 `components/terminalSession.ts`.
 
-## Multiple terminals (Terminal page)
+## Terminals are rows
 
-`TerminalPage` owns a per-stream list of terminals and renders one
-`TerminalPane` per entry. The pure list logic lives in
-`apps/desktop/src/components/Terminal/terminalTabs.ts` (unit-tested):
-`addTerminal` (auto-numbers "Terminal N", collision-safe), `closeTerminal`
-(picks a neighbor as the new active; re-seeds a default when the last one
-closes), `renameTerminal`, `normalizeTerminalList`, plus
-`paneTargetFor(id)` / `commentTargetFor(streamId, id)`.
+A stream's terminals are rows of the `terminal` table (`id`, `stream_id`,
+`title`, `position`, `created_at`; `SqliteTerminalStore`), read as the model
+`v_terminal` (with its `uri`, `oxplow:oxplow/terminal?id=trm3`) and named by
+the `oxplow/terminal` resource. Three commands (`commands/terminal.rs`, scope
+`terminals.write`) write them: `oxplow.terminal.open { stream, title? }`
+(auto-numbered "Terminal N": one past the highest numbered title and never
+below the count, so a generated title never repeats after renames; answers
+`{ id, uri, title }`; an agent opens only in its own stream),
+`oxplow.terminal.rename { terminal, title }` (undoable) and
+`oxplow.terminal.close { terminal }` (`External`: the shell the registry keeps
+under the URI ends, then the row goes; a person's — an agent is refused — and
+confirmed; the last terminal may close). They log `terminal.opened@1`,
+`renamed@1` and `closed@1`. A stream's archive ends its terminals' shells and
+deletes their rows with it.
+
+`TerminalPage` reads the stream's rows (`terminals.ts`, `useTerminals`:
+live) and renders one `TerminalPane` per row. A stream with none when the page
+first opens gets one (once per page: closing the last leaves the page empty
+with **New Terminal**). The old pane-target strings (`shell`, `shell:<id>`,
+`ses3`) and the page-memory list of terminals are gone; a shell is its URI.
+Not migrated: terminals the page memory held (shells re-spawn after a restart
+anyway; a renamed title is lost once). A terminal's comments anchor to its
+URI.
 
 The strip (`TerminalTabStrip.tsx`) runs on the shared
 `useSlideoutStrip` hook (`.context/usability.md` → "Hover reveals, click
@@ -337,8 +351,7 @@ only on a click (the bottom-pinned `terminal-tab-expand` chevron, or the
 strip's dead space) and closes on a background click, pointer-leave,
 Escape, or an outside press. Clicking a glyph activates that terminal;
 rename and close are right-click menu items on the panel row (rename
-opens an inline input there; close is disabled when only one terminal
-remains). Close is **not** an inline `InlineConfirm` `×` anymore — it
+opens an inline input there; the last terminal may close). Close is **not** an inline `InlineConfirm` `×` anymore — it
 matches the stream/thread nav.
 
 Two behaviors the hook fixed here (tsk270), both previously hand-rolled
@@ -350,28 +363,13 @@ now passes the hook's `guard`, which suppresses the passive closes
 (pointer-leave, background click) while leaving the explicit ones
 (Escape, outside press, the collapse chevron) working.
 
-- **The first terminal uses the sentinel id `DEFAULT_TERMINAL_ID`
-  (`"default"`)** → bare `"shell"` pane target + `stream.id` comment
-  target. This is the back-compat hinge: the pre-multi-terminal single
-  shell and any comments anchored to it keep working with zero migration.
-  Additional terminals get random ids → `shell:<id>` pane target +
-  `<streamId>:<id>` comment target.
-- **Persistence**: the terminals are page memory (`tabs.<streamId>`,
-  `{id,title}[]`), shared by every Terminal tab; the open one is history
-  state (`terminalActive`, `Record<streamId, terminalId>`).
-  The backend session registry is in-memory, so after an app restart the
-  list (titles/order/active) is restored but the shells re-spawn fresh.
-- **Each pane is keyed `${stream.id}:${id}`** so a stream switch remounts
-  it against the right stream's worktree.
-- **Close kills, switch detaches.** `TerminalPane` gains a
-  `terminateOnUnmount?` prop: when set, unmount calls
-  `terminateTerminalSession` (kill PTY) instead of `closeTerminalSession`
-  (detach). The page only sets it on a terminal that the user explicitly
-  closed, via a two-phase `closingIds` set: the pane first re-renders
-  with `terminateOnUnmount` true, then the effect removes it from the
-  list so the resulting unmount kills the shell. Stream switches and
-  closing the whole Terminal page tab unmount with the flag false →
-  detach, so those shells survive and reattach.
+- **Each pane is keyed by its terminal's URI**, so a stream switch mounts
+  the other stream's panes against their own worktrees.
+- **Close ends, switch detaches.** Closing is the command; a pane's unmount
+  only detaches (`closeTerminalSession`), so switching terminals, streams or
+  closing the whole Terminal page tab leaves the shells running and a
+  re-attach replays the buffer. The open one is history state
+  (`terminalActive`, `Record<streamId, terminalId>`).
 
 ## File-path link provider
 
@@ -505,10 +503,9 @@ each scans the same line. Examples for the future:
   pty's live cwd) → update the resolution section.
 - Added a new TerminalPane mount site (today: AgentPage + TerminalPage)
   → call out the new host so future work doesn't assume one consumer.
-- Added a new `pane_target` (today: working / talking / shell /
-  `shell:<id>`) → note what the backend spawns for it.
-- Changed how the Terminal page manages its terminal list, persistence,
-  or the kill-vs-detach close path → update "Multiple terminals".
+- Made another URI open a PTY (today: a terminal, an agent session) → note what
+  the backend spawns for it.
+- Changed how terminals are opened, listed or closed → update "Terminals are rows".
 - Changed the tab strip's expand/collapse behavior → change it in
   `components/useSlideoutStrip.ts` (shared with the `Navigator`), not
   here; update "Multiple terminals" only if the strip stops using it.

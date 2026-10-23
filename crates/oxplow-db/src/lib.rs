@@ -58,6 +58,7 @@ pub mod sql_tokens;
 pub mod stream_store;
 pub mod symbol_store;
 pub mod table_generations;
+pub mod terminal_store;
 #[cfg(test)]
 pub(crate) mod test_tasks;
 pub mod thread_answer_store;
@@ -136,6 +137,7 @@ pub use semantic_layer::{
 pub use snapshot_tree::{ContentHasher, SnapshotTree, TreeEntry};
 pub use stream_store::SqliteStreamStore;
 pub use symbol_store::{FileSymbols, SqliteSymbolStore, SymbolCapture, SymbolRow};
+pub use terminal_store::{SqliteTerminalStore, Terminal};
 pub use thread_answer_store::{AnswerShows, SqliteThreadAnswerStore, ThreadAnswer};
 pub use thread_note_store::SqliteThreadNoteStore;
 pub use thread_store::SqliteThreadStore;

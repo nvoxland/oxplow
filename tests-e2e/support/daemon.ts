@@ -28,11 +28,11 @@ export type Daemon = {
 export const LOG_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", ".output", "daemons");
 
 /** The project's `.oxplow/project.yaml`: its threads run the fake terminal
- *  harness (the test extension's `terminal` provider, enabled here), so no
+ *  harness (the test extension's `scripted` provider, enabled here), so no
  *  spec ever starts a real agent CLI. The suite's extensions are on, so the
  *  daemon deploys them from their sources when it starts. */
 function projectYaml(): string {
-  return `agents: [terminal]\nextensions: [oxplow-bundled, e2e, github]\nextensionInstances:\n  e2e/terminal: { enabled: true, config: { team: core } }\n`;
+  return `agents: [scripted]\nextensions: [oxplow-bundled, e2e, github]\nextensionInstances:\n  e2e/scripted: { enabled: true, config: { team: core } }\n`;
 }
 
 /** Put the suite's test extension's source (`tests-e2e/fixtures/extension`)
@@ -51,9 +51,9 @@ function installTestExtension(project: string, providerFake: string): void {
     `#!/bin/sh\nOXPLOW_FAKE_STATE="${state}/fake-state-$OXPLOW_PROVIDER_ID.json" exec ${JSON.stringify(providerFake)} "$@"\n`,
   );
   chmodSync(script, 0o755);
-  const terminal = join(dir, "bin", "terminal");
-  writeFileSync(terminal, `#!/bin/sh\nOXPLOW_FAKE_CAPABILITY=agent_harness exec ${JSON.stringify(providerFake)} "$@"\n`);
-  chmodSync(terminal, 0o755);
+  const scripted = join(dir, "bin", "scripted");
+  writeFileSync(scripted, `#!/bin/sh\nOXPLOW_FAKE_CAPABILITY=agent_harness exec ${JSON.stringify(providerFake)} "$@"\n`);
+  chmodSync(scripted, 0o755);
 }
 
 /** Put the documented github example (`examples/extensions/github`) into

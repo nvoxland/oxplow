@@ -13,7 +13,7 @@ test("an enabled harness's declared settings are offered and saved", async ({ fr
   await page.goto("/");
   await openFromLauncher(page, "Settings: Agents");
   await expect(page.getByText("OpenCode — Model")).toHaveCount(0);
-  await run(daemon, "oxplow.agent.set_agents", { agents: ["terminal", "opencode"] });
+  await run(daemon, "oxplow.agent.set_agents", { agents: ["scripted", "opencode"] });
   await page.reload();
   await openFromLauncher(page, "Settings: Agents");
   const row = page.getByRole("row", { name: /OpenCode — Model/ });

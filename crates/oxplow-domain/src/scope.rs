@@ -468,6 +468,13 @@ pub const SCOPES: &[Scope] = &[
         summary: "Open, close and focus tabs in a thread's set of tabs — an agent's only in its own thread's.",
     },
     Scope {
+        id: "terminals.write",
+        access: Access::Write,
+        host: Host::Daemon,
+        spends: false,
+        summary: "Open, rename and close a stream's terminals: shells in its worktree.",
+    },
+    Scope {
         id: "test_runs.write",
         access: Access::Record,
         host: Host::Daemon,

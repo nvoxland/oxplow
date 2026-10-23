@@ -184,7 +184,7 @@ macro_rules! oxplow_command_table {
         $callback! {
             ctx {
                 // terminal — the agent-spawn path needs plugin_runtime
-                "open_terminal_session" => $crate::commands::terminal::open_terminal_session { pane_target: String, cols: u16, rows: u16 },
+                "open_terminal_session" => $crate::commands::terminal::open_terminal_session { uri: String, cols: u16, rows: u16 },
             }
             svc {
             }
@@ -298,7 +298,7 @@ macro_rules! oxplow_command_table {
                 close_terminal_session => $crate::commands::terminal::close_terminal_session { session_id: String } -> (),
                 terminal_session_cwd => $crate::commands::terminal::terminal_session_cwd { session_id: String } -> Option<String>,
                 terminate_terminal_session => $crate::commands::terminal::terminate_terminal_session { session_id: String } -> (),
-                lookup_terminal_session => $crate::commands::terminal::lookup_terminal_session { session_id: ::oxplow_domain::AgentSessionId } -> Option<String>,
+                lookup_terminal_session => $crate::commands::terminal::lookup_terminal_session { uri: String } -> Option<String>,
                 // snapshot
                 list_snapshot_ops => $crate::commands::snapshot::list_snapshot_ops { stream_id: ::oxplow_domain::StreamId, limit: Option<u32> } -> Vec<::oxplow_db::SnapshotOp>,
                 get_snapshot_stats => $crate::commands::snapshot::get_snapshot_stats { snapshot_id: ::oxplow_domain::SnapshotId } -> ::oxplow_db::SnapshotStats,

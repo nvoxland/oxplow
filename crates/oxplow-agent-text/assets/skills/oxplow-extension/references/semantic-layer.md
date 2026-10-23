@@ -28,7 +28,9 @@
   And for the project: `v_agent_harness` (the registered agents, those
   `agents:` names first, `enabled` and `position`), `v_config_value` (every setting's value now and
   where it comes from) and `v_vcs_workspace` (the repository's working
-  copies and the stream in each; `stream_id IS NULL` is adoptable). A lens
+  copies and the stream in each; `stream_id IS NULL` is adoptable). A stream's
+  terminals — shells in its worktree, in order — are `v_terminal` (open one with
+  `oxplow.terminal.open`). A lens
   over a live model re-runs when what it reads changes.
 - Made when a query names it: `v_commit` / `v_commit_file` `WHERE sha =
   :sha` (the full sha) reads a commit however old, and `v_change WHERE

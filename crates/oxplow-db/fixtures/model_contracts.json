@@ -22814,5 +22814,42 @@
         "name"
       ]
     }
+  },
+  "terminal": {
+    "1": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Terminal id (`trm<id>` in its URI)."
+        },
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "The stream whose worktree the shell runs in."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "Its title: \"Terminal N\" unless it was named."
+        },
+        {
+          "name": "position",
+          "type": "INTEGER",
+          "doc": "Order among the stream's terminals."
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "uri",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/terminal?id=trm<id>`: its URI, the one place SQL spells it — select and join on this, never rebuild it."
+        }
+      ],
+      "key": []
+    }
   }
 }
