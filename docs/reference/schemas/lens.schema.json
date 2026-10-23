@@ -157,6 +157,17 @@
       ],
       "default": null
     },
+    "terminal": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/LensTerminal"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
     "markdown": {
       "anyOf": [
         {
@@ -394,6 +405,11 @@
           "description": "The pending proposals an agent raised, each with Approve and\nDecline: core's consent component. The viz reads\n`v_command_proposal` itself and decides through the person-only\npath, so the lens needs no query beyond `SELECT 1`; its params\n`thread` (a thread ref) and `setting` (a config key) narrow the\nlist.",
           "type": "string",
           "const": "approvals"
+        },
+        {
+          "description": "A terminal per row (`terminal.of`: an `oxplow/terminal` shell's URI\nor an `oxplow/agent_session`'s), kept running while hidden, at full\nsize; `terminal.title` names it in the strip that picks among\nseveral; an agent row's `stopped` and `conversation` say whether\nthe person stopped it and what it is bound to.",
+          "type": "string",
+          "const": "terminal"
         },
         {
           "description": "An agent's answer (`answer.uri`, the first row's: an\n`oxplow/answer` URI), re-run live, with Keep This until it is kept\n(`answer.kept`: the lens it became) — core's component for what\n`oxplow_show_lens` showed.",
@@ -1172,6 +1188,43 @@
           ]
         },
         "kept": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false
+    },
+    "LensTerminal": {
+      "description": "`terminal` viz: the columns of each row's terminal.",
+      "type": "object",
+      "properties": {
+        "of": {
+          "description": "Its URI: an `oxplow/terminal` or `oxplow/agent_session`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "stopped": {
+          "description": "Truthy: the person stopped the agent.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "conversation": {
+          "description": "What the agent is bound to; a change opens it again.",
           "type": [
             "string",
             "null"

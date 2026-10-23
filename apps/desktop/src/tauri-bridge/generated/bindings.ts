@@ -4087,6 +4087,17 @@ export type LensSteps = {
 	status: string | null,
 };
 
+/**  `terminal` viz: the columns of each row's terminal. */
+export type LensTerminal = {
+	/**  Its URI: an `oxplow/terminal` or `oxplow/agent_session`. */
+	of: string | null,
+	title?: string | null,
+	/**  Truthy: the person stopped the agent. */
+	stopped?: string | null,
+	/**  What the agent is bound to; a change opens it again. */
+	conversation?: string | null,
+};
+
 /**
  *  `dashboard` viz: its query's rows are tiles, one per row, each value
  *  naming a column. A row draws its `lens` (run with the page's params it
@@ -4246,6 +4257,14 @@ export type LensViz =
  */
 "approvals" | 
 /**
+ *  A terminal per row (`terminal.of`: an `oxplow/terminal` shell's URI
+ *  or an `oxplow/agent_session`'s), kept running while hidden, at full
+ *  size; `terminal.title` names it in the strip that picks among
+ *  several; an agent row's `stopped` and `conversation` say whether
+ *  the person stopped it and what it is bound to.
+ */
+"terminal" | 
+/**
  *  An agent's answer (`answer.uri`, the first row's: an
  *  `oxplow/answer` URI), re-run live, with Keep This until it is kept
  *  (`answer.kept`: the lens it became) — core's component for what
@@ -4287,6 +4306,7 @@ export type Lens_Deserialize = {
 	diff: LensDiff | null,
 	editor: LensEditor | null,
 	answer: LensAnswer | null,
+	terminal: LensTerminal | null,
 	markdown: LensMarkdown | null,
 	form: LensForm_Deserialize | null,
 	/**  For `custom`: the component and its props. */
@@ -4369,6 +4389,7 @@ export type Lens_Serialize = {
 	diff: LensDiff | null,
 	editor: LensEditor | null,
 	answer: LensAnswer | null,
+	terminal: LensTerminal | null,
 	markdown: LensMarkdown | null,
 	form: LensForm_Serialize | null,
 	/**  For `custom`: the component and its props. */

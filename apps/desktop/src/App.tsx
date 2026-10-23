@@ -52,7 +52,7 @@ import { Menubar } from "./components/Menubar.js";
 import { CenterTabs, type CenterTab } from "./components/CenterTabs/CenterTabs.js";
 import type { DiffSpec } from "./components/Diff/DiffPane.js";
 import { builtInPages } from "./pages/builtInPages.js";
-import type { AppScope, SlotNav } from "./pages/appScope.js";
+import type { SlotNav } from "./pages/appScope.js";
 import { RailHud } from "./components/RailHud/RailHud.js";
 import type { TabRef } from "./tabs/tabState.js";
 import { navigationKey } from "./tabs/navigationKeys.js";
@@ -439,7 +439,7 @@ export function App() {
     setDaemonUnavailable(false);
     logUi("info", "stream created in ui", { streamId: next.id, title: next.title, branch: next.branch });
     // Make the new stream current on the backend BEFORE we let the
-    // TerminalPane mount and call open_terminal_session — that command
+    // terminal view mount and call open_terminal_session — that command
     // builds its session_key from `state.streams.current()`, so without
     // this hop the new thread's terminal would dedup onto the previous
     // stream/thread's PTY and show the wrong agent's transcript.
@@ -1557,28 +1557,6 @@ export function App() {
     // no longer exists) is a compile error, not a blank tab.
     // The features a session's harness declares (`agent_harness`).
     const harnessFeatures = (harness: string): string[] => harnesses.find((h) => h.id === harness)?.features ?? [];
-    // What core offers the built-in pages (`pages/builtInPages.tsx`).
-    const scope: AppScope = {
-      stream,
-      streams,
-      setStreams,
-      threads: currentThreadState.threads,
-      setThreadStates,
-      thread: selectedThread,
-      threadId: selectedThreadId,
-      agentStatus: agentThreadStatus,
-      harnesses,
-      effectiveCenterActive,
-      setCenterActive,
-      vcsEnabled: workspaceContext.vcsEnabled,
-      selectedFilePath: shownFilePath,
-      handleOpenPage,
-      handleNavigateInTab,
-      closePageTab,
-      handleOpenFile,
-      handleNavigateToLocation,
-      handleStreamCreated,
-    };
     // The built-in renderers whose bodies draw on the window's own state;
     // the rest are `builtInPages`. Each reads what it shows from its URI.
     const appRenderers: Record<AppRendererName, (ref: TabRef, nav: SlotNav) => CenterTab | null> = {
@@ -1688,7 +1666,7 @@ export function App() {
               ? page.page
               : null;
         if (builtIn && isBuiltInPage(builtIn)) {
-          const tab = builtInPages[builtIn]({ ref, params: page.params, nav, scope });
+          const tab = builtInPages[builtIn]({ ref, params: page.params, nav });
           return tab ? { ...tab, label: tab.label || (declared ? tabLabel(declared, page.params) : page.page) } : null;
         }
         return {
@@ -1720,7 +1698,7 @@ export function App() {
           const name = page.body.name;
           if (isAppRenderer(name)) return appRenderers[name](ref, nav);
           if (!isBuiltInPage(name)) return null;
-          return builtInPages[name]({ ref, params: parseUri(ref.id)?.params ?? {}, nav, scope });
+          return builtInPages[name]({ ref, params: parseUri(ref.id)?.params ?? {}, nav });
         }
         case "lens": {
           const lens = page.body.lens;

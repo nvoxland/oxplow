@@ -1,4 +1,4 @@
-//! Terminal session registry powering the renderer's `TerminalPane`.
+//! Terminal session registry powering the renderer's terminal view (`terminal/useTerminalSession.ts`).
 //!
 //! Each session bridges an xterm.js instance in the renderer to a
 //! process in a PTY on the host — a shell, or an agent CLI run directly

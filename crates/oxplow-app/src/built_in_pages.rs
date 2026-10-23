@@ -1,7 +1,7 @@
 //! The pages the required bundled extension declares as built-in
 //! components (`pages: [{ component: "oxplow:<name>" }]`): core React the
-//! kit can't express yet — routes (the Terminal) and the
-//! renderers of oxplow's resources (an agent session, a web page: `for:`). A
+//! kit can't express yet: the renderers of oxplow's resources (an agent
+//! session, a web page: `for:`) and the fallback (`resource`). A
 //! stepping stone, not a kind of page: each one leaves this table when its
 //! page becomes a lens or a custom page, and nothing joins it (the
 //! renderers joined once, when a resource stopped picking its page in
@@ -10,13 +10,7 @@
 //! renders exactly these.
 
 /// The built-in page components, by name.
-pub const BUILT_IN_PAGES: &[&str] = &[
-    "agent-session",
-    "external-url",
-    "lens",
-    "resource",
-    "terminal",
-];
+pub const BUILT_IN_PAGES: &[&str] = &["agent-session", "external-url", "lens", "resource"];
 
 /// The built-in named by a manifest's `component: "oxplow:<name>"`.
 pub fn built_in(component: &str) -> Option<&'static str> {
@@ -57,8 +51,8 @@ mod tests {
 
     #[test]
     fn a_component_names_a_built_in_by_its_oxplow_prefix() {
-        assert_eq!(built_in("oxplow:terminal"), Some("terminal"));
-        assert_eq!(built_in("terminal"), None);
+        assert_eq!(built_in("oxplow:resource"), Some("resource"));
+        assert_eq!(built_in("resource"), None);
         assert_eq!(built_in("oxplow:nope"), None);
     }
 }

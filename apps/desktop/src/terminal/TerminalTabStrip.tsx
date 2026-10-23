@@ -1,11 +1,15 @@
 import type { CSSProperties } from "react";
 import { useEffect, useRef, useState } from "react";
-import { titleInitials } from "../../initials.js";
-import { useContextMenu } from "../useRowContextMenu.js";
-import { useSlideoutStrip } from "../useSlideoutStrip.js";
-import { SlideoutChevron } from "../SlideoutChevron.js";
-import type { MenuItem } from "../../menu.js";
-import type { TerminalRow } from "../../terminals.js";
+import { titleInitials } from "../initials.js";
+import { useContextMenu } from "../components/useRowContextMenu.js";
+import { useSlideoutStrip } from "../components/useSlideoutStrip.js";
+import { SlideoutChevron } from "../components/SlideoutChevron.js";
+import type { MenuItem } from "../menu.js";
+/** A terminal the strip lists: its row's URI and title. */
+export interface StripTerminal {
+  id: string;
+  title: string;
+}
 
 /**
  * Vertical tab strip for the Terminal page, sharing its open/close state
@@ -40,7 +44,7 @@ export function TerminalTabStrip({
   onClose,
   onRename,
 }: {
-  tabs: Pick<TerminalRow, "id" | "title">[];
+  tabs: Pick<StripTerminal, "id" | "title">[];
   activeId: string;
   onActivate(id: string): void;
   onNew(): void;
@@ -120,7 +124,13 @@ export function TerminalTabStrip({
                   id: "terminal.rename",
                   label: "Rename…",
                   enabled: true,
-                  run: () => setRenamingId(tab.id),
+                  // The menu sits outside the panel, so pressing it closed
+                  // the panel: open it again for the inline field (as the
+                  // Navigator's Rename does).
+                  run: () => {
+                    setRenamingId(tab.id);
+                    strip.openPanel();
+                  },
                 },
                 {
                   id: "terminal.close",

@@ -44,36 +44,54 @@ missing `LANG`/locale (banner output byte-identical with and without),
 fonts missing from the bundle (all four woff2 are embedded in the binary),
 and an xterm font-metrics race at mount (a resize changes nothing).
 
-## Single component
+## The terminal viz and its host
 
-`apps/desktop/src/components/TerminalPane.tsx` is the **only** xterm.js
-consumer. It's mounted by two page renderers:
+The terminal is drawn by one host in `apps/desktop/src/terminal/`, in
+three pieces:
 
-- `apps/desktop/src/pages/AgentSessionPage.tsx` — an agent session's tab,
-  `uri` the session's (`oxplow:oxplow/agent_session?id=ses3`). The backend spawns
-  the session's harness CLI (Claude, opencode, or Codex's TUI on the thread oxplow
-  opened on its daemon).
-- `apps/desktop/src/pages/TerminalPage.tsx` — the "Terminal" Page (the `terminal` page,
-  a built-in page oxplow-foundation declares). Hosts **multiple** shells: it mounts
-  one `TerminalPane` per terminal, stacked and toggled `display:none`
-  (keep-warm), with a vertical initials strip
-  (`components/Terminal/TerminalTabStrip.tsx`) on the left to select
-  between them. The strip **shares its open/close state machine with the
-  far-left `Navigator`** via `components/useSlideoutStrip.ts`: a thin
-  always-visible glyph column, and a panel that slides out with full
-  titles + a per-row right-click menu (Rename… / Close terminal). Each pane's `uri` is
-  its terminal's (`oxplow:oxplow/terminal?id=trm3`). The backend
-  (`commands/terminal.rs`, `open_terminal_session { uri, cols, rows }`) resolves
-  the URI — a terminal, or an agent session; anything else is refused —
-  and for a terminal spawns the user's `$SHELL -l` (fallback `/bin/sh`)
-  rooted at the terminal's stream's `worktree_path` — no agent command,
-  Claude Code plugin, or system prompt. One persistent shell per terminal:
-  the registry key is the URI, so a re-attach (another window, a browser
-  client) resumes it. No `onUserInterrupt`: Escape is an ordinary shell
-  keystroke here. See "Terminals are rows" below.
+- **`TerminalSurface.tsx`** — the **only** xterm.js consumer: the screen,
+  the font it opens in, the keys and gestures oxplow adds, the file-path
+  links. It knows no session: what the person types comes out of
+  `onData` / `onBinary`, a fit out of `onResize`, and `onOpened(term)`
+  hands the opened terminal over.
+- **`useTerminalSession(uri, …)`** — the PTY its URI names, opened at the
+  surface's size and replayed into it, followed (output, exit), opened
+  again when it must be, and the ordered sender (`terminalInput.ts`). It
+  is the one place the `{type:"input"}` messages are built (the
+  no-automation guard names it). Unmounting detaches; the process keeps
+  running.
+- **`TerminalView.tsx`** — the two together, its visibility measured
+  (`useShown`: a hidden tab is `display: none`, so its box has no size),
+  and what the session says when it isn't running: stopped (Start), ended
+  or failed to start (Start Again / Retry), unable to resume (Retry,
+  Start Fresh). An agent's parts (`agent`: stopped, its conversation,
+  Start, Start Fresh, the Escape interrupt) are given only for an agent
+  session; a shell has none, and Escape is an ordinary keystroke there.
 
-Both go through the same component; only the `uri` (and thus the
-server-side spawn) differs.
+Two pages draw it:
+
+- **The Terminal page** is oxplow-foundation's `terminal` lens over the
+  kit's **`terminal` viz** (`lens/TerminalViz.tsx`, `terminal: { of,
+  title?, stopped?, conversation? }`): one `TerminalView` per row, all
+  mounted and kept warm (`display: none`), the picked one shown. With
+  several, the strip picks — the lens's selection (`select` on its
+  `title` column), so Back un-picks — and its row menu renames (the lens's
+  `rename` action, with the typed title) or closes (its `close` action,
+  which asks first). `+` and **New Terminal** run `oxplow.terminal.open`;
+  a stream with none opens one the first time the page shows (the viz is
+  its own empty state: a terminal lens with no rows isn't "No rows."). A
+  clicked file path opens in its own tab. An agent reads the lens as the
+  terminals' names, never their output.
+- **An agent session's tab** (`pages/AgentSessionPage.tsx`) draws one
+  `TerminalView` on the session's URI with its `agent` parts.
+
+The backend (`commands/terminal.rs`, `open_terminal_session { uri, cols,
+rows }`) resolves the URI — a terminal, or an agent session; anything
+else is refused — and for a terminal spawns the user's `$SHELL -l`
+(fallback `/bin/sh`) rooted at the terminal's stream's `worktree_path`,
+with no agent command, Claude Code plugin or system prompt. One persistent
+shell per terminal: the registry key is the URI, so a re-attach (another
+window, a browser client) resumes it.
 
 An agent PTY is keyed by its **agent session** only (`agent_pane_key`,
 `session|ses3`; the URI names the session): `open_terminal_session` reads
@@ -90,8 +108,8 @@ opencode prompt file per session); shell terminals skip that path
 entirely.
 
 **Restoring tabs starts nothing.** Every tab body stays mounted
-(`display:none`), so an agent session's `TerminalPane` is given
-`startOnActivate`: until its tab is shown it opens no session — except
+(`display:none`), so an agent session's session opens with
+`startOnActivate`: until its view is shown it opens no session — except
 that it attaches, through the spawn-free `lookup_terminal_session`, to an
 agent that already runs. The first time the tab is shown it opens the
 session (resuming its saved conversation). Leaving the tab never stops the
@@ -198,7 +216,7 @@ call twice but still *can* spawn. Like `forward_terminal_input`, the lookup is
 UI/second-client only (`ui(...)` in the surface-parity manifest); it is **not**
 exposed to the agent (no-automation guard, see `.context/agent-model.md`).
 
-The component owns:
+The surface owns:
 
 - The xterm `Terminal` instance + `FitAddon`. **The inner gutter (~8px)
   goes on a wrapper *around* the `hostRef` mount, never on the mount
@@ -224,8 +242,6 @@ The component owns:
   no longer configurable (it was Shift before the v6 upgrade).
 - A custom wheel handler that leaves a Ctrl/Cmd-wheel to the page.
   Scrollback is xterm's own; there is no tmux history mode (tsk1018).
-- The PTY session lifecycle via `desktopBridge().openTerminalSession`
-  / `sendTerminalMessage` / `closeTerminalSession`.
 - Drag-drop "Add to agent context" support (see
   `.context/usability.md` for the convention).
 - The file-path link provider (see below).
@@ -239,7 +255,7 @@ program has bracketed-paste mode on (`\x1b[?2004h`, tracked by xterm
 from the PTY output stream) — wraps the text in `\x1b[200~`…`\x1b[201~`.
 It then fires **one** `onData` event with the whole payload (verified in
 `@xterm/xterm`'s `triggerDataEvent`, which calls `_onData.fire(e)` once).
-`TerminalPane`'s `onData` ships that as a single
+The surface's `onData` (through the session's `input`) ships that as a single
 `forwardTerminalInput(sessionId, {type:"input", bytes:base64})`. In
 remote/daemon mode this is one `POST /ipc/forward_terminal_input`; the
 backend `TerminalSessionRegistry::send` does a single `pty.write` → one
@@ -334,14 +350,14 @@ confirmed; the last terminal may close). They log `terminal.opened@1`,
 `renamed@1` and `closed@1`. A stream's archive ends its terminals' shells and
 deletes their rows with it.
 
-`TerminalPage` reads the stream's rows (`terminals.ts`, `useTerminals`:
-live) and renders one `TerminalPane` per row. A stream with none when the page
-first opens gets one (once per page: closing the last leaves the page empty
-with **New Terminal**). The old pane-target strings (`shell`, `shell:<id>`,
+The Terminal page is a lens over the rows (above). A stream with none when
+the page first opens gets one (once per page: closing the last leaves the
+page empty with **New Terminal**). The old pane-target strings (`shell`, `shell:<id>`,
 `ses3`) and the page-memory list of terminals are gone; a shell is its URI.
 Not migrated: terminals the page memory held (shells re-spawn after a restart
-anyway; a renamed title is lost once). A terminal's comments anchor to its
-URI.
+anyway; a renamed title is lost once). Terminal output takes no comments:
+a buffer that scrolls, wraps and evicts has nothing stable to anchor to (a
+session's transcript is what to comment on).
 
 The strip (`TerminalTabStrip.tsx`) runs on the shared
 `useSlideoutStrip` hook (`.context/usability.md` → "Hover reveals, click
@@ -351,7 +367,8 @@ only on a click (the bottom-pinned `terminal-tab-expand` chevron, or the
 strip's dead space) and closes on a background click, pointer-leave,
 Escape, or an outside press. Clicking a glyph activates that terminal;
 rename and close are right-click menu items on the panel row (rename
-opens an inline input there; the last terminal may close). Close is **not** an inline `InlineConfirm` `×` anymore — it
+opens an inline input there, opening the panel again — pressing the menu,
+outside the panel, closed it; the last terminal may close). Close is **not** an inline `InlineConfirm` `×` anymore — it
 matches the stream/thread nav.
 
 Two behaviors the hook fixed here (tsk270), both previously hand-rolled
@@ -404,7 +421,7 @@ now passes the hook's `guard`, which suppresses the passive closes
   it's applied fresh on each call over the cached shape matches. `TOKEN_RE`
   is module-level (compiled once).
 
-TerminalPane wires `onActivate` to its `onOpenFile` prop, resolving
+The surface wires `onActivate` to its `onOpenFile` prop, resolving
 relative paths against the prop `worktreePath` first (`/`-prefixed
 paths pass through; `~/` paths are dropped — the frontend doesn't
 know HOME).
@@ -413,7 +430,7 @@ know HOME).
 
 - Relative paths resolve against the session's **live cwd**, falling
   back to `stream.worktree_path`. On click, `resolveClickedPath`
-  (`TerminalPane.tsx`) calls the `terminal_session_cwd` IPC, which reads
+  (`terminal/TerminalSurface.tsx`, through the session's `cwd`) calls the `terminal_session_cwd` IPC, which reads
   the child process's cwd by pid (the pty exposes `PaneHandle.pid`; the
   `TerminalSessionRegistry` stashes it; `read_process_cwd` reads
   `/proc/<pid>/cwd` on Linux / `lsof -d cwd` on macOS — no extra crate).
@@ -433,58 +450,6 @@ know HOME).
   match `text` is passed to `onOpenFile` directly, not derived from
   cell coordinates.
 
-## Commenting on terminal output
-
-`TerminalPane` accepts an optional `comments` prop (`{ streamId,
-threadId, targetKind, targetId }`); `AgentPage` passes
-`{ targetKind: "agent", targetId: thread.id }` and `TerminalPage` passes
-`{ targetKind: "terminal", targetId: commentTargetFor(stream.id, id),
-threadId: null }` — i.e. `stream.id` for the default terminal (preserving
-pre-multi-terminal comments) and `<streamId>:<id>` for the rest, so each
-terminal's buffer comments stay isolated. When
-set, `components/Comments/TerminalCommentLayer.tsx` mounts against the
-live `Terminal` (exposed via a `term` state set right after `term.open`).
-The terminal is in the editor/terminal carve-out, so the app-level
-`DomCommentLayer` ignores it — this layer is its dedicated comment
-surface, the xterm analog of `MonacoCommentLayer`.
-
-- **Anchoring is against the serialized buffer, not the DOM.** Only the
-  visible viewport is in the DOM, so `components/Comments/terminalAnchor.ts`
-  flattens every `buffer.active` line (`translateToString(true)`) into one
-  string + per-line char offsets. A selection's quote is the *serialized
-  slice* (from `getSelectionPosition()` buffer coords via `coordToOffset`),
-  NOT `term.getSelection()` — the latter de-wraps, which wouldn't match the
-  search text. `selectors_json` is the shared W3C array plus a
-  `TerminalBufferSelector` (the surface coordinate refinement). Re-anchor
-  runs the shared `resolveAnchor` over the serialized buffer, then maps the
-  offset back to `(line, col)`.
-- **Highlights are xterm decorations**, repainted on `onWriteParsed` /
-  `onScroll`. For each comment, `registerMarker(absoluteLine - cursorAbs)`
-  + `registerDecoration({ x, width })` overlays `.oxplow-terminal-comment`
-  on the line; a click reopens the thread. Placement is wrapped in
-  try/catch so a coordinate edge case degrades to "no highlight" rather
-  than disturbing the terminal.
-- **Repaint is throttled, and skips entirely with no comments.** Each
-  repaint re-serializes the *whole* scrollback (~5000 lines → ~1MB string)
-  and re-anchors every comment over it, which alone can blow a frame
-  budget. So `repaint()` (a) **early-returns before the serialize when
-  `threads.length === 0`** — the common agent-pane case, a streaming
-  terminal with no comments — and (b) bounds the write firehose to **one
-  repaint per `REPAINT_MIN_INTERVAL_MS` (250ms)** with a trailing run via
-  `planRepaint` (`components/Comments/terminalRepaintSchedule.ts`), not one
-  per animation frame. Per-frame repaints ran back-to-back while output
-  streamed and froze the renderer's main thread (`tsk34`; the UI stall
-  watchdog reported it as `main thread stalled` with `centerActive="agent"`).
-  Highlights lagging streamed output by ≤250ms is imperceptible. The serialize
-  itself is wrapped in `timed("terminal-repaint", …)` (from `logger.ts`) so a
-  regression self-reports as a `slow operation` WARN naming the buffer +
-  comment sizes — use `timed()` around any hot synchronous path.
-- **Orphaning is expected.** Scrollback wraps and evicts (5000-line cap),
-  so terminal anchors orphan far more readily than editor anchors —
-  acceptable; the comment still lists in the inbox and the agent still
-  answers it. No `relocateComment` self-heal loop here (unlike the
-  editors): the buffer is too volatile to persist a re-resolved hint.
-
 ## Adding a new link kind
 
 Compose a separate xterm link provider rather than expanding
@@ -501,17 +466,12 @@ each scans the same line. Examples for the future:
 - Added a new xterm addon (WebLinks, search, image, …) → list it.
 - Changed how the link provider resolves paths (e.g. picked up the
   pty's live cwd) → update the resolution section.
-- Added a new TerminalPane mount site (today: AgentPage + TerminalPage)
-  → call out the new host so future work doesn't assume one consumer.
+- Added a new `TerminalView` mount site (today: the `terminal` viz and
+  the agent session's page) → call out the new host.
 - Made another URI open a PTY (today: a terminal, an agent session) → note what
   the backend spawns for it.
 - Changed how terminals are opened, listed or closed → update "Terminals are rows".
 - Changed the tab strip's expand/collapse behavior → change it in
   `components/useSlideoutStrip.ts` (shared with the `Navigator`), not
-  here; update "Multiple terminals" only if the strip stops using it.
-- Changed terminal comment anchoring (buffer serialization, the
-  `TerminalBufferSelector`, or the decoration painting) → update the
-  commenting section.
-- Changed the repaint throttle / empty-threads skip (`REPAINT_MIN_INTERVAL_MS`,
-  `planRepaint`, the `timed("terminal-repaint")` wrap) → update the "Repaint
-  is throttled" bullet; this path is a known main-thread-stall hazard.
+  here; update "Terminals are rows" only if the strip stops using it.
+

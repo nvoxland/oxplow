@@ -377,7 +377,7 @@ pub(crate) async fn launch_session(
 /// Forward a terminal-input protocol message from the renderer to the
 /// PTY backing `session_id`. This is **plumbing for human input only**:
 /// the renderer's xterm pipes the user's own keystrokes / paste / scroll
-/// / resize through here (see `TerminalPane.tsx`). It is NOT an
+/// / resize through here (see `terminal/useTerminalSession.ts`). It is NOT an
 /// agent-messaging or automation API — nothing in oxplow may synthesize
 /// `{type:"input"}` here to "type at" the agent. See the no-automation
 /// invariant in `.context/agent-model.md`. Message shapes live in

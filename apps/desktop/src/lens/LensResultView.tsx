@@ -74,6 +74,7 @@ import { CustomComponentViz } from "./CustomComponentViz.js";
 import type { HostedView } from "./hostedView.js";
 import { DashboardViz, DocumentViz } from "./PartsViz.js";
 import { EditorViz } from "./EditorViz.js";
+import { TerminalViz } from "./TerminalViz.js";
 import { AnswerViz } from "./AnswerViz.js";
 import { CodeViz } from "./CodeViz.js";
 import { DiffViz } from "./DiffViz.js";
@@ -282,7 +283,7 @@ interface Press {
   drop: Drop | null;
 }
 
-function useLensActions(run: LensRun, streamId: string | null) {
+export function useLensActions(run: LensRun, streamId: string | null) {
   const openAfter = useOpenAfter();
   const [busy, setBusy] = useState<string | null>(null);
   // A command that asks: what it asks about, and the runs that wait on the
@@ -565,7 +566,8 @@ function RowsBody({
     }),
   );
   const badges = useDecorations("row-badge", linkedRefs);
-  if (result.rows.length === 0) {
+  // A terminal lens with none is its own empty state: it opens the first.
+  if (result.rows.length === 0 && lens.viz !== "terminal") {
     // `empty: ""` is nothing to say (a part that only stands in for what an
     // extension may bring).
     if (lens.empty === "") return null;
@@ -953,7 +955,7 @@ function RowsBody({
   return (
     <>
       {compact ? null : <ResultCompleteness result={result} />}
-      <LensViz {...{ run, result, lens, cols, cell, first, compact, streamId, onOpenPage, rowMenu, rowsView, onCustomFailure, onCustomReady, componentView, fitCustom }} tree={treeNodesDrawn ? { nodes: treeNodesDrawn, open: tree?.open ?? null } : null} />
+      <LensViz {...{ run, result, lens, cols, cell, first, compact, streamId, onOpenPage, rowMenu, rowsView, onCustomFailure, onCustomReady, componentView, fitCustom, onSetParam }} tree={treeNodesDrawn ? { nodes: treeNodesDrawn, open: tree?.open ?? null } : null} />
       {ctxMenu.menu}
     </>
   );
@@ -1106,10 +1108,13 @@ function LensViz({
   componentView,
   fitCustom,
   tree,
+  onSetParam,
 }: {
   run: LensRun;
   result: LensRun["result"];
   lens: LensRun["lens"];
+  /** Set one of the page's params (a terminal picked). */
+  onSetParam?(name: string, value: SqlCell, row?: PickedRow): void;
   cols: DisplayColumn[];
   cell: CellRenderer;
   first: SqlCell | null;
@@ -1170,6 +1175,8 @@ function LensViz({
       return <DiffViz spec={diffRow(lens, result)} streamId={streamId} onOpenPage={onOpenPage} />;
     case "editor":
       return <EditorViz row={editorRow(lens, result)} onOpenPage={onOpenPage} />;
+    case "terminal":
+      return <TerminalViz run={{ ...run, result }} onSetParam={onSetParam} />;
     case "answer": {
       const row = answerRow(lens, result);
       return <AnswerViz uri={row?.uri ?? null} kept={row?.kept ?? null} onOpenPage={onOpenPage} />;

@@ -573,6 +573,7 @@ export function adHocLens(query: string, viz: LensViz, chart: LensChart | null =
     view: null,
     editor: null,
     answer: null,
+    terminal: null,
     // Drawn in a tile or under an editor, never filling a page.
     fills: false,
     launcherCategory: null,

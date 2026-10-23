@@ -6,7 +6,7 @@
  * this decoder can name them without pulling in the React tree.
  *
  * Drag sources call `setContextRefDrag(e, ref)` in `onDragStart`; the
- * TerminalPane drop handler calls `readContextRef(e)` in `onDragOver`
+ * TerminalSurface drop handler calls `readContextRef(e)` in `onDragOver`
  * and `onDrop` to recognize the payload.
  */
 

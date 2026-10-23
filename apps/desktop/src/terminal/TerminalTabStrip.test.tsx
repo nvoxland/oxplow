@@ -2,9 +2,9 @@ import { afterEach, expect, test } from "bun:test";
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
 import { TerminalTabStrip } from "./TerminalTabStrip.js";
-import type { TerminalRow } from "../../terminals.js";
+import type { StripTerminal } from "./TerminalTabStrip.js";
 
-type TerminalTab = Pick<TerminalRow, "id" | "title">;
+type TerminalTab = Pick<StripTerminal, "id" | "title">;
 
 afterEach(cleanup);
 

@@ -88,3 +88,37 @@ test("a terminal is a row: closed with its shell, and New opens another", async 
   await until("a new row", 15_000, async () => (await rows()).length === 1);
   await expect(page.locator(".xterm")).toBeVisible();
 });
+
+// Several terminals: the strip picks one, its menu renames one through
+// the lens's action and closes one after asking.
+test("a second terminal from the strip is picked, renamed and closed", async ({ fresh }) => {
+  const { page, daemon } = fresh;
+  const rows = async () =>
+    (await ipc<{ rows: unknown[][] }>(daemon, "query_sql", { sql: "SELECT id, title FROM v_terminal ORDER BY position, id" })).rows;
+  await page.goto("/");
+  await openFromLauncher(page, "Terminal");
+  await expect(page.locator(".xterm").first()).toBeVisible();
+  await until("the first terminal's row", 15_000, async () => (await rows()).length === 1);
+  await run(daemon, "oxplow.terminal.open", { stream: "str1" });
+  await until("a second row", 15_000, async () => (await rows()).length === 2);
+  const [secondId] = (await rows())[1] as [number, string];
+  const second = `oxplow:oxplow/terminal?id=trm${secondId}`;
+  await expect(page.getByTestId("terminal-tab-strip")).toBeVisible();
+  await page.getByTestId(`terminal-tab-${second}`).click();
+  await expect(page.locator(`[data-testid="terminal-view"][data-uri="${second}"] .xterm`)).toBeVisible();
+
+  await page.getByTestId("terminal-tab-expand").click();
+  await page.getByTestId(`terminal-tab-row-${second}`).click({ button: "right" });
+  await page.getByTestId("menu-item-terminal.rename").click();
+  const name = page.getByTestId(`terminal-tab-rename-input-${second}`);
+  await name.fill("Builds");
+  await name.press("Enter");
+  await until("the rename", 15_000, async () => ((await rows())[1] as [number, string])[1] === "Builds");
+
+  // The panel stays open after a rename.
+  await page.getByTestId(`terminal-tab-row-${second}`).click({ button: "right" });
+  await page.getByTestId("menu-item-terminal.close").click();
+  await page.getByTestId("lens-action-confirm-run").click();
+  await until("the close", 15_000, async () => (await rows()).length === 1);
+  await expect(page.getByTestId("terminal-tab-strip")).toHaveCount(0);
+});

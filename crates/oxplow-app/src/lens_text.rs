@@ -528,6 +528,7 @@ pub fn render(run: &LensRun, resolved: &Resolved) -> String {
         LensViz::Code => code(run, &resolved.files),
         LensViz::Editor => editor(run, &resolved.files),
         LensViz::Answer => resolved.answer.clone().unwrap_or_else(|| table(run)),
+        LensViz::Terminal => terminals(run),
         LensViz::Diff => one_diff(run, &resolved.diffs),
         LensViz::Approvals => {
             if resolved.approvals.is_empty() {
@@ -890,6 +891,36 @@ fn hunks(run: &LensRun, diffs: &[String]) -> String {
 
 /// Code: each row's file, revision and marked lines, then its text in a
 /// fence named for its extension.
+/// The terminals a lens shows, one line each. Their output isn't read here
+/// (an agent never reads a person's terminal; a session's transcript is).
+fn terminals(run: &LensRun) -> String {
+    let t = run.lens.terminal.clone().unwrap_or_default();
+    let Some(of) = column(run, t.of.as_ref()) else {
+        return table(run);
+    };
+    let title = column(run, t.title.as_ref());
+    let lines: Vec<String> = run
+        .result
+        .rows
+        .iter()
+        .map(|row| {
+            let at = |i: usize| row.get(i).map(cell).unwrap_or_default();
+            let uri = at(of);
+            let name = title.map(at).filter(|n| !n.is_empty()).unwrap_or_else(|| uri.clone());
+            if uri.contains("/agent_session?") {
+                format!("- Agent session {name} ({uri}): its output isn't readable here; read its transcript.")
+            } else {
+                format!("- Terminal {name} ({uri})")
+            }
+        })
+        .collect();
+    if lines.is_empty() {
+        "No terminals.".into()
+    } else {
+        lines.join("\n")
+    }
+}
+
 /// The file an editor shows, as saved: what an agent reads of it (the
 /// person's unsaved edits stay in their window).
 fn editor(run: &LensRun, files: &[String]) -> String {
@@ -1209,6 +1240,7 @@ mod tests {
                 diff: None,
                 editor: None,
                 answer: None,
+                terminal: None,
                 markdown: None,
                 form: None,
                 custom: None,
@@ -1998,6 +2030,34 @@ mod tests {
         assert!(
             text.contains("#### e.txt, being edited (as saved; unsaved edits aren't here)\n\n```txt\nsaved text\n```"),
             "{text}"
+        );
+    }
+
+    /// A terminal lens names its terminals and never their output.
+    #[test]
+    fn terminals_read_as_their_names() {
+        let r = with(
+            run(
+                LensViz::Terminal,
+                None,
+                &["uri", "title"],
+                vec![
+                    vec![t("oxplow:oxplow/terminal?id=trm1"), t("Build")],
+                    vec![t("oxplow:oxplow/agent_session?id=ses2"), t("Claude")],
+                ],
+            ),
+            |l| {
+                l.terminal = Some(crate::extensions::LensTerminal {
+                    of: Some("uri".into()),
+                    title: Some("title".into()),
+                    stopped: None,
+                    conversation: None,
+                })
+            },
+        );
+        assert_eq!(
+            render(&r, &Resolved::default()),
+            "- Terminal Build (oxplow:oxplow/terminal?id=trm1)\n- Agent session Claude (oxplow:oxplow/agent_session?id=ses2): its output isn't readable here; read its transcript."
         );
     }
 

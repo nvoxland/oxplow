@@ -2071,6 +2071,13 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   `steps`, `hunks`, `board` (the groups as columns of cards, each card a
   list row; it needs `group`, whose `values: [..]` fix the columns' order
   and keep empty ones as drop targets — `values` orders any grouped viz),
+  `terminal` (a terminal per row, `terminal: { of, title?, stopped?,
+  conversation? }`: `of` an `oxplow/terminal` or `oxplow/agent_session`
+  URI, all kept running, the picked one shown, a strip picking among
+  several through the lens's `select` column; fills; draws its own empty
+  state; refused in a spec; an agent reads the terminals' names, never
+  their output — `lens/TerminalViz.tsx`, `.context/terminal.md` "The
+  terminal viz and its host"),
   `editor` (the working tree's file, edited: `editor: { path, lines? }`,
   the first row's; its buffer the window's, Save `oxplow.file.save`, its
   tab's ● and Save through `useTabEditing`; refused in a spec, since an

@@ -134,6 +134,12 @@ pub enum LensViz {
     /// `thread` (a thread ref) and `setting` (a config key) narrow the
     /// list.
     Approvals,
+    /// A terminal per row (`terminal.of`: an `oxplow/terminal` shell's URI
+    /// or an `oxplow/agent_session`'s), kept running while hidden, at full
+    /// size; `terminal.title` names it in the strip that picks among
+    /// several; an agent row's `stopped` and `conversation` say whether
+    /// the person stopped it and what it is bound to.
+    Terminal,
     /// An agent's answer (`answer.uri`, the first row's: an
     /// `oxplow/answer` URI), re-run live, with Keep This until it is kept
     /// (`answer.kept`: the lens it became) — core's component for what
@@ -149,7 +155,10 @@ impl LensViz {
     /// It takes its page's whole height (a file, a diff): the page draws
     /// it filling the body, its title in the chrome.
     pub fn fills(self) -> bool {
-        matches!(self, LensViz::Code | LensViz::Diff | LensViz::Editor)
+        matches!(
+            self,
+            LensViz::Code | LensViz::Diff | LensViz::Editor | LensViz::Terminal
+        )
     }
 }
 
@@ -632,6 +641,24 @@ pub struct LensCode {
     /// Several rows' editors scroll together, each from its marked lines.
     #[serde(default)]
     pub sync: bool,
+}
+
+/// `terminal` viz: the columns of each row's terminal.
+#[derive(
+    Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
+)]
+#[serde(deny_unknown_fields)]
+pub struct LensTerminal {
+    /// Its URI: an `oxplow/terminal` or `oxplow/agent_session`.
+    pub of: Option<String>,
+    #[serde(default)]
+    pub title: Option<String>,
+    /// Truthy: the person stopped the agent.
+    #[serde(default)]
+    pub stopped: Option<String>,
+    /// What the agent is bound to; a change opens it again.
+    #[serde(default)]
+    pub conversation: Option<String>,
 }
 
 /// `answer` viz: the answer the first row names, and the lens it was kept
@@ -1427,6 +1454,8 @@ struct LensFile {
     editor: Option<LensEditor>,
     #[serde(default)]
     answer: Option<LensAnswer>,
+    #[serde(default)]
+    terminal: Option<LensTerminal>,
     #[serde(default)]
     markdown: Option<LensMarkdown>,
     #[serde(default)]
@@ -2536,6 +2565,7 @@ pub struct Lens {
     pub diff: Option<LensDiff>,
     pub editor: Option<LensEditor>,
     pub answer: Option<LensAnswer>,
+    pub terminal: Option<LensTerminal>,
     pub markdown: Option<LensMarkdown>,
     pub form: Option<LensForm>,
     /// For `custom`: the component and its props.
@@ -4585,6 +4615,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                 diff: l.diff,
                 editor: l.editor,
                 answer: l.answer,
+                terminal: l.terminal,
                 markdown: l.markdown,
                 form: l.form,
                 custom: l.custom,
@@ -5800,6 +5831,10 @@ fn shape_problem(
             let a = lens.answer.clone().unwrap_or_default();
             need("answer", &[("uri", &a.uri)])
         }
+        LensViz::Terminal => {
+            let t = lens.terminal.clone().unwrap_or_default();
+            need("terminal", &[("of", &t.of)])
+        }
         LensViz::Diff => {
             let d = lens.diff.clone().unwrap_or_default();
             need(
@@ -6237,6 +6272,14 @@ impl Lens {
                     .into_iter()
                     .flatten()
                     .map(|k| ("code", k)),
+            );
+        }
+        if let Some(t) = &self.terminal {
+            out.extend(
+                [&t.of, &t.title, &t.stopped, &t.conversation]
+                    .into_iter()
+                    .flatten()
+                    .map(|k| ("terminal", k)),
             );
         }
         if let Some(a) = &self.answer {
@@ -6996,6 +7039,7 @@ fn check_components(
                 ("diff", l.diff.is_some()),
                 ("editor", l.editor.is_some()),
                 ("answer", l.answer.is_some()),
+                ("terminal", l.terminal.is_some()),
             ]
             .into_iter()
             .filter(|(_, set)| *set)
@@ -7363,6 +7407,7 @@ impl Lens {
             diff: spec.diff.clone(),
             editor: None,
             answer: None,
+            terminal: None,
             markdown: spec.markdown.clone(),
             form: spec.form.clone(),
             custom: None,
@@ -7429,6 +7474,9 @@ pub fn spec_problem(spec: &LensSpec) -> Option<String> {
              private extension that declares the component"
                 .into(),
         );
+    }
+    if spec.viz == LensViz::Terminal {
+        return Some("a `terminal` is a page's; an answer can't open one".into());
     }
     if spec.viz == LensViz::Answer {
         return Some("an `answer` shows an answer; show its lens or spec instead".into());
@@ -10646,6 +10694,41 @@ commands:
         }))
         .unwrap();
         assert!(spec_problem(&spec).unwrap().contains("saves as whoever"));
+    }
+
+    /// `terminal` draws a terminal per row (a shell's URI, or an agent
+    /// session's), filling the page; it needs the URI's column, and an
+    /// answer is never one.
+    #[test]
+    fn a_terminal_lens_names_its_rows() {
+        let (_d, ext) = load_x(
+            &[
+                ("t", "title: T\nquery: SELECT 'oxplow:oxplow/terminal?id=trm1' AS u, 'One' AS t, 0 AS s, NULL AS c\nviz: terminal\nterminal: { of: u, title: t, stopped: s, conversation: c }\n"),
+                ("noterminal", "title: N\nquery: SELECT 1\nviz: terminal\n"),
+            ],
+            "",
+        );
+        let t = ext.lenses.iter().find(|l| l.slug == "t").expect("t loads");
+        assert_eq!(
+            t.terminal,
+            Some(LensTerminal {
+                of: Some("u".into()),
+                title: Some("t".into()),
+                stopped: Some("s".into()),
+                conversation: Some("c".into()),
+            })
+        );
+        assert!(t.fills);
+        assert!(!ext.lenses.iter().any(|l| l.slug == "noterminal"));
+        assert!(ext
+            .errors
+            .join("\n")
+            .contains("`terminal: { of: <column> }`"));
+        let spec: LensSpec = serde_json::from_value(serde_json::json!({
+            "title": "T", "query": "SELECT 1", "viz": "terminal"
+        }))
+        .unwrap();
+        assert!(spec_problem(&spec).is_some());
     }
 
     /// `answer` shows the answer its first row names; it needs the

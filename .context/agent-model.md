@@ -40,8 +40,9 @@ tool calls and is driven by a human, never by oxplow typing at it.
 Synthesizing input would be automating the agent CLI, which risks its
 (Claude Code / Codex / opencode) license terms.
 
-- The renderer's xterm (`TerminalPane.tsx`, its ordered sender
-  `components/terminalInput.ts`) pipes the person's keystrokes, paste,
+- The renderer's terminal (`terminal/TerminalSurface.tsx` for the keys,
+  `terminal/useTerminalSession.ts` and its ordered sender
+  `components/terminalInput.ts` for the session) pipes the person's keystrokes, paste,
   scroll and resize to the PTY through `forward_terminal_input`
   (→ `terminal_sessions.send` → `pty.write`). It is the human-input
   transport, not an agent-messaging API, and it must stay: in remote mode
@@ -61,8 +62,8 @@ Synthesizing input would be automating the agent CLI, which risks its
 **Guards** (each fails the build):
 - `apps/desktop/src/no-agent-input-automation.test.ts` confines
   `forwardTerminalInput` and `{type:"input"}` construction to
-  `TerminalPane.tsx`, `components/terminalInput.ts` and the `api.ts`
-  facade.
+  `terminal/useTerminalSession.ts`, `components/terminalInput.ts` and the
+  `api.ts` facade.
 - A Rust source scan in `crates/oxplow-rpc/src/commands/terminal.rs`
   asserts the only production caller of `terminal_sessions.send(` is the
   `forward_terminal_input` core.

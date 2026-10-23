@@ -648,9 +648,10 @@ declaring *what it is* and mounting the generic layer.
   markdown editor anchors comments in its own layer, and a `code` viz's
   files take them on their URI at their revision (Monaco's menu has Add
   Comment; a click on a highlight opens its thread). A page that doesn't
-  declare it is not commentable. Text inside an editor (Tiptap, Monaco,
-  the terminal) is painted by that editor's layer only: the app-level
-  layer skips it, as it skips its selections.
+  declare it is not commentable. Text inside an editor (Tiptap, Monaco)
+  is painted by that editor's layer only: the app-level layer skips it, as
+  it skips its selections. The terminal takes no comments (its buffer has
+  nothing stable to anchor to), and the app-level layer skips it too.
 
 - **`data-ref` marks a region as a typed "context node."** Its value is
   the canonical URI of the thing, the same as tab ids and the `page_ref`
@@ -686,9 +687,8 @@ declaring *what it is* and mounting the generic layer.
   where it's absent the comment still works, just without an inline
   highlight. Surfaces opted in so far: task rows (`TaskGroupList`), the
   commit page (`GitCommitPage` meta → `commit`), and commit-graph rows (`CommitGraphTable` → `commit`, under the
-  `git-dashboard` root). The **terminal/agent pane** has its own layer
-  (`TerminalCommentLayer`, not the app-level one) because it anchors to
-  the xterm buffer rather than DOM text — see `.context/terminal.md`.
+  `git-dashboard` root). The **terminal** takes no comments
+  (`.context/terminal.md` "Terminals are rows").
 - **Make the text selectable.** Rows are often `userSelect: none` for
   clean drag — set `userSelect: "text"` on the specific label span you
   want commentable (e.g. the task title) so a quote can be anchored

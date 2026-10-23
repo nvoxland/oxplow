@@ -219,10 +219,10 @@ Data's catalog: extensions.md "A custom page's rail"). The built-ins are pinned 
 (`agent-session`, `commit`, `directory`, `editor`, `file-viewer`, `lens`,
 `resource`, `wiki-page`, `work-item`) and only shrinks
 again (a page leaves when it becomes a lens or a custom page — Explore
-Data is oxplow-foundation's custom page now, the editor a lens over the
-`editor` viz). It ends at two: `terminal`, `agent-session` and
-`external-url` wait for a terminal and an embed viz, and `settings` for
-its view document; `lens` (the lens runtime, which draws every lens
+Data is oxplow-foundation's custom page now, the editor and the Terminal
+lenses over the `editor` and `terminal` vizes). It ends at two:
+`agent-session` waits for its document (`external-url` for the embed
+viz); `lens` (the lens runtime, which draws every lens
 page) and `resource` (the fallback when nothing declares a URI) stay —
 neither can be a lens;
 `pages/declaredPages.ts`'s `BUILT_IN_PAGES` mirrors it and a test checks
@@ -263,11 +263,12 @@ oxplow's pages and their params:
   the caps — the rail's, so no "View all" step to go Back from).
 - Lens pages (more): `backlog` (badge: `backlog-count`; a document of `backlog-add`, a quick-add form over `oxplow.work_item.create`, and `backlog-list`, a state-grouped `list` of the items on no thread: params `q`, the search over title and fields, and `thread_id`; drag to reorder, mark rows for bulk state, priority, Bring to this thread and Delete, `r` `i` `b` `d` keys for the states).
 - Lens pages (more): `diff-view` (the Changes page, the renderer of `oxplow/snapshot`, `oxplow/effort` and `oxplow/turn`; view params `start` and `end`, each `''` / `none` / `working` / `snap:<id>` / `git:<rev>`: a picked point is a pushed view change), `tasks` (a document: `tasks-list`, the `work_item.list` replaceable; `tasks-summary`; `tasks-backlog`; view params `show` and `priority`, plus `thread_id` and `stream_id`).
+- Lens page `terminal` (the stream's terminals: a `terminal` viz over `v_terminal`, the picked one the `terminal` selection, `new` / `rename` / `close` actions over `oxplow.terminal.*`; terminal.md "The terminal viz and its host").
 - Lens page `settings` (a view document: view `area`, the overview's search `q`; `#section=<id>` lands inside an area; extensions.md "A document with a view"): a section per area, each a document lens `settings-<area>`.
 - Built-in pages: `board`,
   `files`, `git-dashboard`, `uncommitted-changes`,
   `comments`, `metrics-recorded`,
-  `terminal`, `alerts`,
+  `alerts`,
   `new-task`
   (`parent`),
   `external-url` (a renderer for `https` / `http`; the tab id is the URL), `diff` (`path`, `left`, `right`, `label`,

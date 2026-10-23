@@ -1,5 +1,5 @@
 import { Page } from "../tabs/Page.js";
-import { TerminalPane } from "../components/TerminalPane.js";
+import { TerminalView } from "../terminal/TerminalView.js";
 import type { Stream, Thread } from "../api.js";
 import { recordUserInterrupt, startAgentSession, startAgentSessionFresh } from "../api.js";
 import { useWorkspaceLinkIndex } from "../useWorkspaceLinkIndex.js";
@@ -96,33 +96,20 @@ export function AgentSessionPage({
           ) : null}
           {/* Keyed on the session: another session's pane is another
             *  agent, so React must not reuse this xterm for it. */}
-          <TerminalPane
+          <TerminalView
             key={session.id}
             uri={agentSessionUri(session.id)}
-            visible={visible}
-            startOnActivate
-            stopped={session.stoppedByUser}
-            onStartFresh={() => startAgentSessionFresh(session.id, true)}
-            onChooseAnother={canChooseConversation && onPicker ? () => onPicker("resume") : undefined}
-            restartKey={restartKey}
-            onStart={() => {
-              void startAgentSession(session.id).catch(() => undefined);
+            agent={{
+              stopped: session.stoppedByUser,
+              conversation: String(restartKey),
+              onStart: () => void startAgentSession(session.id).catch(() => undefined),
+              onStartFresh: () => startAgentSessionFresh(session.id, true),
+              onChooseAnother: canChooseConversation && onPicker ? () => onPicker("resume") : undefined,
+              onInterrupt: () => void recordUserInterrupt(session.id, thread.id, stream?.id ?? null),
             }}
             worktreePath={stream?.worktree_path}
             onOpenFile={onOpenFile}
             isLinkablePath={isLinkablePath}
-            comments={
-              stream
-                ? {
-                    streamId: stream.id,
-                    threadId: thread.id,
-                    target: agentSessionUri(session.id),
-                  }
-                : undefined
-            }
-            onUserInterrupt={() => {
-              void recordUserInterrupt(session.id, thread.id, stream?.id ?? null);
-            }}
           />
         </div>
       </div>

@@ -181,7 +181,7 @@ function buildBridge() {
         // Idempotent terminate.
       }
     },
-    // Plumbing for HUMAN terminal input only — the xterm in TerminalPane
+    // Plumbing for HUMAN terminal input only — the xterm in TerminalSurface
     // pipes the user's keystrokes / paste / scroll / resize through here.
     // NOT an agent-messaging or automation API; never synthesize
     // `{type:"input"}` from non-UI code (see .context/agent-model.md).
@@ -220,7 +220,7 @@ function buildBridge() {
         return { ok: false, reason: e instanceof Error ? e.message : String(e) };
       }
     },
-    /// `clipboardReadText` is read by `TerminalPane`'s Cmd+V paste: the
+    /// `clipboardReadText` is read by `TerminalSurface`'s Cmd+V paste: the
     /// shell's clipboard, since a webview's own read may be refused.
     clipboardReadText: async (): Promise<string> =>
       unwrap(await commands.clipboardReadText()),

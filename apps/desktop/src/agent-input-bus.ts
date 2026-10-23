@@ -2,7 +2,7 @@
  * Renderer-side bus for "insert text into the active agent terminal".
  *
  * Drag-drop and right-click "Add to agent context" handlers anywhere in
- * the UI publish text via `insertIntoAgent`; the visible TerminalPane
+ * the UI publish text via `insertIntoAgent`; the visible TerminalSurface
  * subscribes while mounted and writes the text into the agent's stdin
  * (`term.paste`).
  * This is still HUMAN input — a user gesture (drag/drop or "add to

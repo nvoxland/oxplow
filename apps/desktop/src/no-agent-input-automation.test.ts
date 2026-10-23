@@ -11,19 +11,19 @@ import { join } from "node:path";
 // the human-input path, so no other renderer code can synthesize agent
 // input. If this fails, you've added a non-human caller — that's the
 // automation vector this guard exists to block. Route human input
-// through TerminalPane; steer the agent via hook responses, never by
-// typing at it.
+// through the terminal view's session (`terminal/useTerminalSession.ts`);
+// steer the agent via hook responses, never by typing at it.
 
 const SRC_DIR = import.meta.dir;
 
 // These files ARE the human-input path and are allowed to touch the
-// transport: the `api.ts` facade, the xterm pane that pipes the user's
-// own keystrokes/paste, and the pane's ordered sender (tsk979), which
-// sends only through the call the pane hands it. Generated bindings and
+// transport: the `api.ts` facade, the terminal session that pipes the
+// user's own keystrokes/paste from its surface, and its ordered sender
+// (tsk979), which sends only through the call the session hands it. Generated bindings and
 // test files are excluded from the scan entirely (below), so they need no
 // entry here.
-const TERMINAL_PANE = join("components", "TerminalPane.tsx");
-const ALLOWED = new Set<string>(["api.ts", TERMINAL_PANE, join("components", "terminalInput.ts")]);
+const TERMINAL_SESSION = join("terminal", "useTerminalSession.ts");
+const ALLOWED = new Set<string>(["api.ts", TERMINAL_SESSION, join("components", "terminalInput.ts")]);
 
 function sourceFiles(): string[] {
   return readdirSync(SRC_DIR, { recursive: true })
@@ -51,10 +51,10 @@ describe("no agent input automation", () => {
     expect(offenders(/type:\s*"input(-binary)?"/)).toEqual([]);
   });
 
-  // The ordered sender carries `{type:"input"}` messages: only the pane may
-  // make one, so nothing else gets a way to type at the agent through it.
-  test("terminalSender is only used by the terminal pane", () => {
-    const allowed = new Set([TERMINAL_PANE, join("components", "terminalInput.ts")]);
+  // The ordered sender carries `{type:"input"}` messages: only the session
+  // may make one, so nothing else gets a way to type at the agent through it.
+  test("terminalSender is only used by the terminal session", () => {
+    const allowed = new Set([TERMINAL_SESSION, join("components", "terminalInput.ts")]);
     const hits = sourceFiles()
       .filter((rel) => !allowed.has(rel))
       .filter((rel) => /\bterminalSender\b/.test(readFileSync(join(SRC_DIR, rel), "utf8")));
