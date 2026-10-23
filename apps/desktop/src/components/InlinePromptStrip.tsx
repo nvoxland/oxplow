@@ -10,6 +10,8 @@ export interface PromptField {
   multiline?: boolean;
   /** May be left empty (submits ""): clearing it is a choice. */
   optional?: boolean;
+  /** Masked (a token, a key). */
+  secret?: boolean;
 }
 
 /** A checkbox beside the fields; its submitted value is "true" or "". */
@@ -25,8 +27,9 @@ export interface PromptToggle {
  * Cmd/Ctrl+Enter in a multiline field) submits once every field has a
  * value; Escape in any field cancels. The first field is focused and
  * selected. The owner dismisses it, so it keeps what was typed while a
- * submit runs and after one fails. Field `key`s name the submitted
- * values (trimmed) and the test ids (`<testId>-<key>`).
+ * submit runs and after one fails; `error` is why one failed, shown under
+ * the fields. Field `key`s name the submitted values (trimmed) and the
+ * test ids (`<testId>-<key>`).
  */
 export function InlinePromptStrip({
   message,
@@ -36,6 +39,7 @@ export function InlinePromptStrip({
   onSubmit,
   onCancel,
   busy = false,
+  error = null,
   testId,
   style,
 }: {
@@ -46,6 +50,7 @@ export function InlinePromptStrip({
   onSubmit(values: Record<string, string>): void;
   onCancel(): void;
   busy?: boolean;
+  error?: string | null;
   testId?: string;
   style?: CSSProperties;
 }) {
@@ -65,6 +70,7 @@ export function InlinePromptStrip({
   const onKeyDown = (field: PromptField) => (e: React.KeyboardEvent) => {
     if (e.key === "Escape") {
       e.preventDefault();
+      e.stopPropagation();
       onCancel();
     } else if (field.multiline && e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
@@ -103,6 +109,7 @@ export function InlinePromptStrip({
             <input
               key={f.key}
               {...common}
+              type={f.secret ? "password" : "text"}
               ref={i === 0 ? (n) => void (firstRef.current = n) : undefined}
               onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))}
             />
@@ -131,6 +138,11 @@ export function InlinePromptStrip({
           {confirmLabel}
         </button>
       </div>
+      {error ? (
+        <div className="ox-error" data-testid={testId ? `${testId}-error` : undefined}>
+          {error}
+        </div>
+      ) : null}
     </form>
   );
 }

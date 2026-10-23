@@ -207,7 +207,10 @@ empty: Nothing is waiting on you.
   e.g. `{ id: finish, label: Finish, command: oxplow.work_item.transition,
   row: true, input: { uri: "{{row.uri}}", to: done } }`,
   or `{ id: sync, label: Sync PRs, command: oxplow.collector.sync, input:
-  { collector: "github/prs" } }`. With `group: <value>` (on a lens with
+  { collector: "github/prs" } }`. `form: true` opens the command's form
+  instead of running (one text field: a strip above the rows; a Rename…
+  is `fixed: [from], input: { from: "{{row.path}}", to: "{{row.path}}" }`;
+  `commands-and-forms.md`). With `group: <value>` (on a lens with
   `group`), the action is a button in that group's heading instead — it
   shows in a compact panel too; it can't be a row action. Copy and Add
   to Agent Context are on every lens already — don't declare them.

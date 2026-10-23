@@ -55,7 +55,11 @@ markdown itself, nor edits it in a `<textarea>`.
   already shows the editable value. See `InlinePromptStrip`
   (`components/InlinePromptStrip.tsx`: one or more fields, a field may be
   `multiline` — Cmd/Ctrl+Enter submits there; the owner dismisses it, so
-  a failed run keeps what was typed). Same Enter-submits / Escape-cancels contract;
+  a failed run keeps what was typed, and `error` is why, under the
+  fields). A lens's form action whose form, less its `fixed` fields, is
+  one text field is one too, at the top of the lens (`promptField`,
+  `ActionPrompt` in `lens/LensResultView.tsx`): a Rename… on a Files
+  lens is the Project panel's strip, never a one-field slideover. Same Enter-submits / Escape-cancels contract;
   the strip is dismissed by the panel's local `pendingPrompt` state.
 - **Form-shaped flows that warrant a focused workspace use a page tab
   or a slideover, not a centered modal.** The "+ New" flows ship as
@@ -203,7 +207,8 @@ markdown itself, nor edits it in a `<textarea>`.
   A command's refusal that names a field (`INVALID` with `field`, on
   `IpcCallError.field`; `fieldErrors`) is shown that way by every form
   that runs a command — a form lens, a lens's form action (`form: true`,
-  in a `Slideover`, never a modal; success closes it) and, through the
+  in a `Slideover` — or a prompt strip when its form is one text field —
+  never a modal; success closes it) and, through the
   bridge's `field`, a custom component's own form — never only in the
   error rail.
 - **Autofocus the first input** in any inline edit / prompt strip
@@ -489,7 +494,9 @@ not a pick and isn't in the address.
 > buttons; we reversed that. Right-click is discoverable enough for
 > anyone who expects it and the kebab ate row space, so **per-row
 > actions are right-click only again** — no `⋯` buttons on rows. (The
-> old `Kebab.tsx` primitive is deleted.)
+> old `Kebab.tsx` primitive is deleted.) A lens's row actions
+> (`row: true`) are that menu, and nothing else: a declared page gets no
+> row buttons either.
 
 - **Right-click a row to open its action menu.** The shared hook is
   `apps/desktop/src/components/useRowContextMenu.tsx`:

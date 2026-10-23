@@ -232,11 +232,14 @@ actions:
 `viz: board` shows each group as a column of cards. `values` sets the
 columns and their order, and keeps an empty column to drop on.
 
-With `form: true` an action opens the command's form in a side panel
-instead of running at once, its fields starting from `input`; you edit
-them and submit (Enter). `fixed` lists the fields you see but can't
-change — they keep `input`'s values, so an `Edit…` on a row always edits
-that row's item:
+With `form: true` an action opens the command's form instead of running
+at once, its fields starting from `input`; you edit them and submit
+(Enter). `fixed` lists the fields you see but can't change — they keep
+`input`'s values, so an `Edit…` on a row always edits that row's item.
+A form of several fields is a side panel. A form that is one text field
+(a Rename… whose only free field is the new name) is a strip above the
+rows instead, the value selected to type over; Enter runs it and Escape
+cancels.
 
 ```yaml
 actions:

@@ -1,8 +1,8 @@
 import { expect, test } from "bun:test";
 
 import { IpcCallError } from "../ipc-error.js";
-import type { LensAction, LensRun } from "../tauri-bridge/generated/bindings.js";
-import { actionOffered, addLensToContext, copyLens, openAfterAction, performLensAction, rowRecord, type LensActionDeps } from "./lensActions.js";
+import type { FormStart, LensAction, LensRun } from "../tauri-bridge/generated/bindings.js";
+import { actionOffered, addLensToContext, copyLens, openAfterAction, performLensAction, promptField, rowRecord, type LensActionDeps } from "./lensActions.js";
 
 const run = { lens: { id: "acme/prs" }, params: { repo: "x" } } as unknown as LensRun;
 const action: LensAction = { id: "finish", label: "Finish", command: "oxplow.work_item.transition", input: {}, row: false };
@@ -142,4 +142,42 @@ test("an undoable action's toast offers Undo, which undoes the run as the person
   };
   await performLensAction(action, run, null, null, false, d);
   expect(log).toEqual(["toast Finish: done. with undo", "undo 7"]);
+});
+
+// A form action whose form, less its fixed fields, is one text field is a
+// prompt strip at the top of the lens; anything else is a slideover.
+function start(properties: Record<string, unknown>, extra: Partial<FormStart> = {}): FormStart {
+  return {
+    command: { id: "c", input_schema: { type: "object", required: ["uri"], properties } },
+    values: {},
+    fixed: [],
+    fields: null,
+    choices: {},
+    subfields: {},
+    reads: [],
+    ...extra,
+  } as unknown as FormStart;
+}
+
+test("promptField is the one text field a form asks for, when that is all it asks", () => {
+  expect(promptField(start({ to: { type: "string", description: "The new path" } }))?.key).toBe("to");
+  expect(promptField(start({ uri: { type: "string" }, to: { type: "string" } }, { fixed: ["uri"] }))?.key).toBe("to");
+  expect(promptField(start({ uri: { type: "string" }, title: { type: "string" }, notes: { type: "string" } }, { fields: ["title"] }))?.key).toBe("title");
+});
+
+test("promptField is null for more than one field, a fixed one, or a field that isn't text", () => {
+  expect(promptField(start({ a: { type: "string" }, b: { type: "string" } }))).toBeNull();
+  expect(promptField(start({ uri: { type: "string" } }, { fixed: ["uri"] }))).toBeNull();
+  expect(promptField(start({ decision: { type: "string", enum: ["fix", "wontfix"] } }))).toBeNull();
+  expect(promptField(start({ body: { type: "string", contentMediaType: "text/markdown" } }))).toBeNull();
+  expect(promptField(start({ n: { type: "integer" } }))).toBeNull();
+});
+
+// A secret (the schema's `writeOnly`, or a form field that says `secret`)
+// is still one text field, masked and never required: blank keeps the
+// saved one.
+test("promptField says when its field is a secret", () => {
+  expect(promptField(start({ value: { type: "string", writeOnly: true } }))).toMatchObject({ key: "value", secret: true });
+  expect(promptField(start({ value: { type: "string" } }, { fields: [{ name: "value", secret: true }] }))).toMatchObject({ key: "value", secret: true });
+  expect(promptField(start({ to: { type: "string" } }))).toMatchObject({ key: "to", secret: false });
 });

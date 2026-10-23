@@ -72,3 +72,33 @@ test("an optional field may be empty, and a toggle submits its state", () => {
   ]);
   expect(view.getByText("Also rename in Codex")).toBeTruthy();
 });
+
+// A refusal shows under the fields, and the strip stays with what was typed.
+test("an error shows under the fields", () => {
+  const view = render(
+    <InlinePromptStrip testId="p" message="M" fields={fields} confirmLabel="Go" onSubmit={() => {}} onCancel={() => {}} error="a title can't be empty" />,
+  );
+  expect(view.getByTestId("p-error").textContent).toBe("a title can't be empty");
+  expect((view.getByTestId("p-kind") as HTMLInputElement).value).toBe("relates_to");
+});
+
+// A control that handles Escape stops it: the strip's owner (a page, a
+// slideover) must not also cancel.
+test("Escape stops at the strip", () => {
+  let outer = 0;
+  const view = render(
+    <div onKeyDown={() => outer++}>
+      <InlinePromptStrip testId="p" message="M" fields={fields} confirmLabel="Go" onSubmit={() => {}} onCancel={() => {}} />
+    </div>,
+  );
+  fireEvent.keyDown(view.getByTestId("p-kind"), { key: "Escape" });
+  fireEvent.keyDown(view.getByTestId("p-kind"), { key: "a" });
+  expect(outer).toBe(1);
+});
+
+test("a secret field is masked", () => {
+  const view = render(
+    <InlinePromptStrip testId="p" message="M" fields={[{ key: "value", secret: true }]} confirmLabel="Set" onSubmit={() => {}} onCancel={() => {}} />,
+  );
+  expect((view.getByTestId("p-value") as HTMLInputElement).type).toBe("password");
+});

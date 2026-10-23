@@ -2160,8 +2160,10 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
 - `actions`: commands the lens offers, `{ id, label, command, input?,
   row?, group?, form?, fixed?, choices?, then?, when?, primary?, drag?, bulk?, key? }`, with `{{param.x}}` / `{{row.x}}` placeholders (`{{row.x|json}}`: the JSON a text cell holds, typed — the one filter, checked at load, bound in `bind_input`; and a drag action's `{{before.x}}`, `{{after.x}}`, `{{onto.x}}`, `{{group.value}}`, above); run as the lens
   for whoever pressed, so they grant no power. `form: true` opens the
-  command's form instead of running (a slideover: `lens_action_form`
-  gives the command and the bound `input` as starting values); what the
+  command's form instead of running (`lens_action_form` gives the
+  command and the bound `input` as starting values; a slideover, or —
+  when the form less its `fixed` fields is one text field — a prompt
+  strip at the top of the lens, `promptField` / `ActionPrompt`); what the
   person fills in runs (`oxplow_run_lens_action`'s `input`, taken only by a form
   action), its `fixed` fields put back to the bound values (an `Edit…`
   row action keeps the row's `uri`); a form action's `choices` are a

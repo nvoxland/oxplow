@@ -25,6 +25,16 @@ export interface Field {
   children: Field[];
 }
 
+/** The top-level fields that are secrets (a key, a token): the schema
+ *  marks them `writeOnly`, or a form field says `secret`. A secret is
+ *  masked, never a draft a host keeps, and never required: blank keeps
+ *  the saved one. */
+export function secretFields(schema: Schema, specs: ShownField[] | null): Set<string> {
+  const props = (schema.properties ?? {}) as Record<string, { writeOnly?: unknown }>;
+  const marked = Object.entries(props).filter(([, p]) => p?.writeOnly === true).map(([k]) => k);
+  return new Set([...marked, ...(specs ?? []).filter((f) => f.secret).map((f) => f.name)]);
+}
+
 /** Draft text per field path — what the inputs hold. */
 export type Drafts = Record<string, string>;
 

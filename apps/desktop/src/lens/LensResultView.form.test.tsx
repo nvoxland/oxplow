@@ -9,8 +9,9 @@ import { PageNavigationContext, type PageNavigation } from "../tabs/PageNavigati
 // its fields starting from the action's bound input and its fixed fields
 // shown but not editable; submitting runs it with what the person filled
 // in, an invalid field's message lands under that field, and success
-// closes it. A form lens shows the same per-field errors, and after a
-// submit goes where its command says, as its `then` says.
+// closes it. A form that is one text field is a prompt strip at the top of
+// the lens instead. A form lens shows the same per-field errors, and after
+// a submit goes where its command says, as its `then` says.
 
 const realApi = await import("../api.js");
 const runs: Array<{ action: string; row: unknown; input: unknown; confirmed: boolean }> = [];
@@ -29,14 +30,34 @@ const UPDATE: CommandSpec = {
   input_schema: {
     type: "object",
     required: ["uri"],
-    properties: { uri: { type: "string" }, title: { type: "string" } },
+    properties: { uri: { type: "string" }, title: { type: "string", description: "What to call it" } },
   },
 } as unknown as CommandSpec;
+// The same command with a second editable field.
+const UPDATE_WIDE: CommandSpec = {
+  id: "oxplow.work_item.update",
+  input_schema: {
+    type: "object",
+    required: ["uri"],
+    properties: { uri: { type: "string" }, title: { type: "string" }, notes: { type: "string" } },
+  },
+} as unknown as CommandSpec;
+// A command whose one editable field is a choice.
+const DECIDE: CommandSpec = {
+  id: "oxplow.work_item.decide",
+  input_schema: {
+    type: "object",
+    required: ["uri"],
+    properties: { uri: { type: "string" }, title: { type: "string", enum: ["Old", "New"] } },
+  },
+} as unknown as CommandSpec;
+// The command a form action's form is of.
+let actionCommand: CommandSpec = UPDATE;
 
 mock.module("../api.js", () => ({
   ...realApi,
   lensActionForm: async (_id: string, _action: string, _params: unknown, row: Record<string, unknown> | null) => ({
-    command: UPDATE,
+    command: actionCommand,
     values: { uri: row?.uri, title: row?.title },
     fixed: ["uri"],
     fields: null,
@@ -82,6 +103,7 @@ beforeEach(() => {
   formStarts = 0;
   fixedStart = null;
   openAfterPage = null;
+  actionCommand = UPDATE;
 });
 afterEach(cleanup);
 
@@ -128,11 +150,13 @@ const run: LensRun = {
 } as unknown as LensRun;
 
 test("a form action opens its form in a slideover and runs what the person filled in", async () => {
+  actionCommand = UPDATE_WIDE;
   const view = render(<LensResultView run={run} onOpenPage={() => {}} />);
   fireEvent.contextMenu(view.getByTestId("lens-row-0"));
   fireEvent.click(view.getByTestId("menu-item-lens-action-retitle"));
-  // It opened a form instead of running.
-  await waitFor(() => view.getByTestId("lens-action-form"));
+  // It opened a form instead of running: a slideover, its form being two fields.
+  const slideover = await waitFor(() => view.getByTestId("lens-action-form"));
+  expect(slideover.getAttribute("role")).toBe("dialog");
   expect(runs).toEqual([]);
   // The fixed uri is shown, not an input; the title starts from the row.
   expect(view.getByTestId("lens-action-form-fields-uri-fixed").textContent).toContain("oxplow:oxplow/work_item?id=tsk1&provider=oxplow");
@@ -149,6 +173,7 @@ test("a form action opens its form in a slideover and runs what the person fille
 
 test("an invalid field's message shows under it, and the form stays open", async () => {
   invalidField = "/title";
+  actionCommand = UPDATE_WIDE;
   const view = render(<LensResultView run={run} onOpenPage={() => {}} />);
   fireEvent.contextMenu(view.getByTestId("lens-row-0"));
   fireEvent.click(view.getByTestId("menu-item-lens-action-retitle"));
@@ -158,6 +183,67 @@ test("an invalid field's message shows under it, and the form stays open", async
   const error = await waitFor(() => view.getByTestId("lens-action-form-fields-title-error"));
   expect(error.textContent).toContain("can't be empty");
   expect(view.getByTestId("lens-action-form")).toBeTruthy();
+});
+
+/** Press the row's Retitle… and wait for whatever form shape opens. */
+async function pressRetitle(view: ReturnType<typeof render>) {
+  fireEvent.contextMenu(view.getByTestId("lens-row-0"));
+  fireEvent.click(view.getByTestId("menu-item-lens-action-retitle"));
+  return waitFor(() => view.getByTestId("lens-action-form"));
+}
+
+// A one-field form is never a slideover: the Project panel's Rename… is a
+// strip at the top of the panel, and a lens's Rename… is the same.
+test("a form action whose form is one text field opens a prompt strip, not a slideover", async () => {
+  const view = render(<LensResultView run={run} onOpenPage={() => {}} />);
+  const strip = await pressRetitle(view);
+  expect(strip.getAttribute("data-shape")).toBe("prompt");
+  expect(view.queryByRole("dialog")).toBeNull();
+  expect(runs).toEqual([]);
+  // The field's description is the strip's message; the field starts
+  // from the row, focused and selected.
+  expect(strip.textContent).toContain("What to call it");
+  const title = view.getByTestId("lens-action-form-fields-title") as HTMLInputElement;
+  expect(title.value).toBe("Old");
+  expect(document.activeElement).toBe(title);
+  expect(title.selectionStart).toBe(0);
+  expect(title.selectionEnd).toBe(3);
+  expect(view.getByTestId("lens-action-form-fields-submit").textContent).toBe("Retitle");
+  fireEvent.change(title, { target: { value: "New" } });
+  fireEvent.submit(title.form!);
+  await waitFor(() => expect(runs).toHaveLength(1));
+  expect(runs[0].input).toEqual({ title: "New" });
+  expect(runs[0].row).toEqual({ uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", title: "Old" });
+  await waitFor(() => expect(view.queryByTestId("lens-action-form")).toBeNull());
+});
+
+test("Escape closes the strip and runs nothing", async () => {
+  const view = render(<LensResultView run={run} onOpenPage={() => {}} />);
+  await pressRetitle(view);
+  fireEvent.keyDown(view.getByTestId("lens-action-form-fields-title"), { key: "Escape" });
+  await waitFor(() => expect(view.queryByTestId("lens-action-form")).toBeNull());
+  expect(runs).toEqual([]);
+});
+
+test("a refusal naming the field shows under the strip, which stays open", async () => {
+  invalidField = "/title";
+  const view = render(<LensResultView run={run} onOpenPage={() => {}} />);
+  await pressRetitle(view);
+  const title = view.getByTestId("lens-action-form-fields-title") as HTMLInputElement;
+  fireEvent.change(title, { target: { value: "Other" } });
+  fireEvent.submit(title.form!);
+  const error = await waitFor(() => view.getByTestId("lens-action-form-fields-error"));
+  expect(error.textContent).toContain("can't be empty");
+  expect(view.getByTestId("lens-action-form").getAttribute("data-shape")).toBe("prompt");
+  expect((view.getByTestId("lens-action-form-fields-title") as HTMLInputElement).value).toBe("Other");
+});
+
+test("a form whose one field is a choice still opens the slideover", async () => {
+  actionCommand = DECIDE;
+  const view = render(<LensResultView run={run} onOpenPage={() => {}} />);
+  const form = await pressRetitle(view);
+  expect(form.getAttribute("role")).toBe("dialog");
+  expect((view.getByTestId("lens-action-form-fields-title") as HTMLSelectElement).tagName).toBe("SELECT");
 });
 
 test("a form lens shows only its fields, keeps its fixed ones, and puts errors under the field", async () => {

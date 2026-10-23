@@ -86,8 +86,9 @@
   page: `open` (default; Back returns), `replace` (it leaves history —
   a create form giving way to what it made), `stay` (nothing opens) or `close` (the page closes: it showed what the command removed).
 - **A form action** on any lens: `form: true` on an action opens the
-  command's form (a side panel) starting from its `input`, instead of
-  running at once; `fixed` keeps fields to the bound values:
+  command's form starting from its `input`, instead of running at once
+  (a side panel; one text field alone is a prompt strip above the rows);
+  `fixed` keeps fields to the bound values:
   `{ id: edit, label: Edit…, command: oxplow.work_item.update, row: true,
   form: true, fixed: [uri], input: { uri: "{{row.uri}}", title: "{{row.title}}" } }`.
 - **Drag, bulk and key actions** (row actions): `drag: true` runs on a

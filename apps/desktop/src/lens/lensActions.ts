@@ -4,8 +4,9 @@
 /// Agent Context are on every lens (kit affordances, not declared). See
 /// `.context/extensions.md`.
 import { formatContextMention } from "../agent-context-ref.js";
+import { fieldsOf, secretFields, shownFields, type Field } from "../components/SchemaForm/schemaFormModel.js";
 import { IpcCallError, needsConfirmation } from "../ipc-error.js";
-import type { CommandOutcome, Drop, LensAction, LensRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
+import type { CommandOutcome, Drop, FormStart, LensAction, LensRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
 
 export interface LensActionDeps {
   runLensAction(
@@ -102,6 +103,23 @@ export async function openAfterAction(
   } catch (e) {
     deps.recordError(action.label, e instanceof Error ? e.message : String(e));
   }
+}
+
+/** The one text field a form action's form asks for, when that is all it
+ *  asks (its fields, narrowed to `start.fields` when set, less the fixed
+ *  ones): such a form is a prompt strip at the top of the lens, not a
+ *  slideover. Anything else — two fields, a choice, markdown — is null.
+ *  `secret`: the field is a secret (`secretFields`), masked and never
+ *  required. */
+export function promptField(start: FormStart): (Field & { secret: boolean }) | null {
+  const schema = start.command.input_schema as Record<string, unknown>;
+  const all = fieldsOf(schema);
+  const specs = start.fields ? shownFields(start.fields) : null;
+  const listed = specs ? specs.flatMap((spec) => all.find((f) => f.path === spec.name) ?? []) : all;
+  const fixed = new Set(start.fixed);
+  const editable = listed.filter((f) => !fixed.has(f.path));
+  const only = editable.length === 1 ? editable[0]! : null;
+  return only?.kind === "text" ? { ...only, secret: secretFields(schema, specs).has(only.path) } : null;
 }
 
 /** Copy: the lens's text rendering, as an agent would read it. */
