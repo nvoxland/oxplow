@@ -36,8 +36,6 @@ mock.module("../../tauri-bridge/generated/bindings.js", () => ({
   ...realBindings,
   commands: {
     ...realBindings.commands,
-    listWorkspaceFiles: async () => ok(FILES),
-    listWorkspaceEntries: async () => ok([]),
     gitChangeScopes: async () =>
       ok({
         current_branch: "main",
@@ -56,10 +54,18 @@ mock.module("../../tauri-bridge/generated/bindings.js", () => ({
 const realApi = await import("../../api.js");
 mock.module("../../api.js", () => ({
   ...realApi,
-  listWorkspaceFiles: async () => ({
-    files: FILES,
-    summary: { added: 0, modified: 1, deleted: 0, renamed: 0, untracked: 1, conflicted: 0, total: 2 },
-    summaryReads: { models: [], tables: [], measures: [] },
+  // The files are the model's rows (`v_workspace_file`): the whole tree's
+  // walk, and no folder has entries.
+  querySql: async (sql: string) => ({
+    columns: [],
+    rows: sql.includes("kind = 'file'") ? FILES.map((f) => [f.path, f.status]) : [],
+    truncated: false,
+    reads: { models: ["v_workspace_file"], tables: [], measures: [] },
+    freshness: {},
+  }),
+  streamStatusCounts: async () => ({
+    counts: { added: 0, modified: 1, deleted: 0, renamed: 0, untracked: 1, conflicted: 0, total: 2 },
+    reads: { models: [], tables: [], measures: [] },
   }),
 }));
 

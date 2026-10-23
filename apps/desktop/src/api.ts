@@ -355,8 +355,6 @@ import type {
   FileStatus,
   RevisionDetail,
   RevisionInfo,
-  WorkspaceEntry,
-  WorkspaceIndexedFile,
 } from "./tauri-bridge/generated/bindings.js";
 export type {
   BlameLine,
@@ -364,8 +362,6 @@ export type {
   FileStatus,
   RevisionInfo,
   RevisionDetail,
-  WorkspaceEntry,
-  WorkspaceIndexedFile,
 };
 
 // ---- The stream's version control, neutral (`.context/vcs.md`) ----
@@ -2022,29 +2018,11 @@ export function subscribeSnapshotEvents(
   });
 }
 
-export async function listWorkspaceEntries(streamId: string, path = ""): Promise<WorkspaceEntry[]> {
-  return unwrap(
-    await commands.listWorkspaceEntries(streamId || null, path),
-  );
-}
-
 /** The stream's uncommitted files counted by status (`v_change_file`, its
  *  working change), and what the read read, to re-run it on. */
 export async function streamStatusCounts(streamId: string): Promise<{ counts: StatusCounts; reads: Reads }> {
   const res = await querySql(STATUS_COUNTS_SQL, [streamRowId(streamId)], 100);
   return { counts: statusCountsFromRows(res.rows), reads: res.reads };
-}
-
-export async function listWorkspaceFiles(streamId: string): Promise<{
-  files: WorkspaceIndexedFile[];
-  summary: StatusCounts;
-  summaryReads: Reads;
-}> {
-  const [filesRes, status] = await Promise.all([
-    commands.listWorkspaceFiles(streamId || null),
-    streamStatusCounts(streamId),
-  ]);
-  return { files: unwrap(filesRes), summary: status.counts, summaryReads: status.reads };
 }
 
 export async function readWorkspaceFile(streamId: string, path: string): Promise<WorkspaceFile> {

@@ -21,23 +21,6 @@ use oxplow_domain::StreamId;
 use crate::events::{EventBus, OxplowEvent, WorkspaceChangeKind};
 use crate::worktrees::WorktreeRouter;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
-#[serde(rename_all = "lowercase")]
-pub enum WorkspaceEntryKind {
-    File,
-    Directory,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub struct WorkspaceEntry {
-    pub name: String,
-    pub path: String,
-    pub kind: WorkspaceEntryKind,
-    pub status: Option<FileStatus>,
-    pub has_changes: bool,
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct WorkspaceFile {
     pub path: String,
@@ -133,16 +116,6 @@ impl WorkspaceFiles {
             .map_err(|e| WorkspaceError::Io(std::io::Error::other(e.to_string())))?
     }
 
-    pub async fn list_entries(
-        &self,
-        stream_id: Option<&str>,
-        relative_path: String,
-    ) -> Result<Vec<WorkspaceEntry>, WorkspaceError> {
-        let root = self.router.resolve(stream_id).await.into_local_path();
-        let statuses = self.statuses(&root).await;
-        Self::blocking(move || list_workspace_entries(&root, &relative_path, &statuses)).await
-    }
-
     /// The filter for `root`: the project's `generated:` lists and that
     /// workspace's own `.gitignore`s — a stream's, not the primary's.
     fn filter_for(
@@ -153,7 +126,7 @@ impl WorkspaceFiles {
     }
 
     /// Every file, pruned by the stream's filter ([`Self::filter_for`]),
-    /// which also bounds the walk.
+    /// which also bounds the walk (the zone table reads it).
     pub async fn list_files(
         &self,
         stream_id: Option<&str>,
@@ -277,54 +250,6 @@ impl WorkspaceFiles {
         self.announce(stream_id);
         Ok(out)
     }
-}
-
-/// List the immediate children of `root_dir + relative_path`,
-/// excluding `.git/`. Directories sort before files; otherwise
-/// alphabetical. `statuses` annotates files (and propagates into
-/// `has_changes` for directories that contain changed descendants).
-pub fn list_workspace_entries(
-    root_dir: &Path,
-    relative_path: &str,
-    statuses: &HashMap<String, FileStatus>,
-) -> Result<Vec<WorkspaceEntry>, WorkspaceError> {
-    let dir = resolve_workspace_path(root_dir, relative_path)?;
-    let mut entries: Vec<WorkspaceEntry> = Vec::new();
-    for entry in std::fs::read_dir(&dir)? {
-        let entry = entry?;
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if name == ".git" {
-            continue;
-        }
-        let kind = if entry.file_type()?.is_dir() {
-            WorkspaceEntryKind::Directory
-        } else {
-            WorkspaceEntryKind::File
-        };
-        let path = normalize_relative_path(relative_path, &name);
-        let status = if matches!(kind, WorkspaceEntryKind::File) {
-            statuses.get(&path).copied()
-        } else {
-            None
-        };
-        let has_changes = match kind {
-            WorkspaceEntryKind::Directory => has_descendant_changes(&path, statuses),
-            WorkspaceEntryKind::File => status.is_some(),
-        };
-        entries.push(WorkspaceEntry {
-            name,
-            path,
-            kind,
-            status,
-            has_changes,
-        });
-    }
-    entries.sort_by(|a, b| match (a.kind, b.kind) {
-        (WorkspaceEntryKind::Directory, WorkspaceEntryKind::File) => std::cmp::Ordering::Less,
-        (WorkspaceEntryKind::File, WorkspaceEntryKind::Directory) => std::cmp::Ordering::Greater,
-        _ => a.name.cmp(&b.name),
-    });
-    Ok(entries)
 }
 
 /// Recursive flatten — every file under `root_dir`, sorted by path.
@@ -585,11 +510,6 @@ pub fn delete_workspace_path(
     Ok(path)
 }
 
-fn has_descendant_changes(path: &str, statuses: &HashMap<String, FileStatus>) -> bool {
-    let prefix = format!("{path}/");
-    statuses.keys().any(|p| p == path || p.starts_with(&prefix))
-}
-
 fn normalize_relative_path(base: &str, name: &str) -> String {
     if base.is_empty() {
         name.to_string()
@@ -815,29 +735,6 @@ mod tests {
     }
 
     #[test]
-    fn list_entries_sorts_dirs_before_files() {
-        let dir = tempdir().unwrap();
-        std::fs::create_dir(dir.path().join("aaa")).unwrap();
-        std::fs::write(dir.path().join("bbb.txt"), "").unwrap();
-        std::fs::write(dir.path().join("ccc.txt"), "").unwrap();
-        let entries = list_workspace_entries(dir.path(), "", &HashMap::new()).unwrap();
-        assert_eq!(entries[0].name, "aaa");
-        assert_eq!(entries[0].kind, WorkspaceEntryKind::Directory);
-        assert_eq!(entries[1].name, "bbb.txt");
-        assert_eq!(entries[2].name, "ccc.txt");
-    }
-
-    #[test]
-    fn list_entries_skips_dot_git() {
-        let dir = tempdir().unwrap();
-        std::fs::create_dir(dir.path().join(".git")).unwrap();
-        std::fs::write(dir.path().join("a.txt"), "").unwrap();
-        let entries = list_workspace_entries(dir.path(), "", &HashMap::new()).unwrap();
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].name, "a.txt");
-    }
-
-    #[test]
     fn write_then_read_round_trips() {
         let dir = tempdir().unwrap();
         write_workspace_file(dir.path(), "hello.txt", "world").unwrap();
@@ -944,17 +841,5 @@ mod tests {
             paths,
             vec![".gitignore", "dist/bundle.js", "secret.log", "src/main.rs"]
         );
-    }
-
-    #[test]
-    fn directory_with_changed_descendant_has_changes_flag() {
-        let dir = tempdir().unwrap();
-        std::fs::create_dir(dir.path().join("a")).unwrap();
-        std::fs::write(dir.path().join("a/b.txt"), "").unwrap();
-        let mut statuses = HashMap::new();
-        statuses.insert("a/b.txt".into(), FileStatus::Modified);
-        let entries = list_workspace_entries(dir.path(), "", &statuses).unwrap();
-        let a = entries.iter().find(|e| e.name == "a").unwrap();
-        assert!(a.has_changes);
     }
 }

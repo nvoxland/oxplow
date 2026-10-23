@@ -32,11 +32,17 @@ mock.module("../../api.js", () => ({
   },
   subscribeGitRefsEvents: () => () => {},
   // A fresh array each read, like the real index after an event.
-  listWorkspaceFiles: async () => ({
-    files: files.map((f) => ({ ...f })),
-    summary: { modified: 1, added: 0, deleted: 0, untracked: 0, total: 1 },
+  querySql: async (sql: string) => ({
+    columns: [],
+    rows: sql.includes("kind = 'file'") ? files.map((f) => [f.path, f.status]) : [],
+    truncated: false,
+    reads: { models: ["v_workspace_file"], tables: [], measures: [] },
+    freshness: {},
   }),
-  listWorkspaceEntries: async () => [],
+  streamStatusCounts: async () => ({
+    counts: { modified: 1, added: 0, deleted: 0, untracked: 0, total: 1 },
+    reads: { models: [], tables: [], measures: [] },
+  }),
   getChangeScopes: async () => ({
     current_branch: "feature",
     branch_base: "main",

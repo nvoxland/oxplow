@@ -725,16 +725,6 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listWorkspaceEntries: (streamId: string | null, relativePath: string) => typedError<WorkspaceEntry[], IpcError_Serialize>(__TAURI_INVOKE("list_workspace_entries", { streamId, relativePath })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	listWorkspaceFiles: (streamId: string | null) => typedError<WorkspaceIndexedFile[], IpcError_Serialize>(__TAURI_INVOKE("list_workspace_files", { streamId })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	readWorkspaceFile: (streamId: string | null, relativePath: string) => typedError<WorkspaceFile, IpcError_Serialize>(__TAURI_INVOKE("read_workspace_file", { streamId, relativePath })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -6919,24 +6909,9 @@ export type WorkspaceContext = {
 	vcs_enabled: boolean,
 };
 
-export type WorkspaceEntry = {
-	name: string,
-	path: string,
-	kind: WorkspaceEntryKind,
-	status: FileStatus | null,
-	hasChanges: boolean,
-};
-
-export type WorkspaceEntryKind = "file" | "directory";
-
 export type WorkspaceFile = {
 	path: string,
 	content: string,
-};
-
-export type WorkspaceIndexedFile = {
-	path: string,
-	status: FileStatus | null,
 };
 
 /**

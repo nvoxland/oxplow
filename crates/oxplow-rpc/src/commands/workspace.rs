@@ -1,21 +1,10 @@
 //! Cores for the `workspace` command module. Populated by the
 //! oxplow-tauri-ipc -> oxplow-rpc migration; see crate docs.
 
-use oxplow_app::workspace_files::{WorkspaceEntry, WorkspaceFile, WorkspaceIndexedFile};
+use oxplow_app::workspace_files::WorkspaceFile;
 use oxplow_app::Services;
 
 use crate::error::IpcError;
-
-pub async fn list_workspace_entries(
-    svc: &Services,
-    stream_id: Option<String>,
-    relative_path: String,
-) -> Result<Vec<WorkspaceEntry>, IpcError> {
-    svc.workspace_files
-        .list_entries(stream_id.as_deref(), relative_path)
-        .await
-        .map_err(|e| IpcError::internal(e.to_string()))
-}
 
 /// The project's `generated:` lists; the stream's workspace adds its own
 /// `.gitignore`s (`WorkspaceFiles::filter_for`) — the same exclusions as
@@ -47,16 +36,6 @@ pub async fn search_workspace_text(
         .map_err(|e| IpcError::internal(e.to_string()))
 }
 
-pub async fn list_workspace_files(
-    svc: &Services,
-    stream_id: Option<String>,
-) -> Result<Vec<WorkspaceIndexedFile>, IpcError> {
-    svc.workspace_files
-        .list_files(stream_id.as_deref(), &generated(svc))
-        .await
-        .map_err(|e| IpcError::internal(e.to_string()))
-}
-
 pub async fn read_workspace_file(
     svc: &Services,
     stream_id: Option<String>,
@@ -66,55 +45,4 @@ pub async fn read_workspace_file(
         .read(stream_id.as_deref(), relative_path)
         .await
         .map_err(|e| IpcError::internal(e.to_string()))
-}
-
-#[cfg(test)]
-mod tests {
-    #[tokio::test]
-    async fn list_workspace_files_excludes_generated_dirs() {
-        let (svc, dir) = crate::test_support::services().await;
-        std::fs::create_dir_all(dir.path().join("node_modules/pkg")).unwrap();
-        std::fs::write(dir.path().join("node_modules/pkg/index.js"), "x").unwrap();
-        std::fs::create_dir_all(dir.path().join("src")).unwrap();
-        std::fs::write(dir.path().join("src/main.rs"), "fn main() {}").unwrap();
-        svc.services
-            .config
-            .write()
-            .unwrap()
-            .generated
-            .exclude
-            .push("node_modules".into());
-
-        let out = crate::dispatch(
-            "list_workspace_files",
-            serde_json::json!({ "streamId": null }),
-            &svc,
-        )
-        .await
-        .unwrap();
-        let paths: Vec<&str> = out
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|f| f["path"].as_str().unwrap())
-            .collect();
-        assert!(paths.contains(&"src/main.rs"), "got: {paths:?}");
-        assert!(
-            !paths.iter().any(|p| p.starts_with("node_modules")),
-            "generated dirs must be pruned from the index, got: {paths:?}"
-        );
-    }
-
-    #[tokio::test]
-    async fn list_workspace_entries_dispatches_root_listing() {
-        let (svc, _dir) = crate::test_support::services().await;
-        let out = crate::dispatch(
-            "list_workspace_entries",
-            serde_json::json!({ "streamId": null, "relativePath": "" }),
-            &svc,
-        )
-        .await
-        .unwrap();
-        assert!(out.is_array(), "expected a JSON array, got {out}");
-    }
 }

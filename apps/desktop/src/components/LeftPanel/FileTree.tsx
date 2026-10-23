@@ -1,4 +1,5 @@
-import type { FileStatus, WorkspaceEntry, WorkspaceIndexedFile } from "../../api.js";
+import type { FileStatus } from "../../api.js";
+import type { WorkspaceEntry, WorkspaceIndexedFile } from "../../workspaceFiles.js";
 import { PageKindIcon } from "../../pageKinds.js";
 import { basename, StatusBadge, type ContextMenuTarget } from "./shared.js";
 import { setContextRefDrag } from "../../agent-context-dnd.js";

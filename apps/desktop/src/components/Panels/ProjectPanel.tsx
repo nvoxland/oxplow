@@ -17,8 +17,7 @@ import {
   vcsPush,
   vcsStage,
   vcsFileHistory,
-  listWorkspaceEntries,
-  listWorkspaceFiles,
+  streamStatusCounts,
   readWorkspaceFile,
   searchWorkspaceText,
   subscribeGitRefsEvents,
@@ -28,10 +27,10 @@ import {
   type OpOutcome,
   type Stream,
   type TextSearchHit,
-  type WorkspaceEntry,
-  type WorkspaceIndexedFile,
   type StatusCounts,
 } from "../../api.js";
+import { readWorkspaceFolder, readWorkspaceIndex, withFolderChanges, type WorkspaceEntry, type WorkspaceIndexedFile } from "../../workspaceFiles.js";
+import { unionReads } from "../../lens/lensRerun.js";
 import type { DiffRequest } from "../Diff/diff-request.js";
 import { WORKING, gitRevision } from "../../revision.js";
 import { readRefOptions, type RefOption } from "../../vcsHistory.js";
@@ -127,7 +126,7 @@ export function ProjectPanel({
     loadingDirsRef.current = { ...loadingDirsRef.current, [path]: true };
     setLoadingDirs((prev) => ({ ...prev, [path]: true }));
     try {
-      const entries = await listWorkspaceEntries(stream.id, path);
+      const { entries } = await readWorkspaceFolder(stream.id, path);
       setEntriesByDir((prev) => ({ ...prev, [path]: sortFileTreeEntries(entries) }));
       setError(null);
     } catch (e) {
@@ -141,10 +140,10 @@ export function ProjectPanel({
   const loadWorkspaceIndex = useCallback(async () => {
     if (!stream) return;
     try {
-      const result = await listWorkspaceFiles(stream.id);
-      setIndexedFiles(result.files);
-      setStatusSummary(result.summary);
-      setSummaryReads(result.summaryReads);
+      const [index, status] = await Promise.all([readWorkspaceIndex(stream.id), streamStatusCounts(stream.id)]);
+      setIndexedFiles(index.files);
+      setStatusSummary(status.counts);
+      setSummaryReads(unionReads([index.reads, status.reads]));
       setError(null);
     } catch (e) {
       setError(String(e));
@@ -202,10 +201,9 @@ export function ProjectPanel({
       if (refreshTimer) clearTimeout(refreshTimer);
       refreshTimer = setTimeout(() => {
         void loadWorkspaceIndex();
-        // WorkspaceEntry.hasChanges and .status are baked in at loadDir
-        // time. Ancestor dirs of committed files never receive a workspace
-        // fs-watch event, so without reloading them here their stale yellow
-        // dots linger after the commit clears git status.
+        // A file's status is read at loadDir time: a commit clears it
+        // without a workspace fs-watch event, so reload the folders here
+        // (a folder's marker follows the index, read above).
         for (const dir of Object.keys(entriesByDirRef.current)) {
           void loadDir(dir);
         }
@@ -361,14 +359,19 @@ export function ProjectPanel({
       if (!entriesByDir[dir] && !loadingDirsRef.current[dir]) void loadDir(dir);
     }
   }, [effectiveChangedOnly, scopedPaths, entriesByDir, loadDir, stream]);
+  // A folder holds changes when a file under it has a status.
+  const treeEntriesByDir = useMemo(
+    () => Object.fromEntries(Object.entries(entriesByDir).map(([dir, entries]) => [dir, withFolderChanges(entries, indexedFiles)])),
+    [entriesByDir, indexedFiles],
+  );
   const visibleEntriesByDir = useMemo(() => {
-    if (!effectiveChangedOnly) return entriesByDir;
+    if (!effectiveChangedOnly) return treeEntriesByDir;
     const out: Record<string, WorkspaceEntry[]> = {};
-    for (const [dir, entries] of Object.entries(entriesByDir)) {
+    for (const [dir, entries] of Object.entries(treeEntriesByDir)) {
       out[dir] = entries.filter((entry) => changedPathSet.has(entry.path));
     }
     // Inject phantom entries for deleted files — they don't exist on disk so
-    // listWorkspaceEntries doesn't return them. We need a row in the tree so
+    // the model doesn't list them. We need a row in the tree so
     // the user can see that the file was touched in this scope.
     for (const path of scopedDeletions) {
       const parent = dirname(path);
@@ -409,7 +412,7 @@ export function ProjectPanel({
       }
     }
     return out;
-  }, [effectiveChangedOnly, entriesByDir, changedPathSet, scopedDeletions]);
+  }, [effectiveChangedOnly, treeEntriesByDir, changedPathSet, scopedDeletions]);
   const visibleRootEntries = visibleEntriesByDir[""] ?? [];
 
   const [findUsagesState, setFindUsagesState] = useState<{

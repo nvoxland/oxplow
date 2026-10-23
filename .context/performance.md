@@ -469,7 +469,7 @@ most one tick right after a window is covered can still report.
 status, the filtered walk, and the rows into a temp table. On this repo
 (2,321 files kept by the filter): status ~28 ms, walk ~40 ms, temp table
 ~2 ms — about 70 ms a query, and the walk grows with the tree. Listing one
-folder through `list_workspace_entries` costs the status and one
+folder (what the old `list_workspace_entries` IPC did) costs the status and one
 `read_dir`, about 30 ms. So a query that names one folder (`WHERE parent =
 …`) reads that folder alone (`live_models::pushdown`, semantic-layer.md
 "Live models"): the status and one `read_dir`, as the IPC. The Project
@@ -487,7 +487,6 @@ Tauri's IPC bridge, not a function call.
 | call | Tauri IPC | daemon HTTP |
 |---|---|---|
 | `ping` (no work) | p50 ~0 ms, p95 1 ms | p50 4 ms, p95 5 ms |
-| `list_workspace_files` | p50 2 ms, p95 5 ms | p50 5 ms, p95 5 ms |
 | `GET /health` (no preflight) | — | p50 3 ms, p95 9 ms |
 
 So **~3–4 ms per call**, and it is *not* CORS preflight: a plain GET with no

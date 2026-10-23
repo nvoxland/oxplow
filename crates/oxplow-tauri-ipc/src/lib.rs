@@ -229,8 +229,6 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::decide_proposal,
             // log
             // workspace
-            commands::generated::list_workspace_entries,
-            commands::generated::list_workspace_files,
             commands::generated::read_workspace_file,
             commands::generated::files_at,
             commands::generated::vcs_blame,

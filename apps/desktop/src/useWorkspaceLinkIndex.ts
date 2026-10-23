@@ -1,6 +1,8 @@
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
-import { listWorkspaceFiles, subscribeWorkspaceEvents } from "./api.js";
+import { NO_READS, useRerunOnChange } from "./lens/lensRerun.js";
+import type { Reads } from "./tauri-bridge/generated/bindings.js";
+import { readWorkspaceIndex } from "./workspaceFiles.js";
 
 /** Whether a path should be turned into a clickable link (a real workspace
  * file or directory). */
@@ -30,47 +32,42 @@ export function useWorkspaceLinkIndex(streamId: string | undefined): LinkablePre
   const dirsRef = useRef<Set<string>>(new Set());
   const loadedRef = useRef(false);
 
+  // What the last read read: the index follows it, not the workspace events.
+  const [reads, setReads] = useState<Reads>(NO_READS);
+  const load = useCallback(() => {
+    if (!streamId) return;
+    readWorkspaceIndex(streamId)
+      .then((result) => {
+        if (streamRef.current !== streamId) return;
+        const files = new Set<string>();
+        const dirs = new Set<string>();
+        for (const f of result.files) {
+          const p = f.path.replace(/\/+$/, "");
+          files.add(p);
+          for (let slash = p.lastIndexOf("/"); slash > 0; slash = p.lastIndexOf("/", slash - 1)) {
+            dirs.add(p.slice(0, slash));
+          }
+        }
+        filesRef.current = files;
+        dirsRef.current = dirs;
+        loadedRef.current = true;
+        setReads(result.reads);
+      })
+      .catch(() => {
+        // Leave the index empty + unloaded so the predicate stays permissive.
+      });
+  }, [streamId]);
+  const streamRef = useRef(streamId);
+  streamRef.current = streamId;
+
   useEffect(() => {
     loadedRef.current = false;
     filesRef.current = new Set();
     dirsRef.current = new Set();
-    if (!streamId) return;
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-
-    const load = () => {
-      listWorkspaceFiles(streamId)
-        .then((result) => {
-          if (cancelled) return;
-          const files = new Set<string>();
-          const dirs = new Set<string>();
-          for (const f of result.files) {
-            const p = f.path.replace(/\/+$/, "");
-            files.add(p);
-            for (let slash = p.lastIndexOf("/"); slash > 0; slash = p.lastIndexOf("/", slash - 1)) {
-              dirs.add(p.slice(0, slash));
-            }
-          }
-          filesRef.current = files;
-          dirsRef.current = dirs;
-          loadedRef.current = true;
-        })
-        .catch(() => {
-          // Leave the index empty + unloaded so the predicate stays permissive.
-        });
-    };
+    setReads(NO_READS);
     load();
-    const unsubscribe = subscribeWorkspaceEvents(streamId, (event) => {
-      if (event.kind === "updated") return;
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(load, 200);
-    });
-    return () => {
-      cancelled = true;
-      if (timer) clearTimeout(timer);
-      unsubscribe();
-    };
-  }, [streamId]);
+  }, [load]);
+  useRerunOnChange(reads, load);
 
   // Ref-backed so the returned predicate identity is stable (the link provider
   // registers once) while always reading the latest index.

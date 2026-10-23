@@ -5,17 +5,17 @@ import { SEARCH_TRIGGER_TESTID } from "./TitleBar.js";
 import type { CSSProperties } from "react";
 import { useResources } from "../resources.js";
 import { useListNav } from "../kit/index.js";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { NO_READS, useRerunOnChange } from "../lens/lensRerun.js";
+import { readWorkspaceIndex, type WorkspaceIndexedFile } from "../workspaceFiles.js";
+import type { Reads } from "../tauri-bridge/generated/bindings.js";
 import { useExtensions } from "../extensionsStore.js";
 import {
   listRecentPageVisits,
-  listWorkspaceFiles,
   searchSite,
   subscribePageVisitEvents,
-  subscribeWorkspaceEvents,
   type SearchHit,
   type Stream,
-  type WorkspaceIndexedFile,
 } from "../api.js";
 import {
   buildLauncherTree,
@@ -164,39 +164,36 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
     if (open && stream) inputRef.current?.focus();
   }, [open, stream?.id]);
 
-  useEffect(() => {
+  // The stream's files (`v_workspace_file`, a walk of the tree): read once
+  // when it opens, and again when what the read read changes.
+  const [fileReads, setFileReads] = useState<Reads>(NO_READS);
+  const loadFiles = useCallback(() => {
     if (!open || !stream) return;
-    let cancelled = false;
-    let refreshTimer: ReturnType<typeof setTimeout> | null = null;
-    const loadFiles = () => {
-      setLoading(true);
-      setError(null);
-      listWorkspaceFiles(stream.id)
-        .then((result) => {
-          if (cancelled) return;
-          setFiles(result.files);
-        })
-        .catch((e) => {
-          if (cancelled) return;
-          setError(String(e));
-        })
-        .finally(() => {
-          if (cancelled) return;
-          setLoading(false);
-        });
-    };
-    loadFiles();
-    const unsubscribe = subscribeWorkspaceEvents(stream.id, (event) => {
-      if (event.kind === "updated") return;
-      if (refreshTimer) clearTimeout(refreshTimer);
-      refreshTimer = setTimeout(loadFiles, 75);
-    });
-    return () => {
-      cancelled = true;
-      unsubscribe();
-      if (refreshTimer) clearTimeout(refreshTimer);
-    };
+    setLoading(true);
+    setError(null);
+    const streamId = stream.id;
+    readWorkspaceIndex(streamId)
+      .then((result) => {
+        if (streamRef.current !== streamId) return;
+        setFiles(result.files);
+        setFileReads(result.reads);
+      })
+      .catch((e) => {
+        if (streamRef.current !== streamId) return;
+        setError(String(e));
+      })
+      .finally(() => {
+        if (streamRef.current !== streamId) return;
+        setLoading(false);
+      });
   }, [open, stream?.id]);
+  const streamRef = useRef(stream?.id ?? null);
+  streamRef.current = open ? stream?.id ?? null : null;
+  useEffect(() => {
+    setFileReads(NO_READS);
+    loadFiles();
+  }, [loadFiles]);
+  useRerunOnChange(open ? fileReads : NO_READS, loadFiles);
 
   // Body search (unified BM25 index: wiki/task/comment/note/file
   // contents), debounced. This is what makes a multi-word phrase like

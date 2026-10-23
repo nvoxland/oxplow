@@ -133,14 +133,6 @@ async fn get_config_returns_default_for_fresh_project() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn list_workspace_entries_returns_root_listing() {
-    let app = TestApp::build().await;
-    let _entries = commands::generated::list_workspace_entries(app.state(), None, "".into())
-        .await
-        .unwrap();
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn read_workspace_file_missing_path_errors() {
     let app = TestApp::build().await;
     let result = commands::generated::read_workspace_file(
@@ -427,9 +419,6 @@ async fn snapshot_reads_empty_for_fresh_project() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn workspace_reads_and_file_round_trip() {
     let app = TestApp::build().await;
-    let _ = commands::generated::list_workspace_files(app.state(), None)
-        .await
-        .unwrap();
     let _ = commands::generated::files_at(app.state(), None, oxplow_domain::vcs::Revision::Working)
         .await
         .unwrap();

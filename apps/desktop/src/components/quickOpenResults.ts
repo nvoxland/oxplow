@@ -1,6 +1,7 @@
 import { fuzzyMatches } from "../fuzzy-match.js";
 import { commandUri, fileUri, keyOf, pageUri } from "../uri/uri.js";
-import type { SearchHit, WorkspaceIndexedFile } from "../api.js";
+import type { SearchHit } from "../api.js";
+import type { WorkspaceIndexedFile } from "../workspaceFiles.js";
 import type { TabRef } from "../tabs/tabState.js";
 import type { MenuPlace } from "../tauri-bridge/generated/bindings.js";
 import { refFromTabId } from "../tabs/pageRefs.js";

@@ -108,12 +108,12 @@ that runs each call under `spawn_blocking`. `Services.vcs` holds it as
   id or an unknown stream is refused (`NoStream`, IPC `INVALID`), never
   sent to the primary — and a path naming the workspace itself (`""`,
   `.`, `/`) is refused (`WholeWorkspace`), so an empty path can't delete
-  the worktree (tsk551). Reads still default to the primary. `WorkspaceEntry` and
-  `WorkspaceIndexedFile` serialize camelCase (`status`, `hasChanges`),
-  and the desktop uses the generated types directly. The hand-written
-  TS copies went: `listWorkspaceEntries` had never mapped the
-  snake_case wire row, so the file tree's change markers were
-  undefined.
+  the worktree. Reads still default to the primary. The desktop reads a
+  worktree's files from the live model `v_workspace_file` (one folder:
+  `WHERE parent = ?`; the whole tree for Quick Open, the link index and the
+  Project panel's search), through `workspaceFiles.ts`; the
+  `list_workspace_entries` / `list_workspace_files` IPCs are gone. A
+  folder's change marker is derived from the files that have a status.
 - **`BranchReconciler`** (`Services.branch_reconciler`, spawned at
   boot): keeps `stream.branch` equal to the checked-out branch (from
   `vcs.head`), once per stream at boot and on each ref move (`RefMoves`). A

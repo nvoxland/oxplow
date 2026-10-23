@@ -473,14 +473,6 @@ pub const MANIFEST: &[Capability] = &[
     model("list_efforts_overlapping_range", &["v_effort"]),
     // ---- workspace file I/O (agent uses Read/Write tools) ----
     ui(
-        "list_workspace_entries",
-        "workspace file I/O: an agent uses its own Read/Write tools",
-    ),
-    ui(
-        "list_workspace_files",
-        "workspace file I/O: an agent uses its own Read/Write tools",
-    ),
-    ui(
         "read_workspace_file",
         "workspace file I/O: an agent uses its own Read/Write tools",
     ),

@@ -1,4 +1,5 @@
 import { useResourcesLoader } from "./resources.js";
+import { isWorkspaceDir } from "./workspaceFiles.js";
 import { useOpenHandoffs } from "./handoffs.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
@@ -22,7 +23,6 @@ import {
   type GitOpKickoff,
   desktopBridge,
   listStreams,
-  listWorkspaceEntries,
   probeDaemon,
   readWorkspaceFile,
   renameWorkspacePath,
@@ -204,18 +204,6 @@ async function pickAndCreateProject() {
       label: "New project",
       message: e instanceof Error ? e.message : String(e),
     });
-  }
-}
-
-/** True when `path` is a directory in the workspace. `listWorkspaceEntries`
- * does a `read_dir`, which succeeds (even for an empty dir) only for a
- * directory and errors for a file or missing path. */
-async function isWorkspaceDir(streamId: string, path: string): Promise<boolean> {
-  try {
-    await listWorkspaceEntries(streamId, path);
-    return true;
-  } catch {
-    return false;
   }
 }
 
