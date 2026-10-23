@@ -214,6 +214,8 @@ async fn the_comments_inbox_lists_threads_by_target_and_a_picked_one_reads_in_or
         Some("wiki/a-page")
     );
     assert_eq!(open.text(row, "go").as_deref(), Some("Go to location"));
+    // Go to location opens the page at the comment: `#comment=cmt<id>`.
+    assert!(open.text(row, "go_ref").unwrap().contains("comment=cmt"));
     assert_eq!(open.text(row, "latest").as_deref(), Some("user: first"));
     assert!(open.flag(row, "is_open") && open.flag(row, "is_followup"));
 

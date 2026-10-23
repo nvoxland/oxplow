@@ -31,6 +31,15 @@ test("the Comments inbox lists a thread, shows its conversation, and resolves it
   await expect(inbox.getByText("Is that true?").last()).toBeVisible();
   await expect(inbox.getByText("Checking.").last()).toBeVisible();
 
+  // Go to location opens the page at the comment: its address carries it.
+  await row.getByText("Go to location").click();
+  await expect(page.locator('[data-testid^="center-tab-body-oxplow:oxplow/wiki?slug=otters"]:visible')).toHaveAttribute(
+    "data-testid",
+    /#comment=cmt\d+/,
+  );
+  await page.keyboard.press("Meta+[");
+  await expect(threads.getByTestId("lens-row-0")).toBeVisible();
+
   // Resolving takes it out of the unresolved list.
   await row.click({ button: "right" });
   await page.getByTestId("menu-item-lens-action-resolve").click();

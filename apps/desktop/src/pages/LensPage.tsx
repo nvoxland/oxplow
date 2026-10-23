@@ -18,6 +18,7 @@ import { LensResultView } from "../lens/LensResultView.js";
 import { LensRail, type PickedRow } from "../lens/LensRail.js";
 import type { PageAction } from "../kit/actions.js";
 import { CommentNavigator } from "../components/Comments/CommentNavigator.js";
+import { requestCommentReveal } from "../comment-reveal-bus.js";
 import { contextNodeProps } from "../components/Comments/contextNodes.js";
 import { Contents } from "../lens/Contents.js";
 import { PageCommentsContext, type PageComments } from "../lens/pageComments.js";
@@ -69,7 +70,15 @@ export function LensPage({ lensId, params, title: pageTitle, stream, onOpenPage,
   const resource = params ?? NO_PARAMS;
   // The shell's view keys (`#oxplow.renderer=`) are the tab's, never a
   // lens param.
-  const view = pageView(nav?.viewParams ?? NO_PARAMS);
+  // `#comment=<id>` on a page that takes comments asks them to reveal that
+  // one (the Comments inbox's Go to); it is the page's, not a lens param.
+  const shown = pageView(nav?.viewParams ?? NO_PARAMS);
+  const { comment: revealComment, ...withoutComment } = shown;
+  const view = comments ? withoutComment : shown;
+  const revealId = comments && typeof revealComment === "string" && revealComment !== "" ? revealComment : null;
+  useEffect(() => {
+    if (revealId) requestCommentReveal(revealId);
+  }, [revealId]);
   const fromRef = useMemoObject({ ...resource, ...view });
   const overrides = inTab ? fromRef : own;
   const overridesRef = useRef(overrides);

@@ -3,6 +3,7 @@ import { cleanup, render, waitFor } from "@testing-library/react";
 
 import type { Lens, LensRun } from "../tauri-bridge/generated/bindings.js";
 import type { Stream } from "../tauri-bridge/index.js";
+import { peekPendingCommentReveal, clearCommentReveal } from "../comment-reveal-bus.js";
 import { PageNavigationContext, type PageNavigation } from "../tabs/PageNavigationContext.js";
 
 // Comments are a page's capability: a declared page with `comments: true`
@@ -54,7 +55,7 @@ afterEach(() => {
 const URI = "oxplow:oxplow/wiki?slug=notes";
 const stream = { id: "str1" } as unknown as Stream;
 
-function page(comments: boolean) {
+function page(comments: boolean, viewParams: Record<string, string> = {}) {
   const nav = {
     navigate: () => {},
     goBack: () => {},
@@ -62,7 +63,7 @@ function page(comments: boolean) {
     canGoBack: false,
     canGoForward: false,
     ref: { id: `${URI}#lines=1-2` },
-    viewParams: {},
+    viewParams,
     setViewParams: () => {},
   } as unknown as PageNavigation;
   return (
@@ -95,4 +96,20 @@ test("the body's markdown headings are the rail's Contents", async () => {
     ["First", "2"],
     ["Second", "3"],
   ]));
+});
+
+// The Comments inbox's Go to opens the page at `#comment=<id>`: the page
+// asks its comment surfaces to reveal that one, and doesn't hand `comment`
+// to its lens as a param.
+test("a page that takes comments reveals the comment its `#comment` names", async () => {
+  const view = render(page(true, { comment: "cmt1" }));
+  await waitFor(() => expect(view.getByTestId("lens-markdown")).toBeTruthy());
+  expect(peekPendingCommentReveal()).toBe("cmt1");
+  clearCommentReveal("cmt1");
+});
+
+test("a page that doesn't take comments ignores it", async () => {
+  const view = render(page(false, { comment: "cmt2" }));
+  await waitFor(() => expect(view.getByTestId("lens-markdown")).toBeTruthy());
+  expect(peekPendingCommentReveal()).toBeNull();
 });
