@@ -29,7 +29,7 @@ pub mod event_channels {
     /// LSP bridge events.
     pub const LSP: &str = "lsp:event";
     /// Terminal bridge events.
-    pub const TERMINAL: &str = "terminal:event";
+    pub const TERMINAL: &str = "pty:event";
 
     /// Frame keys used as `{"channel": <key>, "payload": …}` on the
     /// daemon's multiplexed `/events` socket, keyed to the channel

@@ -141,7 +141,7 @@ async fn health() -> &'static str {
 }
 
 /// `GET /events` — WebSocket multiplexing the backend event channels
-/// (`oxplow:event`, `lsp:event`, `terminal:event`). Each
+/// (`oxplow:event`, `lsp:event`, `pty:event`). Each
 /// frame is `{"channel":"oxplow"|"lsp"|"terminal","payload":<event>}`
 /// with the event's serialized shape, so the renderer's handlers are
 /// transport-agnostic.

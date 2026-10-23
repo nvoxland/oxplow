@@ -10,7 +10,7 @@
 export const EVENT_CHANNELS = {
   oxplow: "oxplow:event",
   lsp: "lsp:event",
-  terminal: "terminal:event",
+  terminal: "pty:event",
 } as const;
 
 export type EventChannelFrameKey = keyof typeof EVENT_CHANNELS;

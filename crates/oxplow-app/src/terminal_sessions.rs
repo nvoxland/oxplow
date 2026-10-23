@@ -52,7 +52,7 @@ pub enum TerminalSessionError {
 }
 
 /// Server-originated frame, tagged with the originating session.
-/// Forwarded to the renderer over `terminal:event`.
+/// Forwarded to the renderer over `pty:event`.
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct TerminalBridgeEvent {
     #[serde(rename = "sessionId")]

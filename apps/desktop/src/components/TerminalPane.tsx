@@ -19,7 +19,7 @@ import {
 import { formatContextMention } from "../agent-context-ref.js";
 import { installFilePathLinkProvider, type FilePathLinkActivation } from "../terminal-link-provider.js";
 
-/** A PTY session's output or exit, as `terminal:event` carries it. */
+/** A PTY session's output or exit, as `pty:event` carries it. */
 interface TerminalEvent {
   sessionId: string;
   message: string;
