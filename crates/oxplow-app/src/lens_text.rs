@@ -24,12 +24,16 @@ pub const MAX_HUNK_FILES: usize = 20;
 pub const MAX_HUNK_BYTES: usize = 8_000;
 
 /// What a component needs beyond its rows: the runs of a document's or a
-/// dashboard's lens parts (in part order), a
+/// dashboard's lens parts (in part order) and of a dashboard's row tiles,
+/// a
 /// `hunks` lens's diffs (one per row, in row order, up to
 /// [`MAX_HUNK_FILES`]) or a `diff` lens's one, a `code` lens's files.
 #[derive(Debug, Clone, Default)]
 pub struct Resolved {
     pub children: Vec<LensRun>,
+    /// A dashboard's row tiles, one per row (up to [`MAX_ROWS`]): a lens or
+    /// `sql` tile's run, or why it can't run; a text tile's none.
+    pub row_tiles: Vec<Option<Result<LensRun, String>>>,
     pub diffs: Vec<String>,
     /// A `code` lens's files, one per row (up to [`MAX_HUNK_FILES`]): each
     /// one's text at its revision, cut to its marked lines.
@@ -91,7 +95,7 @@ pub async fn text_of(
 
 /// What `run`'s component needs beyond its rows: a document's or a
 /// dashboard's lens parts, each run with the params it declares from the
-/// lens's; a `hunks` lens's diffs,
+/// lens's, and a dashboard's row tiles; a `hunks` lens's diffs,
 /// each file read at both revisions in `root`.
 pub async fn resolve(
     svc: &crate::Services,
@@ -104,23 +108,14 @@ pub async fn resolve(
         LensViz::Document | LensViz::Dashboard => {
             let given = crate::extensions::part_params(run);
             for id in run.lens.part_lenses() {
-                let child = svc.extension_catalog.find_lens(root, id)?;
-                let params = given
-                    .iter()
-                    .filter(|(k, _)| child.params.iter().any(|p| &p.name == *k))
-                    .map(|(k, v)| (k.clone(), v.clone()))
-                    .collect();
-                out.children.push(
-                    crate::extensions::run_lens(
-                        &svc.sql,
-                        &svc.extension_catalog,
-                        root,
-                        id,
-                        params,
-                        ctx,
-                    )
-                    .await?,
-                );
+                out.children
+                    .push(run_part(svc, root, id, &given, ctx).await?);
+            }
+            if let Some(tile) = &run.lens.tile {
+                for row in run.result.rows.iter().take(MAX_ROWS) {
+                    out.row_tiles
+                        .push(row_tile(svc, root, run, tile, row, &given, ctx).await);
+                }
             }
         }
         LensViz::Approvals => out.approvals = pending_proposals(svc, run).await?,
@@ -176,6 +171,84 @@ pub async fn resolve(
         _ => {}
     }
     Ok(out)
+}
+
+/// Lens `id` run as a part: with the params it declares from `given`.
+async fn run_part(
+    svc: &crate::Services,
+    root: &Path,
+    id: &str,
+    given: &BTreeMap<String, SqlCell>,
+    ctx: &crate::extensions::LensContext,
+) -> Result<LensRun, DomainError> {
+    let child = svc.extension_catalog.find_lens(root, id)?;
+    let params = given
+        .iter()
+        .filter(|(k, _)| child.params.iter().any(|p| &p.name == *k))
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+    crate::extensions::run_lens(&svc.sql, &svc.extension_catalog, root, id, params, ctx).await
+}
+
+/// A dashboard row's tile run: its `lens` as a part, else its `sql` shown
+/// as its `display` (a chart display by its `chart`; `metric`, or a chart
+/// without one, as a table). A text tile has none; one that can't run
+/// says why, and the others still run.
+async fn row_tile(
+    svc: &crate::Services,
+    root: &Path,
+    run: &LensRun,
+    tile: &crate::extensions::LensTile,
+    row: &[SqlCell],
+    given: &BTreeMap<String, SqlCell>,
+    ctx: &crate::extensions::LensContext,
+) -> Option<Result<LensRun, String>> {
+    let at = |role: &Option<String>| {
+        column(run, role.as_ref())
+            .and_then(|i| row.get(i))
+            .map(cell)
+            .filter(|v| !v.is_empty())
+    };
+    let ran = if let Some(id) = at(&tile.lens) {
+        run_part(svc, root, &id, given, ctx).await
+    } else {
+        let sql = at(&tile.sql)?;
+        let chart = at(&tile.chart)
+            .and_then(|c| serde_json::from_str::<crate::extensions::LensChart>(&c).ok());
+        let viz = match (at(&tile.display).as_deref(), &chart) {
+            (Some("list"), _) => LensViz::List,
+            (Some("number"), _) => LensViz::Number,
+            (Some("markdown"), _) => LensViz::Markdown,
+            (Some("bar"), Some(_)) => LensViz::Bar,
+            (Some("line"), Some(_)) => LensViz::Line,
+            (Some("treemap"), Some(_)) => LensViz::Treemap,
+            _ => LensViz::Table,
+        };
+        let spec = crate::extensions::LensSpec {
+            title: "Query".into(),
+            description: String::new(),
+            query: sql,
+            viz,
+            params: Vec::new(),
+            columns: Vec::new(),
+            empty: None,
+            chart,
+            tree: None,
+            timeline: None,
+            steps: None,
+            hunks: None,
+            code: None,
+            diff: None,
+            markdown: None,
+            form: None,
+            group: None,
+            emphasis: None,
+            depth: None,
+        };
+        let id = format!("{}#tile", run.lens.id);
+        crate::extensions::run_spec(&svc.sql, &id, &spec, BTreeMap::new(), ctx).await
+    };
+    Some(ran.map_err(|e| e.to_string()))
 }
 
 /// The pending proposals an `approvals` lens shows, one line each: its
@@ -303,13 +376,13 @@ async fn file_diff(svc: &crate::Services, root: &Path, path: &str, from: &str, t
 
 /// `run` as text. A document or dashboard renders its parts in order
 /// under their titles (a lens part its resolved run, a markdown part its
-/// prose), a `hunks` lens its resolved diffs; every other component
-/// renders its rows.
+/// prose), then a dashboard's row tiles; a `hunks` lens its resolved
+/// diffs; every other component renders its rows.
 pub fn render(run: &LensRun, resolved: &Resolved) -> String {
     let rows = &run.result.rows;
     if matches!(run.lens.viz, LensViz::Document | LensViz::Dashboard) {
         let mut runs = resolved.children.iter();
-        return run
+        let parts = run
             .lens
             .parts
             .iter()
@@ -326,7 +399,9 @@ pub fn render(run: &LensRun, resolved: &Resolved) -> String {
                     None => md.clone(),
                 }),
                 (None, None) => None,
-            })
+            });
+        return parts
+            .chain(row_tiles(run, resolved))
             .collect::<Vec<_>>()
             .join("\n\n");
     }
@@ -773,6 +848,44 @@ fn capped_lines(lines: Vec<String>) -> String {
     out.join("\n")
 }
 
+/// A dashboard's row tiles, each under its title (its `title` column,
+/// else its run's): a lens or `sql` tile its resolved run, a text tile its
+/// text (under no heading without a title).
+fn row_tiles<'a>(run: &'a LensRun, resolved: &'a Resolved) -> impl Iterator<Item = String> + 'a {
+    let tile = run.lens.tile.clone().unwrap_or_default();
+    let (title, text) = (
+        column(run, tile.title.as_ref()),
+        column(run, tile.text.as_ref()),
+    );
+    run.result
+        .rows
+        .iter()
+        .zip(&resolved.row_tiles)
+        .filter_map(move |(row, ran)| {
+            let at = |i: Option<usize>| {
+                i.and_then(|i| row.get(i))
+                    .map(cell)
+                    .filter(|v| !v.is_empty())
+            };
+            let (heading, body) = match ran {
+                Some(Ok(c)) => (
+                    at(title).unwrap_or_else(|| c.lens.title.clone()),
+                    render(c, &Resolved::default()),
+                ),
+                Some(Err(e)) => (
+                    at(title).unwrap_or_else(|| "Query".into()),
+                    format!("(can't run it: {e})"),
+                ),
+                None => match (at(title), at(text)) {
+                    (Some(t), body) => (t, body.unwrap_or_default()),
+                    (None, Some(body)) => return Some(body),
+                    (None, None) => return None,
+                },
+            };
+            Some(format!("### {heading}\n\n{body}").trim_end().to_string())
+        })
+}
+
 fn column(run: &LensRun, name: Option<&String>) -> Option<usize> {
     let name = name?;
     run.result.columns.iter().position(|c| c == name)
@@ -951,6 +1064,7 @@ mod tests {
                 empty: None,
                 chart,
                 tree: None,
+                tile: None,
                 timeline: None,
                 steps: None,
                 hunks: None,
@@ -1112,10 +1226,151 @@ mod tests {
                     diffs: Vec::new(),
                     files: Vec::new(),
                     approvals: Vec::new(),
+                    row_tiles: Vec::new(),
                 }
             ),
             "### Open\n\n5\n\n### About\n\nRead me.\n\n### Notes\n\n**ok**"
         );
+    }
+
+    fn tiled(columns: &[&str], rows: Vec<Vec<SqlCell>>) -> LensRun {
+        with(run(LensViz::Dashboard, None, columns, rows), |l| {
+            l.tile = Some(crate::extensions::LensTile {
+                id: Some("id".into()),
+                title: Some("title".into()),
+                lens: Some("lens".into()),
+                sql: Some("sql".into()),
+                display: Some("display".into()),
+                text: Some("text".into()),
+                ..Default::default()
+            })
+        })
+    }
+
+    /// A dashboard whose rows are its tiles reads as a section per row
+    /// after its static parts: under the row's title, else its run's; a
+    /// text tile its text, a tile that can't run why.
+    #[test]
+    fn a_row_tile_dashboard_reads_as_a_section_per_row() {
+        let n = SqlCell::Null(());
+        let mut grid = tiled(
+            &["id", "title", "lens", "sql", "display", "text"],
+            vec![
+                vec![
+                    t("dti1"),
+                    n.clone(),
+                    t("x/open"),
+                    n.clone(),
+                    n.clone(),
+                    n.clone(),
+                ],
+                vec![
+                    t("dti2"),
+                    t("Plan"),
+                    n.clone(),
+                    n.clone(),
+                    n.clone(),
+                    t("Ship it."),
+                ],
+                vec![
+                    t("dti3"),
+                    n.clone(),
+                    n.clone(),
+                    n.clone(),
+                    n.clone(),
+                    t("Just text."),
+                ],
+                vec![
+                    t("dti4"),
+                    t("Bad"),
+                    n.clone(),
+                    t("SELEC"),
+                    n.clone(),
+                    n.clone(),
+                ],
+            ],
+        );
+        grid.lens.parts = vec![crate::extensions::LensPart {
+            id: "intro".into(),
+            title: Some("About".into()),
+            lens: None,
+            markdown: Some("Read me.".into()),
+            size: None,
+            replaceable: None,
+            from: None,
+        }];
+        let mut open = run(LensViz::Number, None, &["n"], vec![vec![SqlCell::Int(5)]]);
+        open.lens.title = "Open".into();
+        let resolved = Resolved {
+            row_tiles: vec![
+                Some(Ok(open)),
+                None,
+                None,
+                Some(Err("no such column".into())),
+            ],
+            ..Resolved::default()
+        };
+        assert_eq!(
+            render(&grid, &resolved),
+            "### About\n\nRead me.\n\n### Open\n\n5\n\n### Plan\n\nShip it.\n\nJust text.\n\n### Bad\n\n(can't run it: no such column)"
+        );
+    }
+
+    /// A row tile's `sql` runs as its display; a lens that isn't there, or
+    /// SQL that fails, says why and the others still run; a text tile
+    /// runs nothing.
+    #[tokio::test]
+    async fn row_tiles_resolve_their_lens_and_sql() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let root = fx.svc.layout.project_dir.clone();
+        let n = SqlCell::Null(());
+        let grid = tiled(
+            &["id", "title", "lens", "sql", "display", "text"],
+            vec![
+                vec![
+                    t("dti1"),
+                    n.clone(),
+                    n.clone(),
+                    t("SELECT 42 AS answer"),
+                    t("number"),
+                    n.clone(),
+                ],
+                vec![
+                    t("dti2"),
+                    n.clone(),
+                    t("x/missing"),
+                    n.clone(),
+                    n.clone(),
+                    n.clone(),
+                ],
+                vec![
+                    t("dti3"),
+                    n.clone(),
+                    n.clone(),
+                    t("SELECT nope FROM nowhere"),
+                    n.clone(),
+                    n.clone(),
+                ],
+                vec![
+                    t("dti4"),
+                    n.clone(),
+                    n.clone(),
+                    n.clone(),
+                    n.clone(),
+                    t("hi"),
+                ],
+            ],
+        );
+        let ctx = crate::extensions::LensContext::default();
+        let resolved = resolve(&fx.svc, &root, &grid, &ctx).await.unwrap();
+        assert_eq!(resolved.row_tiles.len(), 4);
+        let answer = resolved.row_tiles[0].as_ref().unwrap().as_ref().unwrap();
+        assert_eq!(answer.lens.viz, LensViz::Number);
+        assert!(matches!(resolved.row_tiles[1], Some(Err(_))));
+        assert!(matches!(resolved.row_tiles[2], Some(Err(_))));
+        assert!(resolved.row_tiles[3].is_none());
+        let text = render(&grid, &resolved);
+        assert!(text.starts_with("### Query\n\n42\n\n"), "{text}");
     }
 
     fn with<F: FnOnce(&mut Lens)>(mut r: LensRun, f: F) -> LensRun {
@@ -1293,10 +1548,8 @@ mod tests {
             },
         );
         let resolved = Resolved {
-            children: Vec::new(),
             diffs: vec!["-old\n+new\n".into()],
-            files: Vec::new(),
-            approvals: Vec::new(),
+            ..Resolved::default()
         };
         assert_eq!(
             render(&r, &resolved),

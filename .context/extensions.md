@@ -2217,6 +2217,25 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   rows of its own) and a dashboard as a kit `TileGrid`
   (`lens/PartsViz.tsx`), running every part together and re-running all of
   them on any part's reads (`useLensRuns`).
+- **Rows as tiles: `tile:`.** A `dashboard` whose tiles are data (a user
+  dashboard's `v_dashboard_item` rows) names them in a column-role block,
+  `tile: { id, title?, size?, lens?, sql?, display?, chart?, metric?, viz?,
+  text? }` (`LensTile`), each value a column of its query: one tile per
+  row, after the static `tiles:` (which may stay, or be none). A row draws
+  its `lens` (run with the page's params it declares, as a part), else its
+  pinned `sql` shown as `display` (`chart` the JSON of a chart display's
+  roles; `display = metric` the metric card over `metric`/`viz`), else its
+  `text` (a heading band). Load rules (`tile_problem`): only on a
+  dashboard, with a `query`, an `id`, one of `lens`/`sql`/`text`, and
+  `display`/`chart`/`metric`/`viz` only beside `sql`; `columns:` is
+  refused beside it (`row_columns_problem`): the rows are tiles, not a row
+  of params, so `part_params` gives the static parts the page's params
+  alone. Its roles are `role_columns`, checked against the result like a
+  chart's. `lens_text` resolves each row's run (`Resolved.row_tiles`; a
+  `sql` tile through an ad-hoc spec, a chart display without a parsable
+  `chart` or `metric` as a table; one that can't run says why and the
+  rest still run) and renders a `###` per row under its `title` column,
+  else its run's title.
 - **A table or list is keyboard-driven** (`useListNav`): focus it, ↑/↓ move
   the cursor, Enter opens the cursor row's first link or runs its first row
   action (usability.md "Keyboard").

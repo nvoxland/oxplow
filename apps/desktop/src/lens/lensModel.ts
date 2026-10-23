@@ -524,6 +524,7 @@ export function adHocLens(query: string, viz: LensViz, chart: LensChart | null =
     empty: "No rows.",
     chart,
     tree: null,
+    tile: null,
     timeline: null,
     steps: null,
     hunks: null,
@@ -851,13 +852,15 @@ export function treemapItems(
   return out;
 }
 
-/** The params a `grid` passes to one child: those the child declares. */
 /** What a `document`'s or `dashboard`'s parts are given: its query's first
  *  row, column by column, under its own params — one of its own wins when
  *  it holds a value (Rust's `extensions::part_params`). Each part takes the
- *  ones it declares (`childParams`). */
-export function partParams(run: Pick<LensRun, "params" | "result">): Record<string, SqlCell> {
+ *  ones it declares (`childParams`). A dashboard whose rows are its tiles
+ *  gives its params alone. */
+export function partParams(run: Pick<LensRun, "lens" | "params" | "result">): Record<string, SqlCell> {
   const out: Record<string, SqlCell> = { ...run.params };
+  // A dashboard whose rows are its tiles has no row of params.
+  if (run.lens.tile) return out;
   const row = run.result.rows[0];
   if (row) {
     run.result.columns.forEach((column, i) => {

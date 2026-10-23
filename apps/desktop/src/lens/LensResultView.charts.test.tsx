@@ -19,6 +19,7 @@ const base: Lens = {
   empty: null,
   chart: null,
   tree: null,
+  tile: null,
   timeline: null,
   steps: null,
   hunks: null,

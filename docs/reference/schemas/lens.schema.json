@@ -68,6 +68,18 @@
       ],
       "default": null
     },
+    "tile": {
+      "description": "`dashboard` only: its rows are its tiles.",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/LensTile"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
     "timeline": {
       "anyOf": [
         {
@@ -846,6 +858,81 @@
           ]
         },
         "label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "LensTile": {
+      "description": "`dashboard` viz: its query's rows are tiles, one per row, each value\nnaming a column. A row draws its `lens` (run with the page's params it\ndeclares), its pinned `sql` (shown as `display`, a chart by `chart`,\nthe metric card by `metric` and `viz`) or its `text` (a heading band).",
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "The tile's id: what its actions bind as `{{row.<id column>}}`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "size": {
+          "description": "`small`, `wide`, `tall` or `full` (unknown: `small`; a text tile's\ndefault is `full`).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "lens": {
+          "description": "A lens id (`<extension>/<slug>`).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sql": {
+          "description": "Read-only SQL over the published models.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "display": {
+          "description": "How a `sql` tile shows its rows: a viz name, or `metric`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "chart": {
+          "description": "A `sql` tile's chart roles, as JSON (`{\"x\": …, \"y\": …}`).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "metric": {
+          "description": "A `metric` display's metric key.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "viz": {
+          "description": "A `metric` display's card: `line` or `number`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "text": {
           "type": [
             "string",
             "null"

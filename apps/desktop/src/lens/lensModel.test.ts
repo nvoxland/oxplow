@@ -18,6 +18,7 @@ const lens = (over: Partial<Lens> = {}): Lens => ({
   empty: null,
   chart: null,
   tree: null,
+  tile: null,
   timeline: null,
   steps: null,
   hunks: null,
@@ -680,10 +681,19 @@ describe("sparkline and badge formats", () => {
 
 test("a composite's parts get its row under its params, a param holding a value winning", () => {
   const run = (sha: SqlCell, rows: SqlCell[][]) =>
-    ({ params: { stream_id: 1, sha }, result: { columns: ["change_id", "sha"], rows } }) as unknown as LensRun;
+    ({ lens: { tile: null }, params: { stream_id: 1, sha }, result: { columns: ["change_id", "sha"], rows } }) as unknown as LensRun;
   expect(partParams(run("a", [[7, "b"]]))).toEqual({ stream_id: 1, sha: "a", change_id: 7 });
   expect(partParams(run(null, [[7, "b"]]))).toEqual({ stream_id: 1, sha: "b", change_id: 7 });
   expect(partParams(run(null, []))).toEqual({ stream_id: 1, sha: null });
+});
+
+test("a dashboard whose rows are its tiles gives its parts its params alone", () => {
+  const run = {
+    lens: { tile: { id: "id", text: "body" } },
+    params: { id: "dsh1" },
+    result: { columns: ["id", "body"], rows: [["dti1", "x"]] },
+  } as unknown as LensRun;
+  expect(partParams(run)).toEqual({ id: "dsh1" });
 });
 
 describe("foldedAway", () => {

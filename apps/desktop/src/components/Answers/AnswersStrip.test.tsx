@@ -27,6 +27,7 @@ const lens = (title: string): Lens => ({
   empty: null,
   chart: null,
   tree: null,
+  tile: null,
   timeline: null,
   steps: null,
   hunks: null,
