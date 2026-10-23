@@ -350,6 +350,8 @@ pub enum ActionThen {
     Replace,
     /// Nothing opens; the lens's page stays (a form for the next entry).
     Stay,
+    /// The lens's page closes (it showed what the command removed).
+    Close,
 }
 
 /// `form` viz: the command it submits and the values it starts from.
@@ -1384,7 +1386,7 @@ struct ActionFile {
     #[serde(default)]
     choices: BTreeMap<String, String>,
     /// What becomes of the lens's page when the command opens one:
-    /// `open` (default), `replace` or `stay`.
+    /// `open` (default), `replace`, `stay` or `close`.
     #[serde(default)]
     then: ActionThen,
     /// A row action's column: offered only on rows where it is truthy.
@@ -11040,7 +11042,7 @@ commands:
     }
 
     /// What becomes of the page after an action, or a form lens's submit:
-    /// `then: open` (default) | `replace` | `stay`.
+    /// `then: open` (default) | `replace` | `stay` | `close`.
     #[test]
     fn an_action_says_what_becomes_of_its_page() {
         let (_d, ext) = load_x(

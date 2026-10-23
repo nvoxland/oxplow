@@ -56,6 +56,14 @@ test("`then: stay` opens nothing, without asking where", async () => {
   expect(log).toEqual([]);
 });
 
+test("`then: close` closes the lens's page, without asking where", async () => {
+  const { d, log } = deps(undefined, "oxplow:oxplow/work_item?id=tsk9&provider=oxplow");
+  const closed: string[] = [];
+  await openAfterAction({ ...action, then: "close" }, done, { ...d, closePage: () => closed.push("closed") });
+  expect(closed).toEqual(["closed"]);
+  expect(log).toEqual([]);
+});
+
 test("a command that names no page opens nothing, and a refusal to bind is recorded", async () => {
   const quiet = deps();
   await openAfterAction(action, { result: {}, audit_id: 1, event_id: null, inverse: null }, quiet.d);

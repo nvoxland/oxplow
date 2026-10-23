@@ -2180,7 +2180,7 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   never returns to a submitted form; a target that can't live in a tab —
   an agent session, a stream or a thread — closes this one and is shown or
   focused: New Stream's `oxplow.stream.create` opens the stream's URI); `stay` — nothing
-  opens (a form for the next entry). Outside a page (a panel) a page
+  opens (a form for the next entry); `close` — the lens's page closes (Delete on a work item's page). Outside a page (a panel) a page
   opens in a new tab whatever `then` says.
 - `alert`: a row-count or threshold condition that shows a panel badge
   (nudging the agent is what advisories are for).

@@ -2292,6 +2292,7 @@ export function App() {
           ),
         goBack: () => handleGoBack(slot),
         goForward: () => handleGoForward(slot),
+        close: () => closePageTab(currentId),
         canGoBack: sessionTab.at > 0,
         canGoForward: sessionTab.at < sessionTab.entries.length - 1,
         pinned: !!tab.pinned,

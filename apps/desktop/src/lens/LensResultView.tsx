@@ -241,6 +241,7 @@ function useOpenAfter() {
   return {
     openAfter: commandOpenAfter,
     openPage: (page: string, replace: boolean) => void (nav?.openRef ?? openRefInWindow)(page, { replace }),
+    closePage: nav?.close,
     recordError: (label: string, message: string) => recordOpError({ label, message }),
   };
 }

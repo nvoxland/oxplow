@@ -31,6 +31,6 @@ columns:
 actions:
   - { id: bring, label: Bring to this thread, command: oxplow.work_item.move, row: true, when: can_bring, input: { uri: "{{row.uri}}", to: { thread: "{{row.thread_ref}}" } } }
   - { id: send, label: Send to backlog, command: oxplow.work_item.move, row: true, when: can_send, input: { uri: "{{row.uri}}", to: backlog } }
-  - { id: delete, label: Delete, command: oxplow.work_item.delete, row: true, when: can_delete, input: { uri: "{{row.uri}}" } }
+  - { id: delete, label: Delete, command: oxplow.work_item.delete, row: true, then: close, when: can_delete, input: { uri: "{{row.uri}}" } }
 empty: This work item isn't on the active work list.
 hidden: true

@@ -84,7 +84,7 @@
 - **After a submit**, a command with `ui.open_after` opens that page;
   `then:` on the action (or `form.then`) says what becomes of the lens's
   page: `open` (default; Back returns), `replace` (it leaves history —
-  a create form giving way to what it made) or `stay` (nothing opens).
+  a create form giving way to what it made), `stay` (nothing opens) or `close` (the page closes: it showed what the command removed).
 - **A form action** on any lens: `form: true` on an action opens the
   command's form (a side panel) starting from its `input`, instead of
   running at once; `fixed` keeps fields to the bound values:

@@ -68,4 +68,7 @@ test("About offers Send to backlog for an item on the thread, and Delete asks fi
   await expect(page.getByTestId("menu-item-lens-action-send")).toHaveCount(0);
   await page.getByTestId("menu-item-lens-action-delete").click();
   await expect(page.getByTestId("lens-action-confirm-run")).toBeVisible();
+  // Confirmed, the item is gone and its page closes with it.
+  await page.getByTestId("lens-action-confirm-run").click();
+  await expect(page.getByTestId("lens-part-info")).toHaveCount(0);
 });

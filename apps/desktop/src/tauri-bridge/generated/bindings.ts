@@ -992,7 +992,9 @@ export type ActionThen =
  */
 "replace" | 
 /**  Nothing opens; the lens's page stays (a form for the next entry). */
-"stay";
+"stay" | 
+/**  The lens's page closes (it showed what the command removed). */
+"close";
 
 /**
  *  An MCP server as a provider: oxplow's adapter runs `mcp`'s

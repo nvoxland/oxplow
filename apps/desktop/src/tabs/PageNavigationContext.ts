@@ -47,6 +47,8 @@ export interface PageNavigation {
   openRef?(ref: string, how?: NavigateOptions): void;
   goBack(): void;
   goForward(): void;
+  /** Close this page's tab (a page for what was just deleted). */
+  close?(): void;
   canGoBack: boolean;
   canGoForward: boolean;
   /** The tab is pinned (its kind's, `isPinnedKind`): it leads the strip
