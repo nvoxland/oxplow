@@ -24,7 +24,6 @@ import {
   checkProviderInstance,
   cancelOauthSignIn,
   completeOauthSignIn,
-  listExtensions,
   listProviderInstances,
   listenForSignInRedirect,
   stopSignInRedirect,
@@ -37,11 +36,9 @@ import {
   subscribeOxplowEvents,
   type ProviderInstanceView,
 } from "../api.js";
-import { settingValue } from "../configValues.js";
-import type { SignInCompletion, SignInState, UiReplacement } from "../tauri-bridge/generated/bindings.js";
+import type { SignInCompletion, SignInState } from "../tauri-bridge/generated/bindings.js";
 import { readsOf, useRerunOnChange } from "../lens/lensRerun.js";
 import { CredentialRow } from "./CredentialRow.js";
-import { OXPLOWS_OWN } from "../lens/useReplacement.js";
 import { InlineConfirm } from "./InlineConfirm.js";
 import {
   canRemoveInstance,
@@ -58,23 +55,10 @@ import { showToast } from "./toastStore.js";
 
 export function IntegrationsSection() {
   const [views, setViews] = useState<ProviderInstanceView[] | null>(null);
-  const [replaced, setReplaced] = useState<UiReplacement[]>([]);
-  const [chosen, setChosen] = useState<Record<string, string>>({});
 
   const refresh = useCallback(async () => {
     try {
-      const [listed, choices, extensions] = await Promise.all([
-        listProviderInstances(),
-        settingValue("replacements"),
-        listExtensions(),
-      ]);
-      setViews(listed);
-      setReplaced(extensions.filter((e) => e.enabled).flatMap((e) => e.ui.replacements));
-      setChosen(
-        choices !== null && typeof choices === "object" && !Array.isArray(choices)
-          ? Object.fromEntries(Object.entries(choices as Record<string, unknown>).map(([k, v]) => [k, String(v)]))
-          : {},
-      );
+      setViews(await listProviderInstances());
     } catch (e) {
       recordOpError({ label: "List integrations", message: String(e) });
       setViews([]);
@@ -98,13 +82,9 @@ export function IntegrationsSection() {
   useRerunOnChange(readsOf("v_contribution_health"), () => void refresh());
 
   if (views === null) return <div style={mutedStyle}>Loading…</div>;
-  // Replaced components don't need a provider (an extension's view of the
-  // Board needs none), so they're listed with or without instances.
-  const replacements = <Replacements replaced={replaced} chosen={chosen} onChanged={setChosen} />;
   if (views.length === 0) {
     return (
       <div data-testid="integrations-section">
-        {replacements}
         <div style={mutedStyle} data-testid="integrations-empty">
           No extension declares an external provider. A private extension can bring one (its <code>providers:</code>).
         </div>
@@ -113,85 +93,11 @@ export function IntegrationsSection() {
   }
   return (
     <div data-testid="integrations-section">
-      {replacements}
       {views.map((v) => (
         <IntegrationRow key={v.instance} view={v} onChanged={setViews} onCredentialChanged={() => void refresh()} />
       ))}
       <AddInstance views={views} onChanged={setViews} />
     </div>
-  );
-}
-
-/** The core components extensions replace, each with a choice of whose
- *  shows: `replacements`, a person-only key like `activeProviders`, so the
- *  choice is the confirmation `oxplow.config.set` asks for. "Default" is
- *  no entry: the only extension replacing it (several: oxplow's own); a
- *  bound one (the state control) is its item's provider's extension's, and
- *  can only be kept oxplow's. */
-function Replacements({
-  replaced,
-  chosen,
-  onChanged,
-}: {
-  replaced: UiReplacement[];
-  chosen: Record<string, string>;
-  onChanged(chosen: Record<string, string>): void;
-}) {
-  const targets = [...new Set(replaced.map((r) => r.target))].sort();
-  if (targets.length === 0) return null;
-  async function set(target: string, whose: string) {
-    const next = { ...chosen };
-    if (whose === "") delete next[target];
-    else next[target] = whose;
-    try {
-      if (Object.keys(next).length === 0) {
-        await runCommand("oxplow.config.unset", { key: "replacements" }, true);
-      } else {
-        await runCommand("oxplow.config.set", { key: "replacements", value: next }, true);
-      }
-      onChanged(next);
-    } catch (e) {
-      recordOpError({ label: "Choose whose component shows", message: e instanceof Error ? e.message : String(e) });
-    }
-  }
-  return (
-    <fieldset data-testid="integrations-replacements" style={fieldsetStyle}>
-      <legend style={mutedStyle}>Replaced components — whose shows</legend>
-      {targets.map((target) => {
-        const candidates = replaced.filter((r) => r.target === target);
-        const label = candidates[0]?.label ?? target;
-        const bound = candidates[0]?.boundToProvider ?? false;
-        const fallback = bound
-          ? "its provider's extension's"
-          : candidates.length === 1
-            ? candidates[0].extension
-            : "oxplow's own (several replace it)";
-        return (
-          <label
-            key={target}
-            data-testid={`integrations-replacement-${target}`}
-            style={{ display: "flex", gap: 6, alignItems: "center" }}
-          >
-            <span style={{ minWidth: 120 }}>{label}</span>
-            <select
-              data-testid={`integrations-replacement-choice-${target}`}
-              value={chosen[target] ?? ""}
-              onChange={(e) => void set(target, e.target.value)}
-            >
-              <option value="">Default — {fallback}</option>
-              <option value={OXPLOWS_OWN}>oxplow's own</option>
-              {bound
-                ? null
-                : candidates.map((c) => (
-                    <option key={c.extension} value={c.extension}>
-                      {c.extension}
-                    </option>
-                  ))}
-            </select>
-          </label>
-        );
-      })}
-    </fieldset>
   );
 }
 

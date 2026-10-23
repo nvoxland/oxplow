@@ -2149,3 +2149,14 @@
     - { name: "from_seq", type: "INT", doc: "The log position of the first; NULL when none." }
     - { name: "to_seq", type: "INT", doc: "The log position of the last; NULL when none." }
     - { name: "batch", type: "INT", doc: "The most one backfill run reacts to; the rest wait for another run." }
+- name: replacement
+  version: 1
+  key: [target, extension]
+  description: "The core sub-components extensions replace (`work_item.board`, `effort.verdict`), one row per candidate extension, read live from the enabled extensions and the config. `chosen` is the extension the person picked for the target (`oxplow` for oxplow's own), NULL for the default: the only extension replacing it, or oxplow's own where several do, or the item's provider's extension for a `bound_to_provider` target."
+  columns:
+    - { name: "target", type: "TEXT", doc: "The core sub-component, `<area>.<name>`." }
+    - { name: "label", type: "TEXT", doc: "What a person calls it (`board`)." }
+    - { name: "extension", type: "TEXT", doc: "The extension that replaces it." }
+    - { name: "bound_to_provider", type: "INT", doc: "1 when it renders only while that extension's provider decides, so the person chooses only between the default and oxplow's own." }
+    - { name: "capability", type: "TEXT", doc: "The capability the target belongs to." }
+    - { name: "chosen", type: "TEXT", doc: "The person's choice for the target: an extension, or `oxplow`; NULL for the default." }

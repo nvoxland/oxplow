@@ -23,10 +23,12 @@ async function install(daemon: Daemon) {
 /** Choose whose view shows for `target` on Settings → Integrations. */
 async function choose(page: Page, target: string, who: string) {
   await openFromLauncher(page, "Settings: Integrations");
-  const choice = page.getByTestId(`integrations-replacement-choice-${target}`);
-  await choice.selectOption(who);
-  // The select shows what is saved: it holds the choice once it is stored.
-  await expect(choice).toHaveValue(who);
+  const shows = who === "oxplow" ? "oxplow's own" : who;
+  const row = page.locator("tr", { hasText: target }).filter({ hasText: shows }).first();
+  await row.click({ button: "right" });
+  await page.getByTestId("menu-item-lens-action-use").click();
+  // The row says "In use" once the choice is stored.
+  await expect(row).toContainText("In use");
 }
 
 const TARGETS = ["work_item.board", "work_item.list", "work_item.detail"] as const;

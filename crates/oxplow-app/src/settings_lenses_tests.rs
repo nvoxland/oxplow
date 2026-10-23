@@ -1671,3 +1671,97 @@ async fn the_data_area_lists_entities_collectors_and_what_a_backfill_would_do() 
     .await;
     assert!(none.rows.is_empty());
 }
+
+/// Settings → Integrations → Capabilities: each choosable capability's
+/// implementations and a default row; choosing writes `activeProviders`
+/// in its layer (the choices stay the lens's own rows).
+#[tokio::test(flavor = "multi_thread")]
+async fn the_capabilities_lens_lists_the_implementations_and_choosing_one_is_a_config_write() {
+    use crate::lens_actions::{run_lens_action, LensActionCall};
+    let fx = crate::test_fixtures::services_with_task_effort().await;
+    let caps = run_task(&fx, "capabilities", vec![]).await;
+    assert!(!caps.rows.is_empty());
+    // Every capability has its default row; pick a capability's non-default one.
+    let defaults: Vec<&Row> = caps
+        .rows
+        .iter()
+        .filter(|r| caps.flag(r, "is_default"))
+        .collect();
+    assert!(!defaults.is_empty());
+    let choice = caps
+        .rows
+        .iter()
+        .find(|r| caps.flag(r, "can_choose") && caps.text(r, "provider").as_deref() != Some("none"))
+        .expect("a choosable implementation");
+    let cells = |r: &Row| -> std::collections::BTreeMap<String, SqlCell> {
+        caps.columns.iter().cloned().zip(r.clone()).collect()
+    };
+    let press = |action: &str, row: &Row| LensActionCall {
+        lens_id: "oxplow-foundation/capabilities".into(),
+        action_id: action.into(),
+        params: Default::default(),
+        row: Some(cells(row)),
+        input: None,
+        drop: None,
+        on_behalf_of: oxplow_domain::Actor::Human,
+        confirmed: true,
+    };
+    let ctx = crate::extensions::LensContext::default();
+    let root = fx.svc.layout.project_dir.clone();
+    run_lens_action(&fx.svc, &root, press("use-project", choice), &ctx)
+        .await
+        .unwrap();
+    let capability = caps.text(choice, "capability").unwrap();
+    let provider = caps.text(choice, "provider").unwrap();
+    let chosen = crate::config_service::read_config(&fx.svc.config).active_providers;
+    assert_eq!(chosen.get(&capability), Some(&provider));
+    // The default row resets it.
+    let default = defaults
+        .iter()
+        .find(|r| caps.text(r, "capability").as_deref() == Some(capability.as_str()))
+        .unwrap();
+    run_lens_action(&fx.svc, &root, press("default-project", default), &ctx)
+        .await
+        .unwrap();
+    assert!(!crate::config_service::read_config(&fx.svc.config)
+        .active_providers
+        .contains_key(&capability));
+    // Replaced components: each target has the default (in use until one
+    // is chosen), oxplow's own, and each extension replacing it; choosing
+    // writes `replacements`.
+    let replaced = run_task(&fx, "replacements", vec![]).await;
+    let row = replaced
+        .rows
+        .iter()
+        .find(|r| {
+            replaced.text(r, "whose").as_deref() == Some("oxplow") && replaced.flag(r, "can_choose")
+        })
+        .expect("a target oxplow's own can be chosen for");
+    let target = replaced.text(row, "target").unwrap();
+    let row_cells: std::collections::BTreeMap<String, SqlCell> =
+        replaced.columns.iter().cloned().zip(row.clone()).collect();
+    run_lens_action(
+        &fx.svc,
+        &root,
+        LensActionCall {
+            lens_id: "oxplow-foundation/replacements".into(),
+            action_id: "use".into(),
+            params: Default::default(),
+            row: Some(row_cells),
+            input: None,
+            drop: None,
+            on_behalf_of: oxplow_domain::Actor::Human,
+            confirmed: true,
+        },
+        &ctx,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        crate::config_service::read_config(&fx.svc.config)
+            .replacements
+            .get(&target)
+            .map(String::as_str),
+        Some("oxplow")
+    );
+}

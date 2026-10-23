@@ -2015,11 +2015,7 @@ pub const SLOTS: &[SlotSpec] = &[
     SlotSpec::sections("settings.lsp.sections", &[], &[]),
     SlotSpec::sections("settings.extensions.sections", &[], &[]),
     SlotSpec::sections("settings.data.sections", &[], &[]),
-    SlotSpec::sections(
-        "settings.integrations.sections",
-        &[],
-        &["capabilities", "integrations"],
-    ),
+    SlotSpec::sections("settings.integrations.sections", &[], &["integrations"]),
     SlotSpec::sections("settings.ai.sections", &[], &[]),
 ];
 
@@ -9684,7 +9680,7 @@ commands:
                 ("region", "title: R\nparams: [{ name: path }]\nquery: SELECT 1\n"),
                 ("sized", "title: S\nquery: SELECT 1\n"),
             ],
-            "ui:\n  slots:\n    - { slot: settings.integrations.sections, lens: presets, title: Team presets, at: { after: capabilities } }\n    - { slot: settings.integrations.sections, lens: stray, at: { before: gone } }\n    - { slot: diff.file.header, lens: region, at: start }\n    - { slot: settings.integrations.sections, lens: sized, size: wide }\n",
+            "ui:\n  slots:\n    - { slot: settings.integrations.sections, lens: presets, title: Team presets, at: { after: integrations } }\n    - { slot: settings.integrations.sections, lens: stray, at: { before: gone } }\n    - { slot: diff.file.header, lens: region, at: start }\n    - { slot: settings.integrations.sections, lens: sized, size: wide }\n",
         );
         let mounts: Vec<_> = ext
             .ui
@@ -9698,7 +9694,7 @@ commands:
                 (
                     "x/presets",
                     Some(SlotAt::After {
-                        after: "capabilities".into()
+                        after: "integrations".into()
                     }),
                     Some("Team presets")
                 ),
@@ -9716,7 +9712,7 @@ commands:
         assert!(errs.contains("`size` is a dashboard tile's"), "{errs}");
         let warns = ext.warnings.join("\n");
         assert!(
-            warns.contains("has no part `gone` (it has `capabilities`, `integrations`)"),
+            warns.contains("has no part `gone` (it has `integrations`)"),
             "{warns}"
         );
     }

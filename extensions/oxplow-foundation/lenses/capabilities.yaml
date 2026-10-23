@@ -1,0 +1,45 @@
+title: Capabilities
+description: "Which implementation each capability uses - the work list tasks are filed on, how efforts open and close, how file versions are kept. The project's choice is saved in .oxplow/project.yaml; \"just for me\" goes in .oxplow/personal.yaml."
+query: |
+  WITH proj AS (SELECT coalesce((SELECT value FROM v_config_value WHERE key = 'activeProviders' AND origin = 'project'), '{}') AS j),
+       me AS (SELECT coalesce((SELECT value FROM v_config_value WHERE key = 'personal.activeProviders'), '{}') AS j),
+       p AS (SELECT * FROM v_capability_provider WHERE choosable = 1)
+  SELECT p.capability, p.capability_title AS capability_title, p.provider, p.title,
+         CASE
+           WHEN p.capability = 'knowledge' AND p.source = 'builtin' THEN 'pages as Markdown under .oxplow/wiki, pinned to snapshots'
+           WHEN p.capability = 'snapshots' AND json_extract(p.features, '$.contents') = 1 THEN 'reads any file at any point; grows the blob store'
+           WHEN p.capability = 'snapshots' THEN 'what changed, never what it said; no blob store growth'
+         END AS hint,
+         (SELECT group_concat(key, ', ') FROM json_each(p.features) WHERE value = 1) AS features,
+         CASE WHEN p.source = 'none' THEN
+           (SELECT group_concat(l.title, ', ') FROM v_lens l WHERE EXISTS
+              (SELECT 1 FROM json_each(l.needs) n WHERE n.value = p.capability OR n.value LIKE p.capability || '.%'))
+         END AS turns_off,
+         trim(CASE WHEN p.active = 1 THEN 'Active. ' || CASE p.chosen_by WHEN 'personal' THEN 'Your own choice.' WHEN 'project' THEN 'The project''s choice.'
+                     WHEN 'fallback' THEN 'The chosen one isn''t available (its extension is disabled or its instance isn''t running).' ELSE 'The default.' END
+                   ELSE '' END
+              || CASE WHEN json_extract((SELECT j FROM proj), '$.' || p.capability) = p.provider THEN ' The project uses it.' ELSE '' END
+              || CASE WHEN json_extract((SELECT j FROM me), '$.' || p.capability) = p.provider THEN ' You use it.' ELSE '' END) AS standing,
+         CASE WHEN p.active = 1 THEN 'success' END AS tone,
+         1 AS can_choose, 0 AS is_default
+  FROM p WHERE p.available = 1
+  UNION ALL
+  SELECT d.capability, d.capability_title, '', 'The default', NULL, NULL, NULL,
+         'Resets a choice.', NULL, 0, 1
+  FROM (SELECT DISTINCT capability, capability_title FROM p) d
+  ORDER BY 1, 11 DESC, 4
+viz: table
+group: { by: capability_title }
+columns:
+  - { key: title, label: Implementation }
+  - { key: standing, label: Standing, tone: tone }
+  - { key: hint, label: What it means }
+  - { key: features, label: Features }
+  - { key: turns_off, label: Turns off }
+actions:
+  - { id: use-project, label: Use for the Project, command: oxplow.capability.choose, row: true, when: can_choose, input: { capability: "{{row.capability}}", provider: "{{row.provider}}", layer: project } }
+  - { id: use-mine, label: Use Just for Me, command: oxplow.capability.choose, row: true, when: can_choose, input: { capability: "{{row.capability}}", provider: "{{row.provider}}", layer: personal } }
+  - { id: default-project, label: Use the Default for the Project, command: oxplow.capability.choose, row: true, when: is_default, input: { capability: "{{row.capability}}", layer: project } }
+  - { id: same-as-project, label: Same as the Project for Me, command: oxplow.capability.choose, row: true, when: is_default, input: { capability: "{{row.capability}}", layer: personal } }
+empty: Nothing to choose here.
+hidden: true

@@ -34,8 +34,10 @@ test("a person configures, checks and enables the fake tracker, and an item reac
     return !!fake && fake.enabled && fake.health.state.state === "ready";
   });
   await expect(page.getByTestId("integration-status-e2e/fake")).toContainText("Ready");
-  await page.getByTestId("capabilities-work_items-project-fake").click();
-  await expect(page.getByTestId("capabilities-work_items-project-fake")).toBeChecked();
+  const fakeRow = page.locator("tr", { hasText: "fake" }).filter({ hasText: /Fake|fake tracker/i }).first();
+  await fakeRow.click({ button: "right" });
+  await page.getByTestId("menu-item-lens-action-use-project").click();
+  await expect(fakeRow).toContainText("The project uses it");
   // The choice is the daemon's once it lists the fake as the active work list.
   await until("the fake to be the active work list", 30_000, async () => {
     const out = await ipc<{ rows: unknown[][] }>(daemon, "query_sql", {
