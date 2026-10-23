@@ -42,6 +42,7 @@ import {
   rowAsk,
   rowContextRef,
   rowDepth,
+  foldedAway,
   rowEmphasized,
   rowGroups,
   rowRef,
@@ -483,7 +484,16 @@ function RowsBody({
   marks,
 }: LensResultViewProps & { actions?: LensActionsState; marks?: Marks }) {
   const lens = run.lens;
-  const result = limitRows(run.result, maxRows);
+  const limited = limitRows(run.result, maxRows);
+  // The rows under a parent folded away (a `depth` lens: an epic's
+  // children), kept in this step's history state like the groups'.
+  const rowsClosed = useCollapsedSet("lens-rows.closed");
+  const rowId = (row: SqlCell[]) => {
+    const at = limited.columns.indexOf("uri");
+    return at >= 0 && typeof row[at] === "string" ? (row[at] as string) : rowKey(row);
+  };
+  const folding = foldedAway(run.lens, limited.columns, limited.rows, new Set(rowsClosed.ids), rowId);
+  const result = folding.hidden.size === 0 ? limited : { ...limited, rows: limited.rows.filter((r) => !folding.hidden.has(r)) };
   const picks = rowPicks(run, onSetParam);
   const ctxMenu = useContextMenu();
   const refOffersFor = useRefOffers();
@@ -816,6 +826,7 @@ function RowsBody({
       },
       emphasized,
       indent: rowDepth(lens, result.columns, row) * DEPTH_INDENT,
+      fold: folding.parents.has(row) ? { open: !rowsClosed.has(rowId(row)), toggle: () => rowsClosed.toggle(rowId(row)) } : null,
       picks: picks !== null,
       selected: picks?.selected(row) ?? false,
     };
@@ -908,6 +919,8 @@ interface RowLookOut {
   emphasized: boolean;
   /** Extra left padding, px. */
   indent: number;
+  /** A parent row folds its children away. */
+  fold: { open: boolean; toggle(): void } | null;
   /** Clicking it sets a param; `selected`: it holds that param's value. */
   picks: boolean;
   selected: boolean;
@@ -1669,7 +1682,7 @@ function sections(rows: SqlCell[][], view: RowsView | undefined): { group: RowGr
   return groups.map((g) => ({ group: g, rows: view.folded(g) ? [] : g.rows.map((r) => [r, index.get(r) ?? 0]) }));
 }
 
-const noLook: RowLookOut = { props: {}, emphasized: false, indent: 0, picks: false, selected: false };
+const noLook: RowLookOut = { props: {}, emphasized: false, indent: 0, fold: null, picks: false, selected: false };
 
 function ListViz({ rows, cols, cell, rowMenu, view }: RowsVizProps) {
   const [head, ...rest] = cols;
@@ -1696,7 +1709,21 @@ function ListViz({ rows, cols, cell, rowMenu, view }: RowsVizProps) {
                   {...rowMenu(row)}
                   {...look.props}
                 >
-                  <div>{head ? cell(row, head) : null}</div>
+                  <div>
+                    {look.fold ? (
+                      <button
+                        type="button"
+                        data-testid={`lens-row-fold-${i}`}
+                        aria-expanded={look.fold.open}
+                        aria-label={look.fold.open ? "Fold its children away" : "Show its children"}
+                        className="ox-link"
+                        onClick={look.fold.toggle}
+                      >
+                        {look.fold.open ? "▾" : "▸"}
+                      </button>
+                    ) : null}
+                    {head ? cell(row, head) : null}
+                  </div>
                   {rest.length > 0 ? (
                     <div style={{ color: "var(--text-secondary)", fontSize: "var(--text-sm)" }}>
                       {rest.map((c, j) => (

@@ -452,7 +452,6 @@ pub const MANIFEST: &[Capability] = &[
         "list_agent_statuses",
         "agents' live status, shown to the person; an agent is the one with the status",
     ),
-    model("list_open_agent_turns", &["v_agent_turn"]),
     model("get_agent_turn", &["v_agent_turn"]),
     // ---- config ----
     ui(

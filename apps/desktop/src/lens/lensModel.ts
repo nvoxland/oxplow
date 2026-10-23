@@ -173,6 +173,33 @@ export function rowDepth(lens: Lens, columns: string[], row: SqlCell[]): number 
   return Number.isInteger(n) ? Math.max(0, Math.min(8, n)) : 0;
 }
 
+/** The rows of a `depth` lens that are children of a row in `closed`
+ *  (named by `idOf`), however deep, and which rows have children at all:
+ *  a row is a parent when the row after it is deeper. */
+export function foldedAway(
+  lens: Lens,
+  columns: string[],
+  rows: SqlCell[][],
+  closed: ReadonlySet<string>,
+  idOf: (row: SqlCell[]) => string,
+): { hidden: Set<SqlCell[]>; parents: Set<SqlCell[]> } {
+  const hidden = new Set<SqlCell[]>();
+  const parents = new Set<SqlCell[]>();
+  if (!lens.depth) return { hidden, parents };
+  let below: number | null = null;
+  rows.forEach((row, i) => {
+    const d = rowDepth(lens, columns, row);
+    const next = rows[i + 1];
+    if (next && rowDepth(lens, columns, next) > d) parents.add(row);
+    if (below !== null && d > below) {
+      hidden.add(row);
+      return;
+    }
+    below = parents.has(row) && closed.has(idOf(row)) ? d : null;
+  });
+  return { hidden, parents };
+}
+
 /** What dragging the row onto the agent adds to its context: the page
  *  its first link opens (a working-tree file and a wiki page as their
  *  `@` mentions, anything else as its ref), or null when it links

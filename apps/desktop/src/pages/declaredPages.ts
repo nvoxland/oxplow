@@ -24,7 +24,6 @@ export function isAppRenderer(name: string): name is AppRendererName {
 
 /// The rest of the built-ins (`builtInPages.tsx`).
 export const BUILT_IN_PAGES = [
-  "backlog",
   "custom-dashboard",
   "diff-view",
   "explore-data",
@@ -35,7 +34,6 @@ export const BUILT_IN_PAGES = [
   "resource",
   "settings",
   "terminal",
-  "tasks",
 ] as const;
 
 export type BuiltInPageName = (typeof BUILT_IN_PAGES)[number];

@@ -43,15 +43,7 @@ import {
   type Stream,
   type WorkspaceContext,
 } from "./api.js";
-import {
-  applyItemChange,
-  deleteWorkItem,
-  readWorkList,
-  reorderWorkItems,
-  type ItemChange,
-  type WorkList,
-} from "./workItems.js";
-import { useWorkListProfile } from "./useWorkListProfile.js";
+import { readWorkList, type WorkList } from "./workItems.js";
 import {
   closeOpenFile,
   createEmptyFileSession,
@@ -117,7 +109,7 @@ import { PanelRunsProvider } from "./components/Panels/PanelRunsContext.js";
 import { useAlerts } from "./components/Alerts/useAlerts.js";
 import { useAlertToasts } from "./components/Alerts/useAlertToasts.js";
 import { DomCommentLayer } from "./components/Comments/DomCommentLayer.js";
-import { agentSessionRef, diskFilePath, fileOf, lensRef, refFromTabId, directoryRef, externalUrlRef, fileRef, gitCommitRef, pageTabRef, pagePayload, recordedPageKind, isPage, diffRef, newSessionRef, newStreamRef, alertsRef, wikiPageRef, streamSettingsRef, threadSettingsRef, workItemTabRef, viewParamsOf, withViewParams, lineOf, fileRefAt, resourceParamsOf, type PagePayload } from "./tabs/pageRefs.js";
+import { agentSessionRef, diskFilePath, fileOf, lensRef, refFromTabId, directoryRef, externalUrlRef, fileRef, gitCommitRef, pageTabRef, pagePayload, recordedPageKind, isPage, diffRef, newSessionRef, newStreamRef, alertsRef, wikiPageRef, streamSettingsRef, threadSettingsRef, viewParamsOf, withViewParams, lineOf, fileRefAt, resourceParamsOf, type PagePayload } from "./tabs/pageRefs.js";
 import { requestNewThread } from "./new-thread-bus.js";
 import { recordOpError, setOpErrorContext } from "./opErrors.js";
 import { classifyExternalUrl } from "./external-url-allowlist.js";
@@ -136,7 +128,6 @@ import {
   bodies,
   close as sessionClose,
   current as currentEntry,
-  dropCurrent,
   evictions,
   forward as sessionForward,
   MAX_PAGE_TABS,
@@ -273,8 +264,6 @@ export function App() {
   const threadWorkStatesRef = useRef(threadWorkStates);
   threadWorkStatesRef.current = threadWorkStates;
   const [backlogState, setBacklogState] = useState<WorkList | null>(null);
-  // The active work list: what it can do and its own fields.
-  const workListProfile = useWorkListProfile();
   // Each agent session's status (`sessionStatusKey`). A thread's dot is its
   // sessions' roll-up, and its question (the rail dot's tooltip) the one
   // the awaiting session asks.
@@ -837,49 +826,6 @@ export function App() {
   }
 
 
-  // Work-item writes are work_item.* commands, by ref; the thread's and
-  // the backlog's lists re-read from the models when they change
-  // (useBackendSubscriptions), so a handler only runs the command.
-  async function runTaskWrite(write: () => Promise<unknown>) {
-    try {
-      await write();
-      setError(null);
-    } catch (e) {
-      setError(String(e));
-      throw e;
-    }
-  }
-
-  async function handleUpdateTask(ref: string, change: ItemChange) {
-    await runTaskWrite(() => applyItemChange(ref, change));
-  }
-
-  /** The person chose Delete (a right-click menu item, the item page's
-   *  confirm): that is the confirmation the command asks for. */
-  async function handleDeleteTask(ref: string) {
-    await runTaskWrite(() => deleteWorkItem(ref, true));
-    // If the deleted item is open in a tab, go back in its history rather
-    // than leaving a stale page (or close it if there's nothing to go
-    // back to).
-    closeOrGoBackPageTab(workItemTabRef(ref).id);
-  }
-
-  /** A drag's new order on a list: the item it moved, placed by its
-   *  neighbour (`oxplow.work_item.reorder`). */
-  async function reorderList(list: WorkList | null | undefined, orderedRefs: string[]) {
-    const before = (list?.all ?? []).map((i) => i.uri).filter((ref) => orderedRefs.includes(ref));
-    await runTaskWrite(() => reorderWorkItems(before, orderedRefs));
-  }
-
-  async function handleReorderTasks(orderedRefs: string[]) {
-    if (!selectedThread) return;
-    await reorderList(threadWorkStates[selectedThread.id], orderedRefs);
-  }
-
-  async function handleReorderBacklog(orderedRefs: string[]) {
-    await reorderList(backlogState, orderedRefs);
-  }
-
   const currentSession = useMemo(
     () => (stream ? getFileSession(stream.id) : createEmptyFileSession()),
     [fileSessions, stream],
@@ -1150,7 +1096,6 @@ export function App() {
   // input events"), so React doesn't auto-flush effects for them — the
   // useEffect chain can stall for 10+ seconds before committing. Direct
   // ref call inside flushSync sidesteps the scheduler entirely.
-  const planOpenCreateRef = useRef<(() => void) | null>(null);
   // Forward ref so the forms and offers (declared above handleOpenPage) can
   // route through the same page-tab opener used by every other caller.
   // The ref is populated in a useEffect after handleOpenPage is defined.
@@ -1973,26 +1918,6 @@ export function App() {
   windowHandlersRef.current = windowHandlers;
   useEffect(() => startClientHost(() => windowHandlersRef.current), []);
 
-  // Used when the record a tab shows is *deleted* (wiki page / task).
-  // Rather than closing the tab outright, navigate it back one entry in
-  // its own history; only close when there's nothing to go back to.
-  const closeOrGoBackPageTab = useCallback((id: string) => {
-    if (!selectedThreadId) return;
-    const session = sessions[selectedThreadId];
-    const slot = session ? slotShowing(session, id) : null;
-    const tab = session?.tabs.find((t) => t.slot === slot);
-    if (!slot || !tab || tab.at === 0) {
-      closePageTab(id);
-      return;
-    }
-    updateSession(selectedThreadId, (s) => dropCurrent(s, slot));
-    setPageTitles((prev) => {
-      if (!(id in prev)) return prev;
-      const { [id]: _drop, ...rest } = prev;
-      return rest;
-    });
-  }, [selectedThreadId, sessions, closePageTab, updateSession]);
-
   // Enforce the page-tab cap on the shown thread: past MAX_PAGE_TABS the
   // least recently used tabs close (`evictions`). The active tab, pinned
   // ones and files with unsaved changes stay (a soft cap never discards
@@ -2080,11 +2005,7 @@ export function App() {
       setThreadStates,
       thread: selectedThread,
       threadId: selectedThreadId,
-      threadWork: selectedThreadWork,
       agentStatus: agentThreadStatus,
-      backlog: backlogState,
-      workListProfile,
-      planOpenCreateRef,
       harnesses,
       effectiveCenterActive,
       setCenterActive,
@@ -2103,10 +2024,6 @@ export function App() {
       handleRenamePath,
       handleDeletePath,
       handleToggleGenerated,
-      handleUpdateTask,
-      handleDeleteTask,
-      handleReorderTasks,
-      handleReorderBacklog,
     };
     // The built-in renderers whose bodies draw on the window's own state;
     // the rest are `builtInPages`. Each reads what it shows from its URI.

@@ -149,8 +149,8 @@ metrics:
 # launcher (opened from elsewhere).
 pages:
   # Work
-  - { id: tasks, title: Tasks, icon: check-square, category: Work, keywords: dashboard work list, component: "oxplow:tasks" }
-  - { id: backlog, title: Backlog, icon: inbox, category: Work, count: backlog-count, component: "oxplow:backlog" }
+  - { id: tasks, title: Tasks, icon: check-square, category: Work, keywords: dashboard work list, lens: tasks }
+  - { id: backlog, title: Backlog, icon: inbox, category: Work, count: backlog-count, lens: backlog }
   - { id: board, title: Board, icon: columns-3, category: Work, keywords: kanban columns state work items, lens: board }
   - { id: done-work, title: Done Work, icon: circle-check, category: Work, lens: done-work }
   - { id: go-to, title: Go To, icon: star, category: Work, keywords: bookmarks visits recent history, lens: go-to }
@@ -528,8 +528,8 @@ ui:
     - { slot: settings.extensions.sections, lens: extensions-health }
     - { slot: settings.extensions.sections, lens: extensions-credentials }
     - { slot: settings.extensions.sections, lens: extensions-secrets }
-    - { slot: thread.plan.header, lens: thread-handoffs-in }
-    - { slot: thread.plan.header, lens: thread-handoffs-out }
+    - { slot: oxplow-foundation/tasks.sections, lens: thread-handoffs-in, at: { before: list } }
+    - { slot: oxplow-foundation/tasks.sections, lens: thread-handoffs-out, at: { before: list } }
 commands:
   # agent_input.write — the window's agent input.
   - name: agent.draft

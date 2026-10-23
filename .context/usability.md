@@ -61,9 +61,7 @@ markdown itself, nor edits it in a `<textarea>`.
   or a slideover, not a centered modal.** The "+ New" flows ship as
   Page tabs (the New Stream and New Item lens forms, the `Stream/Thread`
   settings pages); cross-page detail openings (snapshot, commit,
-  branch rename, file commit) ship as Slideovers. The remaining
-  legacy hand-rolled modal chrome inside `PlanPane.tsx`'s
-  `NewTaskModal` only backs the edit-double-click flow — do not
+  branch rename, file commit) ship as Slideovers. Do not
   add new modal call sites; route new flows through pages or
   slideovers. The page pattern to copy is
   `apps/desktop/src/pages/SettingsPage.tsx` — full Page tab, no backdrop.
@@ -520,8 +518,8 @@ not a pick and isn't in the address.
 - **Keyboard parity is required** — right-click is mouse-only, so the
   hook's `onKeyDown` opens the same menu on the **Menu key / Shift+F10**
   for the focused row. Wire it on focusable rows; keyboard-first users
-  must never need the mouse. (The Plan pane also covers this with
-  `s`/`p`/Enter and `SelectionActionBar`.)
+  must never need the mouse. (A lens row also covers this with its
+  actions' `key:`s.)
 - The `ContextMenu` popover renderer at
   `apps/desktop/src/components/ContextMenu.tsx` is unchanged. Prefer the
   hook over a raw `onContextMenu` so suppression + keyboard parity stay
@@ -756,9 +754,8 @@ declaring *what it is* and mounting the generic layer.
 - **Common muscle memory:** Cmd/Ctrl+S save, Cmd/Ctrl+F find,
   Cmd/Ctrl+P quick open, Cmd/Ctrl+Shift+N new task. Don't
   collide with these.
-- **Rows: marks, drags and keys** (every lens row viz, `lens/rowInteract.ts`;
-  the Plan pane below follows the same rules by hand until Tasks is a
-  lens). Cmd/Ctrl+click toggles a row's mark, Shift+click marks the range
+- **Rows: marks, drags and keys** (every lens row viz, `lens/rowInteract.ts`; Tasks and Backlog are lenses).
+  Cmd/Ctrl+click toggles a row's mark, Shift+click marks the range
   from the last row clicked, Space toggles the cursor row, Escape clears
   the marks, a plain click clears them. A marked row has a stripe and a
   tint (`[data-marked]`). While rows are marked the marks bar ("N
@@ -768,29 +765,7 @@ declaring *what it is* and mounting the generic layer.
   (`[data-drop]`). A row action's `key:` runs it on the cursor row (or
   the marked rows). Marks are per lens and kept in the entry's history
   state, so Back keeps them.
-- **Plan pane: single-click selects a task row (keyboard
-  cursor); double-click opens the edit modal.** Enter also opens the
-  modal for the selected row. Cmd/Ctrl+click toggles the mark set;
-  Shift+click ranges from the selected anchor. A plain click clears
-  marks and moves the selection. Marked rows render with a yellow
-  left-stripe + tint. Dragging any marked row carries every marked
-  ref in the `WORK_ITEM_DRAG_MIME` payload's `refs` (with each one's
-  title and state) so drops on the backlog chip, on rows / group
-  headers in `TaskGroupList`, on a Board column or on the agent
-  terminal move all of them at once.
-- **Plan pane: a selection-aware action bar appears at the top of the
-  work-group region whenever ≥1 row is marked.** Component:
-  `apps/desktop/src/components/Plan/SelectionActionBar.tsx`. Buttons mirror the
-  marked-set right-click menu — Change status / Change priority /
-  Add to agent context / Delete — plus a Clear button. The bar reads
-  the existing marked-set state in `PlanPane`; there is no separate
-  store. Pure helpers (`shouldShowSelectionActionBar`,
-  `summarizeSelection`) are exported for tests.
-- **Plan pane: Shift+↑/↓ reorders the selected task within its
-  own status section.** Crossing a section boundary is a deliberate
-  no-op — to change status, the user drags (which changes status as
-  a side effect). Plain ↑/↓ just moves selection; Enter toggles the
-  detail pane; `s`/`p` opens the status/priority pickers.
+- **A parent row folds its children (`depth` lenses).** A row the next row is deeper than shows ▾ / ▸; it folds every deeper row after it away until the next row as shallow as itself. Folds are per lens and kept in the entry's history state, like groups'.
 - **One launcher is the single discovery surface.** There is exactly
   one way to find pages, commands, files, and content: the launcher
   (`QuickOpenOverlay`), opened by **Cmd+P** (its `file.quickOpen` menu

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Extension, Lens, LensRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
-import { markParts, treeNodes, timelineEntries, stepItems, hunkRows, codeRows, diffRow, parseLines, slotRuns, mergeDirectory, barRows, childParams, partParams, lineSeries, sparklineValues, numericRowId, treemapItems, cellLinkRef, changedParams, lensViewChange, misplacedViewParams, foldEmpty, displayColumns, formatCell, lensDirectoryEntries, parseParamInput, limitRows, slugify, adHocLens, rowMention, rowAsk, effortRowId, slotExtensions, isTimestamp, rowGroups, rowEmphasized, rowDepth, rowContextRef } from "./lensModel.js";
+import { markParts, treeNodes, timelineEntries, stepItems, hunkRows, codeRows, diffRow, parseLines, slotRuns, mergeDirectory, barRows, childParams, partParams, lineSeries, sparklineValues, numericRowId, treemapItems, cellLinkRef, changedParams, lensViewChange, misplacedViewParams, foldEmpty, foldedAway, displayColumns, formatCell, lensDirectoryEntries, parseParamInput, limitRows, slugify, adHocLens, rowMention, rowAsk, effortRowId, slotExtensions, isTimestamp, rowGroups, rowEmphasized, rowDepth, rowContextRef } from "./lensModel.js";
 import { formatMetricValue, formatShortDateTime } from "../components/format.js";
 import { diffSpecOf, duplicateBlockOf, isPage, lineOf, pagePayload } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
@@ -684,4 +684,26 @@ test("a composite's parts get its row under its params, a param holding a value 
   expect(partParams(run("a", [[7, "b"]]))).toEqual({ stream_id: 1, sha: "a", change_id: 7 });
   expect(partParams(run(null, [[7, "b"]]))).toEqual({ stream_id: 1, sha: "b", change_id: 7 });
   expect(partParams(run(null, []))).toEqual({ stream_id: 1, sha: null });
+});
+
+describe("foldedAway", () => {
+  const lens = { depth: "d" } as unknown as import("../tauri-bridge/generated/bindings.js").Lens;
+  const columns = ["uri", "d"];
+  const rows = [["a", 0], ["a1", 1], ["a11", 2], ["b", 0], ["b1", 1]] as import("../tauri-bridge/generated/bindings.js").SqlCell[][];
+  const id = (r: unknown[]) => String(r[0]);
+  test("a parent is a row the next row is deeper than", () => {
+    const { parents, hidden } = foldedAway(lens, columns, rows, new Set(), id);
+    expect([...parents].map(id)).toEqual(["a", "a1", "b"]);
+    expect(hidden.size).toBe(0);
+  });
+  test("a closed parent hides its children at every depth, and no sibling after them", () => {
+    const { hidden } = foldedAway(lens, columns, rows, new Set(["a"]), id);
+    expect([...hidden].map(id)).toEqual(["a1", "a11"]);
+    const inner = foldedAway(lens, columns, rows, new Set(["a1"]), id);
+    expect([...inner.hidden].map(id)).toEqual(["a11"]);
+  });
+  test("a lens without depth folds nothing", () => {
+    const flat = foldedAway({ depth: null } as never, columns, rows, new Set(["a"]), id);
+    expect(flat.hidden.size + flat.parents.size).toBe(0);
+  });
 });

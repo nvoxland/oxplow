@@ -3,8 +3,7 @@
 
 use oxplow_app::agent_status_derive::{derive_session_status, recent_activity};
 use oxplow_app::{HookEnvelope, Services};
-use oxplow_domain::stores::AgentTurnStore;
-use oxplow_domain::{AgentStatus, AgentTurn, ThreadId};
+use oxplow_domain::{AgentStatus, AgentTurn};
 
 use crate::error::IpcError;
 
@@ -45,13 +44,6 @@ pub async fn list_agent_statuses(svc: &Services) -> Result<Vec<AgentStatus>, Ipc
         s.state = derive_session_status(&events, now);
     }
     Ok(statuses)
-}
-
-pub async fn list_open_agent_turns(
-    svc: &Services,
-    thread_id: ThreadId,
-) -> Result<Vec<AgentTurn>, IpcError> {
-    Ok(svc.agent_turn_store.list_open(&thread_id).await?)
 }
 
 /// One agent turn by id — the turn page's source for its start and end

@@ -12,7 +12,6 @@
 /// The built-in page components, by name.
 pub const BUILT_IN_PAGES: &[&str] = &[
     "agent-session",
-    "backlog",
     "custom-dashboard",
     "diff-view",
     "editor",
@@ -25,7 +24,6 @@ pub const BUILT_IN_PAGES: &[&str] = &[
     "metrics-recorded",
     "resource",
     "settings",
-    "tasks",
     "terminal",
 ];
 
@@ -68,8 +66,8 @@ mod tests {
 
     #[test]
     fn a_component_names_a_built_in_by_its_oxplow_prefix() {
-        assert_eq!(built_in("oxplow:tasks"), Some("tasks"));
-        assert_eq!(built_in("tasks"), None);
+        assert_eq!(built_in("oxplow:settings"), Some("settings"));
+        assert_eq!(built_in("settings"), None);
         assert_eq!(built_in("oxplow:nope"), None);
     }
 }

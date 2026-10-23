@@ -319,14 +319,6 @@ export interface TaskEffort {
   summary: string | null;
 }
 
-export interface EffortDetail {
-  effort: TaskEffort;
-  start_snapshot: FileSnapshot | null;
-  end_snapshot: FileSnapshot | null;
-  changed_paths: string[];
-  counts: { created: number; updated: number; deleted: number };
-}
-
 export const BACKLOG_SCOPE = "__backlog__";
 
 
@@ -2407,33 +2399,6 @@ export function subscribeAgentStatus(
       question: status === "awaiting" ? (detail ?? undefined) : undefined,
     });
   });
-}
-
-export interface OpenAgentTurn {
-  id: string;
-  threadId: string;
-  prompt: string;
-  startedAt: string;
-}
-
-/// Open agent turns (`ended_at IS NULL`) for a thread. The Work
-/// panel renders each as a live spinner row at the top of the In
-/// Progress section; the Stop hook closes the row and the commit's
-/// `ModelsChanged{v_agent_turn}` triggers the refetch that removes it.
-export async function listOpenAgentTurns(threadId: string): Promise<OpenAgentTurn[]> {
-  const rows = unwrap(await commands.listOpenAgentTurns(threadId));
-  return rows.map((row) => ({
-    id: row.id,
-    threadId: row.thread_id,
-    prompt: row.prompt,
-    startedAt: row.started_at,
-  }));
-}
-
-/// Fires whenever an agent turn opens or closes, on any thread
-/// (`v_agent_turn`).
-export function subscribeAgentTurns(onChange: () => void): () => void {
-  return onModelsChanged(["v_agent_turn"], onChange);
 }
 
 export async function probeDaemon(): Promise<boolean> {

@@ -16,6 +16,7 @@ query: |
             AND coalesce((SELECT json_extract(f, '$.lists') FROM feat), 0) = 1) AS can_bring,
          (w.thread_id IS NOT NULL AND w.thread_id = :thread_id
             AND coalesce((SELECT json_extract(f, '$.lists') FROM feat), 0) = 1) AS can_send,
+         'thr' || :thread_id AS thread_ref,
          coalesce((SELECT json_extract(f, '$.delete') FROM feat), 0) AS can_delete
   FROM v_work_item w WHERE w.uri = :uri
 viz: detail
@@ -28,7 +29,7 @@ columns:
   - { key: updated_at, label: Updated, format: relative }
   - { key: closed_at, label: Closed, format: relative }
 actions:
-  - { id: bring, label: Bring to this thread, command: oxplow.work_item.move, row: true, when: can_bring, input: { uri: "{{row.uri}}", to: { thread: "{{param.thread_id}}" } } }
+  - { id: bring, label: Bring to this thread, command: oxplow.work_item.move, row: true, when: can_bring, input: { uri: "{{row.uri}}", to: { thread: "{{row.thread_ref}}" } } }
   - { id: send, label: Send to backlog, command: oxplow.work_item.move, row: true, when: can_send, input: { uri: "{{row.uri}}", to: backlog } }
   - { id: delete, label: Delete, command: oxplow.work_item.delete, row: true, when: can_delete, input: { uri: "{{row.uri}}" } }
 empty: This work item isn't on the active work list.

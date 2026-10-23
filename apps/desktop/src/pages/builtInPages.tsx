@@ -1,5 +1,5 @@
 import { ResourcePage } from "./ResourcePage.js";
-import { diffViewOf, isPage, newTaskRef, viewParamsOf, workItemTabRef, type DiffViewPayload } from "../tabs/pageRefs.js";
+import { diffViewOf, viewParamsOf, type DiffViewPayload } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
 import type { Stream } from "../api.js";
 import { openExternalUrl } from "../api.js";
@@ -12,8 +12,6 @@ import { DiffViewPage } from "./DiffViewPage.js";
 import { GitDashboardPage } from "./GitDashboardPage.js";
 import { TerminalPage } from "./TerminalPage.js";
 import { FilesPage } from "./FilesPage.js";
-import { TasksPage } from "./TasksPage.js";
-import { BacklogPage } from "./BacklogPage.js";
 import { MetricsPage } from "./MetricsPage.js";
 import { CustomDashboardPage } from "./CustomDashboardPage.js";
 import { ExploreDataPage } from "./ExploreDataPage.js";
@@ -29,37 +27,6 @@ export interface BuiltInPageContext {
 }
 
 export type BuiltInPage = (ctx: BuiltInPageContext) => CenterTab | null;
-
-const workPage: BuiltInPage = ({ ref, nav, scope }) => {
-  const sharedProps = {
-    thread: scope.thread,
-    threadWork: scope.threadWork,
-    agentStatus: scope.agentStatus,
-    backlog: scope.backlog,
-    profile: scope.workListProfile,
-    fields: scope.workListProfile.fields,
-    onUpdateTask: scope.handleUpdateTask,
-    onDeleteTask: scope.handleDeleteTask,
-    onReorderTasks: scope.handleReorderTasks,
-    onReorderBacklog: scope.handleReorderBacklog,
-    registerOpenCreate: (fn: () => void) => { scope.planOpenCreateRef.current = fn; },
-    onOpenNewTaskPage: (payload: { parentRef?: string | null }) =>
-      nav.navOpen(newTaskRef(payload)),
-    onOpenTaskPage: (ref: string) => nav.navOpen(workItemTabRef(ref)),
-  };
-  const tasks = isPage(ref, "tasks");
-  return {
-    id: ref.id,
-    label: tasks ? "Tasks" : "Backlog",
-    closable: true,
-    render: () =>
-      tasks ? (
-        <TasksPage {...sharedProps} streams={scope.streams} currentStreamId={scope.stream?.id ?? null} onOpenPage={nav.navOpen} />
-      ) : (
-        <BacklogPage {...sharedProps} />
-      ),
-  };
-};
 
 // A snapshot, an effort, an agent turn (entity pages, P2.11) and an
 // ad-hoc endpoints pair (`diff-view` route) all render as a diff.
@@ -199,8 +166,6 @@ export const builtInPages: Record<BuiltInPageName, BuiltInPage> = {
       render: () => <ExploreDataPage stream={scope.stream} onOpenPage={nav.navOpen} />,
     };
   },
-  tasks: workPage,
-  backlog: workPage,
   // A web page: its tab's id is its URL.
   "external-url": ({ ref }) => {
     const externalUrl = ref.id;

@@ -1,6 +1,5 @@
 [
   "agent-session",
-  "backlog",
   "custom-dashboard",
   "diff-view",
   "editor",
@@ -13,6 +12,5 @@
   "metrics-recorded",
   "resource",
   "settings",
-  "tasks",
   "terminal"
 ]

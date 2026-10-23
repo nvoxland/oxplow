@@ -462,7 +462,7 @@ page's id as a param, so it must declare it:
 |---|---|---|
 | `effort.review.details` | an effort's diff view | `effort_id`, `change_id` |
 | `oxplow-foundation/work-item.sections` | a work item's page, as sections (`state`, `fields`, `body`, `info`, `links`, `comments`, `activity`) | `uri` |
-| `thread.plan.header` | a thread's plan, as a compact strip | `thread_id` |
+| `oxplow-foundation/tasks.sections` | the Tasks page, as sections (`list`, `summary`, `backlog`); `at: { before: list }` for a strip above the list | `thread_id`, `stream_id` |
 | `oxplow-foundation/commit.sections` | a commit's page, as sections (`detail`, `files`) | `change_id` (the page's row) |
 | `oxplow-foundation/uncommitted.sections` | Uncommitted Changes, as sections (`commit`, `files`); `at: { before: commit }` for a strip above everything | `change_id` (the page's row) |
 | `vcs.history.sidebar` | Git history's side column | `stream_id` |

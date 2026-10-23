@@ -5,19 +5,17 @@
  * are in `native`, described by the fields it declares
  * (`v_capability_provider.fields`); what it can do, by its features. Each
  * read returns what it read (`reads`) so a page re-runs with
- * `useRerunOnChange`. Writes are `work_item.*` commands, by ref.
+ * `useRerunOnChange`.
  */
-import { querySql, runCommand, type EffortDetail, type SqlCell } from "./api.js";
+import { querySql, type SqlCell } from "./api.js";
 import { NO_READS } from "./lens/lensRerun.js";
 import { threadIdOf, threadRowId } from "./modelIds.js";
 import { workItemUri } from "./uri/uri.js";
-import { personCommands } from "./personCommands.js";
-import type { CommandOutcome, FieldDecl, Reads, SqlQueryResult, WorkItemsFeatures } from "./tauri-bridge/generated/bindings.js";
+import type { FieldDecl, Reads, SqlQueryResult, WorkItemsFeatures } from "./tauri-bridge/generated/bindings.js";
 
 /** The state every provider maps to. */
 export type CanonicalState = "todo" | "in_progress" | "blocked" | "done" | "canceled";
 
-export const CANONICAL_STATES: readonly CanonicalState[] = ["todo", "in_progress", "blocked", "done", "canceled"];
 
 /** One item on the active work list, as `v_work_item` holds it. */
 export interface WorkItem {
@@ -170,30 +168,6 @@ export async function readWorkList(threadId: string | null): Promise<WorkList> {
   return bucketWorkList(threadId, items, reads);
 }
 
-/** An empty list (before the first read). */
-export function emptyWorkList(threadId: string | null): WorkList {
-  return bucketWorkList(threadId, [], NO_READS);
-}
-
-export interface BoardColumn {
-  state: CanonicalState;
-  items: WorkItem[];
-}
-
-/** The Board: one column per canonical state, in workflow order. */
-export function boardColumns(items: WorkItem[]): BoardColumn[] {
-  return CANONICAL_STATES.map((state) => ({ state, items: items.filter((i) => i.state === state) }));
-}
-
-/** A canonical state as a person reads it. */
-export const STATE_LABEL: Record<CanonicalState, string> = {
-  todo: "To Do",
-  in_progress: "In Progress",
-  blocked: "Blocked",
-  done: "Done",
-  canceled: "Canceled",
-};
-
 // ---- the active list: what it can do and its own fields (v_capability_provider) ----
 
 /** A work-items provider's feature flags, as the provider declares them
@@ -327,130 +301,4 @@ export function workItemRefOfMention(profile: WorkListProfile, id: string): stri
 export async function readWorkListProfile(): Promise<{ profile: WorkListProfile; reads: Reads }> {
   const { providers, reads } = await readCapabilityProviders("work_items");
   return { profile: workListProfileOf(providers), reads };
-}
-
-/** `v_effort` rows joined to their `v_effort_file` rows (one row per
- *  effort and file; an effort with no files has one row with a null
- *  path), in effort order, as an item page's activity. */
-export function effortDetailsFromResult(result: SqlQueryResult): EffortDetail[] {
-  const col = (name: string) => result.columns.indexOf(name);
-  const details: EffortDetail[] = [];
-  let current: EffortDetail | null = null;
-  for (const row of result.rows) {
-    const at = (name: string) => row[col(name)];
-    const id = `eff${Number(at("id"))}`;
-    if (!current || current.effort.id !== id) {
-      const snapshot = (name: string) => (at(name) === null ? null : String(at(name)));
-      current = {
-        effort: {
-          id,
-          work_item: String(at("work_item")),
-          started_at: String(at("started_at")),
-          ended_at: text(at("ended_at")),
-          start_snapshot_id: snapshot("start_snapshot_id"),
-          end_snapshot_id: snapshot("end_snapshot_id"),
-          summary: text(at("summary")),
-        },
-        start_snapshot: null,
-        end_snapshot: null,
-        changed_paths: [],
-        counts: { created: 0, updated: 0, deleted: 0 },
-      };
-      details.push(current);
-    }
-    const path = text(at("path"));
-    if (path === null) continue;
-    current.changed_paths.push(path);
-    const kind = text(at("change_kind")) as keyof EffortDetail["counts"] | null;
-    if (kind && kind in current.counts) current.counts[kind]++;
-  }
-  return details;
-}
-
-/** An item's efforts with the files each changed, newest first — one read
- *  over `v_effort` and `v_effort_file`. */
-export async function readItemEfforts(ref: string): Promise<{ efforts: EffortDetail[]; reads: Reads }> {
-  const res = await querySql(
-    `SELECT e.id, e.work_item, e.started_at, e.ended_at, e.start_snapshot_id, e.end_snapshot_id, e.summary,
-            f.path, f.change_kind
-       FROM v_effort e
-       LEFT JOIN v_effort_file f ON f.effort_id = e.id
-      WHERE e.work_item = ?1
-      ORDER BY e.started_at DESC, e.id DESC, f.path`,
-    [ref],
-    10_000,
-  );
-  return { efforts: effortDetailsFromResult(res), reads: res.reads };
-}
-
-// ---- writes (work_item.* commands, by ref) ----
-
-/** An edit to an item: its text, parent (`null` to clear) or own fields. */
-export interface WorkItemChanges {
-  title?: string;
-  body?: string;
-  parentUri?: string | null;
-  native?: Record<string, unknown>;
-}
-
-/** Edit an item's fields. */
-export async function updateWorkItem(ref: string, changes: WorkItemChanges): Promise<void> {
-  await runCommand("oxplow.work_item.update", {
-    uri: ref,
-    ...(changes.title !== undefined ? { title: changes.title } : {}),
-    ...(changes.body !== undefined ? { body: changes.body } : {}),
-    ...(changes.parentUri !== undefined ? { parent_uri: changes.parentUri ?? "" } : {}),
-    ...(changes.native !== undefined ? { native: changes.native } : {}),
-  });
-}
-
-/** Move an item to a canonical state: `oxplow.work_item.transition`, which the
- *  bus dispatches to the item's provider. */
-export function transitionWorkItem(ref: string, state: CanonicalState): Promise<CommandOutcome | null> {
-  return personCommands.run(`Move to ${STATE_LABEL[state]}`, "oxplow.work_item.transition", { uri: ref, to: state });
-}
-
-/** One edit from any surface: its fields (`oxplow.work_item.update`) and/or its
- *  state (`oxplow.work_item.transition`). */
-export interface ItemChange extends WorkItemChanges {
-  state?: CanonicalState;
-}
-
-export async function applyItemChange(ref: string, change: ItemChange): Promise<void> {
-  const { state, ...fields } = change;
-  if (Object.keys(fields).length > 0) await updateWorkItem(ref, fields);
-  if (state !== undefined) await transitionWorkItem(ref, state);
-}
-
-/** Delete an item. The command asks first: call with `confirmed` once the
- *  person has (an inline confirm). */
-export async function deleteWorkItem(ref: string, confirmed: boolean): Promise<void> {
-  await runCommand("oxplow.work_item.delete", { uri: ref }, confirmed);
-}
-
-/** The one item a drag moved, and its new neighbour: what
- *  `oxplow.work_item.reorder` takes. `null` when nothing moved. */
-export function placementFromOrder(
-  before: string[],
-  after: string[],
-): { id: string; place: { before: string } | { after: string } } | null {
-  const same = (a: string[], b: string[]) => a.length === b.length && a.every((x, i) => x === b[i]);
-  if (same(before, after)) return null;
-  for (let i = 0; i < after.length; i++) {
-    const id = after[i]!;
-    if (!same(before.filter((x) => x !== id), after.filter((x) => x !== id))) continue;
-    return { id, place: i > 0 ? { after: after[i - 1]! } : { before: after[1]! } };
-  }
-  return null;
-}
-
-/** Apply a drag's new order (refs) to a list with `oxplow.work_item.reorder`. */
-export async function reorderWorkItems(before: string[], after: string[]): Promise<void> {
-  const moved = placementFromOrder(before, after);
-  if (moved) await runCommand("oxplow.work_item.reorder", { uri: moved.id, ...moved.place });
-}
-
-/** Take an item to a thread's list or the backlog (`null`), at its end. */
-export async function moveWorkItem(ref: string, threadId: string | null): Promise<void> {
-  await runCommand("oxplow.work_item.move", { uri: ref, to: threadId ? { thread: threadId } : "backlog" });
 }

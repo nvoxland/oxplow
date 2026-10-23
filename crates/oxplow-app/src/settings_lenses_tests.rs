@@ -986,3 +986,175 @@ async fn the_extensions_area_lists_health_and_credentials() {
 
     assert!(run(&fx, "extensions-secrets", vec![]).await.rows.is_empty());
 }
+
+/// The Backlog: the items on no thread, in the list's order, an epic's
+/// children indented under it, filtered by a search that reads the title
+/// or any field; the gated actions follow what the list can do.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_backlog_lists_items_on_no_thread_with_their_epics_and_search() {
+    let fx = crate::test_fixtures::services_with_task_effort().await;
+    let thread = fx.thread.to_string();
+    let mut epic = String::new();
+    for (title, on_thread, parent) in [
+        ("An epic", false, None),
+        ("Child of the epic", false, Some("epic")),
+        ("Plain item", false, None),
+        ("On the thread", true, None),
+    ] {
+        let mut input = serde_json::json!({ "title": title });
+        if on_thread {
+            input["thread"] = serde_json::json!(thread);
+        }
+        if parent.is_some() {
+            input["parent_uri"] = serde_json::json!(epic);
+        }
+        let out = command_task(&fx, "oxplow.work_item.create", input).await;
+        if title == "An epic" {
+            epic = out["uri"].as_str().unwrap().to_string();
+        }
+    }
+    let params = |q: &str| {
+        vec![
+            ("q", SqlCell::Text(q.into())),
+            ("thread_id", SqlCell::Int(fx.thread.value())),
+        ]
+    };
+    let all = run_task(&fx, "backlog-list", params("")).await;
+    assert!(!all.has("title", "On the thread"));
+    let titles: Vec<String> = all
+        .rows
+        .iter()
+        .map(|r| all.text(r, "title").unwrap())
+        .collect();
+    assert_eq!(titles, ["An epic", "Child of the epic", "Plain item"]);
+    let child = all.keyed("title", "Child of the epic");
+    let at = all.columns.iter().position(|c| c == "depth").unwrap();
+    assert_eq!(child[at], SqlCell::Int(1));
+    assert!(
+        all.flag(child, "can_order")
+            && all.flag(child, "can_delete")
+            && all.flag(child, "can_bring")
+    );
+    assert!(all.flag(child, "can_prioritize"));
+    assert!(all
+        .text(all.keyed("title", "An epic"), "add_child")
+        .unwrap()
+        .contains("page=new-task"));
+    assert_eq!(all.text(child, "thread_ref"), Some(thread.clone()));
+
+    let found = run_task(&fx, "backlog-list", params("plain")).await;
+    assert_eq!(found.rows.len(), 1);
+    // A field's value is searchable too (priority defaults to medium).
+    assert_eq!(
+        run_task(&fx, "backlog-list", params("medium"))
+            .await
+            .rows
+            .len(),
+        3
+    );
+
+    // Both parts of the page run; the quick-add form starts a Ready item.
+    let page = run_task(&fx, "backlog", params("")).await;
+    assert!(page.rows.is_empty() || !page.columns.is_empty());
+    assert_eq!(
+        run_task(&fx, "backlog-add", vec![])
+            .await
+            .text(&run_task(&fx, "backlog-add", vec![]).await.rows[0], "state")
+            .as_deref(),
+        Some("todo")
+    );
+}
+
+/// The Tasks page: the items in scope by state with epics nested, the
+/// priority filter keeping an epic whose child matches, the last five
+/// done, and the summary's counts.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_tasks_page_lists_its_scope_by_state_with_epics_and_a_summary() {
+    let fx = crate::test_fixtures::services_with_task_effort().await;
+    let thread = fx.thread.to_string();
+    let mut epic = String::new();
+    for (title, parent, priority) in [
+        ("An epic", false, "low"),
+        ("Urgent child", true, "urgent"),
+        ("Plain child", true, "low"),
+        ("Loose item", false, "low"),
+    ] {
+        let mut input = serde_json::json!({ "title": title, "thread": thread, "native": { "priority": priority } });
+        if parent {
+            input["parent_uri"] = serde_json::json!(epic);
+        }
+        let out = command_task(&fx, "oxplow.work_item.create", input).await;
+        if title == "An epic" {
+            epic = out["uri"].as_str().unwrap().to_string();
+        }
+    }
+    command_task(
+        &fx,
+        "oxplow.work_item.create",
+        serde_json::json!({ "title": "Backlogged" }),
+    )
+    .await;
+    for i in 0..7 {
+        let made = command_task(
+            &fx,
+            "oxplow.work_item.create",
+            serde_json::json!({ "title": format!("Finished {i}"), "thread": thread, "state": "done" }),
+        )
+        .await;
+        assert!(made["uri"].is_string());
+    }
+    let list = |priority: &str| {
+        run_task(
+            &fx,
+            "tasks-list",
+            vec![
+                ("scope", SqlCell::Text("thread".into())),
+                ("priority", SqlCell::Text(priority.into())),
+                ("thread_id", SqlCell::Int(fx.thread.value())),
+                ("stream_id", SqlCell::Int(1)),
+            ],
+        )
+    };
+    let all = list("any").await;
+    assert!(!all.has("title", "Backlogged"));
+    let finished = all
+        .rows
+        .iter()
+        .filter(|r| all.text(r, "title").unwrap().starts_with("Finished"))
+        .count();
+    assert_eq!(finished, 5, "the last five done");
+    let at = all.columns.iter().position(|c| c == "depth").unwrap();
+    assert_eq!(all.keyed("title", "Plain child")[at], SqlCell::Int(1));
+    assert_eq!(all.keyed("title", "An epic")[at], SqlCell::Int(0));
+
+    let urgent = list("urgent").await;
+    let titles: Vec<String> = urgent
+        .rows
+        .iter()
+        .map(|r| urgent.text(r, "title").unwrap())
+        .collect();
+    assert_eq!(
+        titles,
+        ["An epic", "Urgent child"],
+        "the epic stays for its matching child"
+    );
+
+    let doc = run_task(&fx, "tasks", vec![("show", SqlCell::Text("stream".into()))]).await;
+    assert_eq!(doc.text(&doc.rows[0], "scope").as_deref(), Some("stream"));
+
+    let summary = run_task(
+        &fx,
+        "tasks-summary",
+        vec![
+            ("scope", SqlCell::Text("thread".into())),
+            ("thread_id", SqlCell::Int(fx.thread.value())),
+            ("stream_id", SqlCell::Int(1)),
+        ],
+    )
+    .await;
+    let n = |c: &str| summary.rows[0][summary.columns.iter().position(|x| x == c).unwrap()].clone();
+    assert_eq!(n("ready"), SqlCell::Int(4));
+    assert_eq!(n("done"), SqlCell::Int(7));
+    let backlog = run_task(&fx, "tasks-backlog", vec![]).await;
+    assert_eq!(backlog.rows[0][0], SqlCell::Int(1));
+}

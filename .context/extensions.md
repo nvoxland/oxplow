@@ -1006,9 +1006,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     looks for): every mounted lens, run with
     the slot params it declares (`slotRuns`), re-run on data events.
     DiffViewPage offers `effort_id`, `effort` (the effort's URI) and `change_id`; WorkItemPage `uri`
-    (body and sidebar; the item's URI, whichever list); PlanPane
-    `thread_id` (the compact `strip` variant, which hides lenses with no
-    rows); GitCommitPage and UncommittedChangesPage `change_id`, plus
+    (body and sidebar; the item's URI, whichever list); GitCommitPage and UncommittedChangesPage `change_id`, plus
     UncommittedChangesPage's strip `stream_id`.
     Numeric ids come from `numericRowId` (`tsk42` → 42).
   - **Latest request wins** (`src/request-guard.ts`, tsk370). LensSlots,
@@ -2293,7 +2291,7 @@ they live under `ui:`.
 |---|---|---|
 | `effort.review.details` | diff-view for an effort | `effort_id`, `effort`, `change_id` |
 | `oxplow-foundation/work-item.sections` | the Work Item page (a document: parts `state`, `fields`, `body`, `info`, `links`, `comments`, `activity`) | its params (`uri`, `thread_id`, `stream_id`) |
-| `thread.plan.header` | PlanPane (compact strip) | `thread_id` |
+| `oxplow-foundation/tasks.sections` | the Tasks page (a document: parts `list`, `summary`, `backlog`) | its params (`show`, `priority`, `thread_id`, `stream_id`) and its row (`scope`) |
 | `oxplow-foundation/commit.sections` | the commit page (a document: parts `detail`, `files`) | its params (`uri`, `sha`, `stream_id`) and its row (`change_id`, `base_revision`, `head_revision`) |
 | `oxplow-foundation/uncommitted.sections` | the Uncommitted Changes page (a document: parts `commit`, `files`) | its params (`stream_id`) and its row (`change_id`, `base_revision`, `head_revision`) |
 | `diff.file.header` | a file diff (`DiffPane`), a strip under its header (P9.A2; `DiffFileHeaderSlot`) | `path`, `left_revision`, `right_revision` (each a revision in its wire form: `working`, `snap:<id>`, `git:<sha>`), `stream_id` |
@@ -4737,6 +4735,8 @@ What moves out of core, and what it becomes:
 | Directory page | **done:** the `directory` lens, the renderer of `oxplow/dir` (`pages:` entry `lens: directory`, `label: "{{param.path}}"`); `DirectoryPage` is gone |
 | Work Item page | **done:** the `work-item` document (parts `state`, `fields`, `body`, `info`, `links`, `comments`, `activity`) with `comments: true`; `state` and `body` are the `work_item.detail.state` and `work_item.detail` replaceables, a part whose list lacks the feature (`needs: [work_items.links]`, `[work_items.comments]`) is left out, and `info` offers Bring to this thread, Send to backlog and Delete from its right-click menu by what the list declares. The `work_item.detail.body` / `.sidebar` slots became `oxplow-foundation/work-item.sections`; the tab is labelled by the item's id, not its title; `WorkItemPage` is deleted |
 | Wiki page | **done:** the `wiki-page` document (parts `body`, `info`, `refs`) with `comments: true`; the editor is the `markdown` viz, so saving, drafts, comments and Contents come from the one component. The freshness chip moved into the `info` section; `WikiPage`, `WikiPageTab`, `useWikiPageController` and `wikiFreshness` are gone |
+| Tasks page | **done:** the `tasks` document (params `show` — one thread, its stream, everything — `priority`, and the page's `thread_id` / `stream_id` pickers; row `scope`; parts `tasks-list`, `tasks-summary`, `tasks-backlog`). `tasks-list` is `replaceable: work_item.list` (props `scope`, `thread_id`) and a state-grouped `list` with epics indented and foldable (`depth`, a ▾ on a parent row), the last five done, the agent's open turn as a live row at the top of In progress, drag to reorder (`before`), drop on a row to nest it (`onto`), or onto a heading to change state, bulk state and priority, Make top-level, Send to backlog and Delete, `r` `i` `b` `d` keys. The `thread.plan.header` region slot became `oxplow-foundation/tasks.sections` (`at: { before: list }`). The old read-only cross-thread scopes are gone: every row acts. `TasksPage`, `PlanPane`, `TaskGroupList`, `TaskDetail`, the scope picker, filter bar, summary pane and backlog drawer, the page's task-write handlers in `App.tsx` and the `list_open_agent_turns` IPC are deleted |
+| Backlog page | **done:** the `backlog` document: `backlog-add` (a `form` over `oxplow.work_item.create`, `then: stay`) above `backlog-list` (`list` grouped by state, epics indented by `depth`; `drag` actions reorder (`{{before.uri}}` / `{{after.uri}}`) or move to a state (`{{group.value}}`); bulk state, priority, Bring to this thread and Delete, each gated by what the list declares; `r` `i` `b` `d` keys; the `q` search matches title or any field). The per-field filter chips are one search box: a lens declares its params statically, so a chip per declared field needs params from a lens (not built). `BacklogPage`, `PlanPane`'s backlog mode and the backlog reorder wiring are deleted |
 | Board page | **done:** the `board` document, one `replaceable: work_item.board` part `board-cards` (`viz: board` grouped by state, a `drag: true` move action and `Move to` row actions); `scope` comes from the page's `show` filter through the document's query row. Cards show the declared enum fields as text (no `FieldBadge` colours). `BoardPage` and `WorkBoard` are gone; a right-click anywhere on a lens row, a link in it included, opens the row's menu (`onContextMenuCapture`) |
 | Settings → AI | **done:** foundation lenses in `settings.ai.sections`: `ai-providers` (`v_ai_provider`; Test… and Remove… row actions, Remove asks first), `ai-provider-form` (a `form` lens over `oxplow.ai.set_provider`, its `key` a `secret: true` field, `kind` chosen from `v_capability_provider`), `ai-roles` (`v_ai_role`; Assign… / Unassign over `oxplow.ai.set_role`), `ai-calls` (the last 7 days of `v_ai_call`). `set_provider` and `remove_provider` now announce `ConfigChanged` so the lists follow. `AiSection`, `aiSettingsModel` and the AI `api.ts` wrappers are gone |
 | Settings → Agents | **done:** foundation lenses in `settings.agents.sections`: `agents-list` (the harnesses from `v_agent_harness`; Enable / Disable / Move Up / Move Down each hand `oxplow.agent.set_agents` the whole new order, built in SQL and bound with `{{row.x|json}}`), `agents-settings` (the declared settings, `v_agent_harness.settings` (v2) joined with `agentConfig`, a `Change…` form over `oxplow.agent.set_setting`), `agents-new-thread` (`personal.newThreadSession`, `Use This` on `oxplow.config.set` / `unset`, which ask first), `agents-prompt` (an edit form over the new `oxplow.agent.set_prompt_append`). No page-wide Save: each part saves itself. `AgentPicker`, `NewThreadSessionSetting` and the Agents form are gone |
@@ -4811,7 +4811,7 @@ available to every extension:
 - `bar`, `line`, `treemap` and `grid` viz, with `chart` and `children`.
 - `commit` and `metric` link kinds; `file` links with `line`. (A `task`
   kind came and went: a work item links as `page`, by its URI.)
-- `work_item.detail.body` and `thread.plan.header` slots, with slot params checked at load.
+- the Work Item and Tasks pages' section slots, with slot params checked at load.
 - Lens `launcher.category` and `hidden`.
 - Lens `actions:` as commands (P6.B1; the tsk329 registry retired).
 - Disabling extensions per project.
