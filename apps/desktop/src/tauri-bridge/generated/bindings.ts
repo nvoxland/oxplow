@@ -3937,6 +3937,12 @@ export type LensAction = {
 	 */
 	fixed: string[],
 	/**
+	 *  A form action's fields that are secret: masked, never kept in a
+	 *  draft, left out of the input when blank. The command must keep each
+	 *  out of its record (`unrecorded`).
+	 */
+	secret: string[],
+	/**
 	 *  A form action's fields picked from a list: each names a lens
 	 *  (`<extension>/<slug>`) run with the lens's params, whose rows are
 	 *  the choices (`value`, `label`, optional `group`).

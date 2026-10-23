@@ -1295,6 +1295,7 @@ export function FormSlideover({
           initial={start.values}
           fixed={start.fixed}
           choices={start.choices}
+          fields={start.fields ?? undefined}
           serverErrors={form.serverErrors}
           submitLabel={submitLabel}
           busy={form.busy}

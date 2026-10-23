@@ -166,6 +166,7 @@ const EMITTERS: &[(&str, &str)] = &[
     ("ConfigChanged", "crates/oxplow-app/src/commands/ai_settings.rs"),
     ("ConfigChanged", "crates/oxplow-app/src/commands/config_commands.rs"),
     ("ConfigChanged", "crates/oxplow-app/src/lib.rs"),
+    ("CredentialChanged", "crates/oxplow-app/src/commands/credentials.rs"),
     ("CredentialChanged", "crates/oxplow-app/src/providers/registry.rs"),
     // The extension catalog's own signal (tsk1030): what extensions
     // contribute isn't a model to re-read, and a file path was a guess.

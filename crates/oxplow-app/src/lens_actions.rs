@@ -446,11 +446,56 @@ pub async fn action_form(
                     .ok_or_else(|| CommandError::Unknown {
                         name: action.command.clone(),
                     })?;
+            // A secret field is masked and starts blank; the command keeps
+            // it out of its record. The form then names every field of the
+            // command's input, those secret marked.
+            let mut values = values;
+            let fields = if action.secret.is_empty() {
+                None
+            } else {
+                for name in &action.secret {
+                    if !command.unrecorded.iter().any(|k| k == name || k == "*") {
+                        return Err(CommandError::Invalid {
+                            field: Some("/action".into()),
+                            message: format!(
+                                "`{name}` is secret but `{}` records it: the command must declare it `unrecorded`",
+                                command.id
+                            ),
+                        });
+                    }
+                    if let Value::Object(map) = &mut values {
+                        map.remove(name);
+                    }
+                }
+                let names: Vec<String> = command
+                    .input_schema
+                    .get("properties")
+                    .and_then(Value::as_object)
+                    .map(|p| p.keys().cloned().collect())
+                    .unwrap_or_default();
+                Some(
+                    names
+                        .into_iter()
+                        .map(|name| {
+                            if action.secret.contains(&name) {
+                                extensions::LensFormField::Spec(extensions::LensFormFieldSpec {
+                                    name,
+                                    visible_if: BTreeMap::new(),
+                                    secret: true,
+                                    from: None,
+                                })
+                            } else {
+                                extensions::LensFormField::Name(name)
+                            }
+                        })
+                        .collect(),
+                )
+            };
             Ok(FormStart {
                 command,
                 values,
                 fixed: action.fixed,
-                fields: None,
+                fields,
                 choices,
                 subfields: BTreeMap::new(),
                 reads: oxplow_db::Reads::default(),
