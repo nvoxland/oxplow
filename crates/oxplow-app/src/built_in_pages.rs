@@ -13,7 +13,6 @@
 pub const BUILT_IN_PAGES: &[&str] = &[
     "agent-session",
     "backlog",
-    "board",
     "custom-dashboard",
     "diff-view",
     "editor",
@@ -28,8 +27,6 @@ pub const BUILT_IN_PAGES: &[&str] = &[
     "settings",
     "tasks",
     "terminal",
-    "wiki-page",
-    "work-item",
 ];
 
 /// The built-in named by a manifest's `component: "oxplow:<name>"`.

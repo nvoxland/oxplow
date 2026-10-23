@@ -1564,7 +1564,7 @@
     - { name: "parent", type: "TEXT", doc: "The conversation it was forked from, if any." }
     - { name: "problem", type: "TEXT", doc: "Why the harness couldn't list its conversations now; NULL on a conversation." }
 - name: agent_harness
-  version: 1
+  version: 2
   key: [id]
   description: "The agent harnesses registered with oxplow (`claude`, `codex`, `opencode`, an extension's), those `agents:` in project.yaml names first, in its order — the first is a new session's default. Read live when a query names it."
   columns:
@@ -1572,6 +1572,17 @@
     - { name: "title", type: "TEXT", doc: "What it is called." }
     - { name: "enabled", type: "INT", doc: "1 when the project enables it (`agents:` names it, or names none)." }
     - { name: "position", type: "INT", doc: "Its place in priority order, from 0." }
+    - { name: "settings", type: "TEXT", doc: "The settings it declares for the person to set (`agentConfig.<id>.<key>` in project.yaml), as a JSON array of `{ key, title, hint, placeholder }`; `[]` when it declares none. (v2)" }
+- name: extension_secret
+  version: 1
+  key: [extension, reference]
+  description: "The credentials the enabled extensions' providers declare with a host secret reference, and whether a value is kept for each. The value is written with `oxplow.extension.set_secret`, forgotten with `oxplow.extension.revoke_secret`, and never read back: only that one is set. Read live when a query names it."
+  columns:
+    - { name: "extension", type: "TEXT", doc: "The extension whose provider declares the credential." }
+    - { name: "provider", type: "TEXT", doc: "The provider's id in that extension." }
+    - { name: "name", type: "TEXT", doc: "The credential's name, as the provider declares it." }
+    - { name: "reference", type: "TEXT", doc: "The secret's reference, as JSON (`{ schemaVersion, id }`): what the two secret commands take. It carries no value." }
+    - { name: "is_set", type: "INT", doc: "1 when the OS keychain holds a value for it." }
 - name: vcs_workspace
   version: 1
   key: [path]

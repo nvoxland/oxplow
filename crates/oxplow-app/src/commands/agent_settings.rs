@@ -22,6 +22,7 @@ use super::{Handler, TxCtx};
 
 pub const SET_AGENTS: &str = "oxplow.agent.set_agents";
 pub const SET_SETTING: &str = "oxplow.agent.set_setting";
+pub const SET_PROMPT_APPEND: &str = "oxplow.agent.set_prompt_append";
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -41,6 +42,15 @@ pub struct SetSettingInput {
     /// Its value; absent or blank clears it.
     #[serde(default)]
     pub value: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetPromptAppendInput {
+    /// Text appended to every agent's system prompt (`agentPromptAppend`);
+    /// blank removes it.
+    #[serde(default)]
+    pub text: String,
 }
 
 fn invalid(field: &str, message: impl Into<String>) -> CommandError {
@@ -121,6 +131,7 @@ pub fn ops(target: ConfigTarget, harnesses: HarnessRegistry) -> Vec<Op> {
             })),
         )
     };
+    let prompt_target = target.clone();
     let set_setting = {
         let t = target;
         Op::new(
@@ -141,7 +152,24 @@ pub fn ops(target: ConfigTarget, harnesses: HarnessRegistry) -> Vec<Op> {
             })),
         )
     };
-    vec![set_agents, set_setting]
+    let set_prompt_append = Op::new(
+        "config.write",
+        "set_prompt_append",
+        schema::<SetPromptAppendInput>(),
+        true,
+        Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
+            let input: SetPromptAppendInput = parse(input)?;
+            let value = (!input.text.trim().is_empty()).then(|| json!(input.text.trim()));
+            change(
+                &prompt_target,
+                ctx.actor(),
+                "agentPromptAppend",
+                value,
+                Layer::Project,
+            )
+        })),
+    );
+    vec![set_agents, set_setting, set_prompt_append]
 }
 
 #[cfg(test)]
@@ -224,6 +252,51 @@ mod tests {
             .await
             .unwrap();
         assert_ne!(agents_of(svc), order);
+    }
+
+    /// The prompt addition is written as `agentPromptAppend` (blank removes
+    /// it), by a person, an agent or a lens for either.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn anyone_sets_the_prompt_addition() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        let prompt = || crate::config_service::read_config(&svc.config).agent_prompt_append;
+        svc.commands
+            .run(
+                &Actor::Human,
+                SET_PROMPT_APPEND,
+                json!({ "text": "  Prefer TDD.  " }),
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(prompt(), "Prefer TDD.");
+        let agent = Actor::Agent {
+            session_id: None,
+            thread_id: Some(fx.thread),
+            stream_id: None,
+        };
+        let lens = Actor::Lens {
+            lens_id: "oxplow-foundation/agents-prompt".into(),
+            on_behalf_of: Box::new(agent.clone()),
+        };
+        for actor in [agent, lens] {
+            svc.commands
+                .run(&actor, SET_PROMPT_APPEND, json!({ "text": "x" }), true)
+                .await
+                .unwrap();
+            assert_eq!(prompt(), "x");
+        }
+        svc.commands
+            .run(
+                &Actor::Human,
+                SET_PROMPT_APPEND,
+                json!({ "text": " " }),
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(prompt(), "");
     }
 
     /// A person sets one of a harness's declared settings; a blank value

@@ -1,0 +1,18 @@
+title: Activity
+description: The efforts on this item, the latest first. Open one for what it changed.
+params:
+  - { name: uri }
+query: |
+  SELECT e.uri, e.title, e.started_at, e.ended_at,
+         (SELECT count(*) FROM v_effort_file f WHERE f.effort_id = e.id) AS files,
+         e.summary
+  FROM v_effort e WHERE e.work_item = :uri ORDER BY e.started_at DESC, e.id DESC
+viz: table
+columns:
+  - { key: title, label: Effort, link: { kind: page, from: uri } }
+  - { key: started_at, label: Started, format: relative, width: 120 }
+  - { key: ended_at, label: Ended, format: relative, width: 120 }
+  - { key: files, label: Files, width: 70 }
+  - { key: summary, label: Summary }
+empty: No effort on this item yet.
+hidden: true

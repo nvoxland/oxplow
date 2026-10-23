@@ -1,7 +1,6 @@
 [
   "agent-session",
   "backlog",
-  "board",
   "custom-dashboard",
   "diff-view",
   "editor",
@@ -15,7 +14,5 @@
   "resource",
   "settings",
   "tasks",
-  "terminal",
-  "wiki-page",
-  "work-item"
+  "terminal"
 ]

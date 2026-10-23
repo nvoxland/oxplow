@@ -29,11 +29,7 @@ export const SETTINGS_AREAS: readonly SettingsArea[] = [
     id: "agents",
     title: "Agents",
     intro: "The coding agents this project runs, what new threads start with, and what every agent is told.",
-    sections: [
-      { id: "agents", title: "Agents" },
-      { id: "new-threads", title: "New threads" },
-      { id: "prompt", title: "Agent prompt additions" },
-    ],
+    sections: [],
   },
   {
     id: "lsp",
@@ -45,7 +41,7 @@ export const SETTINGS_AREAS: readonly SettingsArea[] = [
     id: "extensions",
     title: "Extensions",
     intro: "Extensions add lenses, pages and data. Their sources are in .oxplow/extensions/; what runs is each one's deployment, with the permissions you approved when it was deployed. Right-click a row to deploy, roll back, enable, share or remove it.",
-    sections: [{ id: "health", title: "Health and credentials" }],
+    sections: [],
   },
   {
     id: "data",
@@ -66,7 +62,7 @@ export const SETTINGS_AREAS: readonly SettingsArea[] = [
     id: "ai",
     title: "AI",
     intro: "The models oxplow itself calls — for summaries, typed questions and extensions. Your coding agents are separate.",
-    sections: [{ id: "ai", title: "AI providers and roles" }],
+    sections: [],
   },
 ];
 

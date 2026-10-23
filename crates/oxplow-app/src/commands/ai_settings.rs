@@ -112,8 +112,12 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
                             input.key,
                         )
                         .map_err(|e| refused("/id", e))?;
+                    let events = svc.events.clone();
                     Ok(HandlerOutput {
                         result: json!({ "id": id, "key_given": key_set }),
+                        after_commit: Some(Box::new(move || {
+                            events.emit(OxplowEvent::ConfigChanged)
+                        })),
                         ..HandlerOutput::default()
                     })
                 })
@@ -135,8 +139,12 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
                     svc.ai
                         .remove_provider(&input.id)
                         .map_err(|e| refused("/id", e))?;
+                    let events = svc.events.clone();
                     Ok(HandlerOutput {
                         result: json!({ "id": input.id }),
+                        after_commit: Some(Box::new(move || {
+                            events.emit(OxplowEvent::ConfigChanged)
+                        })),
                         ..HandlerOutput::default()
                     })
                 })
@@ -384,6 +392,29 @@ mod tests {
             saw |= matches!(event, crate::events::OxplowEvent::ConfigChanged);
         }
         assert!(saw, "set_role emitted no ConfigChanged");
+    }
+
+    /// A provider added, replaced or removed is read from `v_ai_provider`
+    /// (and `v_ai_role`'s key state), which refresh on `ConfigChanged`: so a
+    /// page listing them follows the change.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn setting_and_removing_a_provider_announce_a_config_change() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let mut rx = fx.svc.events.subscribe_ui();
+        for (command, input) in [
+            (
+                super::SET_PROVIDER,
+                json!({ "id": "or", "kind": "openrouter", "key": "k" }),
+            ),
+            (super::REMOVE_PROVIDER, json!({ "id": "or" })),
+        ] {
+            run(&fx, &Actor::Human, command, input).await.unwrap();
+            let mut saw = false;
+            while let Ok(event) = rx.try_recv() {
+                saw |= matches!(event, crate::events::OxplowEvent::ConfigChanged);
+            }
+            assert!(saw, "{command} emitted no ConfigChanged");
+        }
     }
 
     /// Half a binding is refused; an unknown role names the roles.

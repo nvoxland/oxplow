@@ -151,7 +151,7 @@ pages:
   # Work
   - { id: tasks, title: Tasks, icon: check-square, category: Work, keywords: dashboard work list, component: "oxplow:tasks" }
   - { id: backlog, title: Backlog, icon: inbox, category: Work, count: backlog-count, component: "oxplow:backlog" }
-  - { id: board, title: Board, icon: columns-3, category: Work, keywords: kanban columns state work items, component: "oxplow:board" }
+  - { id: board, title: Board, icon: columns-3, category: Work, keywords: kanban columns state work items, lens: board }
   - { id: done-work, title: Done Work, icon: circle-check, category: Work, lens: done-work }
   - { id: go-to, title: Go To, icon: star, category: Work, keywords: bookmarks visits recent history, lens: go-to }
   # Code
@@ -199,8 +199,8 @@ pages:
   - { id: editor, title: Editor, for: oxplow/file, accepts: { rev: absent }, default: true, component: "oxplow:editor" }
   - { id: file-viewer, title: File at a Revision, label: "{{param.path}} ({{param.rev}})", for: oxplow/file, accepts: { rev: present }, lens: file-viewer, comments: true }
   - { id: directory, title: Directory, label: "{{param.path}}", for: oxplow/dir, accepts: { rev: absent }, default: true, lens: directory }
-  - { id: wiki-page, title: Wiki Page, for: oxplow/wiki, default: true, component: "oxplow:wiki-page" }
-  - { id: work-item, title: Work Item, for: oxplow/work_item, default: true, component: "oxplow:work-item" }
+  - { id: wiki-page, title: Wiki Page, label: "{{param.slug}}", for: oxplow/wiki, default: true, comments: true, lens: wiki-page }
+  - { id: work-item, title: Work Item, label: "{{param.id}}", for: oxplow/work_item, default: true, comments: true, lens: work-item }
   - { id: commit, title: Commit, label: "{{param.sha}}", for: oxplow/commit, default: true, lens: commit }
   - { id: metric-detail, title: Metric, for: oxplow/metric, default: true, component: "oxplow:metric-detail" }
   - { id: lens, title: Lens, for: oxplow/lens, default: true, component: "oxplow:lens" }
@@ -510,11 +510,24 @@ ui:
     # Settings → Overview and Language Servers: the whole area.
     - { slot: settings.overview.sections, lens: settings-proposals }
     - { slot: settings.overview.sections, lens: settings-values }
+    # Settings → Agents: the whole area.
+    - { slot: settings.agents.sections, lens: agents-list }
+    - { slot: settings.agents.sections, lens: agents-settings }
+    - { slot: settings.agents.sections, lens: agents-new-thread }
+    - { slot: settings.agents.sections, lens: agents-prompt }
+    # Settings → AI: the whole area.
+    - { slot: settings.ai.sections, lens: ai-providers }
+    - { slot: settings.ai.sections, lens: ai-provider-form }
+    - { slot: settings.ai.sections, lens: ai-roles }
+    - { slot: settings.ai.sections, lens: ai-calls }
     - { slot: settings.lsp.sections, lens: lsp-servers }
     - { slot: settings.lsp.sections, lens: lsp-install }
     - { slot: settings.lsp.sections, lens: lsp-suggestions }
-    - { slot: settings.extensions.sections, lens: extensions-list, at: { before: health } }
-    - { slot: settings.extensions.sections, lens: extensions-deployments, at: { before: health } }
+    - { slot: settings.extensions.sections, lens: extensions-list }
+    - { slot: settings.extensions.sections, lens: extensions-deployments }
+    - { slot: settings.extensions.sections, lens: extensions-health }
+    - { slot: settings.extensions.sections, lens: extensions-credentials }
+    - { slot: settings.extensions.sections, lens: extensions-secrets }
     - { slot: thread.plan.header, lens: thread-handoffs-in }
     - { slot: thread.plan.header, lens: thread-handoffs-out }
 commands:
@@ -627,6 +640,7 @@ commands:
     summary: "Remove an AI provider and its key. Refused while a role uses it."
     scope: ai.settings
     op: remove_provider
+    confirm: always
     example: {"id": "anthropic"}
   - name: ai.set_role
     summary: "Bind a role (`main`, `summarize`, `decide`, or an extension's profile `acme/review`) to a provider and model, or unbind it with neither. `restrict` forbids `tools`, `sql`, `streaming` or `images` for the binding."
@@ -663,6 +677,23 @@ commands:
     op: preview
     tool: preview_collector
     example: {"owner": "work", "id": "hot"}
+  # credentials.write
+  - name: collector.set_credential
+    summary: "Set (or, with no `value`, clear) a credential a collector declares: the value goes to the OS keychain and is never read back, so `v_collector_credential` only says whether one is set."
+    scope: credentials.write
+    op: set_credential
+    example: {"collector": "oxplow:oxplow/collector?collector=triage/hot", "name": "TOKEN", "value": "ghp_example"}
+  - name: extension.set_secret
+    summary: "Keep a host secret a provider's credential refers to (`v_extension_secret.reference`; left out, a fresh reference is made): the value goes to the OS keychain and is never read back. A provider running on the secret restarts."
+    scope: credentials.write
+    op: set_secret
+    example: {"extension": "linear", "value": "lin_api_example"}
+  - name: extension.revoke_secret
+    summary: "Forget a host secret (`extension` and the `reference` from `v_extension_secret`): out of the OS keychain, and a provider running on it restarts."
+    scope: credentials.write
+    op: revoke_secret
+    confirm: destructive
+    example: {"extension": "linear", "reference": {"schemaVersion": 1, "id": "0197a1c2-7b3e-7c4d-8a5f-1b2c3d4e5f60"}}
   # collectors.sync
   - name: collector.sync
     summary: "Run an approved collector now, refreshing what it collects (runs the collector's program or script, which the bus doesn't own). It never approves: an unapproved exec collector is refused. A project report collector (`records:`) reads its report now and records what it parses in `thread` (an agent's own): point at the report, never report numbers yourself."
@@ -696,6 +727,11 @@ commands:
     scope: config.write
     op: set_agent_setting
     example: {"agent": "claude", "key": "model", "value": "opus"}
+  - name: agent.set_prompt_append
+    summary: "Set the text appended to every agent's system prompt (`agentPromptAppend`); blank removes it. It applies to sessions started after. Logged as config.changed, undoable."
+    scope: config.write
+    op: set_prompt_append
+    example: {"text": "Prefer small commits."}
   - name: config.unset
     summary: "Remove one .oxplow/project.yaml key so it returns to its default (or, with `layer: personal`, a person's own choice); logged as config.changed, undo restores it."
     scope: config.write

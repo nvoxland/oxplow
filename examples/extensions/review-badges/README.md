@@ -7,14 +7,14 @@ It reads effort-review's exported `reviews` model and writes nothing.
 | | |
 |---|---|
 | **Review Verdicts** (Work) | One row per work item: its latest review's effort, how it ended, when, and the first 120 characters. The work item links to its page. |
-| **Review** (the task page, below the body) | That work item's latest review in full, if there is one. Mounted on the `work_item.detail.body` slot, which passes the item's `uri`. |
+| **Review** (the task page, among its sections) | That work item's latest review in full, if there is one. Mounted on the `oxplow-foundation/work-item.sections` slot, which passes the item's `uri`. |
 
 ```yaml
 imports:
   - { id: reviews, contribution: oxplow:oxplow/model?model=effort-review/reviews, version: 2, optional: true }
 ui:
   slots:
-    - { slot: work_item.detail.body, lens: item-review }
+    - { slot: oxplow-foundation/work-item.sections, lens: item-review }
 ```
 
 Both lenses read `import_ref('reviews')`, which is how an extension reads

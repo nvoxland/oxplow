@@ -23,35 +23,35 @@ async function wikiWithTask(daemon: Parameters<typeof run>[0] & { thread: string
 async function openWiki(page: import("@playwright/test").Page, slug: string) {
   await searchLauncher(page, `${slug} page`);
   await page.getByTestId(`launcher-hit-oxplow:oxplow/wiki?slug=${slug}`).click();
-  await expect(page.getByTestId("page-wiki")).toContainText("First do");
+  await expect(page.locator('[data-testid="page-lens"]:visible')).toContainText("First do");
 }
 
 test("Cmd+[ goes back through the tab's pages and Cmd+] goes forward", async ({ page, daemon }) => {
   const ref = await wikiWithTask(daemon, "kestrel", "Kestrel follow-up");
   await page.goto("/");
   await openWiki(page, "kestrel");
-  await page.getByTestId("page-wiki").locator(`a[href="${ref}"]`).click();
-  await expect(page.getByTestId("task-rail-delete-trigger")).toBeVisible();
+  await page.locator('[data-testid="page-lens"]:visible').locator(`a[href="${ref}"]`).click();
+  await expect(page.getByTestId("lens-part-state")).toBeVisible();
 
   await page.keyboard.press("Meta+[");
-  await expect(page.getByTestId("page-wiki").filter({ visible: true })).toContainText("First do");
-  await expect(page.getByTestId("task-rail-delete-trigger")).toBeHidden();
+  await expect(page.locator('[data-testid="page-lens"]:visible')).toContainText("First do");
+  await expect(page.getByTestId("lens-part-state")).toBeHidden();
 
   await page.keyboard.press("Meta+]");
-  await expect(page.getByTestId("task-rail-delete-trigger")).toBeVisible();
+  await expect(page.getByTestId("lens-part-state")).toBeVisible();
 });
 
 test("the active tab and its history survive a reload", async ({ page, daemon }) => {
   const ref = await wikiWithTask(daemon, "osprey", "Osprey follow-up");
   await page.goto("/");
   await openWiki(page, "osprey");
-  await page.getByTestId("page-wiki").locator(`a[href="${ref}"]`).click();
-  await expect(page.getByTestId("task-rail-delete-trigger")).toBeVisible();
+  await page.locator('[data-testid="page-lens"]:visible').locator(`a[href="${ref}"]`).click();
+  await expect(page.getByTestId("lens-part-state")).toBeVisible();
 
   await page.reload();
-  await expect(page.getByTestId("task-rail-delete-trigger")).toBeVisible();
+  await expect(page.getByTestId("lens-part-state")).toBeVisible();
   await page.keyboard.press("Meta+[");
-  await expect(page.getByTestId("page-wiki").filter({ visible: true })).toContainText("First do");
+  await expect(page.locator('[data-testid="page-lens"]:visible')).toContainText("First do");
 });
 
 test("Alt+Down steps to the next file of the list it was opened from", async ({ page, daemon }) => {

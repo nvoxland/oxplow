@@ -1,0 +1,18 @@
+title: Referenced files
+description: The files the page cites, each with whether it has changed since the page was written. Mark verified re-pins a file you re-read against the page.
+params:
+  - { name: slug }
+query: |
+  SELECT r.path, CASE WHEN r.stale THEN 'changed since this page was written' ELSE 'current' END AS status,
+         CASE WHEN r.stale THEN 'warning' ELSE 'success' END AS tone
+  FROM v_knowledge_ref r WHERE r.page = uri('oxplow/wiki', 'slug', :slug)
+  ORDER BY r.path
+viz: table
+columns:
+  - { key: path, label: File, link: { kind: file } }
+  - { key: status, label: Status, tone: tone, width: 230 }
+actions:
+  - { id: verify-all, label: Mark all verified, command: oxplow.knowledge.verify_files, input: { slug: "{{param.slug}}" } }
+  - { id: verify, label: Mark verified, command: oxplow.knowledge.verify_files, input: { slug: "{{param.slug}}", files: ["{{row.path}}"] }, row: true }
+empty: This page cites no files.
+hidden: true

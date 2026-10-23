@@ -609,17 +609,21 @@ its source; with no model bound, the recorded ones are all there is.
 
 ## Settings → AI (current)
 
-`apps/desktop/src/components/AiSection.tsx` (+ pure `aiSettingsModel.ts`),
-a section of the Settings page. It reads with the `ai_settings` IPC and
-writes with commands (`commands/ai_settings.rs`), anyone's — a person's, their agent's, or a form lens's: `oxplow.ai.set_provider { id, kind,
+The foundation's lenses in `settings.ai.sections` (`ai-providers`,
+`ai-provider-form`, `ai-roles`, `ai-calls`; `ai-provider-kinds` and
+`ai-provider-choices` are the choices the forms offer). They read the live
+models `v_ai_provider` and `v_ai_role` and write with commands
+(`commands/ai_settings.rs`), anyone's — a person's, their agent's, or a form lens's: `oxplow.ai.set_provider { id, kind,
 base_url?, key? }` (scope `ai.settings`; `key` is a secret (`writeOnly`, commands.md "Secrets"), so a
 refusal that could quote it is recorded without its words, and it goes only to
-the keychain), `oxplow.ai.remove_provider { id }`, `oxplow.ai.set_role { role,
-provider?, model?, restrict? }` (neither provider nor model unbinds; it
-announces `ConfigChanged`: a role's binding is a row of the effective-config
-view, which refreshes on that one signal) and `oxplow.ai.test_provider { id,
-model }` (scope `ai.test`, `spends`: one small call on the person's key). The
-`api.ts` wrappers run them and re-read the settings.
+the keychain; it, `remove_provider` and `set_role` announce `ConfigChanged`,
+which re-reads the two models), `oxplow.ai.remove_provider { id }` (asks first,
+`confirm: always`), `oxplow.ai.set_role { role, provider?, model?, restrict? }`
+(neither provider nor model unbinds) and `oxplow.ai.test_provider { id,
+model }` (scope `ai.test`, `spends`: one small call on the person's key).
+`ai-provider-form` is a `form` lens whose `key` field is `secret: true` (a
+password box, kept out of the draft and the record); Test… and Assign… are row
+form actions.
 
 - Providers: add or update by name (kind, base URL, key). A blank key keeps
   the saved one. Remove is refused while a role uses the provider, and
@@ -628,13 +632,11 @@ model }` (scope `ai.test`, `spends`: one small call on the person's key). The
 - Roles: the built-ins (their text is `BuiltinRole::description`), then
   each active extension's AI profiles (`RoleStatus.extension`,
   `fallback`, `effective`, `problem`), then bindings for profiles nothing
-  declares (a problem, so they can be cleared). Pick a provider and model
-  per role; "Not assigned" clears it, and an unbound profile shows "Falls
-  back to summarize (provider · model)". With a provider chosen,
-  **Allows** Tools / SQL / Streaming / Images checkboxes (all on by
-  default) set the binding's `restrict` with the same Save, Escape putting
-  them back; a restricted row says "Restricted: no tools, no SQL"
-  (`aiSettingsModel.ts` `ALLOWED`, `allowedOf`, `restrictionsOf`).
+  declares (a problem, so they can be cleared). **Assign…** picks a provider
+  and model (and the binding's `restrict` list: `tools`, `sql`, `streaming`,
+  `images`); **Unassign** clears it, and an unbound profile shows "Falls back
+  to summarize (model)". A role the project sets in project.yaml
+  (`overridden`) is changed there.
 - Recent Calls: the last 7 days of `v_ai_call` by role and caller, read
   with `query_sql`, the same path lenses use.
 

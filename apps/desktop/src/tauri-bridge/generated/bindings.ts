@@ -269,29 +269,6 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	setCredential: (extension: string, name: string, value: string | null) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("set_credential", { extension, name, value })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	saveExtensionSecret: (extension: string, reference: {
-	schemaVersion: number,
-	id: string,
-} | null, value: string) => typedError<SecretRef, IpcError_Serialize>(__TAURI_INVOKE("save_extension_secret", { extension, reference, value })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	extensionSecretIsSet: (extension: string, reference: SecretRef) => typedError<boolean, IpcError_Serialize>(__TAURI_INVOKE("extension_secret_is_set", { extension, reference })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	revokeExtensionSecret: (extension: string, reference: SecretRef) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("revoke_extension_secret", { extension, reference })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	listProviderInstances: () => typedError<ProviderInstanceView[], IpcError_Serialize>(__TAURI_INVOKE("list_provider_instances")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the

@@ -1551,6 +1551,17 @@ fn parse_actions(
                 f.id
             ));
         }
+        for s in oxplow_domain::template::strings(&input) {
+            if let Some(filter) = oxplow_domain::template::placeholders(s)
+                .into_iter()
+                .find_map(|p| p.filter.filter(|f| f != "json"))
+            {
+                return Err(format!(
+                    "actions: `{}`: unknown placeholder filter `{filter}` (the only one is `json`)",
+                    f.id
+                ));
+            }
+        }
         for (scope, name) in action_templates(&input) {
             match scope.as_str() {
                 "param"
@@ -1787,10 +1798,6 @@ struct AdvisoryFile {
 pub const SLOTS: &[SlotSpec] = &[
     // An effort's review (its diff view).
     SlotSpec::region("effort.review.details", &["effort_id", "change_id"]),
-    // A work item's page, below its body: the item's ref, whichever list.
-    SlotSpec::region("work_item.detail.body", &["uri"]),
-    // The same page's side rail.
-    SlotSpec::region("work_item.detail.sidebar", &["uri"]),
     // A thread's plan, as a compact strip.
     SlotSpec::region("thread.plan.header", &["thread_id"]),
     // Uncommitted changes: a strip above them, and below the files.
@@ -1804,20 +1811,16 @@ pub const SLOTS: &[SlotSpec] = &[
     // lists the same ids). An extension's own status or configuration
     // views go beside the area they belong to. No params.
     SlotSpec::sections("settings.overview.sections", &["q"], &[]),
-    SlotSpec::sections(
-        "settings.agents.sections",
-        &[],
-        &["agents", "new-threads", "prompt"],
-    ),
+    SlotSpec::sections("settings.agents.sections", &[], &[]),
     SlotSpec::sections("settings.lsp.sections", &[], &[]),
-    SlotSpec::sections("settings.extensions.sections", &[], &["health"]),
+    SlotSpec::sections("settings.extensions.sections", &[], &[]),
     SlotSpec::sections("settings.data.sections", &[], &["data"]),
     SlotSpec::sections(
         "settings.integrations.sections",
         &[],
         &["capabilities", "integrations"],
     ),
-    SlotSpec::sections("settings.ai.sections", &[], &["ai"]),
+    SlotSpec::sections("settings.ai.sections", &[], &[]),
 ];
 
 /// A place in a core page a lens can be mounted ([`SLOTS`]).
@@ -8383,7 +8386,7 @@ empty: No items.
     #[test]
     fn a_slot_mount_to_a_missing_lens_names_its_line() {
         let dir = tempfile::tempdir().unwrap();
-        let manifest = format!("{EXT_V2}ui:\n  slots:\n    - {{ slot: rail, lens: tasks }}\n    - {{ slot: work_item.detail.body, lens: nope }}\n");
+        let manifest = format!("{EXT_V2}ui:\n  slots:\n    - {{ slot: rail, lens: tasks }}\n    - {{ slot: diff.file.header, lens: nope }}\n");
         write(
             dir.path(),
             ".oxplow/extensions/review/extension.yaml",
@@ -8739,7 +8742,10 @@ commands:
                 "oxplow-foundation/commit.sections",
                 "oxplow-bundled/tests-weakened",
             ),
-            ("work_item.detail.body", "oxplow-bundled/task-tokens"),
+            (
+                "oxplow-foundation/work-item.sections",
+                "oxplow-bundled/task-tokens",
+            ),
             ("diff.file.header", "oxplow-bundled/file-co-change"),
         ] {
             assert!(
@@ -9027,10 +9033,10 @@ commands:
             &[
                 ("presets", "title: Presets\nquery: SELECT 1\n"),
                 ("stray", "title: Stray\nquery: SELECT 1\n"),
-                ("region", "title: R\nparams: [{ name: uri }]\nquery: SELECT 1\n"),
+                ("region", "title: R\nparams: [{ name: thread_id }]\nquery: SELECT 1\n"),
                 ("sized", "title: S\nquery: SELECT 1\n"),
             ],
-            "ui:\n  slots:\n    - { slot: settings.agents.sections, lens: presets, title: Team presets, at: { after: agents } }\n    - { slot: settings.agents.sections, lens: stray, at: { before: gone } }\n    - { slot: work_item.detail.body, lens: region, at: start }\n    - { slot: settings.agents.sections, lens: sized, size: wide }\n",
+            "ui:\n  slots:\n    - { slot: settings.integrations.sections, lens: presets, title: Team presets, at: { after: capabilities } }\n    - { slot: settings.integrations.sections, lens: stray, at: { before: gone } }\n    - { slot: thread.plan.header, lens: region, at: start }\n    - { slot: settings.integrations.sections, lens: sized, size: wide }\n",
         );
         let mounts: Vec<_> = ext
             .ui
@@ -9044,7 +9050,7 @@ commands:
                 (
                     "x/presets",
                     Some(SlotAt::After {
-                        after: "agents".into()
+                        after: "capabilities".into()
                     }),
                     Some("Team presets")
                 ),
@@ -9062,7 +9068,7 @@ commands:
         assert!(errs.contains("`size` is a dashboard tile's"), "{errs}");
         let warns = ext.warnings.join("\n");
         assert!(
-            warns.contains("has no part `gone` (it has `agents`, `new-threads`, `prompt`)"),
+            warns.contains("has no part `gone` (it has `capabilities`, `integrations`)"),
             "{warns}"
         );
     }
@@ -9669,6 +9675,31 @@ commands:
         );
     }
 
+    /// A placeholder's `|json` filter loads; any other filter is refused.
+    #[test]
+    fn an_action_placeholder_may_only_filter_with_json() {
+        let (_d, ext) = load_x(
+            &[
+                ("ok", "title: Ok\nquery: SELECT '[1]' AS order_json\nactions:\n  - { id: a, label: A, command: oxplow.agent.set_agents, row: true, input: { agents: \"{{row.order_json|json}}\" } }\n"),
+                ("bad", "title: Bad\nquery: SELECT 1 AS n\nactions:\n  - { id: a, label: A, command: oxplow.agent.set_agents, row: true, input: { agents: \"{{row.n|upper}}\" } }\n"),
+            ],
+            "",
+        );
+        assert!(
+            ext.lenses.iter().any(|l| l.slug == "ok"),
+            "{:?}",
+            ext.errors
+        );
+        assert!(ext.lenses.iter().all(|l| l.slug != "bad"));
+        assert!(
+            ext.errors
+                .join("\n")
+                .contains("unknown placeholder filter `upper`"),
+            "{:?}",
+            ext.errors
+        );
+    }
+
     /// A column's `expand` names a lens of the extension (by slug or whole
     /// id); one that isn't there, or the lens itself, fails the load.
     #[test]
@@ -10172,11 +10203,11 @@ commands:
 
     #[test]
     fn slots_bind_params_the_lens_must_declare() {
-        let task_lens = "title: T\nparams: [{ name: uri }]\nquery: SELECT :uri\n";
+        let task_lens = "title: T\nparams: [{ name: path }]\nquery: SELECT :path\n";
         let thread_lens = "title: Th\nparams: [{ name: thread_id }]\nquery: SELECT :thread_id\n";
         let (_d, ext) = load_x(
             &[("t", task_lens), ("th", thread_lens), ("plain", "title: P\nquery: SELECT 1\n")],
-            "ui:\n  slots:\n    - { slot: work_item.detail.body, lens: t }\n    - { slot: thread.plan.header, lens: th }\n    - { slot: work_item.detail.body, lens: plain }\n",
+            "ui:\n  slots:\n    - { slot: diff.file.header, lens: t }\n    - { slot: thread.plan.header, lens: th }\n    - { slot: diff.file.header, lens: plain }\n",
         );
         let mounted: Vec<(&str, &str)> = ext
             .ui
@@ -10186,13 +10217,10 @@ commands:
             .collect();
         assert_eq!(
             mounted,
-            vec![
-                ("work_item.detail.body", "x/t"),
-                ("thread.plan.header", "x/th")
-            ]
+            vec![("diff.file.header", "x/t"), ("thread.plan.header", "x/th")]
         );
         let errs = ext.errors.join("\n");
-        assert!(errs.contains("`uri`") && errs.contains("plain"), "{errs}");
+        assert!(errs.contains("`path`") && errs.contains("plain"), "{errs}");
     }
 
     /// P9.A2: a file diff's header strip takes lenses about the file — its

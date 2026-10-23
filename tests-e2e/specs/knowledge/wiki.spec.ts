@@ -16,10 +16,10 @@ test("a written page renders, and a task link in it opens the task", async ({ pa
   await page.goto("/");
   await searchLauncher(page, "wombat plan");
   await page.getByTestId("launcher-hit-oxplow:oxplow/wiki?slug=wombat-plan").click();
-  const wiki = page.getByTestId("page-wiki");
+  const wiki = page.locator('[data-testid="page-lens"]:visible');
   await expect(wiki).toContainText("First do");
   await wiki.locator(`a[href="${created.result.uri}"]`).click();
-  await expect(page.getByTestId("task-rail-delete-trigger")).toBeVisible();
+  await expect(page.getByTestId("lens-part-state")).toBeVisible();
   await expect(page.locator("body")).toContainText("Wombat follow-up");
 });
 
@@ -47,4 +47,27 @@ test("the wiki index filters by body and marks the match", async ({ page, daemon
   await expect(index).toContainText("Kiwi notes");
   await expect(index).not.toContainText("Other notes");
   await expect(index.locator("mark.ox-mark")).toContainText("quokka");
+});
+
+// A wiki page is the foundation's `wiki-page` document: its body is the
+// markdown editor (Save only when changed), and a page not yet written is
+// made by its first Save.
+test("a wiki page is edited in place and saved, and a new page is made by its first Save", async ({ page, daemon }) => {
+  await run(daemon, "oxplow.knowledge.write_page", { slug: "ferret-notes", title: "Ferret notes", body: "# Ferret notes\n\nThey steal socks.\n" });
+  await searchable(daemon, "ferret", "wiki");
+  await page.goto("/");
+  await searchLauncher(page, "ferret notes");
+  await page.getByTestId("launcher-hit-oxplow:oxplow/wiki?slug=ferret-notes").click();
+  const body = page.locator('[data-testid="lens-part-body"]:visible');
+  const save = body.getByRole("button", { name: "Save" });
+  await expect(body).toContainText("They steal socks.");
+  await expect(save).toBeDisabled();
+  await body.locator(".ProseMirror").click();
+  await page.keyboard.press("ControlOrMeta+End");
+  await page.keyboard.type(" Also keys.");
+  await expect(save).toBeEnabled();
+  await save.click();
+  await expect(save).toBeDisabled();
+  await page.reload();
+  await expect(page.locator('[data-testid="lens-part-body"]:visible')).toContainText("Also keys.");
 });

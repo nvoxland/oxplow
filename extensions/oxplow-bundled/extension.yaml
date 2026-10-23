@@ -99,11 +99,11 @@ ui:
     - { slot: effort.review.details, lens: effort-metric-deltas }
     - { slot: effort.review.details, lens: effort-nudges }
     - { slot: effort.review.details, lens: effort-plan }
-    - { slot: work_item.detail.body, lens: task-tokens }
+    - { slot: oxplow-foundation/work-item.sections, lens: task-tokens }
     - { slot: thread.plan.header, lens: thread-tokens }
     - { slot: thread.plan.header, lens: thread-plan }
     - { slot: thread.plan.header, lens: thread-shared-work }
-    - { slot: work_item.detail.body, lens: item-shared-work }
+    - { slot: oxplow-foundation/work-item.sections, lens: item-shared-work }
     - { slot: diff.file.header, lens: file-co-change }
     - { slot: effort.review.details, lens: decisions }
     - { slot: effort.review.details, lens: inferred-decisions }

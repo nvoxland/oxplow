@@ -185,7 +185,7 @@ fn put_in(dir: &Path, e: &Ext) {
         );
         sql = "SELECT uri FROM import_ref('dep')";
         let params = if e.mounted {
-            "params: [{ name: uri }]\n"
+            "params: [{ name: effort_id }]\n"
         } else {
             ""
         };
@@ -195,7 +195,7 @@ fn put_in(dir: &Path, e: &Ext) {
             &format!("title: Seen\n{params}query: SELECT uri FROM import_ref('dep')\n"),
         );
         if e.mounted {
-            manifest += "ui:\n  slots:\n    - { slot: work_item.detail.body, lens: seen }\n";
+            manifest += "ui:\n  slots:\n    - { slot: effort.review.details, lens: seen }\n";
         }
     }
     for (binding, producer, kind, version, optional) in &e.kind_imports {

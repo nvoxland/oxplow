@@ -13,6 +13,9 @@
 pub struct Placeholder {
     pub scope: String,
     pub name: String,
+    /// A `|filter` after the name (`{{row.agents|json}}`): how the value is
+    /// read when the placeholder is a string's whole. Only `json` exists.
+    pub filter: Option<String>,
     pub start: usize,
     pub end: usize,
 }
@@ -40,10 +43,15 @@ pub fn placeholders(s: &str) -> Vec<Placeholder> {
         };
         let end = start + close + 2;
         let inner = s[start + 2..start + close].trim();
-        let (scope, name) = inner.split_once('.').unwrap_or((inner, ""));
+        let (scope, rest) = inner.split_once('.').unwrap_or((inner, ""));
+        let (name, filter) = match rest.split_once('|') {
+            Some((name, filter)) => (name.trim(), Some(filter.trim().to_string())),
+            None => (rest, None),
+        };
         out.push(Placeholder {
             scope: scope.to_string(),
             name: name.to_string(),
+            filter,
             start,
             end,
         });
@@ -114,6 +122,16 @@ mod tests {
             Some("thread".to_string())
         );
         assert!(whole_placeholder("{{row.a}} {{row.b}}").is_none());
+        // A filter is not part of the name.
+        let filtered = placeholders("{{ row.agents | json }}");
+        assert_eq!(
+            (
+                filtered[0].name.as_str(),
+                filtered[0].filter.as_deref(),
+                filtered[0].key()
+            ),
+            ("agents", Some("json"), "row.agents".to_string())
+        );
         assert!(whole_placeholder("x {{row.a}}").is_none());
         // A stray opener is part of the next placeholder's text.
         let nested = placeholders("{{{{row.a}}");

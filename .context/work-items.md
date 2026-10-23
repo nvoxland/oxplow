@@ -155,20 +155,23 @@ through `useRerunOnChange` — or `readsChanged` outside a component
 changes. With **none** active every read is empty and the screens show
 their empty states.
 
-**One page for every item** (`pages/WorkItemPage.tsx`, routed from any
-`oxplow/work_item` tab, payload `uri`): title and body edited
-in place, the rail's state pill and declared fields, activity (its
-efforts), backlinks and outbound (the graph is keyed on the item's URI), comments targeting
-the item's URI, and the feature-gated actions above. The item's own
-list's extension may add its state view (`work_item.detail.state`,
-`Replaceable`), beside the state pill — never instead of it, so an item
+**One page for every item** (the `work-item` document lens, the renderer of
+`oxplow/work_item`; param `uri`): the state, the title and the list's declared fields
+(forms over `oxplow.work_item.transition` and `update`), the description
+(a `markdown` viz), About (where it is; Bring to this thread, Send to
+backlog and Delete on its right-click menu, offered by the list's features),
+Links, Comments and Activity (its efforts). Links and Comments are left out
+where the list declares no such feature (`needs: [work_items.links]`,
+`[work_items.comments]`). The item's own
+list's extension may replace its state part (`work_item.detail.state`,
+`Replaceable`); About's menu always offers the moves, so an item
 can always move. **Custom views** need no provider: any extension may
 replace the Board (`work_item.board`), the Tasks list (`work_item.list`)
-or an item's editor — its title and body (`work_item.detail`) — with a
+or an item's description editor (`work_item.detail`) — with a
 lens or component over `v_work_item` that changes items only through the
 interface commands, so it works with whichever list is active; the person
 picks whose shows (`replacements`, Settings → Integrations).
-[extensions.md](./extensions.md) "Replacements" has the contracts. The `work_item.detail.body` / `.sidebar` slots get
+[extensions.md](./extensions.md) "Replacements" has the contracts. The `oxplow-foundation/work-item.sections` slot gets
 `{ uri }`. Link…'s link type is free text (default `relates_to`): the
 provider names its own types, and `about` fits any URI. Its target is
 **any URI** (a work item's, `oxplow:oxplow/effort?id=eff12`, `oxplow:oxplow/collector?collector=x/y`); a link row
@@ -181,13 +184,14 @@ link** — its raw text, muted, tooltip "nothing resolves this URI; its
 extension may be gone" — that still unlinks. `BacklinkEdge.resolved` (the
 IPC's `ref_resolver::resolve_ref`) says which.
 
-The **Board** (the `board` page, `components/Board/WorkBoard.tsx`) shows
+The **Board** (the `board` page, the foundation's `board` document with its
+`board-cards` part: a `viz: board` over `v_work_item`) shows
 items as cards in one column per canonical state. Drag a card to a
-column, or right-click → Move To, to transition it through
-`personCommands` (one person path: its confirmation and its error
-reporting). List rows and Board cards share one drag
-(`WORK_ITEM_DRAG_MIME`: refs, each one's title and state), which the
-agent terminal reads as context URIs. **New Item** files on the active
+column (a `drag: true` action on `oxplow.work_item.transition`), or
+right-click → Move To, to transition it through the work list. Its scope
+(this thread, the backlog, everything) is the page's `show` filter. List
+rows and Board cards drag as lens rows, which the agent terminal reads as
+context URIs. **New Item** files on the active
 list: title, body, a canonical starting state (todo or blocked), the
 list's editable fields and — with `hierarchy` — a parent.
 
@@ -406,7 +410,7 @@ person-only); a failure goes to the op-errors store.
 
 **The UI with every enhancement off** (P6b.C6):
 `apps/desktop/src/pages/CapabilityUi.smoke.test.tsx` renders
-`WorkItemPage` (another provider's item, every flag false), the Board,
+the Board,
 the commit page, uncommitted changes and history with no extensions,
 and asserts each page's core content and the absence of every slot
 section, the Commands menu, decorations and feature-gated actions; then,

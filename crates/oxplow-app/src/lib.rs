@@ -1812,6 +1812,7 @@ impl Services {
             .chain(commands::effect::ops(services_slot.clone()))
             .chain(commands::delivery::ops(services_slot.clone()))
             .chain(commands::ai_settings::ops(services_slot.clone()))
+            .chain(commands::credentials::ops(services_slot.clone()))
             .chain([commands::lsp::restart_op(services_slot.clone())])
             .chain(commands::extension_deploy::ops(services_slot.clone()))
             .chain(commands::agent_reads::ops(services_slot.clone()))
@@ -2293,6 +2294,8 @@ mod tests {
                 "oxplow.code.symbols",
                 "oxplow.code.workspace_symbols",
                 "oxplow.collector.preview",
+                // The OS keychain, outside the database.
+                "oxplow.collector.set_credential",
                 // The collector's own program or script (P7.B3).
                 "oxplow.collector.sync",
                 // A provider's process restarts (P7.C1; was provider.enable).
@@ -2313,7 +2316,9 @@ mod tests {
                 "oxplow.extension.enable",
                 "oxplow.extension.preview",
                 "oxplow.extension.remove",
+                "oxplow.extension.revoke_secret",
                 "oxplow.extension.rollback",
+                "oxplow.extension.set_secret",
                 "oxplow.extension.share",
                 "oxplow.extension.unshare",
                 "oxplow.extension.validate",

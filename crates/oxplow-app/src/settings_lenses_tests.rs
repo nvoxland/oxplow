@@ -1,7 +1,7 @@
 //! Foundation lenses that replaced core pages: Settings' Overview and Language
 //! Servers areas (mounted in each area's slot: what they list, how they group
 //! and search, what Ask puts in the agent's input, what the language-server
-//! rows offer), the Comments inbox, the commit and uncommitted pages, and the Alerts page.
+//! rows offer), the Comments inbox, the commit and uncommitted pages, the Alerts page, Settings → Agents and AI, the Board, and the wiki page.
 
 use oxplow_config::LspServerConfig;
 use oxplow_db::SqlCell;
@@ -538,4 +538,451 @@ async fn the_alerts_page_lists_failures_and_each_part_runs() {
     // Extensions with problems: none in a clean fixture.
     let ext = run(&fx, "alerts-extensions", vec![]).await;
     assert!(ext.rows.iter().all(|r| ext.text(r, "settings").is_some()));
+}
+
+/// Settings → Agents: the agents in priority order with the lists a row's
+/// actions hand `set_agents`; the declared settings of the enabled ones; what
+/// new threads start with.
+#[tokio::test]
+async fn the_agents_area_hands_set_agents_each_new_order() {
+    let fx = services_with_effort().await;
+    let ids: Vec<String> = fx
+        .svc
+        .harnesses
+        .all()
+        .iter()
+        .map(|h| h.id().to_string())
+        .collect();
+    assert!(ids.len() >= 3, "{ids:?}");
+
+    let list = run(&fx, "agents-list", vec![]).await;
+    assert_eq!(list.rows.len(), ids.len());
+    let second = &list.rows[1];
+    let second_id = list.text(second, "id").unwrap();
+    let first_id = list.text(&list.rows[0], "id").unwrap();
+    assert!(list.flag(second, "can_up") && list.flag(second, "can_disable"));
+    assert!(!list.flag(&list.rows[0], "can_up"));
+    // Move Up swaps the second with the first; the list is a JSON array.
+    let up: Vec<String> = serde_json::from_str(&list.text(second, "moved_up").unwrap()).unwrap();
+    assert_eq!(&up[..2], [second_id.clone(), first_id.clone()]);
+    command(
+        &fx,
+        "oxplow.agent.set_agents",
+        serde_json::json!({ "agents": up }),
+    )
+    .await;
+    let after = run(&fx, "agents-list", vec![]).await;
+    assert_eq!(after.text(&after.rows[0], "id"), Some(second_id.clone()));
+
+    // Disable drops it from the order; Enable puts it back last.
+    let without: Vec<String> =
+        serde_json::from_str(&after.text(&after.rows[0], "without_it").unwrap()).unwrap();
+    assert!(!without.contains(&second_id));
+    command(
+        &fx,
+        "oxplow.agent.set_agents",
+        serde_json::json!({ "agents": without }),
+    )
+    .await;
+    let off = run(&fx, "agents-list", vec![]).await;
+    let dropped = off.keyed("id", &second_id);
+    assert!(off.flag(dropped, "can_enable") && !off.flag(dropped, "can_disable"));
+    let with_it: Vec<String> =
+        serde_json::from_str(&off.text(dropped, "with_it").unwrap()).unwrap();
+    assert_eq!(with_it.last(), Some(&second_id));
+
+    // What new threads start with: the picker, until a choice is made.
+    let start = run(&fx, "agents-new-thread", vec![]).await;
+    assert!(start.flag(start.keyed("value", "ask"), "current"));
+    // `config.set` asks first; a lens action's click is the person's yes.
+    fx.svc
+        .commands
+        .run(
+            &oxplow_domain::Actor::Human,
+            "oxplow.config.set",
+            serde_json::json!({ "key": "newThreadSession", "value": "none", "layer": "personal" }),
+            true,
+        )
+        .await
+        .unwrap();
+    let chosen = run(&fx, "agents-new-thread", vec![]).await;
+    assert!(chosen.flag(chosen.keyed("value", "none"), "current"));
+    assert!(chosen.flag(chosen.keyed("value", "ask"), "can_ask"));
+
+    // The prompt addition prefills the form with what is saved.
+    command(
+        &fx,
+        "oxplow.agent.set_prompt_append",
+        serde_json::json!({ "text": "Prefer TDD." }),
+    )
+    .await;
+    let prompt = run(&fx, "agents-prompt", vec![]).await;
+    assert_eq!(
+        prompt.text(&prompt.rows[0], "text").as_deref(),
+        Some("Prefer TDD.")
+    );
+}
+
+/// Settings → AI: a provider lists with its kind and whether it has a key
+/// (never the key), a role bound to it shows its binding and hands
+/// `set_role` its current values, and the kinds and providers are the
+/// choices the forms offer.
+#[tokio::test]
+async fn the_ai_area_lists_providers_roles_and_choices() {
+    let fx = services_with_effort().await;
+    let kinds = run(&fx, "ai-provider-kinds", vec![]).await;
+    assert!(kinds.has("value", "openrouter"), "{:?}", kinds.rows);
+
+    command(
+        &fx,
+        "oxplow.ai.set_provider",
+        serde_json::json!({ "id": "or", "kind": "openrouter", "key": "sk-secret-123" }),
+    )
+    .await;
+    let providers = run(&fx, "ai-providers", vec![]).await;
+    let or = providers.keyed("id", "or");
+    assert_eq!(providers.text(or, "key").as_deref(), Some("Key saved"));
+    assert!(providers
+        .rows
+        .iter()
+        .all(|r| !format!("{r:?}").contains("sk-secret-123")));
+    assert!(run(&fx, "ai-provider-choices", vec![])
+        .await
+        .has("value", "or"));
+
+    command(
+        &fx,
+        "oxplow.ai.set_role",
+        serde_json::json!({ "role": "summarize", "provider": "or", "model": "m1", "restrict": ["tools"] }),
+    )
+    .await;
+    let roles = run(&fx, "ai-roles", vec![]).await;
+    let summarize = roles.keyed("role", "summarize");
+    assert_eq!(roles.text(summarize, "bound").as_deref(), Some("or · m1"));
+    assert_eq!(
+        roles.text(summarize, "restrict").as_deref(),
+        Some("[\"tools\"]")
+    );
+    assert!(roles.flag(summarize, "can_assign") && roles.flag(summarize, "can_unassign"));
+    // A role bound to nothing says what it falls back to or that it is free.
+    let decide = roles.keyed("role", "decide");
+    assert!(!roles.flag(decide, "can_unassign"));
+    // The test action starts from the model a role already uses on it.
+    let again = run(&fx, "ai-providers", vec![]).await;
+    assert_eq!(
+        again.text(again.keyed("id", "or"), "test_model").as_deref(),
+        Some("m1")
+    );
+    assert!(run(&fx, "ai-calls", vec![]).await.rows.is_empty());
+}
+
+/// The Board: every work item in scope as a card in its state, with the
+/// declared enum fields and the comment count; the scope narrows it.
+#[tokio::test]
+async fn the_board_lists_work_items_by_scope() {
+    let fx = crate::test_fixtures::services_with_task_effort().await;
+    let thread = fx.thread.to_string();
+    for (title, thread) in [
+        ("On the thread", Some(thread.clone())),
+        ("In the backlog", None),
+    ] {
+        let mut input = serde_json::json!({ "title": title });
+        if let Some(t) = thread {
+            input["thread"] = serde_json::json!(t);
+        }
+        fx.svc
+            .commands
+            .run(
+                &oxplow_domain::Actor::Human,
+                "oxplow.work_item.create",
+                input,
+                false,
+            )
+            .await
+            .unwrap();
+    }
+    let params = |scope: &str| {
+        vec![
+            ("scope", SqlCell::Text(scope.into())),
+            ("thread_id", SqlCell::Int(fx.thread.value())),
+        ]
+    };
+    let thread_run = run_task(&fx, "board-cards", params("thread")).await;
+    assert!(thread_run.has("title", "On the thread") && !thread_run.has("title", "In the backlog"));
+    let backlog = run_task(&fx, "board-cards", params("backlog")).await;
+    assert!(backlog.has("title", "In the backlog") && !backlog.has("title", "On the thread"));
+    let all = run_task(&fx, "board-cards", params("all")).await;
+    assert!(all.has("title", "On the thread") && all.has("title", "In the backlog"));
+    let card = all.keyed("title", "On the thread");
+    assert_eq!(all.text(card, "state").as_deref(), Some("todo"));
+    assert!(all.flag(card, "not_done") && !all.flag(card, "not_todo"));
+
+    // The page's row says which scope its part draws.
+    let doc = run_task(
+        &fx,
+        "board",
+        vec![
+            ("show", SqlCell::Text("backlog".into())),
+            ("thread_id", SqlCell::Int(fx.thread.value())),
+        ],
+    )
+    .await;
+    assert_eq!(doc.text(&doc.rows[0], "scope").as_deref(), Some("backlog"));
+    let doc = run_task(
+        &fx,
+        "board",
+        vec![
+            ("show", SqlCell::Text("thread".into())),
+            ("thread_id", SqlCell::Null(())),
+        ],
+    )
+    .await;
+    assert_eq!(doc.text(&doc.rows[0], "scope").as_deref(), Some("all"));
+}
+
+async fn run_task(
+    fx: &crate::test_fixtures::TaskEffortFixture,
+    lens: &str,
+    params: Vec<(&str, SqlCell)>,
+) -> Run {
+    let svc = &fx.svc;
+    let run = run_lens(
+        &svc.sql,
+        &svc.extension_catalog,
+        svc.layout.project_dir.as_path(),
+        &format!("oxplow-foundation/{lens}"),
+        params
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v))
+            .collect(),
+        &LensContext::default(),
+    )
+    .await
+    .unwrap();
+    Run {
+        columns: run.result.columns,
+        rows: run.result.rows,
+    }
+}
+
+/// A wiki page: its body is the stored markdown (empty for a page not yet
+/// written, so the first Save creates it), with when it was edited and
+/// whether the files it cites have drifted.
+#[tokio::test]
+async fn the_wiki_page_reads_its_body_even_before_it_is_written() {
+    let fx = services_with_effort().await;
+    let slug = |s: &str| vec![("slug", SqlCell::Text(s.to_string()))];
+    command(
+        &fx,
+        "oxplow.knowledge.write_page",
+        serde_json::json!({ "slug": "otters", "title": "Otters", "body": "# Otters\n\nThey hold hands.\n" }),
+    )
+    .await;
+    let body = run(&fx, "wiki-page-body", slug("otters")).await;
+    assert_eq!(body.rows.len(), 1);
+    assert!(body
+        .text(&body.rows[0], "body")
+        .unwrap()
+        .contains("They hold hands."));
+    assert_eq!(body.text(&body.rows[0], "slug").as_deref(), Some("otters"));
+
+    let new = run(&fx, "wiki-page-body", slug("not-yet")).await;
+    assert_eq!(new.rows.len(), 1);
+    assert_eq!(new.text(&new.rows[0], "body").as_deref(), Some(""));
+    assert_eq!(new.text(&new.rows[0], "slug").as_deref(), Some("not-yet"));
+
+    let info = run(&fx, "wiki-page-info", slug("otters")).await;
+    assert_eq!(
+        info.text(&info.rows[0], "freshness").as_deref(),
+        Some("fresh")
+    );
+    assert!(run(&fx, "wiki-page-info", slug("not-yet"))
+        .await
+        .rows
+        .is_empty());
+    assert!(run(&fx, "wiki-page-refs", slug("otters"))
+        .await
+        .rows
+        .is_empty());
+}
+
+/// A work item's page: the parts read the item by its uri, its list's
+/// features switch the gated buttons, and links show from both ends.
+#[tokio::test]
+async fn the_work_item_page_reads_the_item_its_links_and_its_comments() {
+    let fx = crate::test_fixtures::services_with_task_effort().await;
+    let thread = fx.thread.to_string();
+    for title in ["The item", "Its blocker"] {
+        command_task(
+            &fx,
+            "oxplow.work_item.create",
+            serde_json::json!({ "title": title, "body": "Some words.", "thread": thread }),
+        )
+        .await;
+    }
+    let all = run_task(
+        &fx,
+        "board-cards",
+        vec![
+            ("scope", SqlCell::Text("all".into())),
+            ("thread_id", SqlCell::Int(fx.thread.value())),
+        ],
+    )
+    .await;
+    let uri = all.text(all.keyed("title", "The item"), "uri").unwrap();
+    let blocker = all.text(all.keyed("title", "Its blocker"), "uri").unwrap();
+    command_task(
+        &fx,
+        "oxplow.work_item.link",
+        serde_json::json!({ "uri": uri, "target": blocker, "link_type": "blocks" }),
+    )
+    .await;
+    command_task(
+        &fx,
+        "oxplow.work_item.comment",
+        serde_json::json!({ "uri": uri, "body": "A note." }),
+    )
+    .await;
+    let item = |lens: &'static str, uri: &str| {
+        let mut params = vec![("uri", SqlCell::Text(uri.to_string()))];
+        if lens == "work-item-info" {
+            params.push(("thread_id", SqlCell::Int(fx.thread.value())));
+        }
+        let fx = &fx;
+        async move { run_task(fx, lens, params).await }
+    };
+
+    let state = item("work-item-state", &uri).await;
+    assert_eq!(state.text(&state.rows[0], "to").as_deref(), Some("todo"));
+    let fields = item("work-item-fields-form", &uri).await;
+    assert_eq!(
+        fields.text(&fields.rows[0], "title").as_deref(),
+        Some("The item")
+    );
+    assert!(fields
+        .text(&fields.rows[0], "native")
+        .unwrap()
+        .starts_with('{'));
+    let body = item("work-item-body", &uri).await;
+    assert_eq!(
+        body.text(&body.rows[0], "body").as_deref(),
+        Some("Some words.")
+    );
+
+    // On the viewed thread: it can be sent to the backlog and deleted, not brought.
+    let info = item("work-item-info", &uri).await;
+    assert!(info.flag(&info.rows[0], "can_send"));
+    assert!(!info.flag(&info.rows[0], "can_bring"));
+    assert!(info.flag(&info.rows[0], "can_delete"));
+
+    // Both ends of the link show it; only the item's own end can be unlinked.
+    let links = item("work-item-links", &uri).await;
+    assert_eq!(links.rows.len(), 1);
+    assert!(links.flag(&links.rows[0], "outbound"));
+    let theirs = item("work-item-links", &blocker).await;
+    assert_eq!(theirs.rows.len(), 1);
+    assert!(!theirs.flag(&theirs.rows[0], "outbound"));
+    assert_eq!(
+        theirs.text(&theirs.rows[0], "other").as_deref(),
+        Some(uri.as_str())
+    );
+
+    let comments = item("work-item-comments", &uri).await;
+    assert_eq!(
+        comments.text(&comments.rows[0], "body").as_deref(),
+        Some("A note.")
+    );
+    assert!(item("work-item-activity", &uri).await.rows.is_empty());
+    assert!(item(
+        "work-item-state",
+        "oxplow:oxplow/work_item?id=nope&provider=oxplow"
+    )
+    .await
+    .rows
+    .is_empty());
+}
+
+async fn command_task(
+    fx: &crate::test_fixtures::TaskEffortFixture,
+    name: &str,
+    input: serde_json::Value,
+) -> serde_json::Value {
+    fx.svc
+        .commands
+        .run(&oxplow_domain::Actor::Human, name, input, false)
+        .await
+        .unwrap()
+        .result
+}
+
+/// Settings → Extensions: a collector turned off after failures says why
+/// and offers Enable Again and Repair; a credential an extension's
+/// collectors declare is listed once, with whether a value is kept (never
+/// the value).
+#[tokio::test(flavor = "multi_thread")]
+async fn the_extensions_area_lists_health_and_credentials() {
+    let dir = tempfile::tempdir().unwrap();
+    crate::test_fixtures::init_git_repo(dir.path());
+    let ext = dir.path().join(".oxplow/extensions/acme");
+    std::fs::create_dir_all(&ext).unwrap();
+    std::fs::write(
+        ext.join("extension.yaml"),
+        "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: { process: true, secrets: [TOKEN] }\ncollectors:\n  - id: s\n    runtime: exec\n    entry: sync.sh\n    credentials: [TOKEN]\n    entities:\n      - { name: row, key: id, columns: { id: int } }\n  - id: t\n    runtime: exec\n    entry: sync.sh\n    credentials: [TOKEN]\n    entities:\n      - { name: row2, key: id, columns: { id: int } }\n",
+    )
+    .unwrap();
+    std::fs::write(ext.join("sync.sh"), "#!/bin/sh\necho '{\"entities\":{}}'\n").unwrap();
+    let fx = crate::test_fixtures::services_with_effort_in(dir).await;
+    crate::test_fixtures::activate(&fx.svc).await;
+    fx.svc
+        .db
+        .transaction(|tx| {
+            oxplow_db::contribution_health_store::disable_tx(
+                tx,
+                &crate::collector_runner::contribution_key("acme", "s"),
+                "3 failures in a row; the last: boom",
+                "t",
+            )
+        })
+        .await
+        .unwrap();
+
+    let health = run(&fx, "extensions-health", vec![]).await;
+    let row = health.keyed("contribution", "s");
+    assert_eq!(
+        health.text(row, "status").as_deref(),
+        Some("Disabled: 3 failures in a row; the last: boom")
+    );
+    assert!(health.flag(row, "can_enable"));
+    // No open repair task yet: nothing to hand the agent.
+    assert!(!health.flag(row, "can_repair"));
+
+    let creds = run(&fx, "extensions-credentials", vec![]).await;
+    assert_eq!(
+        creds.rows.len(),
+        1,
+        "one TOKEN for the extension: {:?}",
+        creds.rows
+    );
+    assert_eq!(
+        creds.text(&creds.rows[0], "extension").as_deref(),
+        Some("acme")
+    );
+    assert_eq!(
+        creds.text(&creds.rows[0], "status").as_deref(),
+        Some("Not set")
+    );
+    command(
+        &fx,
+        "oxplow.collector.set_credential",
+        serde_json::json!({ "collector": creds.text(&creds.rows[0], "collector").unwrap(), "name": "TOKEN", "value": "v" }),
+    )
+    .await;
+    let creds = run(&fx, "extensions-credentials", vec![]).await;
+    assert_eq!(
+        creds.text(&creds.rows[0], "status").as_deref(),
+        Some("Saved in keychain")
+    );
+    assert!(creds.flag(&creds.rows[0], "is_set"));
+
+    assert!(run(&fx, "extensions-secrets", vec![]).await.rows.is_empty());
 }

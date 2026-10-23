@@ -15,24 +15,6 @@ pub async fn list_collectors(svc: &Services) -> Result<Vec<CollectorListing>, Ip
     Ok(collector_runner::list_collectors(&Collectors::of(svc, &root)).await?)
 }
 
-/// Set (or clear with `null`) a credential an extension's collector or
-/// provider declares.
-/// The value goes to the keychain and never comes back. UI only.
-pub async fn set_credential(
-    svc: &Services,
-    extension: String,
-    name: String,
-    value: Option<String>,
-) -> Result<(), IpcError> {
-    let root = svc.worktrees.resolve(None).await.into_local_path();
-    Ok(collector_runner::set_credential(
-        &Collectors::of(svc, &root),
-        &extension,
-        &name,
-        value.as_deref(),
-    )?)
-}
-
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -174,8 +156,8 @@ mod tests {
         crate::test_support::publish(&svc).await;
 
         crate::dispatch(
-            "set_credential",
-            json!({ "extension": "my-gh", "name": "GH_PAT", "value": "pat-xyz" }),
+            "run_command",
+            json!({ "id": "oxplow.collector.set_credential", "input": { "collector": "my-gh/s", "name": "GH_PAT", "value": "pat-xyz" }, "confirmed": true }),
             &svc,
         )
         .await
@@ -190,8 +172,8 @@ mod tests {
         assert!(!list.to_string().contains("pat-xyz"));
 
         let err = crate::dispatch(
-            "set_credential",
-            json!({ "extension": "my-gh", "name": "NOPE", "value": "x" }),
+            "run_command",
+            json!({ "id": "oxplow.collector.set_credential", "input": { "collector": "my-gh/s", "name": "NOPE", "value": "x" }, "confirmed": true }),
             &svc,
         )
         .await

@@ -41,6 +41,7 @@ const base: Lens = {
 const lenses: Record<string, Lens> = {
   "x/open": { ...base, id: "x/open", slug: "open", title: "Open", viz: "number", params: [{ name: "stream_id", label: null, default: null, options: [] }] } as Lens,
   "x/none": { ...base, id: "x/none", slug: "none", title: "Nothing", viz: "table" } as Lens,
+  "x/off": { ...base, id: "x/off", slug: "off", title: "Off", viz: "number" } as Lens,
   "x/cards": { ...base, id: "x/cards", slug: "cards", title: "Cards", viz: "number", params: [{ name: "change_id", label: null, default: null, options: [] }] } as Lens,
   "x/pick": {
     ...base,
@@ -67,6 +68,14 @@ mock.module("../api.js", () => ({
   runLens: async (id: string, params: Record<string, unknown>, stream: string | null): Promise<LensRun> => {
     runs.push({ id, params, stream });
     const lens = lenses[id]!;
+    if (id === "x/off") {
+      return {
+        lens,
+        params: params as LensRun["params"],
+        result: { columns: [], rows: [], truncated: false, reads: { models: [], tables: [], measures: [] }, freshness: {} },
+        inactive: { message: "Needs a work list with links.", needs: ["work_items.links"] },
+      } as unknown as LensRun;
+    }
     return {
       lens,
       params: params as LensRun["params"],
@@ -146,4 +155,14 @@ test("a document's row is its sections' params", async () => {
   const view = render(<LensResultView run={doc} streamId="str1" onOpenPage={() => {}} />);
   await waitFor(() => expect(view.getByTestId("lens-part-cards").textContent).toContain("7"));
   expect(runs.find((r) => r.id === "x/cards")).toEqual({ id: "x/cards", params: { change_id: 42 }, stream: "str1" });
+});
+
+test("a section that needs what isn't active is left out, and isn't counted as nothing found", async () => {
+  const { getByTestId, queryByTestId, queryByText } = render(
+    <LensResultView run={page("document", [part({ id: "open", lens: "x/open" }), part({ id: "off", lens: "x/off" })])} streamId="str1" onOpenPage={() => {}} />,
+  );
+  await waitFor(() => expect(getByTestId("lens-part-open").textContent).toContain("7"));
+  expect(queryByTestId("lens-part-off")).toBeNull();
+  expect(queryByTestId("lens-document-nothing-found")).toBeNull();
+  expect(queryByText(/Needs a work list/)).toBeNull();
 });

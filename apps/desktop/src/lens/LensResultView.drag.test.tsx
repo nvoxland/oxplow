@@ -3,6 +3,7 @@ import { cleanup, createEvent, fireEvent, render, waitFor } from "@testing-libra
 
 import type { Lens, LensAction, LensRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
 import { LENS_ROW_DRAG_MIME } from "../dragMimes.js";
+import { PageNavigationContext, type PageNavigation } from "../tabs/PageNavigationContext.js";
 
 // A lens's rows drag to where a drag action runs, mark for a bulk action,
 // and run a row action from its key; a board is columns of them.
@@ -185,4 +186,30 @@ test("a board is a column per group, its values first and empty ones too; a drop
   drag(view.getByTestId("lens-row-0")).dropOn(view.getByTestId("lens-board-column-doing"));
   await waitFor(() => expect(ran).toHaveLength(1));
   expect(ran[0]).toMatchObject({ action: "move", row: record(0), drop: { group: "doing", after: null } });
+});
+
+// A card's title is a link, and a link's own right-click opens its page in a
+// new tab; on a board the right-click on a card is the card's menu.
+test("a right-click on a board card's title link opens the card's menu, not its page", () => {
+  const opened: string[] = [];
+  const run = runOf({
+    viz: "board",
+    group: { by: "state", link: null, values: ["todo", "done"] },
+    columns: [{ key: "title", label: null, link: { kind: "page", from: "uri", line: null, base: null, head: null }, unit: null, icon: null, tone: null }] as never,
+    actions: [finish],
+  });
+  const withUris = {
+    ...run,
+    result: { ...run.result, rows: rows.map(([, title, state], i) => [`oxplow:oxplow/work_item?id=tsk${i + 1}&provider=oxplow`, title, state]) },
+  } as LensRun;
+  const nav = { navigate: () => {}, openRef: (ref: string) => opened.push(ref) } as unknown as PageNavigation;
+  const view = render(
+    <PageNavigationContext.Provider value={nav}>
+      <LensResultView run={withUris} onOpenPage={(r) => opened.push(r.id)} />
+    </PageNavigationContext.Provider>,
+  );
+  const title = view.getByTestId("lens-row-0").querySelector("button, a") as HTMLElement;
+  fireEvent.contextMenu(title);
+  expect(view.getByTestId("menu-item-lens-action-finish")).toBeTruthy();
+  expect(opened).toEqual([]);
 });

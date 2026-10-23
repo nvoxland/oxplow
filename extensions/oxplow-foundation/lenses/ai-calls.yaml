@@ -1,0 +1,20 @@
+title: Recent calls
+description: The last 7 days of oxplow's own model calls, by role and what asked.
+query: |
+  SELECT role, caller, count(*) AS calls, sum(1 - ok) AS failed,
+         sum(input_tokens) AS input_tokens, sum(output_tokens) AS output_tokens, max(at) AS last_at
+  FROM v_ai_call
+  WHERE at >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-7 days')
+  GROUP BY role, caller
+  ORDER BY last_at DESC
+viz: table
+columns:
+  - { key: role, label: Role, width: 110 }
+  - { key: caller, label: Asked by }
+  - { key: calls, label: Calls, width: 70 }
+  - { key: failed, label: Failed, width: 70 }
+  - { key: input_tokens, label: In, format: integer, width: 90 }
+  - { key: output_tokens, label: Out, format: integer, width: 90 }
+  - { key: last_at, label: Last, format: relative, width: 110 }
+empty: No calls in the last 7 days.
+hidden: true

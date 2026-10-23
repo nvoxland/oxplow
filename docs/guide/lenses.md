@@ -195,7 +195,8 @@ actions:
 ```
 
 `{{param.x}}` and `{{row.col}}` fill the input from the lens's params or
-the row. A command that asks for confirmation asks you before it runs.
+the row. `{{row.col|json}}` is the JSON a text column holds, as the value
+it is (a list the row's query built, such as an order). A command that asks for confirmation asks you before it runs.
 
 Three more ways to reach a row action:
 
@@ -456,14 +457,13 @@ page's id as a param, so it must declare it:
 | Slot | Page | Param |
 |---|---|---|
 | `effort.review.details` | an effort's diff view | `effort_id`, `change_id` |
-| `work_item.detail.body` | a work item's page, below its body | `uri` |
-| `work_item.detail.sidebar` | a work item's page, its side rail | `uri` |
+| `oxplow-foundation/work-item.sections` | a work item's page, as sections (`state`, `fields`, `body`, `info`, `links`, `comments`, `activity`) | `uri` |
 | `thread.plan.header` | a thread's plan, as a compact strip | `thread_id` |
 | `oxplow-foundation/commit.sections` | a commit's page, as sections (`detail`, `files`) | `change_id` (the page's row) |
 | `oxplow-foundation/uncommitted.sections` | Uncommitted Changes, as sections (`commit`, `files`); `at: { before: commit }` for a strip above everything | `change_id` (the page's row) |
 | `vcs.history.sidebar` | Git history's side column | `stream_id` |
 | `diff.file.header` | a file diff, above the editor | `path`, `left_revision`, `right_revision`, `stream_id` |
-| `settings.<area>.sections` | A Settings area's page, as sections: `overview` and `lsp` (no parts of their own), `agents` (`agents`, `new-threads`, `prompt`), `extensions` (`health`), `data` (`data`), `integrations` (`capabilities`, `integrations`), `ai` (`ai`) | none; `overview` passes `q`, its search |
+| `settings.<area>.sections` | A Settings area's page, as sections: `overview`, `agents`, `lsp`, `ai` and `extensions` (no parts of their own), `data` (`data`), `integrations` (`capabilities`, `integrations`) | none; `overview` passes `q`, its search |
 
 A lens declares the params its slot passes (a Settings area's lens needs none). `at` works only on a parts slot such as `settings.agents.sections`, or a foundation page's own (`oxplow-foundation/new-session.sections`, part ids `start`, `earlier`, binding `thread_id`). A region slot refuses it. `change_id` points at
 the page's change in `v_change`, with its analysis in `v_change_file`,
@@ -472,7 +472,7 @@ the page's change in `v_change`, with its analysis in `v_change_file`,
 
 ```yaml
 slots:
-  - { slot: work_item.detail.sidebar, lens: item-tokens }
+  - { slot: oxplow-foundation/work-item.sections, lens: item-tokens }
 ```
 
 ### Turning an extension off
@@ -686,7 +686,7 @@ a bookmark doesn't freeze it to one date.
 
 An extension can put its own lens where one of oxplow's views is: the
 Board's cards (`work_item.board`), the Tasks list (`work_item.list`) or a
-task's editor (`work_item.detail`). It needs no work-items provider of its
+task's description editor (`work_item.detail`). It needs no work-items provider of its
 own: a view reads `v_work_item` and changes items through the work-item
 commands (`oxplow.work_item.update`, `transition`, `reorder`, `move`), so it
 works with whichever list is active.

@@ -1,0 +1,17 @@
+title: Comments
+description: The notes on the item, oldest first. Comment… adds one, sent to the item's list.
+needs: [work_items.comments]
+params:
+  - { name: uri }
+query: |
+  SELECT c.id, c.author, c.body, c.created_at
+  FROM v_work_item_comment c WHERE c.uri = :uri ORDER BY c.created_at, c.id
+viz: list
+columns:
+  - { key: author, label: Who, width: 90 }
+  - { key: body, label: Says }
+  - { key: created_at, label: When, format: relative, width: 110 }
+actions:
+  - { id: comment, label: Comment…, command: oxplow.work_item.comment, form: true, fixed: [uri], input: { uri: "{{param.uri}}" } }
+empty: No comments.
+hidden: true

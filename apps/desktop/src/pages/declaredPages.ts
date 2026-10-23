@@ -14,8 +14,6 @@ export const APP_RENDERERS = [
   "editor",
   "lens",
   "metric-detail",
-  "wiki-page",
-  "work-item",
 ] as const;
 
 export type AppRendererName = (typeof APP_RENDERERS)[number];
@@ -27,7 +25,6 @@ export function isAppRenderer(name: string): name is AppRendererName {
 /// The rest of the built-ins (`builtInPages.tsx`).
 export const BUILT_IN_PAGES = [
   "backlog",
-  "board",
   "custom-dashboard",
   "diff-view",
   "explore-data",

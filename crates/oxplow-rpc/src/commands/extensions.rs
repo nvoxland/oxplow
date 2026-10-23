@@ -30,56 +30,6 @@ pub async fn list_extensions(svc: &Services) -> Result<Vec<Extension>, IpcError>
     Ok(svc.listed_extensions(root(svc)).await)
 }
 
-/// Human settings ingress: secrets go directly to the keychain. This has no
-/// command-bus, extension-service or MCP route, and returns identity only.
-pub async fn save_extension_secret(
-    svc: &Services,
-    extension: String,
-    reference: Option<oxplow_domain::extension_secret::SecretRef>,
-    value: String,
-) -> Result<oxplow_domain::extension_secret::SecretRef, IpcError> {
-    let reference = svc
-        .extension_secrets
-        .save(&extension, reference, &value)
-        .await?;
-    secret_changed(svc, extension, reference.clone()).await?;
-    Ok(reference)
-}
-
-pub async fn extension_secret_is_set(
-    svc: &Services,
-    extension: String,
-    reference: oxplow_domain::extension_secret::SecretRef,
-) -> Result<bool, IpcError> {
-    Ok(svc.extension_secrets.is_set(&extension, &reference).await?)
-}
-
-pub async fn revoke_extension_secret(
-    svc: &Services,
-    extension: String,
-    reference: oxplow_domain::extension_secret::SecretRef,
-) -> Result<(), IpcError> {
-    svc.extension_secrets.revoke(&extension, &reference)?;
-    secret_changed(svc, extension, reference).await?;
-    Ok(())
-}
-
-async fn secret_changed(
-    svc: &Services,
-    extension: String,
-    reference: oxplow_domain::extension_secret::SecretRef,
-) -> Result<(), IpcError> {
-    let providers = svc.providers.clone();
-    // Dropping the RPC cannot drop cleanup after the keychain mutation.
-    tokio::spawn(async move {
-        providers
-            .extension_secret_changed(&extension, &reference)
-            .await;
-    })
-    .await
-    .map_err(|_| IpcError::internal("extension secret consumers could not be refreshed"))
-}
-
 /// A service a script may be given, as a person reads it
 /// (`oxplow_domain::service::SERVICES`, the table every reader uses).
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type)]

@@ -37,7 +37,7 @@ import {
 import { collectorRowModel, COLLECTOR_RUNS } from "./extensionRowModel.js";
 import { DeliveryList } from "./DeliveryList.js";
 import { DataTable, type DataColumn } from "../kit/index.js";
-import { EnableAllButton } from "./ExtensionsSection.js";
+import { EnableAllButton } from "./EnableAllButton.js";
 import { recordOpError } from "../opErrors.js";
 import { showToast } from "./toastStore.js";
 

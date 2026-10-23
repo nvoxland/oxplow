@@ -60,7 +60,8 @@ async function swimlanes(page: Page, daemon: Workspace, scope: string) {
   await choose(page, "work_item.board", "task-views");
   await openFromLauncher(page, "Board");
   await expect(page.getByTestId("replacement-work_item.board")).toContainText("replaced by task-views");
-  await page.getByTestId("board-scope").selectOption(scope);
+  await page.getByTestId("lens-param-show-value").filter({ visible: true }).click();
+  await page.getByTestId("lens-param-show-edit").filter({ visible: true }).selectOption(scope);
   await expect(page.getByTestId("replacement-work_item.board")).toContainText("replaced by task-views");
   const frame = page.frameLocator('[data-testid="custom-component-frame"]');
   const card = frame.locator(".card", { hasText: "Card one" });
@@ -130,15 +131,15 @@ test("the editor, the list and oxplow's own, each chosen from Settings", async (
   await page.goto("/");
   for (const target of TARGETS) await choose(page, target, "task-views");
 
-  // The item's page: the form in place of the editor, the rail still oxplow's.
+  // The item's page: the form in place of the description editor, the other parts still oxplow's.
   await openFromLauncher(page, "Item to edit");
   const detail = page.getByTestId("replacement-work_item.detail");
   await expect(detail).toContainText("replaced by task-views");
-  // Only the title and body are shown; the item's ref is fixed, not editable.
+  // Only the fields the form names are shown; the item's ref is fixed, not editable.
   await expect(detail.getByTestId("lens-form-fields-uri")).toHaveCount(0);
   await expect(detail.getByTestId("lens-form-fields-title")).toHaveValue("Item to edit");
-  await expect(page.getByLabel("State")).toBeVisible();
-  await expect(detail.getByLabel("State")).toHaveCount(0);
+  await expect(page.getByTestId("lens-part-state")).toBeVisible();
+  await expect(detail.getByTestId("lens-part-state")).toHaveCount(0);
   // It edits what is saved: Save waits for a change; what was typed is the
   // tab's, so a reload gives it back; Discard puts the saved title back.
   const save = detail.getByTestId("lens-form-fields-submit");
@@ -176,7 +177,7 @@ test("the editor, the list and oxplow's own, each chosen from Settings", async (
   await expect(page.locator('[data-testid^="replacement-"]:visible')).toHaveCount(0);
   await expect(page.getByTestId(/^tasks-row-/).first()).toBeVisible();
   await openFromLauncher(page, "Board");
-  await expect(page.getByTestId("work-board")).toBeVisible();
+  await expect(page.getByTestId("lens-board")).toBeVisible();
   await expect(page.locator('[data-testid^="replacement-"]:visible')).toHaveCount(0);
   await searchable(daemon, "Item edited again", "work_item");
   await openFromLauncher(page, "Item edited again");

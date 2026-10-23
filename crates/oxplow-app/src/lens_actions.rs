@@ -521,6 +521,15 @@ async fn form_start_unpinned(
             }
         }
     }
+    // An object field's column holds JSON text (a work item's `native`):
+    // the form starts from the object.
+    for field in form.fields.iter().flatten().filter(|f| f.from().is_some()) {
+        if let Some(Value::String(text)) = values.get(field.name()) {
+            if let Ok(object @ Value::Object(_)) = serde_json::from_str::<Value>(text) {
+                values.insert(field.name().to_string(), object);
+            }
+        }
+    }
     // A secret is the command's to keep out of its record, and never
     // starts with a value.
     for field in form.fields.iter().flatten().filter(|f| f.secret()) {
@@ -1005,7 +1014,8 @@ pub async fn load_component_pinned(
 }
 
 /// `input` with its placeholders bound: a string that is exactly
-/// `{{param.x}}` / `{{row.x}}` becomes that value (typed), `{{param.x.id}}`
+/// `{{param.x}}` / `{{row.x}}` becomes that value (typed), `{{row.x|json}}`
+/// the JSON that text cell holds (an array a row built), `{{param.x.id}}`
 /// the key of the URI param `x` (a bare id), and a string that
 /// contains them has them spliced in as text. The values are data — they
 /// go into the command's input, never into SQL.
@@ -1044,6 +1054,15 @@ pub fn bind_input(
     };
     Ok(match input {
         Value::String(s) => match oxplow_domain::template::whole_placeholder(s) {
+            Some(p) if p.filter.as_deref() == Some("json") => match lookup(&p.scope, &p.name)? {
+                SqlCell::Text(t) => {
+                    serde_json::from_str(&t).map_err(|e| CommandError::Invalid {
+                        field: Some("/input".into()),
+                        message: format!("`{{{{{}.{}|json}}}}` isn't JSON: {e}", p.scope, p.name),
+                    })?
+                }
+                other => serde_json::to_value(other).unwrap_or(Value::Null),
+            },
             Some(p) => serde_json::to_value(lookup(&p.scope, &p.name)?).unwrap_or(Value::Null),
             None => Value::String(oxplow_domain::template::splice(s, |p| {
                 lookup(&p.scope, &p.name).map(|c| text(&c))
@@ -1758,6 +1777,33 @@ actions:
         assert_eq!(bound, json!({ "a": 3, "b": "tsk42", "c": [42], "d": 1 }));
         let err = bind_input(&json!({ "a": "{{row.id}}" }), &params, None, None).unwrap_err();
         assert!(err.to_string().contains("row.id"), "{err}");
+    }
+
+    /// `{{row.x|json}}` is the JSON a text cell holds, typed: how a row
+    /// hands a command a list it built (the Agents page's new order).
+    #[test]
+    fn a_json_filter_binds_a_cells_json() {
+        let row = BTreeMap::from([(
+            "order".to_string(),
+            SqlCell::Text("[\"claude\",\"codex\"]".into()),
+        )]);
+        let bound = bind_input(
+            &json!({ "agents": "{{row.order|json}}" }),
+            &BTreeMap::new(),
+            Some(&row),
+            None,
+        )
+        .unwrap();
+        assert_eq!(bound, json!({ "agents": ["claude", "codex"] }));
+        let bad = BTreeMap::from([("order".to_string(), SqlCell::Text("not json".into()))]);
+        let err = bind_input(
+            &json!({ "agents": "{{row.order|json}}" }),
+            &BTreeMap::new(),
+            Some(&bad),
+            None,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("isn't JSON"), "{err}");
     }
 
     /// `{{param.x.id}}` is the key of the URI param `x` — a fixed field's

@@ -1,0 +1,13 @@
+title: Page
+description: The page's markdown. Edit it here and Save; a page not yet written is made by its first Save.
+params:
+  - { name: slug }
+query: |
+  SELECT :slug AS slug, coalesce(b.body, '') AS body
+  FROM (SELECT 1) LEFT JOIN v_knowledge_body b ON b.uri = uri('oxplow/wiki', 'slug', :slug)
+viz: markdown
+markdown: { text: body }
+actions:
+  - { id: save, label: Save, command: oxplow.knowledge.write_page, edit: true, fixed: [slug], input: { slug: "{{row.slug}}", body: "{{row.body}}" } }
+  - { id: delete, label: Delete Page, command: oxplow.knowledge.delete_page, input: { slug: "{{param.slug}}" } }
+hidden: true

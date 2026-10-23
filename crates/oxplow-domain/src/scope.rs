@@ -187,6 +187,13 @@ pub const SCOPES: &[Scope] = &[
         summary: "Change the project's configuration file (`.oxplow/project.yaml`).",
     },
     Scope {
+        id: "credentials.write",
+        access: Access::Write,
+        host: Host::Daemon,
+        spends: false,
+        summary: "Set or clear a credential or secret an extension keeps in the OS keychain: written, never read back, kept out of every record.",
+    },
+    Scope {
         id: "dashboards.write",
         access: Access::Record,
         host: Host::Daemon,

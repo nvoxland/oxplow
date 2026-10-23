@@ -306,7 +306,7 @@ row count when that model's own `ModelsChanged` names it
 (`DataSection`, from each count query's `reads`). A collector run
 (frequent) therefore re-lists the collectors and nothing else — it does
 not list the extensions again, re-check each one or recount every model
-(pinned by `ExtensionsSection.runs.test.tsx` and `DataSection.test.tsx`).
+(pinned by `DataSection.test.tsx`).
 The daemon still re-reads `project.yaml` on each extension-catalog call;
 serving it from the loaded copy is open.
 

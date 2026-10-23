@@ -1,8 +1,7 @@
 /**
  * Knowledge pages (the wiki) read through the models (P6.E2,
  * `.context/knowledge.md`): `v_knowledge_page` for the index,
- * `v_knowledge_body` for a page's markdown, `v_knowledge_ref` for its
- * freshness.
+ * `v_knowledge_body` for a page's markdown.
  * Writes are `knowledge.*` commands (`writeWikiPage`).
  */
 import { querySql } from "./api.js";
@@ -10,20 +9,6 @@ import { wikiUri } from "./uri/uri.js";
 import { unionReads } from "./lens/lensRerun.js";
 import type { CapabilityProvider } from "./workItems.js";
 import type { Reads, SqlCell, SqlQueryResult } from "./tauri-bridge/generated/bindings.js";
-
-/** One file ref of a page and whether its file drifted since it was
- *  pinned (`v_knowledge_ref`). */
-export interface WikiRefFreshness {
-  path: string;
-  /** The snapshot it was pinned to (written or verified against). */
-  pinned_snapshot_id: number | null;
-  /** The VCS revision nearest the pin, and whether the pin is exactly it. */
-  pinned_vcs_rev: string | null;
-  pinned_vcs_rev_exact: boolean;
-  /** The file's latest primary-stream snapshot. */
-  latest_snapshot_id: number | null;
-  stale: boolean;
-}
 
 /** One page as the index lists it. */
 export interface WikiPageSummary {
@@ -94,29 +79,6 @@ export async function readWikiPage(
   const summary = pagesFromResult(pages)[0];
   if (!summary) return { page: null, reads };
   return { page: { summary, body: String(body.rows[0]?.[0] ?? "") }, reads };
-}
-
-export function freshnessFromResult(result: SqlQueryResult): WikiRefFreshness[] {
-  const num = (v: SqlCell | undefined) => (v === null || v === undefined ? null : Number(v));
-  return result.rows.map((row) => ({
-    path: String(cell(result, row, "path")),
-    pinned_snapshot_id: num(cell(result, row, "pinned_snapshot_id")),
-    pinned_vcs_rev: cell(result, row, "pinned_vcs_rev") === null ? null : String(cell(result, row, "pinned_vcs_rev")),
-    pinned_vcs_rev_exact: Number(cell(result, row, "pinned_vcs_rev_exact") ?? 0) === 1,
-    latest_snapshot_id: num(cell(result, row, "latest_snapshot_id")),
-    stale: Number(cell(result, row, "stale") ?? 0) === 1,
-  }));
-}
-
-/** A page's file refs and whether each has drifted since it was pinned. */
-export async function readWikiFreshness(slug: string): Promise<{ rows: WikiRefFreshness[]; reads: Reads }> {
-  const res = await querySql(
-    `SELECT path, pinned_snapshot_id, pinned_vcs_rev, pinned_vcs_rev_exact, latest_snapshot_id, stale
-       FROM v_knowledge_ref WHERE page = ?1 ORDER BY path`,
-    [wikiUri(slug)],
-    10_000,
-  );
-  return { rows: freshnessFromResult(res), reads: res.reads };
 }
 
 /** What the wiki's surfaces say when knowledge's active row is `none`. */

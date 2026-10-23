@@ -2131,7 +2131,7 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   (`columns` entry for `tree.label`), so its `link`, `icon` and `tone`
   apply.
 - `actions`: commands the lens offers, `{ id, label, command, input?,
-  row?, group?, form?, fixed?, choices?, then?, when?, primary?, drag?, bulk?, key? }`, with `{{param.x}}` / `{{row.x}}` placeholders (and a drag action's `{{before.x}}`, `{{after.x}}`, `{{onto.x}}`, `{{group.value}}`, above); run as the lens
+  row?, group?, form?, fixed?, choices?, then?, when?, primary?, drag?, bulk?, key? }`, with `{{param.x}}` / `{{row.x}}` placeholders (`{{row.x|json}}`: the JSON a text cell holds, typed — the one filter, checked at load, bound in `bind_input`; and a drag action's `{{before.x}}`, `{{after.x}}`, `{{onto.x}}`, `{{group.value}}`, above); run as the lens
   for whoever pressed, so they grant no power. `form: true` opens the
   command's form instead of running (a slideover: `lens_action_form`
   gives the command and the bound `input` as starting values); what the
@@ -2273,13 +2273,12 @@ they live under `ui:`.
 | Slot | Core page | Params |
 |---|---|---|
 | `effort.review.details` | diff-view for an effort | `effort_id`, `effort`, `change_id` |
-| `work_item.detail.body` | WorkItemPage, below the body | `uri` | — |
-| `work_item.detail.sidebar` | WorkItemPage, in the side rail | `uri` | — |
+| `oxplow-foundation/work-item.sections` | the Work Item page (a document: parts `state`, `fields`, `body`, `info`, `links`, `comments`, `activity`) | its params (`uri`, `thread_id`, `stream_id`) |
 | `thread.plan.header` | PlanPane (compact strip) | `thread_id` |
 | `oxplow-foundation/commit.sections` | the commit page (a document: parts `detail`, `files`) | its params (`uri`, `sha`, `stream_id`) and its row (`change_id`, `base_revision`, `head_revision`) |
 | `oxplow-foundation/uncommitted.sections` | the Uncommitted Changes page (a document: parts `commit`, `files`) | its params (`stream_id`) and its row (`change_id`, `base_revision`, `head_revision`) |
 | `diff.file.header` | a file diff (`DiffPane`), a strip under its header (P9.A2; `DiffFileHeaderSlot`) | `path`, `left_revision`, `right_revision` (each a revision in its wire form: `working`, `snap:<id>`, `git:<sha>`), `stream_id` |
-| `settings.<area>.sections` (core's parts per area: `agents` `agents`, `new-threads`, `prompt`; `extensions` `health`; `data` `data`; `integrations` `capabilities`, `integrations`; `ai` `ai`; `overview` and `lsp` have none — their sections are oxplow-foundation's lenses) | each Settings area's page (`pages/settingsAreas.ts` lists the same ids; a TS test checks they match): an extension's status or setup views go beside the area they belong to | none (`overview`: `q`, the page's search) |
+| `settings.<area>.sections` (core's parts per area: `data` `data`; `integrations` `capabilities`, `integrations`; `overview`, `agents`, `lsp`, `ai` and `extensions` have none — their sections are oxplow-foundation's lenses) | each Settings area's page (`pages/settingsAreas.ts` lists the same ids; a TS test checks they match): an extension's status or setup views go beside the area they belong to | none (`overview`: `q`, the page's search) |
 
 The launcher isn't a slot: a lens lists itself with `launcher.category`.
 
@@ -2313,15 +2312,15 @@ it props it doesn't know.
 
 | Target | Core component | Capability | Bound | Props | View |
 |---|---|---|---|---|---|
-| `work_item.board` | the Board's columns of cards (`WorkBoard`, `BoardPage`) | `work_items` | no | `scope` (`thread` / `backlog` / `all`), `thread_id` (the thread when `scope` is `thread`, else null) | — |
+| `work_item.board` | the Board's columns of cards (the `board-cards` part of the `board` document) | `work_items` | no | `scope` (`thread` / `backlog` / `all`), `thread_id` (the viewed thread; it applies when `scope` is `thread`) | — |
 | `work_item.list` | the Tasks page's list (`TasksList`, `TasksPage`): the scope picker, detail pane and backlog drawer stay oxplow's; the lens's `stream_id` is the scope's stream | `work_items` | no | `scope` (`thread` / `stream` / `all`), `thread_id` (the thread when `scope` is `thread`, else null) | — |
-| `work_item.detail` | a work item's editor, its title and body (`TaskDetail`, `WorkItemPage`): the rail (state pill, Move To, fields, Delete), Comment / Link, slots and activity stay oxplow's | `work_items` | no | `uri` (the item) | — |
-| `work_item.detail.state` | a work item's State (`WorkItemPage`'s rail; P10) — never its Move To, which stays oxplow's canonical states, so a replacement can't strand an item (tsk919) | `work_items` | yes | `uri` (the item) | — |
+| `work_item.detail` | a work item's description editor (the `body` part of the `work-item` document): the state, fields, About, links, comments, activity and the mounts stay oxplow's | `work_items` | no | `uri` (the item) | — |
+| `work_item.detail.state` | a work item's State (the `state` part of the `work-item` document) — never its Move To (the About part's menu), so a replacement can't strand an item | `work_items` | yes | `uri` (the item) | — |
 | `effort.verdict` | an effort's verdict, the first line of its page (`DiffViewPage`). Core has **none of its own**: with no replacement, or `oxplow` chosen, the page shows nothing. oxplow-bundled's `effort-verdict` is the default | `effort_policy` | no | `effort_id` (the effort's row id) | — |
 | `vcs.history.graph` | Git History's commits (a part of the `git-history` document): oxplow's own is a plain list, the part's lens (`git-history-commits`) | `vcs` | no | `head_sha` (the stream's head), `reveal_sha` (a commit to scroll to and mark, or null), `limit` | `q`, `author`, `branch` (Git History's filters; v2) |
 
 **Who places a target.** A core component (`<Replaceable target …
-fallback>`, `BoardPage`) or a **lens part** of a declared page: a
+fallback>`) or a **lens part** of a declared page: a
 `document` section or `dashboard` tile with `replaceable: <target>`
 (`LensPart.replaceable`, `PartsViz`). The part's own lens is oxplow's own
 and the fallback; it must declare every prop of the target's contract
@@ -2373,11 +2372,11 @@ lensId, label }`).
 
 **At render** (`lens/useReplacement.ts`, `components/Replaceable.tsx`).
 A core page wraps the component: `<Replaceable target props streamId
-fallback={<WorkBoard …/>}>` (`BoardPage`). `useReplacement` reads the
+fallback={…}>` (a core page that still places one). `useReplacement` reads the
 enabled extensions' replacements of the target and, only when one
 exists, what decides it:
 - **bound**: the host passes the provider of the thing it shows
-  (`<Replaceable provider={item.provider}>` on `work_item.detail.state`):
+  (`<Replaceable provider={item.provider}>` on `work_item.detail.state`, as the document's `state` part):
   the **item's own provider** decides, whichever is active, so another
   provider's item never gets a lens that sends this one's states
   (tsk918). Which extension brings it is read from
@@ -4717,7 +4716,13 @@ What moves out of core, and what it becomes:
 | Git Commit and Uncommitted Changes pages | **done:** the `commit` and `uncommitted` documents (a `query` row for the change, declared in `columns:`; parts `commit-detail`, `commit-files`, `uncommitted-commit`, `uncommitted-files`); the analysis moves to the `oxplow-foundation/commit.sections` and `oxplow-foundation/uncommitted.sections` mounts (the old `vcs.commit.details`, `vcs.status.header` and `vcs.status.details` slots are gone); the commit tab is labelled by its sha, not its subject, and the file totals line and Cherry-pick's inline confirm are gone; `GitCommitPage` and `UncommittedChangesPage` are deleted |
 | Comments inbox | **done:** the `comments` document lens (`comments-threads`, a grouped table over `v_comment` with `select` on the `comment` param; `comments-conversation`, over `v_comment_message`); the resolved filter is a static `choice` ladder (the old one was cut to the oldest resolved comment) and "Go to location" is a plain link, so it no longer scrolls to the anchor; `CommentsInboxPage` and `comments-filter` are gone |
 | Directory page | **done:** the `directory` lens, the renderer of `oxplow/dir` (`pages:` entry `lens: directory`, `label: "{{param.path}}"`); `DirectoryPage` is gone |
+| Work Item page | **done:** the `work-item` document (parts `state`, `fields`, `body`, `info`, `links`, `comments`, `activity`) with `comments: true`; `state` and `body` are the `work_item.detail.state` and `work_item.detail` replaceables, a part whose list lacks the feature (`needs: [work_items.links]`, `[work_items.comments]`) is left out, and `info` offers Bring to this thread, Send to backlog and Delete from its right-click menu by what the list declares. The `work_item.detail.body` / `.sidebar` slots became `oxplow-foundation/work-item.sections`; the tab is labelled by the item's id, not its title; `WorkItemPage` is deleted |
+| Wiki page | **done:** the `wiki-page` document (parts `body`, `info`, `refs`) with `comments: true`; the editor is the `markdown` viz, so saving, drafts, comments and Contents come from the one component. The freshness chip moved into the `info` section; `WikiPage`, `WikiPageTab`, `useWikiPageController` and `wikiFreshness` are gone |
+| Board page | **done:** the `board` document, one `replaceable: work_item.board` part `board-cards` (`viz: board` grouped by state, a `drag: true` move action and `Move to` row actions); `scope` comes from the page's `show` filter through the document's query row. Cards show the declared enum fields as text (no `FieldBadge` colours). `BoardPage` and `WorkBoard` are gone; a right-click anywhere on a lens row, a link in it included, opens the row's menu (`onContextMenuCapture`) |
+| Settings → AI | **done:** foundation lenses in `settings.ai.sections`: `ai-providers` (`v_ai_provider`; Test… and Remove… row actions, Remove asks first), `ai-provider-form` (a `form` lens over `oxplow.ai.set_provider`, its `key` a `secret: true` field, `kind` chosen from `v_capability_provider`), `ai-roles` (`v_ai_role`; Assign… / Unassign over `oxplow.ai.set_role`), `ai-calls` (the last 7 days of `v_ai_call`). `set_provider` and `remove_provider` now announce `ConfigChanged` so the lists follow. `AiSection`, `aiSettingsModel` and the AI `api.ts` wrappers are gone |
+| Settings → Agents | **done:** foundation lenses in `settings.agents.sections`: `agents-list` (the harnesses from `v_agent_harness`; Enable / Disable / Move Up / Move Down each hand `oxplow.agent.set_agents` the whole new order, built in SQL and bound with `{{row.x|json}}`), `agents-settings` (the declared settings, `v_agent_harness.settings` (v2) joined with `agentConfig`, a `Change…` form over `oxplow.agent.set_setting`), `agents-new-thread` (`personal.newThreadSession`, `Use This` on `oxplow.config.set` / `unset`, which ask first), `agents-prompt` (an edit form over the new `oxplow.agent.set_prompt_append`). No page-wide Save: each part saves itself. `AgentPicker`, `NewThreadSessionSetting` and the Agents form are gone |
 | Settings → Overview and Language Servers | **done:** the areas have no React sections; oxplow-foundation mounts lenses in their slots. Overview: `settings-proposals` (the `approvals` viz) and `settings-values` (a grouped `list` over `v_config_value`: its source, value, doc, Ask the Agent to Change This through `oxplow.agent.draft`, and Change It Here — a link to the area that holds a setting's control; the page's search is the slot param `q`, which the lens reads as `:q`). Language servers: `lsp-servers` (`v_lsp_server`, a row per stream a server runs in; Restart and Remove through `oxplow.lsp.restart_server` / `remove_server`), `lsp-install` (a form over `oxplow.lsp.install_server`) and `lsp-suggestions` (the curated Mason packages for languages with no server). The shell (`SettingsPage`, the rail, the other areas) stays until they convert |
+| Settings → Extensions health and credentials | **done:** foundation lenses in `settings.extensions.sections`: `extensions-health` (`v_contribution_health`, grouped by extension; Enable Again, Repair with the Agent through `oxplow.agent.draft`, Enable All Disabled), `extensions-credentials` (the credentials collectors declare, once per extension; Set… and Clear through `oxplow.collector.set_credential`) and `extensions-secrets` (`v_extension_secret`; Set… and Revoke). The per-extension Enable All button is gone (the all button stays); `ExtensionsSection`, `HealthRow`, `SecretRow` and the `save_extension_secret`, `extension_secret_is_set`, `revoke_extension_secret` and `set_credential` IPCs are deleted; `EnableAllButton` and `CredentialRow` (provider instances) moved to their own files for Settings → Data and Integrations |
 | Rail panels: Comments, Work, Uncommitted, Go To | **done:** Go To (`go-to`, the thread's bookmarks then its recent or most visited pages through the `mode` choice param, `go-to-bookmarks` collapsed — needing bookmarks as project data (`v_bookmark`), lens param `options` and page-kind icons; the rail has no core panels left); Comments (`comments`, a panel `open`ing the inbox) and Work (`work` grouped over the `thread_work` model, which also lists the thread's unlinked efforts — open under In progress, closed under Finished, whose header opens the `thread-activity` lens of the thread's turns by effort — `work-line` collapsed, `work-count`, the `clear_finished` command + `finished_cleared` model); and Uncommitted (`uncommitted`, a tree over the working change's stage-one file list, which change analysis now keeps current on every move). Only the UI moves: stores, commands and views stay core. What Work needed and lenses lacked became general features, listed under "Added for extraction" — the pattern for any panel an extension builds |
 | The effort-close inference of unrecorded decisions and of the claims an agent's answers made (the `effort.decisions` reactor) | **done:** the AI profile `reasoning` (fallback `main`), the job `reasoning`, the command `oxplow.effort.infer_reasoning` and the effects `infer-reasoning` / `store-reasoning`, writing through core's `oxplow.effort.replace_inferred_decisions` and `oxplow.effort.replace_inferred_claims`; review and storage stay core ([ai-providers.md](./ai-providers.md) "Inferred reasoning") |
 
@@ -5279,19 +5284,21 @@ owning extension. Copying team configuration cannot approve use or read another
 namespace. Disabled/uninstalled owners cannot save or inspect a reference;
 explicit human revocation can delete a retained keychain value after uninstall.
 
-`ExtensionSecrets` has human settings ingress only: save/rotate returns a
-reference, inspection returns presence, revocation returns no value. The RPC
-methods are `save_extension_secret`, `extension_secret_is_set` and
-`revoke_extension_secret`; no native command, script service or MCP route exists.
-Secret bytes and keychain error details are never returned or audited. Values
-are bounded to 16 KiB. The three RPCs are desktop IPC entries (classified `ui`
-in the surface-parity manifest: an agent has no route to a secret). Settings →
-Extensions shows one `SecretRow` per credential an extension's provider
-declares with a `secretRef` (`secretCredentials`): "Set" / "Not set" from
-`extension_secret_is_set`, Set/Rotate as a masked `InlineEdit` (Enter commits,
-Escape cancels) that saves under the declared reference, and Revoke behind an
-`InlineConfirm`. Failures go to the op-errors list; the row re-checks presence
-on `extensionsChanged`. The value is never read back to the page.
+`ExtensionSecrets` keeps the values; whoever sets one does it with a command,
+`oxplow.extension.set_secret { extension, reference?, value }` (a fresh
+reference when none is given) and `oxplow.extension.revoke_secret { extension,
+reference }`, scope `credentials.write`. A secret is a kind of value, not a
+kind of actor (commands.md "Secrets"): `value` is `writeOnly`, so a person, an
+agent and a lens for either may set one, and no record, event, result or
+model carries it. Presence is the live model `v_extension_secret` (`extension`,
+`provider`, `name`, `reference` as JSON, `is_set`), read from the catalog's
+provider credentials and the keychain; it follows `CredentialChanged`. Secret
+bytes and keychain error details are never returned or audited. Values are
+bounded to 16 KiB. Settings → Extensions lists them in the foundation's
+`extensions-secrets` lens (Set… / Rotate…, a form over the command whose
+`value` field is masked by the schema, and Revoke). The old
+`save_extension_secret`, `extension_secret_is_set` and
+`revoke_extension_secret` IPCs are gone.
 
 The first trusted consumer is a remote MCP HTTP provider using the shipped
 adapter. Its bearer credential must be named `OXPLOW_MCP_BEARER` and carry

@@ -260,22 +260,6 @@ pub const MANIFEST: &[Capability] = &[
     // The `oxplow.collector.sync` command: the UI runs it through `run_command`,
     // an agent through this tool (as itself, so it never approves).
     ui(
-        "set_credential",
-        "secrets are a person's to set; an agent only sees whether one is set",
-    ),
-    ui(
-        "save_extension_secret",
-        "a host secret reference's value is a person's to set; no agent route reads or writes one",
-    ),
-    ui(
-        "extension_secret_is_set",
-        "presence of a host secret, for the settings row; an agent never needs it",
-    ),
-    ui(
-        "revoke_extension_secret",
-        "a person takes a host secret back, as they gave it",
-    ),
-    ui(
         "list_provider_instances",
         "Settings → Integrations, where a person configures instances (P5.D4, P9.B1)",
     ),

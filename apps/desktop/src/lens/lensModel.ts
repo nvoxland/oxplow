@@ -278,13 +278,16 @@ export function isComposite(viz: LensViz): boolean {
 
 /** Lens runs split for a page of sections: the ones to show, and the ones
  *  with nothing to show — no rows, no error, not a composite (whose parts
- *  decide) and not a form (which has no rows of its own) — folded into one
- *  "Nothing found" line. */
+ *  decide), not a form (which has no rows of its own) and not one with a
+ *  button above its rows (an Add that works on an empty list) — folded into
+ *  one "Nothing found" line. */
 export function foldEmpty<T extends { run: LensRun | null; error: string | null }>(
   runs: T[],
 ): { shown: T[]; empty: T[] } {
   const isEmpty = (r: T) =>
-    r.error === null && r.run !== null && !isComposite(r.run.lens.viz) && r.run.lens.viz !== "form" && r.run.result.rows.length === 0;
+    r.error === null && r.run !== null && !isComposite(r.run.lens.viz) && r.run.lens.viz !== "form" &&
+    r.run.result.rows.length === 0 &&
+    !r.run.lens.actions.some((a) => !a.row && a.group === null);
   return { shown: runs.filter((r) => !isEmpty(r)), empty: runs.filter(isEmpty) };
 }
 

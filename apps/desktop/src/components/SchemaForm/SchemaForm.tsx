@@ -216,7 +216,7 @@ export function SchemaForm({
               drafts={drafts}
               errors={errors}
               onEdit={edit}
-              autoFocus={i === firstEditable && onSubmit !== undefined}
+              autoFocus={i === firstEditable && onSubmit !== undefined && mode === "create"}
               testIdPrefix={testIdPrefix}
               fixed={fixedSet.has(f.path)}
               choices={choices?.[f.path]}

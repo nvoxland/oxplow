@@ -779,4 +779,15 @@ async fn agent_harnesses_are_the_registered_ones_enabled_ones_first() {
         rows(&fx, "SELECT title FROM v_agent_harness WHERE id = 'alpha'").await,
         vec![vec![json!("alpha")]]
     );
+    // The settings a harness declares come with it (`claude` declares a
+    // model), a harness with none has `[]`.
+    let settings = rows(
+        &fx,
+        "SELECT id, json_array_length(settings) FROM v_agent_harness WHERE id IN ('alpha', 'claude') ORDER BY id",
+    )
+    .await;
+    assert_eq!(settings[0], vec![json!("alpha"), json!(0)], "{settings:?}");
+    if let Some(claude) = settings.iter().find(|r| r[0] == json!("claude")) {
+        assert!(claude[1].as_i64().unwrap() > 0, "{settings:?}");
+    }
 }
