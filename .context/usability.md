@@ -606,6 +606,14 @@ mounts the kit's, so a page moving to a lens (`viz: approvals`, params
   is the mirror: it starts closed and only the ones the person *opened* are
   stored (beside the collapsed ids). Expand all /
   Collapse all handle both kinds.
+- **A lens tree's branches**: one the result nests is open by default
+  (the closed ones, by index path, are history state); a lazy branch
+  (`tree.lazy`, a folder loaded on demand) is closed by default and the
+  opened ones, by the row's id, are history state — a folder left open
+  under a closed one stays open for when its parent opens again. A lazy
+  branch's row opens on a plain click or Enter; the disclosure ▸ works on
+  every branch; a link or control in the row, Cmd/Shift-click marks and
+  the right-click menu keep their meaning.
 - **Don't reconcile stored ids against the rendered ones** — the opposite of what
   the rail does for its section ORDER. A page's own filter (Recorded Metrics'
   search) can drop a section entirely; it must come back still collapsed.

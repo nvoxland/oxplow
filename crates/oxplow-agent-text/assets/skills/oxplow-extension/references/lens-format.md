@@ -52,7 +52,7 @@ query: |
   FROM v_work_item w JOIN v_thread t ON t.id = w.thread_id
   WHERE w.state = 'blocked' AND t.stream_id = :stream_id
   ORDER BY w.updated_at DESC
-viz: table                      # table | list | number | markdown | bar | line | treemap | document | dashboard | custom
+viz: table                      # table | list | tree | number | markdown | bar | line | treemap | document | dashboard | custom
 columns:                        # optional; controls headers, order and links
   - { key: title, label: Item, link: { kind: page, from: uri } }
   - { key: thread }
@@ -83,6 +83,12 @@ empty: Nothing is waiting on you.
   - `treemap` draws nested rectangles: `chart: { label: <column>, size:
     <column>, group: <optional column> }`. A tile click follows the
     lens's first column link.
+  - `tree` nests rows: `tree: { id, parent, label }` (columns). A level
+    at a time (a worktree's folders): add `lazy: <param>` (a lens param
+    with a `default`, the top level) and `branch: <column>` (truthy on
+    rows that open), and return one level per param value (`WHERE
+    parent = :folder`); a folder opens by running the lens with the
+    param set to its `id`. No column may `select` the lazy param.
   - `code` shows each row's file read-only at a revision, at full size:
     `code: { path: <column>, revision: <column>, lines: <optional column
     holding 12-40>, sync: <optional bool: editors scroll together> }`.

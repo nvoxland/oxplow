@@ -625,6 +625,12 @@ fn tree(run: &LensRun) -> String {
     ) else {
         return table(run);
     };
+    // A lazy tree's run is one level: a row the `branch` column marks
+    // opens by running the lens again with `lazy` set to its id.
+    let lazy = t.lazy.as_deref().and_then(|p| {
+        let branch = column(run, t.branch.as_ref())?;
+        Some((p, branch))
+    });
     let rows = &run.result.rows;
     let ids: Vec<String> = rows
         .iter()
@@ -639,36 +645,70 @@ fn tree(run: &LensRun) -> String {
                 .flatten()
         })
         .collect();
-    let mut lines: Vec<String> = Vec::new();
-    let mut seen = vec![false; rows.len()];
-    fn walk(
-        at: usize,
-        depth: usize,
-        rows: &[Vec<SqlCell>],
+    // A row that opens lazily: marked `branch`, with no children here.
+    let opens = |at: usize| -> bool {
+        lazy.is_some_and(|(_, branch)| {
+            rows[at].get(branch).is_some_and(truthy) && !parent_of.contains(&Some(at))
+        })
+    };
+    struct Walk<'a> {
+        rows: &'a [Vec<SqlCell>],
         label: usize,
-        parent_of: &[Option<usize>],
-        seen: &mut [bool],
-        lines: &mut Vec<String>,
-    ) {
-        if seen[at] {
-            return;
-        }
-        seen[at] = true;
-        lines.push(format!(
-            "{}- {}",
-            "  ".repeat(depth),
-            rows[at].get(label).map(cell).unwrap_or_default()
-        ));
-        for (child, p) in parent_of.iter().enumerate() {
-            if *p == Some(at) {
-                walk(child, depth + 1, rows, label, parent_of, seen, lines);
+        parent_of: &'a [Option<usize>],
+        opens: &'a dyn Fn(usize) -> bool,
+        seen: Vec<bool>,
+        lines: Vec<String>,
+    }
+    impl Walk<'_> {
+        fn walk(&mut self, at: usize, depth: usize) {
+            if self.seen[at] {
+                return;
+            }
+            self.seen[at] = true;
+            self.lines.push(format!(
+                "{}- {}{}",
+                "  ".repeat(depth),
+                if (self.opens)(at) { "▸ " } else { "" },
+                self.rows[at].get(self.label).map(cell).unwrap_or_default()
+            ));
+            for child in 0..self.parent_of.len() {
+                if self.parent_of[child] == Some(at) {
+                    self.walk(child, depth + 1);
+                }
             }
         }
     }
+    let mut w = Walk {
+        rows,
+        label,
+        parent_of: &parent_of,
+        opens: &opens,
+        seen: vec![false; rows.len()],
+        lines: Vec::new(),
+    };
     for root in (0..rows.len()).filter(|i| parent_of[*i].is_none()) {
-        walk(root, 0, rows, label, &parent_of, &mut seen, &mut lines);
+        w.walk(root, 0);
     }
-    capped_lines(lines)
+    let lines = w.lines;
+    let mut text = capped_lines(lines);
+    if let Some((param, _)) = lazy {
+        let now = run.params.get(param).map(cell).unwrap_or_default();
+        text.push_str(&format!(
+            "\n\nA ▸ row opens with `{param}=<id>`: run the lens with it to read that level (this run: `{param}={now}`)."
+        ));
+    }
+    text
+}
+
+/// A cell that counts as true: not null, zero, empty or false.
+fn truthy(c: &SqlCell) -> bool {
+    match c {
+        SqlCell::Null(()) => false,
+        SqlCell::Bool(b) => *b,
+        SqlCell::Int(i) => *i != 0,
+        SqlCell::Real(r) => *r != 0.0,
+        SqlCell::Text(s) => !s.is_empty() && s != "0" && s != "false",
+    }
 }
 
 /// A timeline: each row's time and label, oldest first, with its ref.
@@ -1442,12 +1482,44 @@ mod tests {
                     id: Some("id".into()),
                     parent: Some("parent".into()),
                     label: Some("name".into()),
+                    ..Default::default()
                 })
             },
         );
         assert_eq!(
             render(&r, &Resolved::default()),
             "- root\n  - child\n    - grandchild\n- orphan"
+        );
+    }
+
+    /// A lazy tree's run is one level: its branches (rows that open) are
+    /// marked, and the agent is told how to read one.
+    #[test]
+    fn a_lazy_tree_reads_as_one_level_with_its_opening_hint() {
+        let mut r = with(
+            run(
+                LensViz::Tree,
+                None,
+                &["id", "parent", "name", "is_dir"],
+                vec![
+                    vec![t("src"), t(""), t("src"), SqlCell::Int(1)],
+                    vec![t("a.rs"), t(""), t("a.rs"), SqlCell::Int(0)],
+                ],
+            ),
+            |l| {
+                l.tree = Some(crate::extensions::LensTree {
+                    id: Some("id".into()),
+                    parent: Some("parent".into()),
+                    label: Some("name".into()),
+                    lazy: Some("folder".into()),
+                    branch: Some("is_dir".into()),
+                })
+            },
+        );
+        r.params.insert("folder".into(), t(""));
+        assert_eq!(
+            render(&r, &Resolved::default()),
+            "- ▸ src\n- a.rs\n\nA ▸ row opens with `folder=<id>`: run the lens with it to read that level (this run: `folder=`)."
         );
     }
 

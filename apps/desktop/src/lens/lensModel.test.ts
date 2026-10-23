@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Extension, Lens, LensRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
-import { markParts, treeNodes, timelineEntries, stepItems, hunkRows, codeRows, diffRow, parseLines, slotRuns, mergeDirectory, barRows, childParams, partParams, lineSeries, sparklineValues, numericRowId, treemapItems, cellLinkRef, changedParams, lensViewChange, misplacedViewParams, foldEmpty, foldedAway, displayColumns, formatCell, lensDirectoryEntries, parseParamInput, limitRows, slugify, adHocLens, rowMention, rowAsk, effortRowId, slotExtensions, isTimestamp, rowGroups, rowEmphasized, rowDepth, rowContextRef, rowTiles, tileSizeOf } from "./lensModel.js";
+import { markParts, treeNodes, lazyTreeNodes, lazyTreeProblem, drawnTreeRows, wantedBranches, timelineEntries, stepItems, hunkRows, codeRows, diffRow, parseLines, slotRuns, mergeDirectory, barRows, childParams, partParams, lineSeries, sparklineValues, numericRowId, treemapItems, cellLinkRef, changedParams, lensViewChange, misplacedViewParams, foldEmpty, foldedAway, displayColumns, formatCell, lensDirectoryEntries, parseParamInput, limitRows, slugify, adHocLens, rowMention, rowAsk, effortRowId, slotExtensions, isTimestamp, rowGroups, rowEmphasized, rowDepth, rowContextRef, rowTiles, tileSizeOf } from "./lensModel.js";
 import { formatMetricValue, formatShortDateTime } from "../components/format.js";
 import { diffSpecOf, duplicateBlockOf, isPage, lineOf, pagePayload } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
@@ -527,6 +527,82 @@ describe("structure components (P6.A2)", () => {
       { label: "root", children: [{ label: "child", children: [{ label: "grandchild", children: [] }] }] },
       { label: "orphan", children: [] },
     ]);
+  });
+
+  // A lazy tree (`tree.lazy`): the result is one level; a row the `branch`
+  // column marks opens into the rows of its own run, spliced under it.
+  const lazyLens = lens({
+    viz: "tree",
+    tree: { id: "id", parent: "p", label: "n", lazy: "folder", branch: "d" },
+    params: [{ name: "folder", label: null, default: "", options: [] }] as never,
+  });
+  const level = (rows: (string | number | null)[][]) => result(["id", "p", "n", "d"], rows);
+  const top = level([
+    ["src", "", "src", 1],
+    ["a.rs", "", "a.rs", 0],
+  ]);
+  const loaded = (rows: (string | number | null)[][]) => ({ run: { lens: lazyLens, params: {}, result: level(rows) } as unknown as LensRun, error: null });
+  const shape = (n: { label: string; branch: boolean; lazy: boolean; children: unknown[]; state: unknown }): unknown => ({
+    label: n.label,
+    branch: n.branch,
+    lazy: n.lazy,
+    state: n.state,
+    children: (n.children as (typeof n)[]).map(shape),
+  });
+
+  test("lazyTreeNodes marks the rows that open and keeps them closed until opened", () => {
+    expect(lazyTreeNodes(lazyLens, top, new Set(), new Map()).map(shape)).toEqual([
+      { label: "src", branch: true, lazy: true, state: null, children: [] },
+      { label: "a.rs", branch: false, lazy: false, state: null, children: [] },
+    ]);
+  });
+
+  test("lazyTreeNodes splices an open branch's run under it, loading until it answers", () => {
+    const open = new Set(["src", "src/lib"]);
+    expect(lazyTreeNodes(lazyLens, top, open, new Map()).map(shape)[0]).toEqual({ label: "src", branch: true, lazy: true, state: "loading", children: [] });
+    const runs = new Map([
+      ["src", loaded([["src/lib", "src", "lib", 1], ["src/main.rs", "src", "main.rs", 0]])],
+      ["src/lib", loaded([["src/lib/x.rs", "src/lib", "x.rs", 0]])],
+    ]);
+    expect(lazyTreeNodes(lazyLens, top, open, runs).map(shape)[0]).toEqual({
+      label: "src", branch: true, lazy: true, state: null,
+      children: [
+        { label: "lib", branch: true, lazy: true, state: null, children: [{ label: "x.rs", branch: false, lazy: false, state: null, children: [] }] },
+        { label: "main.rs", branch: false, lazy: false, state: null, children: [] },
+      ],
+    });
+    const failed = new Map([["src", { run: null, error: "no such folder" }]]);
+    expect(lazyTreeNodes(lazyLens, top, new Set(["src"]), failed).map(shape)[0]).toMatchObject({ state: { error: "no such folder" } });
+  });
+
+  test("lazyTreeNodes still nests the rows the result nests, and a row with children is not lazy", () => {
+    const mixed = level([
+      ["src", "", "src", 1],
+      ["src/a.rs", "src", "a.rs", 0],
+    ]);
+    expect(lazyTreeNodes(lazyLens, mixed, new Set(), new Map()).map(shape)).toEqual([
+      { label: "src", branch: true, lazy: false, state: null, children: [{ label: "a.rs", branch: false, lazy: false, state: null, children: [] }] },
+    ]);
+  });
+
+  test("lazyTreeProblem says when the branch column isn't in the result", () => {
+    expect(lazyTreeProblem(lazyLens, top)).toBeNull();
+    expect(lazyTreeProblem(lazyLens, result(["id", "p", "n"], [["src", "", "src"]]))).toBe("the tree's `branch` column `d` isn't in the result");
+    expect(lazyTreeProblem(lens({ viz: "tree", tree: { id: "id", parent: "p", label: "n" } }), top)).toBeNull();
+  });
+
+  test("drawnTreeRows lists the rows in tree order, spliced children included", () => {
+    const runs = new Map([["src", loaded([["src/main.rs", "src", "main.rs", 0]])]]);
+    const nodes = lazyTreeNodes(lazyLens, top, new Set(["src"]), runs);
+    expect(drawnTreeRows(nodes).map((r) => r[0])).toEqual(["src", "src/main.rs", "a.rs"]);
+  });
+
+  test("wantedBranches are the open branches reachable through open parents, with their id cells", () => {
+    const open = new Set(["src", "src/lib", "gone"]);
+    expect(wantedBranches(lazyLens, top, open, new Map())).toEqual([{ id: "src", value: "src" }]);
+    const runs = new Map([["src", loaded([["src/lib", "src", "lib", 1]])]]);
+    expect(wantedBranches(lazyLens, top, open, runs)).toEqual([{ id: "src", value: "src" }, { id: "src/lib", value: "src/lib" }]);
+    expect(wantedBranches(lazyLens, top, new Set(["src/lib"]), runs)).toEqual([]);
   });
 
   test("treeNodes survives a cycle", () => {

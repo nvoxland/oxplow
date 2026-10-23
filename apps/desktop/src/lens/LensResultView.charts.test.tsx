@@ -1,8 +1,28 @@
-import { afterEach, expect, test } from "bun:test";
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import { afterEach, beforeEach, expect, mock, test } from "bun:test";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { PageNavigationContext, type PageNavigation } from "../tabs/PageNavigationContext.js";
-import type { Lens, LensRun } from "../tauri-bridge/generated/bindings.js";
-import { LensResultView } from "./LensResultView.js";
+import type { Lens, LensRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
+
+// A lazy tree's branches run the lens again (`runLens`) with the lazy
+// param set to the branch's id.
+const branchRuns: Record<string, SqlCell>[] = [];
+const realApi = await import("../api.js");
+mock.module("../api.js", () => ({
+  ...realApi,
+  runLens: async (_id: string, params: Record<string, SqlCell>) => {
+    branchRuns.push(params);
+    const folder = String(params.folder ?? "");
+    return {
+      lens: lazyTree.lens,
+      params,
+      result: { columns: ["id", "p", "n", "d"], rows: [[`${folder}/lib`, folder, "lib", 1], [`${folder}/main.rs`, folder, "main.rs", 0]], truncated: false },
+    } as unknown as LensRun;
+  },
+}));
+const { LensResultView } = await import("./LensResultView.js");
+beforeEach(() => {
+  branchRuns.length = 0;
+});
 
 afterEach(cleanup);
 
@@ -37,6 +57,19 @@ const run = (lens: Partial<Lens>, columns: string[], rows: (string | number)[][]
   params: {},
   result: { columns, rows, truncated: false },
 });
+const lazyTree = run(
+  {
+    viz: "tree",
+    tree: { id: "id", parent: "p", label: "n", lazy: "folder", branch: "d" },
+    params: [{ name: "folder", label: null, default: "", options: [] }] as never,
+    actions: [{ id: "open", label: "Open", command: "oxplow.file.open", input: { path: "{{row.id}}" }, row: true }] as never,
+  },
+  ["id", "p", "n", "d"],
+  [
+    ["src", "", "src", 1],
+    ["a.rs", "", "a.rs", 0],
+  ],
+);
 
 test("bar lenses draw one bar per row", () => {
   const { container } = render(
@@ -208,4 +241,48 @@ test("a tree's closed branches are the step's history state", () => {
   expect(container.querySelectorAll('[data-testid="lens-tree-node"]').length).toBe(1);
   fireEvent.click(getByLabelText("Expand"));
   expect(states).toEqual([{ "lens-tree.closed": [] }]);
+});
+
+// A lazy tree (`tree.lazy`) shows one level, its folders closed; opening
+// one runs the lens with the lazy param set to the folder's id and
+// splices its rows under it, and the open folders are the step's history
+// state. A spliced row is a row like any other: its menu, its marks.
+test("a lazy tree opens a branch by running its lens for it", async () => {
+  const view = render(<LensResultView run={lazyTree} onOpenPage={() => {}} />);
+  expect(view.getAllByTestId("lens-tree-node").length).toBe(2);
+  expect(view.getAllByLabelText("Expand").length).toBe(1);
+  expect(branchRuns).toEqual([]);
+  // A click on the folder's row opens it (a leaf keeps its own click).
+  fireEvent.click(view.getAllByTestId("lens-tree-row")[0]!);
+  await waitFor(() => expect(view.getAllByTestId("lens-tree-node").length).toBe(4));
+  expect(branchRuns).toEqual([{ folder: "src" }]);
+  expect(view.getAllByTestId("lens-tree-row").map((r) => r.textContent)).toEqual(["▾src", "▸lib", "main.rs", "a.rs"]);
+  // Enter on the nested folder opens it too; its run names its own path.
+  fireEvent.keyDown(view.getAllByTestId("lens-tree-row")[1]!, { key: "Enter" });
+  await waitFor(() => expect(branchRuns).toHaveLength(2));
+  expect(branchRuns[1]).toEqual({ folder: "src/lib" });
+  // A spliced row has the row actions in its menu, and marks like any row.
+  fireEvent.contextMenu(view.getAllByTestId("lens-tree-row")[2]!);
+  expect(view.getByTestId("menu-item-lens-action-open")).toBeTruthy();
+  fireEvent.click(view.getAllByTestId("lens-tree-row")[2]!, { metaKey: true });
+  expect(view.getByTestId("lens-marks-count").textContent).toBe("1 selected");
+});
+
+test("a lazy tree's open folders are the step's history state", async () => {
+  const states: Record<string, unknown>[] = [];
+  const nav = {
+    viewParams: {},
+    patchViewParams() {},
+    historyState: { "lens-tree.open:x/l": ["src"] },
+    setHistoryState: (p: Record<string, unknown>) => states.push(p),
+  } as unknown as PageNavigation;
+  const view = render(
+    <PageNavigationContext.Provider value={nav}>
+      <LensResultView run={lazyTree} onOpenPage={() => {}} />
+    </PageNavigationContext.Provider>,
+  );
+  await waitFor(() => expect(view.getAllByTestId("lens-tree-node").length).toBe(4));
+  expect(branchRuns).toEqual([{ folder: "src" }]);
+  fireEvent.click(view.getByLabelText("Collapse"));
+  expect(states).toEqual([{ "lens-tree.open:x/l": [] }]);
 });
