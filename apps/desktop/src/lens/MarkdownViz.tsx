@@ -17,6 +17,7 @@ import { CommandConfirm } from "../components/CommandConfirm.js";
 import { Markdown } from "../components/Markdown/Markdown.js";
 import type { LensAction } from "../tauri-bridge/generated/bindings.js";
 import { useDraft } from "../tabs/useViewParam.js";
+import { useTabEditing } from "../tabs/PageNavigationContext.js";
 import { rowRecord } from "./lensActions.js";
 import { usePageComments } from "./pageComments.js";
 import { useFormSubmit } from "./useFormSubmit.js";
@@ -64,6 +65,8 @@ function MarkdownEditor({ run, streamId, action, saved }: { run: LensRun; stream
     void form.submit({ [field]: md }, false);
   };
   const dirty = draft !== null;
+  // The tab's ● and the menu's Save.
+  useTabEditing({ dirty, save: () => draft !== null && save(draft) });
   const error = form.serverErrors?.[field] ?? null;
   return (
     <div data-testid="lens-markdown" className="ox-markdown-editor">

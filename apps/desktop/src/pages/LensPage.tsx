@@ -259,9 +259,9 @@ export function LensPage({ lensId, params, title: pageTitle, titleFrom, stream, 
     };
   }, [landing, body, run]);
 
-  // A file or a diff fills the page: its title is the chrome's, its body
-  // every pixel the page has.
-  const fills = lens?.viz === "code" || lens?.viz === "diff";
+  // A lens that fills (a file, a diff, a document ending in one: the
+  // loader says) has the chrome's title, its body every pixel the page has.
+  const fills = lens?.fills ?? false;
   return (
     <Page
       testId="page-lens"

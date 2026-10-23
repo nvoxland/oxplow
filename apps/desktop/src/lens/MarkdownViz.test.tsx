@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react
 import { useState, type ReactNode } from "react";
 
 import type { LensAction, LensRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
-import { PageNavigationContext, type PageNavigation } from "../tabs/PageNavigationContext.js";
+import { PageNavigationContext, type PageNavigation, type TabEditing } from "../tabs/PageNavigationContext.js";
 import { PageCommentsContext } from "./pageComments.js";
 
 // A markdown lens with an edit action is an editor whose Save is that
@@ -74,9 +74,10 @@ const runOf = (body: string, actions: LensAction[] = [save]): LensRun =>
   }) as unknown as LensRun;
 
 /** A tab whose history state keeps the draft. */
-function Tab({ state, children }: { state: Record<string, unknown>; children: ReactNode }) {
+function Tab({ state, children, setEditing }: { state: Record<string, unknown>; children: ReactNode; setEditing?: PageNavigation["setEditing"] }) {
   const [held, setHeld] = useState(state);
   const nav = {
+    setEditing,
     historyState: held,
     setHistoryState: (patch: Record<string, unknown>) => {
       Object.assign(state, patch);
@@ -175,4 +176,25 @@ test("on a page that takes comments, the editor's comments are on the page's URI
   );
   await editorOf(view);
   await waitFor(() => expect(targets).toContain("oxplow:oxplow/wiki?slug=notes"));
+});
+
+test("a draft makes its tab dirty, and the tab's Save saves it", async () => {
+  const state: Record<string, unknown> = {};
+  let editing: TabEditing | null = null;
+  const setEditing = (e: TabEditing | null) => {
+    editing = e;
+  };
+  const view = render(
+    <Tab state={state} setEditing={setEditing}>
+      <LensResultView run={runOf("Old text.")} onOpenPage={() => {}} />
+    </Tab>,
+  );
+  const editor = await editorOf(view);
+  await waitFor(() => expect(editing?.dirty).toBe(false));
+  await typeAt(editor, "New. ");
+  await waitFor(() => expect(editing?.dirty).toBe(true));
+  await act(async () => {
+    editing!.save();
+  });
+  await waitFor(() => expect(saves).toEqual([{ action: "save", row: { slug: "notes", body: "Old text." }, input: { body: "New. Old text." } }]));
 });

@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { Page } from "../tabs/Page.js";
 import { EditorPane } from "../components/EditorPane.js";
 import { CommentNavigator } from "../components/Comments/CommentNavigator.js";
-import { usePageTitle, useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
+import { usePageTitle, useOptionalPageNavigation, useTabEditing } from "../tabs/PageNavigationContext.js";
 import { useBacklinks, usePageOutbound } from "../tabs/useBacklinks.js";
 import { fileRef, snapshotRef } from "../tabs/pageRefs.js";
 import { BacklinksList } from "../tabs/BacklinksList.js";
@@ -14,8 +14,8 @@ import { formatShortDateTime } from "../components/format.js";
 import { fileUri } from "../uri/uri.js";
 
 export interface FilePageProps extends ComponentProps<typeof EditorPane> {
-  /** True when the file's draft differs from saved content. Drives the
-   *  ● dirty marker on the page title. */
+  /** True when the file's draft differs from saved content: the tab's
+   *  ● and Save (`useTabEditing`). */
   dirty: boolean;
 }
 
@@ -36,7 +36,8 @@ export interface FilePageProps extends ComponentProps<typeof EditorPane> {
 export function FilePage({ dirty, ...editorProps }: FilePageProps) {
   const path = editorProps.filePath ?? "";
   const basename = path.split("/").pop() ?? path;
-  usePageTitle(basename ? `${dirty ? "● " : ""}${basename}` : "");
+  usePageTitle(basename);
+  useTabEditing({ dirty, save: () => editorProps.onSave() });
   const ctxNav = useOptionalPageNavigation();
   const ref = fileRef(path);
   const backlinkEntries = useBacklinks(ref);

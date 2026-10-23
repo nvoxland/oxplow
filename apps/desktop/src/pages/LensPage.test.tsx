@@ -73,6 +73,13 @@ mock.module("../api.js", () => ({
         result: { columns: ["title"], rows: [["Build health"]], truncated: false, reads: { models: [], tables: [], measures: [] }, freshness: {} },
       } as unknown as LensRun;
     }
+    if (id === "x/fill") {
+      return {
+        lens: { ...docLens, id: "x/fill", title: "Filling", fills: true },
+        params,
+        result: { columns: ["title"], rows: [["One"]], truncated: false, reads: { models: [], tables: [], measures: [] }, freshness: {} },
+      } as unknown as LensRun;
+    }
     if (id === "x/dir") {
       return {
         lens: dirLens,
@@ -205,4 +212,16 @@ test("a page named by its lens's row says its static title, then the row's once 
   );
   await waitFor(() => expect(titles[titles.length - 1]).toBe("Build health"));
   expect(titles[0]).toBe("Dashboard");
+});
+
+test("a lens that fills (the loader says so) draws its title in the chrome and its body filling the page", async () => {
+  const ref = lensRef("x/fill", {});
+  const { getByTestId } = render(
+    <PageNavigationContext.Provider value={nav(ref, [])}>
+      <LensPage lensId="x/fill" params={{}} stream={null} onOpenPage={() => {}} />
+    </PageNavigationContext.Provider>,
+  );
+  await waitFor(() => expect(getByTestId("lens-document")).toBeTruthy());
+  expect(getByTestId("page-lens").querySelector("h1.ox-title")).toBeNull();
+  expect(getByTestId("lens-document").parentElement!.style.flexGrow).toBe("1");
 });

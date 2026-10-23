@@ -26,6 +26,9 @@ export interface CenterTab {
   icon?: string | null;
   /** What the agent is waiting on, when `agentStatus` is awaiting. */
   question?: string;
+  /** Its page holds unsaved edits (`useTabEditing`): a ● before its
+   *  label. */
+  dirty?: boolean;
   /** Kind-specific right-click menu entries for this tab. They render at
    *  the top of the tab's context menu, above the universal "Close Other
    *  Tabs" / "Close Tabs to the Right" pair that CenterTabs appends for
@@ -347,6 +350,7 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
                   verticalAlign: "middle",
                 }}
               >
+                {tab.dirty ? <span data-testid={`center-tab-dirty-${tab.id}`} aria-label="Unsaved changes">● </span> : null}
                 {tab.label}
               </span>
               {tab.closable && onClose ? (
@@ -533,6 +537,7 @@ function OverflowPanel({ tabs, activeId, anchorRef, onActivate, onClose, onDismi
           >
             {tab.agentStatus ? <AgentStatusDot status={tab.agentStatus} question={tab.question} /> : null}
             <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={tab.label}>
+              {tab.dirty ? "● " : ""}
               {tab.label}
             </span>
             {tab.closable && onClose ? (

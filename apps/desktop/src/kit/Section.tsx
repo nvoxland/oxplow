@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 
 import { useSectionCollapse } from "../components/CollapsibleSections.js";
 import { ActionButtons } from "./ActionButtons.js";
@@ -21,6 +21,9 @@ export interface SectionProps {
   collapsible?: boolean;
   /** A collapsible section starts closed (until the person opens it). */
   defaultCollapsed?: boolean;
+  /** It takes the height left in its page (a document's last section when
+   *  the document fills): a flex column its body stretches in. */
+  fill?: boolean;
   children?: ReactNode;
 }
 
@@ -35,6 +38,7 @@ export function Section({
   testId,
   collapsible = false,
   defaultCollapsed = false,
+  fill = false,
   children,
 }: SectionProps) {
   const collapse = useSectionCollapse(id, collapsible, defaultCollapsed);
@@ -44,6 +48,7 @@ export function Section({
       className="ox-section"
       data-section={id}
       data-testid={testId ?? (collapse ? `${collapse.prefix}-group-${id}` : undefined)}
+      style={fill ? fillStyle : undefined}
     >
       <div className="ox-section-head">
         <h2 className="ox-section-title">
@@ -75,7 +80,7 @@ export function Section({
       </div>
       {open ? (
         collapse ? (
-          <div data-testid={`${collapse.prefix}-section-body-${id}`}>
+          <div data-testid={`${collapse.prefix}-section-body-${id}`} style={fill ? fillStyle : undefined}>
             {description ? <p className="ox-section-desc">{description}</p> : null}
             {children}
           </div>
@@ -89,3 +94,5 @@ export function Section({
     </section>
   );
 }
+
+const fillStyle: CSSProperties = { display: "flex", flexDirection: "column", flex: 1, minHeight: 0 };

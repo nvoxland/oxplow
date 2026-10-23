@@ -276,7 +276,7 @@ pub struct CommandUi {
     pub menu: Option<MenuPlace>,
     /// When it's offered — in search, the menu bar and by its shortcut —
     /// in VS Code's when-clause syntax over the window's context keys
-    /// (`crate::when`): `fileShown && fileDirty`, `streamKind == worktree`.
+    /// (`crate::when`): `fileShown && pageDirty`, `streamKind == worktree`.
     /// Absent, always.
     #[serde(default)]
     pub when: Option<String>,

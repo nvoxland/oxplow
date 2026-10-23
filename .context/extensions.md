@@ -2071,7 +2071,11 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   and keep empty ones as drop targets — `values` orders any grouped viz),
   `code` and `diff` (the full-size readers: a file at a
   revision, or one file's diff, read-only, filling a lens page —
-  `LensPage`'s `fill`, no in-body title — `lens/CodeViz.tsx`,
+  `LensPage`'s `fill`, no in-body title; a loaded lens says whether it
+  fills, `Lens.fills`: its viz does, `LensViz::fills`, or it is a
+  document — not a view document — whose last section's lens fills, so
+  that section takes the height left (`fill_document_fills`, run once the
+  catalog is placed) — `lens/CodeViz.tsx`,
   `lens/DiffViz.tsx`, `.context/editor-and-monaco.md` "Read-only code and
   diff vizes"), `approvals` (core's consent component: it reads the
   pending `v_command_proposal` itself and decides through the
