@@ -4313,6 +4313,18 @@ export type LensTree = {
 	id: string | null,
 	parent: string | null,
 	label: string | null,
+	/**
+	 *  A lazy tree: the lens param a branch's children are read with. The
+	 *  run's rows are one level (the param's `default` is the top level);
+	 *  a branch opens by running the lens again with the param set to the
+	 *  row's `id`, its rows spliced under it. Needs `branch`.
+	 */
+	lazy?: string | null,
+	/**
+	 *  A lazy tree's rows that open: the column that is truthy on them. A
+	 *  row with children in the result nests them as an eager tree does.
+	 */
+	branch?: string | null,
 };
 
 /**  How a lens renders its rows. */

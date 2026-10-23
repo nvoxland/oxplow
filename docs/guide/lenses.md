@@ -46,7 +46,7 @@ params:
 query: |
   SELECT uri, title, updated_at FROM v_work_item
   WHERE state = 'blocked' AND thread_id = :thread_id
-viz: table            # table | list | number | markdown | bar | line | treemap | document | dashboard | custom
+viz: table            # table | list | tree | number | markdown | bar | line | treemap | document | dashboard | custom
 columns:
   - { key: title, label: Item, link: { kind: page, from: uri } }
   - { key: updated_at, label: Updated, format: relative, width: 120 }
@@ -177,6 +177,16 @@ A column can set `expand: <lens>` (a lens of the extension, by its slug,
 or `<extension>/<slug>`). The cell gets a ▸ that opens that lens under
 the row, run with the row's values: the params it declares take the
 values of the columns with the same name.
+
+`viz: tree` nests rows: `tree: { id: <column>, parent: <column>, label:
+<column> }` puts each row under the row its `parent` names. A tree over
+something big (a worktree's folders) loads a level at a time instead: add
+`lazy: <param>` (a param of the lens with a `default`, the top level) and
+`branch: <column>` (truthy on the rows that open), and make the query
+return one level for that param (`WHERE parent = :folder`). A folder
+starts closed; clicking it (or Enter) runs the lens again with the param
+set to the folder's `id` and shows its rows under it. The open folders
+stay open through Back and a restart.
 
 A column can set `highlight: <param>` to mark that param's current value
 in its text, wherever it occurs (any case). A search lens uses it on its

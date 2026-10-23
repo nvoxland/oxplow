@@ -640,10 +640,18 @@ function columnValues(result: SqlQueryResult, column: string | null | undefined)
   return i === -1 ? null : result.rows.map((r) => r[i] ?? null);
 }
 
-/** One `tree` node: its row's label, the row, and its children. */
+/** One `tree` node: its row's label, the row, its `tree.id` as text, and
+ *  its children. `branch`: it opens (it has children, or a lazy tree's
+ *  `branch` column marks it); `lazy`: its children come from the lens run
+ *  again for it (`tree.lazy`), and `state` is how that run stands while
+ *  it is open: loading, or failed. */
 export interface TreeNode {
   label: string;
   row: SqlCell[];
+  id: string | null;
+  branch: boolean;
+  lazy: boolean;
+  state: "loading" | { error: string } | null;
   children: TreeNode[];
 }
 
@@ -676,7 +684,7 @@ export function treeNodes(lens: Lens, result: SqlQueryResult): TreeNode[] {
         if (child) children.push(child);
       }
     });
-    return { label: formatCell(labels[at] ?? null), row: result.rows[at]!, children };
+    return { label: formatCell(labels[at] ?? null), row: result.rows[at]!, id: key(ids[at] ?? null), branch: children.length > 0, lazy: false, state: null, children };
   };
   const roots: TreeNode[] = [];
   parentOf.forEach((p, i) => {
@@ -686,6 +694,70 @@ export function treeNodes(lens: Lens, result: SqlQueryResult): TreeNode[] {
     }
   });
   return roots;
+}
+
+/** A lazy tree's run for one open branch: the lens run again with
+ *  `tree.lazy` set to the branch's id (`useLazyBranches`). */
+export interface BranchRun {
+  run: LensRun | null;
+  error: string | null;
+}
+
+/** A cell that counts as true: not null, zero, empty or false. */
+function truthyCell(v: SqlCell | undefined): boolean {
+  return v !== null && v !== undefined && v !== 0 && v !== "" && v !== false && v !== "0" && v !== "false";
+}
+
+/** A lazy tree (`tree.lazy`): the result is one level, nested as
+ *  `treeNodes` nests it; a childless row the `tree.branch` column marks is a
+ *  lazy branch, closed until its id is in `open`, then holding the rows
+ *  of its run in `runs` (keyed by id, built the same way), `loading` until
+ *  the run answers, or the run's error. */
+export function lazyTreeNodes(lens: Lens, result: SqlQueryResult, open: ReadonlySet<string>, runs: ReadonlyMap<string, BranchRun>): TreeNode[] {
+  const branchAt = lens.tree?.branch ? result.columns.indexOf(lens.tree.branch) : -1;
+  const nodesOf = (res: SqlQueryResult): TreeNode[] => treeNodes(lens, res).map(mark);
+  const mark = (node: TreeNode): TreeNode => {
+    if (node.children.length > 0) return { ...node, children: node.children.map(mark) };
+    if (branchAt === -1 || !truthyCell(node.row[branchAt]) || node.id === null) return node;
+    if (!open.has(node.id)) return { ...node, branch: true, lazy: true };
+    const got = runs.get(node.id);
+    if (!got) return { ...node, branch: true, lazy: true, state: "loading" };
+    if (!got.run) return { ...node, branch: true, lazy: true, state: { error: got.error ?? "the run failed" } };
+    return { ...node, branch: true, lazy: true, children: nodesOf(got.run.result) };
+  };
+  return nodesOf(result);
+}
+
+/** What stops a lazy tree from opening anything: its `branch` column
+ *  missing from the result (a spec the loader never checked). */
+export function lazyTreeProblem(lens: Lens, result: SqlQueryResult): string | null {
+  const branch = lens.tree?.lazy ? lens.tree.branch : null;
+  if (!branch || result.columns.includes(branch)) return null;
+  return `the tree's \`branch\` column \`${branch}\` isn't in the result`;
+}
+
+/** The rows a tree draws, in its order: a spliced branch's rows under it. */
+export function drawnTreeRows(nodes: readonly TreeNode[]): SqlCell[][] {
+  return nodes.flatMap((n) => [n.row, ...drawnTreeRows(n.children)]);
+}
+
+/** The lazy branches to run: those in `open` that are reachable, a parent
+ *  at a time, through open branches whose runs are in `runs` — so a folder
+ *  left open under a closed one keeps its place without running. Each
+ *  with its id cell, the lazy param's value. */
+export function wantedBranches(lens: Lens, result: SqlQueryResult, open: ReadonlySet<string>, runs: ReadonlyMap<string, BranchRun>): { id: string; value: SqlCell }[] {
+  const idAt = lens.tree?.id ? result.columns.indexOf(lens.tree.id) : -1;
+  const out: { id: string; value: SqlCell }[] = [];
+  const walk = (nodes: readonly TreeNode[]) => {
+    for (const n of nodes) {
+      if (n.lazy && n.id !== null && open.has(n.id)) {
+        out.push({ id: n.id, value: idAt === -1 ? n.id : (n.row[idAt] ?? n.id) });
+      }
+      walk(n.children);
+    }
+  };
+  walk(lazyTreeNodes(lens, result, open, runs));
+  return out;
 }
 
 /** `timeline` viz: each row's time, label and ref (a canonical ref, when

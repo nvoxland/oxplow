@@ -300,6 +300,16 @@ pub struct LensTree {
     pub id: Option<String>,
     pub parent: Option<String>,
     pub label: Option<String>,
+    /// A lazy tree: the lens param a branch's children are read with. The
+    /// run's rows are one level (the param's `default` is the top level);
+    /// a branch opens by running the lens again with the param set to the
+    /// row's `id`, its rows spliced under it. Needs `branch`.
+    #[serde(default)]
+    pub lazy: Option<String>,
+    /// A lazy tree's rows that open: the column that is truthy on them. A
+    /// row with children in the result nests them as an eager tree does.
+    #[serde(default)]
+    pub branch: Option<String>,
 }
 
 /// `dashboard` viz: its query's rows are tiles, one per row, each value
@@ -5415,6 +5425,46 @@ fn form_fields_problem(f: &LensForm) -> Option<String> {
     })
 }
 
+/// What's wrong with a lazy tree (`tree.lazy` / `tree.branch`): the param
+/// must be the lens's own, with a `default` (the top level) and not one
+/// the context supplies; `branch` says which rows open; a column that
+/// `select`s the lazy param would re-root the page instead of opening.
+fn lazy_tree_problem(lens: &Lens, t: &LensTree) -> Option<String> {
+    let Some(lazy) = &t.lazy else {
+        return t
+            .branch
+            .is_some()
+            .then(|| "`tree.branch` is for a lazy tree (`tree.lazy: <param>`)".to_string());
+    };
+    if LensContext::supplies(lazy) {
+        return Some(format!(
+            "`tree.lazy` can't be `{lazy}`: the context supplies it"
+        ));
+    }
+    let Some(param) = lens.params.iter().find(|p| p.name == *lazy) else {
+        return Some(format!(
+            "`tree.lazy` names param `{lazy}`, which the lens doesn't declare"
+        ));
+    };
+    if param.default.is_none() {
+        return Some(format!(
+            "`tree.lazy` param `{lazy}` needs a `default`: the top level"
+        ));
+    }
+    if t.branch.is_none() {
+        return Some("`tree.lazy` needs `tree.branch: <column>` (the rows that open)".to_string());
+    }
+    lens.columns
+        .iter()
+        .find(|c| c.select.as_deref() == Some(lazy.as_str()))
+        .map(|c| {
+            format!(
+                "column `{}`: `select` names the tree's `lazy` param; a click opens the branch instead",
+                c.key
+            )
+        })
+}
+
 fn shape_problem(
     lens: &Lens,
     ids_in_extension: &[String],
@@ -5460,6 +5510,7 @@ fn shape_problem(
                 "tree",
                 &[("id", &t.id), ("parent", &t.parent), ("label", &t.label)],
             )
+            .or_else(|| lazy_tree_problem(lens, &t))
         }
         LensViz::Timeline => {
             let t = lens.timeline.clone().unwrap_or_default();
@@ -5851,7 +5902,7 @@ impl Lens {
         }
         if let Some(t) = &self.tree {
             out.extend(
-                [&t.id, &t.parent, &t.label]
+                [&t.id, &t.parent, &t.label, &t.branch]
                     .into_iter()
                     .flatten()
                     .map(|k| ("tree", k)),
@@ -5991,6 +6042,14 @@ pub struct LensContext {
 }
 
 impl LensContext {
+    /// The params the context supplies when the caller doesn't.
+    const SUPPLIED: &[&str] = &["stream_id", "thread_id"];
+
+    /// Whether a param named `name` is one the context supplies.
+    pub fn supplies(name: &str) -> bool {
+        Self::SUPPLIED.contains(&name)
+    }
+
     /// The implicit value for a param named `name`, if it is one.
     fn value(&self, name: &str) -> Option<SqlCell> {
         match name {
@@ -9944,6 +10003,63 @@ commands:
                 && errs.contains("`hunks: { path: <column>, from: <column>, to: <column> }`"),
             "{errs}"
         );
+    }
+
+    /// A lazy tree (`tree.lazy: <param>`, `tree.branch: <column>`) runs one
+    /// level at a time: its param needs a default (the top level) and can't
+    /// be one the context supplies; `branch` says which rows open; a
+    /// column that `select`s the lazy param would re-root the page instead.
+    #[test]
+    fn a_lazy_tree_names_its_param_and_its_branch_column() {
+        let tree = |extra: &str| {
+            format!(
+                "title: T\nquery: SELECT 'a' AS id, '' AS p, 'a' AS n, 1 AS d\nviz: tree\n{extra}"
+            )
+        };
+        let folder = "params:\n  - { name: folder, default: \"\" }\n";
+        let (_d, ext) = load_x(
+            &[
+                ("lazy", &tree(&format!("{folder}tree: {{ id: id, parent: p, label: n, lazy: folder, branch: d }}\n"))),
+                ("undeclared", &tree("tree: { id: id, parent: p, label: n, lazy: nope, branch: d }\n")),
+                ("nodefault", &tree("params:\n  - { name: folder }\ntree: { id: id, parent: p, label: n, lazy: folder, branch: d }\n")),
+                ("context", &tree("params:\n  - { name: stream_id, default: 1 }\ntree: { id: id, parent: p, label: n, lazy: stream_id, branch: d }\n")),
+                ("nobranch", &tree(&format!("{folder}tree: {{ id: id, parent: p, label: n, lazy: folder }}\n"))),
+                ("branchonly", &tree("tree: { id: id, parent: p, label: n, branch: d }\n")),
+                ("selectlazy", &tree(&format!("{folder}tree: {{ id: id, parent: p, label: n, lazy: folder, branch: d }}\ncolumns: [{{ key: n, select: folder }}]\n"))),
+            ],
+            "",
+        );
+        let lens = |slug: &str| ext.lenses.iter().find(|l| l.slug == slug);
+        let lazy = lens("lazy").unwrap_or_else(|| panic!("{:?}", ext.errors));
+        let t = lazy.tree.as_ref().unwrap();
+        assert_eq!(
+            (t.lazy.as_deref(), t.branch.as_deref()),
+            (Some("folder"), Some("d"))
+        );
+        for slug in [
+            "undeclared",
+            "nodefault",
+            "context",
+            "nobranch",
+            "branchonly",
+            "selectlazy",
+        ] {
+            assert!(lens(slug).is_none(), "{slug} loaded");
+        }
+        let errs = ext.errors.join("\n");
+        for (slug, says) in [
+            ("undeclared", "`tree.lazy` names param `nope`, which the lens doesn't declare"),
+            ("nodefault", "`tree.lazy` param `folder` needs a `default`: the top level"),
+            ("context", "`tree.lazy` can't be `stream_id`: the context supplies it"),
+            ("nobranch", "`tree.lazy` needs `tree.branch: <column>` (the rows that open)"),
+            ("branchonly", "`tree.branch` is for a lazy tree (`tree.lazy: <param>`)"),
+            ("selectlazy", "column `n`: `select` names the tree's `lazy` param; a click opens the branch instead"),
+        ] {
+            assert!(
+                errs.lines().any(|l| l.contains(slug) && l.contains(says)),
+                "{slug}: {errs}"
+            );
+        }
     }
 
     /// `code` shows each row's file at a revision, `diff` the first row's

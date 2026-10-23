@@ -51,6 +51,9 @@ import {
   stepItems,
   timelineEntries,
   treeNodes,
+  lazyTreeNodes,
+  lazyTreeProblem,
+  drawnTreeRows,
   treemapItems,
   partParams,
   codeRows,
@@ -72,6 +75,7 @@ import { DashboardViz, DocumentViz } from "./PartsViz.js";
 import { CodeViz } from "./CodeViz.js";
 import { DiffViz } from "./DiffViz.js";
 import { useLensRuns } from "./useLensRuns.js";
+import { useLazyBranches } from "./useLazyBranches.js";
 import { DataTable, type DataColumn, type RowProps } from "../kit/DataTable.js";
 import { Facts } from "../kit/Facts.js";
 import { Stat } from "../kit/Stat.js";
@@ -111,6 +115,14 @@ export function LensResultView(props: LensResultViewProps) {
   const { run, streamId = null, compact = false, toolbar = true } = props;
   const actions = useLensActions(run, streamId);
   const marks = useMarks(run);
+  // A lazy tree (`tree.lazy`): the folders open by their id, this step's
+  // history state; each runs the lens again for its rows, which are then
+  // rows of the lens like the root's — marked, dragged, counted.
+  const lazyOpen = useCollapsedSet(`lens-tree.open:${run.lens.id}`);
+  const lazy = run.lens.viz === "tree" && !!run.lens.tree?.lazy;
+  const branches = useLazyBranches(run, lazy ? lazyOpen.ids : [], streamId, props.maxRows);
+  const tree: LazyTree | null = lazy ? { nodes: lazyTreeNodes(run.lens, run.result, new Set(lazyOpen.ids), branches), open: lazyOpen } : null;
+  const shown = tree ? { ...run, result: { ...run.result, rows: drawnTreeRows(tree.nodes) } } : run;
   // A command's confirmation shows wherever the row is — an answer in the
   // strip, a grid child, a dashboard tile — not only where the toolbar is.
   const confirm = actions.pending ? (
@@ -135,10 +147,10 @@ export function LensResultView(props: LensResultViewProps) {
       <>
         {confirm}
         {form}
-        {props.toolbarTo && !compact ? <HandToolbar run={run} streamId={streamId} actions={actions} marks={marks} to={props.toolbarTo} /> : null}
-        {!compact && !props.toolbarTo ? <MarksBar run={run} actions={actions} marks={marks} /> : null}
-        {!compact && !props.toolbarTo && props.partButtons ? <PartButtons run={run} actions={actions} /> : null}
-        <LensBody {...props} actions={actions} marks={marks} />
+        {props.toolbarTo && !compact ? <HandToolbar run={shown} streamId={streamId} actions={actions} marks={marks} to={props.toolbarTo} /> : null}
+        {!compact && !props.toolbarTo ? <MarksBar run={shown} actions={actions} marks={marks} /> : null}
+        {!compact && !props.toolbarTo && props.partButtons ? <PartButtons run={shown} actions={actions} /> : null}
+        <LensBody {...props} run={shown} tree={tree} actions={actions} marks={marks} />
       </>
     );
   }
@@ -146,10 +158,17 @@ export function LensResultView(props: LensResultViewProps) {
     <div>
       {confirm}
       {form}
-      <LensToolbar run={run} streamId={streamId} actions={actions} marks={marks} />
-      <LensBody {...props} actions={actions} marks={marks} />
+      <LensToolbar run={shown} streamId={streamId} actions={actions} marks={marks} />
+      <LensBody {...props} run={shown} tree={tree} actions={actions} marks={marks} />
     </div>
   );
+}
+
+/** A lazy tree's nodes (`lazyTreeNodes`, its open branches' rows spliced
+ *  in) and the open set they toggle. */
+interface LazyTree {
+  nodes: TreeNode[];
+  open: CollapsedSet;
 }
 
 /** The rows a person has marked (`rowInteract.ts`): their keys in the
@@ -450,7 +469,7 @@ function LensToolbar({ run, streamId, actions, marks }: { run: LensRun; streamId
   );
 }
 
-function LensBody(props: LensResultViewProps & { actions?: LensActionsState; marks?: Marks }) {
+function LensBody(props: LensResultViewProps & { actions?: LensActionsState; marks?: Marks; tree?: LazyTree | null }) {
   const { run, onOpenPage, streamId = null } = props;
   // It needs a capability that isn't active: it didn't run, and says what
   // it needs rather than showing nothing.
@@ -486,7 +505,8 @@ function RowsBody({
   componentView = null,
   onSetParam,
   marks,
-}: LensResultViewProps & { actions?: LensActionsState; marks?: Marks }) {
+  tree = null,
+}: LensResultViewProps & { actions?: LensActionsState; marks?: Marks; tree?: LazyTree | null }) {
   const lens = run.lens;
   const limited = limitRows(run.result, maxRows);
   // The rows under a parent folded away (a `depth` lens: an epic's
@@ -714,7 +734,9 @@ function RowsBody({
   });
   // A grouped list or table: its headings, each with its group's actions.
   const groups = rowGroups(lens, result);
-  drawn = groups ? groups.filter((g) => !folded.has(g.key)).flatMap((g) => g.rows) : result.rows;
+  // A tree draws its rows in nesting order (a lazy tree's spliced rows too).
+  const treeNodesDrawn = lens.viz === "tree" ? (tree?.nodes ?? treeNodes(lens, result)) : null;
+  drawn = groups ? groups.filter((g) => !folded.has(g.key)).flatMap((g) => g.rows) : treeNodesDrawn ? drawnTreeRows(treeNodesDrawn) : result.rows;
   const drawnAt = new Map(drawn.map((r, i) => [r, i] as const));
   // Marks, drags and keys (`rowInteract.ts`).
   const drawnKeys = drawn.map(rowKey);
@@ -913,7 +935,7 @@ function RowsBody({
   return (
     <>
       {compact ? null : <ResultCompleteness result={result} />}
-      <LensViz {...{ run, result, lens, cols, cell, first, compact, streamId, onOpenPage, rowMenu, rowsView, onCustomFailure, onCustomReady, componentView }} />
+      <LensViz {...{ run, result, lens, cols, cell, first, compact, streamId, onOpenPage, rowMenu, rowsView, onCustomFailure, onCustomReady, componentView }} tree={treeNodesDrawn ? { nodes: treeNodesDrawn, open: tree?.open ?? null } : null} />
       {ctxMenu.menu}
     </>
   );
@@ -1064,6 +1086,7 @@ function LensViz({
   onCustomFailure,
   onCustomReady,
   componentView,
+  tree,
 }: {
   run: LensRun;
   result: LensRun["result"];
@@ -1074,6 +1097,8 @@ function LensViz({
   compact: boolean;
   streamId: string | null;
   onOpenPage?(ref: TabRef): void;
+  /** A tree's nodes, and the open set a lazy tree's branches toggle. */
+  tree: { nodes: TreeNode[]; open: CollapsedSet | null } | null;
   rowMenu: RowMenu;
   rowsView: RowsView;
   onCustomFailure?(reason: string): void;
@@ -1098,7 +1123,9 @@ function LensViz({
     case "tree":
       return (
         <TreeViz
-          nodes={treeNodes(lens, result)}
+          nodes={tree!.nodes}
+          lazyOpen={tree!.open}
+          problem={lazyTreeProblem(lens, result)}
           label={treeLabelColumn(lens, cols, result.columns)}
           cell={cell}
           rowMenu={rowMenu}
@@ -1420,39 +1447,69 @@ interface TreeVizProps {
   rowLook: RowLook;
 }
 
-/** `tree`: nested rows, each branch collapsible (expanded by default). */
-function TreeViz({ nodes, ...rest }: TreeVizProps & { nodes: TreeNode[] }) {
-  // The closed branches (by their index path) are this step's history state.
+/** `tree`: nested rows, each branch collapsible. A branch the result
+ *  nests is open by default (the closed ones, by index path, are this
+ *  step's history state); a lazy branch (`tree.lazy`) is closed by default
+ *  and opens by its id (`lazyOpen`), its row's click or Enter toggling it. */
+function TreeViz({ nodes, lazyOpen, problem, ...rest }: TreeVizProps & { nodes: TreeNode[]; lazyOpen: CollapsedSet | null; problem: string | null }) {
   const closed = useCollapsedSet("lens-tree.closed");
   return (
-    <ul data-testid="lens-tree" style={treeListStyle}>
-      {nodes.map((n, i) => (
-        <TreeItem key={i} node={n} path={String(i)} closed={closed} {...rest} />
-      ))}
-    </ul>
+    <>
+      {problem ? (
+        <div className="ox-error" data-testid="lens-tree-problem">
+          {problem}
+        </div>
+      ) : null}
+      <ul data-testid="lens-tree" style={treeListStyle}>
+        {nodes.map((n, i) => (
+          <TreeItem key={n.id ?? i} node={n} path={String(i)} closed={closed} lazyOpen={lazyOpen} {...rest} />
+        ))}
+      </ul>
+    </>
   );
 }
 
-function TreeItem({ node, path, closed, ...rest }: TreeVizProps & { node: TreeNode; path: string; closed: CollapsedSet }) {
+function TreeItem({ node, path, closed, lazyOpen, ...rest }: TreeVizProps & { node: TreeNode; path: string; closed: CollapsedSet; lazyOpen: CollapsedSet | null }) {
   const { label, cell, rowMenu, rowLook } = rest;
-  const open = !closed.has(path);
-  const branch = node.children.length > 0;
+  const lazy = node.lazy && lazyOpen !== null && node.id !== null;
+  const open = lazy ? lazyOpen.has(node.id!) : node.branch && !closed.has(path);
+  const toggle = () => (lazy ? lazyOpen.toggle(node.id!) : closed.toggle(path));
   const look = rowLook(node.row);
+  const menu = rowMenu(node.row);
+  // A lazy branch's row opens on a plain click or Enter; a control or link
+  // in it, and a marking click, keep their meaning.
+  const props = lazy
+    ? {
+        ...menu,
+        onClick: (e: React.MouseEvent) => {
+          if (e.metaKey || e.ctrlKey || e.shiftKey || (e.target as Element).closest("a, button, input, select, textarea")) return menu.onClick?.(e);
+          toggle();
+        },
+        onKeyDown: (e: React.KeyboardEvent) => {
+          if (e.key === "Enter" && e.target === e.currentTarget) {
+            e.preventDefault();
+            toggle();
+            return;
+          }
+          menu.onKeyDown(e);
+        },
+      }
+    : menu;
   return (
     <li data-testid="lens-tree-node">
       <div
         data-testid="lens-tree-row"
-        className={[look.picks ? "ox-clickable" : "", look.selected ? "ox-selected" : ""].filter(Boolean).join(" ") || undefined}
+        className={[look.picks || lazy ? "ox-clickable" : "", look.selected ? "ox-selected" : ""].filter(Boolean).join(" ") || undefined}
         style={{ display: "flex", alignItems: "center", gap: 4, padding: "2px 0", ...(look.emphasized || look.selected ? emphasisStyle : {}) }}
-        {...rowMenu(node.row)}
+        {...props}
         {...look.props}
       >
-        {branch ? (
+        {node.branch ? (
           <button
             type="button"
             aria-expanded={open}
             aria-label={open ? "Collapse" : "Expand"}
-            onClick={() => closed.toggle(path)}
+            onClick={toggle}
             style={disclosureStyle}
           >
             {open ? "▾" : "▸"}
@@ -1462,16 +1519,28 @@ function TreeItem({ node, path, closed, ...rest }: TreeVizProps & { node: TreeNo
         )}
         <span>{label ? cell(node.row, label) : node.label}</span>
       </div>
-      {branch && open ? (
+      {open && node.state === "loading" ? (
+        <div data-testid="lens-tree-loading" style={{ ...treeNoteStyle }}>
+          Loading…
+        </div>
+      ) : null}
+      {open && node.state && node.state !== "loading" ? (
+        <div className="ox-error" data-testid="lens-tree-error" style={treeNoteStyle}>
+          {node.state.error}
+        </div>
+      ) : null}
+      {node.children.length > 0 && open ? (
         <ul style={{ ...treeListStyle, paddingLeft: 16 }}>
           {node.children.map((c, i) => (
-            <TreeItem key={i} node={c} path={`${path}.${i}`} closed={closed} {...rest} />
+            <TreeItem key={c.id ?? i} node={c} path={`${path}.${i}`} closed={closed} lazyOpen={lazyOpen} {...rest} />
           ))}
         </ul>
       ) : null}
     </li>
   );
 }
+
+const treeNoteStyle: CSSProperties = { paddingLeft: 36, color: "var(--text-secondary)", fontSize: "var(--text-xs)" };
 
 /** A row's `expand` column, as the set of opened ones names it. */
 function expansionKey(c: DisplayColumn, row: SqlCell[]): string {
