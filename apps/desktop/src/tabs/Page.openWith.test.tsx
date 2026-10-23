@@ -1,4 +1,4 @@
-import { afterEach, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, expect, mock, test } from "bun:test";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
 import { PageNavigationContext, type PageNavigation } from "./PageNavigationContext.js";
@@ -27,6 +27,7 @@ const renderer = (extension: string, id: string, more: object = {}) => ({
 let pages = [renderer("oxplow-foundation", "editor", { default: true }), renderer("acme", "blame")];
 
 const realApi = await import("../api.js");
+const pristineApi = { ...realApi };
 mock.module("../api.js", () => ({
   ...realApi,
   listExtensions: async () => [{ name: "ext", enabled: true, pages, ui: { slots: [], commands: [], decorators: [] } }],
@@ -75,4 +76,10 @@ test("a URI with one renderer, or none, offers nothing", async () => {
   await new Promise((r) => setTimeout(r, 20));
   expect(solo.queryByTestId("page-nav-open-with")).toBeNull();
   pages = [renderer("oxplow-foundation", "editor", { default: true }), renderer("acme", "blame")];
+});
+
+// `mock.module` is process-wide: put the real module back so the files that
+// run after this one don't see this file's extensions.
+afterAll(() => {
+  mock.module("../api.js", () => pristineApi);
 });

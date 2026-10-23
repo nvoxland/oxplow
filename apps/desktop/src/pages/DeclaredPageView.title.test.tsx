@@ -1,4 +1,4 @@
-import { afterEach, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, expect, mock, test } from "bun:test";
 import { cleanup, render, waitFor } from "@testing-library/react";
 
 import type { Extension, ExtensionPage, LensRun } from "../tauri-bridge/generated/bindings.js";
@@ -8,6 +8,7 @@ import { PageNavigationContext, type PageNavigation } from "../tabs/PageNavigati
 // launcher showed — not its id, and not its lens's title.
 
 const realApi = await import("../api.js");
+const pristineApi = { ...realApi };
 // Bun's `mock.module` is process-wide: only what this page reads is faked.
 mock.module("../api.js", () => ({
   ...realApi,
@@ -58,4 +59,10 @@ test("the tab title is the page's manifest title", async () => {
   await new Promise((r) => setTimeout(r, 50));
   expect(titles[titles.length - 1]).toBe("Open Pull Requests");
   expect(titles).not.toContain("PRs (lens)");
+});
+
+// `mock.module` is process-wide: put the real module back so the files that
+// run after this one don't see this file's extensions.
+afterAll(() => {
+  mock.module("../api.js", () => pristineApi);
 });

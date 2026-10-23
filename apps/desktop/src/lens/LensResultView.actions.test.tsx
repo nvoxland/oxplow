@@ -1,10 +1,11 @@
-import { afterEach, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, expect, mock, test } from "bun:test";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import type { Lens, LensRun } from "../tauri-bridge/generated/bindings.js";
 import { IpcCallError } from "../ipc-error.js";
 import { personSpec, recordRefOffers } from "../components/refCommandsTestSupport.js";
 
 const realApi = await import("../api.js");
+const pristineApi = { ...realApi };
 const realQuerySql = realApi.querySql;
 // Bun's `mock.module` is process-wide: everything not faked here delegates
 // to the real module so other test files keep working.
@@ -161,4 +162,10 @@ test("a linked cell gets its ref's badges", async () => {
   };
   const view = render(<LensResultView run={linked} onOpenPage={() => {}} />);
   await waitFor(() => expect(view.getByTestId("lens-row-0").textContent).toContain("flaky"));
+});
+
+// `mock.module` is process-wide: put the real module back so the files that
+// run after this one don't see this file's extensions.
+afterAll(() => {
+  mock.module("../api.js", () => pristineApi);
 });

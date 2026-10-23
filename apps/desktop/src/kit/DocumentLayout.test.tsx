@@ -1,4 +1,4 @@
-import { afterEach, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, expect, mock, test } from "bun:test";
 import { cleanup, render, waitFor } from "@testing-library/react";
 
 // A core document page's sections are a slot: what an extension mounts
@@ -8,6 +8,7 @@ import { cleanup, render, waitFor } from "@testing-library/react";
 const lens = (id: string, title: string) => ({ id, title, params: [{ name: "thread_id" }] });
 const runs: { id: string; params: unknown }[] = [];
 const realApi = await import("../api.js");
+const pristineApi = { ...realApi };
 mock.module("../api.js", () => ({
   ...realApi,
   listExtensions: async () => [
@@ -56,4 +57,10 @@ test("mounted sections land among the page's own by their `at`, marked with thei
   await waitFor(() => expect(runs.find((r) => r.id === "addon/presets")?.params).toEqual({ thread_id: 7 }));
   // Four sections: a contents list in the rail.
   expect(getByTestId("document-contents").textContent).toContain("Team presets");
+});
+
+// `mock.module` is process-wide: put the real module back so the files that
+// run after this one don't see this file's extensions.
+afterAll(() => {
+  mock.module("../api.js", () => pristineApi);
 });

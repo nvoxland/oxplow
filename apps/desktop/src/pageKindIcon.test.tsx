@@ -1,7 +1,8 @@
-import { afterEach, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, expect, mock, test } from "bun:test";
 import { cleanup, render, waitFor } from "@testing-library/react";
 
 const realApi = await import("./api.js");
+const pristineApi = { ...realApi };
 mock.module("./api.js", () => ({
   ...realApi,
   listExtensions: async () => [
@@ -21,4 +22,10 @@ test("a declared page draws the icon its declaration names", async () => {
 test("a page no extension declares draws the lens icon", () => {
   const { container } = render(<PageKindIcon kind="page" />);
   expect(container.querySelector("svg.lucide-glasses")).not.toBeNull();
+});
+
+// `mock.module` is process-wide: put the real module back so the files that
+// run after this one don't see this file's extensions.
+afterAll(() => {
+  mock.module("./api.js", () => pristineApi);
 });

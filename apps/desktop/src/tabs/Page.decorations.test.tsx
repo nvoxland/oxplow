@@ -1,4 +1,4 @@
-import { afterEach, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, expect, mock, test } from "bun:test";
 import { cleanup, render, waitFor } from "@testing-library/react";
 
 import { PageNavigationContext, type PageNavigation } from "./PageNavigationContext.js";
@@ -7,6 +7,7 @@ import { PageNavigationContext, type PageNavigation } from "./PageNavigationCont
 // chip after the page's own; a disabled one labels nothing.
 
 const realApi = await import("../api.js");
+const pristineApi = { ...realApi };
 const realQuerySql = realApi.querySql;
 let enabled = true;
 const queries: string[] = [];
@@ -106,4 +107,10 @@ test("an effort page shows its review verdict as a chip", async () => {
     </PageNavigationContext.Provider>,
   );
   await waitFor(() => expect(view.getByTestId("page-chips").textContent).toBe("closedChanges requested"));
+});
+
+// `mock.module` is process-wide: put the real module back so the files that
+// run after this one don't see this file's extensions.
+afterAll(() => {
+  mock.module("../api.js", () => pristineApi);
 });

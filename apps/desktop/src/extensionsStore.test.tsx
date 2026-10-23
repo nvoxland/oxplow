@@ -1,4 +1,4 @@
-import { afterEach, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, expect, mock, test } from "bun:test";
 import { act, cleanup, render, waitFor } from "@testing-library/react";
 
 // One load of the extensions (the main worktree's, for every stream),
@@ -6,6 +6,7 @@ import { act, cleanup, render, waitFor } from "@testing-library/react";
 // reload when they change.
 
 const realApi = await import("./api.js");
+const pristineApi = { ...realApi };
 let loads = 0;
 let names = ["a"];
 let lastArgs: unknown[] = [];
@@ -73,4 +74,10 @@ test("nothing is kept once no reader is mounted", async () => {
   names = ["c"];
   const again = render(<Names id="one" />);
   await waitFor(() => expect(again.getByTestId("one").textContent).toBe("c"));
+});
+
+// `mock.module` is process-wide: put the real module back so the files that
+// run after this one don't see this file's extensions.
+afterAll(() => {
+  mock.module("./api.js", () => pristineApi);
 });
