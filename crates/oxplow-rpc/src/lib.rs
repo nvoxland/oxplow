@@ -300,7 +300,6 @@ macro_rules! oxplow_command_table {
                 terminate_terminal_session => $crate::commands::terminal::terminate_terminal_session { session_id: String } -> (),
                 lookup_terminal_session => $crate::commands::terminal::lookup_terminal_session { session_id: ::oxplow_domain::AgentSessionId } -> Option<String>,
                 // snapshot
-                list_file_snapshots => $crate::commands::snapshot::list_file_snapshots { path: String } -> Vec<::oxplow_db::FileSnapshot>,
                 list_snapshot_ops => $crate::commands::snapshot::list_snapshot_ops { stream_id: ::oxplow_domain::StreamId, limit: Option<u32> } -> Vec<::oxplow_db::SnapshotOp>,
                 get_snapshot_stats => $crate::commands::snapshot::get_snapshot_stats { snapshot_id: ::oxplow_domain::SnapshotId } -> ::oxplow_db::SnapshotStats,
                 get_blob_storage_bytes => $crate::commands::snapshot::get_blob_storage_bytes {} -> ::oxplow_domain::ByteSize,

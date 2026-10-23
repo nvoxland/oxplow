@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState, type DragEvent as ReactDragEvent } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
-import type { TerminalEvent } from "../editor-session.js";
 import { desktopBridge, onRemoteReconnect } from "../api.js";
 import { logUi } from "../logger.js";
 import { terminalSender, type TerminalMessage, type TerminalSender } from "./terminalInput.js";
@@ -19,6 +18,12 @@ import {
 } from "../agent-context-dnd.js";
 import { formatContextMention } from "../agent-context-ref.js";
 import { installFilePathLinkProvider, type FilePathLinkActivation } from "../terminal-link-provider.js";
+
+/** A PTY session's output or exit, as `terminal:event` carries it. */
+interface TerminalEvent {
+  sessionId: string;
+  message: string;
+}
 
 /** The terminal's font size, px: its cells are measured in it. */
 const TERMINAL_FONT_SIZE = 13;

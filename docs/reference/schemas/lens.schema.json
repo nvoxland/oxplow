@@ -135,6 +135,17 @@
       ],
       "default": null
     },
+    "editor": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/LensEditor"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
     "markdown": {
       "anyOf": [
         {
@@ -352,6 +363,11 @@
           "description": "The first row's file `diff.path` between revisions `diff.from` and\n`diff.to`, at full size, read-only; `diff.lines` revealed on the\nnewer side.",
           "type": "string",
           "const": "diff"
+        },
+        {
+          "description": "The working tree's file `editor.path` (the first row's), edited at\nfull size: its buffer shared with every tab showing it, saved\nthrough `oxplow.file.save`, `editor.lines` revealed.",
+          "type": "string",
+          "const": "editor"
         },
         {
           "description": "Per row, the diff of the file `hunks.path` between the revisions\n`hunks.from` and `hunks.to` (`working`, `snap:<id>`,\n`<vcs>:<rev>`), read-only.",
@@ -1099,6 +1115,27 @@
         },
         "base": {
           "description": "A column naming the older side as the header says it (`vs HEAD`);\nelse the `from` revision, shortened.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false
+    },
+    "LensEditor": {
+      "description": "`editor` viz: the working tree's file the first row names, and the\nlines it reveals.",
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "lines": {
+          "description": "A column holding `12` (or `12-40`: its start): the line revealed.",
           "type": [
             "string",
             "null"

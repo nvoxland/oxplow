@@ -1,17 +1,17 @@
-import type { CSSProperties } from "react";
+import type { CSSProperties, MutableRefObject } from "react";
 import { useEffect, useRef, useState } from "react";
-import type { OpenFileState } from "../editor-session.js";
 import type { BlameLine, Stream } from "../api.js";
-import { desktopBridge, readAt } from "../api.js";
+import { desktopBridge, installLspPackage, readAt } from "../api.js";
 import { computeDiffDecorations } from "../editor-diff.js";
 import { languageForPath } from "../editor-language.js";
-import { hasLspServer } from "../lsp-servers-store.js";
-import { type EditorNavigationTarget, relativePathFromFileUri, streamFileUri } from "../lsp.js";
+import { hasLspServer, refreshLspServers } from "../lsp-servers-store.js";
+import type { EditorNavigationTarget } from "../lsp.js";
 import { normalizeDefinitionTarget } from "../lsp-monaco-mapping.js";
-import { applyNormalizedWorkspaceEdit, workspaceEditIOForStream } from "../lsp-workspace-edit.js";
-import { registerLspProviders } from "./editor-lsp-providers.js";
+import { getSuggestedLspPackage } from "../lspSuggestions.js";
 import { logUi } from "../logger.js";
-import { useLspClients } from "./useLspClients.js";
+import { isDirty as bufferDirty, useBuffer } from "../editor/buffers.js";
+import { buffers, loadMonaco } from "../editor/openFiles.js";
+import { LspMirror } from "../editor/lspMirror.js";
 import { BLAME_WIDTH, useBlame } from "./useBlame.js";
 import { useMonacoViewState } from "./useMonacoViewState.js";
 import type { MenuItem } from "../menu.js";
@@ -26,18 +26,18 @@ import { fileUri } from "../uri/uri.js";
 
 interface Props {
   stream: Stream;
-  filePath: string | null;
-  value: string;
-  isDirty: boolean;
-  onChange(value: string): void;
-  onSave(): void | Promise<void>;
-  findRequest: number;
-  navigationTarget: EditorNavigationTarget | null;
-  openFileOrder: string[];
-  openFiles: Record<string, OpenFileState>;
-  onNavigateToLocation(target: EditorNavigationTarget): Promise<void>;
+  /** The working tree's file it edits: its buffer (`editor/buffers.ts`),
+   *  open and ready. */
+  filePath: string;
+  /** The line it lands on once the file shows (`#lines=`). */
+  line: number | null;
+  onSave(): void;
+  /** Open another file at a line (Go to Definition). */
+  onNavigateToLocation(target: EditorNavigationTarget): void;
   onRevealCommit?(sha: string): void;
   onCompareWithClipboard?(selection: string, path: string): void;
+  /** Where it puts its Find, for the menu's. */
+  findRef?: MutableRefObject<(() => void) | null>;
 }
 
 /** The most of a selection's text an editor publishes as its page detail. */
@@ -46,43 +46,59 @@ const PUBLISHED_SELECTION = 4_000;
 export function EditorPane({
   stream,
   filePath,
-  value,
-  isDirty,
-  onChange,
+  line,
   onSave,
-  findRequest,
-  navigationTarget,
-  openFileOrder,
-  openFiles,
   onNavigateToLocation,
   onRevealCommit,
   onCompareWithClipboard,
+  findRef,
 }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<any>(null);
   const monacoRef = useRef<any>(null);
-  const changeDisposeRef = useRef<{ dispose(): void } | null>(null);
   const focusDisposersRef = useRef<{ dispose(): void }[]>([]);
   const focusDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const openFilesRef = useRef({ order: openFileOrder, files: openFiles });
-  const onChangeRef = useRef(onChange);
+  const buffer = useBuffer(buffers, stream.id, filePath);
+  const isDirty = bufferDirty(buffer);
+  const ready = buffer?.state === "ready";
   const onSaveRef = useRef(onSave);
   useEffect(() => { onSaveRef.current = onSave; }, [onSave]);
   const onNavigateRef = useRef(onNavigateToLocation);
   const streamRef = useRef(stream);
   const filePathRef = useRef(filePath);
-  // Shared editor status banner — written by LSP client status (below),
-  // blame errors, and go-to-definition. The LSP-client lifecycle itself
-  // (clients, diagnostics→markers, didOpen/Close/Save sync, install
-  // suggestion, disposal) lives in useLspClients.
-  const [lspStatus, setLspStatus] = useState<string | null>(null);
-  const {
-    ensureLspClient,
-    flushPendingChanges,
-    lspInstallSuggestion,
-    lspInstalling,
-    installSuggested,
-  } = useLspClients({ monacoRef, filePathRef, stream, openFiles, openFileOrder, setLspStatus });
+  // The status banner: this editor's own word (blame, Go to Definition),
+  // else what the stream's language server says about this file's
+  // language (the stream's LSP mirror, `editor/lspMirror.ts`).
+  const [ownStatus, setLspStatus] = useState<string | null>(null);
+  const [, heardMirror] = useState(0);
+  useEffect(() => LspMirror.of(stream.id)?.subscribe(() => heardMirror((n) => n + 1)), [stream.id, ready]);
+  const languageId = languageForPath(filePath);
+  const mirrorStatus = LspMirror.of(stream.id)?.status(languageId) ?? null;
+  const lspStatus = ownStatus ?? mirrorStatus;
+  const lspInstallSuggestion = mirrorStatus && /LSP unavailable/i.test(mirrorStatus) ? getSuggestedLspPackage(languageId) : null;
+  const [lspInstalling, setLspInstalling] = useState(false);
+  async function installSuggested() {
+    if (!lspInstallSuggestion) return;
+    setLspInstalling(true);
+    try {
+      await installLspPackage(lspInstallSuggestion);
+      setLspStatus(`Installed ${lspInstallSuggestion} — the server starts for the open files`);
+      await refreshLspServers();
+      LspMirror.of(stream.id)?.restart(languageId);
+    } catch (err) {
+      setLspStatus(`Install failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setLspInstalling(false);
+    }
+  }
+  const clientFor = (lang: string) => {
+    const mirror = LspMirror.of(streamRef.current.id);
+    if (!mirror) throw new Error("this file isn't open");
+    return mirror.client(lang);
+  };
+  const flushPendingChanges = (path: string | null) => {
+    if (path) LspMirror.of(streamRef.current.id)?.flush(path);
+  };
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [blameMenu, setBlameMenu] = useState<{ x: number; y: number; sha: string; authorMail: string } | null>(null);
   const onRevealCommitRef = useRef(onRevealCommit);
@@ -112,11 +128,9 @@ export function EditorPane({
     setLspStatus,
   });
 
-  onChangeRef.current = onChange;
   onNavigateRef.current = onNavigateToLocation;
   streamRef.current = stream;
   filePathRef.current = filePath;
-  openFilesRef.current = { order: openFileOrder, files: openFiles };
 
   // Monaco's view state (cursor / scroll / folds / selection) stays with the
   // tab's entry: Back and a restart land on the same line.
@@ -126,7 +140,8 @@ export function EditorPane({
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const monaco = await import("monaco-editor");
+      // Loaded once, the LSP providers registered on it for every file.
+      const monaco = await loadMonaco();
       if (cancelled || !hostRef.current) return;
       monacoRef.current = monaco;
       const editor = monaco.editor.create(hostRef.current, {
@@ -150,19 +165,6 @@ export function EditorPane({
         () => { void onSaveRef.current(); },
       );
       registerGoToDefinitionAction(monaco, editor, () => goToDefinition());
-      registerLspProviders(monaco, {
-        hasServer: hasLspServer,
-        getClient: (languageId) => ensureLspClient(streamRef.current, languageId),
-        flushDoc: (model) =>
-          flushPendingChanges(relativePathFromFileUri(streamRef.current, model.uri.toString())),
-        setStatus: setLspStatus,
-        applyEdits: (normalized) =>
-          applyNormalizedWorkspaceEdit(
-            monaco,
-            workspaceEditIOForStream(monaco, streamRef.current),
-            normalized,
-          ),
-      });
       focusDisposersRef.current.push(editor.onDidChangeCursorSelection(() => scheduleFocusPush()));
       focusDisposersRef.current.push(editor.onDidChangeCursorPosition(() => scheduleFocusPush()));
       editor.onContextMenu((event: any) => {
@@ -198,12 +200,12 @@ export function EditorPane({
     })();
     return () => {
       cancelled = true;
-      changeDisposeRef.current?.dispose();
       focusDisposersRef.current.forEach((d) => d.dispose());
       focusDisposersRef.current = [];
       if (focusDebounceRef.current) clearTimeout(focusDebounceRef.current);
       detachViewStateRef.current?.();
-      // LSP client + diagnostics disposal is owned by useLspClients.
+      // The model is its buffer's (the store disposes it); the editor is ours.
+      editorRef.current?.setModel(null);
       editorRef.current?.dispose();
     };
   }, []);
@@ -221,7 +223,6 @@ export function EditorPane({
     if (!editor) return;
     const currentStream = streamRef.current;
     const currentPath = filePathRef.current;
-    const { order, files } = openFilesRef.current;
     const selectionObj = editor.getSelection?.();
     const hasSelection = !!selectionObj && !selectionObj.isEmpty();
     let selection: {
@@ -246,13 +247,7 @@ export function EditorPane({
       const position = editor.getPosition?.();
       if (position) caret = { line: position.lineNumber, column: position.column };
     }
-    const openFilesPayload = order
-      .map((path) => {
-        const entry = files[path];
-        if (!entry) return null;
-        return { path, dirty: entry.draftContent !== entry.savedContent };
-      })
-      .filter((entry): entry is { path: string; dirty: boolean } => !!entry);
+    const openFilesPayload = buffers.list(currentStream.id).map((b) => ({ path: b.path, dirty: bufferDirty(b) }));
     void desktopBridge().updateEditorFocus({
       streamId: currentStream.id,
       activeFile: currentPath,
@@ -280,45 +275,31 @@ export function EditorPane({
 
   useEffect(() => {
     pushEditorFocus();
-  }, [stream.id, filePath, openFileOrder, openFiles]);
+  }, [stream.id, filePath, isDirty]);
 
+  // The editor shows its buffer's model: the draft, shared with every
+  // editor of the file. Edits to it are the buffer's (the store listens),
+  // and the stream's LSP mirror sends them on.
   useEffect(() => {
-    const monaco = monacoRef.current;
     const editor = editorRef.current;
-    if (!monaco || !editor) return;
-    const t0 = performance.now();
-    logUi("debug", "editor: model-setup start", { path: filePath, valueLength: value.length });
-
-    const uri = filePath
-      ? monaco.Uri.parse(streamFileUri(stream, filePath))
-      : monaco.Uri.from({ scheme: "inmemory", path: `/stream/${stream.id}/placeholder` });
-    let model = monaco.editor.getModel(uri);
-    if (!model) {
-      model = monaco.editor.createModel(value, languageForPath(filePath), uri);
-    }
-    if (model.getValue() !== value) {
-      model.setValue(value);
-    }
-    monaco.editor.setModelLanguage(model, languageForPath(filePath));
+    if (!editor || !ready) return;
+    const model = buffers.model(stream.id, filePath);
+    if (!model || editor.getModel() === model) return;
     closeFindWidget(editor);
     editor.setModel(model);
-    changeDisposeRef.current?.dispose();
-    logUi("debug", "editor: model-setup end", { path: filePath, ms: Math.round(performance.now() - t0) });
-    // didChange sync is NOT pushed from here: edits flow through
-    // onChange → openFiles draft state, and useLspClients feeds drafts
-    // into its debounced DocumentSyncTracker (per-path monotonic LSP
-    // versions — Monaco's getVersionId resets on model swaps).
-    changeDisposeRef.current = editor.onDidChangeModelContent(() => {
-      const next = editor.getValue();
-      if (next !== value) onChangeRef.current(next);
-    });
-  }, [stream.id, filePath, value, monacoReady]);
+  }, [stream.id, filePath, ready, monacoReady]);
 
+  // The menu's Find (Ctrl/Cmd+F outside the editor).
   useEffect(() => {
-    const editor = editorRef.current;
-    if (!editor || !filePath || findRequest === 0) return;
-    void editor.getAction("actions.find")?.run();
-  }, [filePath, findRequest]);
+    if (!findRef) return;
+    findRef.current = () => {
+      editorRef.current?.focus();
+      void editorRef.current?.getAction("actions.find")?.run();
+    };
+    return () => {
+      findRef.current = null;
+    };
+  }, [findRef]);
 
   useEffect(() => {
     if (!filePath) return;
@@ -352,7 +333,7 @@ export function EditorPane({
 
   useEffect(() => {
     applyDiffDecorations();
-  }, [value, filePath, monacoReady]);
+  }, [buffer?.draft, filePath, monacoReady, ready]);
 
   function applyDiffDecorations() {
     const editor = editorRef.current;
@@ -382,14 +363,15 @@ export function EditorPane({
     });
   }
 
+  // Land on `line` (the page's `#lines=`) once the file shows.
   useEffect(() => {
     const editor = editorRef.current;
-    if (!editor || !navigationTarget || navigationTarget.path !== filePath) return;
+    if (!editor || line === null || !ready || !monacoReady) return;
     editor.focus();
-    const position = { lineNumber: navigationTarget.line, column: navigationTarget.column };
+    const position = { lineNumber: line, column: 1 };
     editor.setPosition(position);
     editor.revealPositionInCenter(position);
-  }, [filePath, navigationTarget]);
+  }, [filePath, line, ready, monacoReady]);
 
   async function goToDefinition() {
     const editor = editorRef.current;
@@ -397,13 +379,13 @@ export function EditorPane({
     if (!editor || !model) return;
     const position = editor.getPosition();
     if (!position) return;
-    const languageId = model.getLanguageId();
-    if (!hasLspServer(languageId)) {
-      setLspStatus(`LSP not configured for ${languageId}`);
+    const lang = model.getLanguageId();
+    if (!hasLspServer(lang)) {
+      setLspStatus(`LSP not configured for ${lang}`);
       return;
     }
     flushPendingChanges(filePathRef.current);
-    const client = ensureLspClient(streamRef.current, languageId);
+    const client = clientFor(lang);
     const result = await client.request<unknown>("textDocument/definition", {
       textDocument: { uri: model.uri.toString() },
       position: {
@@ -419,7 +401,7 @@ export function EditorPane({
       editor.revealPositionInCenter({ lineNumber: target.line, column: target.column });
       return;
     }
-    await onNavigateRef.current(target);
+    onNavigateRef.current(target);
   }
 
   const contextMenuItems: MenuItem[] = [
@@ -572,7 +554,7 @@ export function EditorPane({
         onContextMenu={(e) => e.preventDefault()}
       >
         <div ref={hostRef} data-testid="monaco-host" data-file-path={filePath ?? ""} style={{ width: "100%", height: "100%", minHeight: 0 }} />
-        {monacoReady && filePath ? (
+        {monacoReady && ready ? (
           <MonacoCommentLayer
             ref={commentLayerRef}
             editor={editorRef.current}
@@ -596,7 +578,7 @@ export function EditorPane({
             }}
           />
         ) : null}
-        {filePath && lspStatus ? (
+        {lspStatus ? (
           <div style={lspStatusStyle}>
             <span>{lspStatus}</span>
             {lspInstallSuggestion ? (
@@ -606,14 +588,9 @@ export function EditorPane({
                 onClick={() => void installSuggested()}
                 style={lspInstallButtonStyle}
               >
-                {lspInstalling ? `Installing ${lspInstallSuggestion.pkg}…` : `Install ${lspInstallSuggestion.pkg}`}
+                {lspInstalling ? `Installing ${lspInstallSuggestion}…` : `Install ${lspInstallSuggestion}`}
               </button>
             ) : null}
-          </div>
-        ) : null}
-        {!filePath ? (
-          <div style={emptyStyle}>
-            <div>Select a file from the sidebar to open it here.</div>
           </div>
         ) : null}
         {contextMenu ? (
@@ -782,17 +759,6 @@ function truncateAuthor(author: string): string {
   if (author.length <= 14) return author;
   return `${author.slice(0, 13)}…`;
 }
-
-const emptyStyle: CSSProperties = {
-  position: "absolute",
-  inset: 0,
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  color: "var(--muted)",
-  fontSize: 13,
-  background: "rgba(14, 14, 14, 0.85)",
-};
 
 function closeFindWidget(editor: any) {
   editor.getContribution("editor.contrib.findController")?.closeFindWidget?.();

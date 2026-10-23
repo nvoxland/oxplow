@@ -314,7 +314,6 @@ pub const MANIFEST: &[Capability] = &[
     model("get_file_snapshot", &["v_snapshot_file"]),
     model("get_snapshot_stats", &["v_snapshot_file"]),
     ui("read_event_content", "the event page's stored body; an agent reads the event's ref with `read`"),
-    model("list_file_snapshots", &["v_snapshot_file"]),
     // ---- UI selection ----
     ui(
         "select_thread",

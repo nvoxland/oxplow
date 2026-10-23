@@ -233,7 +233,7 @@ export class LspClient {
 }
 
 /// Map RPC failures to the banner text. "LSP unavailable" is load-
-/// bearing: useLspClients keys the install-suggestion flow off it.
+/// bearing: the editor keys the install-suggestion flow off it.
 function statusForError(error: unknown): string {
   const message = errorMessage(error);
   if (/no language server configured/i.test(message)) {

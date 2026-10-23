@@ -139,6 +139,16 @@ pub async fn resolve(
                     .push(file_text(svc, root, &at(p), &at(r), lines).await);
             }
         }
+        LensViz::Editor => {
+            let e = run.lens.editor.clone().unwrap_or_default();
+            let (Some(p), Some(row)) = (column(run, e.path.as_ref()), run.result.rows.first())
+            else {
+                return Ok(out);
+            };
+            let path = row.get(p).map(cell).unwrap_or_default();
+            out.files
+                .push(file_text(svc, root, &path, "working", None).await);
+        }
         LensViz::Diff => {
             let d = run.lens.diff.clone().unwrap_or_default();
             let (Some(p), Some(f), Some(t), Some(row)) = (
@@ -495,6 +505,7 @@ pub fn render(run: &LensRun, resolved: &Resolved) -> String {
         LensViz::Steps => steps(run),
         LensViz::Hunks => hunks(run, &resolved.diffs),
         LensViz::Code => code(run, &resolved.files),
+        LensViz::Editor => editor(run, &resolved.files),
         LensViz::Diff => one_diff(run, &resolved.diffs),
         LensViz::Approvals => {
             if resolved.approvals.is_empty() {
@@ -857,6 +868,35 @@ fn hunks(run: &LensRun, diffs: &[String]) -> String {
 
 /// Code: each row's file, revision and marked lines, then its text in a
 /// fence named for its extension.
+/// The file an editor shows, as saved: what an agent reads of it (the
+/// person's unsaved edits stay in their window).
+fn editor(run: &LensRun, files: &[String]) -> String {
+    let e = run.lens.editor.clone().unwrap_or_default();
+    let (Some(p), Some(row), Some(text)) = (
+        column(run, e.path.as_ref()),
+        run.result.rows.first(),
+        files.first(),
+    ) else {
+        return table(run);
+    };
+    let path = row.get(p).map(cell).unwrap_or_default();
+    format!(
+        "#### {path}, being edited (as saved; unsaved edits aren't here)\n\n```{}\n{}\n```",
+        fence_of(&path),
+        text.trim_end()
+    )
+}
+
+/// A fence's language for `path`: its extension, when it is one word.
+fn fence_of(path: &str) -> String {
+    std::path::Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .filter(|e| e.chars().all(|c| c.is_ascii_alphanumeric()))
+        .unwrap_or_default()
+        .to_ascii_lowercase()
+}
+
 fn code(run: &LensRun, files: &[String]) -> String {
     let c = run.lens.code.clone().unwrap_or_default();
     let (Some(p), Some(r)) = (
@@ -877,12 +917,7 @@ fn code(run: &LensRun, files: &[String]) -> String {
                 .and_then(|i| parse_lines(&at(i)))
                 .map(|(a, b)| format!(":{a}-{b}"))
                 .unwrap_or_default();
-            let fence = std::path::Path::new(&path)
-                .extension()
-                .and_then(|e| e.to_str())
-                .filter(|e| e.chars().all(|c| c.is_ascii_alphanumeric()))
-                .unwrap_or_default()
-                .to_ascii_lowercase();
+            let fence = fence_of(&path);
             format!(
                 "#### {path}@{}{lines}\n\n```{fence}\n{}\n```",
                 at(r),
@@ -1150,6 +1185,7 @@ mod tests {
                 hunks: None,
                 code: None,
                 diff: None,
+                editor: None,
                 markdown: None,
                 form: None,
                 custom: None,
@@ -1915,6 +1951,30 @@ mod tests {
         );
         let text = text_of(&fx.svc, &root, &diff, &ctx).await.unwrap();
         assert!(text.contains("-one") && text.contains("+uno"), "{text}");
+    }
+
+    /// An editor lens reads its first row's file as the working tree has
+    /// it, and says the person's unsaved edits aren't in it.
+    #[tokio::test]
+    async fn an_editor_reads_the_working_file() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let root = fx.svc.layout.project_dir.clone();
+        std::fs::write(root.join("e.txt"), "saved text\n").unwrap();
+        let ctx = crate::extensions::LensContext::default();
+        let editor = with(
+            run(LensViz::Editor, None, &["path"], vec![vec![t("e.txt")]]),
+            |l| {
+                l.editor = Some(crate::extensions::LensEditor {
+                    path: Some("path".into()),
+                    lines: None,
+                })
+            },
+        );
+        let text = text_of(&fx.svc, &root, &editor, &ctx).await.unwrap();
+        assert!(
+            text.contains("#### e.txt, being edited (as saved; unsaved edits aren't here)\n\n```txt\nsaved text\n```"),
+            "{text}"
+        );
     }
 
     /// An approvals lens reads the pending proposals itself: an agent

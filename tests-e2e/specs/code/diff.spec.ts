@@ -24,7 +24,7 @@ test("a committed change shows its hunk", async ({ page, daemon }) => {
   // Its Change Analysis lenses (oxplow-bundled's mounts in the page's
   // `.sections` slot) read their extension's models (tsk977): once they
   // have rendered their runs, none failed.
-  await expect(commit.getByText("Change Analysis")).toBeVisible();
+  await expect(commit.locator(".ox-section-title").getByText("Change Analysis")).toBeVisible();
   await expect(commit).not.toContainText("no such table");
   await commit.getByTestId("lens-part-files").getByRole("button", { name: "emu.txt" }).click();
   await expect(page.getByTestId("lens-diff")).toContainText("second emu line");

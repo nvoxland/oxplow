@@ -655,7 +655,8 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     `fixtures/built_in_pages.json`. The list grew once with the
     renderers (`agent-session`, `commit`, `directory`, `editor`,
     `file-viewer`, `lens`, `resource`, `wiki-page`,
-    `work-item`) and only shrinks again. Any other
+    `work-item`) and only shrinks again (the editor left as a lens over
+    the `editor` viz). Any other
     `component: <id>` names one of the extension's own
     `custom_components` (`PageBody::Component { component:
     "<ext>/<id>" }`): a **custom page**, the component filling the page
@@ -2069,7 +2070,12 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   `steps`, `hunks`, `board` (the groups as columns of cards, each card a
   list row; it needs `group`, whose `values: [..]` fix the columns' order
   and keep empty ones as drop targets — `values` orders any grouped viz),
-  `code` and `diff` (the full-size readers: a file at a
+  `editor` (the working tree's file, edited: `editor: { path, lines? }`,
+  the first row's; its buffer the window's, Save `oxplow.file.save`, its
+  tab's ● and Save through `useTabEditing`; refused in a spec, since an
+  answer never writes as the person; an agent reads it as the file as
+  saved — `lens/EditorViz.tsx`, `.context/editor-and-monaco.md` "The
+  editor viz"), `code` and `diff` (the full-size readers: a file at a
   revision, or one file's diff, read-only, filling a lens page —
   `LensPage`'s `fill`, no in-body title; a loaded lens says whether it
   fills, `Lens.fills`: its viz does, `LensViz::fills`, or it is a

@@ -91,9 +91,8 @@ registrations). Install/remove emit `OxplowEvent::LspServersChanged`.
   `readFile`/`writeWorkspaceFile` read-modify-write (lands on disk);
   file create/rename/delete ops are still skipped + surfaced.
   `registerLspApplyEditHandler` in `lsp.ts` routes server-initiated
-  applyEdits to the editor owning that stream (`useLspClients`
-  registers per mounted editor; unclaimed requests answer
-  `applied:false`). Editor wiring details:
+  applyEdits to the stream's LSP mirror (`editor/lspMirror.ts`, one per
+  stream with open files; unclaimed requests answer `applied:false`). Editor wiring details:
   `.context/editor-and-monaco.md`.
 - **Persisted diagnostics**: `lsp_diagnostics.rs` (spawned at boot)
   subscribes to the session broadcast and stores every

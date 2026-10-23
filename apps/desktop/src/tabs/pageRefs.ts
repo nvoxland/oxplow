@@ -517,7 +517,7 @@ export function goToRef(): TabRef {
 
 /**
  * Form pages: a focused full-tab workspace for each form (new stream,
- * new task, stream and thread settings), matching `SettingsPage`.
+ * new task, stream and thread settings), matching the Settings document.
  */
 
 export interface NewTaskPayload {

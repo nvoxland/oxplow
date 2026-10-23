@@ -58,7 +58,7 @@ import {
   partParams,
   viewedParts,
   codeRows,
-  diffRow,
+  diffRow, editorRow,
   type DisplayColumn,
   type RowGroup,
   type StepStatus,
@@ -73,6 +73,7 @@ import { RefBadge } from "../components/RefBadge.js";
 import { CustomComponentViz } from "./CustomComponentViz.js";
 import type { HostedView } from "./hostedView.js";
 import { DashboardViz, DocumentViz } from "./PartsViz.js";
+import { EditorViz } from "./EditorViz.js";
 import { CodeViz } from "./CodeViz.js";
 import { DiffViz } from "./DiffViz.js";
 import { useLensRuns } from "./useLensRuns.js";
@@ -1166,6 +1167,8 @@ function LensViz({
       return <CodeViz rows={codeRows(lens, result)} streamId={streamId} sync={lens.code?.sync ?? false} onOpenPage={onOpenPage} />;
     case "diff":
       return <DiffViz spec={diffRow(lens, result)} streamId={streamId} onOpenPage={onOpenPage} />;
+    case "editor":
+      return <EditorViz row={editorRow(lens, result)} onOpenPage={onOpenPage} />;
     case "list":
       return <ListViz rows={result.rows} cols={cols} cell={cell} rowMenu={rowMenu} view={rowsView} />;
     case "board":

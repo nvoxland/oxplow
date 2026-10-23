@@ -21,6 +21,9 @@ import { LensResultView } from "../lens/LensResultView.js";
 import { LensRail, type PickedRow } from "../lens/LensRail.js";
 import type { PageAction } from "../kit/actions.js";
 import { CommentNavigator } from "../components/Comments/CommentNavigator.js";
+import { LensStreamContext } from "../lens/LensStream.js";
+import { useBacklinks, usePageOutbound } from "../tabs/useBacklinks.js";
+import { BacklinksList } from "../tabs/BacklinksList.js";
 import { requestCommentReveal } from "../comment-reveal-bus.js";
 import { contextNodeProps } from "../components/Comments/contextNodes.js";
 import { Contents } from "../lens/Contents.js";
@@ -259,6 +262,10 @@ export function LensPage({ lensId, params, title: pageTitle, titleFrom, stream, 
     };
   }, [landing, body, run]);
 
+  // A page showing a resource lists what links to it and what it links
+  // to (the `page_ref` graph), in the nav bar.
+  const linksIn = useBacklinks({ id: renders ?? "" });
+  const linksOut = usePageOutbound({ id: renders ?? "" });
   // A lens that fills (a file, a diff, a document ending in one: the
   // loader says) has the chrome's title, its body every pixel the page has.
   const fills = lens?.fills ?? false;
@@ -273,8 +280,11 @@ export function LensPage({ lensId, params, title: pageTitle, titleFrom, stream, 
       actions={actions}
       pin={{ tile: { kind: "lens", lensId, optionsJson: JSON.stringify({ size: "wide" }) }, onOpenPage }}
       rightRail={rail}
+      backlinks={linksIn.length > 0 ? { count: linksIn.length, body: <BacklinksList entries={linksIn} /> } : undefined}
+      outbound={linksOut.length > 0 ? { count: linksOut.length, body: <BacklinksList entries={linksOut} /> } : undefined}
       commentsNav={pageComments ? <CommentNavigator target={pageComments.target} /> : undefined}
     >
+      <LensStreamContext.Provider value={stream}>
       <PageCommentsContext.Provider value={pageComments}>
       <div
         ref={setBody}
@@ -305,6 +315,7 @@ export function LensPage({ lensId, params, title: pageTitle, titleFrom, stream, 
       {run ? <LensResultView run={run} onOpenPage={onOpenPage} onSetParam={setParam} toolbarTo={setLensActions} componentView={componentView} /> : error ? null : <p>Loading…</p>}
       </div>
       </PageCommentsContext.Provider>
+      </LensStreamContext.Provider>
     </Page>
   );
 }

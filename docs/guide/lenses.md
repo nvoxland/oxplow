@@ -75,6 +75,11 @@ empty: Nothing is blocked.
 - `viz: diff` shows one file's diff, filling the page: `diff: { path:
   <column>, from: <column>, to: <column> }`; `lines` reveals a line, and `base` names the
   older side in the header (`vs HEAD`). Several files are `hunks`.
+- `viz: editor` edits a file of the working tree, filling the page:
+  `editor: { path: <column> }`, with `lines` (a column holding `12`)
+  for the line it lands on. Its tab shows ● while it has unsaved edits,
+  and Save writes them (`oxplow.file.save`). An agent's answer can't be
+  an editor: show the file with `code` at `working`.
 - Unknown keys are errors, so typos show up instead of being ignored.
 
 ### Typed params

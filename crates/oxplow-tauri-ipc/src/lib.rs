@@ -170,7 +170,6 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::record_usage,
             // code quality (duplication only — metrics scan retired, tsk229)
             // snapshots
-            commands::generated::list_file_snapshots,
             commands::generated::list_snapshot_ops,
             commands::generated::list_files_for_snapshot,
             commands::generated::list_wiki_slugs_for_snapshots,

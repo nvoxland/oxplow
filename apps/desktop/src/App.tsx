@@ -21,15 +21,11 @@ import {
   desktopBridge,
   listStreams,
   probeDaemon,
-  readWorkspaceFile,
   renameThread,
   renameStream,
-  subscribeWorkspaceEvents,
   selectThread,
   recordUsage,
   switchStream,
-  runCommand,
-  runCommandForCall,
   runCommandInBackground,
   commandOpenAfter,
   type ThreadMark,
@@ -38,22 +34,7 @@ import {
   type Stream,
   type WorkspaceContext,
 } from "./api.js";
-import {
-  closeOpenFile,
-  createEmptyFileSession,
-  enforceOpenFileLimit,
-  markFileSaved,
-  openFileInSession,
-  removeOpenFiles,
-  renameOpenFilePaths,
-  reorderOpenFiles,
-  selectOpenFile,
-  setLoadedFileContent,
-  setOpenFileLoading,
-  updateFileDraft,
-} from "./editor-session.js";
 import { buildMenuBar, buildNativeMenuSnapshots, menuItemById, OPEN_RECENT_PREFIX } from "./menuBar.js";
-import { externalFileSyncAction } from "./external-file-sync.js";
 import type { EditorNavigationTarget } from "./lsp.js";
 import { Navigator } from "./components/Navigator.js";
 import { StatusBar } from "./components/StatusBar.js";
@@ -67,7 +48,6 @@ import { PersonCommandConfirm } from "./components/PersonCommandConfirm.js";
 import { RemoteConnectionBanner } from "./components/RemoteConnectionBanner.js";
 import { subscribeUiError } from "./ui-error.js";
 import { useBackendSubscriptions } from "./useBackendSubscriptions.js";
-import { useFileSessions } from "./useFileSessions.js";
 import { Menubar } from "./components/Menubar.js";
 import { CenterTabs, type CenterTab } from "./components/CenterTabs/CenterTabs.js";
 import type { DiffSpec } from "./components/Diff/DiffPane.js";
@@ -79,8 +59,6 @@ import { navigationKey } from "./tabs/navigationKeys.js";
 import { PageNavigationContext, type PageNavigation, type TabEditing } from "./tabs/PageNavigationContext.js";
 import { removeBookmark, setBookmark, useBookmarks } from "./tabs/bookmarks.js";
 import type { BookmarkScope } from "./tabs/bookmarks.js";
-import { isUnder, movedPath } from "./fileEvents.js";
-import { useFileEvents } from "./useFileEvents.js";
 import { AgentSessionPage } from "./pages/AgentSessionPage.js";
 import type { MenuItem } from "./menu.js";
 import { InlinePromptStrip } from "./components/InlinePromptStrip.js";
@@ -102,12 +80,11 @@ import { PanelRunsProvider } from "./components/Panels/PanelRunsContext.js";
 import { useAlerts } from "./components/Alerts/useAlerts.js";
 import { useAlertToasts } from "./components/Alerts/useAlertToasts.js";
 import { DomCommentLayer } from "./components/Comments/DomCommentLayer.js";
-import { agentSessionRef, diskFilePath, fileOf, lensRef, refFromTabId, directoryRef, externalUrlRef, fileRef, gitCommitRef, pagePayload, recordedPageKind, isPage, diffRef, newSessionRef, newStreamRef, alertsRef, wikiPageRef, streamSettingsRef, threadSettingsRef, viewParamsOf, withViewParams, lineOf, fileRefAt, resourceParamsOf, type PagePayload } from "./tabs/pageRefs.js";
+import { agentSessionRef, diskFilePath, fileOf, lensRef, refFromTabId, directoryRef, externalUrlRef, fileRef, gitCommitRef, pagePayload, recordedPageKind, isPage, diffRef, newSessionRef, newStreamRef, alertsRef, wikiPageRef, streamSettingsRef, threadSettingsRef, viewParamsOf, withViewParams, fileRefAt, resourceParamsOf, type PagePayload } from "./tabs/pageRefs.js";
 import { requestNewThread } from "./new-thread-bus.js";
 import { recordOpError, setOpErrorContext } from "./opErrors.js";
 import { classifyExternalUrl } from "./external-url-allowlist.js";
 import { installContextMenuSuppressor } from "./context-menu.js";
-import { FilePage } from "./pages/FilePage.js";
 import { QuickOpenOverlay } from "./components/QuickOpenOverlay.js";
 import { NON_TRACKED_KINDS } from "./components/RailHud/history.js";
 import { buildTabReport } from "./tabs/tabReport.js";
@@ -137,33 +114,26 @@ import {
   type Session,
   type Tab,
 } from "./tabs/session.js";
-import {
-  readPersistedFileSessionPaths,
-  writePersistedFileSessionPaths,
-} from "./tabs/fileSessionPersistence.js";
 import { openProject, createProject, listRecentProjects, shellAvailable } from "./api.js";
 import { onRemoteReconnect, triggerRemoteResync } from "./api.js";
 import type { CommandOutcome, ExtensionPage, RecentProjectView } from "./tauri-bridge/generated/bindings.js";
 import { pickFolder } from "./tauri-bridge/nativeDialog.js";
 import { WORKING } from "./revision.js";
+import { isDirty } from "./editor/buffers.js";
+import { buffers } from "./editor/openFiles.js";
 import { recordPageVisit, reportTabs, resolveSymbol } from "./api.js";
 import { advanceDaemonProbeState, INITIAL_DAEMON_PROBE_STATE } from "./daemon-recovery.js";
 import { offerForShortcut } from "./keybindings.js";
 import { commandOffers, type OfferDeps } from "./commandOffers.js";
 import { setRefOfferHost } from "./components/refCommands.js";
 import type { WhenContext } from "./when.js";
-import { runLocally, startClientHost, type ClientCallContext, type ClientCallRef, type ClientHandlers } from "./clientHost.js";
+import { runLocally, startClientHost, type ClientCallContext, type ClientHandlers } from "./clientHost.js";
 import { streamOfThread } from "./tabs/threadTabOps.js";
 import { planNavigation } from "./tabs/navigation.js";
 import { openRef as openRefAt, setWindowRefOpener } from "./tabs/openRef.js";
 import { usePersonCommands } from "./personCommandsStore.js";
 import { personCommands } from "./personCommands.js";
 import { getUiClientId, logUi, setUiLogContext } from "./logger.js";
-
-// Cap on concurrent file tabs in the center. Intellij uses ~10 by default;
-// when this is exceeded, the oldest-touched tab without unsaved changes is
-// closed automatically via enforceOpenFileLimit. Dirty tabs stay pinned.
-const MAX_OPEN_FILE_TABS = 10;
 
 /// Prompt for a folder and open it as an **existing** project.
 /// `newWindow=false` replaces the current window (this process exits
@@ -273,6 +243,7 @@ export function App() {
   // every render of the strip.
   const [dirtyTabs, setDirtyTabs] = useState<Record<string, boolean>>({});
   const tabSavesRef = useRef<Record<string, () => void>>({});
+  const tabFindsRef = useRef<Record<string, () => void>>({});
   const editingSettersRef = useRef<Record<string, (editing: TabEditing | null) => void>>({});
   const editingSetterFor = useCallback((tabId: string) => {
     const known = editingSettersRef.current[tabId];
@@ -280,9 +251,12 @@ export function App() {
     const set = (editing: TabEditing | null) => {
       if (editing) {
         tabSavesRef.current[tabId] = editing.save;
+        if (editing.find) tabFindsRef.current[tabId] = editing.find;
+        else delete tabFindsRef.current[tabId];
         setDirtyTabs((prev) => (prev[tabId] === editing.dirty ? prev : { ...prev, [tabId]: editing.dirty }));
       } else {
         delete tabSavesRef.current[tabId];
+        delete tabFindsRef.current[tabId];
         setDirtyTabs((prev) => {
           if (!(tabId in prev)) return prev;
           const next = { ...prev };
@@ -303,14 +277,9 @@ export function App() {
     return () => clearTimeout(t);
   }, [error]);
   const [daemonUnavailable, setDaemonUnavailable] = useState(false);
-  const { fileSessions, setFileSessions, getFileSession, mutateFileSession } = useFileSessions();
-  const restoredStreamsRef = useRef<Set<string>>(new Set());
   const [workspaceContext, setWorkspaceContext] = useState<WorkspaceContext>({ vcsEnabled: false });
   const [quickOpenVisible, setQuickOpenVisible] = useState(false);
   const [quickOpenQuery, setQuickOpenQuery] = useState("");
-  const [editorFindRequest, setEditorFindRequest] = useState(0);
-  const [editorNavigationTarget, setEditorNavigationTarget] = useState<EditorNavigationTarget | null>(null);
-  const [externalFilePrompt, setExternalFilePrompt] = useState<{ path: string; content: string } | null>(null);
   const daemonDownLogged = useRef(false);
   const daemonProbeState = useRef(INITIAL_DAEMON_PROBE_STATE);
   // macOS uses the native top-of-screen menu bar (driven by the
@@ -488,92 +457,45 @@ export function App() {
   }
 
   /** Open the working-tree file `path`, its tab showing `ref` (the file in
-   *  a view: `#lines=`; the plain file when none is given). With `ref`
-   *  null its buffer is read and no tab changes: the caller's navigation
-   *  places it. */
+   *  a view: `#lines=`; the plain file when none is given). Its buffer is
+   *  read first, so a clicked path that isn't a file (a dotted word in
+   *  prose, a stale link) opens no tab and says so; a directory opens its
+   *  folder's page. With `ref` null only the buffer is read. */
   async function handleOpenFile(path: string, ref: TabRef | null = fileRef(path)) {
     if (!stream) return;
-    // A path that resolves to a directory (e.g. a trailing-slash link from
-    // terminal/agent output) opens the Files tree rooted there, not the
-    // editor. Fast-path the common dir-link form (trailing slash) so no
-    // existence probe runs on the common file-open path.
+    // A trailing-slash link (terminal or agent output) is a folder: no
+    // read is tried for it.
     if (path.endsWith("/") && (await isWorkspaceDir(stream.id, path))) {
       setError(null);
       handleOpenPageRef.current?.(directoryRef(path));
       return;
     }
-
-    // Add the file to the unified per-thread page tab list and make it active.
-    // File tabs share the same chrome / back-forward substrate as every other
-    // page kind; fileSessions owns content + dirty state, threadPageTabs owns
-    // membership.
-    const activateFileTab = () => {
-      if (ref) openTab(ref);
-      setError(null);
-      void recordUsage({
-        kind: "editor-file",
-        key: path,
-        event: "open",
-        streamId: stream.id,
-        threadId: selectedThread?.id ?? null,
-      }).catch(() => {});
-    };
-
-    const existing = getFileSession(stream.id).files[path];
-    // Already open and loaded — just select it, no re-read.
-    if (existing && !existing.isLoading) {
-      mutateFileSession(stream.id, (base) =>
-        enforceOpenFileLimit(selectOpenFile(base, path), MAX_OPEN_FILE_TABS),
-      );
-      activateFileTab();
-      return;
-    }
-
-    // Read FIRST, then open the tab — so a clicked path that isn't a real file
-    // (a dotted identifier in prose, a stale link) opens no tab and doesn't
-    // hijack the active tab; it just shows a dismissible message.
-    let file;
-    try {
-      logUi("debug", "open file: readWorkspaceFile start", { streamId: stream.id, path });
-      file = await readWorkspaceFile(stream.id, path);
-      logUi("debug", "open file: readWorkspaceFile end", {
-        streamId: stream.id,
-        path,
-        size: file.content.length,
-        lineCount: file.content.split("\n").length,
-      });
-    } catch (e) {
-      // The clicked path is actually a directory (no trailing slash): open the
-      // Files tree rooted there.
+    const buffer = await buffers.open(stream, path);
+    if (buffer.state !== "ready") {
       if (await isWorkspaceDir(stream.id, path)) {
         setError(null);
         handleOpenPageRef.current?.(directoryRef(path));
         return;
       }
-      const msg = String(e);
-      // A simply-missing file (e.g. a stale terminal link or a dotted word in
-      // prose) is benign — friendly message, no tab opened, active untouched.
-      const notFound = /no such file|not found|os error 2/i.test(msg);
-      if (notFound) {
+      if (buffer.state === "missing") {
         setError(`File not found: ${path}`);
         logUi("warn", "open file: target does not exist", { streamId: stream.id, path });
       } else {
-        setError(msg);
-        logUi("error", "failed to open file", { streamId: stream.id, path, error: msg });
+        setError(buffer.error ?? `Couldn't open ${path}`);
+        logUi("error", "failed to open file", { streamId: stream.id, path, error: buffer.error });
       }
       return;
     }
-
-    // Exists — open the tab, load its content, activate.
-    mutateFileSession(stream.id, (base) => {
-      const opened = existing
-        ? selectOpenFile(base, path)
-        : openFileInSession(base, path, "", false);
-      return enforceOpenFileLimit(opened, MAX_OPEN_FILE_TABS);
-    });
-    mutateFileSession(stream.id, (s) => setLoadedFileContent(s, path, file.content));
-    activateFileTab();
-    logUi("info", "opened file", { streamId: stream.id, path });
+    if (!ref) return;
+    openTab(ref);
+    setError(null);
+    void recordUsage({
+      kind: "editor-file",
+      key: path,
+      event: "open",
+      streamId: stream.id,
+      threadId: selectedThread?.id ?? null,
+    }).catch(() => {});
   }
 
   /** A `symbol:` ref opens its file at the symbol's line; one pinned to a
@@ -601,118 +523,28 @@ export function App() {
   }
 
   /** Open `target`'s file at its line: its tab in that view (`ref`, else
-   *  `#lines=<line>`), its editor there. */
+   *  `#lines=<line>`, where the editor lands). */
   async function handleNavigateToLocation(target: EditorNavigationTarget, ref?: TabRef) {
-    const shown = ref ?? fileRefAt(target.path, target.line);
-    await handleOpenFile(target.path, shown);
-    setEditorNavigationTarget(target);
-    setCenterActive(shown.id);
+    await handleOpenFile(target.path, ref ?? fileRefAt(target.path, target.line));
   }
 
-  function handleEditorChange(value: string) {
+  /** Close the tab showing the working file `path`. Unsaved edits close
+   *  with it, and a toast offers Undo for a while: the tab and its draft
+   *  come back. */
+  function handleCloseOpenFile(id: string, path: string) {
     if (!stream) return;
-    const session = getFileSession(stream.id);
-    if (!session.selectedPath) return;
-    mutateFileSession(stream.id, (s) => updateFileDraft(s, session.selectedPath!, value));
+    const stashed = buffers.stash(stream.id, path);
+    closePageTab(id);
+    if (!stashed) return;
+    const basename = path.split("/").pop() ?? path;
+    showToast({
+      message: `Closed "${basename}" with unsaved changes.`,
+      actionLabel: "Undo",
+      onUndo: () => {
+        void buffers.restore(stashed).then(() => openTab(fileRef(path)));
+      },
+    });
   }
-
-  /** Save `path`'s unsaved changes in `streamId`'s session; throws what
-   *  went wrong. */
-  /** Save `path` — for the daemon's `call` when answering one (an
-   *  agent's Save, written as the agent), else as the person. */
-  async function saveFile(streamId: string, path: string, call: ClientCallRef | null = null) {
-    const current = getFileSession(streamId).files[path];
-    if (!current) throw new Error(`\`${path}\` isn't open`);
-    if (current.isLoading) throw new Error(`\`${path}\` is still loading`);
-    mutateFileSession(streamId, (s) => setOpenFileLoading(s, path, true));
-    try {
-      // An audited write that logs `file.saved` (its content isn't kept
-      // in the record).
-      const content = current.draftContent;
-      const input = { stream: streamId, path, content };
-      await (call ? runCommandForCall(call, "oxplow.file.save", input) : runCommand("oxplow.file.save", input));
-      mutateFileSession(streamId, (s) => markFileSaved(s, path, content));
-      logUi("info", "saved file", { streamId, path });
-    } catch (e) {
-      mutateFileSession(streamId, (s) => setOpenFileLoading(s, path, false));
-      logUi("error", "failed to save file", { streamId, path, error: String(e) });
-      throw e;
-    }
-  }
-
-  async function handleEditorSave() {
-    if (!stream) return;
-    const selectedPath = getFileSession(stream.id).selectedPath;
-    if (!selectedPath) return;
-    try {
-      await saveFile(stream.id, selectedPath);
-      setError(null);
-    } catch (e) {
-      setError(String(e));
-    }
-  }
-
-  function handleSelectOpenFile(path: string) {
-    if (!stream) return;
-    mutateFileSession(stream.id, (s) => selectOpenFile(s, path));
-    setCenterActive(fileRef(path).id);
-  }
-
-  function handleCloseOpenFile(path: string) {
-    if (!stream) return;
-    // Guard against silently dropping unsaved edits when a user closes a
-    // dirty tab via the × or Cmd+W. Phase-5 redesign: fire-and-undo
-    // instead of a blocking confirm — close immediately, surface a
-    // toast that offers Undo for ~7s. The toast captures the draft so
-    // undo restores the unsaved buffer; if the user lets the toast
-    // expire, the draft is gone (same end-state as the old "Discard").
-    const currentFile = getFileSession(stream.id).files[path];
-    const targetStream = stream;
-    if (currentFile && currentFile.draftContent !== currentFile.savedContent) {
-      const basename = path.split("/").pop() ?? path;
-      const stashed = {
-        savedContent: currentFile.savedContent,
-        draftContent: currentFile.draftContent,
-      };
-      closeOpenFileNow(path);
-      showToast({
-        message: `Closed "${basename}" with unsaved changes.`,
-        actionLabel: "Undo",
-        onUndo: () => {
-          mutateFileSession(targetStream.id, (session) => {
-            const restored = setLoadedFileContent(session, path, stashed.savedContent);
-            return updateFileDraft(restored, path, stashed.draftContent);
-          });
-          setCenterActive(fileRef(path).id);
-        },
-      });
-      return;
-    }
-    closeOpenFileNow(path);
-  }
-
-  function closeOpenFileNow(path: string) {
-    if (!stream) return;
-    mutateFileSession(stream.id, (s) => closeOpenFile(s, path));
-    setEditorNavigationTarget((current) => (current?.path === path ? null : current));
-  }
-
-  // Open buffers follow the worktree's renames and deletes, whoever made them.
-  useFileEvents(stream?.id ?? null, (streamId, event) => {
-    if (event.kind === "renamed") {
-      mutateFileSession(streamId, (s) => renameOpenFilePaths(s, (path) => movedPath(path, event.from, event.to)));
-      setEditorNavigationTarget((current) =>
-        current && isUnder(current.path, event.from)
-          ? { ...current, path: movedPath(current.path, event.from, event.to) }
-          : current,
-      );
-    } else {
-      mutateFileSession(streamId, (current) =>
-        removeOpenFiles(current, current.openOrder.filter((candidate) => isUnder(candidate, event.path))),
-      );
-      setEditorNavigationTarget((current) => (current && isUnder(current.path, event.path) ? null : current));
-    }
-  });
 
   async function handleSelectThread(streamId: string, threadId: string) {
     try {
@@ -771,12 +603,6 @@ export function App() {
   }
 
 
-  const currentSession = useMemo(
-    () => (stream ? getFileSession(stream.id) : createEmptyFileSession()),
-    [fileSessions, stream],
-  );
-  const selectedFilePath = currentSession.selectedPath;
-  const currentFile = selectedFilePath ? currentSession.files[selectedFilePath] ?? null : null;
   const currentThreadState = useMemo(
     () => (stream ? threadStates[stream.id] ?? { selectedThreadId: null, threads: [] } : { selectedThreadId: null, threads: [] }),
     [threadStates, stream],
@@ -803,6 +629,8 @@ export function App() {
   // The shown thread's active tab's page id; `HOME_TAB` when none is
   // chosen (the thread's home tab shows — `effectiveCenterActive`).
   const centerActive = (selectedThreadId ? activeRef(sessions[selectedThreadId])?.id : null) ?? HOME_TAB;
+  // The working-tree file the shown tab edits, if it does.
+  const shownFilePath = diskFilePath(centerActive);
   /** Make the tab showing `id` active in the shown thread (`HOME_TAB`:
    *  none). An id no tab shows changes nothing. */
   const setCenterActive = useCallback(
@@ -846,62 +674,6 @@ export function App() {
     return out;
   }, [streams, threadStates, agentStatuses]);
 
-  const currentFileRef = useRef(currentFile);
-  currentFileRef.current = currentFile;
-
-  useEffect(() => {
-    setExternalFilePrompt(null);
-  }, [stream?.id, selectedFilePath]);
-
-  // Persist the list of open file paths per stream on every session change.
-  // We write the keys of openOrder only — dirty state, draft content, and
-  // scroll position are intentionally dropped.
-  useEffect(() => {
-    writePersistedFileSessionPaths(fileSessions);
-  }, [fileSessions]);
-
-  // Restore previously-open file tabs the first time each stream becomes
-  // active. We add the paths to the session in openOrder, mark each as
-  // loading, then fetch content individually. Using the session helpers
-  // directly (not handleOpenFile) avoids clobbering centerActive during
-  // restore so the saved centerActive remains in effect.
-  useEffect(() => {
-    if (!stream) return;
-    if (restoredStreamsRef.current.has(stream.id)) return;
-    restoredStreamsRef.current.add(stream.id);
-    const persisted = readPersistedFileSessionPaths();
-    const paths = persisted[stream.id];
-    if (!paths || paths.length === 0) return;
-    const streamId = stream.id;
-    // Seed the session with placeholder loading entries so the tabs render
-    // immediately.
-    mutateFileSession(streamId, (initial) => {
-      let base = initial;
-      for (const path of paths) {
-        if (base.files[path]) continue;
-        base = setOpenFileLoading(openFileInSession(base, path, "", true), path, true);
-      }
-      // Drop the selection that openFileInSession implicitly set — we want
-      // the persisted centerActive, not the last restored file, to decide.
-      base = { ...base, selectedPath: null };
-      return enforceOpenFileLimit(base, MAX_OPEN_FILE_TABS);
-    });
-    // Fire content fetches in parallel.
-    for (const path of paths) {
-      void (async () => {
-        try {
-          const file = await readWorkspaceFile(streamId, path);
-          mutateFileSession(streamId, (s) => setLoadedFileContent(s, file.path, file.content));
-        } catch (err) {
-          logUi("warn", "failed to restore open file tab", { streamId, path, error: String(err) });
-          mutateFileSession(streamId, (s) => closeOpenFile(s, path));
-        }
-      })();
-    }
-    // Intentionally only depends on stream — we gate re-runs via the ref.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stream?.id]);
-
   // Backend-event subscription wiring (workspace context, backlog, task
   // events, followup/thread/stream changes, config, agent status) lives
   // in this hook so App doesn't carry ~10 inline subscription effects.
@@ -916,57 +688,6 @@ export function App() {
     setSessionStatuses,
   });
 
-  useEffect(() => {
-    if (!stream || !selectedFilePath) return;
-    let cancelled = false;
-    let refreshTimer: number | null = null;
-    let requestId = 0;
-
-    const refreshSelectedFile = async () => {
-      const currentRequestId = ++requestId;
-      try {
-        const file = await readWorkspaceFile(stream.id, selectedFilePath);
-        if (cancelled || currentRequestId !== requestId || file.path !== selectedFilePath) return;
-        const openFile = currentFileRef.current;
-        switch (externalFileSyncAction(openFile, file.content)) {
-          case "noop":
-            return;
-          case "update-saved":
-            mutateFileSession(stream.id, (s) => setLoadedFileContent(s, file.path, file.content));
-            return;
-          case "replace-draft":
-            mutateFileSession(stream.id, (s) => markFileSaved(s, file.path, file.content));
-            setExternalFilePrompt((current) => (current?.path === file.path ? null : current));
-            return;
-          case "prompt":
-            setExternalFilePrompt({ path: file.path, content: file.content });
-            return;
-        }
-      } catch (e) {
-        if (cancelled) return;
-        setError(String(e));
-        logUi("error", "failed to refresh file after filesystem change", {
-          streamId: stream.id,
-          path: selectedFilePath,
-          error: String(e),
-        });
-      }
-    };
-
-    const unsubscribe = subscribeWorkspaceEvents(stream.id, (event) => {
-      if (event.path !== selectedFilePath || event.kind === "deleted") return;
-      if (refreshTimer) window.clearTimeout(refreshTimer);
-      refreshTimer = window.setTimeout(() => {
-        void refreshSelectedFile();
-      }, 75);
-    });
-
-    return () => {
-      cancelled = true;
-      unsubscribe();
-      if (refreshTimer) window.clearTimeout(refreshTimer);
-    };
-  }, [selectedFilePath, stream]);
   // Imperative shortcut for opening the New-Task modal. When PlanPane is
   // mounted it registers its openCreateModal here; the menu handler can
   // call this ref directly instead of going through setState + useEffect.
@@ -985,7 +706,7 @@ export function App() {
       streamShown: !!stream,
       streamKind: stream?.kind ?? "",
       threadShown: !!selectedThread,
-      fileShown: !!selectedFilePath,
+      fileShown: shownFilePath !== null,
       pageDirty: !!centerActive && !!dirtyTabs[centerActive],
       pageKind: centerActive ? kindForTabId(centerActive) : "",
       vcsEnabled: !!workspaceContext.vcsEnabled,
@@ -995,7 +716,7 @@ export function App() {
         .map((h) => h.id)
         .join(","),
     }),
-    [centerActive, dirtyTabs, harnesses, selectedThread, selectedFilePath, stream, workspaceContext.vcsEnabled],
+    [centerActive, dirtyTabs, harnesses, selectedThread, shownFilePath, stream, workspaceContext.vcsEnabled],
   );
   // Run a Git-menu mutation (pull/push) as a background task and surface
   // any failure the same way the Git Dashboard does: record an op-error
@@ -1171,12 +892,7 @@ export function App() {
   }, [menuGroups]);
 
   const pageTabsForActiveThread = selectedThreadId ? threadPageTabs[selectedThreadId] ?? [] : [];
-  const availableCenterIds = useMemo(() => {
-    const ids = new Set<string>();
-    for (const path of currentSession.openOrder) ids.add(fileRef(path).id);
-    for (const ref of pageTabsForActiveThread) ids.add(ref.id);
-    return ids;
-  }, [currentSession.openOrder, pageTabsForActiveThread]);
+  const availableCenterIds = useMemo(() => new Set(pageTabsForActiveThread.map((ref) => ref.id)), [pageTabsForActiveThread]);
   const effectiveCenterActive = availableCenterIds.has(centerActive)
     ? centerActive
     : homeTabOf(pageTabsForActiveThread);
@@ -1188,9 +904,9 @@ export function App() {
     setUiLogContext({
       streamId: stream?.id ?? null,
       centerActive: effectiveCenterActive,
-      filePath: selectedFilePath ?? null,
+      filePath: shownFilePath,
     });
-  }, [stream?.id, effectiveCenterActive, selectedFilePath]);
+  }, [stream?.id, effectiveCenterActive, shownFilePath]);
 
   // Central page-visit recorder. Fires whenever the resolved active
   // tab changes — covers new-tab opens (any handler), switching to an
@@ -1211,12 +927,10 @@ export function App() {
   const tabLabelByIdRef = useRef<Record<string, string>>({});
   const visitContextRef = useRef<{
     pageTabs: TabRef[];
-    openOrder: string[];
     streamId: string | null;
-  }>({ pageTabs: [], openOrder: [], streamId: null });
+  }>({ pageTabs: [], streamId: null });
   visitContextRef.current = {
     pageTabs: pageTabsForActiveThread,
-    openOrder: currentSession.openOrder,
     streamId: stream?.id ?? null,
   };
   const hydratedHistoryRef = useRef(false);
@@ -1296,26 +1010,6 @@ export function App() {
     return () => clearTimeout(timer);
   }, [effectiveCenterActive, selectedThreadId, sessions, pageTitles, pageDetailTick, windowFocused, windowVisible]);
 
-  const handleCompareWithClipboard = async (selection: string, path: string) => {
-    let clipboard = "";
-    try {
-      clipboard = await navigator.clipboard.readText();
-    } catch (err) {
-      setError(`Clipboard read failed: ${String(err)}`);
-      return;
-    }
-    // The two texts are no address: they ride as the entry's history
-    // state (`diffTextOf`). Each compare is its own tab (the time in its
-    // label); WORKING on both sides is a sentinel the text replaces.
-    const ts = Date.now();
-    const ref = diffRef({ path, leftVersion: WORKING, rightVersion: WORKING, baseLabel: "clipboard", labelOverride: `selection vs clipboard (${ts})` });
-    openTab(ref, { historyState: { diffText: { left: selection, right: clipboard } } });
-  };
-
-  const handleRevealCommit = (sha: string) => {
-    handleOpenPage(gitCommitRef(sha));
-  };
-
   const closeDiffTab = (id: string) => closePageTab(id);
 
 
@@ -1358,12 +1052,6 @@ export function App() {
   }, []);
 
   const handleReorderCenterTabs = useCallback((orderedIds: string[]) => {
-    if (!stream) return;
-    const orderedFiles = orderedIds.flatMap((id) => {
-      const path = diskFilePath(id);
-      return path === null ? [] : [path];
-    });
-    mutateFileSession(stream.id, (base) => reorderOpenFiles(base, orderedFiles));
     // The session's tabs are the strip's order for every kind; pinned tabs
     // never move (the strip won't drag them), and `reconcileSessionTabs`
     // keeps them first.
@@ -1458,18 +1146,13 @@ export function App() {
         const payload = fileOf(ref);
         if (!payload?.path) return;
         const version = payload.version ?? WORKING;
-        // The line it lands on is its view (`#lines=`).
-        const line = lineOf(ref);
+        // The working tree's file is read first (a path that isn't one
+        // opens no tab); the line it lands on is its view (`#lines=`).
         if (version === WORKING) {
-          if (line !== null) {
-            void handleNavigateToLocation({ path: payload.path, line, column: 1 }, ref);
-          } else {
-            void handleOpenFile(payload.path);
-          }
+          void handleOpenFile(payload.path, ref);
           return;
         }
-        // Non-disk: no fileSessions entry (that cache is the working
-        // tree's); a file at a revision is a lens page.
+        // A file at a revision reads itself.
         openTab(ref);
         return;
       }
@@ -1529,20 +1212,10 @@ export function App() {
     openRefRef.current(hit.uri, { newTab: true }, (tab) => handleOpenPage(tab));
   }, [handleOpenPage]);
 
-  /** Close the shown thread's tab showing `id`: its file buffer, title
-   *  and snapshot go with it. */
+  /** Close the shown thread's tab showing `id`: its title goes with it,
+   *  and a file's buffer once no tab shows the file (`buffers.retainOnly`). */
   const closePageTab = useCallback((id: string) => {
     if (!selectedThreadId) return;
-    // A working-tree file's content and dirty state live in its stream's
-    // session; drop that buffer too.
-    const path = diskFilePath(id);
-    if (path !== null && stream) {
-      setFileSessions((prev) => {
-        const session = prev[stream.id];
-        if (!session || !session.files[path]) return prev;
-        return { ...prev, [stream.id]: closeOpenFile(session, path) };
-      });
-    }
     updateSession(selectedThreadId, (session) => {
       const slot = slotShowing(session, id);
       return slot ? sessionClose(session, slot) : session;
@@ -1552,7 +1225,7 @@ export function App() {
       const { [id]: _drop, ...rest } = prev;
       return rest;
     });
-  }, [selectedThreadId, stream, updateSession]);
+  }, [selectedThreadId, updateSession]);
 
   /** The collection a page is opened from, as an entry keeps it. */
   const originOf = (origin: Origin | undefined, ref: TabRef): Origin | undefined => {
@@ -1561,21 +1234,6 @@ export function App() {
     const index = at !== -1 ? at : origin.index;
     if (index < 0 || index >= origin.items.length) return undefined;
     return { ...origin, index };
-  };
-
-  /** What showing `ref` in a tab needs besides the tab: a working-tree
-   *  file's buffer (and its line). */
-  const prepareFor = (ref: TabRef) => {
-    if (typeOf(ref.id) !== "oxplow/file") return;
-    const payload = fileOf(ref);
-    // Only the working tree's version has a buffer (and LSP); another
-    // version's page reads it itself.
-    const isDisk = !payload?.version || payload.version === WORKING;
-    if (!payload?.path || !isDisk) return;
-    // Its buffer only: the navigation itself places the entry.
-    void handleOpenFile(payload.path, null);
-    const line = lineOf(ref);
-    if (line !== null) setEditorNavigationTarget({ path: payload.path, line, column: 1 });
   };
 
   /**
@@ -1599,7 +1257,6 @@ export function App() {
       handleOpenPage(ref);
       return;
     }
-    prepareFor(ref);
     updateSession(selectedThreadId, (session) =>
       sessionNavigate(session, slot, { ref, from: originOf(origin, ref) }, { replace }),
     );
@@ -1616,12 +1273,8 @@ export function App() {
    *  place: history untouched. */
   const handleStepOrigin = useCallback((slot: string, index: number) => {
     if (!selectedThreadId) return;
-    const tab = sessions[selectedThreadId]?.tabs.find((t) => t.slot === slot);
-    const target = tab ? currentEntry(tab).from?.items[index]?.ref : undefined;
-    if (target) prepareFor(target);
     updateSession(selectedThreadId, (session) => stepOrigin(session, slot, index));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedThreadId, sessions, updateSession]);
+  }, [selectedThreadId, updateSession]);
 
   const handleGoBack = useCallback((slot: string) => {
     if (selectedThreadId) updateSession(selectedThreadId, (session) => sessionBack(session, slot));
@@ -1672,18 +1325,14 @@ export function App() {
         handleOpenPageRef.current?.(ref);
         return { uri: ref.id, focused: true };
       }
-      // A working-tree file's content lives in its stream's session: read
-      // it first (a path that isn't a file opens nothing), keeping what
-      // the session shows.
+      // A working-tree file is read first: a path that isn't a file
+      // opens nothing.
       const path = diskFilePath(ref.id);
-      const streamId = streamOfThread(threadStates, thread);
-      if (path !== null && streamId && !getFileSession(streamId).files[path]) {
-        const file = await readWorkspaceFile(streamId, path);
-        mutateFileSession(streamId, (base) => {
-          const opened = openFileInSession(base, path, "", false);
-          return enforceOpenFileLimit({ ...opened, selectedPath: base.selectedPath }, MAX_OPEN_FILE_TABS);
-        });
-        mutateFileSession(streamId, (s) => setLoadedFileContent(s, path, file.content));
+      const fileStream = streams.find((candidate) => candidate.id === streamOfThread(threadStates, thread));
+      if (path !== null && fileStream) {
+        const buffer = await buffers.open(fileStream, path);
+        if (buffer.state === "missing") throw new Error(`\`${path}\` isn't a file in the working tree`);
+        if (buffer.state === "error") throw new Error(buffer.error ?? `couldn't read \`${path}\``);
       }
       updateSession(thread, (session) => {
         const opened = sessionOpen(session, { ref });
@@ -1711,15 +1360,16 @@ export function App() {
           if (path === null) throw new Error(typeof id === "string" ? `\`${id}\` isn't a file in the working tree` : "nothing to save on the page shown");
           const streamId = streamOfThread(threadStates, thread);
           if (!streamId) throw new Error(`no stream has thread \`${thread}\``);
-          await saveFile(streamId, path, ctx.call);
+          await buffers.save(streamId, path, ctx.call);
           return { saved: path };
         },
       },
       "window.show": {
         find: () => {
-          if (!selectedFilePath) throw new Error("no file is shown");
-          setCenterActive(fileRef(selectedFilePath).id);
-          setEditorFindRequest((current) => current + 1);
+          // The page shown finds in what it edits (`useTabEditing`).
+          const find = tabFindsRef.current[centerActive];
+          if (!find) throw new Error("nothing to find in on the page shown");
+          find();
           return null;
         },
         quick_open: (input) => {
@@ -1795,7 +1445,7 @@ export function App() {
     // getFileSession / mutateFileSession are plain functions over the
     // session state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedThreadId, threadStates, closePageTab, updateSession, centerActive, sessions, selectedFilePath, stream, setCenterActive, handleNavigateInTab]);
+  }, [selectedThreadId, threadStates, closePageTab, updateSession, centerActive, sessions, stream, streams, setCenterActive, handleNavigateInTab]);
   const windowHandlersRef = useRef(windowHandlers);
   windowHandlersRef.current = windowHandlers;
   useEffect(() => startClientHost(() => windowHandlersRef.current), []);
@@ -1808,18 +1458,32 @@ export function App() {
     if (!selectedThreadId) return;
     const session = sessions[selectedThreadId];
     if (!session) return;
-    const files = stream ? fileSessions[stream.id] : undefined;
     const dirty = (id: string) => {
       const path = diskFilePath(id);
-      const file = path === null ? undefined : files?.files[path];
-      return !!file && file.draftContent !== file.savedContent;
+      return !!dirtyTabs[id] || (path !== null && !!stream && isDirty(buffers.get(stream.id, path)));
     };
-    const victims = evictions(session, MAX_PAGE_TABS, (t) => dirty(currentEntry(t).ref.id) || !!dirtyTabs[currentEntry(t).ref.id]);
+    const victims = evictions(session, MAX_PAGE_TABS, (t) => dirty(currentEntry(t).ref.id));
     for (const slot of victims) {
       const tab = session.tabs.find((t) => t.slot === slot);
       if (tab) closePageTab(currentEntry(tab).ref.id);
     }
-  }, [sessions, selectedThreadId, fileSessions, stream, closePageTab, dirtyTabs]);
+  }, [sessions, selectedThreadId, stream, closePageTab, dirtyTabs]);
+
+  // A file's buffer lives while a tab of any thread shows the file (any
+  // step of its history): the rest close, their models disposed. Not
+  // until every thread with tabs is placed in a stream, so no buffer is
+  // dropped for a thread not yet loaded.
+  useEffect(() => {
+    const keep: { stream: string; path: string }[] = [];
+    for (const [thread, session] of Object.entries(sessions)) {
+      const files = session.tabs.flatMap((tab) => tab.entries.flatMap((entry) => diskFilePath(entry.ref.id) ?? []));
+      if (files.length === 0) continue;
+      const streamId = streamOfThread(threadStates, thread);
+      if (!streamId) return;
+      for (const path of files) keep.push({ stream: streamId, path });
+    }
+    buffers.retainOnly(keep);
+  }, [sessions, threadStates]);
 
   // Keep the forward ref in sync with the latest handleOpenPage. Used by
   // the forms and offers (declared above handleOpenPage) so menu/keyboard
@@ -1863,8 +1527,8 @@ export function App() {
     // Every tab is a session tab (`tabs/session.ts`): files, diffs, agent
     // sessions and pages alike. A tab keeps a body mounted per page in its
     // history (`bodies`) so Back shows a page as it was; only the current
-    // one is in the strip. fileSessions owns a file's content and dirty
-    // state, the session its place.
+    // one is in the strip. A file's content and unsaved edits are its
+    // buffer's (`editor/openFiles.ts`), its place the session's.
     const pageTabStartIdx = tabs.length;
     const threadSession = selectedThreadId ? sessions[selectedThreadId] : undefined;
     // Tab ids must be unique across the rendered list — the active-tab
@@ -1892,7 +1556,7 @@ export function App() {
       effectiveCenterActive,
       setCenterActive,
       vcsEnabled: workspaceContext.vcsEnabled,
-      selectedFilePath,
+      selectedFilePath: shownFilePath,
       handleOpenPage,
       handleNavigateInTab,
       closePageTab,
@@ -1983,37 +1647,6 @@ export function App() {
               onPicker={(mode) => setConversationPicker(mode ? { sessionId, mode } : null)}
             />
           ),
-        };
-      },
-      // The working tree's file, in the editor.
-      editor: (ref) => {
-        const path = paramOf(ref.id, "path");
-        if (!path) return null;
-        const basename = path.split("/").pop() ?? path;
-        const file = currentSession.files[path];
-        const dirty = !!file && file.draftContent !== file.savedContent;
-        return {
-          id: ref.id,
-          label: basename,
-          closable: true,
-          render: () => stream ? (
-            <FilePage
-              dirty={dirty}
-              stream={stream}
-              filePath={path}
-              value={file?.draftContent ?? ""}
-              isDirty={dirty}
-              onChange={handleEditorChange}
-              onSave={() => { void handleEditorSave(); }}
-              findRequest={editorFindRequest}
-              navigationTarget={editorNavigationTarget?.path === path ? editorNavigationTarget : null}
-              onNavigateToLocation={handleNavigateToLocation}
-              openFileOrder={currentSession.openOrder}
-              openFiles={currentSession.files}
-              onRevealCommit={handleRevealCommit}
-              onCompareWithClipboard={handleCompareWithClipboard}
-            />
-          ) : null,
         };
       },
       lens: (ref, nav) => {
@@ -2140,7 +1773,10 @@ export function App() {
       const registeredTitle = pageTitles[tabId];
       const navValue: PageNavigation = {
         navigate: (newRef, opts) => {
-          if (opts?.newTab) handleOpenPage(newRef);
+          // A new tab with history state (a compare's two texts) is its
+          // own tab; without, the tab already showing the page, or a new one.
+          if (opts?.newTab && opts.state) openTab(newRef, { historyState: opts.state });
+          else if (opts?.newTab) handleOpenPage(newRef);
           else handleNavigateInTab(currentId, newRef, opts?.origin, opts?.replace);
         },
         openRef: (target, how) =>
@@ -2236,10 +1872,6 @@ export function App() {
     openTerminalPath,
     effectiveCenterActive,
     stream,
-    currentSession.openOrder,
-    currentSession.files,
-    editorFindRequest,
-    editorNavigationTarget,
     handleOpenWiki,
     handleOpenCommit,
     handleOpenExternalUrl,
@@ -2257,9 +1889,10 @@ export function App() {
     setPageTitle,
     dirtyTabs,
     editingSetterFor,
+    openTab,
     bookmarks,
     workspaceContext.vcsEnabled,
-    selectedFilePath,
+    shownFilePath,
     centerActive,
     extensions,
   ]);
@@ -2359,22 +1992,10 @@ export function App() {
             <CenterTabs
               tabs={centerTabs}
               activeId={effectiveCenterActive}
-              onActivate={(id) => {
-                const path = diskFilePath(id);
-                if (path !== null) handleSelectOpenFile(path);
-                else setCenterActive(id);
-              }}
+              onActivate={(id) => setCenterActive(id)}
               onClose={(id) => {
                 const path = diskFilePath(id);
-                if (path !== null) {
-                  handleCloseOpenFile(path);
-                  // A file can also live in threadPageTabs when it was
-                  // reached via in-tab navigation from a page (Files
-                  // index, git history, etc.). Removing only the
-                  // session entry left the page-tab clinging with a
-                  // blank EditorPane, uncloseable on a second click.
-                  closePageTab(id);
-                }
+                if (path !== null) handleCloseOpenFile(id, path);
                 else if (id.startsWith("diff:")) closeDiffTab(id);
                 else if (typeOf(id) === "oxplow/agent_session") {
                   // Closing a session's tab closes the session at once, its
@@ -2467,7 +2088,7 @@ export function App() {
         initialQuery={quickOpenQuery}
         stream={stream}
         threadId={selectedThreadId}
-        selectedFilePath={selectedFilePath}
+        selectedFilePath={shownFilePath}
         offers={offers}
         onClose={() => setQuickOpenVisible(false)}
         onOpenFile={(path) => {
@@ -2478,23 +2099,6 @@ export function App() {
         }}
         onOpenSearchHit={openSearchHit}
       />
-      {stream && externalFilePrompt ? (
-        <ExternalFileChangedDialog
-          path={externalFilePrompt.path}
-          onReload={() => {
-            mutateFileSession(stream.id, (s) =>
-              markFileSaved(s, externalFilePrompt.path, externalFilePrompt.content),
-            );
-            setExternalFilePrompt(null);
-          }}
-          onKeepMine={() => {
-            mutateFileSession(stream.id, (s) =>
-              setLoadedFileContent(s, externalFilePrompt.path, externalFilePrompt.content),
-            );
-            setExternalFilePrompt(null);
-          }}
-        />
-      ) : null}
       {daemonUnavailable ? <DaemonDownDialog /> : null}
       <UndoToastStack />
       <PersonCommandConfirm />
@@ -2573,83 +2177,6 @@ function DaemonDownDialog() {
         >
           Reload after restart
         </button>
-      </div>
-    </div>
-  );
-}
-
-function ExternalFileChangedDialog({
-  path,
-  onReload,
-  onKeepMine,
-}: {
-  path: string;
-  onReload(): void;
-  onKeepMine(): void;
-}) {
-  return (
-    <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0, 0, 0, 0.65)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 1000,
-        padding: 24,
-      }}
-    >
-      <div
-        style={{
-          width: "min(520px, 100%)",
-          background: "var(--bg-2)",
-          border: "1px solid var(--border)",
-          borderRadius: 8,
-          padding: 20,
-          boxShadow: "0 0 0 1px rgba(255,255,255,0.12), 0 12px 40px rgba(0, 0, 0, 0.4)",
-          display: "flex",
-          flexDirection: "column",
-          gap: 16,
-        }}
-      >
-        <div>
-          <div style={{ fontSize: 18, fontWeight: 600, marginBottom: 8 }}>File changed on disk</div>
-          <div style={{ color: "var(--muted)", lineHeight: 1.5 }}>
-            <code>{path}</code> changed on disk while you had unsaved edits. Reload the file from disk or keep your
-            draft and treat the new disk content as the latest saved version.
-          </div>
-        </div>
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-          <button type="button"
-            onClick={onKeepMine}
-            style={{
-              background: "transparent",
-              color: "var(--fg)",
-              border: "1px solid var(--border)",
-              padding: "8px 14px",
-              borderRadius: 4,
-              cursor: "pointer",
-              fontFamily: "inherit",
-            }}
-          >
-            Keep my changes
-          </button>
-          <button type="button"
-            onClick={onReload}
-            style={{
-              background: "var(--accent)",
-              color: "#fff",
-              border: "none",
-              padding: "8px 14px",
-              borderRadius: 4,
-              cursor: "pointer",
-              fontFamily: "inherit",
-            }}
-          >
-            Reload from disk
-          </button>
-        </div>
       </div>
     </div>
   );
