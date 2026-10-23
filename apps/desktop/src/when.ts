@@ -2,8 +2,10 @@
 /// person"): VS Code's when-clause syntax over the window's context keys —
 /// `!`, `&&` (tighter than `||`), `||`, parentheses, `==` / `!=` against
 /// `true`, `false` or a string (quoted or bare), `=~` against a regular
-/// expression literal. The ordering comparisons and `in` / `not in` are
-/// VS Code's too but no key holds a number or a list, so they're refused.
+/// expression literal; `true` / `false` alone are the literals (`false`:
+/// never offered on its own). The ordering comparisons and `in` / `not
+/// in` are VS Code's too but no key holds a number or a list, so they're
+/// refused.
 ///
 /// The daemon checks each `when` where its command registers
 /// (`oxplow_domain::when`, the same grammar); both read
@@ -13,6 +15,7 @@
 export type WhenContext = Record<string, boolean | string>;
 
 export type WhenExpr =
+  | { kind: "literal"; value: boolean }
   | { kind: "key"; key: string }
   | { kind: "not"; expr: WhenExpr }
   | { kind: "and" | "or"; left: WhenExpr; right: WhenExpr }
@@ -188,6 +191,7 @@ export function parseWhen(src: string): WhenExpr {
       return inner;
     }
     if (t.t !== "word") throw new Error(`expected a context key, found ${describe(t)}`);
+    if (t.v === "true" || t.v === "false") return { kind: "literal", value: t.v === "true" };
     return comparison(t.v);
   };
   const comparison = (key: string): WhenExpr => {
@@ -221,6 +225,8 @@ export function parseWhen(src: string): WhenExpr {
  *  false alone, equal to nothing (but `false`) and unmatched. */
 export function whenHolds(expr: WhenExpr, context: WhenContext): boolean {
   switch (expr.kind) {
+    case "literal":
+      return expr.value;
     case "key": {
       const v = context[expr.key];
       return v === true || (typeof v === "string" && v !== "");

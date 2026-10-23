@@ -8,7 +8,9 @@
 //! parentheses; `==` / `!=` against `true`, `false` or a string (quoted,
 //! or a bare word); `=~` against a regular expression literal
 //! (`/^work/i`). A key alone is truthy when it's `true` or a non-empty
-//! string. The ordering comparisons (`<` `<=` `>` `>=`) and `in` / `not
+//! string. `true` and `false` alone are the literals (VS Code's too):
+//! `when: "false"` is a command never offered on its own, declared for
+//! its label and `open_after` because lens actions run it. The ordering comparisons (`<` `<=` `>` `>=`) and `in` / `not
 //! in` are VS Code's too, but no context key holds a number or a list, so
 //! they are refused as not supported yet.
 //!
@@ -99,6 +101,8 @@ pub enum Literal {
 /// A parsed `when`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WhenExpr {
+    /// `true` or `false` alone.
+    Literal(bool),
     /// A key alone: `true`, or a non-empty string.
     Key(String),
     Not(Box<WhenExpr>),
@@ -370,6 +374,8 @@ impl Parser {
                     None => Err("expected `)`".into()),
                 }
             }
+            Some(Token::Word(w)) if w == "true" => Ok(WhenExpr::Literal(true)),
+            Some(Token::Word(w)) if w == "false" => Ok(WhenExpr::Literal(false)),
             Some(Token::Word(key)) => self.comparison(key),
             Some(t) => Err(format!("expected a context key, found {}", describe(&t))),
             None => Err("expected a context key".into()),
@@ -465,6 +471,7 @@ fn known(key: &str) -> Result<&'static ContextKey, String> {
 
 fn check_keys(expr: &WhenExpr) -> Result<(), String> {
     match expr {
+        WhenExpr::Literal(_) => Ok(()),
         WhenExpr::Key(key) => known(key).map(|_| ()),
         WhenExpr::Not(e) => check_keys(e),
         WhenExpr::And(a, b) | WhenExpr::Or(a, b) => {
@@ -493,6 +500,7 @@ fn check_keys(expr: &WhenExpr) -> Result<(), String> {
 /// alone, equal to nothing and unmatched.
 pub fn eval(expr: &WhenExpr, context: &BTreeMap<String, ContextValue>) -> bool {
     match expr {
+        WhenExpr::Literal(b) => *b,
         WhenExpr::Key(key) => match context.get(key) {
             Some(ContextValue::Bool(b)) => *b,
             Some(ContextValue::Str(s)) => !s.is_empty(),

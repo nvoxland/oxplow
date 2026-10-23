@@ -173,7 +173,10 @@ tighter than `||`), `||`, parentheses; `==` / `!=` against `true`,
 `=~` against a regular expression literal (`/^work/i`, flags `i` `m`
 `s`). A key alone holds when it is `true` or a non-empty string; a key
 the window doesn't hold is false, equal to nothing (but `false`) and
-unmatched. VS Code's `<` `<=` `>` `>=` and `in` / `not in` parse but are
+unmatched. `true` and `false` alone are the literals: `when: "false"`
+is a command never offered on its own (search, the menu bar, a shortcut),
+declared with a `ui` for its label and `open_after` because lens actions
+run it (`oxplow.file.create`). VS Code's `<` `<=` `>` `>=` and `in` / `not in` parse but are
 refused as not supported yet: no context key holds a number or a list.
 The window publishes its **context keys** (`CONTEXT_KEYS`, the one list):
 `enabledAgents` (the enabled agent harnesses' keys, comma-joined in

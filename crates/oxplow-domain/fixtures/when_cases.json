@@ -29,7 +29,10 @@
     { "when": "streamKind =~ /^work/", "context": { "streamKind": "primary" }, "is": false },
     { "when": "pageKind =~ /^FILE$/i", "context": { "pageKind": "file" }, "is": true },
     { "when": "pageKind =~ /a\\/b/", "context": { "pageKind": "a/b" }, "is": true },
-    { "when": "streamShown && streamKind == worktree && !fileDirty", "context": { "streamShown": true, "streamKind": "worktree" }, "is": true }
+    { "when": "streamShown && streamKind == worktree && !fileDirty", "context": { "streamShown": true, "streamKind": "worktree" }, "is": true },
+    { "when": "false", "context": { "streamShown": true }, "is": false },
+    { "when": "true", "context": {}, "is": true },
+    { "when": "!false && streamShown", "context": { "streamShown": true }, "is": true }
   ],
   "refused": [
     { "when": "", "says": "expected" },
