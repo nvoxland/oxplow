@@ -1,5 +1,5 @@
 import type { PickedRow } from "./LensRail.js";
-import { useCallback, useEffect, useId, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 
 import { listMetricDefinitions, runLensAction, type LensRun, type MetricSpec, type SqlCell } from "../api.js";
 import type { LensAction, LensPart, Reads } from "../tauri-bridge/generated/bindings.js";
@@ -27,6 +27,8 @@ import { NO_READS, useRerunOnChange } from "./lensRerun.js";
 import { dragActionFor, dropBeside, dropInGroup, keyAction, withOrder, type DropAt } from "./rowInteract.js";
 import { useFormSubmit } from "./useFormSubmit.js";
 import { useLensRuns, type PartRun } from "./useLensRuns.js";
+
+const fillStyle: CSSProperties = { display: "flex", flexDirection: "column", flex: 1, minHeight: 0 };
 
 /** Rows a dashboard tile shows before "open the lens for the rest". */
 const TILE_MAX_ROWS = 8;
@@ -108,7 +110,7 @@ function PartBody({
  * in view and draws it as the page's body: no heading (the page's title
  * is the section's), its lens's description as the intro.
  */
-export function DocumentViz(props: PartsVizProps & { viewed?: boolean }) {
+export function DocumentViz(props: PartsVizProps & { viewed?: boolean; fills?: boolean }) {
   const runs = usePartRuns(props);
   const { parts, streamId, onOpenPage, params, onSetParam } = props;
   if (props.viewed) {
@@ -147,16 +149,21 @@ export function DocumentViz(props: PartsVizProps & { viewed?: boolean }) {
   const stays = new Set(parts.filter((p) => p.replaceable || p.title === "").map((p) => p.id));
   const empty = new Set(runs ? foldEmpty(lensParts).empty.filter((e) => !stays.has(e.part.id)).map((e) => e.part.id) : []);
   const folded = parts.filter((p) => empty.has(p.id));
+  // A document that fills (its last section's lens does: the loader says)
+  // is a flex column whose last section takes the height left.
+  const fills = props.fills ?? false;
+  const last = parts[parts.length - 1]?.id;
   return (
-    <div data-testid="lens-document">
+    <div data-testid="lens-document" style={fills ? fillStyle : undefined}>
       {parts
         .filter((p) => !empty.has(p.id) && !inactive.has(p.id))
         .map((part) => {
           const run = runs?.get(part.id);
+          const fill = fills && part.id === last;
           // A part titled "" is bare: its body, no heading.
           if (part.title === "") {
             return (
-              <div key={part.id} data-testid={`lens-part-${part.id}`}>
+              <div key={part.id} data-testid={`lens-part-${part.id}`} style={fill ? fillStyle : undefined}>
                 <PartBody part={part} run={run} streamId={streamId} onOpenPage={onOpenPage} params={params} onSetParam={onSetParam} />
               </div>
             );
@@ -168,6 +175,7 @@ export function DocumentViz(props: PartsVizProps & { viewed?: boolean }) {
               title={<PartTitle part={part} run={run?.run ?? null} onOpenPage={onOpenPage} />}
               source={part.from ?? undefined}
               testId={`lens-part-${part.id}`}
+              fill={fill}
             >
               <PartBody part={part} run={run} streamId={streamId} onOpenPage={onOpenPage} params={params} onSetParam={onSetParam} />
             </Section>

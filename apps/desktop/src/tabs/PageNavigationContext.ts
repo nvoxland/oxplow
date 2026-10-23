@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect } from "react";
+import { createContext, useContext, useEffect, useRef } from "react";
 import type { TabRef } from "./tabState.js";
 import type { SqlCell } from "../tauri-bridge/generated/bindings.js";
 import type { BookmarkScope } from "./bookmarks.js";
@@ -26,6 +26,15 @@ export interface BookmarkBinding {
   /** Bookmark it at `scope` (moving it there), or take it off when it's
    *  already there. */
   toggle(scope: BookmarkScope): void;
+}
+
+/** What a page body that edits tells its tab (`useTabEditing`). */
+export interface TabEditing {
+  /** It holds edits not yet saved: the tab says ●, the menu's Save is
+   *  offered (`pageDirty`), and the tab cap never closes it. */
+  dirty: boolean;
+  /** Save them (the menu's Save, Cmd/Ctrl+S outside the body). */
+  save(): void;
 }
 
 export interface PageNavigation {
@@ -80,6 +89,10 @@ export interface PageNavigation {
    * `title` prop is supplied.
    */
   title?: string;
+  /** Tell the tab whether its page holds unsaved edits and how to save
+   *  them; `null` when it no longer edits. Through `useTabEditing`.
+   *  Absent on a body that isn't the tab's current page. */
+  setEditing?(editing: TabEditing | null): void;
   /** The page this body draws: its entry's ref (`tabs/session.ts`). */
   ref?: TabRef;
   /** **View params** — this tab's address: what the page shows (its
@@ -134,4 +147,25 @@ export function usePageTitle(title: string | null | undefined): void {
     if (title == null || title === "") return;
     set(title);
   }, [set, title]);
+}
+
+/**
+ * Tell the page's tab what it is editing: `dirty` while it holds edits
+ * not yet saved, and `save` to write them. The shell draws the tab's ●,
+ * offers Save (`pageDirty`), runs it from the menu, and keeps the tab
+ * from the tab cap. The latest `save` is the one run. A no-op outside a
+ * tab.
+ */
+export function useTabEditing({ dirty, save }: TabEditing): void {
+  const set = useContext(PageNavigationContext)?.setEditing;
+  const saveRef = useRef(save);
+  saveRef.current = save;
+  useEffect(() => {
+    if (!set) return;
+    set({ dirty, save: () => saveRef.current() });
+  }, [set, dirty]);
+  useEffect(() => {
+    if (!set) return;
+    return () => set(null);
+  }, [set]);
 }

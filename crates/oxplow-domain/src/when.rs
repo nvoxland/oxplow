@@ -45,14 +45,14 @@ pub const CONTEXT_KEYS: &[ContextKey] = &[
         doc: "The agent harnesses the project enables, by key, comma-joined in priority order (`claude,codex`): a command for one says `enabledAgents =~ /(^|,)claude(,|$)/`.",
     },
     ContextKey {
-        name: "fileDirty",
-        kind: KeyKind::Bool,
-        doc: "The file shown has unsaved changes and has finished loading.",
-    },
-    ContextKey {
         name: "fileShown",
         kind: KeyKind::Bool,
         doc: "A file of the working tree is the page shown.",
+    },
+    ContextKey {
+        name: "pageDirty",
+        kind: KeyKind::Bool,
+        doc: "The page shown has unsaved edits (a file's, a wiki page's): its Save would write them.",
     },
     ContextKey {
         name: "pageKind",
@@ -585,12 +585,12 @@ mod tests {
     /// window publishes, each compared to a value of its kind.
     #[test]
     fn a_when_names_known_keys_compared_to_their_kind() {
-        check("fileShown && fileDirty || pageKind == wiki && streamKind =~ /^w/").unwrap();
+        check("fileShown && pageDirty || pageKind == wiki && streamKind =~ /^w/").unwrap();
         for (src, says) in [
             ("fileDirt", "`fileDirt` isn't a context key"),
-            ("fileDirty == yes", "compare it to `true` or `false`"),
+            ("pageDirty == yes", "compare it to `true` or `false`"),
             ("pageKind == true", "is a string"),
-            ("fileDirty =~ /x/", "`=~` matches a string key"),
+            ("pageDirty =~ /x/", "`=~` matches a string key"),
         ] {
             let err = check(src).unwrap_err();
             assert!(err.contains(says), "{src}: {err}");

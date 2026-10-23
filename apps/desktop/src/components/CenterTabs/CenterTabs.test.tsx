@@ -149,3 +149,12 @@ test("a body with the same key keeps its state when its id changes", () => {
   expect(view.getByTestId("count").textContent).toBe("1");
   expect(view.getByTestId("center-tab-body-oxplow:oxplow/lens?lens=x/y&range=7d")).not.toBeNull();
 });
+
+test("a tab whose page holds unsaved edits says ● before its label", () => {
+  const tabs = makeTabs().map((t) => (t.label === "a.ts" ? { ...t, dirty: true } : t));
+  const { getByTestId, queryByTestId } = render(
+    <CenterTabs tabs={tabs} activeId={tabs[1]!.id} onActivate={() => {}} onClose={() => {}} onReorder={() => {}} />,
+  );
+  expect(getByTestId(`center-tab-${tabs[1]!.id}`).textContent).toContain("● a.ts");
+  expect(queryByTestId(`center-tab-dirty-${tabs[2]!.id}`)).toBeNull();
+});

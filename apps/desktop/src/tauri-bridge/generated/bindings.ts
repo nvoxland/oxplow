@@ -1629,7 +1629,7 @@ export type CommandUi = {
 	/**
 	 *  When it's offered — in search, the menu bar and by its shortcut —
 	 *  in VS Code's when-clause syntax over the window's context keys
-	 *  (`crate::when`): `fileShown && fileDirty`, `streamKind == worktree`.
+	 *  (`crate::when`): `fileShown && pageDirty`, `streamKind == worktree`.
 	 *  Absent, always.
 	 */
 	when?: string | null,
@@ -4282,6 +4282,13 @@ export type Lens_Deserialize = {
 	 *  own and mounted ones, filled once mounts are placed).
 	 */
 	view: string | null,
+	/**
+	 *  It takes its page's whole height: its viz does
+	 *  ([`LensViz::fills`]), or it is a document whose last section's lens
+	 *  fills, so that section takes the height left (set once the catalog
+	 *  is placed, `fill_document_fills`).
+	 */
+	fills: boolean,
 	/**  Launcher section; `None` = "Lenses". */
 	launcherCategory: LauncherCategory | null,
 	/**  Not listed in the launcher. */
@@ -4355,6 +4362,13 @@ export type Lens_Serialize = {
 	 *  own and mounted ones, filled once mounts are placed).
 	 */
 	view: string | null,
+	/**
+	 *  It takes its page's whole height: its viz does
+	 *  ([`LensViz::fills`]), or it is a document whose last section's lens
+	 *  fills, so that section takes the height left (set once the catalog
+	 *  is placed, `fill_document_fills`).
+	 */
+	fills: boolean,
 	/**  Launcher section; `None` = "Lenses". */
 	launcherCategory: LauncherCategory | null,
 	/**  Not listed in the launcher. */

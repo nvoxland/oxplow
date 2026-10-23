@@ -807,10 +807,10 @@ commands:
     example: {}
   # editor.write — the window's; an agent saves in its own thread.
   - name: editor.save
-    summary: "Save a file's unsaved changes (`uri`: its tab, `oxplow:oxplow/file?path=src/a.rs`; none saves the one your thread shows)."
+    summary: "Save a file's unsaved changes (`uri`: its tab, `oxplow:oxplow/file?path=src/a.rs`). With none it saves the page your thread shows: its file, or the page's own edits (a wiki page's draft)."
     scope: editor.write
     op: save
-    ui: { label: Save, group: File, shortcut: "Ctrl/Cmd+S", while_typing: true, menu: { bar: file, group: 2_save, order: 10 }, when: "fileDirty" }
+    ui: { label: Save, group: File, shortcut: "Ctrl/Cmd+S", while_typing: true, menu: { bar: file, group: 2_save, order: 10 }, when: "pageDirty" }
     example: {"uri": "oxplow:oxplow/file?path=src/main.rs"}
   # efforts.write
   - name: effort.close

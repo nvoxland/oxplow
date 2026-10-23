@@ -76,7 +76,7 @@ import type { AppScope, SlotNav } from "./pages/appScope.js";
 import { RailHud } from "./components/RailHud/RailHud.js";
 import type { TabRef } from "./tabs/tabState.js";
 import { navigationKey } from "./tabs/navigationKeys.js";
-import { PageNavigationContext, type PageNavigation } from "./tabs/PageNavigationContext.js";
+import { PageNavigationContext, type PageNavigation, type TabEditing } from "./tabs/PageNavigationContext.js";
 import { removeBookmark, setBookmark, useBookmarks } from "./tabs/bookmarks.js";
 import type { BookmarkScope } from "./tabs/bookmarks.js";
 import { isUnder, movedPath } from "./fileEvents.js";
@@ -266,6 +266,33 @@ export function App() {
   const [pageTitles, setPageTitles] = useState<Record<string, string>>({});
   const setPageTitle = useCallback((tabId: string, title: string) => {
     setPageTitles((prev) => (prev[tabId] === title ? prev : { ...prev, [tabId]: title }));
+  }, []);
+  // Per-tab editing (`useTabEditing`), keyed by tab id: which tabs hold
+  // unsaved edits (the ●, `pageDirty`, the tab cap) and their Saves. One
+  // setter per tab, kept, so a body's registration doesn't re-run on
+  // every render of the strip.
+  const [dirtyTabs, setDirtyTabs] = useState<Record<string, boolean>>({});
+  const tabSavesRef = useRef<Record<string, () => void>>({});
+  const editingSettersRef = useRef<Record<string, (editing: TabEditing | null) => void>>({});
+  const editingSetterFor = useCallback((tabId: string) => {
+    const known = editingSettersRef.current[tabId];
+    if (known) return known;
+    const set = (editing: TabEditing | null) => {
+      if (editing) {
+        tabSavesRef.current[tabId] = editing.save;
+        setDirtyTabs((prev) => (prev[tabId] === editing.dirty ? prev : { ...prev, [tabId]: editing.dirty }));
+      } else {
+        delete tabSavesRef.current[tabId];
+        setDirtyTabs((prev) => {
+          if (!(tabId in prev)) return prev;
+          const next = { ...prev };
+          delete next[tabId];
+          return next;
+        });
+      }
+    };
+    editingSettersRef.current[tabId] = set;
+    return set;
   }, []);
   const [error, setError] = useState<string | null>(null);
   // The error banner auto-dismisses; it's transient feedback (e.g. a
@@ -750,7 +777,6 @@ export function App() {
   );
   const selectedFilePath = currentSession.selectedPath;
   const currentFile = selectedFilePath ? currentSession.files[selectedFilePath] ?? null : null;
-  const currentFileDirty = !!currentFile && currentFile.draftContent !== currentFile.savedContent;
   const currentThreadState = useMemo(
     () => (stream ? threadStates[stream.id] ?? { selectedThreadId: null, threads: [] } : { selectedThreadId: null, threads: [] }),
     [threadStates, stream],
@@ -960,7 +986,7 @@ export function App() {
       streamKind: stream?.kind ?? "",
       threadShown: !!selectedThread,
       fileShown: !!selectedFilePath,
-      fileDirty: !!currentFile && !currentFile.isLoading && currentFileDirty,
+      pageDirty: !!centerActive && !!dirtyTabs[centerActive],
       pageKind: centerActive ? kindForTabId(centerActive) : "",
       vcsEnabled: !!workspaceContext.vcsEnabled,
       shellAvailable: shellAvailable(),
@@ -969,7 +995,7 @@ export function App() {
         .map((h) => h.id)
         .join(","),
     }),
-    [centerActive, currentFile, currentFileDirty, harnesses, selectedThread, selectedFilePath, stream, workspaceContext.vcsEnabled],
+    [centerActive, dirtyTabs, harnesses, selectedThread, selectedFilePath, stream, workspaceContext.vcsEnabled],
   );
   // Run a Git-menu mutation (pull/push) as a background task and surface
   // any failure the same way the Git Dashboard does: record an op-error
@@ -1675,7 +1701,14 @@ export function App() {
           const shown = thread === selectedThreadId ? centerActive : activeRef(sessions[thread])?.id;
           const tab = typeof id === "string" ? id : shown;
           const path = tab ? diskFilePath(tab) : null;
-          if (path === null) throw new Error(typeof id === "string" ? `\`${id}\` isn't a file in the working tree` : "no file is shown");
+          // The page shown that isn't a file saves through its own Save
+          // (`useTabEditing`): a wiki page's draft, say.
+          const ownSave = typeof id !== "string" && thread === selectedThreadId && tab ? tabSavesRef.current[tab] : undefined;
+          if (path === null && ownSave) {
+            ownSave();
+            return { saved: tab };
+          }
+          if (path === null) throw new Error(typeof id === "string" ? `\`${id}\` isn't a file in the working tree` : "nothing to save on the page shown");
           const streamId = streamOfThread(threadStates, thread);
           if (!streamId) throw new Error(`no stream has thread \`${thread}\``);
           await saveFile(streamId, path, ctx.call);
@@ -1781,12 +1814,12 @@ export function App() {
       const file = path === null ? undefined : files?.files[path];
       return !!file && file.draftContent !== file.savedContent;
     };
-    const victims = evictions(session, MAX_PAGE_TABS, (t) => dirty(currentEntry(t).ref.id));
+    const victims = evictions(session, MAX_PAGE_TABS, (t) => dirty(currentEntry(t).ref.id) || !!dirtyTabs[currentEntry(t).ref.id]);
     for (const slot of victims) {
       const tab = session.tabs.find((t) => t.slot === slot);
       if (tab) closePageTab(currentEntry(tab).ref.id);
     }
-  }, [sessions, selectedThreadId, fileSessions, stream, closePageTab]);
+  }, [sessions, selectedThreadId, fileSessions, stream, closePageTab, dirtyTabs]);
 
   // Keep the forward ref in sync with the latest handleOpenPage. Used by
   // the forms and offers (declared above handleOpenPage) so menu/keyboard
@@ -1961,7 +1994,7 @@ export function App() {
         const dirty = !!file && file.draftContent !== file.savedContent;
         return {
           id: ref.id,
-          label: `${dirty ? "● " : ""}${basename}`,
+          label: basename,
           closable: true,
           render: () => stream ? (
             <FilePage
@@ -2130,6 +2163,7 @@ export function App() {
         stepOrigin: origin ? (index: number) => handleStepOrigin(slot, index) : undefined,
         setTitle: (t: string) => setPageTitle(tabId, t),
         title: registeredTitle,
+        setEditing: isCurrent ? editingSetterFor(tabId) : undefined,
         ask: parseUri(ref.id) ? { ref: ref.id } : undefined,
         bookmark: {
           scope: bookmarkScope,
@@ -2180,6 +2214,7 @@ export function App() {
       if (registeredTitle && registeredTitle !== tab.label) {
         tab.label = registeredTitle;
       }
+      if (isCurrent && dirtyTabs[tabId]) tab.dirty = true;
       tab.render = () => (
         <PageNavigationContext.Provider value={navValue}>
           {innerRender()}
@@ -2220,6 +2255,8 @@ export function App() {
     closePageTab,
     pageTitles,
     setPageTitle,
+    dirtyTabs,
+    editingSetterFor,
     bookmarks,
     workspaceContext.vcsEnabled,
     selectedFilePath,

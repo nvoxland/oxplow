@@ -136,6 +136,14 @@ pub enum LensViz {
     Custom,
 }
 
+impl LensViz {
+    /// It takes its page's whole height (a file, a diff): the page draws
+    /// it filling the body, its title in the chrome.
+    pub fn fills(self) -> bool {
+        matches!(self, LensViz::Code | LensViz::Diff)
+    }
+}
+
 /// A `custom` lens's component and the props it starts with.
 #[derive(
     Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
@@ -2506,6 +2514,11 @@ pub struct Lens {
     /// view. It is a `filter` choice whose options are the sections (its
     /// own and mounted ones, filled once mounts are placed).
     pub view: Option<String>,
+    /// It takes its page's whole height: its viz does
+    /// ([`LensViz::fills`]), or it is a document whose last section's lens
+    /// fills, so that section takes the height left (set once the catalog
+    /// is placed, `fill_document_fills`).
+    pub fills: bool,
     /// Launcher section; `None` = "Lenses".
     pub launcher_category: Option<LauncherCategory>,
     /// Not listed in the launcher.
@@ -3087,6 +3100,7 @@ pub(super) fn resolve_catalog(
         .collect();
     place_lens_mounts(&mut out);
     fill_view_options(&mut out);
+    fill_document_fills(&mut out);
     warn_unread_row_columns(&mut out);
     out
 }
@@ -3132,6 +3146,35 @@ fn refuse_part_cycles(out: &mut [Extension]) {
 /// own and the mounted ones: each part's id, labelled by its title, else
 /// its lens's title, else its id. Replaced, never added to: a catalog is
 /// resolved again from resolved extensions.
+/// A document fills when the lens of its last part does (mounts placed,
+/// so a mounted last section counts). Documents nest, and part cycles
+/// are refused before this, so it settles in as many rounds as the
+/// deepest nesting. A view document shows one section at a time, so
+/// which part is last says nothing: it doesn't fill.
+fn fill_document_fills(out: &mut [Extension]) {
+    loop {
+        let fills: BTreeMap<String, bool> = out
+            .iter()
+            .flat_map(|e| e.lenses.iter())
+            .map(|l| (l.id.clone(), l.fills))
+            .collect();
+        let mut changed = false;
+        for lens in out.iter_mut().flat_map(|e| e.lenses.iter_mut()) {
+            if lens.viz != LensViz::Document || lens.view.is_some() || lens.fills {
+                continue;
+            }
+            let last = lens.parts.last().and_then(|p| p.lens.as_ref());
+            if last.is_some_and(|id| fills.get(id) == Some(&true)) {
+                lens.fills = true;
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+}
+
 fn fill_view_options(out: &mut [Extension]) {
     let titles: BTreeMap<String, String> = out
         .iter()
@@ -4508,6 +4551,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                 depth: l.depth,
                 parts,
                 view: l.view,
+                fills: l.viz.fills(),
                 launcher_category: l.launcher.map(|la| la.category),
                 hidden: l.hidden,
                 actions,
@@ -7257,6 +7301,7 @@ impl Lens {
             depth: spec.depth.clone(),
             parts: Vec::new(),
             view: None,
+            fills: spec.viz.fills(),
             launcher_category: None,
             hidden: false,
             actions: Vec::new(),
@@ -10178,6 +10223,40 @@ commands:
         assert_eq!(options, [("one", "First"), ("two", "Bee")]);
         assert!(area.take(&SqlCell::Text("two".into())).is_ok());
         assert!(area.take(&SqlCell::Text("nope".into())).is_err());
+    }
+
+    /// A lens fills its page when its viz takes the page's whole height
+    /// (a file, a diff), or when it is a document whose last section's
+    /// lens fills: that section takes the height left.
+    #[test]
+    fn a_lens_says_whether_it_fills() {
+        let code = "title: C\nquery: SELECT 'a.rs' AS path, 'HEAD' AS rev\nviz: code\ncode: { path: path, revision: rev }\n";
+        let (_d, ext) = load_x(
+            &[
+                ("c", code),
+                ("t", "title: T\nquery: SELECT 1 AS n\n"),
+                (
+                    "last",
+                    "title: L\nviz: document\nsections:\n  - { lens: t }\n  - { lens: c }\n",
+                ),
+                (
+                    "first",
+                    "title: F\nviz: document\nsections:\n  - { lens: c }\n  - { lens: t }\n",
+                ),
+                (
+                    "nested",
+                    "title: N\nviz: document\nsections:\n  - { lens: t }\n  - { lens: last }\n",
+                ),
+            ],
+            "",
+        );
+        assert!(ext.errors.is_empty(), "{:?}", ext.errors);
+        let fills = |slug: &str| ext.lenses.iter().find(|l| l.slug == slug).unwrap().fills;
+        assert!(fills("c"));
+        assert!(!fills("t"));
+        assert!(fills("last"));
+        assert!(!fills("first"));
+        assert!(fills("nested"));
     }
 
     /// `view` is a document's, names a declared filter choice with no

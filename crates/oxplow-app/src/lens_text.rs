@@ -1158,6 +1158,7 @@ mod tests {
                 depth: None,
                 parts: Vec::new(),
                 view: None,
+                fills: false,
                 launcher_category: None,
                 hidden: false,
                 actions: Vec::new(),

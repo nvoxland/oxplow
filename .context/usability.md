@@ -374,6 +374,10 @@ markdown itself, nor edits it in a `<textarea>`.
   oxplow's name for the session (the strip says so, and what clearing it
   falls back to — the harness's own name, shown as the placeholder), with
   an "Also rename it in <harness>" box only where the harness can.
+- **A tab whose page holds unsaved edits says ●** before its label (a
+  file, a wiki page's draft — any page body that calls `useTabEditing`).
+  File → Save (Ctrl/Cmd+S, `when: pageDirty`) saves the page shown
+  through its own Save, and the tab cap never closes such a tab.
 - **Closing a dirty file tab** is fire-and-undo: the close completes
   immediately and a toast offers Undo (which restores both the saved
   buffer and the unsaved draft). See `App.tsx` →

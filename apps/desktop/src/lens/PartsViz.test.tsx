@@ -370,3 +370,18 @@ test("a view document runs and draws only its section in view, bare, under its l
   expect(queryByTestId("lens-part-overview")).toBeNull();
   expect(runs.map((r) => r.id)).toEqual(["x/area"]);
 });
+
+test("a document that fills gives its last section the height left; one that doesn't lays its sections out as text", async () => {
+  const parts = [part({ id: "head", title: "Head", lens: "x/open" }), part({ id: "body", title: "Body", lens: "x/area" })];
+  const filling = { ...page("document", parts), lens: { ...base, viz: "document", parts, fills: true } } as unknown as LensRun;
+  const { getByTestId, unmount } = render(<LensResultView run={filling} streamId="str1" onOpenPage={() => {}} />);
+  await waitFor(() => expect(getByTestId("lens-part-body").textContent).toContain("7"));
+  expect(getByTestId("lens-document").style.flexGrow).toBe("1");
+  expect(getByTestId("lens-part-body").style.flexGrow).toBe("1");
+  expect(getByTestId("lens-part-head").style.flexGrow).toBe("");
+  unmount();
+  const plain = render(<LensResultView run={page("document", parts)} streamId="str1" onOpenPage={() => {}} />);
+  await waitFor(() => expect(plain.getByTestId("lens-part-body").textContent).toContain("7"));
+  expect(plain.getByTestId("lens-document").style.flexGrow).toBe("");
+  expect(plain.getByTestId("lens-part-body").style.flexGrow).toBe("");
+});

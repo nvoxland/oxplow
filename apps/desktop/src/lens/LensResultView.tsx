@@ -492,6 +492,7 @@ function LensBody(props: LensResultViewProps & { actions?: LensActionsState; mar
       <DocumentViz
         parts={viewedParts(run.lens, run.params)}
         viewed={!!run.lens.view}
+        fills={run.lens.fills}
         params={run.params}
         given={partParams(run)}
         streamId={streamId}

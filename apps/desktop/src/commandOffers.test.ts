@@ -99,9 +99,9 @@ test("a form that isn't a tab id is one of the window's own; an offer says its s
   const offers = commandOffers(
     [
       spec("oxplow.thread.create", { label: "New Thread…", form: "new-thread", when: "streamShown" }),
-      spec("oxplow.editor.save", { label: "Save", shortcut: "Ctrl/Cmd+S", while_typing: true, menu: { bar: "file", order: 40 }, when: "fileShown && fileDirty" }),
+      spec("oxplow.editor.save", { label: "Save", shortcut: "Ctrl/Cmd+S", while_typing: true, menu: { bar: "file", order: 40 }, when: "fileShown && pageDirty" }),
     ],
-    { ...ctx, when: { streamShown: true, fileShown: true, fileDirty: false } },
+    { ...ctx, when: { streamShown: true, fileShown: true, pageDirty: false } },
     d,
   );
   offers[0].run();

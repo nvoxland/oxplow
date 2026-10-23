@@ -2009,7 +2009,7 @@
           "default": null
         },
         "when": {
-          "description": "When it's offered — in search, the menu bar and by its shortcut —\nin VS Code's when-clause syntax over the window's context keys\n(`crate::when`): `fileShown && fileDirty`, `streamKind == worktree`.\nAbsent, always.",
+          "description": "When it's offered — in search, the menu bar and by its shortcut —\nin VS Code's when-clause syntax over the window's context keys\n(`crate::when`): `fileShown && pageDirty`, `streamKind == worktree`.\nAbsent, always.",
           "type": [
             "string",
             "null"
