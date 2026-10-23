@@ -1,121 +1,9 @@
 import { expect, test } from "bun:test";
 
 import type { PersonCommands } from "./personCommands.js";
-import {
-  enableAgain,
-  healthLine,
-  healthOf,
-  contributionHealthFromResult,
-  repairMention,
-  repairWithAgent,
-  type ContributionHealth,
-} from "./contributionHealth.js";
-import type { SqlQueryResult } from "./tauri-bridge/generated/bindings.js";
+import { enableAgain, enableAllAgain } from "./contributionHealth.js";
 
-const COLUMNS = [
-  "extension",
-  "contribution",
-  "kind",
-  "state",
-  "reason",
-  "consecutive_failures",
-  "last_error",
-  "mean_ms",
-  "dead_letters",
-  "fresh",
-  "repair_item",
-];
-
-const result = (rows: SqlQueryResult["rows"]): SqlQueryResult =>
-  ({
-    columns: COLUMNS,
-    rows,
-    truncated: false,
-    reads: { models: ["v_contribution_health"], tables: [], measures: [] },
-    freshness: {},
-  }) as unknown as SqlQueryResult;
-
-const health = (over: Partial<ContributionHealth>): ContributionHealth => ({
-  extension: "tracker",
-  contribution: "issues",
-  kind: "collector",
-  state: "ok",
-  reason: null,
-  failures: 0,
-  lastError: null,
-  meanMs: null,
-  deadLetters: 0,
-  fresh: true,
-  repairItem: null,
-  ...over,
-});
-
-test("rows read as health", () => {
-  const [h] = contributionHealthFromResult(
-    result([["tracker", "issues", "collector", "disabled", "3 failures", 3, "boom", 12.5, 2, 0, "oxplow:oxplow/work_item?id=tsk9&provider=oxplow"]]),
-  );
-  expect(h).toEqual(
-    health({
-      state: "disabled",
-      reason: "3 failures",
-      failures: 3,
-      lastError: "boom",
-      meanMs: 12.5,
-      deadLetters: 2,
-      fresh: false,
-      repairItem: "oxplow:oxplow/work_item?id=tsk9&provider=oxplow",
-    }),
-  );
-});
-
-test("an extension's health is its contributions'", () => {
-  const rows = [health({}), health({ extension: "other" }), health({ contribution: "prs" })];
-  expect(healthOf(rows, "tracker").map((h) => h.contribution)).toEqual(["issues", "prs"]);
-});
-
-test("a disabled contribution shows its reason and can be enabled and repaired", () => {
-  const line = healthLine(health({ state: "disabled", reason: "3 failures in a row; the last: boom", repairItem: "oxplow:oxplow/work_item?id=tsk9&provider=oxplow" }));
-  expect(line.text).toBe("Disabled: 3 failures in a row; the last: boom");
-  expect(line.tone).toBe("error");
-  expect(line.canEnable).toBe(true);
-  expect(line.repairItem).toBe("oxplow:oxplow/work_item?id=tsk9&provider=oxplow");
-});
-
-test("a disabled contribution without an open repair item has nothing to repair from", () => {
-  const line = healthLine(health({ state: "disabled", reason: "gone" }));
-  expect(line.canEnable).toBe(true);
-  expect(line.repairItem).toBeNull();
-});
-
-test("a failing contribution says how often and why, and isn't enabled again", () => {
-  const line = healthLine(health({ state: "failing", failures: 2, lastError: "timeout" }));
-  expect(line.text).toBe("Failing (2 in a row): timeout");
-  expect(line.tone).toBe("warn");
-  expect(line.canEnable).toBe(false);
-});
-
-test("a healthy contribution says so, with its average, missed schedule and undelivered events", () => {
-  expect(healthLine(health({ meanMs: 41.6 })).text).toBe("OK · 42 ms on average");
-  expect(healthLine(health({})).tone).toBe("ok");
-  const late = healthLine(health({ fresh: false, deadLetters: 1 }));
-  expect(late.text).toBe("OK · missed its schedule · 1 event undelivered");
-  expect(late.tone).toBe("warn");
-  expect(healthLine(health({ deadLetters: 3 })).text).toBe("OK · 3 events undelivered");
-});
-
-test("the repair mention names the repair item as a ref, on one line", () => {
-  expect(repairMention("oxplow:oxplow/work_item?id=tsk9&provider=oxplow")).toBe(
-    "Repair the extension described in [oxplow uri oxplow:oxplow/work_item?id=tsk9&provider=oxplow] — read it first.",
-  );
-});
-
-test("Repair with the Agent fills the agent input with the mention, and only that", () => {
-  const inserted: string[] = [];
-  repairWithAgent("oxplow:oxplow/work_item?id=ENG-12&provider=issues", (t) => inserted.push(t));
-  expect(inserted).toEqual(["Repair the extension described in [oxplow uri oxplow:oxplow/work_item?id=ENG-12&provider=issues] — read it first."]);
-});
-
-test("Enable Again runs oxplow.contribution.enable as the person", async () => {
+const recording = () => {
   const runs: unknown[][] = [];
   const commands = {
     run: async (label: string, command: string, input: unknown) => {
@@ -123,6 +11,17 @@ test("Enable Again runs oxplow.contribution.enable as the person", async () => {
       return true;
     },
   } as unknown as PersonCommands;
-  await enableAgain(health({ state: "disabled" }), commands);
+  return { runs, commands };
+};
+
+test("Enable Again runs oxplow.contribution.enable as the person", async () => {
+  const { runs, commands } = recording();
+  await enableAgain({ extension: "tracker", contribution: "issues", kind: "collector" }, commands);
   expect(runs).toEqual([["Enable tracker/issues", "oxplow.contribution.enable", { extension: "tracker", kind: "collector", contribution: "issues" }]]);
+});
+
+test("Enable All Disabled runs oxplow.contribution.enable_all as the person", async () => {
+  const { runs, commands } = recording();
+  await enableAllAgain(commands);
+  expect(runs).toEqual([["Enable all disabled contributions", "oxplow.contribution.enable_all", {}]]);
 });

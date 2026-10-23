@@ -1,0 +1,3 @@
+SELECT CAST(NULL AS TEXT) AS extension, CAST(NULL AS TEXT) AS provider, CAST(NULL AS TEXT) AS name,
+       CAST(NULL AS TEXT) AS reference, CAST(NULL AS INTEGER) AS is_set
+WHERE 0

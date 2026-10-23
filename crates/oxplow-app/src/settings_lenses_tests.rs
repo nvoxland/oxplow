@@ -914,3 +914,75 @@ async fn command_task(
         .unwrap()
         .result
 }
+
+/// Settings → Extensions: a collector turned off after failures says why
+/// and offers Enable Again and Repair; a credential an extension's
+/// collectors declare is listed once, with whether a value is kept (never
+/// the value).
+#[tokio::test(flavor = "multi_thread")]
+async fn the_extensions_area_lists_health_and_credentials() {
+    let dir = tempfile::tempdir().unwrap();
+    crate::test_fixtures::init_git_repo(dir.path());
+    let ext = dir.path().join(".oxplow/extensions/acme");
+    std::fs::create_dir_all(&ext).unwrap();
+    std::fs::write(
+        ext.join("extension.yaml"),
+        "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: { process: true, secrets: [TOKEN] }\ncollectors:\n  - id: s\n    runtime: exec\n    entry: sync.sh\n    credentials: [TOKEN]\n    entities:\n      - { name: row, key: id, columns: { id: int } }\n  - id: t\n    runtime: exec\n    entry: sync.sh\n    credentials: [TOKEN]\n    entities:\n      - { name: row2, key: id, columns: { id: int } }\n",
+    )
+    .unwrap();
+    std::fs::write(ext.join("sync.sh"), "#!/bin/sh\necho '{\"entities\":{}}'\n").unwrap();
+    let fx = crate::test_fixtures::services_with_effort_in(dir).await;
+    crate::test_fixtures::activate(&fx.svc).await;
+    fx.svc
+        .db
+        .transaction(|tx| {
+            oxplow_db::contribution_health_store::disable_tx(
+                tx,
+                &crate::collector_runner::contribution_key("acme", "s"),
+                "3 failures in a row; the last: boom",
+                "t",
+            )
+        })
+        .await
+        .unwrap();
+
+    let health = run(&fx, "extensions-health", vec![]).await;
+    let row = health.keyed("contribution", "s");
+    assert_eq!(
+        health.text(row, "status").as_deref(),
+        Some("Disabled: 3 failures in a row; the last: boom")
+    );
+    assert!(health.flag(row, "can_enable"));
+    // No open repair task yet: nothing to hand the agent.
+    assert!(!health.flag(row, "can_repair"));
+
+    let creds = run(&fx, "extensions-credentials", vec![]).await;
+    assert_eq!(
+        creds.rows.len(),
+        1,
+        "one TOKEN for the extension: {:?}",
+        creds.rows
+    );
+    assert_eq!(
+        creds.text(&creds.rows[0], "extension").as_deref(),
+        Some("acme")
+    );
+    assert_eq!(
+        creds.text(&creds.rows[0], "status").as_deref(),
+        Some("Not set")
+    );
+    command(
+        &fx,
+        "oxplow.collector.set_credential",
+        serde_json::json!({ "collector": creds.text(&creds.rows[0], "collector").unwrap(), "name": "TOKEN", "value": "v" }),
+    )
+    .await;
+    let creds = run(&fx, "extensions-credentials", vec![]).await;
+    assert_eq!(
+        creds.text(&creds.rows[0], "status").as_deref(),
+        Some("Saved in keychain")
+    );
+    assert!(creds.flag(&creds.rows[0], "is_set"));
+
+    assert!(run(&fx, "extensions-secrets", vec![]).await.rows.is_empty());
+}

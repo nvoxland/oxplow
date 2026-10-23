@@ -2278,7 +2278,7 @@ they live under `ui:`.
 | `oxplow-foundation/commit.sections` | the commit page (a document: parts `detail`, `files`) | its params (`uri`, `sha`, `stream_id`) and its row (`change_id`, `base_revision`, `head_revision`) |
 | `oxplow-foundation/uncommitted.sections` | the Uncommitted Changes page (a document: parts `commit`, `files`) | its params (`stream_id`) and its row (`change_id`, `base_revision`, `head_revision`) |
 | `diff.file.header` | a file diff (`DiffPane`), a strip under its header (P9.A2; `DiffFileHeaderSlot`) | `path`, `left_revision`, `right_revision` (each a revision in its wire form: `working`, `snap:<id>`, `git:<sha>`), `stream_id` |
-| `settings.<area>.sections` (core's parts per area: `extensions` `health`; `data` `data`; `integrations` `capabilities`, `integrations`; `overview`, `agents`, `lsp` and `ai` have none — their sections are oxplow-foundation's lenses) | each Settings area's page (`pages/settingsAreas.ts` lists the same ids; a TS test checks they match): an extension's status or setup views go beside the area they belong to | none (`overview`: `q`, the page's search) |
+| `settings.<area>.sections` (core's parts per area: `data` `data`; `integrations` `capabilities`, `integrations`; `overview`, `agents`, `lsp`, `ai` and `extensions` have none — their sections are oxplow-foundation's lenses) | each Settings area's page (`pages/settingsAreas.ts` lists the same ids; a TS test checks they match): an extension's status or setup views go beside the area they belong to | none (`overview`: `q`, the page's search) |
 
 The launcher isn't a slot: a lens lists itself with `launcher.category`.
 
@@ -4722,6 +4722,7 @@ What moves out of core, and what it becomes:
 | Settings → AI | **done:** foundation lenses in `settings.ai.sections`: `ai-providers` (`v_ai_provider`; Test… and Remove… row actions, Remove asks first), `ai-provider-form` (a `form` lens over `oxplow.ai.set_provider`, its `key` a `secret: true` field, `kind` chosen from `v_capability_provider`), `ai-roles` (`v_ai_role`; Assign… / Unassign over `oxplow.ai.set_role`), `ai-calls` (the last 7 days of `v_ai_call`). `set_provider` and `remove_provider` now announce `ConfigChanged` so the lists follow. `AiSection`, `aiSettingsModel` and the AI `api.ts` wrappers are gone |
 | Settings → Agents | **done:** foundation lenses in `settings.agents.sections`: `agents-list` (the harnesses from `v_agent_harness`; Enable / Disable / Move Up / Move Down each hand `oxplow.agent.set_agents` the whole new order, built in SQL and bound with `{{row.x|json}}`), `agents-settings` (the declared settings, `v_agent_harness.settings` (v2) joined with `agentConfig`, a `Change…` form over `oxplow.agent.set_setting`), `agents-new-thread` (`personal.newThreadSession`, `Use This` on `oxplow.config.set` / `unset`, which ask first), `agents-prompt` (an edit form over the new `oxplow.agent.set_prompt_append`). No page-wide Save: each part saves itself. `AgentPicker`, `NewThreadSessionSetting` and the Agents form are gone |
 | Settings → Overview and Language Servers | **done:** the areas have no React sections; oxplow-foundation mounts lenses in their slots. Overview: `settings-proposals` (the `approvals` viz) and `settings-values` (a grouped `list` over `v_config_value`: its source, value, doc, Ask the Agent to Change This through `oxplow.agent.draft`, and Change It Here — a link to the area that holds a setting's control; the page's search is the slot param `q`, which the lens reads as `:q`). Language servers: `lsp-servers` (`v_lsp_server`, a row per stream a server runs in; Restart and Remove through `oxplow.lsp.restart_server` / `remove_server`), `lsp-install` (a form over `oxplow.lsp.install_server`) and `lsp-suggestions` (the curated Mason packages for languages with no server). The shell (`SettingsPage`, the rail, the other areas) stays until they convert |
+| Settings → Extensions health and credentials | **done:** foundation lenses in `settings.extensions.sections`: `extensions-health` (`v_contribution_health`, grouped by extension; Enable Again, Repair with the Agent through `oxplow.agent.draft`, Enable All Disabled), `extensions-credentials` (the credentials collectors declare, once per extension; Set… and Clear through `oxplow.collector.set_credential`) and `extensions-secrets` (`v_extension_secret`; Set… and Revoke). The per-extension Enable All button is gone (the all button stays); `ExtensionsSection`, `HealthRow`, `SecretRow` and the `save_extension_secret`, `extension_secret_is_set`, `revoke_extension_secret` and `set_credential` IPCs are deleted; `EnableAllButton` and `CredentialRow` (provider instances) moved to their own files for Settings → Data and Integrations |
 | Rail panels: Comments, Work, Uncommitted, Go To | **done:** Go To (`go-to`, the thread's bookmarks then its recent or most visited pages through the `mode` choice param, `go-to-bookmarks` collapsed — needing bookmarks as project data (`v_bookmark`), lens param `options` and page-kind icons; the rail has no core panels left); Comments (`comments`, a panel `open`ing the inbox) and Work (`work` grouped over the `thread_work` model, which also lists the thread's unlinked efforts — open under In progress, closed under Finished, whose header opens the `thread-activity` lens of the thread's turns by effort — `work-line` collapsed, `work-count`, the `clear_finished` command + `finished_cleared` model); and Uncommitted (`uncommitted`, a tree over the working change's stage-one file list, which change analysis now keeps current on every move). Only the UI moves: stores, commands and views stay core. What Work needed and lenses lacked became general features, listed under "Added for extraction" — the pattern for any panel an extension builds |
 | The effort-close inference of unrecorded decisions and of the claims an agent's answers made (the `effort.decisions` reactor) | **done:** the AI profile `reasoning` (fallback `main`), the job `reasoning`, the command `oxplow.effort.infer_reasoning` and the effects `infer-reasoning` / `store-reasoning`, writing through core's `oxplow.effort.replace_inferred_decisions` and `oxplow.effort.replace_inferred_claims`; review and storage stay core ([ai-providers.md](./ai-providers.md) "Inferred reasoning") |
 
@@ -5283,19 +5284,21 @@ owning extension. Copying team configuration cannot approve use or read another
 namespace. Disabled/uninstalled owners cannot save or inspect a reference;
 explicit human revocation can delete a retained keychain value after uninstall.
 
-`ExtensionSecrets` has human settings ingress only: save/rotate returns a
-reference, inspection returns presence, revocation returns no value. The RPC
-methods are `save_extension_secret`, `extension_secret_is_set` and
-`revoke_extension_secret`; no native command, script service or MCP route exists.
-Secret bytes and keychain error details are never returned or audited. Values
-are bounded to 16 KiB. The three RPCs are desktop IPC entries (classified `ui`
-in the surface-parity manifest: an agent has no route to a secret). Settings →
-Extensions shows one `SecretRow` per credential an extension's provider
-declares with a `secretRef` (`secretCredentials`): "Set" / "Not set" from
-`extension_secret_is_set`, Set/Rotate as a masked `InlineEdit` (Enter commits,
-Escape cancels) that saves under the declared reference, and Revoke behind an
-`InlineConfirm`. Failures go to the op-errors list; the row re-checks presence
-on `extensionsChanged`. The value is never read back to the page.
+`ExtensionSecrets` keeps the values; whoever sets one does it with a command,
+`oxplow.extension.set_secret { extension, reference?, value }` (a fresh
+reference when none is given) and `oxplow.extension.revoke_secret { extension,
+reference }`, scope `credentials.write`. A secret is a kind of value, not a
+kind of actor (commands.md "Secrets"): `value` is `writeOnly`, so a person, an
+agent and a lens for either may set one, and no record, event, result or
+model carries it. Presence is the live model `v_extension_secret` (`extension`,
+`provider`, `name`, `reference` as JSON, `is_set`), read from the catalog's
+provider credentials and the keychain; it follows `CredentialChanged`. Secret
+bytes and keychain error details are never returned or audited. Values are
+bounded to 16 KiB. Settings → Extensions lists them in the foundation's
+`extensions-secrets` lens (Set… / Rotate…, a form over the command whose
+`value` field is masked by the schema, and Revoke). The old
+`save_extension_secret`, `extension_secret_is_set` and
+`revoke_extension_secret` IPCs are gone.
 
 The first trusted consumer is a remote MCP HTTP provider using the shipped
 adapter. Its bearer credential must be named `OXPLOW_MCP_BEARER` and carry

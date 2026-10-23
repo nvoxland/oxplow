@@ -42,6 +42,7 @@ pub const NAMES: &[&str] = &[
     "lsp_server",
     "collector_state",
     "collector_credential",
+    "extension_secret",
     "extension_source",
     "zone",
     "zone_unmatched",
@@ -86,6 +87,7 @@ pub fn columns(name: &str) -> &'static [&'static str] {
         ],
         "collector_state" => &["uri", "owner", "id", "network_enforced", "disabled"],
         "collector_credential" => &["collector", "name", "is_set"],
+        "extension_secret" => &["extension", "provider", "name", "reference", "is_set"],
         "extension_source" => &["name", "path", "hash"],
         "zone" => &["position", "zone", "patterns", "color", "files"],
         "zone_unmatched" => &["path"],
@@ -153,7 +155,7 @@ pub fn follows(name: &str, change: &Change<'_>) -> bool {
                 E::ConfigChanged | E::CredentialChanged { .. } | E::ExtensionsChanged
             ),
             "lsp_server" => matches!(event, E::LspServersChanged | E::ConfigChanged),
-            "collector_state" | "collector_credential" => matches!(
+            "collector_state" | "collector_credential" | "extension_secret" => matches!(
                 event,
                 E::CredentialChanged { .. } | E::ExtensionsChanged | E::ConfigChanged
             ),
@@ -352,6 +354,7 @@ impl LiveModels {
             "lsp_server" => Ok(sources.lsp_servers().await),
             "collector_state" => sources.collector_state().await,
             "collector_credential" => sources.collector_credentials().await,
+            "extension_secret" => sources.extension_secrets().await,
             "extension_source" => sources.extension_sources().await,
             "zone" => Ok(sources.zones().await?.0),
             "zone_unmatched" => Ok(sources.zones().await?.1),
@@ -518,6 +521,41 @@ impl LiveSources {
                     .map(move |c| vec![text(collector.clone()), text(c.name.clone()), flag(c.set)])
             })
             .collect())
+    }
+
+    /// The credentials the enabled extensions' providers declare with a
+    /// host secret reference, and whether the keychain holds a value for
+    /// each (presence only: the value is never read out).
+    async fn extension_secrets(&self) -> Result<Vec<Vec<SqlCell>>, DomainError> {
+        let root = crate::collector_runner::primary_root(&self.worktrees).await;
+        let mut rows = Vec::new();
+        for extension in self.catalog.get(&root).iter() {
+            for provider in &extension.providers {
+                for credential in &provider.credentials {
+                    let Some(reference) = &credential.secret_ref else {
+                        continue;
+                    };
+                    let account = crate::extension_secrets::account(
+                        &self.project,
+                        &extension.name,
+                        reference,
+                    );
+                    let is_set = self
+                        .secrets
+                        .get(&account)
+                        .map_err(|_| DomainError::Invariant("reading the keychain failed".into()))?
+                        .is_some();
+                    rows.push(vec![
+                        text(extension.name.clone()),
+                        text(provider.id.clone()),
+                        text(credential.name.clone()),
+                        json(reference),
+                        flag(is_set),
+                    ]);
+                }
+            }
+        }
+        Ok(rows)
     }
 
     /// Each extension source in the main checkout as it is now: its name,

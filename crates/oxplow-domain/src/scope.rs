@@ -138,13 +138,6 @@ pub const SCOPES: &[Scope] = &[
         summary: "Set the person's AI providers (their keys go to the keychain), remove one, or bind a role to a provider and model.",
     },
     Scope {
-        id: "credentials.write",
-        access: Access::Write,
-        host: Host::Daemon,
-        spends: false,
-        summary: "Set or clear a credential or secret an extension keeps in the OS keychain: written, never read back, kept out of every record.",
-    },
-    Scope {
         id: "ai.test",
         access: Access::Read,
         host: Host::Daemon,
@@ -192,6 +185,13 @@ pub const SCOPES: &[Scope] = &[
         host: Host::Daemon,
         spends: false,
         summary: "Change the project's configuration file (`.oxplow/project.yaml`).",
+    },
+    Scope {
+        id: "credentials.write",
+        access: Access::Write,
+        host: Host::Daemon,
+        spends: false,
+        summary: "Set or clear a credential or secret an extension keeps in the OS keychain: written, never read back, kept out of every record.",
     },
     Scope {
         id: "dashboards.write",

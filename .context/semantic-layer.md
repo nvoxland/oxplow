@@ -1131,10 +1131,10 @@ entities from data already in the semantic layer:
 | The `collector.triggers` consumer (`on:` / `where` / `after`) | `crates/oxplow-app/src/collector_triggers.rs` |
 | Entity tables + views, run state (V133 `collector_run`) | `crates/oxplow-db/src/collector_store.rs` |
 | Settings → Data read model (`data_entities`) | `crates/oxplow-app/src/semantic_catalog.rs` |
-| IPC `list_collectors` / `set_credential` (UI only); running is `run_command oxplow.collector.sync` | `crates/oxplow-rpc/src/commands/collectors.rs` |
+| IPC `list_collectors`; setting a credential is `run_command oxplow.collector.set_credential`, running is `run_command oxplow.collector.sync` | `crates/oxplow-rpc/src/commands/collectors.rs` |
 | MCP `oxplow_preview_collector`; an agent syncs with `run_command oxplow.collector.sync`; standing and credentials read `v_collector_state` / `v_collector_credential` (the `oxplow.collector.sync` command as the agent) | `crates/oxplow-mcp/src/lib.rs` |
 | UI: Settings → Data (entities + counts, collector rows, Run) | `apps/desktop/src/components/DataSection.tsx` |
-| UI: credentials per extension | `apps/desktop/src/components/ExtensionsSection.tsx` |
+| UI: credentials per extension | the foundation's `extensions-credentials` lens (`extensions/oxplow-foundation/lenses/`) |
 | IPC `list_data_entities` (models + counts, unsynced entities) | `crates/oxplow-rpc/src/commands/semantic.rs` |
 
 **Decisions (epic tsk289, 2026-09-27).**
@@ -1210,9 +1210,9 @@ entities from data already in the semantic layer:
   another extension nor a same-named extension in another repo can read
   one by declaring the same name. Credentials set before tsk348 (no
   project in the account) aren't read; set them again.
-  - Only a person sets them: IPC `set_credential` (UI-only in the parity
-    manifest; only names some collector or external provider of that extension
-    declares).
+  - Anyone sets them, as the command `oxplow.collector.set_credential`
+    (`value` is `writeOnly`: no record, event or result carries it; only
+    names some collector of that extension declares).
     Listings carry `credentials: [{name, set}]`, never values.
   - An unset credential is simply not passed; the script decides (the
     GitHub example falls back to `gh`). A keychain error fails the run.

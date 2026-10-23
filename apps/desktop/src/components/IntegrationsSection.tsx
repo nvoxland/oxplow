@@ -40,7 +40,7 @@ import {
 import { settingValue } from "../configValues.js";
 import type { SignInCompletion, SignInState, UiReplacement } from "../tauri-bridge/generated/bindings.js";
 import { readsOf, useRerunOnChange } from "../lens/lensRerun.js";
-import { CredentialRow } from "./ExtensionsSection.js";
+import { CredentialRow } from "./CredentialRow.js";
 import { OXPLOWS_OWN } from "../lens/useReplacement.js";
 import { InlineConfirm } from "./InlineConfirm.js";
 import {

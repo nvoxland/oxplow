@@ -41,7 +41,7 @@ export const SETTINGS_AREAS: readonly SettingsArea[] = [
     id: "extensions",
     title: "Extensions",
     intro: "Extensions add lenses, pages and data. Their sources are in .oxplow/extensions/; what runs is each one's deployment, with the permissions you approved when it was deployed. Right-click a row to deploy, roll back, enable, share or remove it.",
-    sections: [{ id: "health", title: "Health and credentials" }],
+    sections: [],
   },
   {
     id: "data",

@@ -209,8 +209,9 @@ with values omitted. Use non-secret settings only: credentials belong to the
 host's secret service. Settings declarations grant no permissions.
 
 Host secret references are identity-only objects:
-`{schemaVersion: 1, id: "<UUIDv7 returned by the host>"}`. A person supplies the
-value through the host's settings API; reads return only whether it is set.
+`{schemaVersion: 1, id: "<UUIDv7 returned by the host>"}`. The value is set with
+`oxplow.extension.set_secret` (Settings → Extensions → Provider secrets); reads
+(`v_extension_secret`) return only whether it is set.
 References can be stored as non-secret settings, and copying them to another
 extension or project does not copy access.
 
@@ -219,8 +220,8 @@ The first supported consumer is a remote MCP HTTP provider. Declare
 `name: OXPLOW_MCP_BEARER` and `secretRef: <the reference object>`. A person must
 approve the extension's permissions when it is deployed. The shipped HTTP transport sends the
 bearer; extension scripts cannot read its value. References are refused for
-package programs, stdio servers and OAuth credentials. A human settings form
-for managing references is not implemented yet.
+package programs, stdio servers and OAuth credentials. Settings → Extensions
+lists each declared reference with Set… and Revoke.
 
 ### What it can declare
 

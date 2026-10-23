@@ -47,10 +47,15 @@ async fn a_secret_set_by_anyone_is_never_read_back() {
         .iter()
         .all(|p| p.key_set));
 
+    leak_sweep(svc, &results, SECRET).await;
+}
+
+/// No result, audit row, event or published model carries `secret`.
+async fn leak_sweep(svc: &crate::Services, results: &[String], secret: &str) {
     let leaks = |what: &str, text: &str| {
-        assert!(!text.contains(SECRET), "{what} carries the secret: {text}")
+        assert!(!text.contains(secret), "{what} carries the secret: {text}")
     };
-    for r in &results {
+    for r in results {
         leaks("a result", r);
     }
     let audit = svc.commands.audit_store().list_recent(1_000).await.unwrap();
@@ -83,4 +88,53 @@ async fn a_secret_set_by_anyone_is_never_read_back() {
             leaks(&name, &serde_json::to_string(&out.rows).unwrap());
         }
     }
+}
+
+/// A collector's credential and a provider's host secret are set by a
+/// person, an agent and a lens for either; the value is in none of the
+/// places the AI key is not.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_credential_or_secret_set_by_anyone_is_never_read_back() {
+    const VALUE: &str = "ghp-collector-credential-5521";
+    let dir = tempfile::tempdir().unwrap();
+    crate::test_fixtures::init_git_repo(dir.path());
+    let ext = dir.path().join(".oxplow/extensions/acme");
+    std::fs::create_dir_all(&ext).unwrap();
+    std::fs::write(
+        ext.join("extension.yaml"),
+        "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: { process: true, secrets: [TOKEN] }\ncollectors:\n  - id: s\n    runtime: exec\n    entry: sync.sh\n    credentials: [TOKEN]\n    entities:\n      - { name: row, key: id, columns: { id: int } }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        ext.join("sync.sh"),
+        "#!/bin/sh\necho '{\"entities\":{\"row\":[]}}'\n",
+    )
+    .unwrap();
+    let fx = crate::test_fixtures::services_with_effort_in(dir).await;
+    crate::test_fixtures::activate(&fx.svc).await;
+    let svc = &fx.svc;
+    let agent = Actor::Agent {
+        session_id: None,
+        thread_id: Some(fx.thread),
+        stream_id: None,
+    };
+    let lens = Actor::Lens {
+        lens_id: "oxplow-foundation/extensions-credentials".into(),
+        on_behalf_of: Box::new(agent.clone()),
+    };
+    let mut results = Vec::new();
+    for actor in [Actor::Human, agent, lens] {
+        let out = svc
+            .commands
+            .run(
+                &actor,
+                crate::commands::credentials::SET_CREDENTIAL,
+                json!({ "collector": "acme/s", "name": "TOKEN", "value": VALUE }),
+                false,
+            )
+            .await
+            .unwrap_or_else(|e| panic!("{actor:?}: {e:?}"));
+        results.push(serde_json::to_string(&out.result).unwrap());
+    }
+    leak_sweep(svc, &results, VALUE).await;
 }

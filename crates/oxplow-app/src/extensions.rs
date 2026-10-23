@@ -1280,10 +1280,6 @@ pub struct LensAction {
     /// Fields of a form action the person sees but can't change: their
     /// values are `input`'s, imposed again when it runs (an item's `ref`).
     pub fixed: Vec<String>,
-    /// A form action's fields that are secret: masked, never kept in a
-    /// draft, left out of the input when blank. The command must keep each
-    /// out of its record (`unrecorded`).
-    pub secret: Vec<String>,
     /// A form action's fields picked from a list: each names a lens
     /// (`<extension>/<slug>`) run with the lens's params, whose rows are
     /// the choices (`value`, `label`, optional `group`).
@@ -1360,10 +1356,6 @@ struct ActionFile {
     /// editable).
     #[serde(default)]
     fixed: Vec<String>,
-    /// A form action's secret fields (masked; the command keeps them out of
-    /// its record).
-    #[serde(default)]
-    secret: Vec<String>,
     /// A form action's fields picked from a list: field → the lens whose
     /// rows are its choices.
     #[serde(default)]
@@ -1553,18 +1545,6 @@ fn parse_actions(
                 f.id
             ));
         }
-        if !f.secret.is_empty() && !f.form {
-            return Err(format!(
-                "actions: `{}`: `secret` is for a form action (`form: true`)",
-                f.id
-            ));
-        }
-        if let Some(both) = f.secret.iter().find(|k| f.fixed.contains(k)) {
-            return Err(format!(
-                "actions: `{}`: `{both}` can't be both fixed and secret",
-                f.id
-            ));
-        }
         if let Some(missing) = f.fixed.iter().find(|k| input.get(k.as_str()).is_none()) {
             return Err(format!(
                 "actions: `{}`: fixed field `{missing}` needs a value in `input`",
@@ -1650,7 +1630,6 @@ fn parse_actions(
             group: f.group,
             form,
             fixed: f.fixed,
-            secret: f.secret,
             choices: f.choices,
             then: f.then,
             when: f.when,
@@ -1834,7 +1813,7 @@ pub const SLOTS: &[SlotSpec] = &[
     SlotSpec::sections("settings.overview.sections", &["q"], &[]),
     SlotSpec::sections("settings.agents.sections", &[], &[]),
     SlotSpec::sections("settings.lsp.sections", &[], &[]),
-    SlotSpec::sections("settings.extensions.sections", &[], &["health"]),
+    SlotSpec::sections("settings.extensions.sections", &[], &[]),
     SlotSpec::sections("settings.data.sections", &[], &["data"]),
     SlotSpec::sections(
         "settings.integrations.sections",

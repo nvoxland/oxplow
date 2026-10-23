@@ -815,6 +815,7 @@ const WORKTREE_PATH_USERS: &[(&str, &str)] = &[
     ("crates/oxplow-app/src/commands/agent_reads/vcs.rs", "diffs the caller's worktree"),
     ("crates/oxplow-app/src/commands/agent_reads/lens.rs", "runs a lens against the caller's worktree"),
     ("crates/oxplow-app/src/commands/extension_deploy.rs", "deploys an extension from the stream's checkout"),
+    ("crates/oxplow-app/src/commands/credentials.rs", "a collector's credential is declared by its extension in the primary checkout"),
     ("crates/oxplow-rpc/src/commands/collectors.rs", "the collector RPCs"),
     ("crates/oxplow-rpc/src/commands/extensions.rs", "the extension RPCs"),
     ("crates/oxplow-rpc/src/commands/git.rs", "the git RPCs"),

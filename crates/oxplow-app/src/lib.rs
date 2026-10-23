@@ -2294,6 +2294,8 @@ mod tests {
                 "oxplow.code.symbols",
                 "oxplow.code.workspace_symbols",
                 "oxplow.collector.preview",
+                // The OS keychain, outside the database.
+                "oxplow.collector.set_credential",
                 // The collector's own program or script (P7.B3).
                 "oxplow.collector.sync",
                 // A provider's process restarts (P7.C1; was provider.enable).
@@ -2314,7 +2316,9 @@ mod tests {
                 "oxplow.extension.enable",
                 "oxplow.extension.preview",
                 "oxplow.extension.remove",
+                "oxplow.extension.revoke_secret",
                 "oxplow.extension.rollback",
+                "oxplow.extension.set_secret",
                 "oxplow.extension.share",
                 "oxplow.extension.unshare",
                 "oxplow.extension.validate",

@@ -3,7 +3,6 @@ import { DocumentLayout, type DocSection } from "../kit/DocumentLayout.js";
 import { useSearchFilter } from "../kit/SearchFilter.js";
 import { Toolbar } from "../kit/Toolbar.js";
 import type { PageAction } from "../kit/actions.js";
-import { ExtensionsSection } from "../components/ExtensionsSection.js";
 import { DataSection } from "../components/DataSection.js";
 import { CapabilitiesSection } from "../components/CapabilitiesSection.js";
 import { IntegrationsSection } from "../components/IntegrationsSection.js";
@@ -122,18 +121,9 @@ function useAreaContent(area: SettingsArea): { sections: DocSection[]; actions?:
     case "agents":
     case "lsp":
     case "ai":
+    case "extensions":
       // Their sections are foundation lenses mounted in the area's slot.
       return { sections: [] };
-    case "extensions":
-      return {
-        sections: [
-          section(
-            "health",
-            <ExtensionsSection />,
-            "Contributions turned off after failures, and the credentials extensions declare.",
-          ),
-        ],
-      };
     case "data":
       return {
         sections: [

@@ -22118,5 +22118,40 @@
         "event_id"
       ]
     }
+  },
+  "extension_secret": {
+    "1": {
+      "columns": [
+        {
+          "name": "extension",
+          "type": "TEXT",
+          "doc": "The extension whose provider declares the credential."
+        },
+        {
+          "name": "provider",
+          "type": "TEXT",
+          "doc": "The provider's id in that extension."
+        },
+        {
+          "name": "name",
+          "type": "TEXT",
+          "doc": "The credential's name, as the provider declares it."
+        },
+        {
+          "name": "reference",
+          "type": "TEXT",
+          "doc": "The secret's reference, as JSON (`{ schemaVersion, id }`): what the two secret commands take. It carries no value."
+        },
+        {
+          "name": "is_set",
+          "type": "INT",
+          "doc": "1 when the OS keychain holds a value for it."
+        }
+      ],
+      "key": [
+        "extension",
+        "reference"
+      ]
+    }
   }
 }

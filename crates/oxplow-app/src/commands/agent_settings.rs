@@ -168,8 +168,7 @@ pub fn ops(target: ConfigTarget, harnesses: HarnessRegistry) -> Vec<Op> {
                 Layer::Project,
             )
         })),
-    )
-    .open_to(Invokers::NO_AGENT);
+    );
     vec![set_agents, set_setting, set_prompt_append]
 }
 
@@ -255,10 +254,10 @@ mod tests {
         assert_ne!(agents_of(svc), order);
     }
 
-    /// The prompt addition is a person's: written as `agentPromptAppend`
-    /// (blank removes it); an agent, or a lens it presses, is `Denied`.
+    /// The prompt addition is written as `agentPromptAppend` (blank removes
+    /// it), by a person, an agent or a lens for either.
     #[tokio::test(flavor = "multi_thread")]
-    async fn a_person_sets_the_prompt_addition() {
+    async fn anyone_sets_the_prompt_addition() {
         let fx = crate::test_fixtures::services_with_effort().await;
         let svc = &fx.svc;
         let prompt = || crate::config_service::read_config(&svc.config).agent_prompt_append;
@@ -282,12 +281,11 @@ mod tests {
             on_behalf_of: Box::new(agent.clone()),
         };
         for actor in [agent, lens] {
-            let err = svc
-                .commands
+            svc.commands
                 .run(&actor, SET_PROMPT_APPEND, json!({ "text": "x" }), true)
                 .await
-                .unwrap_err();
-            assert!(matches!(err, CommandError::Denied { .. }), "{err:?}");
+                .unwrap();
+            assert_eq!(prompt(), "x");
         }
         svc.commands
             .run(

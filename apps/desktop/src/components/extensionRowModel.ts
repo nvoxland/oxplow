@@ -1,6 +1,5 @@
-/** Pure row presentation for Settings → Extensions → Health and credentials,
- *  and the collector rows of Settings → Data. */
-import type { CollectorListing, Extension, SecretRef, Trigger } from "../tauri-bridge/generated/bindings.js";
+/** Pure row presentation for the collector rows of Settings → Data. */
+import type { CollectorListing, Trigger } from "../tauri-bridge/generated/bindings.js";
 import { readsChanged } from "../lens/lensRerun.js";
 import type { Reads } from "../tauri-bridge/generated/bindings.js";
 
@@ -77,50 +76,4 @@ export function collectorRowModel(l: CollectorListing): CollectorRowModel {
     disabled: l.disabled ? `Off on this machine: ${l.disabled}` : null,
     canEnableAgain: !!l.disabled,
   };
-}
-
-/// The credentials an extension's collectors declare, each once, with whether
-/// it has a value (Settings → Extensions; values live in the keychain).
-export function extensionCredentials(
-  listings: CollectorListing[],
-  extension: string,
-): { name: string; set: boolean }[] {
-  const out = new Map<string, boolean>();
-  for (const l of listings) {
-    if (l.owner !== extension) continue;
-    for (const c of l.credentials) out.set(c.name, (out.get(c.name) ?? false) || c.set);
-  }
-  return [...out].map(([name, set]) => ({ name, set })).sort((a, b) => a.name.localeCompare(b.name));
-}
-
-/// A credential an extension's provider declares with a host secret
-/// reference: the settings form sets, rotates and revokes its value (it
-/// goes to the keychain and never comes back).
-export interface SecretCredential {
-  provider: string;
-  name: string;
-  reference: SecretRef;
-}
-
-/// The credentials of an extension's providers that carry a `secretRef`.
-export function secretCredentials(extension: Extension): SecretCredential[] {
-  const out: SecretCredential[] = [];
-  for (const p of extension.providers ?? []) {
-    for (const c of p.credentials) {
-      if (c.secretRef) out.push({ provider: p.id, name: c.name, reference: c.secretRef });
-    }
-  }
-  return out;
-}
-
-/// What a secret row shows: `isSet` is null until the host has answered.
-export function secretRowModel(isSet: boolean | null): {
-  status: string;
-  setLabel: string;
-  canRevoke: boolean;
-} {
-  if (isSet === null) return { status: "Checking…", setLabel: "Set", canRevoke: false };
-  return isSet
-    ? { status: "Set", setLabel: "Rotate", canRevoke: true }
-    : { status: "Not set", setLabel: "Set", canRevoke: false };
 }

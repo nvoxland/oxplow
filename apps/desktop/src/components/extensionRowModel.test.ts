@@ -1,26 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import type { CollectorListing, Extension } from "../tauri-bridge/generated/bindings.js";
+import type { CollectorListing } from "../tauri-bridge/generated/bindings.js";
 import {
   collectorRan,
   collectorRowModel,
-  extensionCredentials,
-  secretCredentials,
-  secretRowModel,
 } from "./extensionRowModel.js";
-
-const ext = (over: Partial<Extension> = {}): Extension => ({
-  name: "review",
-  description: "Review lenses",
-  path: ".oxplow/runtime/extensions/review/0123456789abcdef",
-  errors: [],
-  lenses: [],
-  collectors: [],
-  origin: "project",
-  deployment: { kind: "deployed", hash: "0123456789abcdef" },
-  ui: { slots: [], commands: [], decorators: [] },
-  enabled: true,
-  ...over,
-});
 
 describe("collectorRowModel", () => {
   const listing = (over: Partial<CollectorListing> = {}): CollectorListing => ({
@@ -125,53 +108,8 @@ describe("collectorRowModel", () => {
   });
 });
 
-test("extensionCredentials lists each declared credential once per extension", () => {
-  const l = (extension: string, creds: { name: string; set: boolean }[]) =>
-    ({ owner: extension, credentials: creds }) as unknown as CollectorListing;
-  expect(
-    extensionCredentials(
-      [
-        l("gh", [{ name: "TOKEN", set: true }]),
-        l("gh", [{ name: "TOKEN", set: true }, { name: "APP", set: false }]),
-        l("other", [{ name: "X", set: false }]),
-      ],
-      "gh",
-    ),
-  ).toEqual([
-    { name: "APP", set: false },
-    { name: "TOKEN", set: true },
-  ]);
-});
-
 test("a collector run is a v_collector_run change", () => {
   expect(collectorRan({ kind: "modelsChanged", models: ["v_work_item", "v_collector_run"] })).toBe(true);
   expect(collectorRan({ kind: "modelsChanged", models: ["v_work_item"] })).toBe(false);
   expect(collectorRan({ kind: "tasksChanged" })).toBe(false);
-});
-
-describe("secretCredentials", () => {
-  const ref = { schemaVersion: 1, id: "0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b" } as const;
-  const provider = (credentials: unknown[]) =>
-    ({ id: "remote", credentials }) as unknown as Extension["providers"][number];
-
-  test("an extension's credentials with a secret reference are listed once per provider", () => {
-    const list = secretCredentials(
-      ext({
-        providers: [
-          provider([{ name: "OXPLOW_MCP_BEARER", oauth: null, secretRef: ref }, { name: "PLAIN", oauth: null, secretRef: null }]),
-        ],
-      }),
-    );
-    expect(list).toEqual([{ provider: "remote", name: "OXPLOW_MCP_BEARER", reference: ref }]);
-  });
-
-  test("an extension with no secret references lists none", () => {
-    expect(secretCredentials(ext())).toEqual([]);
-  });
-
-  test("the row says whether a value is set, and offers Rotate only once it is", () => {
-    expect(secretRowModel(null)).toEqual({ status: "Checking…", setLabel: "Set", canRevoke: false });
-    expect(secretRowModel(false)).toEqual({ status: "Not set", setLabel: "Set", canRevoke: false });
-    expect(secretRowModel(true)).toEqual({ status: "Set", setLabel: "Rotate", canRevoke: true });
-  });
 });

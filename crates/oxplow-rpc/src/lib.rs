@@ -248,9 +248,6 @@ macro_rules! oxplow_command_table {
                 get_ui_preferences => $crate::commands::semantic::get_ui_preferences {} -> Vec<::oxplow_db::UiPreference>,
                 set_ui_preference => $crate::commands::semantic::set_ui_preference { scope: String, key: String, value_json: Option<String> } -> (),
                 list_extensions => $crate::commands::extensions::list_extensions {} -> Vec<::oxplow_app::extensions::Extension>,
-                save_extension_secret => $crate::commands::extensions::save_extension_secret { extension: String, reference: Option<::oxplow_domain::extension_secret::SecretRef>, value: String } -> ::oxplow_domain::extension_secret::SecretRef,
-                extension_secret_is_set => $crate::commands::extensions::extension_secret_is_set { extension: String, reference: ::oxplow_domain::extension_secret::SecretRef } -> bool,
-                revoke_extension_secret => $crate::commands::extensions::revoke_extension_secret { extension: String, reference: ::oxplow_domain::extension_secret::SecretRef } -> (),
                 get_lens => $crate::commands::extensions::get_lens { id: String } -> ::oxplow_app::extensions::Lens,
                 run_lens => $crate::commands::extensions::run_lens { id: String, params: Option<::std::collections::BTreeMap<String, ::oxplow_db::SqlCell>>, stream_id: Option<String> } -> ::oxplow_app::extensions::LensRun,
                 run_lens_action => $crate::commands::extensions::run_lens_action { press: $crate::commands::extensions::LensPress, stream_id: Option<String>, confirmed: bool } -> ::oxplow_domain::CommandOutcome,
@@ -271,7 +268,6 @@ macro_rules! oxplow_command_table {
                 // ai (Settings → AI)
                 ai_settings => $crate::commands::ai::ai_settings {} -> ::oxplow_app::ai_service::AiSettings,
                 read_ai_call => $crate::commands::ai::read_ai_call { id: ::oxplow_domain::AiCallId, body: ::oxplow_app::ai_calls::AiCallBody } -> Option<::oxplow_app::event_bodies::EventBody>,
-                set_credential => $crate::commands::collectors::set_credential { extension: String, name: String, value: Option<String> } -> (),
                 // providers (Settings → Integrations)
                 list_provider_instances => $crate::commands::providers::list_provider_instances {} -> Vec<::oxplow_app::providers::ProviderInstanceView>,
                 check_provider_instance => $crate::commands::providers::check_provider_instance { instance: String, config: ::oxplow_domain::Json } -> ::oxplow_app::providers::ProviderInstanceView,

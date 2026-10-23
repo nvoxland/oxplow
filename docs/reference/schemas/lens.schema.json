@@ -1392,14 +1392,6 @@
           },
           "default": []
         },
-        "secret": {
-          "description": "A form action's secret fields (masked; the command keeps them out of\nits record).",
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "default": []
-        },
         "choices": {
           "description": "A form action's fields picked from a list: field → the lens whose\nrows are its choices.",
           "type": "object",

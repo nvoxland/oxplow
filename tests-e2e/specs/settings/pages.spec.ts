@@ -25,7 +25,7 @@ test("every Settings area renders, reached from the rail", async ({ page }) => {
     await expect(page.locator('[data-testid="page-settings"]:visible').getByRole("heading", { level: 1 })).toHaveText(title);
   }
   await page.locator('[data-testid="settings-area-extensions"]:visible').click();
-  await expect(page.locator('[data-testid="extensions-section"]:visible')).toBeVisible();
+  await expect(page.locator('[data-testid="page-settings"]:visible').getByRole("heading", { name: "Health" })).toBeVisible();
   await page.locator('[data-testid="settings-area-data"]:visible').click();
   await expect(page.locator('[data-testid="data-section"]:visible')).toBeVisible();
 });
