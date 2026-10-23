@@ -34,7 +34,6 @@ export const BUILT_IN_PAGES = [
   "resource",
   "settings",
   "terminal",
-  "tasks",
 ] as const;
 
 export type BuiltInPageName = (typeof BUILT_IN_PAGES)[number];

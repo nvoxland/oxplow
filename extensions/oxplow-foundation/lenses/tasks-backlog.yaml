@@ -1,0 +1,9 @@
+title: Backlog
+description: The items waiting on no thread.
+needs: [work_items.lists]
+query: |
+  SELECT count(*) AS waiting, uri('oxplow/page', 'page', 'backlog') AS backlog FROM v_work_item WHERE thread_id IS NULL
+viz: detail
+columns:
+  - { key: waiting, label: Waiting, link: { kind: page, from: backlog } }
+hidden: true

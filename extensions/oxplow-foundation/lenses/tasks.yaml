@@ -1,0 +1,35 @@
+title: Tasks
+description: "The work items on a thread, on every thread of a stream or on all of them, by state: drag to reorder, onto another row to nest it, mark rows for a bulk change, and right-click for the rest."
+needs: [work_items]
+params:
+  - name: show
+    type: choice
+    role: filter
+    label: Show
+    default: thread
+    options:
+      - { value: thread, label: One thread }
+      - { value: stream, label: Its stream }
+      - { value: all, label: Everything }
+  - name: priority
+    type: choice
+    role: filter
+    label: Priority
+    default: any
+    options:
+      - { value: any, label: Any }
+      - { value: urgent, label: Urgent }
+      - { value: high, label: High }
+      - { value: medium, label: Medium }
+      - { value: low, label: Low }
+  - { name: thread_id }
+  - { name: stream_id }
+query: |
+  SELECT CASE :show WHEN 'stream' THEN 'stream' WHEN 'all' THEN 'all' ELSE 'thread' END AS scope
+columns: [{ key: scope }]
+viz: document
+sections:
+  - { id: list, lens: tasks-list, replaceable: work_item.list }
+  - { id: summary, lens: tasks-summary }
+  - { id: backlog, lens: tasks-backlog }
+hidden: true

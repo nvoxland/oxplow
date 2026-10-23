@@ -11,7 +11,7 @@ test("the built-in pages are the Rust table's", () => {
 });
 
 test("a built-in page name is recognized, anything else isn't", () => {
-  expect(isBuiltInPage("tasks")).toBe(true);
+  expect(isBuiltInPage("settings")).toBe(true);
   expect(isBuiltInPage("problems")).toBe(false);
 });
 

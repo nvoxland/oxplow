@@ -3,13 +3,10 @@ import { expect, test } from "bun:test";
 import type { SqlQueryResult } from "./tauri-bridge/generated/bindings.js";
 import {
   activeProviderOf,
-  boardColumns,
   bucketWorkList,
   capabilityProvidersFromResult,
-  effortDetailsFromResult,
   featuresFor,
   itemsFromResult,
-  placementFromOrder,
   workItemsQuery,
   workItemRefOfMention,
   workListProfileOf,
@@ -17,35 +14,6 @@ import {
   type CapabilityProvider,
   type WorkItem,
 } from "./workItems.js";
-
-// An item's activity is one read over the models: `v_effort` joined to
-// `v_effort_file` (one row per effort and file; an effort with no files
-// still appears), newest effort first.
-test("effort rows join to their files: one detail per effort, counts by change kind", () => {
-  const res = {
-    columns: ["id", "work_item", "started_at", "ended_at", "start_snapshot_id", "end_snapshot_id", "summary", "path", "change_kind"],
-    rows: [
-      [7, "oxplow:oxplow/work_item?id=tsk4&provider=oxplow", "t2", null, 10, null, null, "src/a.rs", "updated"],
-      [7, "oxplow:oxplow/work_item?id=tsk4&provider=oxplow", "t2", null, 10, null, null, "src/b.rs", "created"],
-      [7, "oxplow:oxplow/work_item?id=tsk4&provider=oxplow", "t2", null, 10, null, null, "old.rs", "deleted"],
-      [5, "oxplow:oxplow/work_item?id=tsk4&provider=oxplow", "t0", "t1", 8, 9, "did it", null, null],
-    ],
-    truncated: false,
-    reads: { models: ["v_effort", "v_effort_file"], tables: [], measures: [] },
-    freshness: {},
-  } as unknown as SqlQueryResult;
-  const details = effortDetailsFromResult(res);
-  expect(details.map((d) => d.effort.id)).toEqual(["eff7", "eff5"]);
-  expect(details[0]).toEqual({
-    effort: { id: "eff7", work_item: "oxplow:oxplow/work_item?id=tsk4&provider=oxplow", started_at: "t2", ended_at: null, start_snapshot_id: "10", end_snapshot_id: null, summary: null },
-    start_snapshot: null,
-    end_snapshot: null,
-    changed_paths: ["src/a.rs", "src/b.rs", "old.rs"],
-    counts: { created: 1, updated: 1, deleted: 1 },
-  });
-  expect(details[1]?.changed_paths).toEqual([]);
-  expect(details[1]?.effort.summary).toBe("did it");
-});
 
 const result = (rows: SqlQueryResult["rows"]): SqlQueryResult =>
   ({
@@ -96,18 +64,6 @@ test("a query scoped to a thread, the backlog, or everything; states filter; lis
   expect(all.sql).toContain("ORDER BY w.rank IS NULL, w.rank, w.created_at");
 });
 
-test("the Board groups by canonical state, in workflow order, each column in list order", () => {
-  const item = (ref: string, state: WorkItem["state"]): WorkItem => ({ uri: ref, state, title: ref }) as unknown as WorkItem;
-  const columns = boardColumns([item("a", "done"), item("b", "todo"), item("c", "todo"), item("d", "blocked")]);
-  expect(columns.map((c) => [c.state, c.items.map((i) => i.uri)])).toEqual([
-    ["todo", ["b", "c"]],
-    ["in_progress", []],
-    ["blocked", ["d"]],
-    ["done", ["a"]],
-    ["canceled", []],
-  ]);
-});
-
 // A list: an item with a child on it is an epic; the rest by state, done
 // and canceled together. `all` keeps the list order.
 test("a work list: an item with a child is an epic, the rest by state", () => {
@@ -124,13 +80,6 @@ test("a work list: an item with a child is an epic, the rest by state", () => {
   expect(list.done.map((i) => i.uri)).toEqual(["d", "x"]);
   expect(list.items.map((i) => i.uri)).toEqual(["n"]);
   expect(list.all.map((i) => i.uri)).toEqual(["e", "c", "b", "d", "x", "n"]);
-});
-
-test("a reordered list is one item placed next to a neighbour", () => {
-  expect(placementFromOrder(["a", "b", "c", "d"], ["a", "d", "b", "c"])).toEqual({ id: "d", place: { after: "a" } });
-  expect(placementFromOrder(["a", "b", "c"], ["c", "a", "b"])).toEqual({ id: "c", place: { before: "a" } });
-  expect(placementFromOrder(["a", "b", "c"], ["b", "c", "a"])).toEqual({ id: "a", place: { after: "c" } });
-  expect(placementFromOrder(["a", "b"], ["a", "b"])).toBeNull();
 });
 
 // A provider's flags and fields come from v_capability_provider; a

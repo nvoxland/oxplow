@@ -258,7 +258,8 @@ oxplow's pages and their params:
   two lenses; params `mode` `recent` | `by-commit` and `all`, which lifts
   the caps — the rail's, so no "View all" step to go Back from).
 - Lens pages (more): `backlog` (badge: `backlog-count`; a document of `backlog-add`, a quick-add form over `oxplow.work_item.create`, and `backlog-list`, a state-grouped `list` of the items on no thread: params `q`, the search over title and fields, and `thread_id`; drag to reorder, mark rows for bulk state, priority, Bring to this thread and Delete, `r` `i` `b` `d` keys for the states).
-- Built-in pages: `tasks`, `board`,
+- Lens pages (more): `tasks` (a document: `tasks-list`, the `work_item.list` replaceable; `tasks-summary`; `tasks-backlog`; view params `show` and `priority`, plus `thread_id` and `stream_id`).
+- Built-in pages: `board`,
   `files`, `git-dashboard`, `uncommitted-changes`,
   `comments`, `explore-data`, `metrics-recorded`,
   `terminal`, `alerts`, `settings` (view: `area`, `section`, and `q`, the overview's search — another
@@ -620,32 +621,23 @@ launcher (type, then assert `page-<kind>` on the body).
 **Work pages split (post-Phase-3).** The single `AllWorkPage` was
 replaced by four focused pages so each has one job:
 
-- **Tasks** (`page-tasks`) — thread-local task manager (formerly
-  "Plan work", `page-plan-work`). Shows To Do + Blocked in full
-  plus last-5 Done previews. The In Progress section is omitted
-  because the rail HUD's "Active item" + "Up next" already surface
-  it. Header link "View all done →" routes to Done Work; kebab
-  carries the `hide-auto` filter and a "View backlog →"
-  entry. The route page is `tasks`; ref helper is `tasksRef()`.
+- **Tasks** (the `tasks` page, a foundation lens page) — the thread's items by state,
+  or its stream's or everything's (the `show` filter); the last five done and a "View all done →"
+  link to Done Work; the agent's open turn is a live row in In progress. Ref helper is `tasksRef()`.
 - **Done work** (the `done-work` page, a foundation lens page) —
   full descending list of the current thread's closed items (done and canceled).
 - **Backlog** (the `backlog` page, a foundation lens page) — the active list's items on no thread
   (`v_work_item.thread_id IS NULL`); `oxplow.work_item.move` takes one to a thread and back (its
   Bring to this thread action needs the `lists` feature).
 
-Tasks reads the work-item interface (`workItems.readWorkList`) and
-wraps `PlanPane`, which takes the active list's profile
-(`useWorkListProfile`: its features and declared fields) and offers only
-what the list can do: drag reordering with `ordering`, the backlog with
-`lists`, epics with `hierarchy`, Delete with `delete`. Its rows show the
-list's editable enum fields (oxplow's priority), and the Tasks page's
-filter bar a chip row per declared enum field. They pass filter props
-(`visibleSections`, `sectionItemLimit`, `onlyStates`, `excludeStates`,
-`extraSectionLinks`). There's no
-Archived page: oxplow's archived tasks are done or canceled, as the
-interface states them.
+Tasks and Backlog read `v_work_item` and offer only what the active list can
+do (`v_capability_provider`): drag reordering with `ordering`, Send to
+backlog and Bring to this thread with `lists`, epics with `hierarchy`,
+Delete with `delete`. Rows show the list's editable enum fields (oxplow's
+priority). There's no Archived page: oxplow's archived tasks are done or
+canceled, as the interface states them.
 
-The four pages reuse the shared `<Card>` + `cardLinkButton` from
+The pages reuse the shared `<Card>` + `cardLinkButton` from
 `apps/desktop/src/components/Card.tsx` for cross-page "View X →" affordances;
 GitDashboardPage uses the same shell so the dashboard vocabulary is
 consistent across IA.

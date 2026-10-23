@@ -48,9 +48,9 @@ test("a task made elsewhere appears without a reload", async ({ fresh }) => {
   await expect(page.getByTestId("rail-section-ext:oxplow-bundled/work")).toContainText("Made elsewhere");
 });
 
-// The Tasks page's scope is its view params: in its tab's id, so Back
-// undoes a change, a reload keeps it, and opening Tasks again while one
-// tab shows another scope focuses that tab at the default view.
+// The Tasks page's scope is its view params: in its tab's id, so a reload
+// keeps it, and opening Tasks again while one tab shows another scope
+// focuses that tab at the default view.
 test("the Tasks page's scope is its tab's: it re-renders the page, a reload keeps it", async ({ fresh }) => {
   const { page } = fresh;
   await page.goto("/");
@@ -59,21 +59,38 @@ test("the Tasks page's scope is its tab's: it re-renders the page, a reload keep
   await expect(body()).toHaveAttribute("data-testid", "center-tab-body-oxplow:oxplow/page?page=tasks");
   // A mark on the page's element: a change of view re-renders the page,
   // it doesn't mount it again.
-  await body().getByTestId("tasks-scope-picker").evaluate((el) => {
+  await body().getByTestId("page-lens").evaluate((el) => {
     el.setAttribute("data-mounted-once", "yes");
   });
-  await body().getByTestId("tasks-scope-button").click();
-  await body().getByTestId("tasks-scope-all").click();
-  await expect(body()).toHaveAttribute("data-testid", "center-tab-body-oxplow:oxplow/page?page=tasks#scope=all");
-  await expect(body().getByTestId("tasks-scope-picker")).toHaveAttribute("data-mounted-once", "yes");
-  // A scope is a filter: it replaced the entry, so there's no Back to it.
-  await expect(page.getByTestId("page-nav-back").filter({ visible: true })).toBeDisabled();
+  await page.getByTestId("lens-param-show-value").filter({ visible: true }).click();
+  await page.getByTestId("lens-param-show-edit").filter({ visible: true }).selectOption("all");
+  await expect(body()).toHaveAttribute("data-testid", "center-tab-body-oxplow:oxplow/page?page=tasks#show=all");
+  await expect(body().getByTestId("page-lens")).toHaveAttribute("data-mounted-once", "yes");
   await page.reload();
-  await expect(body()).toHaveAttribute("data-testid", "center-tab-body-oxplow:oxplow/page?page=tasks#scope=all");
-  await expect(body().getByTestId("tasks-scope-button")).toContainText("Everything");
+  await expect(body()).toHaveAttribute("data-testid", "center-tab-body-oxplow:oxplow/page?page=tasks#show=all");
+  await expect(page.getByTestId("lens-param-show-value").filter({ visible: true })).toContainText("Everything");
   // Tasks at its default view is the same page: the one tab shows it, no
   // second tab opens.
   await openFromLauncher(page, "Tasks");
   await expect(page.getByTestId("center-tab-oxplow:oxplow/page?page=tasks")).toBeVisible();
   await expect(page.locator('[data-testid^="center-tab-oxplow:oxplow/page?page=tasks"]')).toHaveCount(1);
+});
+
+// Tasks groups the thread's items by state; a row's menu changes one, and
+// a parent's children fold away under it.
+test("the Tasks page lists the thread's items by state, with epics that fold", async ({ page, daemon }) => {
+  const epic = await run<{ result: { uri: string } }>(daemon, "oxplow.work_item.create", { title: "The epic", thread: daemon.thread });
+  await run(daemon, "oxplow.work_item.create", { title: "Under the epic", thread: daemon.thread, parent_uri: epic.result.uri });
+  await run(daemon, "oxplow.work_item.create", { title: "Standalone", thread: daemon.thread });
+  await page.goto("/");
+  await openFromLauncher(page, "Tasks");
+  const list = page.getByTestId("lens-part-list");
+  await expect(list).toContainText("Under the epic");
+  await list.locator('[data-testid^="lens-row-fold-"]').first().click();
+  await expect(list).not.toContainText("Under the epic");
+  await expect(list).toContainText("Standalone");
+  await list.locator('[data-testid^="lens-row-"]').filter({ hasText: "Standalone" }).click({ button: "right" });
+  await page.getByTestId("menu-item-lens-action-to-blocked").click();
+  await expect(page.getByTestId("lens-part-summary")).toContainText("Blocked");
+  await expect(page.getByTestId("lens-part-list")).toContainText("blocked");
 });

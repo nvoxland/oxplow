@@ -1,0 +1,30 @@
+title: Summary
+description: How many items are in each state in scope, the longest-waiting blocked one and what finished last.
+needs: [work_items]
+params:
+  - { name: scope, default: thread }
+  - { name: thread_id }
+  - { name: stream_id }
+query: |
+  WITH scoped AS (
+    SELECT w.* FROM v_work_item w
+    WHERE CASE :scope WHEN 'thread' THEN w.thread_id = :thread_id
+                      WHEN 'stream' THEN w.thread_id IN (SELECT t.id FROM v_thread t WHERE t.stream_id = :stream_id)
+                      ELSE w.thread_id IS NOT NULL END
+  )
+  SELECT (SELECT count(*) FROM scoped WHERE state = 'in_progress') AS in_progress,
+         (SELECT count(*) FROM scoped WHERE state = 'todo') AS ready,
+         (SELECT count(*) FROM scoped WHERE state = 'blocked') AS blocked,
+         (SELECT count(*) FROM scoped WHERE state = 'done') AS done,
+         (SELECT b.title FROM scoped b WHERE b.state = 'blocked' ORDER BY b.updated_at LIMIT 1) AS oldest_blocked,
+         (SELECT b.uri FROM scoped b WHERE b.state = 'blocked' ORDER BY b.updated_at LIMIT 1) AS oldest_blocked_ref,
+         (SELECT group_concat(d.title, ' · ') FROM (SELECT title FROM scoped WHERE state = 'done' ORDER BY coalesce(closed_at, updated_at) DESC LIMIT 3) d) AS recently_done
+viz: detail
+columns:
+  - { key: in_progress, label: In progress }
+  - { key: ready, label: To do }
+  - { key: blocked, label: Blocked }
+  - { key: done, label: Done }
+  - { key: oldest_blocked, label: Oldest blocked, link: { kind: page, from: oldest_blocked_ref } }
+  - { key: recently_done, label: Recently completed }
+hidden: true

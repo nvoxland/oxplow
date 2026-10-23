@@ -27,7 +27,7 @@ test("an accepted effort's page carries the review's verdict chip", async ({ pag
   await searchLauncher(page, "Wombat fix");
   await page.getByTestId(`launcher-hit-${created.result.uri}`).click();
   // The task's effort, its Review: the effort's own page.
-  await page.locator('[data-testid^="tasks-show-in-history-"]').first().click();
+  await page.getByTestId("lens-part-activity").locator("a, button").filter({ hasText: "Wombat fix" }).first().click();
   await expect(page.getByTestId("page-chips")).toContainText("Accepted");
   // It leads with oxplow-bundled's verdict: no tests ran in this effort.
   await expect(page.getByTestId("replacement-effort.verdict")).toContainText("Tests: none ran");

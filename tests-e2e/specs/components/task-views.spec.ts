@@ -175,7 +175,7 @@ test("the editor, the list and oxplow's own, each chosen from Settings", async (
   for (const target of TARGETS) await choose(page, target, "oxplow");
   await openFromLauncher(page, "Tasks");
   await expect(page.locator('[data-testid^="replacement-"]:visible')).toHaveCount(0);
-  await expect(page.getByTestId(/^tasks-row-/).first()).toBeVisible();
+  await expect(page.getByTestId("lens-part-list").locator('[data-testid^="lens-row-"]').first()).toBeVisible();
   await openFromLauncher(page, "Board");
   await expect(page.getByTestId("lens-board")).toBeVisible();
   await expect(page.locator('[data-testid^="replacement-"]:visible')).toHaveCount(0);

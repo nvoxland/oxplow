@@ -568,11 +568,6 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listOpenAgentTurns: (threadId: ThreadId) => typedError<AgentTurn[], IpcError_Serialize>(__TAURI_INVOKE("list_open_agent_turns", { threadId })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	getAgentTurn: (turnId: AgentTurnId) => typedError<{
 	id: AgentTurnId,
 	thread_id: ThreadId,

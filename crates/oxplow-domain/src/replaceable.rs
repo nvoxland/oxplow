@@ -55,10 +55,10 @@ pub const REPLACEABLE: &[Replaceable] = &[
         view: &[],
         label: "board",
     },
-    // The Tasks page's list (`TasksList`): `scope` is `thread`, `stream`
-    // or `all`; `thread_id` the thread when `scope` is `thread`, else
-    // null. Its `stream_id` is the scope's stream. The page's scope
-    // picker, detail pane and backlog drawer stay oxplow's.
+    // The Tasks page's list (the `list` part of the `tasks` document):
+    // `scope` is `thread`, `stream` or `all`; `thread_id` the thread when
+    // `scope` is `thread`, else null. Its `stream_id` is the scope's
+    // stream. The page's filters, summary and backlog parts stay oxplow's.
     Replaceable {
         target: "work_item.list",
         capability: "work_items",

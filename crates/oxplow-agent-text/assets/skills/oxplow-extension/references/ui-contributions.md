@@ -12,7 +12,7 @@
   - `vcs.history.sidebar` (beside Git History) → `stream_id`;
   - `oxplow-foundation/work-item.sections` (a work item's page, whichever
     list) → `uri`;
-  - `thread.plan.header` (the Work panel, compact) → `thread_id`;
+  - `oxplow-foundation/tasks.sections` (the Tasks page: parts `list`, `summary`, `backlog`) → `thread_id`, `stream_id`;
   - `settings.<area>.sections` → no params (`overview` passes `q`, its search); a section on that Settings
     area's page (`overview`, `agents`, `lsp`, `extensions`, `data`,
     `integrations`, `ai`), placed `at` the start, the end or beside one of

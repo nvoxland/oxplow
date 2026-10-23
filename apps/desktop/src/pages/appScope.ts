@@ -1,10 +1,8 @@
-import type { Dispatch, MutableRefObject, SetStateAction } from "react";
+import type { Dispatch, SetStateAction } from "react";
 import type { DiffSpec } from "../components/Diff/DiffPane.js";
 import type { TabRef } from "../tabs/tabState.js";
 import type { AgentStatus, Stream, ThreadState } from "../api.js";
-import type { ItemChange, WorkList } from "../workItems.js";
 import type { useAgentHarnesses } from "../useAgentHarnesses.js";
-import type { useWorkListProfile } from "../useWorkListProfile.js";
 import type { EditorNavigationTarget } from "../lsp.js";
 import type { Origin } from "../tabs/session.js";
 
@@ -34,13 +32,7 @@ export interface AppScope {
   /** The selected thread, `null` when none. */
   thread: ThreadState["threads"][number] | null;
   threadId: string | null;
-  threadWork: WorkList | null;
   agentStatus: AgentStatus;
-  /** The backlog, `null` until it loads. */
-  backlog: WorkList | null;
-  workListProfile: ReturnType<typeof useWorkListProfile>;
-  /** Registers the callback that opens the task list's create row. */
-  planOpenCreateRef: MutableRefObject<(() => void) | null>;
   harnesses: ReturnType<typeof useAgentHarnesses>;
   /** The tab shown in the center now (a page uses it to know it's visible). */
   effectiveCenterActive: string;
@@ -66,7 +58,4 @@ export interface AppScope {
   handleRenamePath: (fromPath: string, toPath: string) => Promise<void>;
   handleDeletePath: (path: string) => Promise<void>;
   handleToggleGenerated: (entry: string, mark: boolean) => Promise<void>;
-  handleUpdateTask: (ref: string, change: ItemChange) => Promise<void>;
-  handleDeleteTask: (ref: string) => Promise<void>;
-  handleReorderTasks: (orderedRefs: string[]) => Promise<void>;
 }

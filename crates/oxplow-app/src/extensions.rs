@@ -1821,8 +1821,6 @@ struct AdvisoryFile {
 pub const SLOTS: &[SlotSpec] = &[
     // An effort's review (its diff view).
     SlotSpec::region("effort.review.details", &["effort_id", "change_id"]),
-    // A thread's plan, as a compact strip.
-    SlotSpec::region("thread.plan.header", &["thread_id"]),
     // Uncommitted changes: a strip above them, and below the files.
     // A file diff's header strip, above the editor: the file and the two
     // revisions the diff reads (`working`, `snap:<id>`, `git:<sha>`).
@@ -9085,10 +9083,10 @@ commands:
             &[
                 ("presets", "title: Presets\nquery: SELECT 1\n"),
                 ("stray", "title: Stray\nquery: SELECT 1\n"),
-                ("region", "title: R\nparams: [{ name: thread_id }]\nquery: SELECT 1\n"),
+                ("region", "title: R\nparams: [{ name: effort_id }]\nquery: SELECT 1\n"),
                 ("sized", "title: S\nquery: SELECT 1\n"),
             ],
-            "ui:\n  slots:\n    - { slot: settings.integrations.sections, lens: presets, title: Team presets, at: { after: capabilities } }\n    - { slot: settings.integrations.sections, lens: stray, at: { before: gone } }\n    - { slot: thread.plan.header, lens: region, at: start }\n    - { slot: settings.integrations.sections, lens: sized, size: wide }\n",
+            "ui:\n  slots:\n    - { slot: settings.integrations.sections, lens: presets, title: Team presets, at: { after: capabilities } }\n    - { slot: settings.integrations.sections, lens: stray, at: { before: gone } }\n    - { slot: effort.review.details, lens: region, at: start }\n    - { slot: settings.integrations.sections, lens: sized, size: wide }\n",
         );
         let mounts: Vec<_> = ext
             .ui
@@ -10309,10 +10307,10 @@ commands:
     #[test]
     fn slots_bind_params_the_lens_must_declare() {
         let task_lens = "title: T\nparams: [{ name: path }]\nquery: SELECT :path\n";
-        let thread_lens = "title: Th\nparams: [{ name: thread_id }]\nquery: SELECT :thread_id\n";
+        let thread_lens = "title: Th\nparams: [{ name: effort_id }]\nquery: SELECT :effort_id\n";
         let (_d, ext) = load_x(
             &[("t", task_lens), ("th", thread_lens), ("plain", "title: P\nquery: SELECT 1\n")],
-            "ui:\n  slots:\n    - { slot: diff.file.header, lens: t }\n    - { slot: thread.plan.header, lens: th }\n    - { slot: diff.file.header, lens: plain }\n",
+            "ui:\n  slots:\n    - { slot: diff.file.header, lens: t }\n    - { slot: effort.review.details, lens: th }\n    - { slot: diff.file.header, lens: plain }\n",
         );
         let mounted: Vec<(&str, &str)> = ext
             .ui
@@ -10322,7 +10320,10 @@ commands:
             .collect();
         assert_eq!(
             mounted,
-            vec![("diff.file.header", "x/t"), ("thread.plan.header", "x/th")]
+            vec![
+                ("diff.file.header", "x/t"),
+                ("effort.review.details", "x/th")
+            ]
         );
         let errs = ext.errors.join("\n");
         assert!(errs.contains("`path`") && errs.contains("plain"), "{errs}");
