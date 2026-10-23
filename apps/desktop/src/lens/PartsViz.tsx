@@ -323,6 +323,15 @@ export function DashboardViz(props: DashboardVizProps) {
         }
       : {};
 
+  // Nothing to draw (no static tile, no row): the lens's empty line, which
+  // `empty: ""` leaves out.
+  if (parts.length === 0 && tiles.length === 0) {
+    return lens.empty === "" ? null : (
+      <p data-testid="lens-empty" style={{ color: "var(--text-secondary)" }}>
+        {lens.empty ?? "No tiles."}
+      </p>
+    );
+  }
   return (
     <TileGrid testId="lens-dashboard" {...gridDrop}>
       {parts.map((part) => {

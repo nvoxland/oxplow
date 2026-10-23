@@ -317,3 +317,15 @@ test("a heading tile with an edit action is edited in place and saved through it
   await waitFor(() => expect(ran).toHaveLength(1));
   expect(ran[0]).toMatchObject({ action: "edit-text", row: record(2), input: { text: "Renamed" } });
 });
+
+test("a dashboard of row tiles with no rows says its empty line, unless it says nothing", async () => {
+  const none = (empty: string | null) => {
+    const run = tiled([]);
+    return { ...run, lens: { ...run.lens, parts: [], empty }, result: { ...run.result, rows: [] } } as unknown as LensRun;
+  };
+  const view = render(<LensResultView run={none("No tiles yet.")} streamId="str1" onOpenPage={() => {}} />);
+  expect(await view.findByText("No tiles yet.")).toBeTruthy();
+  view.unmount();
+  const quiet = render(<LensResultView run={none("")} streamId="str1" onOpenPage={() => {}} />);
+  expect(quiet.queryByTestId("lens-empty")).toBeNull();
+});

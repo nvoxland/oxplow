@@ -39,7 +39,29 @@ test("New Dashboard on the Dashboards page opens the new dashboard", async ({ fr
   await page.goto("/");
   await openFromLauncher(page, "Dashboards");
   await page.getByRole("button", { name: "New Dashboard" }).filter({ visible: true }).first().click();
-  await expect(page.locator('[data-testid="page-custom-dashboard"]:visible')).toBeVisible();
+  await expect(page.locator('[data-testid="lens-part-tiles"]:visible')).toContainText("No tiles yet");
+});
+
+// The dashboard is the foundation's lens: its actions add a heading tile
+// (a one-field form, so a prompt strip) and rename or delete the dashboard.
+test("a dashboard takes a heading tile, a new name, and is deleted from its page", async ({ fresh }) => {
+  const { page } = fresh;
+  await page.goto("/");
+  await openFromLauncher(page, "Dashboards");
+  await page.getByRole("button", { name: "New Dashboard" }).filter({ visible: true }).first().click();
+  await expect(page.locator('[data-testid="lens-part-tiles"]:visible')).toBeVisible();
+  await page.getByRole("button", { name: "Add Heading…" }).filter({ visible: true }).first().click();
+  await page.locator('[data-testid="lens-action-form-fields-text"]:visible').fill("Build health");
+  await page.keyboard.press("Enter");
+  await expect(page.locator('[data-testid="lens-part-tiles"]:visible')).toContainText("Build health");
+  await page.getByRole("button", { name: "Rename…" }).filter({ visible: true }).first().click();
+  await page.locator('[data-testid="lens-action-form-fields-title"]:visible').fill("Health");
+  await page.keyboard.press("Enter");
+  await expect(page.locator('[data-testid="lens-part-title"]:visible')).toContainText("Health");
+  await page.getByRole("button", { name: "Delete" }).filter({ visible: true }).first().click();
+  // Deleting asks first; confirmed, the dashboard is gone and its page closes.
+  await page.getByTestId("lens-action-confirm-run").click();
+  await expect(page.locator('[data-testid="lens-part-tiles"]:visible')).toHaveCount(0);
 });
 
 // Local History is the foundation's document of two lenses: its snapshots

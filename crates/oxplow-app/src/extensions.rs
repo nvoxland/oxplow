@@ -5602,6 +5602,14 @@ fn layout_warnings(lens: &Lens, lenses: &[Lens], renderer: bool) -> Vec<String> 
             .flat_map(|c| [c.select.as_deref(), c.highlight.as_deref()])
             .flatten()
             .collect();
+        // The metric cards of a dashboard's row tiles window their samples
+        // by the page's `range` and `branch`, on the page or a part of it.
+        let windowed = std::iter::once(lens)
+            .chain(
+                lens.part_lenses()
+                    .filter_map(|id| lenses.iter().find(|l| l.id == id)),
+            )
+            .any(|l| l.viz == LensViz::Dashboard && l.tile.is_some());
         for p in &lens.params {
             let read = |token: &str| queries.iter().any(|q| reads_param(q, token));
             let range = p.kind == Some(ParamType::DateRange);
@@ -5610,6 +5618,7 @@ fn layout_warnings(lens: &Lens, lenses: &[Lens], renderer: bool) -> Vec<String> 
                 || range && (read(&format!("{}_from", p.name)) || read(&format!("{}_to", p.name)))
                 || templated.contains(&p.name)
                 || marked.contains(&p.name.as_str())
+                || windowed && ["range", "branch"].contains(&p.name.as_str())
                 // A renderer's lens is run with the URI it shows and the
                 // stream and thread it is shown in: the host's to give.
                 || renderer && ["uri", "stream_id", "thread_id"].contains(&p.name.as_str()))
@@ -10388,6 +10397,18 @@ commands:
         );
         assert!(loaded);
         assert!(warns.is_empty(), "{warns:?}");
+    }
+
+    /// A dashboard whose rows are tiles windows its metric cards by the
+    /// page's `range` and `branch`: the cards read them, not the query.
+    #[test]
+    fn a_tile_dashboards_range_and_branch_are_read_by_its_metric_cards() {
+        let (warns, loaded) = layout_of(
+            "title: P\nparams: [{ name: range, type: date_range, role: filter }, { name: branch, type: branch, role: filter }, { name: z, role: filter }]\nquery: SELECT 'a' AS id, 'x' AS sql, 'metric' AS display\nviz: dashboard\ntile: { id: id, sql: sql, display: display }\n",
+        );
+        assert!(loaded);
+        assert_eq!(warns.len(), 1, "{warns:?}");
+        assert!(warns[0].contains("param `z`"), "{warns:?}");
     }
 
     /// What a deployed extension reports names its source files, the

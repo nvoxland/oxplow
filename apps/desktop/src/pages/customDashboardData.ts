@@ -1,90 +1,11 @@
-import type { LensChart } from "../tauri-bridge/generated/bindings.js";
 import type { Dashboard, SeriesPoint } from "../api.js";
 import { metricSeriesSql } from "../metricsSql.js";
 import type { MenuItem } from "../menu.js";
-import { type TimeRange, rangeFromPreset } from "../kit/rangePresets.js";
 import { seriesPoints } from "./metricDetailData.js";
 
-// Pure helpers behind the custom-dashboard page + tiles (tsk141, epic tsk138).
-// Kept React-free so the tile-option parsing and the add-metric menu assembly
-// are unit-testable without mounting the page — same split as
-// `metricDetailData.ts`.
-
-/** How one tile is rendered. Persisted as the tile's opaque `options_json`
- *  blob (so the shape grows with no migration). Everything is optional — an
- *  absent field falls back to the tile default. Tiles saved with the retired
- *  options (`sparkline` / `bar` viz, chart `mode` / `scale`, a breakdown
- *  `dim`, `alertOffTarget`) parse without them. */
-export interface TileOptions {
-  /** `line` (trend chart, charted the way the metric rolls up) | `number`
-   *  (big headline value). Default `line`. */
-  viz?: "line" | "number";
-  /** Title override — else the metric's own title. */
-  title?: string;
-  /** Grid footprint: `wide` spans 2 columns, `tall` spans 2 rows, `full` spans
-   *  the whole grid width (the heading-band size text tiles default to).
-   *  Default `small` (1×1). */
-  size?: "small" | "wide" | "tall" | "full";
-  /** Heading text for a `text` tile. Plain text, not markdown — see `TextTile`. */
-  text?: string;
-  /** Lens id (`<extension>/<slug>`) for a `lens` tile — see `LensTile`. */
-  lensId?: string;
-  /** Per-tile time-range override: a {@link RANGE_PRESETS} key, or `all` for no
-   *  window. Absent → inherit the dashboard's filter. */
-  range?: string;
-  /** Per-tile branch override. Absent → inherit the dashboard's filter. */
-  branch?: string;
-  /** A `query` tile's pinned SQL (P4.7). */
-  sql?: string;
-  /** How a `query` tile shows its rows: a lens viz, or `metric` — the
-   *  metric card over a metric's captures. */
-  display?: string;
-  /** The metric a `metric` display shows (its key). */
-  metric?: string;
-  /** A chart display's columns (`bar`/`line`: x, y, series; `treemap`:
-   *  label, size, group) — what Explore Data pinned (P6.F1). */
-  chart?: LensChart;
-}
-
-const VIZ = new Set<TileOptions["viz"]>(["line", "number"]);
-const SIZES = new Set<TileOptions["size"]>(["small", "wide", "tall", "full"]);
-
-/** Parse a tile's opaque `options_json` blob into a {@link TileOptions},
- *  tolerating null / blank / malformed JSON (→ `{}`) and silently dropping any
- *  field whose value isn't one this version understands. A tile with a bad blob
- *  renders with defaults rather than crashing the whole grid. */
-export function parseTileOptions(json: string | null | undefined): TileOptions {
-  if (!json) return {};
-  let raw: unknown;
-  try {
-    raw = JSON.parse(json);
-  } catch {
-    return {};
-  }
-  if (typeof raw !== "object" || raw === null) return {};
-  const obj = raw as Record<string, unknown>;
-  const out: TileOptions = {};
-  if (typeof obj.viz === "string" && VIZ.has(obj.viz as TileOptions["viz"])) {
-    out.viz = obj.viz as TileOptions["viz"];
-  }
-  if (typeof obj.title === "string") out.title = obj.title;
-  if (typeof obj.size === "string" && SIZES.has(obj.size as TileOptions["size"])) {
-    out.size = obj.size as TileOptions["size"];
-  }
-  if (typeof obj.text === "string") out.text = obj.text;
-  if (typeof obj.lensId === "string") out.lensId = obj.lensId;
-  if (typeof obj.range === "string") out.range = obj.range;
-  if (typeof obj.branch === "string") out.branch = obj.branch;
-  if (typeof obj.sql === "string") out.sql = obj.sql;
-  if (typeof obj.display === "string") out.display = obj.display;
-  if (typeof obj.metric === "string") out.metric = obj.metric;
-  if (typeof obj.chart === "object" && obj.chart !== null && !Array.isArray(obj.chart)) {
-    const c = obj.chart as Record<string, unknown>;
-    const col = (k: string) => (typeof c[k] === "string" ? (c[k] as string) : null);
-    out.chart = { x: col("x"), y: col("y"), series: col("series"), label: col("label"), size: col("size"), group: col("group") };
-  }
-  return out;
-}
+// Pure helpers behind the dashboard tiles and the metric page's "Add to
+// dashboard" menu. Kept React-free so they are unit-testable without mounting
+// anything — same split as `metricDetailData.ts`.
 
 /** A new tile showing metric `key` as the metric card: a query tile over its
  *  captures (P4.7). */
@@ -95,23 +16,6 @@ export function metricTile(key: string): { kind: "query"; sql: string; display: 
     display: "metric",
     optionsJson: JSON.stringify({ metric: key, viz: "line" }),
   };
-}
-
-/** The window a tile actually renders: the dashboard-level filter, with any
- *  per-tile override winning. A tile `range` of `all` explicitly means "no time
- *  window" (so a tile can opt out of a windowed dashboard). Pure — `now` is
- *  passed in so preset resolution is testable. */
-export function resolveTileWindow(
-  opts: TileOptions,
-  dashboard: { range: TimeRange | null; branch: string | null },
-  now: number,
-): { range: TimeRange | null; branch: string | null } {
-  const range = opts.range
-    ? opts.range === "all"
-      ? null
-      : rangeFromPreset(opts.range, now)
-    : dashboard.range;
-  return { range, branch: opts.branch ?? dashboard.branch };
 }
 
 /** The newest sample's value (largest `captured_at`), or `null` when nothing
@@ -132,13 +36,6 @@ export function deltaTone(delta: number, direction: string): "good" | "bad" | "n
   if (direction === "lower-better") return delta > 0 ? "bad" : "good";
   return "neutral";
 }
-
-// NOTE: an earlier revision defined its own `CATEGORY_ORDER` + `buildAddMetricMenu`
-// here, which grouped metrics differently from the Metrics page. Metric
-// sectioning has exactly one home — `buildMetricSections` in
-// `pages/metricCategories.ts` — and the picker now goes through it via
-// `components/Dashboard/metricPicker.ts` (tsk145). Don't reintroduce a local
-// category table.
 
 /** Build the metric-detail "Add to dashboard ▾" menu: one entry per existing
  *  dashboard, then (when there are any) a separator and **New dashboard…**.

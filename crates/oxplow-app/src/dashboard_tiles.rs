@@ -131,6 +131,15 @@ pub async fn new_tile(sql: &SqlGateway, input: TileInput) -> Result<NewDashboard
     Ok(tile)
 }
 
+/// One row per capture of metric `key`, newest first: what a metric card
+/// reads (the UI's `metricSeriesSql`, ungrouped and unranged).
+fn metric_series_sql(key: &str) -> String {
+    let measure = format!("MEASURE('{}')", key.replace('\'', "''"));
+    format!(
+        "SELECT g.capture_id, g.bucket AS captured_at, {measure} AS value, NULL AS \"group\",\n       c.branch, c.provenance, c.closest_vcs_rev AS vcs_rev, c.source\nFROM metric_grid('capture') g LEFT JOIN v_capture c ON c.id = g.capture_id\nWHERE {measure} IS NOT NULL\nORDER BY g.bucket DESC"
+    )
+}
+
 /// Build the tile from what the caller gave, with everything that needs no
 /// SQL checked; a query tile also returns its [`QueryCheck`].
 pub fn build_tile(input: TileInput) -> Result<(NewDashboardItem, Option<QueryCheck>), DomainError> {
@@ -171,10 +180,9 @@ pub fn build_tile(input: TileInput) -> Result<(NewDashboardItem, Option<QueryChe
     }
     match input.kind.as_str() {
         "query" => {
-            let query = input
+            let given_sql = input
                 .sql
-                .or_else(|| opts.get("sql").and_then(Value::as_str).map(str::to_string))
-                .ok_or_else(|| invalid("a `query` tile needs its `sql`"))?;
+                .or_else(|| opts.get("sql").and_then(Value::as_str).map(str::to_string));
             let display = input
                 .display
                 .or_else(|| {
@@ -194,6 +202,17 @@ pub fn build_tile(input: TileInput) -> Result<(NewDashboardItem, Option<QueryChe
                     "a `metric` display needs the metric key in options `metric`",
                 ));
             }
+            // A metric card's SQL is its metric's captures: the key is
+            // enough, and the tile pins what the key means today.
+            let query = match given_sql {
+                Some(query) => query,
+                None if display == "metric" => metric_series_sql(
+                    opts.get("metric")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default(),
+                ),
+                None => return Err(invalid("a `query` tile needs its `sql`")),
+            };
             let mut chart_columns = Vec::new();
             if let Some((required, optional)) = chart_roles(&display) {
                 let chart = chart_names_roles(&display, required, opts.get("chart"))?;
@@ -297,6 +316,24 @@ mod tests {
             let err = new_tile(&gw, input).await.unwrap_err().to_string();
             assert!(err.contains(says), "{err}");
         }
+    }
+
+    /// A metric card needs the metric key and no SQL: the tile pins the
+    /// metric's captures.
+    #[test]
+    fn a_metric_tile_pins_its_metrics_captures_from_the_key_alone() {
+        let (tile, check) = build_tile(TileInput {
+            kind: "query".into(),
+            display: Some("metric".into()),
+            metric: Some("loc".into()),
+            viz: Some("number".into()),
+            ..TileInput::default()
+        })
+        .unwrap();
+        assert!(check.is_some());
+        let opts: Value = serde_json::from_str(tile.options_json.as_deref().unwrap()).unwrap();
+        assert!(opts["sql"].as_str().unwrap().contains("MEASURE('loc')"));
+        assert_eq!(opts["metric"], "loc");
     }
 
     /// P6.F1: a pinned chart keeps its chart, which must name the

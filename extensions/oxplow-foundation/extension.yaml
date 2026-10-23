@@ -182,7 +182,7 @@ pages:
   - { id: extensions, title: Extensions, icon: package, category: System, keywords: deploy rollback permissions enable disable share, lens: extensions }
   # Opened from elsewhere
   - { id: alerts, title: Alerts, icon: bell, lens: alerts }
-  - { id: custom-dashboard, title: Dashboard, icon: layout-dashboard, params: [id], for: oxplow/dashboard, default: true, component: "oxplow:custom-dashboard" }
+  - { id: custom-dashboard, title: Dashboard, icon: layout-dashboard, for: oxplow/dashboard, default: true, lens: dashboard }
   - { id: new-session, title: New Session, icon: plus, lens: new-session }
   - { id: new-stream, title: New Stream, icon: plus, lens: new-stream }
   - { id: new-task, title: New Item, icon: plus, params: [parent], lens: new-task }
@@ -739,7 +739,7 @@ commands:
     example: {"key": "metricRetentionDays"}
   # dashboards.write
   - name: dashboard.add_item
-    summary: "Add a tile to a dashboard: `query` (pinned `sql`, checked like oxplow_query_sql, shown per `display` — a lens viz, or `metric` for the metric card with its key as `metric` in `options_json`), `lens` (`lens_id`) or `text` (`options_json` `{\"text\": …}`). `options_json` may also set its size and title; `position` where it goes."
+    summary: "Add a tile to a dashboard: `query` (pinned `sql`, checked like oxplow_query_sql, shown per `display` — a lens viz, or `metric` for the metric card, which needs only its key as `metric`: the tile pins that metric's captures), `lens` (`lens_id`) or `text` (`options_json` `{\"text\": …}`). `options_json` may also set its size and title; `position` where it goes."
     scope: dashboards.write
     op: add_item
     example: {"dashboard": "dsh3", "kind": "query", "sql": "SELECT count(*) AS open FROM v_work_item WHERE state = 'todo'", "display": "number"}

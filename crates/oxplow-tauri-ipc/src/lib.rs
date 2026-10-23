@@ -112,7 +112,6 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::get_thread_state,
             // tasks
             commands::generated::list_dashboards,
-            commands::generated::get_dashboard,
             // backlog
             // search
             commands::generated::search,

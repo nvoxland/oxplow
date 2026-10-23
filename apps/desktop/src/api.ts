@@ -1450,28 +1450,17 @@ export function awaitBackgroundTask(taskId: string): Promise<BackgroundTask | nu
 
 export type { MetricSpec, SeriesPoint, MetricCatalogEntry } from "./metricsSql.js";
 
-import type { Dashboard, DashboardWithItems } from "./tauri-bridge/index.js";
+import type { Dashboard } from "./tauri-bridge/index.js";
 import { effortUri, idOf } from "./uri/uri.js";
-export type { Dashboard, DashboardItem, DashboardWithItems } from "./tauri-bridge/index.js";
+export type { Dashboard } from "./tauri-bridge/index.js";
 
 // User-created dashboards (tsk138) — project-global grids of metric tiles.
 export async function listDashboards(): Promise<Dashboard[]> {
   return unwrap(await commands.listDashboards());
 }
-export async function getDashboard(id: string): Promise<DashboardWithItems | null> {
-  return unwrap(await commands.getDashboard(id));
-}
 // Writes are the `dashboard.*` commands (P8.A5).
 export async function createDashboard(title: string): Promise<Dashboard> {
   return (await runCommand("oxplow.dashboard.create", { title })).result as Dashboard;
-}
-export async function renameDashboard(id: string, title: string): Promise<void> {
-  await runCommand("oxplow.dashboard.rename", { dashboard: id, title });
-}
-/** The page's delete button sits behind an `InlineConfirm`, the person's
- *  confirmation (`oxplow.dashboard.delete` is destructive). */
-export async function deleteDashboard(id: string): Promise<void> {
-  await runCommand("oxplow.dashboard.delete", { dashboard: id }, true);
 }
 /** Add a tile: `query` (pinned `sql` shown per `display`), `lens` or `text`. */
 export async function addDashboardItem(req: {
@@ -1492,14 +1481,8 @@ export async function addDashboardItem(req: {
   });
   return (outcome.result as { id: string }).id;
 }
-export async function updateDashboardItem(id: string, optionsJson: string | null): Promise<void> {
-  await runCommand("oxplow.dashboard.update_item", { item: id, ...(optionsJson ? { options_json: optionsJson } : {}) });
-}
 export async function removeDashboardItem(id: string): Promise<void> {
   await runCommand("oxplow.dashboard.remove_item", { item: id });
-}
-export async function reorderDashboardItems(dashboardId: string, order: string[]): Promise<void> {
-  await runCommand("oxplow.dashboard.reorder_items", { dashboard: dashboardId, order });
 }
 /** Fires when a commit touched a dashboard or a tile (`v_dashboard`,
  *  `v_dashboard_item`) — whoever wrote it. */

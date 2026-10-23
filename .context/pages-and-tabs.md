@@ -118,7 +118,7 @@ Foundation declares oxplow's renderers (`agent-session`, `commit`,
 `editor`, `file-viewer`, `lens`, `metric-detail`,
 `resource`, `wiki-page`, `work-item`, and `diff-view` also for
 `oxplow/snapshot`, `oxplow/effort` and `oxplow/turn`; `custom-dashboard`
-for `oxplow/dashboard`; `external-url` for `https` and `http`). Their
+(a lens renderer, `dashboard`) for `oxplow/dashboard`; `external-url` for `https` and `http`). Their
 bodies are listed under "Modules" and "Declared pages". An agent
 session's tab follows its row (`reconcileSessionTabs`). There is no
 `change-analysis` page.
@@ -262,7 +262,7 @@ oxplow's pages and their params:
   `comments`, `explore-data`, `metrics-recorded`,
   `terminal`, `alerts`, `settings` (view: `area`, `section`, and `q`, the overview's search — another
   area is a pushed view change, never a page opened over it; the shell and the rail are React, and the Overview and Language Servers areas are oxplow-foundation lenses mounted in their slots, `settings.overview.sections` / `settings.lsp.sections`),
-  `custom-dashboard` (`id`), `new-task`
+  `new-task`
   (`parent`),
   `external-url` (a renderer for `https` / `http`; the tab id is the URL), `diff` (`path`, `left`, `right`, `label`,
   `base` — the left side's name when it isn't the version's own — and

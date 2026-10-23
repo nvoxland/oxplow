@@ -126,14 +126,6 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	getDashboard: (id: DashboardId) => typedError<{
-	dashboard: Dashboard,
-	items: DashboardItem[],
-} | null, IpcError_Serialize>(__TAURI_INVOKE("get_dashboard", { id })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	search: (query: string, streamId: string | null, resources: string[] | null, limit: number | null) => typedError<SearchHit[], IpcError_Serialize>(__TAURI_INVOKE("search", { query, streamId, resources, limit })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -2101,30 +2093,6 @@ export type Dashboard = {
 };
 
 export type DashboardId = string;
-
-/**
- *  One tile on a dashboard: its `kind` ([`TILE_KINDS`]) and `options_json`,
- *  the per-tile options — a `query` tile's SQL and how it's displayed, a
- *  `lens` tile's lens id, a `text` tile's text, and the size and filter
- *  overrides every tile has.
- */
-export type DashboardItem = {
-	id: DashboardItemId,
-	dashboard_id: DashboardId,
-	sort_index: number,
-	kind: string,
-	options_json: string | null,
-	created_at: Timestamp,
-	updated_at: Timestamp,
-};
-
-export type DashboardItemId = string;
-
-/**  A dashboard plus its tiles, in display order — the `get_dashboard` read shape. */
-export type DashboardWithItems = {
-	dashboard: Dashboard,
-	items: DashboardItem[],
-};
 
 /**  One row of Settings → Data. */
 export type DataEntity = {

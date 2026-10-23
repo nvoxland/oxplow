@@ -10,7 +10,6 @@ import { settingsArea } from "./settingsAreas.js";
 import { TerminalPage } from "./TerminalPage.js";
 import { FilesPage } from "./FilesPage.js";
 import { MetricsPage } from "./MetricsPage.js";
-import { CustomDashboardPage } from "./CustomDashboardPage.js";
 import { ExploreDataPage } from "./ExploreDataPage.js";
 import { ExternalUrlPage } from "./ExternalUrlPage.js";
 
@@ -100,15 +99,6 @@ export const builtInPages: Record<BuiltInPageName, BuiltInPage> = {
       label: "Metrics",
       closable: true,
       render: () => <MetricsPage onOpenPage={nav.navOpen} />,
-    };
-  },
-  "custom-dashboard": ({ ref, params, nav }) => {
-    // `customDashboardRef(id)` — one user-created dashboard (grid of tiles).
-    return {
-      id: ref.id,
-      label: "Dashboard",
-      closable: true,
-      render: () => <CustomDashboardPage dashboardId={params.id} onOpenPage={nav.navOpen} />,
     };
   },
   "explore-data": ({ ref, nav, scope }) => {

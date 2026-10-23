@@ -410,7 +410,6 @@ pub const MANIFEST: &[Capability] = &[
     ),
     // ---- dashboards: agents read the models; writes are `dashboard.*` commands ----
     model("list_dashboards", &["v_dashboard"]),
-    model("get_dashboard", &["v_dashboard", "v_dashboard_item"]),
     // ---- comments (writes are knowledge.*) ----
     model("list_comments_for_target", &["v_comment"]),
     // ---- page visits ----

@@ -1341,3 +1341,113 @@ async fn the_git_dashboard_reads_the_branch_the_tree_and_the_recent_commits() {
     let tree = run_task(&fx, "git-dashboard-uncommitted", stream).await;
     assert_eq!(tree.rows.len(), 1);
 }
+
+/// A dashboard page: its title, a metric added from the catalog with only
+/// its key (the tile pins that metric's captures), then its tile rows,
+/// resized and removed through the tiles' own actions.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_dashboard_page_adds_a_metric_tile_and_edits_its_tiles() {
+    use crate::lens_actions::{run_lens_action, LensActionCall};
+    let fx = services_with_effort().await;
+    let id = command(
+        &fx,
+        "oxplow.dashboard.create",
+        serde_json::json!({ "title": "Health" }),
+    )
+    .await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let by_id = vec![("id", SqlCell::Text(id.clone()))];
+    // The page's row hands its parts the dashboard's id from the URI.
+    let page = run(
+        &fx,
+        "dashboard",
+        vec![(
+            "uri",
+            SqlCell::Text(format!("oxplow:oxplow/dashboard?id={id}")),
+        )],
+    )
+    .await;
+    assert_eq!(page.text(&page.rows[0], "id").as_deref(), Some(id.as_str()));
+    let title = run(&fx, "dashboard-title", by_id.clone()).await;
+    assert_eq!(
+        title.text(&title.rows[0], "title").as_deref(),
+        Some("Health")
+    );
+    let metrics = run(&fx, "dashboard-metrics", vec![]).await;
+    assert!(!metrics.rows.is_empty(), "the catalog lists metrics");
+    let metric = metrics.text(&metrics.rows[0], "value").unwrap();
+    let act = |lens: &str, action: &str, row, input| LensActionCall {
+        lens_id: format!("oxplow-foundation/{lens}"),
+        action_id: action.into(),
+        params: std::collections::BTreeMap::from([("id".to_string(), SqlCell::Text(id.clone()))]),
+        row,
+        input,
+        drop: None,
+        on_behalf_of: oxplow_domain::Actor::Human,
+        confirmed: false,
+    };
+    let root = fx._dir.path();
+    let ctx = LensContext::default();
+    run_lens_action(
+        &fx.svc,
+        root,
+        act(
+            "dashboard-title",
+            "add-metric",
+            None,
+            Some(serde_json::json!({ "metric": metric })),
+        ),
+        &ctx,
+    )
+    .await
+    .unwrap();
+    let tiles = run(&fx, "dashboard-tiles", by_id.clone()).await;
+    assert_eq!(tiles.rows.len(), 1);
+    let row = &tiles.rows[0];
+    assert_eq!(tiles.text(row, "display").as_deref(), Some("metric"));
+    assert_eq!(tiles.text(row, "metric").as_deref(), Some(metric.as_str()));
+    assert_eq!(tiles.text(row, "viz").as_deref(), Some("line"));
+    let cells = |r: &Vec<SqlCell>| {
+        tiles
+            .columns
+            .iter()
+            .cloned()
+            .zip(r.clone())
+            .collect::<std::collections::BTreeMap<_, _>>()
+    };
+    run_lens_action(
+        &fx.svc,
+        root,
+        act("dashboard-tiles", "wide", Some(cells(row)), None),
+        &ctx,
+    )
+    .await
+    .unwrap();
+    run_lens_action(
+        &fx.svc,
+        root,
+        act("dashboard-tiles", "number", Some(cells(row)), None),
+        &ctx,
+    )
+    .await
+    .unwrap();
+    let tiles = run(&fx, "dashboard-tiles", by_id.clone()).await;
+    assert_eq!(tiles.text(&tiles.rows[0], "size").as_deref(), Some("wide"));
+    assert_eq!(tiles.text(&tiles.rows[0], "viz").as_deref(), Some("number"));
+    run_lens_action(
+        &fx.svc,
+        root,
+        act(
+            "dashboard-tiles",
+            "remove",
+            Some(cells(&tiles.rows[0])),
+            None,
+        ),
+        &ctx,
+    )
+    .await
+    .unwrap();
+    assert!(run(&fx, "dashboard-tiles", by_id).await.rows.is_empty());
+}

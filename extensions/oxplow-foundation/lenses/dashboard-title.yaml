@@ -1,0 +1,16 @@
+title: Dashboard title
+description: The dashboard's name, and what to do to the dashboard as a whole - rename it, add a metric or a heading, delete it.
+params:
+  - { name: id }
+query: |
+  SELECT d.title AS title FROM v_dashboard d WHERE 'dsh' || d.id = :id
+viz: detail
+columns:
+  - { key: title, label: Dashboard }
+actions:
+  - { id: add-metric, label: Add Metric…, command: oxplow.dashboard.add_item, form: true, fixed: [dashboard, kind, display, viz], choices: { metric: oxplow-foundation/dashboard-metrics }, input: { dashboard: "{{param.id}}", kind: query, display: metric, viz: line } }
+  - { id: add-heading, label: Add Heading…, command: oxplow.dashboard.add_item, form: true, fixed: [dashboard, kind, size], input: { dashboard: "{{param.id}}", kind: text, size: full } }
+  - { id: rename, label: Rename…, command: oxplow.dashboard.rename, form: true, fixed: [dashboard], input: { dashboard: "{{param.id}}" } }
+  - { id: delete, label: Delete, command: oxplow.dashboard.delete, then: close, input: { dashboard: "{{param.id}}" } }
+empty: This dashboard no longer exists.
+hidden: true

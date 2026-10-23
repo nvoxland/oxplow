@@ -206,7 +206,6 @@ macro_rules! oxplow_command_table {
                 // tasks
                 // dashboards (tsk138)
                 list_dashboards => $crate::commands::dashboards::list_dashboards {} -> Vec<::oxplow_db::Dashboard>,
-                get_dashboard => $crate::commands::dashboards::get_dashboard { id: ::oxplow_domain::DashboardId } -> Option<::oxplow_db::DashboardWithItems>,
                 // effort
                 list_efforts_in_window => $crate::commands::effort::list_efforts_in_window { window_start: ::oxplow_domain::Timestamp, window_end: ::oxplow_domain::Timestamp } -> Vec<::oxplow_db::Effort>,
                 list_efforts_at_snapshots => $crate::commands::effort::list_efforts_at_snapshots { snapshot_ids: Vec<::oxplow_domain::SnapshotId> } -> Vec<::oxplow_db::EffortAtSnapshot>,

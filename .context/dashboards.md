@@ -5,12 +5,11 @@ assembles to view a handful of metrics at a glance. Complements the per-metric
 **detail** page (`.context/metrics.md`) and the **Recorded Metrics** list.
 Epic **tsk138**.
 
-> **Direction (epic tsk275, revised 2026-09-27):** custom dashboards
-> **stay in core** as the simple starting point, alongside the Metrics
-> pages and Explore Data. Tiles can now be `metric`, `text` or **`lens`**.
-> A `lens` tile keeps its `lensId` in `options_json`,
-> `parseTileOptions` passes it through, and it renders via `LensTile`.
-> See [extensions.md](./extensions.md) → "Core explorer".
+> **Direction:** a user dashboard is a foundation lens (`dashboard`, the
+> renderer of the `oxplow/dashboard` resource): its tiles are the rows of
+> a query over `v_dashboard_item` (`tile:`), its editing is lens actions.
+> Tiles are `query` (pinned SQL, shown as a lens viz or the metric card),
+> `lens` (a lens run with the page's params) or `text` (a heading band).
 
 **Scope: project-global.** Metrics are project-scoped, so dashboards are too —
 one set per project, reachable from any stream/thread. The `dashboard` table has
@@ -62,8 +61,8 @@ dashboard.rs`, P8.A5), for the desktop (`runCommand`), an agent
   { dashboard, title }`, `oxplow.dashboard.remove_item { item }` (undone by adding
   it back at its position), `oxplow.dashboard.reorder_items { dashboard, order }`,
   `oxplow.dashboard.delete { dashboard }` (a person's or a lens's,
-  `Confirm::Destructive`; the page's Delete `InlineConfirm` is the
-  confirmation, so the desktop runs it confirmed; not undoable).
+  `Confirm::Destructive`; the page's Delete action asks first; not
+  undoable).
 - `Tx` with a `Precheck`: `oxplow.dashboard.add_item { dashboard, kind, sql?,
   display?, lens_id?, title?, size?, text?, metric?, viz?, chart?,
   options_json?, position? }` and `oxplow.dashboard.update_item { item,
@@ -88,8 +87,8 @@ dashboard.rs`, P8.A5), for the desktop (`runCommand`), an agent
   (remove the tile; restore the old options).
 
 Dashboards and tiles are named by id (`dsh3`, `dti7`). The reads stay
-IPC cores in `oxplow-rpc/src/commands/dashboards.rs` (`list_dashboards`,
-`get_dashboard`); views re-read when `ModelsChanged` names `v_dashboard`
+IPC core in `oxplow-rpc/src/commands/dashboards.rs` (`list_dashboards`;
+the dashboard page reads `v_dashboard` / `v_dashboard_item` itself); views re-read when `ModelsChanged` names `v_dashboard`
 or `v_dashboard_item` (`subscribeDashboardEvents` in
 `apps/desktop/src/api.ts`) — whoever wrote it.
 
@@ -117,64 +116,63 @@ into a sandboxed component. Its examples run in
 `crates/oxplow-app/src/dashboards_reference_tests.rs`, read out of the
 reference file, so the text can't drift from what the commands accept.
 
-## UI (tsk141 — Phase 3)
+## UI
 
-Two page kinds, wired per `.context/pages-and-tabs.md`'s "adding a tab kind"
-checklist:
+Two pages, both foundation lenses:
 
-- **`custom-dashboard`** — payload-bearing (modeled on `metric`): the id
-  is `custom-dashboard:dsh<n>`, `customDashboardRef(id)` carries the id in both
-  the tab id and payload, and a **`refFromTabId` case** rebuilds it from a
-  history-restored tab (no payload). `CustomDashboardPage` uses `Page`'s
-  default full width + `titleInBody` and owns its own padding — a tile grid
-  wants every pixel, so it deliberately does **not** use the reading width
-  (whose 78ch column + 320px rail squeeze the grid; the rail version
-  was reverted after review). The page renders its own **header row** instead:
-  the editable title `<h1>` (`InlineEdit` → `renameDashboard`) on the left,
-  **+ Add metric** and a **Delete** `InlineConfirm` on the right. Body is the
-  kit's tile grid (`TileGrid` / `TileSlot` / `Tile`, `src/kit/Tiles.tsx`:
-  `repeat(auto-fill, minmax(400px, 1fr))`, a slot spanning by its size) — the
-  same grid a `dashboard` lens draws, so a user dashboard and an extension's
-  look alike; the page adds drag-to-reorder on the slots;
-  empty state is a dashed drop-zone card. Live-refreshes when `v_dashboard`
-  / `v_dashboard_item` change (structure); the metric specs and catalog re-read when their models change
-  (`useRerunOnChange`).
+- **`custom-dashboard`** — the renderer of `oxplow/dashboard`
+  (`lens: dashboard`), a `document` of two bare parts:
+  - `dashboard-title` (a `detail` lens: the dashboard's title and its
+    actions — **Add Metric…**, a form whose one field chooses from
+    `dashboard-metrics` (`v_metric_catalog` by category) and runs
+    `add_item` with just the metric key; **Add Heading…** and
+    **Rename…**, one-field forms that open as prompt strips; **Delete**,
+    asks first and closes the page, `then: close`). A dashboard that is
+    gone says so there (`empty`).
+  - `dashboard-tiles` (a `dashboard` lens with `tile:`): the rows of
+    `v_dashboard_item` through `json_extract` of the options. Drag runs
+    `reorder_items` with `{{order.id}}`; a heading's `edit: true` action
+    saves its `text`; right-click gives Rename…, Chart as Line / Number
+    (a metric card only, `when: is_metric`), Size: Small / Wide / Tall /
+    Full and Remove (Delete key). With no tiles it says `empty`.
+  The page's filters are `range` (a `date_range`, default All time — a
+  dashboard is an overview; a bounded default would blank out sparse
+  metrics) and `branch`, which window every metric card (the loader
+  counts them as read by a tile dashboard). The page's `id` is the URI's
+  (`uri_param(:uri, 'id')`, the document's row), so it isn't a filter.
+  Metric cards, query tiles and heading bands are the props-driven
+  `MetricTileBody`, `QueryTileBody` and `TextBand`
+  (`components/Dashboard/`), drawn by `DashboardViz` in a kit
+  `TileGrid` / `TileSlot` (`src/kit/Tiles.tsx`); a lens tile is run as a
+  part. The tab's title is "Dashboard" (a label can't name a row's
+  column).
 - **`dashboards`** — the foundation's `dashboards` lens page
   (the `dashboards` page, `dashboardsRef()`): the user's
   dashboards over `v_dashboard` (each row links to its page) + a **New
   Dashboard** action on `oxplow.dashboard.create`, whose `ui.open_after`
   opens the new one. In the launcher under **Data**.
 
-**Dashboards as lenses.** A `dashboard` lens draws a user dashboard's
-tiles from its rows (`tile:`, `.context/extensions.md` "Rows as tiles"):
-a query over `v_dashboard_item` names each role (`json_extract` of the
-options), and the lens's actions are the editing — a drag action with
-`{{order.id}}` over `reorder_items`, row forms over `update_item`'s flat
-fields (rename, resize), an edit action saving a heading's `text`, a
-`remove_item` row action, whole-lens forms over `add_item` and `rename`.
-The tile bodies are the page's, props-driven: `QueryTileBody`,
-`MetricTileBody` (windowed by the lens's `range`/`branch` params when it
-has them) and `TextBand`; `CustomDashboardPage`'s tiles wrap them.
-
 **Query tiles (P4.7, tsk492).** A dashboard tile is `query` (pinned SQL
 plus how to show it), `lens` or `text`; the `metric` kind and its
 `metric_key` column are gone. `V108__dashboard_query_tiles.sql` rewrote each
 metric tile into a query tile over `metric_grid('capture')` with `display:
 "metric"` and `metric: <key>`, keeping its other options. `display` is a
-lens visualization (`QueryTile.tsx`, the explorer's "Pin to dashboard",
-`PinToDashboard.tsx`) or `metric`, the metric card below; `metricTile(key)`
-in `customDashboardData.ts` builds that tile for the picker and the metric
-page. `update_dashboard_item {id, optionsJson}` re-checks a changed `sql`.
+lens visualization (`QueryTileBody`, the explorer's "Pin to dashboard",
+`PinToDashboard.tsx`) or `metric`, the metric card below; `add_item` with `display: metric` and the metric's key needs no `sql`:
+the tile pins the metric's captures (`metric_series_sql`, the SQL the UI's
+`metricSeriesSql` builds). `metricTile(key)` in `customDashboardData.ts`
+builds the same tile for the metric page's "Add to dashboard".
+`update_item` re-checks a changed `sql`.
 
 **Chart tiles (P6.F1).** A `bar`, `line` or `treemap` query tile carries
 its columns in the options' `chart` — `bar`/`line` `{ x, y, series? }`,
 `treemap` `{ label, size, group? }`, the roles a lens's `chart:` names.
 `new_tile` refuses a chart display without its required roles, or one
 naming a column the query doesn't return (it dry-runs the SQL for one
-row). `parseTileOptions` keeps `chart` and `QueryTile` passes it to
+row). The tile's `chart` column reaches `QueryTileBody`, which passes it to
 `adHocLens`, so a pinned chart renders as it did in Explore Data.
 
-**Metric card** — `components/Dashboard/MetricTile.tsx` (+ `TextTile.tsx`).
+**Metric card** — `MetricTileBody` in `components/Dashboard/MetricTile.tsx` (+ `TextTile.tsx`).
 A `display: "metric"` query tile runs its `sql` through `oxplow_query_sql` and
 switches on the `options_json` `viz`:
 
@@ -187,11 +185,10 @@ A line tile charts the metric the way it rolls up (`defaultChartMode`: sum →
 cumulative, avg → moving average, else the value). **Simplified (tsk309):**
 the `sparkline` / `bar` visualizations, per-tile chart mode and scale, the
 off-target highlight, the dimension filter, saved views and Save Copy are
-gone; `parseTileOptions` reads tiles saved with those options as plain line
-tiles. Breakdowns are for agents (`metric_grid(…, dim)` through `oxplow_query_sql`)
+gone; tiles saved with those options read as plain line tiles. Breakdowns are for agents (`metric_grid(…, dim)` through `oxplow_query_sql`)
 and lenses.
 
-A `text`-kind item is a **heading band** (`TextTile`) labelling the run of tiles
+A `text`-kind item is a **heading band** (`TextBand`) labelling the run of tiles
 beneath it: **plain text**, edited in place with `InlineEdit`, rendered as one
 left-aligned heading. It defaults to the `full` size, sizes to its own text
 height, and wears only a bottom rule — **not a card**.
@@ -207,21 +204,10 @@ True tile-owning sections (membership on `dashboard_item`, collapse, drag-in)
 were considered and declined as beyond the "just a grid that flows" scope
 (tsk147). New text tiles seed **empty** so the placeholder invites a real title.
 
-The page resolves each tile's `def` from one `listMetricDefinitions()` fetch and
-passes it in; the tile runs its own query and re-runs through
-`useRerunOnChange` when what it read changed — its metric's measures, or a
-model the query read. Clicking the title drills through to the metric detail;
-right-click is the tile menu — **Visualization** and **Size** submenus (checked
-= current, writing through `updateDashboardItem`), plus open /
-open-in-new-tab / remove.
-
-**Dashboard filter (tsk142)** — a range + branch control under the header that
-**every tile inherits**, via the pure `resolveTileWindow(opts, dashboard, now)`:
-a per-tile `range`/`branch` option wins, and a tile `range` of `"all"` explicitly
-opts out of a windowed dashboard. Range defaults to **All time** (a dashboard is
-an overview; a bounded default would blank out sparse metrics). The branch
-options are the **union of the branches the tiles report upward** (`onBranches`),
-since no single page-level sample fetch exists.
+The grid reads the metric definitions once (`listMetricDefinitions()`) and
+passes each card its `def`; a card runs its own query and re-runs through
+`useRerunOnChange` when what it read changed. Clicking a card's title drills
+through to the metric detail.
 
 **Tile legibility (tsk144).** `TrendChart` renders through a viewBox, so its
 coordinate-space size *is* its text scale: the original 760×220 chart squeezed
@@ -240,51 +226,14 @@ rendered raw epoch milliseconds. It is now `fmtYTick`, and
 10+-digit integer — a pure-helper test can't catch a "wrong function called in
 JSX" bug.
 
-**Sizing + reorder (tsk142)** — `tileSpanStyle(size)` maps `full` →
-`gridColumn: 1 / -1`, `wide` → `gridColumn: span 2`, `tall` → `gridRow: span 2`.
-The grid's `gridAutoRows` is **`auto`**, not a fixed minimum, so a heading band
-can be one line tall; a metric tile asserts its own `minHeight` on the card
-instead (240, or 500 for `tall`) rather than leaning on the row track (tsk147).
-Tiles **drag to reorder** with
-MIME `application/x-oxplow-dashboard-tile` (distinct from the rail's section
-MIME so a rail drag can't drop into the grid), the pure `moveToIndex` from
-`centerTabsReorder.ts`, and a drop on the grid background meaning "move to the
-end" → `reorderDashboardItems`.
-
-The **drop indicator** is an absolutely-positioned bar in the grid gap
-(`dashboard-drop-line`), on the side the drop will land — which half of the
-hovered tile the pointer is in decides before/after. Two traps it was written
-around (tsk148): an **inset `box-shadow` on the tile wrapper is invisible**,
-because the opaque `TileCard` fills the wrapper and paints over it (that was the
-first attempt, and it never showed); and the drop handler **recomputes the side
-from its own event** instead of reading the `overSide` state, since the final
-`dragOver`'s `setState` may not have re-rendered before `drop` fires.
-
-**Add picker (tsk145)** — `MetricPickerPanel`, an anchored popover: a focused
-search box over a scrollable, categorized list, opened by the header button, the
-empty-state button, or a right-click on the grid. ↑/↓ walk the flattened rows,
-Enter adds, Escape / click-away closes. **Clicking a metric adds it and leaves
-the panel open** (rows already on the dashboard show ✓) — assembling a dashboard
-means adding several tiles, so the panel is a workbench, not a one-shot menu. A
-footer action adds a text/heading tile.
-
-> **Metric sectioning has exactly one home.** The picker's sections come from
-> `pickerSections` (`components/Dashboard/metricPicker.ts`), which delegates to
-> **`buildMetricSections`** in `pages/metricCategories.ts` — the same rule the
-> Recorded Metrics page uses, including its split of `static-quality` into
-> per-language sections. The first cut of this picker carried its *own* category
-> table and consequently grouped metrics differently from the rest of the app
-> (wrong labels, no Coverage group, one giant "Static quality" bucket that
-> overflowed the screen). That is precisely the drift `buildMetricSections`'s doc
-> comment warns about — **do not reintroduce a local category table.** Search is
-> the launcher's `fuzzyMatches` over title + key.
-
-Two traps the sticky section headers hit, worth knowing before styling any
-sticky header: a sticky element does **not** automatically paint above later
-siblings, so without an explicit `z-index` the row buttons (which follow it in
-DOM order) render on top and the header collides with rows scrolling under it;
-and `opacity` on the header dims its **background** too, letting rows show
-through a supposedly opaque bar — dim the text `color` instead.
+**Sizing + reorder.** A tile's `size` (`small`, `wide` = 2 columns,
+`tall` = 2 rows, `full` = the grid's width) is a column of the tile query.
+The grid's `gridAutoRows` is **`auto`**, not a fixed minimum, so a heading
+band can be one line tall; a metric card asserts its own `minHeight`
+instead (240, or 500 for `tall`). Tiles drag like any lens row
+(`LENS_ROW_DRAG_MIME`): a drop beside a tile or on the grid puts the
+dragged one there and runs the drag action with every tile in the new
+order.
 
 **Pin to Dashboard → New Dashboard…** asks for the new dashboard's name
 inline (Enter creates it and pins, Escape cancels; tsk1045 — it used to
@@ -292,13 +241,11 @@ make "My Dashboard" without asking).
 
 **New Dashboard command** — `oxplow.dashboard.create`'s `ui` in
 `oxplow-foundation` (Tasks group): it creates "Untitled dashboard", then
-opens it (`open_after: page:custom-dashboard?id={{result.id}}`), no
+opens it (`open_after: oxplow:oxplow/dashboard?id={{result.id}}`), no
 form.
 
 Pure helpers live in `pages/customDashboardData.ts` (React-free, unit-tested):
-`parseTileOptions` (tolerant of null/malformed JSON, drops unknown enum values),
-`latestValue`, `deltaTone`, `buildAddMetricMenu`, `tileSpanStyle`,
-`resolveTileWindow`.
+`metricTile`, `latestValue`, `deltaTone`, `buildAddToDashboardMenu`.
 
 **Add to dashboard (tsk143)** — the metric-detail page's Details rail carries a
 **Dashboard** block: an "Add to dashboard ▾" button whose menu is the pure

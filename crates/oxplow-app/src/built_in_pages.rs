@@ -12,7 +12,6 @@
 /// The built-in page components, by name.
 pub const BUILT_IN_PAGES: &[&str] = &[
     "agent-session",
-    "custom-dashboard",
     "editor",
     "explore-data",
     "external-url",
