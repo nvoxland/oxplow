@@ -2962,8 +2962,22 @@ it drew, for the frame's own pickers, or `INVALID` with the field; null
 clears it). While a spec shows, the frame sits at its content's height:
 the library posts `{ type: size, height }` (a message, not a request,
 from a `ResizeObserver` on its root; a component leaves `html` and
-`body` at `height: auto`). `openForm`, `setTitle`, `setActions` and
-`showSpec` are a custom page's (`INVALID` elsewhere), and — each kind
+`body` at `height: auto`). Protocol 11: `{ id, method: openForm, form: {
+title, schema, values? } }` is a form of the component's own — the host
+draws `schema` (a JSON Schema; a `writeOnly` string is masked) with the same
+`SchemaForm` in a slideover and answers the values submitted, running
+nothing (closing it answers `CANCELLED`); and `{ id, method: signIn,
+instance, name }` / `{ id, method: cancelSignIn, instance, name }`: the host
+runs the whole OAuth redirect flow for a provider instance's credential
+(`lens/hostSignIn.ts`: the shell listens on the credential's registered port,
+the system browser opens the service's page, each redirect goes to the core)
+and answers `{ state: signed_in }`, `{ state: failed, error }` or `{ state:
+cancelled }`. Each step is a command the component must declare
+(`oxplow.provider.begin_sign_in`, `complete_sign_in`, `cancel_sign_in`),
+run as the component; without the desktop app it answers `INVALID`; a newer
+sign-in of the credential, a `cancelSignIn` or closing the frame ends the one
+under way. `openForm`, `setTitle`, `setActions`, `showSpec`, `signIn` and
+`cancelSignIn` are a custom page's (`INVALID` elsewhere), and — each kind
 of page state by the name of its scope — `{ id, method: setViewParams,
 params }` (string values, null drops one: the `#` of its tab entry, replaced;
 a component has no selection role, so it never pushes, and going
@@ -3043,7 +3057,7 @@ which an opaque origin never passes and nothing served to a frame allows
 waits for `init`, answers `ready`, and resolves with `{ run (the latest),
 page, props, tokens, protocol, onUpdate(fn) → unsubscribe, query(asset,
 params), invoke(command, input), navigate(uri, { newTab, replace }), querySql,
-openForm, setTitle, setActions, showSpec, onAction, viewParams, setViewParams,
+openForm (a command's, or `{ title, schema, values }`), signIn, cancelSignIn, setTitle, setActions, showSpec, onAction, viewParams, setViewParams,
 onViewParams, historyState, setHistoryState, onHistoryState, pageMemory,
 applyTheme(doc?) }` (the `.d.ts` beside it is the reference;
 `viewParams` / `historyState` are null where the host gives no view); a

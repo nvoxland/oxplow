@@ -79,7 +79,7 @@ test("init carries the run, props and tokens, at protocol 10", () => {
   const r = { lens: { id: "x/b", custom: { component: "b", props: { a: 1 } } }, params: {}, result: { columns: [], rows: [], truncated: false } } as unknown as LensRun;
   expect(initMessage(r, { "--accent": "#08f" })).toEqual({
     type: "init",
-    protocol: 10,
+    protocol: 11,
     run: r,
     props: { a: 1 },
     page: null,
@@ -91,7 +91,7 @@ test("init carries the run, props and tokens, at protocol 10", () => {
 test("a component shown as a page gets its page and its view, and no run", () => {
   const page = { streamId: "str1", threadId: "thr2" };
   const view = { viewParams: { from: "2026-10-01" }, historyState: { scroll: 3 } };
-  expect(initMessage(null, {}, page, view)).toEqual({ type: "init", protocol: 10, run: null, props: null, page, view, tokens: {} });
+  expect(initMessage(null, {}, page, view)).toEqual({ type: "init", protocol: 11, run: null, props: null, page, view, tokens: {} });
 });
 
 // A replacement or a lens page's component: a lens's run, and its host's view.
@@ -338,12 +338,11 @@ test("shown by a lens, a component sets no page title, actions or form", async (
   h.send({ id: "a", method: "setActions", actions: [] });
   h.send({ id: "f", method: "openForm", command: "x.y.z" });
   h.send({ id: "s", method: "showSpec", spec: null });
+  h.send({ id: "o", method: "openForm", form: { title: "T", schema: { type: "object" }, values: {} } });
+  h.send({ id: "i", method: "signIn", instance: "t/x", name: "TOKEN" });
   await h.settle();
   expect(h.received.map((m) => (m as { error?: { message: string } }).error?.message)).toEqual([
-    "Only a component shown as a page sets its title, actions, forms or the spec it shows.",
-    "Only a component shown as a page sets its title, actions, forms or the spec it shows.",
-    "Only a component shown as a page sets its title, actions, forms or the spec it shows.",
-    "Only a component shown as a page sets its title, actions, forms or the spec it shows.",
+    ...Array(6).fill("Only a component shown as a page sets its title, actions, forms or the spec it shows, or signs in."),
   ]);
   h.channel.port1.close();
 });
@@ -439,4 +438,24 @@ test("a page's showSpec answers ok once drawn, or the host's refusal with its fi
   expect(shown).toEqual([{ title: "E", query: "SELECT 1", viz: "table" }, null]);
   expect(heights).toEqual([240]);
   h.channel.port1.close();
+});
+
+test("openForm with a form of its own, signIn and cancelSignIn parse; anything else in their place doesn't", () => {
+  const form = { title: "Configure", schema: { type: "object" }, values: { team: "core" } };
+  expect(parseFrameMessage({ id: "1", method: "openForm", form })).toEqual({ type: "request", request: { id: "1", method: "openForm", form } });
+  expect(parseFrameMessage({ id: "2", method: "openForm", form: { title: "T", schema: { type: "object" } } })).toEqual({
+    type: "request",
+    request: { id: "2", method: "openForm", form: { title: "T", schema: { type: "object" }, values: {} } },
+  });
+  expect(parseFrameMessage({ id: "3", method: "openForm", form: { title: "T" } })).toBeNull();
+  expect(parseFrameMessage({ id: "4", method: "openForm", form: { title: "T", schema: [] } })).toBeNull();
+  expect(parseFrameMessage({ id: "5", method: "signIn", instance: "t/x", name: "TOKEN" })).toEqual({
+    type: "request",
+    request: { id: "5", method: "signIn", instance: "t/x", name: "TOKEN" },
+  });
+  expect(parseFrameMessage({ id: "6", method: "cancelSignIn", instance: "t/x", name: "TOKEN" })).toEqual({
+    type: "request",
+    request: { id: "6", method: "cancelSignIn", instance: "t/x", name: "TOKEN" },
+  });
+  expect(parseFrameMessage({ id: "7", method: "signIn", instance: "t/x" })).toBeNull();
 });

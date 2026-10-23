@@ -11,6 +11,9 @@
 ///                 { id, method: "navigate", uri, newTab, replace }    open a page
 ///                 { id, method: "querySql", sql, params }    its own SQL (`sql: read`)
 ///                 { id, method: "openForm", command, input } a declared command's form, in the host
+///                 { id, method: "openForm", form }           a form of its own schema, in the host: the values submitted
+///                 { id, method: "signIn", instance, name }   sign in for a provider instance's credential, in the host
+///                 { id, method: "cancelSignIn", instance, name } end that sign-in
 ///                 { id, method: "setTitle", title }          a page's title (a page only)
 ///                 { id, method: "setActions", actions }      a page's actions (a page only)
 ///                 { id, method: "setViewParams", params }    its host's view params (a host with a view)
@@ -60,8 +63,12 @@ import type { CommandOutcome, LensRun, LensSpec, SqlCell, SqlQueryResult } from 
 /// carries `replace` as a browser's does. 10: a page shows a lens spec the
 /// host draws under it with the kit (`showSpec`, null clearing it), and
 /// the frame says its content's height (`size`), so the page lays the
-/// frame out above what the host draws.
-export const BRIDGE_PROTOCOL = 10;
+/// frame out above what the host draws. 11: a page asks the host to sign in
+/// for a provider instance's credential (`signIn`, `cancelSignIn`: the host
+/// runs the whole redirect flow and answers how it ended), and `openForm`
+/// also takes a form of its own (`{ title, schema, values }`) and answers
+/// the values submitted.
+export const BRIDGE_PROTOCOL = 11;
 
 /** What a page's `showSpec` answers: the rows the host drew. */
 export interface ShownRows {
@@ -69,6 +76,17 @@ export interface ShownRows {
   rows: SqlCell[][];
   truncated: boolean;
 }
+
+/** A form of the component's own, shown by the host: a JSON Schema for
+ *  its fields, starting from `values`. */
+export interface OwnForm {
+  title: string;
+  schema: Record<string, unknown>;
+  values: Record<string, unknown>;
+}
+
+/** How a sign-in the host ran ended. */
+export type SignInResult = { state: "signed_in" } | { state: "failed"; error: string } | { state: "cancelled" };
 
 /** A page action a component declares; core draws it in the nav bar. */
 export interface FrameAction {
@@ -99,6 +117,9 @@ export type BridgeRequest =
   | { id: string; method: "navigate"; uri: string; newTab: boolean; replace: boolean }
   | { id: string; method: "querySql"; sql: string; params: SqlCell[] }
   | { id: string; method: "openForm"; command: string; input: unknown }
+  | { id: string; method: "openForm"; form: OwnForm }
+  | { id: string; method: "signIn"; instance: string; name: string }
+  | { id: string; method: "cancelSignIn"; instance: string; name: string }
   | { id: string; method: "setTitle"; title: string }
   | { id: string; method: "setActions"; actions: FrameAction[] }
   | { id: string; method: "setViewParams"; params: Record<string, string | null> }
@@ -144,9 +165,29 @@ export function parseFrameMessage(data: unknown): FrameMessage | null {
       if (typeof m.sql !== "string" || !Array.isArray(params) || !params.every(isCell)) return null;
       return { type: "request", request: { id: m.id, method: "querySql", sql: m.sql, params: params as SqlCell[] } };
     }
-    case "openForm":
+    case "openForm": {
+      if (m.form !== undefined) {
+        const f = m.form as Record<string, unknown> | null;
+        if (!f || typeof f !== "object" || Array.isArray(f)) return null;
+        const values = f.values ?? {};
+        if (typeof f.title !== "string" || !f.schema || typeof f.schema !== "object" || Array.isArray(f.schema)) return null;
+        if (!values || typeof values !== "object" || Array.isArray(values)) return null;
+        return {
+          type: "request",
+          request: {
+            id: m.id,
+            method: "openForm",
+            form: { title: f.title, schema: f.schema as Record<string, unknown>, values: values as Record<string, unknown> },
+          },
+        };
+      }
       if (typeof m.command !== "string") return null;
       return { type: "request", request: { id: m.id, method: "openForm", command: m.command, input: m.input ?? {} } };
+    }
+    case "signIn":
+    case "cancelSignIn":
+      if (typeof m.instance !== "string" || !m.instance || typeof m.name !== "string" || !m.name) return null;
+      return { type: "request", request: { id: m.id, method: m.method, instance: m.instance, name: m.name } };
     case "setTitle":
       if (typeof m.title !== "string") return null;
       return { type: "request", request: { id: m.id, method: "setTitle", title: m.title } };
@@ -252,6 +293,17 @@ export interface BridgeDeps {
   /** Show a declared command's form in the host and run it as submitted:
    *  `{ result }`, or null when the person closed it. A page only. */
   openForm?(command: string, input: unknown): Promise<{ result: unknown } | null>;
+  /** Show a form of the component's own in the host: the values as
+   *  submitted, or null when the person closed it. A page only. */
+  askForm?(form: OwnForm): Promise<Record<string, unknown> | null>;
+  /** Sign in for a provider instance's credential, the host running the
+   *  whole redirect flow (the person's browser, the shell's listener, the
+   *  core); resolves how it ended. A page only. */
+  signIn?(instance: string, name: string): Promise<SignInResult>;
+  /** End that sign-in under way (it resolves `cancelled`). A page only. */
+  cancelSignIn?(instance: string, name: string): Promise<void>;
+  /** The bridge closed: the host ends what it ran for the frame. */
+  onClose?(): void;
   /** The page's title, in the tab and the nav bar. A page only. */
   setTitle?(title: string): void;
   /** The page's actions, drawn by core in the nav bar. A page only. */
@@ -293,7 +345,7 @@ export function componentMayOpen(ref: string): boolean {
 const shown = (run: LensRun | null) => (run ? JSON.stringify([run.params, run.result]) : "");
 
 /** What a component shown by a lens may not do: the page is its host's. */
-const PAGE_ONLY = "Only a component shown as a page sets its title, actions, forms or the spec it shows.";
+const PAGE_ONLY = "Only a component shown as a page sets its title, actions, forms or the spec it shows, or signs in.";
 /** What a component in a host with no view may not do. */
 const NO_VIEW = "This host gives the component no view: only a page, a replacement or a lens's own page does.";
 
@@ -367,6 +419,17 @@ export function createBridgeHost(
         }
         return;
       case "openForm": {
+        if ("form" in r) {
+          if (!deps.askForm) return fail(r.id, "INVALID", PAGE_ONLY);
+          try {
+            const values = await deps.askForm(r.form);
+            if (values === null) return fail(r.id, "CANCELLED", "The person closed the form.");
+            reply(r.id, values);
+          } catch (e) {
+            failWith(r.id, e);
+          }
+          return;
+        }
         if (!deps.openForm) return fail(r.id, "INVALID", PAGE_ONLY);
         try {
           const out = await deps.openForm(r.command, r.input);
@@ -377,6 +440,23 @@ export function createBridgeHost(
         }
         return;
       }
+      case "signIn":
+        if (!deps.signIn) return fail(r.id, "INVALID", PAGE_ONLY);
+        try {
+          reply(r.id, await deps.signIn(r.instance, r.name));
+        } catch (e) {
+          failWith(r.id, e);
+        }
+        return;
+      case "cancelSignIn":
+        if (!deps.cancelSignIn) return fail(r.id, "INVALID", PAGE_ONLY);
+        try {
+          await deps.cancelSignIn(r.instance, r.name);
+          reply(r.id, null);
+        } catch (e) {
+          failWith(r.id, e);
+        }
+        return;
       case "setTitle":
         if (!deps.setTitle) return fail(r.id, "INVALID", PAGE_ONLY);
         deps.setTitle(r.title);
@@ -462,6 +542,9 @@ export function createBridgeHost(
       port.postMessage({ type: "historyState", state });
     },
     action: (id) => port.postMessage({ type: "action", id }),
-    close: () => port.close(),
+    close: () => {
+      port.close();
+      deps.onClose?.();
+    },
   };
 }

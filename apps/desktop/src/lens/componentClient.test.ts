@@ -359,3 +359,42 @@ test("showSpec resolves once the host drew it, and rejects with the host's refus
   });
   h.close();
 });
+
+// Protocol 11: a page asks the host to sign in, and opens a form of its own.
+test("signIn and cancelSignIn reach the host, which says how it ended; openForm({ schema }) answers the submitted values", async () => {
+  const asked: unknown[] = [];
+  const h = harness({
+    signIn: async (instance, name) => {
+      asked.push(["signIn", instance, name]);
+      return { state: "signed_in" };
+    },
+    cancelSignIn: async (instance, name) => void asked.push(["cancelSignIn", instance, name]),
+    askForm: async (form) => {
+      asked.push(["form", form]);
+      return { team: "core" };
+    },
+  });
+  const connecting = connect({ target: h.frame });
+  h.init();
+  const c = await connecting;
+  expect(await c.signIn("t/x", "TOKEN")).toEqual({ state: "signed_in" });
+  expect(await c.cancelSignIn("t/x", "TOKEN")).toBeNull();
+  const schema = { type: "object", properties: { team: { type: "string" } } };
+  expect(await c.openForm({ title: "Configure", schema, values: { team: "" } })).toEqual({ team: "core" });
+  expect(asked).toEqual([
+    ["signIn", "t/x", "TOKEN"],
+    ["cancelSignIn", "t/x", "TOKEN"],
+    ["form", { title: "Configure", schema, values: { team: "" } }],
+  ]);
+  h.close();
+});
+
+test("a form the person closes rejects CANCELLED", async () => {
+  const h = harness({ askForm: async () => null });
+  const connecting = connect({ target: h.frame });
+  h.init();
+  const c = await connecting;
+  const closed = await c.openForm({ title: "T", schema: { type: "object" } }).catch((e: unknown) => e);
+  expect(closed).toMatchObject({ code: "CANCELLED" });
+  h.close();
+});

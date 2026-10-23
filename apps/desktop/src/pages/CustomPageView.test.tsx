@@ -176,6 +176,27 @@ test("a frame's showSpec is drawn under it; a refused one answers INVALID with i
   await waitFor(() => expect(view.queryByTestId("custom-page-spec")).toBeNull());
 });
 
+// Protocol 11: a form of the frame's own schema. The host draws it; the
+// frame is answered the values submitted, or CANCELLED when it is closed.
+test("a frame's own form is drawn by the host and answers the submitted values, or CANCELLED", async () => {
+  const { view } = setup();
+  const { port, received } = await startFrame(view);
+  const schema = { type: "object", properties: { team: { type: "string", title: "Team" } }, required: ["team"] };
+  port.postMessage({ id: "1", method: "openForm", form: { title: "Configure", schema, values: { team: "core" } } });
+  const input = (await view.findByTestId("custom-page-own-form-fields-team")) as HTMLInputElement;
+  expect(input.value).toBe("core");
+  fireEvent.change(input, { target: { value: "ops" } });
+  fireEvent.click(view.getByTestId("custom-page-own-form-fields-submit"));
+  await waitFor(() => expect(received).toContainEqual({ id: "1", ok: true, result: { team: "ops" } }));
+  await waitFor(() => expect(view.queryByTestId("custom-page-own-form")).toBeNull());
+  port.postMessage({ id: "2", method: "openForm", form: { title: "Configure", schema, values: {} } });
+  await view.findByTestId("custom-page-own-form");
+  fireEvent.keyDown(document.body, { key: "Escape" });
+  await waitFor(() =>
+    expect(received).toContainEqual({ id: "2", ok: false, error: { code: "CANCELLED", message: "The person closed the form." } }),
+  );
+});
+
 test("with a spec shown, the frame sits at the height its content says", async () => {
   const { view } = setup();
   const { port } = await startFrame(view);

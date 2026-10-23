@@ -45,6 +45,9 @@ export interface OxplowSpec {
 }
 
 /** An action drawn in the page's bar. */
+/** How a sign-in the host ran ended. */
+export type OxplowSignInResult = { state: "signed_in" } | { state: "failed"; error: string } | { state: "cancelled" };
+
 export interface OxplowAction {
   id: string;
   label: string;
@@ -84,6 +87,21 @@ export interface OxplowComponent {
    *  starting from `input`: resolves with its result once submitted,
    *  rejects `CANCELLED` when the person closes it. A page only. */
   openForm(command: string, input?: unknown): Promise<unknown>;
+  /** Open a form of the component's own: `schema` is a JSON Schema for its
+   *  fields (a `writeOnly` string is masked), starting from `values`.
+   *  Resolves with the values submitted, running nothing; rejects
+   *  `CANCELLED` when the person closes it. A page only. */
+  openForm(form: { title: string; schema: Record<string, unknown>; values?: Record<string, unknown> }): Promise<Record<string, unknown>>;
+  /** Sign in for a provider instance's credential (one its provider
+   *  declares with `oauth:`). oxplow opens the service's page in the
+   *  person's browser, listens for the redirect on their machine and
+   *  finishes the sign-in, then resolves how it ended. The component
+   *  declares `oxplow.provider.begin_sign_in`, `complete_sign_in` and
+   *  `cancel_sign_in` in `commands`. Rejects `INVALID` without the
+   *  desktop app. A page only. */
+  signIn(instance: string, name: string): Promise<OxplowSignInResult>;
+  /** End that sign-in under way: its {@link signIn} resolves `cancelled`. A page only. */
+  cancelSignIn(instance: string, name: string): Promise<null>;
   /** The page's title, in its tab and bar. A page only. */
   setTitle(title: string): Promise<null>;
   /** Have oxplow draw a lens spec under the page with its own components,

@@ -6,11 +6,26 @@
 import type { CSSProperties, MutableRefObject } from "react";
 import { useEffect, useRef, useState } from "react";
 
-import { invokeComponentCommand, loadComponent, recordUsage, runComponentQuery, runComponentSql, subscribeOxplowEvents } from "../api.js";
+import {
+  answerSignInRedirect,
+  awaitSignInRedirect,
+  canCatchSignInRedirect,
+  invokeComponentCommand,
+  listenForSignInRedirect,
+  loadComponent,
+  openInSystemBrowser,
+  querySql,
+  recordUsage,
+  runComponentQuery,
+  runComponentSql,
+  stopSignInRedirect,
+  subscribeOxplowEvents,
+} from "../api.js";
 import { CommandConfirm } from "../components/CommandConfirm.js";
 import { openRefInWindow } from "../tabs/openRef.js";
 import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
-import type { LensRun, LensSpec } from "../tauri-bridge/generated/bindings.js";
+import type { LensRun, LensSpec, SignInCompletion } from "../tauri-bridge/generated/bindings.js";
+import { createSignInHost } from "./hostSignIn.js";
 import { lensDefinitionChanged } from "./lensRerun.js";
 import {
   componentMayOpen,
@@ -20,6 +35,7 @@ import {
   tokensFromStyle,
   componentBundleUrl,
   type FrameAction,
+  type OwnForm,
   type PageInit,
   type ShownRows,
 } from "./componentBridge.js";
@@ -33,6 +49,8 @@ export interface PageDeps {
   setTitle(title: string): void;
   setActions(actions: FrameAction[]): void;
   openForm(command: string, input: unknown, version: string): Promise<{ result: unknown } | null>;
+  /** Show a form of the frame's own and answer the values submitted. */
+  askForm(form: OwnForm): Promise<Record<string, unknown> | null>;
   /** Run and draw a lens spec under the frame (null clears it). */
   showSpec(spec: LensSpec | null): Promise<ShownRows | null>;
   /** The frame's content height, as it changes. */
@@ -193,6 +211,34 @@ export function ComponentFrame({
     const initial = runRef.current;
     const hosted = viewRef.current;
     const sentView = hosted ? { viewParams: hosted.viewParams, historyState: hosted.historyState } : null;
+    // Signing in is the host's to run (the browser, the shell's listener):
+    // the frame asks and is told how it ended. Each step is a command the
+    // component declares, run as it is.
+    const signIns = createSignInHost({
+        canCatch: canCatchSignInRedirect,
+        redirectPort: async (instance, name) => {
+          const out = await querySql(
+            "SELECT redirect_port FROM v_provider_credential WHERE instance = ?1 AND name = ?2",
+            [instance, name],
+          );
+          const port = out.rows[0]?.[0];
+          return typeof port === "number" ? port : null;
+        },
+        listen: listenForSignInRedirect,
+        awaitRedirect: awaitSignInRedirect,
+        answer: answerSignInRedirect,
+        stop: stopSignInRedirect,
+        openBrowser: openInSystemBrowser,
+        begin: async (instance, name, port) =>
+          (await invokeComponentCommand(component, "oxplow.provider.begin_sign_in", { instance, name, redirect_port: port }, false, version))
+            .result as { url: string; signIn: number },
+        complete: async (instance, name, redirect) =>
+          (await invokeComponentCommand(component, "oxplow.provider.complete_sign_in", { instance, name, redirect }, false, version))
+            .result as SignInCompletion,
+        cancel: async (instance, name, signIn) => {
+          await invokeComponentCommand(component, "oxplow.provider.cancel_sign_in", { instance, name, sign_in: signIn }, false, version);
+        },
+    });
     hostRef.current = createBridgeHost(
       channel.port1,
       {
@@ -229,6 +275,10 @@ export function ComponentFrame({
               setActions: (a: FrameAction[]) => pageDepsRef.current?.setActions(a),
               openForm: (command: string, input: unknown) =>
                 pageDepsRef.current ? pageDepsRef.current.openForm(command, input, version) : Promise.resolve(null),
+              askForm: (form: OwnForm) => pageDepsRef.current?.askForm(form) ?? Promise.resolve(null),
+              signIn: (instance: string, name: string) => signIns.signIn(instance, name),
+              cancelSignIn: (instance: string, name: string) => signIns.cancel(instance, name),
+              onClose: () => void signIns.closeAll(),
               showSpec: (spec: LensSpec | null) => pageDepsRef.current?.showSpec(spec) ?? Promise.resolve(null),
               size: (h: number) => pageDepsRef.current?.size(h),
             }

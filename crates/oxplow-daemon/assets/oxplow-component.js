@@ -21,7 +21,8 @@
 // its params, stream and thread, and it reads with `querySql` (when it
 // declares `sql: read`), titles its page with `setTitle`, puts actions in
 // the page's bar with `setActions` and hears them with `onAction`, and
-// opens a command's form in oxplow with `openForm`. A page may also hand
+// opens a command's form, or a form of its own schema, in oxplow with
+// `openForm`, and signs in for a provider's credential with `signIn`. A page may also hand
 // oxplow a lens spec to draw under it with the kit (`showSpec`): oxplow
 // runs it, keeps it live and offers Save as Lens and Pin to Dashboard; the
 // library tells oxplow the page's content height, so the frame sits at
@@ -51,7 +52,7 @@
   "use strict";
 
   // The protocol this library speaks; `init` says which one the host does.
-  const PROTOCOL = 10;
+  const PROTOCOL = 11;
 
   function component(port, init) {
     let next = 0;
@@ -169,8 +170,26 @@
       querySql: (sql, params) => call({ method: "querySql", sql, params: params || [] }),
       // Open a declared command's form in oxplow, starting from `input`;
       // resolves with its result once submitted, rejects `CANCELLED` when
-      // the person closes it. A page only.
-      openForm: (command, input) => call({ method: "openForm", command, input: input === undefined ? {} : input }),
+      // the person closes it. Or a form of the component's own —
+      // `openForm({ title, schema, values? })`, `schema` a JSON Schema for
+      // its fields (a `writeOnly` string is masked) — which resolves with
+      // the values submitted and runs nothing: the component then invokes
+      // what it will with them. A page only.
+      openForm: (command, input) =>
+        command !== null && typeof command === "object"
+          ? call({ method: "openForm", form: { title: command.title, schema: command.schema, values: command.values || {} } })
+          : call({ method: "openForm", command, input: input === undefined ? {} : input }),
+      // Sign in for a provider instance's credential (one its provider
+      // declares with `oauth:`): oxplow opens the service's page in the
+      // person's browser, listens for the redirect on their machine and
+      // finishes the sign-in, then resolves how it ended — `{ state:
+      // "signed_in" }`, `{ state: "failed", error }` or `{ state:
+      // "cancelled" }`. The component declares `oxplow.provider.begin_sign_in`,
+      // `complete_sign_in` and `cancel_sign_in` in `commands`. Rejects `INVALID`
+      // without the desktop app. A page only.
+      signIn: (instance, name) => call({ method: "signIn", instance, name }),
+      // End that sign-in under way: its `signIn` resolves `cancelled`.
+      cancelSignIn: (instance, name) => call({ method: "cancelSignIn", instance, name }),
       // The page's title. A page only.
       setTitle: (title) => call({ method: "setTitle", title }),
       // Have oxplow draw a lens spec under the page — `{ title, query, viz,

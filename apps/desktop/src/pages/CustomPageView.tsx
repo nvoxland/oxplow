@@ -23,8 +23,10 @@ import { EmptyState } from "../components/Prompts/EmptyState.js";
 import { recordOpError } from "../opErrors.js";
 import type { PageAction } from "../kit/actions.js";
 import { ComponentFrame, CustomBadge, noteStyle, useComponentBundle, type BridgeHost } from "../lens/ComponentFrame.js";
-import type { FrameAction, PageInit } from "../lens/componentBridge.js";
+import type { FrameAction, OwnForm, PageInit } from "../lens/componentBridge.js";
 import { FormSlideover } from "../lens/LensResultView.js";
+import { SchemaForm } from "../components/SchemaForm/SchemaForm.js";
+import { Slideover } from "../components/Slideover.js";
 import { useFormSubmit } from "../lens/useFormSubmit.js";
 import { useHostedView } from "../lens/hostedView.js";
 import { Page } from "../tabs/Page.js";
@@ -66,6 +68,8 @@ export function CustomPageView({
   const [frameTitle, setFrameTitle] = useState<string | null>(null);
   const [frameActions, setFrameActions] = useState<FrameAction[]>([]);
   const [asked, setAsked] = useState<AskedForm | null>(null);
+  // A form of the frame's own schema, shown while it waits for its values.
+  const [ownAsked, setOwnAsked] = useState<{ form: OwnForm; resolve(values: Record<string, unknown> | null): void } | null>(null);
   const hostRef = useRef<BridgeHost | null>(null);
   // Why the frame at `src` was given up on; a new `src` starts afresh.
   const [failed, setFailed] = useState<{ src: string; reason: string } | null>(null);
@@ -103,6 +107,14 @@ export function CustomPageView({
       openForm: (command: string, input: unknown, version: string) =>
         new Promise<{ result: unknown } | null>((resolve, reject) => {
           setAsked({ command, input, version, resolve, reject });
+        }),
+      // A newer form closes the one open: that one's frame hears none.
+      askForm: (form: OwnForm) =>
+        new Promise<Record<string, unknown> | null>((resolve) => {
+          setOwnAsked((open) => {
+            open?.resolve(null);
+            return { form, resolve };
+          });
         }),
       // A refused spec rejects with its code and field: the frame shows it.
       showSpec: async (spec: LensSpec | null) => {
@@ -176,6 +188,28 @@ export function CustomPageView({
   return (
     <Page testId="page-custom" kind="page" width="full" actions={actions} rightRail={rail} rightRailTitle={railLens.lens?.title} fill={rail !== undefined}>
       {body}
+      {ownAsked ? (
+        <Slideover
+          open
+          onClose={() => {
+            ownAsked.resolve(null);
+            setOwnAsked(null);
+          }}
+          title={ownAsked.form.title}
+          testId="custom-page-own-form"
+        >
+          <SchemaForm
+            schema={ownAsked.form.schema}
+            initial={ownAsked.form.values}
+            submitLabel="Submit"
+            onSubmit={(values) => {
+              ownAsked.resolve(values);
+              setOwnAsked(null);
+            }}
+            testIdPrefix="custom-page-own-form-fields"
+          />
+        </Slideover>
+      ) : null}
       {asked && componentKey ? (
         <PageForm
           componentKey={componentKey}

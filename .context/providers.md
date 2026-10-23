@@ -843,6 +843,7 @@ form; sign-in is a provider's.
   all is the same state with "isn't signed in". A token endpoint that
   can't be reached is an ordinary failed start (backoff), and a token
   that's still good is used as it is.
+- **A component page signs in through the bridge** (`signIn`, protocol 11): the host runs the flow below (`lens/hostSignIn.ts`, each step a command the component declares) and answers how it ended; the frame never touches the shell or the browser.
 - **Signing in** is a person's: command `oxplow.provider.begin_sign_in { instance,
   name, redirect_port }` (`ProviderRegistry::begin_sign_in`, `credentials.write`)
   returns the page to open — **only for a provider as its deployment declares it**: the
