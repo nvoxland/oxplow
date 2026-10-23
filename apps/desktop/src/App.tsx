@@ -13,11 +13,8 @@ import {
   startAgentSession,
   stopAgentSession,
   getThreadState,
-  createWorkspaceDirectory,
   type AgentStatus,
   type AgentStatusEntry,
-  createWorkspaceFile,
-  deleteWorkspacePath,
   getCurrentStream,
   getWorkspaceContext,
   type GitOpKickoff,
@@ -25,11 +22,9 @@ import {
   listStreams,
   probeDaemon,
   readWorkspaceFile,
-  renameWorkspacePath,
   renameThread,
   renameStream,
   subscribeWorkspaceEvents,
-  setGenerated,
   selectThread,
   recordUsage,
   switchStream,
@@ -108,7 +103,7 @@ import { PanelRunsProvider } from "./components/Panels/PanelRunsContext.js";
 import { useAlerts } from "./components/Alerts/useAlerts.js";
 import { useAlertToasts } from "./components/Alerts/useAlertToasts.js";
 import { DomCommentLayer } from "./components/Comments/DomCommentLayer.js";
-import { agentSessionRef, diskFilePath, fileOf, lensRef, refFromTabId, directoryRef, externalUrlRef, fileRef, gitCommitRef, pageTabRef, pagePayload, recordedPageKind, isPage, diffRef, newSessionRef, newStreamRef, alertsRef, wikiPageRef, streamSettingsRef, threadSettingsRef, viewParamsOf, withViewParams, lineOf, fileRefAt, resourceParamsOf, type PagePayload } from "./tabs/pageRefs.js";
+import { agentSessionRef, diskFilePath, fileOf, lensRef, refFromTabId, directoryRef, externalUrlRef, fileRef, gitCommitRef, pagePayload, recordedPageKind, isPage, diffRef, newSessionRef, newStreamRef, alertsRef, wikiPageRef, streamSettingsRef, threadSettingsRef, viewParamsOf, withViewParams, lineOf, fileRefAt, resourceParamsOf, type PagePayload } from "./tabs/pageRefs.js";
 import { requestNewThread } from "./new-thread-bus.js";
 import { recordOpError, setOpErrorContext } from "./opErrors.js";
 import { classifyExternalUrl } from "./external-url-allowlist.js";
@@ -148,12 +143,12 @@ import {
   readPersistedFileSessionPaths,
   writePersistedFileSessionPaths,
 } from "./tabs/fileSessionPersistence.js";
-import { generatedPaths, recordPageVisit, reportTabs, resolveSymbol } from "./api.js";
 import { openProject, createProject, listRecentProjects, shellAvailable } from "./api.js";
 import { onRemoteReconnect, triggerRemoteResync } from "./api.js";
 import type { CommandOutcome, ExtensionPage, RecentProjectView } from "./tauri-bridge/generated/bindings.js";
 import { pickFolder } from "./tauri-bridge/nativeDialog.js";
 import { WORKING } from "./revision.js";
+import { recordPageVisit, reportTabs, resolveSymbol } from "./api.js";
 import { advanceDaemonProbeState, INITIAL_DAEMON_PROBE_STATE } from "./daemon-recovery.js";
 import { offerForShortcut } from "./keybindings.js";
 import { commandOffers, type OfferDeps } from "./commandOffers.js";
@@ -287,14 +282,10 @@ export function App() {
   const restoredStreamsRef = useRef<Set<string>>(new Set());
   const [workspaceContext, setWorkspaceContext] = useState<WorkspaceContext>({ vcsEnabled: false });
   const [quickOpenVisible, setQuickOpenVisible] = useState(false);
+  const [quickOpenQuery, setQuickOpenQuery] = useState("");
   const [editorFindRequest, setEditorFindRequest] = useState(0);
   const [editorNavigationTarget, setEditorNavigationTarget] = useState<EditorNavigationTarget | null>(null);
   const [externalFilePrompt, setExternalFilePrompt] = useState<{ path: string; content: string } | null>(null);
-  const [commitFilesRequest, setCommitFilesRequest] = useState(0);
-  const [generated, setGeneratedState] = useState<{ exclude: string[]; include: string[] }>({
-    exclude: [],
-    include: [],
-  });
   const daemonDownLogged = useRef(false);
   const daemonProbeState = useRef(INITIAL_DAEMON_PROBE_STATE);
   // macOS uses the native top-of-screen menu bar (driven by the
@@ -681,34 +672,6 @@ export function App() {
     setEditorNavigationTarget((current) => (current?.path === path ? null : current));
   }
 
-  async function handleCreateFile(path: string) {
-    if (!stream) return;
-    const created = await createWorkspaceFile(stream.id, path, "");
-    setError(null);
-    await handleOpenFile(created.path);
-  }
-
-  async function handleCreateDirectory(path: string) {
-    if (!stream) return;
-    await createWorkspaceDirectory(stream.id, path);
-    setError(null);
-  }
-
-  async function handleRenamePath(fromPath: string, toPath: string) {
-    if (!stream) return;
-    // The open buffers follow from the `file.renamed` event it logs
-    // (`useFileEvents`), whoever renamed.
-    await renameWorkspacePath(stream.id, fromPath, toPath);
-    setError(null);
-  }
-
-  async function handleDeletePath(path: string) {
-    if (!stream) return;
-    // The open buffers close from the `file.deleted` event it logs.
-    await deleteWorkspacePath(stream.id, path);
-    setError(null);
-  }
-
   // Open buffers follow the worktree's renames and deletes, whoever made them.
   useFileEvents(stream?.id ?? null, (streamId, event) => {
     if (event.kind === "renamed") {
@@ -927,22 +890,7 @@ export function App() {
     setStreams,
     setStream,
     setSessionStatuses,
-    setGeneratedState,
   });
-
-  const handleToggleGenerated = async (entry: string, mark: boolean) => {
-    // The "mark as generated" toggle edits the `exclude` list (extra
-    // ignores beyond .gitignore); `include` is left untouched.
-    const exclude = mark
-      ? Array.from(new Set([...generated.exclude, entry])).sort()
-      : generated.exclude.filter((e) => e !== entry);
-    try {
-      const cfg = await setGenerated({ exclude, include: generated.include });
-      setGeneratedState(generatedPaths(cfg));
-    } catch (err) {
-      setError(`Failed to update generated paths: ${String(err)}`);
-    }
-  };
 
   useEffect(() => {
     if (!stream || !selectedFilePath) return;
@@ -1049,11 +997,6 @@ export function App() {
       case "new-thread":
         // The Navigator owns thread creation (inline title + agent picker).
         if (stream) requestNewThread(stream.id);
-        return;
-      case "commit":
-        if (!stream || !workspaceContext.vcsEnabled) return;
-        handleOpenPageRef.current?.(pageTabRef("files"));
-        setCommitFilesRequest((n) => n + 1);
         return;
       default:
         recordOpError({ label: "Open form", message: `the window has no form \`${name}\`` });
@@ -1748,8 +1691,10 @@ export function App() {
           setEditorFindRequest((current) => current + 1);
           return null;
         },
-        quick_open: () => {
+        quick_open: (input) => {
           if (!stream) throw new Error("no stream is shown");
+          const query = (input as { query?: unknown } | null)?.query;
+          setQuickOpenQuery(typeof query === "string" ? query : "");
           setQuickOpenVisible(true);
           return null;
         },
@@ -1917,19 +1862,12 @@ export function App() {
       setCenterActive,
       vcsEnabled: workspaceContext.vcsEnabled,
       selectedFilePath,
-      generatedExclude: generated.exclude,
-      commitFilesRequest,
       handleOpenPage,
       handleNavigateInTab,
       closePageTab,
       handleOpenFile,
       handleNavigateToLocation,
       handleStreamCreated,
-      handleCreateFile,
-      handleCreateDirectory,
-      handleRenamePath,
-      handleDeletePath,
-      handleToggleGenerated,
     };
     // The built-in renderers whose bodies draw on the window's own state;
     // the rest are `builtInPages`. Each reads what it shows from its URI.
@@ -2298,8 +2236,6 @@ export function App() {
     bookmarks,
     workspaceContext.vcsEnabled,
     selectedFilePath,
-    generated,
-    commitFilesRequest,
     centerActive,
     extensions,
   ]);
@@ -2504,6 +2440,7 @@ export function App() {
       </div>
       <QuickOpenOverlay
         open={quickOpenVisible}
+        initialQuery={quickOpenQuery}
         stream={stream}
         threadId={selectedThreadId}
         selectedFilePath={selectedFilePath}

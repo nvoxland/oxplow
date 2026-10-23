@@ -17,15 +17,6 @@ pub async fn vcs_blame(
     Ok(reads::blame(svc, stream_id.as_deref(), &path, &revision).await?)
 }
 
-pub async fn vcs_merge_base(
-    svc: &Services,
-    stream_id: Option<String>,
-    a: Revision,
-    b: Revision,
-) -> Result<Option<Revision>, IpcError> {
-    Ok(reads::merge_base(svc, stream_id.as_deref(), &a, &b).await?)
-}
-
 pub async fn vcs_log(
     svc: &Services,
     stream_id: Option<String>,
@@ -45,15 +36,6 @@ pub async fn vcs_branches(
     stream_id: Option<String>,
 ) -> Result<Vec<Branch>, IpcError> {
     Ok(reads::branches(svc, stream_id.as_deref()).await?)
-}
-
-pub async fn vcs_file_history(
-    svc: &Services,
-    stream_id: Option<String>,
-    path: String,
-    limit: u32,
-) -> Result<Vec<RevisionInfo>, IpcError> {
-    Ok(reads::file_history(svc, stream_id.as_deref(), &path, limit).await?)
 }
 
 #[cfg(test)]
@@ -87,12 +69,6 @@ mod tests {
         )
         .await;
         assert_eq!(blame[0]["revision"], json!(sha));
-        let base = call(
-            "vcs_merge_base",
-            json!({ "streamId": null, "a": "git:HEAD", "b": format!("git:{sha}") }),
-        )
-        .await;
-        assert_eq!(base, json!(format!("git:{sha}")));
         let log = call(
             "vcs_log",
             json!({ "streamId": null, "limit": 5, "all": false }),
@@ -108,11 +84,5 @@ mod tests {
                 .any(|b| b["is_default"] == json!(true)),
             "{branches}"
         );
-        let history = call(
-            "vcs_file_history",
-            json!({ "streamId": null, "path": "a.txt", "limit": 10 }),
-        )
-        .await;
-        assert_eq!(history[0]["id"], json!(sha));
     }
 }

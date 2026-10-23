@@ -703,8 +703,7 @@ destination's id), and the nav bar's Up/Down and "N of M" read it back
 through `PageNavigation.origin` and `stepOrigin(index)` (the nav bar's
 test ids stay `page-nav-sibling-*`). A diff item's ref is `diffRef(spec)`,
 which carries its spec. New-tab paths drop it. Back/Forward restore each
-entry's own origin. Adopted lists: `BacklinksList`, `FileTree` (file rows
-of one directory), `CommitList` / `CommitGraphTable`
+entry's own origin. Adopted lists: `BacklinksList`, `CommitList` / `CommitGraphTable`
 (`CommitRowDispatcher`), and every lens table or list's link column (`lens/linkOrigin.ts`: the
 column's pages, in row order). `WorkGroupList` rows open an edit
 modal, not a page, so they don't adopt.
@@ -833,8 +832,6 @@ keeps its "always-new-tab" behavior outside a page.
 
 Reference implementations:
 
-- `apps/desktop/src/components/LeftPanel/FileTree.tsx` — tree row dispatches
-  via `useRouteDispatch(fileRef(path), { onNavigate: (_, opts) => onOpenFile(path, opts) })`.
 - `apps/desktop/src/components/Notes/NotesPane.tsx` — `NoteRow` and `SearchRow`
   use the hook with `wikiPageRef(slug)` and a `() => onOpenNote(slug)`
   fallback.

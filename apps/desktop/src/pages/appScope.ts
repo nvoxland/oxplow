@@ -40,10 +40,6 @@ export interface AppScope {
   vcsEnabled: boolean;
   /** The file selected in the current session. */
   selectedFilePath: string | null;
-  /** Paths the Files page marks as generated. */
-  generatedExclude: string[];
-  /** Counter that asks the Files page to open its commit flow. */
-  commitFilesRequest: number;
   /** Opens a page in a new tab. */
   handleOpenPage: (ref: TabRef) => void;
   /** Navigates the slot with this tab id to `ref`. */
@@ -52,9 +48,4 @@ export interface AppScope {
   handleOpenFile: (path: string) => Promise<void>;
   handleNavigateToLocation: (target: EditorNavigationTarget) => Promise<void>;
   handleStreamCreated: (next: Stream) => Promise<void>;
-  handleCreateFile: (path: string) => Promise<void>;
-  handleCreateDirectory: (path: string) => Promise<void>;
-  handleRenamePath: (fromPath: string, toPath: string) => Promise<void>;
-  handleDeletePath: (path: string) => Promise<void>;
-  handleToggleGenerated: (entry: string, mark: boolean) => Promise<void>;
 }

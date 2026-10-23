@@ -471,11 +471,6 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	changedPaths: (streamId: string | null, from: string | null, to: string) => typedError<ChangedPath[], IpcError_Serialize>(__TAURI_INVOKE("changed_paths", { streamId, from, to })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	getSnapshotStats: (snapshotId: SnapshotId) => typedError<SnapshotStats, IpcError_Serialize>(__TAURI_INVOKE("get_snapshot_stats", { snapshotId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -511,16 +506,6 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	searchWorkspaceText: (streamId: string | null, query: string, limit: number | null) => typedError<TextSearchHit[], IpcError_Serialize>(__TAURI_INVOKE("search_workspace_text", { streamId, query, limit })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	gitChangeScopes: (streamId: string | null) => typedError<ChangeScopes, IpcError_Serialize>(__TAURI_INVOKE("git_change_scopes", { streamId })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	ingestHookEvent: (envelope: HookEnvelope) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("ingest_hook_event", { envelope })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -541,11 +526,6 @@ export const commands = {
 	 *  implementation and its docs live on the core.
 	 */
 	getConfig: () => typedError<OxplowConfig, IpcError_Serialize>(__TAURI_INVOKE("get_config")),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	setGenerated: (generated: GeneratedConfig) => typedError<OxplowConfig, IpcError_Serialize>(__TAURI_INVOKE("set_generated", { generated })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -646,22 +626,12 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	vcsMergeBase: (streamId: string | null, a: string, b: string) => typedError<string | null, IpcError_Serialize>(__TAURI_INVOKE("vcs_merge_base", { streamId, a, b })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	vcsLog: (streamId: string | null, limit: number | null, all: boolean) => typedError<RevisionInfo[], IpcError_Serialize>(__TAURI_INVOKE("vcs_log", { streamId, limit, all })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
 	vcsBranches: (streamId: string | null) => typedError<Branch[], IpcError_Serialize>(__TAURI_INVOKE("vcs_branches", { streamId })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	vcsFileHistory: (streamId: string | null, path: string, limit: number) => typedError<RevisionInfo[], IpcError_Serialize>(__TAURI_INVOKE("vcs_file_history", { streamId, path, limit })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -1165,14 +1135,6 @@ export type Branch = {
 	behind: number,
 };
 
-export type BranchChangeEntry = {
-	path: string,
-	original_path: string | null,
-	change: ChangeKind,
-	additions: number,
-	deletions: number,
-};
-
 /**
  *  What a deploy builds before it copies: `run` in the source folder, as
  *  the person, then `output` is copied into the deployment. The hash is of
@@ -1235,8 +1197,6 @@ export type ByteSize = number;
 /**  How one thing differs between the installed version and the candidate. */
 export type Change = "added" | "removed" | "changed" | "unchanged";
 
-export type ChangeKind = "added" | "modified" | "deleted" | "renamed" | "copied" | "untracked";
-
 /**  A change's identity and state. */
 export type ChangeRow = {
 	id: number,
@@ -1262,29 +1222,6 @@ export type ChangeRow = {
 	 *  effort's own files); a rerun from the same needn't recompute.
 	 */
 	analyzedFrom: string | null,
-};
-
-/**
- *  "Where am I?" branch context the UI shows above the diff/log
- *  views, plus the live working-tree changeset split by staging
- *  state so the renderer can show a unified files-changed list
- *  without making a second IPC call.
- */
-export type ChangeScopes = {
-	current_branch: string | null,
-	branch_base: string | null,
-	upstream: string | null,
-	on_default_branch: boolean,
-	/**
-	 *  Files in the index (staged for commit). Empty when nothing is
-	 *  staged.
-	 */
-	staged: BranchChangeEntry[],
-	/**
-	 *  Files modified or untracked in the working tree relative to
-	 *  the index. Empty in a clean tree.
-	 */
-	unstaged: BranchChangeEntry[],
 };
 
 /**
@@ -1317,16 +1254,6 @@ export type ChangeTarget =
  *  stream's).
  */
 { kind: "range"; streamId?: string | null; base?: string | null; head: string };
-
-/**
- *  One path that differs between two revisions, without line counts:
- *  what a changed-paths view needs, found by comparing ids alone.
- */
-export type ChangedPath = {
-	path: string,
-	/**  `added`, `modified` or `deleted`. */
-	status: FileStatus,
-};
 
 /**  What `check` found. */
 export type CheckReport = CheckReport_Serialize | CheckReport_Deserialize;
@@ -3047,9 +2974,6 @@ export type FileSnapshot = {
 
 /**  A `file_snapshot` row: one captured file under a snapshot. */
 export type FileSnapshotId = number;
-
-/**  How a path differs from the head, or how a revision changed it. */
-export type FileStatus = "added" | "modified" | "deleted" | "renamed" | "untracked" | "conflicted";
 
 /**
  *  `files: read | write`: the project's files outside the bus. `write`
@@ -6365,15 +6289,6 @@ export type TestingConfig = {
 	 *  which test command to run, what coverage to meet, and so on.
 	 */
 	agentHint: string | null,
-};
-
-/**  A line of a workspace file that matched a text search. */
-export type TextSearchHit = {
-	path: string,
-	/**  1-based. */
-	line: number,
-	/**  The line, cut at 400 bytes. */
-	snippet: string,
 };
 
 export type Thread = {

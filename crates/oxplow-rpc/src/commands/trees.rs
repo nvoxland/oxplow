@@ -4,7 +4,6 @@
 //! `snap:<id>`, `git:<rev>`). The UI's diff, file and history views read
 //! here; none of them knows where the bytes live.
 
-use oxplow_app::trees::ChangedPath;
 use oxplow_app::Services;
 use oxplow_domain::vcs::Revision;
 
@@ -42,23 +41,6 @@ pub async fn files_at(
         .await
         .into_local_path();
     Ok(svc.trees.files_at(&ws, &revision).await?)
-}
-
-/// Which paths changed from `from` (nothing, when absent) to `to`, and
-/// how — no line counts, so no file is read: what the Project panel's
-/// branch and unpushed scopes filter by.
-pub async fn changed_paths(
-    svc: &Services,
-    stream_id: Option<String>,
-    from: Option<Revision>,
-    to: Revision,
-) -> Result<Vec<ChangedPath>, IpcError> {
-    let ws = svc
-        .worktrees
-        .resolve(stream_id.as_deref())
-        .await
-        .into_local_path();
-    Ok(svc.trees.changes(&ws, from.as_ref(), &to).await?)
 }
 
 /// Where the `symbol:` ref `symbol` points in `stream_id`: the current symbol, or —
@@ -128,12 +110,5 @@ mod tests {
             files.as_array().unwrap().contains(&json!("a.txt")),
             "{files}"
         );
-        let paths = call(
-            "changed_paths",
-            json!({ "streamId": null, "from": format!("git:{sha}"), "to": "working" }),
-        )
-        .await
-        .unwrap();
-        assert_eq!(paths, json!([{ "path": "a.txt", "status": "modified" }]));
     }
 }

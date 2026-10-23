@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { STATUS_COUNTS_SQL, STREAM_HEAD_SQL, statusCountsFromRows, streamHeadFromRows } from "./streamHead.js";
+import { STREAM_HEAD_SQL, streamHeadFromRows } from "./streamHead.js";
 import { gitRevision } from "./revision.js";
 
 test("a stream on a branch has its revision and branch", () => {
@@ -16,18 +16,4 @@ test("a detached stream has a revision and no branch; a new one has neither", ()
 test("it reads the stream model and the branch it has checked out", () => {
   expect(STREAM_HEAD_SQL).toContain("v_stream");
   expect(STREAM_HEAD_SQL).toContain("v_branch");
-});
-
-test("uncommitted files are counted by status, untracked apart from added", () => {
-  const counts = statusCountsFromRows([
-    [1, "added", 0, 2],
-    [1, "added", 1, 3],
-    [1, "modified", 0, 4],
-    [1, "deleted", 0, 1],
-  ]);
-  expect(counts).toEqual({ added: 2, modified: 4, deleted: 1, renamed: 0, untracked: 3, conflicted: 1, total: 10 });
-  // A clean tree answers with one row and no files.
-  expect(statusCountsFromRows([[0, null, null, 0]])).toEqual({ added: 0, modified: 0, deleted: 0, renamed: 0, untracked: 0, conflicted: 0, total: 0 });
-  expect(statusCountsFromRows([])).toEqual({ added: 0, modified: 0, deleted: 0, renamed: 0, untracked: 0, conflicted: 0, total: 0 });
-  expect(STATUS_COUNTS_SQL).toContain("v_change_file");
 });

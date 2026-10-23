@@ -1195,8 +1195,8 @@ the workspace watcher and the snapshot store. No changes to
 existing snapshots on toggle; newly ignored paths simply stop
 appearing in future dirty sets.
 
-Toggling the list at runtime (the UI's generated-paths control →
-`set_generated` IPC) takes effect immediately, no restart: the
+Toggling the list at runtime (the Files page's Mark as Generated →
+`oxplow.file.mark_generated`) takes effect immediately, no restart: the
 command rebuilds the `WorkspaceFilter` and calls
 `SnapshotCaptureRegistry::set_workspace_filter`, which swaps the
 filter on every live per-stream `SnapshotCaptureService` (each holds
@@ -2511,21 +2511,18 @@ A few UI surfaces hold non-persisted state that callers (probes,
 docs, future stores) reference by name. Listed here so renames touch
 the docs in one diff:
 
-- **Files-pane filter mode** — `FilterMode = "all" | "uncommitted" |
-  "branch" | "unpushed"` lives in `ProjectPanel` state and
-  drives the file-tree visibility filter. The eye-icon trigger button
-  is `data-testid="files-filter-toggle"`; each popover option is
-  `data-testid="files-filter-option-<value>"` (e.g.
-  `files-filter-option-uncommitted`). `branch` / `unpushed` auto-
-  fall back to `uncommitted` if the underlying scope disappears (no
-  branch base, no upstream).
+- **Files page scope** — the `scope` filter param of the `files` lens
+  (`all`, `uncommitted`, the default branch's name for the branch's
+  changes, the upstream's name for the unpushed ones), in the tab's
+  address; its choices come from `files-scopes`, which offers only those
+  that exist (no branch scope on the default branch, no unpushed scope
+  without an upstream).
 
 ## Related
 
 - [ipc-and-stores.md](./ipc-and-stores.md) — adding new stores and IPC.
 - [agent-model.md](./agent-model.md) — how the agent acts on this data.
-- [git-integration.md](./git-integration.md) — `gitCommitAll` for the
-  Files-panel commit button (user-driven).
+- [git-integration.md](./git-integration.md) — the commit actions (user-driven).
 
 ## Private extension configuration overrides
 

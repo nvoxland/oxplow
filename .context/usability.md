@@ -679,7 +679,7 @@ declaring *what it is* and mounting the generic layer.
   without re-enabling selection on the whole row.
 - **Draggable rows can't be drag-selected** (a mousedown starts the
   drag), so a floating toolbar never appears on them. For those — task
-  rows (`TaskGroupList`) and file-tree rows (`LeftPanel/FileTree`) — add a
+  rows (`TaskGroupList`) — add a
   **"Comment…" item to the row's existing right-click menu** instead. Its
   handler calls `composeForElement(el, label, rect)` (in
   `useDomAnnotations.ts`) to build a `PendingComment` anchored to the
@@ -821,8 +821,6 @@ declaring *what it is* and mounting the generic layer.
   would need to drive:** tabs, primary action buttons, form inputs,
   list items, dock panels. Existing conventions:
   - `dock-tab-<id>` / `dock-panel-<id>` on DockShell rail + content
-  - `file-tree-entry-<path>` on FileTree nodes (plus `data-kind` and,
-    for dirs, `data-expanded`)
   - `monaco-host` on the editor container, `data-file-path=<path>`
   - `plan-new-task`, `task-title`, `task-priority`,
     `task-description`, `task-acceptance`, `task-save`,

@@ -152,12 +152,10 @@ first (`resolve_for_compare`); a mixed pair normalizes the snapshot side
 into VCS ids.
 
 The neutral RPCs are `read_at { streamId, path, revision }`, `files_at`,
-`diff { streamId, from, to }` and `changed_paths` (same arguments, UI
-only), and, for an agent, MCP `read` of `oxplow:oxplow/file?path=<path>&rev=<revision>`. A view that doesn't show line counts calls
-`changed_paths`. The daemon finishes every request it gets (dropping a
+`diff { streamId, from, to }` (UI only), and, for an agent, MCP `read` of `oxplow:oxplow/file?path=<path>&rev=<revision>`. The daemon finishes every request it gets (dropping a
 result in the UI doesn't cancel the work), so a view that refreshes on
-workspace events routes those refreshes through `coalescedRefresh`
-(debounced, single-flight) rather than starting a diff per event. The MCP VCS
+workspace events should not start a diff per event (a lens re-runs once per
+change). The MCP VCS
 reads (`oxplow_diff`, `oxplow_vcs_blame` and `oxplow_read` of a file at a revision) default
 a missing `stream_id` to the caller's own stream — its header, else its
 thread's — and to the primary only for an anonymous caller (tsk555; the
@@ -197,9 +195,8 @@ replaced `get_repo_conflict_state`,
 `get_workspace_status_summary`, `git_blame`, `local_blame`,
 `get_commit_detail` and `get_branch_changes`; MCP `git_diff` became
 `diff { from?, to, since_fork }`. On the desktop: the changed-files lists
-diff `head → working` (`streamHead` + `diffRevisions`), the Project panel's
-branch and unpushed scopes take `changedPaths` from `vcsMergeBase`,
-rerunning when the set of uncommitted paths or the refs move, the rail's counts and conflicts come from
+diff `head → working` (`streamHead` + `diffRevisions`), the Files page's branch and unpushed scopes read the `v_change` of kind range
+from the merge base (`v_branch_divergence.merge_base`) to the working tree, the rail's counts and conflicts come from
 `vcsStatus` (`countStatus`), the commit page and dashboard stats from
 `vcsRevision`, and the blame overlay from `vcsBlame(…, WORKING)`.
 The page smoke tests render the commit page
@@ -235,7 +232,7 @@ rename in between stays; tsk573). A `v_branch.name` is the branch's local name f
 checks out and shows `name` as is (`pickedBranch`, tsk567). What is computed stays live, as live models (`.context/semantic-layer.md` "Live models"): `v_branch_divergence` (any pair of revisions — `ahead`, `behind`, `merge_base`, `overlapping_files`, `readiness` from `Vcs::divergence`: a stream against the default branch, a remote branch against HEAD; a branch against its own upstream is `v_branch.ahead` / `behind`) and `v_commit_between` (`Vcs::revisions_between`, 100 per pair), both narrowed to the pair the query pins (`base`, `head`; one side pinned, the other ranges over `Vcs::branches`; neither, each local branch against the default) and announced on `VcsRefsChanged` and with `v_branch`. The Git Dashboard's `streams`, `readiness` and `between` lenses read them. `vcs_file_history` (the index keeps 500
 commits per head; a file's full history can be older) stays an IPC, and agents read `v_commit`,
 `v_commit_file`, `v_branch` and the two live models through `oxplow_query_sql`. Git-native reads keep `git_` names:
-`git_change_scopes`, `git_resolve_commit_ref_labels`,
+`git_resolve_commit_ref_labels`,
 `git_list_recent_remote_branches`. Deleted: `get_git_log`,
 `get_commits_ahead_of`, `list_file_commits`, `list_branches`,
 `list_local_branches`, `get_default_branch`, `get_ahead_behind`,

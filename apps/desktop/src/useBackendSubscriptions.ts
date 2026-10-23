@@ -2,8 +2,6 @@ import { type Dispatch, type RefObject, type SetStateAction, useEffect } from "r
 
 import {
   type AgentStatusEntry,
-  generatedPaths,
-  getConfig,
   getThreadState,
   listAgentStatuses,
   listStreams,
@@ -41,7 +39,6 @@ export interface BackendSubscriptionHandlers {
   setStream: Dispatch<SetStateAction<Stream | null>>;
   /** Each agent session's status, by `sessionStatusKey`. */
   setSessionStatuses: Dispatch<SetStateAction<Record<string, AgentStatusEntry>>>;
-  setGeneratedState: (next: { exclude: string[]; include: string[] }) => void;
 }
 
 /**
@@ -57,7 +54,6 @@ export interface BackendSubscriptionApi {
   listStreams: typeof listStreams;
   subscribeAgentStatus: typeof subscribeAgentStatus;
   listAgentStatuses: typeof listAgentStatuses;
-  getConfig: typeof getConfig;
   onRemoteReconnect: typeof onRemoteReconnect;
 }
 
@@ -68,7 +64,6 @@ const defaultApi: BackendSubscriptionApi = {
   listStreams,
   subscribeAgentStatus,
   listAgentStatuses,
-  getConfig,
   onRemoteReconnect,
 };
 
@@ -83,7 +78,6 @@ export function useBackendSubscriptions(
     setStreams,
     setStream,
     setSessionStatuses,
-    setGeneratedState,
   } = handlers;
   const {
     subscribeWorkspaceContext,
@@ -92,7 +86,6 @@ export function useBackendSubscriptions(
     listStreams,
     subscribeAgentStatus,
     listAgentStatuses,
-    getConfig,
     onRemoteReconnect,
   } = api;
 
@@ -162,30 +155,6 @@ export function useBackendSubscriptions(
     });
     return unsubscribe;
   }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    const reload = () => {
-      void getConfig()
-        .then((cfg) => {
-          if (cancelled) return;
-          setGeneratedState(generatedPaths(cfg));
-        })
-        .catch((error) => {
-          logUi("warn", "failed to load config", { error: String(error) });
-        });
-    };
-    reload();
-    const unsub = subscribeOxplowEvents((event) => {
-      if (event.kind === "configChanged") reload();
-    });
-    const unsubReconnect = onRemoteReconnect(() => reload());
-    return () => {
-      cancelled = true;
-      unsub();
-      unsubReconnect();
-    };
-  }, [setGeneratedState]);
 
   useEffect(() => {
     let cancelled = false;

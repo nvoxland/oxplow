@@ -388,8 +388,13 @@ fn every_ui_event_has_a_listener() {
             }
         }
     }
+    // Read only inside the daemon: the live models that follow it
+    // (`v_workspace_file`, `v_branch_divergence`, …) and the snapshot
+    // capture. The renderer re-reads those models, so it needs no listener.
+    const DAEMON_ONLY: &[&str] = &["vcsRefsChanged"];
     let unheard: Vec<String> = event_kinds()
         .into_iter()
+        .filter(|k| !DAEMON_ONLY.contains(&k.as_str()))
         .filter(|k| !text.contains(&format!("\"{k}\"")))
         .collect();
     assert_eq!(unheard, Vec::<String>::new());
@@ -818,7 +823,6 @@ const WORKTREE_PATH_USERS: &[(&str, &str)] = &[
     ("crates/oxplow-app/src/commands/credentials.rs", "a collector's credential is declared by its extension in the primary checkout"),
     ("crates/oxplow-rpc/src/commands/collectors.rs", "the collector RPCs"),
     ("crates/oxplow-rpc/src/commands/extensions.rs", "the extension RPCs"),
-    ("crates/oxplow-rpc/src/commands/git.rs", "the git RPCs"),
     ("crates/oxplow-rpc/src/commands/semantic.rs", "the semantic layer's RPCs"),
     ("crates/oxplow-rpc/src/commands/trees.rs", "the file-tree RPCs"),
 ];

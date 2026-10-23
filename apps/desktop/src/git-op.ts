@@ -36,22 +36,6 @@ export async function awaitGitOp(kickoff: GitOpKickoff): Promise<OpOutcome> {
   return normalizeGitOpResult(task);
 }
 
-/// Run a quick VCS command and settle it into an `OpOutcome`: a refusal
-/// or failure (the command threw) becomes an unsuccessful outcome
-/// carrying the reason, so a result view shows it like any other.
-export async function settleGitOp(op: () => Promise<OpOutcome>): Promise<OpOutcome> {
-  try {
-    return await op();
-  } catch (e) {
-    return {
-      success: false,
-      log: e instanceof Error ? e.message : String(e),
-      conflicts: [],
-      auto_resolved: 0,
-    };
-  }
-}
-
 /// Failure message from a result: the conflicted paths when there are
 /// any, else the provider's log, else the caller's fallback (e.g. "merge
 /// failed"). Trimmed.

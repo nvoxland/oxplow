@@ -283,6 +283,15 @@ pub struct NavigateInput {
 #[serde(deny_unknown_fields)]
 pub struct NoInput {}
 
+/// `quick_open`: the search box, optionally starting on a query.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct QuickOpenInput {
+    /// What the box starts with (a Find Usages for a file's name).
+    #[serde(default)]
+    pub query: Option<String>,
+}
+
 /// The window's operations, run through `host` when the daemon runs them.
 pub fn ops(host: &Arc<ClientHost>) -> Vec<Op> {
     // An agent's in its own thread; a person's anywhere.
@@ -307,7 +316,7 @@ pub fn ops(host: &Arc<ClientHost>) -> Vec<Op> {
         host,
         "window.show",
         "quick_open",
-        schema::<NoInput>(),
+        schema::<QuickOpenInput>(),
     ));
     // Takes the person to a ref: open to an agent, which is how it shows them
     // what it found.

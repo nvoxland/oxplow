@@ -289,7 +289,7 @@ pub const UI_INPUT_BINDINGS: &[&str] = &["stream", "thread", "uri", "uri.id"];
 
 /// The window's own forms: a `ui.form` that isn't a page's ref
 /// (`App.tsx` `openForm`).
-pub const WINDOW_FORMS: &[&str] = &["new-thread", "commit"];
+pub const WINDOW_FORMS: &[&str] = &["new-thread"];
 
 /// The menu bar's menus (`menuBar.ts` `MenuId`).
 pub const MENU_BARS: &[&str] = &["file", "edit"];
@@ -1126,7 +1126,7 @@ mod tests {
             json!({ "label": "New", "input": { "thread": "{{thread}}", "n": 1 } }),
             json!({ "label": "Finish", "about": "oxplow/work_item", "input": { "uri": "{{uri}}", "id": "{{uri.id}}" } }),
             json!({ "label": "New Task…", "form": "oxplow:oxplow/page?page=new-task" }),
-            json!({ "label": "Commit…", "form": "commit" }),
+            json!({ "label": "New Thread…", "form": "new-thread" }),
             json!({ "label": "New", "open_after": "oxplow:oxplow/dashboard?id={{result.id}}" }),
             json!({ "label": "New", "open_after": "oxplow:oxplow/agent_session?id={{result.id}}" }),
             // A result field that is itself the ref to open.
@@ -1160,7 +1160,7 @@ mod tests {
             (
                 json!({ "label": "X", "form": "new-task" }),
                 "/ui/form",
-                "new-thread, commit",
+                "(new-thread)",
             ),
             (
                 json!({ "label": "X", "about": "Work Item" }),

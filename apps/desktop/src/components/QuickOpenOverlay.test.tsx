@@ -151,3 +151,23 @@ test("↑/↓ and Enter work from the input, and the input names the row under t
   fireEvent.keyDown(input, { key: "Escape" });
   expect(closed).toBe(afterPick + 1);
 });
+
+// Opened with a query (Find Usages from a file's menu), the box starts on it.
+test("a launcher opened with a query starts on it", () => {
+  const view = render(
+    <QuickOpenOverlay
+      open
+      initialQuery="needle"
+      stream={stream}
+      threadId="thr1"
+      selectedFilePath={null}
+      pages={pages}
+      offers={[]}
+      onClose={() => {}}
+      onOpenFile={() => {}}
+      onOpenPage={() => {}}
+      onOpenSearchHit={() => {}}
+    />,
+  );
+  expect((view.container.querySelector("input") as HTMLInputElement).value).toBe("needle");
+});

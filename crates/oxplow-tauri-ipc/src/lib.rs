@@ -186,7 +186,6 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::list_files_for_snapshot,
             commands::generated::list_wiki_slugs_for_snapshots,
             commands::generated::get_file_snapshot,
-            commands::generated::changed_paths,
             commands::generated::get_snapshot_stats,
             commands::generated::get_blob_storage_bytes,
             // branch
@@ -194,15 +193,12 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::git_resolve_commit_ref_labels,
             commands::generated::read_at,
             commands::generated::resolve_symbol,
-            commands::generated::search_workspace_text,
-            commands::generated::git_change_scopes,
             // hooks / agent lifecycle
             commands::generated::ingest_hook_event,
             commands::generated::read_event_content,
             commands::generated::list_agent_statuses,
             // config
             commands::generated::get_config,
-            commands::generated::set_generated,
             commands::generated::get_workspace_context,
             // efforts
             commands::generated::list_efforts_at_snapshots,
@@ -223,10 +219,8 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::read_workspace_file,
             commands::generated::files_at,
             commands::generated::vcs_blame,
-            commands::generated::vcs_merge_base,
             commands::generated::vcs_log,
             commands::generated::vcs_branches,
-            commands::generated::vcs_file_history,
             // background tasks
             commands::generated::list_background_tasks,
             commands::generated::get_background_task,

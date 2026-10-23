@@ -354,12 +354,8 @@ pub const MANIFEST: &[Capability] = &[
     agent("oxplow_thread_notes"),
     agent("oxplow_thread_sessions"),
     // ---- git ----
-    both_named("git.status", "git_change_scopes", "oxplow_vcs_status"),
+    agent("oxplow_vcs_status"),
     agent("oxplow_diff"),
-    ui(
-        "changed_paths",
-        "an agent reads the same paths, with line counts, through `diff`",
-    ),
     both_named("vcs_log", "vcs_log", "oxplow_vcs_log"),
     both_named("vcs_blame", "vcs_blame", "oxplow_vcs_blame"),
     ui("read_at", "the editor's file at a revision; an agent reads a file ref at that revision with `read`"),
@@ -368,10 +364,6 @@ pub const MANIFEST: &[Capability] = &[
         "opening a symbol link; an agent reads v_symbol, and `read` for a pinned version",
     ),
     both_named("vcs_branches", "vcs_branches", "oxplow_vcs_branches"),
-    ui(
-        "search_workspace_text",
-        "an agent searches its worktree with its own Grep tool",
-    ),
     // ---- snapshots / local history ----
     model("list_snapshot_ops", &["v_snapshot_op"]),
     model("list_files_for_snapshot", &["v_snapshot_file"]),
@@ -436,7 +428,6 @@ pub const MANIFEST: &[Capability] = &[
     ),
     // ---- git (presentation / worktree / remote helpers) ----
     model("git_resolve_commit_ref_labels", &["v_branch", "v_tag"]),
-    model("vcs_file_history", &["v_commit_file"]),
     // ---- hooks / agent lifecycle ----
     ui(
         "ingest_hook_event",
@@ -452,10 +443,6 @@ pub const MANIFEST: &[Capability] = &[
         "the renderer's whole config; an agent reads keys with `oxplow.config.list_keys`",
     ),
     ui(
-        "set_generated",
-        "the Settings form; an agent sets config with `oxplow.config.set`",
-    ),
-    ui(
         "get_workspace_context",
         "the window's project path and VCS state, for the shell",
     ),
@@ -469,10 +456,6 @@ pub const MANIFEST: &[Capability] = &[
     ui(
         "files_at",
         "a revision's file list, for the editor; an agent reads a revision's file with `read`",
-    ),
-    ui(
-        "vcs_merge_base",
-        "an ancestry walk the VCS answers; an agent runs git in its worktree",
     ),
     // ---- background tasks ----
     ui(

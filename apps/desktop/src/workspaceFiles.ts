@@ -8,37 +8,14 @@
  */
 import { querySql } from "./api.js";
 import { streamRowId } from "./modelIds.js";
-import type { FileStatus, Reads, SqlCell } from "./tauri-bridge/generated/bindings.js";
-
-export interface WorkspaceEntry {
-  name: string;
-  path: string;
-  kind: "file" | "directory";
-  status: FileStatus | null;
-  /** A file with a status, or a folder holding one (see [`withFolderChanges`]). */
-  hasChanges: boolean;
-}
+import type { Reads, SqlCell } from "./tauri-bridge/generated/bindings.js";
 
 export interface WorkspaceIndexedFile {
   path: string;
-  status: FileStatus | null;
+  status: string | null;
 }
 
-const status = (cell: SqlCell | undefined): FileStatus | null => (typeof cell === "string" ? (cell as FileStatus) : null);
-
-/** One folder's entries (`path` "" is the root) and what the read read. */
-export async function readWorkspaceFolder(streamId: string, path: string): Promise<{ entries: WorkspaceEntry[]; reads: Reads }> {
-  const res = await querySql(
-    "SELECT name, path, kind, status FROM v_workspace_file WHERE stream_id = ?1 AND parent = ?2",
-    [streamRowId(streamId), path.replace(/\/+$/, "")],
-    100_000,
-  );
-  const entries = res.rows.map((row): WorkspaceEntry => {
-    const s = status(row[3]);
-    return { name: String(row[0]), path: String(row[1]), kind: row[2] === "dir" ? "directory" : "file", status: s, hasChanges: s !== null };
-  });
-  return { entries, reads: res.reads };
-}
+const status = (cell: SqlCell | undefined): string | null => (typeof cell === "string" ? cell : null);
 
 /** Every file of the stream (folders left out) with its status, and what
  *  the read read. A walk of the whole tree: read it once. */
@@ -64,17 +41,4 @@ export async function isWorkspaceDir(streamId: string, path: string): Promise<bo
     1,
   );
   return res.rows.length > 0;
-}
-
-/** `entries` with each folder's `hasChanges` set from the files that have
- *  a status (every ancestor of one holds a change). */
-export function withFolderChanges(entries: WorkspaceEntry[], files: readonly WorkspaceIndexedFile[]): WorkspaceEntry[] {
-  const folders = new Set<string>();
-  for (const f of files) {
-    if (f.status === null) continue;
-    for (let slash = f.path.lastIndexOf("/"); slash > 0; slash = f.path.lastIndexOf("/", slash - 1)) {
-      folders.add(f.path.slice(0, slash));
-    }
-  }
-  return entries.map((e) => (e.kind === "directory" ? { ...e, hasChanges: folders.has(e.path) } : e));
 }

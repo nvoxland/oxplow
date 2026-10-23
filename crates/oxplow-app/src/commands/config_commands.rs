@@ -88,6 +88,22 @@ pub struct UnsetInput {
     pub layer: Layer,
 }
 
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct MarkGeneratedInput {
+    /// The file or folder, by the name the project's `generated` list
+    /// holds it by (`target`, `dist`, `*.min.js`).
+    pub entry: String,
+    /// Mark it generated (the default: left out of snapshots and the
+    /// change views), or, `false`, take the mark off.
+    #[serde(default = "mark")]
+    pub generated: bool,
+}
+
+fn mark() -> bool {
+    true
+}
+
 /// Which layer a config write goes to.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -360,7 +376,7 @@ pub fn ops(target: ConfigTarget) -> Vec<Op> {
         )
     };
     let unset = {
-        let t = target;
+        let t = target.clone();
         Op::new(
             "config.write",
             "unset",
@@ -373,7 +389,41 @@ pub fn ops(target: ConfigTarget) -> Vec<Op> {
             })),
         )
     };
-    vec![list, get, set, unset]
+    let mark_generated = {
+        let t = target;
+        Op::new(
+            "config.write",
+            "mark_generated",
+            schema::<MarkGeneratedInput>(),
+            true,
+            Handler::Tx(Arc::new(move |ctx: &super::TxCtx<'_>, input| {
+                let input: MarkGeneratedInput = parse(input)?;
+                let entry = input.entry.trim().trim_matches('/').to_string();
+                if entry.is_empty() {
+                    return Err(CommandError::Invalid {
+                        field: Some("/entry".into()),
+                        message: "name a file or folder".into(),
+                    });
+                }
+                let mut generated = t
+                    .config
+                    .read()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .generated
+                    .clone();
+                generated.exclude.retain(|e| e != &entry);
+                if input.generated {
+                    generated.exclude.push(entry);
+                    generated.exclude.sort();
+                }
+                // Nothing marked is the key absent, as the file is written.
+                let value = (generated != oxplow_config::GeneratedConfig::default())
+                    .then(|| serde_json::to_value(&generated).expect("generated serializes"));
+                change(&t, ctx.actor(), "generated", value, Layer::Project)
+            })),
+        )
+    };
+    vec![list, get, set, unset, mark_generated]
 }
 
 #[cfg(test)]
@@ -850,5 +900,36 @@ mod tests {
             writers.is_empty(),
             "project.yaml written outside config.*: {writers:?}"
         );
+    }
+
+    /// Marking a folder generated adds it to the `generated` key's
+    /// `exclude` list (sorted, once), unmarking takes it off, and
+    /// nothing marked removes the key.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn marking_a_path_generated_edits_the_exclude_list() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        let run = |input: Value| {
+            let svc = svc.clone();
+            async move {
+                svc.commands
+                    .run(&Actor::Human, "oxplow.file.mark_generated", input, true)
+                    .await
+                    .unwrap()
+            }
+        };
+        let exclude = || {
+            crate::config_service::read_config(&svc.config)
+                .generated
+                .exclude
+        };
+        run(json!({ "entry": "dist" })).await;
+        run(json!({ "entry": "build/" })).await;
+        run(json!({ "entry": "dist" })).await;
+        assert_eq!(exclude(), ["build", "dist"]);
+        run(json!({ "entry": "dist", "generated": false })).await;
+        assert_eq!(exclude(), ["build"]);
+        run(json!({ "entry": "build", "generated": false })).await;
+        assert!(exclude().is_empty());
     }
 }

@@ -29,14 +29,6 @@ export interface GroupedGitRefs {
   recent?: string[];
 }
 
-/** One ref a compare picker offers ([`readRefOptions`]). */
-export interface RefOption {
-  ref: string;
-  label: string;
-  kind: "local" | "remote" | "tag";
-  name?: string;
-}
-
 /** A branch as `v_branch` holds it. */
 export interface BranchRow {
   name: string;
@@ -110,19 +102,4 @@ export async function readRefGroups(): Promise<GroupedGitRefs> {
     tags: tags.map((t) => ({ name: t.name, ref: `refs/tags/${t.name}` })),
     recent: local.slice(0, 5).map((b) => b.name),
   };
-}
-
-/** Every branch and tag as one flat list — what "Compare with…" offers. */
-export async function readRefOptions(): Promise<RefOption[]> {
-  const groups = await readRefGroups();
-  return [
-    ...groups.local.map((b) => ({ ref: b.ref, label: b.name, kind: "local" as const, name: b.name })),
-    ...groups.remote.map((b) => ({
-      ref: b.ref,
-      label: `${b.remote}/${b.name}`,
-      kind: "remote" as const,
-      name: `${b.remote}/${b.name}`,
-    })),
-    ...groups.tags.map((t) => ({ ref: t.ref, label: t.name, kind: "tag" as const, name: t.name })),
-  ];
 }

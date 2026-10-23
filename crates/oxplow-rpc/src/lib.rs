@@ -288,22 +288,17 @@ macro_rules! oxplow_command_table {
                 record_usage => $crate::commands::usage::record_usage { kind: String, payload_json: String } -> ::oxplow_db::UsageEvent,
                 // git
                 git_resolve_commit_ref_labels => $crate::commands::git::git_resolve_commit_ref_labels { shas: Vec<String> } -> ::std::collections::HashMap<String, Vec<::oxplow_app::vcs::CommitRefLabel>>,
-                git_change_scopes => $crate::commands::git::git_change_scopes { stream_id: Option<String> } -> ::oxplow_app::vcs::ChangeScopes,
-                search_workspace_text => $crate::commands::workspace::search_workspace_text { stream_id: Option<String>, query: String, limit: Option<u32> } -> Vec<::oxplow_app::workspace_files::TextSearchHit>,
                 read_at => $crate::commands::trees::read_at { stream_id: Option<String>, path: String, revision: ::oxplow_domain::vcs::Revision } -> Option<String>,
                 // workspace
                 resolve_symbol => $crate::commands::trees::resolve_symbol { stream_id: String, symbol: String } -> Option<::oxplow_app::symbol_resolve::SymbolLocation>,
                 files_at => $crate::commands::trees::files_at { stream_id: Option<String>, revision: ::oxplow_domain::vcs::Revision } -> Vec<String>,
                 vcs_blame => $crate::commands::vcs::vcs_blame { stream_id: Option<String>, path: String, revision: ::oxplow_domain::vcs::Revision } -> Vec<::oxplow_domain::vcs::BlameLine>,
-                vcs_merge_base => $crate::commands::vcs::vcs_merge_base { stream_id: Option<String>, a: ::oxplow_domain::vcs::Revision, b: ::oxplow_domain::vcs::Revision } -> Option<::oxplow_domain::vcs::Revision>,
                 vcs_log => $crate::commands::vcs::vcs_log { stream_id: Option<String>, limit: Option<u32>, all: bool } -> Vec<::oxplow_domain::vcs::RevisionInfo>,
                 vcs_branches => $crate::commands::vcs::vcs_branches { stream_id: Option<String> } -> Vec<::oxplow_domain::vcs::Branch>,
-                vcs_file_history => $crate::commands::vcs::vcs_file_history { stream_id: Option<String>, path: String, limit: u32 } -> Vec<::oxplow_domain::vcs::RevisionInfo>,
                 read_workspace_file => $crate::commands::workspace::read_workspace_file { stream_id: Option<String>, relative_path: String } -> ::oxplow_app::workspace_files::WorkspaceFile,
                 // code_quality (duplication only — the metrics scan was retired in tsk229)
                 // config
                 get_config => $crate::commands::config::get_config {} -> ::oxplow_config::OxplowConfig,
-                set_generated => $crate::commands::config::set_generated { generated: ::oxplow_config::GeneratedConfig } -> ::oxplow_config::OxplowConfig,
                 get_workspace_context => $crate::commands::config::get_workspace_context {} -> $crate::commands::config::WorkspaceContext,
                 // lsp
                 list_installed_lsp_packages => $crate::commands::lsp::list_installed_lsp_packages {} -> Vec<$crate::commands::lsp::InstalledLspPackage>,
@@ -325,7 +320,6 @@ macro_rules! oxplow_command_table {
                 list_wiki_slugs_for_snapshots => $crate::commands::snapshot::list_wiki_slugs_for_snapshots { snapshot_ids: Vec<::oxplow_domain::SnapshotId> } -> Vec<(::oxplow_domain::SnapshotId, String)>,
                 list_files_for_snapshot => $crate::commands::snapshot::list_files_for_snapshot { snapshot_id: ::oxplow_domain::SnapshotId } -> Vec<::oxplow_db::FileSnapshot>,
                 get_file_snapshot => $crate::commands::snapshot::get_file_snapshot { file_snapshot_id: ::oxplow_domain::FileSnapshotId } -> Option<::oxplow_db::FileSnapshot>,
-                changed_paths => $crate::commands::trees::changed_paths { stream_id: Option<String>, from: Option<::oxplow_domain::vcs::Revision>, to: ::oxplow_domain::vcs::Revision } -> Vec<::oxplow_app::trees::ChangedPath>,
                 // background
                 list_background_tasks => $crate::commands::background::list_background_tasks {} -> Vec<::oxplow_app::BackgroundTask>,
                 get_background_task => $crate::commands::background::get_background_task { id: String } -> Option<::oxplow_app::BackgroundTask>,

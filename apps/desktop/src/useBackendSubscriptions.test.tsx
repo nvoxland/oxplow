@@ -13,7 +13,6 @@ let reconnectHandlers: Array<() => void> = [];
 let unsubCount = 0;
 const listAgentStatuses = mock(async (): Promise<unknown[]> => []);
 const setSessionStatuses = mock((_next: unknown) => {});
-const getConfig = mock(async () => ({ generated: { exclude: [], include: [] } }));
 const getThreadState = mock(async () => ({ selectedThreadId: null, threads: [] }));
 
 function makeApi(): BackendSubscriptionApi {
@@ -38,7 +37,6 @@ function makeApi(): BackendSubscriptionApi {
     getThreadState: getThreadState as never,
     listStreams: (async () => []) as never,
     listAgentStatuses: listAgentStatuses as never,
-    getConfig: getConfig as never,
   };
 }
 
@@ -52,7 +50,6 @@ function makeHandlers() {
     setStreams: noop as never,
     setStream: noop as never,
     setSessionStatuses: setSessionStatuses as never,
-    setGeneratedState: noop,
     setEnabledAgents: noop,
   };
 }
@@ -73,7 +70,6 @@ beforeEach(() => {
   unsubCount = 0;
   listAgentStatuses.mockClear();
   setSessionStatuses.mockClear();
-  getConfig.mockClear();
 });
 
 afterEach(cleanup);
@@ -81,8 +77,8 @@ afterEach(cleanup);
 test("subscribes to the oxplow event bus on mount", () => {
   render(<Harness />);
   // threads (v_thread), streams (v_stream), streamOrphaned,
-  // configChanged, agent sessions (v_agent_session) = 5 subscriptions.
-  expect(oxplowHandlers.length).toBe(5);
+  // agent sessions (v_agent_session) = 4 subscriptions.
+  expect(oxplowHandlers.length).toBe(4);
 });
 
 test("does not re-subscribe across re-renders (no churn)", () => {
@@ -97,15 +93,15 @@ test("does not re-subscribe across re-renders (no churn)", () => {
 test("unsubscribes every subscription on unmount", () => {
   const { unmount } = render(<Harness />);
   unmount();
-  // 5 oxplow + workspace-context + agent-status = 7, plus 2 reconnect
-  // handlers (config, agent-status) = 9.
-  expect(unsubCount).toBe(9);
+  // 4 oxplow + workspace-context + agent-status = 6, plus the reconnect
+  // handler (agent-status) = 7.
+  expect(unsubCount).toBe(7);
 });
 
 test("registers reconnect handlers for the core stores", () => {
   render(<Harness />);
-  // config and agent-status re-hydrate on a remote WS reconnect.
-  expect(reconnectHandlers.length).toBe(2);
+  // agent-status re-hydrates on a remote WS reconnect.
+  expect(reconnectHandlers.length).toBe(1);
 });
 
 test("two sessions in one thread keep their own statuses", async () => {
@@ -134,8 +130,7 @@ test("a change to the agent sessions re-reads the statuses: a closed one's drops
 
 test("re-hydrates core stores on a remote reconnect", async () => {
   render(<Harness />);
-  // One fetch each on mount.
-  expect(getConfig).toHaveBeenCalledTimes(1);
+  // One fetch on mount.
   expect(listAgentStatuses).toHaveBeenCalledTimes(1);
 
   await act(async () => {
@@ -143,8 +138,7 @@ test("re-hydrates core stores on a remote reconnect", async () => {
     await Promise.resolve();
   });
 
-  // A second fetch each after the reconnect fired.
-  expect(getConfig).toHaveBeenCalledTimes(2);
+  // A second fetch after the reconnect fired.
   expect(listAgentStatuses).toHaveBeenCalledTimes(2);
 });
 

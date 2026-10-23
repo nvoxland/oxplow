@@ -199,7 +199,6 @@ async fn vcs_branches_include_the_default_branch() {
 async fn git_reads_over_primary_worktree() {
     let app = TestApp::build().await;
     let s = app.state();
-    let _ = commands::generated::git_change_scopes(s.clone(), None).await;
     let _ = commands::generated::vcs_log(s.clone(), None, Some(10), false).await;
     let _ = commands::generated::read_at(
         s.clone(),
@@ -208,7 +207,6 @@ async fn git_reads_over_primary_worktree() {
         oxplow_domain::vcs::Revision::git("HEAD"),
     )
     .await;
-    let _ = commands::generated::vcs_file_history(s.clone(), None, "nope.txt".into(), 10).await;
     let _ = commands::generated::vcs_blame(
         s.clone(),
         None,
@@ -222,12 +220,6 @@ async fn git_reads_over_primary_worktree() {
 async fn git_list_commands_return_empty_for_fresh_repo() {
     let app = TestApp::build().await;
     let s = app.state();
-    assert!(
-        commands::generated::search_workspace_text(s.clone(), None, "needle".into(), Some(10))
-            .await
-            .unwrap()
-            .is_empty()
-    );
     assert!(
         commands::generated::git_resolve_commit_ref_labels(s.clone(), vec![])
             .await
@@ -259,15 +251,6 @@ async fn stream_reads() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn config_setters_round_trip() {
     let app = TestApp::build().await;
-    commands::generated::set_generated(
-        app.state(),
-        oxplow_config::GeneratedConfig {
-            exclude: vec!["generated/".into()],
-            include: vec![],
-        },
-    )
-    .await
-    .unwrap();
     let _ = commands::generated::get_workspace_context(app.state()).await;
 }
 

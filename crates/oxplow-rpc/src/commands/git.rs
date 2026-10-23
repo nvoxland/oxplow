@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 
-use oxplow_app::vcs::{ChangeScopes, CommitRefLabel};
+use oxplow_app::vcs::CommitRefLabel;
 use oxplow_app::Services;
 use oxplow_domain::DomainError;
 
@@ -19,21 +19,6 @@ pub async fn git_resolve_commit_ref_labels(
 ) -> Result<HashMap<String, Vec<CommitRefLabel>>, IpcError> {
     svc.git
         .commit_ref_labels(&svc.layout.project_dir, shas)
-        .await
-        .map_err(|e| DomainError::from(e).into())
-}
-
-pub async fn git_change_scopes(
-    svc: &Services,
-    stream_id: Option<String>,
-) -> Result<ChangeScopes, IpcError> {
-    let ws = svc
-        .worktrees
-        .resolve(stream_id.as_deref())
-        .await
-        .into_local_path();
-    svc.git
-        .change_scopes(&ws)
         .await
         .map_err(|e| DomainError::from(e).into())
 }

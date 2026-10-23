@@ -4,7 +4,6 @@ import type {
   ListedConversation,
   TabReport,
   BegunSignIn,
-  ChangeScopes,
   HookEnvelope,
   OpOutcome,
   OxplowConfig,
@@ -14,7 +13,6 @@ import type {
   Scope,
   SignInCompletion,
   SnapshotTrigger,
-  TextSearchHit,
 } from "./tauri-bridge/generated/bindings.js";
 import { listen, onRemoteReconnect, triggerRemoteResync } from "./tauri-bridge/transport.js";
 
@@ -48,7 +46,6 @@ import type {
   CommentMessage,
   CommentStatus,
   CommentThread,
-  ChangedPath,
   Extension,
   Lens,
   LensRun,
@@ -78,7 +75,6 @@ export interface ProviderConfig {
   kind: string;
   baseUrl: string | null;
 }
-export type { ChangedPath };
 export type { ServiceListing, ScriptServices };
 export type { DataEntity, Extension, Lens, LensRun, LensViz, LensSpec, SearchHit, CollectorListing, CollectorRunReport, SqlCell, SqlQueryResult };
 export type { ProviderInstanceView };
@@ -248,7 +244,7 @@ let cachedBridge: DesktopBridge | null = null;
 
 // The wire's own shapes, from the generated bindings: nothing converts a
 // shape at the boundary (P11, tsk963–964).
-export type { BackgroundTask, ChangeScopes, OxplowConfig, OxplowEvent, TextSearchHit };
+export type { BackgroundTask, OxplowConfig, OxplowEvent };
 export type { OpOutcome } from "./tauri-bridge/index.js";
 
 
@@ -339,19 +335,15 @@ import type { Revision } from "./revision.js";
 import {
   STREAM_HEAD_SQL,
   streamHeadFromRows,
-  statusCountsFromRows,
-  STATUS_COUNTS_SQL,
   type StreamHead,
 } from "./streamHead.js";
 import { streamRowId } from "./modelIds.js";
 import type {
   BlameLine,
-  FileStatus,
   RevisionInfo,
 } from "./tauri-bridge/generated/bindings.js";
 export type {
   BlameLine,
-  FileStatus,
   RevisionInfo,
 };
 
@@ -372,36 +364,6 @@ export async function vcsBlame(
   revision: Revision,
 ): Promise<BlameLine[]> {
   return unwrap(await commands.vcsBlame(streamId || null, path, revision));
-}
-
-/** Revisions that changed `path`, newest first. */
-export async function vcsFileHistory(
-  streamId: string,
-  path: string,
-  limit = 50,
-): Promise<RevisionInfo[]> {
-  return unwrap(await commands.vcsFileHistory(streamId || null, path, limit));
-}
-
-/** Where the histories of `a` and `b` fork. */
-export async function vcsMergeBase(
-  streamId: string,
-  a: Revision,
-  b: Revision,
-): Promise<Revision | null> {
-  return unwrap(await commands.vcsMergeBase(streamId || null, a, b));
-}
-
-/** How many paths of each kind a status holds. Renames count as
- *  modifications only where a caller folds them. */
-export interface StatusCounts {
-  added: number;
-  modified: number;
-  deleted: number;
-  renamed: number;
-  untracked: number;
-  conflicted: number;
-  total: number;
 }
 
 import type { InstalledLspPackage, LspServerListing } from "./tauri-bridge/generated/bindings.js";
@@ -803,24 +765,12 @@ export async function renameCurrentStream(title: string): Promise<Stream> {
   return renameStream(cur.id, title);
 }
 
-/** The config's `generated` paths, both lists there: the bindings mark a
- *  list the daemon always sends optional, since it has a default. */
-export function generatedPaths(cfg: OxplowConfig): { exclude: string[]; include: string[] } {
-  return { exclude: cfg.generated.exclude ?? [], include: cfg.generated.include ?? [] };
-}
-
 export async function getConfig(): Promise<OxplowConfig> {
   return unwrap(await commands.getConfig());
 }
 
 /// The enabled agent harnesses, by key, in priority order.
 
-
-export async function setGenerated(
-  generated: { exclude: string[]; include: string[] },
-): Promise<OxplowConfig> {
-  return unwrap(await commands.setGenerated(generated));
-}
 
 /// Set (or clear, with null/blank) one of a harness's declared settings —
 /// `agentConfig.<agent>.<key>` in .oxplow/project.yaml, which its launch
@@ -1159,73 +1109,10 @@ export async function setThreadPrompt(
   return [];
 }
 
-export async function getChangeScopes(streamId: string): Promise<ChangeScopes> {
-  return unwrap(await commands.gitChangeScopes(streamId));
-}
-
-export async function searchWorkspaceText(
-  streamId: string,
-  query: string,
-  options?: { limit?: number },
-): Promise<TextSearchHit[]> {
-  return unwrap(await commands.searchWorkspaceText(streamId, query, options?.limit ?? null));
-}
-
-/** Throw away the workspace's changes to `paths` — destructive, so the
- *  person has confirmed. */
-export async function vcsDiscard(streamId: string, paths: string[], confirmed: boolean): Promise<OpOutcome> {
-  return runVcs("oxplow.vcs.discard", { stream: streamId, paths }, confirmed);
-}
-
-export async function vcsStage(streamId: string, paths: string[]): Promise<OpOutcome> {
-  return runVcs("oxplow.vcs.stage", { stream: streamId, paths });
-}
-
-/** Append a pattern to the workspace's `.gitignore`. */
-export async function gitIgnore(streamId: string, entry: string): Promise<OpOutcome> {
-  return runVcs("oxplow.git.ignore", { stream: streamId, entry });
-}
-
 /** A remote branch to push to or pull from; omitted = the upstream. */
 export interface RemoteBranchTarget {
   remote: string;
   branch: string;
-}
-
-export async function vcsPush(
-  streamId: string,
-  to?: RemoteBranchTarget,
-  confirmed = false,
-): Promise<GitOpKickoff> {
-  const where = to ? ` ${to.remote} ${to.branch}` : "";
-  return runAsBackgroundTask(to ? `Push to ${to.remote}/${to.branch}` : "Push", "vcs", `push${where}`, () =>
-    runVcs("oxplow.vcs.push", { stream: streamId, ...to }, confirmed),
-  );
-}
-
-export async function vcsPull(
-  streamId: string,
-  from?: RemoteBranchTarget,
-  confirmed = false,
-): Promise<GitOpKickoff> {
-  const where = from ? ` ${from.remote} ${from.branch}` : "";
-  return runAsBackgroundTask(from ? `Pull ${from.remote}/${from.branch}` : "Pull", "vcs", `pull${where}`, () =>
-    runVcs("oxplow.vcs.pull", { stream: streamId, ...from }, confirmed),
-  );
-}
-
-/** Commit the stream's changes; `revision` is the new one (`git:<sha>`). */
-export async function vcsCommit(
-  streamId: string,
-  message: string,
-  includeUntracked = true,
-): Promise<{ success: boolean; revision: string }> {
-  const outcome = await runCommand("oxplow.vcs.commit", {
-    stream: streamId,
-    message,
-    include_untracked: includeUntracked,
-  });
-  return outcome.result as { success: boolean; revision: string };
 }
 
 /** Write a wiki page — the `oxplow.knowledge.write_page` command (P5.C3): the
@@ -1696,17 +1583,6 @@ export async function listFilesForSnapshot(snapshotId: number): Promise<Snapshot
   }));
 }
 
-/** Which paths changed from `from` (nothing, when null) to `to`, and
- *  how — {@link diffRevisions} without the line counts, so the daemon
- *  reads no file. For views that filter by what changed. */
-export async function changedPaths(
-  streamId: string,
-  from: Revision | null,
-  to: Revision,
-): Promise<ChangedPath[]> {
-  return unwrap(await commands.changedPaths(streamId || null, from, to));
-}
-
 /** Every file in the stream's workspace at `revision`, sorted. */
 export async function filesAt(streamId: string, revision: Revision): Promise<string[]> {
   return unwrap(await commands.filesAt(streamId || null, revision));
@@ -1806,13 +1682,6 @@ export function subscribeSnapshotEvents(
   });
 }
 
-/** The stream's uncommitted files counted by status (`v_change_file`, its
- *  working change), and what the read read, to re-run it on. */
-export async function streamStatusCounts(streamId: string): Promise<{ counts: StatusCounts; reads: Reads }> {
-  const res = await querySql(STATUS_COUNTS_SQL, [streamRowId(streamId)], 100);
-  return { counts: statusCountsFromRows(res.rows), reads: res.reads };
-}
-
 export async function readWorkspaceFile(streamId: string, path: string): Promise<WorkspaceFile> {
   return unwrap(await commands.readWorkspaceFile(streamId || null, path));
 }
@@ -1844,46 +1713,6 @@ export async function writeWorkspaceFile(
 ): Promise<{ path: string; bytes: number }> {
   const out = await runCommand("oxplow.file.save", { stream: streamId, path, content });
   return out.result as { path: string; bytes: number };
-}
-
-/** Make a file: `oxplow.file.create`. */
-export async function createWorkspaceFile(
-  streamId: string,
-  path: string,
-  content = "",
-): Promise<WorkspacePathChange> {
-  const out = await runCommand("oxplow.file.create", { stream: streamId, path, content });
-  return out.result as WorkspacePathChange;
-}
-
-/** Make a directory: `oxplow.file.create_directory`. */
-export async function createWorkspaceDirectory(
-  streamId: string,
-  path: string,
-): Promise<WorkspacePathChange> {
-  const out = await runCommand("oxplow.file.create_directory", { stream: streamId, path });
-  return out.result as WorkspacePathChange;
-}
-
-/** Move a file or directory: `oxplow.file.rename`. */
-export async function renameWorkspacePath(
-  streamId: string,
-  fromPath: string,
-  toPath: string,
-): Promise<WorkspaceRenameResult> {
-  const out = await runCommand("oxplow.file.rename", { stream: streamId, from: fromPath, to: toPath });
-  const { from, to } = out.result as { from: string; to: string };
-  return { fromPath: from, toPath: to };
-}
-
-/** Remove a file or directory: `oxplow.file.delete`. The caller has
- *  asked the person (the file tree's inline confirm). */
-export async function deleteWorkspacePath(
-  streamId: string,
-  path: string,
-): Promise<WorkspacePathChange> {
-  const out = await runCommand("oxplow.file.delete", { stream: streamId, path }, true);
-  return out.result as WorkspacePathChange;
 }
 
 export function subscribeOxplowEvents(
@@ -1923,17 +1752,6 @@ export function subscribeWorkspaceEvents(
       path: event.path as string,
       t: Date.now(),
     });
-  });
-}
-
-export function subscribeGitRefsEvents(
-  streamId: string,
-  onEvent: () => void,
-): () => void {
-  return subscribeOxplowEvents((event) => {
-    if (event.kind !== "vcsRefsChanged") return;
-    if (event.streamId !== streamId) return;
-    onEvent();
   });
 }
 

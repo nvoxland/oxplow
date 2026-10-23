@@ -37,6 +37,8 @@ import { launcherDirectory, useLauncherCounts } from "./extensionLauncher.js";
 
 interface Props {
   open: boolean;
+  /** What the box starts with each time it opens (a Find Usages). */
+  initialQuery?: string;
   stream: Stream | null;
   /** Active thread — scopes the "Recent" section to this thread's visits,
    *  matching the rail History block. */
@@ -84,7 +86,7 @@ const RECENT_LIMIT = 10;
  *  the pointer would fight the wheel. */
 const rowA11y = ({ onMouseEnter: _hover, ...rest }: ReturnType<ReturnType<typeof useListNav>["optionProps"]>) => rest;
 
-export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pages: staticPages, offers, onClose, onOpenFile, onOpenPage, onOpenSearchHit }: Props) {
+export function QuickOpenOverlay({ open, initialQuery, stream, threadId, selectedFilePath, pages: staticPages, offers, onClose, onOpenFile, onOpenPage, onOpenSearchHit }: Props) {
   const [query, setQuery] = useState("");
   const [files, setFiles] = useState<WorkspaceIndexedFile[]>([]);
   const [siteHits, setSiteHits] = useState<SearchHit[]>([]);
@@ -156,7 +158,7 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
   // loading while it's open must not wipe what the person typed.
   useEffect(() => {
     if (!open) return;
-    setQuery("");
+    setQuery(initialQuery ?? "");
   }, [open]);
   // Its input has the focus whenever it shows: it renders only once there
   // is a stream, which on a fresh window can be just after it opened.

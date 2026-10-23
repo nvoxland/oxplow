@@ -8,7 +8,6 @@ import type { AppScope, SlotNav } from "./appScope.js";
 import { SettingsPage } from "./SettingsPage.js";
 import { settingsArea } from "./settingsAreas.js";
 import { TerminalPage } from "./TerminalPage.js";
-import { FilesPage } from "./FilesPage.js";
 import { ExploreDataPage } from "./ExploreDataPage.js";
 import { ExternalUrlPage } from "./ExternalUrlPage.js";
 
@@ -65,29 +64,6 @@ export const builtInPages: Record<BuiltInPageName, BuiltInPage> = {
               void scope.handleOpenFile(rel);
             }
           }}
-        />
-      ),
-    };
-  },
-  files: ({ ref, nav, scope }) => {
-    return {
-      id: ref.id,
-      label: "Files",
-      closable: true,
-      render: () => (
-        <FilesPage
-          stream={scope.stream}
-          vcsEnabled={scope.vcsEnabled}
-          selectedFilePath={scope.selectedFilePath}
-          generated={scope.generatedExclude}
-          onOpenFile={nav.navOpenFile}
-          onOpenDiff={nav.navOpenDiff}
-          onCreateFile={scope.handleCreateFile}
-          onCreateDirectory={scope.handleCreateDirectory}
-          onRenamePath={scope.handleRenamePath}
-          onDeletePath={scope.handleDeletePath}
-          onToggleGenerated={scope.handleToggleGenerated}
-          commitRequest={scope.commitFilesRequest}
         />
       ),
     };

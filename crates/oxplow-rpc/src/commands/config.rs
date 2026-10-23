@@ -3,52 +3,14 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use oxplow_app::commands::config_commands::{SET, UNSET};
 use oxplow_app::config_service::read_config;
 use oxplow_app::Services;
-use oxplow_config::{GeneratedConfig, OxplowConfig};
-use oxplow_domain::Actor;
-use serde_json::{json, Value};
+use oxplow_config::OxplowConfig;
 
 use crate::error::IpcError;
 
 pub async fn get_config(svc: &Services) -> Result<OxplowConfig, IpcError> {
     Ok(read_config(&svc.config))
-}
-
-/// Set `key` (or unset it, with `None`) as the person, through
-/// `oxplow.config.set` / `oxplow.config.unset`: validated, audited, logged as
-/// `config.changed` and undoable, like any config change. The person's
-/// own action is their confirmation for a human-only key. Returns the
-/// config as it is afterwards.
-pub(crate) async fn set_key(
-    svc: &Services,
-    key: &str,
-    value: Option<Value>,
-) -> Result<OxplowConfig, IpcError> {
-    let (command, input) = match value {
-        Some(value) => (SET, json!({ "key": key, "value": value })),
-        None => (UNSET, json!({ "key": key })),
-    };
-    svc.commands
-        .run(&Actor::Human, command, input, true)
-        .await?;
-    Ok(read_config(&svc.config))
-}
-
-fn value_of<T: Serialize>(v: &T) -> Value {
-    serde_json::to_value(v).expect("config values serialize")
-}
-
-/// The generated-file include/exclude lists. The snapshot captures pick up
-/// the new filter from the `config.changed` event (`config_reactors`), the
-/// same way they do when an agent sets the key.
-pub async fn set_generated(
-    svc: &Services,
-    generated: GeneratedConfig,
-) -> Result<OxplowConfig, IpcError> {
-    let value = (generated != GeneratedConfig::default()).then(|| value_of(&generated));
-    set_key(svc, "generated", value).await
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -92,59 +54,5 @@ mod tests {
             .await
             .unwrap();
         assert!(out.is_object(), "expected a config object, got {out}");
-    }
-
-    /// `(actor, key)` of each successful `oxplow.config.set` / `oxplow.config.unset`, oldest first.
-    async fn audited_config_sets(svc: &crate::RpcContext) -> Vec<(String, String)> {
-        let mut rows: Vec<(String, String)> =
-            oxplow_db::SqliteCommandAuditStore::new(svc.db.clone())
-                .list_recent(100)
-                .await
-                .unwrap()
-                .into_iter()
-                .filter(|a| {
-                    (a.command == "oxplow.config.set" || a.command == "oxplow.config.unset")
-                        && a.error.is_none()
-                })
-                .map(|a| {
-                    (
-                        serde_json::to_value(a.actor_kind)
-                            .unwrap()
-                            .as_str()
-                            .unwrap()
-                            .to_string(),
-                        a.input["key"].as_str().unwrap().to_string(),
-                    )
-                })
-                .collect();
-        rows.reverse();
-        rows
-    }
-
-    /// tsk515: every settings write is the person's `oxplow.config.set` — audited,
-    /// logged as `config.changed`, undoable — and the file says what the
-    /// returned config says.
-    #[tokio::test]
-    async fn settings_writes_are_the_persons_config_commands() {
-        let (svc, dir) = services().await;
-        for (command, args) in [(
-            "set_generated",
-            json!({ "generated": { "exclude": ["dist"], "include": [] } }),
-        )] {
-            crate::dispatch(command, args, &svc)
-                .await
-                .unwrap_or_else(|e| panic!("{command}: {}", e.message));
-        }
-        let keys: Vec<String> = audited_config_sets(&svc)
-            .await
-            .into_iter()
-            .map(|(actor, key)| {
-                assert_eq!(actor, "human");
-                key
-            })
-            .collect();
-        assert_eq!(keys, ["generated"]);
-        let file = std::fs::read_to_string(dir.path().join(".oxplow/project.yaml")).unwrap();
-        assert!(file.contains("dist"), "dist missing from:\n{file}");
     }
 }

@@ -155,7 +155,7 @@ pages:
   - { id: done-work, title: Done Work, icon: circle-check, category: Work, lens: done-work }
   - { id: go-to, title: Go To, icon: star, category: Work, keywords: bookmarks visits recent history, lens: go-to }
   # Code
-  - { id: files, title: Files, icon: folder-tree, category: Code, component: "oxplow:files" }
+  - { id: files, title: Files, icon: folder-tree, category: Code, lens: files }
   - { id: problems, title: Problems, icon: triangle-alert, category: Code, lens: problems }
   - { id: symbols, title: Symbols, icon: list-tree, category: Code, params: [path], lens: symbols }
   # Git
@@ -717,6 +717,11 @@ commands:
     scope: config.write
     op: set
     example: {"key": "metricRetentionDays", "value": 30}
+  - name: file.mark_generated
+    summary: "Mark a file or folder (by the name the project's `generated` list holds it by: `target`, `dist`, `*.min.js`) as generated, or with `generated: false` take the mark off. Writes the `generated` key's `exclude` list in .oxplow/project.yaml (logged as config.changed, undoable); snapshots and change views leave marked paths out."
+    scope: config.write
+    op: mark_generated
+    example: {"entry": "dist"}
   - name: agent.set_agents
     summary: "Set which agent harnesses are on, by key, in priority order: the first is a new session's default. Each must be registered. Writes `agents` in .oxplow/project.yaml (logged as config.changed, undoable)."
     scope: config.write
@@ -1420,7 +1425,7 @@ commands:
     summary: "Commit the stream's changes (untracked files too, unless `include_untracked: false`); returns the new revision."
     scope: vcs.write
     op: commit
-    ui: { label: "Commit Changes…", group: Git, form: commit, when: "streamShown && vcsEnabled" }
+    ui: { label: "Commit Changes…", group: Git, form: "oxplow:oxplow/page?page=uncommitted-changes", when: "streamShown && vcsEnabled" }
     example: {"stream": "str1", "message": "fix: stop the login redirect loop"}
   - name: vcs.delete_branch
     summary: "Delete a branch (`force` even when unmerged)."
@@ -1463,7 +1468,7 @@ commands:
     ui: { label: Find, group: Edit, shortcut: "Ctrl/Cmd+F", while_typing: true, menu: { bar: edit, group: 1_find, order: 10 }, when: "fileShown" }
     example: {}
   - name: window.quick_open
-    summary: "Show the search box (files, pages, commands)."
+    summary: "Show the search box (files, pages, commands), starting on `query` when given."
     scope: window.show
     op: quick_open
     ui: { label: "Quick Open…", group: File, shortcut: "Ctrl/Cmd+P", while_typing: true, menu: { bar: file, group: 3_go, order: 10 }, when: "streamShown" }

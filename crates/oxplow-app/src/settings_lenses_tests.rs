@@ -1451,3 +1451,136 @@ async fn the_dashboard_page_adds_a_metric_tile_and_edits_its_tiles() {
     .unwrap();
     assert!(run(&fx, "dashboard-tiles", by_id).await.rows.is_empty());
 }
+
+/// The Files page: all files a folder at a time, or the changed files in
+/// their folders (the working tree, each opening a diff), with the actions
+/// on a row offered where they apply.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_files_page_lists_a_folder_or_the_changed_files() {
+    let fx = crate::test_fixtures::services_with_task_effort().await;
+    let root = fx.fx._dir.path();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(root.join("src/new.rs"), "fn main() {}\n").unwrap();
+    std::fs::write(root.join("top.txt"), "x\n").unwrap();
+    let stream = vec![("stream_id", SqlCell::Int(1))];
+
+    let branch = fx
+        .svc
+        .sql
+        .query_sql("SELECT branch FROM v_stream WHERE id = 1", vec![], None)
+        .await
+        .unwrap()
+        .rows[0][0]
+        .clone();
+    let SqlCell::Text(branch) = branch else {
+        panic!("a stream has a branch")
+    };
+    fx.svc
+        .git_store
+        .replace_branches(vec![oxplow_db::GitBranchRow {
+            name: branch,
+            kind: "local".into(),
+            remote: None,
+            head_sha: None,
+            stream_id: Some(1),
+            is_default: true,
+            upstream: None,
+            ahead: 0,
+            behind: 0,
+        }])
+        .await
+        .unwrap();
+    // The scopes on offer: at least all files and the working tree's.
+    let scopes = run_task(&fx, "files-scopes", stream.clone()).await;
+    assert!(scopes.has("value", "all"), "{:?}", scopes.rows);
+    assert!(scopes.has("value", "uncommitted"), "{:?}", scopes.rows);
+
+    // The page's row: the working tree scope names a working change.
+    let mut p = stream.clone();
+    p.push(("scope", SqlCell::Text("uncommitted".into())));
+    let page = run_task(&fx, "files", p).await;
+    assert_eq!(
+        page.text(&page.rows[0], "change_kind").as_deref(),
+        Some("working")
+    );
+
+    // All files, a folder at a time.
+    let tree = |scope: &str, folder: &str, kind: SqlCell, target: SqlCell| {
+        let mut p = stream.clone();
+        p.push(("scope", SqlCell::Text(scope.into())));
+        p.push(("folder", SqlCell::Text(folder.into())));
+        p.push(("change_kind", kind));
+        p.push(("change_target", target));
+        p
+    };
+    let all = run_task(
+        &fx,
+        "files-tree",
+        tree(
+            "all",
+            "",
+            SqlCell::Text(String::new()),
+            SqlCell::Text(String::new()),
+        ),
+    )
+    .await;
+    assert!(
+        all.has("name", "top.txt") && all.has("name", "src"),
+        "{:?}",
+        all.rows
+    );
+    let src = run_task(
+        &fx,
+        "files-tree",
+        tree(
+            "all",
+            "src",
+            SqlCell::Text(String::new()),
+            SqlCell::Text(String::new()),
+        ),
+    )
+    .await;
+    assert!(
+        src.has("name", "new.rs") && src.has("name", ".."),
+        "{:?}",
+        src.rows
+    );
+    let file = src
+        .rows
+        .iter()
+        .find(|r| src.text(r, "name").as_deref() == Some("new.rs"))
+        .unwrap();
+    assert_eq!(
+        src.text(file, "target").as_deref(),
+        Some("oxplow:oxplow/file?path=src/new.rs")
+    );
+
+    // Only the changed files: nested, each opening a diff. (The working
+    // change is made on first ask and computed after; the Uncommitted page
+    // shows the same wait.)
+    run_task(&fx, "uncommitted", stream.clone()).await;
+    let changed_params = || {
+        tree(
+            "uncommitted",
+            "",
+            SqlCell::Text("working".into()),
+            SqlCell::Text(String::new()),
+        )
+    };
+    let mut changed = run_task(&fx, "files-tree", changed_params()).await;
+    for _ in 0..50 {
+        if !changed.rows.is_empty() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        changed = run_task(&fx, "files-tree", changed_params()).await;
+    }
+    let new = changed
+        .rows
+        .iter()
+        .find(|r| changed.text(r, "id").as_deref() == Some("src/new.rs"))
+        .unwrap_or_else(|| panic!("{:?}", changed.rows));
+    assert_eq!(changed.text(new, "parent").as_deref(), Some("src"));
+    assert!(changed.text(new, "target").unwrap().contains("page=diff"));
+    assert!(changed.has("id", "src"));
+}

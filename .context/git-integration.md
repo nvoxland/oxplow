@@ -45,10 +45,11 @@ to both `vcsRefsChanged` and `workspaceChanged`, and each refresh runs
 `status --untracked-files=all` worktree walk. Agent edit storms drove a
 full rescan every 250ms, overlapping.
 
-It now routes both subscriptions through one `coalescedRefresh`
-(`apps/desktop/src/coalesced-refresh.ts`) — trailing debounce **plus
-single-flight**, with exactly one queued follow-up so the summary can't
-end stale. And each scan is cheaper (tsk241): `get_change_scopes`
+It was fixed with a trailing debounce **plus single-flight** (one queued
+follow-up, so the summary can't end stale); the helper (`coalesced-refresh.ts`)
+went with the last two views that used it, which are lenses now (a lens re-runs
+once per change). Write it again for any new expensive refresh fed by more
+than one event stream. And each scan is cheaper (tsk241): `get_change_scopes`
 (`oxplow-git/src/branch_changes.rs`) reads the branch, its base and its
 upstream in-process through `git2`, the repo opened once, so the one git
 process a scan spawns is the `status` — whose untracked walk uses git's
@@ -96,7 +97,7 @@ registration: we never seed cache for dirs we never care about.
 Subscribes via the **debounced** view (`subscribe_debounced(250ms)`)
 and bridges each batch onto `OxplowEvent::WorkspaceChanged`. Consumed by:
 
-- `ProjectPanel` to refresh the file tree.
+- The Files page's lenses (`v_workspace_file` follows `WorkspaceChanged`).
 - `EditorPane` for external-file-changed prompts.
 
 Source files mutate constantly; this watcher's job is to keep the
@@ -114,7 +115,7 @@ root and filter per delivered event, which meant every write under
 build flooded it (tsk206).
 
 The snapshot service's filter can be **swapped at runtime** by the
-`set_generated` IPC, whose documented contract is that include/exclude
+`oxplow.file.mark_generated` command (and a hand edit of the `generated` key), whose documented contract is that include/exclude
 edits apply *without an app restart*. Since the watch set is derived from
 the filter, `set_workspace_filter` also fires a `refilter` notify and the
 watcher starts a new `watch_workspace` with the new filter — otherwise a
@@ -218,9 +219,7 @@ outside the worktree would be missed.
 Fires `vcsRefsChanged` after each debounce. Consumed silently (no
 loading spinner) by:
 
-- `ProjectPanel` — refreshes the indexed git statuses.
-- (Formerly `GitChangesPanel`, now folded into `ProjectPanel`'s filter
-  modes.)
+- The Files page's lenses (`v_workspace_file`, `v_branch`, `v_change` follow it).
 - `SnapshotCapture::spawn_git_refs_listener` — requests a snapshot for
   the stream, so every commit lands a snapshot row stamped with the new
   HEAD (`snapshot.revision`/`branch`) even when the worktree
@@ -256,12 +255,12 @@ non-recursive `FsWatcher` on `projectDir`, spawned once at boot from
 whose basename is `.oxplow/project.yaml`, it calls
 `Services::reload_config_from_disk`, which re-runs
 `load_project_config`, swaps the in-memory `Arc<RwLock<OxplowConfig>>`,
-re-applies the snapshot `WorkspaceFilter` (mirroring `set_generated`),
+re-applies the snapshot `WorkspaceFilter` (as `oxplow.file.mark_generated` does),
 and emits `OxplowEvent::ConfigChanged`. Exists because config is
 otherwise read only once at boot — without it, an out-of-band edit
 (notably the agent running `/oxplow:configure`, which writes a
 `testing:` block and report collectors) wouldn't take effect until restart. The IPC
-setters (`set_generated`, `set_agent_prompt_append`) still mutate the
+setter `set_agent_prompt_append` still mutates the
 in-memory config directly; this watcher covers every other edit path.
 
 ### Orphan detection (boot + runtime)
@@ -528,11 +527,10 @@ another tool's checkout.
 
 ## UI commit affordance
 
-The Files panel (`ProjectPanel`) shows a **Commit (N)** button in its
-header toolbar whenever `vcsEnabled && uncommittedPaths.length > 0`.
-Clicking it opens a small `CommitDialog` with a commit-message
-textarea; submitting runs the `oxplow.vcs.commit` command (`vcsCommit`). This
-is the UI entry point for
+The Files page (the `files` lens) has a **Commit Changes…** action in its header
+part: a form over `oxplow.vcs.commit` (message, include untracked). The
+Uncommitted Changes page has an inline message box, and the command's menu
+entry opens that page. These are the UI entry points for
 user-driven commits. oxplow never steers the agent to commit.
 
 Button carries `data-testid="files-commit"`; the dialog's message

@@ -6,7 +6,6 @@ import {
   gitOpOutcomeMessage,
   normalizeGitOpResult,
   opErrorOf,
-  settleGitOp,
 } from "./git-op.js";
 import type { BackgroundTask, GitOpKickoff, OpOutcome } from "./api.js";
 
@@ -108,20 +107,6 @@ describe("gitOpOutcomeMessage", () => {
     expect(
       gitOpOutcomeMessage("Cherry-pick a1b2c3d", outcome({ success: false, log: "conflict" })),
     ).toBe("Cherry-pick a1b2c3d failed");
-  });
-});
-
-describe("settleGitOp", () => {
-  test("passes a command's outcome through", async () => {
-    expect(await settleGitOp(async () => outcome({ log: "done" }))).toEqual(outcome({ log: "done" }));
-  });
-
-  test("a refused or failed command becomes an unsuccessful outcome with the reason", async () => {
-    const r = await settleGitOp(async () => {
-      throw new Error("`oxplow.vcs.discard` needs confirmation");
-    });
-    expect(r.success).toBe(false);
-    expect(r.log).toBe("`oxplow.vcs.discard` needs confirmation");
   });
 });
 
