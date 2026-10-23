@@ -5,6 +5,7 @@ import type { PickedRow } from "./LensRail.js";
 import { Fragment, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { commandOpenAfter, lensActionForm, lensForm, lensText, runLensAction, submitLensForm, undoCommand, type LensRun, type SqlCell } from "../api.js";
 import { Slideover } from "../components/Slideover.js";
+import { InlinePromptStrip } from "../components/InlinePromptStrip.js";
 import type { FormStart } from "../tauri-bridge/generated/bindings.js";
 import type { Drop, LensAction } from "../tauri-bridge/generated/bindings.js";
 import { DailyBarChart } from "../components/Analytics/DailyBarChart.js";
@@ -18,7 +19,7 @@ import { CommandConfirm } from "../components/CommandConfirm.js";
 import { ResultCompleteness } from "./ResultCompleteness.js";
 import { useFormSubmit } from "./useFormSubmit.js";
 import { SchemaForm } from "../components/SchemaForm/SchemaForm.js";
-import { withSubfields, type Drafts } from "../components/SchemaForm/schemaFormModel.js";
+import { withSubfields, type Drafts, type Field } from "../components/SchemaForm/schemaFormModel.js";
 import { NO_READS, useRerunOnChange } from "./lensRerun.js";
 import { RouteLink, routeDispatch } from "../tabs/RouteLink.js";
 import { linkOrigins } from "./linkOrigin.js";
@@ -76,7 +77,7 @@ import { Facts } from "../kit/Facts.js";
 import { Stat } from "../kit/Stat.js";
 import { recordOpError } from "../opErrors.js";
 import { showToast } from "../components/toastStore.js";
-import { actionOffered, addLensToContext, copyLens, openAfterAction, performLensAction, rowRecord } from "./lensActions.js";
+import { actionOffered, addLensToContext, copyLens, openAfterAction, performLensAction, promptField, rowRecord } from "./lensActions.js";
 import { useHistoryState } from "../tabs/useHistoryState.js";
 import {
   chainedDrops,
@@ -89,6 +90,7 @@ import {
   rowKey,
   shownMarks,
   takesOnto,
+  withOrder,
   type DropAt,
 } from "./rowInteract.js";
 import { LENS_ROW_DRAG_MIME } from "../dragMimes.js";
@@ -121,7 +123,8 @@ export function LensResultView(props: LensResultViewProps) {
       testIdPrefix="lens-action-confirm"
     />
   ) : null;
-  // A form action's form, in a slideover beside whatever pressed it.
+  // A form action's form: a slideover beside whatever pressed it, or a
+  // prompt strip at the top of the lens when the form is one text field.
   const form = actions.form ? (
     <ActionForm run={run} streamId={streamId} pressed={actions.form} onClose={actions.closeForm} />
   ) : null;
@@ -318,7 +321,7 @@ function useLensActions(run: LensRun, streamId: string | null) {
   };
 }
 
-type LensActionsState = ReturnType<typeof useLensActions>;
+export type LensActionsState = ReturnType<typeof useLensActions>;
 
 /** The toolbar's actions as the page's: Copy, Add to Agent Context and
  *  the whole-lens actions, handed up whenever what they say changes. */
@@ -465,7 +468,7 @@ function LensBody(props: LensResultViewProps & { actions?: LensActionsState; mar
     return <DocumentViz parts={run.lens.parts} params={run.params} given={partParams(run)} streamId={streamId} onOpenPage={onOpenPage} onSetParam={props.onSetParam} />;
   }
   if (run.lens.viz === "dashboard") {
-    return <DashboardViz parts={run.lens.parts} params={run.params} given={partParams(run)} streamId={streamId} onOpenPage={onOpenPage} onSetParam={props.onSetParam} />;
+    return <DashboardViz run={run} actions={props.actions} parts={run.lens.parts} params={run.params} given={partParams(run)} streamId={streamId} onOpenPage={onOpenPage} onSetParam={props.onSetParam} />;
   }
   if (run.lens.viz === "form") return <FormViz run={run} streamId={streamId} />;
   return <RowsBody {...props} />;
@@ -737,9 +740,10 @@ function RowsBody({
     }
   };
   // The drag action the drop runs, once per dragged row, each landing
-  // after the one before it.
-  const dropRows = (dragged: SqlCell[][], at: DropAt) => {
+  // after the one before it; its order is every row of the result.
+  const dropRows = (dragged: SqlCell[][], place: DropAt) => {
     const records = dragged.map(recordOf);
+    const at = withOrder(place, result.rows.map(recordOf), records);
     const first = records[0];
     const action = first ? dragActionFor(dragActions, first, at) : null;
     if (!action || !actions) return;
@@ -1241,10 +1245,11 @@ function FormViz({ run, streamId }: { run: LensRun; streamId: string | null }) {
   );
 }
 
-/** A form action's form (`form: true`), in a slideover: its command's
- *  fields starting from the action's bound input, its fixed fields shown
- *  but not editable; submitting runs it as the lens, for the person, and
- *  closes it. */
+/** A form action's form (`form: true`): its command's fields starting
+ *  from the action's bound input, its fixed fields shown but not editable;
+ *  submitting runs it as the lens, for the person, and closes it. A form
+ *  that is one text field is a prompt strip at the top of the lens
+ *  (`promptField`); any other is a slideover. */
 function ActionForm({
   run,
   streamId,
@@ -1284,15 +1289,68 @@ function ActionForm({
     // rowKey stands in for `row`.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [run.lens.id, action.id, rowKey, streamId]);
+  // Which shape opens is the form's to say: nothing until it is read.
+  if (!start) return null;
+  const submitLabel = action.label.replace(/…$/, "");
+  const field = promptField(start);
+  if (field) {
+    return <ActionPrompt label={action.label} start={start} field={field} form={form} submitLabel={submitLabel} onClose={onClose} testId="lens-action-form" />;
+  }
+  return <FormSlideover title={action.label} start={start} form={form} submitLabel={submitLabel} onClose={onClose} testId="lens-action-form" />;
+}
+
+/** A form that is one text field, as a prompt strip at the top of the
+ *  lens (the Project panel's Rename… is the same strip): the field's
+ *  description is its message, the bound value is selected to type over,
+ *  Enter runs, Escape cancels. A secret field is masked, and blank leaves
+ *  it out (it keeps what is saved). A command that asks is confirmed above it;
+ *  a refusal shows under it and the strip stays with what was typed.
+ *  `testId` is the slideover's, so whoever presses the action finds the
+ *  field and the submit at the same ids whichever shape opens. */
+function ActionPrompt({
+  label,
+  start,
+  field,
+  form,
+  submitLabel,
+  onClose,
+  testId,
+}: {
+  label: string;
+  start: FormStart;
+  field: Field & { secret: boolean };
+  form: ReturnType<typeof useFormSubmit>;
+  submitLabel: string;
+  onClose(): void;
+  testId: string;
+}) {
+  const values = (start.values ?? {}) as Record<string, unknown>;
+  // A secret is never required: blank keeps the saved one, so it is left out.
+  const optional = !field.required || field.secret;
+  const errors = form.serverErrors;
+  const error = errors ? (errors[field.key] ?? Object.values(errors)[0] ?? null) : null;
   return (
-    <FormSlideover
-      title={action.label}
-      start={start}
-      form={form}
-      submitLabel={action.label.replace(/…$/, "")}
-      onClose={onClose}
-      testId="lens-action-form"
-    />
+    <div data-testid={testId} data-shape="prompt">
+      {form.pending ? (
+        <CommandConfirm
+          label={label}
+          command={start.command.id}
+          onConfirm={() => void form.submit(form.pending!, true)}
+          onCancel={form.cancel}
+          testIdPrefix={`${testId}-confirm`}
+        />
+      ) : null}
+      <InlinePromptStrip
+        message={field.description ?? field.label}
+        fields={[{ key: field.key, initialValue: String(values[field.key] ?? ""), placeholder: field.label, optional, secret: field.secret }]}
+        confirmLabel={submitLabel}
+        busy={form.busy}
+        error={error}
+        onSubmit={(v) => void form.submit(field.secret && !v[field.key] ? {} : { [field.key]: v[field.key] }, false)}
+        onCancel={onClose}
+        testId={`${testId}-fields`}
+      />
+    </div>
   );
 }
 

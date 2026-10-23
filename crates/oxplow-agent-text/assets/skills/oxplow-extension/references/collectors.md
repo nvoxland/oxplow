@@ -37,6 +37,8 @@ Rules:
   extension is deployed; you can't approve. Once it is deployed,
   `run_command` `oxplow.collector.sync { collector: "<extension>/<id>" }`
   re-runs it.
+- `v_collector` lists every enabled collector with its trigger, `enabled`,
+  `state` (`disabled`, `failing`, `never_run`, `ok`) and last run.
 - `v_collector_run` shows each collector's last run and error, and
   `v_collector_state` whether this OS enforces its `network` list
   (`network_enforced`) and why failures disabled it, if they did.

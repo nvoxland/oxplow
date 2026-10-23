@@ -208,7 +208,10 @@ Three more ways to reach a row action:
   `{{before.col}}` is the row below where it landed, `{{after.col}}` the
   row above, `{{onto.col}}` a row it was dropped on, and
   `{{group.value}}` the group it landed in. A field whose row isn't there
-  (a drop at the end of the list) is left out.
+  (a drop at the end of the list) is left out. `{{order.col}}` is a list:
+  the column of every row, in the order after the drop. Use it for a
+  command that takes the whole new order, as the whole value of a field
+  (`order: "{{order.id}}"`).
 - **`bulk: true`**: mark rows with Cmd/Ctrl+click, Shift+click or Space,
   and the action shows in the bar above them. It runs once for each
   marked row.
@@ -229,11 +232,14 @@ actions:
 `viz: board` shows each group as a column of cards. `values` sets the
 columns and their order, and keeps an empty column to drop on.
 
-With `form: true` an action opens the command's form in a side panel
-instead of running at once, its fields starting from `input`; you edit
-them and submit (Enter). `fixed` lists the fields you see but can't
-change — they keep `input`'s values, so an `Edit…` on a row always edits
-that row's item:
+With `form: true` an action opens the command's form instead of running
+at once, its fields starting from `input`; you edit them and submit
+(Enter). `fixed` lists the fields you see but can't change — they keep
+`input`'s values, so an `Edit…` on a row always edits that row's item.
+A form of several fields is a side panel. A form that is one text field
+(a Rename… whose only free field is the new name) is a strip above the
+rows instead, the value selected to type over; Enter runs it and Escape
+cancels.
 
 ```yaml
 actions:
@@ -381,6 +387,15 @@ tiles:
   `sections`.
 - A lens your agent shows as an answer can't be a document or a
   dashboard.
+
+A dashboard can also take its tiles from its query's rows: name the
+columns in `tile: { id, title?, size?, lens? | sql? | text? }` (a `sql`
+tile also takes `display`, `chart`, `metric` and `viz`). Each row is a
+tile, after any `tiles:`. The tiles act like rows: right-click a tile
+for its actions, press an action's key, or drag it where a drag action
+runs (`{{order.id}}` gives the command every tile in the new order). An
+`edit: true` action that saves the `text` column lets you edit a heading
+in place. A dashboard with `tile:` takes no `columns:`.
 
 Another extension can add to your document or dashboard. It mounts a lens
 in a slot named `<extension>/<slug>.sections` (document) or

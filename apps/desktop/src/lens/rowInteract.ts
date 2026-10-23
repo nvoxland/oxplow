@@ -56,16 +56,18 @@ export function dropZone(y: number, top: number, height: number, onto: boolean):
 }
 
 /** Where dragged rows landed, as the server binds it: the row below the
- *  drop (`before`), the row above (`after`), the row dropped on, and the
- *  group dropped in. */
+ *  drop (`before`), the row above (`after`), the row dropped on, the
+ *  group dropped in, and every row of the result in its order after the
+ *  drop (`withOrder`). */
 export interface DropAt {
   before: Record<string, SqlCell> | null;
   after: Record<string, SqlCell> | null;
   onto: Record<string, SqlCell> | null;
   group: SqlCell | null;
+  order: Record<string, SqlCell>[] | null;
 }
 
-export const NOWHERE: DropAt = { before: null, after: null, onto: null, group: null };
+export const NOWHERE: DropAt = { before: null, after: null, onto: null, group: null, order: null };
 
 /** A drop beside row `index` of `rows` (a group's rows, in drawing order;
  *  the dragged rows left out by the caller): `before` that row or `after`
@@ -78,8 +80,27 @@ export function dropBeside(
 ): DropAt {
   const at = rows[index] ?? null;
   if (zone === "onto") return { ...NOWHERE, onto: at, group };
-  if (zone === "before") return { before: at, after: rows[index - 1] ?? null, onto: null, group };
-  return { before: rows[index + 1] ?? null, after: at, onto: null, group };
+  if (zone === "before") return { ...NOWHERE, before: at, after: rows[index - 1] ?? null, group };
+  return { ...NOWHERE, before: rows[index + 1] ?? null, after: at, group };
+}
+
+/** `at` with its order: `rows` (every row of the result, in order) with
+ *  the `dragged` ones moved before `at.before`, else after `at.after`,
+ *  else to the end. A drop onto a row moves nothing. */
+export function withOrder(
+  at: DropAt,
+  rows: readonly Record<string, SqlCell>[],
+  dragged: readonly Record<string, SqlCell>[],
+): DropAt {
+  if (at.onto !== null) return { ...at, order: [...rows] };
+  const key = (r: Record<string, SqlCell>) => JSON.stringify(r);
+  const away = new Set(dragged.map(key));
+  const rest = rows.filter((r) => !away.has(key(r)));
+  const index = (r: Record<string, SqlCell> | null) => (r ? rest.findIndex((x) => key(x) === key(r)) : -1);
+  const before = index(at.before);
+  const after = index(at.after);
+  const to = before !== -1 ? before : after !== -1 ? after + 1 : rest.length;
+  return { ...at, order: [...rest.slice(0, to), ...dragged, ...rest.slice(to)] };
 }
 
 /** A drop in a group but on no row (its heading, a board column's empty
@@ -102,8 +123,9 @@ function scopesOf(input: unknown, out: Set<string> = new Set()): Set<string> {
 
 /** The drag action a drop of `row` at `at` runs: the first the row is
  *  offered (`when`) whose places are all there — one that names the group
- *  needs a group, one that names `onto` needs a row dropped on. Before and
- *  after may be missing (a drop at an end): the server leaves them out. */
+ *  needs a group, one that names `onto` needs a row dropped on, one that
+ *  names the order needs it. Before and after may be missing (a drop at
+ *  an end): the server leaves them out. */
 export function dragActionFor(actions: readonly LensAction[], row: Record<string, SqlCell>, at: DropAt): LensAction | null {
   return (
     actions.find((a) => {
@@ -111,6 +133,7 @@ export function dragActionFor(actions: readonly LensAction[], row: Record<string
       const scopes = scopesOf(a.input);
       if (scopes.has("group") && at.group === null) return false;
       if (scopes.has("onto") && at.onto === null) return false;
+      if (scopes.has("order") && at.order === null) return false;
       if (!scopes.has("onto") && at.onto !== null) return false;
       return true;
     }) ?? null
@@ -123,8 +146,8 @@ export function takesOnto(actions: readonly LensAction[]): boolean {
 }
 
 /** Several rows dropped together, in drawing order: each lands after the
- *  one dropped before it, so they keep their order where they land. A
- *  drop onto a row puts each onto it. */
+ *  one dropped before it, so they keep their order where they land, and
+ *  all share one order. A drop onto a row puts each onto it. */
 export function chainedDrops(at: DropAt, dragged: readonly Record<string, SqlCell>[]): DropAt[] {
   return dragged.map((_, i) => (i === 0 || at.onto !== null ? at : { ...at, after: dragged[i - 1]! }));
 }

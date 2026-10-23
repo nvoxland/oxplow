@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { querySql, type DashboardItem, type LensRun, type LensViz } from "../../api.js";
+import type { LensChart } from "../../tauri-bridge/generated/bindings.js";
 import { LensResultView } from "../../lens/LensResultView.js";
 import { adHocLens } from "../../lens/lensModel.js";
 import { NO_READS, useRerunOnChange } from "../../lens/lensRerun.js";
@@ -13,30 +14,28 @@ import { useContextMenu } from "../useRowContextMenu.js";
 const TILE_MAX_ROWS = 8;
 
 /**
- * A `query` dashboard tile (P4.7): pinned SQL over the published models,
- * shown as a lens viz (`display`), kept live by what it read. The metric
- * card display is `MetricTile`. See `.context/dashboards.md`.
+ * A query tile's body: pinned SQL over the published models, shown as a
+ * lens viz (`display`, `table` when absent), kept live by what it read.
+ * The custom-dashboard page's `QueryTile` and a dashboard lens's row
+ * tiles draw it.
  */
-export function QueryTile({
-  item,
-  opts,
+export function QueryTileBody({
+  sql,
+  display: shown,
+  chart,
+  maxRows = TILE_MAX_ROWS,
   onOpenPage,
-  onRemove,
-  onConfigure,
 }: {
-  item: DashboardItem;
-  opts: TileOptions;
+  sql: string;
+  display: string | null;
+  chart: LensChart | null;
+  maxRows?: number;
   onOpenPage?: (ref: TabRef) => void;
-  onRemove?: () => void;
-  onConfigure?: (next: Partial<TileOptions>) => void;
 }) {
-  const sql = opts.sql ?? "";
-  const display = (opts.display ?? "table") as LensViz;
-  const chart = opts.chart ?? null;
+  const display = (shown ?? "table") as LensViz;
   const chartKey = JSON.stringify(chart);
   const [run, setRun] = useState<LensRun | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const ctxMenu = useContextMenu();
   const guard = useRequestGuard();
 
   const refresh = useCallback(async () => {
@@ -56,6 +55,35 @@ export function QueryTile({
     void refresh();
   }, [refresh]);
   useRerunOnChange(run?.result.reads ?? NO_READS, () => void refresh());
+
+  if (error) return <div style={{ fontSize: "var(--text-xs)", color: "var(--severity-critical)" }}>{error}</div>;
+  if (!run) return <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>Loading…</div>;
+  return (
+    <div style={{ overflow: "auto", minHeight: 0 }}>
+      <LensResultView run={run} onOpenPage={(ref) => onOpenPage?.(ref)} maxRows={maxRows} />
+    </div>
+  );
+}
+
+/**
+ * A `query` dashboard tile (P4.7): its title over a `QueryTileBody`. The
+ * metric card display is `MetricTile`. See `.context/dashboards.md`.
+ */
+export function QueryTile({
+  item,
+  opts,
+  onOpenPage,
+  onRemove,
+  onConfigure,
+}: {
+  item: DashboardItem;
+  opts: TileOptions;
+  onOpenPage?: (ref: TabRef) => void;
+  onRemove?: () => void;
+  onConfigure?: (next: Partial<TileOptions>) => void;
+}) {
+  const sql = opts.sql ?? "";
+  const ctxMenu = useContextMenu();
 
   const menuItems: MenuItem[] = [
     {
@@ -94,15 +122,7 @@ export function QueryTile({
       <div style={{ fontWeight: 600, color: "var(--text-primary)" }} title={sql}>
         {opts.title ?? "Query"}
       </div>
-      {error ? (
-        <div style={{ fontSize: "var(--text-xs)", color: "var(--severity-critical)" }}>{error}</div>
-      ) : run ? (
-        <div style={{ overflow: "auto", minHeight: 0 }}>
-          <LensResultView run={run} onOpenPage={(ref) => onOpenPage?.(ref)} maxRows={TILE_MAX_ROWS} />
-        </div>
-      ) : (
-        <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>Loading…</div>
-      )}
+      <QueryTileBody sql={sql} display={opts.display ?? null} chart={opts.chart ?? null} onOpenPage={onOpenPage} />
       {ctxMenu.menu}
     </section>
   );

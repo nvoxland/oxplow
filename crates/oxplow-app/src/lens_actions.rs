@@ -39,7 +39,9 @@ pub struct LensActionCall {
 /// Where a dragged row landed: the rows on either side of the drop
 /// (`before`: the one below it, `after`: the one above), the row it was
 /// dropped on, and the value of the group it was dropped in. What isn't
-/// there is `None` (a drop at a list's end has no row below).
+/// there is `None` (a drop at a list's end has no row below). `order` is
+/// every row of the result in its order after the drop (the dragged rows
+/// moved to where they landed; a drop onto a row leaves it as it was).
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize, specta::Type)]
 pub struct Drop {
     #[serde(default)]
@@ -50,11 +52,14 @@ pub struct Drop {
     pub onto: Option<BTreeMap<String, SqlCell>>,
     #[serde(default)]
     pub group: Option<SqlCell>,
+    #[serde(default)]
+    pub order: Option<Vec<BTreeMap<String, SqlCell>>>,
 }
 
 impl Drop {
     /// The value `{{scope.name}}` names here, if any: a neighbour row's
-    /// column, or the group's value.
+    /// column, or the group's value. `{{order.*}}` is a list, not a cell
+    /// ([`Drop::order_of`]).
     fn value(&self, scope: &str, name: &str) -> Option<SqlCell> {
         let row = match scope {
             "before" => self.before.as_ref(),
@@ -65,10 +70,21 @@ impl Drop {
         };
         row?.get(name).cloned()
     }
+
+    /// `{{order.name}}`: that column of every row in the new order, if the
+    /// drop has an order and every row has the column.
+    fn order_of(&self, name: &str) -> Option<Value> {
+        self.order
+            .as_ref()?
+            .iter()
+            .map(|r| r.get(name).and_then(|c| serde_json::to_value(c).ok()))
+            .collect::<Option<Vec<_>>>()
+            .map(Value::Array)
+    }
 }
 
 /// The scopes a drop binds.
-const DROP_SCOPES: &[&str] = &["before", "after", "onto", "group"];
+const DROP_SCOPES: &[&str] = &["before", "after", "onto", "group", "order"];
 
 /// Run `call`'s action, with the lens resolved in `lens_root` (the stream's
 /// worktree) and its params seen from `ctx`.
@@ -1016,8 +1032,9 @@ pub async fn load_component_pinned(
 /// `input` with its placeholders bound: a string that is exactly
 /// `{{param.x}}` / `{{row.x}}` becomes that value (typed), `{{row.x|json}}`
 /// the JSON that text cell holds (an array a row built), `{{param.x.id}}`
-/// the key of the URI param `x` (a bare id), and a string that
-/// contains them has them spliced in as text. The values are data — they
+/// the key of the URI param `x` (a bare id), `{{order.x}}` the list of a
+/// drop's rows' `x` in their new order (only as a field's whole value),
+/// and a string that contains them has them spliced in as text. The values are data — they
 /// go into the command's input, never into SQL.
 pub fn bind_input(
     input: &Value,
@@ -1037,6 +1054,14 @@ pub fn bind_input(
                 u.param(&key).map(|k| SqlCell::Text(k.to_string()))
             }),
             "row" => row.and_then(|r| r.get(name)).cloned(),
+            "order" => {
+                return Err(CommandError::Invalid {
+                    field: Some("/input".into()),
+                    message: format!(
+                        "`{{{{order.{name}}}}}` is a list: bind it as a field's whole value"
+                    ),
+                })
+            }
             s if DROP_SCOPES.contains(&s) => drop.and_then(|d| d.value(s, name)),
             _ => None,
         };
@@ -1063,28 +1088,54 @@ pub fn bind_input(
                 }
                 other => serde_json::to_value(other).unwrap_or(Value::Null),
             },
+            Some(p) if p.scope == "order" => {
+                drop.and_then(|d| d.order_of(&p.name))
+                    .ok_or_else(|| CommandError::Invalid {
+                        field: Some("/input".into()),
+                        message: format!("`{{{{order.{}}}}}` has no value here", p.name),
+                    })?
+            }
             Some(p) => serde_json::to_value(lookup(&p.scope, &p.name)?).unwrap_or(Value::Null),
             None => Value::String(oxplow_domain::template::splice(s, |p| {
                 lookup(&p.scope, &p.name).map(|c| text(&c))
             })?),
         },
-        Value::Array(items) => Value::Array(
-            items
+        Value::Array(items) => {
+            // A list is the whole value `{{order.x}}` binds, never an item.
+            if let Some(p) = items
                 .iter()
-                .map(|i| bind_input(i, params, row, drop))
-                .collect::<Result<_, _>>()?,
-        ),
+                .filter_map(Value::as_str)
+                .filter_map(oxplow_domain::template::whole_placeholder)
+                .find(|p| p.scope == "order")
+            {
+                return Err(CommandError::Invalid {
+                    field: Some("/input".into()),
+                    message: format!(
+                        "`{{{{order.{}}}}}` is a list: bind it as a field's whole value",
+                        p.name
+                    ),
+                });
+            }
+            Value::Array(
+                items
+                    .iter()
+                    .map(|i| bind_input(i, params, row, drop))
+                    .collect::<Result<_, _>>()?,
+            )
+        }
         Value::Object(map) => {
             let mut out = serde_json::Map::new();
             for (k, v) in map {
                 // A field that is exactly a drop's place with nothing there
                 // (no row below a drop at the end) is left out: the
-                // command's optional field stays absent.
+                // command's optional field stays absent. A drop always has
+                // its order.
                 let absent = v
                     .as_str()
                     .and_then(oxplow_domain::template::whole_placeholder)
                     .is_some_and(|p| {
-                        DROP_SCOPES.contains(&p.scope.as_str())
+                        p.scope != "order"
+                            && DROP_SCOPES.contains(&p.scope.as_str())
                             && drop.is_none_or(|d| d.value(&p.scope, &p.name).is_none())
                     });
                 if !absent {
@@ -1126,6 +1177,34 @@ actions:
   - { id: push, label: Push, command: oxplow.vcs.push, input: { stream: str1 } }
   - { id: prompt, label: Prompt, command: oxplow.config.set, input: { key: agentPromptAppend, value: be brief } }
   - { id: retitle, label: Retitle…, command: oxplow.work_item.update, row: true, form: true, fixed: [uri], input: { uri: "{{row.uri}}", title: "{{row.title}}" } }
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            ext.join("lenses/tiles.yaml"),
+            r#"title: Tiles
+params: [{ name: id, default: "" }]
+query: |
+  SELECT 'dti' || i.id AS id, i.kind,
+         json_extract(i.options_json, '$.title') AS title,
+         json_extract(i.options_json, '$.size') AS size,
+         json_extract(i.options_json, '$.lensId') AS lens,
+         json_extract(i.options_json, '$.sql') AS sql,
+         json_extract(i.options_json, '$.display') AS display,
+         json_extract(i.options_json, '$.chart') AS chart,
+         json_extract(i.options_json, '$.metric') AS metric,
+         json_extract(i.options_json, '$.viz') AS viz,
+         json_extract(i.options_json, '$.text') AS text
+  FROM v_dashboard_item i WHERE 'dsh' || i.dashboard_id = :id ORDER BY i.sort_index
+viz: dashboard
+tile: { id: id, title: title, size: size, lens: lens, sql: sql, display: display, chart: chart, metric: metric, viz: viz, text: text }
+actions:
+  - { id: reorder, label: Reorder, command: oxplow.dashboard.reorder_items, drag: true, input: { dashboard: "{{param.id}}", order: "{{order.id}}" } }
+  - { id: rename, label: Rename…, command: oxplow.dashboard.update_item, row: true, form: true, fixed: [item], input: { item: "{{row.id}}", title: "{{row.title}}", size: "{{row.size}}" } }
+  - { id: edit-text, label: Save, command: oxplow.dashboard.update_item, edit: true, fixed: [item], input: { item: "{{row.id}}", text: "{{row.text}}" } }
+  - { id: remove, label: Remove, command: oxplow.dashboard.remove_item, row: true, key: Delete, input: { item: "{{row.id}}" } }
+  - { id: add-text, label: Add Heading…, command: oxplow.dashboard.add_item, form: true, fixed: [dashboard, kind], input: { dashboard: "{{param.id}}", kind: text } }
+  - { id: rename-dashboard, label: Rename Dashboard…, command: oxplow.dashboard.rename, form: true, fixed: [dashboard], input: { dashboard: "{{param.id}}" } }
 "#,
         )
         .unwrap();
@@ -1334,6 +1413,157 @@ actions:
         );
     }
 
+    /// A dashboard lens whose rows are its tiles edits them through its
+    /// actions alone: a drag binds the whole new order, row forms rename
+    /// and resize, the edit action saves a heading, a key removes, and
+    /// whole-lens forms add a tile and rename the dashboard.
+    #[tokio::test]
+    async fn a_dashboard_lens_reorders_renames_and_removes_its_tiles() {
+        let (fx, root) = fixture().await;
+        let svc = fx.svc.clone();
+        let made = svc
+            .commands
+            .run(
+                &Actor::Human,
+                "oxplow.dashboard.create",
+                json!({ "title": "D" }),
+                false,
+            )
+            .await
+            .unwrap();
+        let dashboard = made.result["id"].as_str().unwrap().to_string();
+        for text in ["A", "B", "C"] {
+            svc.commands
+                .run(
+                    &Actor::Human,
+                    "oxplow.dashboard.add_item",
+                    json!({ "dashboard": dashboard, "kind": "text", "text": text }),
+                    false,
+                )
+                .await
+                .unwrap();
+        }
+        let params = BTreeMap::from([("id".to_string(), SqlCell::Text(dashboard.clone()))]);
+        // The tiles as the lens reads them: each row by its column.
+        let tiles = || {
+            let (svc, root, params) = (svc.clone(), root.clone(), params.clone());
+            async move {
+                let ctx = extensions::LensContext::default();
+                let run = extensions::run_lens(
+                    &svc.sql,
+                    &svc.extension_catalog,
+                    &root,
+                    "acme/tiles",
+                    params,
+                    &ctx,
+                )
+                .await
+                .unwrap();
+                let cols = run.result.columns.clone();
+                run.result
+                    .rows
+                    .into_iter()
+                    .map(|r| {
+                        cols.iter()
+                            .cloned()
+                            .zip(r)
+                            .collect::<BTreeMap<String, SqlCell>>()
+                    })
+                    .collect::<Vec<_>>()
+            }
+        };
+        let texts = |rows: &[BTreeMap<String, SqlCell>], col: &str| {
+            rows.iter()
+                .map(|r| match &r[col] {
+                    SqlCell::Text(t) => t.clone(),
+                    _ => String::new(),
+                })
+                .collect::<Vec<_>>()
+        };
+        let act = |action: &'static str,
+                   row: Option<BTreeMap<String, SqlCell>>,
+                   input: Option<Value>,
+                   drop: Option<Drop>| {
+            let (svc, root, params) = (svc.clone(), root.clone(), params.clone());
+            async move {
+                let mut c = call(action, params, row, Actor::Human, false);
+                c.lens_id = "acme/tiles".into();
+                c.input = input;
+                c.drop = drop;
+                run_lens_action(&svc, &root, c, &extensions::LensContext::default()).await
+            }
+        };
+
+        // C dragged to the front: the drop's order is every tile.
+        let rows = tiles().await;
+        assert_eq!(texts(&rows, "text"), ["A", "B", "C"]);
+        let order = vec![rows[2].clone(), rows[0].clone(), rows[1].clone()];
+        act(
+            "reorder",
+            Some(rows[2].clone()),
+            None,
+            Some(Drop {
+                before: Some(rows[0].clone()),
+                order: Some(order),
+                ..Drop::default()
+            }),
+        )
+        .await
+        .unwrap();
+        let rows = tiles().await;
+        assert_eq!(texts(&rows, "text"), ["C", "A", "B"]);
+
+        // Rename and resize A; edit C's heading in place.
+        act(
+            "rename",
+            Some(rows[1].clone()),
+            Some(json!({ "title": "First", "size": "wide" })),
+            None,
+        )
+        .await
+        .unwrap();
+        act(
+            "edit-text",
+            Some(rows[0].clone()),
+            Some(json!({ "text": "Sea" })),
+            None,
+        )
+        .await
+        .unwrap();
+        let rows = tiles().await;
+        assert_eq!(texts(&rows, "title"), ["", "First", ""]);
+        assert_eq!(texts(&rows, "size"), ["", "wide", ""]);
+        assert_eq!(texts(&rows, "text"), ["Sea", "A", "B"]);
+
+        // Remove B; add a heading; rename the dashboard.
+        act("remove", Some(rows[2].clone()), None, None)
+            .await
+            .unwrap();
+        act("add-text", None, Some(json!({ "text": "New" })), None)
+            .await
+            .unwrap();
+        act(
+            "rename-dashboard",
+            None,
+            Some(json!({ "title": "Board" })),
+            None,
+        )
+        .await
+        .unwrap();
+        let rows = tiles().await;
+        assert_eq!(texts(&rows, "text"), ["Sea", "A", "New"]);
+        let title = svc
+            .sql
+            .query_sql(
+                "SELECT title FROM v_dashboard WHERE 'dsh' || id = ?1",
+                vec![SqlCell::Text(dashboard.clone())],
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(title.rows, vec![vec![SqlCell::Text("Board".into())]]);
+    }
+
     /// Where a drop landed binds `{{before.*}}`, `{{after.*}}`, `{{onto.*}}`
     /// and `{{group.value}}`; a field that is exactly one of them with
     /// nothing there is left out; anywhere else, it has no value.
@@ -1345,27 +1575,48 @@ actions:
             after: None,
             onto: Some(near("o")),
             group: Some(SqlCell::Text("done".into())),
+            order: Some(vec![near("x"), near("b"), near("y")]),
         };
         let input = serde_json::json!({
             "before": "{{before.uri}}",
             "after": "{{after.uri}}",
             "parent": "{{onto.uri}}",
             "to": "{{group.value}}",
-            "note": "near {{before.uri}}"
+            "note": "near {{before.uri}}",
+            "order": "{{order.uri}}"
         });
         assert_eq!(
             bind_input(&input, &BTreeMap::new(), None, Some(&drop)).unwrap(),
-            serde_json::json!({ "before": "b", "parent": "o", "to": "done", "note": "near b" })
+            serde_json::json!({
+                "before": "b", "parent": "o", "to": "done", "note": "near b",
+                "order": ["x", "b", "y"]
+            })
         );
         for bad in [
             serde_json::json!({ "list": ["{{after.uri}}"] }),
             serde_json::json!({ "note": "near {{after.uri}}" }),
+            serde_json::json!({ "list": ["{{order.uri}}"] }),
+            serde_json::json!({ "note": "in {{order.uri}}" }),
+            serde_json::json!({ "order": "{{order.missing}}" }),
         ] {
             assert!(
                 bind_input(&bad, &BTreeMap::new(), None, Some(&drop)).is_err(),
                 "{bad}"
             );
         }
+        // A drop always has its order: one without is refused, never left out.
+        let no_order = Drop {
+            order: None,
+            ..drop.clone()
+        };
+        let err = bind_input(
+            &serde_json::json!({ "order": "{{order.uri}}" }),
+            &BTreeMap::new(),
+            None,
+            Some(&no_order),
+        )
+        .unwrap_err();
+        assert!(format!("{err:?}").contains("has no value here"), "{err:?}");
     }
 
     /// A row action with `when` is offered only on rows whose column is

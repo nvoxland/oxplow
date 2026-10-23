@@ -17,6 +17,12 @@ pub const DISPLAYS: &[&str] = &[
     "table", "list", "number", "markdown", "bar", "line", "treemap", "metric",
 ];
 
+/// The sizes a tile can take (its options' `size`).
+pub const SIZES: &[&str] = &["small", "wide", "tall", "full"];
+
+/// How the metric card draws (its options' `viz`).
+pub const METRIC_VIZ: &[&str] = &["line", "number"];
+
 /// What a caller gives for a new tile.
 #[derive(Debug, Clone, Default)]
 pub struct TileInput {
@@ -30,6 +36,18 @@ pub struct TileInput {
     /// Anything else the tile carries (size, title, a text tile's `text`,
     /// the metric card's `metric` and `viz`, …).
     pub options_json: Option<String>,
+    /// The tile's title override. Beats the same key in `options_json`.
+    pub title: Option<String>,
+    /// One of [`SIZES`].
+    pub size: Option<String>,
+    /// A `text` tile's heading (plain text).
+    pub text: Option<String>,
+    /// The metric card's metric key.
+    pub metric: Option<String>,
+    /// One of [`METRIC_VIZ`].
+    pub viz: Option<String>,
+    /// A chart tile's columns (a JSON object).
+    pub chart: Option<Value>,
 }
 
 /// The chart columns a chart display needs (P6.F1): `bar` and `line` an
@@ -123,6 +141,34 @@ pub fn build_tile(input: TileInput) -> Result<(NewDashboardItem, Option<QueryChe
         }
         _ => Map::new(),
     };
+    for (key, flat) in [
+        ("title", &input.title),
+        ("size", &input.size),
+        ("text", &input.text),
+        ("metric", &input.metric),
+        ("viz", &input.viz),
+    ] {
+        if let Some(v) = flat {
+            opts.insert(key.into(), Value::String(v.clone()));
+        }
+    }
+    if let Some(chart) = &input.chart {
+        opts.insert("chart".into(), chart.clone());
+    }
+    for (key, allowed) in [("size", SIZES), ("viz", METRIC_VIZ)] {
+        if let Some(v) = opts.get(key) {
+            if !v.as_str().is_some_and(|s| allowed.contains(&s)) {
+                let shown = v.as_str().map_or_else(|| v.to_string(), str::to_string);
+                return Err(invalid(format!(
+                    "unknown {key} `{shown}` ({})",
+                    allowed.join(" | ")
+                )));
+            }
+        }
+    }
+    if opts.get("chart").is_some_and(|c| !c.is_object()) {
+        return Err(invalid("`chart` must be an object of column names"));
+    }
     match input.kind.as_str() {
         "query" => {
             let query = input
@@ -307,5 +353,76 @@ mod tests {
             .to_string();
             assert!(err.contains(says), "{display}: {err}");
         }
+    }
+
+    #[tokio::test]
+    async fn a_tile_takes_flat_fields_over_its_options() {
+        let gw = SqlGateway::new(oxplow_db::Database::in_memory());
+        let tile = new_tile(
+            &gw,
+            TileInput {
+                kind: "text".into(),
+                title: Some("Flat".into()),
+                size: Some("full".into()),
+                text: Some("hi".into()),
+                options_json: Some(r#"{"title":"Blob","size":"wide","range":"7d"}"#.into()),
+                ..TileInput::default()
+            },
+        )
+        .await
+        .unwrap();
+        let opts: Value = serde_json::from_str(tile.options_json.as_deref().unwrap()).unwrap();
+        assert_eq!(opts["title"], "Flat");
+        assert_eq!(opts["size"], "full");
+        assert_eq!(opts["text"], "hi");
+        assert_eq!(opts["range"], "7d");
+    }
+
+    #[tokio::test]
+    async fn size_viz_and_chart_are_checked() {
+        let gw = SqlGateway::new(oxplow_db::Database::in_memory());
+        for (input, says) in [
+            (
+                TileInput {
+                    kind: "text".into(),
+                    size: Some("huge".into()),
+                    ..TileInput::default()
+                },
+                "unknown size `huge` (small | wide | tall | full)",
+            ),
+            (
+                TileInput {
+                    kind: "text".into(),
+                    options_json: Some(r#"{"viz":"pie"}"#.into()),
+                    ..TileInput::default()
+                },
+                "unknown viz `pie` (line | number)",
+            ),
+            (
+                TileInput {
+                    kind: "text".into(),
+                    chart: Some(Value::String("x".into())),
+                    ..TileInput::default()
+                },
+                "`chart` must be an object",
+            ),
+        ] {
+            let err = new_tile(&gw, input).await.unwrap_err().to_string();
+            assert!(err.contains(says), "{err}");
+        }
+        let tile = new_tile(
+            &gw,
+            TileInput {
+                kind: "query".into(),
+                sql: Some("SELECT 'a' AS day, 3 AS n".into()),
+                display: Some("bar".into()),
+                chart: Some(serde_json::json!({"x":"day","y":"n"})),
+                viz: Some("number".into()),
+                ..TileInput::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert!(tile.options_json.unwrap().contains(r#""viz":"number""#));
     }
 }

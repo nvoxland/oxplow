@@ -15,6 +15,41 @@ const HEADING_STYLE: React.CSSProperties = {
   color: "var(--text, #ddd)",
 };
 
+/** A heading band's text: edited in place with `InlineEdit` when it can be
+ *  saved (`onCommit`), else plain. The custom-dashboard page's `TextTile`
+ *  and a dashboard lens's text row tiles draw it. */
+export function TextBand({ text, onCommit, testId }: { text: string; onCommit?: (next: string) => void; testId: string }) {
+  if (!onCommit) {
+    return (
+      <span data-testid={testId} style={HEADING_STYLE}>
+        {text}
+      </span>
+    );
+  }
+  return (
+    <InlineEdit
+      value={text}
+      onCommit={onCommit}
+      allowEmpty
+      placeholder="Click to add a heading…"
+      ariaLabel="Section heading"
+      testId={testId}
+      displayStyle={HEADING_STYLE}
+      inputStyle={{ ...HEADING_STYLE, width: "100%" }}
+    />
+  );
+}
+
+/** A heading band's frame: no card, only a rule under the text. */
+export const BAND_STYLE: React.CSSProperties = {
+  // A band, not a panel: no card fill or border, just a rule under the
+  // heading, and only as tall as the text itself.
+  borderBottom: "1px solid var(--border-subtle)",
+  padding: "4px 2px 6px",
+  minWidth: 0,
+  alignSelf: "start",
+};
+
 /**
  * A `text` dashboard tile (tsk142) — a **heading band** labelling the run of
  * tiles beneath it. The body is **plain text**, edited in place with
@@ -67,25 +102,9 @@ export function TextTile({
     <section
       data-testid={`text-tile-${item.id}`}
       onContextMenu={(e) => ctxMenu.open(e, menuItems)}
-      style={{
-        // A band, not a panel: no card fill or border, just a rule under the
-        // heading, and only as tall as the text itself.
-        borderBottom: "1px solid var(--border-subtle)",
-        padding: "4px 2px 6px",
-        minWidth: 0,
-        alignSelf: "start",
-      }}
+      style={BAND_STYLE}
     >
-      <InlineEdit
-        value={text}
-        onCommit={(next) => onConfigure?.({ text: next })}
-        allowEmpty
-        placeholder="Click to add a heading…"
-        ariaLabel="Section heading"
-        testId={`text-tile-edit-${item.id}`}
-        displayStyle={HEADING_STYLE}
-        inputStyle={{ ...HEADING_STYLE, width: "100%" }}
-      />
+      <TextBand text={text} onCommit={(next) => onConfigure?.({ text: next })} testId={`text-tile-edit-${item.id}`} />
       {ctxMenu.menu}
     </section>
   );

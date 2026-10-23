@@ -2273,13 +2273,16 @@ export type DimensionEntry = {
  *  Where a dragged row landed: the rows on either side of the drop
  *  (`before`: the one below it, `after`: the one above), the row it was
  *  dropped on, and the value of the group it was dropped in. What isn't
- *  there is `None` (a drop at a list's end has no row below).
+ *  there is `None` (a drop at a list's end has no row below). `order` is
+ *  every row of the result in its order after the drop (the dragged rows
+ *  moved to where they landed; a drop onto a row leaves it as it was).
  */
 export type Drop = {
 	before?: { [key in string]: SqlCell } | null,
 	after?: { [key in string]: SqlCell } | null,
 	onto?: { [key in string]: SqlCell } | null,
 	group?: SqlCell | null,
+	order?: { [key in string]: SqlCell }[] | null,
 };
 
 /**
@@ -4372,6 +4375,36 @@ export type LensSteps = {
 	status: string | null,
 };
 
+/**
+ *  `dashboard` viz: its query's rows are tiles, one per row, each value
+ *  naming a column. A row draws its `lens` (run with the page's params it
+ *  declares), its pinned `sql` (shown as `display`, a chart by `chart`,
+ *  the metric card by `metric` and `viz`) or its `text` (a heading band).
+ */
+export type LensTile = {
+	/**  The tile's id: what its actions bind as `{{row.<id column>}}`. */
+	id: string | null,
+	title: string | null,
+	/**
+	 *  `small`, `wide`, `tall` or `full` (unknown: `small`; a text tile's
+	 *  default is `full`).
+	 */
+	size: string | null,
+	/**  A lens id (`<extension>/<slug>`). */
+	lens: string | null,
+	/**  Read-only SQL over the published models. */
+	sql: string | null,
+	/**  How a `sql` tile shows its rows: a viz name, or `metric`. */
+	display: string | null,
+	/**  A `sql` tile's chart roles, as JSON (`{"x": …, "y": …}`). */
+	chart: string | null,
+	/**  A `metric` display's metric key. */
+	metric: string | null,
+	/**  A `metric` display's card: `line` or `number`. */
+	viz: string | null,
+	text: string | null,
+};
+
 /**  `timeline` viz: when each row happened and what it says. */
 export type LensTimeline = {
 	at: string | null,
@@ -4508,6 +4541,8 @@ export type Lens_Deserialize = {
 	/**  Columns a chart viz draws from. */
 	chart: LensChart | null,
 	tree: LensTree | null,
+	/**  `dashboard` only: its query's rows are its tiles. */
+	tile: LensTile | null,
 	timeline: LensTimeline | null,
 	steps: LensSteps | null,
 	hunks: LensHunks | null,
@@ -4573,6 +4608,8 @@ export type Lens_Serialize = {
 	/**  Columns a chart viz draws from. */
 	chart: LensChart | null,
 	tree: LensTree | null,
+	/**  `dashboard` only: its query's rows are its tiles. */
+	tile: LensTile | null,
 	timeline: LensTimeline | null,
 	steps: LensSteps | null,
 	hunks: LensHunks | null,

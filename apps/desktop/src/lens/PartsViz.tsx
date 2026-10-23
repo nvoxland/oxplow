@@ -1,8 +1,17 @@
 import type { PickedRow } from "./LensRail.js";
-import type { ReactNode } from "react";
+import { useCallback, useEffect, useId, useMemo, useState, type ReactNode } from "react";
 
-import type { LensRun, SqlCell } from "../api.js";
-import type { LensPart } from "../tauri-bridge/generated/bindings.js";
+import { listMetricDefinitions, runLensAction, type LensRun, type MetricSpec, type SqlCell } from "../api.js";
+import type { LensAction, LensPart, Reads } from "../tauri-bridge/generated/bindings.js";
+import { insertIntoAgent } from "../agent-input-bus.js";
+import { CommandConfirm } from "../components/CommandConfirm.js";
+import { MetricTileBody } from "../components/Dashboard/MetricTile.js";
+import { QueryTileBody } from "../components/Dashboard/QueryTile.js";
+import { BAND_STYLE, TextBand } from "../components/Dashboard/TextTile.js";
+import { useContextMenu } from "../components/useRowContextMenu.js";
+import { LENS_ROW_DRAG_MIME } from "../dragMimes.js";
+import { resolveRange } from "../kit/rangePresets.js";
+import type { MenuItem } from "../menu.js";
 import { Replaceable } from "../components/Replaceable.js";
 import { Markdown } from "../components/Markdown/Markdown.js";
 import { Loading } from "../kit/Loading.js";
@@ -11,8 +20,12 @@ import { Tile, TileGrid, TileSlot } from "../kit/Tiles.js";
 import { lensRef } from "../tabs/pageRefs.js";
 import { RouteLink } from "../tabs/RouteLink.js";
 import type { TabRef } from "../tabs/tabState.js";
-import { LensResultView } from "./LensResultView.js";
-import { foldEmpty } from "./lensModel.js";
+import { LensResultView, type LensActionsState } from "./LensResultView.js";
+import { actionOffered } from "./lensActions.js";
+import { foldEmpty, rowAsk, rowTiles, type RowTile } from "./lensModel.js";
+import { NO_READS, useRerunOnChange } from "./lensRerun.js";
+import { dragActionFor, dropBeside, dropInGroup, keyAction, withOrder, type DropAt } from "./rowInteract.js";
+import { useFormSubmit } from "./useFormSubmit.js";
 import { useLensRuns, type PartRun } from "./useLensRuns.js";
 
 /** Rows a dashboard tile shows before "open the lens for the rest". */
@@ -151,24 +164,264 @@ export function DocumentViz(props: PartsVizProps) {
   );
 }
 
-/** `dashboard`: its parts as tiles at their sizes, each a titled card. */
-export function DashboardViz(props: PartsVizProps) {
-  const runs = usePartRuns(props);
-  const { parts, streamId, onOpenPage, params, onSetParam } = props;
+/** The metric definitions, when some tile shows the metric card: one
+ *  fetch for the grid, re-read when they change. */
+function useMetricDefs(wanted: boolean): Map<string, MetricSpec> {
+  const [defs, setDefs] = useState<Map<string, MetricSpec>>(new Map());
+  const [reads, setReads] = useState<Reads>(NO_READS);
+  const load = useCallback(() => {
+    if (!wanted) return;
+    void listMetricDefinitions().then((specs) => {
+      setDefs(new Map(specs.rows.map((d) => [d.key, d])));
+      setReads(specs.reads);
+    });
+  }, [wanted]);
+  useEffect(() => load(), [load]);
+  useRerunOnChange(reads, load);
+  return defs;
+}
+
+/** The column an edit action saves (`{{row.<column>}}` bound to its
+ *  edited field), if any. */
+function editColumn(action: LensAction): string | null {
+  const bound = action.editField ? (action.input as Record<string, unknown> | null)?.[action.editField] : null;
+  const m = typeof bound === "string" ? /^\{\{\s*row\.([^}|\s]+)\s*\}\}$/.exec(bound) : null;
+  return m ? m[1]! : null;
+}
+
+interface DashboardVizProps extends PartsVizProps {
+  /** The dashboard's own run: its rows are its tiles when it has `tile:`. */
+  run: LensRun;
+  /** Its actions, pressed from its row tiles. */
+  actions?: LensActionsState;
+}
+
+/**
+ * `dashboard`: its parts as tiles at their sizes, each a titled card, then
+ * its row tiles (`tile:`): one per row, drawn by its lens, its SQL (as a
+ * viz or the metric card) or its text (a heading band). A row tile is a
+ * row: right-click offers its row actions, their keys run them, it drags
+ * where a drag action runs (`{{order.*}}`: every tile in its new order),
+ * and a heading is edited in place through the edit action. See
+ * `.context/extensions.md` "Rows as tiles".
+ */
+export function DashboardViz(props: DashboardVizProps) {
+  const { run, actions, parts, params, given, streamId, onOpenPage, onSetParam } = props;
+  const lens = run.lens;
+  const tiles = rowTiles(run);
+  // Row tiles' lenses by tile id, sorted: a reorder runs nothing again.
+  const rowLenses = tiles
+    .filter((t) => t.kind === "lens")
+    .map((t) => ({ key: `row:${t.id}`, lensId: t.lens! }))
+    .sort((a, b) => a.key.localeCompare(b.key));
+  const runs = useLensRuns([...parts.flatMap((p) => (p.lens ? [{ key: p.id, lensId: p.lens }] : [])), ...rowLenses], given ?? params, streamId);
+  const defs = useMetricDefs(tiles.some((t) => t.kind === "metric"));
+  // The metric cards' window: the page's `range` and `branch`, if it has them.
+  const rangeKey = typeof params.range === "string" ? params.range : "all";
+  const branch = typeof params.branch === "string" && params.branch !== "" ? params.branch : null;
+  const window = useMemo(() => ({ range: resolveRange(rangeKey, Date.now()), branch }), [rangeKey, branch]);
+  const ctxMenu = useContextMenu();
+  const dragToken = useId();
+  const [hint, setHint] = useState<{ id: string; zone: "before" | "after" } | null>(null);
+  const dragActions = lens.actions.filter((a) => a.drag);
+  const rowActions = lens.actions.filter((a) => a.row && !a.edit && !a.drag);
+  const edit = lens.actions.find((a) => a.edit && lens.tile?.text && editColumn(a) === lens.tile.text) ?? null;
+  const records = tiles.map((t) => t.record);
+
+  const carriesTile = (e: React.DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes(LENS_ROW_DRAG_MIME);
+  const draggedTile = (e: React.DragEvent): RowTile | null => {
+    try {
+      const p = JSON.parse(e.dataTransfer.getData(LENS_ROW_DRAG_MIME)) as { token?: unknown; keys?: unknown };
+      if (p.token !== dragToken || !Array.isArray(p.keys)) return null;
+      return tiles.find((t) => t.id === p.keys[0]) ?? null;
+    } catch {
+      return null;
+    }
+  };
+  // A drop runs the drag action with every tile in its new order.
+  const dropTile = (dragged: RowTile, place: DropAt) => {
+    const at = withOrder(place, records, [dragged.record]);
+    const action = dragActionFor(dragActions, dragged.record, at);
+    if (action && actions) actions.runDrops(action, [{ row: dragged.record, drop: at }]);
+  };
+  const others = (dragged: RowTile) => tiles.filter((t) => t.id !== dragged.id);
+  const sideOf = (e: React.DragEvent): "before" | "after" => {
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    return e.clientX < r.left + r.width / 2 ? "before" : "after";
+  };
+
+  const itemsFor = (tile: RowTile): MenuItem[] => [
+    { id: "ask-about-row", label: "Ask About This", enabled: true, run: () => insertIntoAgent(rowAsk(lens, run.result.columns, run.result.rows[tiles.indexOf(tile)] ?? [])) },
+    ...rowActions
+      .filter((a) => actionOffered(a, tile.record))
+      .map((a) => ({ id: `lens-action-${a.id}`, label: a.label, enabled: actions !== undefined, run: () => actions?.run(a, tile.record) })),
+  ];
+
+  const slotProps = (tile: RowTile): Record<string, unknown> => {
+    const drags = dragActions.some((a) => actionOffered(a, tile.record));
+    return {
+      tabIndex: 0,
+      "data-drop": hint?.id === tile.id ? hint.zone : undefined,
+      onContextMenu: (e: React.MouseEvent) => ctxMenu.open(e, itemsFor(tile)),
+      onKeyDown: (e: React.KeyboardEvent) => {
+        if (e.target !== e.currentTarget) return;
+        const keyed = e.metaKey || e.ctrlKey || e.altKey ? null : keyAction(lens.actions, e.key);
+        if (keyed && actions && actionOffered(keyed, tile.record)) {
+          e.preventDefault();
+          actions.run(keyed, tile.record);
+          return;
+        }
+        ctxMenu.openForKey(e, itemsFor(tile));
+      },
+      ...(drags
+        ? {
+            draggable: true,
+            onDragStart: (e: React.DragEvent) => {
+              e.dataTransfer.setData(LENS_ROW_DRAG_MIME, JSON.stringify({ token: dragToken, keys: [tile.id] }));
+              e.dataTransfer.effectAllowed = "move";
+            },
+          }
+        : {}),
+      ...(dragActions.length > 0
+        ? {
+            onDragOver: (e: React.DragEvent) => {
+              if (!carriesTile(e)) return;
+              e.preventDefault();
+              e.stopPropagation();
+              const zone = sideOf(e);
+              if (hint?.id !== tile.id || hint.zone !== zone) setHint({ id: tile.id, zone });
+            },
+            onDragLeave: () => setHint((h) => (h?.id === tile.id ? null : h)),
+            onDrop: (e: React.DragEvent) => {
+              if (!carriesTile(e)) return;
+              e.preventDefault();
+              e.stopPropagation();
+              setHint(null);
+              const dragged = draggedTile(e);
+              if (!dragged || dragged.id === tile.id) return;
+              const list = others(dragged);
+              dropTile(dragged, dropBeside(list.map((t) => t.record), list.indexOf(tile), sideOf(e), null));
+            },
+          }
+        : {}),
+    };
+  };
+  // A drop on the grid between or past the tiles puts the tile last.
+  const gridDrop =
+    dragActions.length > 0
+      ? {
+          onDragOver: (e: React.DragEvent) => {
+            if (carriesTile(e)) e.preventDefault();
+          },
+          onDrop: (e: React.DragEvent) => {
+            if (!carriesTile(e)) return;
+            e.preventDefault();
+            setHint(null);
+            const dragged = draggedTile(e);
+            if (dragged) dropTile(dragged, dropInGroup(others(dragged).map((t) => t.record), null));
+          },
+        }
+      : {};
+
   return (
-    <TileGrid testId="lens-dashboard">
+    <TileGrid testId="lens-dashboard" {...gridDrop}>
       {parts.map((part) => {
-        const run = runs?.get(part.id);
+        const partRun = runs?.get(part.id);
         return (
           <TileSlot key={part.id} size={part.size ?? (part.markdown !== null ? "full" : "small")} data-testid={`lens-part-${part.id}`}>
-            <Tile title={<PartTitle part={part} run={run?.run ?? null} onOpenPage={onOpenPage} />}>
-              <PartBody part={part} run={run} maxRows={TILE_MAX_ROWS} streamId={streamId} onOpenPage={onOpenPage} params={params} onSetParam={onSetParam} />
+            <Tile title={<PartTitle part={part} run={partRun?.run ?? null} onOpenPage={onOpenPage} />}>
+              <PartBody part={part} run={partRun} maxRows={TILE_MAX_ROWS} streamId={streamId} onOpenPage={onOpenPage} params={params} onSetParam={onSetParam} />
             </Tile>
           </TileSlot>
         );
       })}
+      {tiles.map((tile) => (
+        <TileSlot key={`row:${tile.id}`} size={tile.size} data-testid={`lens-tile-${tile.id}`} {...slotProps(tile)}>
+          <RowTileBody
+            tile={tile}
+            run={runs?.get(`row:${tile.id}`)}
+            def={tile.metric ? (defs.get(tile.metric) ?? null) : null}
+            window={window}
+            edit={edit}
+            dashboard={run}
+            streamId={streamId}
+            onOpenPage={onOpenPage}
+            params={params}
+            onSetParam={onSetParam}
+          />
+        </TileSlot>
+      ))}
+      {ctxMenu.menu}
     </TileGrid>
   );
+}
+
+/** A row tile's card (or heading band) by its kind. */
+function RowTileBody({
+  tile,
+  run,
+  def,
+  window,
+  edit,
+  dashboard,
+  streamId,
+  onOpenPage,
+  params,
+  onSetParam,
+}: {
+  tile: RowTile;
+  run: PartRun | undefined;
+  def: MetricSpec | null;
+  window: { range: ReturnType<typeof resolveRange>; branch: string | null };
+  /** The lens's edit action, when it saves the tiles' text. */
+  edit: LensAction | null;
+  dashboard: LensRun;
+  streamId: string | null;
+  onOpenPage?(ref: TabRef): void;
+  params: Record<string, SqlCell>;
+  onSetParam?(name: string, value: SqlCell, row?: PickedRow): void;
+}) {
+  const field = edit?.editField ?? "";
+  const form = useFormSubmit(
+    edit?.label ?? "Save",
+    (input, confirmed) => runLensAction(dashboard.lens.id, edit!.id, dashboard.params, tile.record, streamId, confirmed, input),
+    () => {},
+  );
+  switch (tile.kind) {
+    case "lens": {
+      const part: LensPart = { id: tile.id, title: tile.title, lens: tile.lens, markdown: null, size: tile.size, replaceable: null, from: null };
+      return (
+        <Tile title={<PartTitle part={part} run={run?.run ?? null} onOpenPage={onOpenPage} />}>
+          <PartBody part={part} run={run} maxRows={TILE_MAX_ROWS} streamId={streamId} onOpenPage={onOpenPage} params={params} onSetParam={onSetParam} />
+        </Tile>
+      );
+    }
+    case "sql":
+      return (
+        <Tile title={tile.title ?? "Query"}>
+          <QueryTileBody sql={tile.sql!} display={tile.display} chart={tile.chart} maxRows={TILE_MAX_ROWS} onOpenPage={onOpenPage} />
+        </Tile>
+      );
+    case "metric":
+      return (
+        <Tile title={tile.title ?? def?.title ?? tile.metric ?? "Metric"}>
+          <MetricTileBody sql={tile.sql} metricKey={tile.metric} viz={tile.viz} size={tile.size} def={def} window={window} />
+        </Tile>
+      );
+    case "text":
+      return (
+        <div style={BAND_STYLE}>
+          {form.pending && edit ? (
+            <CommandConfirm label={edit.label} command={edit.command} onConfirm={() => void form.submit(form.pending!, true)} onCancel={form.cancel} testIdPrefix={`lens-tile-${tile.id}-confirm`} />
+          ) : null}
+          <TextBand
+            text={tile.text ?? ""}
+            onCommit={edit ? (next) => next !== (tile.text ?? "") && void form.submit({ [field]: next }, false) : undefined}
+            testId={`lens-tile-${tile.id}-text`}
+          />
+        </div>
+      );
+  }
 }
 
 const titleLinkStyle = {

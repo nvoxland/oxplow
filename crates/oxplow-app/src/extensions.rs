@@ -302,6 +302,54 @@ pub struct LensTree {
     pub label: Option<String>,
 }
 
+/// `dashboard` viz: its query's rows are tiles, one per row, each value
+/// naming a column. A row draws its `lens` (run with the page's params it
+/// declares), its pinned `sql` (shown as `display`, a chart by `chart`,
+/// the metric card by `metric` and `viz`) or its `text` (a heading band).
+#[derive(
+    Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
+)]
+#[serde(deny_unknown_fields)]
+pub struct LensTile {
+    /// The tile's id: what its actions bind as `{{row.<id column>}}`.
+    pub id: Option<String>,
+    pub title: Option<String>,
+    /// `small`, `wide`, `tall` or `full` (unknown: `small`; a text tile's
+    /// default is `full`).
+    pub size: Option<String>,
+    /// A lens id (`<extension>/<slug>`).
+    pub lens: Option<String>,
+    /// Read-only SQL over the published models.
+    pub sql: Option<String>,
+    /// How a `sql` tile shows its rows: a viz name, or `metric`.
+    pub display: Option<String>,
+    /// A `sql` tile's chart roles, as JSON (`{"x": …, "y": …}`).
+    pub chart: Option<String>,
+    /// A `metric` display's metric key.
+    pub metric: Option<String>,
+    /// A `metric` display's card: `line` or `number`.
+    pub viz: Option<String>,
+    pub text: Option<String>,
+}
+
+impl LensTile {
+    /// Each role and the column it names.
+    pub fn roles(&self) -> [(&'static str, &Option<String>); 10] {
+        [
+            ("id", &self.id),
+            ("title", &self.title),
+            ("size", &self.size),
+            ("lens", &self.lens),
+            ("sql", &self.sql),
+            ("display", &self.display),
+            ("chart", &self.chart),
+            ("metric", &self.metric),
+            ("viz", &self.viz),
+            ("text", &self.text),
+        ]
+    }
+}
+
 /// `timeline` viz: when each row happened and what it says.
 #[derive(
     Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
@@ -813,12 +861,14 @@ struct PartFile {
 
 /// A lens file's `sections:` (for `document`) or `tiles:` (for
 /// `dashboard`) as parts: ids defaulted and unique, exactly one of `lens`
-/// and `markdown`, a size only on a tile.
+/// and `markdown`, a size only on a tile. A dashboard whose rows are its
+/// tiles (`row_tiles`) may have none.
 fn parse_parts(
     extension: &str,
     viz: LensViz,
     sections: Vec<PartFile>,
     tiles: Vec<PartFile>,
+    row_tiles: bool,
 ) -> Result<Vec<LensPart>, String> {
     let (key, files) = match viz {
         LensViz::Document if tiles.is_empty() => ("sections", sections),
@@ -828,7 +878,7 @@ fn parse_parts(
         _ if sections.is_empty() && tiles.is_empty() => return Ok(Vec::new()),
         _ => return Err("`sections` are a `document`'s and `tiles` a `dashboard`'s".into()),
     };
-    if files.is_empty() {
+    if files.is_empty() && !row_tiles {
         return Err(format!("viz `{}` needs `{key}: [...]`", viz_name(viz)));
     }
     let mut out: Vec<LensPart> = Vec::new();
@@ -1222,6 +1272,9 @@ struct LensFile {
     chart: Option<LensChart>,
     #[serde(default)]
     tree: Option<LensTree>,
+    /// `dashboard` only: its rows are its tiles.
+    #[serde(default)]
+    tile: Option<LensTile>,
     #[serde(default)]
     timeline: Option<LensTimeline>,
     #[serde(default)]
@@ -1600,8 +1653,8 @@ fn parse_actions(
                     ))
                 }
                 "row" if row => {}
-                "before" | "after" | "onto" if f.drag => {}
-                "before" | "after" | "onto" => {
+                "before" | "after" | "onto" | "order" if f.drag => {}
+                "before" | "after" | "onto" | "order" => {
                     return Err(format!(
                         "actions: `{}`: `{{{{{scope}.{name}}}}}` needs `drag: true` (it is where a drop landed)",
                         f.id
@@ -2336,6 +2389,8 @@ pub struct Lens {
     /// Columns a chart viz draws from.
     pub chart: Option<LensChart>,
     pub tree: Option<LensTree>,
+    /// `dashboard` only: its query's rows are its tiles.
+    pub tile: Option<LensTile>,
     pub timeline: Option<LensTimeline>,
     pub steps: Option<LensSteps>,
     pub hunks: Option<LensHunks>,
@@ -4192,6 +4247,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                     l.viz,
                     std::mem::take(&mut l.sections),
                     std::mem::take(&mut l.tiles),
+                    l.tile.is_some(),
                 )?;
                 let tool = l
                     .tool
@@ -4215,6 +4271,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                 empty: l.empty,
                 chart: l.chart,
                 tree: l.tree,
+                tile: l.tile,
                 timeline: l.timeline,
                 steps: l.steps,
                 hunks: l.hunks,
@@ -5182,6 +5239,11 @@ fn row_columns_problem(lens: &Lens) -> Option<String> {
     if lens.columns.is_empty() {
         return None;
     }
+    if lens.tile.is_some() {
+        return Some(
+            "a dashboard whose rows are tiles names them in `tile:`, not `columns:`".into(),
+        );
+    }
     let viz = format!("{:?}", lens.viz).to_lowercase();
     if lens.query.trim().is_empty() {
         return Some(format!("a `{viz}` without a query has no row to name"));
@@ -5206,6 +5268,40 @@ fn row_columns_problem(lens: &Lens) -> Option<String> {
                 c.key
             )
         })
+}
+
+/// A dashboard whose rows are its tiles (`tile:`): only a dashboard's,
+/// over a query, each row named by its `id` and drawn by its `lens`, `sql`
+/// or `text`; how a `sql` tile shows only with `sql`.
+fn tile_problem(lens: &Lens) -> Option<String> {
+    let t = lens.tile.as_ref()?;
+    if lens.viz != LensViz::Dashboard {
+        return Some(format!(
+            "`tile` is for viz `dashboard`, not `{}`",
+            viz_name(lens.viz)
+        ));
+    }
+    if lens.query.trim().is_empty() {
+        return Some("a `dashboard` whose rows are tiles needs a `query`".into());
+    }
+    if t.id.is_none() {
+        return Some("`tile` needs `id: <column>`".into());
+    }
+    if t.lens.is_none() && t.sql.is_none() && t.text.is_none() {
+        return Some("`tile` needs one of `lens`, `sql` or `text`".into());
+    }
+    if t.sql.is_none() {
+        let sql_only = [
+            ("display", &t.display),
+            ("chart", &t.chart),
+            ("metric", &t.metric),
+            ("viz", &t.viz),
+        ];
+        if let Some((role, _)) = sql_only.iter().find(|(_, c)| c.is_some()) {
+            return Some(format!("`tile.{role}` is a `sql` tile's"));
+        }
+    }
+    None
 }
 
 /// A document's or dashboard's part naming a lens of its own extension
@@ -5283,6 +5379,7 @@ fn shape_problem(
         .or_else(|| param_problem(lens))
         .or_else(|| highlight_problem(lens))
         .or_else(|| markdown_problem(lens))
+        .or_else(|| tile_problem(lens))
     {
         return Some(problem);
     }
@@ -5381,13 +5478,23 @@ fn shape_problem(
 }
 
 /// A `markdown` block off its viz, or an edit action that doesn't save the
-/// text the viz shows.
+/// text the viz shows: a markdown viz's text, or a row-tile dashboard's
+/// text tiles (`tile.text`, edited in place).
 fn markdown_problem(lens: &Lens) -> Option<String> {
     let viz = format!("{:?}", lens.viz).to_lowercase();
     if lens.markdown.is_some() && lens.viz != LensViz::Markdown {
         return Some(format!("`markdown` is for viz `markdown`, not `{viz}`"));
     }
     let edit = lens.actions.iter().find(|a| a.edit)?;
+    if let Some(text) = lens.tile.as_ref().and_then(|t| t.text.as_deref()) {
+        let saved = edit_column(edit)?;
+        return (saved != text).then(|| {
+            format!(
+                "`{}` saves `{saved}`, but the tiles' text is `{text}`",
+                edit.id
+            )
+        });
+    }
     if lens.viz != LensViz::Markdown {
         return Some(format!(
             "an edit action (`{}`) is a `markdown` viz's, not `{viz}`'s",
@@ -5661,7 +5768,7 @@ fn row_style_problem(lens: &Lens) -> Option<String> {
 
 impl Lens {
     /// Every result column the lens's component blocks name (`chart`,
-    /// `tree`, `timeline`, `steps`, `hunks`) and its row styling
+    /// `tree`, `tile`, `timeline`, `steps`, `hunks`) and its row styling
     /// (`group`, `emphasis`, `depth`) — what `validate` checks the query
     /// returns.
     pub fn role_columns(&self) -> Vec<(&'static str, &String)> {
@@ -5675,6 +5782,14 @@ impl Lens {
                     .into_iter()
                     .flatten()
                     .map(|k| ("tree", k)),
+            );
+        }
+        if let Some(t) = &self.tile {
+            out.extend(
+                t.roles()
+                    .into_iter()
+                    .filter_map(|(_, k)| k.as_ref())
+                    .map(|k| ("tile", k)),
             );
         }
         if let Some(t) = &self.timeline {
@@ -6119,9 +6234,13 @@ pub fn resolve_params(
 
 /// The params a `document`'s or `dashboard`'s parts are given: its query's
 /// first row, column by column, under its own params — one of its own
-/// wins when it holds a value. Each part takes the ones it declares.
+/// wins when it holds a value. Each part takes the ones it declares. A
+/// dashboard whose rows are its tiles has no row of params: its own alone.
 pub fn part_params(run: &LensRun) -> BTreeMap<String, SqlCell> {
     let mut out = run.params.clone();
+    if run.lens.tile.is_some() {
+        return out;
+    }
     if let Some(row) = run.result.rows.first() {
         for (column, cell) in run.result.columns.iter().zip(row) {
             match out.get(column) {
@@ -6618,8 +6737,12 @@ async fn prepare(
                         ));
                     }
                     for (scope, name) in action_templates(&a.input) {
-                        // A drop's neighbours are rows of the same result.
-                        let a_row = matches!(scope.as_str(), "row" | "before" | "after" | "onto");
+                        // A drop's neighbours and its order are rows of the
+                        // same result.
+                        let a_row = matches!(
+                            scope.as_str(),
+                            "row" | "before" | "after" | "onto" | "order"
+                        );
                         if a_row && !cols.contains(&name) {
                             ext.errors.push(format!(
                                 "lens {id}: action `{}` uses `{{{{{scope}.{name}}}}}`, which isn't in \
@@ -6750,6 +6873,7 @@ impl Lens {
             empty: spec.empty.clone(),
             chart: spec.chart.clone(),
             tree: spec.tree.clone(),
+            tile: None,
             timeline: spec.timeline.clone(),
             steps: spec.steps.clone(),
             hunks: spec.hunks.clone(),
@@ -7206,6 +7330,7 @@ mod tests {
                 "{ id: put, label: Put, command: x.y.z, drag: true, input: { uri: '{{row.uri}}', before: '{{before.uri}}', after: '{{after.uri}}', parent: '{{onto.uri}}' } }",
                 "{ id: done, label: Done, command: x.y.z, row: true, bulk: true, key: f, input: { uri: '{{row.uri}}' } }",
                 "{ id: del, label: Delete, command: x.y.z, row: true, key: Delete }",
+                "{ id: order, label: Reorder, command: x.y.z, drag: true, input: { order: '{{order.uri}}' } }",
             ],
             true,
         )
@@ -7218,6 +7343,7 @@ mod tests {
             (vec!["{ id: a, label: A, command: x.y.z, drag: true, form: true }"], true, "a drag action can't be a form"),
             (vec!["{ id: a, label: A, command: x.y.z, drag: true, primary: true }"], true, "a drag action can't be `primary`"),
             (vec!["{ id: a, label: A, command: x.y.z, row: true, input: { b: '{{before.uri}}' } }"], true, "`{{before.uri}}` needs `drag: true`"),
+            (vec!["{ id: a, label: A, command: x.y.z, row: true, input: { o: '{{order.uri}}' } }"], true, "`{{order.uri}}` needs `drag: true`"),
             (vec!["{ id: a, label: A, command: x.y.z, drag: true, input: { g: '{{group.value}}' } }"], false, "`{{group.value}}` needs the lens to have a `group`"),
             (vec!["{ id: a, label: A, command: x.y.z, drag: true, input: { g: '{{group.by}}' } }"], true, "`{{group.by}}` isn't `{{group.value}}`"),
             (vec!["{ id: a, label: A, command: x.y.z, bulk: true }"], true, "`bulk` is for a row action"),
@@ -9231,6 +9357,181 @@ commands:
         assert!(
             errs.contains("shown.yaml") && errs.contains("a composite's column is only its `key`"),
             "{errs}"
+        );
+    }
+
+    /// A dashboard that names its rows' tiles in `tile:` needs no static
+    /// `tiles:`, may still have them, and its tile roles are columns its
+    /// query must return.
+    #[test]
+    fn a_dashboards_rows_are_tiles_when_it_names_them() {
+        let q =
+            "query: SELECT 'dti1' AS id, 'T' AS title, NULL AS q, 'hi' AS body\nviz: dashboard\n";
+        let (_d, ext) = load_x(
+            &[
+                ("n", "title: N\nquery: SELECT 1 AS n\nviz: number\n"),
+                (
+                    "rows",
+                    &format!(
+                        "title: Rows\n{q}tile: {{ id: id, title: title, sql: q, text: body }}\n"
+                    ),
+                ),
+                (
+                    "both",
+                    &format!(
+                        "title: Both\n{q}tile: {{ id: id, text: body }}\ntiles: [{{ lens: n }}]\n"
+                    ),
+                ),
+            ],
+            "",
+        );
+        let lens = |slug: &str| {
+            ext.lenses
+                .iter()
+                .find(|l| l.slug == slug)
+                .unwrap_or_else(|| panic!("{slug}: {:?}", ext.errors))
+        };
+        let rows = lens("rows");
+        assert!(rows.parts.is_empty());
+        assert_eq!(rows.tile.as_ref().unwrap().id.as_deref(), Some("id"));
+        let roles: Vec<(&str, &str)> = rows
+            .role_columns()
+            .into_iter()
+            .map(|(b, c)| (b, c.as_str()))
+            .collect();
+        assert_eq!(
+            roles,
+            vec![
+                ("tile", "id"),
+                ("tile", "title"),
+                ("tile", "q"),
+                ("tile", "body")
+            ]
+        );
+        assert_eq!(lens("both").parts.len(), 1);
+    }
+
+    /// `tile:` is checked at load: a dashboard's, over a query, with an
+    /// `id` and something to draw, a `sql` tile's display only with `sql`,
+    /// and never beside `columns:`.
+    #[test]
+    fn a_row_tile_dashboard_is_checked_at_load() {
+        let (_d, ext) = load_x(
+            &[
+                ("table", "title: A\nquery: SELECT 1 AS id\ntile: { id: id, text: id }\n"),
+                ("no-query", "title: B\nviz: dashboard\ntile: { id: id, text: t }\n"),
+                ("no-id", "title: C\nquery: SELECT 1 AS t\nviz: dashboard\ntile: { text: t }\n"),
+                ("no-body", "title: D\nquery: SELECT 1 AS id\nviz: dashboard\ntile: { id: id, title: id }\n"),
+                ("display", "title: E\nquery: SELECT 1 AS id\nviz: dashboard\ntile: { id: id, text: id, display: id }\n"),
+                ("columns", "title: F\nquery: SELECT 1 AS id\nviz: dashboard\ncolumns: [{ key: id }]\ntile: { id: id, text: id }\n"),
+            ],
+            "",
+        );
+        assert!(
+            ext.lenses.is_empty(),
+            "{:?}",
+            ext.lenses.iter().map(|l| &l.slug).collect::<Vec<_>>()
+        );
+        let errs = ext.errors.join("\n");
+        for (slug, says) in [
+            ("table", "`tile` is for viz `dashboard`, not `table`"),
+            (
+                "no-query",
+                "a `dashboard` whose rows are tiles needs a `query`",
+            ),
+            ("no-id", "`tile` needs `id: <column>`"),
+            ("no-body", "`tile` needs one of `lens`, `sql` or `text`"),
+            ("display", "`tile.display` is a `sql` tile's"),
+            (
+                "columns",
+                "a dashboard whose rows are tiles names them in `tile:`, not `columns:`",
+            ),
+        ] {
+            assert!(
+                ext.errors
+                    .iter()
+                    .any(|e| e.contains(&format!("{slug}.yaml")) && e.contains(says)),
+                "{slug}: {errs}"
+            );
+        }
+    }
+
+    /// A row-tile dashboard's edit action edits a text tile in place: it
+    /// saves the `tile.text` column, and nothing else.
+    #[test]
+    fn a_row_tile_dashboards_edit_action_saves_its_text() {
+        let q = "query: SELECT 'dti1' AS id, 'x' AS body, 'T' AS title\nviz: dashboard\ntile: { id: id, title: title, text: body }\n";
+        let edit = |col: &str| {
+            format!(
+                "actions:\n  - {{ id: edit, label: Save, command: x.y.z, edit: true, fixed: [item], input: {{ item: '{{{{row.id}}}}', text: '{{{{row.{col}}}}}' }} }}\n"
+            )
+        };
+        let (_d, ext) = load_x(
+            &[
+                ("ok", &format!("title: Ok\n{q}{}", edit("body"))),
+                ("wrong", &format!("title: Wrong\n{q}{}", edit("title"))),
+                (
+                    "plain",
+                    &format!(
+                        "title: Plain\nviz: dashboard\ntiles: [{{ markdown: hi, id: m }}]\n{}",
+                        edit("body")
+                    ),
+                ),
+            ],
+            "",
+        );
+        assert!(
+            ext.lenses.iter().any(|l| l.slug == "ok"),
+            "{:?}",
+            ext.errors
+        );
+        let errs = ext.errors.join("\n");
+        assert!(
+            errs.contains("wrong.yaml")
+                && errs.contains("`edit` saves `title`, but the tiles' text is `body`"),
+            "{errs}"
+        );
+        assert!(
+            errs.contains("plain.yaml")
+                && errs.contains("an edit action (`edit`) is a `markdown` viz's"),
+            "{errs}"
+        );
+    }
+
+    /// A dashboard whose rows are its tiles gives its static parts its own
+    /// params alone: its first row is a tile, not a row of params.
+    #[test]
+    fn a_row_tile_dashboard_gives_its_parts_no_row() {
+        let (_d, ext) = load_x(
+            &[(
+                "dash",
+                "title: D\nparams: [{ name: id }]\nquery: SELECT 'dti1' AS tid, 'x' AS body\nviz: dashboard\ntile: { id: tid, text: body }\n",
+            )],
+            "",
+        );
+        let lens = ext.lenses.into_iter().find(|l| l.slug == "dash").unwrap();
+        let run = LensRun {
+            lens,
+            params: BTreeMap::from([("id".to_string(), SqlCell::Text("dsh1".into()))]),
+            result: oxplow_db::SqlQueryResult {
+                columns: vec!["tid".into(), "body".into()],
+                rows: vec![vec![
+                    SqlCell::Text("dti1".into()),
+                    SqlCell::Text("x".into()),
+                ]],
+                truncated: false,
+                reads: oxplow_db::Reads::default(),
+                freshness: Vec::new(),
+                generation: None,
+                coverage: Vec::new(),
+            },
+            alert: None,
+            warnings: Vec::new(),
+            inactive: None,
+        };
+        assert_eq!(
+            part_params(&run),
+            BTreeMap::from([("id".to_string(), SqlCell::Text("dsh1".into()))])
         );
     }
 

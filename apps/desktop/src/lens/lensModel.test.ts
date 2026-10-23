@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Extension, Lens, LensRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
-import { markParts, treeNodes, timelineEntries, stepItems, hunkRows, codeRows, diffRow, parseLines, slotRuns, mergeDirectory, barRows, childParams, partParams, lineSeries, sparklineValues, numericRowId, treemapItems, cellLinkRef, changedParams, lensViewChange, misplacedViewParams, foldEmpty, foldedAway, displayColumns, formatCell, lensDirectoryEntries, parseParamInput, limitRows, slugify, adHocLens, rowMention, rowAsk, effortRowId, slotExtensions, isTimestamp, rowGroups, rowEmphasized, rowDepth, rowContextRef } from "./lensModel.js";
+import { markParts, treeNodes, timelineEntries, stepItems, hunkRows, codeRows, diffRow, parseLines, slotRuns, mergeDirectory, barRows, childParams, partParams, lineSeries, sparklineValues, numericRowId, treemapItems, cellLinkRef, changedParams, lensViewChange, misplacedViewParams, foldEmpty, foldedAway, displayColumns, formatCell, lensDirectoryEntries, parseParamInput, limitRows, slugify, adHocLens, rowMention, rowAsk, effortRowId, slotExtensions, isTimestamp, rowGroups, rowEmphasized, rowDepth, rowContextRef, rowTiles, tileSizeOf } from "./lensModel.js";
 import { formatMetricValue, formatShortDateTime } from "../components/format.js";
 import { diffSpecOf, duplicateBlockOf, isPage, lineOf, pagePayload } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
@@ -18,6 +18,7 @@ const lens = (over: Partial<Lens> = {}): Lens => ({
   empty: null,
   chart: null,
   tree: null,
+  tile: null,
   timeline: null,
   steps: null,
   hunks: null,
@@ -680,10 +681,58 @@ describe("sparkline and badge formats", () => {
 
 test("a composite's parts get its row under its params, a param holding a value winning", () => {
   const run = (sha: SqlCell, rows: SqlCell[][]) =>
-    ({ params: { stream_id: 1, sha }, result: { columns: ["change_id", "sha"], rows } }) as unknown as LensRun;
+    ({ lens: { tile: null }, params: { stream_id: 1, sha }, result: { columns: ["change_id", "sha"], rows } }) as unknown as LensRun;
   expect(partParams(run("a", [[7, "b"]]))).toEqual({ stream_id: 1, sha: "a", change_id: 7 });
   expect(partParams(run(null, [[7, "b"]]))).toEqual({ stream_id: 1, sha: "b", change_id: 7 });
   expect(partParams(run(null, []))).toEqual({ stream_id: 1, sha: null });
+});
+
+test("a row tile's size is one of the four, else its kind's default", () => {
+  expect(tileSizeOf("wide", "sql")).toBe("wide");
+  expect(tileSizeOf("huge", "sql")).toBe("small");
+  expect(tileSizeOf(null, "lens")).toBe("small");
+  expect(tileSizeOf(null, "text")).toBe("full");
+  expect(tileSizeOf("small", "text")).toBe("small");
+});
+
+test("a dashboard's rows are its tiles, each drawn by its lens, sql, metric or text", () => {
+  const run = {
+    lens: { tile: { id: "id", title: "title", size: "size", lens: "lens", sql: "sql", display: "display", chart: "chart", metric: "metric", viz: "viz", text: "text" } },
+    params: {},
+    result: {
+      columns: ["id", "title", "size", "lens", "sql", "display", "chart", "metric", "viz", "text"],
+      rows: [
+        ["dti1", null, "wide", "x/open", null, null, null, null, null, null],
+        ["dti2", "Bars", null, null, "SELECT 1", "bar", '{"x":"a","y":"b"}', null, null, null],
+        ["dti3", null, null, null, "SELECT 2", "metric", null, "loc", "number", null],
+        ["dti4", null, null, null, null, null, null, null, null, "Section"],
+        ["dti5", null, null, null, null, null, null, null, null, null],
+      ],
+    },
+  } as unknown as LensRun;
+  const tiles = rowTiles(run);
+  expect(tiles.map((t) => [t.id, t.kind, t.size])).toEqual([
+    ["dti1", "lens", "wide"],
+    ["dti2", "sql", "small"],
+    ["dti3", "metric", "small"],
+    ["dti4", "text", "full"],
+    ["dti5", "text", "full"],
+  ]);
+  expect(tiles[0]!.lens).toBe("x/open");
+  expect(tiles[1]).toMatchObject({ title: "Bars", sql: "SELECT 1", display: "bar", chart: { x: "a", y: "b", series: null } });
+  expect(tiles[2]).toMatchObject({ metric: "loc", viz: "number" });
+  expect(tiles[3]!.text).toBe("Section");
+  expect(tiles[0]!.record).toMatchObject({ id: "dti1", lens: "x/open" });
+  expect(rowTiles({ ...run, lens: { tile: null } } as unknown as LensRun)).toEqual([]);
+});
+
+test("a dashboard whose rows are its tiles gives its parts its params alone", () => {
+  const run = {
+    lens: { tile: { id: "id", text: "body" } },
+    params: { id: "dsh1" },
+    result: { columns: ["id", "body"], rows: [["dti1", "x"]] },
+  } as unknown as LensRun;
+  expect(partParams(run)).toEqual({ id: "dsh1" });
 });
 
 describe("foldedAway", () => {

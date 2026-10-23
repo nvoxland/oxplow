@@ -750,15 +750,25 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       it came from; a marked row carries every marked row), and where it
       lands binds `{{before.*}}` (the row below the drop), `{{after.*}}`
       (the row above), `{{onto.*}}` (the row dropped on: its middle third,
-      offered only when some drag action names it) and `{{group.value}}`
+      offered only when some drag action names it), `{{group.value}}`
       (the group a drop lands in: among its rows, on its heading, on a board
-      column). A field that is exactly one of these with nothing there is
-      **left out** of the input (a drop at a list's end has no row below),
-      so a command's optional field stays absent; one spliced into text, or
-      in a list, with nothing there is an error. Several drag actions may be
+      column) and `{{order.*}}`: that column of **every row of the result**
+      (not only the drawn ones) in its order after the drop, the dragged
+      rows moved before the row below, else after the row above, else to
+      the end (`withOrder`; a drop onto a row moves nothing), so a command
+      that takes a whole new order (`oxplow.dashboard.reorder_items`'s
+      `order`) gets one. `{{order.*}}` binds a list, so it is only a field's
+      whole value (spliced into text or put in a list it is an error), and
+      a drop always has one (`Drop.order`; without it the field is an
+      error, never left out). A field that is exactly one of the others
+      with nothing there is **left out** of the input (a drop at a list's
+      end has no row below), so a command's optional field stays absent;
+      one spliced into text, or in a list, with nothing there is an error.
+      Every drop scope needs `drag: true`, and its column must be in the
+      result. Several drag actions may be
       declared: a drop runs the first the row is offered whose places are
       all there (one naming the group needs a group; one naming `onto` needs
-      a row dropped on). Rows dropped together run it once each, in drawing
+      a row dropped on; one naming the order needs it). Rows dropped together run it once each, in drawing
       order, each after the one before it. The press carries the `drop`
       (`lens_actions::Drop`); a drop on another action, or a drag action
       pressed without one, is `Invalid` at `/drop`. `bulk: true` puts a row
@@ -2150,8 +2160,10 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
 - `actions`: commands the lens offers, `{ id, label, command, input?,
   row?, group?, form?, fixed?, choices?, then?, when?, primary?, drag?, bulk?, key? }`, with `{{param.x}}` / `{{row.x}}` placeholders (`{{row.x|json}}`: the JSON a text cell holds, typed — the one filter, checked at load, bound in `bind_input`; and a drag action's `{{before.x}}`, `{{after.x}}`, `{{onto.x}}`, `{{group.value}}`, above); run as the lens
   for whoever pressed, so they grant no power. `form: true` opens the
-  command's form instead of running (a slideover: `lens_action_form`
-  gives the command and the bound `input` as starting values); what the
+  command's form instead of running (`lens_action_form` gives the
+  command and the bound `input` as starting values; a slideover, or —
+  when the form less its `fixed` fields is one text field — a prompt
+  strip at the top of the lens, `promptField` / `ActionPrompt`); what the
   person fills in runs (`oxplow_run_lens_action`'s `input`, taken only by a form
   action), its `fixed` fields put back to the bound values (an `Edit…`
   row action keeps the row's `uri`); a form action's `choices` are a
@@ -2217,6 +2229,35 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   rows of its own) and a dashboard as a kit `TileGrid`
   (`lens/PartsViz.tsx`), running every part together and re-running all of
   them on any part's reads (`useLensRuns`).
+- **Rows as tiles: `tile:`.** A `dashboard` whose tiles are data (a user
+  dashboard's `v_dashboard_item` rows) names them in a column-role block,
+  `tile: { id, title?, size?, lens?, sql?, display?, chart?, metric?, viz?,
+  text? }` (`LensTile`), each value a column of its query: one tile per
+  row, after the static `tiles:` (which may stay, or be none). A row draws
+  its `lens` (run with the page's params it declares, as a part), else its
+  pinned `sql` shown as `display` (`chart` the JSON of a chart display's
+  roles; `display = metric` the metric card over `metric`/`viz`), else its
+  `text` (a heading band). Load rules (`tile_problem`): only on a
+  dashboard, with a `query`, an `id`, one of `lens`/`sql`/`text`, and
+  `display`/`chart`/`metric`/`viz` only beside `sql`; `columns:` is
+  refused beside it (`row_columns_problem`): the rows are tiles, not a row
+  of params, so `part_params` gives the static parts the page's params
+  alone. Its roles are `role_columns`, checked against the result like a
+  chart's. `lens_text` resolves each row's run (`Resolved.row_tiles`; a
+  `sql` tile through an ad-hoc spec, a chart display without a parsable
+  `chart` or `metric` as a table; one that can't run says why and the
+  rest still run) and renders a `###` per row under its `title` column,
+  else its run's title. The UI (`DashboardViz`, `rowTiles` in
+  `lensModel.ts`) draws each row in a `TileSlot` (`lens-tile-<id>`) at its
+  size: a lens tile as a part (its run joins `useLensRuns` keyed by tile
+  id, sorted, so a reorder re-runs nothing), a `sql` tile as
+  `QueryTileBody`, the metric card as `MetricTileBody` (one
+  `listMetricDefinitions()` for the grid; windowed by the page's
+  `range`/`branch` params), a text tile as `TextBand`. Its **edit action** (`edit: true`, the one
+  inline-edit mechanism) edits a text tile in place, so it must save the
+  `tile.text` column (`markdown_problem`); tiles are rows, so the lens's
+  row, drag (`{{order.id}}` for a whole new order) and key actions act on
+  them.
 - **A table or list is keyboard-driven** (`useListNav`): focus it, ↑/↓ move
   the cursor, Enter opens the cursor row's first link or runs its first row
   action (usability.md "Keyboard").

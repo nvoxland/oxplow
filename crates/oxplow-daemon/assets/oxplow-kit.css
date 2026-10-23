@@ -244,6 +244,16 @@
    is a titled card. 400px: a chart's labelled axis must fit. */
 .ox-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(400px, 1fr)); grid-auto-rows: auto; gap: var(--space-4); }
 .ox-tile-slot { min-width: 0; position: relative; }
+/* Where a dragged tile lands: a bar in the grid gap beside the tile. The
+   inset shadow other rows use would be painted under the opaque card. */
+.ox-tile-slot[data-drop] { box-shadow: none; }
+.ox-tile-slot[data-drop="before"]::before,
+.ox-tile-slot[data-drop="after"]::after {
+  content: ""; position: absolute; top: 0; bottom: 0; width: 3px; border-radius: 2px;
+  background: var(--accent); pointer-events: none; z-index: 2;
+}
+.ox-tile-slot[data-drop="before"]::before { left: calc(var(--space-4) / -2 - 1.5px); }
+.ox-tile-slot[data-drop="after"]::after { right: calc(var(--space-4) / -2 - 1.5px); }
 .ox-tile-wide { grid-column: span 2; }
 .ox-tile-tall { grid-row: span 2; }
 .ox-tile-full { grid-column: 1 / -1; }

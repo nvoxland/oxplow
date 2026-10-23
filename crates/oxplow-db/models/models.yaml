@@ -1339,6 +1339,26 @@
   tests:
     - { not_null: subject }
     - { relationships: { column: stream_id, to: stream, field: id } }
+- name: collector
+  version: 1
+  key: [uri]
+  description: "Every enabled extension's collectors, one row each, with their standing: whether this machine has them on, their last run and its outcome, and when the next scheduled run is due. What Settings → Data lists. Run one with `oxplow.collector.sync` (`input.collector` is `<extension>/<id>`); turn a disabled one back on with `oxplow.contribution.enable`. Its network and credential standing on this machine is `v_collector_state` and `v_collector_credential` (join on `uri`); its declaration is `v_contribution`; its run history is `v_extension_run`."
+  columns:
+    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/collector?collector=<extension>/<id>`: its URI, the same as `v_contribution.uri` and `v_collector_run.uri`." }
+    - { name: "extension", type: "TEXT", doc: "The extension that declares it (`project` for the project's own)." }
+    - { name: "id", type: "TEXT", doc: "Its id within the extension; `<extension>/<id>` is what `oxplow.collector.sync` takes as `collector`." }
+    - { name: "trigger", type: "TEXT", doc: "How it comes to run: `call` (manual), `schedule` (`every:`), `events` (`on:`) or `run` (after a test or analysis run)." }
+    - { name: "enabled", type: "INT", doc: "1 unless failures disabled it on this machine (`disabled_reason` says why)." }
+    - { name: "state", type: "TEXT", doc: "`disabled`, `failing` (its health is failing or its last run failed), `never_run` or `ok`." }
+    - { name: "last_run_at", type: "TEXT", doc: "When it last ran (RFC 3339); NULL when it never ran." }
+    - { name: "last_status", type: "TEXT", doc: "The last run's outcome: `ok`, `error` or `skipped`; NULL when it never ran." }
+    - { name: "error", type: "TEXT", doc: "The last run's error, when it failed." }
+    - { name: "row_counts_json", type: "TEXT", doc: "Rows per entity after the last successful run, as JSON." }
+    - { name: "disabled_reason", type: "TEXT", doc: "Why it is disabled; NULL when it is not." }
+    - { name: "next_due_at", type: "TEXT", doc: "When a scheduled collector should next run (RFC 3339); NULL when it has no schedule or no health row yet." }
+    - { name: "fresh", type: "", doc: "1 unless a scheduled run is overdue or its last run failed, so its data is the last good run's; NULL before it has a health row." }
+  tests:
+    - { not_null: uri }
 - name: collector_run
   version: 6
   description: "Each collector's last run: its outcome, the row counts it wrote and its checkpoint. A collector is owned by an extension, the project (`project`) or oxplow (`built-in`)."

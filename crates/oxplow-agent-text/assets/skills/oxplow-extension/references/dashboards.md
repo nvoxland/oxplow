@@ -51,10 +51,14 @@ Tile kinds:
 - **`text`**: a heading over the tiles after it, `options_json`
   `{"text": "…"}`. It labels; it doesn't contain.
 
-Every tile's `options_json` may set `title` and `size` (`small`, `wide`,
-`tall` or `full`). Change one with `oxplow.dashboard.update_item { item,
-options_json }`, drop one with `oxplow.dashboard.remove_item { item }`,
-reorder with `oxplow.dashboard.reorder_items { dashboard, order }`.
+Every tile may set `title` and `size` (`small`, `wide`, `tall` or
+`full`). `add_item` and `update_item` take `title`, `size`, `text`,
+`metric`, `viz` and `chart` as fields of their own, beside `options_json`
+(a field given flat wins over the same key there). Change a tile with
+`oxplow.dashboard.update_item { item, title?, size?, … }`: the fields you
+give merge into its stored options, and `options_json` alone replaces
+them all. A re-pointed `sql` or `display` is checked again. Drop a tile
+with `oxplow.dashboard.remove_item { item }`, and reorder with `oxplow.dashboard.reorder_items { dashboard, order }`.
 Deleting a dashboard is the person's.
 
 Read what's there before adding to it: `SELECT id, title FROM
