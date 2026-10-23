@@ -345,7 +345,7 @@ pub const SCOPES: &[Scope] = &[
         access: Access::Record,
         host: Host::Daemon,
         spends: false,
-        summary: "Show a lens beside the conversation.",
+        summary: "Show a lens in the thread, as a tab of it.",
     },
     Scope {
         id: "lenses.write",

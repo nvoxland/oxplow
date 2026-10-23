@@ -148,6 +148,9 @@ metrics:
   - {"key":"oxplow.analysis.warnings","title":"Analysis warnings","sourceMeasure":"oxplow.lint_hit","aggregation":"count","filter":{"severity":"warning"},"unit":"count","direction":"lower-better","displayKind":"gauge","category":"static-quality","description":"Static-analysis warnings in the latest run.","sliceableDims":["oxplow.branch","oxplow.vcs_rev"]}
   - {"key":"work.tasks_completed","title":"Tasks completed","entity":"v_work_item","where":"state = 'done'","time":"closed_at","aggregation":"count","unit":"tasks","category":"operational","description":"Work items done, by the day they were closed."}
   - {"key":"work.open_tasks","title":"Open tasks","entity":"v_work_item","where":"state IN ('todo', 'in_progress', 'blocked')","aggregation":"count","unit":"tasks","category":"operational","description":"Work items ready, in progress or blocked, captured over time."}
+# A thread's answers: what its agents showed with `oxplow_show_lens`.
+panels:
+  - { id: answers, title: Answers, icon: message-square, scope: thread, body: thread-answers, count: thread-answers-count }
 # Oxplow's pages. They are core-named (`oxplow:oxplow/page?page=<id>`), as this extension's
 # commands are. A page is drawn by a lens; one the kit can't draw yet names a
 # built-in component (`oxplow:<name>`), until it can — that list only shrinks
@@ -210,6 +213,7 @@ pages:
   - { id: commit, title: Commit, label: "{{param.sha|short}}", for: oxplow/commit, default: true, lens: commit }
   - { id: metric-detail, title: Metric, label: "{{row.title}}", for: oxplow/metric, default: true, lens: metric }
   - { id: lens, title: Lens, for: oxplow/lens, default: true, component: "oxplow:lens" }
+  - { id: answer, title: Answer, label: "{{row.title}}", for: oxplow/answer, default: true, lens: answer }
   - { id: agent-session, title: Agent Session, for: oxplow/agent_session, default: true, pinned: true, component: "oxplow:agent-session" }
   - { id: resource, title: Resource, component: "oxplow:resource" }
 # What oxplow's URIs name (`oxplow:oxplow/<resource>?<params>`): declared
@@ -1151,7 +1155,7 @@ commands:
     example: {"id": "review/waiting", "params": {"state": "todo"}}
   # lenses.show
   - name: lens.show
-    summary: "Show the person an answer in their thread: an existing lens with params, or a lens of your own (title, query, viz). It renders beside the conversation, where they can keep it."
+    summary: "Show the person an answer in their thread: an existing lens with params, or a lens of your own (title, query, viz). It opens as a tab of the thread, listed in its Answers panel, where they can keep it."
     scope: lenses.show
     op: show
     tool: show_lens

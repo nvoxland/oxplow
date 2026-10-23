@@ -970,22 +970,23 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       path or reserved name never reaches the filesystem — and a failed
       deploy removes only the files it wrote (never a directory that was
       there before).
-    - **UI** (P6.C2, `components/Answers/`): a terminal thread's
-      `AgentPage` shows the **Answers strip** above the terminal — the
-      thread's answers from `v_thread_answer` (`threadAnswers.ts`,
-      `useThreadAnswers`), newest first, hidden while there are none,
-      collapsible (Escape inside it collapses; remembered in the session tab's
-      history state). Each `ThreadAnswer`
-      re-runs through `run_answer` with `useRerunOnChange`, and offers
-      **Keep This** (an inline name — empty takes it from the title —
-      Enter keeps via `oxplow.lens.keep`, Escape cancels) or, once it is a lens
-      (kept, or an existing lens shown), a link to it. A **kept** answer
-      is one line — its title and lens link — with Show / Hide, so kept
-      answers don't crowd the terminal; the strip is capped at 35% of the
-      column, and the terminal below it sits in a flex column so it refits
-      when the strip grows (tsk1042: a `height: 100%` under a flex item
-      doesn't resolve, so the terminal was clipped and never refit). The
-      agent tab has no route context, so `AgentPage` takes `onOpenPage`.
+    - **UI: an answer is the thread's.** Foundation's `answer` page (the
+      renderer of `oxplow/answer`; a document whose row, from
+      `v_thread_answer`, names the tab, and whose one bare section,
+      `answer-body`, is the kit's **`answer` viz**: `answer: { uri,
+      kept? }`, `lens/AnswerViz.tsx`) re-runs the answer through
+      `run_answer` with `useRerunOnChange` and offers **Keep This** (an
+      inline name — empty takes it from the title — Enter keeps via
+      `oxplow.lens.keep`, Escape cancels) or, once it is a lens (kept, or
+      an existing lens shown), a link to it. **Shown means opened**: the
+      window watches the shown thread's answers (`shownAnswers.ts`, over
+      `v_thread_answer`; one recorded in the ten seconds before the
+      window started watching counts) and opens each new one as a tab of
+      the thread *behind* what the person is on, so a terminal keeps its
+      keys. Foundation's thread panel **Answers** (`thread-answers`, its
+      badge `thread-answers-count`: the ones not kept) lists them. An
+      agent reads an `answer` lens as the answer's text (`lens_text`),
+      and an answer is never itself an `answer` (`spec_problem`).
     - Explore Data's **Save as Lens** (`oxplow.lens.keep { spec, stream }`) uses
       the lens's title as a new extension's `intent.purpose`, and the
       caller's thread, when it has one, as its `intent.origin`.

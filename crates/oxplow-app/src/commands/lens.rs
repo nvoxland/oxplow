@@ -4,7 +4,7 @@
 //! Data's Save as Lens does — as a lens in an extension's source and deploys
 //! it.
 //! The rows live in `thread_answer` (`v_thread_answer`); `run_answer`
-//! runs one for the Answers strip and for `oxplow_show_lens`'s text.
+//! runs one for its page (the `answer` viz) and for `oxplow_show_lens`'s text.
 
 use crate::commands::ops::Op;
 use std::collections::BTreeMap;

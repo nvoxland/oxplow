@@ -3464,6 +3464,15 @@ export type LensAlert = {
 	label: string | null,
 };
 
+/**
+ *  `answer` viz: the answer the first row names, and the lens it was kept
+ *  as (once it was).
+ */
+export type LensAnswer = {
+	uri: string | null,
+	kept?: string | null,
+};
+
 /**  Which result columns a chart viz draws from. */
 export type LensChart = {
 	x?: string | null,
@@ -4237,6 +4246,13 @@ export type LensViz =
  */
 "approvals" | 
 /**
+ *  An agent's answer (`answer.uri`, the first row's: an
+ *  `oxplow/answer` URI), re-run live, with Keep This until it is kept
+ *  (`answer.kept`: the lens it became) — core's component for what
+ *  `oxplow_show_lens` showed.
+ */
+"answer" | 
+/**
  *  The extension's own web component (`custom.component`), in
  *  a sandboxed frame; its rows are what it shows and what an agent
  *  reads (as a table).
@@ -4270,6 +4286,7 @@ export type Lens_Deserialize = {
 	code: LensCode | null,
 	diff: LensDiff | null,
 	editor: LensEditor | null,
+	answer: LensAnswer | null,
 	markdown: LensMarkdown | null,
 	form: LensForm_Deserialize | null,
 	/**  For `custom`: the component and its props. */
@@ -4351,6 +4368,7 @@ export type Lens_Serialize = {
 	code: LensCode | null,
 	diff: LensDiff | null,
 	editor: LensEditor | null,
+	answer: LensAnswer | null,
 	markdown: LensMarkdown | null,
 	form: LensForm_Serialize | null,
 	/**  For `custom`: the component and its props. */

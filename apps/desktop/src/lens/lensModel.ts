@@ -572,6 +572,7 @@ export function adHocLens(query: string, viz: LensViz, chart: LensChart | null =
     parts: [],
     view: null,
     editor: null,
+    answer: null,
     // Drawn in a tile or under an editor, never filling a page.
     fills: false,
     launcherCategory: null,
@@ -899,6 +900,16 @@ export function editorRow(lens: Lens, result: SqlQueryResult): { path: string; l
   const path = at(lens.editor?.path);
   if (typeof path !== "string" || !path) return null;
   return { path, line: parseLines(at(lens.editor?.lines))?.start ?? null };
+}
+
+/** `answer` viz: the answer the first row names and the lens it was kept
+ *  as; null when the row names no answer. */
+export function answerRow(lens: Lens, result: SqlQueryResult): { uri: string; kept: string | null } | null {
+  const at = (column: string | null | undefined) => columnValues(result, column)?.[0];
+  const uri = at(lens.answer?.uri);
+  if (typeof uri !== "string" || !uri) return null;
+  const kept = at(lens.answer?.kept);
+  return { uri, kept: typeof kept === "string" && kept ? kept : null };
 }
 
 /** `bar` viz rows: `chart.x` labels and `chart.y` values (NULL → 0). */

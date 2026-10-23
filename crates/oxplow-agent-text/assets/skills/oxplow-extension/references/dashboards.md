@@ -8,7 +8,7 @@ same rules hold.
 
 | They want | Build | Who sees it, and how fresh |
 |---|---|---|
-| An answer now ("which tests are flaky?") | `oxplow_show_lens` with a `spec` | Them, beside the conversation, live; **Keep This** saves it |
+| An answer now ("which tests are flaky?") | `oxplow_show_lens` with a `spec` | Them, as a tab of their thread, live; **Keep This** saves it |
 | A page they come back to | a lens file (`lens-format.md`) | Anyone with the extension, live |
 | Several numbers at a glance | an oxplow **dashboard** (below) | The project, live: tiles re-run as the data moves |
 | A view no lens viz draws | a **custom component** (below) | As a lens: live, sandboxed |

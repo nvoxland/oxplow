@@ -3,8 +3,7 @@ import { TerminalPane } from "../components/TerminalPane.js";
 import type { Stream, Thread } from "../api.js";
 import { recordUserInterrupt, startAgentSession, startAgentSessionFresh } from "../api.js";
 import { useWorkspaceLinkIndex } from "../useWorkspaceLinkIndex.js";
-import { AnswersStrip } from "../components/Answers/AnswersStrip.js";
-import type { TabRef } from "../tabs/tabState.js";
+import { ThreadWaiting } from "../components/ThreadWaiting.js";
 import type { AgentSessionRow } from "../agentSessions.js";
 import { ConversationPicker } from "../components/ConversationPicker.js";
 import type { PickerMode } from "../components/conversationRows.js";
@@ -27,8 +26,6 @@ interface AgentSessionPageProps {
   visible: boolean;
   /** Click-through handler for file paths detected in terminal output. */
   onOpenFile?(absPath: string, line?: number, column?: number): void;
-  /** Open a page (an answer's links); the agent tab has no route context. */
-  onOpenPage?(ref: TabRef): void;
   /** Its harness lists its saved conversations: the person may choose one. */
   canChooseConversation?: boolean;
   /** The conversation picker open over the terminal, if one is. */
@@ -53,7 +50,6 @@ export function AgentSessionPage({
   stream,
   visible,
   onOpenFile,
-  onOpenPage,
   canChooseConversation,
   picker,
   onPicker,
@@ -81,8 +77,8 @@ export function AgentSessionPage({
   return (
     <Page testId="page-agent" title={title} titleIcon={<AgentIcon icon={harnessIcon} size={14} />} actions={actions}>
       <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
-        {/* What the agent showed with `oxplow_show_lens` (P6.C2). */}
-        <AnswersStrip key={thread.id} threadId={thread.id} onOpenPage={onOpenPage} />
+        {/* What the thread's agents asked for that waits on the person. */}
+        <ThreadWaiting key={thread.id} threadId={thread.id} />
         {/* A flex column all the way down: a percentage height under a flex
           *  item doesn't resolve, so the terminal kept its own height when
           *  the strip grew, was clipped, and never refit (tsk1042). */}

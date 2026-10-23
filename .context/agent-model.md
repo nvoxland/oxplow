@@ -305,8 +305,10 @@ permission mode); an agent changes only its own stream.
 **Lenses.** When the person asks to see, list, compare or track
 something, the agent answers with `oxplow_show_lens` (the `oxplow.lens.show`
 command): an existing lens with params, or its own `spec` (table, chart,
-tree). It renders beside the conversation, live, with "Keep this", and
-the tool returns its URI and its text rendering. `oxplow_run_lens` reads what a
+tree). It is the thread's: it opens as a tab of the thread (its page,
+the `answer` renderer of `oxplow/answer`), live, with "Keep This", and
+the thread's Answers panel lists it; the tool returns its URI and its
+text rendering. `oxplow_run_lens` reads what a
 lens shows (text by default, `format: "json"` for rows); `oxplow_run_lens_action`
 runs a lens's declared action as the lens acting for the caller, under
 the same rules as running the command directly.
