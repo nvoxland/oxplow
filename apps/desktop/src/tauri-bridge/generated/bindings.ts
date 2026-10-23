@@ -545,11 +545,6 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	enableMetrics: (keys: string[], enabled: boolean) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("enable_metrics", { keys, enabled })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	runCommand: (id: string, input: unknown, confirmed: boolean) => typedError<CommandOutcome, IpcError_Serialize>(__TAURI_INVOKE("run_command", { id, input, confirmed })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the

@@ -1,19 +1,14 @@
 import { expect, test } from "bun:test";
 
 import type { SeriesPoint } from "../api.js";
-import { rangeFromPreset } from "../kit/rangePresets.js";
 import {
   branchOptions,
   defaultChartMode,
   deltaVsFirst,
-  exclusionReason,
   filterByRange,
   filterByBranch,
-  inRangeStat,
-  specAggregation,
   transformSeries,
   seriesPoints,
-  widestPresetWindow,
   yDomain,
 } from "./metricDetailData.js";
 
@@ -37,22 +32,6 @@ test("deltaVsFirst is last-minus-first, null under two points", () => {
   ).toBe(7);
   expect(deltaVsFirst([s({ captured_at: "2026-06-01T00:00:00Z", value: 5 })])).toBeNull();
 });
-
-test("widestPresetWindow spans the largest preset and contains every preset", () => {
-  const now = Date.parse("2026-06-25T12:00:00Z");
-  const widest = widestPresetWindow(now);
-  expect(widest.to).toBe(now);
-  // 30d is the widest range the pages offer.
-  expect(widest.from).toBe(now - 30 * 24 * 60 * 60 * 1000);
-  // Every preset the UI can select is a subset — so a client-side filterByRange
-  // within the fetched widest window never needs a re-fetch (tsk202).
-  for (const key of ["1d", "2d", "3d", "7d", "30d"]) {
-    const r = rangeFromPreset(key, now);
-    expect(r.from).toBeGreaterThanOrEqual(widest.from);
-    expect(r.to).toBeLessThanOrEqual(widest.to);
-  }
-});
-
 
 test("filterByRange keeps inclusive in-window samples, drops bad timestamps", () => {
   const range = { from: Date.parse("2026-06-10T00:00:00Z"), to: Date.parse("2026-06-20T00:00:00Z") };
@@ -104,22 +83,6 @@ test("branchOptions + filterByBranch", () => {
   expect(filterByBranch(rows, null).length).toBe(4);
 });
 
-test("inRangeStat respects the spec aggregation", () => {
-  const rows = [
-    s({ captured_at: "2026-06-01T00:00:00Z", value: 10 }),
-    s({ captured_at: "2026-06-02T00:00:00Z", value: 4 }),
-    s({ captured_at: "2026-06-03T00:00:00Z", value: 6 }),
-  ];
-  expect(inRangeStat(rows, "sum")).toEqual({ label: "Total in range", value: 20, signed: false });
-  expect(inRangeStat(rows, "avg")).toEqual({ label: "Avg in range", value: 20 / 3, signed: false });
-  // last/level → signed last−first (6 − 10).
-  expect(inRangeStat(rows, "last")).toEqual({ label: "Δ in range", value: -4, signed: true });
-  // delta needs ≥2 points; sum/avg work with 1.
-  expect(inRangeStat([rows[0]!], "last")).toBeNull();
-  expect(inRangeStat([rows[0]!], "sum")).toEqual({ label: "Total in range", value: 10, signed: false });
-  expect(inRangeStat([], "sum")).toBeNull();
-});
-
 test("defaultChartMode follows the spec aggregation", () => {
   expect(defaultChartMode("sum")).toBe("cumulative");
   expect(defaultChartMode("avg")).toBe("avg");
@@ -164,17 +127,3 @@ test("yDomain auto pads a flat series so it isn't on an edge", () => {
 // `package` is not special: `oxplow.package` is a registered dimension like
 // `oxplow.model`, and `dim_value` resolves both.
 
-test("specAggregation shows an entity metric's own aggregation", () => {
-  expect(specAggregation({ aggregation: "sum", entity_json: null })).toBe("sum");
-  expect(
-    specAggregation({ aggregation: "sum", entity_json: '{"view":"v_work_item","aggregation":"count"}' }),
-  ).toBe("count");
-  expect(specAggregation({ aggregation: "last", entity_json: "not json" })).toBe("last");
-});
-
-test("exclusionReason words each reason a scan can leave a file out", () => {
-  expect(exclusionReason("oversize")).toBe("over the size limit");
-  expect(exclusionReason("binary")).toBe("binary");
-  expect(exclusionReason("unreadable")).toBe("unreadable");
-  expect(exclusionReason("other")).toBe("other");
-});

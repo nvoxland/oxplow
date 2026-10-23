@@ -5,7 +5,7 @@ import { seriesPoints as seriesPointRows } from "../../metricsSql.js";
 import { NO_READS, useRerunOnChange } from "../../lens/lensRerun.js";
 import { useRequestGuard } from "../../request-guard.js";
 import { formatMetricValue } from "../format.js";
-import { TrendChart } from "../../pages/MetricDetail.js";
+import { TrendChart } from "../charts/TrendChart.js";
 import type { TimeRange } from "../../kit/rangePresets.js";
 import {
   branchOptions,

@@ -13,7 +13,6 @@ export const APP_RENDERERS = [
   "agent-session",
   "editor",
   "lens",
-  "metric-detail",
 ] as const;
 
 export type AppRendererName = (typeof APP_RENDERERS)[number];

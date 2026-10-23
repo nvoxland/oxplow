@@ -988,7 +988,7 @@ is a typed client over the commands (the conformance suite uses it).
 **Config is written only by `config.*`** (tsk515). The Settings page's
 typed IPC setters (`set_agents`, `set_agent_prompt_append`,
 `set_agent_model`)
-and `enable_metrics` each run `oxplow.config.set` / `oxplow.config.unset` as
+each run `oxplow.config.set` / `oxplow.config.unset` as
 `Actor::Human`, confirmed when the key asks — through `oxplow_rpc::commands::config::set_key`.
 `config_service` only reads. `only_the_config_commands_write_project_yaml`
 scans the crates for any other `write_project_key` call. A key whose

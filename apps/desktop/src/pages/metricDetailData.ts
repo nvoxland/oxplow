@@ -1,5 +1,5 @@
 import type { SeriesPoint } from "../api.js";
-import { rangeFromPreset, type TimeRange } from "../kit/rangePresets.js";
+import type { TimeRange } from "../kit/rangePresets.js";
 
 // Pure helpers behind the per-kind Metric detail view (tsk232). Kept out of the
 // component so they're unit-testable without a DOM — same split as
@@ -8,14 +8,6 @@ import { rangeFromPreset, type TimeRange } from "../kit/rangePresets.js";
 // shape the trend chart plots.
 
 export type ChartPoint = { t: number; v: number };
-
-/** The widest bounded preset window ending at `now` (tsk202). Passing this to
- *  `listMetricSamples` bounds the backend read to the widest span the pages
- *  offer (30 days), while the client still switches between narrower ranges
- *  INSTANTLY via `filterByRange` (no re-fetch). */
-export function widestPresetWindow(now: number): TimeRange {
-  return rangeFromPreset("30d", now);
-}
 
 /** Series points whose `captured_at` falls inside the window (inclusive). */
 export function filterByRange(samples: SeriesPoint[], range: TimeRange): SeriesPoint[] {
@@ -120,70 +112,4 @@ export function deltaVsFirst(samples: SeriesPoint[]): number | null {
   const pts = seriesPoints(samples);
   if (pts.length < 2) return null;
   return pts[pts.length - 1]!.v - pts[0]!.v;
-}
-
-/** The headline "in range" stat, computed the way the spec AGGREGATES rather
- *  than always last−first — so a `sum`/per-event metric like tokens shows its
- *  window total, not a meaningless endpoint diff:
- *  - `sum` → "Total in range" (Σ of in-range values);
- *  - `avg` → "Avg in range" (mean);
- *  - anything else (`last`/`count` level gauges) → "Δ in range" (last − first),
- *    the signed change. `null` when there's nothing to show. */
-/** The aggregation to show for a metric: an entity metric's own (count,
- *  median, …) from its `entity_json`, else the spec's. The stored
- *  `aggregation` of an entity metric only says how its points combine. */
-export function specAggregation(def: { aggregation: string; entity_json: string | null }): string {
-  if (def.entity_json) {
-    try {
-      const agg = (JSON.parse(def.entity_json) as { aggregation?: unknown }).aggregation;
-      if (typeof agg === "string") return agg;
-    } catch {
-      // Not JSON: fall back to the stored aggregation.
-    }
-  }
-  return def.aggregation;
-}
-
-export function inRangeStat(
-  samples: SeriesPoint[],
-  aggregation: string,
-): { label: string; value: number; signed: boolean } | null {
-  const pts = seriesPoints(samples);
-  if (pts.length === 0) return null;
-  if (aggregation === "sum") {
-    return { label: "Total in range", value: pts.reduce((a, p) => a + p.v, 0), signed: false };
-  }
-  if (aggregation === "avg") {
-    return { label: "Avg in range", value: pts.reduce((a, p) => a + p.v, 0) / pts.length, signed: false };
-  }
-  if (pts.length < 2) return null;
-  return { label: "Δ in range", value: pts[pts.length - 1]!.v - pts[0]!.v, signed: true };
-}
-
-/** A file the latest scans of a metric's collectors were not given. */
-export type UncheckedFile = { path: string; reason: string };
-
-/**
- * The files a metric's collectors left out (oversize, binary, unreadable) and
- * no later scan has covered: the facts they last had stay, unchecked. `?1` is
- * the metric's measure key. Read through the `capture_exclusion` model.
- */
-export const UNCHECKED_FILES_SQL =
-  "SELECT DISTINCT e.path, e.reason FROM v_capture_exclusion e " +
-  "WHERE e.unchecked = 1 AND e.producer IN (" +
-  "SELECT DISTINCT c.producer FROM v_capture c JOIN v_fact f ON f.capture_id = c.id WHERE f.measure_key = ?1) " +
-  "ORDER BY e.path LIMIT 200";
-
-/** The notice's words for a reason. */
-export function exclusionReason(reason: string): string {
-  switch (reason) {
-    case "oversize":
-      return "over the size limit";
-    case "binary":
-      return "binary";
-    case "unreadable":
-      return "unreadable";
-    default:
-      return reason;
-  }
 }

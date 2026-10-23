@@ -1,0 +1,30 @@
+title: Trend
+description: The metric over the range, charted the way it rolls up - running total for a sum, moving average for an average, the value otherwise - split by the dimension when one is picked.
+params:
+  - { name: metric }
+  - { name: range, type: date_range, role: filter, default: 7d, presets: [1d, 2d, 3d, 7d, 30d, all] }
+  - { name: branch, type: branch, role: filter }
+  - { name: slice, default: "" }
+query: |
+  WITH pts AS (
+    SELECT p.captured_at, p.value, p.group_value FROM v_metric_point p
+    WHERE p.metric = :metric AND p.dimension = :slice
+      AND (:branch IS NULL OR p.branch = :branch)
+      AND (:range_from IS NULL OR p.captured_at >= :range_from)
+      AND (:range_to IS NULL OR p.captured_at <= :range_to)
+  ), agg AS (
+    SELECT coalesce(json_extract(s.entity_json, '$.aggregation'), s.aggregation) AS aggregation, s.target
+    FROM v_metric_spec s WHERE s.key = :metric
+  )
+  SELECT p.captured_at AS at,
+         CASE (SELECT aggregation FROM agg)
+           WHEN 'sum' THEN sum(p.value) OVER (PARTITION BY p.group_value ORDER BY p.captured_at)
+           WHEN 'avg' THEN avg(p.value) OVER (PARTITION BY p.group_value ORDER BY p.captured_at ROWS BETWEEN 4 PRECEDING AND CURRENT ROW)
+           ELSE p.value END AS value,
+         coalesce(p.group_value, 'all') AS series,
+         CASE WHEN coalesce((SELECT aggregation FROM agg), '') NOT IN ('sum', 'avg') THEN (SELECT target FROM agg) END AS target
+  FROM pts p ORDER BY p.captured_at
+viz: line
+chart: { x: at, y: value, series: series, targets: target }
+empty: No recordings in this range.
+hidden: true

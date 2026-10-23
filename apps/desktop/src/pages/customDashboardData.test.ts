@@ -2,10 +2,8 @@ import { describe, expect, it, mock } from "bun:test";
 
 import type { SeriesPoint } from "../api.js";
 import {
-  buildAddToDashboardMenu,
   deltaTone,
   latestValue,
-  metricTile,
 } from "./customDashboardData.js";
 
 function sample(capturedAt: string, value: number): SeriesPoint {
@@ -48,45 +46,5 @@ describe("deltaTone", () => {
     expect(deltaTone(0, "higher-better")).toBe("neutral");
     expect(deltaTone(5, "neutral")).toBe("neutral");
     expect(deltaTone(5, "whatever")).toBe("neutral");
-  });
-});
-
-
-describe("buildAddToDashboardMenu", () => {
-  const dashboards = [
-    { id: "dsh1", title: "Coverage", sort_index: 0 },
-    { id: "dsh2", title: "Tokens", sort_index: 1 },
-  ] as unknown as Parameters<typeof buildAddToDashboardMenu>[0];
-
-  it("lists one entry per dashboard, then a separator and 'New dashboard…'", () => {
-    const menu = buildAddToDashboardMenu(dashboards, () => {}, () => {});
-    expect(menu.map((m) => m.label)).toEqual(["Coverage", "Tokens", "", "New dashboard…"]);
-    expect(menu[2]?.separator).toBe(true);
-  });
-
-  it("calls onPick with the chosen dashboard id, and onNew for the new entry", () => {
-    const onPick = mock((_id: string) => {});
-    const onNew = mock(() => {});
-    const menu = buildAddToDashboardMenu(dashboards, onPick, onNew);
-    menu[1]?.run?.();
-    expect(onPick).toHaveBeenCalledWith("dsh2");
-    menu[3]?.run?.();
-    expect(onNew).toHaveBeenCalled();
-  });
-
-  it("offers only 'New dashboard…' (no leading separator) when there are none yet", () => {
-    const menu = buildAddToDashboardMenu([], () => {}, () => {});
-    expect(menu.map((m) => m.label)).toEqual(["New dashboard…"]);
-  });
-});
-
-describe("metricTile", () => {
-  it("pins a query over the metric's captures, shown as the metric card", () => {
-    const tile = metricTile("oxplow.coverage");
-    expect(tile.kind).toBe("query");
-    expect(tile.display).toBe("metric");
-    expect(tile.sql).toContain("metric_grid('capture')");
-    expect(tile.sql).toContain("MEASURE('oxplow.coverage')");
-    expect(JSON.parse(tile.optionsJson)).toEqual({ metric: "oxplow.coverage", viz: "line" });
   });
 });

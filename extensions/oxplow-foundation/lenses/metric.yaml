@@ -1,0 +1,15 @@
+title: Metric
+description: "One metric: what it is, its trend over a range and branch (split by a dimension if you like), and its recordings. The renderer of oxplow's `metric` resource."
+params:
+  - { name: uri }
+  - { name: metric }
+  - { name: range, type: date_range, role: filter, label: Range, default: 7d, presets: [1d, 2d, 3d, 7d, 30d, all] }
+  - { name: branch, type: branch, role: filter, label: Branch }
+  - { name: slice, type: choice, role: filter, label: Slice by, options_from: metrics-dimensions, default: "" }
+viz: document
+sections:
+  - { id: header, title: "", lens: metric-header }
+  - { id: chart, title: "", lens: metric-chart }
+  - { id: unchecked, title: "", lens: metric-unchecked }
+  - { id: recordings, title: Recordings, lens: metric-recordings }
+hidden: true

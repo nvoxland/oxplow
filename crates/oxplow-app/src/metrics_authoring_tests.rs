@@ -413,6 +413,123 @@ fn text_of(cell: &SqlCell) -> String {
     }
 }
 
+/// The metric page: its definition and headline, its trend (split by a
+/// dimension when sliced), its recordings with their unit; the header turns
+/// the metric off and on through `oxplow.metric.enable`.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_metric_page_reads_the_definition_the_trend_and_the_recordings() {
+    use crate::lens_actions::{run_lens_action, LensActionCall};
+    let (p, _) = project(|_| {}).await;
+    p.baseline().await;
+    let (plan, _) = rust(&[("calm", 0)]);
+    let (theme, _) = rust(&[("calm", 0), ("a", 11), ("b", 11), ("c", 13)]);
+    write(p.dir.path(), "engine/plan.rs", &plan);
+    write(p.dir.path(), "ui/theme.rs", &theme);
+    p.delta().await;
+
+    let run = |lens: &str, params: Vec<(&str, SqlCell)>| {
+        let svc = p.svc.clone();
+        let root = p.dir.path().to_path_buf();
+        let lens = format!("oxplow-foundation/{lens}");
+        let params: std::collections::BTreeMap<String, SqlCell> = params
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v))
+            .collect();
+        async move {
+            let run = crate::extensions::run_lens(
+                &svc.sql,
+                &svc.extension_catalog,
+                &root,
+                &lens,
+                params,
+                &crate::extensions::LensContext::default(),
+            )
+            .await
+            .unwrap();
+            let cols = run.result.columns.clone();
+            run.result
+                .rows
+                .into_iter()
+                .map(|r| {
+                    cols.iter()
+                        .cloned()
+                        .zip(r)
+                        .collect::<std::collections::BTreeMap<String, SqlCell>>()
+                })
+                .collect::<Vec<_>>()
+        }
+    };
+    let metric = || vec![("metric", SqlCell::Text(MEASURE.into()))];
+    let header = run("metric-header", metric()).await;
+    assert_eq!(header.len(), 1, "{header:?}");
+    assert_eq!(header[0]["id"], SqlCell::Text(MEASURE.into()));
+    assert_eq!(header[0]["enabled"], SqlCell::Int(1));
+    assert!(
+        matches!(&header[0]["in_range"], SqlCell::Text(t) if !t.is_empty()),
+        "{header:?}"
+    );
+
+    // The trend: one series, the two captures' values in order.
+    let chart = run("metric-chart", metric()).await;
+    let values: Vec<f64> = chart
+        .iter()
+        .map(|r| match r["value"] {
+            SqlCell::Real(v) => v,
+            ref other => panic!("{other:?}"),
+        })
+        .collect();
+    assert_eq!(values.len(), 2, "{chart:?}");
+    // Sliced by area: a series per area.
+    let mut sliced = metric();
+    sliced.push(("slice", SqlCell::Text(AREA.into())));
+    let by_area = run("metric-chart", sliced).await;
+    let series: std::collections::BTreeSet<String> = by_area
+        .iter()
+        .map(|r| match &r["series"] {
+            SqlCell::Text(t) => t.clone(),
+            other => panic!("{other:?}"),
+        })
+        .collect();
+    assert_eq!(series, ["engine".to_string(), "ui".to_string()].into());
+
+    let recordings = run("metric-recordings", metric()).await;
+    assert_eq!(recordings.len(), 2, "{recordings:?}");
+    assert_eq!(recordings[0]["trust"], SqlCell::Text("observed".into()));
+
+    // Off, then on again, from the header's actions.
+    let act =
+        |action: &str, row: Option<std::collections::BTreeMap<String, SqlCell>>| LensActionCall {
+            lens_id: "oxplow-foundation/metric-header".into(),
+            action_id: action.into(),
+            params: std::collections::BTreeMap::from([(
+                "metric".to_string(),
+                SqlCell::Text(MEASURE.into()),
+            )]),
+            row,
+            input: None,
+            drop: None,
+            on_behalf_of: oxplow_domain::Actor::Human,
+            confirmed: false,
+        };
+    let ctx = crate::extensions::LensContext::default();
+    // Off writes the `metrics:` list (the catalog follows once the project
+    // reseeds); on again takes the entry back out.
+    let listed = || {
+        crate::config_service::read_config(&p.svc.config)
+            .metrics
+            .len()
+    };
+    let before = listed();
+    run_lens_action(&p.svc, p.dir.path(), act("disable", None), &ctx)
+        .await
+        .unwrap();
+    assert_ne!(listed(), before, "disabling changed the metrics list");
+    run_lens_action(&p.svc, p.dir.path(), act("enable", None), &ctx)
+        .await
+        .unwrap();
+    assert_eq!(listed(), before);
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn the_metric_slices_by_area_and_filters_by_a_dimension() {
     let (p, _) = project(|_| {}).await;

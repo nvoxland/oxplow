@@ -13,7 +13,6 @@ export { DocumentLayout, type DocSection } from "./DocumentLayout.js";
 export { Facts, type Fact } from "./Facts.js";
 export { humanize } from "./humanize.js";
 export { ParamList, ParamRow, type ParamListProps, type ParamRowProps } from "./ParamControls.js";
-export { MetricFilters, METRIC_RANGE_PRESETS, type MetricFiltersProps } from "./MetricFilters.js";
 export { Popover, type PopoverProps } from "./Popover.js";
 export { RailGroup, type RailGroupProps } from "./RailGroup.js";
 export { Loading } from "./Loading.js";

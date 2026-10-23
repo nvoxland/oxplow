@@ -202,7 +202,7 @@ pages:
   - { id: wiki-page, title: Wiki Page, label: "{{param.slug}}", for: oxplow/wiki, default: true, comments: true, lens: wiki-page }
   - { id: work-item, title: Work Item, label: "{{param.id}}", for: oxplow/work_item, default: true, comments: true, lens: work-item }
   - { id: commit, title: Commit, label: "{{param.sha}}", for: oxplow/commit, default: true, lens: commit }
-  - { id: metric-detail, title: Metric, for: oxplow/metric, default: true, component: "oxplow:metric-detail" }
+  - { id: metric-detail, title: Metric, for: oxplow/metric, default: true, lens: metric }
   - { id: lens, title: Lens, for: oxplow/lens, default: true, component: "oxplow:lens" }
   - { id: agent-session, title: Agent Session, for: oxplow/agent_session, default: true, pinned: true, component: "oxplow:agent-session" }
   - { id: resource, title: Resource, component: "oxplow:resource" }

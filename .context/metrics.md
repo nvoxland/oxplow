@@ -186,7 +186,7 @@ welded to collection.
 > fixes, cheapest read to root cause:
 > - **Reads-based refresh** (P4.7, replacing tsk197's `subscribeMetricRefresh`).
 >   Each metric reader in `api.ts` returns its rows with the query's `reads`,
->   and every metric view (`MetricTile`, `MetricDetailPage`, the Metrics lens,
+>   and every metric view (`MetricTile`, the Metric lens, the Metrics lens,
 >   the dashboard's spec and catalog load) re-runs through
 >   `useRerunOnChange`, so a view refreshes only when a model or measure it
 >   read changed. An enable toggle or a `project.yaml` edit arrives as
@@ -1644,11 +1644,10 @@ the change loop announces `OxplowEvent::MetricSamplesChanged` for what landed.
 - **The desktop reads metrics through SQL** (P4.7, tsk492 — the metric IPC
   reads are gone). `src/metricsSql.ts` builds the queries and row shapes;
   `api.ts` runs them through `query_sql` and returns the rows with the
-  query's `reads` (what the views subscribe to): `listMetricSamples` is
-  `metric_grid('capture'[, dim])` joined to `v_capture` (one row per capture,
-  newest first, bounded to a range in SQL), `listMetricDefinitions` reads
-  `v_metric_spec` (v2 adds `entity_json`), `listMetricCatalog` reads
-  `v_metric_catalog`. The one metric IPC left is `enable_metrics`, below. The dimension roll-up, per-capture
+  query's `reads` (what the views subscribe to): the dashboard tiles read `metric_grid('capture'[, dim])` joined to
+  `v_capture` (one row per capture, newest first), `listMetricDefinitions` reads
+  `v_metric_spec` (v2 adds `entity_json`); the Metrics and Metric pages are lenses
+  over `v_metric_point`, `v_metric_catalog` and `v_metric_spec`. There is no metric IPC left: the enable switch is the `oxplow.metric.enable` command. The dimension roll-up, per-capture
   findings, measure series/rollup and effort-delta IPC commands were removed
   with the UI that used them (tsk309); agents slice with `metric_grid(…, dim)`
   and read offenders with `metric_findings()`, and per-effort deltas are
@@ -1743,23 +1742,31 @@ just carries a Help blurb pointing there.
 > branch are the query's own `WHERE` on `captured_at` and `branch`
 > (the point's capture time sorts as text).
 
-- **Metric Detail** (`MetricDetailPage.tsx` + the pieces in `MetricDetail.tsx`
-  and pure `metricDetailData.ts`, `PageKind` `"metric"`, routed by
-  `metricRef(key)`). The metric name is the H1 and its `description` the
-  intro. The main column is the trend chart (drag to select a range; charted
-  the way the metric rolls up — `defaultChartMode`: sum → cumulative) and the
-  paginated recordings (`RecordingsTable`, 25/page; the page is history state).
-  Range, branch and slice are the ref's view (`metric:<key>?range=…`, a
-  brushed window is `range=<from>..<to>`), drawn by `MetricFilters`. The
-  details rail holds those filters, the agg-aware in-range stat and the full
-  definition metadata (`MetricStatsRail`), **Add to dashboard ▾** and the
-  **Enabled** checkbox. **Simplified (tsk309):** chart mode/scale controls,
-  the breakdown card and group filter, the per-kind drill-ins (findings
-  table, test tree, coverage lines, top subjects), the Metric Recording page,
-  the target-override input and the "In this effort" callout are gone.
-  Targets live in config; breakdowns and findings are for agents
-  (`metric_grid(…, dim)`, `v_fact` through `oxplow_query_sql`) and lenses.
-  Old `metric-recording:<capture>:<key>` tab ids reopen the metric.
+- **Metric Detail** (the `metric` lens, the renderer of `oxplow/metric`
+  — `metricUri(key)` — in the `metric-detail` page entry) — a `document`
+  of `metric-header`, `metric-chart`, `metric-unchecked` and
+  `metric-recordings`, all over `v_metric_point` (pinned to the page's
+  `metric`) and the definition models. Range (a `date_range`, 7 days by
+  default), branch and **Slice by** are the page's filters, in its address.
+  The header is a `detail`: the metric's name and description, the
+  agg-aware **in range** headline (a total for a `sum`, an average for an
+  `avg`, the change first to last otherwise: `inRangeStat`'s rule in
+  SQL), the definition (ID, type, aggregation, measure, scope, category,
+  language, unit, direction, target, warn and fail thresholds, enabled),
+  and the actions **Enable**, **Disable** (`oxplow.metric.enable`) and
+  **Add to Dashboard…** (`oxplow.dashboard.add_item` with the metric's
+  key and a choice of dashboards). The chart is a `line` chart, the metric
+  charted the way it rolls up (a running total for a sum, a five-capture
+  moving average for an average, the value otherwise) with the target line
+  for the rest, one series per group when sliced; the recordings are the
+  newest 200 captures with their unit, branch, version and trust; the
+  unchecked part lists files a scan left out. **Lost with the React page:**
+  dragging a range on the chart (use the range filter), the 25-per-page
+  pager, New dashboard… from the metric (make one on the Dashboards page,
+  then add), and the enable-prompt body for a disabled metric (the header
+  just shows Enabled: no and the Enable action). Targets live in config;
+  breakdowns and findings are for agents (`metric_grid(…, dim)`, `v_fact`
+  through `oxplow_query_sql`) and lenses.
 
 > **Definition descriptions (tsk309).** Every metric carries a one-line
 > `description` (on `metric_definition`). It's inherent to the definition — set
@@ -1775,16 +1782,12 @@ There is **no Metric Settings page anymore**. Configuration was a dedicated
 page ("Metrics Catalog" tsk282, retitled "Metric Settings" tsk80) until tsk117
 folded it into the surfaces where you already look at a metric:
 
-- **Per-metric config lives on the Metric Detail page** — a "Configure" block
-  at the bottom of the details rail: an **Enabled** checkbox
-  (`metric-detail-enabled` → `set_metric_enabled`); targets are set in
-  `.oxplow/project.yaml`. Failures surface via `recordOpError`.
-  The block reads the **catalog entry** (`list_metric_catalog`), NOT the spec:
-  a disabled metric's spec is pruned, so the spec-driven page body would
-  otherwise dead-end. A disabled metric's detail page renders an enable-prompt
-  body (`metric-detail-disabled`) with the Configure block still in the rail —
-  that rail is exactly how the metric gets turned back on. The page refreshes
-  on `configChanged` as well as `metricSamplesChanged`.
+- **Per-metric config lives on the Metric Detail page** — its header's
+  **Enable** and **Disable** actions (`oxplow.metric.enable`); targets are set in
+  `.oxplow/project.yaml`. The header reads the **catalog** (`v_metric_catalog`),
+  NOT only the spec: a disabled metric's spec is pruned, so the page still has
+  its name and the Enable action. The catalog follows the config edit once the
+  project reseeds.
 - **"+ New metric" scaffolding is agent-driven (tsk122).** The inline
   `NewMetricBar.tsx` form was **removed** — authoring a metric always needs the
   collector script edited anyway, which is agent work. The scaffold backend
@@ -1834,7 +1837,7 @@ The mechanics behind those controls (unchanged by tsk117):
   `(stream_id, uri)` — a function the symbol index doesn't hold isn't listed.
   Token-usage facts use `ai_model:<name>` subjects (`ai_model_ref`).
 - **Enable/disable** via the `oxplow.metric.enable { keys, enabled }` command
-  (`commands/metric.rs`; the desktop's `enable_metrics` IPC runs it as the
+  (`commands/metric.rs`; the Metric page's Enable and Disable actions run it as the
   person) — it computes the new `metrics:` list and hands it to
   `oxplow.config.set`'s core, so it is audited, logged as `config.changed` and
   undoable. Its config shape is

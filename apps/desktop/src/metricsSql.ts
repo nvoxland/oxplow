@@ -19,14 +19,6 @@ export type SeriesPoint = {
   source: string | null;
 };
 
-/** A sliced metric's points, one series per dimension value, in first-seen
- *  order (Slice By on the metric pages). */
-export function seriesByGroup(points: SeriesPoint[]): { group: string | null; points: SeriesPoint[] }[] {
-  const groups = new Map<string | null, SeriesPoint[]>();
-  for (const p of points) groups.set(p.group, [...(groups.get(p.group) ?? []), p]);
-  return [...groups.entries()].map(([group, pts]) => ({ group, points: pts }));
-}
-
 /** A metric definition — a row of `v_metric_spec`. */
 export type MetricSpec = {
   key: string;
@@ -45,20 +37,6 @@ export type MetricSpec = {
   display_kind: string;
   extension: string | null;
   entity_json: string | null;
-};
-
-/** A metric this project can use, and whether it's on — `v_metric_catalog`. */
-export type MetricCatalogEntry = {
-  key: string;
-  title: string;
-  kind: string;
-  language: string | null;
-  scope: string;
-  enabled: boolean;
-  target: number | null;
-  trigger: string;
-  toggleable: boolean;
-  category: string | null;
 };
 
 /** A string as a SQL literal. */
@@ -91,10 +69,6 @@ export const METRIC_SPECS_SQL =
   "SELECT key, title, unit, source_measure, aggregation, direction, target, warn_at, fail_at, " +
   "description, category, language, scope, display_kind, extension, entity_json " +
   "FROM v_metric_spec ORDER BY key";
-
-export const METRIC_CATALOG_SQL =
-  "SELECT key, title, kind, language, scope, enabled, target, trigger, toggleable, category " +
-  "FROM v_metric_catalog ORDER BY key";
 
 const text = cellText;
 const num = cellNumber;
@@ -130,20 +104,5 @@ export function metricSpecs(result: SqlQueryResult): MetricSpec[] {
     display_kind: text(r.display_kind) ?? "gauge",
     extension: text(r.extension),
     entity_json: text(r.entity_json),
-  }));
-}
-
-export function catalogEntries(result: SqlQueryResult): MetricCatalogEntry[] {
-  return rowObjects(result).map((r) => ({
-    key: text(r.key) ?? "",
-    title: text(r.title) ?? "",
-    kind: text(r.kind) ?? "",
-    language: text(r.language),
-    scope: text(r.scope) ?? "",
-    enabled: r.enabled === 1 || r.enabled === true,
-    target: num(r.target),
-    trigger: text(r.trigger) ?? "auto",
-    toggleable: r.toggleable === 1 || r.toggleable === true,
-    category: text(r.category),
   }));
 }

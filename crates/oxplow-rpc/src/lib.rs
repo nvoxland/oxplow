@@ -211,7 +211,6 @@ macro_rules! oxplow_command_table {
                 list_efforts_at_snapshots => $crate::commands::effort::list_efforts_at_snapshots { snapshot_ids: Vec<::oxplow_domain::SnapshotId> } -> Vec<::oxplow_db::EffortAtSnapshot>,
                 // metrics: reads are SQL (`metric_grid()`, `v_metric_catalog`); this
                 // switches them, through the `oxplow.metric.enable` command (P4.7)
-                enable_metrics => $crate::commands::metrics::enable_metrics { keys: Vec<String>, enabled: bool } -> (),
                 // the command bus, as the person
                 get_command => $crate::commands::bus::get_command { name: String } -> ::oxplow_domain::CommandSpec,
                 list_person_commands => $crate::commands::bus::list_person_commands {} -> Vec<::oxplow_domain::CommandSpec>,

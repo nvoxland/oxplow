@@ -1,0 +1,28 @@
+title: Recordings
+description: Every capture of the metric in the range, newest first.
+params:
+  - { name: metric }
+  - { name: range, type: date_range, role: filter, default: 7d, presets: [1d, 2d, 3d, 7d, 30d, all] }
+  - { name: branch, type: branch, role: filter }
+query: |
+  WITH pts AS (
+    SELECT p.captured_at, p.value, p.branch, p.capture_id FROM v_metric_point p
+    WHERE p.metric = :metric
+      AND (:branch IS NULL OR p.branch = :branch)
+      AND (:range_from IS NULL OR p.captured_at >= :range_from)
+      AND (:range_to IS NULL OR p.captured_at <= :range_to)
+  )
+  SELECT p.captured_at AS time, p.value, (SELECT unit FROM v_metric_spec WHERE key = :metric) AS unit,
+         p.branch, substr(c.closest_vcs_rev, 1, 8) AS version,
+         CASE WHEN c.provenance = 'observed' THEN 'observed' ELSE '⚠ ' || coalesce(c.provenance, '?') END AS trust
+  FROM pts p LEFT JOIN v_capture c ON c.id = p.capture_id
+  ORDER BY p.captured_at DESC LIMIT 200
+viz: table
+columns:
+  - { key: time, label: Time, format: datetime }
+  - { key: value, label: Value, unit: unit }
+  - { key: branch, label: Branch }
+  - { key: version, label: Version }
+  - { key: trust, label: Trust }
+empty: No recordings in range.
+hidden: true

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { catalogEntries, metricSeriesSql, seriesPoints } from "./metricsSql.js";
+import { metricSeriesSql, seriesPoints } from "./metricsSql.js";
 
 const reads = { models: [], tables: [], measures: [] };
 
@@ -21,7 +21,7 @@ describe("metrics read through SQL", () => {
     expect(grouped).toContain("AND g.bucket >= ?1 AND g.bucket <= ?2");
   });
 
-  test("rows become points and catalog entries", () => {
+  test("rows become points", () => {
     const points = seriesPoints({
       columns: ["capture_id", "captured_at", "value", "group", "branch", "provenance", "vcs_rev", "source"],
       rows: [[7, "2026-03-02T10:00:00.000000Z", 3.5, null, "main", "observed", "abc123", "builtin"]],
@@ -41,25 +41,5 @@ describe("metrics read through SQL", () => {
         source: "builtin",
       },
     ]);
-    const [entry] = catalogEntries({
-      columns: ["key", "title", "kind", "language", "scope", "enabled", "target", "trigger", "toggleable", "category"],
-      rows: [["a", "A", "gauge", null, "built-in", 1, null, "auto", 0, "testing"]],
-      truncated: false,
-      reads,
-      freshness: [],
-    });
-    expect(entry.enabled).toBe(true);
-    expect(entry.toggleable).toBe(false);
   });
-});
-
-import { seriesByGroup } from "./metricsSql.js";
-
-test("a sliced metric's points split into one series per group", () => {
-  const p = (group: string | null, value: number) =>
-    ({ capture_id: 1, captured_at: "t", value, group, branch: null, provenance: null, vcs_rev: null, source: null }) as never;
-  expect(seriesByGroup([p("core", 1), p("ui", 2), p("core", 3)]).map((s) => [s.group, s.points.length])).toEqual([
-    ["core", 2],
-    ["ui", 1],
-  ]);
 });

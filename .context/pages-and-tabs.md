@@ -115,7 +115,7 @@ otherwise. A tab's label and icon come from `recordedPageKind(ref)` /
 (`oxplow/file`), else a web page's scheme.
 
 Foundation declares oxplow's renderers (`agent-session`, `commit`,
-`editor`, `file-viewer`, `lens`, `metric-detail`,
+`editor`, `file-viewer`, `lens`,
 `resource`, `wiki-page`, `work-item`, and `diff-view` also for
 `oxplow/snapshot`, `oxplow/effort` and `oxplow/turn`; `custom-dashboard`
 (a lens renderer, `dashboard`) for `oxplow/dashboard`; `external-url` for `https` and `http`). Their
@@ -213,7 +213,7 @@ oxplow's own until the kit can draw them, `component: oxplow:<name>`, a
 `crates/oxplow-app/src/built_in_pages.rs` and its golden
 `fixtures/built_in_pages.json`. The list grew once with the renderers
 (`agent-session`, `commit`, `directory`, `editor`, `file-viewer`, `lens`,
-`metric-detail`, `resource`, `wiki-page`, `work-item`) and only shrinks
+`resource`, `wiki-page`, `work-item`) and only shrinks
 again (a page leaves when it becomes a lens). It ends at six: `editor`,
 `terminal`, `agent-session` and `external-url` wait for an editor,
 terminal and embed viz; `lens` (the lens runtime, which draws every lens
@@ -390,7 +390,6 @@ param) with `useListNav`
 holds focus itself spreads its `keyProps`), `Stat` (a figure; `big` when
 it is its place's whole — the lens `number` viz), `Facts` (labels beside
 values — the lens `detail` viz, a metric's definition),
-`MetricFilters` (the range, branch and slice of a metric page as `ParamRow`s),
 `TileGrid` / `TileSlot` / `Tile`, `Loading`, `ActionButtons`, and
 `EmptyState` (re-exported; it lives beside the agent prompts it offers).
 Lengths come from the spacing and radius tokens (theming.md).

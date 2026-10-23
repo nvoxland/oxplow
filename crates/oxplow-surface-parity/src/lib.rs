@@ -134,10 +134,6 @@ pub const MANIFEST: &[Capability] = &[
     // Metrics read through SQL (`v_metric_spec`, `v_fact`, `metric_grid()`)
     // on both surfaces, and change through the `metric.*` commands
     // (`run_command`); nothing metric-specific is left on MCP (P4.8).
-    ui(
-        "enable_metrics",
-        "the Catalog toggle, a person's typed call into `oxplow.metric.enable`; an agent runs the command itself",
-    ),
     // Architectural zones (tsk251) — agent-only: the agent reads the table
     // here and writes it with `oxplow.config.set` (tsk411); the renderer only reads
     // it (it rides on `get_config`), so there is no IPC counterpart.

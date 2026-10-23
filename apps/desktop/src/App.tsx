@@ -91,7 +91,6 @@ import { renameHint, renameSession } from "./sessionRename.js";
 import { useAgentHarnesses } from "./useAgentHarnesses.js";
 import { readThreadSessions, useThreadSessions } from "./agentSessions.js";
 import { rollUpAgentStatus, threadStatuses } from "./agentStatusRollup.js";
-import { MetricDetailPage } from "./pages/MetricDetailPage.js";
 import { LensPage } from "./pages/LensPage.js";
 import { insertIntoAgent } from "./agent-input-bus.js";
 import { getPageDetailStore } from "./tabs/openPageDetail.js";
@@ -1983,17 +1982,6 @@ export function App() {
               onCompareWithClipboard={handleCompareWithClipboard}
             />
           ) : null,
-        };
-      },
-      "metric-detail": (ref, nav) => {
-        const metricKey = paramOf(ref.id, "metric") ?? undefined;
-        return {
-          id: ref.id,
-          label: "Metric",
-          closable: true,
-          render: () => (
-            <MetricDetailPage metricKey={metricKey} onOpenPage={nav.navOpen} />
-          ),
         };
       },
       lens: (ref, nav) => {

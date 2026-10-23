@@ -23,15 +23,9 @@ export { shellAvailable } from "./tauri-bridge/transport.js";
 export { onRemoteReconnect, triggerRemoteResync };
 import { EVENT_CHANNELS } from "./tauri-bridge/channels.js";
 import {
-  METRIC_CATALOG_SQL,
   METRIC_SPECS_SQL,
-  catalogEntries,
-  metricSeriesSql,
   metricSpecs as metricSpecRows,
-  seriesPoints as seriesPointRows,
-  type MetricCatalogEntry,
   type MetricSpec,
-  type SeriesPoint,
 } from "./metricsSql.js";
 import { IpcCallError, ipcErrorCode, ipcErrorDetails, ipcErrorField, ipcErrorMessage } from "./ipc-error.js";
 import type {
@@ -1335,7 +1329,7 @@ export function awaitBackgroundTask(taskId: string): Promise<BackgroundTask | nu
   });
 }
 
-export type { MetricSpec, SeriesPoint, MetricCatalogEntry } from "./metricsSql.js";
+export type { MetricSpec, SeriesPoint } from "./metricsSql.js";
 
 import type { Dashboard } from "./tauri-bridge/index.js";
 import { effortUri, idOf } from "./uri/uri.js";
@@ -1368,24 +1362,6 @@ export async function addDashboardItem(req: {
   });
   return (outcome.result as { id: string }).id;
 }
-export async function removeDashboardItem(id: string): Promise<void> {
-  await runCommand("oxplow.dashboard.remove_item", { item: id });
-}
-/** Fires when a commit touched a dashboard or a tile (`v_dashboard`,
- *  `v_dashboard_item`) — whoever wrote it. */
-export function subscribeDashboardEvents(fn: () => void): () => void {
-  return subscribeOxplowEvents((event) => {
-    const models = (event as { models?: unknown }).models;
-    if (
-      event.kind === "modelsChanged" &&
-      Array.isArray(models) &&
-      models.some((m) => m === "v_dashboard" || m === "v_dashboard_item")
-    ) {
-      fn();
-    }
-  });
-}
-
 /** Rows a metric reader returned, and what the query read — hand `reads` to
  *  `useRerunOnChange` so the view refreshes when (and only when) they change. */
 export interface MetricRows<T> {
@@ -1397,26 +1373,6 @@ export interface MetricRows<T> {
 export async function listMetricDefinitions(): Promise<MetricRows<MetricSpec>> {
   const result = await querySql(METRIC_SPECS_SQL, [], 10_000);
   return { rows: metricSpecRows(result), reads: result.reads };
-}
-
-/** One metric's captures, newest first — `metric_grid('capture')` joined to
- *  `v_capture` (P4.7). `groupBy` slices by a dimension (one row per
- *  capture × group); `range` (epoch ms, inclusive) bounds the rows returned. */
-export async function listMetricSamples(
-  metricKey: string,
-  limit?: number,
-  groupBy?: string | null,
-  range?: { from: number; to: number } | null,
-): Promise<MetricRows<SeriesPoint>> {
-  const params = range ? [new Date(range.from).toISOString(), new Date(range.to).toISOString()] : [];
-  const result = await querySql(metricSeriesSql(metricKey, groupBy, !!range), params, limit ?? 200);
-  return { rows: seriesPointRows(result), reads: result.reads };
-}
-
-/** Every metric this project can use, with whether it's on — `v_metric_catalog`. */
-export async function listMetricCatalog(): Promise<MetricRows<MetricCatalogEntry>> {
-  const result = await querySql(METRIC_CATALOG_SQL, [], 10_000);
-  return { rows: catalogEntries(result), reads: result.reads };
 }
 
 /** Run a command on the bus as the person (P5.A1). `confirmed` says the
@@ -1449,11 +1405,6 @@ export async function undoCommand(auditId: number, confirmed = false): Promise<C
  *  agent's proposal `proposal:<id>`. */
 export async function decideProposal(id: number, approve: boolean): Promise<CommandOutcome | null> {
   return unwrap(await commands.decideProposal(id, approve));
-}
-
-/** Turn metrics on or off in this project (the `oxplow.metric.enable` command). */
-export async function enableMetrics(keys: string[], enabled: boolean): Promise<void> {
-  unwrap(await commands.enableMetrics(keys, enabled));
 }
 
 /** Efforts whose span overlaps `[windowStart, windowEnd]` (RFC-3339) — the
