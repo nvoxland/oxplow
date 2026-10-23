@@ -1,0 +1,3 @@
+SELECT CAST(NULL AS TEXT) AS target, CAST(NULL AS TEXT) AS label, CAST(NULL AS TEXT) AS extension,
+       CAST(NULL AS INTEGER) AS bound_to_provider, CAST(NULL AS TEXT) AS capability, CAST(NULL AS TEXT) AS chosen
+WHERE 0

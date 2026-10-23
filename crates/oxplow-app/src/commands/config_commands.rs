@@ -104,6 +104,32 @@ fn mark() -> bool {
     true
 }
 
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ChooseProviderInput {
+    /// The capability (`work_items`, `effort_policy`, `snapshots`, …).
+    pub capability: String,
+    /// The implementation to use; absent or blank: the default (the
+    /// project's, for a personal choice).
+    #[serde(default)]
+    pub provider: Option<String>,
+    /// `project` (the default: shared in `.oxplow/project.yaml`) or
+    /// `personal` (just for this person).
+    #[serde(default)]
+    pub layer: Layer,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ChooseReplacementInput {
+    /// The core sub-component an extension replaces (`work_item.board`).
+    pub target: String,
+    /// Whose shows: an extension's name, or `oxplow` for oxplow's own.
+    /// Leave it out for the default.
+    #[serde(default)]
+    pub whose: Option<String>,
+}
+
 /// Which layer a config write goes to.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -390,7 +416,7 @@ pub fn ops(target: ConfigTarget) -> Vec<Op> {
         )
     };
     let mark_generated = {
-        let t = target;
+        let t = target.clone();
         Op::new(
             "config.write",
             "mark_generated",
@@ -423,7 +449,95 @@ pub fn ops(target: ConfigTarget) -> Vec<Op> {
             })),
         )
     };
-    vec![list, get, set, unset, mark_generated]
+    let choose_provider = {
+        let t = target.clone();
+        Op::new(
+            "config.write",
+            "choose_provider",
+            schema::<ChooseProviderInput>(),
+            true,
+            Handler::Tx(Arc::new(move |ctx: &super::TxCtx<'_>, input| {
+                let input: ChooseProviderInput = parse(input)?;
+                let capability = input.capability.trim().to_string();
+                if capability.is_empty() {
+                    return Err(CommandError::Invalid {
+                        field: Some("/capability".into()),
+                        message: "name a capability".into(),
+                    });
+                }
+                let cfg = t.config.read().unwrap_or_else(|e| e.into_inner()).clone();
+                let mut chosen: serde_json::Map<String, Value> = input
+                    .layer
+                    .value(&cfg, &t.project_dir, "activeProviders")
+                    .and_then(|v| v.as_object().cloned())
+                    .unwrap_or_default();
+                match input
+                    .provider
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|p| !p.is_empty())
+                {
+                    Some(provider) => {
+                        chosen.insert(capability, Value::String(provider.to_string()));
+                    }
+                    None => {
+                        chosen.remove(&capability);
+                    }
+                }
+                // Nothing chosen is the key absent.
+                let value = (!chosen.is_empty()).then(|| Value::Object(chosen));
+                change(&t, ctx.actor(), "activeProviders", value, input.layer)
+            })),
+        )
+    };
+    let choose_replacement = {
+        let t = target;
+        Op::new(
+            "config.write",
+            "choose_replacement",
+            schema::<ChooseReplacementInput>(),
+            true,
+            Handler::Tx(Arc::new(move |ctx: &super::TxCtx<'_>, input| {
+                let input: ChooseReplacementInput = parse(input)?;
+                let target = input.target.trim().to_string();
+                if target.is_empty() {
+                    return Err(CommandError::Invalid {
+                        field: Some("/target".into()),
+                        message: "name the component".into(),
+                    });
+                }
+                let cfg = t.config.read().unwrap_or_else(|e| e.into_inner()).clone();
+                let mut chosen: serde_json::Map<String, Value> = Layer::Project
+                    .value(&cfg, &t.project_dir, "replacements")
+                    .and_then(|v| v.as_object().cloned())
+                    .unwrap_or_default();
+                match input
+                    .whose
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|w| !w.is_empty())
+                {
+                    Some(whose) => {
+                        chosen.insert(target, Value::String(whose.to_string()));
+                    }
+                    None => {
+                        chosen.remove(&target);
+                    }
+                }
+                let value = (!chosen.is_empty()).then(|| Value::Object(chosen));
+                change(&t, ctx.actor(), "replacements", value, Layer::Project)
+            })),
+        )
+    };
+    vec![
+        list,
+        get,
+        set,
+        unset,
+        mark_generated,
+        choose_provider,
+        choose_replacement,
+    ]
 }
 
 #[cfg(test)]
@@ -931,5 +1045,44 @@ mod tests {
         assert_eq!(exclude(), ["build"]);
         run(json!({ "entry": "build", "generated": false })).await;
         assert!(exclude().is_empty());
+    }
+
+    /// Choosing an implementation edits `activeProviders` in the layer
+    /// asked for, keeping the other capabilities' choices; no provider
+    /// goes back to the default, and the last one removes the key.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn choosing_a_provider_edits_that_capabilitys_entry_in_its_layer() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        let run = |input: Value| {
+            let svc = svc.clone();
+            async move {
+                svc.commands
+                    .run(&Actor::Human, "oxplow.capability.choose", input, true)
+                    .await
+                    .unwrap()
+            }
+        };
+        let project = || crate::config_service::read_config(&svc.config).active_providers;
+        let personal = || crate::config_service::read_config(&svc.config).personal_active_providers;
+        run(json!({ "capability": "snapshots", "provider": "contents_store" })).await;
+        run(json!({ "capability": "effort_policy", "provider": "none" })).await;
+        assert_eq!(project().len(), 2);
+        run(json!({ "capability": "snapshots", "provider": "other", "layer": "personal" })).await;
+        assert_eq!(
+            personal().get("snapshots").map(String::as_str),
+            Some("other")
+        );
+        assert_eq!(
+            project().len(),
+            2,
+            "a personal choice leaves the project's alone"
+        );
+        run(json!({ "capability": "snapshots" })).await;
+        assert!(!project().contains_key("snapshots"));
+        run(json!({ "capability": "effort_policy" })).await;
+        assert!(project().is_empty());
+        run(json!({ "capability": "snapshots", "layer": "personal" })).await;
+        assert!(personal().is_empty());
     }
 }

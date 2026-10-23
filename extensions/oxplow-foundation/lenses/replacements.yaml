@@ -1,0 +1,32 @@
+title: Replaced components
+description: The core components extensions replace, with whose shows. The default is the only extension replacing it, or oxplow's own where several do.
+query: |
+  SELECT target, label, extension AS whose, extension AS title,
+         CASE WHEN chosen = extension THEN 'In use' WHEN chosen IS NULL THEN '' ELSE '' END AS standing,
+         CASE WHEN chosen = extension THEN 'success' END AS tone,
+         (chosen IS NULL OR chosen <> extension) AND bound_to_provider = 0 AS can_choose, 0 AS is_default
+  FROM v_replacement
+  UNION ALL
+  SELECT DISTINCT target, label, 'oxplow', 'oxplow''s own',
+         CASE WHEN chosen = 'oxplow' THEN 'In use' ELSE '' END,
+         CASE WHEN chosen = 'oxplow' THEN 'success' END,
+         (chosen IS NULL OR chosen <> 'oxplow') AS can_choose, 0
+  FROM v_replacement
+  UNION ALL
+  SELECT DISTINCT target, label, '', 'Default',
+         CASE WHEN chosen IS NULL THEN 'In use' ELSE '' END,
+         CASE WHEN chosen IS NULL THEN 'success' END,
+         0, (chosen IS NOT NULL)
+  FROM v_replacement
+  ORDER BY 1, 8 DESC, 4
+viz: table
+group: { by: label }
+columns:
+  - { key: target, label: Component }
+  - { key: title, label: Shows }
+  - { key: standing, label: Standing, tone: tone }
+actions:
+  - { id: use, label: Use This, command: oxplow.replacement.choose, row: true, when: can_choose, input: { target: "{{row.target}}", whose: "{{row.whose}}" } }
+  - { id: default, label: Use the Default, command: oxplow.replacement.choose, row: true, when: is_default, input: { target: "{{row.target}}" } }
+empty: No extension replaces a core component.
+hidden: true

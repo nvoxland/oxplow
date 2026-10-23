@@ -58,6 +58,7 @@ pub const NAMES: &[&str] = &[
     "metric_point",
     "data_entity",
     "effect_backfill",
+    "replacement",
 ];
 
 /// The columns a live model's rows have, in order.
@@ -157,6 +158,14 @@ pub fn columns(name: &str) -> &'static [&'static str] {
         ],
         "data_entity" => &["name", "owner", "kind", "description", "row_count"],
         "effect_backfill" => &["effect", "planned", "from_seq", "to_seq", "batch"],
+        "replacement" => &[
+            "target",
+            "label",
+            "extension",
+            "bound_to_provider",
+            "capability",
+            "chosen",
+        ],
         _ => &[],
     }
 }
@@ -244,7 +253,7 @@ pub fn follows(name: &str, change: &Change<'_>) -> bool {
             ),
             // The catalog and the config decide what exists; a model's
             // rows are counted when asked for.
-            "data_entity" | "effect_backfill" => {
+            "data_entity" | "effect_backfill" | "replacement" => {
                 matches!(event, E::ConfigChanged | E::ExtensionsChanged)
             }
             // New captures, and the metrics a config or extension turns on.
@@ -466,6 +475,7 @@ impl LiveModels {
             "metric_point" => sources.metric_points(stream, filters).await,
             "data_entity" => sources.data_entities(filters).await,
             "effect_backfill" => sources.effect_backfill(filters).await,
+            "replacement" => Ok(sources.replacements()),
             other => Err(DomainError::Invalid(format!(
                 "`v_{other}` isn't a live model"
             ))),
@@ -1221,6 +1231,41 @@ impl LiveSources {
             ]);
         }
         Ok(rows)
+    }
+
+    /// `v_replacement`: each core sub-component an enabled extension
+    /// replaces, one row per candidate extension, with the extension the
+    /// person chose for the target (`replacements` in the config), if any.
+    fn replacements(&self) -> Vec<Vec<SqlCell>> {
+        let chosen = self
+            .config
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .replacements
+            .clone();
+        let mut rows = Vec::new();
+        for ext in self
+            .catalog
+            .unpinned(
+                self.worktrees.project_dir(),
+                "replacements are listed from declarations",
+            )
+            .iter()
+            .filter(|e| e.enabled)
+        {
+            for r in &ext.ui.replacements {
+                rows.push(vec![
+                    text(r.target.clone()),
+                    text(r.label.clone()),
+                    text(r.extension.clone()),
+                    flag(r.bound_to_provider),
+                    text(r.capability.clone()),
+                    opt(chosen.get(&r.target).cloned()),
+                ]);
+            }
+        }
+        rows.sort_by(|a, b| format!("{:?}{:?}", a[0], a[2]).cmp(&format!("{:?}{:?}", b[0], b[2])));
+        rows
     }
 
     /// `v_effect_backfill`: what `oxplow.effect.backfill` would have the

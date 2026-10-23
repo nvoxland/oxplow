@@ -528,6 +528,8 @@ ui:
     - { slot: settings.extensions.sections, lens: extensions-health }
     - { slot: settings.extensions.sections, lens: extensions-credentials }
     - { slot: settings.extensions.sections, lens: extensions-secrets }
+    - { slot: settings.integrations.sections, lens: capabilities, title: Capabilities }
+    - { slot: settings.integrations.sections, lens: replacements, title: Replaced components }
     - { slot: settings.data.sections, lens: data-entities, title: Entities }
     - { slot: settings.data.sections, lens: data-sources, title: Collectors }
     - { slot: settings.data.sections, lens: data-effects, title: Effects }
@@ -727,6 +729,16 @@ commands:
     scope: config.write
     op: mark_generated
     example: {"entry": "dist"}
+  - name: capability.choose
+    summary: "Choose which implementation a capability uses (`work_items`, `effort_policy`, `snapshots`, …): the project's choice in .oxplow/project.yaml (`activeProviders`), or with `layer: personal` this person's own in .oxplow/personal.yaml. Leave `provider` out to go back to the default (for a personal choice, the same as the project). Logged as config.changed, undoable."
+    scope: config.write
+    op: choose_provider
+    example: {"capability": "snapshots", "provider": "oxplow-bundled/diffs"}
+  - name: replacement.choose
+    summary: "Choose whose component shows where an extension replaces a core one (`replacements` in .oxplow/project.yaml): an extension's name, or `oxplow` for oxplow's own. Leave `whose` out for the default. Logged as config.changed, undoable."
+    scope: config.write
+    op: choose_replacement
+    example: {"target": "work_item.board", "whose": "task-views"}
   - name: agent.set_agents
     summary: "Set which agent harnesses are on, by key, in priority order: the first is a new session's default. Each must be registered. Writes `agents` in .oxplow/project.yaml (logged as config.changed, undoable)."
     scope: config.write

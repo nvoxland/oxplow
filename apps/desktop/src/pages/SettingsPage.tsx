@@ -3,7 +3,6 @@ import { DocumentLayout, type DocSection } from "../kit/DocumentLayout.js";
 import { useSearchFilter } from "../kit/SearchFilter.js";
 import { Toolbar } from "../kit/Toolbar.js";
 import type { PageAction } from "../kit/actions.js";
-import { CapabilitiesSection } from "../components/CapabilitiesSection.js";
 import { IntegrationsSection } from "../components/IntegrationsSection.js";
 import { settingsRef, viewParamsOf } from "../tabs/pageRefs.js";
 import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
@@ -127,14 +126,6 @@ function useAreaContent(area: SettingsArea): { sections: DocSection[]; actions?:
     case "integrations":
       return {
         sections: [
-          section(
-            "capabilities",
-            <CapabilitiesSection />,
-            <>
-              Which work list tasks are filed on, how efforts open and close, how file versions are kept. The project&apos;s choice is
-              saved in <code>.oxplow/project.yaml</code>; &ldquo;Just for me&rdquo; goes in <code>.oxplow/personal.yaml</code>.
-            </>,
-          ),
           section(
             "integrations",
             <IntegrationsSection />,

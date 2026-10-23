@@ -9,10 +9,7 @@ import { formatShortDateTime } from "./format.js";
 const realApi = await import("../api.js");
 const ran: Array<[string, unknown, boolean]> = [];
 let active: unknown = null;
-let chosenReplacements: Record<string, string> = {};
 let noInstances = false;
-/** `tracker`'s `ui.replacements`. */
-let replacements: unknown[] = [];
 const credentialSaves: Array<[string, string, string | null]> = [];
 const STATIC_CREDENTIALS: unknown[] = [{ name: "FAKE_TOKEN", set: false, signIn: null }];
 const signIns: Array<[string, string]> = [];
@@ -77,15 +74,8 @@ mock.module("../api.js", () => ({
     readsSettings(sql)
       ? configValueResult([
           { key: "activeProviders", value: active },
-          { key: "replacements", value: chosenReplacements },
         ])
       : (realApi.querySql as (...a: unknown[]) => unknown)(sql, ...rest),
-  // Nothing unless a test declares a replacement: this fake outlives the
-  // file (a module mock is process-wide).
-  listExtensions: async () =>
-    replacements.length === 0
-      ? []
-      : [{ name: "tracker", enabled: true, pages: [], ui: { slots: [], commands: [], decorators: [], replacements }, lenses: [] }],
   subscribeOxplowEvents: (fn: (event: Record<string, unknown>) => void) => {
     listeners.add(fn);
     return () => listeners.delete(fn);
@@ -162,9 +152,7 @@ afterEach(async () => {
   shellPresent = true;
   instance.credentials = STATIC_CREDENTIALS;
   active = null;
-  chosenReplacements = {};
   noInstances = false;
-  replacements = [];
 });
 
 // P7.A3: a running instance's collector shows its last read and records,
@@ -177,46 +165,6 @@ test("Sync Now runs provider.sync for that collector", async () => {
   await waitFor(() =>
     expect(ran).toEqual([["oxplow.provider.sync", { instance: "tracker/fake", collector: "work_items" }, false]]),
   );
-});
-
-// A person chooses whose replaced component shows — an extension, oxplow's
-// own, or the default — through `replacements`, a person's
-// `oxplow.config.set` like the active provider; listed even with no
-// provider instance.
-test("a person chooses whose replaced component shows", async () => {
-  const none = render(<IntegrationsSection />);
-  await waitFor(() => none.getByTestId("integrations-section"));
-  expect(none.queryByTestId("integrations-replacements")).toBeNull();
-  cleanup();
-
-  replacements = [
-    { id: "tracker/work_item.board", extension: "tracker", target: "work_item.board", capability: "work_items", boundToProvider: false, lensId: "tracker/board", label: "board", version: 1, view: [] },
-  ];
-  const view = render(<IntegrationsSection />);
-  const row = await waitFor(() => view.getByTestId("integrations-replacement-work_item.board"));
-  expect(row.textContent).toContain("board");
-  const choice = view.getByTestId("integrations-replacement-choice-work_item.board") as HTMLSelectElement;
-  expect(choice.value).toBe("");
-  expect([...choice.options].map((o) => o.value)).toEqual(["", "oxplow", "tracker"]);
-  fireEvent.change(choice, { target: { value: "oxplow" } });
-  await waitFor(() =>
-    expect(ran).toEqual([["oxplow.config.set", { key: "replacements", value: { "work_item.board": "oxplow" } }, true]]),
-  );
-  await waitFor(() => expect(choice.value).toBe("oxplow"));
-  fireEvent.change(choice, { target: { value: "" } });
-  await waitFor(() => expect(ran[1]).toEqual(["oxplow.config.unset", { key: "replacements" }, true]));
-});
-
-// A replaced component needs no provider (an extension's Board doesn't), so
-// the choice is there with no instance at all.
-test("replaced components are listed with no provider instance", async () => {
-  noInstances = true;
-  replacements = [
-    { id: "views/work_item.board", extension: "views", target: "work_item.board", capability: "work_items", boundToProvider: false, lensId: "views/board", label: "board", version: 1, view: [] },
-  ];
-  const view = render(<IntegrationsSection />);
-  await waitFor(() => view.getByTestId("integrations-replacement-work_item.board"));
-  expect(view.getByTestId("integrations-empty")).toBeTruthy();
 });
 
 // P9.B1: a provider's credential is an instance's own — saved under the

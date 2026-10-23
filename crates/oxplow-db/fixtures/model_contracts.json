@@ -22590,5 +22590,45 @@
         "effect"
       ]
     }
+  },
+  "replacement": {
+    "1": {
+      "columns": [
+        {
+          "name": "target",
+          "type": "TEXT",
+          "doc": "The core sub-component, `<area>.<name>`."
+        },
+        {
+          "name": "label",
+          "type": "TEXT",
+          "doc": "What a person calls it (`board`)."
+        },
+        {
+          "name": "extension",
+          "type": "TEXT",
+          "doc": "The extension that replaces it."
+        },
+        {
+          "name": "bound_to_provider",
+          "type": "INT",
+          "doc": "1 when it renders only while that extension's provider decides, so the person chooses only between the default and oxplow's own."
+        },
+        {
+          "name": "capability",
+          "type": "TEXT",
+          "doc": "The capability the target belongs to."
+        },
+        {
+          "name": "chosen",
+          "type": "TEXT",
+          "doc": "The person's choice for the target: an extension, or `oxplow`; NULL for the default."
+        }
+      ],
+      "key": [
+        "target",
+        "extension"
+      ]
+    }
   }
 }
