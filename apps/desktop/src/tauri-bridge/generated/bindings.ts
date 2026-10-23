@@ -2437,13 +2437,16 @@ export type Divergence = {
  *  Where a dragged row landed: the rows on either side of the drop
  *  (`before`: the one below it, `after`: the one above), the row it was
  *  dropped on, and the value of the group it was dropped in. What isn't
- *  there is `None` (a drop at a list's end has no row below).
+ *  there is `None` (a drop at a list's end has no row below). `order` is
+ *  every row of the result in its order after the drop (the dragged rows
+ *  moved to where they landed; a drop onto a row leaves it as it was).
  */
 export type Drop = {
 	before?: { [key in string]: SqlCell } | null,
 	after?: { [key in string]: SqlCell } | null,
 	onto?: { [key in string]: SqlCell } | null,
 	group?: SqlCell | null,
+	order?: { [key in string]: SqlCell }[] | null,
 };
 
 /**

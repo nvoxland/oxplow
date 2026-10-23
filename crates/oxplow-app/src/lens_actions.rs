@@ -39,7 +39,9 @@ pub struct LensActionCall {
 /// Where a dragged row landed: the rows on either side of the drop
 /// (`before`: the one below it, `after`: the one above), the row it was
 /// dropped on, and the value of the group it was dropped in. What isn't
-/// there is `None` (a drop at a list's end has no row below).
+/// there is `None` (a drop at a list's end has no row below). `order` is
+/// every row of the result in its order after the drop (the dragged rows
+/// moved to where they landed; a drop onto a row leaves it as it was).
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize, specta::Type)]
 pub struct Drop {
     #[serde(default)]
@@ -50,11 +52,14 @@ pub struct Drop {
     pub onto: Option<BTreeMap<String, SqlCell>>,
     #[serde(default)]
     pub group: Option<SqlCell>,
+    #[serde(default)]
+    pub order: Option<Vec<BTreeMap<String, SqlCell>>>,
 }
 
 impl Drop {
     /// The value `{{scope.name}}` names here, if any: a neighbour row's
-    /// column, or the group's value.
+    /// column, or the group's value. `{{order.*}}` is a list, not a cell
+    /// ([`Drop::order_of`]).
     fn value(&self, scope: &str, name: &str) -> Option<SqlCell> {
         let row = match scope {
             "before" => self.before.as_ref(),
@@ -65,10 +70,21 @@ impl Drop {
         };
         row?.get(name).cloned()
     }
+
+    /// `{{order.name}}`: that column of every row in the new order, if the
+    /// drop has an order and every row has the column.
+    fn order_of(&self, name: &str) -> Option<Value> {
+        self.order
+            .as_ref()?
+            .iter()
+            .map(|r| r.get(name).and_then(|c| serde_json::to_value(c).ok()))
+            .collect::<Option<Vec<_>>>()
+            .map(Value::Array)
+    }
 }
 
 /// The scopes a drop binds.
-const DROP_SCOPES: &[&str] = &["before", "after", "onto", "group"];
+const DROP_SCOPES: &[&str] = &["before", "after", "onto", "group", "order"];
 
 /// Run `call`'s action, with the lens resolved in `lens_root` (the stream's
 /// worktree) and its params seen from `ctx`.
@@ -1016,8 +1032,9 @@ pub async fn load_component_pinned(
 /// `input` with its placeholders bound: a string that is exactly
 /// `{{param.x}}` / `{{row.x}}` becomes that value (typed), `{{row.x|json}}`
 /// the JSON that text cell holds (an array a row built), `{{param.x.id}}`
-/// the key of the URI param `x` (a bare id), and a string that
-/// contains them has them spliced in as text. The values are data — they
+/// the key of the URI param `x` (a bare id), `{{order.x}}` the list of a
+/// drop's rows' `x` in their new order (only as a field's whole value),
+/// and a string that contains them has them spliced in as text. The values are data — they
 /// go into the command's input, never into SQL.
 pub fn bind_input(
     input: &Value,
@@ -1037,6 +1054,14 @@ pub fn bind_input(
                 u.param(&key).map(|k| SqlCell::Text(k.to_string()))
             }),
             "row" => row.and_then(|r| r.get(name)).cloned(),
+            "order" => {
+                return Err(CommandError::Invalid {
+                    field: Some("/input".into()),
+                    message: format!(
+                        "`{{{{order.{name}}}}}` is a list: bind it as a field's whole value"
+                    ),
+                })
+            }
             s if DROP_SCOPES.contains(&s) => drop.and_then(|d| d.value(s, name)),
             _ => None,
         };
@@ -1063,28 +1088,54 @@ pub fn bind_input(
                 }
                 other => serde_json::to_value(other).unwrap_or(Value::Null),
             },
+            Some(p) if p.scope == "order" => {
+                drop.and_then(|d| d.order_of(&p.name))
+                    .ok_or_else(|| CommandError::Invalid {
+                        field: Some("/input".into()),
+                        message: format!("`{{{{order.{}}}}}` has no value here", p.name),
+                    })?
+            }
             Some(p) => serde_json::to_value(lookup(&p.scope, &p.name)?).unwrap_or(Value::Null),
             None => Value::String(oxplow_domain::template::splice(s, |p| {
                 lookup(&p.scope, &p.name).map(|c| text(&c))
             })?),
         },
-        Value::Array(items) => Value::Array(
-            items
+        Value::Array(items) => {
+            // A list is the whole value `{{order.x}}` binds, never an item.
+            if let Some(p) = items
                 .iter()
-                .map(|i| bind_input(i, params, row, drop))
-                .collect::<Result<_, _>>()?,
-        ),
+                .filter_map(Value::as_str)
+                .filter_map(oxplow_domain::template::whole_placeholder)
+                .find(|p| p.scope == "order")
+            {
+                return Err(CommandError::Invalid {
+                    field: Some("/input".into()),
+                    message: format!(
+                        "`{{{{order.{}}}}}` is a list: bind it as a field's whole value",
+                        p.name
+                    ),
+                });
+            }
+            Value::Array(
+                items
+                    .iter()
+                    .map(|i| bind_input(i, params, row, drop))
+                    .collect::<Result<_, _>>()?,
+            )
+        }
         Value::Object(map) => {
             let mut out = serde_json::Map::new();
             for (k, v) in map {
                 // A field that is exactly a drop's place with nothing there
                 // (no row below a drop at the end) is left out: the
-                // command's optional field stays absent.
+                // command's optional field stays absent. A drop always has
+                // its order.
                 let absent = v
                     .as_str()
                     .and_then(oxplow_domain::template::whole_placeholder)
                     .is_some_and(|p| {
-                        DROP_SCOPES.contains(&p.scope.as_str())
+                        p.scope != "order"
+                            && DROP_SCOPES.contains(&p.scope.as_str())
                             && drop.is_none_or(|d| d.value(&p.scope, &p.name).is_none())
                     });
                 if !absent {
@@ -1345,27 +1396,48 @@ actions:
             after: None,
             onto: Some(near("o")),
             group: Some(SqlCell::Text("done".into())),
+            order: Some(vec![near("x"), near("b"), near("y")]),
         };
         let input = serde_json::json!({
             "before": "{{before.uri}}",
             "after": "{{after.uri}}",
             "parent": "{{onto.uri}}",
             "to": "{{group.value}}",
-            "note": "near {{before.uri}}"
+            "note": "near {{before.uri}}",
+            "order": "{{order.uri}}"
         });
         assert_eq!(
             bind_input(&input, &BTreeMap::new(), None, Some(&drop)).unwrap(),
-            serde_json::json!({ "before": "b", "parent": "o", "to": "done", "note": "near b" })
+            serde_json::json!({
+                "before": "b", "parent": "o", "to": "done", "note": "near b",
+                "order": ["x", "b", "y"]
+            })
         );
         for bad in [
             serde_json::json!({ "list": ["{{after.uri}}"] }),
             serde_json::json!({ "note": "near {{after.uri}}" }),
+            serde_json::json!({ "list": ["{{order.uri}}"] }),
+            serde_json::json!({ "note": "in {{order.uri}}" }),
+            serde_json::json!({ "order": "{{order.missing}}" }),
         ] {
             assert!(
                 bind_input(&bad, &BTreeMap::new(), None, Some(&drop)).is_err(),
                 "{bad}"
             );
         }
+        // A drop always has its order: one without is refused, never left out.
+        let no_order = Drop {
+            order: None,
+            ..drop.clone()
+        };
+        let err = bind_input(
+            &serde_json::json!({ "order": "{{order.uri}}" }),
+            &BTreeMap::new(),
+            None,
+            Some(&no_order),
+        )
+        .unwrap_err();
+        assert!(format!("{err:?}").contains("has no value here"), "{err:?}");
     }
 
     /// A row action with `when` is offered only on rows whose column is

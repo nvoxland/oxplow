@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 
 import type { LensAction } from "../tauri-bridge/generated/bindings.js";
-import { chainedDrops, dragActionFor, dropBeside, dropInGroup, dropZone, keyAction, marksAfterClick, NOWHERE, shownMarks } from "./rowInteract.js";
+import { chainedDrops, dragActionFor, dropBeside, dropInGroup, dropZone, keyAction, marksAfterClick, NOWHERE, shownMarks, withOrder } from "./rowInteract.js";
 
 // Marks, drops and keys are rules over rows, tested without a page.
 
@@ -34,9 +34,9 @@ const r = (uri: string) => ({ uri });
 
 test("a drop beside a row binds it and its neighbour on the other side, if any", () => {
   const rows = [r("a"), r("b"), r("c")];
-  expect(dropBeside(rows, 1, "before", "todo")).toEqual({ before: r("b"), after: r("a"), onto: null, group: "todo" });
-  expect(dropBeside(rows, 2, "after", null)).toEqual({ before: null, after: r("c"), onto: null, group: null });
-  expect(dropBeside(rows, 0, "before", null)).toEqual({ before: r("a"), after: null, onto: null, group: null });
+  expect(dropBeside(rows, 1, "before", "todo")).toEqual({ ...NOWHERE, before: r("b"), after: r("a"), group: "todo" });
+  expect(dropBeside(rows, 2, "after", null)).toEqual({ ...NOWHERE, after: r("c") });
+  expect(dropBeside(rows, 0, "before", null)).toEqual({ ...NOWHERE, before: r("a") });
   expect(dropBeside(rows, 1, "onto", null)).toEqual({ ...NOWHERE, onto: r("b") });
   expect(dropInGroup(rows, "done")).toEqual({ ...NOWHERE, after: r("c"), group: "done" });
   expect(dropInGroup([], "done")).toEqual({ ...NOWHERE, group: "done" });
@@ -55,6 +55,22 @@ test("a drop runs the first drag action whose places are all there", () => {
   expect(dragActionFor(all, r("a"), { ...NOWHERE, onto: r("b") })?.id).toBe("parent");
   expect(dragActionFor(all, r("a"), { ...NOWHERE, before: r("b") })?.id).toBe("reorder");
   expect(dragActionFor([action({ id: "plain" })], r("a"), NOWHERE)).toBeNull();
+});
+
+test("a drop's order is every row with the dragged ones moved to where they landed", () => {
+  const rows = [r("a"), r("b"), r("c"), r("d")];
+  const ids = (at: { order: { uri: string }[] | null }) => at.order?.map((o) => o.uri);
+  expect(ids(withOrder({ ...NOWHERE, before: r("b"), after: r("a") }, rows, [r("d")]))).toEqual(["a", "d", "b", "c"]);
+  expect(ids(withOrder({ ...NOWHERE, after: r("c") }, rows, [r("a"), r("b")]))).toEqual(["c", "a", "b", "d"]);
+  expect(ids(withOrder(NOWHERE, rows, [r("b")]))).toEqual(["a", "c", "d", "b"]);
+  // A drop onto a row moves nothing.
+  expect(ids(withOrder({ ...NOWHERE, onto: r("c") }, rows, [r("a")]))).toEqual(["a", "b", "c", "d"]);
+});
+
+test("an action that binds the order runs only on a drop that has one", () => {
+  const order = action({ id: "order", drag: true, input: { order: "{{order.uri}}" } });
+  expect(dragActionFor([order], r("a"), { ...NOWHERE, before: r("b") })).toBeNull();
+  expect(dragActionFor([order], r("a"), { ...NOWHERE, before: r("b"), order: [r("a"), r("b")] })?.id).toBe("order");
 });
 
 test("rows dropped together land each after the one before it", () => {

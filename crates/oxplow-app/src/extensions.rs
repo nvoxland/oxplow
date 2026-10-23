@@ -1653,8 +1653,8 @@ fn parse_actions(
                     ))
                 }
                 "row" if row => {}
-                "before" | "after" | "onto" if f.drag => {}
-                "before" | "after" | "onto" => {
+                "before" | "after" | "onto" | "order" if f.drag => {}
+                "before" | "after" | "onto" | "order" => {
                     return Err(format!(
                         "actions: `{}`: `{{{{{scope}.{name}}}}}` needs `drag: true` (it is where a drop landed)",
                         f.id
@@ -6729,8 +6729,12 @@ async fn prepare(
                         ));
                     }
                     for (scope, name) in action_templates(&a.input) {
-                        // A drop's neighbours are rows of the same result.
-                        let a_row = matches!(scope.as_str(), "row" | "before" | "after" | "onto");
+                        // A drop's neighbours and its order are rows of the
+                        // same result.
+                        let a_row = matches!(
+                            scope.as_str(),
+                            "row" | "before" | "after" | "onto" | "order"
+                        );
                         if a_row && !cols.contains(&name) {
                             ext.errors.push(format!(
                                 "lens {id}: action `{}` uses `{{{{{scope}.{name}}}}}`, which isn't in \
@@ -7318,6 +7322,7 @@ mod tests {
                 "{ id: put, label: Put, command: x.y.z, drag: true, input: { uri: '{{row.uri}}', before: '{{before.uri}}', after: '{{after.uri}}', parent: '{{onto.uri}}' } }",
                 "{ id: done, label: Done, command: x.y.z, row: true, bulk: true, key: f, input: { uri: '{{row.uri}}' } }",
                 "{ id: del, label: Delete, command: x.y.z, row: true, key: Delete }",
+                "{ id: order, label: Reorder, command: x.y.z, drag: true, input: { order: '{{order.uri}}' } }",
             ],
             true,
         )
@@ -7330,6 +7335,7 @@ mod tests {
             (vec!["{ id: a, label: A, command: x.y.z, drag: true, form: true }"], true, "a drag action can't be a form"),
             (vec!["{ id: a, label: A, command: x.y.z, drag: true, primary: true }"], true, "a drag action can't be `primary`"),
             (vec!["{ id: a, label: A, command: x.y.z, row: true, input: { b: '{{before.uri}}' } }"], true, "`{{before.uri}}` needs `drag: true`"),
+            (vec!["{ id: a, label: A, command: x.y.z, row: true, input: { o: '{{order.uri}}' } }"], true, "`{{order.uri}}` needs `drag: true`"),
             (vec!["{ id: a, label: A, command: x.y.z, drag: true, input: { g: '{{group.value}}' } }"], false, "`{{group.value}}` needs the lens to have a `group`"),
             (vec!["{ id: a, label: A, command: x.y.z, drag: true, input: { g: '{{group.by}}' } }"], true, "`{{group.by}}` isn't `{{group.value}}`"),
             (vec!["{ id: a, label: A, command: x.y.z, bulk: true }"], true, "`bulk` is for a row action"),

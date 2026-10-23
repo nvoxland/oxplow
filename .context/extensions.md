@@ -750,15 +750,25 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       it came from; a marked row carries every marked row), and where it
       lands binds `{{before.*}}` (the row below the drop), `{{after.*}}`
       (the row above), `{{onto.*}}` (the row dropped on: its middle third,
-      offered only when some drag action names it) and `{{group.value}}`
+      offered only when some drag action names it), `{{group.value}}`
       (the group a drop lands in: among its rows, on its heading, on a board
-      column). A field that is exactly one of these with nothing there is
-      **left out** of the input (a drop at a list's end has no row below),
-      so a command's optional field stays absent; one spliced into text, or
-      in a list, with nothing there is an error. Several drag actions may be
+      column) and `{{order.*}}`: that column of **every row of the result**
+      (not only the drawn ones) in its order after the drop, the dragged
+      rows moved before the row below, else after the row above, else to
+      the end (`withOrder`; a drop onto a row moves nothing), so a command
+      that takes a whole new order (`oxplow.dashboard.reorder_items`'s
+      `order`) gets one. `{{order.*}}` binds a list, so it is only a field's
+      whole value (spliced into text or put in a list it is an error), and
+      a drop always has one (`Drop.order`; without it the field is an
+      error, never left out). A field that is exactly one of the others
+      with nothing there is **left out** of the input (a drop at a list's
+      end has no row below), so a command's optional field stays absent;
+      one spliced into text, or in a list, with nothing there is an error.
+      Every drop scope needs `drag: true`, and its column must be in the
+      result. Several drag actions may be
       declared: a drop runs the first the row is offered whose places are
       all there (one naming the group needs a group; one naming `onto` needs
-      a row dropped on). Rows dropped together run it once each, in drawing
+      a row dropped on; one naming the order needs it). Rows dropped together run it once each, in drawing
       order, each after the one before it. The press carries the `drop`
       (`lens_actions::Drop`); a drop on another action, or a drag action
       pressed without one, is `Invalid` at `/drop`. `bulk: true` puts a row

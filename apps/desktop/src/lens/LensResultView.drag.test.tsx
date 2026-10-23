@@ -117,12 +117,20 @@ test("a row with a drag action drags; dropped beside another, the action runs wi
   // The top half of the first row: before it, nothing above.
   d.dropOn(tall(first), 5);
   await waitFor(() => expect(ran).toHaveLength(1));
-  expect(ran[0]).toEqual({ action: "reorder", row: record(2), drop: { before: record(0), after: null, onto: null, group: null }, confirmed: false });
+  expect(ran[0]).toEqual({ action: "reorder", row: record(2), drop: { before: record(0), after: null, onto: null, group: null, order: [record(2), record(0), record(1)] }, confirmed: false });
   // The bottom half of the second row: after it, before the one below (the dragged row left out).
   ran.length = 0;
   drag(view.getByTestId("lens-row-0")).dropOn(tall(view.getByTestId("lens-row-1")), 25);
   await waitFor(() => expect(ran).toHaveLength(1));
-  expect(ran[0]!.drop).toEqual({ before: record(2), after: record(1), onto: null, group: null });
+  expect(ran[0]!.drop).toEqual({ before: record(2), after: record(1), onto: null, group: null, order: [record(1), record(0), record(2)] });
+});
+
+test("a drag action that binds the order gets every row in its new order", async () => {
+  const order = action({ id: "order", label: "Reorder", command: "oxplow.dashboard.reorder_items", drag: true, input: { order: "{{order.uri}}" } });
+  const view = render(<LensResultView run={runOf({ actions: [order] })} onOpenPage={() => {}} />);
+  drag(view.getByTestId("lens-row-0")).dropOn(tall(view.getByTestId("lens-row-2")), 25);
+  await waitFor(() => expect(ran).toHaveLength(1));
+  expect(ran[0]).toMatchObject({ action: "order", drop: { order: [record(1), record(2), record(0)] } });
 });
 
 test("a row without a drag action isn't draggable, and a drop on it runs nothing", async () => {
@@ -160,8 +168,8 @@ test("dragging a marked row carries every marked row, and they land in order", a
   d.dropOn(tall(view.getByTestId("lens-row-0")), 5);
   await waitFor(() => expect(ran).toHaveLength(2));
   expect(ran.map((r) => [r.row, r.drop])).toEqual([
-    [record(1), { before: record(0), after: null, onto: null, group: null }],
-    [record(2), { before: record(0), after: record(1), onto: null, group: null }],
+    [record(1), { before: record(0), after: null, onto: null, group: null, order: [record(1), record(2), record(0)] }],
+    [record(2), { before: record(0), after: record(1), onto: null, group: null, order: [record(1), record(2), record(0)] }],
   ]);
 });
 

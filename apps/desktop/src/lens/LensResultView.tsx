@@ -89,6 +89,7 @@ import {
   rowKey,
   shownMarks,
   takesOnto,
+  withOrder,
   type DropAt,
 } from "./rowInteract.js";
 import { LENS_ROW_DRAG_MIME } from "../dragMimes.js";
@@ -734,9 +735,10 @@ function RowsBody({
     }
   };
   // The drag action the drop runs, once per dragged row, each landing
-  // after the one before it.
-  const dropRows = (dragged: SqlCell[][], at: DropAt) => {
+  // after the one before it; its order is every row of the result.
+  const dropRows = (dragged: SqlCell[][], place: DropAt) => {
     const records = dragged.map(recordOf);
+    const at = withOrder(place, result.rows.map(recordOf), records);
     const first = records[0];
     const action = first ? dragActionFor(dragActions, first, at) : null;
     if (!action || !actions) return;

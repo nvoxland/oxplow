@@ -208,7 +208,10 @@ Three more ways to reach a row action:
   `{{before.col}}` is the row below where it landed, `{{after.col}}` the
   row above, `{{onto.col}}` a row it was dropped on, and
   `{{group.value}}` the group it landed in. A field whose row isn't there
-  (a drop at the end of the list) is left out.
+  (a drop at the end of the list) is left out. `{{order.col}}` is a list:
+  the column of every row, in the order after the drop. Use it for a
+  command that takes the whole new order, as the whole value of a field
+  (`order: "{{order.id}}"`).
 - **`bulk: true`**: mark rows with Cmd/Ctrl+click, Shift+click or Space,
   and the action shows in the bar above them. It runs once for each
   marked row.

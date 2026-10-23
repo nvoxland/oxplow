@@ -92,8 +92,10 @@
   form: true, fixed: [uri], input: { uri: "{{row.uri}}", title: "{{row.title}}" } }`.
 - **Drag, bulk and key actions** (row actions): `drag: true` runs on a
   drop, binding `{{before.x}}` / `{{after.x}}` (the rows below / above
-  where it landed; a missing one is left out), `{{onto.x}}` and
-  `{{group.value}}` — `viz: board` with `group: { by, values }` drags
+  where it landed; a missing one is left out), `{{onto.x}}`,
+  `{{group.value}}` and `{{order.x}}` (a list: column `x` of every row in
+  its new order, for a command that takes a whole order; only as a
+  field's whole value) — `viz: board` with `group: { by, values }` drags
   cards between columns; `bulk: true` runs once per marked row; `key: f`
   runs on the cursor row. You run the command yourself; these are the
   person's gestures.
