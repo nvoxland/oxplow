@@ -27,10 +27,10 @@ and agents query.
 > - **Current (tsk324):** the exec-source `network` allowlist, enforced
 >   on macOS.
 > - **Current (tsk325):** Settings → Data: every entity with its owner and
->   row count, and the source rows. `list_data_entities` (IPC, UI-only)
->   lists models and unsynced entities without counting; the UI counts
->   each model with `oxplow_query_sql`, one at a time, so a model too big to
->   count within the 5 s timeout costs only its own cell (tsk1065).
+>   row count, and the source rows. `v_data_entity` (a live model) lists
+>   models and unsynced entities without counting; a row's count is read by
+>   pinning its `name`, so a model too big to count within the 5 s timeout
+>   costs only its own cell (tsk1065).
 > - **Current (P4, epic tsk484):** every published view is a **model**
 >   (core files and extensions' `models:`, compiled with lineage,
 >   contracts, versions and tests; the registry `v_model*` is the
@@ -1145,11 +1145,11 @@ entities from data already in the semantic layer:
 | The `collector.triggers` consumer (`on:` / `where` / `after`) | `crates/oxplow-app/src/collector_triggers.rs` |
 | Entity tables + views, run state (V133 `collector_run`) | `crates/oxplow-db/src/collector_store.rs` |
 | Settings → Data read model (`data_entities`) | `crates/oxplow-app/src/semantic_catalog.rs` |
-| IPC `list_collectors`; setting a credential is `run_command oxplow.collector.set_credential`, running is `run_command oxplow.collector.sync` | `crates/oxplow-rpc/src/commands/collectors.rs` |
+| `v_collector` (standing) / `v_collector_credential`; setting a credential is `run_command oxplow.collector.set_credential`, running is `run_command oxplow.collector.sync` | `crates/oxplow-app/src/collector_runner.rs` |
 | MCP `oxplow_preview_collector`; an agent syncs with `run_command oxplow.collector.sync`; standing and credentials read `v_collector_state` / `v_collector_credential` (the `oxplow.collector.sync` command as the agent) | `crates/oxplow-mcp/src/lib.rs` |
-| UI: Settings → Data (entities + counts, collector rows, Run) | `apps/desktop/src/components/DataSection.tsx` |
+| UI: Settings → Data (entities + counts, collector rows, Sync Now, effects, Backfill) | the foundation's `data-*` lenses (`extensions/oxplow-foundation/lenses/`) |
 | UI: credentials per extension | the foundation's `extensions-credentials` lens (`extensions/oxplow-foundation/lenses/`) |
-| IPC `list_data_entities` (models + counts, unsynced entities) | `crates/oxplow-rpc/src/commands/semantic.rs` |
+| `v_data_entity` (live: models + unsynced entities; `row_count` for the pinned one), `v_effect_backfill` (live: what a backfill would react to) | `crates/oxplow-app/src/live_models.rs` |
 
 **Decisions (epic tsk289, 2026-09-27).**
 

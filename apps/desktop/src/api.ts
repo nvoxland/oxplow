@@ -47,11 +47,8 @@ import type {
   LensSpec,
   RecentProjectView,
   RoleBinding,
-  CollectorListing,
-  CollectorRunReport,
   ScriptServices,
   ServiceListing,
-  DataEntity,
   CommandOutcome,
   CommandSpec,
   FormStart,
@@ -70,7 +67,7 @@ export interface ProviderConfig {
   baseUrl: string | null;
 }
 export type { ServiceListing, ScriptServices };
-export type { DataEntity, Extension, Lens, LensRun, LensViz, LensSpec, SearchHit, CollectorListing, CollectorRunReport, SqlCell, SqlQueryResult };
+export type { Extension, Lens, LensRun, LensViz, LensSpec, SearchHit, SqlCell, SqlQueryResult };
 export type { ProviderInstanceView };
 
 /// Convert the tauri-specta {status, data|error} envelope into a
@@ -584,16 +581,6 @@ export async function reportTabs(report: TabReport): Promise<void> {
   unwrap(await commands.reportTabs(report));
 }
 
-/// Extension-declared collectors with their last run.
-export async function listCollectors(): Promise<CollectorListing[]> {
-  return unwrap(await commands.listCollectors());
-}
-
-/** Run a collector now (`oxplow.collector.sync`). */
-export async function syncCollector(collector: string): Promise<CollectorRunReport> {
-  return (await runCommand("oxplow.collector.sync", { collector })).result as CollectorRunReport;
-}
-
 /// Analyze a change (a commit, an effort, or a stream's working tree) if
 /// needed and return its `v_change` row. See `.context/semantic-layer.md`.
 export async function ensureChange(target: ChangeTarget): Promise<ChangeRow> {
@@ -718,12 +705,6 @@ export {
 /// and Settings' (`agentKinds.ts`).
 export async function listAgentHarnesses(): Promise<HarnessListing[]> {
   return unwrap(await commands.listAgentHarnesses());
-}
-
-/// Settings → Data: every published model with its row count, and the
-/// entities extensions declare that haven't synced.
-export async function listDataEntities(): Promise<DataEntity[]> {
-  return unwrap(await commands.listDataEntities());
 }
 
 export async function listThreads(streamId: string): Promise<Thread[]> {
@@ -2052,20 +2033,6 @@ export async function listBacklinks(target: string, limit: number | null = null)
 // Read through `v_event_dead_letter` (delivery.ts); a person retries or
 // discards here.
 // ----------------------------------------------------------------------
-
-/** Run the parked event through its consumer again (`oxplow.delivery.retry`);
- *  returns the letter's new state. */
-export async function retryDeadLetter(id: number): Promise<{ state: string; attempts: number; error: string }> {
-  const out = await runCommand("oxplow.delivery.retry", { id });
-  return out.result as { state: string; attempts: number; error: string };
-}
-
-/** Give up on the parked event (`oxplow.delivery.discard`; stays visible as
- *  `discarded`). The caller has asked the person. */
-export async function discardDeadLetter(id: number): Promise<{ state: string }> {
-  const out = await runCommand("oxplow.delivery.discard", { id }, true);
-  return out.result as { state: string };
-}
 
 /** Pages this source points AT. Inverse of `listBacklinks`. */
 export async function listPageOutbound(source: string, limit: number | null = null): Promise<BacklinkEdge[]> {

@@ -528,6 +528,11 @@ ui:
     - { slot: settings.extensions.sections, lens: extensions-health }
     - { slot: settings.extensions.sections, lens: extensions-credentials }
     - { slot: settings.extensions.sections, lens: extensions-secrets }
+    - { slot: settings.data.sections, lens: data-entities, title: Entities }
+    - { slot: settings.data.sections, lens: data-sources, title: Collectors }
+    - { slot: settings.data.sections, lens: data-effects, title: Effects }
+    - { slot: settings.data.sections, lens: alerts-reactions, title: Failed reactions }
+    - { slot: settings.data.sections, lens: alerts-deliveries, title: Undelivered events }
     - { slot: oxplow-foundation/tasks.sections, lens: thread-handoffs-in, at: { before: list } }
     - { slot: oxplow-foundation/tasks.sections, lens: thread-handoffs-out, at: { before: list } }
 commands:

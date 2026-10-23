@@ -72,8 +72,10 @@ test("TODOs are sorted by the scripted model, and a decision from the board or t
     await run(daemon, "oxplow.ai.set_provider", { id: "sorter", kind: "sorter", base_url: model.url });
     await run(daemon, "oxplow.ai.set_role", { role: "decide", provider: "sorter", model: "sorter" });
     await until("the todos collector to be listed", 60_000, async () => {
-      const collectors = await ipc<Array<{ owner: string; spec: { id: string } }>>(daemon, "list_collectors");
-      return collectors.some((c) => c.owner === "triage" && c.spec.id === "todos");
+      const collectors = await ipc<{ rows: unknown[][] }>(daemon, "query_sql", {
+        sql: "SELECT 1 FROM v_collector WHERE extension = 'triage' AND id = 'todos'",
+      });
+      return collectors.rows.length > 0;
     });
 
     mkdirSync(join(daemon.project, "src"), { recursive: true });

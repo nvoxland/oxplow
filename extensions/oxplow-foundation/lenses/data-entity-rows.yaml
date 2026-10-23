@@ -1,0 +1,12 @@
+title: Rows
+description: How many rows one entity holds.
+params:
+  - { name: name }
+query: |
+  SELECT CASE WHEN row_count IS NULL THEN 'Not synced yet' ELSE row_count || ' rows' END AS rows
+  FROM v_data_entity WHERE name = :name
+viz: detail
+columns:
+  - { key: rows, label: Rows }
+empty: Not known.
+hidden: true

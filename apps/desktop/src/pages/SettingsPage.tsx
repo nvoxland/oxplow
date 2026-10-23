@@ -3,7 +3,6 @@ import { DocumentLayout, type DocSection } from "../kit/DocumentLayout.js";
 import { useSearchFilter } from "../kit/SearchFilter.js";
 import { Toolbar } from "../kit/Toolbar.js";
 import type { PageAction } from "../kit/actions.js";
-import { DataSection } from "../components/DataSection.js";
 import { CapabilitiesSection } from "../components/CapabilitiesSection.js";
 import { IntegrationsSection } from "../components/IntegrationsSection.js";
 import { settingsRef, viewParamsOf } from "../tabs/pageRefs.js";
@@ -122,18 +121,9 @@ function useAreaContent(area: SettingsArea): { sections: DocSection[]; actions?:
     case "lsp":
     case "ai":
     case "extensions":
+    case "data":
       // Their sections are foundation lenses mounted in the area's slot.
       return { sections: [] };
-    case "data":
-      return {
-        sections: [
-          section(
-            "data",
-            <DataSection />,
-            "What oxplow can query: its own data and what extension sources bring in. Sources run here; set credentials under Extensions.",
-          ),
-        ],
-      };
     case "integrations":
       return {
         sections: [

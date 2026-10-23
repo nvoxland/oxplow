@@ -27,7 +27,7 @@ test("every Settings area renders, reached from the rail", async ({ page }) => {
   await page.locator('[data-testid="settings-area-extensions"]:visible').click();
   await expect(page.locator('[data-testid="page-settings"]:visible').getByRole("heading", { name: "Health" })).toBeVisible();
   await page.locator('[data-testid="settings-area-data"]:visible').click();
-  await expect(page.locator('[data-testid="data-section"]:visible')).toBeVisible();
+  await expect(page.locator('[data-testid="page-settings"]:visible').getByRole("heading", { name: "Collectors" })).toBeVisible();
 });
 
 // An area is Settings at another view: one page, re-rendered, its area in

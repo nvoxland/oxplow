@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { deliveryAlert, lettersFromResult, letterLine, reactionLine, reactionsFromResult } from "./delivery.js";
+import { deliveryAlert, lettersFromResult, reactionsFromResult } from "./delivery.js";
 import type { SqlQueryResult } from "./tauri-bridge/generated/bindings.js";
 
 const result = (rows: SqlQueryResult["rows"]): SqlQueryResult =>
@@ -24,12 +24,6 @@ test("rows read as undelivered events", () => {
       lastFailedAt: "2026-10-01T00:00:00Z",
     },
   ]);
-});
-
-test("a letter says which consumer couldn't take which event", () => {
-  const [l] = lettersFromResult(result([[7, "change.analyze", 41, "snapshot.taken", "boom", 1, "t"]]));
-  expect(letterLine(l)).toBe("change.analyze couldn't take snapshot.taken (event 41), once");
-  expect(letterLine({ ...l, attempts: 4 })).toBe("change.analyze couldn't take snapshot.taken (event 41), 4 times");
 });
 
 test("the Alerts row counts the undelivered events, or isn't there", () => {
@@ -58,9 +52,4 @@ test("failed reactions read from v_effect_run, and say what failed on what", () 
     eventType: "work_item.state_changed",
     retryAt: null,
   });
-  expect(reactionLine(r)).toBe("acme/mark-done failed on work_item.state_changed (event 41)");
-  expect(reactionLine({ ...r, attempt: 3 })).toBe("acme/mark-done failed on work_item.state_changed (event 41), attempt 3");
-  expect(reactionLine({ ...r, retryAt: "2026-10-03T12:00:10.000Z" })).toBe(
-    "acme/mark-done failed on work_item.state_changed (event 41); sent again by itself shortly",
-  );
 });

@@ -35,15 +35,14 @@ test("a failed reaction is in Delivery, and a person's Retry composes it afresh"
   await page.goto("/");
   await openFromLauncher(page, "Settings: Data");
   await run(daemon, "oxplow.work_item.create", { title: "Plum [fail]", thread: daemon.thread });
-  const row = page.locator('[data-testid^="reaction-row-e2e/note-created-"]');
+  const row = page.locator("tr", { hasText: "tsk999999" });
   await expect(row).toBeVisible();
-  await expect(row).toContainText("tsk999999");
   // The person fixes what made it fail, then retries: the effect reads the
   // item as it is now.
   await run(daemon, "oxplow.work_item.update", { uri: await refOf(daemon, "Plum [fail]"), title: "Plum" });
-  const key = (await row.getAttribute("data-testid"))!.replace("reaction-row-", "");
-  await page.getByTestId(`reaction-retry-${key}-trigger`).click();
-  await page.getByTestId(`reaction-retry-${key}-confirm`).click();
+  await row.click({ button: "right" });
+  await page.getByTestId("menu-item-lens-action-retry").click();
+  await page.getByTestId("lens-action-confirm-run").click();
   await expect(row).toHaveCount(0);
   await expect.poll(() => notesOn(daemon, "Plum")).toBe(1);
 });
@@ -78,8 +77,10 @@ test("a person's Backfill reaches what was logged before the effect was deployed
   expect(await late()).toBe(0);
   await page.goto("/");
   await openFromLauncher(page, "Settings: Data");
-  await page.getByTestId("effect-backfill-late/note").click();
-  await expect(page.getByTestId("effect-backfill-ask-late/note")).toBeVisible();
-  await page.getByTestId("effect-backfill-run-late/note").click();
+  // The effect's row opens on what a backfill would do; Backfill asks first.
+  await page.locator("tr", { hasText: "late/note" }).getByRole("button", { name: "Expand" }).click();
+  await expect(page.getByTestId("lens-action-backfill")).toBeVisible();
+  await page.getByTestId("lens-action-backfill").click();
+  await page.getByTestId("lens-action-confirm-run").click();
   await expect.poll(late).toBe(1);
 });

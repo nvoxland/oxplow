@@ -155,9 +155,7 @@ bespoke IPC/MCP read. The result says what it read (`reads`), and the
 view refreshes through `useRerunOnChange` when `ModelsChanged` names a
 model it read — no per-feature event to add. A bespoke read stays for
 what SQL can't answer (a git or LSP call, a file on disk, an entity an
-extension declared but hasn't synced); Settings → Data's
-`list_data_entities` is one. Don't fold per-model SQL (e.g. row counts)
-into such a read: one slow query fails the whole call (tsk1065).
+extension declared but hasn't synced) is a live model when the lens layer can read it (`v_data_entity`: its row count is counted only for the one name the query pins, since one slow count would fail the whole list, tsk1065).
 
 A new operation that the UI invokes and that mutates persistent state
 touches roughly seven files. They sit in this order:
@@ -303,10 +301,7 @@ part on its own trigger: the catalog or config change
 collectors; `useRerunOnChange` over the models the part read (`v_collector_run` for
 the collector list, `v_extension_run` for the last runs); and a model's
 row count when that model's own `ModelsChanged` names it
-(`DataSection`, from each count query's `reads`). A collector run
-(frequent) therefore re-lists the collectors and nothing else — it does
-not list the extensions again, re-check each one or recount every model
-(pinned by `DataSection.test.tsx`).
+(each part is its own lens run). A collector run (frequent) therefore re-lists the collectors and nothing else.
 The daemon still re-reads `project.yaml` on each extension-catalog call;
 serving it from the loaded copy is open.
 

@@ -56,6 +56,8 @@ pub const NAMES: &[&str] = &[
     "commit_between",
     "extension_change",
     "metric_point",
+    "data_entity",
+    "effect_backfill",
 ];
 
 /// The columns a live model's rows have, in order.
@@ -153,6 +155,8 @@ pub fn columns(name: &str) -> &'static [&'static str] {
             "branch",
             "stream_id",
         ],
+        "data_entity" => &["name", "owner", "kind", "description", "row_count"],
+        "effect_backfill" => &["effect", "planned", "from_seq", "to_seq", "batch"],
         _ => &[],
     }
 }
@@ -168,6 +172,10 @@ pub fn pushdown(name: &str) -> &'static [&'static str] {
         "branch_divergence" | "commit_between" | "extension_change" => &["base", "head"],
         // One metric is one series read; the dimension is how it is sliced.
         "metric_point" => &["metric", "dimension"],
+        // Counting a model is a query of its own; counting an effect's
+        // backfill reads the event log: each only for the one asked for.
+        "data_entity" => &["name"],
+        "effect_backfill" => &["effect"],
         _ => &[],
     }
 }
@@ -234,6 +242,11 @@ pub fn follows(name: &str, change: &Change<'_>) -> bool {
                 event,
                 E::WorkspaceChanged { .. } | E::VcsRefsChanged { .. } | E::ConfigChanged
             ),
+            // The catalog and the config decide what exists; a model's
+            // rows are counted when asked for.
+            "data_entity" | "effect_backfill" => {
+                matches!(event, E::ConfigChanged | E::ExtensionsChanged)
+            }
             // New captures, and the metrics a config or extension turns on.
             "metric_point" => matches!(
                 event,
@@ -451,6 +464,8 @@ impl LiveModels {
             "commit_between" => sources.commits_between(stream, filters).await,
             "extension_change" => sources.extension_changes(stream, filters).await,
             "metric_point" => sources.metric_points(stream, filters).await,
+            "data_entity" => sources.data_entities(filters).await,
+            "effect_backfill" => sources.effect_backfill(filters).await,
             other => Err(DomainError::Invalid(format!(
                 "`v_{other}` isn't a live model"
             ))),
@@ -1153,6 +1168,101 @@ impl LiveSources {
             }
         }
         Ok(rows)
+    }
+
+    /// `v_data_entity`: every published model, then every entity the
+    /// enabled extensions declare but haven't synced (`kind` `sql`,
+    /// `entity` or `declared`). `row_count` is the model's row count, counted
+    /// only for the one the query pins as `name` (counting each is a
+    /// query: the list leaves it NULL).
+    async fn data_entities(
+        &self,
+        filters: &[(String, String)],
+    ) -> Result<Vec<Vec<SqlCell>>, DomainError> {
+        let svc = self
+            .services
+            .get()
+            .map_err(|e| DomainError::Invalid(e.to_string()))?;
+        let root = self.worktrees.project_dir().to_path_buf();
+        let all = crate::semantic_catalog::data_entities(&svc.sql, &self.catalog, &root).await?;
+        let pinned = filters.iter().find(|(c, _)| c == "name").map(|(_, v)| v);
+        let mut rows = Vec::new();
+        for e in all {
+            if pinned.is_some_and(|n| *n != e.name) {
+                continue;
+            }
+            let counted = if pinned.is_some() && e.kind != "declared" {
+                // Names come from the registry, never from the query.
+                let result = svc
+                    .sql
+                    .query_sql(
+                        &format!("SELECT count(*) FROM \"{}\"", e.name),
+                        vec![],
+                        Some(1),
+                    )
+                    .await;
+                match result
+                    .ok()
+                    .and_then(|r| r.rows.into_iter().next())
+                    .and_then(|r| r.into_iter().next())
+                {
+                    Some(SqlCell::Int(n)) => SqlCell::Int(n),
+                    _ => SqlCell::Null(()),
+                }
+            } else {
+                SqlCell::Null(())
+            };
+            rows.push(vec![
+                text(e.name),
+                text(e.owner),
+                text(e.kind),
+                text(e.description),
+                counted,
+            ]);
+        }
+        Ok(rows)
+    }
+
+    /// `v_effect_backfill`: what `oxplow.effect.backfill` would have the
+    /// effect pinned as `effect` (`<extension>/<id>`) react to: how many
+    /// events, the log positions they span, and how many one run reacts
+    /// to. Unpinned, nothing: reading the log for each effect is a scan.
+    async fn effect_backfill(
+        &self,
+        filters: &[(String, String)],
+    ) -> Result<Vec<Vec<SqlCell>>, DomainError> {
+        let Some((_, name)) = filters.iter().find(|(c, _)| c == "effect") else {
+            return Ok(Vec::new());
+        };
+        let svc = self
+            .services
+            .get()
+            .map_err(|e| DomainError::Invalid(e.to_string()))?;
+        let Some((_, decl)) = crate::effect_triggers::find_effect(&svc, name) else {
+            return Ok(Vec::new());
+        };
+        let vocabulary = svc.vocabulary.current();
+        let planned = svc
+            .db
+            .read(move |tx| {
+                crate::commands::effect::unreacted_tx(
+                    tx,
+                    &vocabulary,
+                    &decl,
+                    &crate::commands::effect::Range::default(),
+                    0,
+                    1_000,
+                )
+            })
+            .await?;
+        let opt = |v: Option<i64>| v.map_or(SqlCell::Null(()), SqlCell::Int);
+        Ok(vec![vec![
+            text(name.clone()),
+            SqlCell::Int(i64::try_from(planned.count).unwrap_or(i64::MAX)),
+            opt(planned.from_seq),
+            opt(planned.to_seq),
+            SqlCell::Int(crate::commands::effect::BACKFILL_BATCH as i64),
+        ]])
     }
 
     /// The files and folders the stream's worktree's filter keeps: in

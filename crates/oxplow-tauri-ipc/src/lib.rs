@@ -117,7 +117,6 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::search,
             // semantic layer
             commands::generated::query_sql,
-            commands::generated::list_data_entities,
             commands::generated::get_panel_layout,
             commands::generated::set_panel_layout,
             commands::generated::get_ui_preferences,
@@ -142,7 +141,6 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::report_tabs,
             commands::generated::list_native_conversations,
             commands::generated::rename_native_conversation,
-            commands::generated::list_collectors,
             commands::generated::list_provider_instances,
             commands::generated::check_provider_instance,
             commands::generated::set_provider_instance,

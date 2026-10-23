@@ -2129,3 +2129,23 @@
     - { name: "group_value", type: "TEXT", doc: "The dimension's value for this point; NULL when the series is not sliced." }
     - { name: "branch", type: "TEXT", doc: "The capture's branch; NULL for operational facts with no worktree." }
     - { name: "stream_id", type: "INT", doc: "The stream whose captures were read." }
+- name: data_entity
+  version: 1
+  key: [name]
+  description: "What can be queried: every published model (`v_model`'s rows) and every entity an enabled extension declares but has not synced. Read live. `WHERE name = 'v_commit'` also counts that model's rows (`row_count`); the list leaves `row_count` NULL, since counting each is a query of its own."
+  columns:
+    - { name: "name", type: "TEXT", doc: "The view to query (`v_work_item`, `v_my_gh_pr`)." }
+    - { name: "owner", type: "TEXT", doc: "`core`, or the extension that provides it." }
+    - { name: "kind", type: "TEXT", doc: "`sql` (a model file), `entity` (an extension's synced data) or `declared` (an entity whose source hasn't synced: no view yet)." }
+    - { name: "description", type: "TEXT", doc: "What it holds." }
+    - { name: "row_count", type: "INT", doc: "Its row count, when the query pins `name`; else NULL." }
+- name: effect_backfill
+  version: 1
+  key: [effect]
+  description: "What a backfill of an effect would react to: the matching events it never reacted to (logged before it was approved, or while it waited). Read live, and only for the effect the query pins (`WHERE effect = '<extension>/<id>'`); unpinned it has no rows. `oxplow.effect.backfill` with `to_seq` runs on just these."
+  columns:
+    - { name: "effect", type: "TEXT", doc: "The effect, `<extension>/<id>`." }
+    - { name: "planned", type: "INT", doc: "How many events it would react to." }
+    - { name: "from_seq", type: "INT", doc: "The log position of the first; NULL when none." }
+    - { name: "to_seq", type: "INT", doc: "The log position of the last; NULL when none." }
+    - { name: "batch", type: "INT", doc: "The most one backfill run reacts to; the rest wait for another run." }
