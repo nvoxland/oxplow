@@ -129,6 +129,27 @@ pub struct SqliteChangeStore {
 }
 
 /// A stored revision column (`NULL` → `None`).
+const SELECT_ROW: &str =
+    "SELECT id, stream_id, kind, target, base_revision, head_revision, status, error,
+                                 computed_at, snapshot_id, events_to, analyzed_from FROM change";
+
+fn row_of(r: &rusqlite::Row<'_>) -> rusqlite::Result<ChangeRow> {
+    Ok(ChangeRow {
+        id: r.get(0)?,
+        stream_id: r.get(1)?,
+        kind: r.get(2)?,
+        target: r.get(3)?,
+        base_revision: revision_at(r, 4)?,
+        head_revision: revision_at(r, 5)?,
+        status: r.get(6)?,
+        error: r.get(7)?,
+        computed_at: r.get(8)?,
+        snapshot_id: r.get(9)?,
+        events_to: r.get(10)?,
+        analyzed_from: r.get(11)?,
+    })
+}
+
 fn revision_at(r: &rusqlite::Row<'_>, i: usize) -> rusqlite::Result<Option<Revision>> {
     r.get::<_, Option<String>>(i)?
         .map(|s| {
@@ -200,28 +221,25 @@ impl SqliteChangeStore {
     pub async fn get(&self, id: i64) -> Result<Option<ChangeRow>, DomainError> {
         self.db
             .call(move |c| {
-                let mut st = c.prepare(
-                    "SELECT id, stream_id, kind, target, base_revision, head_revision, status, error, computed_at,
-                            snapshot_id, events_to, analyzed_from
-                     FROM change WHERE id = ?1",
-                )?;
-                let mut rows = st.query_map([id], |r| {
-                    Ok(ChangeRow {
-                        id: r.get(0)?,
-                        stream_id: r.get(1)?,
-                        kind: r.get(2)?,
-                        target: r.get(3)?,
-                        base_revision: revision_at(r, 4)?,
-                        head_revision: revision_at(r, 5)?,
-                        status: r.get(6)?,
-                        error: r.get(7)?,
-                        computed_at: r.get(8)?,
-                        snapshot_id: r.get(9)?,
-                        events_to: r.get(10)?,
-                        analyzed_from: r.get(11)?,
-                    })
-                })?;
+                let mut st = c.prepare(&format!("{SELECT_ROW} WHERE id = ?1"))?;
+                let mut rows = st.query_map([id], row_of)?;
                 rows.next().transpose()
+            })
+            .await
+    }
+
+    /// `stream`'s `range` changes whose head is the working tree: they
+    /// move with the stream, so the `change.analyze` consumer refreshes
+    /// them as it does the stream's `working` change. Oldest first.
+    pub async fn list_working_ranges(&self, stream: i64) -> Result<Vec<ChangeRow>, DomainError> {
+        self.db
+            .call(move |c| {
+                let mut st = c.prepare(&format!(
+                    "{SELECT_ROW} WHERE stream_id = ?1 AND kind = 'range'
+                       AND head_revision = 'working' ORDER BY id"
+                ))?;
+                let rows = st.query_map([stream], row_of)?;
+                rows.collect()
             })
             .await
     }
@@ -516,6 +534,37 @@ mod tests {
     use super::*;
     use crate::SemanticLayer;
     use serde_json::json;
+
+    /// A range whose head is the working tree moves with its stream: the
+    /// store lists those, per stream, for the consumer that keeps mutable
+    /// changes current. One between two fixed revisions is left alone.
+    #[tokio::test]
+    async fn working_headed_ranges_are_listed_per_stream() {
+        let store = SqliteChangeStore::new(Database::in_memory());
+        let base = Revision::git("abc");
+        for (stream, target, head) in [
+            (1, "git:abc..working", Revision::Working),
+            (1, "git:abc..snap:2", Revision::Snapshot(2)),
+            (2, "git:abc..working", Revision::Working),
+        ] {
+            store
+                .get_or_create(stream, "range", target, Some(&base), &head)
+                .await
+                .unwrap();
+        }
+        store
+            .get_or_create(1, "working", "", Some(&base), &Revision::Working)
+            .await
+            .unwrap();
+        let listed: Vec<(i64, String)> = store
+            .list_working_ranges(1)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|r| (r.stream_id, r.target))
+            .collect();
+        assert_eq!(listed, vec![(1, "git:abc..working".to_string())]);
+    }
 
     /// An effort analyzed while open (head: the working tree) that has since
     /// closed (head: its end snapshot) must be recomputed; the store says

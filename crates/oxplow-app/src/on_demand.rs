@@ -124,7 +124,8 @@ impl OnDemand {
 
 /// The change a `v_change` request names, run for `stream`: a `commit` by
 /// its sha, the `working` tree (target `''`), an `effort` or a `turn` by
-/// its row id. Anything else names none.
+/// its row id, a `range` by its two sides (`<base>..<head>`, the base
+/// empty for "from nothing"). Anything else names none.
 fn change_target(
     request: &Request,
     stream: Option<i64>,
@@ -146,6 +147,17 @@ fn change_target(
         "turn" => ChangeTarget::Turn {
             turn_id: oxplow_domain::AgentTurnId::new(target.parse().ok()?).to_string(),
         },
+        "range" => {
+            let (base, head) = target.split_once("..")?;
+            if head.is_empty() {
+                return None;
+            }
+            ChangeTarget::Range {
+                stream_id,
+                base: (!base.is_empty()).then(|| base.to_string()),
+                head: head.to_string(),
+            }
+        }
         _ => return None,
     })
 }
@@ -200,6 +212,27 @@ mod tests {
             requests("SELECT path FROM v_commit_file f WHERE f.sha = :sha", &p).unwrap(),
             vec![request("commit_file", &[("sha", "abc")])]
         );
+        // A range's target is built in SQL from its two sides.
+        let sides = named(&[("start", "snap:1"), ("end", "working")]);
+        assert_eq!(
+            requests(
+                "SELECT id FROM v_change WHERE kind = 'range' AND target = :start || '..' || :end",
+                &sides
+            )
+            .unwrap(),
+            vec![request(
+                "change",
+                &[("kind", "range"), ("target", "snap:1..working")]
+            )]
+        );
+        assert_eq!(
+            requests(
+                "SELECT id FROM v_change c WHERE kind = 'range' AND target = :start || '..' || c.head_revision",
+                &sides
+            )
+            .unwrap(),
+            vec![]
+        );
         for sql in [
             "SELECT id FROM v_change WHERE kind = 'commit'",
             "SELECT id FROM v_change WHERE kind = 'commit' OR target = :sha",
@@ -244,12 +277,40 @@ mod tests {
                 effort_id: "eff7".into()
             })
         );
+        // A range: `<base>..<head>`, the base empty for "from nothing".
+        assert_eq!(
+            change_target(
+                &request(
+                    "change",
+                    &[("kind", "range"), ("target", "snap:1..working")]
+                ),
+                Some(1)
+            ),
+            Some(ChangeTarget::Range {
+                stream_id: Some("str1".into()),
+                base: Some("snap:1".into()),
+                head: "working".into()
+            })
+        );
+        assert_eq!(
+            change_target(
+                &request("change", &[("kind", "range"), ("target", "..git:abc")]),
+                None
+            ),
+            Some(ChangeTarget::Range {
+                stream_id: None,
+                base: None,
+                head: "git:abc".into()
+            })
+        );
         for (kind, target, stream) in [
             ("working", "", None),
             ("working", "x", Some(1)),
             ("commit", "", Some(1)),
             ("effort", "x", None),
             ("other", "1", Some(1)),
+            ("range", "snap:1..", Some(1)),
+            ("range", "snap:1", Some(1)),
         ] {
             assert_eq!(
                 change_target(

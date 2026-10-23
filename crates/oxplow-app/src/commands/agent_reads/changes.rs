@@ -16,13 +16,20 @@ use crate::change_analysis::ChangeTarget;
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct EnsureChangeParams {
     /// `commit` (a commit vs its parent), `effort` (an effort's start →
-    /// end), or `working` (a stream's uncommitted work vs HEAD).
+    /// end), `working` (a stream's uncommitted work vs HEAD) or `range`
+    /// (any two revisions).
     pub kind: String,
     /// For `commit`: a sha or revspec (`HEAD`, `main~2`).
     pub sha: Option<String>,
     /// For `effort`: the effort id (`eff42`).
     pub effort_id: Option<String>,
-    /// For `working` and `commit`: the stream id; your own when omitted.
+    /// For `range`: the older side, a revision (`working`, `snap:<id>`,
+    /// `git:<rev>`); omitted, the whole tree at `head`.
+    pub base: Option<String>,
+    /// For `range`: the newer side, a revision.
+    pub head: Option<String>,
+    /// For `working`, `commit` and `range`: the stream id; your own when
+    /// omitted.
     pub stream_id: Option<String>,
 }
 
@@ -53,10 +60,15 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
                 "working" => ChangeTarget::Working {
                     stream_id: need(stream.clone(), "stream_id")?,
                 },
+                "range" => ChangeTarget::Range {
+                    stream_id: stream.clone(),
+                    base: p.base.clone(),
+                    head: need(p.head.clone(), "head")?,
+                },
                 other => {
                     return Err(invalid(
                         "/kind",
-                        format!("kind `{other}` isn't commit, effort or working"),
+                        format!("kind `{other}` isn't commit, effort, working or range"),
                     ))
                 }
             };

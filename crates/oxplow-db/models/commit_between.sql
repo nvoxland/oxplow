@@ -1,0 +1,5 @@
+SELECT CAST(NULL AS TEXT) AS base, CAST(NULL AS TEXT) AS head, CAST(NULL AS TEXT) AS sha,
+       CAST(NULL AS TEXT) AS short_sha, CAST(NULL AS TEXT) AS author, CAST(NULL AS TEXT) AS email,
+       CAST(NULL AS TEXT) AS committed_at, CAST(NULL AS TEXT) AS subject,
+       CAST(NULL AS INTEGER) AS stream_id
+WHERE 0

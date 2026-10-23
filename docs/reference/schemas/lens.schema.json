@@ -389,8 +389,16 @@
           },
           "default": []
         },
+        "options_from": {
+          "description": "A lens whose rows are the values it takes, when it's a choice\nwhose options aren't fixed (`value`, `label`, optional `group` —\nthe form `choices` contract): a slug of this extension, or\n`<extension>/<slug>`; a loaded lens has the whole id. The page runs\nit with the params it declares of the page's, so an `end` picker's\nlens can leave out what `start` is. Its options aren't known at\nload, so no `default` is needed and any text is taken. Exclusive\nwith `options`.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
         "type": {
-          "description": "What it holds, and so how a page draws it. Left out, it is a\n`choice` when it has `options`, else `text`; a loaded lens always\nsays.",
+          "description": "What it holds, and so how a page draws it. Left out, it is a\n`choice` when it has `options` or `options_from`, else `text`; a\nloaded lens always says.",
           "anyOf": [
             {
               "$ref": "#/definitions/ParamType"

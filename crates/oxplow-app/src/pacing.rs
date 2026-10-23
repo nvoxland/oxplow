@@ -104,25 +104,44 @@ async fn since_run(
 ) -> Result<Option<Duration>, oxplow_domain::DomainError> {
     let last = match paced {
         Paced::Change(target, _) => {
-            let (kind, key) = match target {
-                crate::change_analysis::ChangeTarget::Working { stream_id } => (
-                    "working",
-                    oxplow_domain::StreamId::try_from_str(stream_id).map(|s| s.value()),
-                ),
-                crate::change_analysis::ChangeTarget::Effort { effort_id } => (
+            use crate::change_analysis::ChangeTarget;
+            let stream = |s: &str| oxplow_domain::StreamId::try_from_str(s).map(|s| s.value());
+            // The row's key: its kind and target, and its stream where the
+            // target alone doesn't name it.
+            let (kind, key, stream) = match target {
+                ChangeTarget::Working { stream_id } => {
+                    ("working", String::new(), Some(stream(stream_id)))
+                }
+                ChangeTarget::Effort { effort_id } => (
                     "effort",
-                    oxplow_domain::EffortId::try_from_str(effort_id).map(|e| e.value()),
+                    match oxplow_domain::EffortId::try_from_str(effort_id) {
+                        Some(e) => e.value().to_string(),
+                        None => return Ok(None),
+                    },
+                    None,
+                ),
+                ChangeTarget::Range {
+                    stream_id: Some(stream_id),
+                    base,
+                    head,
+                } => (
+                    "range",
+                    format!("{}..{head}", base.as_deref().unwrap_or_default()),
+                    Some(stream(stream_id)),
                 ),
                 _ => return Ok(None),
             };
-            let Some(key) = key else { return Ok(None) };
+            let stream = match stream {
+                Some(None) => return Ok(None),
+                Some(Some(s)) => Some(s),
+                None => None,
+            };
             svc.db
                 .read(move |c| {
                     c.query_row(
                         "SELECT max(computed_at) FROM change
-                          WHERE kind = ?1 AND (CASE ?1 WHEN 'working' THEN stream_id
-                                                       ELSE CAST(target AS INTEGER) END) = ?2",
-                        rusqlite::params![kind, key],
+                          WHERE kind = ?1 AND target = ?2 AND (?3 IS NULL OR stream_id = ?3)",
+                        rusqlite::params![kind, key, stream],
                         |r| r.get::<_, Option<String>>(0),
                     )
                     .map_err(oxplow_db::map_sql_err)

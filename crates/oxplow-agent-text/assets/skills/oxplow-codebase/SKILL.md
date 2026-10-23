@@ -1,6 +1,6 @@
 ---
 name: oxplow-codebase
-description: Answering questions about the project's history and code from oxplow's own data — who changed what and when, which branches exist, where a symbol is defined, what a file declares, which files have errors, and the errors the person saw in the app. Loads on v_op_error, v_commit, v_commit_file, v_branch, v_tag, v_symbol, v_diagnostic, oxplow_code_definition, oxplow_code_references, oxplow_code_symbols, and when the user asks "who changed X", "when did X change", "history of X", "what branches", "where is X defined", "what's in this file", "what calls X", "what's broken", or "can you see that error" / "the red error toast".
+description: Answering questions about the project's history and code from oxplow's own data — who changed what and when, which branches exist and how far apart they are, where a symbol is defined, what a file declares, which files have errors, and the errors the person saw in the app. Loads on v_op_error, v_commit, v_commit_file, v_branch, v_branch_divergence, v_commit_between, v_tag, v_symbol, v_diagnostic, oxplow_code_definition, oxplow_code_references, oxplow_code_symbols, and when the user asks "who changed X", "when did X change", "history of X", "what branches", "where is X defined", "what's in this file", "what calls X", "what's broken", or "can you see that error" / "the red error toast".
 ---
 
 # The project's history and code
@@ -10,7 +10,7 @@ the code as SQL models. Read them with `oxplow_query_sql` before shelling out to
 `git log` or grepping: they're indexed, shared with lenses, and cover
 every stream. `v_model_column` documents each column.
 
-## History (`v_commit`, `v_commit_file`, `v_branch`, `v_tag`)
+## History (`v_commit`, `v_commit_file`, `v_branch`, `v_tag`, `v_branch_divergence`, `v_commit_between`)
 
 - **`v_commit`** — one row per commit (`sha`, `author`, `email`,
   `committed_at`, `subject`, `body`, `parents`), refreshed on boot and
@@ -34,6 +34,17 @@ every stream. `v_model_column` documents each column.
   `upstream`, `ahead`, `behind`); **`v_tag`** — tags. A `v_stream` row's
   `head_sha` is where its workspace is. Uncommitted files: `v_change_file`
   of the `v_change` with `kind = 'working'` (`staged`, `untracked`).
+- **`v_branch_divergence`** — how far one revision has moved from another,
+  read from the repository when asked: pin the pair (`WHERE base = 'main'
+  AND head = 'feature'`) for `ahead`, `behind`, `merge_base`,
+  `overlapping_files` (JSON) and `readiness` (`already_integrated`,
+  `clean`, `conflict`); pin one side and the other ranges over every
+  branch; pin neither and each local branch is compared with the default.
+  **`v_commit_between`** — the commits on `head` that `base` lacks (`sha`,
+  `short_sha`, `author`, `email`, `committed_at`, `subject`), newest first,
+  100 per pair at most, narrowed the same way: what is unpushed or
+  unmerged. A side is any revision git resolves (`origin/main`, a sha,
+  `HEAD`).
 
 Changing history (commit, merge, rebase, push, checkout): the
 `oxplow.vcs.*` commands (`list_commands`) or `git` in your terminal.

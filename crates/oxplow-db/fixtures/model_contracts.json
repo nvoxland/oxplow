@@ -2096,6 +2096,91 @@
         }
       ],
       "key": []
+    },
+    "4": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Change id (the change_id in v_change_*)."
+        },
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "Stream whose repo it's in."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "`commit`, `effort`, `turn`, `working` or `range`."
+        },
+        {
+          "name": "target",
+          "type": "TEXT",
+          "doc": "The commit sha, the effort row id, the turn row id, '' for the working tree, or `<base>..<head>` for a range (each side a revision as resolved: `git:<full sha>`, `snap:<id>`, `working`; the base empty for the whole tree at the head)."
+        },
+        {
+          "name": "base_revision",
+          "type": "TEXT",
+          "doc": "What it's compared against, as a revision: `git:<sha>`, `git:HEAD`, `snap:<id>`; NULL for a root commit or a range from nothing."
+        },
+        {
+          "name": "head_revision",
+          "type": "TEXT",
+          "doc": "The newer side, as a revision: `git:<sha>`, `snap:<id>` or `working`."
+        },
+        {
+          "name": "status",
+          "type": "TEXT",
+          "doc": "`pending`, `running`, `done` or `failed`."
+        },
+        {
+          "name": "error",
+          "type": "TEXT",
+          "doc": "Why it failed, if it did."
+        },
+        {
+          "name": "computed_at",
+          "type": "TEXT",
+          "doc": "When the analysis last finished (RFC 3339)."
+        },
+        {
+          "name": "snapshot_id",
+          "type": "INTEGER",
+          "doc": "The stream's snapshot it was computed against (the head's for a turn or a closed effort); NULL for a commit."
+        },
+        {
+          "name": "events_to",
+          "type": "INTEGER",
+          "doc": "The event log's highest seq when the last analysis began: what its inputs had seen."
+        },
+        {
+          "name": "files_at",
+          "type": "TEXT",
+          "doc": "When its changed files (stage one: v_change_file's paths, status and line counts) were last listed (RFC 3339); kept current on every move, apart from the deeper analysis."
+        },
+        {
+          "name": "files_events_to",
+          "type": "INTEGER",
+          "doc": "The event log's highest seq when the files were last listed: what that list had seen."
+        },
+        {
+          "name": "conflicted",
+          "type": "INTEGER",
+          "doc": "For a working tree, how many files git reports conflicted; NULL for other kinds."
+        },
+        {
+          "name": "in_progress",
+          "type": "TEXT",
+          "doc": "For a working tree, git's operation in progress (`merge`, `rebase`, `cherry_pick`, `revert`, …); NULL when none or for other kinds."
+        },
+        {
+          "name": "elapsed_ms",
+          "type": "INTEGER",
+          "doc": "How long its last deep analysis took (ms). Its duplicate scan is timed in v_code_quality_scan (scope `change <id>`)."
+        }
+      ],
+      "key": []
     }
   },
   "change_duplicate": {
@@ -22116,6 +22201,114 @@
       ],
       "key": [
         "event_id"
+      ]
+    }
+  },
+  "branch_divergence": {
+    "1": {
+      "columns": [
+        {
+          "name": "base",
+          "type": "TEXT",
+          "doc": "The revision compared against, as the query spelled it."
+        },
+        {
+          "name": "head",
+          "type": "TEXT",
+          "doc": "The revision compared, as the query spelled it."
+        },
+        {
+          "name": "ahead",
+          "type": "INT",
+          "doc": "Commits on `head` that `base` lacks."
+        },
+        {
+          "name": "behind",
+          "type": "INT",
+          "doc": "Commits on `base` that `head` lacks."
+        },
+        {
+          "name": "merge_base",
+          "type": "TEXT",
+          "doc": "The sha the two split at; NULL when their histories are unrelated."
+        },
+        {
+          "name": "overlapping_files",
+          "type": "TEXT",
+          "doc": "JSON array of the files changed on both sides since they split, sorted; `[]` when none."
+        },
+        {
+          "name": "readiness",
+          "type": "TEXT",
+          "doc": "Whether `head` would merge into `base` cleanly: `already_integrated` (nothing ahead), `clean` (ahead, no file changed on both sides) or `conflict`."
+        },
+        {
+          "name": "stream_id",
+          "type": "INT",
+          "doc": "The stream whose repository was read (v_stream.id): the query's, else the primary."
+        }
+      ],
+      "key": [
+        "base",
+        "head",
+        "stream_id"
+      ]
+    }
+  },
+  "commit_between": {
+    "1": {
+      "columns": [
+        {
+          "name": "base",
+          "type": "TEXT",
+          "doc": "The revision whose commits are left out, as the query spelled it."
+        },
+        {
+          "name": "head",
+          "type": "TEXT",
+          "doc": "The revision walked, as the query spelled it."
+        },
+        {
+          "name": "sha",
+          "type": "TEXT",
+          "doc": "The commit's full sha (joins v_commit, v_commit_file)."
+        },
+        {
+          "name": "short_sha",
+          "type": "TEXT",
+          "doc": "Its short sha."
+        },
+        {
+          "name": "author",
+          "type": "TEXT",
+          "doc": "Author name."
+        },
+        {
+          "name": "email",
+          "type": "TEXT",
+          "doc": "Author email."
+        },
+        {
+          "name": "committed_at",
+          "type": "TEXT",
+          "doc": "When it was committed (RFC 3339)."
+        },
+        {
+          "name": "subject",
+          "type": "TEXT",
+          "doc": "The first line of its message."
+        },
+        {
+          "name": "stream_id",
+          "type": "INT",
+          "doc": "The stream whose repository was read (v_stream.id): the query's, else the primary."
+        }
+      ],
+      "key": [
+        "base",
+        "head",
+        "sha",
+        "stream_id"
       ]
     }
   },

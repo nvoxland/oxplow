@@ -42,6 +42,9 @@ pub struct Divergence {
     pub ahead: u32,
     /// Commits on `base` not reachable from `head`.
     pub behind: u32,
+    /// The merge-base's sha; `None` for unrelated histories (or a lookup
+    /// failure).
+    pub merge_base: Option<String>,
     /// Files changed on **both** sides since the merge-base, sorted.
     /// Empty unless `readiness` is `Conflict`.
     pub overlapping_files: Vec<String>,
@@ -53,6 +56,7 @@ impl Divergence {
         Divergence {
             ahead: 0,
             behind: 0,
+            merge_base: None,
             overlapping_files: vec![],
             readiness: MergeReadiness::AlreadyIntegrated,
         }
@@ -102,11 +106,13 @@ pub fn compute_divergence(repo_path: &Path, base: &str, head: &str) -> Divergenc
         .graph_ahead_behind(head_oid, base_oid)
         .map(|(a, b)| (a as u32, b as u32))
         .unwrap_or((0, 0));
+    let merge_base = repo.merge_base(base_oid, head_oid).ok();
 
     if ahead == 0 {
         return Divergence {
             ahead: 0,
             behind,
+            merge_base: merge_base.map(|o| o.to_string()),
             overlapping_files: vec![],
             readiness: MergeReadiness::AlreadyIntegrated,
         };
@@ -115,7 +121,6 @@ pub fn compute_divergence(repo_path: &Path, base: &str, head: &str) -> Divergenc
     // Files changed on each side since the common ancestor. Unrelated
     // histories (no merge-base) diff against the empty tree on both
     // sides, so every shared path counts as an overlap.
-    let merge_base = repo.merge_base(base_oid, head_oid).ok();
     let head_files = changed_paths(&repo, merge_base, head_oid).unwrap_or_default();
     let base_files = changed_paths(&repo, merge_base, base_oid).unwrap_or_default();
 
@@ -129,6 +134,7 @@ pub fn compute_divergence(repo_path: &Path, base: &str, head: &str) -> Divergenc
     Divergence {
         ahead,
         behind,
+        merge_base: merge_base.map(|o| o.to_string()),
         overlapping_files,
         readiness,
     }

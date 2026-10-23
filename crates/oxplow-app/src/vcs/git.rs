@@ -645,6 +645,7 @@ impl Vcs for GitProvider {
             Ok(Divergence {
                 ahead: d.ahead,
                 behind: d.behind,
+                merge_base: d.merge_base,
                 overlapping_files: d.overlapping_files,
                 readiness: match d.readiness {
                     oxplow_git::MergeReadiness::AlreadyIntegrated => {

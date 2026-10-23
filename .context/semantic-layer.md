@@ -494,8 +494,12 @@ repo), what the zone table does to the worktree (`v_zone`,
 every setting's effective value (`v_config_value`), a worktree's files
 (`v_workspace_file`), the harnesses' saved conversations
 (`v_agent_conversation`: files the harness writes outside oxplow), the
-registered agent harnesses (`v_agent_harness`: which `agents:` enables, and the settings each declares) and the
-repository's working copies (`v_vcs_workspace`). A restated table (as `v_lens` and `v_extension` are, in the
+registered agent harnesses (`v_agent_harness`: which `agents:` enables, and the settings each declares), the
+repository's working copies (`v_vcs_workspace`) and how far two revisions
+have parted and the commits between them (`v_branch_divergence`,
+`v_commit_between`: a graph walk over refs a fetch can move, narrowed to
+the pair the query pins — one side pinned, the other ranges over every
+branch; neither, every local branch against the default). A restated table (as `v_lens` and `v_extension` are, in the
 extension-generation transaction) would be wrong between the change and the
 next restatement, and nothing says when that is. So these are **live
 models** (`crates/oxplow-app/src/live_models.rs`, `LiveModels::NAMES`): the
@@ -535,7 +539,10 @@ rows are read when a query names the model.
 - **Made on demand (stored models).** The stored-model twin of
   "narrowed by the query" (`on_demand.rs`): a model names the columns
   that, all pinned by a query's certain `<column> = <value>` conditions
-  (`sql_tokens::text_filters`, the same rule), ask for one thing; the
+  (`sql_tokens::text_filters`, the same rule; a value may be parts joined
+  by `||`, each a literal or a parameter — `Operand::Concat`, how a range
+  change's `target` is named from its two sides — and is certain only
+  when every part is a text), ask for one thing; the
   gateway has that thing stored before the query runs, when a run (not a
   check) asks for it. `v_commit` and `v_commit_file` by `sha` (the full
   id): `commit_indexer::ensure_commit` runs the workspace's scan first, so
@@ -562,7 +569,9 @@ rows are read when a query names the model.
   `WorkspaceChanged`, `VcsRefsChanged`, `LspServersChanged`,
   `CredentialChanged`, `ExtensionsChanged`) and the
   models it reads through (`v_agent_conversation` follows `v_agent_session`
-  and `v_agent_turn`; `v_vcs_workspace` follows `v_stream`). The bus, as
+  and `v_agent_turn`; `v_vcs_workspace` follows `v_stream`;
+  `v_branch_divergence` and `v_commit_between` follow `v_branch`, the
+  branches an unpinned side ranges over). The bus, as
   it posts such an event, posts the `ModelsChanged` naming the live models
   that follow it (`models_changed::announced_after`, so every emitter is
   covered and no backend code listens to the bus), and the change loop adds
@@ -1255,13 +1264,22 @@ what other threads and the person changed), an
 agent `turn` (its `start_snapshot_id` → its end `snapshot_id` — what the
 turn changed, even across a snapshot taken mid-turn; a turn still
 running is `NotFound`; target `{"kind":"turn","turnId":"trn12"}`, P2.10,
-V101) or a stream's `working` tree (vs HEAD). V101 rebuilt `change` to
+V101), a stream's `working` tree (vs HEAD) or a `range`: any two
+revisions, each spelled as a `rev` is (`working`, `snap:<id>`,
+`git:<rev>`), keyed `<base>..<head>` by the sides as resolved (a git side
+by its full sha, so `git:HEAD` and the sha share a row), the base empty
+for the whole tree at the head (`..snap:5`); target `{"kind":"range",
+"base":"snap:3","head":"working","streamId":"str1"}` (the primary stream
+when none). A range is the whole diff (no own-files limit), analyzed as a
+commit is; one headed at the working tree moves with the stream and is
+kept current with the `working` change (below). V101 rebuilt `change` to
 widen its kind CHECK, emptying the cache first (rows are recomputed on
-demand). `crates/oxplow-app/src/change_analysis.rs`
+demand); `V105__change_range` widened it again, keeping the rows.
+`crates/oxplow-app/src/change_analysis.rs`
 analyzes it and stores the rows behind `v_change*`; lenses (the
 oxplow-bundled change cards) only read them.
 
-- **Getting one.** A query that names it, `SELECT id FROM v_change WHERE kind = 'commit' AND target = :sha` (or `kind = 'working' AND target = ''`, the query's stream), creates it and starts its analysis ("Made on demand" above): how a declared page gets its `change_id`. `ensure_change(target)` (IPC and MCP; not hinted read-only, since it stores the analysis) returns
+- **Getting one.** A query that names it, `SELECT id FROM v_change WHERE kind = 'commit' AND target = :sha` (or `kind = 'working' AND target = ''`, the query's stream; or `kind = 'range' AND target = :start || '..' || :end`, the two sides as params — a `start` left NULL would make the whole value NULL, so a lens defaults it to `''`), creates it and starts its analysis ("Made on demand" above): how a declared page gets its `change_id`. `ensure_change(target)` (IPC and MCP; not hinted read-only, since it stores the analysis) returns
   the `v_change` row, computing first if needed. It diffs its two
   revisions (`v_change.base_revision` → `head_revision`) through `Trees`
   (shared with the `diff` IPC, `.context/vcs.md`), reads the
@@ -1328,14 +1346,18 @@ oxplow-bundled change cards) only read them.
   (`change_reactor.rs`) recomputes them as the stream moves: on a
   `snapshot.taken` that recorded files (not `unchanged`) or a
   `vcs.head.moved`, it first runs stage one for the stream's `working`
-  change and the open efforts' (one without a start snapshot is
+  change, its `range` changes headed at the working tree
+  (`SqliteChangeStore::list_working_ranges`; a range between two fixed
+  revisions is immutable, computed once like a commit's) and the open
+  efforts' (one without a start snapshot is
   skipped): only the event's thread's effort when a thread's take made
   it, every open effort on the stream otherwise — so the lists are always
-  current. The deep analysis is
+  current. `watch_working_files` restates the same working-headed lists
+  on a ref or index move. The deep analysis is
   **paced** (`change_reactor::deep_pacing`, the same mechanism as
   collectors' — metrics.md "Pacing"): a take records core's job in
-  `pending_run` (`owner` `core`, `id` `change/working/<stream>` or
-  `change/effort/<effort>`) and `crate::pacing` runs `refresh_change`
+  `pending_run` (`owner` `core`, `id` `change/working/<stream>`,
+  `change/effort/<effort>` or `change/range/<stream>/<base>..<head>`) and `crate::pacing` runs `refresh_change`
   once 20 s pass with no further take, at most every 2 minutes; a HEAD move
   or an `agent.turn.ended` (the moment someone looks at a turn's work)
   analyzes at once and clears the job. Each analysis records

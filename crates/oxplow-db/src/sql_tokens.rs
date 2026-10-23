@@ -302,11 +302,13 @@ pub fn string_literal(text: &str) -> Option<String> {
 }
 
 /// The value a condition compares a column with: a string literal's value,
-/// or a parameter as written (`:name`, `?2`).
+/// a parameter as written (`:name`, `?2`), or a concatenation of such
+/// parts (`:start || '..' || :end`), which is one value built in SQL.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Operand {
     Text(String),
     Param(String),
+    Concat(Vec<Operand>),
 }
 
 /// [`equality_filters`] with each value as text: a literal's, or the text
@@ -319,9 +321,18 @@ pub fn text_filters(
     params: &crate::SqlParams,
 ) -> Result<Vec<(String, String)>, DomainError> {
     use crate::{SqlCell, SqlParams};
-    let value = |operand: Operand| -> Option<String> {
+    fn value(operand: Operand, params: &SqlParams) -> Option<String> {
         let cell = match operand {
             Operand::Text(t) => return Some(t),
+            // Every part a text, or the whole is none (a NULL part makes
+            // the SQL value NULL, which no row's text equals).
+            Operand::Concat(parts) => {
+                return parts
+                    .into_iter()
+                    .map(|p| value(p, params))
+                    .collect::<Option<Vec<_>>>()
+                    .map(|v| v.concat())
+            }
             Operand::Param(p) => match params {
                 SqlParams::Positional(values) => {
                     let n: usize = p.strip_prefix('?')?.parse().ok()?;
@@ -337,10 +348,10 @@ pub fn text_filters(
             SqlCell::Text(t) => Some(t.clone()),
             _ => None,
         }
-    };
+    }
     Ok(equality_filters(sql, view, columns)?
         .into_iter()
-        .filter_map(|(column, operand)| Some((column, value(operand)?)))
+        .filter_map(|(column, operand)| Some((column, value(operand, params)?)))
         .collect())
 }
 
@@ -350,7 +361,8 @@ pub fn text_filters(
 /// It says so only when it is sure: `sql` is one plain `SELECT` reading
 /// `view` once, as its only source (`FROM view [[AS] alias] WHERE …`), and
 /// each condition is a top-level conjunct of exactly `[q.]column = value`
-/// (either way round; `value` a string literal or a parameter). An `OR`,
+/// (either way round; `value` a string literal, a parameter, or parts of
+/// those joined by `||`). An `OR`,
 /// `BETWEEN` or `CASE` in the `WHERE`, a join, a compound, a `WITH` or a
 /// second read of `view` gives none.
 pub fn equality_filters(
@@ -440,6 +452,24 @@ pub fn equality_filters(
         TokenKind::Param => Some(Operand::Param(t.text.to_string())),
         _ => None,
     };
+    // One operand, or operands joined by `||` (two `|` tokens): `a || b`.
+    let value = |v: &[&&Token<'_>]| -> Option<Operand> {
+        let mut parts = Vec::new();
+        let mut rest = v;
+        loop {
+            let (first, after) = rest.split_first()?;
+            parts.push(operand(first)?);
+            match after {
+                [] => break,
+                [a, b, more @ ..] if a.is_punct('|') && b.is_punct('|') => rest = more,
+                _ => return None,
+            }
+        }
+        Some(match parts.len() {
+            1 => parts.pop()?,
+            _ => Operand::Concat(parts),
+        })
+    };
     let mut found = Vec::new();
     let mut start = i;
     for j in i..=end {
@@ -452,11 +482,9 @@ pub fn equality_filters(
             continue;
         };
         let (left, right) = (&conjunct[..eq], &conjunct[eq + 1..]);
-        let pair = match (left, right) {
-            (l, [v]) => column(l).zip(operand(v)),
-            ([v], r) => column(r).zip(operand(v)),
-            _ => None,
-        };
+        let pair = column(left)
+            .zip(value(right))
+            .or_else(|| column(right).zip(value(left)));
         found.extend(pair);
     }
     Ok(found)
@@ -740,5 +768,61 @@ mod tests {
         )
         .unwrap()
         .is_empty());
+    }
+
+    /// A value may be built in SQL: `a || b || …`, each part a literal or
+    /// a parameter, is one value (a page names a range of revisions as
+    /// `:start || '..' || :end`), its text the parts' joined. A part that
+    /// is neither (a column, a call), or a parameter bound to nothing,
+    /// makes the condition narrow nothing.
+    #[test]
+    fn a_concatenation_of_literals_and_parameters_is_one_value() {
+        use crate::{SqlCell, SqlParams};
+        assert_eq!(
+            filters("SELECT 1 FROM v_workspace_file WHERE path = :start || '..' || :end"),
+            vec![(
+                "path".to_string(),
+                Operand::Concat(vec![
+                    Operand::Param(":start".into()),
+                    Operand::Text("..".into()),
+                    Operand::Param(":end".into()),
+                ])
+            )]
+        );
+        for sql in [
+            "SELECT 1 FROM v_workspace_file WHERE path = :start || parent",
+            "SELECT 1 FROM v_workspace_file WHERE path = :start || lower('x')",
+            "SELECT 1 FROM v_workspace_file WHERE path = :start ||",
+            "SELECT 1 FROM v_workspace_file WHERE path = :start || || :end",
+            "SELECT 1 FROM v_workspace_file WHERE path = :start | :end",
+        ] {
+            assert_eq!(filters(sql), vec![], "{sql}");
+        }
+        let sql = "SELECT 1 FROM v_change WHERE kind = 'range' AND target = :start || '..' || :end";
+        let bound = |start: Option<SqlCell>| {
+            let mut p = vec![("end".to_string(), SqlCell::Text("working".into()))];
+            p.extend(start.map(|s| ("start".to_string(), s)));
+            SqlParams::Named(p)
+        };
+        assert_eq!(
+            text_filters(
+                sql,
+                "v_change",
+                &["kind", "target"],
+                &bound(Some(SqlCell::Text("snap:1".into())))
+            )
+            .unwrap(),
+            vec![
+                ("kind".to_string(), "range".to_string()),
+                ("target".to_string(), "snap:1..working".to_string())
+            ]
+        );
+        for start in [None, Some(SqlCell::Int(1)), Some(SqlCell::Null(()))] {
+            assert_eq!(
+                text_filters(sql, "v_change", &["kind", "target"], &bound(start.clone())).unwrap(),
+                vec![("kind".to_string(), "range".to_string())],
+                "{start:?}"
+            );
+        }
     }
 }

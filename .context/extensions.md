@@ -1913,11 +1913,12 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
 `description`, `query`, `viz`, `params`, `columns`, `empty`, `chart`,
 `sections`, `tiles`, `launcher`, `hidden`, `actions` and `alert`.
 
-- `params`: `name`, `label`, `default`, `options`, `type`, `place`,
-  `presets`.
+- `params`: `name`, `label`, `default`, `options`, `options_from`,
+  `type`, `presets`, `role`.
 - **Typed params** (`ParamType`, `LensParam::take`): `type` is `text`
   (bound as-is; the default with no `options`), `choice` (one of
-  `options`; the default with them), `bool` (`true`/`false`/`1`/`0`,
+  `options`, or any text when `options_from` names the lens that lists
+  them; the default with either), `bool` (`true`/`false`/`1`/`0`,
   bound 1 or 0), `search` and `branch` (text, trimmed, NULL when empty;
   `branch` NULL means every branch), or `date_range`. A loaded lens
   always says its type (`typed`), so a page never infers it. A
@@ -1927,11 +1928,12 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   open — so tab ids, `run.params` and agents see one value; `binds`
   adds `:<name>_from` / `:<name>_to` (RFC 3339, NULL for an open end; a
   date's `to` is the next day, so the day counts) just before the query
-  runs, never as params. The loader refuses `options` off a choice,
-  `presets` off a date_range, an unknown preset and a default its type
-  doesn't take (`param_problem`); a run supplying such a value is
-  refused (`resolve_params`). There is no `place`: every param draws in
-  the page's rail.
+  runs, never as params. The loader refuses `options` or `options_from`
+  off a choice, both on one, a choice with neither, `presets` off a
+  date_range, an unknown preset and a default its type doesn't take
+  (`param_problem`); a run supplying such a value is refused
+  (`resolve_params`). There is no `place`: every param draws in the
+  page's rail.
 - **A param's `role`** (`ParamRole`) says where its value rides in the
   URI. `resource` (the default, nothing written) names what the page
   shows, so it is in the `?` and a change opens another resource.
@@ -1988,6 +1990,23 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   the viewer's, remembered as the panel's memory (`choices` under the panel,
   `PanelRunsProvider`); a pick the lens no longer offers falls back to
   the default (`panelChoices`).
+- **Choice params whose options a lens lists.** `options_from: <lens>`
+  (a slug of the extension, qualified at load as `expand` is, or
+  `<extension>/<slug>`; it must exist, `options_from_problem`) makes a
+  choice whose options aren't fixed: the lens's rows are `value`,
+  `label`, optional `group` (the form `choices` contract). The rail
+  (`ParamControls.tsx`, `useListedOptions`) runs it for the page's stream
+  with the page's current values of the params it declares
+  (`childParams`), so an `end` picker's lens can leave out what `start`
+  is, groups the options (`<optgroup>`), shows the picked option's label
+  (the raw value until the options arrive) and re-runs it when what it
+  read changes (`useRerunOnChange`, the one place a param control
+  follows data). No `default` is needed and none is checked (the options
+  aren't known at load); a run takes any text, and the query says what an
+  unknown value means. An agent's lens tool (`agent_tools::lens_schema`)
+  emits no `enum` for it; its description names the lens to run. `type:
+  branch` stays its own TS query of `v_branch`; folding it into
+  `options_from` over a branches lens is a follow-up.
 - **Id params are pickers (tsk1043).** On a lens page, a param named
   `uri` (a work item, over `v_work_item`), `effort_id`, `thread_id` or
   `stream_id` — oxplow's own ids,

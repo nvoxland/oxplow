@@ -1,6 +1,6 @@
 //! The `change.analyze` pump consumer (P7.B4): keeps the mutable changes
-//! — a stream's working tree and its open efforts — analyzed as the
-//! stream moves.
+//! — a stream's working tree, its open efforts and its ranges headed at
+//! the working tree — analyzed as the stream moves.
 //!
 //! On a `snapshot.taken` that recorded files (not `unchanged`) or a
 //! `vcs.head.moved`, it first lists the changed files of the event's
@@ -38,6 +38,24 @@ use crate::Services;
 /// The consumer's name: its checkpoint and dead letters.
 pub const NAME: &str = "change.analyze";
 
+/// The changes of `stream` that move with its working tree: its `working`
+/// change, then each `range` change whose head is the working tree.
+async fn working_targets(
+    svc: &Services,
+    stream: oxplow_domain::StreamId,
+) -> Result<Vec<ChangeTarget>, DomainError> {
+    let ranges = svc.change_store.list_working_ranges(stream.value()).await?;
+    Ok(std::iter::once(ChangeTarget::Working {
+        stream_id: stream.to_string(),
+    })
+    .chain(
+        ranges
+            .iter()
+            .filter_map(crate::change_analysis::range_target),
+    )
+    .collect())
+}
+
 const SNAPSHOT_TAKEN: &str = "snapshot.taken";
 const HEAD_MOVED: &str = "vcs.head.moved";
 const EFFORT_FINISHED: &str = "effort.finished";
@@ -66,11 +84,21 @@ fn forces(event: &StoredEvent) -> bool {
 }
 
 /// The paced job of `target`'s deep analysis in `pending_run`: owner
-/// `core`, id `change/working/<stream>` or `change/effort/<effort>`.
+/// `core`, id `change/working/<stream>`, `change/effort/<effort>` or
+/// `change/range/<stream>/<base>..<head>` (a range of a known stream,
+/// its sides as its stored key spells them).
 pub fn job_id(target: &ChangeTarget) -> Option<String> {
     match target {
         ChangeTarget::Working { stream_id } => Some(format!("change/working/{stream_id}")),
         ChangeTarget::Effort { effort_id } => Some(format!("change/effort/{effort_id}")),
+        ChangeTarget::Range {
+            stream_id: Some(stream_id),
+            base,
+            head,
+        } => Some(format!(
+            "change/range/{stream_id}/{}..{head}",
+            base.as_deref().unwrap_or_default()
+        )),
         _ => None,
     }
 }
@@ -86,11 +114,21 @@ pub fn target_of(job: &str) -> Option<ChangeTarget> {
         "effort" => Some(ChangeTarget::Effort {
             effort_id: id.to_string(),
         }),
+        "range" => {
+            let (stream_id, key) = id.split_once('/')?;
+            let (base, head) = key.split_once("..")?;
+            Some(ChangeTarget::Range {
+                stream_id: Some(stream_id.to_string()),
+                base: (!base.is_empty()).then(|| base.to_string()),
+                head: head.to_string(),
+            })
+        }
         _ => None,
     }
 }
 
-/// Keep every stream's working-tree file list in `v_change_file` current
+/// Keep every stream's working-tree file lists in `v_change_file` current
+/// — its `working` change's and its ranges' headed at the working tree —
 /// where no snapshot says so: once at boot (so a stream has its `working`
 /// change before anything is edited), and whenever its refs move or a VCS
 /// write (stage, discard, commit, …) changes its index. Stage one only —
@@ -105,15 +143,17 @@ pub async fn watch_working_files(svc: Arc<Services>) {
     let list = |stream: oxplow_domain::StreamId| {
         let svc = svc.clone();
         async move {
-            if let Err(error) = crate::change_analysis::refresh_files(
-                &svc,
-                ChangeTarget::Working {
-                    stream_id: stream.to_string(),
-                },
-            )
-            .await
-            {
-                tracing::debug!(%error, %stream, "listing a working tree's files failed");
+            let targets = match working_targets(&svc, stream).await {
+                Ok(t) => t,
+                Err(error) => {
+                    tracing::debug!(%error, %stream, "listing a stream's ranges failed");
+                    return;
+                }
+            };
+            for target in targets {
+                if let Err(error) = crate::change_analysis::refresh_files(&svc, target).await {
+                    tracing::debug!(%error, %stream, "listing a working tree's files failed");
+                }
             }
         }
     };
@@ -252,13 +292,10 @@ impl AsyncEventConsumer for ChangeReactor {
             // An effort with no start snapshot has nothing to diff.
             .filter(|e| e.start_snapshot_id.is_some())
             .collect();
-        let targets: Vec<ChangeTarget> = std::iter::once(ChangeTarget::Working {
-            stream_id: stream.to_string(),
-        })
-        .chain(open.into_iter().map(|e| ChangeTarget::Effort {
+        let mut targets = working_targets(&svc, stream).await?;
+        targets.extend(open.into_iter().map(|e| ChangeTarget::Effort {
             effort_id: e.id.to_string(),
-        }))
-        .collect();
+        }));
         for target in &targets {
             crate::change_analysis::refresh_files(&svc, target.clone())
                 .await
@@ -936,6 +973,59 @@ mod tests {
     }
 
     /// HEAD moving recomputes the working change.
+    /// A range whose head is the working tree moves with the stream: a
+    /// head move lists its files again, as it does the `working` change's.
+    /// One between two fixed revisions is left as computed.
+    #[tokio::test]
+    async fn a_head_move_refreshes_the_ranges_headed_at_the_working_tree() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let root = f.svc.layout.project_dir.clone();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/lib.rs"), BEFORE).unwrap();
+        let base = crate::test_fixtures::commit_all(&root, "base");
+        std::fs::write(root.join("src/lib.rs"), "fn a() -> i32 {\n    2\n}\n").unwrap();
+        let head = crate::test_fixtures::commit_all(&root, "change");
+        let range = |head: &str| ChangeTarget::Range {
+            stream_id: Some("str1".into()),
+            base: Some(format!("git:{base}")),
+            head: head.to_string(),
+        };
+        let moving = crate::change_analysis::ensure_change(&f.svc, range("working"))
+            .await
+            .unwrap();
+        let fixed = crate::change_analysis::ensure_change(&f.svc, range(&format!("git:{head}")))
+            .await
+            .unwrap();
+        std::fs::write(root.join("src/new.rs"), "fn n() {}\n").unwrap();
+        let reactor = ChangeReactor::new(Arc::downgrade(&f.svc));
+        reactor
+            .handle(&log(&f.svc, head_moved()).await)
+            .await
+            .unwrap();
+        let svc = &f.svc;
+        let paths = |id: i64| async move {
+            let out = svc
+                .sql
+                .query_sql(
+                    "SELECT path FROM v_change_file WHERE change_id = ?1 ORDER BY path",
+                    vec![oxplow_db::SqlCell::Int(id)],
+                    None,
+                )
+                .await
+                .unwrap();
+            serde_json::to_value(out.rows).unwrap()
+        };
+        assert_eq!(
+            paths(moving.id).await,
+            serde_json::json!([["src/lib.rs"], ["src/new.rs"]])
+        );
+        assert_eq!(paths(fixed.id).await, serde_json::json!([["src/lib.rs"]]));
+        // Its deep analysis is paced under a job that names it back.
+        let job = job_id(&range("working")).unwrap();
+        assert_eq!(job, format!("change/range/str1/git:{base}..working"));
+        assert_eq!(target_of(&job), Some(range("working")));
+    }
+
     #[tokio::test]
     async fn a_head_move_recomputes_the_working_change() {
         let f = crate::test_fixtures::services_with_effort().await;

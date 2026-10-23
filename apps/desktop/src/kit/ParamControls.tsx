@@ -1,10 +1,11 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 
-import { querySql, type SqlCell, type SqlQueryResult } from "../api.js";
+import { getLens, querySql, runLens, type LensRun, type SqlCell, type SqlQueryResult } from "../api.js";
 import { recordOpError } from "../opErrors.js";
-import { isDefaultValue, parseParamInput } from "../lens/lensModel.js";
+import { childParams, isDefaultValue, parseParamInput } from "../lens/lensModel.js";
+import { NO_READS, useRerunOnChange } from "../lens/lensRerun.js";
 import { paramKind, paramOptions, paramOptionsSql, type ParamKind, type ParamOption } from "../lens/lensParams.js";
-import type { LensParam, ParamType } from "../tauri-bridge/generated/bindings.js";
+import type { Lens, LensParam, ParamType, Reads } from "../tauri-bridge/generated/bindings.js";
 import { humanize } from "./humanize.js";
 import { Popover } from "./Popover.js";
 import { DEFAULT_RANGE_PRESETS, rangePresetLabel, splitRange } from "./rangePresets.js";
@@ -18,12 +19,28 @@ const SHOWN_ROWS = 6;
 
 type Query = (sql: string) => Promise<SqlQueryResult>;
 
+/** What a choice's `options_from` lens is read with: its definition (which
+ *  of the page's params it declares) and a run of it. */
+export interface OptionsSource {
+  lens(id: string): Promise<Lens>;
+  run(id: string, params: Record<string, SqlCell>, streamId: string | null): Promise<LensRun>;
+}
+
+const OPTIONS_SOURCE: OptionsSource = { lens: getLens, run: runLens };
+
 export interface ParamRowProps {
   param: LensParam;
   value: SqlCell;
   onApply(name: string, value: SqlCell): void;
   /** Reads the options of a branch or id picker; `querySql` unless a test injects one. */
   query?: Query;
+  /** The page's current param values: what a choice's `options_from` lens
+   *  is run with (the ones it declares). */
+  values?: Record<string, SqlCell>;
+  /** The stream the page runs for: what that lens runs for. */
+  streamId?: string | null;
+  /** Reads that lens; the app's lens API unless a test injects one. */
+  optionsSource?: OptionsSource;
 }
 
 /**
@@ -33,12 +50,13 @@ export interface ParamRowProps {
  * Escape keeps the value from before the edit, and focus comes back to
  * the value. A bool has nothing to open: its value is the checkbox.
  */
-export function ParamRow({ param, value, onApply, query = querySql }: ParamRowProps) {
+export function ParamRow({ param, value, onApply, query = querySql, values = {}, streamId = null, optionsSource = OPTIONS_SOURCE }: ParamRowProps) {
   const name = param.name;
   const label = param.label ?? humanize(name);
   const type = paramType(param);
   const kind = type === "text" ? paramKind(name) : null;
   const options = usePickerOptions(kind, query);
+  const listed = useListedOptions(type === "choice" ? (param.options_from ?? null) : null, values, streamId, optionsSource);
   // What it applied shows at once; the run's echo replaces it when it comes.
   const [shown, setShown] = useState<SqlCell>(value);
   useEffect(() => setShown(value), [value]);
@@ -61,7 +79,7 @@ export function ParamRow({ param, value, onApply, query = querySql }: ParamRowPr
     refocus.current = true;
     setEditing(false);
   };
-  const said = summary(param, type, shown, options);
+  const said = summary(param, type, shown, options, listed);
   const editor = { name, label, value: shown, onApply: apply, onDone: done };
 
   return (
@@ -88,7 +106,7 @@ export function ParamRow({ param, value, onApply, query = querySql }: ParamRowPr
       ) : editing ? (
         <span className="ox-param-edit">
           {type === "choice" ? (
-            <SelectEditor {...editor} options={(param.options ?? []).map((o) => ({ value: o.value, label: o.label }))} />
+            <SelectEditor {...editor} options={param.options_from ? listed : (param.options ?? []).map((o) => ({ value: o.value, label: o.label }))} />
           ) : type === "branch" ? (
             <BranchEditor {...editor} query={query} />
           ) : type === "search" ? (
@@ -123,18 +141,20 @@ export interface ParamListProps {
   values: Record<string, SqlCell>;
   onApply(name: string, value: SqlCell): void;
   query?: Query;
+  /** The stream the page runs for (a choice's `options_from` lens runs for it). */
+  streamId?: string | null;
 }
 
 /** A page's params as rows, in their declared order: six, the rest behind
  *  More (N) — except one that is set, which always shows. */
-export function ParamList({ params, values, onApply, query }: ParamListProps) {
+export function ParamList({ params, values, onApply, query, streamId = null }: ParamListProps) {
   const [all, setAll] = useHistoryState<boolean>("paramsMore", false);
   const shown = params.filter((p, i) => all || i < SHOWN_ROWS || !sameValue(paramType(p), values[p.name] ?? null, p.default ?? null));
   const folded = params.length - shown.length;
   return (
     <div className="ox-params">
       {shown.map((p) => (
-        <ParamRow key={p.name} param={p} value={values[p.name] ?? null} onApply={onApply} query={query} />
+        <ParamRow key={p.name} param={p} value={values[p.name] ?? null} values={values} streamId={streamId} onApply={onApply} query={query} />
       ))}
       {folded > 0 ? (
         <button type="button" className="ox-link ox-params-more" data-testid="lens-params-more" onClick={() => setAll(true)}>
@@ -145,9 +165,10 @@ export function ParamList({ params, values, onApply, query }: ParamListProps) {
   );
 }
 
-/** A param's type, as its lens says or as it follows from `options`. */
+/** A param's type, as its lens says or as it follows from `options` /
+ *  `options_from`. */
 function paramType(param: LensParam): ParamType {
-  return param.type ?? ((param.options?.length ?? 0) > 0 ? "choice" : "text");
+  return param.type ?? ((param.options?.length ?? 0) > 0 || param.options_from ? "choice" : "text");
 }
 
 /** Whether a value is the param's default (`isDefaultValue`). */
@@ -173,13 +194,14 @@ function rangeEnd(end: string): string {
   return end === "" ? "…" : end.length > 10 ? end.slice(0, 16).replace("T", " ") : end;
 }
 
-/** What a row says its value is; null when it has none. */
-function summary(param: LensParam, type: ParamType, value: SqlCell, options: ParamOption[]): string | null {
+/** What a row says its value is; null when it has none. A dynamic choice
+ *  says the raw value until its options arrive. */
+function summary(param: LensParam, type: ParamType, value: SqlCell, options: ParamOption[], listed: Option[]): string | null {
   const t = text(value);
   if (t === "") return type === "branch" ? "All branches" : null;
   switch (type) {
     case "choice":
-      return param.options?.find((o) => o.value === t)?.label ?? t;
+      return (param.options_from ? listed : param.options ?? []).find((o) => o.value === t)?.label ?? t;
     case "date_range": {
       const ends = splitRange(t);
       return ends ? `${rangeEnd(ends[0])} – ${rangeEnd(ends[1])}` : rangePresetLabel(t);
@@ -300,11 +322,84 @@ function useOnce(done: () => void): (() => void) & { over(): boolean } {
 interface Option {
   value: string;
   label: string;
+  /** An `<optgroup>` the option sits in (a dynamic choice's `group`). */
+  group?: string | null;
 }
 
-/** A select that applies the option picked and closes; Escape closes. */
+/** The options of a choice whose `options_from` names a lens: that lens
+ *  run for the page's stream with the page's values it declares, re-run
+ *  when what it read changes (the one place a param control follows data).
+ *  Rows are `value`, `label`, optional `group`. */
+function useListedOptions(lensId: string | null, values: Record<string, SqlCell>, streamId: string | null, source: OptionsSource): Option[] {
+  const [options, setOptions] = useState<Option[]>([]);
+  const [reads, setReads] = useState<Reads>(NO_READS);
+  const [definition, setDefinition] = useState<Lens | null>(null);
+  useEffect(() => {
+    setDefinition(null);
+    if (!lensId) return;
+    let live = true;
+    source
+      .lens(lensId)
+      .then((lens) => {
+        if (live) setDefinition(lens);
+      })
+      .catch((e: unknown) => recordOpError({ label: `Read lens ${lensId}`, message: e instanceof Error ? e.message : String(e) }));
+    return () => {
+      live = false;
+    };
+  }, [lensId, source]);
+  const params = definition ? childParams(definition, values) : null;
+  const paramsKey = JSON.stringify(params);
+  const live = useRef(true);
+  const load = useCallback(() => {
+    if (!lensId || !params) return;
+    const started = live;
+    source
+      .run(lensId, params, streamId)
+      .then((run) => {
+        if (!started.current) return;
+        setOptions(listedOptions(run.result));
+        setReads(run.result.reads);
+      })
+      .catch((e: unknown) => recordOpError({ label: `List ${lensId}`, message: e instanceof Error ? e.message : String(e) }));
+    // `params` is `paramsKey`'s content.
+  }, [lensId, paramsKey, streamId, source]);
+  useEffect(() => {
+    live.current = true;
+    load();
+    return () => {
+      live.current = false;
+    };
+  }, [load]);
+  useRerunOnChange(reads, load);
+  return options;
+}
+
+/** A choice lens's rows as options: `value`, `label` (the value when
+ *  none), optional `group`. */
+function listedOptions(result: SqlQueryResult): Option[] {
+  const v = result.columns.indexOf("value");
+  const l = result.columns.indexOf("label");
+  const g = result.columns.indexOf("group");
+  return result.rows.map((row) => {
+    const value = text(row[v] ?? null);
+    const label = row[l];
+    const group = g === -1 ? null : row[g];
+    return { value, label: label === null || label === undefined ? value : String(label), group: group === null || group === undefined ? null : String(group) };
+  });
+}
+
+/** A select that applies the option picked and closes; Escape closes.
+ *  Options with a `group` sit in an `<optgroup>`, after the ungrouped. */
 function SelectEditor({ name, label, value, onApply, onDone, options, empty }: EditorProps & { options: Option[]; empty?: Option }) {
   const current = text(value);
+  const groups: string[] = [];
+  for (const o of options) if (o.group && !groups.includes(o.group)) groups.push(o.group);
+  const option = (o: Option) => (
+    <option key={o.value} value={o.value}>
+      {o.label}
+    </option>
+  );
   return (
     <select
       autoFocus
@@ -322,10 +417,11 @@ function SelectEditor({ name, label, value, onApply, onDone, options, empty }: E
     >
       {empty ? <option value="">{empty.label}</option> : null}
       {current !== "" && !options.some((o) => o.value === current) ? <option value={current}>{current}</option> : null}
-      {options.map((o) => (
-        <option key={o.value} value={o.value}>
-          {o.label}
-        </option>
+      {options.filter((o) => !o.group).map(option)}
+      {groups.map((group) => (
+        <optgroup key={group} label={group}>
+          {options.filter((o) => o.group === group).map(option)}
+        </optgroup>
       ))}
     </select>
   );

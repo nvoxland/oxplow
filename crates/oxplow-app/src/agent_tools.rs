@@ -153,8 +153,20 @@ fn lens_schema(lens: &Lens) -> Value {
     let mut properties = Map::new();
     for param in &lens.params {
         let mut property = Map::new();
-        if let Some(label) = &param.label {
-            property.insert("description".into(), json!(label));
+        // Options a lens lists aren't known until it runs: the agent runs
+        // that lens to see them.
+        let from = param
+            .options_from
+            .as_ref()
+            .map(|lens| format!("one of the `value`s lens `{lens}` lists (run it to see them)"));
+        let description = match (&param.label, from) {
+            (Some(label), Some(from)) => Some(format!("{label} — {from}")),
+            (Some(label), None) => Some(label.clone()),
+            (None, Some(from)) => Some(from),
+            (None, None) => None,
+        };
+        if let Some(description) = description {
+            property.insert("description".into(), json!(description));
         }
         if !param.options.is_empty() {
             let values: Vec<&str> = param.options.iter().map(|o| o.value.as_str()).collect();
@@ -328,7 +340,13 @@ mod tests {
             root.join("lenses/open.yaml"),
             "title: Open Work\ndescription: The items still open.\nquery: SELECT 1 AS n\n\
              params:\n  - { name: state, label: State, default: todo, options: [{ value: todo, label: To do }, { value: done, label: Done }] }\n\
+             \x20 - { name: owner, label: Owner, options_from: owners }\n\
              tool: open_work\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("lenses/owners.yaml"),
+            "title: Owners\nquery: SELECT 'me' AS value, 'Me' AS label\n",
         )
         .unwrap();
         activate_with_problems(&fx.svc).await;
@@ -345,6 +363,12 @@ mod tests {
         assert_eq!(
             lens.input_schema["properties"]["state"],
             json!({ "description": "State", "enum": ["todo", "done"], "default": "todo" })
+        );
+        // Options a lens lists aren't known until it runs: no enum, and
+        // the description says which lens to run to see them.
+        assert_eq!(
+            lens.input_schema["properties"]["owner"],
+            json!({ "description": "Owner — one of the `value`s lens `acme/owners` lists (run it to see them)" })
         );
         assert!(lens
             .description
