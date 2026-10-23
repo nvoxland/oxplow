@@ -1,0 +1,32 @@
+title: Streams
+description: "The other streams: their branch, whether the agent is working, their uncommitted files and how far they are from this stream's branch. Open a row for the commits it has that this branch lacks; right-click to merge it in or rebase onto it."
+params:
+  - { name: stream_id }
+  - { name: branch }
+query: |
+  WITH apart AS (
+    SELECT d.head AS branch, d.ahead, d.behind FROM v_branch_divergence d WHERE d.base = :branch
+  )
+  SELECT s.title, s.branch AS other, :branch AS base, s.branch AS head,
+         EXISTS (SELECT 1 FROM v_agent_status a JOIN v_thread t ON t.id = a.thread_id
+                  WHERE t.stream_id = s.id AND a.state = 'running') AS working,
+         coalesce((SELECT '↑' || a.ahead || ' ↓' || a.behind FROM apart a WHERE a.branch = s.branch), '') AS apart,
+         coalesce((SELECT CASE WHEN count(*) = 0 THEN 'clean' ELSE count(*) || ' changed' END
+                     FROM v_change c JOIN v_change_file f ON f.change_id = c.id
+                    WHERE c.kind = 'working' AND c.target = '' AND c.stream_id = s.id), 'clean') AS uncommitted,
+         coalesce((SELECT a.ahead > 0 FROM apart a WHERE a.branch = s.branch), 0) AS can_join
+  FROM v_stream s
+  WHERE s.id <> :stream_id AND s.archived_at IS NULL
+  ORDER BY s.kind <> 'primary', s.title
+viz: list
+columns:
+  - { key: title, label: Stream, expand: git-dashboard-between }
+  - { key: other, label: Branch }
+  - { key: working, label: Agent, format: badge }
+  - { key: uncommitted, label: Working tree }
+  - { key: apart, label: Apart }
+actions:
+  - { id: merge, label: Merge into current, command: oxplow.vcs.merge, row: true, when: can_join, input: { stream: "str{{param.stream_id}}", rev: "{{row.other}}" } }
+  - { id: rebase, label: Rebase current onto, command: oxplow.git.rebase, row: true, when: can_join, input: { stream: "str{{param.stream_id}}", rev: "{{row.other}}" } }
+empty: No other streams.
+hidden: true

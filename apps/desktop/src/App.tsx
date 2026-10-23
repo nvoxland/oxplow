@@ -2156,8 +2156,7 @@ export function App() {
       };
       // A diff in this tab: Back returns to the page it came from.
       const navOpenDiff = (spec: DiffSpec, origin?: Origin) => handleOpenDiffInTab(currentId, spec, origin);
-      const navRevealCommit = (sha: string) => navOpen(gitCommitRef(sha));
-      const slotNav: SlotNav = { slotId: currentId, navOpen, navOpenFile, navOpenDiff, navRevealCommit };
+      const slotNav: SlotNav = { slotId: currentId, navOpen, navOpenFile, navOpenDiff };
       for (const body of bodies(sessionTab)) {
         const ref = body.entry.ref;
         if (renderedTabIds.has(ref.id)) continue;

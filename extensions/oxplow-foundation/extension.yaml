@@ -159,7 +159,7 @@ pages:
   - { id: problems, title: Problems, icon: triangle-alert, category: Code, lens: problems }
   - { id: symbols, title: Symbols, icon: list-tree, category: Code, params: [path], lens: symbols }
   # Git
-  - { id: git-dashboard, title: Git, icon: git-branch, category: Git, component: "oxplow:git-dashboard" }
+  - { id: git-dashboard, title: Git, icon: git-branch, category: Git, lens: git-dashboard }
   - { id: git-history, title: Git History, icon: git-merge, category: Git, lens: git-history }
   - { id: uncommitted-changes, title: Uncommitted, icon: git-branch, category: Git, lens: uncommitted }
   # Activity

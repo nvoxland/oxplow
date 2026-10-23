@@ -13,7 +13,6 @@ export type SlotNav = {
   navOpen: (newRef: TabRef, opts?: { newTab?: boolean; origin?: Origin }) => void;
   navOpenFile: (path: string, opts?: { newTab?: boolean }) => void;
   navOpenDiff: (spec: DiffSpec, origin?: Origin) => void;
-  navRevealCommit: (sha: string) => void;
 };
 
 /**

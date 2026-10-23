@@ -289,7 +289,6 @@ macro_rules! oxplow_command_table {
                 record_usage => $crate::commands::usage::record_usage { kind: String, payload_json: String } -> ::oxplow_db::UsageEvent,
                 // git
                 git_resolve_commit_ref_labels => $crate::commands::git::git_resolve_commit_ref_labels { shas: Vec<String> } -> ::std::collections::HashMap<String, Vec<::oxplow_app::vcs::CommitRefLabel>>,
-                git_list_recent_remote_branches => $crate::commands::git::git_list_recent_remote_branches { limit: Option<u32> } -> Vec<::oxplow_app::vcs::RemoteBranchEntry>,
                 git_change_scopes => $crate::commands::git::git_change_scopes { stream_id: Option<String> } -> ::oxplow_app::vcs::ChangeScopes,
                 search_workspace_text => $crate::commands::workspace::search_workspace_text { stream_id: Option<String>, query: String, limit: Option<u32> } -> Vec<::oxplow_app::workspace_files::TextSearchHit>,
                 read_at => $crate::commands::trees::read_at { stream_id: Option<String>, path: String, revision: ::oxplow_domain::vcs::Revision } -> Option<String>,
@@ -297,12 +296,9 @@ macro_rules! oxplow_command_table {
                 resolve_symbol => $crate::commands::trees::resolve_symbol { stream_id: String, symbol: String } -> Option<::oxplow_app::symbol_resolve::SymbolLocation>,
                 files_at => $crate::commands::trees::files_at { stream_id: Option<String>, revision: ::oxplow_domain::vcs::Revision } -> Vec<String>,
                 vcs_blame => $crate::commands::vcs::vcs_blame { stream_id: Option<String>, path: String, revision: ::oxplow_domain::vcs::Revision } -> Vec<::oxplow_domain::vcs::BlameLine>,
-                vcs_revision => $crate::commands::vcs::vcs_revision { stream_id: Option<String>, revision: ::oxplow_domain::vcs::Revision } -> Option<::oxplow_domain::vcs::RevisionDetail>,
                 vcs_merge_base => $crate::commands::vcs::vcs_merge_base { stream_id: Option<String>, a: ::oxplow_domain::vcs::Revision, b: ::oxplow_domain::vcs::Revision } -> Option<::oxplow_domain::vcs::Revision>,
                 vcs_log => $crate::commands::vcs::vcs_log { stream_id: Option<String>, limit: Option<u32>, all: bool } -> Vec<::oxplow_domain::vcs::RevisionInfo>,
                 vcs_branches => $crate::commands::vcs::vcs_branches { stream_id: Option<String> } -> Vec<::oxplow_domain::vcs::Branch>,
-                vcs_divergence => $crate::commands::vcs::vcs_divergence { stream_id: Option<String>, base: ::oxplow_domain::vcs::Revision, head: ::oxplow_domain::vcs::Revision } -> ::oxplow_domain::vcs::Divergence,
-                vcs_revisions_between => $crate::commands::vcs::vcs_revisions_between { stream_id: Option<String>, base: ::oxplow_domain::vcs::Revision, head: ::oxplow_domain::vcs::Revision, limit: u32 } -> Vec<::oxplow_domain::vcs::RevisionInfo>,
                 vcs_file_history => $crate::commands::vcs::vcs_file_history { stream_id: Option<String>, path: String, limit: u32 } -> Vec<::oxplow_domain::vcs::RevisionInfo>,
                 read_workspace_file => $crate::commands::workspace::read_workspace_file { stream_id: Option<String>, relative_path: String } -> ::oxplow_app::workspace_files::WorkspaceFile,
                 // code_quality (duplication only — the metrics scan was retired in tsk229)

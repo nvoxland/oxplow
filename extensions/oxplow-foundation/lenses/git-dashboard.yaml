@@ -1,0 +1,17 @@
+title: Git Dashboard
+description: "The stream's branch against its upstream, the working tree, the recent commits, the other streams, which of them can merge cleanly, and the recent remote branches."
+needs: [vcs]
+params:
+  - { name: stream_id }
+query: |
+  SELECT s.branch AS branch FROM v_stream s WHERE s.id = :stream_id
+columns: [{ key: branch }]
+viz: document
+sections:
+  - { id: upstream, lens: git-dashboard-upstream }
+  - { id: uncommitted, lens: git-dashboard-uncommitted }
+  - { id: recent, lens: git-dashboard-recent }
+  - { id: streams, lens: git-dashboard-streams }
+  - { id: readiness, lens: git-dashboard-readiness }
+  - { id: remotes, lens: git-dashboard-remotes }
+hidden: true

@@ -1254,3 +1254,90 @@ async fn the_changes_page_frames_an_effort_and_a_picked_range() {
         assert!(!options.rows.is_empty(), "{lens}");
     }
 }
+
+/// The Git Dashboard: the stream's branch with no upstream, the working
+/// tree, the last commits; with no other stream or remote the rest is empty.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_git_dashboard_reads_the_branch_the_tree_and_the_recent_commits() {
+    let fx = crate::test_fixtures::services_with_task_effort().await;
+    std::fs::write(fx.fx._dir.path().join("new.txt"), "x\n").unwrap();
+    let stream = vec![("stream_id", SqlCell::Int(1))];
+    let page = run_task(&fx, "git-dashboard", stream.clone()).await;
+    assert_eq!(page.rows.len(), 1, "{:?}", page.rows);
+    let branch = page.text(&page.rows[0], "branch").unwrap();
+    let with_branch = |extra: Vec<(&'static str, SqlCell)>| {
+        let mut p = stream.clone();
+        p.push(("branch", SqlCell::Text(branch.clone())));
+        p.extend(extra);
+        p
+    };
+    fx.svc
+        .git_store
+        .replace_branches(vec![oxplow_db::GitBranchRow {
+            name: branch.clone(),
+            kind: "local".into(),
+            remote: None,
+            head_sha: None,
+            stream_id: Some(1),
+            is_default: true,
+            upstream: None,
+            ahead: 0,
+            behind: 0,
+        }])
+        .await
+        .unwrap();
+    let upstream = run_task(&fx, "git-dashboard-upstream", with_branch(vec![])).await;
+    assert_eq!(
+        upstream.text(&upstream.rows[0], "status").as_deref(),
+        Some("No upstream")
+    );
+    fx.svc
+        .git_store
+        .upsert_commit(oxplow_db::GitCommitRow {
+            sha: "a".repeat(40),
+            author: "Ada".into(),
+            email: "ada@example.com".into(),
+            committed_secs: 1_700_000_000,
+            subject: "first".into(),
+            body: String::new(),
+            parents: vec![],
+            files: vec![],
+        })
+        .await
+        .unwrap();
+    fx.svc
+        .git_store
+        .replace_stream_heads(vec![(1, "a".repeat(40))])
+        .await
+        .unwrap();
+    let recent = run_task(&fx, "git-dashboard-recent", stream.clone()).await;
+    assert!(!recent.rows.is_empty(), "the fixture repo has a commit");
+    assert!(recent
+        .text(&recent.rows[0], "commit_ref")
+        .unwrap()
+        .contains("commit?sha="));
+    let streams = run_task(&fx, "git-dashboard-streams", with_branch(vec![])).await;
+    assert!(streams.rows.is_empty());
+    assert!(
+        run_task(&fx, "git-dashboard-readiness", with_branch(vec![]))
+            .await
+            .rows
+            .is_empty()
+    );
+    assert!(run_task(&fx, "git-dashboard-remotes", with_branch(vec![]))
+        .await
+        .rows
+        .is_empty());
+    let between = run_task(
+        &fx,
+        "git-dashboard-between",
+        vec![
+            ("base", SqlCell::Text(branch.clone())),
+            ("head", SqlCell::Text(branch)),
+        ],
+    )
+    .await;
+    assert!(between.rows.is_empty());
+    let tree = run_task(&fx, "git-dashboard-uncommitted", stream).await;
+    assert_eq!(tree.rows.len(), 1);
+}

@@ -193,7 +193,6 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             // branch
             // git
             commands::generated::git_resolve_commit_ref_labels,
-            commands::generated::git_list_recent_remote_branches,
             commands::generated::read_at,
             commands::generated::resolve_symbol,
             commands::generated::search_workspace_text,
@@ -225,12 +224,9 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::read_workspace_file,
             commands::generated::files_at,
             commands::generated::vcs_blame,
-            commands::generated::vcs_revision,
             commands::generated::vcs_merge_base,
             commands::generated::vcs_log,
             commands::generated::vcs_branches,
-            commands::generated::vcs_divergence,
-            commands::generated::vcs_revisions_between,
             commands::generated::vcs_file_history,
             // background tasks
             commands::generated::list_background_tasks,

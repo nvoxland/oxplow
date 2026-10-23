@@ -499,11 +499,6 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	gitListRecentRemoteBranches: (limit: number | null) => typedError<RemoteBranchEntry[], IpcError_Serialize>(__TAURI_INVOKE("git_list_recent_remote_branches", { limit })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	readAt: (streamId: string | null, path: string, revision: string) => typedError<string | null, IpcError_Serialize>(__TAURI_INVOKE("read_at", { streamId, path, revision })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -659,15 +654,6 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	vcsRevision: (streamId: string | null, revision: string) => typedError<{
-	info: RevisionInfo,
-	body: string,
-	files: RevisionFile[],
-} | null, IpcError_Serialize>(__TAURI_INVOKE("vcs_revision", { streamId, revision })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	vcsMergeBase: (streamId: string | null, a: string, b: string) => typedError<string | null, IpcError_Serialize>(__TAURI_INVOKE("vcs_merge_base", { streamId, a, b })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -679,16 +665,6 @@ export const commands = {
 	 *  implementation and its docs live on the core.
 	 */
 	vcsBranches: (streamId: string | null) => typedError<Branch[], IpcError_Serialize>(__TAURI_INVOKE("vcs_branches", { streamId })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	vcsDivergence: (streamId: string | null, base: string, head: string) => typedError<Divergence, IpcError_Serialize>(__TAURI_INVOKE("vcs_divergence", { streamId, base, head })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	vcsRevisionsBetween: (streamId: string | null, base: string, head: string, limit: number) => typedError<RevisionInfo[], IpcError_Serialize>(__TAURI_INVOKE("vcs_revisions_between", { streamId, base, head, limit })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -2291,20 +2267,6 @@ export type DimensionEntry = {
 	 *  `LEFT JOIN v_thread t ON t.id = e.thread_id`.
 	 */
 	join?: string | null,
-};
-
-/**  How far `head` and `base` have diverged. */
-export type Divergence = {
-	ahead: number,
-	behind: number,
-	/**
-	 *  The revision they split at; `None` when their histories are
-	 *  unrelated.
-	 */
-	merge_base: string | null,
-	/**  Files changed on both sides since they split, sorted. */
-	overlapping_files: string[],
-	readiness: MergeReadiness,
 };
 
 /**
@@ -4810,15 +4772,6 @@ export type MenuPlace = {
 	order: number,
 };
 
-/**  Whether `head` would merge into `base` cleanly. */
-export type MergeReadiness = 
-/**  `head` has nothing `base` lacks. */
-"already_integrated" | 
-/**  `head` is ahead and no file changed on both sides. */
-"clean" | 
-/**  `head` is ahead and some file changed on both sides. */
-"conflict";
-
 /**
  *  Whether an extension's metric is active before the project says
  *  anything about it ([`MetricEntry::default`]).
@@ -5811,13 +5764,6 @@ export type Relationship = {
 	field: string,
 };
 
-export type RemoteBranchEntry = {
-	ref_name: string,
-	short_name: string,
-	last_commit_at: number,
-	last_commit_subject: string,
-};
-
 /**
  *  A report file a collector reads as part of its input
  *  (`input.report`): a tool's output in the worktree.
@@ -5881,21 +5827,6 @@ export type RetentionWindow = {
 	payloadDays: number,
 	/**  Days its large content (tool input and output) is kept. */
 	contentDays: number,
-};
-
-/**  One revision in full: its message and the files it changed. */
-export type RevisionDetail = {
-	info: RevisionInfo,
-	body: string,
-	files: RevisionFile[],
-};
-
-/**  A file a revision changed, against its first parent. */
-export type RevisionFile = {
-	path: string,
-	status: FileStatus,
-	additions: number,
-	deletions: number,
 };
 
 /**  One revision, as a list shows it. */

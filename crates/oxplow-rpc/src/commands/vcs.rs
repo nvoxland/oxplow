@@ -4,7 +4,7 @@
 
 use oxplow_app::vcs::reads;
 use oxplow_app::Services;
-use oxplow_domain::vcs::{BlameLine, Branch, Divergence, Revision, RevisionDetail, RevisionInfo};
+use oxplow_domain::vcs::{BlameLine, Branch, Revision, RevisionInfo};
 
 use crate::error::IpcError;
 
@@ -15,14 +15,6 @@ pub async fn vcs_blame(
     revision: Revision,
 ) -> Result<Vec<BlameLine>, IpcError> {
     Ok(reads::blame(svc, stream_id.as_deref(), &path, &revision).await?)
-}
-
-pub async fn vcs_revision(
-    svc: &Services,
-    stream_id: Option<String>,
-    revision: Revision,
-) -> Result<Option<RevisionDetail>, IpcError> {
-    Ok(reads::revision(svc, stream_id.as_deref(), &revision).await?)
 }
 
 pub async fn vcs_merge_base(
@@ -53,25 +45,6 @@ pub async fn vcs_branches(
     stream_id: Option<String>,
 ) -> Result<Vec<Branch>, IpcError> {
     Ok(reads::branches(svc, stream_id.as_deref()).await?)
-}
-
-pub async fn vcs_divergence(
-    svc: &Services,
-    stream_id: Option<String>,
-    base: Revision,
-    head: Revision,
-) -> Result<Divergence, IpcError> {
-    Ok(reads::divergence(svc, stream_id.as_deref(), &base, &head).await?)
-}
-
-pub async fn vcs_revisions_between(
-    svc: &Services,
-    stream_id: Option<String>,
-    base: Revision,
-    head: Revision,
-    limit: u32,
-) -> Result<Vec<RevisionInfo>, IpcError> {
-    Ok(reads::revisions_between(svc, stream_id.as_deref(), &base, &head, limit).await?)
 }
 
 pub async fn vcs_file_history(
@@ -114,12 +87,6 @@ mod tests {
         )
         .await;
         assert_eq!(blame[0]["revision"], json!(sha));
-        let detail = call(
-            "vcs_revision",
-            json!({ "streamId": null, "revision": "git:HEAD" }),
-        )
-        .await;
-        assert_eq!(detail["info"]["subject"], json!("c1"));
         let base = call(
             "vcs_merge_base",
             json!({ "streamId": null, "a": "git:HEAD", "b": format!("git:{sha}") }),
@@ -141,18 +108,6 @@ mod tests {
                 .any(|b| b["is_default"] == json!(true)),
             "{branches}"
         );
-        let div = call(
-            "vcs_divergence",
-            json!({ "streamId": null, "base": "git:HEAD", "head": "git:HEAD" }),
-        )
-        .await;
-        assert_eq!(div["readiness"], json!("already_integrated"));
-        let between = call(
-            "vcs_revisions_between",
-            json!({ "streamId": null, "base": "git:HEAD", "head": "git:HEAD", "limit": 10 }),
-        )
-        .await;
-        assert_eq!(between, json!([]));
         let history = call(
             "vcs_file_history",
             json!({ "streamId": null, "path": "a.txt", "limit": 10 }),

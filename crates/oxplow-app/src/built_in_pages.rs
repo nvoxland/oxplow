@@ -17,7 +17,6 @@ pub const BUILT_IN_PAGES: &[&str] = &[
     "explore-data",
     "external-url",
     "files",
-    "git-dashboard",
     "lens",
     "metric-detail",
     "metrics-recorded",

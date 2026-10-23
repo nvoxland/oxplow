@@ -432,15 +432,6 @@ pub const MANIFEST: &[Capability] = &[
     ),
     // ---- git (presentation / worktree / remote helpers) ----
     model("git_resolve_commit_ref_labels", &["v_branch", "v_tag"]),
-    model("git_list_recent_remote_branches", &["v_branch"]),
-    ui(
-        "vcs_divergence",
-        "an ancestry walk the VCS answers; an agent runs git in its worktree",
-    ),
-    ui(
-        "vcs_revisions_between",
-        "an ancestry walk the VCS answers; an agent reads `v_commit`",
-    ),
     model("vcs_file_history", &["v_commit_file"]),
     // ---- hooks / agent lifecycle ----
     ui(
@@ -474,10 +465,6 @@ pub const MANIFEST: &[Capability] = &[
     ui(
         "files_at",
         "a revision's file list, for the editor; an agent reads a revision's file with `read`",
-    ),
-    ui(
-        "vcs_revision",
-        "one revision's detail for the history view; an agent reads `v_commit`",
     ),
     ui(
         "vcs_merge_base",

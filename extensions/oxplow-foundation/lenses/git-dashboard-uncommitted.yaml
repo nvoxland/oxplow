@@ -1,0 +1,22 @@
+title: Uncommitted
+description: What the working tree has changed, by status; the Uncommitted Changes page lists the files.
+params:
+  - { name: stream_id }
+query: |
+  WITH w AS (
+    SELECT c.id FROM v_change c WHERE c.kind = 'working' AND c.target = '' AND c.stream_id = :stream_id
+  ), f AS (
+    SELECT cf.status, cf.untracked FROM v_change_file cf JOIN w ON cf.change_id = w.id
+  )
+  SELECT CASE WHEN count(*) = 0 THEN 'No uncommitted files'
+              ELSE count(*) || ' changed'
+                   || CASE WHEN sum(status = 'modified' AND untracked = 0) > 0 THEN ' · ' || sum(status = 'modified' AND untracked = 0) || ' modified' ELSE '' END
+                   || CASE WHEN sum(status = 'added' AND untracked = 0) > 0 THEN ' · ' || sum(status = 'added' AND untracked = 0) || ' added' ELSE '' END
+                   || CASE WHEN sum(status = 'deleted') > 0 THEN ' · ' || sum(status = 'deleted') || ' deleted' ELSE '' END
+                   || CASE WHEN sum(untracked = 1) > 0 THEN ' · ' || sum(untracked = 1) || ' untracked' ELSE '' END END AS changes,
+         uri('oxplow/page', 'page', 'uncommitted-changes') AS view
+  FROM f
+viz: detail
+columns:
+  - { key: changes, label: Changes, link: { kind: page, from: view } }
+hidden: true

@@ -7,7 +7,6 @@ import type { BuiltInPageName } from "./declaredPages.js";
 import type { AppScope, SlotNav } from "./appScope.js";
 import { SettingsPage } from "./SettingsPage.js";
 import { settingsArea } from "./settingsAreas.js";
-import { GitDashboardPage } from "./GitDashboardPage.js";
 import { TerminalPage } from "./TerminalPage.js";
 import { FilesPage } from "./FilesPage.js";
 import { MetricsPage } from "./MetricsPage.js";
@@ -45,20 +44,6 @@ export const builtInPages: Record<BuiltInPageName, BuiltInPage> = {
     closable: true,
     render: () => <ResourcePage uri={ref.id} />,
   }),
-  "git-dashboard": ({ ref, nav, scope }) => {
-    return {
-      id: ref.id,
-      label: "Git Dashboard",
-      closable: true,
-      render: () => (
-        <GitDashboardPage
-          stream={scope.stream}
-          onOpenPage={nav.navOpen}
-          onRevealCommit={nav.navRevealCommit}
-        />
-      ),
-    };
-  },
   terminal: ({ ref, scope }) => {
     return {
       id: ref.id,

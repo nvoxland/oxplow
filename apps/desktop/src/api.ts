@@ -249,7 +249,7 @@ let cachedBridge: DesktopBridge | null = null;
 // The wire's own shapes, from the generated bindings: nothing converts a
 // shape at the boundary (P11, tsk963–964).
 export type { BackgroundTask, ChangeScopes, OxplowConfig, OxplowEvent, TextSearchHit };
-export type { OpOutcome, RemoteBranchEntry, MergeReadiness } from "./tauri-bridge/index.js";
+export type { OpOutcome } from "./tauri-bridge/index.js";
 
 
 // Stream / Thread come straight from the Tauri bindings — the
@@ -338,28 +338,21 @@ export interface WorkspaceRenameResult {
 import type { Revision } from "./revision.js";
 import {
   STREAM_HEAD_SQL,
-  STREAM_UPSTREAM_SQL,
   streamHeadFromRows,
-  streamUpstreamFromRows,
   statusCountsFromRows,
   STATUS_COUNTS_SQL,
   type StreamHead,
-  type StreamUpstream,
 } from "./streamHead.js";
 import { streamRowId } from "./modelIds.js";
 import type {
   BlameLine,
-  Divergence,
   FileStatus,
-  RevisionDetail,
   RevisionInfo,
 } from "./tauri-bridge/generated/bindings.js";
 export type {
   BlameLine,
-  Divergence,
   FileStatus,
   RevisionInfo,
-  RevisionDetail,
 };
 
 // ---- The stream's version control, neutral (`.context/vcs.md`) ----
@@ -371,13 +364,6 @@ export async function streamHead(streamId: string): Promise<StreamHead> {
   return streamHeadFromRows(res.rows);
 }
 
-/** How far the stream's checked-out branch has parted from its upstream
- *  (`v_branch`, restated whenever refs move). */
-export async function streamUpstream(streamId: string): Promise<StreamUpstream> {
-  const res = await querySql(STREAM_UPSTREAM_SQL, [streamRowId(streamId)], 1);
-  return streamUpstreamFromRows(res.rows);
-}
-
 /** Who last changed each line of `path` at `revision` (the working tree:
  *  uncommitted lines have no revision). */
 export async function vcsBlame(
@@ -386,35 +372,6 @@ export async function vcsBlame(
   revision: Revision,
 ): Promise<BlameLine[]> {
   return unwrap(await commands.vcsBlame(streamId || null, path, revision));
-}
-
-/** A revision's message and changed files; null when the workspace
- *  doesn't have it. */
-export async function vcsRevision(
-  streamId: string,
-  revision: Revision,
-): Promise<RevisionDetail | null> {
-  return unwrap(await commands.vcsRevision(streamId || null, revision));
-}
-
-/** How far `head` and `base` have diverged, and whether `head` would
- *  merge cleanly (live; a stream's history reads `v_commit`). */
-export async function vcsDivergence(
-  streamId: string,
-  base: Revision,
-  head: Revision,
-): Promise<Divergence> {
-  return unwrap(await commands.vcsDivergence(streamId || null, base, head));
-}
-
-/** Revisions on `head` that `base` lacks, newest first. */
-export async function vcsRevisionsBetween(
-  streamId: string,
-  base: Revision,
-  head: Revision,
-  limit = 200,
-): Promise<RevisionInfo[]> {
-  return unwrap(await commands.vcsRevisionsBetween(streamId || null, base, head, limit));
 }
 
 /** Revisions that changed `path`, newest first. */
@@ -1257,12 +1214,6 @@ export async function vcsPull(
   );
 }
 
-export async function vcsFetch(streamId: string, remote?: string): Promise<GitOpKickoff> {
-  return runAsBackgroundTask("Fetch", "vcs", `fetch${remote ? ` ${remote}` : ""}`, () =>
-    runVcs("oxplow.vcs.fetch", { stream: streamId, remote: remote ?? null }),
-  );
-}
-
 /** Commit the stream's changes; `revision` is the new one (`git:<sha>`). */
 export async function vcsCommit(
   streamId: string,
@@ -1275,13 +1226,6 @@ export async function vcsCommit(
     include_untracked: includeUntracked,
   });
   return outcome.result as { success: boolean; revision: string };
-}
-
-export async function listRecentRemoteBranches(
-  _streamId: string,
-  limit?: number,
-): Promise<import("./tauri-bridge/index.js").RemoteBranchEntry[]> {
-  return unwrap(await commands.gitListRecentRemoteBranches(limit ?? null));
 }
 
 /** Write a wiki page — the `oxplow.knowledge.write_page` command (P5.C3): the

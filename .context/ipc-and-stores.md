@@ -370,16 +370,8 @@ both together when adding a channel.
 
 ## Git dashboard / cross-worktree IPC
 
-The Git Dashboard reads its lists through the models and its live
-comparisons through the neutral RPCs ([vcs.md](./vcs.md)):
+The Git Dashboard is a foundation document lens over the models ([vcs.md](./vcs.md)); the cross-worktree IPCs left are:
 
-- `vcsDivergence(streamId, base, head)` — `{ ahead, behind,
-  overlapping_files, readiness }` for the branch header, the worktree
-  rows and the merge-readiness card.
-- `vcsRevisionsBetween(streamId, base, head, limit?)` —
-  `RevisionInfo[]` for pairwise commit-diff displays.
-- `listRecentRemoteBranches(streamId, limit?)` —
-  `RemoteBranchEntry[]` sorted by committer date.
 - `vcsPush(streamId, { remote, branch })` / `vcsPull(streamId, { remote,
   branch })` — the `oxplow.vcs.push` / `oxplow.vcs.pull` commands aimed at a remote
   branch (a refspec push of HEAD; fetch + merge), each run inside a

@@ -199,8 +199,6 @@ async fn vcs_branches_include_the_default_branch() {
 async fn git_reads_over_primary_worktree() {
     let app = TestApp::build().await;
     let s = app.state();
-    let head = || oxplow_domain::vcs::Revision::git("HEAD");
-    let _ = commands::generated::vcs_divergence(s.clone(), None, head(), head()).await;
     let _ = commands::generated::git_change_scopes(s.clone(), None).await;
     let _ = commands::generated::vcs_log(s.clone(), None, Some(10), false).await;
     let _ = commands::generated::read_at(
@@ -224,12 +222,6 @@ async fn git_reads_over_primary_worktree() {
 async fn git_list_commands_return_empty_for_fresh_repo() {
     let app = TestApp::build().await;
     let s = app.state();
-    assert!(
-        commands::generated::git_list_recent_remote_branches(s.clone(), Some(10))
-            .await
-            .unwrap()
-            .is_empty()
-    );
     assert!(
         commands::generated::search_workspace_text(s.clone(), None, "needle".into(), Some(10))
             .await

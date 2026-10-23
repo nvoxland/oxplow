@@ -1,0 +1,20 @@
+title: Upstream
+description: Where the stream's branch stands against the branch it tracks. Push, Pull and Fetch run as the person.
+params:
+  - { name: stream_id }
+  - { name: branch }
+query: |
+  SELECT b.name AS branch,
+         CASE WHEN b.upstream IS NULL THEN 'No upstream'
+              ELSE 'tracks ' || b.upstream || '   ↑' || b.ahead || ' ↓' || b.behind END AS status
+  FROM v_branch b WHERE b.kind = 'local' AND b.name = :branch
+viz: detail
+columns:
+  - { key: branch, label: Branch }
+  - { key: status, label: Upstream }
+actions:
+  - { id: push, label: Push, command: oxplow.vcs.push, input: { stream: "str{{param.stream_id}}" } }
+  - { id: pull, label: Pull, command: oxplow.vcs.pull, input: { stream: "str{{param.stream_id}}" } }
+  - { id: fetch, label: Fetch, command: oxplow.vcs.fetch, input: { stream: "str{{param.stream_id}}" } }
+empty: No branch is checked out.
+hidden: true

@@ -1,0 +1,15 @@
+title: Commits in the stream's branch
+description: The commits in `head` that `base` lacks, newest first.
+params:
+  - { name: base }
+  - { name: head }
+query: |
+  SELECT c.subject, uri('oxplow/commit', 'sha', c.sha) AS commit_ref, c.author, c.committed_at
+  FROM v_commit_between c WHERE c.base = :base AND c.head = :head
+viz: list
+columns:
+  - { key: subject, label: Commit, link: { kind: page, from: commit_ref } }
+  - { key: author, label: Who }
+  - { key: committed_at, label: When, format: relative, width: 110 }
+empty: No commits ahead.
+hidden: true

@@ -6,8 +6,8 @@
  * returns what it read (`reads`) so a caller re-runs with
  * `useRerunOnChange` when a model changes.
  */
-import { querySql, type SqlCell } from "./api.js";
-import type { Reads, RevisionInfo } from "./tauri-bridge/generated/bindings.js";
+import { querySql } from "./api.js";
+import type { Reads } from "./tauri-bridge/generated/bindings.js";
 
 /** A branch as the pickers show it: a git ref name (`refs/heads/main`,
  *  `refs/remotes/origin/main`) and, for a remote one, its remote. */
@@ -53,112 +53,6 @@ export interface BranchRow {
 export interface TagRow {
   name: string;
   sha: string;
-}
-
-export interface History {
-  commits: RevisionInfo[];
-  /** Local branch heads, for badges. */
-  branchHeads: { name: string; sha: string }[];
-  tags: TagRow[];
-  reads: Reads;
-}
-
-const COMMIT_COLUMNS = "c.sha, c.author, c.email, c.committed_at, c.subject, c.parents";
-
-/** A `v_commit` row (in `COMMIT_COLUMNS` order) as a `RevisionInfo`. */
-export function commitFromRow(row: SqlCell[]): RevisionInfo {
-  const [sha, author, email, committedAt, subject, parents] = row;
-  const id = String(sha);
-  let parentList: string[] = [];
-  try {
-    const parsed: unknown = JSON.parse(String(parents ?? "[]"));
-    if (Array.isArray(parsed)) parentList = parsed.map(String);
-  } catch {
-    parentList = [];
-  }
-  return {
-    id,
-    short_id: id.slice(0, 7),
-    author: String(author ?? ""),
-    email: String(email ?? ""),
-    time: Math.floor(Date.parse(String(committedAt)) / 1000),
-    subject: String(subject ?? ""),
-    parents: parentList,
-  };
-}
-
-/** `commits` with every child before its parents (what the graph's lanes
- *  need), otherwise newest first in the order given. Commit times are
- *  whole seconds and clocks skew, so a time order alone can list a parent
- *  (a rebase's, a scripted series') before its child. */
-export function topoOrder(commits: RevisionInfo[]): RevisionInfo[] {
-  const present = new Set(commits.map((c) => c.id));
-  const children = new Map<string, number>();
-  for (const c of commits) {
-    for (const p of c.parents) {
-      if (present.has(p)) children.set(p, (children.get(p) ?? 0) + 1);
-    }
-  }
-  const byId = new Map(commits.map((c) => [c.id, c]));
-  const ready = commits.filter((c) => !children.get(c.id));
-  const out: RevisionInfo[] = [];
-  const rank = new Map(commits.map((c, i) => [c.id, i]));
-  while (ready.length > 0) {
-    // The newest ready commit; ties keep the order given.
-    let best = 0;
-    for (let i = 1; i < ready.length; i++) {
-      const a = ready[i], b = ready[best];
-      if (a.time > b.time || (a.time === b.time && rank.get(a.id)! < rank.get(b.id)!)) best = i;
-    }
-    const [next] = ready.splice(best, 1);
-    out.push(next);
-    for (const p of next.parents) {
-      const left = (children.get(p) ?? 0) - 1;
-      children.set(p, left);
-      if (left === 0 && byId.has(p)) ready.push(byId.get(p)!);
-    }
-  }
-  return out;
-}
-
-/** The SQL for a history read: from `head` along parents, or — `head`
- *  null — every indexed commit. Newest first, `?2` rows at most; the
- *  caller puts them in [`topoOrder`]. */
-export function historySql(head: string | null): string {
-  if (head === null) {
-    return `SELECT ${COMMIT_COLUMNS} FROM v_commit c
-            ORDER BY c.committed_at DESC, c.sha LIMIT ?1`;
-  }
-  return `WITH RECURSIVE reach(sha) AS (
-            SELECT ?1
-            UNION
-            SELECT p.value FROM reach
-              JOIN v_commit c ON c.sha = reach.sha, json_each(c.parents) p
-          )
-          SELECT ${COMMIT_COLUMNS} FROM v_commit c JOIN reach USING (sha)
-          ORDER BY c.committed_at DESC, c.sha LIMIT ?2`;
-}
-
-/** A stream's history from its head commit (`head`), or every branch's
- *  (`head` null), with branch-head and tag badges. */
-export async function readHistory(head: string | null, limit: number): Promise<History> {
-  const [commits, branches, tags] = await Promise.all([
-    querySql(historySql(head), head === null ? [limit] : [head, limit], limit),
-    querySql(
-      "SELECT name, head_sha FROM v_branch WHERE kind = 'local' AND head_sha IS NOT NULL ORDER BY name",
-    ),
-    querySql("SELECT name, sha FROM v_tag ORDER BY name"),
-  ]);
-  return {
-    commits: topoOrder(commits.rows.map(commitFromRow)),
-    branchHeads: branches.rows.map(([name, sha]) => ({ name: String(name), sha: String(sha) })),
-    tags: tags.rows.map(([name, sha]) => ({ name: String(name), sha: String(sha) })),
-    reads: {
-      models: [...new Set([...commits.reads.models, ...branches.reads.models, ...tags.reads.models])],
-      tables: [],
-      measures: [],
-    },
-  };
 }
 
 /** Every branch, local first then remote-tracking, each by name. */

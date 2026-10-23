@@ -25,25 +25,6 @@ export function streamHeadFromRows(rows: SqlCell[][]): StreamHead {
   };
 }
 
-/** How far the stream's checked-out branch has parted from its upstream. */
-export interface StreamUpstream {
-  upstream: string | null;
-  ahead: number;
-  behind: number;
-}
-
-/** The SQL behind it: the local branch the stream has checked out. */
-export const STREAM_UPSTREAM_SQL = `SELECT b.upstream, b.ahead, b.behind
-  FROM v_branch b WHERE b.stream_id = ?1 AND b.kind = 'local'`;
-
-/** The upstream out of that query's rows: none for a detached stream or a
- *  branch that tracks nothing. */
-export function streamUpstreamFromRows(rows: SqlCell[][]): StreamUpstream {
-  const [upstream, ahead, behind] = rows[0] ?? [null, 0, 0];
-  const name = typeof upstream === "string" && upstream ? upstream : null;
-  return { upstream: name, ahead: name ? Number(ahead ?? 0) : 0, behind: name ? Number(behind ?? 0) : 0 };
-}
-
 /** The SQL behind it: the stream's working change (`v_change`) and its
  *  files (`v_change_file`) grouped by status and whether git tracks them,
  *  with the conflicted count riding along — a stream with no changed

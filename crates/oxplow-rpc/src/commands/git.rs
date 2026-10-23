@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 
-use oxplow_app::vcs::{ChangeScopes, CommitRefLabel, RemoteBranchEntry};
+use oxplow_app::vcs::{ChangeScopes, CommitRefLabel};
 use oxplow_app::Services;
 use oxplow_domain::DomainError;
 
@@ -19,16 +19,6 @@ pub async fn git_resolve_commit_ref_labels(
 ) -> Result<HashMap<String, Vec<CommitRefLabel>>, IpcError> {
     svc.git
         .commit_ref_labels(&svc.layout.project_dir, shas)
-        .await
-        .map_err(|e| DomainError::from(e).into())
-}
-
-pub async fn git_list_recent_remote_branches(
-    svc: &Services,
-    limit: Option<u32>,
-) -> Result<Vec<RemoteBranchEntry>, IpcError> {
-    svc.git
-        .recent_remote_branches(&svc.layout.project_dir, limit.map_or(50, |n| n as usize))
         .await
         .map_err(|e| DomainError::from(e).into())
 }
