@@ -1,0 +1,10 @@
+title: Answer
+description: What an agent showed you in this thread, live. Keep This makes it a lens you can reopen and pin.
+params:
+  - { name: uri }
+query: SELECT uri, title FROM v_thread_answer WHERE uri = :uri
+viz: document
+columns: [{ key: title }, { key: uri }]
+sections:
+  - { lens: answer-body, title: "" }
+hidden: true

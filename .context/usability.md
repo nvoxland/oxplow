@@ -272,10 +272,10 @@ markdown itself, nor edits it in a `<textarea>`.
   `proposal-<id>`, `proposal-approve-<id>` (a destructive one's:
   `proposal-approve-<id>-trigger` / `-confirm`), `proposal-decline-<id>`,
   `proposal-error-<id>`, `rail-alert-proposals`.
-- **A proposal also waits where the conversation is** (P9.A3). A terminal
-  thread's Answers strip shows the thread's pending proposals in a
-  "Waiting for you (n)" group above its answers — never collapsed, and
-  the strip shows for them alone (`thread-proposals`). A chat transcript
+- **A proposal also waits where the conversation is** (P9.A3). Above an
+  agent session's terminal, `ThreadWaiting` shows the thread's pending
+  proposals in a "Waiting for you (n)" group — never collapsed, hidden
+  while nothing waits (`thread-proposals`). A chat transcript
   shows the card under the tool call that made the proposal
   (`proposalOfTool`); once decided, a muted line stays there saying what
   became of it — "Approved by you — it ran.", "Declined by you — nothing
@@ -572,8 +572,8 @@ not a pick and isn't in the address.
 
 An agent's pending proposals are drawn by the kit's `Approvals`
 (`src/kit/Approvals.tsx`): `ProposalCard` is its card, `ProposalList` draws
-proposals a page already read (Alerts, a Settings row's compact card, the
-thread's Answers strip) and `Approvals` reads them itself, which is what
+proposals a page already read (Alerts, a Settings row's compact card,
+`ThreadWaiting` above an agent's terminal) and `Approvals` reads them itself, which is what
 `viz: approvals` renders. A page never draws its own Approve / Decline; it
 mounts the kit's, so a page moving to a lens (`viz: approvals`, params
 `thread` / `setting`) changes where the cards sit, not the cards.

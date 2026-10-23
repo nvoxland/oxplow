@@ -42,6 +42,8 @@ pub struct Resolved {
     pub files: Vec<String>,
     /// An `approvals` lens's pending proposals, one line each.
     pub approvals: Vec<String>,
+    /// An `answer` lens's answer, as showing it returned it.
+    pub answer: Option<String>,
 }
 
 /// A lens run as an agent reads it: the text, and what it needs to know
@@ -138,6 +140,25 @@ pub async fn resolve(
                 out.files
                     .push(file_text(svc, root, &at(p), &at(r), lines).await);
             }
+        }
+        LensViz::Answer => {
+            let a = run.lens.answer.clone().unwrap_or_default();
+            let id = column(run, a.uri.as_ref())
+                .and_then(|i| run.result.rows.first()?.get(i).map(cell))
+                .and_then(|uri| {
+                    oxplow_domain::uri::build::parse_as::<i64>(
+                        &uri,
+                        oxplow_domain::uri::resources::ANSWER,
+                    )
+                    .ok()
+                });
+            out.answer = Some(match id {
+                Some(id) => match Box::pin(crate::commands::lens::text_answer(svc, id)).await {
+                    Ok((_, text)) => text,
+                    Err(e) => format!("(that answer can't be read: {e})"),
+                },
+                None => "(no answer is named)".into(),
+            });
         }
         LensViz::Editor => {
             let e = run.lens.editor.clone().unwrap_or_default();
@@ -506,6 +527,7 @@ pub fn render(run: &LensRun, resolved: &Resolved) -> String {
         LensViz::Hunks => hunks(run, &resolved.diffs),
         LensViz::Code => code(run, &resolved.files),
         LensViz::Editor => editor(run, &resolved.files),
+        LensViz::Answer => resolved.answer.clone().unwrap_or_else(|| table(run)),
         LensViz::Diff => one_diff(run, &resolved.diffs),
         LensViz::Approvals => {
             if resolved.approvals.is_empty() {
@@ -1186,6 +1208,7 @@ mod tests {
                 code: None,
                 diff: None,
                 editor: None,
+                answer: None,
                 markdown: None,
                 form: None,
                 custom: None,
@@ -1345,6 +1368,7 @@ mod tests {
                     files: Vec::new(),
                     approvals: Vec::new(),
                     row_tiles: Vec::new(),
+                    answer: None,
                 }
             ),
             "### Open\n\n5\n\n### About\n\nRead me.\n\n### Notes\n\n**ok**"
@@ -1975,6 +1999,49 @@ mod tests {
             text.contains("#### e.txt, being edited (as saved; unsaved edits aren't here)\n\n```txt\nsaved text\n```"),
             "{text}"
         );
+    }
+
+    /// An `answer` lens reads as its answer: the text showing it
+    /// returned, so an agent reading the answer's page reads the answer.
+    #[tokio::test]
+    async fn an_answer_lens_reads_as_its_answer() {
+        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let agent = oxplow_domain::Actor::Agent {
+            session_id: None,
+            thread_id: Some(fx.thread),
+            stream_id: None,
+        };
+        let out = fx
+            .svc
+            .commands
+            .run(
+                &agent,
+                "oxplow.lens.show",
+                serde_json::json!({ "spec": { "title": "Busy Tasks", "query": "SELECT title FROM v_work_item", "viz": "table" } }),
+                false,
+            )
+            .await
+            .unwrap();
+        let id = out.result["answer"].as_i64().unwrap();
+        let answer = with(
+            run(
+                LensViz::Answer,
+                None,
+                &["uri"],
+                vec![vec![t(&format!("oxplow:oxplow/answer?id={id}"))]],
+            ),
+            |l| {
+                l.answer = Some(crate::extensions::LensAnswer {
+                    uri: Some("uri".into()),
+                    kept: None,
+                })
+            },
+        );
+        let root = fx.svc.layout.project_dir.clone();
+        let ctx = crate::extensions::LensContext::default();
+        let text = text_of(&fx.svc, &root, &answer, &ctx).await.unwrap();
+        let shown = out.result["text"].as_str().unwrap();
+        assert!(text.contains(shown), "{text}\n---\n{shown}");
     }
 
     /// An approvals lens reads the pending proposals itself: an agent

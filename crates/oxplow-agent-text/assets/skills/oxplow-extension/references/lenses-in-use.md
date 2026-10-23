@@ -8,7 +8,8 @@ rows into the terminal: call `oxplow_show_lens` with either `lens` (an existing
 lens id, plus `params`) or `spec` (a lens of your own: `title`, `query`,
 `viz` and what the viz needs, the same keys as a lens file). oxplow runs
 the query read-only (as `oxplow_query_sql` does), stores the answer on the
-thread and shows it beside the conversation; the tool returns the
+thread and opens it as a tab of the thread, listed in its Answers
+panel; the tool returns the
 answer's ref and its text rendering, which is what you tell the user.
 An answer is never a `form` (its submit would run a command as the
 user), a `grid` or a `custom` component.

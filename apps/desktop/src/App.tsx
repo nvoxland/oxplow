@@ -121,6 +121,7 @@ import { pickFolder } from "./tauri-bridge/nativeDialog.js";
 import { WORKING } from "./revision.js";
 import { isDirty } from "./editor/buffers.js";
 import { buffers } from "./editor/openFiles.js";
+import { watchShownAnswers } from "./shownAnswers.js";
 import { recordPageVisit, reportTabs, resolveSymbol } from "./api.js";
 import { advanceDaemonProbeState, INITIAL_DAEMON_PROBE_STATE } from "./daemon-recovery.js";
 import { offerForShortcut } from "./keybindings.js";
@@ -1469,6 +1470,20 @@ export function App() {
     }
   }, [sessions, selectedThreadId, stream, closePageTab, dirtyTabs]);
 
+  // What an agent shows in the shown thread (`oxplow_show_lens`) opens as
+  // a tab of it, behind what the person is on: the Answers panel counts
+  // it, and the person's terminal keeps the keys.
+  useEffect(() => {
+    if (!selectedThreadId) return;
+    const thread = selectedThreadId;
+    return watchShownAnswers(thread, (uri) => {
+      updateSession(thread, (session) => {
+        const opened = sessionOpen(session, { ref: { id: uri } });
+        return { ...opened, active: session.active, mru: [...session.mru, ...opened.mru.filter((m) => !session.mru.includes(m))] };
+      });
+    });
+  }, [selectedThreadId, updateSession]);
+
   // A file's buffer lives while a tab of any thread shows the file (any
   // step of its history): the rest close, their models disposed. Not
   // until every thread with tabs is placed in a stream, so no buffer is
@@ -1641,7 +1656,6 @@ export function App() {
               stream={stream}
               visible={effectiveCenterActive === ref.id}
               onOpenFile={openTerminalPath}
-              onOpenPage={handleOpenPage}
               canChooseConversation={!!session && harnessFeatures(session.harness).includes("conversation_list")}
               picker={conversationPicker?.sessionId === sessionId ? conversationPicker.mode : null}
               onPicker={(mode) => setConversationPicker(mode ? { sessionId, mode } : null)}

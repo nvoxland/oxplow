@@ -134,6 +134,11 @@ pub enum LensViz {
     /// `thread` (a thread ref) and `setting` (a config key) narrow the
     /// list.
     Approvals,
+    /// An agent's answer (`answer.uri`, the first row's: an
+    /// `oxplow/answer` URI), re-run live, with Keep This until it is kept
+    /// (`answer.kept`: the lens it became) — core's component for what
+    /// `oxplow_show_lens` showed.
+    Answer,
     /// The extension's own web component (`custom.component`), in
     /// a sandboxed frame; its rows are what it shows and what an agent
     /// reads (as a table).
@@ -627,6 +632,18 @@ pub struct LensCode {
     /// Several rows' editors scroll together, each from its marked lines.
     #[serde(default)]
     pub sync: bool,
+}
+
+/// `answer` viz: the answer the first row names, and the lens it was kept
+/// as (once it was).
+#[derive(
+    Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
+)]
+#[serde(deny_unknown_fields)]
+pub struct LensAnswer {
+    pub uri: Option<String>,
+    #[serde(default)]
+    pub kept: Option<String>,
 }
 
 /// `editor` viz: the working tree's file the first row names, and the
@@ -1408,6 +1425,8 @@ struct LensFile {
     diff: Option<LensDiff>,
     #[serde(default)]
     editor: Option<LensEditor>,
+    #[serde(default)]
+    answer: Option<LensAnswer>,
     #[serde(default)]
     markdown: Option<LensMarkdown>,
     #[serde(default)]
@@ -2516,6 +2535,7 @@ pub struct Lens {
     pub code: Option<LensCode>,
     pub diff: Option<LensDiff>,
     pub editor: Option<LensEditor>,
+    pub answer: Option<LensAnswer>,
     pub markdown: Option<LensMarkdown>,
     pub form: Option<LensForm>,
     /// For `custom`: the component and its props.
@@ -4564,6 +4584,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                 code: l.code,
                 diff: l.diff,
                 editor: l.editor,
+                answer: l.answer,
                 markdown: l.markdown,
                 form: l.form,
                 custom: l.custom,
@@ -5775,6 +5796,10 @@ fn shape_problem(
             let e = lens.editor.clone().unwrap_or_default();
             need("editor", &[("path", &e.path)])
         }
+        LensViz::Answer => {
+            let a = lens.answer.clone().unwrap_or_default();
+            need("answer", &[("uri", &a.uri)])
+        }
         LensViz::Diff => {
             let d = lens.diff.clone().unwrap_or_default();
             need(
@@ -6212,6 +6237,14 @@ impl Lens {
                     .into_iter()
                     .flatten()
                     .map(|k| ("code", k)),
+            );
+        }
+        if let Some(a) = &self.answer {
+            out.extend(
+                [&a.uri, &a.kept]
+                    .into_iter()
+                    .flatten()
+                    .map(|k| ("answer", k)),
             );
         }
         if let Some(e) = &self.editor {
@@ -6962,6 +6995,7 @@ fn check_components(
                 ("code", l.code.is_some()),
                 ("diff", l.diff.is_some()),
                 ("editor", l.editor.is_some()),
+                ("answer", l.answer.is_some()),
             ]
             .into_iter()
             .filter(|(_, set)| *set)
@@ -7328,6 +7362,7 @@ impl Lens {
             code: spec.code.clone(),
             diff: spec.diff.clone(),
             editor: None,
+            answer: None,
             markdown: spec.markdown.clone(),
             form: spec.form.clone(),
             custom: None,
@@ -7394,6 +7429,9 @@ pub fn spec_problem(spec: &LensSpec) -> Option<String> {
              private extension that declares the component"
                 .into(),
         );
+    }
+    if spec.viz == LensViz::Answer {
+        return Some("an `answer` shows an answer; show its lens or spec instead".into());
     }
     if spec.viz == LensViz::Editor {
         return Some(
@@ -10608,6 +10646,32 @@ commands:
         }))
         .unwrap();
         assert!(spec_problem(&spec).unwrap().contains("saves as whoever"));
+    }
+
+    /// `answer` shows the answer its first row names; it needs the
+    /// URI's column, and an answer is never itself one.
+    #[test]
+    fn an_answer_lens_names_its_uri() {
+        let (_d, ext) = load_x(
+            &[
+                ("a", "title: A\nquery: SELECT 'oxplow:oxplow/answer?id=1' AS u, NULL AS k\nviz: answer\nanswer: { uri: u, kept: k }\n"),
+                ("noanswer", "title: N\nquery: SELECT 1\nviz: answer\n"),
+            ],
+            "",
+        );
+        let a = ext.lenses.iter().find(|l| l.slug == "a").expect("a loads");
+        assert_eq!(a.answer.as_ref().and_then(|x| x.kept.as_deref()), Some("k"));
+        assert!(!a.fills);
+        assert!(!ext.lenses.iter().any(|l| l.slug == "noanswer"));
+        assert!(ext
+            .errors
+            .join("\n")
+            .contains("`answer: { uri: <column> }`"));
+        let spec: LensSpec = serde_json::from_value(serde_json::json!({
+            "title": "A", "query": "SELECT 1", "viz": "answer"
+        }))
+        .unwrap();
+        assert!(spec_problem(&spec).is_some());
     }
 
     /// A param's `options` are the values it takes: its default

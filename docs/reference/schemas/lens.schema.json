@@ -146,6 +146,17 @@
       ],
       "default": null
     },
+    "answer": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/LensAnswer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
     "markdown": {
       "anyOf": [
         {
@@ -383,6 +394,11 @@
           "description": "The pending proposals an agent raised, each with Approve and\nDecline: core's consent component. The viz reads\n`v_command_proposal` itself and decides through the person-only\npath, so the lens needs no query beyond `SELECT 1`; its params\n`thread` (a thread ref) and `setting` (a config key) narrow the\nlist.",
           "type": "string",
           "const": "approvals"
+        },
+        {
+          "description": "An agent's answer (`answer.uri`, the first row's: an\n`oxplow/answer` URI), re-run live, with Keep This until it is kept\n(`answer.kept`: the lens it became) — core's component for what\n`oxplow_show_lens` showed.",
+          "type": "string",
+          "const": "answer"
         },
         {
           "description": "The extension's own web component (`custom.component`), in\na sandboxed frame; its rows are what it shows and what an agent\nreads (as a table).",
@@ -1136,6 +1152,26 @@
         },
         "lines": {
           "description": "A column holding `12` (or `12-40`: its start): the line revealed.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false
+    },
+    "LensAnswer": {
+      "description": "`answer` viz: the answer the first row names, and the lens it was kept\nas (once it was).",
+      "type": "object",
+      "properties": {
+        "uri": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kept": {
           "type": [
             "string",
             "null"

@@ -205,7 +205,7 @@ pub const MANIFEST: &[Capability] = &[
     agent("oxplow_show_lens"),
     ui(
         "run_answer",
-        "runs an answer for the Answers strip; `show_lens` gives the agent its text",
+        "runs an answer for its page (the `answer` viz); `show_lens` gives the agent its text",
     ),
     ui(
         "lens_form",

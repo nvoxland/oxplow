@@ -210,7 +210,7 @@ The component owns:
   (`document.fonts.load`, tsk1042). xterm measures its cells when it opens
   and again only *after* a resize, so a terminal opened while JetBrains
   Mono was still loading measured the fallback's 15px rows. Its next fit —
-  the Answers strip appearing, which changes the pane but not the window —
+  a strip appearing above it, which changes the pane but not the window —
   sized the rows by those, then re-measured at 17px and overflowed the
   pane, input line below the fold. (A window resize re-measured on its
   own, which is why it looked fine after one.) The e2e holds the font back
