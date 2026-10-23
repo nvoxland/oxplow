@@ -6,16 +6,45 @@ context menus / decorations / overlays, and the LSP bridge. For the
 broader "Monaco at the core, custom shell around it" rationale, see
 `architecture.md`.
 
-## Single editor instance, models per file
+## The editor viz
 
-`apps/desktop/src/components/EditorPane.tsx` mounts **one** Monaco editor and
-swaps `editor.model` whenever `filePath` changes. Models are keyed by
-URI via `streamFileUri(stream, path)` (see `apps/desktop/src/lsp.ts`), so opening
-the same file across tabs hits the same model and edit history.
+The working tree's file opens on oxplow-foundation's `editor` page, a
+lens (`lenses/editor.yaml`: params `uri`, `path`, `lines` a filter)
+over the kit's **`editor` viz** (`lens/EditorViz.tsx`, `editor: { path,
+lines }`; extensions.md "Lenses"). The viz opens the file's buffer,
+draws `EditorPane` over it, lands on `#lines=`'s start, and tells its
+tab what it edits (`useTabEditing`: the ● on the tab, File → Save and
+Find, the tab cap never closing it). Saving runs `oxplow.file.save`. A
+path that isn't a file says so in the page. Go to Definition, Reveal
+commit and Compare with Clipboard open their pages in their own tabs
+(the compare's two texts as the new entry's history state). An agent
+reads an editor lens as the file as saved (`lens_text`: unsaved edits
+stay in the window), and an answer is never an editor (`spec_problem`).
 
-This avoids the cost (and visual flicker) of rebuilding the editor on
-every tab switch — the parent `CenterTabs` keeps `EditorPane` mounted
-in the same slot and only changes the `filePath` prop.
+## Buffers: one model per open file
+
+`apps/desktop/src/editor/buffers.ts` holds the working tree's open files,
+one **buffer** per (stream, path): the saved text, the draft, its state
+(`loading` / `ready` / `missing` / `error`), and a disk `conflict`.
+`editor/openFiles.ts` is the window's one store (`buffers`): it reads
+through `read_at` at the working revision, saves through
+`oxplow.file.save` (an agent's Save for its call), and makes a **Monaco
+model per buffer** at `streamFileUri(stream, path)`. The model *is* the
+draft: typing, and an LSP edit to a file no editor shows, are edits to
+it, and the store follows them. Every editor of the file shares the
+model and its undo history; an `EditorPane` only `setModel`s it.
+
+- **Buffers follow the tabs.** `App.tsx` calls `buffers.retainOnly` with
+  every file a tab of any thread shows (any step of its history): the
+  rest close and their models are disposed. A closed tab with unsaved
+  edits is `stash`ed first, and the toast's Undo `restore`s it.
+- **The worktree is followed per stream** (`watch`): a file changed on
+  disk (debounced 75 ms) is read again — a clean buffer takes it, a
+  draft gets a `conflict` the viz asks about (Reload from disk / Keep my
+  changes); a `file.renamed` / `file.deleted` from the event log
+  (`watchFileEvents.ts`, whoever ran it) moves or closes the buffers.
+- **A stream's language services start with its first buffer** and stop
+  with its last (`StreamServices`: the LSP mirror, "LSP bridge").
 
 The Monaco host `<div>` carries `data-testid="monaco-host"` and
 `data-file-path=<currentFilePath>` so test harnesses can assert which
@@ -43,16 +72,12 @@ keydown before it propagates to the webview. If you ever see save
 firing twice, something changed in that dispatch order — investigate
 before deleting either binding.
 
-## Closing a dirty tab prompts before discarding
+## Closing a dirty tab offers Undo
 
-`handleCloseOpenFile` in `apps/desktop/src/App.tsx` checks `draftContent !==
-savedContent` before calling `closeOpenFile`, and pops a
-`window.confirm` when the tab is dirty. Cancelling the confirm leaves
-the tab and its draft intact. The other call to `closeOpenFile` in
-App.tsx is an error-path cleanup (open-file IPC failed) — that one
-intentionally skips the prompt because there's nothing worth saving
-yet. Auto-close via `enforceOpenFileLimit` already refuses to discard
-dirty tabs, so all three close paths are now consistent.
+`handleCloseOpenFile` in `apps/desktop/src/App.tsx` stashes a dirty
+buffer (`buffers.stash`), closes the tab at once, and shows a toast
+whose Undo restores the buffer and reopens the tab with the draft. The
+tab cap (`evictions`) never closes a tab whose page is dirty.
 
 ## Custom context menu
 
@@ -313,24 +338,29 @@ native application; anything touching a non-open file (and any LSP
 `oxplow.lsp.applyCodeAction`, which applies the edit then forwards
 the command to `workspace/executeCommand`. Server-initiated
 `workspace/applyEdit` arrives as an `applyEditRequest` event and is
-applied by the stream's mounted editor (see `.context/lsp.md`).
+applied for the stream by its mirror (see `.context/lsp.md`).
 
-The **client lifecycle** itself lives in
-`apps/desktop/src/components/useLspClients.ts` (a hook EditorPane mounts):
-the per-language `LspClient` cache + `ensureLspClient`, diagnostics →
-Monaco markers (`markerOwnerRef`), the document sync (`didOpen` /
-`didChange` / `didClose` / `didSave`), the install-suggestion state +
-`installSuggested` flow, and disposal on both stream-switch and unmount.
+The **client lifecycle** is the stream's **LSP mirror**
+(`apps/desktop/src/editor/lspMirror.ts`), the buffer store's
+`StreamServices` for it: one per stream, started with its first buffer
+and stopped with its last, whichever editors (if any) show the files.
+It owns the stream's per-language `LspClient`s, sets diagnostics as
+markers on the file's model, and syncs documents as the **buffers** do:
+`didOpen` when a buffer whose language has a server opens (or when the
+server appears: `subscribeLspServers`), `didChange` on each edit,
+`didSave` on a save, `didClose` (markers cleared) on a close.
 `didChange` rides `DocumentSyncTracker`
 (`apps/desktop/src/lsp-document-sync.ts`): per-path **monotonic** LSP
 versions (Monaco's `getVersionId` resets on model swaps — don't use it)
-with a ~200ms debounce; the hook's `flushPendingChanges(path)` must be
-called before `didSave` and before any positional request so the server
-never answers against stale text. EditorPane keeps the Monaco editor +
-provider registration and calls the hook's `ensureLspClient`; the shared
-status banner (`lspStatus`) stays in EditorPane because blame +
-go-to-definition also write to it, so the hook takes `setLspStatus` as
-a param.
+with a ~200ms debounce; `mirror.flush(path)` must be called before any
+positional request so the server never answers against stale text (a
+save flushes first itself). Each language's status (`status`,
+`subscribe`) is what the editors showing it put in their banner, beside
+their own word (blame, Go to Definition); `restart(lang)` drops a
+language's client after an install. The providers are registered once,
+when Monaco first loads (`loadMonaco` in `editor/openFiles.ts`), and
+each asks for the model's stream by its URI — so every editor of every
+stream is served by one set, never one per pane.
 
 Language eligibility is **data-driven**: `hasLspServer(languageId)`
 (`apps/desktop/src/lsp-servers-store.ts`, backed by `list_lsp_servers`,

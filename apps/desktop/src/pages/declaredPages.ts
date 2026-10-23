@@ -8,10 +8,9 @@ import type { PagePayload } from "../tabs/pageRefs.js";
 import { extPageUri, pageUri as corePageRef } from "../uri/uri.js";
 
 /// The built-in renderers whose bodies draw on the window's own state
-/// (`App.tsx` `appRenderers`): the editor's buffers, the thread's sessions.
+/// (`App.tsx` `appRenderers`): the thread's sessions.
 export const APP_RENDERERS = [
   "agent-session",
-  "editor",
   "lens",
 ] as const;
 

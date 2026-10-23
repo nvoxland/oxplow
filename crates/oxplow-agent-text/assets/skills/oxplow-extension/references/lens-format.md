@@ -95,6 +95,9 @@ empty: Nothing is waiting on you.
   - `diff` shows the first row's file between two revisions, at full
     size: `diff: { path: <column>, from: <column>, to: <column>, lines:
     <optional>, base: <optional: the older side's name in the header> }`. Several files are `hunks`.
+  - `editor` edits the first row's working-tree file at full size:
+    `editor: { path: <column>, lines: <optional column holding 12> }`.
+    The person saves it; an answer (`oxplow_show_lens`) can't be one.
   - `board` draws the groups as columns of cards: `group: { by:
     <column>, values: [<the columns in order>] }`.
   - `document` is a wiki-style page of sections: `sections: [...]`. See

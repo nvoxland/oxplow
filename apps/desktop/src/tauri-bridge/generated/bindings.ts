@@ -351,11 +351,6 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listFileSnapshots: (path: string) => typedError<FileSnapshot[], IpcError_Serialize>(__TAURI_INVOKE("list_file_snapshots", { path })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	listSnapshotOps: (streamId: StreamId, limit: number | null) => typedError<SnapshotOp[], IpcError_Serialize>(__TAURI_INVOKE("list_snapshot_ops", { streamId, limit })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -3582,6 +3577,16 @@ export type LensDiff = {
 	base?: string | null,
 };
 
+/**
+ *  `editor` viz: the working tree's file the first row names, and the
+ *  lines it reveals.
+ */
+export type LensEditor = {
+	path: string | null,
+	/**  A column holding `12` (or `12-40`: its start): the line revealed. */
+	lines?: string | null,
+};
+
 /**  `form` viz: the command it submits and the values it starts from. */
 export type LensForm = LensForm_Serialize | LensForm_Deserialize;
 
@@ -4204,6 +4209,12 @@ export type LensViz =
  */
 "diff" | 
 /**
+ *  The working tree's file `editor.path` (the first row's), edited at
+ *  full size: its buffer shared with every tab showing it, saved
+ *  through `oxplow.file.save`, `editor.lines` revealed.
+ */
+"editor" | 
+/**
  *  Per row, the diff of the file `hunks.path` between the revisions
  *  `hunks.from` and `hunks.to` (`working`, `snap:<id>`,
  *  `<vcs>:<rev>`), read-only.
@@ -4258,6 +4269,7 @@ export type Lens_Deserialize = {
 	hunks: LensHunks | null,
 	code: LensCode | null,
 	diff: LensDiff | null,
+	editor: LensEditor | null,
 	markdown: LensMarkdown | null,
 	form: LensForm_Deserialize | null,
 	/**  For `custom`: the component and its props. */
@@ -4338,6 +4350,7 @@ export type Lens_Serialize = {
 	hunks: LensHunks | null,
 	code: LensCode | null,
 	diff: LensDiff | null,
+	editor: LensEditor | null,
 	markdown: LensMarkdown | null,
 	form: LensForm_Serialize | null,
 	/**  For `custom`: the component and its props. */

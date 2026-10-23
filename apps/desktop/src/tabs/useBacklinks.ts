@@ -14,8 +14,7 @@ import type { BacklinkEntry } from "./backlinkTypes.js";
  *
  * Replaces the old in-memory `computeBacklinks` indexer + per-kind
  * `appPageBacklinks` providers — every page kind goes through the
- * same code path now, including FilePage (which used to render an
- * empty list because it never wired the indexer).
+ * same code path now.
  */
 export function useBacklinks(target: TabRef): BacklinkEntry[] {
   const [entries, setEntries] = useState<BacklinkEntry[]>([]);

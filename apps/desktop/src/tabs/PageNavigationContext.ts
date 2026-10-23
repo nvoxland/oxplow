@@ -18,6 +18,9 @@ export interface NavigateOptions {
   /** In place of the current page, which leaves history: Back won't
    *  return to it (a submitted form gives way to what it made). */
   replace?: boolean;
+  /** The new entry's history state: what it shows that is no address
+   *  (a compare's two texts). With `newTab`. */
+  state?: Record<string, unknown>;
 }
 
 export interface BookmarkBinding {
@@ -35,6 +38,8 @@ export interface TabEditing {
   dirty: boolean;
   /** Save them (the menu's Save, Cmd/Ctrl+S outside the body). */
   save(): void;
+  /** Find in what it edits (the menu's Find), when it can. */
+  find?(): void;
 }
 
 export interface PageNavigation {
@@ -156,14 +161,17 @@ export function usePageTitle(title: string | null | undefined): void {
  * from the tab cap. The latest `save` is the one run. A no-op outside a
  * tab.
  */
-export function useTabEditing({ dirty, save }: TabEditing): void {
+export function useTabEditing({ dirty, save, find }: TabEditing): void {
   const set = useContext(PageNavigationContext)?.setEditing;
   const saveRef = useRef(save);
   saveRef.current = save;
+  const findRef = useRef(find);
+  findRef.current = find;
+  const finds = !!find;
   useEffect(() => {
     if (!set) return;
-    set({ dirty, save: () => saveRef.current() });
-  }, [set, dirty]);
+    set({ dirty, save: () => saveRef.current(), ...(finds ? { find: () => findRef.current?.() } : {}) });
+  }, [set, dirty, finds]);
   useEffect(() => {
     if (!set) return;
     return () => set(null);

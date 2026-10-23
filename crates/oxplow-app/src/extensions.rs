@@ -114,6 +114,10 @@ pub enum LensViz {
     /// `diff.to`, at full size, read-only; `diff.lines` revealed on the
     /// newer side.
     Diff,
+    /// The working tree's file `editor.path` (the first row's), edited at
+    /// full size: its buffer shared with every tab showing it, saved
+    /// through `oxplow.file.save`, `editor.lines` revealed.
+    Editor,
     /// Per row, the diff of the file `hunks.path` between the revisions
     /// `hunks.from` and `hunks.to` (`working`, `snap:<id>`,
     /// `<vcs>:<rev>`), read-only.
@@ -140,7 +144,7 @@ impl LensViz {
     /// It takes its page's whole height (a file, a diff): the page draws
     /// it filling the body, its title in the chrome.
     pub fn fills(self) -> bool {
-        matches!(self, LensViz::Code | LensViz::Diff)
+        matches!(self, LensViz::Code | LensViz::Diff | LensViz::Editor)
     }
 }
 
@@ -623,6 +627,19 @@ pub struct LensCode {
     /// Several rows' editors scroll together, each from its marked lines.
     #[serde(default)]
     pub sync: bool,
+}
+
+/// `editor` viz: the working tree's file the first row names, and the
+/// lines it reveals.
+#[derive(
+    Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
+)]
+#[serde(deny_unknown_fields)]
+pub struct LensEditor {
+    pub path: Option<String>,
+    /// A column holding `12` (or `12-40`: its start): the line revealed.
+    #[serde(default)]
+    pub lines: Option<String>,
 }
 
 /// `diff` viz: the first row's file, between two revisions, at full size.
@@ -1389,6 +1406,8 @@ struct LensFile {
     code: Option<LensCode>,
     #[serde(default)]
     diff: Option<LensDiff>,
+    #[serde(default)]
+    editor: Option<LensEditor>,
     #[serde(default)]
     markdown: Option<LensMarkdown>,
     #[serde(default)]
@@ -2534,6 +2553,7 @@ pub struct Lens {
     pub hunks: Option<LensHunks>,
     pub code: Option<LensCode>,
     pub diff: Option<LensDiff>,
+    pub editor: Option<LensEditor>,
     pub markdown: Option<LensMarkdown>,
     pub form: Option<LensForm>,
     /// For `custom`: the component and its props.
@@ -4581,6 +4601,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                 hunks: l.hunks,
                 code: l.code,
                 diff: l.diff,
+                editor: l.editor,
                 markdown: l.markdown,
                 form: l.form,
                 custom: l.custom,
@@ -5793,6 +5814,10 @@ fn shape_problem(
             let c = lens.code.clone().unwrap_or_default();
             need("code", &[("path", &c.path), ("revision", &c.revision)])
         }
+        LensViz::Editor => {
+            let e = lens.editor.clone().unwrap_or_default();
+            need("editor", &[("path", &e.path)])
+        }
         LensViz::Diff => {
             let d = lens.diff.clone().unwrap_or_default();
             need(
@@ -6230,6 +6255,14 @@ impl Lens {
                     .into_iter()
                     .flatten()
                     .map(|k| ("code", k)),
+            );
+        }
+        if let Some(e) = &self.editor {
+            out.extend(
+                [&e.path, &e.lines]
+                    .into_iter()
+                    .flatten()
+                    .map(|k| ("editor", k)),
             );
         }
         if let Some(d) = &self.diff {
@@ -6971,6 +7004,7 @@ fn check_components(
                 ("hunks", l.hunks.is_some()),
                 ("code", l.code.is_some()),
                 ("diff", l.diff.is_some()),
+                ("editor", l.editor.is_some()),
             ]
             .into_iter()
             .filter(|(_, set)| *set)
@@ -7336,6 +7370,7 @@ impl Lens {
             hunks: spec.hunks.clone(),
             code: spec.code.clone(),
             diff: spec.diff.clone(),
+            editor: None,
             markdown: spec.markdown.clone(),
             form: spec.form.clone(),
             custom: None,
@@ -7400,6 +7435,13 @@ pub fn spec_problem(spec: &LensSpec) -> Option<String> {
         return Some(
             "a `custom` lens renders an extension's component; write it as a lens file in a \
              private extension that declares the component"
+                .into(),
+        );
+    }
+    if spec.viz == LensViz::Editor {
+        return Some(
+            "an `editor` saves as whoever presses Save, and an answer never writes as the \
+             person; show the file with `code` at `working`"
                 .into(),
         );
     }
@@ -10639,6 +10681,37 @@ commands:
             errs.contains("`diff: { path: <column>, from: <column>, to: <column> }`"),
             "{errs}"
         );
+    }
+
+    /// `editor` edits the working tree's file its first row names (its
+    /// `lines` revealed), filling the page; it needs the path's column,
+    /// and an agent's answer is never one (it would save as the person).
+    #[test]
+    fn an_editor_lens_names_its_file_and_fills() {
+        let (_d, ext) = load_x(
+            &[
+                ("e", "title: E\nquery: SELECT 'src/a.rs' AS p, '3' AS l\nviz: editor\neditor: { path: p, lines: l }\n"),
+                ("noeditor", "title: N\nquery: SELECT 1\nviz: editor\n"),
+            ],
+            "",
+        );
+        let e = ext.lenses.iter().find(|l| l.slug == "e").expect("e loads");
+        assert_eq!(
+            e.editor,
+            Some(LensEditor {
+                path: Some("p".into()),
+                lines: Some("l".into()),
+            })
+        );
+        assert!(e.fills);
+        assert!(!ext.lenses.iter().any(|l| l.slug == "noeditor"));
+        let errs = ext.errors.join("\n");
+        assert!(errs.contains("`editor: { path: <column> }`"), "{errs}");
+        let spec: LensSpec = serde_json::from_value(serde_json::json!({
+            "title": "E", "query": "SELECT 'a' AS p", "viz": "editor"
+        }))
+        .unwrap();
+        assert!(spec_problem(&spec).unwrap().contains("saves as whoever"));
     }
 
     /// A param's `options` are the values it takes: its default

@@ -93,6 +93,6 @@ test("a file URI with a rev opens the read-only viewer, and without one the edit
   // The foundation's `file-viewer` lens: a `code` viz of the file at the revision.
   await expect(page.getByTestId("lens-code")).toContainText("koala");
   await navigate(daemon, "oxplow:oxplow/file?path=koala.txt");
-  await expect(page.getByTestId("page-file")).toBeVisible();
-  await expect(page.getByTestId("page-file").locator(".monaco-editor").first()).toBeVisible();
+  await expect(page.getByTestId("lens-editor")).toBeVisible();
+  await expect(page.getByTestId("lens-editor").locator(".monaco-editor").first()).toBeVisible();
 });

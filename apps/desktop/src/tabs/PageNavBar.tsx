@@ -65,13 +65,6 @@ export interface PageNavBarProps {
     count: number;
     body: ReactNode;
   };
-  /** Optional snapshots dropdown — same shape, used by FilePage to
-   *  expose this file's per-snapshot history without crowding the
-   *  outbound (page-ref) panel. */
-  snapshots?: {
-    count: number;
-    body: ReactNode;
-  };
   /** Optional self-contained comment navigator (count + prev/next jump
    *  + orphaned list) for comment-bearing pages. Rendered before the
    *  backlinks dropdown. */
@@ -105,7 +98,6 @@ export function PageNavBar({
   bookmark,
   backlinks,
   outbound,
-  snapshots,
   comments,
   actions,
   pin,
@@ -114,7 +106,6 @@ export function PageNavBar({
 }: PageNavBarProps) {
   const [backlinksOpen, setBacklinksOpen] = useState(false);
   const [outboundOpen, setOutboundOpen] = useState(false);
-  const [snapshotsOpen, setSnapshotsOpen] = useState(false);
   const [scopeOpen, setScopeOpen] = useState(false);
   const [siblingListOpen, setSiblingListOpen] = useState(false);
   const siblingPopoverRef = useRef<HTMLDivElement | null>(null);
@@ -524,47 +515,6 @@ export function PageNavBar({
               }}
             >
               {outbound.body}
-            </div>
-          ) : null}
-        </div>
-      ) : null}
-
-      {snapshots ? (
-        <div style={{ position: "relative" }}>
-          <button
-            type="button"
-            data-testid="page-nav-snapshots-toggle"
-            onClick={() => setSnapshotsOpen((v) => !v)}
-            disabled={snapshots.count === 0}
-            aria-expanded={snapshotsOpen}
-            style={{
-              ...navButtonStyle(snapshots.count > 0),
-              padding: "4px 10px",
-              fontSize: "var(--text-xs)",
-            }}
-          >
-            Snapshots ({snapshots.count}) {snapshotsOpen ? "▾" : "▸"}
-          </button>
-          {snapshotsOpen && snapshots.count > 0 ? (
-            <div
-              data-testid="page-nav-snapshots-popover"
-              style={{
-                position: "absolute",
-                top: "calc(100% + 4px)",
-                right: 0,
-                minWidth: 280,
-                maxWidth: 480,
-                maxHeight: 360,
-                overflow: "auto",
-                background: "var(--surface-card)",
-                border: "1px solid var(--border-subtle)",
-                borderRadius: 6,
-                boxShadow: "0 4px 12px rgba(0,0,0,0.18)",
-                padding: 8,
-                zIndex: 10,
-              }}
-            >
-              {snapshots.body}
             </div>
           ) : null}
         </div>

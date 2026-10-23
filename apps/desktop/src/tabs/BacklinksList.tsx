@@ -6,34 +6,13 @@ import type { MenuItem } from "../menu.js";
 import { useContextMenu } from "../components/useRowContextMenu.js";
 import type { BacklinkEntry } from "./backlinkTypes.js";
 import { kindForTabId, PageKindIcon } from "../pageKinds.js";
-import { commitUri, idOf, snapshotUri, typeOf } from "../uri/uri.js";
+import { commitUri, idOf, typeOf } from "../uri/uri.js";
 import { openRefInWindow } from "./openRef.js";
 import { refTargetNow } from "./refOpener.js";
 import { setContextRefDrag } from "../agent-context-dnd.js";
 import type { ContextRef } from "../agent-context-ref.js";
 import { useOptionalPageNavigation } from "./PageNavigationContext.js";
 import type { Origin } from "./session.js";
-
-/**
- * A backlink entry that points at a snapshot. Snapshots aren't a Page
- * kind today (there's no SnapshotPage); the host supplies an
- * `onOpenSnapshot` callback that mounts `SnapshotDetailSlideover` over
- * its own page chrome instead of navigating away. The entry carries
- * just enough metadata to render the row and prefill the slideover
- * header so it doesn't flash on open.
- */
-export interface SnapshotBacklinkEntry {
-  kind: "snapshot";
-  snapshotId: string;
-  label: string;
-  /** Optional pre-known source ("effort-end", "effort-start", …) for header. */
-  source?: string;
-  /** Optional pre-known free-form label for the header. */
-  snapshotLabel?: string | null;
-  /** Optional related tasks id (for the "Open task" affordance in the slideover). */
-  tasksId?: number | null;
-  subtitle?: string;
-}
 
 /**
  * Same shape for commits. Backlinks pointing at a git commit open the
@@ -51,9 +30,6 @@ export interface CommitBacklinkEntry {
 
 export interface BacklinksListProps {
   entries: BacklinkEntry[];
-  /** Optional snapshot-typed backlinks. Click opens the host's
-   *  SnapshotDetailSlideover. */
-  snapshotEntries?: SnapshotBacklinkEntry[];
   /** Optional commit-typed backlinks. Click opens the host's
    *  CommitDetailSlideover. */
   commitEntries?: CommitBacklinkEntry[];
@@ -61,9 +37,6 @@ export interface BacklinksListProps {
    *  Without them — or with none for a row — right-click opens the page in
    *  a new tab. */
   entryMenu?(entry: BacklinkEntry): MenuItem[];
-  /** Required when `snapshotEntries` is provided. Receives the snapshot
-   *  id + a small descriptor so the host can route into a slideover. */
-  onOpenSnapshot?(payload: { snapshotId: string; label?: string | null; source?: string; tasksId?: number | null }): void;
   /** Required when `commitEntries` is provided. */
   onOpenCommit?(payload: { sha: string; subject?: string }): void;
 }
@@ -96,17 +69,15 @@ export function refToContextRef(ref: string): ContextRef | null {
  */
 export function BacklinksList({
   entries,
-  snapshotEntries = [],
   commitEntries = [],
   entryMenu,
-  onOpenSnapshot,
   onOpenCommit,
 }: BacklinksListProps) {
   const ctxNav = useOptionalPageNavigation();
   const openRef = ctxNav?.openRef ?? openRefInWindow;
   const { open: openMenu, menu } = useContextMenu();
-  // Pre-compute the origin (the regular `entries` only — snapshot
-  // and commit entries open slideovers and don't participate in tab-
+  // Pre-compute the origin (the regular `entries` only — commit
+  // entries open slideovers and don't participate in tab-
   // level navigation). The destination page receives this as its
   // `origin` and steps through it by the row's index.
   const originList = useMemo<Origin>(
@@ -120,7 +91,7 @@ export function BacklinksList({
     }),
     [entries],
   );
-  const totalEntries = entries.length + snapshotEntries.length + commitEntries.length;
+  const totalEntries = entries.length + commitEntries.length;
   if (totalEntries === 0) {
     return (
       <EmptyState
@@ -133,31 +104,6 @@ export function BacklinksList({
   }
   return (
     <div data-testid="backlinks-list" style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      {snapshotEntries.map((entry) => (
-        <button
-          key={snapshotUri(entry.snapshotId)}
-          type="button"
-          data-testid={`backlinks-snapshot-${entry.snapshotId}`}
-          onClick={() => onOpenSnapshot?.({
-            snapshotId: entry.snapshotId,
-            label: entry.snapshotLabel ?? null,
-            source: entry.source,
-            tasksId: entry.tasksId ?? null,
-          })}
-          disabled={!onOpenSnapshot}
-          style={listButtonStyle}
-        >
-          <PageKindIcon kind="snapshot" size={14} style={{ color: "var(--text-secondary)", flexShrink: 0 }} />
-          <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {entry.label}
-          </span>
-          {entry.subtitle ? (
-            <span style={{ color: "var(--text-secondary)", fontSize: 11 }}>{entry.subtitle}</span>
-          ) : (
-            <span style={{ color: "var(--text-secondary)", fontSize: 11 }}>snapshot</span>
-          )}
-        </button>
-      ))}
       {commitEntries.map((entry) => (
         <button
           key={commitUri(entry.sha)}

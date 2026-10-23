@@ -47,9 +47,6 @@ export interface PageNavBarConfig {
    *  when they want to surface what they point AT in addition to
    *  what points at them. */
   outbound?: { count: number; body: ReactNode };
-  /** Optional snapshots dropdown — same shape. FilePage uses this
-   *  to expose the file's per-snapshot history. */
-  snapshots?: { count: number; body: ReactNode };
   /** Optional comment navigator node (count + prev/next + orphaned
    *  list) for comment-bearing pages. */
   comments?: ReactNode;
@@ -97,10 +94,6 @@ export interface PageProps {
    *  sibling dropdown next to Backlinks in the nav bar. Sibling to
    *  backlinks; same shape. */
   outbound?: { count: number; body: ReactNode };
-  /** Optional snapshots list — for pages where per-snapshot
-   *  history is meaningful (currently just FilePage). Renders as a
-   *  sibling dropdown next to Backlinks/Outbound. */
-  snapshots?: { count: number; body: ReactNode };
   /** Optional comment navigator node, rendered in the nav bar before
    *  Backlinks. Comment-bearing pages (file/wiki/task) pass a
    *  `<CommentNavigator targetKind targetId />`. */
@@ -160,7 +153,7 @@ export const pageH1Style: CSSProperties = {
  * The chrome reads only semantic CSS variables. Both light and dark
  * themes are styled by `public/index.html`.
  */
-export function Page({ title, titleIcon, kind, chips: ownChips, actions, pin, children, backlinks, outbound, snapshots, commentsNav, navBar, testId, titleInBody = false, width = "full", fill = false, rightRail, rightRailTitle }: PageProps) {
+export function Page({ title, titleIcon, kind, chips: ownChips, actions, pin, children, backlinks, outbound, commentsNav, navBar, testId, titleInBody = false, width = "full", fill = false, rightRail, rightRailTitle }: PageProps) {
   const [backlinksOpen, setBacklinksOpen] = useState(false);
   // Pages that don't pass an explicit `navBar` prop still get one
   // when rendered inside a PageNavigationContext provider — that's
@@ -249,7 +242,6 @@ export function Page({ title, titleIcon, kind, chips: ownChips, actions, pin, ch
             ? { count: backlinksCount ?? 0, body: backlinksBody }
             : undefined),
         outbound: baseNavBar.outbound ?? outbound,
-        snapshots: baseNavBar.snapshots ?? snapshots,
         comments: baseNavBar.comments ?? commentsNav,
       }
     : undefined;
@@ -280,7 +272,6 @@ export function Page({ title, titleIcon, kind, chips: ownChips, actions, pin, ch
           bookmark={effectiveNavBar.bookmark}
           backlinks={effectiveNavBar.backlinks}
           outbound={effectiveNavBar.outbound}
-          snapshots={effectiveNavBar.snapshots}
           comments={effectiveNavBar.comments}
           actions={actions}
           pin={pin}

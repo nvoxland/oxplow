@@ -571,6 +571,7 @@ export function adHocLens(query: string, viz: LensViz, chart: LensChart | null =
     depth: null,
     parts: [],
     view: null,
+    editor: null,
     // Drawn in a tile or under an editor, never filling a page.
     fills: false,
     launcherCategory: null,
@@ -889,6 +890,15 @@ export function diffRow(lens: Lens, result: SqlQueryResult): DiffSpec | null {
   const base = at(lens.diff?.base);
   const baseLabel = typeof base === "string" && base ? base : shortRevisionLabel(from);
   return { path, leftVersion: from, rightVersion: to, baseLabel, ...(line ? { revealLine: line } : {}) };
+}
+
+/** `editor` viz: the working tree's file the first row names and the line
+ *  it lands on (its `lines`' start); null when the row names no file. */
+export function editorRow(lens: Lens, result: SqlQueryResult): { path: string; line: number | null } | null {
+  const at = (column: string | null | undefined) => columnValues(result, column)?.[0];
+  const path = at(lens.editor?.path);
+  if (typeof path !== "string" || !path) return null;
+  return { path, line: parseLines(at(lens.editor?.lines))?.start ?? null };
 }
 
 /** `bar` viz rows: `chart.x` labels and `chart.y` values (NULL → 0). */

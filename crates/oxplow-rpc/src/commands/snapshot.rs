@@ -31,22 +31,6 @@ fn current_filter(svc: &Services) -> WorkspaceFilter {
         .unwrap_or_default()
 }
 
-/// Every captured row of one file path, newest first (`file_snapshot` rows).
-pub async fn list_file_snapshots(
-    svc: &Services,
-    path: String,
-) -> Result<Vec<FileSnapshot>, IpcError> {
-    // Whole-path filter: if the queried path itself is currently
-    // marked generated, return an empty history rather than the
-    // pre-config captures. The UI shouldn't surface a "history" view
-    // for a path the user has declared they don't care about.
-    let filter = current_filter(svc);
-    if filter.ignore(Path::new(&path), false) {
-        return Ok(Vec::new());
-    }
-    Ok(svc.snapshot_store.list_for_path(&path).await?)
-}
-
 /// The stream's snapshot operation log, newest first: every take — a new
 /// snapshot or one that found the tree unchanged — with its trigger,
 /// anchors, timing and budget (P2.11).
@@ -125,20 +109,4 @@ pub async fn get_file_snapshot(
     file_snapshot_id: FileSnapshotId,
 ) -> Result<Option<FileSnapshot>, IpcError> {
     Ok(svc.snapshot_store.get(file_snapshot_id.value()).await?)
-}
-
-#[cfg(test)]
-mod tests {
-    #[tokio::test]
-    async fn list_file_snapshots_dispatches() {
-        let (svc, _dir) = crate::test_support::services().await;
-        let out = crate::dispatch(
-            "list_file_snapshots",
-            serde_json::json!({ "path": "src/main.rs" }),
-            &svc,
-        )
-        .await
-        .unwrap();
-        assert!(out.is_array(), "expected a JSON array, got {out}");
-    }
 }

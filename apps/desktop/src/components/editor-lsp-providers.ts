@@ -11,7 +11,7 @@
 /// against stale text — the didChange debounce makes this load-bearing.
 
 import { allKnownLanguageIds } from "../editor-language.js";
-import type { LspClient } from "../lsp.js";
+import type { LspClientLike } from "../editor/lspMirror.js";
 import {
   completionResultToMonacoList,
   definitionResultToMonacoLocations,
@@ -31,16 +31,20 @@ import {
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
+/// Each dep is asked for the model a request is about, by its URI: the
+/// file's stream answers it (registered once, the providers serve every
+/// editor of every stream).
 export interface LspProviderDeps {
   hasServer(languageId: string): boolean;
-  getClient(languageId: string): LspClient;
+  getClient(uri: string, languageId: string): LspClientLike;
   /// Flush pending (debounced) didChange for the model's document.
   flushDoc(model: any): void;
-  /// Surface a status-banner message (skipped file ops, etc.).
-  setStatus(message: string | null): void;
+  /// Surface a status-banner message (skipped file ops, etc.) where the
+  /// file is shown.
+  setStatus(uri: string, message: string | null): void;
   /// Apply a normalized workspace edit across open models AND non-open
   /// files (read-modify-write through the workspace file IPC).
-  applyEdits(normalized: NormalizedWorkspaceEdit): Promise<ApplyWorkspaceEditResult>;
+  applyEdits(uri: string, normalized: NormalizedWorkspaceEdit): Promise<ApplyWorkspaceEditResult>;
 }
 
 /// Default completion trigger characters; covers member access,
@@ -68,17 +72,18 @@ export function registerLspProviders(monaco: any, deps: LspProviderDeps): void {
     "oxplow.lsp.applyCodeAction",
     (
       _accessor: unknown,
+      uri: string,
       languageId: string,
       normalized: NormalizedWorkspaceEdit | null,
       command: { command: string; arguments?: unknown[] } | null,
     ) => {
       void (async () => {
         if (normalized) {
-          reportApplyResult(deps, "code action", await deps.applyEdits(normalized));
+          reportApplyResult(deps, uri, "code action", await deps.applyEdits(uri, normalized));
         }
         if (command?.command) {
           await deps
-            .getClient(languageId)
+            .getClient(uri, languageId)
             .request("workspace/executeCommand", {
               command: command.command,
               arguments: command.arguments ?? [],
@@ -100,7 +105,7 @@ export function registerLspProviders(monaco: any, deps: LspProviderDeps): void {
         if (!active(model)) return null;
         deps.flushDoc(model);
         const result = await deps
-          .getClient(languageId)
+          .getClient(model.uri.toString(), languageId)
           .request<unknown>("textDocument/definition", positionParams(model, position));
         return definitionResultToMonacoLocations(monaco, result);
       },
@@ -111,7 +116,7 @@ export function registerLspProviders(monaco: any, deps: LspProviderDeps): void {
         if (!active(model)) return null;
         deps.flushDoc(model);
         const result = await deps
-          .getClient(languageId)
+          .getClient(model.uri.toString(), languageId)
           .request<any>("textDocument/hover", positionParams(model, position));
         if (!result?.contents) return null;
         return {
@@ -125,7 +130,7 @@ export function registerLspProviders(monaco: any, deps: LspProviderDeps): void {
       provideReferences: async (model: any, position: any) => {
         if (!active(model)) return [];
         deps.flushDoc(model);
-        const result = await deps.getClient(languageId).request<unknown[]>(
+        const result = await deps.getClient(model.uri.toString(), languageId).request<unknown[]>(
           "textDocument/references",
           {
             ...positionParams(model, position),
@@ -144,7 +149,7 @@ export function registerLspProviders(monaco: any, deps: LspProviderDeps): void {
         if (!active(model)) return { suggestions: [] };
         deps.flushDoc(model);
         const result = await deps
-          .getClient(languageId)
+          .getClient(model.uri.toString(), languageId)
           .request<unknown>("textDocument/completion", positionParams(model, position));
         const word = model.getWordUntilPosition(position);
         const defaultRange = new monaco.Range(
@@ -166,12 +171,12 @@ export function registerLspProviders(monaco: any, deps: LspProviderDeps): void {
       provideRenameEdits: async (model: any, position: any, newName: string) => {
         if (!active(model)) return { edits: [], rejectReason: "no language server" };
         deps.flushDoc(model);
-        const result = await deps.getClient(languageId).request<unknown>(
+        const result = await deps.getClient(model.uri.toString(), languageId).request<unknown>(
           "textDocument/rename",
           { ...positionParams(model, position), newName },
         );
         const normalized = normalizeWorkspaceEdit(result);
-        reportSkippedOps(deps, normalized);
+        reportSkippedOps(deps, model.uri.toString(), normalized);
         if (!normalized.files.length) {
           return { edits: [], rejectReason: "nothing to rename here" };
         }
@@ -185,8 +190,8 @@ export function registerLspProviders(monaco: any, deps: LspProviderDeps): void {
         );
         if (closed.length) {
           void deps
-            .applyEdits({ files: closed, skippedFileOps: 0 })
-            .then((applied) => reportApplyResult(deps, "rename", applied));
+            .applyEdits(model.uri.toString(), { files: closed, skippedFileOps: 0 })
+            .then((applied) => reportApplyResult(deps, model.uri.toString(), "rename", applied));
         }
         return toMonacoWorkspaceEdit(monaco, { files: open, skippedFileOps: 0 });
       },
@@ -196,7 +201,7 @@ export function registerLspProviders(monaco: any, deps: LspProviderDeps): void {
       provideCodeActions: async (model: any, range: any, context: any) => {
         if (!active(model)) return { actions: [], dispose() {} };
         deps.flushDoc(model);
-        const result = await deps.getClient(languageId).request<unknown>(
+        const result = await deps.getClient(model.uri.toString(), languageId).request<unknown>(
           "textDocument/codeAction",
           {
             textDocument: { uri: model.uri.toString() },
@@ -222,7 +227,7 @@ export function registerLspProviders(monaco: any, deps: LspProviderDeps): void {
           // Bare Command (no title+edit shape) → still offer it.
           if (typeof a.title !== "string") return [];
           const normalized = a.edit ? normalizeWorkspaceEdit(a.edit) : null;
-          if (normalized) reportSkippedOps(deps, normalized);
+          if (normalized) reportSkippedOps(deps, model.uri.toString(), normalized);
           // Edits confined to open models ride Monaco's native code-
           // action application; anything touching a non-open file is
           // deferred to the applyCodeAction command (runs on selection,
@@ -248,7 +253,7 @@ export function registerLspProviders(monaco: any, deps: LspProviderDeps): void {
                   ? {
                       id: "oxplow.lsp.applyCodeAction",
                       title: a.command?.title ?? a.title,
-                      arguments: [languageId, commandEdit, a.command ?? null],
+                      arguments: [model.uri.toString(), languageId, commandEdit, a.command ?? null],
                     }
                   : undefined,
             },
@@ -262,7 +267,7 @@ export function registerLspProviders(monaco: any, deps: LspProviderDeps): void {
       provideDocumentSymbols: async (model: any) => {
         if (!active(model)) return [];
         deps.flushDoc(model);
-        const result = await deps.getClient(languageId).request<unknown>(
+        const result = await deps.getClient(model.uri.toString(), languageId).request<unknown>(
           "textDocument/documentSymbol",
           { textDocument: { uri: model.uri.toString() } },
         );
@@ -272,9 +277,10 @@ export function registerLspProviders(monaco: any, deps: LspProviderDeps): void {
   }
 }
 
-function reportSkippedOps(deps: LspProviderDeps, normalized: NormalizedWorkspaceEdit): void {
+function reportSkippedOps(deps: LspProviderDeps, uri: string, normalized: NormalizedWorkspaceEdit): void {
   if (normalized.skippedFileOps > 0) {
     deps.setStatus(
+      uri,
       `LSP: skipped ${normalized.skippedFileOps} file create/rename/delete operation(s) — apply those manually`,
     );
   }
@@ -282,12 +288,13 @@ function reportSkippedOps(deps: LspProviderDeps, normalized: NormalizedWorkspace
 
 function reportApplyResult(
   deps: LspProviderDeps,
+  uri: string,
   what: string,
   result: ApplyWorkspaceEditResult,
 ): void {
   if (result.failures.length) {
-    deps.setStatus(`LSP ${what}: ${result.failures.length} file(s) failed — ${result.failures[0]}`);
+    deps.setStatus(uri, `LSP ${what}: ${result.failures.length} file(s) failed — ${result.failures[0]}`);
   } else if (result.appliedFiles > 0) {
-    deps.setStatus(`LSP ${what}: updated ${result.appliedFiles} file(s)`);
+    deps.setStatus(uri, `LSP ${what}: updated ${result.appliedFiles} file(s)`);
   }
 }

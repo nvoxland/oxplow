@@ -1,7 +1,7 @@
 //! The pages the required bundled extension declares as built-in
 //! components (`pages: [{ component: "oxplow:<name>" }]`): core React the
-//! kit can't express yet — routes (Tasks, Settings) and the renderers of
-//! oxplow's resources (the editor, a commit, a wiki page: `for:`). A
+//! kit can't express yet — routes (Settings, the Terminal) and the
+//! renderers of oxplow's resources (an agent session, a web page: `for:`). A
 //! stepping stone, not a kind of page: each one leaves this table when its
 //! page becomes a lens or a custom page, and nothing joins it (the
 //! renderers joined once, when a resource stopped picking its page in
@@ -12,7 +12,6 @@
 /// The built-in page components, by name.
 pub const BUILT_IN_PAGES: &[&str] = &[
     "agent-session",
-    "editor",
     "external-url",
     "lens",
     "resource",

@@ -91,15 +91,6 @@ async fn top_visited_pages_empty_for_fresh_project() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn list_file_snapshots_empty_for_unknown_path() {
-    let app = TestApp::build().await;
-    let v = commands::generated::list_file_snapshots(app.state(), "nope.txt".into())
-        .await
-        .unwrap();
-    assert!(v.is_empty());
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn get_file_snapshot_missing_returns_none() {
     let app = TestApp::build().await;
     let v = commands::generated::get_file_snapshot(app.state(), 99999.into())
