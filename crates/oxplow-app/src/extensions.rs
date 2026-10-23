@@ -920,9 +920,19 @@ pub struct LensParam {
     /// `default` must be one; a run supplying another is refused.
     #[serde(default)]
     pub options: Vec<LensParamOption>,
+    /// A lens whose rows are the values it takes, when it's a choice
+    /// whose options aren't fixed (`value`, `label`, optional `group` —
+    /// the form `choices` contract): a slug of this extension, or
+    /// `<extension>/<slug>`; a loaded lens has the whole id. The page runs
+    /// it with the params it declares of the page's, so an `end` picker's
+    /// lens can leave out what `start` is. Its options aren't known at
+    /// load, so no `default` is needed and any text is taken. Exclusive
+    /// with `options`.
+    #[serde(default)]
+    pub options_from: Option<String>,
     /// What it holds, and so how a page draws it. Left out, it is a
-    /// `choice` when it has `options`, else `text`; a loaded lens always
-    /// says.
+    /// `choice` when it has `options` or `options_from`, else `text`; a
+    /// loaded lens always says.
     #[serde(default, rename = "type")]
     pub kind: Option<ParamType>,
     /// What it is to the page, and so where it rides in the page's URI:
@@ -1001,13 +1011,15 @@ pub struct LensParamOption {
 }
 
 impl LensParam {
-    /// Its type, as written or as it follows from `options`.
+    /// Its type, as written or as it follows from `options` /
+    /// `options_from`.
     pub fn kind(&self) -> ParamType {
-        self.kind.unwrap_or(if self.options.is_empty() {
-            ParamType::Text
-        } else {
-            ParamType::Choice
-        })
+        self.kind
+            .unwrap_or(if self.options.is_empty() && self.options_from.is_none() {
+                ParamType::Text
+            } else {
+                ParamType::Choice
+            })
     }
 
     /// `value` as this param binds it, or why it doesn't take it. NULL is
@@ -1022,6 +1034,12 @@ impl LensParam {
         }
         match self.kind() {
             ParamType::Text => Ok(value.clone()),
+            // Options a lens lists aren't known here: the query says what
+            // an unknown value means.
+            ParamType::Choice if self.options_from.is_some() => match value {
+                SqlCell::Text(_) => Ok(value.clone()),
+                _ => Err(format!("is text, not {}", shown())),
+            },
             ParamType::Choice => match value {
                 SqlCell::Text(v) if self.options.iter().any(|o| &o.value == v) => Ok(value.clone()),
                 _ => Err(format!(
@@ -1113,10 +1131,14 @@ fn param_problem(lens: &Lens) -> Option<String> {
                  one); leave it out"
                     .to_string(),
             )
-        } else if kind == ParamType::Choice && p.options.is_empty() {
-            Some("a choice needs `options`".to_string())
+        } else if kind == ParamType::Choice && p.options.is_empty() && p.options_from.is_none() {
+            Some("a choice needs `options` or `options_from`".to_string())
+        } else if !p.options.is_empty() && p.options_from.is_some() {
+            Some("a choice takes `options` or `options_from`, not both".to_string())
         } else if kind != ParamType::Choice && !p.options.is_empty() {
             Some("`options` are only for a choice".to_string())
+        } else if kind != ParamType::Choice && p.options_from.is_some() {
+            Some("`options_from` is only for a choice".to_string())
         } else if kind != ParamType::DateRange && !p.presets.is_empty() {
             Some("`presets` are only for a date_range".to_string())
         } else if let Some(bad) = p
@@ -1125,8 +1147,9 @@ fn param_problem(lens: &Lens) -> Option<String> {
             .find(|k| !RANGE_PRESETS.iter().any(|(r, _)| r == k))
         {
             Some(format!("unknown preset `{bad}`"))
-        } else if kind == ParamType::Choice && p.default.is_none() {
-            // A choice starts somewhere.
+        } else if kind == ParamType::Choice && p.default.is_none() && p.options_from.is_none() {
+            // A choice with fixed options starts somewhere; one whose
+            // options a lens lists may start open.
             Some("a choice needs a `default`, one of its options".to_string())
         } else {
             p.default
@@ -4247,13 +4270,18 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
     ext.custom_components
         .retain(|c| !missing_assets.contains(&c.id));
 
-    // A column's `expand` names a lens by slug or `<extension>/<slug>`; the
-    // loaded lens has the whole id.
+    // A column's `expand` and a param's `options_from` name a lens by slug
+    // or `<extension>/<slug>`; the loaded lens has the whole id.
     for l in &mut ext.lenses {
         let extension = l.extension.clone();
         for c in &mut l.columns {
             if let Some(e) = c.expand.as_mut().filter(|e| !e.contains('/')) {
                 *e = format!("{extension}/{e}");
+            }
+        }
+        for p in &mut l.params {
+            if let Some(o) = p.options_from.as_mut().filter(|o| !o.contains('/')) {
+                *o = format!("{extension}/{o}");
             }
         }
     }
@@ -4264,6 +4292,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         if let Some(problem) = shape_problem(l, &ids, &components)
             .or_else(|| choices_problem(l, &ids))
             .or_else(|| expand_problem(l, &ids))
+            .or_else(|| options_from_problem(l, &ids))
         {
             ext.errors.push(format!("{}: {problem}", l.origin.running));
             bad.push(l.id.clone());
@@ -5118,6 +5147,29 @@ fn expand_problem(lens: &Lens, ids_in_extension: &[String]) -> Option<String> {
             Some(format!(
                 "column `{}`: `expand` lens `{target}` isn't in this extension's lenses/",
                 c.key
+            ))
+        } else {
+            None
+        }
+    })
+}
+
+/// A param's `options_from` naming a lens of this extension that isn't
+/// there (another extension's resolves with the catalog), or the lens
+/// itself.
+fn options_from_problem(lens: &Lens, ids_in_extension: &[String]) -> Option<String> {
+    lens.params.iter().find_map(|p| {
+        let target = p.options_from.as_deref()?;
+        let mine = target.split_once('/').map(|(e, _)| e) == Some(lens.extension.as_str());
+        if target == lens.id {
+            Some(format!(
+                "param `{}`: `options_from` names the lens itself",
+                p.name
+            ))
+        } else if mine && !ids_in_extension.iter().any(|id| id == target) {
+            Some(format!(
+                "param `{}`: `options_from` lens `{target}` isn't in this extension's lenses/",
+                p.name
             ))
         } else {
             None
@@ -9500,8 +9552,12 @@ commands:
     fn typed_params_are_checked_at_load() {
         let (_d, ext) = load_x(
             &[
-                ("ok", "title: OK\nquery: SELECT 1 AS a\nparams:\n  - { name: range, type: date_range, presets: [7d, all], default: 7d }\n  - { name: flag, type: bool, default: true }\n  - { name: q, type: search }\n  - { name: br, type: branch }\n  - { name: mode, default: a, options: [{ value: a, label: A }] }\n  - { name: free }\n"),
+                ("ok", "title: OK\nquery: SELECT 1 AS a\nparams:\n  - { name: range, type: date_range, presets: [7d, all], default: 7d }\n  - { name: flag, type: bool, default: true }\n  - { name: q, type: search }\n  - { name: br, type: branch }\n  - { name: mode, default: a, options: [{ value: a, label: A }] }\n  - { name: free }\n  - { name: end, options_from: ends }\n  - { name: start, type: choice, options_from: other/ends, default: anything }\n"),
+                ("ends", "title: Ends\nquery: SELECT 'snap:1' AS value, 'One' AS label\n"),
                 ("choice_without_options", "title: X\nquery: SELECT 1 AS a\nparams: [{ name: m, type: choice }]\n"),
+                ("both_option_sources", "title: X\nquery: SELECT 1 AS a\nparams: [{ name: m, options_from: ends, options: [{ value: a, label: A }] }]\n"),
+                ("options_from_on_text", "title: X\nquery: SELECT 1 AS a\nparams: [{ name: m, type: text, options_from: ends }]\n"),
+                ("options_from_missing", "title: X\nquery: SELECT 1 AS a\nparams: [{ name: m, options_from: nowhere }]\n"),
                 ("options_on_text", "title: X\nquery: SELECT 1 AS a\nparams: [{ name: m, type: text, options: [{ value: a, label: A }] }]\n"),
                 ("presets_on_text", "title: X\nquery: SELECT 1 AS a\nparams: [{ name: m, presets: [7d] }]\n"),
                 ("unknown_preset", "title: X\nquery: SELECT 1 AS a\nparams: [{ name: m, type: date_range, presets: [5y] }]\n"),
@@ -9527,12 +9583,38 @@ commands:
                 ParamType::Branch,
                 ParamType::Choice,
                 ParamType::Text,
+                ParamType::Choice,
+                ParamType::Choice,
             ]
             .map(Some)
         );
+        // A dynamic choice's lens is qualified as `expand` is; its options
+        // aren't known at load, so its default (if any) isn't checked.
+        let from: Vec<_> = ok
+            .params
+            .iter()
+            .skip(6)
+            .map(|p| p.options_from.as_deref())
+            .collect();
+        assert_eq!(from, [Some("x/ends"), Some("other/ends")]);
         let errs = ext.errors.join("\n");
         for (slug, says) in [
-            ("choice_without_options", "needs `options`"),
+            (
+                "choice_without_options",
+                "needs `options` or `options_from`",
+            ),
+            (
+                "both_option_sources",
+                "`options` or `options_from`, not both",
+            ),
+            (
+                "options_from_on_text",
+                "`options_from` is only for a choice",
+            ),
+            (
+                "options_from_missing",
+                "`options_from` lens `x/nowhere` isn't in this extension's lenses/",
+            ),
             ("options_on_text", "`options` are only for a choice"),
             ("presets_on_text", "`presets` are only for a date_range"),
             ("unknown_preset", "`5y`"),
@@ -9550,6 +9632,29 @@ commands:
                 "{slug}: {errs}"
             );
         }
+    }
+
+    /// A choice whose options come from a lens takes any text (the query
+    /// says what an unknown value means) and NULL, as every param.
+    #[test]
+    fn a_dynamic_choice_takes_any_text() {
+        let p = LensParam {
+            name: "end".into(),
+            label: None,
+            default: None,
+            options: Vec::new(),
+            options_from: Some("x/ends".into()),
+            kind: None,
+            role: None,
+            presets: Vec::new(),
+        };
+        assert_eq!(p.kind(), ParamType::Choice);
+        assert_eq!(
+            p.take(&SqlCell::Text("snap:9".into())),
+            Ok(SqlCell::Text("snap:9".into()))
+        );
+        assert_eq!(p.take(&SqlCell::Null(())), Ok(SqlCell::Null(())));
+        assert!(p.take(&SqlCell::Int(3)).unwrap_err().contains("text"));
     }
 
     /// A bool binds 1 or 0, a search its trimmed text or NULL, and a

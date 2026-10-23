@@ -95,7 +95,11 @@ query: |
 ```
 
 - `text` (the default) is a text box; with `options` a param is a
-  `choice`, drawn as a select.
+  `choice`, drawn as a select. When the options aren't fixed, name a lens
+  that lists them instead: `options_from: endpoints` runs the extension's
+  `endpoints` lens (rows `value`, `label`, optional `group`) with the
+  page's current values of the params it declares, and the select follows
+  its data.
 - `bool` is a checkbox and binds 1 or 0.
 - `search` applies as you type; empty binds NULL.
 - `branch` picks one of the repository's branches; "All branches" binds NULL.

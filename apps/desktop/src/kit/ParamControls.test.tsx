@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
 import type { SqlCell, SqlQueryResult } from "../api.js";
-import type { LensParam } from "../tauri-bridge/generated/bindings.js";
+import type { Lens, LensParam, LensRun } from "../tauri-bridge/generated/bindings.js";
 import { ParamList, ParamRow } from "./ParamControls.js";
 
 afterEach(cleanup);
@@ -62,6 +62,42 @@ test("a choice shows its option's label and applies the one picked", () => {
   expect(applied).toEqual([["mode", "b"]]);
   expect(view.queryByTestId("lens-param-mode-edit")).toBeNull();
   expect(valueButton().textContent).toBe("Most visited");
+});
+
+// A choice whose options a lens lists runs that lens with the page's
+// values it declares, shows the option's label, groups them, and follows
+// the lens's reads.
+test("a dynamic choice loads its options from its lens with the page's params, grouped", async () => {
+  const runs: [string, Record<string, SqlCell>, string | null][] = [];
+  const source = {
+    lens: async (id: string) => ({ id, params: [{ name: "start" }, { name: "stream_id" }] }) as unknown as Lens,
+    run: async (id: string, params: Record<string, SqlCell>, streamId: string | null) => {
+      runs.push([id, params, streamId]);
+      return {
+        result: {
+          columns: ["value", "label", "group"],
+          rows: [
+            ["snap:1", "First", "Snapshots"],
+            ["snap:2", "Second", "Snapshots"],
+            ["working", "Working tree", null],
+          ],
+          reads: { models: ["v_snapshot"], tables: [], measures: [] },
+        },
+      } as unknown as LensRun;
+    },
+  };
+  const p = param({ name: "end", type: "choice", options_from: "x/ends" });
+  const applied: [string, SqlCell][] = [];
+  const view = render(<ParamRow param={p} value="snap:2" values={{ start: "snap:1", end: "snap:2", other: 1 }} streamId="str1" onApply={(n, v) => applied.push([n, v])} optionsSource={source} />);
+  const valueButton = () => view.getByTestId("lens-param-end-value");
+  await waitFor(() => expect(valueButton().textContent).toBe("Second"));
+  expect(runs).toEqual([["x/ends", { start: "snap:1" }, "str1"]]);
+  fireEvent.click(valueButton());
+  const edit = view.getByTestId("lens-param-end-edit") as HTMLSelectElement;
+  expect([...edit.querySelectorAll("optgroup")].map((g) => g.label)).toEqual(["Snapshots"]);
+  expect([...edit.options].map((o) => o.textContent)).toEqual(["Working tree", "First", "Second"]);
+  fireEvent.change(edit, { target: { value: "working" } });
+  expect(applied).toEqual([["end", "working"]]);
 });
 
 test("a text param named like an id param picks what exists, shown by its title", async () => {

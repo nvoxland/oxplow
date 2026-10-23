@@ -4349,9 +4349,20 @@ export type LensParam = {
 	 */
 	options?: LensParamOption[],
 	/**
+	 *  A lens whose rows are the values it takes, when it's a choice
+	 *  whose options aren't fixed (`value`, `label`, optional `group` —
+	 *  the form `choices` contract): a slug of this extension, or
+	 *  `<extension>/<slug>`; a loaded lens has the whole id. The page runs
+	 *  it with the params it declares of the page's, so an `end` picker's
+	 *  lens can leave out what `start` is. Its options aren't known at
+	 *  load, so no `default` is needed and any text is taken. Exclusive
+	 *  with `options`.
+	 */
+	options_from?: string | null,
+	/**
 	 *  What it holds, and so how a page draws it. Left out, it is a
-	 *  `choice` when it has `options`, else `text`; a loaded lens always
-	 *  says.
+	 *  `choice` when it has `options` or `options_from`, else `text`; a
+	 *  loaded lens always says.
 	 */
 	type?: ParamType | null,
 	/**

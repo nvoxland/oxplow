@@ -26,6 +26,8 @@ export interface LensRailProps {
   /** Params that are what the page is, never a control (a renderer's
    *  `uri`). */
   fixed?: readonly string[];
+  /** The stream the page runs for: a choice's `options_from` lens runs for it. */
+  streamId?: string | null;
 }
 
 /**
@@ -33,7 +35,7 @@ export interface LensRailProps {
  * params as rows), Selection (what a row click picked, never an input),
  * and About this page (its extension and the source file to edit).
  */
-export function LensRail({ lens, values, picked, outOfDate, onApply, onOpenPage, fixed = [] }: LensRailProps) {
+export function LensRail({ lens, values, picked, outOfDate, onApply, onOpenPage, fixed = [], streamId = null }: LensRailProps) {
   const filters = lens.params.filter((p) => p.role !== "selection" && !fixed.includes(p.name));
   const selections = lens.params.filter((p) => p.role === "selection");
   const changed = filters.filter((p) => !isDefault(p, values[p.name] ?? null));
@@ -43,7 +45,7 @@ export function LensRail({ lens, values, picked, outOfDate, onApply, onOpenPage,
     <>
       {filters.length > 0 ? (
         <RailGroup title="Filters" action={reset} testId="lens-rail-filters">
-          <ParamList params={filters} values={values} onApply={onApply} />
+          <ParamList params={filters} values={values} onApply={onApply} streamId={streamId} />
         </RailGroup>
       ) : null}
       {selections.length > 0 ? (

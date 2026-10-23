@@ -114,7 +114,10 @@ empty: Nothing is waiting on you.
   series, from that column's last value in it.
 - **Params have a `type`**, which picks their control on the page:
   `text` (the default), `choice` (`options: [{ value, label }]` and a
-  `default` that is one of them), `bool` (bound 1 or 0), `search`
+  `default` that is one of them — or `options_from: <lens>`, a lens of
+  the extension whose rows are `value`, `label` and optional `group`,
+  run with the page's values of the params it declares, re-run as its
+  data changes; no `default` needed), `bool` (bound 1 or 0), `search`
   (trimmed text, NULL when empty; applies as the person types), `branch`
   (a branch name, NULL for all) and `date_range` (a preset `1d 2d 3d 7d
   30d 90d all`, or `<from>..<to>`; pick the quick picks with `presets:`).

@@ -174,7 +174,7 @@ export function LensPage({ lensId, params, title: pageTitle, stream, onOpenPage,
   });
   const outOfDate = useOutOfDate(lens?.origin.extension ?? null, lens?.origin.deployment ?? null);
   const rightRail = lens ? (
-    <LensRail lens={lens} values={run?.params ?? {}} picked={picked} outOfDate={outOfDate} onApply={setParam} onOpenPage={onOpenPage} fixed={renders ? RENDERED : undefined} />
+    <LensRail lens={lens} values={run?.params ?? {}} picked={picked} outOfDate={outOfDate} onApply={setParam} onOpenPage={onOpenPage} fixed={renders ? RENDERED : undefined} streamId={streamId} />
   ) : undefined;
 
   // Comments are the page's when it declares them, on its URI (its tab's
