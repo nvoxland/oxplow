@@ -1,0 +1,10 @@
+/* Settings → Integrations, in the theme's tokens. The frame is as tall as
+   this content (oxplow fits it), so `html` and `body` stay at `height: auto`. */
+body { padding: 0; font-family: var(--font-ui); font-size: var(--text-sm, 13px); color: var(--text-primary); }
+.row { padding: 6px 0; border-bottom: 1px solid var(--border-subtle); display: flex; flex-direction: column; gap: 4px; }
+.line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.grow { flex: 1; }
+.muted { font-size: var(--text-xs, 11px); color: var(--text-secondary); }
+.problem { font-size: var(--text-xs, 11px); color: var(--severity-critical); }
+.add { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.empty { color: var(--text-secondary); }

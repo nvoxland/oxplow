@@ -342,7 +342,12 @@ test("shown by a lens, a component sets no page title, actions or form", async (
   h.send({ id: "i", method: "signIn", instance: "t/x", name: "TOKEN" });
   await h.settle();
   expect(h.received.map((m) => (m as { error?: { message: string } }).error?.message)).toEqual([
-    ...Array(6).fill("Only a component shown as a page sets its title, actions, forms or the spec it shows, or signs in."),
+    "Only a component shown as a page sets its title, actions or the spec it shows.",
+    "Only a component shown as a page sets its title, actions or the spec it shows.",
+    "This host shows no forms and signs in for no component.",
+    "Only a component shown as a page sets its title, actions or the spec it shows.",
+    "This host shows no forms and signs in for no component.",
+    "This host shows no forms and signs in for no component.",
   ]);
   h.channel.port1.close();
 });

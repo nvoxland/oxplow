@@ -914,7 +914,7 @@ form; sign-in is a provider's.
   `not_signed_in | signed_in { until? } | sign_in_again` (`until` only
   for a token that can't renew itself). The Integrations row shows a
   **Sign in** / **Sign in again** button and **Sign out** instead of a
-  value box (`signInLine`).
+  value box (`signInLine` in the component's `app.js`).
 - **Limits.** Only the desktop app can sign in (a plain browser on a
   daemon can't catch the redirect). A declared `redirect_port` already in
   use on the person's machine fails the listen, with the reason on the
@@ -1151,37 +1151,55 @@ reconcile (tsk716). An external write whose
 reply was lost (it landed at the tracker but the call timed out) is
 restated by the next read.
 
-**Settings → Integrations** (`IntegrationsSection.tsx`; its operations are commands, `commands/provider_instances.rs`, scope `providers.write` and `credentials.write`, all `External`): the instances are read as the live models `v_provider_instance` (every declared provider and
-configured instance, with its state, `detail`, config and config schema), `v_provider_credential` (each credential's presence and sign-in state, never a value) and `v_provider_collector` (each collector's reads), pushed down on `instance`, following `ConfigChanged`, `ExtensionsChanged`, `CredentialChanged` and the models `v_contribution_health` / `v_collector_state`. `api.ts` assembles a `ProviderInstanceView` from the three (`providerInstances.ts`) until Integrations is a foundation component. `oxplow.provider.check_instance { instance, config }` (start
-it with that config and `check`, enabling and saving nothing — the
-outcome is the view's state) and `oxplow.provider.set_instance { instance,
-enabled, config }` (`ProviderRegistry::set_instance`: enabling checks
-first and refuses an unconfigured instance, writing
-nothing, with the problem's field as `/config/<path>`; then `oxplow.config.set`
-of `extensionInstances` — to enable, `oxplow.contribution.enable` runs **first**, so
-a failed enable writes nothing and the config never says enabled for
-an instance that wasn't — then a reconcile). Each row
-shows its state, its credentials (each set into the keychain through
-`oxplow.provider.set_credential`, or signed in for — "Credentials and sign-in"),
-the config as a form from the provider's `config_schema`
-(`SchemaForm`, P6.B2: Escape resets an edit; a field's problem disables
-the actions), Check and Enable / Disable / Enable again, and each
-collector's line (`collectorLine`: records delivered, last read, a
-failed read's error; the view's `collectors`) with **Sync Now** while it
-runs. **Instances** (P9.B6): under the rows, "Add another instance of
-`<ext>/<provider>`" takes a name (the instance id: snake_case, not
-already an instance — `newInstanceProblem` says so before the core
-does) and a scope ("This project's" / "Mine, in every project") and calls
-`oxplow.provider.add_instance`; Enter adds, Escape clears. A named instance, a
-project's replacement of the person's own, and one whose provider is
-gone have **Remove** (`InlineConfirm`, `oxplow.provider.remove_instance`:
-`canRemoveInstance`) — a global one whose provider is gone included: a
-global instance is left out of the list only where the project doesn't
-have its extension enabled; a provider's own instance is turned off, not
-removed. The page is covered by `IntegrationsSection.test.tsx` and
-`integrationsModel.test.ts`, the core by `providers/tests.rs`, and the
+**Settings → Integrations** is oxplow-foundation's own component
+(`extensions/oxplow-foundation/components/integrations/`: `index.html`,
+`app.js`, `app.css`, hand-written, no build), mounted by the lens
+`integrations` in `settings.integrations.sections` after Capabilities and
+Replaced components. Its operations are commands
+(`commands/provider_instances.rs`, scopes `providers.write` and
+`credentials.write`, all `External`) and the instances are read as the live
+models `v_provider_instance` (every declared provider and configured
+instance, with its state, `detail`, config and config schema),
+`v_provider_credential` (each credential's presence and sign-in state,
+never a value) and `v_provider_collector` (each collector's reads), pushed
+down on `instance` and following `ConfigChanged`, `ExtensionsChanged`,
+`CredentialChanged` and the models `v_contribution_health` /
+`v_collector_state`. The lens's query names all three (credentials and
+collectors as aggregate columns), so a change to any of them changes the
+rows and the frame re-reads (`onUpdate`; a lens re-run posts `update` only
+when its rows differ). The component declares the `oxplow.provider.*`
+commands it runs and `sql: read`; the frame is as tall as its content
+(`fit`: a document section has no height to fill). Each row shows the
+instance's state, its collectors, its credentials, and: **Configure…**
+opens the config as oxplow's form (`openForm({ schema: configSchema,
+values })`, answering the values; the edit is the component's until it is
+saved), **Check** (`oxplow.provider.check_instance { instance, config }`:
+start it with that config and `check`, enabling and saving nothing — the
+outcome is the view's state), **Enable / Disable / Enable again**
+(`oxplow.provider.set_instance { instance, enabled, config }`:
+`ProviderRegistry::set_instance`: enabling checks first and refuses an
+unconfigured instance, writing nothing, with the problem's field as
+`/config/<path>`; then `oxplow.config.set` of `extensionInstances` — to
+enable, `oxplow.contribution.enable` runs **first**, so a failed enable
+writes nothing and the config never says enabled for an instance that
+wasn't — then a reconcile), **Save changes** for an enabled instance's
+edited config, and **Sync Now** (`oxplow.provider.sync`) on a collector
+while the instance runs. A pasted credential is **Set… / Replace…**
+(a masked `writeOnly` field of an `openForm`; `oxplow.provider.set_credential`)
+and **Forget**; a signed-in one is **Sign in** (`signIn`, above) and **Sign
+out**. **Instances** (P9.B6): under the rows, "Add another instance of
+`<ext>/<provider>`" opens a form for a name (the instance id: lowercase
+snake_case, not already an instance) and a scope ("project" / "global")
+and runs `oxplow.provider.add_instance`. A named instance, a project's
+replacement of the person's own, and one whose provider is gone have
+**Remove** (`oxplow.provider.remove_instance`, `confirm: destructive`, so
+oxplow asks the person) — a global one whose provider is gone included: a
+global instance is left out of the list only where the project doesn't have
+its extension enabled; a provider's own instance is turned off, not
+removed. The core is covered by `providers/tests.rs`
+(`provider_instances_are_managed_by_commands_and_read_as_a_model`), and the
 whole in a browser by the suite's `integrations/fake-provider` spec
-(`tests-e2e/`, P11): a person fills the fake's Team, presses Check and
+(`tests-e2e/`, P11): a person configures the fake's Team in the form, presses Check and
 Enable, makes it the project's work list in Settings → Capabilities; an item created on it reaches the
 fake's service, and after Sync Now it is on the Board. Admitting the
 program is the extension's deploy (the Extensions page); a deploy restarts

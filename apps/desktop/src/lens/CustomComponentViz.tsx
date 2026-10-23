@@ -12,6 +12,7 @@ import { useEffect, useState } from "react";
 import { remoteBaseUrl } from "../tauri-bridge/transport.js";
 import type { LensRun } from "../tauri-bridge/generated/bindings.js";
 import { ComponentFrame, CustomBadge, noteStyle, useComponentBundle } from "./ComponentFrame.js";
+import { useFrameForms } from "./frameForms.js";
 import type { HostedView } from "./hostedView.js";
 
 export function CustomComponentViz({
@@ -21,6 +22,7 @@ export function CustomComponentViz({
   onFailure,
   onReady,
   view = null,
+  fit = false,
   base = remoteBaseUrl(),
   readyTimeoutMs = 3000,
 }: {
@@ -38,6 +40,8 @@ export function CustomComponentViz({
   /** Its host's view, where the host shares one (a replacement, a lens's
    *  own page); none in a tile or a slot. */
   view?: HostedView | null;
+  /** The frame is as tall as its content says: a section of a document. */
+  fit?: boolean;
   /** The daemon that serves bundles; none means no component. */
   base?: string | null;
   readyTimeoutMs?: number;
@@ -47,6 +51,8 @@ export function CustomComponentViz({
   // it is shown.
   const componentKey = component ? `${run.lens.extension}/${component}` : null;
   const { loadKey, version, src, error } = useComponentBundle(componentKey, base);
+  // A lens's component may open forms and sign in, as a page's may.
+  const frameForms = useFrameForms(componentKey, run.lens.title);
   // Why the frame at `src` was given up on; a new `src` starts afresh.
   const [failed, setFailed] = useState<{ src: string; reason: string } | null>(null);
   const reason =
@@ -99,7 +105,10 @@ export function CustomComponentViz({
         onFail={(why) => setFailed({ src, reason: why })}
         onReady={onReady}
         view={view}
+        formDeps={frameForms.forms}
+        fit={fit}
       />
+      {frameForms.element}
     </div>
   );
 }

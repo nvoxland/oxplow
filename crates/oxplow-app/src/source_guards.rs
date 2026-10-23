@@ -391,7 +391,10 @@ fn every_ui_event_has_a_listener() {
     // Read only inside the daemon: the live models that follow it
     // (`v_workspace_file`, `v_branch_divergence`, …) and the snapshot
     // capture. The renderer re-reads those models, so it needs no listener.
-    const DAEMON_ONLY: &[&str] = &["vcsRefsChanged"];
+    // A credential's news (`v_provider_credential`, a sign-in's end) is the
+    // same: the models that follow it are re-read, and a sign-in's own end
+    // is the host's answer to the component that asked.
+    const DAEMON_ONLY: &[&str] = &["vcsRefsChanged", "credentialChanged"];
     let unheard: Vec<String> = event_kinds()
         .into_iter()
         .filter(|k| !DAEMON_ONLY.contains(&k.as_str()))

@@ -65,7 +65,8 @@ async function swimlanes(page: Page, daemon: Workspace, scope: string) {
   await page.getByTestId("lens-param-show-value").filter({ visible: true }).click();
   await page.getByTestId("lens-param-show-edit").filter({ visible: true }).selectOption(scope);
   await expect(page.getByTestId("replacement-work_item.board")).toContainText("replaced by task-views");
-  const frame = page.frameLocator('[data-testid="custom-component-frame"]');
+  // Settings may still be open in another tab: its Integrations frame is a second one.
+  const frame = page.frameLocator('iframe[aria-label="Swimlanes"]');
   const card = frame.locator(".card", { hasText: "Card one" });
   await expect(card).toBeVisible();
   await expect(frame.locator(".lane")).toHaveCount(5);

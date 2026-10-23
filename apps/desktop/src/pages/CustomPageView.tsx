@@ -12,7 +12,7 @@
 /// pick writes the view (pushed, so Back un-picks), which the frame hears.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { componentForm, getLens, invokeComponentCommand, runLens, runLensSpec, type LensRun, type SqlCell } from "../api.js";
+import { getLens, runLens, runLensSpec, type LensRun, type SqlCell } from "../api.js";
 import { PinToDashboard } from "../components/Dashboard/PinToDashboard.js";
 import { SaveAsLens } from "../components/SaveAsLens.js";
 import { LensResultView } from "../lens/LensResultView.js";
@@ -20,29 +20,18 @@ import { childParams, lensViewChange } from "../lens/lensModel.js";
 import { NO_READS, useRerunOnChange } from "../lens/lensRerun.js";
 import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
 import { EmptyState } from "../components/Prompts/EmptyState.js";
-import { recordOpError } from "../opErrors.js";
 import type { PageAction } from "../kit/actions.js";
 import { ComponentFrame, CustomBadge, noteStyle, useComponentBundle, type BridgeHost } from "../lens/ComponentFrame.js";
-import type { FrameAction, OwnForm, PageInit } from "../lens/componentBridge.js";
-import { FormSlideover } from "../lens/LensResultView.js";
-import { SchemaForm } from "../components/SchemaForm/SchemaForm.js";
-import { Slideover } from "../components/Slideover.js";
-import { useFormSubmit } from "../lens/useFormSubmit.js";
+import type { FrameAction, PageInit } from "../lens/componentBridge.js";
+import { useFrameForms } from "../lens/frameForms.js";
 import { useHostedView } from "../lens/hostedView.js";
 import { Page } from "../tabs/Page.js";
 import { usePageTitle } from "../tabs/PageNavigationContext.js";
 import type { PagePayload } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { remoteBaseUrl } from "../tauri-bridge/transport.js";
-import type { ExtensionPage, FormStart, Lens, LensSpec, Stream } from "../tauri-bridge/generated/bindings.js";
+import type { ExtensionPage, Lens, LensSpec, Stream } from "../tauri-bridge/generated/bindings.js";
 
-interface AskedForm {
-  command: string;
-  input: unknown;
-  version: string;
-  resolve(out: { result: unknown } | null): void;
-  reject(e: unknown): void;
-}
 
 export function CustomPageView({
   page,
@@ -65,11 +54,9 @@ export function CustomPageView({
 }) {
   const componentKey = declared.body.kind === "component" ? declared.body.component : null;
   const bundle = useComponentBundle(componentKey, base);
+  const frameForms = useFrameForms(componentKey, declared.title);
   const [frameTitle, setFrameTitle] = useState<string | null>(null);
   const [frameActions, setFrameActions] = useState<FrameAction[]>([]);
-  const [asked, setAsked] = useState<AskedForm | null>(null);
-  // A form of the frame's own schema, shown while it waits for its values.
-  const [ownAsked, setOwnAsked] = useState<{ form: OwnForm; resolve(values: Record<string, unknown> | null): void } | null>(null);
   const hostRef = useRef<BridgeHost | null>(null);
   // Why the frame at `src` was given up on; a new `src` starts afresh.
   const [failed, setFailed] = useState<{ src: string; reason: string } | null>(null);
@@ -104,18 +91,6 @@ export function CustomPageView({
     () => ({
       setTitle: setFrameTitle,
       setActions: setFrameActions,
-      openForm: (command: string, input: unknown, version: string) =>
-        new Promise<{ result: unknown } | null>((resolve, reject) => {
-          setAsked({ command, input, version, resolve, reject });
-        }),
-      // A newer form closes the one open: that one's frame hears none.
-      askForm: (form: OwnForm) =>
-        new Promise<Record<string, unknown> | null>((resolve) => {
-          setOwnAsked((open) => {
-            open?.resolve(null);
-            return { form, resolve };
-          });
-        }),
       // A refused spec rejects with its code and field: the frame shows it.
       showSpec: async (spec: LensSpec | null) => {
         if (spec === null) {
@@ -170,6 +145,7 @@ export function CustomPageView({
           run={null}
           page={init}
           pageDeps={pageDeps}
+          formDeps={frameForms.forms}
           view={view}
           hostRef={hostRef}
           height={shown ? (height ?? 120) : null}
@@ -188,36 +164,7 @@ export function CustomPageView({
   return (
     <Page testId="page-custom" kind="page" width="full" actions={actions} rightRail={rail} rightRailTitle={railLens.lens?.title} fill={rail !== undefined}>
       {body}
-      {ownAsked ? (
-        <Slideover
-          open
-          onClose={() => {
-            ownAsked.resolve(null);
-            setOwnAsked(null);
-          }}
-          title={ownAsked.form.title}
-          testId="custom-page-own-form"
-        >
-          <SchemaForm
-            schema={ownAsked.form.schema}
-            initial={ownAsked.form.values}
-            submitLabel="Submit"
-            onSubmit={(values) => {
-              ownAsked.resolve(values);
-              setOwnAsked(null);
-            }}
-            testIdPrefix="custom-page-own-form-fields"
-          />
-        </Slideover>
-      ) : null}
-      {asked && componentKey ? (
-        <PageForm
-          componentKey={componentKey}
-          title={frameTitle ?? declared.title}
-          asked={asked}
-          onDone={() => setAsked(null)}
-        />
-      ) : null}
+      {frameForms.element}
     </Page>
   );
 }
@@ -338,64 +285,3 @@ function useLensOf(id: string | null): { lens: Lens | null; error: string | null
   return out;
 }
 const specStyle = { padding: "12px 16px", borderTop: "1px solid var(--border-subtle)" } as const;
-
-/** A declared command's form the frame asked for, in a slideover: its
- *  fields start from the frame's input; submitting runs it as the
- *  component (the confirm, when it asks, is the host's) and answers the
- *  frame with its result; closing it answers none. */
-function PageForm({
-  componentKey,
-  title,
-  asked,
-  onDone,
-}: {
-  componentKey: string;
-  title: string;
-  asked: AskedForm;
-  onDone(): void;
-}) {
-  const [start, setStart] = useState<FormStart | null>(null);
-  const answered = useRef(false);
-  const answer = (out: { result: unknown } | null) => {
-    if (answered.current) return;
-    answered.current = true;
-    asked.resolve(out);
-    onDone();
-  };
-  const form = useFormSubmit(
-    title,
-    (input, confirmed) => invokeComponentCommand(componentKey, asked.command, input, confirmed, asked.version),
-    (outcome) => answer({ result: outcome.result }),
-  );
-  useEffect(() => {
-    let live = true;
-    componentForm(componentKey, asked.command, asked.input, asked.version).then(
-      (s) => {
-        if (live) setStart(s);
-      },
-      (e: unknown) => {
-        if (!live) return;
-        recordOpError({ label: title, message: e instanceof Error ? e.message : String(e) });
-        answered.current = true;
-        asked.reject(e);
-        onDone();
-      },
-    );
-    return () => {
-      live = false;
-    };
-    // The form asked for is `asked`; it is fixed for this mount.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [asked]);
-  return (
-    <FormSlideover
-      title={title}
-      start={start}
-      form={form}
-      submitLabel="Submit"
-      onClose={() => answer(null)}
-      testId="custom-page-form"
-    />
-  );
-}
-

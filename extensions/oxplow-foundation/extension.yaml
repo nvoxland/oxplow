@@ -21,6 +21,9 @@ custom_components:
   # Explore Data: an SQL box and a viz picker over the models; oxplow draws
   # the result under it with its own components (`showSpec`).
   - { id: explore-data, title: Explore Data, bundle: dist/explore-data, sql: read, commands: [oxplow.lens.draft_with_agent] }
+  # Settings → Integrations: hand-written (no build), so it lives beside the
+  # built components, not in dist/.
+  - { id: integrations, title: Integrations, bundle: components/integrations, sql: read, commands: [oxplow.provider.check_instance, oxplow.provider.set_instance, oxplow.provider.add_instance, oxplow.provider.turn_off_here, oxplow.provider.remove_instance, oxplow.provider.set_credential, oxplow.provider.begin_sign_in, oxplow.provider.complete_sign_in, oxplow.provider.cancel_sign_in, oxplow.provider.sync] }
 intent:
   purpose: >-
     Declare oxplow's own commands — what a person, an agent and a lens can
@@ -533,6 +536,7 @@ ui:
     - { slot: settings.extensions.sections, lens: extensions-secrets }
     - { slot: settings.integrations.sections, lens: capabilities, title: Capabilities }
     - { slot: settings.integrations.sections, lens: replacements, title: Replaced components }
+    - { slot: settings.integrations.sections, lens: integrations, title: Integrations }
     - { slot: settings.data.sections, lens: data-entities, title: Entities }
     - { slot: settings.data.sections, lens: data-sources, title: Collectors }
     - { slot: settings.data.sections, lens: data-effects, title: Effects }

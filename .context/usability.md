@@ -83,10 +83,9 @@ markdown itself, nor edits it in a `<textarea>`.
   a change of section is pushed (Back returns), and the launcher lists
   each section by name. On any lens page `#section=<id>` lands on that
   section. A page that shows state from outside any model
-  refreshes on the event that says it changed (Integrations on
-  `configChanged` and `credentialChanged`, Data on `extensionsChanged`). Integrations
-  also re-reads when an instance's health is recorded (`v_contribution_health`,
-  through `useRerunOnChange`): Enable's own `configChanged` can be read
+  refreshes on the event that says it changed (Data on `extensionsChanged`; Integrations'
+  lens re-runs when the `v_provider_*` models change). Integrations
+  also re-reads when an instance's health is recorded (`v_contribution_health`): Enable's own `configChanged` can be read
   before the instance has started, and nothing else says it finished
   (tsk1053).
 - **A re-read never wipes what the person typed** (tsk1054). A host

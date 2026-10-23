@@ -53,7 +53,7 @@ export const SETTINGS_AREAS: readonly SettingsArea[] = [
     id: "integrations",
     title: "Integrations",
     intro: "Which implementation each capability uses, and the outside systems extensions connect to.",
-    sections: [{ id: "integrations", title: "Integrations" }],
+    sections: [],
   },
   {
     id: "ai",
