@@ -1,0 +1,25 @@
+title: Concurrent Efforts
+description: The other efforts whose snapshots overlap this range.
+params:
+  - { name: start_rev }
+  - { name: end_rev }
+  - { name: effort_id }
+query: |
+  WITH r AS (
+    SELECT CASE WHEN :start_rev LIKE 'snap:%' THEN CAST(substr(:start_rev, 6) AS INTEGER) ELSE 0 END AS lo,
+           CASE WHEN :end_rev LIKE 'snap:%' THEN CAST(substr(:end_rev, 6) AS INTEGER) ELSE 9223372036854775807 END AS hi,
+           (SELECT s.created_at FROM v_snapshot s WHERE :start_rev LIKE 'snap:%' AND s.id = CAST(substr(:start_rev, 6) AS INTEGER)) AS lo_at
+    WHERE :start_rev LIKE 'snap:%' OR :end_rev LIKE 'snap:%'
+  )
+  SELECT e.title AS effort, coalesce(e.work_item, e.uri) AS ref
+  FROM v_effort e, r
+  WHERE (:effort_id IS NULL OR e.id <> :effort_id)
+    AND e.start_snapshot_id IS NOT NULL
+    AND e.start_snapshot_id <= r.hi
+    AND (e.end_snapshot_id IS NULL OR e.end_snapshot_id >= r.lo)
+    AND NOT (e.ended_at IS NOT NULL AND r.lo_at IS NOT NULL AND e.ended_at < r.lo_at)
+  ORDER BY e.started_at
+viz: list
+columns:
+  - { key: effort, label: Effort, link: { kind: page, from: ref } }
+hidden: true

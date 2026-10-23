@@ -3,7 +3,7 @@
 - **Slots** mount a lens into a core page (`ui: { slots: [{ slot, lens }] }`
   in `extension.yaml`). The lens must declare at least one param the slot
   binds, and gets only the ones it declares:
-  - `effort.review.details` (an effort's diff) → `effort_id`, `effort` (the effort's ref, for an action's `input`), `change_id`;
+  - `oxplow-foundation/changes.sections` (an effort's diff) → `effort_id`, `effort` (the effort's ref, for an action's `input`), `change_id`;
   - `oxplow-foundation/commit.sections` (a commit page) and
     `oxplow-foundation/uncommitted.sections` (the working tree), sections
     of those documents → `change_id` (the `v_change*` analysis; the page's

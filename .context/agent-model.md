@@ -1583,7 +1583,7 @@ a `PlanProposed` hook with `tool.plan`; that waits on no one. opencode's
 
 `v_agent_plan` (thread, effort, turn, session, `proposed_at`, `text`,
 `path`, and `event_id`, the event to read with `oxplow_read event:<id>`)
-reads them; the bundled `effort-plan` (slot `effort.review.details`) and
+reads them; the bundled `effort-plan` (slot `oxplow-foundation/changes.sections`) and
 `thread-plan` (slot `thread.plan.header`) lenses show a plan, newest
 first.
 
@@ -1844,7 +1844,7 @@ its nudges stay undelivered rather than being stamped and lost. **One-shot marks
 are durable** (`claim_once`, per effort or per thread): the report-less
 nudge fires once per effort, an advisory once per its `once_per` scope,
 across restarts. A person reads what oxplow told the agent in the bundled
-`effort-nudges` lens ("Agent Nudges", `effort.review.details` slot).
+`effort-nudges` lens ("Agent Nudges", `oxplow-foundation/changes.sections` slot).
 
 ### Observe conformance
 

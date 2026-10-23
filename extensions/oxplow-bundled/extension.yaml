@@ -92,30 +92,30 @@ skills:
   - { name: work-next, kind: command, file: commands/work-next.md }
 ui:
   slots:
-    - { slot: effort.review.details, lens: change-review }
+    - { slot: oxplow-foundation/changes.sections, lens: change-review }
     - { slot: oxplow-foundation/commit.sections, lens: change-review }
     - { slot: oxplow-foundation/uncommitted.sections, lens: change-review }
-    - { slot: effort.review.details, lens: effort-tests }
-    - { slot: effort.review.details, lens: effort-metric-deltas }
-    - { slot: effort.review.details, lens: effort-nudges }
-    - { slot: effort.review.details, lens: effort-plan }
+    - { slot: oxplow-foundation/changes.sections, lens: effort-tests }
+    - { slot: oxplow-foundation/changes.sections, lens: effort-metric-deltas }
+    - { slot: oxplow-foundation/changes.sections, lens: effort-nudges }
+    - { slot: oxplow-foundation/changes.sections, lens: effort-plan }
     - { slot: oxplow-foundation/work-item.sections, lens: task-tokens }
     - { slot: oxplow-foundation/tasks.sections, lens: thread-tokens, at: { before: list } }
     - { slot: oxplow-foundation/tasks.sections, lens: thread-plan, at: { before: list } }
     - { slot: oxplow-foundation/tasks.sections, lens: thread-shared-work, at: { before: list } }
     - { slot: oxplow-foundation/work-item.sections, lens: item-shared-work }
     - { slot: diff.file.header, lens: file-co-change }
-    - { slot: effort.review.details, lens: decisions }
-    - { slot: effort.review.details, lens: inferred-decisions }
-    - { slot: effort.review.details, lens: unverified-claims }
-    - { slot: effort.review.details, lens: what-deviated }
-    - { slot: effort.review.details, lens: tests-weakened }
+    - { slot: oxplow-foundation/changes.sections, lens: decisions }
+    - { slot: oxplow-foundation/changes.sections, lens: inferred-decisions }
+    - { slot: oxplow-foundation/changes.sections, lens: unverified-claims }
+    - { slot: oxplow-foundation/changes.sections, lens: what-deviated }
+    - { slot: oxplow-foundation/changes.sections, lens: tests-weakened }
     - { slot: oxplow-foundation/commit.sections, lens: tests-weakened }
     - { slot: oxplow-foundation/uncommitted.sections, lens: tests-weakened }
-    - { slot: effort.review.details, lens: struggled }
-    - { slot: effort.review.details, lens: session-files }
-    - { slot: effort.review.details, lens: context-read }
-    - { slot: effort.review.details, lens: review-prompt }
+    - { slot: oxplow-foundation/changes.sections, lens: struggled }
+    - { slot: oxplow-foundation/changes.sections, lens: session-files }
+    - { slot: oxplow-foundation/changes.sections, lens: context-read }
+    - { slot: oxplow-foundation/changes.sections, lens: review-prompt }
   # Git History's commits drawn as a graph, in place of oxplow's plain
   # list (`vcs.history.graph`, a target no provider binds). It only shows
   # and opens commits, so it isn't a program to approve.

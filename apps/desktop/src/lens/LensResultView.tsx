@@ -525,6 +525,9 @@ function RowsBody({
   );
   const badges = useDecorations("row-badge", linkedRefs);
   if (result.rows.length === 0) {
+    // `empty: ""` is nothing to say (a part that only stands in for what an
+    // extension may bring).
+    if (lens.empty === "") return null;
     return (
       <p data-testid="lens-empty" style={{ color: "var(--text-secondary)" }}>
         {lens.empty ?? "No rows."}

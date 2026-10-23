@@ -295,5 +295,5 @@ ui:
 - Foundation pages are document lenses, so they have parts slots like any:
   `oxplow-foundation/new-session.sections` (part ids `start` and
   `earlier`; binds `thread_id`).
-- `at` is refused on a core region slot, such as `effort.review.details`.
+- `at` is refused on a core region slot, such as `oxplow-foundation/changes.sections`.
   `size` is allowed only on a `.tiles` slot.

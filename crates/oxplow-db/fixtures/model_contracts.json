@@ -22346,5 +22346,56 @@
         "reference"
       ]
     }
+  },
+  "extension_change": {
+    "1": {
+      "columns": [
+        {
+          "name": "base",
+          "type": "TEXT",
+          "doc": "The earlier side, as the query spelled it."
+        },
+        {
+          "name": "head",
+          "type": "TEXT",
+          "doc": "The later side, as the query spelled it."
+        },
+        {
+          "name": "name",
+          "type": "TEXT",
+          "doc": "The extension."
+        },
+        {
+          "name": "change",
+          "type": "TEXT",
+          "doc": "`added`, `removed` or `changed`."
+        },
+        {
+          "name": "errors",
+          "type": "TEXT",
+          "doc": "What's wrong with the later version, as a JSON array of text."
+        },
+        {
+          "name": "lines",
+          "type": "TEXT",
+          "doc": "What the change does, as a JSON array of lines (grants first, then collectors' outputs, models and their rows, lenses); `[]` for a removed extension."
+        },
+        {
+          "name": "lens_changes",
+          "type": "TEXT",
+          "doc": "The lenses that differ, as a JSON array of `{ id, change }`."
+        },
+        {
+          "name": "stream_id",
+          "type": "INT",
+          "doc": "The stream whose worktree was reviewed."
+        }
+      ],
+      "key": [
+        "base",
+        "head",
+        "name"
+      ]
+    }
   }
 }

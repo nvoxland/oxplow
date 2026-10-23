@@ -12,7 +12,6 @@ import {
   duplicateBlockRef,
   effortDiffRef,
   endpointDiffRef,
-  endpointsOf,
   extPageRef,
   externalUrlRef,
   fileRef,
@@ -27,7 +26,6 @@ import {
   alertsRef,
   refFromTabId,
   fileOf,
-  diffViewOf,
   recordedPageKind,
   snapshotRef,
   streamSettingsRef,
@@ -132,11 +130,8 @@ describe("pageRefs", () => {
   test("an effort, snapshot or turn page is its canonical ref (P2.11)", () => {
     const effort = effortDiffRef("eff42");
     expect(effort).toEqual({ id: "oxplow:oxplow/effort?id=eff42" });
-    expect(diffViewOf(effort)).toEqual({ mode: "effort", effortId: "eff42" });
     expect(snapshotRef(112)).toEqual({ id: "oxplow:oxplow/snapshot?id=112" });
-    expect(diffViewOf(snapshotRef(112))).toEqual({ mode: "snapshot", snapshotId: 112 });
     expect(turnRef("trn7")).toEqual({ id: "oxplow:oxplow/turn?id=trn7" });
-    expect(diffViewOf(turnRef("trn7"))).toEqual({ mode: "turn", turnId: "trn7" });
     for (const [ref, kind] of [[effort, "oxplow/effort"], [snapshotRef(112), "oxplow/snapshot"], [turnRef("trn7"), "oxplow/turn"]] as const) {
       expect(refFromTabId(ref.id)).toEqual(ref);
       expect(recordedPageKind(ref)).toBe(kind);
@@ -162,7 +157,6 @@ describe("pageRefs", () => {
     );
     expect(a.id).toBe("oxplow:oxplow/page?page=diff-view#end=snap:9&start=snap:1");
     expect(a.id).toBe(b.id);
-    expect(endpointsOf(a)).toEqual({ mode: "endpoints", start: "snap:1", end: "snap:9" });
     const c = endpointDiffRef(null, "git:abc123");
     expect(c.id).toBe("oxplow:oxplow/page?page=diff-view#end=git:abc123&start=none");
     // The endpoints are the page's view: another pair is the same page.
@@ -171,9 +165,6 @@ describe("pageRefs", () => {
 });
 
 describe("refFromTabId — diff-view", () => {
-  test("an effort is its own page now: diff-view without endpoints names none", () => {
-    expect(endpointsOf(refFromTabId("oxplow:oxplow/page?effort=eff42&page=diff-view")!)).toBeNull();
-  });
 
   test("round-trips snapshot↔snapshot endpoints", () => {
     const ref = endpointDiffRef(

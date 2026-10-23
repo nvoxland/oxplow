@@ -6,7 +6,7 @@ import type { ReactElement } from "react";
 // extensions (so no slot sections, no Commands menu, no decorations) and
 // every provider flag false (so no feature-gated action). Every command a
 // page makes goes through a Proxy over the bindings answering empty data,
-// as `DiffViewPage.smoke.test.tsx` does; then, with one extension, the
+// as the page smoke tests do; then, with one extension, the
 // mounts P6b added receive their params.
 
 const realTransport = await import("../tauri-bridge/transport.js");

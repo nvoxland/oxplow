@@ -350,7 +350,7 @@ pub const MANIFEST: &[Capability] = &[
     agent("oxplow_thread_sessions"),
     // ---- git ----
     both_named("git.status", "git_change_scopes", "oxplow_vcs_status"),
-    both_named("diff", "diff", "oxplow_diff"),
+    agent("oxplow_diff"),
     ui(
         "changed_paths",
         "an agent reads the same paths, with line counts, through `diff`",
@@ -368,7 +368,6 @@ pub const MANIFEST: &[Capability] = &[
         "an agent searches its worktree with its own Grep tool",
     ),
     // ---- snapshots / local history ----
-    model("list_snapshots_for_stream", &["v_snapshot"]),
     model("list_snapshot_ops", &["v_snapshot_op"]),
     model("list_files_for_snapshot", &["v_snapshot_file"]),
     model("get_file_snapshot", &["v_snapshot_file"]),
@@ -452,7 +451,6 @@ pub const MANIFEST: &[Capability] = &[
         "list_agent_statuses",
         "agents' live status, shown to the person; an agent is the one with the status",
     ),
-    model("get_agent_turn", &["v_agent_turn"]),
     // ---- config ----
     ui(
         "get_config",
@@ -467,10 +465,7 @@ pub const MANIFEST: &[Capability] = &[
         "the window's project path and VCS state, for the shell",
     ),
     // ---- efforts ----
-    model("get_effort_files", &["v_effort_file"]),
-    model("get_effort", &["v_effort"]),
     model("list_efforts_at_snapshots", &["v_effort"]),
-    model("list_efforts_overlapping_range", &["v_effort"]),
     // ---- workspace file I/O (agent uses Read/Write tools) ----
     ui(
         "read_workspace_file",
@@ -479,10 +474,6 @@ pub const MANIFEST: &[Capability] = &[
     ui(
         "files_at",
         "a revision's file list, for the editor; an agent reads a revision's file with `read`",
-    ),
-    ui(
-        "extension_impact_between",
-        "an effort review's Extension Changes; an agent runs `oxplow extension check --impact`",
     ),
     ui(
         "vcs_revision",

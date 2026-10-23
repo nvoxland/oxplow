@@ -183,14 +183,11 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             // code quality (duplication only — metrics scan retired, tsk229)
             // snapshots
             commands::generated::list_file_snapshots,
-            commands::generated::list_snapshots_for_stream,
             commands::generated::list_snapshot_ops,
             commands::generated::list_files_for_snapshot,
             commands::generated::list_wiki_slugs_for_snapshots,
             commands::generated::get_file_snapshot,
-            commands::generated::diff,
             commands::generated::changed_paths,
-            commands::generated::extension_impact_between,
             commands::generated::get_snapshot_stats,
             commands::generated::get_blob_storage_bytes,
             // branch
@@ -205,16 +202,12 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::ingest_hook_event,
             commands::generated::read_event_content,
             commands::generated::list_agent_statuses,
-            commands::generated::get_agent_turn,
             // config
             commands::generated::get_config,
             commands::generated::set_generated,
             commands::generated::get_workspace_context,
             // efforts
-            commands::generated::get_effort_files,
-            commands::generated::get_effort,
             commands::generated::list_efforts_at_snapshots,
-            commands::generated::list_efforts_overlapping_range,
             commands::generated::list_efforts_in_window,
             commands::generated::enable_metrics,
             commands::generated::run_command,

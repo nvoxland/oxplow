@@ -1,0 +1,24 @@
+title: Extension Changes
+description: "The extensions under `.oxplow/extensions/` this change touches, each with what the change does: both versions loaded as their revision holds them and reviewed on their own overlays."
+params:
+  - { name: start_rev }
+  - { name: end_rev }
+  - { name: stream_id }
+query: |
+  SELECT c.name, c.change,
+         coalesce((SELECT group_concat(e.value, char(10)) FROM json_each(c.errors) e), '') AS errors,
+         coalesce((SELECT group_concat(l.value, char(10)) FROM json_each(c.lines) l), '') AS does,
+         coalesce((SELECT group_concat(json_extract(x.value, '$.id') || ' (' || json_extract(x.value, '$.change') || ')', ', ')
+                   FROM json_each(c.lens_changes) x), '') AS lenses
+  FROM v_extension_change c
+  WHERE c.base = :start_rev AND c.head = :end_rev AND c.stream_id = :stream_id
+  ORDER BY c.name
+viz: table
+columns:
+  - { key: name, label: Extension }
+  - { key: change, label: Change, width: 90 }
+  - { key: does, label: What it changes }
+  - { key: lenses, label: Lenses }
+  - { key: errors, label: Problems }
+empty: ""
+hidden: true

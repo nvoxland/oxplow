@@ -226,24 +226,6 @@ export function resourceParamsOf(ref: TabRef): Record<string, SqlCell> {
   return u && resource ? cellsOf(u.params, keyParamOf(resource)) : {};
 }
 
-/** A diff view's spec from its URI: a snapshot's, an effort's or a turn's
- *  changes, or a `diff-view` route's pair of endpoints. */
-export function diffViewOf(ref: TabRef): DiffViewPayload | null {
-  const id = paramOf(ref.id, "id");
-  switch (typeOf(ref.id)) {
-    case "oxplow/snapshot": {
-      const n = Number(id);
-      return Number.isInteger(n) ? { mode: "snapshot", snapshotId: n } : null;
-    }
-    case "oxplow/effort":
-      return id ? { mode: "effort", effortId: id } : null;
-    case "oxplow/turn":
-      return id ? { mode: "turn", turnId: id } : null;
-    default:
-      return endpointsOf(ref);
-  }
-}
-
 /** A ref's view: its id's `#` params, read as the params form reads them
  *  (an empty value is null, a number a number). */
 export function viewParamsOf(ref: TabRef): Record<string, SqlCell> {
@@ -499,12 +481,6 @@ export function gitDashboardRef(): TabRef {
  *   pair of revisions (`working`, `snap:<id>`, `git:<rev>`). `start =
  *   null` (`none`) diffs `end` against the empty tree (everything added).
  */
-export type DiffViewPayload =
-  | { mode: "snapshot"; snapshotId: number }
-  | { mode: "effort"; effortId: string }
-  | { mode: "turn"; turnId: string }
-  | { mode: "endpoints"; start: Revision | null; end: Revision };
-
 /** A single captured snapshot's page. Drill-in from the Local History
  *  dashboard, file version history, and snapshot backlinks. */
 export function snapshotRef(snapshotId: number): TabRef {
@@ -526,15 +502,6 @@ export function turnRef(turnId: string): TabRef {
  *  the empty tree. */
 export function endpointDiffRef(start: Revision | null, end: Revision): TabRef {
   return pageTabRef("diff-view", {}, { start: start ?? "none", end });
-}
-
-/** A `diff-view` page's endpoints, from its view; null without an end. */
-export function endpointsOf(ref: TabRef): DiffViewPayload | null {
-  const view = viewParamsOfUri(ref.id);
-  const end = parseRevision(view.end ?? "");
-  if (!end) return null;
-  const start = view.start ?? "none";
-  return { mode: "endpoints", start: start === "none" ? null : parseRevision(start), end };
 }
 
 /** Uncommitted Changes — the working tree's changed files, commit form

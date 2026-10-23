@@ -3,7 +3,7 @@
 What comes with oxplow, built as an ordinary extension:
 
 - the effort review packet: what a person checks before accepting an
-  agent's work, shown on each effort's diff (the `effort.review.details`
+  agent's work, shown on each effort's diff (the `oxplow-foundation/changes.sections`
   slot), and the verdicts they give;
 - the analytics lenses: tests and coverage, metric deltas, churn,
   duplication, co-change, token use and page visits;

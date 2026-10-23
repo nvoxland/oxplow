@@ -5,7 +5,6 @@ import type {
   TabReport,
   BegunSignIn,
   ChangeScopes,
-  ExtensionChange,
   HookEnvelope,
   OpOutcome,
   OxplowConfig,
@@ -50,7 +49,6 @@ import type {
   CommentStatus,
   CommentThread,
   ChangedPath,
-  DiffEntry,
   Extension,
   Lens,
   LensRun,
@@ -80,7 +78,7 @@ export interface ProviderConfig {
   kind: string;
   baseUrl: string | null;
 }
-export type { ChangedPath, DiffEntry };
+export type { ChangedPath };
 export type { ServiceListing, ScriptServices };
 export type { DataEntity, Extension, Lens, LensRun, LensViz, LensSpec, SearchHit, CollectorListing, CollectorRunReport, SqlCell, SqlQueryResult };
 export type { ProviderInstanceView };
@@ -1718,34 +1716,6 @@ export async function listFileSnapshotsForPath(
   }));
 }
 
-/** List snapshot rows for a stream, newest first. */
-export async function listSnapshots(streamId: string, limit?: number): Promise<Snapshot[]> {
-  const rows = unwrap(
-    await commands.listSnapshotsForStream(streamId, limit ?? null),
-  ) as unknown as Array<{
-    id: number;
-    stream_id: string;
-    created_at: string;
-    file_count: number;
-    revision: Revision | null;
-    branch: string | null;
-    parent_snapshot_id: number | null;
-    trigger: SnapshotTrigger;
-    over_budget: boolean;
-  }>;
-  return rows.map((r) => ({
-    id: r.id,
-    streamId: r.stream_id,
-    createdAt: r.created_at,
-    fileCount: r.file_count,
-    revision: r.revision,
-    branch: r.branch,
-    parentSnapshotId: r.parent_snapshot_id,
-    trigger: r.trigger,
-    overBudget: r.over_budget,
-  }));
-}
-
 /** Aggregate created/modified/deleted counts for a snapshot. */
 export async function getSnapshotStats(snapshotId: number): Promise<{
   created: number;
@@ -1799,17 +1769,6 @@ export async function listFilesForSnapshot(snapshotId: number): Promise<Snapshot
   }));
 }
 
-/** What changed from `from` (nothing, when null) to `to` in the
- *  stream's workspace — any two revisions: working tree, snapshots,
- *  commits. Powers the diff views and the changed-files lists. */
-export async function diffRevisions(
-  streamId: string,
-  from: Revision | null,
-  to: Revision,
-): Promise<DiffEntry[]> {
-  return unwrap(await commands.diff(streamId || null, from, to));
-}
-
 /** Which paths changed from `from` (nothing, when null) to `to`, and
  *  how — {@link diffRevisions} without the line counts, so the daemon
  *  reads no file. For views that filter by what changed. */
@@ -1821,55 +1780,9 @@ export async function changedPaths(
   return unwrap(await commands.changedPaths(streamId || null, from, to));
 }
 
-/** The extensions that changed between `start` (null: nothing before) and
- *  `end` of the stream's workspace, each with what the change does
- *  — the "Extension Changes" section of an effort's review. */
-export async function extensionImpactBetween(
-  streamId: string,
-  start: Revision | null,
-  end: Revision,
-): Promise<ExtensionChange[]> {
-  return unwrap(await commands.extensionImpactBetween(streamId || null, start, end));
-}
-
 /** Every file in the stream's workspace at `revision`, sorted. */
 export async function filesAt(streamId: string, revision: Revision): Promise<string[]> {
   return unwrap(await commands.filesAt(streamId || null, revision));
-}
-
-/** One agent turn by id (`trn<N>`) — its start and end snapshots, for
- *  the turn page's diff. `null` when the id is unknown. */
-export async function getAgentTurn(
-  turnId: string,
-): Promise<{ id: string; startSnapshotId: number | null; snapshotId: number | null } | null> {
-  const row = unwrap(await commands.getAgentTurn(turnId)) as unknown as {
-    id: string;
-    start_snapshot_id: number | null;
-    snapshot_id: number | null;
-  } | null;
-  return row
-    ? { id: row.id, startSnapshotId: row.start_snapshot_id, snapshotId: row.snapshot_id }
-    : null;
-}
-
-/** One effort by id — its snapshot bracket + task id, so the diff view
- *  can resolve `effortDiffRef(effortId)` into (start, end) endpoints.
- *  `null` when the id is unknown. */
-export async function getEffort(effortId: string): Promise<OverlappingEffort | null> {
-  const row = unwrap(await commands.getEffort(effortId)) as unknown as RawEffort | null;
-  return row ? toOverlappingEffort(row) : null;
-}
-
-/** An effort's files: claimed by an edit tool, or observed changing
- *  during one of its thread's turns. */
-export async function listEffortFiles(
-  effortId: string,
-): Promise<Array<{ path: string; change: "created" | "updated" | "deleted" }>> {
-  const rows = unwrap(await commands.getEffortFiles(effortId)) as unknown as Array<{
-    path: string;
-    change: "created" | "updated" | "deleted";
-  }>;
-  return rows.map((r) => ({ path: r.path, change: r.change }));
 }
 
 /** One (snapshot, effort) pair. `completedHere` is true when the
@@ -1936,58 +1849,6 @@ export async function listEffortsAtSnapshots(
     endSnapshotId: r.effort.end_snapshot_id,
     completedHere: r.effort.end_snapshot_id === r.snapshot_id,
   }));
-}
-
-/** An effort row as the IPC sends it (snake_case; see the generated
- *  `Effort` binding). */
-interface RawEffort {
-  id: string;
-  work_item: string | null;
-  thread_id: string;
-  started_at: string;
-  ended_at: string | null;
-  start_snapshot_id: number | null;
-  end_snapshot_id: number | null;
-  summary: string | null;
-}
-
-function toOverlappingEffort(r: RawEffort): OverlappingEffort {
-  return {
-    effortId: r.id,
-    workItem: r.work_item,
-    threadId: r.thread_id,
-    startedAt: r.started_at,
-    endedAt: r.ended_at,
-    startSnapshotId: r.start_snapshot_id,
-    endSnapshotId: r.end_snapshot_id,
-    summary: r.summary,
-  };
-}
-
-export interface OverlappingEffort {
-  effortId: string;
-  /** The effort's work item ref; `null` while it's unlinked. */
-  workItem: string | null;
-  threadId: string;
-  startedAt: string;
-  endedAt: string | null;
-  startSnapshotId: number | null;
-  endSnapshotId: number | null;
-  summary: string | null;
-}
-
-/** Efforts whose snapshot window overlaps the half-open range
- *  `(rangeStart, rangeEnd]` — including ones that merely started or
- *  ended inside it, contain it, or are still open. Drives the diff
- *  view's roster of other efforts that overlapped the diffed range. */
-export async function listEffortsOverlappingRange(
-  rangeStart: number,
-  rangeEnd: number,
-): Promise<OverlappingEffort[]> {
-  const rows = unwrap(
-    await commands.listEffortsOverlappingRange(rangeStart, rangeEnd),
-  ) as unknown as RawEffort[];
-  return rows.map(toOverlappingEffort);
 }
 
 export interface SnapshotTakenEventPayload {

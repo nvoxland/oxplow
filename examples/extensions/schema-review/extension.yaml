@@ -63,6 +63,6 @@ ui:
   replacements:
     - { target: effort.verdict, lens: effort-verdict, version: 1 }
   slots:
-    - { slot: effort.review.details, lens: schema-changes }
+    - { slot: oxplow-foundation/changes.sections, lens: schema-changes }
   decorators:
     - { model: verdict, resource: oxplow/effort, placement: row-badge, label: label, color: color }

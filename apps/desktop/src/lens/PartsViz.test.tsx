@@ -166,3 +166,21 @@ test("a section that needs what isn't active is left out, and isn't counted as n
   expect(queryByTestId("lens-document-nothing-found")).toBeNull();
   expect(queryByText(/Needs a work list/)).toBeNull();
 });
+
+test("a part titled \"\" is bare: its body with no heading, and it never folds into nothing found", async () => {
+  const { getByTestId, queryByTestId, container } = render(
+    <LensResultView run={page("document", [part({ id: "quiet", title: "", lens: "x/none" }), part({ id: "open", lens: "x/open" })])} streamId="str1" onOpenPage={() => {}} />,
+  );
+  await waitFor(() => expect(getByTestId("lens-part-open").textContent).toContain("7"));
+  expect(getByTestId("lens-part-quiet").querySelector("h2")).toBeNull();
+  expect(queryByTestId("lens-document-nothing-found")).toBeNull();
+  expect(container.textContent).not.toContain("Nothing");
+});
+
+test("a part that declares a param the page's row has no value for is left out", async () => {
+  const run = page("document", [part({ id: "mine", lens: "x/open" }), part({ id: "theirs", lens: "x/cards" })]);
+  const withRow = { ...run, params: { stream_id: 3 }, result: { columns: ["change_id"], rows: [[null]], truncated: false } } as unknown as LensRun;
+  const { getByTestId, queryByTestId } = render(<LensResultView run={withRow} streamId="str1" onOpenPage={() => {}} />);
+  await waitFor(() => expect(getByTestId("lens-part-mine")).toBeTruthy());
+  expect(queryByTestId("lens-part-theirs")).toBeNull();
+});

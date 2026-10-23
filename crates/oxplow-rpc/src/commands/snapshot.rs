@@ -5,7 +5,7 @@ use oxplow_domain::{ByteSize, FileSnapshotId, SnapshotId};
 use std::path::Path;
 
 use oxplow_app::Services;
-use oxplow_db::{FileSnapshot, Snapshot, SnapshotStats};
+use oxplow_db::{FileSnapshot, SnapshotStats};
 use oxplow_domain::StreamId;
 use oxplow_fs_watch::WorkspaceFilter;
 
@@ -45,19 +45,6 @@ pub async fn list_file_snapshots(
         return Ok(Vec::new());
     }
     Ok(svc.snapshot_store.list_for_path(&path).await?)
-}
-
-/// `snapshot` rows for a stream — one entry per `request_snapshot()`
-/// call that captured anything. Newest first.
-pub async fn list_snapshots_for_stream(
-    svc: &Services,
-    stream_id: StreamId,
-    limit: Option<u32>,
-) -> Result<Vec<Snapshot>, IpcError> {
-    Ok(svc
-        .snapshot_store
-        .list_snapshots_for_stream(stream_id, limit.map_or(200, |n| n as usize))
-        .await?)
 }
 
 /// The stream's snapshot operation log, newest first: every take — a new

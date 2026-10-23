@@ -1,0 +1,64 @@
+title: Changes
+description: "What changed between two points of the project: a snapshot (against the one before), an effort or a turn (its start to its end, or to the working tree while it runs), or any two points picked here. The renderer of oxplow's `snapshot`, `effort` and `turn` resources, and the Changes page."
+params:
+  - { name: uri }
+  - { name: start, type: choice, role: filter, options_from: changes-starts, label: From, default: "" }
+  - { name: end, type: choice, role: filter, options_from: changes-ends, label: To, default: "" }
+  - { name: stream_id }
+query: |
+  WITH res AS (
+    SELECT uri_resource(:uri) AS kind, uri_param(:uri, 'id') AS id
+  ), derived AS (
+    SELECT 'effort' AS subject, e.id AS effort_row, e.work_item,
+           CASE WHEN e.start_snapshot_id IS NOT NULL THEN 'snap:' || e.start_snapshot_id ELSE '' END AS s,
+           CASE WHEN e.end_snapshot_id IS NOT NULL THEN 'snap:' || e.end_snapshot_id ELSE 'working' END AS en
+    FROM res, v_effort e WHERE res.kind = 'oxplow/effort' AND e.id = CAST(substr(res.id, 4) AS INTEGER)
+    UNION ALL
+    SELECT 'turn', NULL, NULL, 'snap:' || t.start_snapshot_id,
+           CASE WHEN t.snapshot_id IS NOT NULL THEN 'snap:' || t.snapshot_id ELSE 'working' END
+    FROM res, v_agent_turn t WHERE res.kind = 'oxplow/turn' AND t.id = CAST(substr(res.id, 4) AS INTEGER)
+      AND t.start_snapshot_id IS NOT NULL
+    UNION ALL
+    SELECT 'snapshot', NULL, NULL,
+           coalesce((SELECT 'snap:' || max(p.id) FROM v_snapshot p WHERE p.stream_id = n.stream_id AND p.id < n.id), ''),
+           'snap:' || n.id
+    FROM res, v_snapshot n WHERE res.kind = 'oxplow/snapshot' AND n.id = CAST(res.id AS INTEGER)
+    UNION ALL
+    SELECT 'range', NULL, NULL, '', '' FROM res WHERE res.kind IS NULL
+  ), chosen AS (
+    SELECT CASE WHEN coalesce(:end, '') <> '' THEN 'range' ELSE d.subject END AS subject,
+           CASE WHEN coalesce(:end, '') <> '' THEN NULL ELSE d.effort_row END AS effort_row,
+           CASE WHEN coalesce(:end, '') <> '' THEN NULL ELSE d.work_item END AS work_item,
+           CASE WHEN coalesce(:end, '') <> '' THEN CASE WHEN :start = 'none' THEN '' ELSE coalesce(:start, '') END ELSE d.s END AS start_rev,
+           CASE WHEN coalesce(:end, '') <> '' THEN :end ELSE d.en END AS end_rev
+    FROM derived d
+  )
+  SELECT subject, start_rev, end_rev, coalesce(work_item, '') AS work_item,
+         effort_row AS effort_id,
+         CASE WHEN effort_row IS NOT NULL THEN 'eff' || effort_row END AS effort,
+         (end_rev = 'working') AS in_progress,
+         (SELECT r.id FROM v_change r WHERE r.kind = 'range' AND r.target = start_rev || '..' || end_rev) AS range_change_id,
+         CASE WHEN effort_row IS NOT NULL
+              THEN (SELECT c.id FROM v_change c WHERE c.kind = 'effort' AND c.target = CAST(effort_row AS TEXT))
+              ELSE (SELECT r.id FROM v_change r WHERE r.kind = 'range' AND r.target = start_rev || '..' || end_rev) END AS change_id
+  FROM chosen WHERE end_rev <> ''
+columns:
+  - { key: subject }
+  - { key: start_rev }
+  - { key: end_rev }
+  - { key: work_item }
+  - { key: effort_id }
+  - { key: effort }
+  - { key: in_progress }
+  - { key: range_change_id }
+  - { key: change_id }
+viz: document
+sections:
+  - { id: effort, lens: changes-effort }
+  - { id: header, lens: changes-header }
+  - { id: description, lens: changes-description }
+  - { id: verdict, lens: changes-verdict, title: "", replaceable: effort.verdict }
+  - { id: concurrent, lens: changes-concurrent }
+  - { id: files, lens: changes-files }
+  - { id: extensions, lens: changes-extensions }
+hidden: true

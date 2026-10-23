@@ -1160,3 +1160,97 @@ async fn the_tasks_page_lists_its_scope_by_state_with_epics_and_a_summary() {
     let backlog = run_task(&fx, "tasks-backlog", vec![]).await;
     assert_eq!(backlog.rows[0][0], SqlCell::Int(1));
 }
+
+/// The Changes page: an effort's page frames its own bracket (to the
+/// working tree while it is open), the pickers override it with a range,
+/// and the parts that belong to an effort have it to read.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_changes_page_frames_an_effort_and_a_picked_range() {
+    let fx = crate::test_fixtures::services_with_task_effort().await;
+    let effort = fx.fx.effort;
+    let uri = format!("oxplow:oxplow/effort?id=eff{}", effort.value());
+    let page = |extra: Vec<(&'static str, SqlCell)>| {
+        let mut params = vec![
+            ("uri", SqlCell::Text(uri.clone())),
+            ("stream_id", SqlCell::Int(1)),
+        ];
+        params.extend(extra);
+        run_task(&fx, "changes", params)
+    };
+    let own = page(vec![]).await;
+    assert_eq!(own.rows.len(), 1, "{:?}", own.rows);
+    let row = &own.rows[0];
+    assert_eq!(own.text(row, "subject").as_deref(), Some("effort"));
+    assert_eq!(own.text(row, "end_rev").as_deref(), Some("working"));
+    assert!(own.flag(row, "in_progress"));
+    assert_eq!(
+        own.text(row, "effort").as_deref(),
+        Some(format!("eff{}", effort.value()).as_str())
+    );
+
+    // A picked end turns it into a range, leaving the effort.
+    let picked = page(vec![
+        ("start", SqlCell::Text(String::new())),
+        ("end", SqlCell::Text("working".into())),
+    ])
+    .await;
+    assert_eq!(
+        picked.text(&picked.rows[0], "subject").as_deref(),
+        Some("range")
+    );
+    assert_eq!(
+        picked.rows[0][picked
+            .columns
+            .iter()
+            .position(|c| c == "effort_id")
+            .unwrap()],
+        SqlCell::Null(())
+    );
+
+    // The route page: no URI, no end - nothing to compare yet.
+    let route = run_task(&fx, "changes", vec![("stream_id", SqlCell::Int(1))]).await;
+    assert!(route.rows.is_empty());
+
+    // Its parts.
+    let effort_part = run_task(
+        &fx,
+        "changes-effort",
+        vec![
+            ("effort_id", SqlCell::Int(effort.value())),
+            ("effort", SqlCell::Text(format!("eff{}", effort.value()))),
+        ],
+    )
+    .await;
+    assert_eq!(
+        effort_part.text(&effort_part.rows[0], "state").as_deref(),
+        Some("Open")
+    );
+    let header = run_task(
+        &fx,
+        "changes-header",
+        vec![
+            ("subject", SqlCell::Text("effort".into())),
+            ("start_rev", SqlCell::Text(String::new())),
+            ("end_rev", SqlCell::Text("working".into())),
+            ("work_item", SqlCell::Null(())),
+            ("in_progress", SqlCell::Int(1)),
+        ],
+    )
+    .await;
+    assert_eq!(
+        header.text(&header.rows[0], "from_label").as_deref(),
+        Some("(initial)")
+    );
+    assert_eq!(
+        header.text(&header.rows[0], "to_label").as_deref(),
+        Some("working tree")
+    );
+    assert!(header
+        .text(&header.rows[0], "note")
+        .unwrap()
+        .contains("in progress"));
+    for lens in ["changes-starts", "changes-ends"] {
+        let options = run_task(&fx, lens, vec![("stream_id", SqlCell::Int(1))]).await;
+        assert!(!options.rows.is_empty(), "{lens}");
+    }
+}

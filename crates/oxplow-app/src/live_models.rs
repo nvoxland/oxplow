@@ -54,6 +54,7 @@ pub const NAMES: &[&str] = &[
     "agent_harness",
     "branch_divergence",
     "commit_between",
+    "extension_change",
 ];
 
 /// The columns a live model's rows have, in order.
@@ -131,6 +132,16 @@ pub fn columns(name: &str) -> &'static [&'static str] {
             "subject",
             "stream_id",
         ],
+        "extension_change" => &[
+            "base",
+            "head",
+            "name",
+            "change",
+            "errors",
+            "lines",
+            "lens_changes",
+            "stream_id",
+        ],
         _ => &[],
     }
 }
@@ -143,7 +154,7 @@ pub fn pushdown(name: &str) -> &'static [&'static str] {
         "workspace_file" => &["parent"],
         // One pair is one graph walk; a side left open ranges over the
         // branches (`LiveSources::branch_pairs`).
-        "branch_divergence" | "commit_between" => &["base", "head"],
+        "branch_divergence" | "commit_between" | "extension_change" => &["base", "head"],
         _ => &[],
     }
 }
@@ -201,6 +212,11 @@ pub fn follows(name: &str, change: &Change<'_>) -> bool {
             "vcs_workspace" | "branch_divergence" | "commit_between" => {
                 matches!(event, E::VcsRefsChanged { .. })
             }
+            // A range headed at the working tree moves with the files.
+            "extension_change" => matches!(
+                event,
+                E::VcsRefsChanged { .. } | E::WorkspaceChanged { .. } | E::ExtensionsChanged
+            ),
             "workspace_file" => matches!(
                 event,
                 E::WorkspaceChanged { .. } | E::VcsRefsChanged { .. } | E::ConfigChanged
@@ -238,6 +254,8 @@ pub struct LiveSources {
     pub streams: Arc<dyn oxplow_domain::stores::StreamStore>,
     pub harnesses: oxplow_domain::agent::registry::HarnessRegistry,
     pub vcs: Arc<dyn oxplow_domain::vcs::Vcs>,
+    /// The services, once built (`v_extension_change` reviews with them).
+    pub services: crate::commands::util::ServicesSlot,
 }
 
 /// The most conversations listed per harness.
@@ -406,6 +424,7 @@ impl LiveModels {
             "agent_harness" => Ok(sources.agent_harnesses()),
             "branch_divergence" => sources.branch_divergence(stream, filters).await,
             "commit_between" => sources.commits_between(stream, filters).await,
+            "extension_change" => sources.extension_changes(stream, filters).await,
             other => Err(DomainError::Invalid(format!(
                 "`v_{other}` isn't a live model"
             ))),
@@ -971,6 +990,73 @@ impl LiveSources {
             }
         }
         Ok(rows)
+    }
+
+    /// `v_extension_change`: the extensions under `.oxplow/extensions/`
+    /// whose files differ between the revisions the query pins as `base`
+    /// (`''`: nothing before) and `head`, each with what the change does
+    /// (`extensions::extension_changes_between`). Unpinned, nothing: the
+    /// review runs both versions.
+    async fn extension_changes(
+        &self,
+        stream: Option<StreamId>,
+        filters: &[(String, String)],
+    ) -> Result<Vec<Vec<SqlCell>>, DomainError> {
+        let pinned = |column: &str| {
+            filters
+                .iter()
+                .find(|(c, _)| c == column)
+                .map(|(_, v)| v.clone())
+        };
+        let (Some(base), Some(head)) = (pinned("base"), pinned("head")) else {
+            return Ok(Vec::new());
+        };
+        let stream = self.stream(stream).await?;
+        let ws =
+            crate::worktrees::workspace_path(self.worktrees.project_dir(), &stream.worktree_path);
+        let parse = |s: &str| {
+            s.parse::<oxplow_domain::vcs::Revision>()
+                .map_err(DomainError::Invalid)
+        };
+        let start = if base.is_empty() || base == "none" {
+            None
+        } else {
+            Some(parse(&base)?)
+        };
+        let end = parse(&head)?;
+        let svc = self
+            .services
+            .get()
+            .map_err(|e| DomainError::Invalid(e.to_string()))?;
+        let changes =
+            crate::extensions::extension_changes_between(&svc, &ws, start.as_ref(), &end).await?;
+        Ok(changes
+            .into_iter()
+            .map(|c| {
+                let lines = c
+                    .impact
+                    .as_ref()
+                    .map(|i| i.lines.clone())
+                    .unwrap_or_default();
+                let lenses: Vec<serde_json::Value> = c
+                    .impact
+                    .iter()
+                    .flat_map(|i| i.lenses.iter())
+                    .filter(|l| !matches!(l.change, crate::extension_impact::Change::Unchanged))
+                    .map(|l| serde_json::json!({ "id": l.id, "change": wire_name(&l.change) }))
+                    .collect();
+                vec![
+                    text(base.clone()),
+                    text(head.clone()),
+                    text(c.name),
+                    text(wire_name(&c.change)),
+                    json(&c.errors),
+                    json(&lines),
+                    json(&lenses),
+                    SqlCell::Int(stream.id.value()),
+                ]
+            })
+            .collect())
     }
 
     /// The files and folders the stream's worktree's filter keeps: in

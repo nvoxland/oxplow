@@ -477,13 +477,13 @@ over a database file); adversarial and concurrency coverage is still to do.
 >   - the core explorer: the Explore Data page (with Save as Lens) and
 >     lens tiles on dashboards;
 >   - **bundled extensions** (compiled in, read-only, reserved names) and
->     the `effort.review.details` **slot**; the bundled `oxplow-bundled` extension
+>     the `oxplow-foundation/changes.sections` **slot**; the bundled `oxplow-bundled` extension
 >     holds the effort review packet;
 >   - `exec` **sources** that bring external records in as entities. The
 >     mechanics and decisions are in
 >     [semantic-layer.md](./semantic-layer.md) → "User and extension
 >     sources", and a tested example is in `examples/extensions/github/`.
->   - **slots** (now `effort.review.details`, `vcs.commit.details`,
+>   - **slots** (now `oxplow-foundation/changes.sections`, `vcs.commit.details`,
 >     `vcs.status.details`, `work_item.detail.body`, `thread.plan.header`),
 >     **advisories**, per-project **disabling**, and the
 >     **analytics extraction** (tsk280): every analytics page and
@@ -1005,7 +1005,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     `data-slot="<slot>"`, which the "every enhancement off" smoke test
     looks for): every mounted lens, run with
     the slot params it declares (`slotRuns`), re-run on data events.
-    DiffViewPage offers `effort_id`, `effort` (the effort's URI) and `change_id`; WorkItemPage `uri`
+    the Changes page offers `effort_id`, `effort` and `change_id` (its row); WorkItemPage `uri`
     (body and sidebar; the item's URI, whichever list); GitCommitPage and UncommittedChangesPage `change_id`, plus
     UncommittedChangesPage's strip `stream_id`.
     Numeric ids come from `numericRowId` (`tsk42` → 42).
@@ -1050,7 +1050,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   **Review**: on each effort's activity card, and in the details rail for
   the newest effort.
 - **The review packet** (in `oxplow-bundled`). Its lenses, mounted in
-  `effort.review.details`:
+  `oxplow-foundation/changes.sections`:
   - Decisions Made (`v_decision`, `provenance = 'recorded'`)
   - Decisions Oxplow Noticed (`v_decision`, `provenance = 'inferred'`)
   - Unverified Claims (`v_claim` whose `v_oxplow_bundled_claim_status`
@@ -1518,7 +1518,7 @@ collectors:  [...]   # entity collectors (exec / starlark / jaq / read → entit
                      # see semantic-layer.md "Collectors"
 ui:                  # what it adds to the core UI (a command's own `ui:` puts it in core menus: see "Commands")
   slots:             # lenses mounted into core pages; see "Slots"
-    - { slot: effort.review.details, lens: change-review }
+    - { slot: oxplow-foundation/changes.sections, lens: change-review }
   decorators: …      # labels from its models on core URIs (stable since P10; see "Decorators")
   replacements: …    # a lens in place of a named core component (see "Replacements")
 advisories:  [...]   # see "Advisories"
@@ -2289,7 +2289,7 @@ they live under `ui:`.
 
 | Slot | Core page | Params |
 |---|---|---|
-| `effort.review.details` | diff-view for an effort | `effort_id`, `effort`, `change_id` |
+| `oxplow-foundation/changes.sections` | the Changes page (a document: parts `effort`, `header`, `description`, `verdict`, `concurrent`, `files`, `extensions`) | its params (`uri`, `start`, `end`, `stream_id`) and its row (`subject`, `start_rev`, `end_rev`, `work_item`, `effort_id`, `effort`, `in_progress`, `range_change_id`, `change_id`; a lens declaring `effort_id` or `effort` is left out of a page that shows no effort) |
 | `oxplow-foundation/work-item.sections` | the Work Item page (a document: parts `state`, `fields`, `body`, `info`, `links`, `comments`, `activity`) | its params (`uri`, `thread_id`, `stream_id`) |
 | `oxplow-foundation/tasks.sections` | the Tasks page (a document: parts `list`, `summary`, `backlog`) | its params (`show`, `priority`, `thread_id`, `stream_id`) and its row (`scope`) |
 | `oxplow-foundation/commit.sections` | the commit page (a document: parts `detail`, `files`) | its params (`uri`, `sha`, `stream_id`) and its row (`change_id`, `base_revision`, `head_revision`) |
@@ -2333,7 +2333,7 @@ it props it doesn't know.
 | `work_item.list` | the Tasks page's list (`TasksList`, `TasksPage`): the scope picker, detail pane and backlog drawer stay oxplow's; the lens's `stream_id` is the scope's stream | `work_items` | no | `scope` (`thread` / `stream` / `all`), `thread_id` (the thread when `scope` is `thread`, else null) | — |
 | `work_item.detail` | a work item's description editor (the `body` part of the `work-item` document): the state, fields, About, links, comments, activity and the mounts stay oxplow's | `work_items` | no | `uri` (the item) | — |
 | `work_item.detail.state` | a work item's State (the `state` part of the `work-item` document) — never its Move To (the About part's menu), so a replacement can't strand an item | `work_items` | yes | `uri` (the item) | — |
-| `effort.verdict` | an effort's verdict, the first line of its page (`DiffViewPage`). Core has **none of its own**: with no replacement, or `oxplow` chosen, the page shows nothing. oxplow-bundled's `effort-verdict` is the default | `effort_policy` | no | `effort_id` (the effort's row id) | — |
+| `effort.verdict` | an effort's verdict, the first line of its page (the `verdict` part of the `changes` document). Core has **none of its own**: with no replacement, or `oxplow` chosen, the page shows nothing. oxplow-bundled's `effort-verdict` is the default | `effort_policy` | no | `effort_id` (the effort's row id) | — |
 | `vcs.history.graph` | Git History's commits (a part of the `git-history` document): oxplow's own is a plain list, the part's lens (`git-history-commits`) | `vcs` | no | `head_sha` (the stream's head), `reveal_sha` (a commit to scroll to and mark, or null), `limit` | `q`, `author`, `branch` (Git History's filters; v2) |
 
 **Who places a target.** A core component (`<Replaceable target …
@@ -2626,18 +2626,17 @@ file is byte-identical after. Text output adds `impact against <rev>:`
 and the report's lines; `--json` adds `impact` (the `ImpactReport`) and
 `against` to the check's JSON.
 
-**On an effort's review.** DiffViewPage shows an "Extension
+**On an effort's review.** The Changes page shows an "Extension
 Changes" section when the change's files include `.oxplow/extensions/**`
-(`changedExtensions`): RPC `extension_impact_between { streamId, start,
-end }` → `extensions::extension_changes_between` names each extension
-whose files differ between the two revisions (`Trees::diff`), loads both
+the `changes-extensions` part reads the live model `v_extension_change`
+(pinned to `base` and `head`, each a `v_change` revision spelling): the
+server's `extensions::extension_changes_between` names each extension whose
+files differ between the two revisions (`Trees::diff`), loads both
 versions as those revisions hold them (`extension_tree_at`) and reviews
-them with `impact_between` — an `ExtensionChange { name, change,
-impact?, errors }` each (a removed one has no report). The section
-renders each with `ImpactReportView` (the server's lines, then each
-changed lens before and after), the component `check --impact`
-shows too. While the RPC runs it says "Reviewing acme…"; when it fails, "Could
-not review acme: <why>" — never a spinner that doesn't end.
+them with `impact_between` — a row each (name, change, problems, the
+report's lines, the lenses that differ). A removed one has no report. The
+lenses' before/after text is not shown (the changed file's diff has it); a
+failed review is a row's problems, never a spinner that doesn't end.
 
 ## Commands in core menus (a command's `ui.about`)
 
@@ -4720,13 +4719,13 @@ What moves out of core, and what it becomes:
 |---|---|
 | Planning / Review / Quality dashboards | `document` lenses (**done**: `planning`, `review`, `quality`) |
 | Code-quality runner, dup scan, FindingPage, DuplicateBlockPage | **done:** the `findings` / `duplicate-blocks` lenses; the dup scan runs in core's change analysis; the compare page is the foundation `duplicate-block` lens (`DuplicateBlockPage` is gone) |
-| Change-analysis cards (treemap, look-here-first, functions, co-change, zones) | **done:** the `change-review` document in the `effort.review.details` / `oxplow-foundation/commit.sections` / `oxplow-foundation/uncommitted.sections` slots; core keeps a changed-files tree (`ChangedFilesTree`, `useChangedFiles`) |
+| Change-analysis cards (treemap, look-here-first, functions, co-change, zones) | **done:** the `change-review` document in the `oxplow-foundation/changes.sections` / `oxplow-foundation/commit.sections` / `oxplow-foundation/uncommitted.sections` slots; core keeps a changed-files tree (`ChangedFilesTree`, `useChangedFiles`) |
 | Fact collectors (`.oxplow/extensions/project/collectors/*.star`, idiom `.star`; gauges until P7.B3) | extensions can declare fact collectors (tsk311); done: the code metrics are oxplow-foundation's (the opt-in ones say `default: off`) |
 | Metric-threshold nudges | **done:** the `threshold-crossed` advisory (with `metric-deltas`) |
 | Usage / page analytics / token pages, `ThreadTokenTotal`, `EffortTokenUsage` | **done:** the `usage` dashboard; `task-tokens` (`work_item.detail.body` slot) and `thread-tokens` (`thread.plan.header` slot) |
 | Git History's commit graph | **done:** the `history-graph` component, replacing core's plain `CommitList` (`vcs.history.graph`) |
 | Local history dashboard | stays core (snapshots are substrate); the `recent-snapshots` lens in `review` covers the at-a-glance view |
-| Effort metrics block, effort coverage page, tests-run and nudge blocks | **done:** `effort.review.details` slot lenses `effort-tests` (a document: coverage, untested files, test runs, failed tests, analysis findings), `effort-metric-deltas`, `effort-nudges` |
+| Effort metrics block, effort coverage page, tests-run and nudge blocks | **done:** `oxplow-foundation/changes.sections` slot lenses `effort-tests` (a document: coverage, untested files, test runs, failed tests, analysis findings), `effort-metric-deltas`, `effort-nudges` |
 | Alerts page | **done:** the `alerts` document (parts above; `oxplow.effect.retry` is open to a lens a person presses, still confirmed). **Dropped:** "From extensions" (panel badges): they are client state from each panel run, so the page doesn't list them and the bell doesn't count them; a badge shows in its panel and its toast's Review opens the panel's lens. `AlertsPage` and `OpErrorDetail` are gone |
 | Duplicate Block page | **done:** the `duplicate-block` lens — `SELECT :left … UNION ALL SELECT :right …` over two route-param sides (a missing `*_at` is `working`), `viz: code` with `sync: true`, tab label `{{param.left}} ↔ {{param.right}}` |
 | Diff and File at a Revision pages | **done:** the `diff` lens (a `diff` viz; its `diff:` block takes a `base` column for the header's `vs <base>`; a clipboard compare's text stays in the entry's history state, read by `DiffViz`) and the `file-viewer` lens (a `code` viz); `DiffPage` and `FileViewerPage` are gone |
@@ -4736,6 +4735,7 @@ What moves out of core, and what it becomes:
 | Work Item page | **done:** the `work-item` document (parts `state`, `fields`, `body`, `info`, `links`, `comments`, `activity`) with `comments: true`; `state` and `body` are the `work_item.detail.state` and `work_item.detail` replaceables, a part whose list lacks the feature (`needs: [work_items.links]`, `[work_items.comments]`) is left out, and `info` offers Bring to this thread, Send to backlog and Delete from its right-click menu by what the list declares. The `work_item.detail.body` / `.sidebar` slots became `oxplow-foundation/work-item.sections`; the tab is labelled by the item's id, not its title; `WorkItemPage` is deleted |
 | Wiki page | **done:** the `wiki-page` document (parts `body`, `info`, `refs`) with `comments: true`; the editor is the `markdown` viz, so saving, drafts, comments and Contents come from the one component. The freshness chip moved into the `info` section; `WikiPage`, `WikiPageTab`, `useWikiPageController` and `wikiFreshness` are gone |
 | Tasks page | **done:** the `tasks` document (params `show` — one thread, its stream, everything — `priority`, and the page's `thread_id` / `stream_id` pickers; row `scope`; parts `tasks-list`, `tasks-summary`, `tasks-backlog`). `tasks-list` is `replaceable: work_item.list` (props `scope`, `thread_id`) and a state-grouped `list` with epics indented and foldable (`depth`, a ▾ on a parent row), the last five done, the agent's open turn as a live row at the top of In progress, drag to reorder (`before`), drop on a row to nest it (`onto`), or onto a heading to change state, bulk state and priority, Make top-level, Send to backlog and Delete, `r` `i` `b` `d` keys. The `thread.plan.header` region slot became `oxplow-foundation/tasks.sections` (`at: { before: list }`). The old read-only cross-thread scopes are gone: every row acts. `TasksPage`, `PlanPane`, `TaskGroupList`, `TaskDetail`, the scope picker, filter bar, summary pane and backlog drawer, the page's task-write handlers in `App.tsx` and the `list_open_agent_turns` IPC are deleted |
+| Changes page | **done:** the `changes` document (params `uri`, `start`, `end` — choice params with `options_from` the `changes-starts` / `changes-ends` lenses — and `stream_id`; its row frames the range: an effort's bracket, a turn's, a snapshot against the one before, or the picked pair, to the working tree while it runs). Parts: `effort` (title, linked task, open/closed; Rename…, Link to task…, Unlink, Close effort), `header` (from, to, work item, the in-progress note), `description`, `verdict` (a bare part, `replaceable: effort.verdict`), `concurrent`, `files` (a tree over `v_change_file` of the range's `v_change`, an effort's own files on its page) and `extensions` (`v_extension_change`). The `effort.review.details` region slot became `oxplow-foundation/changes.sections`. A document part that declares a param the page's row names and gives no value (an effort's lens on a range) is left out; a part titled `""` is bare (no heading); `empty: ""` says nothing. `DiffViewPage`, `EffortHeader`, the endpoint picker, `ChangedFilesTree`, `useChangedFiles`, `diffViewModel`, `ImpactReportView` and the `diff`, `extension_impact_between`, `get_effort`, `get_effort_files`, `get_agent_turn`, `list_efforts_overlapping_range` and `list_snapshots_for_stream` IPCs are deleted |
 | Backlog page | **done:** the `backlog` document: `backlog-add` (a `form` over `oxplow.work_item.create`, `then: stay`) above `backlog-list` (`list` grouped by state, epics indented by `depth`; `drag` actions reorder (`{{before.uri}}` / `{{after.uri}}`) or move to a state (`{{group.value}}`); bulk state, priority, Bring to this thread and Delete, each gated by what the list declares; `r` `i` `b` `d` keys; the `q` search matches title or any field). The per-field filter chips are one search box: a lens declares its params statically, so a chip per declared field needs params from a lens (not built). `BacklogPage`, `PlanPane`'s backlog mode and the backlog reorder wiring are deleted |
 | Board page | **done:** the `board` document, one `replaceable: work_item.board` part `board-cards` (`viz: board` grouped by state, a `drag: true` move action and `Move to` row actions); `scope` comes from the page's `show` filter through the document's query row. Cards show the declared enum fields as text (no `FieldBadge` colours). `BoardPage` and `WorkBoard` are gone; a right-click anywhere on a lens row, a link in it included, opens the row's menu (`onContextMenuCapture`) |
 | Settings → AI | **done:** foundation lenses in `settings.ai.sections`: `ai-providers` (`v_ai_provider`; Test… and Remove… row actions, Remove asks first), `ai-provider-form` (a `form` lens over `oxplow.ai.set_provider`, its `key` a `secret: true` field, `kind` chosen from `v_capability_provider`), `ai-roles` (`v_ai_role`; Assign… / Unassign over `oxplow.ai.set_role`), `ai-calls` (the last 7 days of `v_ai_call`). `set_provider` and `remove_provider` now announce `ConfigChanged` so the lists follow. `AiSection`, `aiSettingsModel` and the AI `api.ts` wrappers are gone |
@@ -4784,7 +4784,7 @@ collection ingest, attribution, token ingest, page visits (the rail and
 launcher use them), the fact store and engine, the Go To page and
 bookmarks (`v_bookmark`; the rail's Go To pane is the extension's), the Git
 dashboard. diff-view shrinks to title + file list + diff + the
-`effort.review.details` slot; WorkItemPage keeps the `work_item.detail.body` slot.
+`oxplow-foundation/changes.sections` slot; WorkItemPage keeps the `work_item.detail.body` slot.
 
 New in the extension: the **effort review packet**, all live exception
 lenses:

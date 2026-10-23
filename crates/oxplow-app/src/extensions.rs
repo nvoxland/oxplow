@@ -1821,8 +1821,6 @@ struct AdvisoryFile {
 /// a mount there goes `at:` the start, the end, or beside one of the
 /// page's parts, named by the stable ids listed here.
 pub const SLOTS: &[SlotSpec] = &[
-    // An effort's review (its diff view).
-    SlotSpec::region("effort.review.details", &["effort_id", "change_id"]),
     // Uncommitted changes: a strip above them, and below the files.
     // A file diff's header strip, above the editor: the file and the two
     // revisions the diff reads (`working`, `snap:<id>`, `git:<sha>`).
@@ -2276,7 +2274,7 @@ struct PanelFile {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct LensSlot {
-    /// Which page region, from [`SLOTS`] (`effort.review.details`,
+    /// Which page region, from [`SLOTS`] (`diff.file.header`,
     /// `vcs.commit.details`, …), or a document or dashboard lens's parts
     /// (`<extension>/<slug>.sections`, `.tiles`); the lens takes the params
     /// it offers.
@@ -7067,7 +7065,7 @@ mod tests {
     #[test]
     fn a_broken_nested_entry_doesnt_sink_the_manifest() {
         let d = tempfile::tempdir().unwrap();
-        let manifest = "manifest: 2\nname: x\nintent:\n  purpose: p\n  examples:\n    - { name: a }\n    - { name: b, bogus: 1 }\nui:\n  slots:\n    - { slot: effort.review.details, lens: l, bogus: 1 }\nskills:\n  - name: s\n    file: s.md\n";
+        let manifest = "manifest: 2\nname: x\nintent:\n  purpose: p\n  examples:\n    - { name: a }\n    - { name: b, bogus: 1 }\nui:\n  slots:\n    - { slot: diff.file.header, lens: l, bogus: 1 }\nskills:\n  - name: s\n    file: s.md\n";
         std::fs::create_dir_all(d.path().join(".oxplow/extensions/x")).unwrap();
         std::fs::write(
             d.path().join(".oxplow/extensions/x/extension.yaml"),
@@ -8786,10 +8784,22 @@ commands:
         assert!(!b.intent.as_ref().unwrap().examples.is_empty());
         // The review packet and the analytics lenses, mounted together.
         for (slot, lens) in [
-            ("effort.review.details", "oxplow-bundled/decisions"),
-            ("effort.review.details", "oxplow-bundled/inferred-decisions"),
-            ("effort.review.details", "oxplow-bundled/change-review"),
-            ("effort.review.details", "oxplow-bundled/effort-tests"),
+            (
+                "oxplow-foundation/changes.sections",
+                "oxplow-bundled/decisions",
+            ),
+            (
+                "oxplow-foundation/changes.sections",
+                "oxplow-bundled/inferred-decisions",
+            ),
+            (
+                "oxplow-foundation/changes.sections",
+                "oxplow-bundled/change-review",
+            ),
+            (
+                "oxplow-foundation/changes.sections",
+                "oxplow-bundled/effort-tests",
+            ),
             (
                 "oxplow-foundation/commit.sections",
                 "oxplow-bundled/tests-weakened",
@@ -8933,12 +8943,12 @@ commands:
         write(
             dir.path(),
             ".oxplow/extensions/mine/extension.yaml",
-            "manifest: 2\nname: mine\nintent:\n  purpose: test\nui:\n  slots:\n    - { slot: effort.review.details, lens: nope }\n    - { slot: sidebar, lens: a }\n    - { slot: effort.review.details, lens: a }\n",
+            "manifest: 2\nname: mine\nintent:\n  purpose: test\nui:\n  slots:\n    - { slot: diff.file.header, lens: nope }\n    - { slot: sidebar, lens: a }\n    - { slot: diff.file.header, lens: a }\n",
         );
         write(
             dir.path(),
             ".oxplow/extensions/mine/lenses/a.yaml",
-            "title: A\nparams: [{ name: effort_id }]\nquery: SELECT :effort_id\n",
+            "title: A\nparams: [{ name: path }]\nquery: SELECT :path\n",
         );
         let e = load_extensions(dir.path())
             .into_iter()
@@ -9085,10 +9095,10 @@ commands:
             &[
                 ("presets", "title: Presets\nquery: SELECT 1\n"),
                 ("stray", "title: Stray\nquery: SELECT 1\n"),
-                ("region", "title: R\nparams: [{ name: effort_id }]\nquery: SELECT 1\n"),
+                ("region", "title: R\nparams: [{ name: path }]\nquery: SELECT 1\n"),
                 ("sized", "title: S\nquery: SELECT 1\n"),
             ],
-            "ui:\n  slots:\n    - { slot: settings.integrations.sections, lens: presets, title: Team presets, at: { after: capabilities } }\n    - { slot: settings.integrations.sections, lens: stray, at: { before: gone } }\n    - { slot: effort.review.details, lens: region, at: start }\n    - { slot: settings.integrations.sections, lens: sized, size: wide }\n",
+            "ui:\n  slots:\n    - { slot: settings.integrations.sections, lens: presets, title: Team presets, at: { after: capabilities } }\n    - { slot: settings.integrations.sections, lens: stray, at: { before: gone } }\n    - { slot: diff.file.header, lens: region, at: start }\n    - { slot: settings.integrations.sections, lens: sized, size: wide }\n",
         );
         let mounts: Vec<_> = ext
             .ui
@@ -10309,10 +10319,10 @@ commands:
     #[test]
     fn slots_bind_params_the_lens_must_declare() {
         let task_lens = "title: T\nparams: [{ name: path }]\nquery: SELECT :path\n";
-        let thread_lens = "title: Th\nparams: [{ name: effort_id }]\nquery: SELECT :effort_id\n";
+        let thread_lens = "title: Th\nparams: [{ name: stream_id }]\nquery: SELECT :stream_id\n";
         let (_d, ext) = load_x(
             &[("t", task_lens), ("th", thread_lens), ("plain", "title: P\nquery: SELECT 1\n")],
-            "ui:\n  slots:\n    - { slot: diff.file.header, lens: t }\n    - { slot: effort.review.details, lens: th }\n    - { slot: diff.file.header, lens: plain }\n",
+            "ui:\n  slots:\n    - { slot: diff.file.header, lens: t }\n    - { slot: diff.file.header, lens: th }\n    - { slot: diff.file.header, lens: plain }\n",
         );
         let mounted: Vec<(&str, &str)> = ext
             .ui
@@ -10322,10 +10332,7 @@ commands:
             .collect();
         assert_eq!(
             mounted,
-            vec![
-                ("diff.file.header", "x/t"),
-                ("effort.review.details", "x/th")
-            ]
+            vec![("diff.file.header", "x/t"), ("diff.file.header", "x/th")]
         );
         let errs = ext.errors.join("\n");
         assert!(errs.contains("`path`") && errs.contains("plain"), "{errs}");
@@ -11308,12 +11315,12 @@ commands:
             &[
                 (
                     "files",
-                    "title: F\nparams: [{ name: change_id }]\nquery: SELECT 1\ncolumns:\n  - { key: path, link: { kind: diff-at, line: ln, base: b, head: h } }\n  - { key: dup, link: { kind: compare, head: h } }\n",
+                    "title: F\nparams: [{ name: path }]\nquery: SELECT 1\ncolumns:\n  - { key: path, link: { kind: diff-at, line: ln, base: b, head: h } }\n  - { key: dup, link: { kind: compare, head: h } }\n",
                 ),
-                ("both", "title: B\nparams: [{ name: effort_id }]\nquery: SELECT 1\n"),
+                ("both", "title: B\nparams: [{ name: left_revision }]\nquery: SELECT 1\n"),
                 ("none", "title: N\nparams: [{ name: other }]\nquery: SELECT 1\n"),
             ],
-            "ui:\n  slots:\n    - { slot: effort.review.details, lens: files }\n    - { slot: effort.review.details, lens: both }\n    - { slot: effort.review.details, lens: none }\n",
+            "ui:\n  slots:\n    - { slot: diff.file.header, lens: files }\n    - { slot: diff.file.header, lens: both }\n    - { slot: diff.file.header, lens: none }\n",
         );
         let link = ext
             .lenses
@@ -11338,16 +11345,13 @@ commands:
         assert_eq!(
             mounted,
             vec![
-                ("effort.review.details", "x/files"),
-                ("effort.review.details", "x/both")
+                ("diff.file.header", "x/files"),
+                ("diff.file.header", "x/both")
             ],
             "a slot lens needs at least one of the slot's params"
         );
         let errs = ext.errors.join("\n");
-        assert!(
-            errs.contains("none") && errs.contains("change_id"),
-            "{errs}"
-        );
+        assert!(errs.contains("none") && errs.contains("path"), "{errs}");
     }
 
     /// A page's `label` is what its tab says, `{{param.<name>}}` filled from

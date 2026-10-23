@@ -419,11 +419,6 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listSnapshotsForStream: (streamId: StreamId, limit: number | null) => typedError<Snapshot[], IpcError_Serialize>(__TAURI_INVOKE("list_snapshots_for_stream", { streamId, limit })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	listSnapshotOps: (streamId: StreamId, limit: number | null) => typedError<SnapshotOp[], IpcError_Serialize>(__TAURI_INVOKE("list_snapshot_ops", { streamId, limit })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -484,17 +479,7 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	diff: (streamId: string | null, from: string | null, to: string) => typedError<DiffEntry[], IpcError_Serialize>(__TAURI_INVOKE("diff", { streamId, from, to })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	changedPaths: (streamId: string | null, from: string | null, to: string) => typedError<ChangedPath[], IpcError_Serialize>(__TAURI_INVOKE("changed_paths", { streamId, from, to })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	extensionImpactBetween: (streamId: string | null, start: string | null, end: string) => typedError<ExtensionChange[], IpcError_Serialize>(__TAURI_INVOKE("extension_impact_between", { streamId, start, end })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -568,36 +553,6 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	getAgentTurn: (turnId: AgentTurnId) => typedError<{
-	id: AgentTurnId,
-	thread_id: ThreadId,
-	/**
-	 *  The agent session it ran in; `None` for a turn no session claims
-	 *  (a hook from an agent oxplow didn't start).
-	 */
-	agent_session_id: AgentSessionId | null,
-	prompt: string,
-	answer: string | null,
-	/**  The harness's own session id, when it reported one. */
-	session_id: string | null,
-	started_at: Timestamp,
-	ended_at: Timestamp | null,
-	/**
-	 *  The snapshot the stream's worktree was at when the turn opened;
-	 *  `start_snapshot_id → snapshot_id` is what the turn changed.
-	 *  `None` when the stream had no snapshot yet.
-	 */
-	start_snapshot_id: number | null,
-	/**
-	 *  The snapshot the worktree was at when the turn ended (its
-	 *  `turn_end` take); `None` while running.
-	 */
-	snapshot_id: number | null,
-} | null, IpcError_Serialize>(__TAURI_INVOKE("get_agent_turn", { turnId })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	getConfig: () => typedError<OxplowConfig, IpcError_Serialize>(__TAURI_INVOKE("get_config")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -613,43 +568,7 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	getEffortFiles: (effortId: EffortId) => typedError<EffortFile[], IpcError_Serialize>(__TAURI_INVOKE("get_effort_files", { effortId })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	getEffort: (effortId: EffortId) => typedError<{
-	id: EffortId,
-	/**
-	 *  The work item it's linked to, as a canonical `work_item` ref; `None`
-	 *  while unlinked (oxplow opens efforts itself).
-	 */
-	work_item: string | null,
-	/**
-	 *  Its own title, when one was set; `None` means the default
-	 *  (`v_effort.title`).
-	 */
-	title: string | null,
-	/**  What closed it (`commit`, `switch`, `person`, `agent`, `system`). */
-	closed_by: string | null,
-	thread_id: ThreadId,
-	started_at: Timestamp,
-	ended_at: Timestamp | null,
-	start_snapshot_id: number | null,
-	end_snapshot_id: number | null,
-	/**  The effort's summary prose — the canonical text. */
-	summary: string | null,
-} | null, IpcError_Serialize>(__TAURI_INVOKE("get_effort", { effortId })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	listEffortsAtSnapshots: (snapshotIds: SnapshotId[]) => typedError<EffortAtSnapshot[], IpcError_Serialize>(__TAURI_INVOKE("list_efforts_at_snapshots", { snapshotIds })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	listEffortsOverlappingRange: (rangeStart: SnapshotId, rangeEnd: SnapshotId) => typedError<Effort[], IpcError_Serialize>(__TAURI_INVOKE("list_efforts_overlapping_range", { rangeStart, rangeEnd })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -1087,39 +1006,6 @@ export type AgentStatusState = "idle" | "running" | "awaiting_user" | "stopped" 
  *  notice. Never logged: `agent.status.changed` has no such state.
  */
 "stalled";
-
-/**
- *  One open or closed agent turn. Open rows render as live in-progress
- *  entries in the Work panel; the Stop hook closes the row.
- */
-export type AgentTurn = {
-	id: AgentTurnId,
-	thread_id: ThreadId,
-	/**
-	 *  The agent session it ran in; `None` for a turn no session claims
-	 *  (a hook from an agent oxplow didn't start).
-	 */
-	agent_session_id: AgentSessionId | null,
-	prompt: string,
-	answer: string | null,
-	/**  The harness's own session id, when it reported one. */
-	session_id: string | null,
-	started_at: Timestamp,
-	ended_at: Timestamp | null,
-	/**
-	 *  The snapshot the stream's worktree was at when the turn opened;
-	 *  `start_snapshot_id → snapshot_id` is what the turn changed.
-	 *  `None` when the stream had no snapshot yet.
-	 */
-	start_snapshot_id: number | null,
-	/**
-	 *  The snapshot the worktree was at when the turn ended (its
-	 *  `turn_end` take); `None` while running.
-	 */
-	snapshot_id: number | null,
-};
-
-export type AgentTurnId = string;
 
 /**  Which body of the call. */
 export type AiCallBody = 
@@ -2365,18 +2251,6 @@ export type Descriptor = {
 };
 
 /**
- *  One path that differs between two revisions. `additions`/`deletions`
- *  are line counts, `0` for binary or unreadable content.
- */
-export type DiffEntry = {
-	path: string,
-	/**  `added`, `modified` or `deleted`. */
-	status: FileStatus,
-	additions: number,
-	deletions: number,
-};
-
-/**
  *  One entry in the top-level `dimensions:` block — the **conformed-dimension
  *  catalog** authoring surface. A dimension is a
  *  slice axis that means the same thing to every fact that carries it
@@ -2555,30 +2429,6 @@ export type EffortAtSnapshot = {
 	effort: Effort,
 };
 
-export type EffortFile = {
-	effort_id: EffortId,
-	path: string,
-	change: EffortFileChange,
-	/**  The snapshot the file ref was captured at. */
-	local_snapshot_id: number,
-	/**
-	 *  Closest known git commit at capture time. See V20 column
-	 *  docs. NULL when no git information is available (no commits
-	 *  yet, headless repo, etc.).
-	 */
-	closest_vcs_rev: string | null,
-	/**
-	 *  `true` when `local_snapshot_id`'s snapshot is byte-equal to
-	 *  `closest_vcs_rev` (clean worktree at capture, or
-	 *  set later when the snapshot is stamped with a revision — a take on
-	 *  a clean head, or a head move; `stamp_revision_tx`).
-	 */
-	vcs_rev_exact: boolean,
-	source: FileSource,
-};
-
-export type EffortFileChange = "created" | "updated" | "deleted";
-
 export type EffortId = string;
 
 export type EntityColumn = {
@@ -2685,20 +2535,6 @@ export type ExportDeclaration = {
 
 /**  A loaded extension and anything wrong with it. */
 export type Extension = Extension_Serialize | Extension_Deserialize;
-
-/**
- *  One extension that changed between two revisions of a workspace:
- *  what an effort's review shows for it.
- */
-export type ExtensionChange = {
-	name: string,
-	/**  `added`, `removed` or `changed`. */
-	change: Change,
-	/**  What the change does; `None` for a removed extension. */
-	impact: ImpactReport | null,
-	/**  What's wrong with the later version. */
-	errors: string[],
-};
 
 /**
  *  A command an extension declares (valid ones; invalid ones are in the
@@ -3278,16 +3114,6 @@ export type FileSnapshot = {
 
 /**  A `file_snapshot` row: one captured file under a snapshot. */
 export type FileSnapshotId = number;
-
-/**  How an effort came to own a file. */
-export type FileSource = 
-/**  An edit tool named it. */
-"claimed" | 
-/**
- *  It changed during one of the thread's turns and no other thread
- *  claimed it — a shell edit, a formatter, a generator.
- */
-"observed";
 
 /**  How a path differs from the head, or how a revision changed it. */
 export type FileStatus = "added" | "modified" | "deleted" | "renamed" | "untracked" | "conflicted";
@@ -4488,7 +4314,7 @@ export type LensRun_Serialize = {
 /**  A lens an extension mounts into a core page. */
 export type LensSlot = {
 	/**
-	 *  Which page region, from [`SLOTS`] (`effort.review.details`,
+	 *  Which page region, from [`SLOTS`] (`diff.file.header`,
 	 *  `vcs.commit.details`, …), or a document or dashboard lens's parts
 	 *  (`<extension>/<slug>.sections`, `.tiles`); the lens takes the params
 	 *  it offers.
@@ -6307,49 +6133,6 @@ export type SlotAt = SlotEdge | ({ after: string }) & { before?: never } | ({ be
 
 /**  The ends of a page's parts. */
 export type SlotEdge = "start" | "end";
-
-/**
- *  `snapshot` row — one per `request_snapshot()` call that had
- *  dirty files. Groups the `file_snapshot` rows captured in that
- *  batch. See [[crates/oxplow-db/migrations/V13__snapshot.sql]].
- */
-export type Snapshot = {
-	id: number,
-	stream_id: StreamId,
-	created_at: Timestamp,
-	file_count: number,
-	/**
-	 *  The VCS revision this snapshot's tree equals (`git:<sha>`).
-	 *  Populated only when the workspace was clean at the head at
-	 *  capture time; `None` when it was dirty or isn't under version
-	 *  control. Not unique — several snapshots can share one revision
-	 *  when local history captures files the VCS doesn't track.
-	 */
-	revision: string | null,
-	/**
-	 *  The branch the workspace was on when this snapshot was captured
-	 *  (e.g. `main`). `None` for a detached head or a
-	 *  directory not under version control.
-	 */
-	branch: string | null,
-	/**
-	 *  Whole-tree identity: the xxh3-128 of the sorted manifest of
-	 *  the reconstructed tree ([`crate::snapshot_tree::manifest_hash`]).
-	 *  Two snapshots with equal `tree_hash` hold the same files. `None`
-	 *  on a snapshot taken without a reconstructed tree.
-	 */
-	tree_hash: string | null,
-	/**
-	 *  What the take that CREATED this snapshot recorded (its first
-	 *  `snapshot_op`, P2.11): the snapshot it grew from — the "previous"
-	 *  a single-snapshot diff starts at — why it was taken, and whether
-	 *  it ran over its budget. `parent_snapshot_id` is `None` for a stream's
-	 *  first snapshot.
-	 */
-	parent_snapshot_id: number | null,
-	trigger: SnapshotTrigger,
-	over_budget: boolean,
-};
 
 /**  A `snapshot` row. */
 export type SnapshotId = number;

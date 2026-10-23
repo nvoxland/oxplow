@@ -1280,6 +1280,7 @@ impl Services {
                 )
             })
         });
+        let services_slot = commands::util::ServicesSlot::default();
         // The live models (`live_models`) read these when a query names them.
         sql.live_models().bind(live_models::LiveSources {
             ai: ai.clone(),
@@ -1296,6 +1297,7 @@ impl Services {
             streams: stream_store.clone(),
             harnesses: harnesses.clone(),
             vcs: vcs.clone(),
+            services: services_slot.clone(),
         });
         let extension_secrets = Arc::new(extension_secrets::ExtensionSecrets::new(
             extension_catalog.clone(),
@@ -1731,7 +1733,6 @@ impl Services {
         commands
             .add_op(collector_runner::sync_op(collector_runner.clone()))
             .expect("collector.sync's op registers");
-        let services_slot = commands::util::ServicesSlot::default();
         // A query that names a commit or a change by its keys has it made
         // first (`on_demand`), through the services once they exist.
         sql.on_demand().bind(services_slot.clone());

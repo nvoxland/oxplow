@@ -1583,6 +1583,19 @@
     - { name: "name", type: "TEXT", doc: "The credential's name, as the provider declares it." }
     - { name: "reference", type: "TEXT", doc: "The secret's reference, as JSON (`{ schemaVersion, id }`): what the two secret commands take. It carries no value." }
     - { name: "is_set", type: "INT", doc: "1 when the OS keychain holds a value for it." }
+- name: extension_change
+  version: 1
+  key: [base, head, name]
+  description: "The extensions under `.oxplow/extensions/` whose files differ between two revisions, each with what the change does: both versions loaded as their revision holds them and reviewed on their own overlays. Read live, and only when the query pins both sides (`WHERE base = :b AND head = :h`, each a revision as `v_change` spells it: `git:<rev>`, `snap:<id>`, `working`; `''` base for nothing before): the review runs both versions, so unpinned it has no rows."
+  columns:
+    - { name: "base", type: "TEXT", doc: "The earlier side, as the query spelled it." }
+    - { name: "head", type: "TEXT", doc: "The later side, as the query spelled it." }
+    - { name: "name", type: "TEXT", doc: "The extension." }
+    - { name: "change", type: "TEXT", doc: "`added`, `removed` or `changed`." }
+    - { name: "errors", type: "TEXT", doc: "What's wrong with the later version, as a JSON array of text." }
+    - { name: "lines", type: "TEXT", doc: "What the change does, as a JSON array of lines (grants first, then collectors' outputs, models and their rows, lenses); `[]` for a removed extension." }
+    - { name: "lens_changes", type: "TEXT", doc: "The lenses that differ, as a JSON array of `{ id, change }`." }
+    - { name: "stream_id", type: "INT", doc: "The stream whose worktree was reviewed." }
 - name: vcs_workspace
   version: 1
   key: [path]

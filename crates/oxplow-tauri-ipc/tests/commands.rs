@@ -161,7 +161,7 @@ async fn read_workspace_file_missing_path_errors() {
 // ---------------------------------------------------------------------------
 
 use oxplow_domain::stores::{StreamStore, ThreadStore};
-use oxplow_domain::{EffortId, Stream, Thread};
+use oxplow_domain::{Stream, Thread};
 
 /// Primary stream + its default thread, both of which `TestApp::build`
 /// guarantees via `ensure_primary`.
@@ -371,12 +371,6 @@ async fn search_returns_empty_for_fresh_project() {
 async fn effort_reads_empty_for_unknown_ids() {
     let app = TestApp::build().await;
     assert!(
-        commands::generated::get_effort_files(app.state(), EffortId::new(999))
-            .await
-            .unwrap()
-            .is_empty()
-    );
-    assert!(
         commands::generated::list_efforts_at_snapshots(app.state(), vec![])
             .await
             .unwrap()
@@ -389,13 +383,7 @@ async fn effort_reads_empty_for_unknown_ids() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn snapshot_reads_empty_for_fresh_project() {
     let app = TestApp::build().await;
-    let (stream, _) = primary_and_thread(&app).await;
-    assert!(
-        commands::generated::list_snapshots_for_stream(app.state(), stream.id, Some(10))
-            .await
-            .unwrap()
-            .is_empty()
-    );
+    let (_stream, _) = primary_and_thread(&app).await;
     assert!(
         commands::generated::list_files_for_snapshot(app.state(), 999.into())
             .await

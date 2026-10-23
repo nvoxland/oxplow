@@ -1,0 +1,10 @@
+title: Verdict
+description: "An effort's verdict is a review policy's: oxplow has none of its own, so with no extension bringing one (the `effort.verdict` replacement), nothing shows."
+params:
+  - { name: effort_id }
+query: |
+  SELECT 1 AS verdict WHERE 0
+viz: table
+columns: [{ key: verdict }]
+empty: ""
+hidden: true

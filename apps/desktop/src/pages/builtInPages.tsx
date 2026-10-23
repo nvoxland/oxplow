@@ -1,14 +1,12 @@
 import { ResourcePage } from "./ResourcePage.js";
-import { diffViewOf, viewParamsOf, type DiffViewPayload } from "../tabs/pageRefs.js";
+import { viewParamsOf } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
-import type { Stream } from "../api.js";
 import { openExternalUrl } from "../api.js";
 import type { CenterTab } from "../components/CenterTabs/CenterTabs.js";
 import type { BuiltInPageName } from "./declaredPages.js";
 import type { AppScope, SlotNav } from "./appScope.js";
 import { SettingsPage } from "./SettingsPage.js";
 import { settingsArea } from "./settingsAreas.js";
-import { DiffViewPage } from "./DiffViewPage.js";
 import { GitDashboardPage } from "./GitDashboardPage.js";
 import { TerminalPage } from "./TerminalPage.js";
 import { FilesPage } from "./FilesPage.js";
@@ -28,35 +26,6 @@ export interface BuiltInPageContext {
 
 export type BuiltInPage = (ctx: BuiltInPageContext) => CenterTab | null;
 
-// A snapshot, an effort, an agent turn (entity pages, P2.11) and an
-// ad-hoc endpoints pair (`diff-view` route) all render as a diff.
-export const diffViewTab = (ref: TabRef, payload: DiffViewPayload | null, nav: SlotNav, stream: Stream | null): CenterTab | null => {
-  if (!payload) return null;
-  const label =
-    payload.mode === "snapshot"
-      ? `Snapshot ${payload.snapshotId}`
-      : payload.mode === "effort"
-        ? `Effort ${payload.effortId}`
-        : payload.mode === "turn"
-          ? `Turn ${payload.turnId}`
-          : "Diff";
-  return {
-    id: ref.id,
-    label,
-    closable: true,
-    render: () => (
-      <DiffViewPage
-        stream={stream}
-        spec={payload}
-        onOpenDiff={nav.navOpenDiff}
-        onOpenDiffInTab={nav.navOpenDiff}
-        onOpenPage={nav.navOpen}
-        onOpenFile={nav.navOpenFile}
-      />
-    ),
-  };
-};
-
 export const builtInPages: Record<BuiltInPageName, BuiltInPage> = {
   settings: ({ ref, nav }) => {
     const view = viewParamsOf(ref);
@@ -69,7 +38,6 @@ export const builtInPages: Record<BuiltInPageName, BuiltInPage> = {
       render: () => <SettingsPage area={area.id} section={section} onOpenPage={nav.navOpen} />,
     };
   },
-  "diff-view": ({ ref, nav, scope }) => diffViewTab(ref, diffViewOf(ref), nav, scope.stream),
   // What a URI no page renders opens on.
   resource: ({ ref }) => ({
     id: ref.id,

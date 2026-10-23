@@ -1877,7 +1877,7 @@ The mechanics behind those controls (unchanged by tsk117):
   collector's `entry` from its owner's extension folder (`collector_script_text`; oxplow-foundation's scripts are embedded like any bundled extension file).
 
 Metrics are also surfaced **organically off the Metrics pages** (tsk250): the
-effort review (`DiffViewPage`'s `effort.review.details` slot) shows the oxplow-bundled
+effort review (`DiffViewPage`'s `oxplow-foundation/changes.sections` slot) shows the oxplow-bundled
 `effort-metric-deltas` lens — the metrics the effort moved, before→after with
 Δ, better/worse and any threshold crossing, over `v_effort_metric_delta`
 (tests, coverage, analysis, tokens and nudges have their own lenses and are

@@ -1033,7 +1033,7 @@ seeders for tests.
   (the `list_snapshots_for_stream` IPC op, `v_snapshot`) joins each snapshot's FIRST op for its
   `parent_snapshot_id`, `trigger` and `over_budget`. The diff view's
   "previous" for a single snapshot is that recorded parent
-  (`previousSnapshotId` in `apps/desktop/src/diffViewModel.ts`), falling
+  (the `changes` lens's `max(id) < N` on the stream), falling
   back to the next-smaller id only for a snapshot no op created; Local
   History shows the trigger and marks an over-budget take "slow".
 - **Every take records an op**, including one that found nothing new:

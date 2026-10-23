@@ -872,11 +872,11 @@ mod tests {
         };
         w(
             ".oxplow/extensions/demo/extension.yaml",
-            "manifest: 2\nname: demo\nintent:\n  purpose: test\nui:\n  slots:\n    - { slot: effort.review.details, lens: review }\n",
+            "manifest: 2\nname: demo\nintent:\n  purpose: test\nui:\n  slots:\n    - { slot: diff.file.header, lens: review }\n",
         );
         w(
             ".oxplow/extensions/demo/lenses/review.yaml",
-            "title: Review\nparams:\n  - { name: effort_id }\nquery: SELECT :effort_id AS effort\n",
+            "title: Review\nparams:\n  - { name: path }\nquery: SELECT :path AS effort\n",
         );
         w(
             ".oxplow/extensions/demo/lenses/streams.yaml",

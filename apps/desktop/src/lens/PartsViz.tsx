@@ -99,8 +99,22 @@ export function DocumentViz(props: PartsVizProps) {
   // A part that needs what isn't active (a link, where the work list keeps
   // none) isn't offered at all, rather than saying what it needs.
   const inactive = new Set(parts.filter((p) => runs?.get(p.id)?.run?.inactive).map((p) => p.id));
-  const lensParts = parts.filter((p) => p.lens && !inactive.has(p.id)).map((p) => ({ part: p, run: runs?.get(p.id)?.run ?? null, error: runs?.get(p.id)?.error ?? null }));
-  const empty = new Set(runs ? foldEmpty(lensParts).empty.map((e) => e.part.id) : []);
+  // A part that declares a param the page's row names and has no value for
+  // (an effort's lens on a page that shows no effort) has nothing to show
+  // for this page: it is left out. (A page param that is unset is another
+  // matter: the part shows what to pick.)
+  const given = props.given ?? params;
+  for (const p of parts) {
+    const lens = runs?.get(p.id)?.run?.lens;
+    if (lens?.params.some((q) => given[q.name] === null && params[q.name] !== null && q.name in given)) inactive.add(p.id);
+  }
+  const lensParts = parts
+    .filter((p) => p.lens && !inactive.has(p.id))
+    .map((p) => ({ part: p, run: runs?.get(p.id)?.run ?? null, error: runs?.get(p.id)?.error ?? null }));
+  // A replaceable part stands for whatever replaces it, and a bare one has
+  // no heading to hold: neither folds into "Nothing found".
+  const stays = new Set(parts.filter((p) => p.replaceable || p.title === "").map((p) => p.id));
+  const empty = new Set(runs ? foldEmpty(lensParts).empty.filter((e) => !stays.has(e.part.id)).map((e) => e.part.id) : []);
   const folded = parts.filter((p) => empty.has(p.id));
   return (
     <div data-testid="lens-document">
@@ -108,6 +122,14 @@ export function DocumentViz(props: PartsVizProps) {
         .filter((p) => !empty.has(p.id) && !inactive.has(p.id))
         .map((part) => {
           const run = runs?.get(part.id);
+          // A part titled "" is bare: its body, no heading.
+          if (part.title === "") {
+            return (
+              <div key={part.id} data-testid={`lens-part-${part.id}`}>
+                <PartBody part={part} run={run} streamId={streamId} onOpenPage={onOpenPage} params={params} onSetParam={onSetParam} />
+              </div>
+            );
+          }
           return (
             <Section
               key={part.id}

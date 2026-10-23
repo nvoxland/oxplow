@@ -202,7 +202,7 @@ branch and unpushed scopes take `changedPaths` from `vcsMergeBase`,
 rerunning when the set of uncommitted paths or the refs move, the rail's counts and conflicts come from
 `vcsStatus` (`countStatus`), the commit page and dashboard stats from
 `vcsRevision`, and the blame overlay from `vcsBlame(…, WORKING)`.
-`DiffViewPage.smoke.test.tsx` renders the diff view and the commit page
+The page smoke tests render the commit page
 over a command Proxy that records any git-shaped call.
 
 ## History and branches on the models (P5.B5)

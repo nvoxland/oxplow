@@ -362,7 +362,7 @@ errorCount, warningCount, infoCount, noteCount }`; its `metric_value` is the
 error+warning count (**lower is better**, unlike coverage where higher is
 better). The effort review shows the latest run's findings in the
 oxplow-bundled *Static Analysis* lens (part of its `effort-tests` document,
-mounted in the `effort.review.details` slot), each row opening the file at the line.
+mounted in the `oxplow-foundation/changes.sections` slot), each row opening the file at the line.
 The analysis ride-along has **no nudge** — the report-less nudge is
 test-specific.
 
@@ -377,7 +377,7 @@ page's Activity timeline (`TaskDetail.tsx` → `ActivityTimeline`):
   lens in the `oxplow-foundation/work-item.sections` slot) — but
   **not** coverage, test runs or static analysis. Those live only on the
   effort **diff view** (`DiffViewPage`, the effort-review surface), as the
-  oxplow-bundled `effort-tests` document lens in its `effort.review.details` slot:
+  oxplow-bundled `effort-tests` document lens in its `oxplow-foundation/changes.sections` slot:
   diff coverage, most-untested files, test runs, tests that failed (with
   their latest status, so a red→green loop reads plainly) and analyzer
   findings, all SQL over `v_effort_observation`'s payloads.

@@ -209,10 +209,7 @@ macro_rules! oxplow_command_table {
                 get_dashboard => $crate::commands::dashboards::get_dashboard { id: ::oxplow_domain::DashboardId } -> Option<::oxplow_db::DashboardWithItems>,
                 // effort
                 list_efforts_in_window => $crate::commands::effort::list_efforts_in_window { window_start: ::oxplow_domain::Timestamp, window_end: ::oxplow_domain::Timestamp } -> Vec<::oxplow_db::Effort>,
-                get_effort_files => $crate::commands::effort::get_effort_files { effort_id: ::oxplow_domain::EffortId } -> Vec<::oxplow_db::EffortFile>,
-                get_effort => $crate::commands::effort::get_effort { effort_id: ::oxplow_domain::EffortId } -> Option<::oxplow_db::Effort>,
                 list_efforts_at_snapshots => $crate::commands::effort::list_efforts_at_snapshots { snapshot_ids: Vec<::oxplow_domain::SnapshotId> } -> Vec<::oxplow_db::EffortAtSnapshot>,
-                list_efforts_overlapping_range => $crate::commands::effort::list_efforts_overlapping_range { range_start: ::oxplow_domain::SnapshotId, range_end: ::oxplow_domain::SnapshotId } -> Vec<::oxplow_db::Effort>,
                 // metrics: reads are SQL (`metric_grid()`, `v_metric_catalog`); this
                 // switches them, through the `oxplow.metric.enable` command (P4.7)
                 enable_metrics => $crate::commands::metrics::enable_metrics { keys: Vec<String>, enabled: bool } -> (),
@@ -231,7 +228,6 @@ macro_rules! oxplow_command_table {
                 ingest_hook_event => $crate::commands::hooks::ingest_hook_event { envelope: ::oxplow_app::HookEnvelope } -> (),
                 read_event_content => $crate::commands::hooks::read_event_content { event_id: String, body: oxplow_app::event_bodies::EventBodyKey } -> Option<oxplow_app::event_bodies::EventBody>,
                 list_agent_statuses => $crate::commands::hooks::list_agent_statuses {} -> Vec<::oxplow_domain::AgentStatus>,
-                get_agent_turn => $crate::commands::hooks::get_agent_turn { turn_id: ::oxplow_domain::AgentTurnId } -> Option<::oxplow_domain::AgentTurn>,
                 // wiki
                 // events (the log's dead-letter queue)
                 // page_refs
@@ -328,7 +324,6 @@ macro_rules! oxplow_command_table {
                 lookup_terminal_session => $crate::commands::terminal::lookup_terminal_session { session_id: ::oxplow_domain::AgentSessionId } -> Option<String>,
                 // snapshot
                 list_file_snapshots => $crate::commands::snapshot::list_file_snapshots { path: String } -> Vec<::oxplow_db::FileSnapshot>,
-                list_snapshots_for_stream => $crate::commands::snapshot::list_snapshots_for_stream { stream_id: ::oxplow_domain::StreamId, limit: Option<u32> } -> Vec<::oxplow_db::Snapshot>,
                 list_snapshot_ops => $crate::commands::snapshot::list_snapshot_ops { stream_id: ::oxplow_domain::StreamId, limit: Option<u32> } -> Vec<::oxplow_db::SnapshotOp>,
                 get_snapshot_stats => $crate::commands::snapshot::get_snapshot_stats { snapshot_id: ::oxplow_domain::SnapshotId } -> ::oxplow_db::SnapshotStats,
                 get_blob_storage_bytes => $crate::commands::snapshot::get_blob_storage_bytes {} -> ::oxplow_domain::ByteSize,
@@ -336,8 +331,6 @@ macro_rules! oxplow_command_table {
                 list_files_for_snapshot => $crate::commands::snapshot::list_files_for_snapshot { snapshot_id: ::oxplow_domain::SnapshotId } -> Vec<::oxplow_db::FileSnapshot>,
                 get_file_snapshot => $crate::commands::snapshot::get_file_snapshot { file_snapshot_id: ::oxplow_domain::FileSnapshotId } -> Option<::oxplow_db::FileSnapshot>,
                 changed_paths => $crate::commands::trees::changed_paths { stream_id: Option<String>, from: Option<::oxplow_domain::vcs::Revision>, to: ::oxplow_domain::vcs::Revision } -> Vec<::oxplow_app::trees::ChangedPath>,
-                diff => $crate::commands::trees::diff { stream_id: Option<String>, from: Option<::oxplow_domain::vcs::Revision>, to: ::oxplow_domain::vcs::Revision } -> Vec<::oxplow_app::trees::DiffEntry>,
-                extension_impact_between => $crate::commands::trees::extension_impact_between { stream_id: Option<String>, start: Option<::oxplow_domain::vcs::Revision>, end: ::oxplow_domain::vcs::Revision } -> Vec<::oxplow_app::extensions::ExtensionChange>,
                 // background
                 list_background_tasks => $crate::commands::background::list_background_tasks {} -> Vec<::oxplow_app::BackgroundTask>,
                 get_background_task => $crate::commands::background::get_background_task { id: String } -> Option<::oxplow_app::BackgroundTask>,
@@ -500,8 +493,10 @@ mod tests {
     #[tokio::test]
     async fn bad_args_are_rejected_as_invalid() {
         let (svc, _dir) = services().await;
-        // `effortId` is required; an empty object can't deserialize into Args.
-        let err = dispatch("get_effort", json!({}), &svc).await.unwrap_err();
+        // `snapshotIds` is required; an empty object can't deserialize into Args.
+        let err = dispatch("list_efforts_at_snapshots", json!({}), &svc)
+            .await
+            .unwrap_err();
         assert_eq!(err.code, "INVALID");
     }
 }

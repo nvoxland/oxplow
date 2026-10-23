@@ -368,7 +368,13 @@ tiles:
   the parts and the lenses mounted into the page's `.sections` slot may
   declare as params, besides the page's own `params`.
 - A document folds sections with no rows into one line: "Nothing found:
-  ...".
+  ...". A section with a button above it (an Add) stays. A part titled
+  `""` is bare: its body with no heading, and it never folds. A lens
+  whose `empty:` is `""` says nothing when it has no rows.
+- A part is left out of a page whose row names a column the part declares
+  as a param and gives it no value: an effort's lens on a page that shows
+  no effort. (A page param that is unset is not a row column: the part
+  runs and shows what to pick.)
 - A tile has a `size`: `small` (default), `wide`, `tall` or `full`. A
   markdown tile defaults to `full`. A section takes no `size`.
 - A document has `sections`, not `tiles`. A dashboard has `tiles`, not
@@ -460,7 +466,7 @@ page's id as a param, so it must declare it:
 
 | Slot | Page | Param |
 |---|---|---|
-| `effort.review.details` | an effort's diff view | `effort_id`, `change_id` |
+| `oxplow-foundation/changes.sections` | an effort's diff view | `effort_id`, `change_id` |
 | `oxplow-foundation/work-item.sections` | a work item's page, as sections (`state`, `fields`, `body`, `info`, `links`, `comments`, `activity`) | `uri` |
 | `oxplow-foundation/tasks.sections` | the Tasks page, as sections (`list`, `summary`, `backlog`); `at: { before: list }` for a strip above the list | `thread_id`, `stream_id` |
 | `oxplow-foundation/commit.sections` | a commit's page, as sections (`detail`, `files`) | `change_id` (the page's row) |

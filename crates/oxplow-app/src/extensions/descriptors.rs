@@ -550,7 +550,7 @@ mod tests {
              panels:\n  - {{ id: inbox, title: Inbox, scope: project, body: open }}\n\
              resources:\n  - {{ name: pr, label: Pull request, params: {{ id: {{ required: true, pattern: '^[0-9]+$' }} }}, resolve: prs, icon: git-pull-request }}\n\
              custom_components:\n  - {{ id: chart }}\n\
-             ui:\n  slots:\n    - {{ slot: effort.review.details, lens: open }}\n    - {{ slot: effort.review.details, lens: open }}\n  decorators:\n    - {{ model: prs, resource: oxplow/work_item, placement: ref-chip, label: title }}\n"
+             ui:\n  slots:\n    - {{ slot: diff.file.header, lens: open }}\n    - {{ slot: diff.file.header, lens: open }}\n  decorators:\n    - {{ model: prs, resource: oxplow/work_item, placement: ref-chip, label: title }}\n"
         )
     }
 
@@ -565,7 +565,7 @@ mod tests {
         write(
             root,
             &format!("{dir}/lenses/open.yaml"),
-            "title: Open\nquery: \"SELECT 1 AS n WHERE :change_id = :change_id\"\nparams:\n  - { name: change_id, label: Change, default: \"\" }\n",
+            "title: Open\nquery: \"SELECT 1 AS n WHERE :path = :path\"\nparams:\n  - { name: path, label: Path, default: \"\" }\n",
         );
         write(root, &format!("{dir}/merged.json"), NUMBER_SCHEMA);
         write(
@@ -708,8 +708,8 @@ mod tests {
         assert_eq!(
             ids,
             vec![
-                "oxplow:oxplow/slot?slot=acme-pr/effort.review.details-0",
-                "oxplow:oxplow/slot?slot=acme-pr/effort.review.details-1"
+                "oxplow:oxplow/slot?slot=acme-pr/diff.file.header-0",
+                "oxplow:oxplow/slot?slot=acme-pr/diff.file.header-1"
             ]
         );
         for d in slots {
