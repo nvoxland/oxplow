@@ -51,6 +51,8 @@ pub const NAMES: &[&str] = &[
     "vcs_workspace",
     "workspace_file",
     "agent_harness",
+    "branch_divergence",
+    "commit_between",
 ];
 
 /// The columns a live model's rows have, in order.
@@ -106,6 +108,27 @@ pub fn columns(name: &str) -> &'static [&'static str] {
         "vcs_workspace" => &["path", "branch", "head", "is_main", "stream_id"],
         "agent_harness" => &["id", "title", "enabled", "position"],
         "workspace_file" => &["stream_id", "path", "parent", "name", "kind", "status"],
+        "branch_divergence" => &[
+            "base",
+            "head",
+            "ahead",
+            "behind",
+            "merge_base",
+            "overlapping_files",
+            "readiness",
+            "stream_id",
+        ],
+        "commit_between" => &[
+            "base",
+            "head",
+            "sha",
+            "short_sha",
+            "author",
+            "email",
+            "committed_at",
+            "subject",
+            "stream_id",
+        ],
         _ => &[],
     }
 }
@@ -116,6 +139,9 @@ pub fn pushdown(name: &str) -> &'static [&'static str] {
     match name {
         // One folder is one `read_dir`; the whole tree is a walk.
         "workspace_file" => &["parent"],
+        // One pair is one graph walk; a side left open ranges over the
+        // branches (`LiveSources::branch_pairs`).
+        "branch_divergence" | "commit_between" => &["base", "head"],
         _ => &[],
     }
 }
@@ -168,7 +194,11 @@ pub fn follows(name: &str, change: &Change<'_>) -> bool {
             "config_value" | "agent_harness" => {
                 matches!(event, E::ConfigChanged | E::ExtensionsChanged)
             }
-            "vcs_workspace" => matches!(event, E::VcsRefsChanged { .. }),
+            // A push, pull, fetch, commit or checkout moves what a pair
+            // compares.
+            "vcs_workspace" | "branch_divergence" | "commit_between" => {
+                matches!(event, E::VcsRefsChanged { .. })
+            }
             "workspace_file" => matches!(
                 event,
                 E::WorkspaceChanged { .. } | E::VcsRefsChanged { .. } | E::ConfigChanged
@@ -182,6 +212,8 @@ pub fn follows(name: &str, change: &Change<'_>) -> bool {
                 "agent_conversation" => reads("v_agent_session") || reads("v_agent_turn"),
                 // A stream adopting a working copy.
                 "vcs_workspace" => reads("v_stream"),
+                // The branches an unpinned side ranges over.
+                "branch_divergence" | "commit_between" => reads("v_branch"),
                 _ => false,
             }
         }
@@ -229,6 +261,10 @@ pub async fn harness_conversations(
 /// How many unmatched paths `v_zone_unmatched` lists: enough to see the
 /// shape of what's missing, few enough to read.
 const UNMATCHED_SAMPLE: usize = 20;
+
+/// The most commits `v_commit_between` lists per pair: it answers what is
+/// unpushed or unmerged, not a history (`v_commit` is that).
+const BETWEEN_LIMIT: u32 = 100;
 
 /// The gateway's handle on the live models: shared by every clone of it,
 /// bound once.
@@ -365,6 +401,8 @@ impl LiveModels {
                     .await
             }
             "agent_harness" => Ok(sources.agent_harnesses()),
+            "branch_divergence" => sources.branch_divergence(stream, filters).await,
+            "commit_between" => sources.commits_between(stream, filters).await,
             other => Err(DomainError::Invalid(format!(
                 "`v_{other}` isn't a live model"
             ))),
@@ -764,6 +802,139 @@ impl LiveSources {
                 ]
             })
             .collect())
+    }
+
+    /// The pairs of revisions `v_branch_divergence` and `v_commit_between`
+    /// compare, in `stream`'s worktree, from what the query pins: both
+    /// sides, one pair; one side, the other every branch of the repository
+    /// (local and remote-tracking, the pinned one left out); neither,
+    /// every local branch as the head against the default branch (which is
+    /// left out). Each side is kept as the query spelled it (its rows'
+    /// `base` and `head`) and resolved beside; a side the VCS can't resolve
+    /// drops its pair, so one bad name never empties a dashboard.
+    async fn branch_pairs(
+        &self,
+        stream: Option<StreamId>,
+        filters: &[(String, String)],
+    ) -> Result<(Stream, std::path::PathBuf, Vec<(String, String)>), DomainError> {
+        let stream = self.stream(stream).await?;
+        let ws = self
+            .worktrees
+            .resolve(Some(&stream.id.to_string()))
+            .await
+            .into_local_path();
+        let pinned = |column: &str| {
+            filters
+                .iter()
+                .find(|(c, _)| c == column)
+                .map(|(_, v)| v.clone())
+        };
+        let (base, head) = (pinned("base"), pinned("head"));
+        let branches = || async { Ok::<_, DomainError>(self.vcs.branches(&ws).await?) };
+        let full_name = |b: &oxplow_domain::vcs::Branch| match &b.remote {
+            Some(remote) => format!("{remote}/{}", b.name),
+            None => b.name.clone(),
+        };
+        let pairs: Vec<(String, String)> = match (base, head) {
+            (Some(base), Some(head)) => vec![(base, head)],
+            (Some(base), None) => branches()
+                .await?
+                .iter()
+                .map(full_name)
+                .filter(|h| *h != base)
+                .map(|h| (base.clone(), h))
+                .collect(),
+            (None, Some(head)) => branches()
+                .await?
+                .iter()
+                .map(full_name)
+                .filter(|b| *b != head)
+                .map(|b| (b, head.clone()))
+                .collect(),
+            (None, None) => {
+                let branches = branches().await?;
+                match branches
+                    .iter()
+                    .find(|b| b.remote.is_none() && b.is_default)
+                    .map(|b| b.name.clone())
+                {
+                    Some(default) => branches
+                        .iter()
+                        .filter(|b| b.remote.is_none() && b.name != default)
+                        .map(|b| (default.clone(), b.name.clone()))
+                        .collect(),
+                    None => Vec::new(),
+                }
+            }
+        };
+        let mut resolved = Vec::with_capacity(pairs.len());
+        for (base, head) in pairs {
+            let both = (
+                self.vcs.resolve(&ws, &base).await,
+                self.vcs.resolve(&ws, &head).await,
+            );
+            if both.0.is_ok() && both.1.is_ok() {
+                resolved.push((base, head));
+            }
+        }
+        Ok((stream, ws, resolved))
+    }
+
+    /// `v_branch_divergence`: how far each pair's `head` has moved from its
+    /// `base` (`Vcs::divergence`).
+    async fn branch_divergence(
+        &self,
+        stream: Option<StreamId>,
+        filters: &[(String, String)],
+    ) -> Result<Vec<Vec<SqlCell>>, DomainError> {
+        let (stream, ws, pairs) = self.branch_pairs(stream, filters).await?;
+        let mut rows = Vec::with_capacity(pairs.len());
+        for (base, head) in pairs {
+            let d = self.vcs.divergence(&ws, &base, &head).await?;
+            rows.push(vec![
+                text(base),
+                text(head),
+                SqlCell::Int(i64::from(d.ahead)),
+                SqlCell::Int(i64::from(d.behind)),
+                opt(d.merge_base),
+                json(&d.overlapping_files),
+                text(wire_name(&d.readiness)),
+                SqlCell::Int(stream.id.value()),
+            ]);
+        }
+        Ok(rows)
+    }
+
+    /// `v_commit_between`: for each pair, the commits on `head` that
+    /// `base` lacks, newest first (`Vcs::revisions_between`), at most
+    /// [`BETWEEN_LIMIT`] of them.
+    async fn commits_between(
+        &self,
+        stream: Option<StreamId>,
+        filters: &[(String, String)],
+    ) -> Result<Vec<Vec<SqlCell>>, DomainError> {
+        let (stream, ws, pairs) = self.branch_pairs(stream, filters).await?;
+        let mut rows = Vec::new();
+        for (base, head) in pairs {
+            for c in self
+                .vcs
+                .revisions_between(&ws, &base, &head, BETWEEN_LIMIT)
+                .await?
+            {
+                rows.push(vec![
+                    text(base.clone()),
+                    text(head.clone()),
+                    text(c.id),
+                    text(c.short_id),
+                    text(c.author),
+                    text(c.email),
+                    text(oxplow_domain::Timestamp::from_unix_ms(c.time * 1000).to_text()),
+                    text(c.subject),
+                    SqlCell::Int(stream.id.value()),
+                ]);
+            }
+        }
+        Ok(rows)
     }
 
     /// The files and folders the stream's worktree's filter keeps: in

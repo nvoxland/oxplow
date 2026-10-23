@@ -189,6 +189,9 @@ pub enum MergeReadiness {
 pub struct Divergence {
     pub ahead: u32,
     pub behind: u32,
+    /// The revision they split at; `None` when their histories are
+    /// unrelated.
+    pub merge_base: Option<String>,
     /// Files changed on both sides since they split, sorted.
     pub overlapping_files: Vec<String>,
     pub readiness: MergeReadiness,

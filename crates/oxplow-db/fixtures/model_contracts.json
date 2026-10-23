@@ -22171,5 +22171,113 @@
         "event_id"
       ]
     }
+  },
+  "branch_divergence": {
+    "1": {
+      "columns": [
+        {
+          "name": "base",
+          "type": "TEXT",
+          "doc": "The revision compared against, as the query spelled it."
+        },
+        {
+          "name": "head",
+          "type": "TEXT",
+          "doc": "The revision compared, as the query spelled it."
+        },
+        {
+          "name": "ahead",
+          "type": "INT",
+          "doc": "Commits on `head` that `base` lacks."
+        },
+        {
+          "name": "behind",
+          "type": "INT",
+          "doc": "Commits on `base` that `head` lacks."
+        },
+        {
+          "name": "merge_base",
+          "type": "TEXT",
+          "doc": "The sha the two split at; NULL when their histories are unrelated."
+        },
+        {
+          "name": "overlapping_files",
+          "type": "TEXT",
+          "doc": "JSON array of the files changed on both sides since they split, sorted; `[]` when none."
+        },
+        {
+          "name": "readiness",
+          "type": "TEXT",
+          "doc": "Whether `head` would merge into `base` cleanly: `already_integrated` (nothing ahead), `clean` (ahead, no file changed on both sides) or `conflict`."
+        },
+        {
+          "name": "stream_id",
+          "type": "INT",
+          "doc": "The stream whose repository was read (v_stream.id): the query's, else the primary."
+        }
+      ],
+      "key": [
+        "base",
+        "head",
+        "stream_id"
+      ]
+    }
+  },
+  "commit_between": {
+    "1": {
+      "columns": [
+        {
+          "name": "base",
+          "type": "TEXT",
+          "doc": "The revision whose commits are left out, as the query spelled it."
+        },
+        {
+          "name": "head",
+          "type": "TEXT",
+          "doc": "The revision walked, as the query spelled it."
+        },
+        {
+          "name": "sha",
+          "type": "TEXT",
+          "doc": "The commit's full sha (joins v_commit, v_commit_file)."
+        },
+        {
+          "name": "short_sha",
+          "type": "TEXT",
+          "doc": "Its short sha."
+        },
+        {
+          "name": "author",
+          "type": "TEXT",
+          "doc": "Author name."
+        },
+        {
+          "name": "email",
+          "type": "TEXT",
+          "doc": "Author email."
+        },
+        {
+          "name": "committed_at",
+          "type": "TEXT",
+          "doc": "When it was committed (RFC 3339)."
+        },
+        {
+          "name": "subject",
+          "type": "TEXT",
+          "doc": "The first line of its message."
+        },
+        {
+          "name": "stream_id",
+          "type": "INT",
+          "doc": "The stream whose repository was read (v_stream.id): the query's, else the primary."
+        }
+      ],
+      "key": [
+        "base",
+        "head",
+        "sha",
+        "stream_id"
+      ]
+    }
   }
 }

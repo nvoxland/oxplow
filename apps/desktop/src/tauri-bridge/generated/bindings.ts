@@ -2459,6 +2459,11 @@ export type DimensionEntry = {
 export type Divergence = {
 	ahead: number,
 	behind: number,
+	/**
+	 *  The revision they split at; `None` when their histories are
+	 *  unrelated.
+	 */
+	merge_base: string | null,
 	/**  Files changed on both sides since they split, sorted. */
 	overlapping_files: string[],
 	readiness: MergeReadiness,

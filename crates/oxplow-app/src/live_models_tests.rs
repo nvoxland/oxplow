@@ -569,6 +569,101 @@ async fn vcs_workspaces_say_which_stream_uses_each() {
     );
 }
 
+/// How far one branch has moved from another, and the commits between
+/// them, read from the VCS when a query names them, narrowed to the pair
+/// it pins: with one side pinned the other ranges over every branch; with
+/// none, every local branch is compared with the default. A side the VCS
+/// can't resolve gives no row.
+#[tokio::test]
+async fn branch_divergence_and_the_commits_between_are_read_live() {
+    let fx = services_with_effort().await;
+    let (_, wt) = worktree_stream(&fx, "feature").await;
+    let project = fx._dir.path();
+    let split = fx.svc.vcs.resolve(project, "HEAD").await.unwrap();
+    std::fs::write(wt.join("seed.txt"), "seed, grown").unwrap();
+    std::fs::write(wt.join("feature.txt"), "f").unwrap();
+    let on_feature = crate::test_fixtures::commit_all(&wt, "feature work");
+    std::fs::write(project.join("seed.txt"), "seed, pruned").unwrap();
+    let on_main = crate::test_fixtures::commit_all(project, "main work");
+
+    assert_eq!(
+        rows(
+            &fx,
+            "SELECT ahead, behind, merge_base, overlapping_files, readiness, stream_id IS NOT NULL
+               FROM v_branch_divergence WHERE base = 'main' AND head = 'feature'"
+        )
+        .await,
+        vec![vec![
+            json!(1),
+            json!(1),
+            json!(split),
+            json!("[\"seed.txt\"]"),
+            json!("conflict"),
+            json!(1)
+        ]]
+    );
+    assert_eq!(
+        rows(
+            &fx,
+            "SELECT ahead, readiness FROM v_branch_divergence WHERE base = 'feature' AND head = 'main'"
+        )
+        .await,
+        vec![vec![json!(1), json!("conflict")]]
+    );
+    // Head pinned alone: every other branch as the base.
+    assert_eq!(
+        rows(
+            &fx,
+            "SELECT base, head FROM v_branch_divergence WHERE head = 'feature' ORDER BY base"
+        )
+        .await,
+        vec![vec![json!("main"), json!("feature")]]
+    );
+    // Nothing pinned: each local branch against the default, which is left out.
+    assert_eq!(
+        rows(
+            &fx,
+            "SELECT base, head, ahead FROM v_branch_divergence ORDER BY head"
+        )
+        .await,
+        vec![vec![json!("main"), json!("feature"), json!(1)]]
+    );
+    assert_eq!(
+        rows(
+            &fx,
+            "SELECT ahead FROM v_branch_divergence WHERE base = 'nope' AND head = 'feature'"
+        )
+        .await,
+        Vec::<Vec<Value>>::new()
+    );
+
+    assert_eq!(
+        rows(
+            &fx,
+            "SELECT sha, short_sha = substr(sha, 1, length(short_sha)), author, subject, committed_at IS NOT NULL
+               FROM v_commit_between WHERE base = 'main' AND head = 'feature'"
+        )
+        .await,
+        vec![vec![json!(on_feature), json!(1), json!("test"), json!("feature work"), json!(1)]]
+    );
+    assert_eq!(
+        rows(
+            &fx,
+            "SELECT base, head, sha FROM v_commit_between WHERE base = 'feature' ORDER BY head"
+        )
+        .await,
+        vec![vec![json!("feature"), json!("main"), json!(on_main)]]
+    );
+    assert_eq!(
+        rows(
+            &fx,
+            "SELECT sha FROM v_commit_between WHERE base = 'main' AND head = 'main'"
+        )
+        .await,
+        Vec::<Vec<Value>>::new()
+    );
+}
+
 /// Every harness's saved conversations begun in the stream's worktree; a
 /// harness that can't list now is a row saying why, not a failed query.
 #[tokio::test]
@@ -648,6 +743,16 @@ fn a_change_names_the_live_models_that_follow_it() {
         crate::models_changed::live_models_reading(&["v_agent_session".to_string()]),
         vec!["v_agent_conversation".to_string()]
     );
+    // What a pair of branches compares moves with the refs, and the
+    // branches an unpinned side ranges over are `v_branch`'s.
+    let refs = after(OxplowEvent::VcsRefsChanged {
+        stream_id: oxplow_domain::StreamId::new(1),
+    });
+    let branches = crate::models_changed::live_models_reading(&["v_branch".to_string()]);
+    for model in ["v_branch_divergence", "v_commit_between"] {
+        assert!(refs.contains(&model.to_string()), "{refs:?}");
+        assert!(branches.contains(&model.to_string()), "{branches:?}");
+    }
 }
 
 /// The registered agent harnesses, the ones `agents:` names first (a new

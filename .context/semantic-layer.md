@@ -494,8 +494,12 @@ repo), what the zone table does to the worktree (`v_zone`,
 every setting's effective value (`v_config_value`), a worktree's files
 (`v_workspace_file`), the harnesses' saved conversations
 (`v_agent_conversation`: files the harness writes outside oxplow), the
-registered agent harnesses (`v_agent_harness`: which `agents:` enables) and the
-repository's working copies (`v_vcs_workspace`). A restated table (as `v_lens` and `v_extension` are, in the
+registered agent harnesses (`v_agent_harness`: which `agents:` enables), the
+repository's working copies (`v_vcs_workspace`) and how far two revisions
+have parted and the commits between them (`v_branch_divergence`,
+`v_commit_between`: a graph walk over refs a fetch can move, narrowed to
+the pair the query pins — one side pinned, the other ranges over every
+branch; neither, every local branch against the default). A restated table (as `v_lens` and `v_extension` are, in the
 extension-generation transaction) would be wrong between the change and the
 next restatement, and nothing says when that is. So these are **live
 models** (`crates/oxplow-app/src/live_models.rs`, `LiveModels::NAMES`): the
@@ -565,7 +569,9 @@ rows are read when a query names the model.
   `WorkspaceChanged`, `VcsRefsChanged`, `LspServersChanged`,
   `CredentialChanged`, `ExtensionsChanged`) and the
   models it reads through (`v_agent_conversation` follows `v_agent_session`
-  and `v_agent_turn`; `v_vcs_workspace` follows `v_stream`). The bus, as
+  and `v_agent_turn`; `v_vcs_workspace` follows `v_stream`;
+  `v_branch_divergence` and `v_commit_between` follow `v_branch`, the
+  branches an unpinned side ranges over). The bus, as
   it posts such an event, posts the `ModelsChanged` naming the live models
   that follow it (`models_changed::announced_after`, so every emitter is
   covered and no backend code listens to the bus), and the change loop adds

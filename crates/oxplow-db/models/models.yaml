@@ -193,6 +193,22 @@
     - { name: "upstream", type: "TEXT", doc: "For a local branch that tracks one, its remote-tracking branch (`origin/main`); NULL otherwise. (v2)" }
     - { name: "ahead", type: "INTEGER", doc: "Commits a local branch has that its upstream lacks; 0 without an upstream and for a remote-tracking branch. (v2)" }
     - { name: "behind", type: "INTEGER", doc: "Commits a local branch's upstream has that it lacks; 0 without an upstream and for a remote-tracking branch. (v2)" }
+- name: branch_divergence
+  version: 1
+  key: [base, head, stream_id]
+  description: "How far one revision has moved from another, read from the VCS when a query names it (live). Narrowed by the query: `WHERE base = … AND head = …` is one pair; one side pinned, the other ranges over every branch of the stream's repository (local and remote-tracking, the pinned one left out); neither pinned, every local branch as `head` against the default branch. Each side is any revision the VCS resolves (a branch, `origin/main`, a sha, `HEAD`); a side it can't gives no row. A branch against its own upstream is `v_branch.ahead` / `behind`."
+  columns:
+    - { name: "base", type: "TEXT", doc: "The revision compared against, as the query spelled it." }
+    - { name: "head", type: "TEXT", doc: "The revision compared, as the query spelled it." }
+    - { name: "ahead", type: "INT", doc: "Commits on `head` that `base` lacks." }
+    - { name: "behind", type: "INT", doc: "Commits on `base` that `head` lacks." }
+    - { name: "merge_base", type: "TEXT", doc: "The sha the two split at; NULL when their histories are unrelated." }
+    - { name: "overlapping_files", type: "TEXT", doc: "JSON array of the files changed on both sides since they split, sorted; `[]` when none." }
+    - { name: "readiness", type: "TEXT", doc: "Whether `head` would merge into `base` cleanly: `already_integrated` (nothing ahead), `clean` (ahead, no file changed on both sides) or `conflict`." }
+    - { name: "stream_id", type: "INT", doc: "The stream whose repository was read (v_stream.id): the query's, else the primary." }
+  tests:
+    - { not_null: base }
+    - { not_null: head }
 - name: capture
   version: 1
   description: "Captures: one scan or run that produced facts, with its when/where/who context."
@@ -402,6 +418,22 @@
     - { name: "parent_count", type: "", doc: "Number of parents (2+ for a merge)." }
     - { name: "parents", type: "TEXT", doc: "Every parent's sha, as a JSON array (first parent first)." }
     - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/commit?sha=<sha>`: its URI, the one place SQL spells it — select and join on this, never rebuild it. (v2)" }
+- name: commit_between
+  version: 1
+  key: [base, head, sha, stream_id]
+  description: "The commits on `head` that `base` lacks (`git log base..head`), newest first, at most 100 per pair, read from the VCS when a query names it (live): what is unpushed, what a branch would merge. Narrowed by the query as `v_branch_divergence` is: a pinned pair, one side ranging over every branch, or every local branch against the default. Whole histories are `v_commit`."
+  columns:
+    - { name: "base", type: "TEXT", doc: "The revision whose commits are left out, as the query spelled it." }
+    - { name: "head", type: "TEXT", doc: "The revision walked, as the query spelled it." }
+    - { name: "sha", type: "TEXT", doc: "The commit's full sha (joins v_commit, v_commit_file)." }
+    - { name: "short_sha", type: "TEXT", doc: "Its short sha." }
+    - { name: "author", type: "TEXT", doc: "Author name." }
+    - { name: "email", type: "TEXT", doc: "Author email." }
+    - { name: "committed_at", type: "TEXT", doc: "When it was committed (RFC 3339)." }
+    - { name: "subject", type: "TEXT", doc: "The first line of its message." }
+    - { name: "stream_id", type: "INT", doc: "The stream whose repository was read (v_stream.id): the query's, else the primary." }
+  tests:
+    - { not_null: sha }
 - name: commit_file
   version: 1
   description: "Files each commit changed, against its first parent."
