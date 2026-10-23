@@ -1181,6 +1181,34 @@ actions:
         )
         .unwrap();
         std::fs::write(
+            ext.join("lenses/tiles.yaml"),
+            r#"title: Tiles
+params: [{ name: id, default: "" }]
+query: |
+  SELECT 'dti' || i.id AS id, i.kind,
+         json_extract(i.options_json, '$.title') AS title,
+         json_extract(i.options_json, '$.size') AS size,
+         json_extract(i.options_json, '$.lensId') AS lens,
+         json_extract(i.options_json, '$.sql') AS sql,
+         json_extract(i.options_json, '$.display') AS display,
+         json_extract(i.options_json, '$.chart') AS chart,
+         json_extract(i.options_json, '$.metric') AS metric,
+         json_extract(i.options_json, '$.viz') AS viz,
+         json_extract(i.options_json, '$.text') AS text
+  FROM v_dashboard_item i WHERE 'dsh' || i.dashboard_id = :id ORDER BY i.sort_index
+viz: dashboard
+tile: { id: id, title: title, size: size, lens: lens, sql: sql, display: display, chart: chart, metric: metric, viz: viz, text: text }
+actions:
+  - { id: reorder, label: Reorder, command: oxplow.dashboard.reorder_items, drag: true, input: { dashboard: "{{param.id}}", order: "{{order.id}}" } }
+  - { id: rename, label: Rename…, command: oxplow.dashboard.update_item, row: true, form: true, fixed: [item], input: { item: "{{row.id}}", title: "{{row.title}}", size: "{{row.size}}" } }
+  - { id: edit-text, label: Save, command: oxplow.dashboard.update_item, edit: true, fixed: [item], input: { item: "{{row.id}}", text: "{{row.text}}" } }
+  - { id: remove, label: Remove, command: oxplow.dashboard.remove_item, row: true, key: Delete, input: { item: "{{row.id}}" } }
+  - { id: add-text, label: Add Heading…, command: oxplow.dashboard.add_item, form: true, fixed: [dashboard, kind], input: { dashboard: "{{param.id}}", kind: text } }
+  - { id: rename-dashboard, label: Rename Dashboard…, command: oxplow.dashboard.rename, form: true, fixed: [dashboard], input: { dashboard: "{{param.id}}" } }
+"#,
+        )
+        .unwrap();
+        std::fs::write(
             ext.join("lenses/board.yaml"),
             r#"title: Board
 query: "SELECT uri, title, state FROM v_work_item"
@@ -1383,6 +1411,157 @@ actions:
             body, "## New\n\nThe saved text.",
             "the fixed uri kept this item"
         );
+    }
+
+    /// A dashboard lens whose rows are its tiles edits them through its
+    /// actions alone: a drag binds the whole new order, row forms rename
+    /// and resize, the edit action saves a heading, a key removes, and
+    /// whole-lens forms add a tile and rename the dashboard.
+    #[tokio::test]
+    async fn a_dashboard_lens_reorders_renames_and_removes_its_tiles() {
+        let (fx, root) = fixture().await;
+        let svc = fx.svc.clone();
+        let made = svc
+            .commands
+            .run(
+                &Actor::Human,
+                "oxplow.dashboard.create",
+                json!({ "title": "D" }),
+                false,
+            )
+            .await
+            .unwrap();
+        let dashboard = made.result["id"].as_str().unwrap().to_string();
+        for text in ["A", "B", "C"] {
+            svc.commands
+                .run(
+                    &Actor::Human,
+                    "oxplow.dashboard.add_item",
+                    json!({ "dashboard": dashboard, "kind": "text", "text": text }),
+                    false,
+                )
+                .await
+                .unwrap();
+        }
+        let params = BTreeMap::from([("id".to_string(), SqlCell::Text(dashboard.clone()))]);
+        // The tiles as the lens reads them: each row by its column.
+        let tiles = || {
+            let (svc, root, params) = (svc.clone(), root.clone(), params.clone());
+            async move {
+                let ctx = extensions::LensContext::default();
+                let run = extensions::run_lens(
+                    &svc.sql,
+                    &svc.extension_catalog,
+                    &root,
+                    "acme/tiles",
+                    params,
+                    &ctx,
+                )
+                .await
+                .unwrap();
+                let cols = run.result.columns.clone();
+                run.result
+                    .rows
+                    .into_iter()
+                    .map(|r| {
+                        cols.iter()
+                            .cloned()
+                            .zip(r)
+                            .collect::<BTreeMap<String, SqlCell>>()
+                    })
+                    .collect::<Vec<_>>()
+            }
+        };
+        let texts = |rows: &[BTreeMap<String, SqlCell>], col: &str| {
+            rows.iter()
+                .map(|r| match &r[col] {
+                    SqlCell::Text(t) => t.clone(),
+                    _ => String::new(),
+                })
+                .collect::<Vec<_>>()
+        };
+        let act = |action: &'static str,
+                   row: Option<BTreeMap<String, SqlCell>>,
+                   input: Option<Value>,
+                   drop: Option<Drop>| {
+            let (svc, root, params) = (svc.clone(), root.clone(), params.clone());
+            async move {
+                let mut c = call(action, params, row, Actor::Human, false);
+                c.lens_id = "acme/tiles".into();
+                c.input = input;
+                c.drop = drop;
+                run_lens_action(&svc, &root, c, &extensions::LensContext::default()).await
+            }
+        };
+
+        // C dragged to the front: the drop's order is every tile.
+        let rows = tiles().await;
+        assert_eq!(texts(&rows, "text"), ["A", "B", "C"]);
+        let order = vec![rows[2].clone(), rows[0].clone(), rows[1].clone()];
+        act(
+            "reorder",
+            Some(rows[2].clone()),
+            None,
+            Some(Drop {
+                before: Some(rows[0].clone()),
+                order: Some(order),
+                ..Drop::default()
+            }),
+        )
+        .await
+        .unwrap();
+        let rows = tiles().await;
+        assert_eq!(texts(&rows, "text"), ["C", "A", "B"]);
+
+        // Rename and resize A; edit C's heading in place.
+        act(
+            "rename",
+            Some(rows[1].clone()),
+            Some(json!({ "title": "First", "size": "wide" })),
+            None,
+        )
+        .await
+        .unwrap();
+        act(
+            "edit-text",
+            Some(rows[0].clone()),
+            Some(json!({ "text": "Sea" })),
+            None,
+        )
+        .await
+        .unwrap();
+        let rows = tiles().await;
+        assert_eq!(texts(&rows, "title"), ["", "First", ""]);
+        assert_eq!(texts(&rows, "size"), ["", "wide", ""]);
+        assert_eq!(texts(&rows, "text"), ["Sea", "A", "B"]);
+
+        // Remove B; add a heading; rename the dashboard.
+        act("remove", Some(rows[2].clone()), None, None)
+            .await
+            .unwrap();
+        act("add-text", None, Some(json!({ "text": "New" })), None)
+            .await
+            .unwrap();
+        act(
+            "rename-dashboard",
+            None,
+            Some(json!({ "title": "Board" })),
+            None,
+        )
+        .await
+        .unwrap();
+        let rows = tiles().await;
+        assert_eq!(texts(&rows, "text"), ["Sea", "A", "New"]);
+        let title = svc
+            .sql
+            .query_sql(
+                "SELECT title FROM v_dashboard WHERE 'dsh' || id = ?1",
+                vec![SqlCell::Text(dashboard.clone())],
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(title.rows, vec![vec![SqlCell::Text("Board".into())]]);
     }
 
     /// Where a drop landed binds `{{before.*}}`, `{{after.*}}`, `{{onto.*}}`

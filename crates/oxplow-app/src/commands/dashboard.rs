@@ -79,6 +79,25 @@ pub struct AddItemInput {
     /// a chart's `chart`), as JSON.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub options_json: Option<String>,
+    /// The tile's title, over the one in `options_json`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    /// Its size: `small`, `wide`, `tall` or `full`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<String>,
+    /// A `text` tile's markdown body.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    /// The metric key of a `metric` display.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metric: Option<String>,
+    /// How the metric card draws: `line` or `number`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub viz: Option<String>,
+    /// A chart display's columns, an object: `{ x, y, series? }` for `bar`
+    /// and `line`, `{ label, size, group? }` for `treemap`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chart: Option<Value>,
     /// Where it goes (0 = first); the end when absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub position: Option<i64>,
@@ -89,10 +108,38 @@ pub struct AddItemInput {
 pub struct UpdateItemInput {
     /// The tile (`dti7`).
     pub item: String,
-    /// Its options JSON, checked as a new tile of its kind is (a query
-    /// tile's `sql` and `display`, a lens tile's `lensId`).
+    /// Its options JSON, replacing all of its options (the fields below
+    /// then merge into it). Checked as a new tile of its kind is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub options_json: Option<String>,
+    /// A query tile's SQL, re-checked like a new tile's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sql: Option<String>,
+    /// A query tile's display: a lens viz, or `metric`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display: Option<String>,
+    /// A lens tile's lens (`<extension>/<slug>`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lens_id: Option<String>,
+    /// The tile's title, over the one in `options_json`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    /// Its size: `small`, `wide`, `tall` or `full`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<String>,
+    /// A `text` tile's markdown body.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    /// The metric key of a `metric` display.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metric: Option<String>,
+    /// How the metric card draws: `line` or `number`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub viz: Option<String>,
+    /// A chart display's columns, an object: `{ x, y, series? }` for `bar`
+    /// and `line`, `{ label, size, group? }` for `treemap`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chart: Option<Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -250,10 +297,63 @@ fn add_tile_input(input: AddItemInput) -> TileInput {
         display: input.display,
         lens_id: input.lens_id,
         options_json: input.options_json,
+        title: input.title,
+        size: input.size,
+        text: input.text,
+        metric: input.metric,
+        viz: input.viz,
+        chart: input.chart,
     }
 }
 
-/// `dashboard.update_item { item, options_json? }`: an edited tile is
+/// The options an edit leaves a tile with: `options_json` if given (it
+/// replaces the blob), else the stored options, with each flat field the
+/// edit gives written over them.
+fn merged_update(stored: Option<&str>, input: &UpdateItemInput) -> Result<String, CommandError> {
+    let raw = input.options_json.as_deref().or(stored);
+    let mut opts: serde_json::Map<String, Value> = match raw {
+        Some(raw) if !raw.trim().is_empty() => serde_json::from_str(raw)
+            .map_err(|e| invalid("/options_json", format!("options_json: {e}")))?,
+        _ => serde_json::Map::new(),
+    };
+    // A stored tile may hold a retired size or viz (`sparkline`), which
+    // reads as absent: an edit keeps it absent rather than refusing.
+    if input.options_json.is_none() {
+        for (key, taken) in [
+            ("size", crate::dashboard_tiles::SIZES),
+            ("viz", crate::dashboard_tiles::METRIC_VIZ),
+        ] {
+            if opts
+                .get(key)
+                .is_some_and(|v| !v.as_str().is_some_and(|s| taken.contains(&s)))
+            {
+                opts.remove(key);
+            }
+        }
+    }
+    for (key, flat) in [
+        ("sql", &input.sql),
+        ("display", &input.display),
+        ("lensId", &input.lens_id),
+        ("title", &input.title),
+        ("size", &input.size),
+        ("text", &input.text),
+        ("metric", &input.metric),
+        ("viz", &input.viz),
+    ] {
+        if let Some(v) = flat {
+            opts.insert(key.into(), Value::String(v.clone()));
+        }
+    }
+    if let Some(chart) = &input.chart {
+        opts.insert("chart".into(), chart.clone());
+    }
+    Ok(Value::Object(opts).to_string())
+}
+
+/// `dashboard.update_item { item, options_json?, sql?, display?, lens_id?,
+/// title?, size?, text?, metric?, viz?, chart? }`: the flat fields merge
+/// into the tile's options (`options_json` alone replaces them). An edited tile is
 /// checked as a new one of its kind is — its options parse, a query tile
 /// keeps its SQL (held to the read contract, before the transaction) and a
 /// display it can show. Undone by its previous options.
@@ -263,15 +363,16 @@ pub fn update_item_op(db: Database, sql: SqlGateway) -> Op {
         Box::pin(async move {
             let input: UpdateItemInput = parse(input)?;
             let id = item_id(&input.item, "/item")?;
-            let kind = db
+            let stored = db
                 .read(move |tx| {
-                    item_tx(tx, id)?.map(|t| t.kind).ok_or_else(|| {
+                    item_tx(tx, id)?.ok_or_else(|| {
                         oxplow_domain::DomainError::Invalid(format!("no tile `{id}`"))
                     })
                 })
                 .await
                 .map_err(|e| tile_error(e, "/item"))?;
-            new_tile(&sql, update_tile_input(kind, input.options_json))
+            let merged = merged_update(stored.options_json.as_deref(), &input)?;
+            new_tile(&sql, update_tile_input(stored.kind, merged))
                 .await
                 .map(|_| ())
                 .map_err(|e| tile_error(e, "/options_json"))
@@ -287,7 +388,8 @@ pub fn update_item_op(db: Database, sql: SqlGateway) -> Op {
             let id = item_id(&input.item, "/item")?;
             let before = item_tx(ctx.conn, id)?
                 .ok_or_else(|| invalid("/item", format!("no tile `{id}`")))?;
-            let (tile, _) = build_tile(update_tile_input(before.kind, input.options_json))
+            let merged = merged_update(before.options_json.as_deref(), &input)?;
+            let (tile, _) = build_tile(update_tile_input(before.kind.clone(), merged))
                 .map_err(|e| tile_error(e, "/options_json"))?;
             update_item_tx(ctx.conn, id, tile.options_json.as_deref())?;
             Ok(HandlerOutput {
@@ -303,10 +405,10 @@ pub fn update_item_op(db: Database, sql: SqlGateway) -> Op {
     .with_precheck(precheck)
 }
 
-fn update_tile_input(kind: String, options_json: Option<String>) -> TileInput {
+fn update_tile_input(kind: String, options_json: String) -> TileInput {
     TileInput {
         kind,
-        options_json,
+        options_json: Some(options_json),
         ..TileInput::default()
     }
 }
@@ -662,5 +764,112 @@ mod tests {
             .await
             .unwrap();
         assert!(fx.svc.dashboard_store.list().await.unwrap().is_empty());
+    }
+
+    async fn options(fx: &EffortFixture, d: &str) -> Vec<Value> {
+        tiles(fx, d)
+            .await
+            .iter()
+            .map(|o| serde_json::from_str(o).unwrap())
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn a_tile_takes_its_fields_flat() {
+        let fx = services_with_effort().await;
+        let d = dashboard(&fx).await;
+        run(
+            &fx,
+            &Actor::Human,
+            ADD_ITEM,
+            json!({ "dashboard": d, "kind": "text", "title": "Flat", "size": "wide", "text": "hi",
+                    "options_json": json!({ "title": "Blob", "range": "7d" }).to_string() }),
+        )
+        .await
+        .unwrap();
+        let o = &options(&fx, &d).await[0];
+        assert_eq!(o["title"], "Flat");
+        assert_eq!(o["size"], "wide");
+        assert_eq!(o["text"], "hi");
+        assert_eq!(o["range"], "7d");
+    }
+
+    #[tokio::test]
+    async fn editing_a_tile_merges_its_fields_into_its_options() {
+        let fx = services_with_effort().await;
+        let d = dashboard(&fx).await;
+        let out = run(
+            &fx,
+            &Actor::Human,
+            ADD_ITEM,
+            json!({ "dashboard": d, "kind": "query", "sql": "SELECT count(*) AS n FROM v_work_item",
+                    "display": "number", "size": "wide", "title": "Old" }),
+        )
+        .await
+        .unwrap();
+        let item = out.result["id"].as_str().unwrap().to_string();
+        let edit = out_edit(&fx, &item);
+        edit(json!({ "title": "New" })).await.unwrap();
+        let o = &options(&fx, &d).await[0];
+        assert_eq!(o["title"], "New");
+        assert_eq!(o["size"], "wide");
+        assert_eq!(o["display"], "number");
+        // A re-pointed SQL is rechecked.
+        let err = edit(json!({ "sql": "SELECT * FROM task" }))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CommandError::Invalid { .. }), "{err:?}");
+        edit(json!({ "sql": "SELECT 2 AS n" })).await.unwrap();
+        assert_eq!(options(&fx, &d).await[0]["sql"], "SELECT 2 AS n");
+        for (bad, says) in [
+            (json!({ "size": "huge" }), "unknown size `huge`"),
+            (json!({ "viz": "pie" }), "unknown viz `pie`"),
+            (json!({ "chart": "x" }), "`chart` must be an object"),
+        ] {
+            let err = edit(bad).await.unwrap_err();
+            assert!(err.to_string().contains(says), "{err}");
+        }
+        // options_json alone replaces the blob.
+        edit(json!({ "options_json": json!({ "sql": "SELECT 3 AS n" }).to_string() }))
+            .await
+            .unwrap();
+        let o = &options(&fx, &d).await[0];
+        assert_eq!(o["sql"], "SELECT 3 AS n");
+        assert!(o.get("title").is_none() && o.get("size").is_none(), "{o}");
+    }
+
+    /// A stored tile's retired size or viz reads as absent, so an edit of
+    /// another field leaves it out rather than refusing the tile.
+    #[test]
+    fn an_edit_drops_a_stored_tiles_retired_options() {
+        let input: UpdateItemInput =
+            serde_json::from_value(json!({ "item": "dti1", "title": "New" })).unwrap();
+        let merged: Value = serde_json::from_str(
+            &merged_update(
+                Some(r#"{"viz":"sparkline","size":"huge","metric":"loc"}"#),
+                &input,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(merged, json!({ "title": "New", "metric": "loc" }));
+    }
+
+    fn out_edit<'a>(
+        fx: &'a EffortFixture,
+        item: &'a str,
+    ) -> impl Fn(
+        Value,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<Output = Result<oxplow_domain::CommandOutcome, CommandError>>
+                + 'a,
+        >,
+    > {
+        move |fields: Value| {
+            let mut input = fields;
+            input["item"] = json!(item);
+            Box::pin(run(fx, &Actor::Human, UPDATE_ITEM, input))
+        }
     }
 }

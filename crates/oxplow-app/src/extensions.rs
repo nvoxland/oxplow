@@ -5480,13 +5480,23 @@ fn shape_problem(
 }
 
 /// A `markdown` block off its viz, or an edit action that doesn't save the
-/// text the viz shows.
+/// text the viz shows: a markdown viz's text, or a row-tile dashboard's
+/// text tiles (`tile.text`, edited in place).
 fn markdown_problem(lens: &Lens) -> Option<String> {
     let viz = format!("{:?}", lens.viz).to_lowercase();
     if lens.markdown.is_some() && lens.viz != LensViz::Markdown {
         return Some(format!("`markdown` is for viz `markdown`, not `{viz}`"));
     }
     let edit = lens.actions.iter().find(|a| a.edit)?;
+    if let Some(text) = lens.tile.as_ref().and_then(|t| t.text.as_deref()) {
+        let saved = edit_column(edit)?;
+        return (saved != text).then(|| {
+            format!(
+                "`{}` saves `{saved}`, but the tiles' text is `{text}`",
+                edit.id
+            )
+        });
+    }
     if lens.viz != LensViz::Markdown {
         return Some(format!(
             "an edit action (`{}`) is a `markdown` viz's, not `{viz}`'s",
@@ -9434,6 +9444,48 @@ commands:
                 "{slug}: {errs}"
             );
         }
+    }
+
+    /// A row-tile dashboard's edit action edits a text tile in place: it
+    /// saves the `tile.text` column, and nothing else.
+    #[test]
+    fn a_row_tile_dashboards_edit_action_saves_its_text() {
+        let q = "query: SELECT 'dti1' AS id, 'x' AS body, 'T' AS title\nviz: dashboard\ntile: { id: id, title: title, text: body }\n";
+        let edit = |col: &str| {
+            format!(
+                "actions:\n  - {{ id: edit, label: Save, command: x.y.z, edit: true, fixed: [item], input: {{ item: '{{{{row.id}}}}', text: '{{{{row.{col}}}}}' }} }}\n"
+            )
+        };
+        let (_d, ext) = load_x(
+            &[
+                ("ok", &format!("title: Ok\n{q}{}", edit("body"))),
+                ("wrong", &format!("title: Wrong\n{q}{}", edit("title"))),
+                (
+                    "plain",
+                    &format!(
+                        "title: Plain\nviz: dashboard\ntiles: [{{ markdown: hi, id: m }}]\n{}",
+                        edit("body")
+                    ),
+                ),
+            ],
+            "",
+        );
+        assert!(
+            ext.lenses.iter().any(|l| l.slug == "ok"),
+            "{:?}",
+            ext.errors
+        );
+        let errs = ext.errors.join("\n");
+        assert!(
+            errs.contains("wrong.yaml")
+                && errs.contains("`edit` saves `title`, but the tiles' text is `body`"),
+            "{errs}"
+        );
+        assert!(
+            errs.contains("plain.yaml")
+                && errs.contains("an edit action (`edit`) is a `markdown` viz's"),
+            "{errs}"
+        );
     }
 
     /// A dashboard whose rows are its tiles gives its static parts its own

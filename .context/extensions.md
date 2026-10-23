@@ -2245,7 +2245,11 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   `sql` tile through an ad-hoc spec, a chart display without a parsable
   `chart` or `metric` as a table; one that can't run says why and the
   rest still run) and renders a `###` per row under its `title` column,
-  else its run's title.
+  else its run's title. Its **edit action** (`edit: true`, the one
+  inline-edit mechanism) edits a text tile in place, so it must save the
+  `tile.text` column (`markdown_problem`); tiles are rows, so the lens's
+  row, drag (`{{order.id}}` for a whole new order) and key actions act on
+  them.
 - **A table or list is keyboard-driven** (`useListNav`): focus it, ↑/↓ move
   the cursor, Enter opens the cursor row's first link or runs its first row
   action (usability.md "Keyboard").

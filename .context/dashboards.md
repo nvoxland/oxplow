@@ -65,8 +65,18 @@ dashboard.rs`, P8.A5), for the desktop (`runCommand`), an agent
   `Confirm::Destructive`; the page's Delete `InlineConfirm` is the
   confirmation, so the desktop runs it confirmed; not undoable).
 - `Tx` with a `Precheck`: `oxplow.dashboard.add_item { dashboard, kind, sql?,
-  display?, lens_id?, options_json?, position? }` and `oxplow.dashboard.update_item
-  { item, options_json? }`. A tile is checked as `dashboard_tiles::new_tile`
+  display?, lens_id?, title?, size?, text?, metric?, viz?, chart?,
+  options_json?, position? }` and `oxplow.dashboard.update_item { item,
+  options_json?, sql?, display?, lens_id?, title?, size?, text?, metric?,
+  viz?, chart? }`. The flat fields are the tile's option keys (`size` in
+  `SIZES`, `viz` in `METRIC_VIZ`, `chart` an object; checked in
+  `build_tile`) so a lens form can edit one at a time; on add a flat field
+  beats the same key in `options_json`. An update **merges**: it starts
+  from `options_json` if given (which alone replaces the whole blob, as
+  agents rely on) else the stored options, and overlays the flat fields
+  (`merged_update`; a stored retired `size`/`viz` such as `sparkline`
+  reads as absent and is dropped, so editing another field of an old tile
+  isn't refused). A tile is checked as `dashboard_tiles::new_tile`
   does, an edited one as a new tile of its kind (its options parse, a
   query tile keeps its SQL — `SqlGateway::check`: the read contract,
   `MEASURE()` resolved — and a display it can show, a lens tile its lens).
