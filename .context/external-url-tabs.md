@@ -20,7 +20,7 @@ trade safe.
 ## A web page is a resource
 
 A web page's tab id is its URL (`https://example.com/docs`), and foundation's
-`external-url` page renders it with `for: [https, http]`
+`external-url` page (a lens page over `web-page`, `viz: embed`) renders it with `for: [https, http]`
 ([pages-and-tabs.md](./pages-and-tabs.md) "Renderers"). `externalUrlRef(url)`
 is `{ id: url }`. The allowlist gates `refFromTabId`: an http(s) URL that
 passes `classifyExternalUrl` is a tab, any other text is not.
@@ -36,11 +36,18 @@ capability (defined in
 explicitly grants **zero oxplow commands and zero Tauri plugin permissions**
 — it behaves like a sandboxed browser tab.
 
-`apps/desktop/src/pages/ExternalUrlPage.tsx` is no longer a webview
+The `embed` viz (`apps/desktop/src/lens/EmbedViz.tsx`, `embed: { url: <column> }`
+on foundation's hidden `web-page` lens, whose `uri` param is the URL and whose
+tab label is `{{param.uri|url}}`: host and path, cut to 40) is not a webview
 host. It calls `desktopBridge().openExternalUrl(url)` (which dispatches
-to `commands::webview::open_external_url` in the Rust shell), then
-renders a small status panel with a "re-open" button. The actual page
-content lives in the spawned window, isolated from the main webview.
+to `commands::webview::open_external_url` in the Rust shell) once per tab entry
+(`opened` in its history state, so a restored tab doesn't spawn a window
+again), then renders a small status panel: where it opened, Open again, Open in
+Browser (the system browser) and Copy URL, and the error line when the
+window could not open. A URL the allowlist refuses draws "Couldn't open
+link" and opens nothing. The actual page content lives in the spawned
+window, isolated from the main webview. An agent reads the lens as a link line;
+an answer (`oxplow_show_lens`) can't be an embed.
 
 ## Security stance
 
@@ -65,7 +72,7 @@ oxplow's IPC surface.
 |---|---|
 | `apps/desktop/src/external-url-allowlist.ts` | Pure: `classifyExternalUrl(url)` → `{ ok, url } \| { ok: false, reason }`, `isAllowedExternalUrl`, `describeRejection`. Default policy: http(s) only. Tested in `external-url-allowlist.test.ts`. |
 | `apps/desktop/src/tabs/pageRefs.ts` | `externalUrlRef(url)` (`{ id: url }`) — must be called only after passing through the allowlist; `refFromTabId` applies it to any http(s) URL. |
-| `apps/desktop/src/pages/ExternalUrlPage.tsx` | Status / re-open panel; auto-invokes `desktopBridge().openExternalUrl(url)` on mount. No `<webview>` element. |
+| `apps/desktop/src/lens/EmbedViz.tsx` | The `embed` viz: status / re-open panel; invokes `desktopBridge().openExternalUrl(url)` once per entry. No `<webview>` element. |
 | `crates/oxplow-tauri-ipc/src/commands/webview.rs` | `open_external_url(url)` Tauri command. Validates scheme, generates `ext-url-<uuid>` label, builds the new `WebviewWindow`. |
 | `apps/desktop/src-tauri/capabilities/external-url.json` | Empty-permission capability; matches `ext-url-*` window labels. |
 

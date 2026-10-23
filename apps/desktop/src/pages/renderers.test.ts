@@ -102,3 +102,14 @@ test("a label fills row columns and applies its filters; with no row yet it says
   const both = page("both", { title: "Both", label: "{{row.title|basename}} · {{param.id}}" });
   expect(tabLabel(both, { id: "7" }, { title: "x/y" })).toBe("y · 7");
 });
+
+test("the url filter is a web page's host and path, cut to 40", () => {
+  const web = page("external-url", { title: "Web Page", label: "{{param.uri|url}}" });
+  expect(tabLabel(web, { uri: "https://example.com/" })).toBe("example.com");
+  expect(tabLabel(web, { uri: "https://docs.example.com/guide/start?x=1#top" })).toBe("docs.example.com/guide/start");
+  const long = tabLabel(web, { uri: `https://example.com/${"a".repeat(80)}` });
+  expect(long.length).toBe(40);
+  expect(long.endsWith("…")).toBe(true);
+  // Not a URL: kept as it is.
+  expect(tabLabel(web, { uri: "nonsense" })).toBe("nonsense");
+});

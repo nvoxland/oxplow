@@ -558,13 +558,14 @@ export interface ExternalUrlPayload {
 }
 
 /**
- * Tab ref for an external (http/https) URL rendered inside a sandboxed
- * <webview> in the app. The URL keys the id so reopening the same link
- * reuses the existing tab rather than stacking duplicates.
+ * Tab ref for an external (http/https) URL, shown by the Web Page tab (the
+ * `embed` viz opens it in a sandboxed window). The URL keys the id so
+ * reopening the same link reuses the existing tab rather than stacking
+ * duplicates.
  *
  * Callers MUST validate the URL through `classifyExternalUrl` from
- * `src/ui/external-url-allowlist.ts` before constructing this ref —
- * the renderer trusts that the payload has already been gated.
+ * `external-url-allowlist.ts` before constructing this ref — the
+ * renderer trusts that the payload has already been gated.
  */
 export function externalUrlRef(url: string): TabRef {
   return { id: url };

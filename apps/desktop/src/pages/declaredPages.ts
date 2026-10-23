@@ -22,7 +22,6 @@ export function isAppRenderer(name: string): name is AppRendererName {
 
 /// The rest of the built-ins (`builtInPages.tsx`).
 export const BUILT_IN_PAGES = [
-  "external-url",
   "resource",
   "terminal",
 ] as const;

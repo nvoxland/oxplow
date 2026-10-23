@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Extension, Lens, LensRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
-import { markParts, treeNodes, lazyTreeNodes, lazyTreeProblem, drawnTreeRows, wantedBranches, timelineEntries, stepItems, hunkRows, codeRows, diffRow, editorRow, answerRow, parseLines, slotRuns, mergeDirectory, barRows, childParams, partParams, lineSeries, sparklineValues, numericRowId, treemapItems, cellLinkRef, changedParams, lensViewChange, misplacedViewParams, viewedParts, viewOptions, offeredFilters, foldEmpty, foldedAway, displayColumns, formatCell, lensDirectoryEntries, parseParamInput, limitRows, slugify, adHocLens, rowMention, rowAsk, effortRowId, slotExtensions, isTimestamp, rowGroups, rowEmphasized, rowDepth, rowContextRef, rowTiles, tileSizeOf } from "./lensModel.js";
+import { markParts, treeNodes, lazyTreeNodes, lazyTreeProblem, drawnTreeRows, wantedBranches, timelineEntries, stepItems, hunkRows, codeRows, diffRow, editorRow, embedRow, answerRow, parseLines, slotRuns, mergeDirectory, barRows, childParams, partParams, lineSeries, sparklineValues, numericRowId, treemapItems, cellLinkRef, changedParams, lensViewChange, misplacedViewParams, viewedParts, viewOptions, offeredFilters, foldEmpty, foldedAway, displayColumns, formatCell, lensDirectoryEntries, parseParamInput, limitRows, slugify, adHocLens, rowMention, rowAsk, effortRowId, slotExtensions, isTimestamp, rowGroups, rowEmphasized, rowDepth, rowContextRef, rowTiles, tileSizeOf } from "./lensModel.js";
 import { formatMetricValue, formatShortDateTime } from "../components/format.js";
 import { diffSpecOf, duplicateBlockOf, isPage, lineOf, pagePayload } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
@@ -686,6 +686,14 @@ describe("structure components (P6.A2)", () => {
       { path: "x.rs", revision: "git:abc", lines: { start: 12, end: 40 }, row: ["x.rs", "git:abc", "40-12"] },
       { path: "y.rs", revision: "working", lines: null, row: ["y.rs", "working", null] },
     ]);
+  });
+
+  test("embedRow is the first row's URL", () => {
+    const l = lens({ viz: "embed", embed: { url: "u" } } as never);
+    const r = (rows: unknown[][]) => ({ columns: ["u"], rows, truncated: false }) as never;
+    expect(embedRow(l, r([["https://a.test/x"]]))).toEqual({ url: "https://a.test/x" });
+    expect(embedRow(l, r([[null]]))).toBeNull();
+    expect(embedRow(l, r([]))).toBeNull();
   });
 
   test("answerRow is the first row's answer and the lens it was kept as", () => {

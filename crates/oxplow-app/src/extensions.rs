@@ -139,6 +139,11 @@ pub enum LensViz {
     /// (`answer.kept`: the lens it became) — core's component for what
     /// `oxplow_show_lens` showed.
     Answer,
+    /// A web page (`embed.url`, the first row's), opened in oxplow's
+    /// sandboxed window: the page is a status panel with Open again, Open in
+    /// Browser and Copy URL — core's component for what an `http(s)` link
+    /// opens.
+    Embed,
     /// The extension's own web component (`custom.component`), in
     /// a sandboxed frame; its rows are what it shows and what an agent
     /// reads (as a table).
@@ -149,7 +154,10 @@ impl LensViz {
     /// It takes its page's whole height (a file, a diff): the page draws
     /// it filling the body, its title in the chrome.
     pub fn fills(self) -> bool {
-        matches!(self, LensViz::Code | LensViz::Diff | LensViz::Editor)
+        matches!(
+            self,
+            LensViz::Code | LensViz::Diff | LensViz::Editor | LensViz::Embed
+        )
     }
 }
 
@@ -644,6 +652,16 @@ pub struct LensAnswer {
     pub uri: Option<String>,
     #[serde(default)]
     pub kept: Option<String>,
+}
+
+/// `embed` viz: the web page the first row names.
+#[derive(
+    Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
+)]
+#[serde(deny_unknown_fields)]
+pub struct LensEmbed {
+    /// The column holding the page's URL (`http` or `https`).
+    pub url: Option<String>,
 }
 
 /// `editor` viz: the working tree's file the first row names, and the
@@ -1425,6 +1443,8 @@ struct LensFile {
     diff: Option<LensDiff>,
     #[serde(default)]
     editor: Option<LensEditor>,
+    #[serde(default)]
+    embed: Option<LensEmbed>,
     #[serde(default)]
     answer: Option<LensAnswer>,
     #[serde(default)]
@@ -2535,6 +2555,7 @@ pub struct Lens {
     pub code: Option<LensCode>,
     pub diff: Option<LensDiff>,
     pub editor: Option<LensEditor>,
+    pub embed: Option<LensEmbed>,
     pub answer: Option<LensAnswer>,
     pub markdown: Option<LensMarkdown>,
     pub form: Option<LensForm>,
@@ -4584,6 +4605,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                 code: l.code,
                 diff: l.diff,
                 editor: l.editor,
+                embed: l.embed,
                 answer: l.answer,
                 markdown: l.markdown,
                 form: l.form,
@@ -5339,7 +5361,8 @@ fn renderer_problem(
         };
         let has = |name: &str| match decl {
             Some(d) => d.additional || d.params.contains_key(name),
-            None => !scheme,
+            // A web page's lens takes the page as its `uri`.
+            None => !scheme || name == "uri",
         };
         if let Some(name) = named.iter().find(|n| !has(n)) {
             return Err(format!(
@@ -5800,6 +5823,10 @@ fn shape_problem(
             let a = lens.answer.clone().unwrap_or_default();
             need("answer", &[("uri", &a.uri)])
         }
+        LensViz::Embed => {
+            let e = lens.embed.clone().unwrap_or_default();
+            need("embed", &[("url", &e.url)])
+        }
         LensViz::Diff => {
             let d = lens.diff.clone().unwrap_or_default();
             need(
@@ -6247,6 +6274,9 @@ impl Lens {
                     .map(|k| ("answer", k)),
             );
         }
+        if let Some(e) = &self.embed {
+            out.extend(e.url.iter().map(|k| ("embed", k)));
+        }
         if let Some(e) = &self.editor {
             out.extend(
                 [&e.path, &e.lines]
@@ -6503,7 +6533,7 @@ enum LabelFrom {
 
 /// The label filters: `short` is the first 7 characters (a sha),
 /// `basename` the last path segment.
-const LABEL_FILTERS: &[&str] = &["short", "basename"];
+const LABEL_FILTERS: &[&str] = &["short", "basename", "url"];
 
 /// What a page's `label` names: each `{{param.<name>}}` or
 /// `{{row.<column>}}`, optionally filtered (`{{param.sha|short}}`), spaces
@@ -6995,6 +7025,7 @@ fn check_components(
                 ("code", l.code.is_some()),
                 ("diff", l.diff.is_some()),
                 ("editor", l.editor.is_some()),
+                ("embed", l.embed.is_some()),
                 ("answer", l.answer.is_some()),
             ]
             .into_iter()
@@ -7362,6 +7393,7 @@ impl Lens {
             code: spec.code.clone(),
             diff: spec.diff.clone(),
             editor: None,
+            embed: None,
             answer: None,
             markdown: spec.markdown.clone(),
             form: spec.form.clone(),
@@ -7437,6 +7469,13 @@ pub fn spec_problem(spec: &LensSpec) -> Option<String> {
         return Some(
             "an `editor` saves as whoever presses Save, and an answer never writes as the \
              person; show the file with `code` at `working`"
+                .into(),
+        );
+    }
+    if spec.viz == LensViz::Embed {
+        return Some(
+            "an `embed` opens a web page on the person's machine, and an answer never does \
+             that; link to the page in markdown instead"
                 .into(),
         );
     }
@@ -10615,6 +10654,35 @@ commands:
             errs.contains("`diff: { path: <column>, from: <column>, to: <column> }`"),
             "{errs}"
         );
+    }
+
+    /// `embed` opens the web page its first row names, filling the page; it
+    /// needs the URL's column, and an answer never opens a page.
+    #[test]
+    fn an_embed_lens_names_its_url_and_fills() {
+        let (_d, ext) = load_x(
+            &[
+                ("e", "title: E\nquery: SELECT 'https://a.test/x' AS u\nviz: embed\nembed: { url: u }\n"),
+                ("noembed", "title: N\nquery: SELECT 1\nviz: embed\n"),
+            ],
+            "",
+        );
+        let e = ext.lenses.iter().find(|l| l.slug == "e").expect("e loads");
+        assert_eq!(
+            e.embed,
+            Some(LensEmbed {
+                url: Some("u".into())
+            })
+        );
+        assert!(e.fills);
+        assert!(!ext.lenses.iter().any(|l| l.slug == "noembed"));
+        let errs = ext.errors.join("\n");
+        assert!(errs.contains("`embed: { url: <column> }`"), "{errs}");
+        let spec: LensSpec = serde_json::from_value(serde_json::json!({
+            "title": "E", "query": "SELECT 'a' AS u", "viz": "embed"
+        }))
+        .unwrap();
+        assert!(spec_problem(&spec).unwrap().contains("opens a web page"));
     }
 
     /// `editor` edits the working tree's file its first row names (its

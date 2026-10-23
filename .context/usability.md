@@ -981,8 +981,7 @@ declaring *what it is* and mounting the generic layer.
   picks before/after, and the drop lands exactly there (`moveToIndex`).
   Pure reorder math lives in `centerTabsReorder.ts` (unit-tested).
 - **Right-clicking a center tab** opens its action menu: any kind-specific
-  entries (the `CenterTab.contextMenu` slot — e.g. external-url's "Open in
-  Browser") followed by the universal **"Close Other Tabs"** /
+  entries (the `CenterTab.contextMenu` slot) followed by the universal **"Close Other Tabs"** /
   **"Close Tabs to the Right"** pair that `CenterTabs` appends for every
   tab. Each close item is disabled when it has no targets; targets are
   computed over the real open tabs in strip order (overflowed-but-open tabs

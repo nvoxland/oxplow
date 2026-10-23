@@ -572,6 +572,7 @@ export function adHocLens(query: string, viz: LensViz, chart: LensChart | null =
     parts: [],
     view: null,
     editor: null,
+    embed: null,
     answer: null,
     // Drawn in a tile or under an editor, never filling a page.
     fills: false,
@@ -910,6 +911,12 @@ export function answerRow(lens: Lens, result: SqlQueryResult): { uri: string; ke
   if (typeof uri !== "string" || !uri) return null;
   const kept = at(lens.answer?.kept);
   return { uri, kept: typeof kept === "string" && kept ? kept : null };
+}
+
+/** `embed` viz: the web page the first row names; null when it names none. */
+export function embedRow(lens: Lens, result: SqlQueryResult): { url: string } | null {
+  const url = columnValues(result, lens.embed?.url)?.[0];
+  return typeof url === "string" && url ? { url } : null;
 }
 
 /** `bar` viz rows: `chart.x` labels and `chart.y` values (NULL → 0). */

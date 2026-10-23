@@ -58,7 +58,7 @@ import {
   partParams,
   viewedParts,
   codeRows,
-  diffRow, editorRow, answerRow,
+  diffRow, editorRow, embedRow, answerRow,
   type DisplayColumn,
   type RowGroup,
   type StepStatus,
@@ -75,6 +75,7 @@ import type { HostedView } from "./hostedView.js";
 import { DashboardViz, DocumentViz } from "./PartsViz.js";
 import { EditorViz } from "./EditorViz.js";
 import { AnswerViz } from "./AnswerViz.js";
+import { EmbedViz } from "./EmbedViz.js";
 import { CodeViz } from "./CodeViz.js";
 import { DiffViz } from "./DiffViz.js";
 import { useLensRuns } from "./useLensRuns.js";
@@ -1170,6 +1171,8 @@ function LensViz({
       return <DiffViz spec={diffRow(lens, result)} streamId={streamId} onOpenPage={onOpenPage} />;
     case "editor":
       return <EditorViz row={editorRow(lens, result)} onOpenPage={onOpenPage} />;
+    case "embed":
+      return <EmbedViz url={embedRow(lens, result)?.url ?? null} />;
     case "answer": {
       const row = answerRow(lens, result);
       return <AnswerViz uri={row?.uri ?? null} kept={row?.kept ?? null} onOpenPage={onOpenPage} />;

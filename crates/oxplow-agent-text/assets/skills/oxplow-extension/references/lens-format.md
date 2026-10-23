@@ -98,6 +98,10 @@ empty: Nothing is waiting on you.
   - `editor` edits the first row's working-tree file at full size:
     `editor: { path: <column>, lines: <optional column holding 12> }`.
     The person saves it; an answer (`oxplow_show_lens`) can't be one.
+  - `embed` opens the first row's web page (`http` or `https`) in oxplow's
+    sandboxed window and shows its status panel: `embed: { url: <column> }`.
+    A web-page renderer's lens takes the page as its `uri` param. An answer
+    can't be one.
   - `board` draws the groups as columns of cards: `group: { by:
     <column>, values: [<the columns in order>] }`.
   - `document` is a wiki-style page of sections: `sections: [...]`. See
@@ -187,7 +191,8 @@ empty: Nothing is waiting on you.
   `{{param.<name>}}` from the URI or route params, `{{row.<column>}}` from
   the one row of its lens when that is a `document` with a `query:` (name
   the column in `columns:`), each optionally filtered: `|short` (first 7
-  characters) or `|basename` (last path segment). The tab says the page's
+  characters), `|basename` (last path segment) or `|url` (a web page's host and
+  path, cut to 40). The tab says the page's
   `title` until the lens has run.
 
 - **Row styling** on `list` / `table` (each names a result column):

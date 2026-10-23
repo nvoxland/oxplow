@@ -3596,6 +3596,12 @@ export type LensEditor = {
 	lines?: string | null,
 };
 
+/**  `embed` viz: the web page the first row names. */
+export type LensEmbed = {
+	/**  The column holding the page's URL (`http` or `https`). */
+	url: string | null,
+};
+
 /**  `form` viz: the command it submits and the values it starts from. */
 export type LensForm = LensForm_Serialize | LensForm_Deserialize;
 
@@ -4253,6 +4259,13 @@ export type LensViz =
  */
 "answer" | 
 /**
+ *  A web page (`embed.url`, the first row's), opened in oxplow's
+ *  sandboxed window: the page is a status panel with Open again, Open in
+ *  Browser and Copy URL — core's component for what an `http(s)` link
+ *  opens.
+ */
+"embed" | 
+/**
  *  The extension's own web component (`custom.component`), in
  *  a sandboxed frame; its rows are what it shows and what an agent
  *  reads (as a table).
@@ -4286,6 +4299,7 @@ export type Lens_Deserialize = {
 	code: LensCode | null,
 	diff: LensDiff | null,
 	editor: LensEditor | null,
+	embed: LensEmbed | null,
 	answer: LensAnswer | null,
 	markdown: LensMarkdown | null,
 	form: LensForm_Deserialize | null,
@@ -4368,6 +4382,7 @@ export type Lens_Serialize = {
 	code: LensCode | null,
 	diff: LensDiff | null,
 	editor: LensEditor | null,
+	embed: LensEmbed | null,
 	answer: LensAnswer | null,
 	markdown: LensMarkdown | null,
 	form: LensForm_Serialize | null,

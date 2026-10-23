@@ -21,7 +21,6 @@ describe("kindForTabId", () => {
     expect(kindForTabId("oxplow:oxplow/page?page=new-session")).toBe("new-session");
     expect(kindForTabId("oxplow:oxplow/page?page=tasks")).toBe("tasks");
     expect(kindForTabId("oxplow:oxplow/page?page=gh/open-prs")).toBe("gh/open-prs");
-    expect(kindForTabId("oxplow:oxplow/page?page=external-url&url=https://example.com")).toBe("external-url");
     expect(kindForTabId("oxplow:oxplow/page?left=disk&page=diff&path=a/b.ts&right=ref:x")).toBe("diff");
   });
 

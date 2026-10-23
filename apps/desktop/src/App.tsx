@@ -177,6 +177,12 @@ const HOME_TAB = "";
 
 /** The tab a thread falls back to: its first agent session's, else the
  *  session picker, else its first tab. */
+/** The params a tab's label and renderer are given: an oxplow URI's, and for
+ *  a web page (no oxplow URI) the page itself as `uri`. */
+function renderedParams(id: string): Record<string, string> {
+  return parseUri(id)?.params ?? { uri: id };
+}
+
 function homeTabOf(tabs: TabRef[]): string {
   return (
     tabs.find((t) => typeOf(t.id) === "oxplow/agent_session")?.id ??
@@ -1712,7 +1718,7 @@ export function App() {
       const page = rendererFor(ref.id, declaredPages, viewParamsOf(ref)) ?? fallbackRenderer;
       if (!page) return null;
       const tab = renderBody(page, ref, nav);
-      return tab ? { ...tab, label: tab.label || tabLabel(page, parseUri(ref.id)?.params ?? {}), ...(page.pinned ? { pinned: true } : {}) } : null;
+      return tab ? { ...tab, label: tab.label || tabLabel(page, renderedParams(ref.id)), ...(page.pinned ? { pinned: true } : {}) } : null;
     };
     const renderBody = (page: ExtensionPage, ref: TabRef, nav: SlotNav): CenterTab | null => {
       switch (page.body.kind) {
@@ -1720,17 +1726,17 @@ export function App() {
           const name = page.body.name;
           if (isAppRenderer(name)) return appRenderers[name](ref, nav);
           if (!isBuiltInPage(name)) return null;
-          return builtInPages[name]({ ref, params: parseUri(ref.id)?.params ?? {}, nav, scope });
+          return builtInPages[name]({ ref, params: renderedParams(ref.id), nav, scope });
         }
         case "lens": {
           const lens = page.body.lens;
           return {
             id: ref.id,
-            label: tabLabel(page, parseUri(ref.id)?.params ?? {}),
+            label: tabLabel(page, renderedParams(ref.id)),
             closable: true,
             // A renderer's lens is run with the URI it shows.
             render: () => (
-              <LensPage lensId={lens} title={tabLabel(page, parseUri(ref.id)?.params ?? {})} titleFrom={labelReadsRow(page) ? (row) => tabLabel(page, parseUri(ref.id)?.params ?? {}, row) : undefined} params={{ uri: identityOf(ref.id) ?? ref.id }} renders={ref.id} stream={stream} onOpenPage={nav.navOpen} comments={page.comments} threadId={selectedThread?.id ?? null} />
+              <LensPage lensId={lens} title={tabLabel(page, renderedParams(ref.id))} titleFrom={labelReadsRow(page) ? (row) => tabLabel(page, renderedParams(ref.id), row) : undefined} params={{ uri: identityOf(ref.id) ?? ref.id }} renders={ref.id} stream={stream} onOpenPage={nav.navOpen} comments={page.comments} threadId={selectedThread?.id ?? null} />
             ),
           };
         }
@@ -1738,7 +1744,7 @@ export function App() {
           const shown: PagePayload = { extension: page.extension, page: page.id, params: { uri: identityOf(ref.id) ?? ref.id } };
           return {
             id: ref.id,
-            label: tabLabel(page, parseUri(ref.id)?.params ?? {}),
+            label: tabLabel(page, renderedParams(ref.id)),
             closable: true,
             render: () => (
               <DeclaredPageView page={shown} declared={page} stream={stream} threadId={selectedThread?.id ?? null} onOpenPage={nav.navOpen} />
