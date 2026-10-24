@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Extension, Lens, LensRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
-import { markParts, treeNodes, lazyTreeNodes, lazyTreeProblem, drawnTreeRows, wantedBranches, timelineEntries, stepItems, hunkRows, codeRows, diffRow, editorRow, embedRow, answerRow, parseLines, slotRuns, mergeDirectory, barRows, childParams, partParams, lineSeries, sparklineValues, numericRowId, treemapItems, cellLinkRef, changedParams, lensViewChange, misplacedViewParams, viewedParts, viewOptions, offeredFilters, foldEmpty, foldedAway, displayColumns, formatCell, lensDirectoryEntries, parseParamInput, limitRows, slugify, adHocLens, rowMention, rowAsk, effortRowId, slotExtensions, isTimestamp, rowGroups, rowEmphasized, rowDepth, rowContextRef, rowTiles, tileSizeOf } from "./lensModel.js";
+import { markParts, treeNodes, lazyTreeNodes, lazyTreeProblem, drawnTreeRows, wantedBranches, timelineEntries, stepItems, hunkRows, codeRows, diffRow, editorRow, embedRow, answerRow, parseLines, slotRuns, mergeDirectory, barRows, childParams, partParams, lineSeries, sparklineValues, numericRowId, treemapItems, cellLinkRef, changedParams, lensViewChange, misplacedViewParams, viewedParts, viewOptions, offeredFilters, foldEmpty, foldedAway, displayColumns, formatCell, lensDirectoryEntries, parseParamInput, limitRows, slugify, adHocLens, rowMention, rowAssistantContext, effortRowId, slotExtensions, isTimestamp, rowGroups, rowEmphasized, rowDepth, rowContextRef, rowTiles, tileSizeOf } from "./lensModel.js";
 import { formatMetricValue, formatShortDateTime } from "../components/format.js";
 import { diffSpecOf, duplicateBlockOf, isPage, lineOf, pagePayload } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
@@ -323,11 +323,14 @@ describe("rowMention", () => {
   });
 });
 
-describe("rowAsk", () => {
-  test("Ask About This on a row asks about what it links to, else the row itself", () => {
+describe("rowAssistantContext", () => {
+  test("Ask the Assistant on a row asks about the page it links to, else the row as text", () => {
     const linked = lens({ columns: [{ key: "sha", label: null, link: { kind: "commit", from: null, line: null } }] });
-    expect(rowAsk(linked, ["sha", "subject"], ["abc123", "Fix"])).toBe("[oxplow uri oxplow:oxplow/commit?sha=abc123] ");
-    expect(rowAsk(lens(), ["id", "title"], [42, "Fix it"])).toBe('[oxplow lens review/waiting row: id=42, title="Fix it"] ');
+    expect(rowAssistantContext(linked, ["sha", "subject"], ["abc123", "Fix"])).toEqual({ kind: "page", uri: "oxplow:oxplow/commit?sha=abc123" });
+    expect(rowAssistantContext(lens(), ["id", "title"], [42, "Fix it"])).toEqual({
+      kind: "selection",
+      text: '[oxplow lens review/waiting row: id=42, title="Fix it"]',
+    });
   });
 });
 

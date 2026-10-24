@@ -40,7 +40,7 @@ import {
   markParts,
   limitRows,
   lineSeries,
-  rowAsk,
+  rowAssistantContext,
   rowContext,
   rowContextRef,
   rowDepth,
@@ -65,7 +65,7 @@ import {
   type StepStatus,
   type TreeNode,
 } from "./lensModel.js";
-import { insertIntoAgent } from "../agent-input-bus.js";
+import { askAssistant } from "../components/Assistant/assistantSession.js";
 import { addToContext } from "../contextBasket.js";
 import { lensRef } from "../tabs/pageRefs.js";
 import { useContextMenu } from "../components/useRowContextMenu.js";
@@ -689,9 +689,9 @@ function RowsBody({
   const rowItems = (row: SqlCell[]) => [
     {
       id: "ask-about-row",
-      label: "Ask About This",
+      label: "Ask the Assistant",
       enabled: true,
-      run: () => insertIntoAgent(rowAsk(lens, result.columns, row)),
+      run: () => void askAssistant(rowAssistantContext(lens, result.columns, row)),
     },
     {
       id: "add-row-to-context",

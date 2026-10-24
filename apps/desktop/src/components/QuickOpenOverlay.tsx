@@ -32,7 +32,7 @@ import { kindForTabId, PageKindIcon, pageKindLabel } from "../pageKinds.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { RAIL_HISTORY_EXCLUDE_KINDS } from "./RailHud/history.js";
 import type { PageCategory } from "./RailHud/sections.js";
-import { insertIntoAgent } from "../agent-input-bus.js";
+import { askAssistant } from "./Assistant/assistantSession.js";
 import { launcherDirectory, useLauncherCounts } from "./extensionLauncher.js";
 
 interface Props {
@@ -341,7 +341,7 @@ export function QuickOpenOverlay({ open, initialQuery, stream, threadId, selecte
       setTimeout(result.entry.run, 0);
       return;
     } else if (result.kind === "file") onOpenFile(result.file.path);
-    else if (result.kind === "ask") insertIntoAgent(result.text);
+    else if (result.kind === "ask") void askAssistant(null, result.text);
     else onOpenSearchHit(result.hit);
     onClose();
   }
@@ -520,7 +520,7 @@ export function QuickOpenOverlay({ open, initialQuery, stream, threadId, selecte
                     data-row-index={index}
                     {...rowA11y(nav.optionProps(index))}
                     onClick={() => confirm(result)}
-                    title="Put this in the agent's input (it isn't sent)"
+                    title="Put this question in the Assistant's box (it isn't sent)"
                     style={{
                       ...resultStyle,
                       background: active ? "rgba(74, 158, 255, 0.18)" : "transparent",
@@ -530,9 +530,9 @@ export function QuickOpenOverlay({ open, initialQuery, stream, threadId, selecte
                       ?
                     </span>
                     <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      Ask the Agent: {result.text}
+                      Ask the Assistant: {result.text}
                     </span>
-                    <span style={{ color: "var(--muted)", fontSize: 11 }}>agent</span>
+                    <span style={{ color: "var(--muted)", fontSize: 11 }}>assistant</span>
                   </button>
                 );
               }

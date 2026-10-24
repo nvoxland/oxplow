@@ -1,6 +1,6 @@
 /// The page nav bar's ☰ menu, as data: everything a page can be acted on
 /// with that isn't how it is navigated, in a fixed order — oxplow's own
-/// first (Ask, then the standard actions, in their order), then the page's
+/// first (Ask the Assistant, then Add to Context, then the standard actions, in their order), then the page's
 /// and its extensions' own sorted by label (an action, or a submenu its
 /// `submenu` / a command's `ui.group` names, merged by name), then Open
 /// With, then the panels (Backlinks, Outbound, Pin to Dashboard) it opens
@@ -28,8 +28,8 @@ export type PagePanel = "backlinks" | "outbound" | "pin";
 
 export interface PageMenuSource {
   actions?: readonly PageAction[];
-  /** Ask About This and the catalog's prompts about the page's kind. */
-  ask?: { prompts: string[]; askThis(): void; askPrompt(prompt: string): void };
+  /** Ask the Assistant about the page (its suggested prompts are the panel's). */
+  ask?: { askAssistant(): void };
   /** The commands about the page's resource. */
   commands?: Array<Pick<CommandEntry, "id" | "label" | "group" | "run" | "enabled">>;
   openWith?: OpenWithProps;
@@ -70,17 +70,12 @@ export function pageMenuItems(source: PageMenuSource): MenuItem[] {
   // their own order, so they are in the same spot on every page.
   const standard: MenuItem[] = [];
   if (source.ask) {
-    const ask = source.ask;
     standard.push({
-      id: "page-ask",
-      label: "Ask",
+      id: "page-ask-assistant",
+      label: "Ask the Assistant",
       enabled: true,
-      icon: "message-square",
-      submenuHeader: "Fills the agent's input; nothing is sent",
-      submenu: [
-        { id: "page-ask-this", label: "Ask About This", enabled: true, run: ask.askThis },
-        ...ask.prompts.map((p, i) => ({ id: `page-ask-prompt-${i}`, label: p, enabled: true, run: () => ask.askPrompt(p) })),
-      ],
+      icon: "sparkles",
+      run: source.ask.askAssistant,
     });
   }
   if (source.context) {

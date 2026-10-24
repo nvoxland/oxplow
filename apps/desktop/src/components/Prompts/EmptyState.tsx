@@ -4,8 +4,7 @@
 /// input, never sends. `compact` is the one-line form for rail sections.
 import type { CSSProperties, ReactNode } from "react";
 
-import { insertIntoAgent } from "../../agent-input-bus.js";
-import { chipStyle } from "./SuggestedPrompts.js";
+import { askAssistant } from "../Assistant/assistantSession.js";
 
 export function EmptyState({
   title,
@@ -30,14 +29,14 @@ export function EmptyState({
       {children}
       {prompts.length > 0 ? (
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
-          {compact ? null : <span style={{ color: "var(--text-secondary)" }}>Ask the agent:</span>}
+          {compact ? null : <span style={{ color: "var(--text-secondary)" }}>Ask the Assistant:</span>}
           {prompts.slice(0, 3).map((p) => (
             <button
               key={p}
               type="button"
               style={chipStyle}
-              title="Put this in the agent's input (it isn't sent)"
-              onClick={() => insertIntoAgent(p)}
+              title="Put this question in the Assistant's box (it isn't sent)"
+              onClick={() => void askAssistant(null, p)}
             >
               {p}
             </button>
@@ -62,4 +61,14 @@ const compactStyle: CSSProperties = {
   gap: 4,
   color: "var(--text-muted)",
   fontSize: "var(--text-xs)",
+};
+
+const chipStyle: CSSProperties = {
+  border: "1px solid var(--border-subtle)",
+  borderRadius: 12,
+  padding: "2px 8px",
+  background: "var(--surface-card)",
+  color: "var(--text-primary)",
+  fontSize: "var(--text-xs)",
+  cursor: "pointer",
 };

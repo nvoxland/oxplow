@@ -78,6 +78,7 @@ import { useAlertToasts } from "./components/Alerts/useAlertToasts.js";
 import { DomCommentLayer } from "./components/Comments/DomCommentLayer.js";
 import { agentSessionRef, diskFilePath, fileOf, lensRef, refFromTabId, directoryRef, externalUrlRef, fileRef, gitCommitRef, pagePayload, recordedPageKind, isPage, diffRef, newSessionRef, newStreamRef, alertsRef, wikiPageRef, streamSettingsRef, threadSettingsRef, viewParamsOf, withViewParams, fileRefAt, resourceParamsOf, type PagePayload } from "./tabs/pageRefs.js";
 import { requestNewThread } from "./new-thread-bus.js";
+import { setAssistantScope } from "./components/Assistant/assistantSession.js";
 import { setSelectedThread } from "./contextBasket.js";
 import { recordOpError, setOpErrorContext } from "./opErrors.js";
 import { classifyExternalUrl } from "./external-url-allowlist.js";
@@ -691,6 +692,9 @@ export function App() {
   useEffect(() => {
     setSelectedThread(selectedThreadId);
   }, [selectedThreadId]);
+  useEffect(() => {
+    setAssistantScope({ stream: stream?.id ?? null, thread: selectedThreadId });
+  }, [stream?.id, selectedThreadId]);
 
   const streamStatuses = useMemo<Record<string, AgentStatus>>(() => {
     const out: Record<string, AgentStatus> = {};

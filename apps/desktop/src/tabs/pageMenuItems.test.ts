@@ -18,7 +18,7 @@ test("standard actions come first in their own order, then the custom ones sorte
       { id: "csv", label: "As CSV", run: noop, submenu: "Download" },
       { id: "json", label: "As JSON", run: noop, submenu: "Download" },
     ],
-    ask: { prompts: ["What changed?"], askThis: noop, askPrompt: noop },
+    ask: { askAssistant: noop },
     context: { add: noop },
     commands: [
       { id: "tracker.sync", label: "Sync", group: "Tracker", run: noop },
@@ -33,7 +33,7 @@ test("standard actions come first in their own order, then the custom ones sorte
   });
   // The primary and prominent actions stay buttons in the bar, never in the menu.
   expect(ids(items)).toEqual([
-    "page-ask",
+    "page-ask-assistant",
     "page-add-to-context",
     "action-refresh",
     "action-copy",
@@ -66,14 +66,14 @@ test("standard actions come first in their own order, then the custom ones sorte
     ["Text", false],
     ["Formatted", true],
   ]);
-  const ask = items.find((i) => i.id === "page-ask")!;
-  expect(ask.submenu!.map((i) => i.label)).toEqual(["Ask About This", "What changed?"]);
+  const ask = items.find((i) => i.id === "page-ask-assistant")!;
+  expect([ask.label, ask.icon]).toEqual(["Ask the Assistant", "sparkles"]);
 });
 
 test("the items run what they stand for", () => {
   const ran: string[] = [];
   const items = pageMenuItems({
-    ask: { prompts: ["Why?"], askThis: () => ran.push("ask"), askPrompt: (p) => ran.push(`prompt:${p}`) },
+    ask: { askAssistant: () => ran.push("ask") },
     commands: [{ id: "x.y", label: "Y", group: "X", run: () => ran.push("command") }],
     openWith: { options: [{ name: "a/b", title: "B" }, { name: "a/c", title: "C" }], current: "a/b", pick: (n) => ran.push(`pick:${n}`) },
     backlinks: 1,
@@ -82,10 +82,10 @@ test("the items run what they stand for", () => {
   });
   const find = (id: string, list: MenuItem[] = items): MenuItem =>
     list.flatMap((i) => [i, ...(i.submenu ?? [])]).find((i) => i.id === id)!;
-  for (const id of ["page-ask-this", "page-ask-prompt-0", "ref-command-x.y", "page-open-with-a/c", "page-backlinks", "page-pin"]) {
+  for (const id of ["page-ask-assistant", "ref-command-x.y", "page-open-with-a/c", "page-backlinks", "page-pin"]) {
     void find(id).run?.();
   }
-  expect(ran).toEqual(["ask", "prompt:Why?", "command", "pick:a/c", "panel:backlinks", "panel:pin"]);
+  expect(ran).toEqual(["ask", "command", "pick:a/c", "panel:backlinks", "panel:pin"]);
 });
 
 test("a page that offers nothing gets no menu, and Open With needs two renderers", () => {
@@ -117,8 +117,8 @@ test("the primary and prominent actions stay in the bar", () => {
 // thread's basket; with no thread selected it says why it can't.
 test("Add to Context follows Ask and is disabled with a reason when no thread is selected", () => {
   const ran: string[] = [];
-  const on = pageMenuItems({ ask: { prompts: [], askThis: noop, askPrompt: noop }, context: { add: () => ran.push("add") }, openPanel: noop });
-  expect(ids(on)).toEqual(["page-ask", "page-add-to-context"]);
+  const on = pageMenuItems({ ask: { askAssistant: noop }, context: { add: () => ran.push("add") }, openPanel: noop });
+  expect(ids(on)).toEqual(["page-ask-assistant", "page-add-to-context"]);
   const item = on.find((i) => i.id === "page-add-to-context")!;
   expect(item.label).toBe("Add to Context");
   expect(item.icon).toBe("at-sign");

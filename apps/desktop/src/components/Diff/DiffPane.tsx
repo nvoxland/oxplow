@@ -2,10 +2,10 @@ import React, { useEffect, useRef, useState } from "react";
 import { readAt } from "../../api.js";
 import { languageForPath } from "../../editor-language.js";
 import type { Revision } from "../../revision.js";
-import { askAboutSelection, selectionUri } from "../../agent-context-ref.js";
+import { selectionUri } from "../../agent-context-ref.js";
 import { addToContext } from "../../contextBasket.js";
 import { diffAskTarget } from "./diffAsk.js";
-import { insertIntoAgent } from "../../agent-input-bus.js";
+import { askAssistant } from "../Assistant/assistantSession.js";
 import { DiffFileHeaderSlot } from "./DiffFileHeaderSlot.js";
 import { useMonacoViewState } from "../useMonacoViewState.js";
 
@@ -98,14 +98,18 @@ export function DiffPane({ streamId, spec, visible, onJumpToSource }: Props) {
       askableRef.current = modified.createContextKey("oxplow.diffAskable", diffAskTarget(specRef.current) !== null);
       modified.addAction({
         id: "oxplow.askAbout",
-        label: "Ask About This",
+        label: "Ask the Assistant",
         contextMenuGroupId: "navigation",
         precondition: "editorHasSelection && oxplow.diffAskable",
-        run: (ed: { getSelection(): { startLineNumber: number; endLineNumber: number; endColumn: number } | null }) => {
+        run: (ed: {
+          getSelection(): { startLineNumber: number; endLineNumber: number; endColumn: number; isEmpty(): boolean } | null;
+          getModel(): { getValueInRange(range: unknown): string } | null;
+        }) => {
           const target = diffAskTarget(specRef.current);
           const sel = ed.getSelection();
-          if (!sel || !target) return;
-          insertIntoAgent(askAboutSelection(target.path, sel, target.rev));
+          const model = ed.getModel();
+          if (!sel || sel.isEmpty() || !model || !target) return;
+          void askAssistant({ kind: "selection", uri: selectionUri(target.path, sel, target.rev), text: model.getValueInRange(sel) });
         },
       });
       modified.addAction({

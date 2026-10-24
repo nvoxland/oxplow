@@ -459,9 +459,9 @@ it is acted on with is in one place. The ☰'s order is fixed
 out and the ☰ itself hidden when it would be empty:
 
 1. **oxplow's own, always first and in their own order**, so they sit in
-   the same spot on every page: **Ask** (a submenu: Ask About This, then
-   the catalog's prompts about the page's kind; `menu-item-page-ask`,
-   `menu-item-page-ask-this`), then **Add to Context** (the page's ref and title go in the selected
+   the same spot on every page: **Ask the Assistant** (`menu-item-page-ask-assistant`, icon `sparkles`: opens the
+   dock's Assistant about the page; the catalog's prompts about the page's kind are the
+   panel's chips), then **Add to Context** (the page's ref and title go in the selected
    thread's basket; `menu-item-page-add-to-context`), then the page's
    `standard` actions (a lens page's Refresh when it declares `refresh: true`,
    Copy);

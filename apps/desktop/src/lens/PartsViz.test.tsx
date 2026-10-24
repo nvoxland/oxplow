@@ -292,7 +292,7 @@ test("right-click on a row tile offers its row actions, and a key runs one", asy
   const tile = view.getByTestId("lens-tile-dti2");
   fireEvent.contextMenu(tile);
   expect(view.getByText("Remove")).toBeTruthy();
-  expect(view.getByText("Ask About This")).toBeTruthy();
+  expect(view.getByText("Ask the Assistant")).toBeTruthy();
   fireEvent.keyDown(document.body, { key: "Escape" });
   fireEvent.keyDown(tile, { key: "Delete" });
   await waitFor(() => expect(ran).toHaveLength(1));

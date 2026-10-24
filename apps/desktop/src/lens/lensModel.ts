@@ -22,7 +22,8 @@ import { diffRef, duplicateBlockRef, effortDiffRef, fileRefAt, gitCommitRef, len
 import { WORKING, parseRevision, shortRevisionLabel } from "../revision.js";
 import type { TabRef } from "../tabs/tabState.js";
 import type { DiffSpec } from "../components/Diff/DiffPane.js";
-import { formatContextMention, type ContextRef } from "../agent-context-ref.js";
+import type { AssistantContext } from "../components/Assistant/assistantApi.js";
+import type { ContextRef } from "../agent-context-ref.js";
 import { idOf, parseUri, typeOf } from "../uri/uri.js";
 
 export interface DisplayColumn {
@@ -605,12 +606,11 @@ export function rowRef(lens: Lens, columns: string[], row: SqlCell[]): string | 
   return null;
 }
 
-/** Ask About This on a lens row (P6.D1): the first ref the row links to
- *  (`[oxplow uri commit:abc]`), or — a row that links nowhere — the row
- *  itself as a lens mention. */
-export function rowAsk(lens: Lens, columns: string[], row: SqlCell[]): string {
-  const ref = rowRef(lens, columns, row);
-  return ref ? formatContextMention({ kind: "ref", ref }) : rowMention(lens.id, columns, row);
+/** Ask the Assistant about a lens row: the first page the row links to,
+ *  or — a row that links nowhere — the row itself as text (a lens mention). */
+export function rowAssistantContext(lens: Lens, columns: string[], row: SqlCell[]): AssistantContext {
+  const c = rowContext(lens, columns, row);
+  return "uri" in c ? { kind: "page", uri: c.uri } : { kind: "selection", text: c.text };
 }
 
 /** Add to Context on a lens row: the first page the row links to, else

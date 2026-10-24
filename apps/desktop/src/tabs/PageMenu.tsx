@@ -6,19 +6,15 @@ import type { CSSProperties, ReactNode } from "react";
 import { useRef, useState } from "react";
 import { Menu } from "lucide-react";
 
-import { formatContextMention } from "../agent-context-ref.js";
-import { insertIntoAgent } from "../agent-input-bus.js";
+import { askAssistant } from "../components/Assistant/assistantSession.js";
 import { addDisabledReason, addToContext, useSelectedThreadId } from "../contextBasket.js";
 import { ContextMenu } from "../components/ContextMenu.js";
 import { PinToDashboardMenu, type PinnedTile } from "../components/Dashboard/PinToDashboard.js";
-import { askText, promptsAbout } from "../components/Prompts/promptModel.js";
-import { usePromptCatalog } from "../components/Prompts/usePromptCatalog.js";
 import type { AskTarget } from "../components/Prompts/askTarget.js";
 import { useRefOffers } from "../components/refCommands.js";
 import { usePopoverDismiss } from "../components/usePopoverDismiss.js";
 import type { PageAction } from "../kit/actions.js";
 import type { MenuPosition } from "../menu.js";
-import { typeOf } from "../uri/uri.js";
 import { pageMenuItems, type OpenWithProps, type PagePanel } from "./pageMenuItems.js";
 import type { TabRef } from "./tabState.js";
 
@@ -39,24 +35,15 @@ const MENU_WIDTH = 240;
 
 export function PageMenu({ actions, ask, label, openWith, backlinks, outbound, pin, buttonStyle }: PageMenuProps) {
   const offersFor = useRefOffers();
-  const catalog = usePromptCatalog();
   const [at, setAt] = useState<MenuPosition | null>(null);
   const [panel, setPanel] = useState<PagePanel | null>(null);
   const button = useRef<HTMLButtonElement | null>(null);
   const boxRef = usePopoverDismiss<HTMLDivElement>(panel !== null, () => setPanel(null));
 
-  // URI-SWITCH: a prompt's `about` names the resource.
-  const kind = ask ? typeOf(ask.ref) : null;
   const thread = useSelectedThreadId();
   const items = pageMenuItems({
     actions,
-    ask: ask
-      ? {
-          prompts: kind ? promptsAbout(catalog, kind).map((p) => p.prompt) : [],
-          askThis: () => insertIntoAgent(formatContextMention({ kind: "ref", ref: ask.ref })),
-          askPrompt: (prompt) => insertIntoAgent(askText(prompt, ask.ref)),
-        }
-      : undefined,
+    ask: ask ? { askAssistant: () => void askAssistant({ kind: "page", uri: ask.ref, ...(label ? { label } : {}) }) } : undefined,
     context: ask
       ? { add: () => void addToContext({ uri: ask.ref, label }), disabledReason: addDisabledReason(thread) }
       : undefined,

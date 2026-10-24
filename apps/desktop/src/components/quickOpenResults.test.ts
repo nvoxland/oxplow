@@ -74,7 +74,7 @@ describe("buildQuickOpenResults", () => {
   const commands = [command("git.commit", "Commit Changes…")];
   const files = [file("src/git.rs"), file("README.md")];
 
-  test("a typed query ends with Ask the Agent, carrying what was typed; an empty one has none", () => {
+  test("a typed query ends with Ask the Assistant, carrying what was typed; an empty one has none", () => {
     const out = buildQuickOpenResults({ query: "  Why is git slow?  ", pages, commands, files, siteHits: [] });
     expect(out.results[out.results.length - 1]).toEqual({ kind: "ask", text: "Why is git slow?" });
     const nothing = buildQuickOpenResults({ query: "zzzz", pages, commands, files, siteHits: [] });

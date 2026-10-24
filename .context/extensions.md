@@ -4811,9 +4811,9 @@ tool: open_work              # offered as <namespace>_open_work
     (`ThreadRuntimeRegistry::open_page`).
   - A hidden-but-mounted page can't overwrite the report, because only
     the active page's detail is sent.
-- **Row actions (current):** right-click a lens row → "Ask About This"
-  (P6.D1): `[oxplow uri <URI>]` for the first URI the row links to, else
-  `[oxplow lens <id> row: col=value, …]` (`rowAsk`).
+- **Row actions (current):** right-click a lens row → "Ask the Assistant":
+  the first page the row links to, else the row as text
+  `[oxplow lens <id> row: col=value, …]` (`rowAssistantContext`).
 - **The prompt catalog (current):** what a person can ask.
   - Core's are the answerability questions, by area
     (`crates/oxplow-agent-text/assets/questions/*.yaml`,

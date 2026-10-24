@@ -5,7 +5,7 @@ import { personSpec, recordRefOffers } from "../components/refCommandsTestSuppor
 
 // The nav bar's ☰ lists the commands about the page's ref (their
 // `ui.about`, one submenu per group) and runs one, the ref bound into its
-// input; and Ask About This puts the page's ref in the agent's input.
+// input; and Ask the Assistant opens the Assistant about the page.
 
 const realApi = await import("../api.js");
 mock.module("../api.js", () => ({
@@ -18,7 +18,8 @@ mock.module("../api.js", () => ({
   ],
 }));
 const { PageMenu } = await import("./PageMenu.js");
-const { subscribeAgentInput } = await import("../agent-input-bus.js");
+const { dockStore } = await import("../components/Dock/dockStore.js");
+const { setAssistantScope } = await import("../components/Assistant/assistantSession.js");
 
 const ran: Array<[string, unknown]> = [];
 beforeEach(() => {
@@ -47,7 +48,7 @@ test("a page's ref gets its kind's commands, run with the ref bound", async () =
 test("no commands for the page's kind: the menu has Ask and no command groups", async () => {
   const view = await openMenu("oxplow:oxplow/wiki?slug=notes");
   await new Promise((r) => setTimeout(r, 20));
-  expect(view.getByTestId("menu-item-page-ask")).toBeTruthy();
+  expect(view.getByTestId("menu-item-page-ask-assistant")).toBeTruthy();
   expect(view.container.querySelector('[data-testid^="menu-item-page-submenu-"]')).toBeNull();
 });
 
@@ -60,15 +61,13 @@ test("an effort's page offers Accept Review and Request Changes", async () => {
   await waitFor(() => expect(ran).toEqual([["oxplow.review.accept", { uri: "oxplow:oxplow/effort?id=eff3" }]]));
 });
 
-// Ask About This: the open page's ref goes into the agent's input for the
-// person to finish the question — never sent.
-test("Ask About This puts the page's ref in the agent's input", async () => {
-  const inserted: string[] = [];
-  const off = subscribeAgentInput((t) => inserted.push(t));
-  const view = await openMenu("oxplow:oxplow/commit?sha=abc123", "page-ask");
-  fireEvent.click(view.getByTestId("menu-item-page-ask-this"));
-  await waitFor(() => expect(inserted).toEqual(["[oxplow uri oxplow:oxplow/commit?sha=abc123] "]));
-  off();
+// Ask the Assistant: the dock's Assistant panel opens, about the page.
+test("Ask the Assistant opens the Assistant panel about the page", async () => {
+  setAssistantScope({ stream: null, thread: null });
+  const view = await openMenu("oxplow:oxplow/commit?sha=abc123");
+  fireEvent.click(view.getByTestId("menu-item-page-ask-assistant"));
+  await waitFor(() => expect(dockStore.get().open).toBe("assistant"));
+  dockStore.close();
 });
 
 test("the ☰ button closes the menu it opened", async () => {
@@ -76,7 +75,7 @@ test("the ☰ button closes the menu it opened", async () => {
   const button = view.getByTestId("page-nav-menu");
   fireEvent.mouseDown(button);
   fireEvent.click(button);
-  expect(view.queryByTestId("menu-item-page-ask")).toBeNull();
+  expect(view.queryByTestId("menu-item-page-ask-assistant")).toBeNull();
 });
 
 test("a page with nothing to offer has no ☰", () => {

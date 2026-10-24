@@ -30,7 +30,7 @@ export type QuickOpenResult =
   | { kind: "command"; entry: CommandEntry }
   | { kind: "file"; file: WorkspaceIndexedFile }
   | { kind: "hit"; hit: SearchHit }
-  /** "Ask the Agent: <text>" — puts what was typed in the agent's input
+  /** "Ask the Assistant: <text>" — puts what was typed in the Assistant's box
    *  (never sent). Last in every search. */
   | { kind: "ask"; text: string };
 

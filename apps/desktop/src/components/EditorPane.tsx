@@ -17,9 +17,9 @@ import { useMonacoViewState } from "./useMonacoViewState.js";
 import type { MenuItem } from "../menu.js";
 import { ContextMenu } from "./ContextMenu.js";
 import { gitRevision } from "../revision.js";
-import { askAboutSelection, selectionUri } from "../agent-context-ref.js";
+import { selectionUri } from "../agent-context-ref.js";
 import { addToContext } from "../contextBasket.js";
-import { insertIntoAgent } from "../agent-input-bus.js";
+import { askAssistant } from "./Assistant/assistantSession.js";
 import { MonacoCommentLayer, type MonacoCommentHandle } from "./Comments/MonacoCommentLayer.js";
 import { getPageDetailStore } from "../tabs/openPageDetail.js";
 import { fileRef } from "../tabs/pageRefs.js";
@@ -508,12 +508,14 @@ export function EditorPane({
     },
     {
       id: "editor.ask-about",
-      label: "Ask About This",
+      label: "Ask the Assistant",
       enabled: !!filePath && hasEditorSelection(editorRef.current),
       run: () => {
-        const sel = editorRef.current?.getSelection?.();
-        if (!sel || sel.isEmpty() || !filePath) return;
-        insertIntoAgent(askAboutSelection(filePath, sel));
+        const editor = editorRef.current;
+        const sel = editor?.getSelection?.();
+        const model = editor?.getModel();
+        if (!editor || !model || !sel || sel.isEmpty() || !filePath) return;
+        void askAssistant({ kind: "selection", uri: selectionUri(filePath, sel), text: model.getValueInRange(sel) });
       },
     },
     {

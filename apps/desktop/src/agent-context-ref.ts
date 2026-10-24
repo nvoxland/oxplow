@@ -20,17 +20,6 @@ export type ContextRef =
   /** Ask About This (P6.D1): any canonical ref; the agent reads it by kind. */
   | { kind: "ref"; ref: string };
 
-/** Ask About This on a selection (the editor, a diff's right side): the
- *  selected lines of `path` at `rev` (null = the working tree). A
- *  selection ending at column 1 of a line doesn't include that line. */
-export function askAboutSelection(
-  path: string,
-  sel: { startLineNumber: number; endLineNumber: number; endColumn: number },
-  rev: string | null = null,
-): string {
-  return formatContextMention({ kind: "ref", ref: selectionUri(path, sel, rev) });
-}
-
 /** The URI of a selection's lines (the same ones Ask About This names). */
 export function selectionUri(
   path: string,

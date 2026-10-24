@@ -289,12 +289,12 @@ markdown itself, nor edits it in a `<textarea>`.
 
 ## Menus a page or row gets from extensions
 
-- **Order is fixed.** A page's nav bar's ☰: oxplow's own first (Ask, then
-  the standard actions, in their order — the same spot on every page),
+- **Order is fixed.** A page's nav bar's ☰: oxplow's own first (Ask the Assistant, then
+  Add to Context and the standard actions, in their order — the same spot on every page),
   then the page's and its extensions' own sorted by label, a submenu by
   its name (an action's `submenu` and a command's `ui.group` of the same
   name share one), then Open With and the panels
-  (`.context/pages-and-tabs.md` "The nav bar is core's"). A row's right-click menu: Ask About This, the lens's row
+  (`.context/pages-and-tabs.md` "The nav bar is core's"). A row's right-click menu: Ask the Assistant, the lens's row
   actions, then a separator and one submenu per `ui.group` with the
   commands about the row's ref (`refCommandMenuItems`). A Board card:
   Move To, then the same tail. The Navigator's thread menu ends with the
@@ -1101,31 +1101,36 @@ no caller may bypass the bus to write to the terminal.
   - note → `@.oxplow/wiki/<slug>.md `.
   - work item → `[oxplow oxplow:oxplow/work_item?id=<id>&provider=<provider>: "<title>" (<state>)] `
     (plain-text reference; the agent reads it with `read`).
-  - any canonical URI → `[oxplow uri <uri>] ` — **Ask About This**
-    (below). The agent guide says how to read each kind.
+  - any canonical URI → `[oxplow uri <uri>] ` (a drop into a terminal agent). The agent guide says how to read each kind.
   - Always trailing space so the user can keep typing.
 - **Right-click parity**: every drag source should also offer "Add to
   agent context" in its right-click menu — keyboard-first users
   shouldn't have to drag. Funnel both paths through the same
   `insertIntoAgent + formatContextMention` calls.
-- **Ask About This** (P6.D1) is the conversation-first form of the
-  same gesture: it puts `[oxplow uri <uri>] ` in the agent's input for
-  the person to finish the question, and never sends. It's on:
-  - the page nav bar's ☰ (`menu-item-page-ask`), for any page whose tab id is a
+- **Ask = the Assistant.** Every Ask entry opens the Assistant, the
+  dock's on-the-spot agent (`components/Assistant/`), about what was asked
+  about; nothing goes to a terminal agent. It's on:
+  - the page nav bar's ☰ (**Ask the Assistant**, `menu-item-page-ask-assistant`,
+    icon `sparkles`, first in the menu), for any page whose tab id is a
     canonical URI (`PageNavigationContext.ask`: `{ ref, streamId }`);
-  - a lens row's right-click menu (`rowAsk`: the first URI the row links
-    to, else the row as a lens mention);
-  - an editor selection and a diff's right-side selection
-    (`askAboutSelection`: `oxplow:oxplow/file?path=<path>[&rev=<rev>]#lines=<a>-<b>`). A diff offers it
-    only while its right side names a file (`Diff/diffAsk.ts`, a Monaco
-    context key on the action's precondition); a compare with the
-    clipboard has no Ask action rather than one that does nothing.
-  The ☰'s Ask is a submenu (`tabs/pageMenuItems.ts`): Ask About This,
-  then the catalog's prompts `about` the page's resource
-  (`promptsAbout`), each inserted as `[oxplow uri <uri>] <question>`.
-  The launcher's last row for any typed text is **Ask the Agent: <text>**,
-  which inserts the text the same way. Nothing in oxplow sends agent
-  input on its own; these only fill the draft.
+  - a lens row's right-click menu (`rowAssistantContext`: the first page
+    the row links to, else the row as text);
+  - an editor selection and a diff's right-side selection (the selected
+    text, with `oxplow:oxplow/file?path=<path>[&rev=<rev>]#lines=<a>-<b>` as
+    its source). A diff offers it only while its right side names a file
+    (`Diff/diffAsk.ts`, a Monaco context key on the action's precondition);
+    a compare with the clipboard has no Ask action rather than one that does
+    nothing.
+  The catalog's prompts `about` the page's resource (`promptsAbout`) are
+  chips above the panel's prompt box; a chip, an empty state's prompt and
+  the launcher's last row for any typed text (**Ask the Assistant: <text>**)
+  put their question in the box. Nothing in oxplow sends a prompt on its own:
+  only Enter does. The prompt box: Enter sends, Shift+Enter adds a line,
+  Escape stops a running turn (and is not passed on, or the dock would close);
+  a running turn leaves the box read-only, not disabled, so Escape still
+  reaches it. States: no model (a link to Settings → AI), suggestions, running,
+  a permission card waiting (Allow / Decline), an error. `insertIntoAgent`
+  stays for drag-and-drop into a terminal agent.
 - **Add to Context** is the collect-then-ask form, and it is universal:
   the ☰ of any page with a canonical URI (`menu-item-page-add-to-context`,
   disabled with "Select a thread first" when none is selected), a

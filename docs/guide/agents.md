@@ -57,6 +57,27 @@ an in-progress task to make an edit, and work tracking never gates Stop.
 Efforts belong to the thread and can span sessions. See
 [Agent control](agent-control.md) and [Local History](local-history.md).
 
+## Ask the Assistant
+
+The Assistant is a short-lived agent in the bottom bar (the sparkles
+icon) for a question or a small job about what you are looking at. It is
+not one of the thread's agent sessions and does not see the context
+basket.
+
+Open it from **Ask the Assistant** in a page's ☰ menu, from the right-click
+menu of a selection in an editor or a diff, or from a row's menu. It opens
+about that page, text or row. The prompt box takes your question: Enter
+sends, Shift+Enter adds a line, Escape stops a running turn. Suggested
+questions about the page sit above the box; one fills the box and sends
+nothing.
+
+The Assistant reads freely. To change something it needs **Allow
+changes**, and each change asks first with Allow or Decline. A change
+shows **Undo**, and **Undo this turn** undoes the turn's changes. **Continue in
+session…** hands the conversation to an open agent session in the stream.
+Pick the model in the panel, or bind the Assistant role in Settings → AI. The
+conversation is gone when oxplow restarts.
+
 ## Collect context for the agents
 
 Add to Context puts things in a thread's context basket:

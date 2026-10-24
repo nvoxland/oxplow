@@ -1,13 +1,11 @@
-import { afterEach, beforeEach, expect, mock, test } from "bun:test";
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { afterEach, expect, mock, test } from "bun:test";
+import { cleanup, fireEvent, render } from "@testing-library/react";
 
-import { subscribeAgentInput } from "../../agent-input-bus.js";
-import { askText, promptsAbout, type CatalogPrompt } from "./promptModel.js";
-import { effortUri, fileUri } from "../../uri/uri.js";
+import { promptsAbout, type CatalogPrompt } from "./promptModel.js";
 import { promptsOf } from "./usePromptCatalog.js";
 
 // P6.D2: the prompt catalog, contextual suggestions, and EmptyState —
-// every Ask fills the agent's input and never sends.
+// every Ask fills the Assistant's box and never sends.
 
 const catalog: CatalogPrompt[] = [
   { prompt: "Which files did this effort touch?", about: "oxplow/effort", source: { kind: "area", name: "work_items" } },
@@ -25,42 +23,26 @@ mock.module("../../api.js", () => ({
       ? { columns: ["source_kind", "source", "prompt", "about"], rows, truncated: false, reads: { models: ["v_prompt"], tables: [], measures: [] } }
       : realApi.querySql(sql),
 }));
-const { SuggestedPrompts } = await import("./SuggestedPrompts.js");
 const { EmptyState } = await import("./EmptyState.js");
 
-const inserted: string[] = [];
-let off: () => void = () => {};
-beforeEach(() => {
-  inserted.length = 0;
-  off = subscribeAgentInput((t) => inserted.push(t));
-});
+const { getAssistant, resetAssistant } = await import("../Assistant/assistantSession.js");
+const { dockStore } = await import("../Dock/dockStore.js");
 afterEach(() => {
-  off();
   cleanup();
+  resetAssistant();
+  dockStore.close();
 });
 
-test("v_prompt's rows are the catalog; prompts about a kind; asking about a ref leads with it", () => {
+test("v_prompt's rows are the catalog; prompts about a kind", () => {
   expect(promptsOf(rows)).toEqual(catalog);
   expect(promptsAbout(catalog, "oxplow/effort").map((p) => p.prompt)).toEqual(["Which files did this effort touch?"]);
-  expect(askText("Who has changed this file the most?", fileUri("src/a.rs"))).toBe(
-    `[oxplow uri ${fileUri("src/a.rs")}] Who has changed this file the most?`,
-  );
-  expect(askText("Which PRs wait on me?", null)).toBe("Which PRs wait on me?");
 });
 
-test("a page for an effort suggests its prompts, asked about that effort", async () => {
-  const view = render(<SuggestedPrompts refId={effortUri("eff12")} />);
-  const ask = await waitFor(() => view.getByText("Which files did this effort touch?"));
-  expect(view.queryByText("Who has changed this file the most?")).toBeNull();
-  fireEvent.click(ask);
-  expect(inserted).toEqual([`[oxplow uri ${effortUri("eff12")}] Which files did this effort touch?`]);
-});
-
-test("an empty state offers prompts; Ask fills the input", () => {
+test("an empty state offers prompts; Ask puts it in the Assistant's box", () => {
   const view = render(
     <EmptyState testId="x-empty" title="No dashboards yet" text="A dashboard is a grid of tiles." prompts={["Build a dashboard of test health"]} />,
   );
   expect(view.getByTestId("x-empty").textContent).toContain("No dashboards yet");
   fireEvent.click(view.getByText("Build a dashboard of test health"));
-  expect(inserted).toEqual(["Build a dashboard of test health"]);
+  expect(getAssistant().draft?.text).toBe("Build a dashboard of test health");
 });
