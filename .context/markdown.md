@@ -48,9 +48,20 @@ set**, and a surface never builds its own:
   context" drag (`CONTEXT_REF_MIME`: a file, a wiki page, a lens row's
   ref, a work item) or a work-item drag (`WORK_ITEM_DRAG_MIME`, several
   items) dropped on the field goes in where it lands as links
-  (`insertRefLinks`), and the field shows the dashed drop highlight while
+  (`insertRefLinks`; at the caret when the point names no place —
+  `handleDOMEvents.drop`, ahead of ProseMirror's own drop, which gives up
+  there and lets the browser paste the drag's text), and the field shows the dashed drop highlight while
   such a drag is over it. A pasted oxplow URI goes in as its link; a URI
   or web URL pasted over a selection links it; other text pastes as text.
+- **A Source view** (the editor, `Markdown.tsx`): the corner toggle
+  (where the pencil was, revealed the same way) or Cmd/Ctrl+Shift+M shows
+  the text as stored — `[[…]]` and all — in a plain monospace box, and
+  back. The owner hears the same `onChange` / `onCommit` from either view
+  (the box commits as the editor does: 300 ms after typing, on blur, on
+  unmount) and the same keys reach it; comments show only in the rich
+  view. The mode is the field's own, not saved. A one-line field
+  (`inlineOnly`) has none; a field with `hidePencil` keeps the shortcut
+  without the button.
 - **Mermaid** fences draw as diagrams, always (pan, zoom, the
   lightbox; in the editor, the `MermaidBlock` node view, click to edit
   its source).
@@ -80,6 +91,9 @@ never reset.
   lens editor. A value from outside is applied even while focused: the
   owner echoes exactly what it heard, so anything else is a reset it
   means (Discard, Escape).
+- **A click in the text keeps its caret.** Clicking the field around the
+  text focuses the end; a click in the text doesn't (Tiptap's focus lands
+  a frame later and moved the caret under keys already typed).
 - **Keys**: Cmd/Ctrl+Enter (`onSubmitShortcut`), Cmd/Ctrl+S
   (`onSaveShortcut`) and Escape (`onEscape`, when none of the editor's
   popovers is open) reach the owner with the text as it is now. Enter
@@ -155,7 +169,7 @@ why).
   The plain-DOM comment layer keeps its own one-button
   `SelectionCommentToolbar` (`components/Comments/`).
 - **`refDrops.ts`** — what a drop names and what a paste is (pure);
-  `RichTextField`'s `handleDrop` / `handlePaste` act on them. A real drop
+  `RichTextField`'s drop handler and `handlePaste` act on them. A real drop
   needs layout (`posAtCoords`), so it is covered in the browser suite
   (`knowledge/wiki.spec.ts`), the rest in unit tests.
 - **`RefTitles.tsx`** — the title widget a bare ref link gets in the

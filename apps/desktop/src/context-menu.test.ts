@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { shouldSuppressContextMenu, type ElementDescriptor } from "./context-menu.js";
+import { describeChain, shouldSuppressContextMenu, type ElementDescriptor } from "./context-menu.js";
 
 const div = (classes: string[] = []): ElementDescriptor => ({ tag: "div", classes });
 
@@ -35,4 +35,16 @@ describe("shouldSuppressContextMenu", () => {
     expect(shouldSuppressContextMenu([div(["view-line"]), div(["monaco-editor"])])).toBe(false);
     expect(shouldSuppressContextMenu([div(["xterm-rows"]), div(["xterm"])])).toBe(false);
   });
+});
+
+// A selection starts in a text node: its chain is its element's, so a
+// selection inside an editor is the editor's (the comment layer stays out).
+test("describeChain from a text node starts at its element", () => {
+  const host = document.createElement("div");
+  host.contentEditable = "true";
+  host.innerHTML = "<p>hello</p>";
+  document.body.appendChild(host);
+  const text = host.querySelector("p")!.firstChild!;
+  expect(shouldSuppressContextMenu(describeChain(text))).toBe(false);
+  host.remove();
 });

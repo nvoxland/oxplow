@@ -514,6 +514,23 @@
         background: var(--surface-card);
         outline: 1px solid var(--border-strong);
       }
+      /* The markdown editor's Source toggle (Markdown.tsx): where the pencil
+         was, revealed the same way; and the Source box. */
+      .oxplow-md-source-toggle {
+        position: absolute; top: 4px; right: 4px; z-index: 1; display: inline-flex; padding: 3px;
+        border: 0; border-radius: 4px; background: transparent; color: var(--text-secondary);
+        opacity: 0.35; cursor: pointer; transition: opacity 120ms ease;
+      }
+      .oxplow-md-editor:hover .oxplow-md-source-toggle,
+      .oxplow-md-editor:focus-within .oxplow-md-source-toggle,
+      .oxplow-md-source-toggle[aria-pressed="true"] { opacity: 0.85; }
+      .oxplow-md-source-toggle:hover { background: var(--surface-card); }
+      .oxplow-md-source {
+        display: block; width: 100%; box-sizing: border-box; min-height: 12em; resize: vertical;
+        padding: 6px 28px 6px 8px; border: 1px solid var(--border-strong); border-radius: 6px;
+        background: var(--surface-card); color: var(--text-primary);
+        font-family: var(--font-mono); font-size: 12.5px; line-height: 1.5;
+      }
       .oxplow-rt-field:hover .oxplow-rt-pencil,
       .oxplow-rt-field:focus-within .oxplow-rt-pencil { opacity: 0.85 !important; }
       .oxplow-rt-editor.ProseMirror { outline: none; min-height: 1.4em; }

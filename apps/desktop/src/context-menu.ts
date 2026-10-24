@@ -41,14 +41,15 @@ export function shouldSuppressContextMenu(chain: ElementDescriptor[]): boolean {
 }
 
 /// Build the closest-first ancestor [`ElementDescriptor`] chain for an
-/// event target. Exported so the selection-comment affordance can reuse
+/// event target or a selection's start node. Exported so the selection-comment affordance can reuse
 /// the exact same exemption test (`shouldSuppressContextMenu`) — a
 /// region where the OS menu is suppressed is also where our own
 /// selection affordances belong, and editors/inputs/terminal are the
 /// shared carve-out.
 export function describeChain(target: EventTarget | null): ElementDescriptor[] {
   const chain: ElementDescriptor[] = [];
-  let el = target instanceof Element ? target : null;
+  // A text node (where a selection starts) is its element's.
+  let el = target instanceof Element ? target : target instanceof Node ? target.parentElement : null;
   while (el) {
     chain.push({
       tag: el.tagName.toLowerCase(),

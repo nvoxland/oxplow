@@ -158,3 +158,25 @@ test("the editor formats a selection and takes a dropped page as a link", async 
   await expect.poll(() => readFileSync(join(daemon.project, ".oxplow", "wiki", "heron-notes.md"), "utf8")).toMatch(/\*\*Start here\.\*\*.*\[\[heron-pond\]\]/);
   expect(readFileSync(join(daemon.project, ".oxplow", "wiki", "heron-notes.md"), "utf8")).toMatch(/^# Heron notes\n/);
 });
+
+// The Source view shows the page as stored, wikilinks and all; an edit
+// there saves like any other.
+test("a wiki page's Source view edits the stored text", async ({ page, daemon }) => {
+  await run(daemon, "oxplow.knowledge.write_page", { slug: "stoat-den", title: "Stoat den", body: "# Stoat den\n" });
+  await run(daemon, "oxplow.knowledge.write_page", { slug: "stoat-notes", title: "Stoat notes", body: "# Stoat notes\n\nSee [[stoat-den]].\n" });
+  await searchable(daemon, "stoat", "wiki");
+  await page.goto("/");
+  await searchLauncher(page, "stoat notes");
+  await page.getByTestId("launcher-hit-oxplow:oxplow/wiki?slug=stoat-notes").click();
+  const body = page.locator('[data-testid="lens-part-body"]:visible');
+  await expect(body).toContainText("See");
+  await body.getByTestId("markdown-source-toggle").click();
+  const source = body.getByTestId("markdown-source");
+  await expect(source).toHaveValue(/See \[\[stoat-den\]\]\./);
+  await source.fill("# Stoat notes\n\nSee [[stoat-den]] and **more**.\n");
+  const save = body.getByRole("button", { name: "Save" });
+  await save.click();
+  await expect.poll(() => readFileSync(join(daemon.project, ".oxplow", "wiki", "stoat-notes.md"), "utf8")).toContain("See [[stoat-den]] and **more**.");
+  await body.getByTestId("markdown-source-toggle").click();
+  await expect(body.locator(".ProseMirror strong")).toHaveText("more");
+});

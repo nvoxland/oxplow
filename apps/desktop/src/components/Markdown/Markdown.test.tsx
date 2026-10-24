@@ -88,3 +88,34 @@ test("without a change handler it is the viewer: no editable surface", async () 
   expect(view.container.querySelector("[contenteditable]")).toBeNull();
   expect(view.getByTestId("md").querySelector("h1")?.textContent).toBe("Hello");
 });
+
+test("Source shows the text as stored; an edit there is the owner's, and the rich view comes back with it", async () => {
+  const changes: string[] = [];
+  const view = render(<Markdown value="See [[local-snapshots]]." onChange={(md) => changes.push(md)} />);
+  await settle();
+  fireEvent.click(view.getByTestId("markdown-source-toggle"));
+  const source = view.getByTestId("markdown-source") as HTMLTextAreaElement;
+  expect(source.value).toBe("See [[local-snapshots]].");
+  // The editor is gone, and its comments with it, while Source shows.
+  expect(view.container.querySelector("[contenteditable]")).toBeNull();
+  fireEvent.change(source, { target: { value: "See [[other-page]]." } });
+  expect(changes.at(-1)).toBe("See [[other-page]].");
+  fireEvent.click(view.getByTestId("markdown-source-toggle"));
+  await settle();
+  expect(view.queryByTestId("markdown-source")).toBeNull();
+  expect(view.container.querySelector(`a[href="${wikiPageRef("other-page").id}"]`)).not.toBeNull();
+});
+
+test("Cmd/Ctrl+Shift+M switches to Source and back; a one-line field has none", async () => {
+  const view = render(<Markdown value="Hello" onChange={() => {}} testId="md" />);
+  await settle();
+  fireEvent.keyDown(view.getByTestId("md"), { key: "m", metaKey: true, shiftKey: true });
+  const source = await view.findByTestId("markdown-source");
+  fireEvent.keyDown(source, { key: "M", ctrlKey: true, shiftKey: true });
+  await settle();
+  expect(view.queryByTestId("markdown-source")).toBeNull();
+  cleanup();
+  const title = render(<Markdown value="Hello" onChange={() => {}} inlineOnly />);
+  await settle();
+  expect(title.queryByTestId("markdown-source-toggle")).toBeNull();
+});

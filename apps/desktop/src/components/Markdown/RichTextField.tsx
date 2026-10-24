@@ -277,17 +277,21 @@ export function RichTextField({
         insertRefLinks(ed, from, [{ uri: link.uri, title: link.uri }], (id) => owner.current.mentionRef?.(id) ?? null);
         return true;
       },
-      // An "Add to agent context" or work-item drag goes in as links where
-      // it lands.
-      handleDrop(view, event, _slice, moved) {
-        const ed = editorRef.current;
-        setDropping(false);
-        if (!ed || moved || !event.dataTransfer) return false;
-        const refs = droppedRefs(event.dataTransfer);
-        if (refs.length === 0) return false;
-        const pos = view.posAtCoords({ left: event.clientX, top: event.clientY })?.pos ?? view.state.selection.from;
-        insertRefLinks(ed, pos, refs, (id) => owner.current.mentionRef?.(id) ?? null);
-        return true;
+      handleDOMEvents: {
+        // An "Add to agent context" or work-item drag goes in as links where
+        // it lands — at the caret when the point names no place (ProseMirror's
+        // own drop gives up there, and the browser would paste its text).
+        drop(view, event) {
+          setDropping(false);
+          const ed = editorRef.current;
+          if (!ed || !event.dataTransfer) return false;
+          const refs = droppedRefs(event.dataTransfer);
+          if (refs.length === 0) return false;
+          event.preventDefault();
+          const pos = view.posAtCoords({ left: event.clientX, top: event.clientY })?.pos ?? view.state.selection.from;
+          insertRefLinks(ed, pos, refs, (id) => owner.current.mentionRef?.(id) ?? null);
+          return true;
+        },
       },
     },
     onUpdate({ editor }) {
@@ -702,9 +706,12 @@ export function RichTextField({
       style={wrapperStyle}
       onClick={(event) => {
         if (handleAnchorIntent(event, false)) return;
-        // Clicking anywhere on the wrapper focuses the editor — keeps
-        // the "the whole block is editable" feel from Linear.
-        if (editor && !editor.isFocused) editor.commands.focus("end");
+        // Clicking the wrapper around the text focuses the editor — keeps
+        // the "the whole block is editable" feel from Linear. A click in
+        // the text placed the caret itself: focusing the end (a frame
+        // later) would move it under keys already typed.
+        const inText = (event.target as HTMLElement | null)?.closest?.(".ProseMirror");
+        if (editor && !editor.isFocused && !inText) editor.commands.focus("end");
       }}
       onAuxClick={(event) => {
         // Middle-click on a link → new-tab navigate.
