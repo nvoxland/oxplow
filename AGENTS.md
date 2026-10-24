@@ -49,12 +49,13 @@ or exact mechanics.
     they're pushed. Plain `cargo clippy --workspace --all-targets -- -D
     warnings` gives readable diagnostics. Run `cargo fmt --all` after
     editing `.rs`. Don't `#[allow(...)]` a real lint.
-- **Build oxplow to run it with `bun run build:dev`**, then
-  `./target/debug/oxplow .`; not `cargo build --bin oxplow`: building
-  the shell copies the *staged* daemon next to it, so a shell built
-  without restaging runs an old backend. On a first run, quit oxplow and
-  run `cargo run -q -p oxplow-dev -- extension deploy` before you start
-  it (boot deploys nothing from source). `DEV.md` "Run from source".
+- **Run oxplow from source with `bun run run:dev`** (oxplow quit): it
+  builds (`bun run build:dev`), deploys the extensions whose source
+  changed (`oxplow-dev extension deploy`; boot deploys nothing from
+  source) and starts `./target/debug/oxplow .`. Never `cargo build --bin
+  oxplow`: building the shell copies the *staged* daemon next to it, so a
+  shell built without restaging runs an old backend. `DEV.md` "Run from
+  source".
 - **Extension work and core work go live differently.**
   - **Extensions** (`extensions/oxplow-foundation`, `extensions/oxplow-bundled`,
     any `.oxplow/extensions/<name>`): write them the way oxplow's shipped
@@ -63,12 +64,10 @@ or exact mechanics.
     it, then `oxplow.extension.deploy { name }` replaces what runs in the
     running app. Never restart oxplow for an extension change, and never
     ask the person to.
-  - **Core** (any Rust crate, `apps/desktop/src`): it runs only after
-    `bun run build:dev` and a restart of oxplow, which is the person's to
-    do: say so when you finish. A core change that foundation's source
-    changes with (a removed built-in, a renamed operation) also needs
-    foundation deployed with oxplow quit:
-    `cargo run -q -p oxplow-dev -- extension deploy`.
+  - **Core** (any Rust crate, `apps/desktop/src`): it runs only after the
+    person quits oxplow and runs `bun run run:dev` (build, deploy, start):
+    say so when you finish. That also deploys foundation when its source
+    changed with core (a removed built-in, a renamed operation).
   - **Recovering** when oxplow boots without foundation (no agents, no
     Alerts, no Settings; the shell shows "oxplow-foundation isn't
     running") or an extension is held: `cargo run -q -p oxplow-dev --

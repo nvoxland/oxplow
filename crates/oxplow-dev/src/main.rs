@@ -165,22 +165,20 @@ async fn deploy_from_outside(project: &Path, name: Option<&String>) -> Result<St
     let names = match name {
         Some(name) => vec![name.clone()],
         None => {
+            // Each with a source here: a project that runs the copies
+            // built into oxplow has no source for them, and nothing to do.
             let settings = oxplow_config::extension_settings(project);
             let mut names: Vec<String> = oxplow_app::bundled_extensions::BUNDLED
                 .iter()
                 .filter(|b| b.required)
                 .map(|b| b.name.to_string())
                 .collect();
-            for (n, _) in settings.enabled() {
-                if !names.contains(&n)
-                    && settings
-                        .source(project, &n)
-                        .join("extension.yaml")
-                        .is_file()
-                {
-                    names.push(n);
-                }
-            }
+            names.extend(settings.enabled().into_iter().map(|(n, _)| n));
+            let mut seen = std::collections::BTreeSet::new();
+            names.retain(|n| {
+                seen.insert(n.clone())
+                    && settings.source(project, n).join("extension.yaml").is_file()
+            });
             names
         }
     };
@@ -988,5 +986,29 @@ mod tests {
         for name in ["oxplow-foundation", "acme"] {
             assert!(again.contains(&format!("{name}: already runs")), "{again}");
         }
+    }
+
+    /// A project that runs the extensions built into oxplow has no source
+    /// for them: deploying with no name deploys nothing, and succeeds.
+    #[tokio::test]
+    async fn deploy_with_no_name_skips_what_has_no_source() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path();
+        let ok = std::process::Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(p)
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok);
+        drop(
+            oxplow_app::Services::boot(
+                oxplow_app::AppLayout::for_project(p),
+                Arc::new(oxplow_ai::secrets::MemorySecrets::default()),
+            )
+            .unwrap(),
+        );
+        let out = dev(p, &["extension", "deploy"]).await.unwrap();
+        assert!(!out.contains("deployed"), "{out}");
     }
 }

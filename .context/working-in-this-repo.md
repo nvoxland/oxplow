@@ -241,11 +241,12 @@ run (a no-op when current) and the sidecars restaged when they changed,
 because tauri-build copies a staged sidecar over `target/debug/<name>`:
 a stale one ran old script-worker code under the tests.
 
-**Building oxplow to run it: `bun run build:dev`**, then
-`./target/debug/oxplow .`; never a `cargo build` of the shell alone.
-There is no Vite dev server or `tauri dev` route. On a first run, quit
-oxplow and run `cargo run -q -p oxplow-dev -- extension deploy` before
-you start it. Extension changes redeploy in the running app. The shell runs the daemon beside it, and
+**Running oxplow from source: `bun run run:dev`** (`scripts/run-dev.sh`),
+with oxplow quit: `bun run build:dev`, then `oxplow-dev extension deploy`
+(what changed, foundation first), then `./target/debug/oxplow .`; it
+refuses before building while oxplow holds the project. Never a `cargo
+build` of the shell alone. There is no Vite dev server or `tauri dev`
+route. Extension changes redeploy in the running app. The shell runs the daemon beside it, and
 building the shell copies the *staged* daemon there, so without staging
 first it runs the last staged one, however old; `DEV.md` "Run from
 source" has the rest.

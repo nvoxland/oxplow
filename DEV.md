@@ -30,11 +30,22 @@ This installs only the frontend deps (React, Monaco, xterm,
 ## Run from source
 
 There is one way to build and run oxplow in dev. The Vite dev server,
-HMR and `tauri dev` are not used.
+HMR and `tauri dev` are not used. With oxplow quit:
 
 ```
-bun run build:dev          # stage sidecars, build the frontend, build the shell
-./target/debug/oxplow .    # run it
+bun run run:dev            # build, deploy the extensions, run it on this checkout
+```
+
+`scripts/run-dev.sh` does the three steps below in order and stops at the
+first that fails. It refuses at once while oxplow holds the project, before
+it builds. `bun run run:dev <dir>` opens another project, `--no-deploy`
+skips the deploy, and `--help` says the rest. The steps, when you want one
+alone:
+
+```
+bun run build:dev                                # stage sidecars, build the frontend, build the shell
+cargo run -q -p oxplow-dev -- extension deploy   # deploy what changed (oxplow quit)
+./target/debug/oxplow .                          # run it
 ```
 
 To open a project, pass its directory as the **first positional arg**
@@ -44,22 +55,19 @@ project picker. There is no cwd fallback, and flag-style args like
 [.context/architecture.md](./.context/architecture.md)) keeps a project
 from climbing into a parent repo.
 
-**First run.** Boot does not deploy extensions from source. With oxplow
-quit, deploy them once, then start oxplow:
-
-```
-cargo run -q -p oxplow-dev -- extension deploy
-```
-
-This deploys every enabled extension whose source changed, foundation
-first. If foundation is not running, oxplow shows a dialog that names
-this command.
+**Why the deploy step.** Boot does not deploy extensions from source.
+`oxplow-dev extension deploy` deploys every enabled extension whose source
+changed, foundation first, and says "already runs" for the rest. A
+project that runs the copies built into oxplow has no sources for them,
+so it deploys nothing there. If foundation is not running, oxplow shows a
+dialog that names this command.
 
 **Iterate.**
 
 - **Extension change**: redeploy in the running app
   (`oxplow.extension.deploy`, or Settings → Extensions). No restart.
-- **Core change (Rust or `apps/desktop/src`)**: run `bun run build:dev`,
+- **Core change (Rust or `apps/desktop/src`)**: quit oxplow and run
+  `bun run run:dev`. By hand: run `bun run build:dev`,
   then quit and re-run `./target/debug/oxplow .`. If the change also
   changes foundation's source, or breaks foundation's deployment, the
   dialog says so. Quit oxplow, run the `oxplow-dev` deploy above, then
