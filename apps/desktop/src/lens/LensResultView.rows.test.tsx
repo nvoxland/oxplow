@@ -421,8 +421,8 @@ test("a link opens with its column's pages as the origin", () => {
   fireEvent.click(view.getByText("Child"));
   const [ref, origin] = opened[0]!;
   expect(ref).toBe("oxplow:oxplow/work_item?id=tsk2&provider=oxplow");
-  expect((origin as { index: number; items: { label: string }[] }).index).toBe(1);
-  expect((origin as { items: { label: string }[] }).items.map((i) => i.label)).toEqual(["Epic", "Child", "Next"]);
+  // The collection is the lens's link column, run again for its list.
+  expect(origin).toMatchObject({ items: [], live: { lens: "x/work", column: "title" } });
 });
 
 // A lens table is keyboard-driven as every list is (`useListNav`): ↑/↓ move

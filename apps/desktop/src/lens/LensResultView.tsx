@@ -582,7 +582,7 @@ function RowsBody({
   // A link column's pages are one collection: Up and Down on the page a
   // row opens step through its siblings.
   const origins = new Map(
-    cols.filter((c) => c.link).map((c) => [c.key, linkOrigins(lens.title, c, result.rows, result.columns)] as const),
+    cols.filter((c) => c.link).map((c) => [c.key, linkOrigins(lens.title, { lens: lens.id, params: run.params }, c, result.rows, result.columns)] as const),
   );
   // An edit action is the markdown editor's Save, not a row's.
   const rowActions0 = lens.actions.filter((a) => a.row && !a.edit);

@@ -54,6 +54,7 @@ import type { TabRef } from "./tabs/tabState.js";
 import { navigationKey } from "./tabs/navigationKeys.js";
 import { PageNavigationContext, type PageNavigation, type TabEditing } from "./tabs/PageNavigationContext.js";
 import type { PageAction } from "./kit/actions.js";
+import { LiveOriginResolver, liveItemsOf, resolvedOrigin } from "./tabs/liveOrigin.js";
 import { removeBookmark, setBookmark, useBookmarks } from "./tabs/bookmarks.js";
 import type { BookmarkScope } from "./tabs/bookmarks.js";
 import { reconcileSessionTabs } from "./tabs/sessionTabs.js";
@@ -103,6 +104,7 @@ import {
   identityOf as pageIdentityOf,
   type Entry,
   type Origin,
+  type OriginItem,
   type Session,
   type Tab,
 } from "./tabs/session.js";
@@ -1262,6 +1264,8 @@ export function App() {
   /** The collection a page is opened from, as an entry keeps it. */
   const originOf = (origin: Origin | undefined, ref: TabRef): Origin | undefined => {
     if (!origin) return undefined;
+    // A live origin has no items; it finds its place when it is resolved.
+    if (origin.live) return origin;
     const at = origin.items.findIndex((item) => item.ref.id === ref.id);
     const index = at !== -1 ? at : origin.index;
     if (index < 0 || index >= origin.items.length) return undefined;
@@ -1303,9 +1307,13 @@ export function App() {
 
   /** Show item `index` of the collection the tab was opened from, in
    *  place: history untouched. */
+  // The pages a live origin (a lens's link column) lists now, by tab slot.
+  const [liveItems, setLiveItems] = useState<Record<string, { key: string; items: OriginItem[] }>>({});
+  const liveItemsRef = useRef(liveItems);
+  liveItemsRef.current = liveItems;
   const handleStepOrigin = useCallback((slot: string, index: number) => {
     if (!selectedThreadId) return;
-    updateSession(selectedThreadId, (session) => stepOrigin(session, slot, index));
+    updateSession(selectedThreadId, (session) => stepOrigin(session, slot, index, liveItemsOf(liveItemsRef.current, slot, currentEntry(session.tabs.find((t) => t.slot === slot)!).from)));
   }, [selectedThreadId, updateSession]);
 
   const handleGoBack = useCallback((slot: string) => {
@@ -1324,7 +1332,8 @@ export function App() {
     const session = selectedThreadId ? sessions[selectedThreadId] : undefined;
     const tab = session?.tabs.find((t) => t.slot === session.active);
     if (!tab) return { back: () => {}, forward: () => {}, step: () => {} };
-    const origin = currentEntry(tab).from;
+    const entry = currentEntry(tab);
+    const origin = entry.from ? resolvedOrigin(entry.from, liveItemsOf(liveItems, tab.slot, entry.from), entry.ref) : null;
     return {
       back: () => handleGoBack(tab.slot),
       forward: () => handleGoForward(tab.slot),
@@ -1711,7 +1720,8 @@ export function App() {
       const slot = sessionTab.slot;
       const tabId = tab.id;
       const currentId = currentEntry(sessionTab).ref.id;
-      const origin: Origin | null = isCurrent ? (currentEntry(sessionTab).from ?? null) : null;
+      const stored = isCurrent ? currentEntry(sessionTab).from : undefined;
+      const origin: Origin | null = stored ? resolvedOrigin(stored, liveItemsOf(liveItems, slot, stored), ref) : null;
       const innerRender = tab.render;
       const bookmarkScope = bookmarks.find((b) => b.ref.id === ref.id)?.scope ?? null;
       const registeredTitle = pageTitles[tabId];
@@ -1867,6 +1877,17 @@ export function App() {
     // One owner of every extension panel's runs, read by the rail, the
     // status bar's bell and the Alerts page.
     <PanelRunsProvider streamId={stream?.id ?? null} threadId={selectedThreadId}>
+    {(sessions[selectedThreadId ?? ""]?.tabs ?? []).map((t) => {
+      const live = currentEntry(t).from?.live;
+      return live ? (
+        <LiveOriginResolver
+          key={`${t.slot}/${JSON.stringify(live)}`}
+          live={live}
+          streamId={stream?.id ?? null}
+          onItems={(items) => setLiveItems((prev) => ({ ...prev, [t.slot]: { key: JSON.stringify(live), items } }))}
+        />
+      ) : null;
+    })}
     <AlertToasts onReview={(lens) => handleOpenPage(lens ? lensRef(lens) : alertsRef())} />
     <div style={{ display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden" }}>
       {/* macOS uses an Overlay titlebar (transparent, hidden title), so the

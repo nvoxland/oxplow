@@ -15,6 +15,7 @@
  *   a pick pushes one); another identity is another page.
  */
 
+import type { SqlCell } from "../tauri-bridge/generated/bindings.js";
 import type { TabRef } from "./tabState.js";
 import { identityOf as uriIdentityOf } from "../uri/uri.js";
 
@@ -27,8 +28,19 @@ export interface OriginItem {
 /** The collection a page was opened from: Up and Down step through it. */
 export interface Origin {
   title?: string;
+  /** The items as they were when the page opened; none for a live origin. */
   items: OriginItem[];
   index: number;
+  /** The collection is a lens's link column, run again whenever it is wanted
+   *  (the host resolves `items` from it and finds `index` by the page). */
+  live?: LiveOrigin;
+}
+
+export interface LiveOrigin {
+  lens: string;
+  params: Record<string, SqlCell>;
+  /** The lens column whose links are the pages. */
+  column: string;
 }
 
 export interface Entry {
@@ -190,11 +202,12 @@ export function forward(s: Session, slot: string): Session {
 }
 
 /** Show item `index` of the current entry's origin in its place: Up and
- *  Down step through a collection without touching history. */
-export function stepOrigin(s: Session, slot: string, index: number): Session {
+ *  Down step through a collection without touching history. A live origin
+ *  steps through `items`, as the host resolved them. */
+export function stepOrigin(s: Session, slot: string, index: number, items?: OriginItem[]): Session {
   return withTab(s, slot, (t) => {
     const now = current(t);
-    const item = now.from?.items[index];
+    const item = (items ?? now.from?.items)?.[index];
     if (!now.from || !item || index === now.from.index) return t;
     const entries = [...t.entries];
     entries[t.at] = { ref: item.ref, from: { ...now.from, index } };

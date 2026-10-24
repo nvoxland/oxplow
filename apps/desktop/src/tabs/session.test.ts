@@ -193,6 +193,15 @@ describe("origin: the collection a page was opened from", () => {
     expect(ids(back(s, slot))).toEqual(["oxplow:oxplow/wiki?slug=a"]);
   });
 
+  test("a live origin steps through the items it is given", () => {
+    const live: Origin = { title: "L", items: [], index: 0, live: { lens: "x/y", params: {}, column: "k" } };
+    let s = open(emptySession(), e(fileRef("src/a.ts"), { from: live }));
+    s = stepOrigin(s, s.active!, 1, [{ ref: fileRef("src/a.ts"), label: "a" }, { ref: fileRef("src/b.ts"), label: "b" }]);
+    const now = current(s.tabs[0]!);
+    expect(now.ref.id).toBe(fileRef("src/b.ts").id);
+    expect(now.from?.live?.lens).toBe("x/y");
+  });
+
   test("a step out of range changes nothing", () => {
     const s = open(emptySession(), e(fileRef("src/a.ts"), { from: origin }));
     expect(stepOrigin(s, s.active!, 3)).toBe(s);

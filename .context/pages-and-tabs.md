@@ -709,8 +709,13 @@ through `PageNavigation.origin` and `stepOrigin(index)` (the nav bar's
 test ids stay `page-nav-sibling-*`). A diff item's ref is `diffRef(spec)`,
 which carries its spec. New-tab paths drop it. Back/Forward restore each
 entry's own origin. Adopted lists: `BacklinksList`, `CommitList` / `CommitGraphTable`
-(`CommitRowDispatcher`), and every lens table or list's link column (`lens/linkOrigin.ts`: the
-column's pages, in row order). `WorkGroupList` rows open an edit
+(`CommitRowDispatcher`), and every lens table or list's link column
+(`lens/linkOrigin.ts`). That one is **live**: the origin keeps no items, only
+`live: { lens, params, column }`, and `LiveOriginResolver` (`tabs/liveOrigin.tsx`)
+runs the lens again, as a lens page does, and hands App the column's pages in row
+order. `resolvedOrigin` finds the current page in that list for the nav bar and the
+keys; `stepOrigin(s, slot, index, items)` steps through the resolved list. A page
+the lens no longer lists has no Up/Down. `WorkGroupList` rows open an edit
 modal, not a page, so they don't adopt.
 
 **Keys.** The global handler in `App.tsx` (`tabs/navigationKeys.ts`):
