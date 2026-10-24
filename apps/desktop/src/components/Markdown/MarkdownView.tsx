@@ -90,7 +90,7 @@ export function parseGitRefTarget(target: string): string | null {
  * shared `PageKindIcon` understands. Returns `null` for kinds that
  * shouldn't carry a leading glyph.
  */
-function parsedLinkIconKind(parsed: ParsedLink): string | null {
+export function parsedLinkIconKind(parsed: ParsedLink): string | null {
   switch (parsed.kind) {
     case "ref":
       // URI-SWITCH: the icon table is keyed by resource name.
@@ -449,36 +449,9 @@ function WikiLinkSpan({
   /** A ref of an extension's kind: titled from its kind's model. */
   extensionRef: string | null;
 }) {
-  const wiki = useWikiRef(internalSlug);
-  const item = useWorkItemRef(itemRef);
-  const extensionTitle = useExtensionRefTitle(extensionRef);
   const cm = useRowContextMenu(items);
   const { children, ...rest } = anchorProps;
-  // The link text is swapped for the resolved title when the link was
-  // authored as a bare ref (the rendered text still equals the slug / id,
-  // i.e. no `|label`) and the cache resolved a real title. Author-supplied
-  // labels (`[[slug|Custom]]`) and unknown / not-yet-loaded refs fall back
-  // to the original children (the slug / id) verbatim.
-  const childrenText = flattenChildrenText(children);
-  const overrideText =
-    internalSlug && wiki.title && childrenText === internalSlug
-      ? wiki.title
-      : itemRef && item.title && (childrenText === workItemLabel(itemRef) || childrenText === itemRef)
-        ? item.title
-        : extensionRef && extensionTitle && extensionWikilinkRef(childrenText) === extensionRef
-          ? extensionTitle
-          : null;
-  // A recognized ref whose object doesn't exist (deleted page / item, an
-  // item on a list that isn't active, a stale wikilink) renders broken
-  // and non-clickable. `loading` and
-  // `found` both stay a live link so a not-yet-resolved ref isn't
-  // briefly flagged.
-  const brokenReason =
-    internalSlug && wiki.status === "missing"
-      ? `Broken link: wiki page “${internalSlug}” does not exist`
-      : itemRef && item.status === "missing"
-        ? `Broken link: work item ${workItemLabel(itemRef)} isn't on the active work list`
-        : null;
+  const { title: overrideText, brokenReason } = useRefLinkTitle({ internalSlug, itemRef, extensionRef }, flattenChildrenText(children));
   if (brokenReason) {
     return <BrokenLink reason={brokenReason}>{children}</BrokenLink>;
   }
@@ -501,6 +474,57 @@ function WikiLinkSpan({
       {cm.menu}
     </span>
   );
+}
+
+/** What a link names that has a title: a wiki page, a work item, an
+ *  extension's ref (`refLinkNames`). */
+export interface RefLinkNames {
+  internalSlug: string | null;
+  itemRef: string | null;
+  extensionRef: string | null;
+}
+
+/** The titled refs `parsed` names: none for a link with no title (a file,
+ *  a directory, a commit, a web page). */
+export function refLinkNames(parsed: ParsedLink): RefLinkNames {
+  return {
+    internalSlug: parsed.kind === "internal" ? parsed.slug : null,
+    itemRef: parsed.kind === "work_item" ? parsed.ref : null,
+    extensionRef: parsed.kind === "ref" ? parsed.ref : null,
+  };
+}
+
+/**
+ * The one title rule for a ref link, the viewer's and the editor's: the
+ * title replaces the link's text when the link was written bare (its text
+ * still equals the slug / id, no `|label`) and the title resolved; an
+ * author's label and a ref not yet loaded keep the text. A ref whose
+ * object doesn't exist (a deleted page, an item not on the active list)
+ * is broken, with the reason. `loading` and `found` both stay a live
+ * link, so a ref not yet resolved isn't briefly flagged.
+ */
+export function useRefLinkTitle(
+  { internalSlug, itemRef, extensionRef }: RefLinkNames,
+  text: string,
+): { title: string | null; brokenReason: string | null } {
+  const wiki = useWikiRef(internalSlug);
+  const item = useWorkItemRef(itemRef);
+  const extensionTitle = useExtensionRefTitle(extensionRef);
+  const title =
+    internalSlug && wiki.title && text === internalSlug
+      ? wiki.title
+      : itemRef && item.title && (text === workItemLabel(itemRef) || text === itemRef)
+        ? item.title
+        : extensionRef && extensionTitle && extensionWikilinkRef(text) === extensionRef
+          ? extensionTitle
+          : null;
+  const brokenReason =
+    internalSlug && wiki.status === "missing"
+      ? `Broken link: wiki page “${internalSlug}” does not exist`
+      : itemRef && item.status === "missing"
+        ? `Broken link: work item ${workItemLabel(itemRef)} isn't on the active work list`
+        : null;
+  return { title, brokenReason };
 }
 
 /**
@@ -536,7 +560,7 @@ export function linkRef(parsed: ParsedLink): string | null {
  * click handler) with a tooltip explaining why, so a reader can't click
  * through to nowhere and the author sees it needs fixing.
  */
-function BrokenLink({ reason, children }: { reason: string; children: React.ReactNode }) {
+export function BrokenLink({ reason, children }: { reason: string; children: React.ReactNode }) {
   return (
     <span className="oxplow-broken-link" data-testid="broken-wikilink" title={reason}>
       {children}
@@ -753,9 +777,7 @@ export function MarkdownView({ body, maxHeight, style, className }: MarkdownView
             // `|label`), swap the rendered text from the slug to the
             // page title so readers see "Local Snapshots" not
             // `local-snapshots`. Author-supplied labels are preserved.
-            const internalSlug = parsed.kind === "internal" ? parsed.slug : null;
-            const itemRef = parsed.kind === "work_item" ? parsed.ref : null;
-            const extensionRef = parsed.kind === "ref" ? parsed.ref : null;
+            const { internalSlug, itemRef, extensionRef } = refLinkNames(parsed);
             return (
               <WikiLinkSpan
                 anchorProps={props}

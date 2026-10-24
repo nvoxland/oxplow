@@ -4,6 +4,7 @@ import Placeholder from "@tiptap/extension-placeholder";
 import { Table, TableCell, TableHeader, TableRow } from "@tiptap/extension-table";
 import { Markdown, type MarkdownStorage } from "tiptap-markdown";
 import { InternalLink } from "./InternalLink.js";
+import { RefTitles } from "./RefTitles.js";
 import { MermaidBlock } from "./MermaidBlock.js";
 import { CommentDecorations } from "./CommentDecorations.js";
 
@@ -46,6 +47,8 @@ export function richTextExtensions({
     }),
     MermaidBlock,
     InternalLink,
+    // A bare ref link shows its title, as in the viewer (decorations only).
+    RefTitles,
     // GFM tables (block content — off for inline-only fields). tiptap-markdown
     // ships the GFM table serializer + markdown-it parses tables, so adding
     // the standard table nodes is all the round-trip needs. Without these the

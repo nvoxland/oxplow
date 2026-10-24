@@ -19,9 +19,10 @@ set**, and a surface never builds its own:
   offers Open, Open in new tab and a Copy of what it names (path, SHA,
   id, link). A web link opens in the app's web page when the allowlist
   takes it (`classifyExternalUrl`), else in the browser. An in-page
-  anchor jumps. A broken `[[…]]` is inert and marked. The viewer also
-  swaps a bare ref's text for its title (the editor can't: the text is
-  what it stores).
+  anchor jumps. A broken `[[…]]` is inert and marked. A bare ref link
+  (a wiki page, a work item, an extension's ref, written without a
+  `|label`) shows its title (`useRefLinkTitle`, one rule for both modes;
+  in the editor the stored text stays the slug, below).
 - **Mermaid** fences draw as diagrams, always (pan, zoom, the
   lightbox; in the editor, the `MermaidBlock` node view, click to edit
   its source).
@@ -114,6 +115,8 @@ why).
   `setContent` in a `queueMicrotask`, re-checking focus/destroyed at
   apply time (`RichTextField.render.test.tsx`). Don't call `setContent`
   synchronously from a React effect.
+- **`RefTitles.tsx`** — the title widget a bare ref link gets in the
+  editor ("A ref link's title in the editor").
 - **`MermaidBlock.tsx`** — extends Tiptap's `CodeBlock` (same node
   name, `codeBlock`) with a React NodeView that paints rendered SVG
   via `renderMermaidInto` when the caret is outside, and a raw
@@ -194,12 +197,19 @@ including the bare vs. labeled forms (`[[path]]` vs.
 `[[path|label]]`). Plain http/https links and image links are left
 alone — collapsing those into `[[ ]]` form would be lossy.
 
-## What does NOT round-trip yet
+## A ref link's title in the editor
 
-- **Title resolution in the editor.** The viewer swaps a bare
-  `[[slug]]`'s text for the page's title; the editor shows the slug,
-  since its text is what it saves. (The right-click link menu is both
-  modes'.)
+The editor can't change a link's text: the text is what it saves. So
+`RefTitles.tsx` draws the title beside it: a React widget decoration
+(`addDecorations` + `ReactWidgetRenderer`) before each link that names a
+titled ref. Once the title resolves for a bare link, the widget shows the
+kind's icon and the title (`[data-ref-title]`, an `<a>` with the same
+href, so a click opens it as any link does), and CSS hides the link
+beside it (`.oxplow-ref-title:has([data-ref-title]) + a` in
+`index.html`). A broken ref shows marked in its place. With the caret
+strictly inside the link there is no widget, and the slug shows to edit
+(arrow in: a click opens the link). Decorations only, so nothing of it is
+saved. `RichTextField.titles.test.tsx`.
 
 ## CSS surfaces
 

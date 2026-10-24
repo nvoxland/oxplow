@@ -18,7 +18,10 @@ test("a written page renders, and a task link in it opens the task", async ({ pa
   await page.getByTestId("launcher-hit-oxplow:oxplow/wiki?slug=wombat-plan").click();
   const wiki = page.locator('[data-testid="page-lens"]:visible');
   await expect(wiki).toContainText("First do");
-  await wiki.locator(`a[href="${created.result.uri}"]`).click();
+  // The link shows the task's title (the body keeps its id).
+  const link = wiki.locator(`[data-ref-title][href="${created.result.uri}"]`);
+  await expect(link).toHaveText("Wombat follow-up");
+  await link.click();
   await expect(page.getByTestId("lens-part-state")).toBeVisible();
   await expect(page.locator("body")).toContainText("Wombat follow-up");
 });
@@ -70,4 +73,19 @@ test("a wiki page is edited in place and saved, and a new page is made by its fi
   await expect(save).toBeDisabled();
   await page.reload();
   await expect(page.locator('[data-testid="lens-part-body"]:visible')).toContainText("Also keys.");
+});
+
+// In the editor a bare link shows its page's title, as the viewer does,
+// while the body keeps the slug.
+test("a wiki link in the editor shows its page's title", async ({ page, daemon }) => {
+  await run(daemon, "oxplow.knowledge.write_page", { slug: "otter-den", title: "Otter den", body: "# Otter den\n" });
+  await run(daemon, "oxplow.knowledge.write_page", { slug: "otter-notes", title: "Otter notes", body: "# Otter notes\n\nSee [[otter-den]] first.\n" });
+  await searchable(daemon, "otter", "wiki");
+  await page.goto("/");
+  await searchLauncher(page, "otter notes");
+  await page.getByTestId("launcher-hit-oxplow:oxplow/wiki?slug=otter-notes").click();
+  const body = page.locator('[data-testid="lens-part-body"]:visible');
+  const href = "oxplow:oxplow/wiki?slug=otter-den";
+  await expect(body.locator(`[data-ref-title][href="${href}"]`)).toHaveText("Otter den");
+  await expect(body.locator(`a[href="${href}"]:not([data-ref-title])`)).toBeHidden();
 });
