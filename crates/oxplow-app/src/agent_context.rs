@@ -135,6 +135,7 @@ impl AgentContext {
             baselines: Vec::new(),
             handoffs: Vec::new(),
             nudges: Vec::new(),
+            basket: Vec::new(),
             agent_session,
         };
         let ctx_block = self
@@ -146,6 +147,10 @@ impl AgentContext {
         let handoffs_block = handoffs(svc, *thread_id).await;
         if let Some((_, ids)) = &handoffs_block {
             pending.handoffs = ids.clone();
+        }
+        let basket_block = context_basket(svc, *thread_id).await;
+        if let Some((_, ids)) = &basket_block {
+            pending.basket = ids.clone();
         }
         // Prompt advisories land as nudges beside any a turn's end or a
         // late tool call left; the prompt carries them all.
@@ -171,6 +176,7 @@ impl AgentContext {
         let combined: String = [
             ctx_block,
             handoffs_block.map(|(text, _)| text),
+            basket_block.map(|(text, _)| text),
             advisory_block.map(|(text, _)| text),
             decisions_block,
         ]
@@ -207,6 +213,18 @@ impl AgentContext {
         if !built.nudges.is_empty() {
             if let Err(err) = svc.nudge_store.mark_delivered(built.nudges).await {
                 warn!(?err, "marking the delivered nudges failed");
+            }
+        }
+        if !built.basket.is_empty() {
+            let (ids, session) = (built.basket, built.agent_session.map(|s| s.value()));
+            if let Err(err) = svc
+                .db
+                .transaction(move |tx| {
+                    oxplow_db::thread_context_store::mark_delivered_tx(tx, &ids, session)
+                })
+                .await
+            {
+                warn!(?err, "stamping the delivered context basket failed");
             }
         }
     }
@@ -282,6 +300,8 @@ pub struct PendingContext {
     baselines: Vec<(String, String)>,
     handoffs: Vec<HandoffId>,
     nudges: Vec<i64>,
+    /// The context basket's items it carries (`thread_context_item.id`).
+    basket: Vec<i64>,
     agent_session: Option<AgentSessionId>,
 }
 
@@ -294,6 +314,7 @@ impl PendingContext {
             baselines: Vec::new(),
             handoffs: Vec::new(),
             nudges: Vec::new(),
+            basket: Vec::new(),
             agent_session: None,
         }
     }
@@ -363,6 +384,75 @@ async fn waiting_nudges(svc: &Services, thread_id: &ThreadId) -> Option<(String,
     let ids = nudges.iter().map(|n| n.id).collect();
     let text: Vec<String> = nudges.into_iter().map(|n| n.message).collect();
     (!text.is_empty()).then(|| (text.join("\n\n"), ids))
+}
+
+/// Characters of one piece of text from the context basket a prompt
+/// carries; the rest is read through where it came from.
+pub const BASKET_TEXT_IN_CONTEXT: usize = 4_000;
+
+/// The thread's context basket — what the person collected for its
+/// agents and no agent was given yet — as one `<context-basket>` block and
+/// the items' ids, still undelivered: they reach the first prompt of any
+/// agent in the thread, and [`AgentContext::commit`] stamps them once the
+/// agent has the text, which empties the basket.
+async fn context_basket(svc: &Services, thread: ThreadId) -> Option<(String, Vec<i64>)> {
+    let items = match svc
+        .db
+        .read(move |c| oxplow_db::thread_context_store::undelivered_tx(c, thread))
+        .await
+    {
+        Ok(items) if !items.is_empty() => items,
+        Ok(_) => return None,
+        Err(err) => {
+            warn!(?err, "reading the thread's context basket failed");
+            return None;
+        }
+    };
+    let ids = items.iter().map(|i| i.id).collect();
+    Some((basket_block(&items), ids))
+}
+
+/// The `<context-basket>` block for `items`: each page as a mention the
+/// agent reads with `oxplow_read`, each piece of text quoted with where it
+/// came from.
+pub fn basket_block(items: &[oxplow_db::thread_context_store::ContextItem]) -> String {
+    use oxplow_db::thread_context_store::ContextKind;
+    let mut s = String::from(
+        "<context-basket>\nThe person collected these for this prompt while exploring. \
+         Read a `[oxplow uri …]` with `oxplow_read`.\n",
+    );
+    for item in items {
+        let label = item
+            .label
+            .as_deref()
+            .map(|l| format!(" ({l})"))
+            .unwrap_or_default();
+        match (item.kind, &item.source_uri, &item.text) {
+            (ContextKind::Page, Some(uri), _) => {
+                s.push_str(&format!("- [oxplow uri {uri}]{label}\n"));
+            }
+            (_, source, Some(text)) => {
+                let from = source
+                    .as_deref()
+                    .map(|u| format!(" from [oxplow uri {u}]"))
+                    .unwrap_or_default();
+                let mut text = text.clone();
+                if text.len() > BASKET_TEXT_IN_CONTEXT {
+                    let mut end = BASKET_TEXT_IN_CONTEXT;
+                    while !text.is_char_boundary(end) {
+                        end -= 1;
+                    }
+                    text.truncate(end);
+                    text.push_str("\n… (cut; read the rest where it came from)");
+                }
+                let fence = if text.contains("```") { "````" } else { "```" };
+                s.push_str(&format!("- Text{from}{label}:\n{fence}\n{text}\n{fence}\n"));
+            }
+            _ => {}
+        }
+    }
+    s.push_str("</context-basket>");
+    s
 }
 
 /// Characters of a handoff's body its prompt carries; the rest is read
@@ -694,6 +784,67 @@ mod tests {
             .unwrap();
         svc.event_pump.run_once().await.unwrap();
         assert!(changes.has_changed().unwrap());
+    }
+
+    /// What the person collected in the thread's context basket reaches
+    /// the next prompt of any agent in the thread once — pages as
+    /// mentions, text quoted with where it came from — and the basket is
+    /// then empty; a failed delivery (built, never committed) keeps it.
+    #[tokio::test]
+    async fn the_context_basket_reaches_the_next_prompt_once() {
+        use oxplow_domain::Actor;
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &*fx.svc;
+        let session = crate::test_fixtures::open_session(svc, fx.thread).await;
+        for input in [
+            serde_json::json!({ "thread": fx.thread.to_string(), "uri": "oxplow:oxplow/commit?sha=abc", "label": "Fix the parser" }),
+            serde_json::json!({ "thread": fx.thread.to_string(), "uri": "oxplow:oxplow/file?path=src/a.rs#lines=3-4", "text": "fn a() {}" }),
+        ] {
+            svc.commands
+                .run(
+                    &Actor::Human,
+                    crate::commands::context_basket::ADD,
+                    input,
+                    false,
+                )
+                .await
+                .unwrap();
+        }
+        let ctx = AgentContext::default();
+        // Built but not delivered: still waiting.
+        let built = ctx
+            .build_context(svc, &fx.thread, Some("s1"), Some(session), None)
+            .await
+            .unwrap();
+        assert!(built.text.contains("<context-basket>"), "{}", built.text);
+        drop(built);
+        async fn waiting(svc: &crate::Services, thread: ThreadId) -> usize {
+            svc.db
+                .read(move |c| oxplow_db::thread_context_store::undelivered_tx(c, thread))
+                .await
+                .unwrap()
+                .len()
+        }
+        assert_eq!(waiting(svc, fx.thread).await, 2);
+
+        let text = ctx
+            .prompt_context(svc, &fx.thread, Some("s1"), Some(session), None)
+            .await
+            .unwrap();
+        assert!(
+            text.contains("- [oxplow uri oxplow:oxplow/commit?sha=abc] (Fix the parser)"),
+            "{text}"
+        );
+        assert!(
+            text.contains("- Text from [oxplow uri oxplow:oxplow/file?path=src/a.rs#lines=3-4]:\n```\nfn a() {}\n```"),
+            "{text}"
+        );
+        assert_eq!(waiting(svc, fx.thread).await, 0);
+        let again = ctx
+            .prompt_context(svc, &fx.thread, Some("s1"), Some(session), None)
+            .await
+            .unwrap_or_default();
+        assert!(!again.contains("<context-basket>"), "{again}");
     }
 
     /// A handoff to a thread reaches its agent once, at the next prompt —

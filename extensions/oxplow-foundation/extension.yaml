@@ -656,6 +656,22 @@ commands:
     scope: bookmarks.write
     op: remove
     example: {"uri": "oxplow:oxplow/page?page=git-dashboard", "thread": "thr3"}
+  # context.write — the person's context basket for a thread's agents.
+  - name: context.add
+    summary: "Put a page (`uri`) or a piece of text (`text`, from `uri` when known) in a thread's context basket. The next prompt to any agent in that thread carries everything waiting there, then the basket is empty. The person's: an agent can't add to it."
+    scope: context.write
+    op: add
+    example: {"thread": "thr1", "uri": "oxplow:oxplow/commit?sha=abc1234", "label": "abc1234"}
+  - name: context.remove
+    summary: "Take an item (`v_thread_context.id`) out of its thread's context basket."
+    scope: context.write
+    op: remove
+    example: {"item": 12}
+  - name: context.clear
+    summary: "Empty a thread's context basket of everything still waiting; what was delivered stays as a record."
+    scope: context.write
+    op: clear
+    example: {"thread": "thr1"}
   # changes.read
   - name: change.ensure
     summary: "Analyze a change and return its row (`v_change`). A commit vs its parent, an effort (start → end), or a stream's uncommitted work vs HEAD. Then read the analysis with oxplow_query_sql: v_change_file (files, zones), v_oxplow_bundled_change_interest (look-here-first scores, when oxplow-bundled is on), v_change_function (added/deleted/modified functions, deltas, churn), v_change_import (cross-zone imports), v_oxplow_bundled_change_co_change (files whose usual partners are missing, or that were dormant; oxplow-bundled), v_change_duplicate (copied blocks; arrives a little later). Cached: commits and closed efforts are analyzed once. It fills a derived cache and changes no record."

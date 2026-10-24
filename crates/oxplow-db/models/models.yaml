@@ -1744,6 +1744,24 @@
     - { unique: id }
     - { relationships: { column: from_thread_id, to: thread, field: id } }
     - { relationships: { column: to_thread_id, to: thread, field: id } }
+- name: thread_context
+  version: 1
+  description: "A thread's context basket: pages and pieces of text the person collected for the thread's agents (`oxplow.context.add`). The next prompt to any agent in the thread carries every item not yet delivered, as a `<context-basket>` block, and stamps it delivered; a delivered item stays as a record of what went out."
+  columns:
+    - { name: "id", type: "INTEGER", doc: "Item id (the `item` the `oxplow.context.*` commands take)." }
+    - { name: "thread_id", type: "INTEGER", doc: "The thread whose basket it is in." }
+    - { name: "kind", type: "TEXT", doc: "`page` (a page, by `source_uri`) or `text` (a piece of text, from `source_uri` when known)." }
+    - { name: "source_uri", type: "TEXT", doc: "The page, or where the text came from (a file's lines, a wiki page, a row's ref); NULL for text from nowhere oxplow names." }
+    - { name: "label", type: "TEXT", doc: "What the person saw it as (the page's title); NULL when none was given." }
+    - { name: "text", type: "TEXT", doc: "The text, for a `text` item; NULL for a page." }
+    - { name: "added_at", type: "TEXT", doc: "RFC 3339 timestamp." }
+    - { name: "delivered_at", type: "TEXT", doc: "When a prompt carried it to an agent; NULL while it waits in the basket." }
+    - { name: "delivered_session_id", type: "INTEGER", doc: "The agent session whose prompt carried it (v_agent_session.id); NULL while it waits, or when the prompt came from no known session." }
+    - { name: "thread_uri", type: "TEXT", doc: "Its thread's URI (`oxplow:oxplow/thread?id=thr<n>`)." }
+  tests:
+    - { not_null: id }
+    - { unique: id }
+    - { relationships: { column: thread_id, to: thread, field: id } }
 - name: thread_note
   version: 5
   description: "A thread's notes: the capture pad an agent writes as it works (`oxplow.knowledge.add_note`; ref `oxplow:oxplow/thread_note?id=not<n>`)."

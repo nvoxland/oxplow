@@ -944,6 +944,20 @@ No polling. The launch prompt's `developerInstructions` leave the session
 context out (the harness declares `prompt_context`); the first injection
 carries it.
 
+**The context basket.** What the person collected for the thread's
+agents (`thread_context_item`, `v_thread_context`, the `oxplow.context.*`
+commands) rides the next prompt of *any* agent in the thread as a
+`<context-basket>` block after the handoffs (`agent_context::basket_block`):
+each page as `[oxplow uri …]` with its label, each piece of text quoted
+(up to `BASKET_TEXT_IN_CONTEXT` characters) with where it came from.
+`commit` stamps the items it carried delivered to the session, which
+empties the basket; a delivered item stays as a record. Claude Code and
+opencode get it at prompt submit. Codex gets it by injection while no turn
+runs (an `oxplow.context.add` run wakes `context_watch`), so with two
+agents in a thread an idle Codex can take the basket before the agent the
+person prompts. The basket is the person's: an agent's `context.*` run is
+refused. Pinned by `the_context_basket_reaches_the_next_prompt_once`.
+
 **Building takes nothing; delivery commits.** `build_context` returns a
 `PendingContext` and changes no state: no baseline moves, no handoff or
 nudge is stamped. `AgentContext::commit` records the blocks as the

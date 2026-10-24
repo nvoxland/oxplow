@@ -62,6 +62,7 @@ pub mod terminal_store;
 #[cfg(test)]
 pub(crate) mod test_tasks;
 pub mod thread_answer_store;
+pub mod thread_context_store;
 pub mod thread_note_store;
 pub mod thread_store;
 pub mod token_usage_store;

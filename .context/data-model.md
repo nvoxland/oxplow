@@ -2115,6 +2115,17 @@ bookmarking at another scope moves it. Read through `v_bookmark` (the UI's
 `oxplow.bookmark.remove` (commands.md). They used to live in webview localStorage, where neither lenses nor the
 agent could see them; those weren't carried over.
 
+### `thread_context_item` — `thread_context_store` (`crates/oxplow-db/src/thread_context_store.rs`)
+
+V107. A thread's context basket: what the person collected for the
+thread's agents while exploring. `kind` is `page` (`source_uri` the page's
+canonical URI) or `text` (`text`, from `source_uri` when known). The next
+prompt to any agent in the thread carries every row with no
+`delivered_at` and stamps `delivered_at` / `delivered_session_id`
+(`agent-model.md` "The context basket"); delivered rows stay as a record.
+Read through `v_thread_context`; every write is an `oxplow.context.*`
+command (commands.md).
+
 ### `capability_provider` — `SqliteCapabilityStore` (`crates/oxplow-db/src/capability_store.rs`)
 
 V128 (P6b.C2; V15 adds `title`, `source`, `available`, `chosen_by`; V16

@@ -3,7 +3,7 @@
 //! A harness with no prompt hook (Codex) is given its context by
 //! injection, between turns. The context changes while no turn runs — a
 //! handoff sent to the thread, another agent arriving in its worktree, a
-//! decision recorded — and the agent should have it before the person's
+//! decision recorded, something put in the thread's context basket — and the agent should have it before the person's
 //! next prompt, not after that turn ends. This pump consumer bumps
 //! [`Services::context_changes`](crate::Services) when the log records
 //! one of the facts the context reads; each session that watches it builds
@@ -17,8 +17,12 @@ use crate::event_pump::AsyncEventConsumer;
 
 pub const NAME: &str = "agent.context_changes";
 
-/// The command whose record is a decision the context lists.
-const RECORD_DECISION: &str = "oxplow.effort.record_decision";
+/// The commands whose runs change what the context lists: a decision
+/// recorded, and an item put in the thread's context basket.
+const CHANGING_COMMANDS: &[&str] = &[
+    "oxplow.effort.record_decision",
+    crate::commands::context_basket::ADD,
+];
 
 /// The event types whose facts the context reads: the handoffs and their
 /// count, the agents open in a worktree, and the open effort and its
@@ -57,10 +61,11 @@ impl AsyncEventConsumer for ContextChanges {
 
     async fn handle(&self, event: &StoredEvent) -> Result<(), DomainError> {
         let payload = &event.envelope.payload;
-        // Any command is logged; only the one that records a decision
-        // changes the context.
+        // Any command is logged; only a few change the context.
         if event.envelope.event_type == "command.executed"
-            && payload["command"].as_str() != Some(RECORD_DECISION)
+            && !payload["command"]
+                .as_str()
+                .is_some_and(|c| CHANGING_COMMANDS.contains(&c))
         {
             return Ok(());
         }

@@ -1810,6 +1810,7 @@ impl Services {
         // over these operations (`commands/ops.rs`).
         for op in commands::bookmark::ops()
             .into_iter()
+            .chain(commands::context_basket::ops())
             .chain(commands::extension_jobs::ops(jobs.clone()))
             .chain(commands::extension_state::ops(
                 extension_state::StateHost::new(
