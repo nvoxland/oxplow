@@ -1,4 +1,4 @@
-//! An ACP session's conversation, held in memory (a `session/load` replay
+//! A chat session's conversation, held in memory (a resume's replay
 //! rebuilds it after a restart; there is no table).
 //!
 //! Each item has a stable `id` and a `seq` that is bumped every time the

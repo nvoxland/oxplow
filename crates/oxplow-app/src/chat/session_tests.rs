@@ -1,23 +1,30 @@
-//! The session against the scripted fake agent (`oxplow-acp-fake`) over
-//! an in-memory pipe, with a recording host in place of `Services`.
+//! The session actor against a scripted in-process agent (`FakeConn`, a
+//! [`Connection`]) and a recording host in place of `Services`; then a Codex
+//! thread on a scripted app-server daemon.
 
 #![allow(clippy::unwrap_used)]
 
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use oxplow_acp_fake::{FakeOptions, FakeState, Shared};
 use oxplow_domain::ThreadId;
 use oxplow_runtime::policy::{DenyLayer, PolicyDecision};
 use parking_lot::Mutex;
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, mpsc, oneshot, watch, Notify};
 
-use super::acp::{AcpOpen, McpHttp};
-use super::conn::TurnTokens;
+use super::conn::{
+    Connection, Incoming, Opened, PermissionReply, ReadReply, TurnEnd, TurnTokens, WriteReply,
+};
 use super::host::ChatHost;
+use super::human_prompt::HumanPrompt;
 use super::manager::ChatManager;
-use super::model::PermissionAnswer;
+use super::model::{
+    ChatUpdate, PermissionAnswer, PermissionAsk, PermissionKind, PermissionOption, ToolCall,
+    ToolCallPatch, ToolKind, ToolStatus,
+};
 use super::session::{ChatError, ChatEvent, ChatEventBody, ChatStatus, SessionSpec};
 use super::transcript::ItemBody;
 use oxplow_domain::agent::tool::{ToolKind as Kind, ToolUse};
@@ -150,15 +157,368 @@ fn spec(cwd: &std::path::Path) -> SessionSpec {
     }
 }
 
-fn acp_open() -> AcpOpen {
-    AcpOpen {
-        agent: "fake".into(),
-        mcp: vec![McpHttp {
-            name: "oxplow".into(),
-            url: "http://127.0.0.1:1/mcp".into(),
-            headers: vec![("Authorization".into(), "Bearer t".into())],
-        }],
-        ..AcpOpen::default()
+// ---------------------------------------------------------------------
+// The scripted agent.
+//
+// It does what the prompt tells it: every text line of the form
+// `fake:<command> <args>` is one step, in order; other lines (an attached
+// context block) are ignored.
+//
+// | step | what the agent does |
+// |---|---|
+// | `say <text>` | an agent message chunk |
+// | `think <text>` | a thought chunk |
+// | `edit <path>` | an edit tool call, then a permission request; reports `permission: <option id or cancelled>` |
+// | `edit-anyway <path>` | like `edit`, but completes whatever the answer |
+// | `bypass <path>` | an edit tool call that completes without asking |
+// | `fswrite <path> <content>` | an edit tool call that asks oxplow to write the file; reports `fs ok` or `fs error: <message>` |
+// | `fsread <path>` | asks oxplow to read the file; reports `read: <content>` |
+// | `bash <command>` | an execute tool call completing with exit code 0 |
+// | `tokens <in> <out>` | per-turn counts on the turn's end |
+// | `wait` | blocks until cancelled, then ends the turn `cancelled` |
+// | `crash` | the agent goes away at once |
+// ---------------------------------------------------------------------
+
+/// What the agent keeps between connections (a reopen resumes its
+/// history) and what tests read back.
+#[derive(Default)]
+struct FakeState {
+    /// session id → every update sent in it, replayed on resume.
+    history: HashMap<String, Vec<ChatUpdate>>,
+    /// The blocks of every prompt received.
+    prompts: Vec<Vec<String>>,
+    /// How each open went: `new` or `load <id>`.
+    opens: Vec<String>,
+    next_session: u64,
+    next_tool: u64,
+}
+
+type Shared = Arc<Mutex<FakeState>>;
+
+#[derive(Default, Clone)]
+struct FakeOptions {
+    /// Resume this session (replaying its history) instead of a new one.
+    resume: Option<String>,
+    /// The system prompt the agent has no other way to take.
+    preamble: Option<String>,
+    /// Refuse to open, with this message.
+    refuse: Option<String>,
+}
+
+struct Inner {
+    state: Shared,
+    tx: mpsc::UnboundedSender<Incoming>,
+    sid: Mutex<String>,
+    cancelled: AtomicBool,
+    wake: Notify,
+    ended: watch::Sender<bool>,
+}
+
+struct FakeConn {
+    inner: Arc<Inner>,
+    opts: FakeOptions,
+}
+
+fn connect(
+    state: &Shared,
+    opts: FakeOptions,
+) -> (Arc<dyn Connection>, mpsc::UnboundedReceiver<Incoming>) {
+    let (tx, rx) = mpsc::unbounded_channel();
+    let (ended, _) = watch::channel(false);
+    let inner = Arc::new(Inner {
+        state: state.clone(),
+        tx,
+        sid: Mutex::new(String::new()),
+        cancelled: AtomicBool::new(false),
+        wake: Notify::new(),
+        ended,
+    });
+    (Arc::new(FakeConn { inner, opts }), rx)
+}
+
+#[async_trait]
+impl Connection for FakeConn {
+    async fn open(&self, _cwd: &std::path::Path) -> Result<Opened, String> {
+        if let Some(why) = &self.opts.refuse {
+            return Err(why.clone());
+        }
+        let i = &self.inner;
+        let session_id = {
+            let mut s = i.state.lock();
+            match &self.opts.resume {
+                Some(id) => {
+                    let history = s.history.get(id).cloned().ok_or("unknown session")?;
+                    s.opens.push(format!("load {id}"));
+                    // The replay reaches the incoming channel before open returns.
+                    for u in history {
+                        let _ = i.tx.send(Incoming::Update(Box::new(u)));
+                    }
+                    id.clone()
+                }
+                None => {
+                    s.next_session += 1;
+                    let id = format!("fake-session-{}", s.next_session);
+                    s.history.entry(id.clone()).or_default();
+                    s.opens.push("new".into());
+                    id
+                }
+            }
+        };
+        *i.sid.lock() = session_id.clone();
+        Ok(Opened {
+            session_id,
+            preamble: self.opts.preamble.clone(),
+        })
+    }
+
+    fn prompt(&self, prompt: HumanPrompt) -> Result<(), String> {
+        let inner = self.inner.clone();
+        let blocks = prompt.blocks().to_vec();
+        inner.state.lock().prompts.push(blocks.clone());
+        inner.cancelled.store(false, Ordering::SeqCst);
+        tokio::spawn(async move { inner.run_prompt(blocks).await });
+        Ok(())
+    }
+
+    fn cancel(&self) {
+        self.inner.cancelled.store(true, Ordering::SeqCst);
+        self.inner.wake.notify_one();
+    }
+
+    async fn closed(&self) {
+        let mut rx = self.inner.ended.subscribe();
+        let _ = rx.wait_for(|ended| *ended).await;
+    }
+}
+
+impl Inner {
+    fn send(&self, msg: Incoming) {
+        let _ = self.tx.send(msg);
+    }
+
+    fn update(&self, u: ChatUpdate) {
+        let sid = self.sid.lock().clone();
+        self.state
+            .lock()
+            .history
+            .entry(sid)
+            .or_default()
+            .push(u.clone());
+        self.send(Incoming::Update(Box::new(u)));
+    }
+
+    fn say(&self, text: &str) {
+        self.update(ChatUpdate::AgentChunk(text.to_string()));
+    }
+
+    fn tool_call(
+        &self,
+        kind: ToolKind,
+        label: &str,
+        target: &str,
+        raw_input: serde_json::Value,
+        status: ToolStatus,
+    ) -> String {
+        let n = {
+            let mut s = self.state.lock();
+            s.next_tool += 1;
+            s.next_tool
+        };
+        let id = format!("{}-t{n}", self.sid.lock());
+        self.update(ChatUpdate::ToolCall(ToolCall {
+            id: id.clone(),
+            title: format!("{label} {target}"),
+            kind,
+            status,
+            locations: if kind == ToolKind::Edit {
+                vec![target.to_string()]
+            } else {
+                vec![]
+            },
+            raw_input: Some(raw_input),
+            ..ToolCall::default()
+        }));
+        id
+    }
+
+    fn tool_status(&self, id: &str, status: ToolStatus, raw_output: Option<serde_json::Value>) {
+        self.update(ChatUpdate::ToolCallUpdate(ToolCallPatch {
+            id: id.to_string(),
+            status: Some(status),
+            raw_output,
+            ..ToolCallPatch::default()
+        }));
+    }
+
+    async fn run_prompt(&self, blocks: Vec<String>) {
+        for b in &blocks {
+            self.update(ChatUpdate::UserChunk(b.clone()));
+        }
+        let mut tokens = None;
+        let steps: Vec<(String, String)> = blocks
+            .iter()
+            .flat_map(|b| b.lines())
+            .filter_map(|l| l.trim().strip_prefix("fake:"))
+            .map(|l| match l.split_once(' ') {
+                Some((c, a)) => (c.to_string(), a.to_string()),
+                None => (l.to_string(), String::new()),
+            })
+            .collect();
+        for (cmd, arg) in steps {
+            if self.cancelled.load(Ordering::SeqCst) {
+                break;
+            }
+            match cmd.as_str() {
+                "say" => self.say(&arg),
+                "think" => self.update(ChatUpdate::ThoughtChunk(arg)),
+                "edit" | "edit-anyway" => {
+                    let id = self.tool_call(
+                        ToolKind::Edit,
+                        "edit",
+                        &arg,
+                        serde_json::json!({"file_path": arg}),
+                        ToolStatus::Pending,
+                    );
+                    let (answer_tx, answer_rx) = oneshot::channel();
+                    self.send(Incoming::Permission {
+                        ask: Box::new(PermissionAsk {
+                            tool: ToolCallPatch {
+                                id: id.clone(),
+                                title: Some(format!("Edit {arg}")),
+                                kind: Some(ToolKind::Edit),
+                                locations: Some(vec![arg.clone()]),
+                                ..ToolCallPatch::default()
+                            },
+                            options: vec![
+                                option("allow", "Allow", PermissionKind::AllowOnce),
+                                option("always", "Always allow", PermissionKind::AllowAlways),
+                                option("reject", "Reject", PermissionKind::RejectOnce),
+                            ],
+                        }),
+                        reply: PermissionReply::new(move |a| {
+                            let _ = answer_tx.send(a.clone());
+                        }),
+                    });
+                    let chosen = match answer_rx.await {
+                        Ok(PermissionAnswer::Selected { option_id }) => option_id,
+                        _ => "cancelled".to_string(),
+                    };
+                    // `edit-anyway` ignores the answer, like an adapter that
+                    // writes without honouring a reject.
+                    let status = if cmd == "edit-anyway" || chosen == "allow" || chosen == "always"
+                    {
+                        ToolStatus::Completed
+                    } else {
+                        ToolStatus::Failed
+                    };
+                    self.tool_status(&id, status, None);
+                    self.say(&format!("permission: {chosen}"));
+                }
+                "bypass" => {
+                    self.tool_call(
+                        ToolKind::Edit,
+                        "edit",
+                        &arg,
+                        serde_json::json!({"file_path": arg}),
+                        ToolStatus::Completed,
+                    );
+                }
+                "fswrite" => {
+                    let (path, content) = arg.split_once(' ').unwrap_or((arg.as_str(), ""));
+                    let id = self.tool_call(
+                        ToolKind::Edit,
+                        "edit",
+                        path,
+                        serde_json::json!({"file_path": path}),
+                        ToolStatus::InProgress,
+                    );
+                    let (done_tx, done_rx) = oneshot::channel();
+                    self.send(Incoming::WriteFile {
+                        path: path.into(),
+                        content: content.to_string(),
+                        reply: WriteReply::new(move |r| {
+                            let _ = done_tx.send(r);
+                        }),
+                    });
+                    match done_rx.await {
+                        Ok(Ok(())) => {
+                            self.tool_status(&id, ToolStatus::Completed, None);
+                            self.say("fs ok");
+                        }
+                        Ok(Err(why)) => {
+                            self.tool_status(&id, ToolStatus::Failed, None);
+                            self.say(&format!("fs error: {why}"));
+                        }
+                        Err(_) => break,
+                    }
+                }
+                "fsread" => {
+                    let (read_tx, read_rx) = oneshot::channel();
+                    self.send(Incoming::ReadFile {
+                        path: arg.clone().into(),
+                        line: None,
+                        limit: None,
+                        reply: ReadReply::new(move |r| {
+                            let _ = read_tx.send(r);
+                        }),
+                    });
+                    let text = match read_rx.await {
+                        Ok(Ok(content)) => content,
+                        Ok(Err(why)) => format!("error {why}"),
+                        Err(_) => break,
+                    };
+                    self.say(&format!("read: {text}"));
+                }
+                "bash" => {
+                    let id = self.tool_call(
+                        ToolKind::Execute,
+                        "execute",
+                        &arg,
+                        serde_json::json!({"command": arg}),
+                        ToolStatus::InProgress,
+                    );
+                    self.tool_status(
+                        &id,
+                        ToolStatus::Completed,
+                        Some(serde_json::json!({"exit_code": 0})),
+                    );
+                }
+                "tokens" => {
+                    let mut n = arg
+                        .split_whitespace()
+                        .map(|x| x.parse::<u64>().unwrap_or(0));
+                    tokens = Some(TurnTokens {
+                        input: n.next().unwrap_or(0),
+                        output: n.next().unwrap_or(0),
+                        ..TurnTokens::default()
+                    });
+                }
+                "wait" => {
+                    while !self.cancelled.load(Ordering::SeqCst) {
+                        self.wake.notified().await;
+                    }
+                }
+                "crash" => {
+                    let _ = self.ended.send(true);
+                    return;
+                }
+                _ => {}
+            }
+        }
+        let cancelled = self.cancelled.load(Ordering::SeqCst);
+        self.send(Incoming::PromptDone(Ok(TurnEnd {
+            stop_reason: if cancelled { "cancelled" } else { "end_turn" }.into(),
+            usage: tokens,
+            run: None,
+        })));
+    }
+}
+
+fn option(id: &str, name: &str, kind: PermissionKind) -> PermissionOption {
+    PermissionOption {
+        id: id.into(),
+        name: name.into(),
+        kind,
     }
 }
 
@@ -170,26 +530,18 @@ struct Rig {
     dir: tempfile::TempDir,
 }
 
+/// Open a session on a fresh manager against the agent `fake` holds.
 async fn open_with(
     host: Host,
     fake: Shared,
     opts: FakeOptions,
-    open_fn: impl FnOnce(&mut AcpOpen),
     dir: tempfile::TempDir,
 ) -> (Rig, Result<(), ChatError>) {
     let mgr = ChatManager::new();
     let host = Arc::new(host);
-    let (client, agent) = tokio::io::duplex(1 << 16);
-    let (ar, aw) = tokio::io::split(agent);
-    let f = fake.clone();
-    tokio::spawn(async move {
-        let _ = oxplow_acp_fake::serve(ar, aw, f, opts).await;
-    });
-    let (cr, cw) = tokio::io::split(client);
-    let mut open = acp_open();
-    open_fn(&mut open);
+    let (conn, incoming) = connect(&fake, opts);
     let r = mgr
-        .open_with_io(host.clone(), spec(dir.path()), open, cw, cr)
+        .open_connection(host.clone(), spec(dir.path()), conn, incoming)
         .await;
     // After open: the startup `Idle` must not read as a finished turn.
     let events = mgr.subscribe();
@@ -210,7 +562,6 @@ async fn open(host: Host) -> Rig {
         host,
         Shared::default(),
         FakeOptions::default(),
-        |_| {},
         tempfile::tempdir().unwrap(),
     )
     .await;
@@ -219,6 +570,14 @@ async fn open(host: Host) -> Rig {
 }
 
 impl Rig {
+    /// Open the session again on this manager (a Restart).
+    async fn reopen(&self, opts: FakeOptions) -> Result<(), ChatError> {
+        let (conn, incoming) = connect(&self.fake, opts);
+        self.mgr
+            .open_connection(self.host.clone(), spec(self.dir.path()), conn, incoming)
+            .await
+    }
+
     async fn wait(&mut self, what: &str, pred: impl Fn(&ChatEventBody) -> bool) -> ChatEventBody {
         let fut = async {
             loop {
@@ -274,8 +633,8 @@ impl Rig {
             .collect()
     }
 
-    fn prompts(&self) -> Vec<serde_json::Value> {
-        self.fake.lock().unwrap().prompts.clone()
+    fn prompts(&self) -> Vec<Vec<String>> {
+        self.fake.lock().prompts.clone()
     }
 }
 
@@ -469,82 +828,62 @@ async fn the_context_rides_each_human_prompt() {
     rig.turn("fake:bash cargo test").await;
     rig.turn("next").await;
     let prompts = rig.prompts();
-    let texts = |i: usize| -> Vec<String> {
-        prompts[i]["prompt"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|b| b["text"].as_str().unwrap().to_string())
-            .collect()
-    };
-    assert_eq!(texts(0), vec!["CTX", "fake:bash cargo test"]);
-    assert_eq!(texts(1), vec!["CTX", "next"]);
+    assert_eq!(prompts[0], vec!["CTX", "fake:bash cargo test"]);
+    assert_eq!(prompts[1], vec!["CTX", "next"]);
 }
 
+/// An agent with no other way to take the system prompt gets it ahead of
+/// the first prompt, and only that one.
 #[tokio::test]
-async fn the_system_prompt_goes_in_meta_or_ahead_of_the_first_prompt() {
-    let (mut meta, r) = open_with(
-        Host::default(),
-        Shared::default(),
-        FakeOptions::default(),
-        |s| {
-            s.system_prompt = Some("SYS".into());
-            s.system_prompt_via_meta = true;
-        },
-        tempfile::tempdir().unwrap(),
-    )
-    .await;
-    r.unwrap();
-    meta.turn("a").await;
-    let new = meta.fake.lock().unwrap().new_sessions[0].clone();
-    assert_eq!(new["_meta"]["systemPrompt"]["append"], "SYS");
-    assert_eq!(new["mcpServers"][0]["type"], "http");
-    assert_eq!(new["mcpServers"][0]["headers"][0]["name"], "Authorization");
-    assert_eq!(meta.prompts()[0]["prompt"].as_array().unwrap().len(), 1);
-
-    let (mut inline, r) = open_with(
-        Host::default(),
-        Shared::default(),
-        FakeOptions::default(),
-        |s| s.system_prompt = Some("SYS".into()),
-        tempfile::tempdir().unwrap(),
-    )
-    .await;
-    r.unwrap();
-    inline.turn("a").await;
-    inline.turn("b").await;
-    let p = inline.prompts();
-    assert_eq!(p[0]["prompt"][0]["text"], "SYS");
-    assert_eq!(p[1]["prompt"].as_array().unwrap().len(), 1);
-}
-
-#[tokio::test]
-async fn an_agent_without_http_mcp_is_refused_clearly() {
-    let (_rig, r) = open_with(
+async fn the_system_prompt_rides_ahead_of_the_first_prompt_only() {
+    let (mut rig, r) = open_with(
         Host::default(),
         Shared::default(),
         FakeOptions {
-            mcp_http: false,
+            preamble: Some("SYS".into()),
             ..Default::default()
         },
-        |_| {},
+        tempfile::tempdir().unwrap(),
+    )
+    .await;
+    r.unwrap();
+    rig.turn("a").await;
+    rig.turn("b").await;
+    let p = rig.prompts();
+    assert_eq!(p[0], vec!["SYS", "a"]);
+    assert_eq!(p[1], vec!["b"]);
+}
+
+#[tokio::test]
+async fn an_agent_that_refuses_to_open_is_reported() {
+    let (rig, r) = open_with(
+        Host::default(),
+        Shared::default(),
+        FakeOptions {
+            refuse: Some("no such model".into()),
+            ..Default::default()
+        },
         tempfile::tempdir().unwrap(),
     )
     .await;
     let Err(ChatError::Agent(msg)) = r else {
         panic!("expected a refusal")
     };
-    assert!(msg.contains("HTTP MCP"), "{msg}");
+    assert!(msg.contains("no such model"), "{msg}");
+    assert!(!rig.mgr.is_open(&session()));
+    assert!(rig
+        .items()
+        .iter()
+        .any(|b| matches!(b, ItemBody::Error { .. })));
 }
 
 #[tokio::test]
 async fn a_load_replay_rebuilds_the_transcript_and_records_nothing() {
-    let fake: Shared = Arc::new(std::sync::Mutex::new(FakeState::default()));
+    let fake: Shared = Shared::default();
     let mut first = open_with(
         Host::default(),
         fake.clone(),
         FakeOptions::default(),
-        |_| {},
         tempfile::tempdir().unwrap(),
     )
     .await
@@ -566,16 +905,17 @@ async fn a_load_replay_rebuilds_the_transcript_and_records_nothing() {
             ..Default::default()
         },
         fake.clone(),
-        FakeOptions::default(),
-        |s| s.resume_session_id = Some(session_id.clone()),
+        FakeOptions {
+            resume: Some(session_id.clone()),
+            ..Default::default()
+        },
         tempfile::tempdir().unwrap(),
     )
     .await;
     r.unwrap();
-    assert_eq!(fake.lock().unwrap().loads.len(), 1);
     assert_eq!(
-        fake.lock().unwrap().new_sessions.len(),
-        1,
+        fake.lock().opens,
+        vec!["new".to_string(), format!("load {session_id}")],
         "loaded, not new"
     );
     assert_eq!(second.agent_text(), vec!["one".to_string()]);
@@ -672,12 +1012,11 @@ async fn fs_reads_and_writes_stay_inside_the_sessions_worktree() {
 
 #[tokio::test]
 async fn each_open_is_a_new_generation_and_its_events_say_so() {
-    let fake: Shared = Arc::new(std::sync::Mutex::new(FakeState::default()));
+    let fake: Shared = Shared::default();
     let (first, r) = open_with(
         Host::default(),
         fake.clone(),
         FakeOptions::default(),
-        |_| {},
         tempfile::tempdir().unwrap(),
     )
     .await;
@@ -687,23 +1026,7 @@ async fn each_open_is_a_new_generation_and_its_events_say_so() {
     // Reopening on the same manager (a Restart) starts a new generation.
     let mut events = first.mgr.subscribe();
     tokio::time::sleep(Duration::from_millis(50)).await;
-    let (client, agent) = tokio::io::duplex(1 << 16);
-    let (ar, aw) = tokio::io::split(agent);
-    tokio::spawn(async move {
-        let _ = oxplow_acp_fake::serve(ar, aw, fake, FakeOptions::default()).await;
-    });
-    let (cr, cw) = tokio::io::split(client);
-    first
-        .mgr
-        .open_with_io(
-            first.host.clone(),
-            spec(first.dir.path()),
-            acp_open(),
-            cw,
-            cr,
-        )
-        .await
-        .unwrap();
+    first.reopen(FakeOptions::default()).await.unwrap();
     let g2 = first.mgr.transcript(&session(), 0).unwrap().generation;
     assert_ne!(g1, g2);
     // Late events from the closed session still carry its generation, so
@@ -725,44 +1048,30 @@ async fn each_open_is_a_new_generation_and_its_events_say_so() {
 
 #[tokio::test]
 async fn concurrent_opens_start_one_agent() {
-    let fake: Shared = Arc::new(std::sync::Mutex::new(FakeState::default()));
+    let fake: Shared = Shared::default();
     let mgr = ChatManager::new();
     let host = Arc::new(Host::default());
     let dir = tempfile::tempdir().unwrap();
-    let transport = || {
-        let (client, agent) = tokio::io::duplex(1 << 16);
-        let (ar, aw) = tokio::io::split(agent);
-        let f = fake.clone();
-        tokio::spawn(async move {
-            let _ = oxplow_acp_fake::serve(ar, aw, f, FakeOptions::default()).await;
-        });
-        tokio::io::split(client)
-    };
-    let (r1, w1) = transport();
-    let (r2, w2) = transport();
+    let (c1, r1) = connect(&fake, FakeOptions::default());
+    let (c2, r2) = connect(&fake, FakeOptions::default());
     let (a, b) = tokio::join!(
-        mgr.open_with_io(host.clone(), spec(dir.path()), acp_open(), w1, r1),
-        mgr.open_with_io(host.clone(), spec(dir.path()), acp_open(), w2, r2),
+        mgr.open_connection(host.clone(), spec(dir.path()), c1, r1),
+        mgr.open_connection(host.clone(), spec(dir.path()), c2, r2),
     );
     a.unwrap();
     b.unwrap();
     tokio::time::sleep(Duration::from_millis(100)).await;
-    assert_eq!(
-        fake.lock().unwrap().new_sessions.len(),
-        1,
-        "one agent session, not two"
-    );
+    assert_eq!(fake.lock().opens.len(), 1, "one agent session, not two");
     assert_eq!(host.count("started"), 1);
 }
 
 #[tokio::test]
 async fn close_is_immediate_and_a_replaced_sessions_teardown_records_nothing() {
-    let fake: Shared = Arc::new(std::sync::Mutex::new(FakeState::default()));
+    let fake: Shared = Shared::default();
     let (rig, r) = open_with(
         Host::default(),
         fake.clone(),
         FakeOptions::default(),
-        |_| {},
         tempfile::tempdir().unwrap(),
     )
     .await;
@@ -771,16 +1080,7 @@ async fn close_is_immediate_and_a_replaced_sessions_teardown_records_nothing() {
     assert!(!rig.mgr.is_open(&session()), "closed at once");
     // Reopen right away (a Restart) while the old actor may still be
     // shutting down.
-    let (client, agent) = tokio::io::duplex(1 << 16);
-    let (ar, aw) = tokio::io::split(agent);
-    tokio::spawn(async move {
-        let _ = oxplow_acp_fake::serve(ar, aw, fake, FakeOptions::default()).await;
-    });
-    let (cr, cw) = tokio::io::split(client);
-    rig.mgr
-        .open_with_io(rig.host.clone(), spec(rig.dir.path()), acp_open(), cw, cr)
-        .await
-        .unwrap();
+    rig.reopen(FakeOptions::default()).await.unwrap();
     tokio::time::sleep(Duration::from_millis(200)).await;
     let log = rig.host.log();
     let last = log

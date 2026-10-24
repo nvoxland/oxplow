@@ -1,40 +1,22 @@
-//! Every open chat session, by agent session: an ACP agent's or a Codex
-//! thread's. Holds only each session's command sender and shared view; the
+//! Every open chat session, by agent session: a Codex thread's. Holds only each session's command sender and shared view; the
 //! actor (`session.rs`) owns the connection. Events for every session go
 //! out on one broadcast channel.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
-use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use oxplow_domain::AgentSessionId;
 use parking_lot::Mutex;
 use serde::Serialize;
-use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, BufReader};
 use tokio::sync::{broadcast, mpsc, oneshot};
 
-use super::acp::{self as wire, AcpOpen};
 use super::codex::{CodexConnection, CodexOpen};
 use super::conn::{Connection, Incoming};
 use super::host::ChatHost;
 use super::model::ContextUsage;
 use super::session::{Actor, ChatError, ChatEvent, ChatStatus, Command, SessionSpec, SessionView};
 use super::transcript::TranscriptItem;
-
-/// The ACP agent's program to run.
-#[derive(Debug, Clone)]
-pub struct Launch {
-    /// Absolute path.
-    pub program: PathBuf,
-    pub args: Vec<String>,
-    pub env: Vec<(String, String)>,
-    /// What it must not inherit from oxplow's environment
-    /// (`agent_path::not_inherited`).
-    pub env_remove: Vec<String>,
-    pub open: AcpOpen,
-}
 
 /// A session as the UI reads it.
 #[derive(Debug, Clone, PartialEq, Serialize, specta::Type)]
@@ -164,66 +146,6 @@ impl ChatManager {
         }
     }
 
-    /// Start the ACP agent's process and its session. An agent already
-    /// running for the session is kept (`Ok`).
-    pub async fn open(
-        &self,
-        host: Arc<dyn ChatHost>,
-        spec: SessionSpec,
-        launch: Launch,
-    ) -> Result<(), ChatError> {
-        let Some(reservation) = self.reserve(&spec) else {
-            return Ok(());
-        };
-        let mut cmd = tokio::process::Command::new(&launch.program);
-        cmd.args(&launch.args)
-            .current_dir(&spec.cwd)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(true);
-        for k in &launch.env_remove {
-            cmd.env_remove(k);
-        }
-        if let Some(path) = crate::agent_path::augmented_path() {
-            cmd.env("PATH", path);
-        }
-        for (k, v) in &launch.env {
-            cmd.env(k, v);
-        }
-        let mut child = match cmd.spawn() {
-            Ok(c) => c,
-            Err(e) => {
-                self.release(&reservation.session, reservation.generation);
-                return Err(ChatError::Agent(format!(
-                    "starting {}: {e}",
-                    launch.program.display()
-                )));
-            }
-        };
-        let (Some(stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
-            self.release(&reservation.session, reservation.generation);
-            return Err(ChatError::Agent("the agent's stdio is unavailable".into()));
-        };
-        if let Some(stderr) = child.stderr.take() {
-            let view = reservation.view.clone();
-            tokio::spawn(async move {
-                let mut lines = BufReader::new(stderr).lines();
-                while let Ok(Some(line)) = lines.next_line().await {
-                    view.lock().push_stderr(line);
-                }
-            });
-        }
-        self.start_acp(
-            host,
-            spec,
-            reservation,
-            launch.open,
-            (stdin, stdout, Some(child)),
-        )
-        .await
-    }
-
     /// Open the session's thread on Codex's app-server daemon and observe
     /// it; its id, what Codex's TUI attaches to. A session already running
     /// is kept, and its thread's id answered.
@@ -251,75 +173,25 @@ impl ChatManager {
             .ok_or(ChatError::NotOpen)
     }
 
-    /// Run an ACP session over an existing transport (tests, the
-    /// in-process fake). `write` is the agent's input, `read` its output.
-    pub async fn open_with_io<W, R>(
-        &self,
-        host: Arc<dyn ChatHost>,
-        spec: SessionSpec,
-        open: AcpOpen,
-        write: W,
-        read: R,
-    ) -> Result<(), ChatError>
-    where
-        W: AsyncWrite + Send + 'static,
-        R: AsyncRead + Send + 'static,
-    {
-        let Some(reservation) = self.reserve(&spec) else {
-            return Ok(());
-        };
-        self.start_acp(host, spec, reservation, open, (write, read, None))
-            .await
-    }
-
     fn generation(&self) -> u64 {
         self.next_generation
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     }
 
-    /// Run the ACP connection over `io` — the agent's input, its output,
-    /// and its process when oxplow spawned it — with the session's actor
-    /// on it.
-    async fn start_acp<W, R>(
+    /// Run a session on a connection already made (tests: an in-process
+    /// agent). A session already running is kept (`Ok`).
+    #[cfg(test)]
+    pub(super) async fn open_connection(
         &self,
         host: Arc<dyn ChatHost>,
         spec: SessionSpec,
-        reservation: Reservation,
-        open: AcpOpen,
-        (write, read, child): (W, R, Option<tokio::process::Child>),
-    ) -> Result<(), ChatError>
-    where
-        W: AsyncWrite + Send + 'static,
-        R: AsyncRead + Send + 'static,
-    {
-        let Reservation {
-            commands: cmd_rx,
-            view,
-            current,
-            ..
-        } = reservation;
-        let (ready_tx, ready_rx) = oneshot::channel();
-        let actor = Actor::new(spec, host, view.clone(), self.events.clone(), current);
-        let teardown = actor.teardown_handle();
-        tokio::spawn(async move {
-            let r = wire::run(write, read, open, move |conn, incoming| {
-                actor.run(conn, incoming, cmd_rx, ready_tx)
-            })
-            .await;
-            // A transport error drops the actor mid-loop, before its own
-            // teardown; end the session here (a no-op when it already ran).
-            let reason = match r {
-                Ok(()) => "the agent connection ended".to_string(),
-                Err(e) => {
-                    tracing::warn!(error = %e, "acp: connection ended with an error");
-                    format!("the agent connection failed: {e}")
-                }
-            };
-            teardown.run(Some(reason)).await;
-            // Dropping the child kills it (`kill_on_drop`).
-            drop(child);
-        });
-        Self::ready(ready_rx, &view).await
+        conn: Arc<dyn Connection>,
+        incoming: mpsc::UnboundedReceiver<Incoming>,
+    ) -> Result<(), ChatError> {
+        let Some(reservation) = self.reserve(&spec) else {
+            return Ok(());
+        };
+        self.start(host, spec, reservation, conn, incoming).await
     }
 
     /// Run the session's actor on an open connection.

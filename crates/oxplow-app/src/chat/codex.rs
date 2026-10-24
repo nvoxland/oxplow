@@ -24,7 +24,7 @@ use parking_lot::Mutex;
 use serde_json::{json, Value};
 use tokio::sync::{mpsc, watch};
 
-use super::acp::{cap, cap_value};
+use super::conn::{cap, cap_value};
 use super::conn::{Connection, Incoming, Opened, SubagentChange, TurnEnd, TurnTokens};
 use super::human_prompt::HumanPrompt;
 use super::model::{

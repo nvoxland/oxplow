@@ -42,8 +42,7 @@ ends, replies still awaited fail (`calls_cut_off` counts them, and
 connection — what was awaited fails saying so — and each channel holds
 `channel_capacity` (1,024) messages, so a reader that falls behind slows
 the other side (its writes block on the pipe) instead of queueing without
-end. It is deliberately not the
-`agent-client-protocol` layer: that one is ACP-typed and actor-heavy.
+end.
 
 **Notifications about an in-flight request:** `$/cancel { id }` (host →
 provider: stop; it answers `Cancelled`), `$/progress { id, message?,
@@ -104,8 +103,7 @@ stub generation for provider authors.
 
 ## The fake provider (`crates/oxplow-provider-fake`)
 
-A scripted **work-items** provider, lib + bin (the `oxplow-acp-fake`
-pattern), that the host's tests and the conformance kit drive over real
+A scripted **work-items** provider, lib + bin, that the host's tests and the conformance kit drive over real
 stdio. `declarations()` is its `InitializeResult`: the `work_items`
 capability (hierarchy, comments, links, delete and `idempotent_writes`),
 the work-items verbs `create` / `update` / `transition` (undoable: its
@@ -939,7 +937,7 @@ form; sign-in is a provider's.
   that ships. Guard `no_test_double_is_a_production_dependency`
   (tsk930) holds that for every test double — a workspace crate named
   `*-fake` or `*-sim` (`oxplow-oauth-sim`, `oxplow-ai-fake`,
-  `oxplow-provider-fake`, `oxplow-acp-fake`): no workspace crate reaches
+  `oxplow-provider-fake`): no workspace crate reaches
   one through a normal or build edge of the resolved graph (`cargo
   metadata`), however its manifest spells the dependency.
 

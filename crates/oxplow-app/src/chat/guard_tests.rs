@@ -1,8 +1,8 @@
 //! Source-scan guard: oxplow never synthesizes agent input. A prompt
 //! reaches a chat session's agent only because a person submitted it, so the
 //! code that can build or send one is pinned here. `HumanPrompt` enforces
-//! the same at the type level; this catches a new path around it (a raw
-//! `session/prompt`, a second builder, a new caller of the submit path).
+//! the same at the type level; this catches a new path around it (a Codex
+//! `turn/start`, a second builder, a new caller of the submit path).
 //! The TS side has `no-agent-input-automation.test.ts`.
 
 #![allow(clippy::unwrap_used)]
@@ -59,7 +59,7 @@ fn source_lines() -> Vec<(String, String)> {
 }
 
 /// `needle` in `line` not preceded by an identifier character, so
-/// `PromptRequest` doesn't match `SetThreadPromptRequest`.
+/// `compose(` doesn't match `decompose(`.
 fn contains_word(line: &str, needle: &str) -> bool {
     line.match_indices(needle).any(|(i, _)| {
         !line[..i]
@@ -77,17 +77,6 @@ fn files_containing(lines: &[(String, String)], needle: &str) -> Vec<String> {
         .collect();
     files.dedup();
     files
-}
-
-const FAKE: &str = "crates/oxplow-acp-fake/";
-
-#[test]
-fn only_wire_names_the_sdk_prompt_request() {
-    let lines = source_lines();
-    assert_eq!(
-        files_containing(&lines, "PromptRequest"),
-        vec!["crates/oxplow-app/src/chat/acp.rs"]
-    );
 }
 
 /// Nothing in production starts a Codex turn: the person prompts in
@@ -108,16 +97,6 @@ fn only_the_codex_connection_injects_context() {
         files_containing(&lines, "\"thread/inject_items\""),
         vec!["crates/oxplow-app/src/chat/codex.rs"]
     );
-}
-
-#[test]
-fn no_code_sends_a_raw_session_prompt() {
-    let lines = source_lines();
-    let hits: Vec<String> = files_containing(&lines, "\"session/prompt\"")
-        .into_iter()
-        .filter(|f| !f.starts_with(FAKE))
-        .collect();
-    assert!(hits.is_empty(), "raw session/prompt in {hits:?}");
 }
 
 #[test]

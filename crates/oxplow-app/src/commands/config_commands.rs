@@ -485,7 +485,7 @@ pub fn ops(target: ConfigTarget) -> Vec<Op> {
                     }
                 }
                 // Nothing chosen is the key absent.
-                let value = (!chosen.is_empty()).then(|| Value::Object(chosen));
+                let value = (!chosen.is_empty()).then_some(Value::Object(chosen));
                 change(&t, ctx.actor(), "activeProviders", value, input.layer)
             })),
         )
@@ -524,7 +524,7 @@ pub fn ops(target: ConfigTarget) -> Vec<Op> {
                         chosen.remove(&target);
                     }
                 }
-                let value = (!chosen.is_empty()).then(|| Value::Object(chosen));
+                let value = (!chosen.is_empty()).then_some(Value::Object(chosen));
                 change(&t, ctx.actor(), "replacements", value, Layer::Project)
             })),
         )

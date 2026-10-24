@@ -1,10 +1,10 @@
-//! One chat session: an actor task that owns the agent's connection (an
-//! ACP agent's, a Codex thread's: [`Connection`]) and turns its traffic
+//! One chat session: an actor task that owns the agent's connection (a
+//! Codex thread's today: [`Connection`]) and turns its traffic
 //! into transcript items, policy decisions and recording. The manager
 //! (`manager.rs`) holds only its command sender and the shared
 //! [`SessionView`].
 //!
-//! The rules it keeps (see `.context/agent-model.md` → "ACP agents"):
+//! The rules it keeps (see `.context/agent-model.md` → "The chat machinery (a library)"):
 //! - it sends a prompt only for [`Command::Prompt`], which comes only from
 //!   a person's submit; a second prompt while a turn runs is an error,
 //!   never queued;
@@ -29,7 +29,7 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 
 use super::host::ChatHost;
 
-/// What a write oxplow makes for an ACP agent (`fs/write_text_file`) is
+/// What a write oxplow makes for a connection's agent (`Incoming::WriteFile`) is
 /// called, where a person reads it and in the record.
 const FS_WRITE: &str = "fs/write_text_file";
 use super::conn::{Connection, Incoming, PermissionReply, TurnEnd};
@@ -63,7 +63,7 @@ pub enum ChatEventBody {
     Closed { reason: Option<String> },
 }
 
-/// A change to one agent session's ACP agent, pushed to the UI.
+/// A change to one agent session's chat agent, pushed to the UI.
 #[derive(Debug, Clone, PartialEq, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ChatEvent {
@@ -102,7 +102,7 @@ pub struct SessionSpec {
     /// The agent session it runs.
     pub session_id: oxplow_domain::AgentSessionId,
     pub thread_id: ThreadId,
-    /// What runs it, as a person names it: the `acpAgents` name, or the
+    /// What runs it, as a person names it: the
     /// harness's.
     pub agent: String,
     /// Its worktree.
