@@ -11,6 +11,7 @@ import { useMemo } from "react";
 import { LensResultView } from "../../lens/LensResultView.js";
 import type { ExtensionPanel } from "../../tauri-bridge/generated/bindings.js";
 import type { TabRef } from "../../tabs/tabState.js";
+import { ContextDockBody, useContextBadge } from "../Context/ContextDockPanel.js";
 import { AlertsDockBody, useAlertsBadge } from "../Alerts/AlertsDockPanel.js";
 import { usePanelRuns } from "../Panels/PanelRunsContext.js";
 import { badgeCount } from "../Panels/usePanelRuns.js";
@@ -42,6 +43,7 @@ export interface DockPanelDef {
 export const CORE_ORDER = ["assistant", "context", "alerts"];
 
 const core: DockPanelDef[] = [
+  { id: "context", title: "Context", icon: "at-sign", useBadge: useContextBadge, Body: ContextDockBody },
   { id: "alerts", title: "Alerts", icon: "bell", useBadge: useAlertsBadge, Body: AlertsDockBody },
 ];
 

@@ -950,6 +950,20 @@ agents in a thread an idle Codex can take the basket before the agent the
 person prompts. The basket is the person's: an agent's `context.*` run is
 refused. Pinned by `the_context_basket_reaches_the_next_prompt_once`.
 
+*The UI* (`apps/desktop/src/contextBasket.ts`, the window's selected thread
+from `setSelectedThread`): **Add to Context** is on every page's ☰
+(`menu-item-page-add-to-context`, beside Ask; `oxplow.context.add` with the
+page's canonical ref and title; disabled with a reason when no thread is
+selected) and on selections: an editor's and a diff's right-side selection
+(**Add Selection to Context**, text plus the `#lines=` URI), a lens row's
+menu (**Add to Context**: the row's first linked page, else the row as
+text) and the floating toolbar over a selection on a commentable page.
+Each toasts with Undo. The **Context** dock panel (`@`, badge = waiting
+items) lists what waits with × per item (`oxplow.context.remove`), Clear
+(`oxplow.context.clear`) and a link to the **Context** page (foundation lens
+`context`: Waiting and Delivered (last 20) over `v_thread_context`, row
+action Remove, Clear in the nav bar).
+
 **Building takes nothing; delivery commits.** `build_context` returns a
 `PendingContext` and changes no state: no baseline moves, no handoff or
 nudge is stamped. `AgentContext::commit` records the blocks as the

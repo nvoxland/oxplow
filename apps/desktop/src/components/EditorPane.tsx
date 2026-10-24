@@ -17,7 +17,8 @@ import { useMonacoViewState } from "./useMonacoViewState.js";
 import type { MenuItem } from "../menu.js";
 import { ContextMenu } from "./ContextMenu.js";
 import { gitRevision } from "../revision.js";
-import { askAboutSelection } from "../agent-context-ref.js";
+import { askAboutSelection, selectionUri } from "../agent-context-ref.js";
+import { addToContext } from "../contextBasket.js";
 import { insertIntoAgent } from "../agent-input-bus.js";
 import { MonacoCommentLayer, type MonacoCommentHandle } from "./Comments/MonacoCommentLayer.js";
 import { getPageDetailStore } from "../tabs/openPageDetail.js";
@@ -513,6 +514,18 @@ export function EditorPane({
         const sel = editorRef.current?.getSelection?.();
         if (!sel || sel.isEmpty() || !filePath) return;
         insertIntoAgent(askAboutSelection(filePath, sel));
+      },
+    },
+    {
+      id: "editor.add-to-context",
+      label: "Add Selection to Context",
+      enabled: !!filePath && hasEditorSelection(editorRef.current),
+      run: () => {
+        const editor = editorRef.current;
+        const sel = editor?.getSelection?.();
+        const model = editor?.getModel();
+        if (!editor || !model || !sel || sel.isEmpty() || !filePath) return;
+        void addToContext({ uri: selectionUri(filePath, sel), text: model.getValueInRange(sel) });
       },
     },
     {

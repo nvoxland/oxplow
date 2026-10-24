@@ -273,6 +273,7 @@ export function Page({ title, titleIcon, kind, chips: ownChips, actions, pin, ch
           siblings={effectiveNavBar.siblings}
           title={titleInBody ? undefined : effectiveTitle}
           titleIcon={titleInBody ? undefined : titleIcon}
+          pageLabel={typeof effectiveTitle === "string" ? effectiveTitle : undefined}
           bookmark={effectiveNavBar.bookmark}
           backlinks={effectiveNavBar.backlinks}
           outbound={effectiveNavBar.outbound}

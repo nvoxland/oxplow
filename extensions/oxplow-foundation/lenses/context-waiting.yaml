@@ -1,0 +1,21 @@
+title: Waiting
+description: Collected and not yet sent. The next prompt to an agent in the thread carries it.
+params:
+  - { name: thread_id }
+query: |
+  SELECT c.id, c.kind,
+         coalesce(c.label, c.source_uri, substr(c.text, 1, 80)) AS what,
+         c.source_uri, substr(c.text, 1, 200) AS preview, c.added_at
+  FROM v_thread_context c
+  WHERE c.thread_id = :thread_id AND c.delivered_at IS NULL
+  ORDER BY c.id
+viz: table
+columns:
+  - { key: what, label: Collected, link: { kind: page, from: source_uri } }
+  - { key: kind, label: Kind, width: 70 }
+  - { key: preview, label: Text }
+  - { key: added_at, label: Added, format: relative, width: 110 }
+actions:
+  - { id: remove, label: Remove, command: oxplow.context.remove, input: { item: "{{row.id}}" }, row: true }
+empty: "Nothing collected yet. Add a page from its ☰ and text from a selection's right-click; the next prompt to an agent in this thread carries it."
+hidden: true

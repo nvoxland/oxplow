@@ -343,7 +343,7 @@ For several forms on one
 page, make a document whose parts are form lenses; each submits on its
 own.
 An action runs as the lens acting for you, so it can't do anything you
-couldn't. Copy and Add to Context are on every lens; you don't
+couldn't. Copy is on every lens, and Add to Context is on every page's ☰; you don't
 declare them.
 
 A lens action never approves a permission. A source that executes a
@@ -550,7 +550,7 @@ Problems show under Settings → Extensions. Agents check their work with
 Every lens page has the same layout:
 
 - **The title row** holds what acts on the whole page: Copy,
-  Add to Context, the lens's own actions and, if the lens says
+  the lens's own actions and, if the lens says
   `refresh: true`, Refresh.
 - **The body** is the content: the title, the description, then the
   sections, tables and charts.

@@ -19,6 +19,7 @@ test("standard actions come first in their own order, then the custom ones sorte
       { id: "json", label: "As JSON", run: noop, submenu: "Download" },
     ],
     ask: { prompts: ["What changed?"], askThis: noop, askPrompt: noop },
+    context: { add: noop },
     commands: [
       { id: "tracker.sync", label: "Sync", group: "Tracker", run: noop },
       { id: "tracker.archive", label: "Archive", group: "Tracker", run: noop },
@@ -33,6 +34,7 @@ test("standard actions come first in their own order, then the custom ones sorte
   // The primary and prominent actions stay buttons in the bar, never in the menu.
   expect(ids(items)).toEqual([
     "page-ask",
+    "page-add-to-context",
     "action-refresh",
     "action-copy",
     "—",
@@ -109,4 +111,19 @@ test("the primary and prominent actions stay in the bar", () => {
       { id: "d", label: "D", run: noop, prominent: true },
     ]).map((a) => a.id),
   ).toEqual(["b", "c", "d"]);
+});
+
+// Add to Context is oxplow's own entry, next to Ask: the page goes in the
+// thread's basket; with no thread selected it says why it can't.
+test("Add to Context follows Ask and is disabled with a reason when no thread is selected", () => {
+  const ran: string[] = [];
+  const on = pageMenuItems({ ask: { prompts: [], askThis: noop, askPrompt: noop }, context: { add: () => ran.push("add") }, openPanel: noop });
+  expect(ids(on)).toEqual(["page-ask", "page-add-to-context"]);
+  const item = on.find((i) => i.id === "page-add-to-context")!;
+  expect(item.label).toBe("Add to Context");
+  expect(item.icon).toBe("at-sign");
+  item.run!();
+  expect(ran).toEqual(["add"]);
+  const off = pageMenuItems({ context: { add: noop, disabledReason: "Select a thread first" }, openPanel: noop });
+  expect(off[0]).toMatchObject({ id: "page-add-to-context", enabled: false, label: "Add to Context (Select a thread first)" });
 });

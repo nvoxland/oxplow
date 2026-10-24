@@ -3,7 +3,6 @@
 /// the command does, and grants no power the person lacks. Copy and Add to
 /// Agent Context are on every lens (kit affordances, not declared). See
 /// `.context/extensions.md`.
-import { formatContextMention } from "../agent-context-ref.js";
 import { fieldsOf, secretFields, shownFields, type Field } from "../components/SchemaForm/schemaFormModel.js";
 import { IpcCallError, needsConfirmation } from "../ipc-error.js";
 import type { CommandOutcome, Drop, FormStart, LensAction, LensRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
@@ -155,10 +154,4 @@ export async function copyLens(
     deps.recordError("Copy", e instanceof Error ? e.message : String(e));
     return false;
   }
-}
-
-/** Add to Context: the lens and its params, into the agent's input
- *  (never sent). */
-export function addLensToContext(run: LensRun, insertIntoAgent: (text: string) => void): void {
-  insertIntoAgent(formatContextMention({ kind: "lens", lensId: run.lens.id, params: run.params }));
 }

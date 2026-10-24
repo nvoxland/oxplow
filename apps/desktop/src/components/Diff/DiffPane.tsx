@@ -2,7 +2,8 @@ import React, { useEffect, useRef, useState } from "react";
 import { readAt } from "../../api.js";
 import { languageForPath } from "../../editor-language.js";
 import type { Revision } from "../../revision.js";
-import { askAboutSelection } from "../../agent-context-ref.js";
+import { askAboutSelection, selectionUri } from "../../agent-context-ref.js";
+import { addToContext } from "../../contextBasket.js";
 import { diffAskTarget } from "./diffAsk.js";
 import { insertIntoAgent } from "../../agent-input-bus.js";
 import { DiffFileHeaderSlot } from "./DiffFileHeaderSlot.js";
@@ -105,6 +106,22 @@ export function DiffPane({ streamId, spec, visible, onJumpToSource }: Props) {
           const sel = ed.getSelection();
           if (!sel || !target) return;
           insertIntoAgent(askAboutSelection(target.path, sel, target.rev));
+        },
+      });
+      modified.addAction({
+        id: "oxplow.addToContext",
+        label: "Add Selection to Context",
+        contextMenuGroupId: "navigation",
+        precondition: "editorHasSelection && oxplow.diffAskable",
+        run: (ed: {
+          getSelection(): { startLineNumber: number; endLineNumber: number; endColumn: number; isEmpty(): boolean } | null;
+          getModel(): { getValueInRange(range: unknown): string } | null;
+        }) => {
+          const target = diffAskTarget(specRef.current);
+          const sel = ed.getSelection();
+          const model = ed.getModel();
+          if (!sel || sel.isEmpty() || !model || !target) return;
+          void addToContext({ uri: selectionUri(target.path, sel, target.rev), text: model.getValueInRange(sel) });
         },
       });
       editorRef.current = editor;

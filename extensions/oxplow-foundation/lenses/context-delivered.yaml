@@ -1,0 +1,20 @@
+title: Delivered
+description: The last 20 items an agent's prompt carried.
+params:
+  - { name: thread_id }
+query: |
+  SELECT c.id, c.kind,
+         coalesce(c.label, c.source_uri, substr(c.text, 1, 80)) AS what,
+         c.source_uri, substr(c.text, 1, 200) AS preview, c.delivered_at
+  FROM v_thread_context c
+  WHERE c.thread_id = :thread_id AND c.delivered_at IS NOT NULL
+  ORDER BY c.delivered_at DESC, c.id DESC
+  LIMIT 20
+viz: table
+columns:
+  - { key: what, label: Collected, link: { kind: page, from: source_uri } }
+  - { key: kind, label: Kind, width: 70 }
+  - { key: preview, label: Text }
+  - { key: delivered_at, label: Delivered, format: relative, width: 110 }
+empty: Nothing delivered yet.
+hidden: true

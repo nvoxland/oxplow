@@ -25,6 +25,11 @@ finish.
   prompt in a `<handoffs>` block. Take it on or decline it with
   `oxplow.handoff.resolve`; to hand work to another thread, see
   `references/commands.md`. Nothing wakes the other agent.
+- **Context basket.** A `<context-basket>` block in a prompt is what the
+  person collected for the thread: pages as `[oxplow uri …]` with their
+  label, and pieces of text quoted with where they came from. It is theirs
+  to put there (you can't add to it); read a page with `oxplow_read` on its
+  URI. It arrives once, then is empty.
 - **Hints.** oxplow may add short guidance to your next prompt or tool
   result (work grown large with nothing committed, metric movement). Each
   is advisory.

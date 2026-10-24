@@ -28,8 +28,17 @@ export function askAboutSelection(
   sel: { startLineNumber: number; endLineNumber: number; endColumn: number },
   rev: string | null = null,
 ): string {
+  return formatContextMention({ kind: "ref", ref: selectionUri(path, sel, rev) });
+}
+
+/** The URI of a selection's lines (the same ones Ask About This names). */
+export function selectionUri(
+  path: string,
+  sel: { startLineNumber: number; endLineNumber: number; endColumn: number },
+  rev: string | null = null,
+): string {
   const end = sel.endColumn === 1 && sel.endLineNumber > sel.startLineNumber ? sel.endLineNumber - 1 : sel.endLineNumber;
-  return formatContextMention({ kind: "ref", ref: fileLinesUri(path, sel.startLineNumber, end, rev) });
+  return fileLinesUri(path, sel.startLineNumber, end, rev);
 }
 
 export function formatContextMention(ref: ContextRef): string {
