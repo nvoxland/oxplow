@@ -11,6 +11,7 @@ import {
   flatten,
   type CommentRange,
 } from "./CommentDecorations.js";
+import { addToContext } from "../../contextBasket.js";
 import { createComment, relinkComment, relocateComment } from "../../api.js";
 import type { CommentIntent } from "../../tauri-bridge/generated/bindings.js";
 import { extractContext } from "../Comments/anchor.js";
@@ -612,6 +613,14 @@ export function RichTextField({
         },
       },
     ];
+    if (!empty) {
+      items.push({
+        id: "context.add",
+        label: "Add Selection to Context",
+        enabled: true,
+        run: () => void addToContext({ uri: comments?.target, text }),
+      });
+    }
     if (comments && !empty) {
       items.push({
         id: "comment.add",

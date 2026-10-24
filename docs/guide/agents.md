@@ -57,6 +57,23 @@ an in-progress task to make an edit, and work tracking never gates Stop.
 Efforts belong to the thread and can span sessions. See
 [Agent control](agent-control.md) and [Local History](local-history.md).
 
+## Collect context for the agents
+
+Add to Context puts things in a thread's context basket:
+
+- A page's ☰ menu → **Add to Context** adds the page.
+- A selection in an editor or a diff, a lens row's right-click menu, and
+  the **Add to Context** button over selected text on a commentable page
+  add that text (or row).
+
+The **Context** icon in the bottom bar shows how many items wait. Open it
+to see them, take one out with ×, or **Clear** them all. **Open Context
+page** shows the full list, with what was already delivered.
+
+The next prompt to any agent in the thread carries the basket. Then it is
+empty. An item you removed is not sent. Add to Context needs a selected
+thread.
+
 ## Input
 
 The person sends terminal input and chat prompts. Oxplow context and

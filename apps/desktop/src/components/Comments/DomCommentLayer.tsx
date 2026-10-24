@@ -27,6 +27,7 @@ import { clearCommentHighlights, paintCommentHighlights } from "./cssHighlight.j
 import { textContentRange } from "./domAnchor.js";
 import { NewCommentPopover } from "./NewCommentPopover.js";
 import { anchorInputFromSelectors } from "./selectors.js";
+import { addToContext } from "../../contextBasket.js";
 import { SelectionCommentToolbar } from "./SelectionCommentToolbar.js";
 import { useDomAnnotations } from "./useDomAnnotations.js";
 
@@ -165,7 +166,14 @@ export function DomCommentLayer({
   return (
     <div data-selection-comment-ui>
       {pending && !composing && (
-        <SelectionCommentToolbar rect={pending.rect} onAdd={beginCompose} />
+        <SelectionCommentToolbar
+          rect={pending.rect}
+          onAdd={beginCompose}
+          onAddContext={() => {
+            void addToContext({ uri: pending.target, text: pending.quote });
+            cancel();
+          }}
+        />
       )}
       {pending && composing && (
         <NewCommentPopover rect={pending.rect} onCreate={handleCreate} onDismiss={cancel} />

@@ -236,7 +236,7 @@ test("Refresh is in the nav bar only when the page asks for it", async () => {
     </PageNavigationContext.Provider>,
   );
   fireEvent.click(await waitFor(() => without.getByTestId("page-nav-menu")));
-  await waitFor(() => expect(without.getByTestId("menu-item-action-lens-add-to-context")).toBeTruthy());
+  await waitFor(() => expect(without.getByTestId("menu-item-action-lens-copy")).toBeTruthy());
   expect(without.queryByTestId("menu-item-action-lens-refresh")).toBeNull();
   expect(without.queryByTestId("menu-item-action-lens-improve-with-agent")).toBeNull();
   cleanup();

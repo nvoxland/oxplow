@@ -553,6 +553,11 @@ export function alertsRef(): TabRef {
   return pageTabRef("alerts");
 }
 
+/** The Context page: what the person collected for the thread's agents. */
+export function contextRef(): TabRef {
+  return pageTabRef("context");
+}
+
 export interface ExternalUrlPayload {
   url: string;
 }

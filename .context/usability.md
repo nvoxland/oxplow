@@ -1126,6 +1126,14 @@ no caller may bypass the bus to write to the terminal.
   The launcher's last row for any typed text is **Ask the Agent: <text>**,
   which inserts the text the same way. Nothing in oxplow sends agent
   input on its own; these only fill the draft.
+- **Add to Context** is the collect-then-ask form, and it is universal:
+  the ☰ of any page with a canonical URI (`menu-item-page-add-to-context`,
+  disabled with "Select a thread first" when none is selected), a
+  selection in an editor or a diff's right side, a lens row's menu, and the
+  floating toolbar on a commentable page's selection (**Add to Context**
+  beside Add comment). It puts the page or text in the selected thread's
+  basket (`oxplow.context.add`, toast with Undo); the next prompt to any
+  agent in the thread carries it. The Context dock panel and page list it.
 - **Repair with the Agent** (P7.C3, Settings → Extensions, on a disabled
   contribution with an open repair item) is the same gesture: it fills
   the input with `Repair the extension described in [oxplow uri <item>]

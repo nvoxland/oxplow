@@ -44,6 +44,8 @@ export interface PageNavBarProps {
   };
   /** Page title rendered to the right of the back/forward arrows. */
   title?: ReactNode;
+  /** The page's name as text: what its Add to Context entry says. */
+  pageLabel?: string;
   /** Drawn before the title: what the page is (an agent's logo). */
   titleIcon?: ReactNode;
   /** Optional bookmark affordance — when omitted, no star renders.
@@ -102,6 +104,7 @@ export function PageNavBar({
   siblings,
   title,
   titleIcon,
+  pageLabel,
   bookmark,
   backlinks,
   outbound,
@@ -465,6 +468,7 @@ export function PageNavBar({
       <PageMenu
         actions={actions}
         ask={ask}
+        label={pageLabel}
         openWith={openWith}
         backlinks={backlinks}
         outbound={outbound}

@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 
 import { IpcCallError } from "../ipc-error.js";
 import type { FormStart, LensAction, LensRun } from "../tauri-bridge/generated/bindings.js";
-import { actionOffered, addLensToContext, offeredWholeLens, copyLens, openAfterAction, performLensAction, promptField, rowRecord, type LensActionDeps } from "./lensActions.js";
+import { actionOffered, offeredWholeLens, copyLens, openAfterAction, performLensAction, promptField, rowRecord, type LensActionDeps } from "./lensActions.js";
 
 const run = { lens: { id: "acme/prs" }, params: { repo: "x" } } as unknown as LensRun;
 const action: LensAction = { id: "finish", label: "Finish", command: "oxplow.work_item.transition", input: {}, row: false };
@@ -100,12 +100,6 @@ test("copy puts the lens's text rendering on the clipboard", async () => {
   });
   expect(ok).toBe(true);
   expect(log).toEqual([`acme/prs {"repo":"x"} str1`]);
-});
-
-test("add to context hands the lens and its params to the agent", () => {
-  const log: string[] = [];
-  addLensToContext(run, (t) => log.push(t));
-  expect(log).toEqual(['[oxplow lens acme/prs repo="x"] ']);
 });
 
 test("rowRecord maps columns to the row's values", () => {

@@ -33,6 +33,9 @@ export interface PageMenuSource {
   /** The commands about the page's resource. */
   commands?: Array<Pick<CommandEntry, "id" | "label" | "group" | "run" | "enabled">>;
   openWith?: OpenWithProps;
+  /** Add to Context: the page goes in the thread's basket. With a reason,
+   *  not now. */
+  context?: { add(): void; disabledReason?: string | null };
   /** How many pages link here / this page links to. */
   backlinks?: number;
   outbound?: number;
@@ -78,6 +81,16 @@ export function pageMenuItems(source: PageMenuSource): MenuItem[] {
         { id: "page-ask-this", label: "Ask About This", enabled: true, run: ask.askThis },
         ...ask.prompts.map((p, i) => ({ id: `page-ask-prompt-${i}`, label: p, enabled: true, run: () => ask.askPrompt(p) })),
       ],
+    });
+  }
+  if (source.context) {
+    const why = source.context.disabledReason;
+    standard.push({
+      id: "page-add-to-context",
+      label: why ? `Add to Context (${why})` : "Add to Context",
+      enabled: !why,
+      icon: "at-sign",
+      run: source.context.add,
     });
   }
   standard.push(...inMenu.filter((a) => a.standard).map(item));

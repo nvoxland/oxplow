@@ -1765,3 +1765,52 @@ async fn the_capabilities_lens_lists_the_implementations_and_choosing_one_is_a_c
         Some("oxplow")
     );
 }
+
+/// The Context page: its Waiting section lists what the person collected,
+/// and Clear — a whole-lens action on the `context` document, bound to the
+/// page's `thread_id` — empties it through the lens-action path, leaving
+/// what was delivered.
+#[tokio::test]
+async fn the_context_pages_clear_empties_the_threads_basket() {
+    use crate::lens_actions::{run_lens_action, LensActionCall};
+    let fx = services_with_effort().await;
+    let thread = fx.thread.to_string();
+    let add = |uri: &str| {
+        let svc = fx.svc.clone();
+        let input = serde_json::json!({ "thread": thread, "uri": uri, "label": uri });
+        async move {
+            svc.commands
+                .run(
+                    &oxplow_domain::Actor::Human,
+                    "oxplow.context.add",
+                    input,
+                    false,
+                )
+                .await
+                .unwrap()
+        }
+    };
+    add("oxplow:oxplow/page?page=tasks").await;
+    add("oxplow:oxplow/page?page=board").await;
+    let row_id = fx.thread.value();
+    let by_thread = || vec![("thread_id", SqlCell::Int(row_id))];
+    assert_eq!(run(&fx, "context-waiting", by_thread()).await.rows.len(), 2);
+
+    let call = LensActionCall {
+        lens_id: "oxplow-foundation/context".into(),
+        action_id: "clear".into(),
+        params: std::collections::BTreeMap::from([("thread_id".to_string(), SqlCell::Int(row_id))]),
+        row: None,
+        input: None,
+        drop: None,
+        on_behalf_of: oxplow_domain::Actor::Human,
+        confirmed: false,
+    };
+    run_lens_action(&fx.svc, fx._dir.path(), call, &LensContext::default())
+        .await
+        .unwrap();
+    assert!(run(&fx, "context-waiting", by_thread())
+        .await
+        .rows
+        .is_empty());
+}

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useId, useMemo, useState, type CSSProperties, t
 import { listMetricDefinitions, runLensAction, type LensRun, type MetricSpec, type SqlCell } from "../api.js";
 import type { LensAction, LensPart, Reads } from "../tauri-bridge/generated/bindings.js";
 import { insertIntoAgent } from "../agent-input-bus.js";
+import { addToContext } from "../contextBasket.js";
 import { CommandConfirm } from "../components/CommandConfirm.js";
 import { MetricTileBody } from "../components/Dashboard/MetricTile.js";
 import { QueryTileBody } from "../components/Dashboard/QueryTile.js";
@@ -22,7 +23,7 @@ import { RouteLink } from "../tabs/RouteLink.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { LensResultView, type LensActionsState } from "./LensResultView.js";
 import { actionOffered } from "./lensActions.js";
-import { foldEmpty, rowAsk, rowTiles, type RowTile } from "./lensModel.js";
+import { foldEmpty, rowAsk, rowContext, rowTiles, type RowTile } from "./lensModel.js";
 import { NO_READS, useRerunOnChange } from "./lensRerun.js";
 import { dragActionFor, dropBeside, dropInGroup, keyAction, withOrder, type DropAt } from "./rowInteract.js";
 import { useFormSubmit } from "./useFormSubmit.js";
@@ -278,6 +279,7 @@ export function DashboardViz(props: DashboardVizProps) {
 
   const itemsFor = (tile: RowTile): MenuItem[] => [
     { id: "ask-about-row", label: "Ask About This", enabled: true, run: () => insertIntoAgent(rowAsk(lens, run.result.columns, run.result.rows[tiles.indexOf(tile)] ?? [])) },
+    { id: "add-row-to-context", label: "Add to Context", enabled: true, run: () => void addToContext(rowContext(lens, run.result.columns, run.result.rows[tiles.indexOf(tile)] ?? [])) },
     ...rowActions
       .filter((a) => actionOffered(a, tile.record))
       .map((a) => ({ id: `lens-action-${a.id}`, label: a.label, enabled: actions !== undefined, run: () => actions?.run(a, tile.record) })),

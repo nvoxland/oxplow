@@ -8,6 +8,7 @@ import { Menu } from "lucide-react";
 
 import { formatContextMention } from "../agent-context-ref.js";
 import { insertIntoAgent } from "../agent-input-bus.js";
+import { addDisabledReason, addToContext, useSelectedThreadId } from "../contextBasket.js";
 import { ContextMenu } from "../components/ContextMenu.js";
 import { PinToDashboardMenu, type PinnedTile } from "../components/Dashboard/PinToDashboard.js";
 import { askText, promptsAbout } from "../components/Prompts/promptModel.js";
@@ -24,6 +25,8 @@ import type { TabRef } from "./tabState.js";
 export interface PageMenuProps {
   actions?: readonly PageAction[];
   ask?: AskTarget;
+  /** The page's name, for its basket entry. */
+  label?: string;
   openWith?: OpenWithProps;
   backlinks?: { count: number; body: ReactNode };
   outbound?: { count: number; body: ReactNode };
@@ -34,7 +37,7 @@ export interface PageMenuProps {
 /** The widest the menu is, px; it opens leftward from the button. */
 const MENU_WIDTH = 240;
 
-export function PageMenu({ actions, ask, openWith, backlinks, outbound, pin, buttonStyle }: PageMenuProps) {
+export function PageMenu({ actions, ask, label, openWith, backlinks, outbound, pin, buttonStyle }: PageMenuProps) {
   const offersFor = useRefOffers();
   const catalog = usePromptCatalog();
   const [at, setAt] = useState<MenuPosition | null>(null);
@@ -44,6 +47,7 @@ export function PageMenu({ actions, ask, openWith, backlinks, outbound, pin, but
 
   // URI-SWITCH: a prompt's `about` names the resource.
   const kind = ask ? typeOf(ask.ref) : null;
+  const thread = useSelectedThreadId();
   const items = pageMenuItems({
     actions,
     ask: ask
@@ -52,6 +56,9 @@ export function PageMenu({ actions, ask, openWith, backlinks, outbound, pin, but
           askThis: () => insertIntoAgent(formatContextMention({ kind: "ref", ref: ask.ref })),
           askPrompt: (prompt) => insertIntoAgent(askText(prompt, ask.ref)),
         }
+      : undefined,
+    context: ask
+      ? { add: () => void addToContext({ uri: ask.ref, label }), disabledReason: addDisabledReason(thread) }
       : undefined,
     commands: ask ? offersFor(ask.ref) : undefined,
     openWith,

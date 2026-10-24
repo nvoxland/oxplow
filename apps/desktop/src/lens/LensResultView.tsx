@@ -41,6 +41,7 @@ import {
   limitRows,
   lineSeries,
   rowAsk,
+  rowContext,
   rowContextRef,
   rowDepth,
   foldedAway,
@@ -65,6 +66,8 @@ import {
   type TreeNode,
 } from "./lensModel.js";
 import { insertIntoAgent } from "../agent-input-bus.js";
+import { addToContext } from "../contextBasket.js";
+import { lensRef } from "../tabs/pageRefs.js";
 import { useContextMenu } from "../components/useRowContextMenu.js";
 import { refCommandMenuItems, useRefOffers } from "../components/refCommands.js";
 import { safeColor } from "../components/decorators.js";
@@ -86,7 +89,7 @@ import { Facts } from "../kit/Facts.js";
 import { Stat } from "../kit/Stat.js";
 import { recordOpError } from "../opErrors.js";
 import { showToast } from "../components/toastStore.js";
-import { actionOffered, addLensToContext, copyLens, offeredWholeLens, openAfterAction, performLensAction, promptField, rowRecord } from "./lensActions.js";
+import { actionOffered, copyLens, offeredWholeLens, openAfterAction, performLensAction, promptField, rowRecord } from "./lensActions.js";
 import { useHistoryState } from "../tabs/useHistoryState.js";
 import {
   chainedDrops,
@@ -399,13 +402,6 @@ function HandToolbar({ run, streamId, actions, marks, to }: { run: LensRun; stre
             }
           }),
       },
-      {
-        id: "lens-add-to-context",
-        label: "Add to Context",
-        standard: true,
-        icon: "at-sign",
-        run: () => addLensToContext(run, insertIntoAgent),
-      },
       ...buttons.map((a) => ({
         id: `lens-action-${a.id}`,
         label: a.label,
@@ -467,7 +463,7 @@ function LensToolbar({ run, streamId, actions, marks }: { run: LensRun; streamId
       >
         {copied ? "Copied" : "Copy"}
       </button>
-      <button type="button" data-testid="lens-add-to-context" onClick={() => addLensToContext(run, insertIntoAgent)}>
+      <button type="button" data-testid="lens-add-to-context" onClick={() => void addToContext({ uri: lensRef(run.lens.id, run.params).id, label: run.lens.title })}>
         Add to Context
       </button>
       {buttons.map((a) => (
@@ -696,6 +692,12 @@ function RowsBody({
       label: "Ask About This",
       enabled: true,
       run: () => insertIntoAgent(rowAsk(lens, result.columns, row)),
+    },
+    {
+      id: "add-row-to-context",
+      label: "Add to Context",
+      enabled: true,
+      run: () => void addToContext(rowContext(lens, result.columns, row)),
     },
     ...rowActions
       .filter((a) => actionOffered(a, rowRecord(result.columns, row)))

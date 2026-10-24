@@ -382,7 +382,7 @@ test("a column with no label is headed by its key in words", () => {
   expect([...view.getByTestId("lens-table").querySelectorAll("thead th")].map((th) => th.textContent)).toContain("Title");
 });
 
-// On a page, Copy, Add to Context and the lens's actions are the
+// On a page, Copy and the lens's actions are the
 // page's: handed up for its nav bar, not drawn above the body.
 test("toolbarTo hands the toolbar's actions to the page instead of drawing them", async () => {
   let handed: { id: string; label: string }[] = [];
@@ -397,7 +397,6 @@ test("toolbarTo hands the toolbar's actions to the page instead of drawing them"
   await waitFor(() =>
     expect(handed).toEqual([
       { id: "lens-copy", label: "Copy" },
-      { id: "lens-add-to-context", label: "Add to Context" },
       { id: "lens-action-sync", label: "Sync" },
     ]),
   );

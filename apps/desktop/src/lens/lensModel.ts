@@ -613,6 +613,13 @@ export function rowAsk(lens: Lens, columns: string[], row: SqlCell[]): string {
   return ref ? formatContextMention({ kind: "ref", ref }) : rowMention(lens.id, columns, row);
 }
 
+/** Add to Context on a lens row: the first page the row links to, else
+ *  the row itself as text (a lens mention). */
+export function rowContext(lens: Lens, columns: string[], row: SqlCell[]): { uri: string } | { text: string } {
+  const ref = rowRef(lens, columns, row);
+  return ref ? { uri: ref } : { text: rowMention(lens.id, columns, row).trim() };
+}
+
 /** What a slot runs: each mounted lens with the slot params it declares
  *  (a slot offers several, e.g. `effort.review.details`'s `effort_id`, `effort` and
  *  `change_id`; `oxplow_run_lens` rejects undeclared ones). */
