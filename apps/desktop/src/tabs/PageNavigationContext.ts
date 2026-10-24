@@ -30,6 +30,10 @@ export interface BookmarkBinding {
   /** Bookmark it at `scope` (moving it there), or take it off when it's
    *  already there. */
   toggle(scope: BookmarkScope): void;
+  /** The same page is bookmarked at other values (another view); the scope
+   *  of that bookmark, and what moves it to this view. */
+  other?: { scope: BookmarkScope } | null;
+  updateOther?(): void;
 }
 
 /** What a page body that edits tells its tab (`useTabEditing`). */

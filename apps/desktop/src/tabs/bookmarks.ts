@@ -13,6 +13,7 @@ import { NO_READS, useRerunOnChange } from "../lens/lensRerun.js";
 import { streamRowId, threadRowId } from "../modelIds.js";
 import type { Reads, SqlCell, SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
 import { recordedPageKind, refFromTabId } from "./pageRefs.js";
+import { identityOf } from "./session.js";
 import type { TabRef } from "./tabState.js";
 
 export type BookmarkScope = "thread" | "stream" | "project";
@@ -110,4 +111,28 @@ export async function setBookmark(viewer: BookmarkViewer, ref: TabRef, label: st
  *  needs (`undoCommand`). */
 export function removeBookmark(viewer: BookmarkViewer, refId: string): ReturnType<typeof runCommand> {
   return runCommand("oxplow.bookmark.remove", { uri: refId, ...viewerInput(viewer) });
+}
+
+/** The bookmark of `ref`'s page at another view (the same identity, another
+ *  `#`), if there is one — the narrowest scope first, as the list is. A
+ *  bookmark of `ref` itself isn't "other". */
+export function bookmarkedElsewhere(bookmarks: Bookmark[], ref: TabRef): Bookmark | null {
+  const page = identityOf(ref.id);
+  return bookmarks.find((b) => b.ref.id !== ref.id && identityOf(b.ref.id) === page) ?? null;
+}
+
+/** Moving `from` to `ref`: its star comes off and `ref`'s goes on at the
+ *  same scope, as one `oxplow.command.sequence` (one transaction, one undo). */
+export function moveBookmarkInput(viewer: BookmarkViewer, from: Bookmark, ref: TabRef, label: string | null) {
+  return {
+    calls: [
+      { name: "oxplow.bookmark.remove", input: { uri: from.ref.id, ...viewerInput(viewer) } },
+      { name: "oxplow.bookmark.set", input: setBookmarkInput(viewer, ref, label, from.scope) },
+    ],
+  };
+}
+
+/** Update the bookmark `from` to `ref`. */
+export async function moveBookmark(viewer: BookmarkViewer, from: Bookmark, ref: TabRef, label: string | null): Promise<void> {
+  await runCommand("oxplow.command.sequence", moveBookmarkInput(viewer, from, ref, label));
 }

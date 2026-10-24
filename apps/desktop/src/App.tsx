@@ -55,7 +55,7 @@ import { navigationKey } from "./tabs/navigationKeys.js";
 import { PageNavigationContext, type PageNavigation, type TabEditing } from "./tabs/PageNavigationContext.js";
 import type { PageAction } from "./kit/actions.js";
 import { LiveOriginResolver, liveItemsOf, resolvedOrigin } from "./tabs/liveOrigin.js";
-import { removeBookmark, setBookmark, useBookmarks } from "./tabs/bookmarks.js";
+import { bookmarkedElsewhere, moveBookmark, removeBookmark, setBookmark, useBookmarks } from "./tabs/bookmarks.js";
 import type { BookmarkScope } from "./tabs/bookmarks.js";
 import { reconcileSessionTabs } from "./tabs/sessionTabs.js";
 import { newThreadOpening } from "./newThreadSession.js";
@@ -1724,6 +1724,7 @@ export function App() {
       const origin: Origin | null = stored ? resolvedOrigin(stored, liveItemsOf(liveItems, slot, stored), ref) : null;
       const innerRender = tab.render;
       const bookmarkScope = bookmarks.find((b) => b.ref.id === ref.id)?.scope ?? null;
+      const elsewhere = bookmarkScope === null ? bookmarkedElsewhere(bookmarks, ref) : null;
       const registeredTitle = pageTitles[tabId];
       const navValue: PageNavigation = {
         navigate: (newRef, opts) => {
@@ -1758,6 +1759,13 @@ export function App() {
         ask: parseUri(ref.id) ? { ref: ref.id } : undefined,
         bookmark: {
           scope: bookmarkScope,
+          other: elsewhere ? { scope: elsewhere.scope } : null,
+          updateOther: elsewhere
+            ? () => {
+                moveBookmark({ threadId: selectedThreadId, streamId: stream?.id ?? null }, elsewhere, ref, registeredTitle ?? tab.label).catch((e: unknown) =>
+                  recordOpError({ label: "Bookmark", message: e instanceof Error ? e.message : String(e) }));
+              }
+            : undefined,
           toggle: (scope: BookmarkScope) => {
             const viewer = { threadId: selectedThreadId, streamId: stream?.id ?? null };
             const write = bookmarkScope === scope

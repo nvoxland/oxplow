@@ -36,6 +36,8 @@ export interface PageNavBarConfig {
   bookmark?: {
     scope: BookmarkScope | null;
     onToggleScope(scope: BookmarkScope): void;
+    other?: { scope: BookmarkScope } | null;
+    onUpdateOther?(): void;
   };
   /** The page's ref and stream, for the Ask menu. */
   ask?: AskTarget;
@@ -226,6 +228,8 @@ export function Page({ title, titleIcon, kind, chips: ownChips, actions, pin, ch
       ? {
           scope: ctxNav.bookmark.scope,
           onToggleScope: (scope) => ctxNav.bookmark!.toggle(scope),
+          other: ctxNav.bookmark.other,
+          onUpdateOther: ctxNav.bookmark.updateOther,
         }
       : undefined,
     ask: ctxNav.ask,

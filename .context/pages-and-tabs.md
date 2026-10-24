@@ -731,7 +731,11 @@ visits by the page's **identity** (`identityOf`: the id without its
 `#…`) — a filter or a pick isn't a new visit, so Recents lists the page
 once (V102 emptied `page_visit` when the identity rule changed). A
 bookmark is of the full URI, view included: change a filter and the star
-goes off; set it back and it's on.
+goes off; set it back and it's on. The same page
+(`identityOf`) starred at another view shows a coloured outline star ("Bookmarked
+at other values") whose popover offers **update that bookmark**
+(`bookmarkedElsewhere`, `moveBookmark`: one `oxplow.command.sequence` of remove +
+set at the same scope, so one undo).
 
 **Persistence.** One key, `oxplow.layout.v7.sessions` (`{ [thread]:
 Session }`, written on every change, read on start; corrupt text reads

@@ -52,6 +52,10 @@ export interface PageNavBarProps {
     /** The scope this page is bookmarked at; the star is filled when set. */
     scope: BookmarkScope | null;
     onToggleScope(scope: BookmarkScope): void;
+    /** The same page is bookmarked at other values (its view): the star
+     *  says so and the popover offers to move that bookmark here. */
+    other?: { scope: BookmarkScope } | null;
+    onUpdateOther?(): void;
   };
   /** Optional backlinks dropdown content — when omitted, no dropdown renders. */
   backlinks?: {
@@ -377,12 +381,12 @@ export function PageNavBar({
           <button
             type="button"
             data-testid="page-nav-bookmark"
-            title="Bookmark"
+            title={bookmark.scope == null && bookmark.other ? "Bookmarked at other values" : "Bookmark"}
             onClick={() => setScopeOpen((v) => !v)}
             aria-expanded={scopeOpen}
             style={{
               ...navButtonStyle(true),
-              color: bookmark.scope != null ? "var(--accent-fg)" : "var(--text-secondary)",
+              color: bookmark.scope != null || bookmark.other ? "var(--accent-fg)" : "var(--text-secondary)",
             }}
           >
             {bookmark.scope != null ? "★" : "☆"}
@@ -404,6 +408,29 @@ export function PageNavBar({
                 fontSize: "var(--text-xs)",
               }}
             >
+              {bookmark.scope == null && bookmark.other && bookmark.onUpdateOther ? (
+                <button
+                  type="button"
+                  data-testid="page-nav-bookmark-update"
+                  onClick={() => {
+                    bookmark.onUpdateOther!();
+                    setScopeOpen(false);
+                  }}
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    textAlign: "left",
+                    padding: "4px 6px",
+                    background: "transparent",
+                    border: "none",
+                    borderBottom: "1px solid var(--border-subtle)",
+                    color: "var(--text-primary)",
+                    cursor: "pointer",
+                  }}
+                >
+                  Bookmarked at other values: update that bookmark
+                </button>
+              ) : null}
               {(["thread", "stream", "project"] as BookmarkScope[]).map((scope) => {
                 const active = bookmark.scope === scope;
                 return (
