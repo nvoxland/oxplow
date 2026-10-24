@@ -579,6 +579,7 @@ export function adHocLens(query: string, viz: LensViz, chart: LensChart | null =
     fills: false,
     launcherCategory: null,
     hidden: false,
+    refresh: false,
     actions: [],
     alert: null,
     needs: [],

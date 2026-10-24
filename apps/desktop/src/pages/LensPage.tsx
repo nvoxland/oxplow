@@ -7,11 +7,9 @@ import type { Stream } from "../tauri-bridge/index.js";
 import { getLens, querySql, runLens, type LensRun, type SqlCell } from "../api.js";
 import { lensRef, withResourceParams } from "../tabs/pageRefs.js";
 import { getPageDetailStore } from "../tabs/openPageDetail.js";
-import { insertIntoAgent } from "../agent-input-bus.js";
-import { formatContextMention } from "../agent-context-ref.js";
 import { pageView, shellView, withRenderedParams } from "./renderers.js";
 import { rowRecord } from "../lens/lensActions.js";
-import { changedParams, lensViewChange, misplacedViewParams, viewOptions, viewParam, viewedParts } from "../lens/lensModel.js";
+import { lensViewChange, misplacedViewParams, viewOptions, viewParam, viewedParts } from "../lens/lensModel.js";
 import { RailGroup } from "../kit/RailGroup.js";
 import type { Lens } from "../tauri-bridge/generated/bindings.js";
 import { useHostedView } from "../lens/hostedView.js";
@@ -53,6 +51,9 @@ export interface LensPageProps {
   /** Its text takes comments (`comments: true` on its `pages:` entry):
    *  on its URI, from this thread. */
   comments?: boolean;
+  /** Its page offers Refresh (`refresh: true` on its `pages:` entry); the
+   *  lens's own `refresh: true` does too. */
+  refresh?: boolean;
   threadId?: string | null;
 }
 
@@ -61,13 +62,13 @@ export interface LensPageProps {
  * `.oxplow/extensions/<ext>/lenses/<slug>.yaml` in this stream's worktree.
  * Re-runs when oxplow data changes, so it stays live. Its rail is the one
  * place for its controls (`LensRail`): its filters, what a row click
- * picked, and where it comes from; Copy, Add to Agent Context and its
+ * picked, and where it comes from; Copy, Add to Context and its
  * own actions are the page's, in the nav bar. See `.context/extensions.md`.
  */
 /** What a renderer's lens is run with, never a control: the URI it shows. */
 const RENDERED = ["uri"];
 
-export function LensPage({ lensId, params, title: pageTitle, titleFrom, stream, onOpenPage, renders, comments = false, threadId = null }: LensPageProps) {
+export function LensPage({ lensId, params, title: pageTitle, titleFrom, stream, onOpenPage, renders, comments = false, refresh: pageRefresh = false, threadId = null }: LensPageProps) {
   const streamId = stream?.id ?? null;
   const [run, setRun] = useState<LensRun | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -147,26 +148,17 @@ export function LensPage({ lensId, params, title: pageTitle, titleFrom, stream, 
     return () => store.publish(pageId, null);
   }, [lensId, pageId, runParams]);
 
-  const improveWithAgent = () => {
-    const params = lens ? changedParams(lens, run?.params ?? {}) : {};
-    insertIntoAgent(formatContextMention({ kind: "lens", lensId, params }));
-  };
-
   // The lens's own toolbar, handed up by its view for the nav bar.
   const [lensActions, setLensActions] = useState<PageAction[]>([]);
   // The same actions on the tab's right-click menu.
   useTabActions(lensActions);
   const actions: PageAction[] = [
-    { id: "lens-refresh", label: "Refresh", standard: true, icon: "refresh-cw", run: () => void refresh() },
+    // A lens re-runs on its own when oxplow's data changes; Refresh is
+    // for one that reads outside oxplow.
+    ...(pageRefresh || lens?.refresh
+      ? [{ id: "lens-refresh", label: "Refresh", standard: true, icon: "refresh-cw", run: () => void refresh() }]
+      : []),
     ...lensActions,
-    {
-      id: "lens-improve-with-agent",
-      label: "Improve with Agent",
-      standard: true,
-      icon: "sparkles",
-      title: "Add this lens to the agent's context so you can ask it to change the lens",
-      run: improveWithAgent,
-    },
   ];
 
   // A param set from the rail or by a row click (a column's `select`,
@@ -311,7 +303,7 @@ export function LensPage({ lensId, params, title: pageTitle, titleFrom, stream, 
           <div style={{ fontWeight: 600, marginBottom: 4 }}>This lens couldn't run.</div>
           <div style={{ fontFamily: "var(--font-mono, monospace)", whiteSpace: "pre-wrap" }}>{error}</div>
           <div style={{ marginTop: 8, color: "var(--text-secondary)" }}>
-            Use “Improve with Agent” and ask the agent to fix it; it can check its work with
+            Ask an agent to fix it; it can check its work with
             <code> validate_extension</code>.
           </div>
         </div>

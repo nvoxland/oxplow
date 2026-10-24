@@ -462,7 +462,7 @@ out and the ☰ itself hidden when it would be empty:
    the same spot on every page: **Ask** (a submenu: Ask About This, then
    the catalog's prompts about the page's kind; `menu-item-page-ask`,
    `menu-item-page-ask-this`), then the page's `standard` actions (a lens
-   page's Refresh, Copy, Add to Agent Context, Improve with Agent);
+   page's Refresh when it declares `refresh: true`, Copy, Add to Context);
 2. **the page's and its extensions' own, sorted by label** (case and
    accents aside): each other action (`menu-item-action-<id>`; a busy one
    says `label…` and is greyed), and each submenu by its name

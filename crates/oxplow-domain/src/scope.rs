@@ -152,13 +152,6 @@ pub const SCOPES: &[Scope] = &[
         summary: "Star a page for a person, at a thread, stream or project, or take the star off.",
     },
     Scope {
-        id: "context.write",
-        access: Access::Record,
-        host: Host::Daemon,
-        spends: false,
-        summary: "Put a page or a piece of text in a thread's context basket for its agents, take one out, or empty it.",
-    },
-    Scope {
         id: "changes.read",
         access: Access::Read,
         host: Host::Daemon,
@@ -192,6 +185,13 @@ pub const SCOPES: &[Scope] = &[
         host: Host::Daemon,
         spends: false,
         summary: "Change the project's configuration file (`.oxplow/project.yaml`).",
+    },
+    Scope {
+        id: "context.write",
+        access: Access::Record,
+        host: Host::Daemon,
+        spends: false,
+        summary: "Put a page or a piece of text in a thread's context basket for its agents, take one out, or empty it.",
     },
     Scope {
         id: "credentials.write",

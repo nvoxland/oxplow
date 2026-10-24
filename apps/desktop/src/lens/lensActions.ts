@@ -157,7 +157,7 @@ export async function copyLens(
   }
 }
 
-/** Add to Agent Context: the lens and its params, into the agent's input
+/** Add to Context: the lens and its params, into the agent's input
  *  (never sent). */
 export function addLensToContext(run: LensRun, insertIntoAgent: (text: string) => void): void {
   insertIntoAgent(formatContextMention({ kind: "lens", lensId: run.lens.id, params: run.params }));

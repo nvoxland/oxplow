@@ -185,7 +185,7 @@ pages:
   - { id: dashboards, title: Dashboards, icon: layout-dashboard, category: Data, keywords: custom metric tiles lens, lens: dashboards }
   # System
   - { id: terminal, title: Terminal, icon: terminal, category: System, lens: terminal }
-  - { id: settings, title: Settings, icon: settings, category: System, keywords: every setting config preferences, lens: settings }
+  - { id: settings, title: Settings, icon: settings, category: System, keywords: every setting config preferences, refresh: true, lens: settings }
   - { id: catalog, title: Catalog, icon: book-open, category: System, keywords: ask prompts questions what can i help data config, lens: catalog-overview }
   - { id: closed-threads, title: Closed Threads, icon: archive, category: System, lens: closed-threads }
   - { id: extensions, title: Extensions, icon: package, category: System, keywords: deploy rollback permissions enable disable share, lens: extensions }

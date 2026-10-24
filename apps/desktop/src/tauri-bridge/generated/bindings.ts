@@ -2372,6 +2372,11 @@ export type ExtensionPage = {
 	 *  viz, a code viz, plain text) starts one.
 	 */
 	comments: boolean,
+	/**
+	 *  Its page offers Refresh (`refresh: true`), for a lens that reads
+	 *  outside oxplow. The lens's own `refresh` does the same.
+	 */
+	refresh: boolean,
 	/**  What draws it. */
 	body: PageBody,
 	/**
@@ -4491,6 +4496,11 @@ export type Lens_Deserialize = {
 	launcherCategory: LauncherCategory | null,
 	/**  Not listed in the launcher. */
 	hidden: boolean,
+	/**
+	 *  Its page offers Refresh (`refresh: true`): it reads outside oxplow,
+	 *  so nothing re-runs it for the person.
+	 */
+	refresh: boolean,
 	/**  Commands the lens offers, as buttons or row actions (P6.B1). */
 	actions: LensAction_Deserialize[],
 	/**  When the lens needs attention (its panel's badge). */
@@ -4575,6 +4585,11 @@ export type Lens_Serialize = {
 	launcherCategory: LauncherCategory | null,
 	/**  Not listed in the launcher. */
 	hidden: boolean,
+	/**
+	 *  Its page offers Refresh (`refresh: true`): it reads outside oxplow,
+	 *  so nothing re-runs it for the person.
+	 */
+	refresh: boolean,
 	/**  Commands the lens offers, as buttons or row actions (P6.B1). */
 	actions: LensAction_Serialize[],
 	/**  When the lens needs attention (its panel's badge). */

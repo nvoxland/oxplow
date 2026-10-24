@@ -1148,10 +1148,12 @@ rail stacks its groups in a fixed order, so nothing moves as values
 change: **Filters** (its filter params), **Selection** (what a row click
 picked) and **About this page** (its extension and the source file to
 edit, and a line when the source changed since its deploy). Page-level
-actions — Refresh, Copy, Add to Agent Context, the lens's whole-lens
-actions, Improve with Agent — are in the nav bar (its ☰, unless
-`prominent`), never in the rail or above the body (`LensResultView`'s
-`toolbarTo` hands them up).
+actions — Copy, Add to Context, the lens's whole-lens actions, and
+Refresh only for a lens that declares `refresh: true` (a lens re-runs
+on its own when oxplow's data changes; Refresh is for one that reads
+outside oxplow) — are in the nav bar (its ☰, unless `prominent`), never
+in the rail or above the body (`LensResultView`'s `toolbarTo` hands them
+up).
 
 A param is a **row**, drawn by the kit's `ParamRow`
 (`src/kit/ParamControls.tsx`): its label beside its value. At rest the

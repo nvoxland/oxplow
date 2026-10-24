@@ -343,7 +343,7 @@ For several forms on one
 page, make a document whose parts are form lenses; each submits on its
 own.
 An action runs as the lens acting for you, so it can't do anything you
-couldn't. Copy and Add to Agent Context are on every lens; you don't
+couldn't. Copy and Add to Context are on every lens; you don't
 declare them.
 
 A lens action never approves a permission. A source that executes a
@@ -549,8 +549,9 @@ Problems show under Settings → Extensions. Agents check their work with
 
 Every lens page has the same layout:
 
-- **The title row** holds what acts on the whole page: Refresh, Copy,
-  Add to Agent Context, Improve with Agent and the lens's own actions.
+- **The title row** holds what acts on the whole page: Copy,
+  Add to Context, the lens's own actions and, if the lens says
+  `refresh: true`, Refresh.
 - **The body** is the content: the title, the description, then the
   sections, tables and charts.
 - **The side panel** has three groups. **Filters** lists each param
@@ -565,8 +566,6 @@ a param no query reads. The warnings show in `oxplow extension check`
 and on the Extensions page, each with what to do instead.
 
 - Right-click a row → **Add Row to Agent Context**.
-- **Improve with Agent** puts `[oxplow lens <id>]` in the agent's input so you
-  can ask for changes.
 - **Pin to Dashboard** adds it as a [dashboard](dashboards.md) tile.
 - The agent can see what you're looking at: `oxplow_get_open_page` returns the page
   (what it shows), its view (your filters and picks) and, for a lens, the exact rows

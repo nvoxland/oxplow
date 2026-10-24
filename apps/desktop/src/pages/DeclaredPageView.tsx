@@ -50,6 +50,7 @@ export function DeclaredPageView({
       stream={stream}
       onOpenPage={onOpenPage}
       comments={declared.comments}
+      refresh={declared.refresh}
       threadId={threadId}
     />
   );

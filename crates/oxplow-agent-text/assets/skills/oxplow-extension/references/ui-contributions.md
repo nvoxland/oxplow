@@ -45,7 +45,7 @@
   pattern> }` limits it to URIs whose params fit; `default: true` (only
   for a resource your extension declares, one page per resource) makes
   it the page a plain open uses; `pinned: true` pins its tabs;
-  `comments: true` lets the person comment on the page's text (on its
+  `refresh: true` offers Refresh on the page (for a lens that reads outside oxplow). `comments: true` lets the person comment on the page's text (on its
   URI). Its lens
   must declare a `uri` param and runs with the URI; a param named like
   one of the URI's params (`id`, `path`) gets its value, and any other

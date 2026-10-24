@@ -181,7 +181,11 @@ empty: Nothing is waiting on you.
 - **`launcher: { category: Activity }`** lists the lens under that
   launcher heading (Work, Code, Git, Activity, Knowledge, Data, Lenses,
   System; default Lenses). **`hidden: true`** keeps it out of the
-  launcher, for lenses only a slot shows.
+  launcher, for lenses only a slot shows. **`refresh: true`** puts a
+  Refresh button in the page's nav bar. Leave it out unless the lens
+  reads outside oxplow (an integration, a file on disk): a lens re-runs
+  on its own when the oxplow data it read changes. A `pages:` entry
+  takes `refresh: true` too.
 - **Something to run from the launcher** is a command with a `ui` (`ui:
   { label, group, input? }`): it can run another command with fixed input
   (a `scope:` + `op:` over the same operation, or a script composing
@@ -235,10 +239,10 @@ empty: Nothing is waiting on you.
   `commands-and-forms.md`). With `group: <value>` (on a lens with
   `group`), the action is a button in that group's heading instead — it
   shows in a compact panel too; it can't be a row action. Copy and Add
-  to Agent Context are on every lens already — don't declare them.
+  to Context are on every lens already — don't declare them.
   A lens page's actions without `row` or `group` go in its nav bar's ☰
-  menu, sorted by label after oxplow's own (Ask, Refresh, Copy, Add to
-  Agent Context, Improve with Agent). `submenu: <name>` puts one in a
+  menu, sorted by label after oxplow's own (Ask, Copy, Add to Context,
+  and Refresh when the lens declares `refresh: true`). `submenu: <name>` puts one in a
   submenu of that name, shared with the commands whose `ui.group` is the
   same name. `prominent: true` keeps one a button in the bar instead: use
   it only for what a person comes to the page to do (a list's New

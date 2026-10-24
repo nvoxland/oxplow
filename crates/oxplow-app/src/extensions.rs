@@ -1505,6 +1505,11 @@ struct LensFile {
     /// Keep it out of the launcher (e.g. a lens only a slot shows).
     #[serde(default)]
     hidden: bool,
+    /// Offer Refresh on its page. Off by default: a lens re-runs on its
+    /// own when oxplow's data changes; turn it on for one that reads
+    /// outside oxplow (an integration, a file on disk).
+    #[serde(default)]
+    refresh: bool,
     /// Commands the lens offers (`{ id, label, command, input, row }`).
     /// Parsed by [`parse_actions`].
     #[serde(default)]
@@ -2432,6 +2437,9 @@ pub struct ExtensionPage {
     /// nav bar steps through them, and a selection in its text (a markdown
     /// viz, a code viz, plain text) starts one.
     pub comments: bool,
+    /// Its page offers Refresh (`refresh: true`), for a lens that reads
+    /// outside oxplow. The lens's own `refresh` does the same.
+    pub refresh: bool,
     /// What draws it.
     pub body: PageBody,
     /// A component page's rail: a lens of its extension (`<ext>/<slug>`)
@@ -2533,6 +2541,9 @@ struct PageFile {
     /// Its text takes comments, anchored to its URI.
     #[serde(default)]
     comments: bool,
+    /// Offer Refresh on it, for a lens that reads outside oxplow.
+    #[serde(default)]
+    refresh: bool,
 }
 
 /// A page's `for`: one resource or several.
@@ -2679,6 +2690,9 @@ pub struct Lens {
     pub launcher_category: Option<LauncherCategory>,
     /// Not listed in the launcher.
     pub hidden: bool,
+    /// Its page offers Refresh (`refresh: true`): it reads outside oxplow,
+    /// so nothing re-runs it for the person.
+    pub refresh: bool,
     /// Commands the lens offers, as buttons or row actions (P6.B1).
     pub actions: Vec<LensAction>,
     /// When the lens needs attention (its panel's badge).
@@ -4713,6 +4727,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                 fills: l.viz.fills(),
                 launcher_category: l.launcher.map(|la| la.category),
                 hidden: l.hidden,
+                refresh: l.refresh,
                 actions,
                 alert,
                 needs: l.needs,
@@ -5200,7 +5215,7 @@ fn parse_pages(
             Ok(p) => p,
             Err(e) => {
                 errors.push((Some(i), format!(
-                    "pages: {e} (a page is `{{ id, title, icon?, category?, keywords?, params?, count?, for?, accepts?, default?, pinned?, comments?, lens | component, rail? }}`; a category is one of Work, Code, Git, Activity, Knowledge, Data, Lenses, System)"
+                    "pages: {e} (a page is `{{ id, title, icon?, category?, keywords?, params?, count?, for?, accepts?, default?, pinned?, comments?, refresh?, lens | component, rail? }}`; a category is one of Work, Code, Git, Activity, Knowledge, Data, Lenses, System)"
                 )));
                 continue;
             }
@@ -5347,6 +5362,7 @@ fn parse_pages(
                 default: p.default,
                 pinned: p.pinned,
                 comments: p.comments,
+                refresh: p.refresh,
                 body: body.expect("checked above"),
                 rail: p.rail.map(|r| format!("{extension}/{r}")),
             });
@@ -7516,6 +7532,7 @@ impl Lens {
             fills: spec.viz.fills(),
             launcher_category: None,
             hidden: false,
+            refresh: false,
             actions: Vec::new(),
             alert: None,
             needs: Vec::new(),
@@ -12725,6 +12742,19 @@ commands:
     }
 
     #[test]
+    fn refresh_is_opt_in_on_a_lens() {
+        let lenses = [
+            ("a", "title: A\nquery: SELECT 1\n"),
+            ("b", "title: B\nquery: SELECT 1\nrefresh: true\n"),
+        ];
+        let (_d, ext) = load_x(&lenses, "manifest: 2\nintent:\n  purpose: p\n");
+        assert!(ext.errors.is_empty(), "{:?}", ext.errors);
+        let lens = |slug: &str| ext.lenses.iter().find(|l| l.slug == slug).unwrap();
+        assert!(!lens("a").refresh);
+        assert!(lens("b").refresh);
+    }
+
+    #[test]
     fn launcher_category_and_hidden_parse() {
         let (_d, ext) = load_x(
             &[
@@ -13123,7 +13153,7 @@ commands:
         ];
         let (_d, ext) = load_x(
             &lenses,
-            "manifest: 2\nintent:\n  purpose: p\npages:\n  - { id: open-prs, title: Open PRs, icon: git-pull-request, category: Work, keywords: pull requests, params: [author], count: waiting, lens: open }\n  - { id: detail, title: Detail, lens: open, comments: true }\n",
+            "manifest: 2\nintent:\n  purpose: p\npages:\n  - { id: open-prs, title: Open PRs, icon: git-pull-request, category: Work, keywords: pull requests, params: [author], count: waiting, lens: open }\n  - { id: detail, title: Detail, lens: open, comments: true, refresh: true }\n",
         );
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
         assert_eq!(
@@ -13145,6 +13175,7 @@ commands:
                     default: false,
                     pinned: false,
                     comments: false,
+                    refresh: false,
                     body: PageBody::Lens {
                         lens: "x/open".into()
                     },
@@ -13166,6 +13197,7 @@ commands:
                     default: false,
                     pinned: false,
                     comments: true,
+                    refresh: true,
                     body: PageBody::Lens {
                         lens: "x/open".into()
                     },

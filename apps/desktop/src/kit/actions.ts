@@ -15,7 +15,7 @@ export interface PageAction {
    *  (a lens action's `prominent`). Several may be. */
   prominent?: boolean;
   /** One of oxplow's own actions every page of its kind has (a lens
-   *  page's Refresh, Copy, Add to Agent Context, Improve with Agent): the
+   *  page's Refresh, Copy, Add to Context): the
    *  ☰ keeps these together at the top, in the order given, and sorts the
    *  page's other actions by label. */
   standard?: boolean;

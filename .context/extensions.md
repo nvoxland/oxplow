@@ -590,7 +590,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     page (`origin`). A row shows what it applied at once, before the run
     echoes it. A row click on a column that `select`s a param sets it
     (`onSetParam` with the row, through a document's or dashboard's
-    parts when the page holds the param). Copy, Add to Agent Context
+    parts when the page holds the param). Copy, Add to Context
     and the whole-lens actions are handed to the nav bar
     (`toolbarTo`): in its ☰, except a whole-lens action the manifest marks
     `prominent: true`, which stays a button there (several may; a row,
@@ -609,8 +609,11 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     `resource` param navigates to another resource (`withResourceParams`). So a reopened tab, a
     restart, a bookmark and Back show the same filters and the same
     pick. Outside a tab it keeps its params itself.
-  - A run failure shows the error inline, with a nudge to use "Improve
-    with Agent".
+  - A run failure shows the error inline, with a nudge to ask an agent.
+  - Refresh is opt-in: a lens page offers it only when the lens, or the
+    `pages:` entry, says `refresh: true`. A lens re-runs on its own when
+    the models it read change, so Refresh is for one that reads outside
+    oxplow (an integration's list, a file on disk).
   - The page re-runs when a model it read changed (`modelsChanged`), when
     facts landed for a measure its `metric_grid()` read
     (`metricSamplesChanged`), when the live set changes —
@@ -618,8 +621,6 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     reconnect (`onRemoteReconnect`): events sent while the daemon was
     unreachable never arrive, so anything may have changed (tsk1050). Every
     lens host uses `useRerunOnChange` in `src/lens/lensRerun.ts`.
-  - "Improve with Agent" inserts `[oxplow lens <id> k=v…]`, with only the
-    changed params, through the standard add-to-context path.
   - The Cmd+P launcher re-reads lenses (the live set's) every
     time it opens and lists them under their `launcher.category`
     (default **Lenses**; `hidden` ones not at all), merged into the
@@ -852,7 +853,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       `IpcCallError`'s `code`) shows a confirm strip in the toolbar: Run
       (focused, Enter) or Cancel (Escape).
     - **Every lens has Copy** (its text rendering, the `lens_text` RPC)
-      **and Add to Agent Context** (`[oxplow lens <id> params…]` into the
+      **and Add to Context** (`[oxplow lens <id> params…]` into the
       agent's input, never sent) — kit affordances, not declared. A
       compact strip and a composite's parts (`toolbar={false}`) show no
       toolbar.
@@ -1086,7 +1087,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   (`LensSlots`) and a `document`'s sections with no rows (no error, not a composite)
   fold into one closing line, "Nothing found: Duplication, Co-change
   Surprises, …", each a link to its lens (`lensModel::foldEmpty`). A
-  section's Copy / Add to Agent Context show on hover or focus (the
+  section's Copy / Add to Context show on hover or focus (the
   `.lens-section` rule in `index.html`). The effort page opens with its
   **verdict** above the slots: the `effort.verdict` replacement target
   ("Replacements"), which core leaves empty — what counts as tested,
@@ -4884,8 +4885,8 @@ tool: open_work              # offered as <namespace>_open_work
 
 An `oxplow-extension` skill (shipped in `crates/oxplow-agent-text/assets`)
 teaches the format, the `v_*` contract and the loop "read `v_model` →
-oxplow_query_sql → write files → oxplow_validate_extension → oxplow_run_lens". "Improve with Agent" on a lens pastes
-`[oxplow lens <ext>/<slug>]` plus its params into the agent's context.
+oxplow_query_sql → write files → oxplow_validate_extension → oxplow_run_lens". Add to Context on a lens page
+carries `[oxplow lens <ext>/<slug>]` plus its params.
 
 **Getting newcomers there (tsk373).** "New Lens with Your Agent…"
 (`lens.newWithAgent`, a Tasks search command in the launcher; needs a
