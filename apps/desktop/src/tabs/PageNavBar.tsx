@@ -461,7 +461,7 @@ export function PageNavBar({
 
       {comments ?? null}
 
-      {barActions(actions).length > 0 ? <ActionButtons actions={barActions(actions)} /> : null}
+      {barActions(actions).length > 0 ? <ActionButtons actions={barActions(actions)} buttonStyle={navButtonStyle(true)} /> : null}
       <PageMenu
         actions={actions}
         ask={ask}
@@ -469,7 +469,8 @@ export function PageNavBar({
         backlinks={backlinks}
         outbound={outbound}
         pin={pin}
-        buttonStyle={navButtonStyle(true)}
+        // The ☰ is the bar's edge, not one more button: no box around it.
+        buttonStyle={{ ...navButtonStyle(true), borderColor: "transparent" }}
       />
     </div>
   );
@@ -488,5 +489,13 @@ function navButtonStyle(enabled: boolean): React.CSSProperties {
     opacity: enabled ? 1 : 0.4,
     fontSize: "var(--text-sm)",
     minWidth: 28,
+    // One height for every control in the bar, its glyph, icon or label
+    // centered: a text button and an icon-only one line up.
+    height: 28,
+    boxSizing: "border-box",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    lineHeight: 1,
   };
 }

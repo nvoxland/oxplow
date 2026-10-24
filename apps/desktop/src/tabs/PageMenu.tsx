@@ -4,6 +4,7 @@
 /// (Backlinks, Outbound, Pin to Dashboard). Hidden when it would be empty.
 import type { CSSProperties, ReactNode } from "react";
 import { useRef, useState } from "react";
+import { Menu } from "lucide-react";
 
 import { formatContextMention } from "../agent-context-ref.js";
 import { insertIntoAgent } from "../agent-input-bus.js";
@@ -89,7 +90,7 @@ export function PageMenu({ actions, ask, openWith, backlinks, outbound, pin, but
         onClick={toggle}
         style={buttonStyle}
       >
-        ☰
+        <Menu size={18} aria-hidden />
       </button>
       {at ? <ContextMenu items={items} position={at} minWidth={MENU_WIDTH} onClose={() => setAt(null)} zIndex={20} /> : null}
       {panel === "backlinks" && backlinks ? (
