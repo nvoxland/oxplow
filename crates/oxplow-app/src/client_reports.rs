@@ -219,6 +219,27 @@ impl ClientReports {
         out
     }
 
+    /// The threads the live windows are showing at `now` (what the person is
+    /// looking at), each with the tab it has selected, if any.
+    pub fn shown(&self, now: Timestamp) -> Vec<(ThreadId, Option<String>)> {
+        let mut out: Vec<(ThreadId, Option<String>)> = Vec::new();
+        for c in self.live(now) {
+            let Some(thread) = c.report.shown_thread else {
+                continue;
+            };
+            let active = c
+                .report
+                .threads
+                .iter()
+                .find(|t| t.thread == thread)
+                .and_then(|t| t.active.clone());
+            if !out.iter().any(|(t, a)| *t == thread && *a == active) {
+                out.push((thread, active));
+            }
+        }
+        out
+    }
+
     /// The threads any live window reported at `now`.
     pub fn reported_threads(&self, now: Timestamp) -> Vec<ThreadId> {
         let mut out: Vec<ThreadId> = self
@@ -337,6 +358,40 @@ mod tests {
             at(4_000),
         );
         assert_eq!(r.open_pages(ThreadId::new(1), at(4_500))[0].client, "b");
+    }
+
+    /// What the windows are looking at, for the answer to "what is open?"
+    /// when a thread has nothing reported: the shown thread and its selected
+    /// tab, one entry per distinct pair.
+    #[test]
+    fn the_shown_threads_are_what_the_windows_look_at() {
+        let r = ClientReports::new();
+        r.report(
+            report(
+                "a",
+                true,
+                1,
+                vec![thread(
+                    1,
+                    vec![tab("oxplow:oxplow/wiki?slug=home", "wiki")],
+                    Some("oxplow:oxplow/wiki?slug=home"),
+                )],
+            ),
+            at(1_000),
+        );
+        assert_eq!(
+            r.shown(at(2_000)),
+            [(
+                ThreadId::new(1),
+                Some("oxplow:oxplow/wiki?slug=home".to_string())
+            )]
+        );
+        // A window showing a thread with nothing selected shows none.
+        r.report(
+            report("a", true, 1, vec![thread(1, vec![], None)]),
+            at(3_000),
+        );
+        assert_eq!(r.shown(at(4_000)), [(ThreadId::new(1), None)]);
     }
 
     #[test]

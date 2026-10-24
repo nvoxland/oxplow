@@ -797,6 +797,12 @@ mod tests {
         ))
         .unwrap();
         assert_eq!(none["open"], serde_json::Value::Null);
+        // A null says why, and where the person is looking.
+        assert!(none["reason"]
+            .as_str()
+            .unwrap()
+            .contains("no window reports"));
+        assert_eq!(none["shown"], serde_json::json!([]));
 
         let p = proj.path().join(".oxplow/extensions/demo/lenses");
         std::fs::create_dir_all(&p).unwrap();
