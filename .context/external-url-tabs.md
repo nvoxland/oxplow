@@ -53,7 +53,7 @@ an answer (`oxplow_show_lens`) can't be an embed.
 
 | Layer | Where | What it enforces |
 |---|---|---|
-| Scheme allowlist (renderer) | `apps/desktop/src/external-url-allowlist.ts` | Only http(s) URLs reach the bridge call. Anything else (file:, javascript:, data:, blob:, custom protocols) returns a structured rejection that surfaces a refusal in `ExternalUrlPage` instead of opening a window. |
+| Scheme allowlist (renderer) | `apps/desktop/src/external-url-allowlist.ts` | Only http(s) URLs reach the bridge call. Anything else (file:, javascript:, data:, blob:, custom protocols) returns a structured rejection that surfaces a refusal in the Web Page tab (`lens/EmbedViz.tsx`) instead of opening a window. |
 | Scheme allowlist (Rust) | `crates/oxplow-tauri-ipc/src/commands/webview.rs` (`open_external_url`) | Re-validates `http://` / `https://` prefix before constructing the `WebviewWindowBuilder`. The renderer can't smuggle a non-http(s) URL through the IPC. |
 | Capability scope | `apps/desktop/src-tauri/capabilities/external-url.json` | `permissions: []` — no `core:default`, no Tauri plugin defaults, no oxplow commands. The window glob `ext-url-*` matches the label format `open_external_url` assigns. |
 | Capability listing | `apps/desktop/src-tauri/tauri.conf.json` `app.security.capabilities` | Capabilities are listed explicitly so a stray file in `capabilities/` cannot widen the surface — the directory's auto-enable behavior is bypassed. |

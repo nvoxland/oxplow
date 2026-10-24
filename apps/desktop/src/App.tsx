@@ -48,7 +48,7 @@ import { Menubar } from "./components/Menubar.js";
 import { CenterTabs, type CenterTab } from "./components/CenterTabs/CenterTabs.js";
 import type { DiffSpec } from "./components/Diff/DiffPane.js";
 import { builtInPages } from "./pages/builtInPages.js";
-import type { SlotNav } from "./pages/appScope.js";
+import type { SlotNav } from "./pages/slotNav.js";
 import { RailHud } from "./components/RailHud/RailHud.js";
 import type { TabRef } from "./tabs/tabState.js";
 import { navigationKey } from "./tabs/navigationKeys.js";
