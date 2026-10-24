@@ -23,6 +23,16 @@ set**, and a surface never builds its own:
   (a wiki page, a work item, an extension's ref, written without a
   `|label`) shows its title (`useRefLinkTitle`, one rule for both modes;
   in the editor the stored text stays the slug, below).
+- **`[[` completes** (the editor): typing `[[` lists what it could link
+  to under the caret, filtered as the person types — the site search's
+  hits (wiki pages, work items, commits, extensions' resources; not file
+  content matches) and, on a page of a stream, its files by name
+  (`refOptions.ts`; the owner's search is `useRefSearch` in
+  `Markdown.tsx`). ↑/↓ move, Enter or Tab picks, Escape closes the list
+  and keeps the text (the owner's Escape waits while it shows). The pick
+  goes in as its link, saved as the wikilink a person would type
+  (`refLinkOf`: `[[slug]]`, `[[path:12]]`, `[[tsk42]]`; a ref with no bare
+  form as `[title](uri)`), and shows its title.
 - **Mermaid** fences draw as diagrams, always (pan, zoom, the
   lightbox; in the editor, the `MermaidBlock` node view, click to edit
   its source).
@@ -115,6 +125,13 @@ why).
   `setContent` in a `queueMicrotask`, re-checking focus/destroyed at
   apply time (`RichTextField.render.test.tsx`). Don't call `setContent`
   synchronously from a React effect.
+- **`RefCompletion.tsx`** — `[[` completion: a `@tiptap/suggestion`
+  plugin (debounced, a stale search aborted, the list mounted and placed
+  by the plugin) and its list. Mounted only when the field is given a
+  `refSearch`; `editor.storage.refCompletion.open` says the list shows, so
+  `RichTextField`'s own keys stand aside. `refOptions.ts` is what it lists
+  (pure), `refLinkOf` (`MarkdownView.tsx`) what a pick puts in, tested
+  against `postprocessWikilinks` for each kind.
 - **`RefTitles.tsx`** — the title widget a bare ref link gets in the
   editor ("A ref link's title in the editor").
 - **`MermaidBlock.tsx`** — extends Tiptap's `CodeBlock` (same node

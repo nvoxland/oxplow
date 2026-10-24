@@ -4,6 +4,7 @@ import {
   parseMarkdownLink,
   postprocessWikilinks,
   preprocessWikilinks,
+  refLinkOf,
 } from "./MarkdownView.js";
 import {
   directoryRef,
@@ -13,7 +14,7 @@ import {
   wikiPageRef,
 } from "../../tabs/pageRefs.js";
 import { WORKING } from "../../revision.js";
-import { commitUri, dirUri, fileLinesUri, fileUri, workItemUri } from "../../uri/uri.js";
+import { commitUri, dirUri, fileLinesUri, fileUri, resourceUri, wikiUri, workItemUri } from "../../uri/uri.js";
 
 // parseMarkdownLink is shared by WikiPageTab and TaskDetail. WikiPageTab needs
 // to distinguish wiki-internal links (`./foo`, `bar.md`) from external
@@ -441,4 +442,25 @@ test("linkRef: things that aren't pages have no target", () => {
   expect(linkRef({ kind: "external" })).toBeNull();
   expect(linkRef({ kind: "anchor" })).toBeNull();
   expect(linkRef({ kind: "empty" })).toBeNull();
+});
+
+// A URI put in as a link (completion, a drop, a paste) saves as the
+// wikilink a person would have typed, and a ref with no bare form keeps
+// its title as the label.
+test("refLinkOf: each kind saves as its bare wikilink", () => {
+  const saved = (uri: string, title = "T", mention?: (id: string) => string | null) => {
+    const { href, text } = refLinkOf(uri, title, mention);
+    return postprocessWikilinks(`[${text}](${href})`);
+  };
+  expect(saved(wikiUri("local-snapshots"))).toBe("[[local-snapshots]]");
+  expect(saved(fileUri("src/a.ts"))).toBe("[[src/a.ts]]");
+  expect(saved(fileLinesUri("src/a.ts", 12, 12))).toBe("[[src/a.ts:12]]");
+  expect(saved(dirUri("src/components"))).toBe("[[dir:src/components]]");
+  const sha = "0123456789abcdef0123456789abcdef01234567";
+  expect(saved(commitUri(sha))).toBe(`[[git:${sha}]]`);
+  const item = workItemUri("oxplow", "tsk42");
+  // A bare id when it is the active list's, else the whole URI.
+  expect(saved(item, "T", (id) => (id === "tsk42" ? item : null))).toBe("[[tsk42]]");
+  expect(saved(item, "T", () => null)).toBe(`[[${item}]]`);
+  expect(saved(resourceUri("acme/pr", { id: 12 }), "Fix the parser")).toBe(`[Fix the parser](${resourceUri("acme/pr", { id: 12 })})`);
 });

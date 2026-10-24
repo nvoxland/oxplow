@@ -217,6 +217,45 @@ function collapseLinksOutsideInlineCode(text: string): string {
   }).join("");
 }
 
+/**
+ * A URI as a link in the editor's spelling — what completion, a drop and a
+ * paste put in: `href` its link target, `text` the label
+ * `postprocessWikilinks` collapses to the bare wikilink (a wiki page's slug,
+ * a file's `path[@rev][:line]`, a directory's path, a commit's short sha, a
+ * work item's id when it is the active list's (`mentionRef`), else its
+ * whole URI), so it saves as `[[…]]` and shows its title (`useRefLinkTitle`).
+ * A ref with no bare form keeps `title` as its label (`[title](uri)`).
+ */
+export function refLinkOf(uri: string, title: string, mentionRef: MentionRef = () => null): { href: string; text: string } {
+  const href = linkTarget(uri);
+  const parsed = parseUri(uri);
+  const p = parsed?.params ?? {};
+  switch (typeOf(uri)) {
+    case "oxplow/file": {
+      if (!p.path) break;
+      const line = /^(\d+)-\d+$/.exec(parsed?.view.lines ?? "")?.[1];
+      const rev = p.rev ? `@${p.rev.startsWith("git:") ? p.rev.slice(4) : p.rev}` : "";
+      return { href, text: `${p.path}${rev}${line ? `:${line}` : ""}` };
+    }
+    case "oxplow/dir":
+      if (p.path) return { href, text: p.path };
+      break;
+    case "oxplow/wiki":
+      if (p.slug) return { href, text: p.slug };
+      break;
+    case "oxplow/commit":
+      if (p.sha) return { href, text: p.sha.slice(0, 7) };
+      break;
+    case "oxplow/work_item": {
+      if (workItemId(uri) === null) break;
+      const whole = identityOf(uri) ?? uri;
+      const id = workItemLabel(uri);
+      return { href, text: mentionRef(id) === whole ? id : whole };
+    }
+  }
+  return { href, text: title };
+}
+
 function collapseInternalLink(label: string, url: string): string | null {
   const uri = parseUri(url);
   if (uri !== null) {
