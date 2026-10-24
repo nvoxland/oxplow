@@ -29,6 +29,8 @@ import { selectionToolbarVisible } from "./selectionToolbar.js";
 import { ContextMenu } from "../ContextMenu.js";
 import type { MenuItem } from "../../menu.js";
 import { followLink, linkMenu, type OpenRef } from "./links.js";
+import type { MentionRef } from "./MarkdownView.js";
+import type { RefSearch } from "./refOptions.js";
 import { useOptionalPageNavigation } from "../../tabs/PageNavigationContext.js";
 
 /// Comment integration bundle. When provided, the field highlights
@@ -127,6 +129,11 @@ export interface RichTextFieldProps {
   /** When set, the field becomes comment-enabled (highlights, the
    *  selection affordance, and the thread popover). */
   comments?: RichTextCommentConfig;
+  /** Where `[[` looks (`RefCompletion`); none, and `[[` is plain text.
+   *  Read at mount: a field has it or doesn't. */
+  refSearch?: RefSearch;
+  /** A work item id that is the active list's: a picked item saves as it. */
+  mentionRef?: MentionRef;
 }
 
 export function RichTextField({
@@ -144,12 +151,14 @@ export function RichTextField({
   style,
   hidePencil,
   comments,
+  refSearch,
+  mentionRef,
 }: RichTextFieldProps) {
   const lastCommittedRef = useRef(value);
   const debounceRef = useRef<number | null>(null);
   // The owner's latest callbacks: the editor is made once.
-  const owner = useRef({ onCommit, onChange, onSubmitShortcut, onSaveShortcut, onEscape });
-  owner.current = { onCommit, onChange, onSubmitShortcut, onSaveShortcut, onEscape };
+  const owner = useRef({ onCommit, onChange, onSubmitShortcut, onSaveShortcut, onEscape, refSearch, mentionRef });
+  owner.current = { onCommit, onChange, onSubmitShortcut, onSaveShortcut, onEscape, refSearch, mentionRef };
   // A popover of the field's is open: Escape is the popover's.
   const popoverOpenRef = useRef(false);
   const commit = (md: string) => {
@@ -193,7 +202,16 @@ export function RichTextField({
     // "flushSync was called from inside a lifecycle method" warning. No
     // SSR here, so deferring to a post-commit effect is invisible.
     immediatelyRender: false,
-    extensions: richTextExtensions({ inlineOnly, placeholder }),
+    extensions: richTextExtensions({
+      inlineOnly,
+      placeholder,
+      refCompletion: refSearch
+        ? {
+            search: (query, signal) => owner.current.refSearch?.(query, signal) ?? Promise.resolve([]),
+            mentionRef: (id) => owner.current.mentionRef?.(id) ?? null,
+          }
+        : undefined,
+    }),
     content: value,
     autofocus: autofocus ? "end" : false,
     editorProps: {
@@ -214,6 +232,8 @@ export function RichTextField({
           owner.current.onSaveShortcut(md());
           return true;
         }
+        // The `[[` list's keys are its own.
+        if (editorRef.current?.storage.refCompletion?.open) return false;
         if (event.key === "Escape" && owner.current.onEscape && !popoverOpenRef.current) {
           event.preventDefault();
           owner.current.onEscape();

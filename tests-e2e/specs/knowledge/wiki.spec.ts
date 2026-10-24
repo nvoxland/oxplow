@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { run, searchable } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
 import { openFromLauncher, searchLauncher, workItemIdOf } from "../../support/ui.js";
@@ -88,4 +91,32 @@ test("a wiki link in the editor shows its page's title", async ({ page, daemon }
   const href = "oxplow:oxplow/wiki?slug=otter-den";
   await expect(body.locator(`[data-ref-title][href="${href}"]`)).toHaveText("Otter den");
   await expect(body.locator(`a[href="${href}"]:not([data-ref-title])`)).toBeHidden();
+});
+
+// `[[` in the editor lists what it could link to; the picked page goes in
+// as its link, shows its title, and saves as the wikilink.
+test("[[ completes a link to a wiki page", async ({ page, daemon }) => {
+  await run(daemon, "oxplow.knowledge.write_page", { slug: "badger-sett", title: "Badger sett", body: "# Badger sett\n" });
+  await run(daemon, "oxplow.knowledge.write_page", { slug: "badger-notes", title: "Badger notes", body: "# Badger notes\n\nStart here.\n" });
+  await searchable(daemon, "badger", "wiki");
+  await page.goto("/");
+  await searchLauncher(page, "badger notes");
+  await page.getByTestId("launcher-hit-oxplow:oxplow/wiki?slug=badger-notes").click();
+  const body = page.locator('[data-testid="lens-part-body"]:visible');
+  await expect(body).toContainText("Start here.");
+  await body.locator(".ProseMirror").click();
+  await page.keyboard.press("ControlOrMeta+End");
+  await page.keyboard.type(" See [[badger se");
+  const href = "oxplow:oxplow/wiki?slug=badger-sett";
+  await expect(page.getByTestId(`ref-completion-row-${href}`)).toBeVisible();
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("ref-completion")).toHaveCount(0);
+  await expect(body.locator(`[data-ref-title][href="${href}"]`)).toHaveText("Badger sett");
+  const save = body.getByRole("button", { name: "Save" });
+  await save.click();
+  await expect(save).toBeDisabled();
+  // The page's file keeps the wikilink a person would have typed.
+  expect(readFileSync(join(daemon.project, ".oxplow", "wiki", "badger-notes.md"), "utf8")).toContain("See [[badger-sett]]");
+  await page.reload();
+  await expect(page.locator('[data-testid="lens-part-body"]:visible').locator(`[data-ref-title][href="${href}"]`)).toHaveText("Badger sett");
 });

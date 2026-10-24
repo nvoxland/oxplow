@@ -16,11 +16,15 @@
 import { useCallback, useMemo, useRef } from "react";
 import type { CSSProperties } from "react";
 
+import { searchSite } from "../../api.js";
+import { useLensStream } from "../../lens/LensStream.js";
 import { useResources } from "../../resources.js";
+import { readWorkspaceIndex } from "../../workspaceFiles.js";
 import { useWorkListProfile } from "../../useWorkListProfile.js";
 import { workItemRefOfMention } from "../../workItems.js";
 import { MarkdownView, postprocessWikilinks, preprocessWikilinks } from "./MarkdownView.js";
 import { RichTextField, type RichTextCommentConfig } from "./RichTextField.js";
+import { fileOptions, mergeRefOptions, type RefSearch } from "./refOptions.js";
 
 /** Comments on the editor's text: the page they are on (`target`, a URI),
  *  the stream they belong to and the thread they come from. */
@@ -83,6 +87,8 @@ function MarkdownEditor({
 }: MarkdownProps) {
   const refKinds = useResources();
   const profile = useWorkListProfile();
+  const refSearch = useRefSearch();
+  const mentionRef = useCallback((id: string) => workItemRefOfMention(profile, id), [profile]);
   // The last text handed out, as stored and as the editor spelled it: the
   // owner's echo of it is the editor's own text, not a change to apply.
   const lastOut = useRef<{ stored: string; editor: string } | null>(null);
@@ -119,9 +125,44 @@ function MarkdownEditor({
       autofocus={autofocus}
       hidePencil={hidePencil}
       comments={comments}
+      refSearch={refSearch}
+      mentionRef={mentionRef}
       testId={testId}
       className={className}
       style={style}
     />
   );
+}
+
+/** How many rows `[[` lists. */
+const REF_LIMIT = 12;
+
+/** Where `[[` looks: the site search (project-wide, as the quick open) and,
+ *  on a page of a stream, its files by name — the index read once, on the
+ *  first `[[`. */
+function useRefSearch(): RefSearch {
+  const stream = useLensStream();
+  const files = useRef<{ stream: string; paths: Promise<string[]> } | null>(null);
+  const streamRef = useRef(stream?.id ?? null);
+  streamRef.current = stream?.id ?? null;
+  return useCallback<RefSearch>(async (query, signal) => {
+    const q = query.trim();
+    if (!q) return [];
+    const streamId = streamRef.current;
+    if (streamId && files.current?.stream !== streamId) {
+      files.current = {
+        stream: streamId,
+        paths: readWorkspaceIndex(streamId).then(
+          (r) => r.files.map((f) => f.path),
+          () => [],
+        ),
+      };
+    }
+    const [hits, paths] = await Promise.all([
+      q.length >= 2 ? searchSite(q, streamId, null, REF_LIMIT).catch(() => []) : Promise.resolve([]),
+      streamId && files.current ? files.current.paths : Promise.resolve([]),
+    ]);
+    if (signal.aborted) return [];
+    return mergeRefOptions(hits, fileOptions(paths, q, REF_LIMIT), REF_LIMIT);
+  }, []);
 }
