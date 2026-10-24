@@ -70,6 +70,7 @@ import { DeclaredPageView } from "./pages/DeclaredPageView.js";
 import { kindForTabId } from "./pageKinds.js";
 import { declaredPage, isAppRenderer, isBuiltInPage, type AppRendererName } from "./pages/declaredPages.js";
 import { useExtensions } from "./extensionsStore.js";
+import { foundationDown, FOUNDATION, RECOVERY_COMMAND } from "./foundationDown.js";
 import { PanelRunsProvider } from "./components/Panels/PanelRunsContext.js";
 import { useAlerts } from "./components/Alerts/useAlerts.js";
 import { useAlertToasts } from "./components/Alerts/useAlertToasts.js";
@@ -1570,6 +1571,7 @@ export function App() {
   );
 
   const extensions = useExtensions();
+  const foundationErrors = foundationDown(extensions);
   // Every enabled extension's pages: the routes and the renderers.
   const declaredPages = useMemo(
     () => (extensions ?? []).filter((e) => e.enabled).flatMap((e) => e.pages),
@@ -2060,6 +2062,9 @@ export function App() {
         onOpenSearchHit={openSearchHit}
       />
       {daemonUnavailable ? <DaemonDownDialog /> : null}
+      {!daemonUnavailable && foundationErrors ? (
+        <FoundationDownDialog key={foundationErrors.join("\n")} errors={foundationErrors} />
+      ) : null}
       <UndoToastStack />
       <PersonCommandConfirm />
       <RemoteConnectionBanner />
@@ -2092,6 +2097,90 @@ function isEditableTarget(target: EventTarget | null): boolean {
     return type === "text" || type === "search" || type === "email" || type === "url" || type === "password" || type === "" || type === "tel";
   }
   return false;
+}
+
+/**
+ * Shown when the required foundation extension isn't running. The deploy
+ * command is foundation's own, so the shell can't run it: the dialog says
+ * what to run outside. Dismissal is local; a new problem text (the key)
+ * shows it again.
+ */
+function FoundationDownDialog({ errors }: { errors: string[] }) {
+  const [dismissed, setDismissed] = useState(false);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setDismissed(true);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+  if (dismissed) return null;
+  const button = { padding: "8px 14px", borderRadius: 4, cursor: "pointer", fontFamily: "inherit" } as const;
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0, 0, 0, 0.65)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 999,
+        padding: 24,
+      }}
+    >
+      <div
+        style={{
+          width: "min(560px, 100%)",
+          background: "var(--bg-2)",
+          border: "1px solid var(--border)",
+          borderRadius: 8,
+          padding: 20,
+          boxShadow: "0 0 0 1px rgba(255,255,255,0.12), 0 12px 40px rgba(0, 0, 0, 0.4)",
+        }}
+      >
+        <div style={{ fontSize: 18, fontWeight: 600, marginBottom: 8 }}>{FOUNDATION} isn't running</div>
+        <div style={{ color: "var(--muted)", lineHeight: 1.5, marginBottom: 12 }}>
+          Agents, Alerts, Settings and the core commands need it.
+        </div>
+        <ul style={{ margin: "0 0 12px", paddingLeft: 20, lineHeight: 1.5 }}>
+          {errors.map((line, i) => (
+            <li key={i}>{line}</li>
+          ))}
+        </ul>
+        <div style={{ marginBottom: 8 }}>Quit oxplow, run this in the repo, then start oxplow again:</div>
+        <code
+          style={{
+            display: "block",
+            padding: 8,
+            marginBottom: 16,
+            background: "var(--bg-1)",
+            border: "1px solid var(--border)",
+            borderRadius: 4,
+            userSelect: "all",
+          }}
+        >
+          {RECOVERY_COMMAND}
+        </code>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            type="button"
+            onClick={() => void navigator.clipboard.writeText(RECOVERY_COMMAND).catch(() => {})}
+            style={{ ...button, background: "var(--accent)", color: "#fff", border: "none" }}
+          >
+            Copy command
+          </button>
+          <button
+            type="button"
+            onClick={() => setDismissed(true)}
+            style={{ ...button, background: "transparent", color: "inherit", border: "1px solid var(--border)" }}
+          >
+            Dismiss
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function DaemonDownDialog() {

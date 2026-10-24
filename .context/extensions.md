@@ -472,8 +472,8 @@ over a database file); adversarial and concurrency coverage is still to do.
 >   - the `oxplow-extension` agent skill;
 >   - the lens page and the launcher's "Lenses" section;
 >   - sharing: `oxplow.extension.share` / `unshare` move a source in or out
->     of git, and a teammate's checkout deploys it at startup ("Sources and
->     deployments");
+>     of git, and a teammate deploys it in their checkout ("Sources and
+>     deployments": boot deploys nothing);
 >   - Explore Data (oxplow-foundation's custom page, with Save as Lens) and
 >     lens tiles on dashboards;
 >   - **bundled extensions** (compiled in, read-only, reserved names) and
@@ -888,7 +888,8 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   - **Yourself.** A source is personal (`.oxplow/.gitignore` ignores it). It
     runs after `oxplow.extension.deploy`.
   - **Your team.** `oxplow.extension.share { name }` un-ignores the source;
-    the person commits it. A teammate's checkout deploys it at startup.
+    the person commits it. A teammate deploys it in their checkout (Settings
+    → Extensions lists it `undeployed` with Deploy): boot deploys nothing.
   - **Someone else's.** The interim way: clone it into
     `.oxplow/extensions/<name>/` (or point `extensionSources` at it), list
     it, deploy it.
@@ -1279,10 +1280,12 @@ source directly: an edit changes nothing until it is deployed.
   rules for oxplow's own extensions still apply). Set in `project.yaml`
   (this repo commits it), overridable in `personal.yaml`, read
   once when the catalog is made (`ExtensionCatalog::settings`): changing
-  it takes a restart. At startup a required extension with no shipped
-  copy deploys from its source with nothing to approve (it is the
-  project's own code); `oxplow-bundled` waits for its permissions like any
-  extension. Nothing ships to roll back to, and a non-required one can be
+  it takes a restart. Boot deploys nothing here either: a checkout's first
+  run, and a core change that foundation's recorded deployment doesn't
+  activate against, need `cargo run -q -p oxplow-dev -- extension deploy`
+  with oxplow quit (`extension_deploy::DEPLOY_FROM_OUTSIDE`; it deploys
+  every extension that is on whose source isn't what runs, foundation
+  first). Nothing ships to roll back to, and a non-required one can be
   removed.
 - **The live set:** each extension's active deployment, in the
   `extension_deployment` table (`v_extension_deployment`: name, hash,
@@ -1355,56 +1358,65 @@ hash is already in the store. A component bundle under `output` loads from
 the source as declared (`BundleLook::Unknown`) while `output` doesn't
 exist yet, so validate and preview pass before any build. A bundled
 extension's build runs when oxplow is built ("Shipped deployments"); while
-developing oxplow, startup stages the output that build left in its
-source folder (recording the command, so a deploy with the same command
-asks nothing), and a source whose output isn't built is a problem saying
-how to build it. `oxplow extension check`
+developing oxplow its deploy (from `oxplow-dev` or the app) runs the build
+like any extension's. `oxplow extension check`
 runs no build (the built source isn't deployed in its throwaway);
 `extension test` builds, as the author's own run; its copy links the
 `exclude` folders instead of copying them.
 
-**Startup** (`extension_deploy::start`, before the first activation): the
-live set starts from the active rows whose folder is still in the store;
-each extension that is on with no deployment here (a fresh clone, a
-just-pulled teammate's) is staged from the main checkout's source and
-activates with the rest — one that doesn't prepare is held, as any is. One
-whose source declares permissions (beyond what ships, for a bundled one)
-isn't: it stays `undeployed` and `v_extension.pending` says what it asks
-for, until a person deploys it ("Permissions"). A source with a `build:`
-waits the same way, its pending line naming the build: nothing has
-approved its command on this machine.
-Every extension is held the same way, foundation included
-(`CatalogSnapshot::admitted`, `extension_catalog::Failed`). Boot is one
-activation (`ExtensionActivation::initialize`: `start`, then the first
-generation). A deployment of an extension that ships with oxplow that is
-held with nothing of it running — it doesn't load or doesn't prepare —
-**gives way** to the copy that ships (`activate_kind`: out of the live set
-and the staged changes, admitted again), which the publication records as
-the live set; its problems say "the shipped version runs until it is
-deployed again". While developing oxplow nothing ships, so a broken
-foundation is held like any extension: the rest activates, its problem
-says why, and fixing and deploying (or restarting) brings it back. A
-required extension `start` can't stage (no source, a `build:`) is a
-problem too. Nothing runs in its place on purpose — it is fixed from
-outside, in its source — so its problem has to be enough to act on
-(`ExtensionActivation::explain_required`): which deployment doesn't
-activate, that the agent harnesses, Alerts and core's commands are
-missing without it, and to fix the source and restart or deploy. It is
-logged, listed in `v_extension.errors` by the activation that finds it
-(startup's own problems too: `initialize` hands them to the first
-activation), and stands across later activations — which don't hold it
-again, since nothing of it is live — until it runs. Without that the
-listing went blank on the next activation and Alerts, itself
-foundation's, couldn't open to say anything. The usual cause is a
+**Startup** (`extension_deploy::start`, before the first activation)
+**deploys nothing.** The live set starts from the active rows whose folder
+is still in the store, and that is all boot runs. An extension that is on
+with no deployment here (a fresh clone, a just-pulled teammate's) is listed
+`undeployed`, its `pending` naming what its deploy will ask for, until a
+person deploys it. So what runs is only ever what someone deployed, never a
+source caught half-edited. (Until 2026-10-24 boot deployed those sources
+itself; with a held deployment losing its record, that made a core change
+take two restarts and put whatever the source held live unasked.)
+Boot is one activation (`ExtensionActivation::initialize`: `start`, then
+the first generation).
+
+**The live set is what was chosen, not what happened to run.** A
+deployment that is held — it doesn't load or doesn't prepare against this
+oxplow — keeps its row `active` and its place in the catalog's live map,
+whatever runs in its place (its last working version, the copy that
+ships, or nothing): every activation and every boot tries it again and
+lists why it doesn't run (`v_extension.errors`), until a person deploys
+another or rolls back. The publication records the published deployments
+plus each held name's chosen hash (`activate_kind`: `chosen`, read before
+the change is staged). A change that is held was never chosen, so a failed
+deploy still changes nothing. Because the chosen hash of a held extension
+isn't running, `deploy`'s "already" check also asks that it runs: deploying
+the same source again activates it again.
+
+A deployment of an extension that ships with oxplow that is held with
+nothing of it running — it doesn't load or doesn't prepare — **gives way**
+to the copy that ships (`activate_kind`: out of the staged changes,
+admitted again); its problems say "the shipped version runs until it is
+deployed again", and it stays chosen as above. While developing oxplow
+nothing ships, so a broken or missing foundation is just not there: the
+rest activates and its problem says why. `start` reports a required
+extension with no deployment at all; `explain_required` reports one whose
+deployment doesn't activate. Both lines say what is missing without it
+(the agent harnesses, Alerts, core's commands and pages) and how to bring
+it back from outside — quit oxplow, run `cargo run -q -p oxplow-dev --
+extension deploy`, start it — since the commands that deploy are
+foundation's own. It is logged, listed in `v_extension.errors` by the
+activation that finds it (startup's own problems too: `initialize` hands
+them to the first activation), and stands across later activations until
+it runs. The desktop shell draws one plain dialog for it
+(`apps/desktop/src/foundationDown.ts`, `FoundationDownDialog` in
+`App.tsx`): the problem lines and that command, Copy and Dismiss; nothing
+else in the app handles a missing foundation. The usual cause is a
 deployment an older oxplow recorded meeting a newer core: core and
 foundation's source change together in one commit, but the recorded
-deployment is the source as it was (a page naming a built-in component
-core then removed). It is fixed from outside oxplow: `oxplow-dev extension
-status` shows what the next boot would run and hold back without starting
-it (`extension_deploy::next_boot`: the active deployments activated in a
-throwaway in memory), and `oxplow-dev extension deploy <name>` deploys a
-source with oxplow quit (`.context/working-in-this-repo.md` "oxplow-dev"). Boot stops only when a generation can't publish at all (the
-host, the database).
+deployment is the source as it was. `oxplow-dev extension status` shows
+what the next boot would run and hold back without starting it
+(`extension_deploy::next_boot`: the active deployments activated in a
+throwaway in memory), and `oxplow-dev extension deploy [<name>]` deploys
+with oxplow quit (`.context/working-in-this-repo.md` "oxplow-dev"). Boot
+stops only when a generation can't publish at all (the host, the
+database).
 
 **Sharing is one explicit act.** `.oxplow/.gitignore` ignores everything
 but `project.yaml`, so a new extension's source is personal.
@@ -1504,8 +1516,8 @@ There is no separate approval store: each deployment row records the
 permissions it was approved with (`v_extension_deployment.permissions`).
 Keep This (`oxplow.lens.keep`) never asks: it fails, saying why, when the
 extension's source gained a permission since it was last deployed. A
-fresh machine has nothing running, so a teammate's extension that
-declares permissions waits for its first deploy here (Startup).
+fresh machine has nothing running, so a teammate's extension waits for
+its first deploy here (Startup), which asks for what it declares.
 
 **The Extensions page** (foundation's `extensions` page, also mounted in
 Settings → Extensions through `oxplow-foundation/settings-extensions.sections`, ahead of

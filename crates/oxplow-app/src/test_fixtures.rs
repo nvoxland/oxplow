@@ -151,7 +151,8 @@ pub const FOUNDATION_BUILD: &str = "\"bun install --frozen-lockfile && bun run b
 /// [`services_with_effort`] while developing oxplow: oxplow's own
 /// extensions run from their sources (`enableBundledExtensions: false`),
 /// each a copy of the repo's folder in the project's
-/// `.oxplow/extensions/`, deployed at startup like any extension.
+/// `.oxplow/extensions/`. Boot deploys nothing, so foundation is deployed
+/// once booted, as `oxplow-dev extension deploy` does for a checkout.
 pub async fn services_developing_oxplow() -> EffortFixture {
     let dir = tempfile::tempdir().unwrap();
     init_git_repo(dir.path());
@@ -174,12 +175,21 @@ pub async fn services_developing_oxplow() -> EffortFixture {
         "enableBundledExtensions: false\n",
     )
     .unwrap();
-    services_with_effort_in(dir).await
+    let svc = crate::Services::in_memory(dir.path()).await.unwrap();
+    crate::extension_deploy::deploy(&svc, "oxplow-foundation", dir.path(), None, true)
+        .await
+        .expect("foundation deploys from its source");
+    with_effort(dir, svc).await
 }
 
 /// [`services_with_effort`] over the project `dir`, already set up.
 pub async fn services_with_effort_in(dir: tempfile::TempDir) -> EffortFixture {
     let svc = crate::Services::in_memory(dir.path()).await.unwrap();
+    with_effort(dir, svc).await
+}
+
+/// A stream, a thread's session and an open effort over booted `svc`.
+async fn with_effort(dir: tempfile::TempDir, svc: Arc<crate::Services>) -> EffortFixture {
     svc.streams.ensure_primary().await.unwrap();
     // Activation logged the capability choices; the policy has heard them
     // (they close open efforts) before the fixture opens one.

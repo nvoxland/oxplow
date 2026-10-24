@@ -155,6 +155,7 @@ const OXPLOW_SKILLS: &[SkillFiles] = &[
     skill!(
         "oxplow-extension",
         [
+            "development-cycle",
             "scaffolding",
             "semantic-layer",
             "lens-format",

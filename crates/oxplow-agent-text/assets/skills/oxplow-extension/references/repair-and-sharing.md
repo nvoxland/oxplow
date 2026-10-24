@@ -32,8 +32,10 @@ in `v_contribution_health` (`extension`, `contribution`, `kind`, `state` = `ok` 
 - **Deploy:** nothing runs a source. After an edit is right, run
   `oxplow.extension.deploy { name }` (`run_command`). It copies the source
   into `.oxplow/runtime/extensions/<name>/<hash>/`, makes that copy live and
-  returns once it runs. If the extension does not prepare, the deploy fails
-  with the problems and the old deployment keeps running.
+  returns once it runs, replacing what ran: no restart. If the extension
+  does not prepare, the deploy fails with the problems and the old
+  deployment keeps running. Boot deploys nothing, so a restart never
+  publishes a source (`references/development-cycle.md`).
   `oxplow.extension.rollback { name, to? }` makes an earlier deployment live.
 - **Needs a tool to build** (TypeScript, a bundler): declare
   `build: { run: <command>, output: dist, exclude: [node_modules] }`.

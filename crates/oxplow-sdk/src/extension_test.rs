@@ -2308,9 +2308,9 @@ async fn suite_host(
     let tmp = tempfile::tempdir().map_err(|e| e.to_string())?;
     let target = tmp.path().join(EXTENSIONS_DIR).join(&ext.name);
     crate::throwaway::copy_dir(&root.join(&ext.path), &target).map_err(|e| e.to_string())?;
-    // It, and what ships with oxplow, are on; boot deploys what is listed,
-    // and the author's own run of its tests deploys it as they would:
-    // confirmed, whatever it declares.
+    // It, and what ships with oxplow, are on; boot deploys nothing, so the
+    // author's own run of its tests deploys it as they would: confirmed,
+    // whatever it declares.
     std::fs::create_dir_all(tmp.path().join(".oxplow")).map_err(|e| e.to_string())?;
     let on: Vec<&str> = oxplow_config::DEFAULT_EXTENSIONS
         .iter()

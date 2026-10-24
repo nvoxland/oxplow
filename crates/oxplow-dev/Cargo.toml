@@ -17,6 +17,7 @@ path = "src/main.rs"
 [dependencies]
 oxplow-ai = { workspace = true }
 oxplow-app = { workspace = true }
+oxplow-config = { workspace = true }
 oxplow-db = { workspace = true }
 oxplow-domain = { workspace = true }
 oxplow-tasks = { workspace = true }

@@ -4685,6 +4685,7 @@ version = "0.7.0"
 dependencies = [
  "oxplow-ai",
  "oxplow-app",
+ "oxplow-config",
  "oxplow-db",
  "oxplow-domain",
  "oxplow-tasks",
@@ -5221,6 +5222,7 @@ dependencies = [
  "syn 2.0.119",
  "syn 3.0.6",
  "sync_wrapper",
+ "tauri-macros",
  "time",
  "tokio",
  "tokio-util",

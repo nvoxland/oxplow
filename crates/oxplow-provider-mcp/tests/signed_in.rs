@@ -37,7 +37,7 @@ fn write_extension(project: &Path, sim: &OAuthSim) {
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/notes");
     let ext = project.join(".oxplow/extensions/notes");
     copy_dir(&fixture, &ext);
-    // On for the project, so boot deploys it.
+    // On for the project; it runs nothing until it is deployed.
     std::fs::write(
         project.join(".oxplow/project.yaml"),
         "extensions: [oxplow-bundled, notes]\n",
@@ -99,7 +99,7 @@ async fn a_signed_in_bearer_renews_once_when_its_server_stops_taking_it() {
     .await
     .unwrap();
 
-    // The person deploys it (it runs a program: boot waits for them) and
+    // The person deploys it (boot deploys nothing) and
     // enables the instance.
     oxplow_app::extension_deploy::deploy(&svc, "notes", project, None, true)
         .await

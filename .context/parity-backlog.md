@@ -27,7 +27,7 @@ or moving oxplow-mcp behind a child-process boundary with stdio
 transport that can be respawned). What landed instead: a
 `POST /dev/ping` health-check endpoint on the control plane so dev
 tooling can verify the server is up + a session's bearer is live. For
-real iteration, `bun run tauri:dev` rebuilds the Rust side on save.
+real iteration, run `bun run build:dev` and restart oxplow.
 
 ## Useful follow-ups discovered during the sweep
 

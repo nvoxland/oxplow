@@ -314,7 +314,7 @@ fn target_of(
 }
 
 /// Deploy `name` from its source in the checkout at `root`, made from
-/// `from_stream` (`None`: oxplow itself, at startup). Turns it on in the
+/// `from_stream` (`None`: no stream, `oxplow-dev`). Turns it on in the
 /// person's layer when nothing turns it on yet. A source that declares
 /// permissions beyond what runs now goes live only `confirmed` by a
 /// person; otherwise nothing changes and it says what it would add.
@@ -344,7 +344,14 @@ pub async fn deploy(
         .map_err(|e| invalid(format!("extension `{name}`: {e}")))?
     };
     let target = target_of(shipped_of(svc, name), &hash);
-    let live_now = svc.extension_catalog.live().get(name) == target.as_ref();
+    // Already the one that runs: chosen, and not held (a held deployment
+    // stays chosen; deploying it again activates it again).
+    let live_now = svc.extension_catalog.live().get(name) == target.as_ref()
+        && running(svc, name).is_some_and(|e| match (&e.deployment, &target) {
+            (crate::extensions::Deployment::Deployed { hash }, Some(t)) => hash == t,
+            (crate::extensions::Deployment::Shipped { .. }, None) => true,
+            _ => false,
+        });
     requirements_met(
         &oxplow_config::extension_settings(&project),
         name,
@@ -831,8 +838,9 @@ pub fn unshare(svc: &Services, name: &str) -> Result<(), DomainError> {
 
 /// Copy `name`'s source at `source` into the store (unless it is there, or
 /// it is the deployment that ships) and record it: the live-set change
-/// that runs it. No load check: activation holds one that doesn't load, as
-/// at startup.
+/// that runs it, for tests that stage sources as a deploy would. No load
+/// check: activation holds one that doesn't load.
+#[cfg(test)]
 async fn stage(
     svc: &Arc<Services>,
     name: &str,
@@ -878,15 +886,19 @@ async fn stage(
     Ok(Some(target))
 }
 
+/// The command that deploys a checkout's extensions from outside oxplow,
+/// with oxplow quit: what a problem says when oxplow's own extension has
+/// nothing to run (`oxplow-dev`, never shipped).
+pub const DEPLOY_FROM_OUTSIDE: &str = "cargo run -q -p oxplow-dev -- extension deploy";
+
 /// Before the first activation: start the live set from the deployments
-/// recorded as active whose folder is still in the store, then stage each
-/// enabled extension that has none here from the main checkout's source.
-/// What a startup deploy can't do becomes that extension's problem; the
-/// rest start. A required extension with nothing to run is a problem too
-/// (the second value): it isn't held, it simply isn't there.
-pub(crate) async fn start(
-    svc: &Arc<Services>,
-) -> Result<(LiveChanges, VocabularyErrors), DomainError> {
+/// recorded as active whose folder is still in the store. Boot deploys
+/// nothing: an enabled extension with no deployment here stays undeployed
+/// until a person deploys it, so what runs is only ever what someone
+/// deployed. A required extension with nothing to run (no deployment, and
+/// no copy ships: oxplow developing itself) is a problem, returned for the
+/// first activation to list; it isn't held, it simply isn't there.
+pub(crate) async fn start(svc: &Arc<Services>) -> Result<VocabularyErrors, DomainError> {
     let project = svc.layout.project_dir.clone();
     let rows = svc.db.read(|c| store_rows::list_tx(c, None)).await?;
     let live = rows
@@ -897,78 +909,26 @@ pub(crate) async fn start(
         .map(|r| (r.name, r.hash))
         .collect();
     svc.extension_catalog.set_live(live);
-    let settings = oxplow_config::extension_settings(&project);
-    let mut names: Vec<String> = settings.enabled().into_iter().map(|(n, _)| n).collect();
-    names.extend(
-        crate::bundled_extensions::BUNDLED
-            .iter()
-            .filter(|b| b.required)
-            .map(|b| b.name.to_string()),
-    );
-    let mut changes = LiveChanges::new();
-    let mut problems = VocabularyErrors::new();
-    for name in names {
-        if svc.extension_catalog.live().contains_key(&name) {
+    let mut missing = VocabularyErrors::new();
+    for b in crate::bundled_extensions::BUNDLED
+        .iter()
+        .filter(|b| b.required)
+    {
+        if svc.extension_catalog.live().contains_key(b.name) || shipped_of(svc, b.name).is_some() {
             continue;
         }
-        let required = crate::bundled_extensions::is_required(&name);
-        let shipped = shipped_of(svc, &name);
-        let source = settings.source(&project, &name);
-        if !source.join("extension.yaml").is_file() {
-            if required && shipped.is_none() {
-                problems.insert(
-                    name.clone(),
-                    vec![format!(
-                        "its source {} has no extension.yaml, and no copy of it ships with this oxplow",
-                        crate::extensions::shown(&project, &source)
-                    )],
-                );
-            }
-            continue;
-        }
-        // One that would add permissions waits for a person to deploy it
-        // (its listing says what for); a bundled one's baseline is what
-        // ships. One with a build waits too: nothing has approved its
-        // command. A required one with no copy shipping (oxplow
-        // developing itself) is the project's own code and deploys.
-        let loaded = crate::extensions::load_extension_at(&source, &name);
-        let declared = loaded.permissions;
-        let trusted = shipped.is_none() && required;
-        let baseline = shipped.map(shipped_permissions).unwrap_or_default();
-        // Its build is the one building oxplow ran (`build.rs`): what it
-        // wrote is staged; a source not built yet says how to build it.
-        if let (Some(build), true) = (&loaded.build, trusted) {
-            if !source.join(&build.output).is_dir() {
-                problems.insert(
-                    name.clone(),
-                    vec![format!(
-                        "its `{}` isn't built: run `{}` in {} (building oxplow does)",
-                        build.output,
-                        build.run,
-                        crate::extensions::shown(&project, &source)
-                    )],
-                );
-                continue;
-            }
-        } else if !declared.added_over(&baseline).is_empty() && !trusted || loaded.build.is_some() {
-            continue;
-        }
-        let build_run = loaded.build.as_ref().map(|b| b.run.clone());
-        match stage(svc, &name, &source, None, declared, build_run).await {
-            Ok(Some(target)) => {
-                changes.insert(name, Some(target));
-            }
-            Ok(None) => {}
-            Err(error) if trusted => {
-                problems.insert(
-                    name.clone(),
-                    vec![format!("it couldn't be deployed: {error}")],
-                );
-            }
-            Err(error) => tracing::warn!(%name, %error, "startup deploy failed"),
-        }
+        missing.insert(
+            b.name.to_string(),
+            vec![format!(
+                "oxplow's own `{name}` has no deployment here and no copy of it ships with \
+                 this build, so what it provides (the agent harnesses, Alerts, core commands \
+                 and pages) is missing: quit oxplow, run `{DEPLOY_FROM_OUTSIDE}` in the \
+                 project, then start oxplow again",
+                name = b.name
+            )],
+        );
     }
-    Ok((changes, problems))
+    Ok(missing)
 }
 
 /// What the next boot of a project would run, found without starting it.
@@ -1078,7 +1038,7 @@ pub async fn next_boot(project: &Path, rows: &[DeploymentRow]) -> Result<NextBoo
                         .iter()
                         .find(|r| r.name == name && r.hash == hash)
                         .map(|r| format!(" of {}", r.deployed_at))
-                        .unwrap_or_else(|| " (startup deploys its source)".into());
+                        .unwrap_or_default();
                     format!("its deployment {hash}{at}")
                 }
                 Some(crate::extensions::Deployment::Shipped { .. }) => {
@@ -1112,7 +1072,7 @@ pub async fn next_boot(project: &Path, rows: &[DeploymentRow]) -> Result<NextBoo
 /// that wrote them would deploy them: every source in the project whose
 /// deployment isn't the live one is staged, turned on for the person
 /// unless something turned it off, and activated with the rest — one that
-/// doesn't load is held, as at startup.
+/// doesn't load is held, as at boot.
 #[cfg(test)]
 pub(crate) async fn stage_sources(svc: &Arc<Services>) -> LiveChanges {
     let project = svc.layout.project_dir.clone();
@@ -1191,6 +1151,19 @@ mod tests {
             .unwrap()
             .into_iter()
             .map(|r| (r.hash, r.active))
+            .collect()
+    }
+
+    /// The hashes of `name`'s deployments recorded active.
+    async fn active_hashes(svc: &Services, name: &str) -> Vec<String> {
+        let name = name.to_string();
+        svc.db
+            .read(move |c| store_rows::list_tx(c, Some(&name)))
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|r| r.active)
+            .map(|r| r.hash)
             .collect()
     }
 
@@ -1511,10 +1484,10 @@ mod tests {
         assert!(!text.contains("extensions/acme/"), "{text}");
     }
 
-    /// At startup a built extension with no deployment here waits for a
-    /// person, its listing naming the build it would run.
+    /// Boot leaves a built extension with no deployment here for a person
+    /// to deploy, its listing naming the build that deploy would run.
     #[tokio::test]
-    async fn startup_leaves_a_built_extension_undeployed_with_the_build_line_pending() {
+    async fn boot_leaves_a_built_extension_undeployed_with_the_build_line_pending() {
         let fx = crate::test_fixtures::services_with_effort().await;
         let svc = &fx.svc;
         let root = svc.layout.project_dir.clone();
@@ -1531,11 +1504,10 @@ mod tests {
         assert!(!root.join(".oxplow/extensions/acme/dist").exists());
     }
 
-    /// At startup an extension that is on but undeployed deploys by itself
-    /// only when it asks for nothing; one that declares permissions waits,
-    /// and says what for.
+    /// Boot leaves an extension that declares permissions undeployed, and
+    /// its listing says what its deploy will ask for.
     #[tokio::test]
-    async fn startup_leaves_a_declaring_extension_undeployed_and_says_what_it_needs() {
+    async fn boot_leaves_a_declaring_extension_undeployed_and_says_what_it_needs() {
         let fx = crate::test_fixtures::services_with_effort().await;
         let svc = &fx.svc;
         let root = svc.layout.project_dir.clone();
@@ -1968,10 +1940,11 @@ mod tests {
         assert!(settings.personal.enable.contains(&"acme".to_string()));
     }
 
-    /// At startup an enabled extension with no deployment here deploys
-    /// from its source; one listed with neither is listed as not here.
+    /// Boot deploys nothing: an enabled extension with a source and no
+    /// deployment here is listed undeployed and runs nothing until a person
+    /// deploys it; one listed with neither is listed as not here.
     #[tokio::test]
-    async fn startup_deploys_what_is_on_and_lists_what_is_not_here() {
+    async fn boot_deploys_nothing_an_enabled_source_is_undeployed() {
         let fx = crate::test_fixtures::services_with_effort().await;
         let svc = &fx.svc;
         let root = svc.layout.project_dir.clone();
@@ -1986,7 +1959,9 @@ mod tests {
             .initialize(svc.clone())
             .await
             .unwrap();
-        assert_eq!(lens_title(svc).as_deref(), Some("One"));
+        assert_eq!(lens_title(svc), None);
+        assert_eq!(acme(svc).unwrap().deployment, Deployment::Undeployed);
+        assert!(rows(svc).await.is_empty());
         let ghost = svc
             .extension_catalog
             .unpinned(&root, "a test reads the catalog")
@@ -1999,10 +1974,10 @@ mod tests {
     }
 
     /// While developing oxplow (`enableBundledExtensions: false`) its own
-    /// extensions run from their sources: foundation is deployed at
-    /// startup like any extension, with nothing to approve (it is the
-    /// project's own code); `oxplow-bundled` waits for a person to approve
-    /// its permissions, as any extension does.
+    /// extensions run from their sources, deployed like any extension's
+    /// (the fixture deploys foundation, as `oxplow-dev extension deploy`
+    /// does); `oxplow-bundled`, never deployed, is listed undeployed with
+    /// the permissions its deploy will ask for.
     #[tokio::test]
     async fn developing_oxplow_its_own_extensions_run_from_their_sources() {
         let fx = crate::test_fixtures::services_developing_oxplow().await;
@@ -2155,6 +2130,9 @@ mod tests {
             .initialize(svc.clone())
             .await
             .expect("foundation activates");
+        // What runs is the shipped copy; what the person chose stays
+        // recorded, so every boot tries it again and says why it doesn't.
+        assert_eq!(active_hashes(svc, name).await, vec![hash.to_string()]);
         let active = svc.extension_catalog.active().unwrap();
         let foundation = active.extensions().iter().find(|e| e.name == name).unwrap();
         assert!(
@@ -2172,7 +2150,10 @@ mod tests {
                 .is_some_and(|p| p.iter().any(|m| m.contains("not_a_key"))),
             "{problems:?}"
         );
-        assert!(!svc.extension_catalog.live().contains_key(name));
+        assert_eq!(
+            svc.extension_catalog.live().get(name).map(String::as_str),
+            Some(hash)
+        );
     }
 
     /// Services over a fresh project that haven't activated: what a boot
@@ -2297,11 +2278,13 @@ mod tests {
         assert!(svc.commands.spec("oxplow.config.get").is_some());
     }
 
-    /// While developing oxplow nothing ships to fall back to: a broken
-    /// foundation source is held at boot like any extension, the rest
-    /// activate, and its problem says why.
+    /// While developing oxplow nothing ships and boot deploys nothing: a
+    /// checkout with foundation's source but no deployment of it runs
+    /// without foundation, and its problem — in the listing the shell's
+    /// dialog reads, and still after a later activation — names the
+    /// command that deploys it. Another extension deploys and runs.
     #[tokio::test]
-    async fn developing_oxplow_a_broken_foundation_is_held_and_the_rest_runs() {
+    async fn developing_oxplow_with_no_foundation_deployment_says_how_to_deploy_it() {
         let (dir, svc) = unbooted();
         for b in crate::bundled_extensions::BUNDLED {
             let to = dir.path().join(".oxplow/extensions").join(b.name);
@@ -2311,11 +2294,6 @@ mod tests {
                 std::fs::write(file, bytes).unwrap();
             }
         }
-        let manifest = dir
-            .path()
-            .join(".oxplow/extensions/oxplow-foundation/extension.yaml");
-        let text = std::fs::read_to_string(&manifest).unwrap();
-        std::fs::write(&manifest, format!("{text}not_a_key: 1\n")).unwrap();
         write(
             dir.path(),
             ".oxplow/project.yaml",
@@ -2344,23 +2322,23 @@ mod tests {
             return;
         }
         assert!(running(&svc, "oxplow-foundation").is_none());
-        assert!(running(&svc, "acme").is_some());
-        // Its problem says why, in its listing too (what Alerts reads), and
-        // still after a later activation: it isn't running until it's fixed.
+        assert!(running(&svc, "acme").is_none());
         for _ in 0..2 {
             let why = svc.extension_activation.problems();
             assert!(
-                why.get("oxplow-foundation")
-                    .is_some_and(|p| p.iter().any(|m| m.contains("not_a_key"))),
+                why.get("oxplow-foundation").is_some_and(|p| p
+                    .iter()
+                    .any(|m| m.contains("oxplow-dev -- extension deploy"))),
                 "{why:?}"
             );
-            let listed = listed_errors(&svc, "oxplow-foundation").await;
-            assert!(listed.contains("not_a_key"), "{listed}");
             svc.extension_activation
                 .activate(svc.clone())
                 .await
                 .unwrap();
         }
+        let root = svc.layout.project_dir.clone();
+        deploy(&svc, "acme", &root, None, true).await.unwrap();
+        assert!(running(&svc, "acme").is_some());
     }
 
     /// What the next boot would run is found without touching the
@@ -2500,13 +2478,17 @@ mod tests {
             return;
         }
         assert!(running(&svc, "oxplow-foundation").is_none());
+        assert_eq!(
+            active_hashes(&svc, "oxplow-foundation").await,
+            vec!["00000000000000ba"]
+        );
         for _ in 0..2 {
             let listed = listed_errors(&svc, "oxplow-foundation").await;
             for said in [
                 "not_a_key",
                 "deployment 00000000000000ba doesn't activate",
                 "agent harnesses",
-                "restart oxplow",
+                "oxplow-dev -- extension deploy",
             ] {
                 assert!(listed.contains(said), "{said}: {listed}");
             }
@@ -2564,73 +2546,42 @@ mod tests {
         );
     }
 
-    /// While developing oxplow, foundation's build is cargo's: startup
-    /// stages the output its source folder already holds, with the build
-    /// recorded, so a later deploy with the same command asks nothing; a
-    /// source whose output isn't built is a problem saying how to build it.
+    /// A deployment held at boot is still the one the person chose: it
+    /// stays recorded active, so a later activation and the next boot try
+    /// it again and list why, instead of forgetting it and leaving the
+    /// extension undeployed (which a boot that deployed sources then
+    /// replaced with whatever the source held).
     #[tokio::test]
-    async fn developing_oxplow_a_built_foundation_stages_what_cargo_built() {
-        for built in [true, false] {
-            let (dir, svc) = unbooted();
-            let to = dir.path().join(".oxplow/extensions/oxplow-foundation");
-            // Foundation's own source as it ships, its output only when built
-            // (the build itself a no-op here: cargo's would have run it).
-            for (rel, bytes) in crate::bundled_extensions::find("oxplow-foundation")
-                .unwrap()
-                .files
-            {
-                if built || !rel.starts_with("dist/") {
-                    write(&to, rel, &String::from_utf8_lossy(bytes));
-                }
-            }
-            let manifest = std::fs::read_to_string(to.join("extension.yaml")).unwrap();
-            write(
-                &to,
-                "extension.yaml",
-                &manifest.replacen(crate::test_fixtures::FOUNDATION_BUILD, "\"true\"", 1),
-            );
-            write(
-                dir.path(),
-                ".oxplow/project.yaml",
-                "enableBundledExtensions: false\n",
-            );
-            let svc = {
-                drop(svc);
-                Services::in_memory_inactive(dir.path()).unwrap()
-            };
-            svc.extension_activation
-                .initialize(svc.clone())
-                .await
-                .unwrap();
-            if !cfg!(debug_assertions) {
-                return;
-            }
-            let why = svc.extension_activation.problems();
-            if built {
-                let ext = running(&svc, "oxplow-foundation").expect("it runs");
-                assert!(matches!(ext.deployment, Deployment::Deployed { .. }));
-                let rows = svc
-                    .db
-                    .read(|c| store_rows::list_tx(c, Some("oxplow-foundation")))
-                    .await
-                    .unwrap();
-                assert_eq!(rows[0].build_run.as_deref(), Some("true"));
-                let root = svc.layout.project_dir.clone();
-                let again = deploy(&svc, "oxplow-foundation", &root, None, false)
-                    .await
-                    .unwrap();
-                assert!(again.already);
-            } else {
-                assert!(running(&svc, "oxplow-foundation").is_none());
-                assert!(
-                    why.get("oxplow-foundation")
-                        .is_some_and(|p| p.iter().any(|m| m.contains("`dist` isn't built"))),
-                    "{why:?}"
-                );
-                let listed = listed_errors(&svc, "oxplow-foundation").await;
-                assert!(listed.contains("`dist` isn't built"), "{listed}");
-            }
-        }
+    async fn a_deployment_held_at_boot_stays_recorded_and_is_reported_again() {
+        let (dir, svc) = unbooted();
+        write(dir.path(), ".oxplow/project.yaml", "extensions: [acme]\n");
+        let broken = "manifest: 2\nname: acme\nnot_a_key: 1\nintent:\n  purpose: test\n";
+        active_deployment(
+            &svc,
+            "acme",
+            "00000000000000cc",
+            &[("extension.yaml", broken.into())],
+        )
+        .await;
+        svc.extension_activation
+            .initialize(svc.clone())
+            .await
+            .unwrap();
+        assert!(running(&svc, "acme").is_none());
+        assert_eq!(active_hashes(&svc, "acme").await, vec!["00000000000000cc"]);
+        svc.extension_activation
+            .activate(svc.clone())
+            .await
+            .unwrap();
+        assert_eq!(active_hashes(&svc, "acme").await, vec!["00000000000000cc"]);
+        // The next boot starts from the same record and says the same.
+        svc.extension_catalog.set_live(Default::default());
+        let missing = start(&svc).await.unwrap();
+        assert!(missing.is_empty(), "{missing:?}");
+        assert_eq!(
+            svc.extension_catalog.live().get("acme").map(String::as_str),
+            Some("00000000000000cc")
+        );
     }
 
     /// Everything in an extension's folder is copied into each deployment,

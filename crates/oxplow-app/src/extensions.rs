@@ -2769,8 +2769,7 @@ pub struct Extension {
     /// What it waits on a person for when it is on but undeployed: the
     /// permissions its source would add, one line each
     /// ([`Permissions::added_over`]), and its build command when it has one
-    /// (`extension_deploy::build_line`); startup deploys only one that
-    /// asks for nothing.
+    /// (`extension_deploy::build_line`): what its deploy will ask.
     #[serde(default)]
     pub pending: Vec<String>,
     /// It is the team's: the project's own list names it

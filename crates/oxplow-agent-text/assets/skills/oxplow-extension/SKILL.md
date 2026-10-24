@@ -20,9 +20,9 @@ rows; build a lens file only for a lasting page.
 
 **The loop:** find the data (`v_model`, `v_model_column`, `oxplow_query_sql`:
 read the columns, never guess) → write the files → `oxplow_validate_extension`
-(`oxplow extension check`) after every edit → `oxplow_run_lens` → tell the user
-`oxplow.extension.deploy { name }` when it is right (it returns once the
-extension is live) → tell the user the title and how to open it (Cmd+P).
+after every edit → `oxplow_run_lens` → run `oxplow.extension.deploy { name }`
+when a step is complete (it replaces what runs, live; never ask for a
+restart) → tell the user the title and how to open it (Cmd+P).
 Pass your own `stream_id` when in a worktree stream. `check`,
 `oxplow_preview_extension`, `oxplow_run_lens` and `oxplow_show_lens` with a
 `spec` read the source and dry-run, so no deploy is needed first.
@@ -30,6 +30,7 @@ Pass your own `stream_id` when in a worktree stream. `check`,
 **Open the reference for the task at hand** (a file here, or `oxplow_get_skill`
 with `name: oxplow-extension` and `reference: <name>`):
 
+- `references/development-cycle.md`: source and deployment, when to deploy, held deployments.
 - `references/scaffolding.md`: the kinds `extension new` makes, the words used exactly.
 - `references/semantic-layer.md`: finding data, URIs in SQL and scripts, publishing and
   importing models.
@@ -51,6 +52,5 @@ with `name: oxplow-extension` and `reference: <name>`):
 Rules that live in other skills: wikilinks and URIs in prose, see
 `oxplow-wiki-capture`; waiting on the person, `oxplow-runtime`; test
 commands run in the foreground, `oxplow-collection`; metrics, `oxplow-metrics`.
-An extension declares `permissions:`; a person approves them when it is
-deployed, and also a new or changed `build:` command. You can't approve;
-your deploy that adds one becomes a proposal.
+A person approves an extension's `permissions:` and a new or changed
+`build:` command at deploy; your deploy that adds one becomes a proposal.

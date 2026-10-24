@@ -46,8 +46,11 @@ oxplow-dev uri convert [<kind>=<extension> …] each stdin line that is an old r
 
 oxplow-dev extension status                  what the next boot would run, and what it
                                              would hold back and why (safe while oxplow runs)
-oxplow-dev extension deploy <name>           deploy <name>'s source as the app does,
+oxplow-dev extension deploy [<name>]         deploy <name>'s source as the app does,
                                              confirming its permissions and build as you;
+                                             with no name, every extension that is on and
+                                             whose source changed (foundation first): the
+                                             first run of a checkout, or after a core change;
                                              only while oxplow is quit
 
 oxplow-dev --help                            this
@@ -130,6 +133,87 @@ fn uri_convert(input: &str, args: &[String]) -> Result<String, String> {
         .collect::<Vec<_>>()
         .join("\n"))
 }
+/// Deploy from outside oxplow, as the app does: `name`'s source, or with
+/// none every extension that is on (oxplow's required ones first) whose
+/// source isn't what runs. Boot deploys nothing, so this is how a checkout
+/// gets its first deployments, and how oxplow-foundation comes back after
+/// a core change its recorded deployment doesn't activate against.
+async fn deploy_from_outside(project: &Path, name: Option<&String>) -> Result<String, String> {
+    let layout = oxplow_app::AppLayout::for_project(project);
+    let running = "oxplow is running on this project: quit it first, or deploy from \
+                   inside it (`oxplow.extension.deploy`) if its foundation runs";
+    if oxplow_app::is_project_locked(project) {
+        return Err(running.into());
+    }
+    // Held while this boots and deploys, as a daemon holds it.
+    let _lock = oxplow_app::try_acquire_instance_lock(&layout)
+        .map_err(|e| e.to_string())?
+        .ok_or(running)?;
+    let svc = Arc::new(
+        oxplow_app::Services::boot(
+            layout,
+            Arc::new(oxplow_ai::secrets::MemorySecrets::default()),
+        )
+        .map_err(|e| e.to_string())?,
+    );
+    // Startup, as a boot runs it: the live set it starts from is what
+    // the deploys replace.
+    svc.extension_activation
+        .initialize(svc.clone())
+        .await
+        .map_err(|e| e.to_string())?;
+    let names = match name {
+        Some(name) => vec![name.clone()],
+        None => {
+            let settings = oxplow_config::extension_settings(project);
+            let mut names: Vec<String> = oxplow_app::bundled_extensions::BUNDLED
+                .iter()
+                .filter(|b| b.required)
+                .map(|b| b.name.to_string())
+                .collect();
+            for (n, _) in settings.enabled() {
+                if !names.contains(&n)
+                    && settings
+                        .source(project, &n)
+                        .join("extension.yaml")
+                        .is_file()
+                {
+                    names.push(n);
+                }
+            }
+            names
+        }
+    };
+    let mut out = Vec::new();
+    let mut failed = Vec::new();
+    for name in &names {
+        match oxplow_app::extension_deploy::deploy(&svc, name, project, None, true).await {
+            Ok(deployed) => {
+                out.push(format!(
+                    "{name}: {} {}",
+                    if deployed.already {
+                        "already runs"
+                    } else {
+                        "deployed"
+                    },
+                    deployed.hash
+                ));
+                out.extend(deployed.warnings.iter().map(|w| format!("  warning: {w}")));
+            }
+            Err(e) => failed.push(format!("deploy `{name}`: {e}")),
+        }
+    }
+    for (other, why) in svc.extension_activation.problems() {
+        out.push(format!("held back: {other}"));
+        out.extend(why.iter().map(|w| format!("  - {w}")));
+    }
+    if failed.is_empty() {
+        Ok(out.join("\n"))
+    } else {
+        out.extend(failed);
+        Err(out.join("\n"))
+    }
+}
 
 /// `extension status` and `extension deploy <name>`: an agent outside
 /// oxplow finding and fixing what the next boot would run — a deployment
@@ -161,49 +245,8 @@ async fn extension(project: &Path, args: &[String]) -> Result<String, String> {
             }
             Ok(out.join("\n"))
         }
-        [deploy, name] if deploy == "deploy" => {
-            let layout = oxplow_app::AppLayout::for_project(project);
-            let running = "oxplow is running on this project: quit it first, or deploy from \
-                           inside it (`oxplow.extension.deploy`) if its foundation runs";
-            if oxplow_app::is_project_locked(project) {
-                return Err(running.into());
-            }
-            // Held while this boots and deploys, as a daemon holds it.
-            let _lock = oxplow_app::try_acquire_instance_lock(&layout)
-                .map_err(|e| e.to_string())?
-                .ok_or(running)?;
-            let svc = Arc::new(
-                oxplow_app::Services::boot(
-                    layout,
-                    Arc::new(oxplow_ai::secrets::MemorySecrets::default()),
-                )
-                .map_err(|e| e.to_string())?,
-            );
-            // Startup, as a boot runs it: the live set it starts from is
-            // what the deploy replaces.
-            svc.extension_activation
-                .initialize(svc.clone())
-                .await
-                .map_err(|e| e.to_string())?;
-            let deployed = oxplow_app::extension_deploy::deploy(&svc, name, project, None, true)
-                .await
-                .map_err(|e| format!("deploy `{name}`: {e}"))?;
-            let mut out = vec![format!(
-                "{name}: {} {}",
-                if deployed.already {
-                    "already runs"
-                } else {
-                    "deployed"
-                },
-                deployed.hash
-            )];
-            out.extend(deployed.warnings.iter().map(|w| format!("  warning: {w}")));
-            for (other, why) in svc.extension_activation.problems() {
-                out.push(format!("held back: {other}"));
-                out.extend(why.iter().map(|w| format!("  - {w}")));
-            }
-            Ok(out.join("\n"))
-        }
+        [deploy, name] if deploy == "deploy" => deploy_from_outside(project, Some(name)).await,
+        [deploy] if deploy == "deploy" => deploy_from_outside(project, None).await,
         _ => Err(format!("usage:\n{USAGE}")),
     }
 }
@@ -902,5 +945,48 @@ mod tests {
         let status = dev(p, &["extension", "status"]).await.unwrap();
         assert!(!status.contains("doesn't activate"), "{status}");
         assert!(status.contains(&hash), "{status}");
+    }
+
+    /// With no name, `extension deploy` deploys every extension that is on
+    /// whose source isn't what runs, foundation first: a checkout's first
+    /// run, since boot deploys nothing. Run again, each already runs.
+    #[tokio::test]
+    async fn deploy_with_no_name_deploys_what_is_on() {
+        if !cfg!(debug_assertions) {
+            return;
+        }
+        let dir = developing_oxplow_with_a_stale_foundation().await;
+        let p = dir.path();
+        let acme = p.join(".oxplow/extensions/acme");
+        std::fs::create_dir_all(acme.join("lenses")).unwrap();
+        std::fs::write(
+            acme.join("extension.yaml"),
+            "manifest: 2\nname: acme\nintent:\n  purpose: test\n",
+        )
+        .unwrap();
+        std::fs::write(
+            acme.join("lenses/one.yaml"),
+            "title: One\nquery: \"SELECT 1 AS n\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            p.join(".oxplow/project.yaml"),
+            "enableBundledExtensions: false\nextensions: [acme]\n",
+        )
+        .unwrap();
+        let first = dev(p, &["extension", "deploy"]).await.unwrap();
+        let at = |what: &str| {
+            first
+                .find(what)
+                .unwrap_or_else(|| panic!("{what}: {first}"))
+        };
+        assert!(
+            at("oxplow-foundation: deployed") < at("acme: deployed"),
+            "{first}"
+        );
+        let again = dev(p, &["extension", "deploy"]).await.unwrap();
+        for name in ["oxplow-foundation", "acme"] {
+            assert!(again.contains(&format!("{name}: already runs")), "{again}");
+        }
     }
 }

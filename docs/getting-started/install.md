@@ -97,18 +97,22 @@ bun / node / rust from `mise.toml`.
 git clone https://github.com/nvoxland/oxplow
 cd oxplow
 bun install --frozen-lockfile     # frontend deps (React, Monaco, xterm)
-bun run tauri:dev                 # builds the Rust shell + boots Vite
+bun run build:dev                 # builds the frontend and the Rust shell
+./target/debug/oxplow .           # runs it on this directory
 ```
 
-For everything else — split-process dev, packaged builds, the
-release flow — see [`DEV.md`](https://github.com/nvoxland/oxplow/blob/main/DEV.md).
+Working on oxplow itself? This repository runs oxplow's own extensions
+from their sources, and nothing deploys them for you: before the first
+run, and after a core change, quit oxplow and run `cargo run -q -p
+oxplow-dev -- extension deploy`. For everything else — packaged builds,
+the release flow — see [`DEV.md`](https://github.com/nvoxland/oxplow/blob/main/DEV.md).
 
 ## After install
 
 1. Launch oxplow and open the directory you want to work in. The
    prebuilt app prompts you to pick a project on first launch; from
-   source, run `bun run tauri:dev` in that directory (it opens
-   `$PWD`). See
+   source, run `<oxplow checkout>/target/debug/oxplow .` in that
+   directory (it opens `$PWD`). See
    [`DEV.md`](https://github.com/nvoxland/oxplow/blob/main/DEV.md)
    for other run modes.
 2. The opened directory **is** the workspace. Oxplow does not

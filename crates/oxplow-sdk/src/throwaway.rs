@@ -95,8 +95,8 @@ impl Host {
         )
         .await
         .map_err(|e| e.to_string())?;
-        // Startup holds back one that declares permissions; the author's
-        // own test run deploys what it copied, as they would, confirmed.
+        // Boot deploys nothing; the author's own test run deploys what it
+        // copied, as they would, confirmed.
         let mut deploys = Vec::new();
         for name in &on {
             let copied = root.join(EXTENSIONS_DIR).join(name);

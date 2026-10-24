@@ -6,7 +6,6 @@
     "apps/*"
   ],
   "scripts": {
-    "dev": "bun run --cwd apps/desktop dev",
     "build": "bun run --cwd apps/desktop build",
     "typecheck": "bun run --cwd apps/desktop typecheck && tsc -p tests-e2e",
     "test": "bun run --cwd apps/desktop test && cargo test --workspace",
@@ -19,8 +18,7 @@
     "lint:searchable": "python3 scripts/check-control-chars.py",
     "clean:target": "sh scripts/sweep-target.sh --now",
     "type:coverage": "type-coverage -p apps/desktop/tsconfig.json --json-output > target/type-coverage.json",
-    "build:dev": "bash apps/desktop/src-tauri/scripts/stage-sidecars.sh debug && bun run --cwd apps/desktop build && cargo build -p oxplow-desktop --features tauri/custom-protocol",
-    "tauri:dev": "bash apps/desktop/src-tauri/scripts/stage-sidecars.sh debug && OXPLOW_PROJECT_DIR=\"$PWD\" bun run --cwd apps/desktop tauri dev",
+    "build:dev": "bash apps/desktop/src-tauri/scripts/stage-sidecars.sh debug && bun run --cwd apps/desktop build && cargo build -p oxplow-desktop",
     "tauri:build": "bun run --cwd apps/desktop tauri build",
     "tauri:build:app": "bun run --cwd apps/desktop tauri build --bundles app",
     "e2e": "playwright test"

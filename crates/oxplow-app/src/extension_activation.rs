@@ -229,25 +229,24 @@ impl ExtensionActivation {
     /// Initialize before ingress/background extension consumers are exposed.
     /// The baseline is required bundled code only, with no external instances.
     /// A rejected full candidate keeps this baseline available for repair.
-    /// First the live set starts (`extension_deploy::start`): an enabled
-    /// extension with no deployment here deploys from its source.
+    /// First the live set starts (`extension_deploy::start`) from the
+    /// deployments recorded active; boot deploys nothing.
     pub async fn initialize(&self, svc: Arc<Services>) -> Result<(), DomainError> {
-        let (changes, unstaged) = match crate::extension_deploy::start(&svc).await {
-            Ok(started) => started,
+        let missing = match crate::extension_deploy::start(&svc).await {
+            Ok(missing) => missing,
             Err(error) => {
-                tracing::warn!(%error, "startup deploys failed");
-                (LiveChanges::new(), VocabularyErrors::new())
+                tracing::warn!(%error, "the recorded deployments couldn't be read");
+                VocabularyErrors::new()
             }
         };
-        // What startup couldn't deploy is the first activation's to list
-        // (each is a required extension, kept until it runs).
-        for (name, why) in &unstaged {
-            tracing::warn!(%name, why = %why.join("; "), "oxplow's own extension couldn't be deployed at startup");
+        // A required extension with nothing to run is the first
+        // activation's to list, kept until it runs.
+        for (name, why) in &missing {
+            tracing::warn!(%name, why = %why.join("; "), "oxplow's own extension has nothing to run");
         }
-        *self.problems.lock() = unstaged;
-        // A candidate overtaken by a change made while it was staged is
-        // staged again: the startup deploys must not be lost with it. An
-        // extension that can't activate is held (a bundled one gives way to
+        *self.problems.lock() = missing;
+        let changes = LiveChanges::new();
+        // An extension that can't activate is held (a bundled one gives way to
         // the copy that ships); a generation that can't publish at all
         // stops the boot.
         let mut attempts = 0;
@@ -559,6 +558,10 @@ impl ExtensionActivation {
             return Err(rejected("activation cannot wait on its own reader"));
         }
         let _one = self.activating.lock().await;
+        // What the person chose before this change: a held deployment
+        // keeps its place in it (`give_way` takes it out of the catalog's
+        // map while the shipped copy runs).
+        let chosen = svc.extension_catalog.live();
         let _staged = svc.extension_catalog.stage_changes(changes);
         let settings = svc.extension_catalog.settings(&svc.layout.project_dir);
         let mut raw = svc.extension_catalog.snapshot(&svc.layout.project_dir);
@@ -624,6 +627,19 @@ impl ExtensionActivation {
             } = prepared;
             Self::explain_required(&settings, &raw, &snapshot, &self.problems(), &mut held);
             database.list_held(&held, &raw);
+            // The live set is what the person chose: what runs, except that
+            // a held extension keeps the deployment chosen for it, whatever
+            // runs in its place (its last working version, the shipped
+            // copy, nothing). Recorded active, it is tried again by the next
+            // activation and the next boot, which say why it doesn't run,
+            // until a person deploys or rolls back. A change that is held
+            // was never chosen: it isn't in `chosen`, so it isn't kept.
+            let mut live = crate::extension_catalog::live_of(snapshot.extensions());
+            for name in held.keys().chain(gave_way.keys()) {
+                if let Some(hash) = chosen.get(name) {
+                    live.insert(name.clone(), hash.clone());
+                }
+            }
             let db = svc.db.clone();
             let published = snapshot.clone();
             // Move the owned writer into the worker closure. Cancelling the async
@@ -677,13 +693,11 @@ impl ExtensionActivation {
                     {
                         return Err(rejected("catalog changed while activation was staged"));
                     }
-                    let live: Vec<(String, String)> =
-                        crate::extension_catalog::live_of(published.extensions())
-                            .into_iter()
-                            .collect();
+                    let chosen: Vec<(String, String)> =
+                        live.iter().map(|(n, h)| (n.clone(), h.clone())).collect();
                     oxplow_db::extension_deployment_store::set_active_tx(
                         publication.transaction()?,
-                        &live,
+                        &chosen,
                     )
                     .map_err(TxError::Storage)?;
                     // An effect starts when a generation that runs it
@@ -749,8 +763,7 @@ impl ExtensionActivation {
                         .expect("bundle candidate consumed only after successful commit")
                         .publish(&svc.component_bundles);
                     svc.extension_catalog.publish_active(published.clone());
-                    svc.extension_catalog
-                        .set_live(crate::extension_catalog::live_of(published.extensions()));
+                    svc.extension_catalog.set_live(live.clone());
                     // Admission enables callbacks and their live-owner checks.
                     // Publish the matching owner catalog before starting them;
                     // readers remain excluded by the owned generation writer.
@@ -850,9 +863,10 @@ impl ExtensionActivation {
             let line = format!(
                 "oxplow's own `{name}` isn't running: {failed}, and while developing oxplow \
                  nothing runs in its place, so what it provides (the agent harnesses, \
-                 Alerts, core commands and pages) is missing. Fix its source and restart \
-                 oxplow, which deploys it, or deploy it",
-                name = b.name
+                 Alerts, core commands and pages) is missing. Fix its source, quit oxplow, \
+                 run `{deploy}` in the project, then start oxplow again",
+                name = b.name,
+                deploy = crate::extension_deploy::DEPLOY_FROM_OUTSIDE
             );
             tracing::warn!(name = b.name, why = %held[b.name].join("; "), "{line}");
             let why = held.get_mut(b.name).expect("checked above");

@@ -116,26 +116,39 @@ cargo run -q -p oxplow-dev -- wiki delete some-page
 cargo run -q -p oxplow-dev -- --thread thr1 wiki note "…"
 cargo run -q -p oxplow-dev -- wiki search burrows
 cargo run -q -p oxplow-dev -- extension status
-cargo run -q -p oxplow-dev -- extension deploy oxplow-foundation
+cargo run -q -p oxplow-dev -- extension deploy                     # everything on whose source changed
+cargo run -q -p oxplow-dev -- extension deploy oxplow-foundation   # one extension
 cargo run -q -p oxplow-dev -- --help
 ```
 
-`extension status` and `extension deploy` are for fixing what oxplow would
-run from outside it, when it can't fix itself: oxplow-foundation not
-running (no agents, no Alerts, no core commands — a deployment an older
-oxplow recorded that doesn't activate against this one), or a source
-changed and never deployed. `status` is read-only and safe while oxplow
-runs: it activates the active deployments in a throwaway oxplow in
-memory, as the next boot would (`extension_deploy::next_boot`), and says
-what each runs, whether its source changed since, and what would be held
-back and why. `deploy <name>` deploys the source as the app does (built,
-copied into the store, activated, recorded active), confirming its
-permissions and build as the person running it. It refuses while oxplow
-holds the project (the instance lock: a running daemon keeps the live set
-in memory and its next publication would undo it), so quit oxplow, deploy,
-then start it. With foundation running, deploy from inside oxplow instead
-(`oxplow.extension.deploy`). Nothing deploys foundation on its own: a
-deployment may be mid-way on purpose, so a person or their agent decides.
+`extension status` and `extension deploy` change what oxplow runs from
+outside it. Boot deploys nothing, so they are how a checkout gets its
+first deployments and how oxplow comes back when it can't fix itself:
+oxplow-foundation not running (no agents, no Alerts, no Settings, no core
+commands; the shell's "oxplow-foundation isn't running" dialog names the
+command), usually a deployment an older oxplow recorded that doesn't
+activate against the core you just built. `status` is read-only and safe
+while oxplow runs: it activates the active deployments in a throwaway
+oxplow in memory, as the next boot would (`extension_deploy::next_boot`),
+and says what each runs, whether its source changed since, and what would
+be held back and why. `deploy <name>` deploys that source as the app does
+(built, copied into the store, activated, recorded active), confirming its
+permissions and build as the person running it; `deploy` with no name does
+that for every extension that is on and whose source isn't what runs,
+oxplow's required ones first. It refuses while oxplow holds the project
+(the instance lock: a running daemon keeps the live set in memory and its
+next publication would undo it), so quit oxplow, deploy, then start it.
+With foundation running, deploy from inside oxplow instead
+(`oxplow.extension.deploy`, or Deploy in Settings → Extensions): it
+replaces what runs at once, no restart. Nothing deploys on its own: a
+source may be mid-way on purpose, so a person or their agent decides.
+
+**Recovering a broken oxplow** (it boots without foundation, or an
+extension is held): run `extension status` to see what runs and why
+something is held; fix the source if the problem is in it; quit oxplow;
+`extension deploy` (or `extension deploy <name>`); start oxplow. To go
+back to an earlier deployment instead, use `oxplow.extension.rollback`
+from inside oxplow (it needs foundation running).
 
 `wiki` runs the `oxplow.knowledge.*` commands on the same bus with oxplow's
 wiki as the store, whatever the project has active (pages are
@@ -169,8 +182,8 @@ The backend is Rust; the desktop frontend is React/Monaco/xterm.
 - `apps/desktop/` — the Tauri 2 desktop product. Frontend TS lives in
   `apps/desktop/src/`; the Tauri shell crate is at
   `apps/desktop/src-tauri/`. `tauri.conf.json` lives next to the
-  shell crate; `bun run tauri:dev` (run from anywhere via root
-  workspace scripts) boots Vite + the shell.
+  shell crate; `bun run build:dev` (root workspace script)
+  builds the frontend and the shell; run `./target/debug/oxplow .`.
 - `extensions/oxplow-foundation`, `extensions/oxplow-bundled` — oxplow's
   own extensions, compiled into the app by `crates/oxplow-app/build.rs`
   (every file in the folder ships; a `build:` runs there first). Building
@@ -228,8 +241,11 @@ run (a no-op when current) and the sidecars restaged when they changed,
 because tauri-build copies a staged sidecar over `target/debug/<name>`:
 a stale one ran old script-worker code under the tests.
 
-**Building oxplow to run it: `bun run build:dev`**, never a `cargo
-build` of the shell alone. The shell runs the daemon beside it, and
+**Building oxplow to run it: `bun run build:dev`**, then
+`./target/debug/oxplow .`; never a `cargo build` of the shell alone.
+There is no Vite dev server or `tauri dev` route. On a first run, quit
+oxplow and run `cargo run -q -p oxplow-dev -- extension deploy` before
+you start it. Extension changes redeploy in the running app. The shell runs the daemon beside it, and
 building the shell copies the *staged* daemon there, so without staging
 first it runs the last staged one, however old; `DEV.md` "Run from
 source" has the rest.
@@ -456,7 +472,7 @@ Until that's installed, run both manually each turn.
 **One feature set per third-party crate, for every build.** Cargo's
 resolver picks a dependency's features from what the packages being
 built ask for, so `cargo nextest -p oxplow-app`, `cargo build -p
-oxplow-desktop` (`tauri dev`), clippy and a workspace build each
+oxplow-desktop`, clippy and a workspace build each
 resolved different sets (tokio with or without `test-util`, seven
 serde_json variants…). Every switch rebuilt the graph under new hashes
 and kept every copy — 85 GB of `target/debug` was about five builds of
