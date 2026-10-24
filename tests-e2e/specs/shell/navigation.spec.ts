@@ -30,7 +30,7 @@ test("Cmd+[ goes back through the tab's pages and Cmd+] goes forward", async ({ 
   const ref = await wikiWithTask(daemon, "kestrel", "Kestrel follow-up");
   await page.goto("/");
   await openWiki(page, "kestrel");
-  await page.locator('[data-testid="page-lens"]:visible').locator(`a[href="${ref}"]`).click();
+  await page.locator('[data-testid="page-lens"]:visible').locator(`[data-ref-title][href="${ref}"]`).click();
   await expect(page.getByTestId("lens-part-state")).toBeVisible();
 
   await page.keyboard.press("Meta+[");
@@ -45,7 +45,7 @@ test("the active tab and its history survive a reload", async ({ page, daemon })
   const ref = await wikiWithTask(daemon, "osprey", "Osprey follow-up");
   await page.goto("/");
   await openWiki(page, "osprey");
-  await page.locator('[data-testid="page-lens"]:visible').locator(`a[href="${ref}"]`).click();
+  await page.locator('[data-testid="page-lens"]:visible').locator(`[data-ref-title][href="${ref}"]`).click();
   await expect(page.getByTestId("lens-part-state")).toBeVisible();
 
   await page.reload();
@@ -68,6 +68,37 @@ test("Alt+Down steps to the next file of the list it was opened from", async ({ 
   await page.keyboard.press("Alt+ArrowDown");
   await expect(page.getByTestId("center-tab-oxplow:oxplow/file?path=bb.txt")).toBeVisible();
   await expect(page.getByTestId("center-tab-oxplow:oxplow/file?path=aa.txt")).toBeHidden();
+});
+
+// A list's link column is live: Up and Down step through the lens as it is now,
+// not the rows it had when the page was opened.
+test("Up and Down from a page opened from a lens follow the lens's rows as they change", async ({ page, daemon }) => {
+  const made: Record<string, string> = {};
+  for (const title of ["Origin alpha", "Origin beta", "Origin gamma"]) {
+    const created = await run<{ result: { uri: string } }>(daemon, "oxplow.work_item.create", { title });
+    made[title] = created.result.uri;
+  }
+  await page.goto("/");
+  await openFromLauncher(page, "Backlog");
+  await page.getByTestId("lens-part-items").getByText("Origin alpha").click();
+  await expect(page.getByTestId("page-nav-sibling-indicator").filter({ visible: true })).toContainText("1 of 3");
+
+  // A row made after the page was opened is in the list the keys step.
+  await run(daemon, "oxplow.work_item.create", { title: "Origin delta" });
+  await expect(page.getByTestId("page-nav-sibling-indicator").filter({ visible: true })).toContainText("1 of 4");
+  const shown = page.locator('[data-testid^="center-tab-body-"]:visible');
+  for (const title of ["beta", "gamma", "delta"]) {
+    await page.keyboard.press("Alt+ArrowDown");
+    await expect(shown).toContainText(`Origin ${title}`);
+  }
+  await page.getByTestId("page-nav-sibling-prev").filter({ visible: true }).click();
+  await expect(shown).toContainText("Origin gamma");
+
+  // A page the lens no longer lists has no Up or Down.
+  await run(daemon, "oxplow.work_item.move", { uri: made["Origin gamma"], to: { thread: `thr${daemon.thread.replace(/^thr/, "")}` } });
+  await expect(page.getByTestId("page-nav-siblings").filter({ visible: true })).toHaveCount(0);
+  await page.keyboard.press("Alt+ArrowDown");
+  await expect(shown).toContainText("Origin gamma");
 });
 
 const navigate = (daemon: Parameters<typeof run>[0], uri: string, extra: Record<string, unknown> = {}) =>

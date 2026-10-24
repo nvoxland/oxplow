@@ -1,3 +1,4 @@
+import { ipc } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
 import { expandRailSection, openFromLauncher } from "../../support/ui.js";
 
@@ -80,4 +81,36 @@ test("the Local History page draws its snapshots and keeps its grouping in the a
   await page.getByTestId("lens-param-mode-value").filter({ visible: true }).click();
   await page.getByTestId("lens-param-mode-edit").filter({ visible: true }).selectOption("by-commit");
   await expect(page.locator('[data-testid="center-tab-body-oxplow:oxplow/page?page=local-history#mode=by-commit"]:visible')).toHaveCount(1);
+});
+
+// A bookmark is of the page's whole address, view included. The same page at
+// another view shows the star as "bookmarked at other values", and its popover
+// moves that bookmark to the view on screen (one undoable command).
+test("the star offers to move a bookmark made at another filter value", async ({ fresh }) => {
+  const { page, daemon } = fresh;
+  const bookmarked = async () =>
+    (await ipc<{ rows: string[][] }>(daemon, "query_sql", { sql: "SELECT uri FROM v_bookmark" })).rows.map((r) => String(r[0]));
+  await page.goto("/");
+  await openFromLauncher(page, "Local History");
+  const star = page.getByTestId("page-nav-bookmark").filter({ visible: true });
+  await star.click();
+  await page.getByTestId("page-nav-bookmark-scope-thread").filter({ visible: true }).click();
+  await expect(star).toHaveText("★");
+  // The star's popover closes with a second click on the star.
+  await star.click();
+  await expect(page.getByTestId("page-nav-bookmark-popover").filter({ visible: true })).toHaveCount(0);
+  await expect.poll(bookmarked).toEqual([expect.stringContaining("local-history")]);
+  const before = (await bookmarked())[0];
+  expect(before).not.toContain("mode=by-commit");
+
+  // Another value of the page's filter: the star is off, but says why.
+  await page.getByTestId("lens-param-mode-value").filter({ visible: true }).click();
+  await page.getByTestId("lens-param-mode-edit").filter({ visible: true }).selectOption("by-commit");
+  await expect(star).toHaveText("☆");
+  await expect(star).toHaveAttribute("title", "Bookmarked at other values");
+
+  await star.click();
+  await page.getByTestId("page-nav-bookmark-update").filter({ visible: true }).click();
+  await expect(star).toHaveText("★");
+  await expect.poll(bookmarked).toEqual([expect.stringContaining("mode=by-commit")]);
 });
