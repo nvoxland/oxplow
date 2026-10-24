@@ -15,12 +15,14 @@ const calls: string[] = [];
 let running: string | null = null;
 let listener: (e: { sessionId: string; message: string }) => void = () => {};
 let next = 1;
+let answer: Promise<void> = Promise.resolve();
 mock.module("../api.js", () => ({
   ...realApi,
   onRemoteReconnect: () => () => {},
   desktopBridge: () => ({
     openTerminalSession: async (uri: string, cols: number, rows: number) => {
       calls.push(`open ${uri} ${cols}x${rows}`);
+      await answer;
       return { sessionId: `term-${next++}`, replayB64: btoa("hello") };
     },
     lookupTerminalSession: async (uri: string) => {
@@ -28,7 +30,7 @@ mock.module("../api.js", () => ({
       return running;
     },
     closeTerminalSession: async (id: string) => void calls.push(`detach ${id}`),
-    forwardTerminalInput: async (id: string, message: string) => void calls.push(`input ${id} ${message}`),
+    terminalInput: (uri: string, message: string) => void calls.push(`input ${uri} ${message}`),
     terminalSessionCwd: async () => null,
     onTerminalEvent: (cb: typeof listener) => {
       listener = cb;
@@ -43,6 +45,7 @@ afterEach(() => {
   calls.length = 0;
   running = null;
   next = 1;
+  answer = Promise.resolve();
 });
 
 function fakeTerm() {
@@ -102,16 +105,34 @@ test("an agent moved to another conversation opens again once its process exits"
   expect(result.current.ended).toBeNull();
 });
 
-test("keys go to the session; an ended one takes none; unmounting detaches", async () => {
+test("keys go to the terminal's URI at once, encoded, before its open answers too", async () => {
+  let release: () => void = () => {};
+  answer = new Promise<void>((r) => {
+    release = r;
+  });
+  const { result } = renderHook(() => useTerminalSession(SHELL, { shown: true }));
+  act(() => void result.current.attach(fakeTerm().term));
+  act(() => result.current.input("é"));
+  act(() => result.current.binary("\x01"));
+  act(() => result.current.resize(100, 30));
+  expect(calls.filter((c) => c.startsWith("input"))).toEqual([
+    `input ${SHELL} {"type":"input","bytes":"w6k="}`,
+    `input ${SHELL} {"type":"input-binary","bytes":"AQ=="}`,
+    `input ${SHELL} {"type":"resize","cols":100,"rows":30}`,
+  ]);
+  release();
+  await waitFor(() => expect(calls).toContain(`open ${SHELL} 80x24`));
+});
+
+test("an ended session takes no keys; unmounting detaches", async () => {
   const { result, unmount } = renderHook(() => useTerminalSession(SHELL, { shown: true }));
   act(() => void result.current.attach(fakeTerm().term));
+  await waitFor(() => expect(result.current.ended).toBeNull());
   await waitFor(() => expect(calls.length).toBe(1));
-  act(() => result.current.input("ls"));
-  await waitFor(() => expect(calls.some((c) => c.startsWith("input term-1"))).toBe(true));
+  await new Promise((r) => setTimeout(r, 0));
   act(() => listener({ sessionId: "term-1", message: JSON.stringify({ type: "exit", exitCode: 1 }) }));
   const before = calls.length;
   act(() => result.current.input("x"));
-  await new Promise((r) => setTimeout(r, 10));
   expect(calls.length).toBe(before);
   unmount();
   expect(calls).toContain("detach term-1");

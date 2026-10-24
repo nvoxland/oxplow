@@ -55,11 +55,12 @@ three pieces:
   `onData` / `onBinary`, a fit out of `onResize`, and `onOpened(term)`
   hands the opened terminal over.
 - **`useTerminalSession(uri, …)`** — the PTY its URI names, opened at the
-  surface's size and replayed into it, followed (output, exit), opened
-  again when it must be, and the ordered sender (`terminalInput.ts`). It
-  is the one place the `{type:"input"}` messages are built (the
-  no-automation guard names it). Unmounting detaches; the process keeps
-  running.
+  surface's size and replayed into it, followed (output, exit), and opened
+  again when it must be. What the person types it encodes and writes at
+  once to the terminal's URI (`terminalInput`, see "Paste path and input
+  ordering"): it keeps no queue and no buffer. It is the one place the
+  `{type:"input"}` messages are built (the no-automation guard names it).
+  Unmounting detaches; the process keeps running.
 - **`TerminalView.tsx`** — the two together, its visibility measured
   (`useShown`: a hidden tab is `display: none`, so its box has no size),
   and what the session says when it isn't running: stopped (Start), ended
@@ -217,11 +218,10 @@ a terminal or an agent session **without spawning**: the registry's read-only
 `TerminalSessionRegistry::session_id_for_key` under the same key
 (`terminal_key`, or `agent_pane_key`) (reads `by_key`, validates the id still lives in
 `inner`; a killed-but-stale entry reads as `None`). Returns `None` when no
-live PTY exists. This is the spawn-free path a second client uses to
-resolve a session's agent PTY before `forward_terminal_input` (the human-keystroke transport), instead
-of the spawn-capable `open_terminal_session` — which, since tsk138, is safe to
-call twice but still *can* spawn. Like `forward_terminal_input`, the lookup is
-UI/second-client only (`ui(...)` in the surface-parity manifest); it is **not**
+live PTY exists. This is the spawn-free path a hidden agent tab uses to
+find out whether its agent runs, instead of the spawn-capable
+`open_terminal_session` — which is safe to call twice but still *can*
+spawn. Like terminal input, the lookup is UI/second-client only (`ui(...)` in the surface-parity manifest); it is **not**
 exposed to the agent (no-automation guard, see `.context/agent-model.md`).
 
 The surface owns:
@@ -264,10 +264,10 @@ from the PTY output stream) — wraps the text in `\x1b[200~`…`\x1b[201~`.
 It then fires **one** `onData` event with the whole payload (verified in
 `@xterm/xterm`'s `triggerDataEvent`, which calls `_onData.fire(e)` once).
 The surface's `onData` (through the session's `input`) ships that as a single
-`forwardTerminalInput(sessionId, {type:"input", bytes:base64})`. In
-remote/daemon mode this is one `POST /ipc/forward_terminal_input`; the
-backend `TerminalSessionRegistry::send` does a single `pty.write` → one
-`write_all` on the PTY owner task's FIFO mpsc, and replies once it has.
+`terminalInput(uri, {type:"input", bytes:base64})`: one frame on the
+daemon's socket. The terminal's input queue writes it with a single
+`TerminalSessionRegistry::send` → one `pty.write` → one `write_all` on the
+PTY owner task's FIFO mpsc.
 
 **A single paste is therefore one contiguous, in-order write to the PTY
 child — there is no oxplow-side chunking or reordering.** This is
@@ -291,31 +291,41 @@ output, testing the wrong direction).
 > delivering agent-pane pastes with `\n` separators instead of `\r` — is
 > tracked as a follow-up but unverified, so it was not shipped.
 
-**Between messages, the pane keeps the order (tsk979).** Every message a
-pane sends — each keystroke's `onData`, a resize, a history move —
-goes through one `terminalSender` (`components/terminalInput.ts`): a
-message is sent only once the one before it returned. Fired off as
-independent calls they were separate HTTP requests in daemon mode, and a
-later keystroke could overtake an earlier one (the browser suite typed
-`$((6*7))` and the shell got `$((67*))`). Keystrokes made while a send is
-in flight wait together and go as one `input` message, so fast typing
-costs no extra round trips — except a bare Escape, which keeps its own
-message (merged with the next key it reads as an Alt sequence; `\x1b\r`
-is Shift+Enter), and an Enter, which keeps its own too: merged with the
-text before it, Claude Code read the chunk as a paste, turned the Enter
-into a newline and didn't send the prompt (tsk1027, found typing a long
-prompt fast). A newer resize replaces a waiting one, so a drag doesn't
-queue up behind a slow link (tsk992). A failed send is logged and the next still goes; one
-that doesn't answer within `SEND_TIMEOUT_MS` (5 s) is reported and its
-session's waiting messages are **dropped** — never delivered later in a
-burst the person didn't see land (a stale prompt and Enter, into an
-agent's terminal). The sender lives as long as its pane (created and
-closed by an effect, read through a ref): an unmounted pane's waiting
-messages are dropped and nothing more is sent. Keystrokes typed while
-the session is still opening (its id not back yet) are held — up to
-`HELD_MAX` characters, keystrokes only — and sent first once it opens
-(`attach`), so a fast typist's first keys aren't lost (tsk993). Locked by
-`terminalInput.test.ts`.
+**Between messages, one stream keeps the order.** Every message a view
+writes — each keystroke's `onData`, a resize, a history move — is one
+frame on the daemon's `/events` WebSocket (`sendSocketFrame` in
+`tauri-bridge/transport.ts`): `{"channel":"terminal","uri":…,"message":…}`.
+Every project window drives a daemon, a local one too
+(`.context/remote-daemon.md`), so the socket is the one route. Frames on
+one socket arrive in the order they were written, and the daemon reads
+each (`terminal_frame` → `terminal_input`, sync) before the next. Separate
+`/ipc` requests didn't keep the order — a later keystroke could overtake
+an earlier one (the browser suite typed `$((6*7))` and the shell got
+`$((67*))`) — and cost a round trip each. The window doesn't wait for an
+answer; none comes. Frames written while the socket is still opening are
+sent first once it opens; with the socket closed they are dropped (the
+daemon is gone, and reconnecting opens the terminal again).
+
+**The backend holds keys until the PTY is up.** Input is addressed by the
+terminal's **URI** (known before its PTY exists), never by session id. In
+the daemon, `TerminalSessionRegistry::enqueue_input(key, message)` puts it
+on the key's queue (created on first use); the queue's drain task is the
+only caller of `send`. Per message, in order: find the key's live session;
+with none yet (still spawning), wait on the registry's `ready` signal
+(raised as each session registers) up to `INPUT_WAIT` (10 s); then write
+it. Input whose PTY never comes (a launch failure, which the view shows)
+is dropped with the messages queued behind it, never written later into
+another process. A session that ends under a write is waited for once
+more. The queue goes with its session (`close`, or the exit unregister),
+so keys typed after an exit wait in a fresh queue for the next one. The
+window keeps no buffer: a fast typist's first keys wait in the daemon.
+Locked by `input_written_before_the_session_exists_arrives_once_it_does`,
+`many_inputs_arrive_in_order` and `input_for_a_key_that_never_opens_is_dropped`
+(`terminal_sessions.rs`), `a_terminal_frame_on_the_socket_reaches_the_pty_in_order`
+(`oxplow-daemon`), and the e2e burst typed as the terminal appears.
+
+Each `onData` is its own message, so a bare Escape and the Enter after it
+are two PTY writes, as they were typed. Nothing merges keys any more.
 
 ## When a session ends or goes away (tsk1026)
 
@@ -334,8 +344,7 @@ the same reopen, so the person can fix the cause and retry without
 reopening the tab). It takes no keys, and a reconnect tries the open again.
 
 The pane opens its session through one `openSession` path — first mount,
-Start Again, `onRemoteReconnect` (the daemon came back), and a send that
-fails with "terminal session not found". Opening again returns the same id
+Start Again, and `onRemoteReconnect` (the daemon came back). Opening again returns the same id
 for a session that survived (nothing changes) or a new one: the screen is
 reset and the new session's replay is written under a dim "the previous
 session ended; this one was started again" line. Helpers in

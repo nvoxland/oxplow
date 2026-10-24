@@ -1208,7 +1208,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   external programs, and optional custom components in sandboxed frames.
   Extension JavaScript does not execute with the app window's authority.
   Code in the window holds the daemon's UI
-  token, and `/ipc` includes `forward_terminal_input`, so agent-written JS
+  token, and its `/events` socket carries terminal input, so agent-written JS
   in the window could drive the agent. Custom components use the declared,
   scoped bridge instead; arbitrary app-window code remains outside that
   contract.

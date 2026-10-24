@@ -2,8 +2,10 @@
 /// host"): the PTY its URI names — an `oxplow/terminal` shell or an
 /// `oxplow/agent_session`'s harness — opened at the surface's size and
 /// replayed into it, followed (output, exit), and opened again when it
-/// must be: Start Again, the daemon coming back, a send finding it gone,
-/// the host moving it to another conversation (`conversation` changing).
+/// must be: Start Again, the daemon coming back, the host moving it to
+/// another conversation (`conversation` changing). What the person types
+/// goes straight to the terminal's URI: the daemon keeps it in order and
+/// holds it until the PTY is up.
 /// An agent's (`startOnActivate`) spawns nothing until it is shown, but
 /// attaches at once to one that runs. Unmounting detaches: the process
 /// keeps running.
@@ -12,11 +14,9 @@ import type { Terminal } from "@xterm/xterm";
 
 import { desktopBridge, onRemoteReconnect } from "../api.js";
 import { logUi } from "../logger.js";
-import { terminalSender, type TerminalMessage, type TerminalSender } from "../components/terminalInput.js";
 import {
   type ExitOutcome,
   failedLaunch,
-  isSessionGone,
   isStopped,
   mayStartNow,
   readSessionMessage,
@@ -62,7 +62,6 @@ export interface TerminalSession {
 
 export function useTerminalSession(uri: string, opts: TerminalSessionOptions): TerminalSession {
   const sessionIdRef = useRef<string | null>(null);
-  const senderRef = useRef<TerminalSender | null>(null);
   const reopenRef = useRef<(() => void) | null>(null);
   const activateRef = useRef<(() => void) | null>(null);
   const activatedRef = useRef(false);
@@ -99,22 +98,6 @@ export function useTerminalSession(uri: string, opts: TerminalSessionOptions): T
   useEffect(() => {
     if (opts.shown && !live.current.stopped) activateRef.current?.();
   }, [opts.shown]);
-
-  // Every message, in order (tsk979); the sender lives as long as the view.
-  useEffect(() => {
-    const sender = terminalSender(
-      (sessionId, message) => desktopBridge().forwardTerminalInput(sessionId, message),
-      (error) => {
-        logUi("warn", "terminal input failed", { error: String(error) });
-        if (isSessionGone(error) && !endedRef.current) reopenRef.current?.();
-      },
-    );
-    senderRef.current = sender;
-    return () => {
-      sender.close();
-      if (senderRef.current === sender) senderRef.current = null;
-    };
-  }, []);
 
   // Unmounted: detach, never kill (closing is the row's command).
   useEffect(
@@ -175,7 +158,6 @@ export function useTerminalSession(uri: string, opts: TerminalSessionOptions): T
             endedRef.current = false;
             launchFailedRef.current = false;
             setEnded(null);
-            senderRef.current?.attach(sessionId);
             // The ring buffer: the screen as it was left.
             if (replayB64) {
               try {
@@ -241,11 +223,14 @@ export function useTerminalSession(uri: string, opts: TerminalSessionOptions): T
     [uri],
   );
 
-  const send = useCallback((message: TerminalMessage) => {
-    // An ended session takes no keys: they must not reach the next one.
-    if (endedRef.current && message.type !== "resize") return;
-    senderRef.current?.send(sessionIdRef.current, message);
-  }, []);
+  const send = useCallback(
+    (message: TerminalMessage) => {
+      // An ended session takes no keys: they must not reach the next one.
+      if (endedRef.current && message.type !== "resize") return;
+      desktopBridge().terminalInput(uri, encode(message));
+    },
+    [uri],
+  );
 
   const cwd = useCallback(async () => {
     const id = sessionIdRef.current;
@@ -262,4 +247,44 @@ export function useTerminalSession(uri: string, opts: TerminalSessionOptions): T
     ended,
     stopped: isStoppedNow,
   };
+}
+
+/** One message to a terminal; `data` is what xterm gave (text for
+ *  `input`, a byte per character for `input-binary`). */
+type TerminalMessage =
+  | { type: "input"; data: string }
+  | { type: "input-binary"; data: string }
+  | { type: "resize"; cols: number; rows: number };
+
+/** `message` as the PTY's protocol reads it (`oxplow_app::terminal_sessions`). */
+function encode(message: TerminalMessage): string {
+  switch (message.type) {
+    case "input":
+      return JSON.stringify({ type: "input", bytes: utf8ToBase64(message.data) });
+    case "input-binary":
+      return JSON.stringify({ type: "input-binary", bytes: binaryToBase64(message.data) });
+    default:
+      return JSON.stringify(message);
+  }
+}
+
+function binaryToBase64(data: string) {
+  let binary = "";
+  for (let i = 0; i < data.length; i++) {
+    binary += String.fromCharCode(data.charCodeAt(i) & 0xff);
+  }
+  return btoa(binary);
+}
+
+/** A JS string as UTF-8 bytes, then base64: `btoa()` alone refuses any
+ *  character above U+00FF (a pasted smart quote or emoji). */
+function utf8ToBase64(data: string) {
+  const bytes = new TextEncoder().encode(data);
+  let binary = "";
+  // Chunked: `apply` with a large array exceeds the argument limit.
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunkSize)));
+  }
+  return btoa(binary);
 }

@@ -41,16 +41,17 @@ Synthesizing input would be automating the agent CLI, which risks its
 (Claude Code / Codex / opencode) license terms.
 
 - The renderer's terminal (`terminal/TerminalSurface.tsx` for the keys,
-  `terminal/useTerminalSession.ts` and its ordered sender
-  `components/terminalInput.ts` for the session) pipes the person's keystrokes, paste,
-  scroll and resize to the PTY through `forward_terminal_input`
-  (→ `terminal_sessions.send` → `pty.write`). It is the human-input
-  transport, not an agent-messaging API, and it must stay: in remote mode
-  the PTY is on the daemon, and browser keystrokes reach it only this
-  way.
-- `forward_terminal_input` is UI-only: never on the MCP surface
-  (`oxplow-surface-parity`'s `ui("forward_terminal_input")` row), so an
-  agent can't type at itself or a peer.
+  `terminal/useTerminalSession.ts` for the session) pipes the person's
+  keystrokes, paste, scroll and resize to the PTY as frames on the
+  daemon's `/events` socket (`terminalInput` → `sendSocketFrame`), which
+  the daemon hands to `terminal_input` (→ `terminal_sessions.enqueue_input`
+  → the terminal's queue → `send` → `pty.write`; `.context/terminal.md`
+  "Paste path and input ordering"). It is the human-input transport, not
+  an agent-messaging API, and it must stay: the PTY is on the daemon, and
+  keystrokes reach it only this way.
+- Terminal input is UI-only: it isn't a command at all (no `/ipc` route,
+  no Tauri command, nothing on the MCP surface), so an agent can't type
+  at itself or a peer.
 - A chat-library prompt is built only by `chat/human_prompt.rs`
   `compose`, from a person's submit ("The chat machinery (library)");
   nothing in production submits one.
@@ -61,12 +62,13 @@ Synthesizing input would be automating the agent CLI, which risks its
 
 **Guards** (each fails the build):
 - `apps/desktop/src/no-agent-input-automation.test.ts` confines
-  `forwardTerminalInput` and `{type:"input"}` construction to
-  `terminal/useTerminalSession.ts`, `components/terminalInput.ts` and the
-  `api.ts` facade.
+  `terminalInput` and `{type:"input"}` construction to
+  `terminal/useTerminalSession.ts` and the `api.ts` facade, and
+  `sendSocketFrame` to the facade and the transport.
 - A Rust source scan in `crates/oxplow-rpc/src/commands/terminal.rs`
-  asserts the only production caller of `terminal_sessions.send(` is the
-  `forward_terminal_input` core.
+  asserts the only production caller of `terminal_sessions.enqueue_input(`
+  is the `terminal_input` core (the queue's drain task is the only caller
+  of `send`).
 - `chat/guard_tests.rs` pins the chat library's prompt path: no production
   code calls `submit_human_prompt` ("The chat machinery (library)").
 
@@ -1568,7 +1570,7 @@ equivalence between tools.
 | Duplicate ids | `a_conversation_bound_in_another_open_slot_is_found`, the refusals in `a_person_resumes_a_chosen_conversation` and `a_person_opens_a_session_on_a_chosen_conversation` |
 | Two-window tab context | `two_windows_each_report_their_own_page`, `tabs_are_listed_per_thread_with_selection_visibility_and_staleness` |
 | Stream / worktree assignment | `no_thread_edits_another_streams_worktree` (a thread never writes another stream's worktree, the primary checkout included), `an_agent_opens_in_its_own_stream_and_its_close_is_proposed` |
-| No terminal input from restore, metadata, tab discovery or handoff | `terminal_sessions_send_has_single_production_caller` and `no-agent-input-automation.test.ts`: the one way bytes reach a PTY is the person's keystrokes |
+| No terminal input from restore, metadata, tab discovery or handoff | `terminal_input_has_single_production_caller` and `no-agent-input-automation.test.ts`: the one way bytes reach a PTY is the person's keystrokes |
 
 Not yet covered: a recorded Claude hook carrying `session_title` (filed).
 

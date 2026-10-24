@@ -54,12 +54,6 @@ export function readSessionMessage(message: string): SessionMessage | null {
   return null;
 }
 
-/** Whether a failed send means the session is gone (the daemon restarted,
- *  or the session ended), so the pane should open it again. */
-export function isSessionGone(error: unknown): boolean {
-  return /terminal session not found/i.test(error instanceof Error ? error.message : String(error));
-}
-
 /** After opening the pane's session again: `same` when the session the pane
  *  shows is still the one running (a reconnect that lost nothing), `new`
  *  when it was replaced and the screen must start over from its replay. */

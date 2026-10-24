@@ -652,11 +652,6 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	forwardTerminalInput: (sessionId: string, message: string) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("forward_terminal_input", { sessionId, message })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	closeTerminalSession: (sessionId: string) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("close_terminal_session", { sessionId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the

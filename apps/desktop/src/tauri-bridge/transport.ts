@@ -271,9 +271,10 @@ export function ipcRequest(name: string, args: Record<string, unknown> | undefin
   };
 }
 
-/// Calls whose latency a person feels: keystrokes to a terminal and the
-/// switch of a stream. They have lanes of their own (see `createLanes`).
-export const PRIORITY_COMMANDS: ReadonlySet<string> = new Set(["forward_terminal_input", "switch_stream"]);
+/// Calls whose latency a person feels: the switch of a stream. They have a
+/// lane of their own (see `createLanes`). Keystrokes to a terminal aren't
+/// calls: they ride the socket (`sendSocketFrame`).
+export const PRIORITY_COMMANDS: ReadonlySet<string> = new Set(["switch_stream"]);
 
 /// How many `/ipc` requests each lane keeps in flight. The webview holds
 /// six HTTP/1.1 connections to the daemon; the lanes add up to that, so a
@@ -435,9 +436,13 @@ function ensureSocket(): void {
     if (!handlers) return;
     for (const h of handlers) h({ payload: frame.payload });
   };
-  ws.onopen = handleSocketOpen;
+  ws.onopen = () => {
+    flushFrames(ws, waitingFrames);
+    handleSocketOpen();
+  };
   ws.onclose = () => {
     socket = null;
+    waitingFrames.length = 0;
     // A refused token isn't a drop: nothing to wait out or retry.
     if (tokenRefused) return;
     notifyConnectionState("down");
@@ -451,6 +456,37 @@ function ensureSocket(): void {
   ws.onerror = () => {
     ws.close();
   };
+}
+
+/// What a frame is written on: the shared socket, or a test's stand-in.
+type FrameSocket = { readyState: number; send(frame: string): void };
+
+/// Frames written while the socket was still opening, sent once it opens.
+const waitingFrames: string[] = [];
+
+/// Write `frame` on `ws` now when it is open, hold it in `waiting` while it
+/// opens, and drop it when there is no socket or it closed: the daemon is
+/// gone, and reconnecting opens the terminal again. Pure; exported for
+/// tests.
+export function writeFrame(ws: FrameSocket | null, waiting: string[], frame: string): void {
+  if (ws?.readyState === WebSocket.OPEN) ws.send(frame);
+  else if (ws?.readyState === WebSocket.CONNECTING) waiting.push(frame);
+}
+
+/// The socket opened: send the frames held for it, in order. Exported for
+/// tests.
+export function flushFrames(ws: FrameSocket, waiting: string[]): void {
+  for (const frame of waiting.splice(0)) ws.send(frame);
+}
+
+/// Write one frame to this window's daemon on the `/events` socket, after
+/// every frame written before it: the person's terminal input
+/// (`{"channel":"terminal","uri","message"}`), which must reach the PTY in
+/// the order it was typed — separate `/ipc` requests could overtake one
+/// another. Fire and forget: no answer comes back.
+export function sendSocketFrame(frame: string): void {
+  ensureSocket();
+  writeFrame(socket, waitingFrames, frame);
 }
 
 /// Where a `listen(channel)` subscription routes: the daemon

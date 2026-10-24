@@ -28,8 +28,9 @@ pub use oxplow_pty::SpawnRequest;
 use oxplow_pty::{PaneEvent, PaneId, PtyManager};
 use serde::{Deserialize, Serialize};
 use specta::Type;
+use std::time::Duration;
 use thiserror::Error;
-use tokio::sync::{broadcast, Mutex};
+use tokio::sync::{broadcast, mpsc, Mutex};
 use tokio::task::JoinHandle;
 use tracing::{debug, warn};
 
@@ -167,7 +168,23 @@ pub struct TerminalSessionRegistry {
     /// Where an agent pane's exit is recorded; set once the ingest is
     /// built (`ingest_exits_into`).
     exits: Arc<std::sync::OnceLock<crate::hook_ingest::HookIngestService>>,
+    /// Each terminal's input queue, by key ([`Self::enqueue_input`]): its
+    /// drain task is the only writer of input to the terminal's PTY.
+    input: Arc<std::sync::Mutex<HashMap<SessionKey, mpsc::UnboundedSender<String>>>>,
+    /// Signalled each time a session is registered, so a queue waiting
+    /// for its terminal's PTY looks again.
+    ready: Arc<tokio::sync::Notify>,
+    /// The runtime the drain tasks run on: [`Self::enqueue_input`] is
+    /// called from outside it (Tauri runs a sync command on its main
+    /// thread).
+    runtime: Option<tokio::runtime::Handle>,
+    /// How long input waits for its terminal's PTY before it is dropped.
+    input_wait: Duration,
 }
+
+/// How long input written for a terminal waits for its PTY (typed while it
+/// spawns) before it is dropped: the launch failed.
+const INPUT_WAIT: Duration = Duration::from_secs(10);
 
 impl TerminalSessionRegistry {
     pub fn new(pty: PtyManager, activity: crate::output_activity::OutputActivity) -> Self {
@@ -179,6 +196,86 @@ impl TerminalSessionRegistry {
             events_tx,
             activity,
             exits: Arc::new(std::sync::OnceLock::new()),
+            input: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            ready: Arc::new(tokio::sync::Notify::new()),
+            runtime: tokio::runtime::Handle::try_current().ok(),
+            input_wait: INPUT_WAIT,
+        }
+    }
+
+    /// The registry with input waiting `wait` for its PTY (tests).
+    pub fn with_input_wait(mut self, wait: Duration) -> Self {
+        self.input_wait = wait;
+        self
+    }
+
+    /// Queue one input message (`input`, `input-binary` or `resize`, as
+    /// [`Self::send`] reads it) for the terminal under `key`. Never blocks:
+    /// the key's drain task writes its messages to the PTY in the order
+    /// they were queued, holding them while the PTY is not there yet (up
+    /// to the input wait, then dropping them). The person's keystrokes
+    /// only: never an automation API (`.context/agent-model.md`).
+    pub fn enqueue_input(&self, key: SessionKey, message: String) {
+        let mut queues = self.input.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(tx) = queues.get(&key) {
+            if tx.send(message.clone()).is_ok() {
+                return;
+            }
+        }
+        let Some(runtime) = self
+            .runtime
+            .clone()
+            .or_else(|| tokio::runtime::Handle::try_current().ok())
+        else {
+            warn!(%key, "terminal input dropped: no runtime to write it on");
+            return;
+        };
+        let (tx, rx) = mpsc::unbounded_channel();
+        let _ = tx.send(message);
+        queues.insert(key.clone(), tx);
+        runtime.spawn(self.clone().drain_input(key, rx));
+    }
+
+    /// A terminal's input queue: each message, in order, to its live PTY.
+    async fn drain_input(self, key: SessionKey, mut rx: mpsc::UnboundedReceiver<String>) {
+        while let Some(message) = rx.recv().await {
+            let mut written = false;
+            // A session that ends under the write is waited for once more
+            // (Start Again replaces it).
+            for _ in 0..2 {
+                let Some(id) = self.wait_for_session(&key).await else {
+                    break;
+                };
+                match self.send(&id, &message).await {
+                    Err(TerminalSessionError::NotFound(_)) => continue,
+                    Err(e) => warn!(%key, error = %e, "terminal input not written"),
+                    Ok(()) => {}
+                }
+                written = true;
+                break;
+            }
+            if !written {
+                let mut dropped = 1;
+                while rx.try_recv().is_ok() {
+                    dropped += 1;
+                }
+                warn!(%key, dropped, "terminal input dropped: its PTY never came");
+            }
+        }
+    }
+
+    /// The live session under `key`, waiting up to the input wait for one
+    /// to be registered.
+    async fn wait_for_session(&self, key: &str) -> Option<String> {
+        let deadline = tokio::time::Instant::now() + self.input_wait;
+        loop {
+            let notified = self.ready.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            if let Some(id) = self.session_id_for_key(key).await {
+                return Some(id);
+            }
+            tokio::time::timeout_at(deadline, notified).await.ok()?;
         }
     }
 
@@ -260,7 +357,7 @@ impl TerminalSessionRegistry {
     /// `None` when none is registered (or the indexed session was
     /// already killed, leaving a stale `by_key` entry). **Never
     /// spawns** — it only reads the index, so a caller can resolve a
-    /// thread's agent PTY to `forward_terminal_input` without going
+    /// thread's agent PTY without going
     /// through the spawn-capable `attach_or_create` path (tsk139).
     pub async fn session_id_for_key(&self, key: &str) -> Option<String> {
         let session_id = self.by_key.lock().await.get(key).cloned()?;
@@ -303,6 +400,7 @@ impl TerminalSessionRegistry {
         let exits = Arc::clone(&self.exits);
         let sessions = Arc::clone(&self.inner);
         let by_key = Arc::clone(&self.by_key);
+        let input = Arc::clone(&self.input);
         let pty = self.pty.clone();
         let key_for_task = key.clone();
         // Held until the entry is inserted, so a process that exits at once
@@ -360,6 +458,12 @@ impl TerminalSessionRegistry {
                         let mut keys = by_key.lock().await;
                         if keys.get(&key_for_task) == Some(&session_id_for_task) {
                             keys.remove(&key_for_task);
+                            // Keys typed after the exit wait for the next
+                            // process in a fresh queue.
+                            input
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner())
+                                .remove(&key_for_task);
                         }
                         drop(keys);
                         if let (Some(pane), Some(ingest)) = (agent, exits.get()) {
@@ -407,6 +511,7 @@ impl TerminalSessionRegistry {
         );
         self.by_key.lock().await.insert(key, session_id.clone());
         drop(map);
+        self.ready.notify_waiters();
         Ok(session_id)
     }
 
@@ -427,7 +532,9 @@ impl TerminalSessionRegistry {
             .flatten()
     }
 
-    /// Dispatch one renderer-issued JSON message.
+    /// Write one input message to a live session's PTY. Only the input
+    /// queue's drain task calls it ([`Self::enqueue_input`]), and the
+    /// paste-order tests.
     pub async fn send(&self, session_id: &str, message: &str) -> Result<(), TerminalSessionError> {
         let parsed: serde_json::Value = serde_json::from_str(message)
             .map_err(|e| TerminalSessionError::InvalidMessage(e.to_string()))?;
@@ -505,6 +612,10 @@ impl TerminalSessionRegistry {
         entry.forwarder.abort();
         let _ = self.pty.kill(&entry.pane_id).await;
         self.by_key.lock().await.remove(&entry.key);
+        self.input
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&entry.key);
         Ok(())
     }
 }
@@ -556,10 +667,9 @@ fn read_process_cwd(pid: u32) -> Option<std::path::PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Duration;
 
     /// Build an `{type:"input", bytes:<base64>}` message the way the
-    /// renderer's `forwardTerminalInput` does for a paste.
+    /// renderer's `terminalInput` does for a paste.
     fn input_message(raw: &[u8]) -> String {
         let b64 = B64.encode(raw);
         serde_json::json!({ "type": "input", "bytes": b64 }).to_string()
@@ -876,6 +986,18 @@ mod tests {
             PtyManager::spawn(),
             crate::output_activity::OutputActivity::new(),
         );
+        let (req, path) = capture_request(label);
+        let key = format!("shell:{}", uuid::Uuid::new_v4().simple());
+        let session_id = reg
+            .spawn_with(req, key, None)
+            .await
+            .expect("spawn capture shell");
+        (reg, session_id, path)
+    }
+
+    /// A `cat > <file>` PTY's request: what reaches its stdin lands in the
+    /// file, in order.
+    fn capture_request(label: &str) -> (SpawnRequest, std::path::PathBuf) {
         let dir = std::env::temp_dir();
         let path = dir.join(format!(
             "oxplow-paste-{label}-{}.capture",
@@ -892,12 +1014,72 @@ mod tests {
             cols: 80,
             rows: 24,
         };
+        (req, path)
+    }
+
+    /// Input written for a terminal before its PTY exists — typed while it
+    /// was still spawning — is held, then arrives once the PTY does, in
+    /// order.
+    #[tokio::test]
+    async fn input_written_before_the_session_exists_arrives_once_it_does() {
+        let reg = TerminalSessionRegistry::new(
+            PtyManager::spawn(),
+            crate::output_activity::OutputActivity::new(),
+        );
         let key = format!("shell:{}", uuid::Uuid::new_v4().simple());
-        let session_id = reg
-            .spawn_with(req, key, None)
-            .await
-            .expect("spawn capture shell");
-        (reg, session_id, path)
+        for marker in ["EARLY_ONE ", "EARLY_TWO ", "EARLY_THREE\r"] {
+            reg.enqueue_input(key.clone(), input_message(marker.as_bytes()));
+        }
+        let (req, path) = capture_request("early");
+        let session_id = reg.spawn_with(req, key, None).await.expect("spawn");
+        let captured = read_capture_until(&path, &["EARLY_ONE", "EARLY_TWO", "EARLY_THREE"]).await;
+        assert_marker_order(&captured, &["EARLY_ONE", "EARLY_TWO", "EARLY_THREE"]);
+        let _ = reg.close(&session_id).await;
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// Many small writes, each its own message (a fast typist's keys),
+    /// reach the PTY in the order they were written.
+    #[tokio::test]
+    async fn many_inputs_arrive_in_order() {
+        let reg = TerminalSessionRegistry::new(
+            PtyManager::spawn(),
+            crate::output_activity::OutputActivity::new(),
+        );
+        let key = format!("shell:{}", uuid::Uuid::new_v4().simple());
+        let (req, path) = capture_request("many");
+        let session_id = reg.spawn_with(req, key.clone(), None).await.expect("spawn");
+        let markers: Vec<String> = (0..200).map(|i| format!("K{i:03} ")).collect();
+        for m in &markers {
+            reg.enqueue_input(key.clone(), input_message(m.as_bytes()));
+        }
+        reg.enqueue_input(key.clone(), input_message(b"\r"));
+        let needles: Vec<&str> = markers.iter().map(|m| m.trim()).collect();
+        let captured = read_capture_until(&path, &needles).await;
+        assert_marker_order(&captured, &needles);
+        let _ = reg.close(&session_id).await;
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// Input for a terminal whose PTY never comes (its launch failed) is
+    /// dropped after the wait, never replayed into a later process.
+    #[tokio::test]
+    async fn input_for_a_key_that_never_opens_is_dropped() {
+        let reg = TerminalSessionRegistry::new(
+            PtyManager::spawn(),
+            crate::output_activity::OutputActivity::new(),
+        )
+        .with_input_wait(std::time::Duration::from_millis(100));
+        let key = format!("shell:{}", uuid::Uuid::new_v4().simple());
+        reg.enqueue_input(key.clone(), input_message(b"STALE "));
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        let (req, path) = capture_request("stale");
+        let session_id = reg.spawn_with(req, key.clone(), None).await.expect("spawn");
+        reg.enqueue_input(key.clone(), input_message(b"FRESH\r"));
+        let captured = read_capture_until(&path, &["FRESH"]).await;
+        assert!(!captured.contains("STALE"), "{captured:?}");
+        let _ = reg.close(&session_id).await;
+        let _ = std::fs::remove_file(&path);
     }
 
     /// Regression for tsk93: a multi-paragraph paste (blank-line

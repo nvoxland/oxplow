@@ -225,7 +225,6 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             // terminal
             commands::terminal::open_terminal_session,
             // acp
-            commands::generated::forward_terminal_input,
             commands::generated::close_terminal_session,
             commands::generated::terminal_session_cwd,
             commands::generated::terminate_terminal_session,

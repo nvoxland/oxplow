@@ -47,6 +47,22 @@ test("a terminal opens a shell in the project", async ({ page }) => {
   expect(fit.screen).toBeLessThanOrEqual(fit.mount + 1);
 });
 
+// Keys typed the moment the terminal shows — before its shell is up —
+// arrive, all of them, in the order typed: the daemon holds them for the
+// PTY, and one socket keeps them in order.
+test("a burst typed as the terminal appears arrives whole and in order", async ({ page }) => {
+  await page.goto("/");
+  await openFromLauncher(page, "Terminal");
+  const terminal = page.locator(".xterm");
+  await expect(terminal).toBeVisible();
+  await terminal.click();
+  const run = "0123456789abcdefghijklmnopqrstuvwxyz".repeat(3);
+  await page.keyboard.type(`echo burst-${run}-$((6*7))`);
+  await page.keyboard.press("Enter");
+  // The output, not the typed line: only the shell computes 42.
+  await expect(page.locator(".xterm-rows")).toContainText(`burst-${run}-42`);
+});
+
 // tsk1026: a session whose process exited says so, takes no keys, and Start
 // Again opens a fresh one in the same pane.
 test("an exited shell says so, and Start Again opens a new one", async ({ page }) => {

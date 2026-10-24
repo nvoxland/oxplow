@@ -449,17 +449,13 @@ pub const MANIFEST: &[Capability] = &[
         "the editor answers a server's edit request",
     ),
     // ---- terminal ----
-    // `forward_terminal_input` is UI-ONLY by design and must never reach
-    // the MCP (agent) surface: it is the human keystroke/paste transport,
-    // not an automation API — part of the no-automation guard (see
-    // `.context/agent-model.md`).
+    // The person's terminal is UI-ONLY by design and must never reach the
+    // MCP (agent) surface. Its keystrokes aren't a command at all: they
+    // ride the `/events` socket (`terminal_input`), never an automation
+    // API — part of the no-automation guard (see `.context/agent-model.md`).
     ui(
         "open_terminal_session",
         "the person's terminal: never an automation API",
-    ),
-    ui(
-        "forward_terminal_input",
-        "the human's keystroke and paste transport: oxplow never synthesizes agent input",
     ),
     ui(
         "close_terminal_session",
@@ -475,7 +471,7 @@ pub const MANIFEST: &[Capability] = &[
     ),
     ui(
         "lookup_terminal_session",
-        "feeds `forward_terminal_input`, which is the human's alone",
+        "the person's terminal: never an automation API",
     ),
     // ---- menu ----
     ui("set_native_menu", "the native menu bar"),

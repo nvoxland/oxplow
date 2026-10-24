@@ -9,7 +9,8 @@
 //!   `{"status":"ok","data":…}` / `{"status":"error","error":…}` so the
 //!   frontend's existing unwrap path works unchanged.
 //! - `GET /events` — WebSocket multiplexing the oxplow / lsp /
-//!   terminal event channels (wired by the streaming workstream).
+//!   terminal event channels, and carrying the person's terminal input
+//!   the other way, in order.
 //!
 //! Single-user by design: bind to `127.0.0.1` on the remote box and
 //! reach it through `ssh -L <localPort>:127.0.0.1:<port>`.
@@ -144,7 +145,9 @@ async fn health() -> &'static str {
 /// (`oxplow:event`, `lsp:event`, `pty:event`). Each
 /// frame is `{"channel":"oxplow"|"lsp"|"terminal","payload":<event>}`
 /// with the event's serialized shape, so the renderer's handlers are
-/// transport-agnostic.
+/// transport-agnostic. The window writes its terminal input on the same
+/// socket (`{"channel":"terminal","uri":…,"message":…}`), so keystrokes
+/// reach the PTY in the order they were typed.
 ///
 /// The channels are subscribed here, before the upgrade is answered
 /// (tsk995): the upgrade's callback runs only after the client has its
@@ -152,7 +155,8 @@ async fn health() -> &'static str {
 /// cause an event no forwarder was there to see.
 async fn events_ws(State(state): State<DaemonState>, ws: WebSocketUpgrade) -> Response {
     let forwarders = subscribe(&state);
-    ws.on_upgrade(move |socket| events_stream(socket, forwarders))
+    let services = state.ctx.services.clone();
+    ws.on_upgrade(move |socket| events_stream(socket, forwarders, services))
 }
 
 /// One channel's subscription, waiting for the socket's queue to forward
@@ -237,7 +241,11 @@ fn ws_frame_keys() -> [&'static str; 3] {
 
 /// Start each channel's forwarder into one queue, then pump the socket
 /// from it.
-async fn events_stream(socket: WebSocket, subscriptions: [Forwarder; 3]) {
+async fn events_stream(
+    socket: WebSocket,
+    subscriptions: [Forwarder; 3],
+    services: std::sync::Arc<oxplow_app::Services>,
+) {
     let (mut sink, mut inbound) = socket.split();
     let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(256);
     let forwarders = subscriptions.map(|start| start(tx.clone()));
@@ -254,9 +262,10 @@ async fn events_stream(socket: WebSocket, subscriptions: [Forwarder; 3]) {
                 None => break,
             },
             msg = inbound.next() => match msg {
-                // Inbound traffic is only ping/close — commands go over
-                // /ipc. None/Close ends the stream.
+                // Inbound traffic is terminal input, ping and close —
+                // commands go over /ipc. None/Close ends the stream.
                 Some(Ok(Message::Close(_))) | None => break,
+                Some(Ok(Message::Text(text))) => terminal_frame(&services, &text),
                 Some(Ok(_)) => continue,
                 Some(Err(_)) => break,
             },
@@ -264,6 +273,30 @@ async fn events_stream(socket: WebSocket, subscriptions: [Forwarder; 3]) {
     }
     for f in forwarders {
         f.abort();
+    }
+}
+
+/// One terminal-input frame from the window: its message queued for the
+/// terminal's PTY, before the next frame is read. A frame that isn't one,
+/// or names no terminal, is logged and dropped.
+fn terminal_frame(services: &oxplow_app::Services, text: &str) {
+    #[derive(serde::Deserialize)]
+    struct Frame {
+        channel: String,
+        uri: String,
+        message: String,
+    }
+    let [_, _, terminal] = ws_frame_keys();
+    match serde_json::from_str::<Frame>(text) {
+        Ok(f) if f.channel == terminal => {
+            if let Err(e) =
+                oxplow_rpc::commands::terminal::terminal_input(services, f.uri.clone(), f.message)
+            {
+                tracing::warn!(uri = %f.uri, error = %e, "terminal input refused");
+            }
+        }
+        Ok(f) => tracing::warn!(channel = %f.channel, "events ws: no inbound channel"),
+        Err(e) => tracing::warn!(error = %e, "events ws: unreadable inbound frame"),
     }
 }
 
@@ -894,6 +927,63 @@ mod tests {
             v["payload"]["message"].is_string(),
             "terminal frame carries the JSON-encoded protocol message"
         );
+    }
+
+    /// Terminal input written on the socket reaches the PTY in the order
+    /// it was written, back to back with no answer between.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_terminal_frame_on_the_socket_reaches_the_pty_in_order() {
+        use futures::SinkExt as _;
+        let (svc, dir) = services().await;
+        let daemon = run_server("127.0.0.1:0".parse().unwrap(), daemon_state(svc.clone()))
+            .await
+            .unwrap();
+        let uri = oxplow_domain::uri::build::terminal_uri(oxplow_domain::TerminalId::new(7));
+        let capture = dir.path().join("typed.txt");
+        let command = format!("cat > '{}'", capture.display());
+        svc.terminal_sessions
+            .attach_or_create(uri.clone(), 80, 24, |cols, rows| {
+                oxplow_app::terminal_sessions::SpawnRequest {
+                    command: "sh".into(),
+                    args: vec!["-lc".into(), command],
+                    cwd: dir.path().to_path_buf(),
+                    env: oxplow_app::agent_path::base_pty_env(),
+                    env_remove: vec![],
+                    cols,
+                    rows,
+                }
+            })
+            .await
+            .unwrap();
+        let url = format!("ws://{}/events?token={UI_TOKEN}", daemon.bind_addr);
+        let (mut ws, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
+        let keys: Vec<String> = (0..50).map(|i| format!("W{i:02} ")).collect();
+        for k in keys.iter().map(String::as_str).chain(["\r"]) {
+            let bytes = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, k);
+            let frame = serde_json::json!({
+                "channel": "terminal",
+                "uri": uri,
+                "message": serde_json::json!({ "type": "input", "bytes": bytes }).to_string(),
+            });
+            ws.send(tokio_tungstenite::tungstenite::Message::Text(
+                frame.to_string().into(),
+            ))
+            .await
+            .unwrap();
+        }
+        let want: String = keys.concat();
+        let got = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            loop {
+                let text = std::fs::read_to_string(&capture).unwrap_or_default();
+                if text.contains(want.trim_end()) {
+                    return text;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+        })
+        .await
+        .expect("the typed keys, in order");
+        assert!(got.contains(want.trim_end()), "{got:?}");
     }
 
     #[tokio::test]

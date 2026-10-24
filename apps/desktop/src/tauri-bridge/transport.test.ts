@@ -13,6 +13,8 @@ import {
   PRIORITY_IN_FLIGHT,
   PRIORITY_COMMANDS,
   triggerRemoteResync,
+  writeFrame,
+  flushFrames,
 } from "./transport";
 import { EVENT_CHANNELS } from "./channels";
 import { SHELL_COMMANDS } from "./generated/shellCommands";
@@ -198,7 +200,7 @@ describe("request lanes", () => {
     return { run: () => done, finish };
   }
 
-  test("a burst of reads fills the bulk lane and terminal input still goes at once", async () => {
+  test("a burst of reads fills the bulk lane and a priority call still goes at once", async () => {
     const lanes = createLanes({ bulk: BULK_IN_FLIGHT, priority: PRIORITY_IN_FLIGHT });
     let started = 0;
     const reads = Array.from({ length: 20 }, () => {
@@ -225,9 +227,46 @@ describe("request lanes", () => {
     reads.forEach((r) => r.finish());
   });
 
-  test("the lanes together stay within the webview's six connections, and input is a priority call", () => {
+  test("the lanes together stay within the webview's six connections, and a stream switch is a priority call", () => {
     expect(BULK_IN_FLIGHT + PRIORITY_IN_FLIGHT).toBeLessThanOrEqual(6);
-    expect(PRIORITY_COMMANDS.has("forward_terminal_input")).toBe(true);
+    expect(PRIORITY_COMMANDS.has("switch_stream")).toBe(true);
     expect(PRIORITY_COMMANDS.has("list_streams")).toBe(false);
+  });
+});
+
+describe("frames the window writes on the socket", () => {
+  function fakeSocket(readyState: number) {
+    const sent: string[] = [];
+    return { sent, socket: { readyState, send: (f: string) => void sent.push(f) } };
+  }
+
+  test("an open socket sends each frame at once, in order", () => {
+    const { sent, socket } = fakeSocket(WebSocket.OPEN);
+    const waiting: string[] = [];
+    writeFrame(socket, waiting, "a");
+    writeFrame(socket, waiting, "b");
+    expect(sent).toEqual(["a", "b"]);
+    expect(waiting).toEqual([]);
+  });
+
+  test("a socket still opening holds them until it opens, then sends them first", () => {
+    const { sent, socket } = fakeSocket(WebSocket.CONNECTING);
+    const waiting: string[] = [];
+    writeFrame(socket, waiting, "a");
+    writeFrame(socket, waiting, "b");
+    expect(sent).toEqual([]);
+    socket.readyState = WebSocket.OPEN;
+    flushFrames(socket, waiting);
+    writeFrame(socket, waiting, "c");
+    expect(sent).toEqual(["a", "b", "c"]);
+  });
+
+  test("with no socket, or a closed one, a frame is dropped", () => {
+    const waiting: string[] = [];
+    writeFrame(null, waiting, "a");
+    const { sent, socket } = fakeSocket(WebSocket.CLOSED);
+    writeFrame(socket, waiting, "b");
+    expect(sent).toEqual([]);
+    expect(waiting).toEqual([]);
   });
 });

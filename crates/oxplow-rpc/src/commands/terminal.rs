@@ -374,21 +374,29 @@ pub(crate) async fn launch_session(
     Ok(launch)
 }
 
-/// Forward a terminal-input protocol message from the renderer to the
-/// PTY backing `session_id`. This is **plumbing for human input only**:
-/// the renderer's xterm pipes the user's own keystrokes / paste / scroll
-/// / resize through here (see `terminal/useTerminalSession.ts`). It is NOT an
-/// agent-messaging or automation API — nothing in oxplow may synthesize
-/// `{type:"input"}` here to "type at" the agent. See the no-automation
-/// invariant in `.context/agent-model.md`. Message shapes live in
-/// `oxplow_app::terminal_sessions`.
-pub async fn forward_terminal_input(
-    svc: &Services,
-    session_id: String,
-    message: String,
-) -> Result<(), IpcError> {
-    svc.terminal_sessions.send(&session_id, &message).await?;
+/// Queue a terminal-input protocol message for the PTY of `uri` (a
+/// terminal or an agent session): the person's keystrokes, paste, scroll
+/// and resize, in the order the window wrote them. The window writes them
+/// on the daemon's `/events` socket, one frame each; this is called for
+/// each frame before the next is read. Synchronous: it only queues, so the
+/// frames' order is the PTY's, and keys typed before
+/// the PTY is up wait for it in the registry
+/// (`TerminalSessionRegistry::enqueue_input`). This is **plumbing for human
+/// input only**: it is NOT an agent-messaging or automation API — nothing
+/// in oxplow may synthesize `{type:"input"}` here to "type at" the agent.
+/// See the no-automation invariant in `.context/agent-model.md`. Message
+/// shapes live in `oxplow_app::terminal_sessions`.
+pub fn terminal_input(svc: &Services, uri: String, message: String) -> Result<(), IpcError> {
+    svc.terminal_sessions.enqueue_input(key_of(&uri)?, message);
     Ok(())
+}
+
+/// The registry key of `uri`'s PTY.
+fn key_of(uri: &str) -> Result<String, IpcError> {
+    Ok(match target_of(uri)? {
+        Target::Terminal(id) => terminal_key(id),
+        Target::AgentSession(id) => agent_pane_key(id),
+    })
 }
 
 /// Read-only lookup of the live PTY of `uri` (a terminal or an agent session),
@@ -396,19 +404,16 @@ pub async fn forward_terminal_input(
 /// `open_terminal_session` registers, `None` when no live PTY exists (never
 /// opened, or terminated; an unknown session likewise).
 ///
-/// This is the spawn-free path a second client uses to resolve a
-/// session's agent PTY before `forward_terminal_input` (delivering the
-/// human's keystrokes), instead of the spawn-capable
-/// `open_terminal_session`.
+/// This is the spawn-free path a second client uses to find a session's
+/// agent PTY, instead of the spawn-capable `open_terminal_session`.
 pub async fn lookup_terminal_session(
     svc: &Services,
     uri: String,
 ) -> Result<Option<String>, IpcError> {
-    let key = match target_of(&uri)? {
-        Target::Terminal(id) => terminal_key(id),
-        Target::AgentSession(id) => agent_pane_key(id),
-    };
-    Ok(svc.terminal_sessions.session_id_for_key(&key).await)
+    Ok(svc
+        .terminal_sessions
+        .session_id_for_key(&key_of(&uri)?)
+        .await)
 }
 
 /// Detach the renderer from `session_id` without killing the PTY —
@@ -928,22 +933,22 @@ mod tests {
     }
 
     #[test]
-    fn terminal_sessions_send_has_single_production_caller() {
+    fn terminal_input_has_single_production_caller() {
         // No-automation guard (see .context/agent-model.md → "No
-        // synthesized agent terminal input"). The terminal-input registry
-        // method `terminal_sessions.send(` is the path that turns a
-        // protocol message into a PTY write — i.e. the only way to put
-        // bytes in front of the agent. It may have EXACTLY ONE production
-        // caller: `forward_terminal_input` in this file, which carries
-        // the human's own keystrokes/paste. Any other crate-source caller
-        // would be a way for oxplow to synthesize agent input and must
-        // fail the build. (Test/`reg.send(` call sites in
-        // oxplow-app use a different receiver and don't match.)
+        // synthesized agent terminal input"). The registry's input queue
+        // `terminal_sessions.enqueue_input(` is the only way to put bytes
+        // in front of the agent (its drain task is the only caller of
+        // `send`). It may have EXACTLY ONE production caller:
+        // `terminal_input` in this file, which carries the human's own
+        // keystrokes/paste. Any other crate-source caller would be a way
+        // for oxplow to synthesize agent input and must fail the build.
+        // (The registry's own tests call `reg.enqueue_input(` and don't
+        // match.)
         let crates_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .expect("crates dir");
         let allowed = "oxplow-rpc/src/commands/terminal.rs";
-        let needle = "terminal_sessions.send(";
+        let needle = "terminal_sessions.enqueue_input(";
         let mut offenders: Vec<String> = Vec::new();
         let mut stack = vec![crates_dir.to_path_buf()];
         while let Some(dir) = stack.pop() {
@@ -973,8 +978,20 @@ mod tests {
         assert!(
             offenders.is_empty(),
             "unexpected callers of the terminal-input registry method: {offenders:?} \
-             — agent terminal input must flow only through forward_terminal_input"
+             — agent terminal input must flow only through terminal_input"
         );
+    }
+
+    #[tokio::test]
+    async fn terminal_input_refuses_a_uri_of_no_terminal() {
+        let (ctx, _dir) = services().await;
+        let err = super::terminal_input(
+            &ctx.services,
+            "oxplow:oxplow/thread?id=thr1".into(),
+            r#"{"type":"input","bytes":"eA=="}"#.into(),
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("thread"), "{err}");
     }
 
     #[tokio::test]

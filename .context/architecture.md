@@ -54,7 +54,7 @@ terminal input (automating the agent CLI would risk violating its
 license/ToS). Steering happens through hook responses the agent's own
 harness injects, not by oxplow synthesizing input. This is a hard
 invariant, guarded by tests — the mechanics and the human-input
-transport (`forward_terminal_input`) live in
+transport (`terminal_input`, frames on the daemon's socket) live in
 [agent-model.md](./agent-model.md#no-synthesized-agent-terminal-input-no-automation).
 
 ### Scoped exceptions

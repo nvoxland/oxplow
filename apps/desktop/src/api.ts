@@ -10,14 +10,14 @@ import type {
   SymbolLocation,
   SnapshotTrigger,
 } from "./tauri-bridge/generated/bindings.js";
-import { listen, onRemoteReconnect, triggerRemoteResync } from "./tauri-bridge/transport.js";
+import { listen, onRemoteReconnect, sendSocketFrame, triggerRemoteResync } from "./tauri-bridge/transport.js";
 
 /** Whether this window is in the desktop shell — false in a plain browser
  *  driving a daemon, which has no native menu or recent projects. */
 export { shellAvailable } from "./tauri-bridge/transport.js";
 
 export { onRemoteReconnect, triggerRemoteResync };
-import { EVENT_CHANNELS } from "./tauri-bridge/channels.js";
+import { EVENT_CHANNELS, type EventChannelFrameKey } from "./tauri-bridge/channels.js";
 import {
   METRIC_SPECS_SQL,
   metricSpecs as metricSpecRows,
@@ -184,8 +184,10 @@ function buildBridge() {
     // pipes the user's keystrokes / paste / scroll / resize through here.
     // NOT an agent-messaging or automation API; never synthesize
     // `{type:"input"}` from non-UI code (see .context/agent-model.md).
-    forwardTerminalInput: async (sessionId: string, message: string): Promise<void> => {
-      unwrap(await commands.forwardTerminalInput(sessionId, message));
+    // One frame on the daemon's socket, so keys reach the PTY of `uri` in
+    // the order they were typed; the daemon holds them until it is up.
+    terminalInput: (uri: string, message: string): void => {
+      sendSocketFrame(JSON.stringify({ channel: "terminal" satisfies EventChannelFrameKey, uri, message }));
     },
     /// Best-effort live cwd of the session's child (the shell, for the Terminal
     /// page). null when undeterminable; callers fall back to the worktree root.

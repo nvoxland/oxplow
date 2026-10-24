@@ -6,7 +6,8 @@ import { join } from "node:path";
 // .context/agent-model.md → "No synthesized agent terminal input").
 //
 // The ONLY source of agent terminal input is human keystrokes / paste
-// via the UI. The terminal-input transport (`forwardTerminalInput`) and
+// via the UI. The terminal-input transport (`terminalInput`, a frame on
+// the daemon's socket through `sendSocketFrame`) and
 // the `{type:"input"}` protocol message it carries must stay confined to
 // the human-input path, so no other renderer code can synthesize agent
 // input. If this fails, you've added a non-human caller — that's the
@@ -18,12 +19,12 @@ const SRC_DIR = import.meta.dir;
 
 // These files ARE the human-input path and are allowed to touch the
 // transport: the `api.ts` facade, the terminal session that pipes the
-// user's own keystrokes/paste from its surface, and its ordered sender
-// (tsk979), which sends only through the call the session hands it. Generated bindings and
-// test files are excluded from the scan entirely (below), so they need no
-// entry here.
+// user's own keystrokes/paste from its surface, and the transport that
+// writes the frame. Generated bindings and test files are excluded from
+// the scan entirely (below), so they need no entry here.
 const TERMINAL_SESSION = join("terminal", "useTerminalSession.ts");
-const ALLOWED = new Set<string>(["api.ts", TERMINAL_SESSION, join("components", "terminalInput.ts")]);
+const TRANSPORT = join("tauri-bridge", "transport.ts");
+const ALLOWED = new Set<string>(["api.ts", TERMINAL_SESSION]);
 
 function sourceFiles(): string[] {
   return readdirSync(SRC_DIR, { recursive: true })
@@ -43,21 +44,20 @@ function offenders(pattern: RegExp): string[] {
 }
 
 describe("no agent input automation", () => {
-  test("forwardTerminalInput is only referenced on the human-input path", () => {
-    expect(offenders(/forwardTerminalInput/)).toEqual([]);
+  test("terminalInput is only referenced on the human-input path", () => {
+    expect(offenders(/\bterminalInput\b/)).toEqual([]);
   });
 
   test('{type:"input"} terminal messages are only built on the human-input path', () => {
     expect(offenders(/type:\s*"input(-binary)?"/)).toEqual([]);
   });
 
-  // The ordered sender carries `{type:"input"}` messages: only the session
-  // may make one, so nothing else gets a way to type at the agent through it.
-  test("terminalSender is only used by the terminal session", () => {
-    const allowed = new Set([TERMINAL_SESSION, join("components", "terminalInput.ts")]);
+  // The socket's frames reach a PTY: only the facade writes one.
+  test("sendSocketFrame is only used by the api facade", () => {
+    const allowed = new Set(["api.ts", TRANSPORT]);
     const hits = sourceFiles()
       .filter((rel) => !allowed.has(rel))
-      .filter((rel) => /\bterminalSender\b/.test(readFileSync(join(SRC_DIR, rel), "utf8")));
+      .filter((rel) => /\bsendSocketFrame\b/.test(readFileSync(join(SRC_DIR, rel), "utf8")));
     expect(hits).toEqual([]);
   });
 });

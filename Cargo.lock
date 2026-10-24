@@ -4586,6 +4586,7 @@ name = "oxplow-daemon"
 version = "0.7.0"
 dependencies = [
  "axum",
+ "base64 0.23.1",
  "futures",
  "oxplow-ai",
  "oxplow-app",
