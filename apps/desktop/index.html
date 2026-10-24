@@ -286,6 +286,23 @@
         text-underline-offset: 2px;
         cursor: default;
       }
+      /* The editor's selection toolbar (SelectionToolbar.tsx). */
+      .ox-selection-toolbar {
+        z-index: 1000; display: inline-flex; align-items: center; gap: 2px; padding: 3px;
+        background: var(--surface-elevated); border: 1px solid var(--border-strong);
+        border-radius: 6px; box-shadow: 0 4px 14px rgba(0,0,0,0.35);
+        font-family: var(--font-ui); font-size: 12px; color: var(--text-primary);
+      }
+      .ox-selection-toolbar-button {
+        display: inline-flex; align-items: center; padding: 4px 6px; border: 0; border-radius: 4px;
+        background: transparent; color: inherit; font: inherit; cursor: pointer;
+      }
+      .ox-selection-toolbar-button:hover { background: var(--surface-card); }
+      .ox-selection-toolbar-button[aria-pressed="true"] { background: rgba(74, 158, 255, 0.18); color: var(--accent); }
+      .ox-selection-toolbar-input {
+        width: 240px; padding: 4px 6px; border: 1px solid var(--border-strong); border-radius: 4px;
+        background: var(--surface-card); color: var(--text-primary); font: inherit;
+      }
       /* The editor's `[[` list (RefCompletion.tsx). */
       .ox-ref-completion {
         z-index: 1000; min-width: 260px; max-width: 420px; max-height: 300px; overflow-y: auto;

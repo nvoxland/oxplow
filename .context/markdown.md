@@ -33,6 +33,24 @@ set**, and a surface never builds its own:
   goes in as its link, saved as the wikilink a person would type
   (`refLinkOf`: `[[slug]]`, `[[path:12]]`, `[[tsk42]]`; a ref with no bare
   form as `[title](uri)`), and shows its title.
+- **A format toolbar on a selection** (the editor, `SelectionToolbar.tsx`):
+  Bold, Italic, Code, Link, Heading / Subheading (not in an `inlineOnly`
+  field), and Add comment where the text takes comments. It floats at the
+  selection's end after a mouse selection (on the mouseup) or a keyboard
+  one; it hides when the selection collapses, a comment popover opens, or
+  the focus leaves for anything but the toolbar. Buttons act on the press
+  (a click would collapse the selection) and say whether they are on.
+  Link opens a box: a web URL or an oxplow URI as typed, anything else
+  read as a wikilink's target (`linkHref`: `local-snapshots`,
+  `src/a.ts:12`, `tsk42`); Enter applies, an empty box removes the link,
+  Escape leaves the text as it was.
+- **Drop and paste** (the editor, `refDrops.ts`): an "Add to agent
+  context" drag (`CONTEXT_REF_MIME`: a file, a wiki page, a lens row's
+  ref, a work item) or a work-item drag (`WORK_ITEM_DRAG_MIME`, several
+  items) dropped on the field goes in where it lands as links
+  (`insertRefLinks`), and the field shows the dashed drop highlight while
+  such a drag is over it. A pasted oxplow URI goes in as its link; a URI
+  or web URL pasted over a selection links it; other text pastes as text.
 - **Mermaid** fences draw as diagrams, always (pan, zoom, the
   lightbox; in the editor, the `MermaidBlock` node view, click to edit
   its source).
@@ -132,6 +150,14 @@ why).
   `RichTextField`'s own keys stand aside. `refOptions.ts` is what it lists
   (pure), `refLinkOf` (`MarkdownView.tsx`) what a pick puts in, tested
   against `postprocessWikilinks` for each kind.
+- **`SelectionToolbar.tsx`** — the selection toolbar, its gate
+  (`selectionToolbarVisible`) and the link box's reading (`linkHref`).
+  The plain-DOM comment layer keeps its own one-button
+  `SelectionCommentToolbar` (`components/Comments/`).
+- **`refDrops.ts`** — what a drop names and what a paste is (pure);
+  `RichTextField`'s `handleDrop` / `handlePaste` act on them. A real drop
+  needs layout (`posAtCoords`), so it is covered in the browser suite
+  (`knowledge/wiki.spec.ts`), the rest in unit tests.
 - **`RefTitles.tsx`** — the title widget a bare ref link gets in the
   editor ("A ref link's title in the editor").
 - **`MermaidBlock.tsx`** — extends Tiptap's `CodeBlock` (same node
@@ -301,14 +327,11 @@ item.threadId }`.
   lists "Relink orphaned: …" entries that re-attach an orphaned comment
   to the current selection via `relink_comment` (rewrites quote +
   anchor, clears orphaned).
-- **Authoring: selection toolbar + right-click.** On mouseup with a
-  non-collapsed selection, the field floats the shared
-  `SelectionCommentToolbar` ("Add comment") at the selection end —
-  mirroring the plain-DOM surfaces, which this contenteditable region
-  is deliberately carved out of (`useDomAnnotations` skips
-  contenteditable). Gating is the pure `selectionToolbarVisible`
-  (`Markdown/selectionToolbar.ts`); the toolbar hides when the
-  selection collapses or a composer/popover is open. *Opening* an
+- **Authoring: selection toolbar + right-click.** A selection floats the
+  editor's toolbar (above), whose Add comment opens the composer —
+  mirroring the plain-DOM surfaces' button, which this contenteditable
+  region is deliberately carved out of (`useDomAnnotations` skips
+  contenteditable). *Opening* an
   existing comment stays right-click-only (click-to-open would fight
   cursor placement). The wrapper's `onContextMenu` **always** fires and
   `preventDefault`s, so the native webview menu never appears in the

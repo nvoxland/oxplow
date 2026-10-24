@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { CSSProperties, MouseEvent as ReactMouseEvent } from "react";
 import { EditorContent, useEditor } from "@tiptap/react";
+import type { Editor } from "@tiptap/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import { Pencil } from "lucide-react";
 import { getMarkdown, richTextExtensions } from "./richTextExtensions.js";
@@ -24,12 +25,13 @@ import {
 } from "../../comment-reveal-bus.js";
 import { CommentPopover } from "../Comments/CommentPopover.js";
 import { NewCommentPopover } from "../Comments/NewCommentPopover.js";
-import { SelectionCommentToolbar } from "../Comments/SelectionCommentToolbar.js";
-import { selectionToolbarVisible } from "./selectionToolbar.js";
+import { SelectionToolbar, selectionToolbarVisible } from "./SelectionToolbar.js";
 import { ContextMenu } from "../ContextMenu.js";
 import type { MenuItem } from "../../menu.js";
 import { followLink, linkMenu, type OpenRef } from "./links.js";
-import type { MentionRef } from "./MarkdownView.js";
+import { refLinkOf, type MentionRef } from "./MarkdownView.js";
+import { dragCarriesRefs, droppedRefs, pastedLink, type DroppedRef } from "./refDrops.js";
+import { linkTarget } from "../../uri/uri.js";
 import type { RefSearch } from "./refOptions.js";
 import { useOptionalPageNavigation } from "../../tabs/PageNavigationContext.js";
 
@@ -59,6 +61,20 @@ function buildAnchorJson(doc: PMNode, from: number, to: number, approx: boolean)
   if (endOff === -1) endOff = map.length;
   const { prefix, suffix } = extractContext(text, startOff, endOff);
   return JSON.stringify({ from, to, prefix, suffix, textOffset: startOff, approx });
+}
+
+/** Put `refs` in at `pos` as their links (`refLinkOf`), a space between
+ *  them and before them when the text there doesn't end in one. */
+export function insertRefLinks(editor: Editor, pos: number, refs: readonly DroppedRef[], mentionRef: MentionRef): void {
+  if (refs.length === 0) return;
+  const before = pos > 0 ? editor.state.doc.textBetween(Math.max(0, pos - 1), pos, "\n", "\n") : "";
+  const content: Array<{ type: "text"; text: string; marks?: Array<{ type: "link"; attrs: { href: string } }> }> = [];
+  refs.forEach((ref, i) => {
+    if (i > 0 || (before !== "" && !/\s/.test(before))) content.push({ type: "text", text: " " });
+    const { href, text } = refLinkOf(ref.uri, ref.title, mentionRef);
+    content.push({ type: "text", text, marks: [{ type: "link", attrs: { href } }] });
+  });
+  editor.chain().focus().insertContentAt(pos, content).run();
 }
 
 interface PendingSelection {
@@ -189,9 +205,13 @@ export function RichTextField({
   const [commentMenu, setCommentMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(
     null,
   );
-  // Floating "Add comment" toolbar over a fresh selection (mouse-driven,
-  // like the plain-DOM layer). Null when hidden.
+  // The floating selection toolbar (format, and Add comment where comments
+  // are) over a fresh selection. Null when hidden.
   const [selToolbarRect, setSelToolbarRect] = useState<DOMRect | null>(null);
+  // A mouse button is down in the field: the toolbar waits for the mouseup.
+  const mouseDownRef = useRef(false);
+  // A drag of refs is over the field: it shows it takes the drop.
+  const [dropping, setDropping] = useState(false);
   popoverOpenRef.current = pendingSel !== null || activeComment !== null || commentMenu !== null;
 
   const editor = useEditor({
@@ -242,6 +262,33 @@ export function RichTextField({
         void view;
         return false;
       },
+      // A pasted oxplow URI goes in as its link; a URI or a web URL over
+      // a selection links it. Any other paste is the editor's own.
+      handlePaste(view, event) {
+        const ed = editorRef.current;
+        const link = pastedLink(event.clipboardData?.getData("text/plain") ?? "");
+        if (!ed || !link) return false;
+        const { empty, from } = view.state.selection;
+        if (!empty) {
+          ed.chain().focus().setLink({ href: link.kind === "ref" ? linkTarget(link.uri) : link.url }).run();
+          return true;
+        }
+        if (link.kind !== "ref") return false;
+        insertRefLinks(ed, from, [{ uri: link.uri, title: link.uri }], (id) => owner.current.mentionRef?.(id) ?? null);
+        return true;
+      },
+      // An "Add to agent context" or work-item drag goes in as links where
+      // it lands.
+      handleDrop(view, event, _slice, moved) {
+        const ed = editorRef.current;
+        setDropping(false);
+        if (!ed || moved || !event.dataTransfer) return false;
+        const refs = droppedRefs(event.dataTransfer);
+        if (refs.length === 0) return false;
+        const pos = view.posAtCoords({ left: event.clientX, top: event.clientY })?.pos ?? view.state.selection.from;
+        insertRefLinks(ed, pos, refs, (id) => owner.current.mentionRef?.(id) ?? null);
+        return true;
+      },
     },
     onUpdate({ editor }) {
       if (owner.current.onChange) {
@@ -254,7 +301,10 @@ export function RichTextField({
         commit(getMarkdown(editor));
       }, 300);
     },
-    onBlur({ editor }) {
+    onBlur({ editor, event }) {
+      // Focus left for anything but the toolbar (its link box): hide it.
+      const to = (event as FocusEvent).relatedTarget as HTMLElement | null;
+      if (!to?.closest?.("[data-testid='selection-toolbar']")) setSelToolbarRect(null);
       flushAnchors();
       if (debounceRef.current != null) {
         window.clearTimeout(debounceRef.current);
@@ -438,13 +488,14 @@ export function RichTextField({
     };
   };
 
-  // Hide the selection toolbar whenever the selection collapses
-  // (keyboard or programmatic) — the mouseup path below only covers
-  // mouse-driven selections.
+  // The toolbar follows the selection: hidden when it collapses, placed
+  // when the keyboard makes one (a mouse selection waits for its mouseup,
+  // below).
   useEffect(() => {
     if (!editor) return;
     const onSelectionUpdate = () => {
       if (editor.state.selection.empty) setSelToolbarRect(null);
+      else if (!mouseDownRef.current) placeRef.current();
     };
     editor.on("selectionUpdate", onSelectionUpdate);
     return () => {
@@ -452,34 +503,37 @@ export function RichTextField({
     };
   }, [editor]);
 
+  // Float the toolbar at the selection's end, when it shows at all.
+  const placeSelectionToolbar = () => {
+    if (!editor || editor.isDestroyed) return;
+    const { to, empty } = editor.state.selection;
+    const visible = selectionToolbarVisible({
+      selectionEmpty: empty,
+      composerOpen: !!pendingSel,
+      popoverOpen: !!activeComment,
+    });
+    if (!visible) {
+      setSelToolbarRect(null);
+      return;
+    }
+    try {
+      const c = editor.view.coordsAtPos(to);
+      setSelToolbarRect(new DOMRect(c.left, c.top, 0, c.bottom - c.top));
+    } catch {
+      const domSel = window.getSelection();
+      if (!domSel || domSel.rangeCount === 0) return;
+      setSelToolbarRect(domSel.getRangeAt(0).getBoundingClientRect());
+    }
+  };
+  // This render's (it reads the popovers' state), for the listener below.
+  const placeRef = useRef(placeSelectionToolbar);
+  placeRef.current = placeSelectionToolbar;
   // Mirror the plain-DOM selection affordance: on mouseup with a fresh
-  // non-collapsed selection, float the "Add comment" toolbar at the
-  // selection's end. Deferred a tick so the browser finalizes the
-  // selection first (same trick as useDomAnnotations).
+  // selection, float the toolbar. Deferred a tick so the browser finalizes
+  // the selection first (same trick as useDomAnnotations).
   const handleSelectionMouseUp = () => {
-    if (!editor || !comments) return;
-    window.setTimeout(() => {
-      if (!editor || editor.isDestroyed) return;
-      const { to, empty } = editor.state.selection;
-      const visible = selectionToolbarVisible({
-        commentsEnabled: !!comments,
-        selectionEmpty: empty,
-        composerOpen: !!pendingSel,
-        popoverOpen: !!activeComment,
-      });
-      if (!visible) {
-        setSelToolbarRect(null);
-        return;
-      }
-      try {
-        const c = editor.view.coordsAtPos(to);
-        setSelToolbarRect(new DOMRect(c.left, c.top, 0, c.bottom - c.top));
-      } catch {
-        const domSel = window.getSelection();
-        if (!domSel || domSel.rangeCount === 0) return;
-        setSelToolbarRect(domSel.getRangeAt(0).getBoundingClientRect());
-      }
-    }, 0);
+    mouseDownRef.current = false;
+    window.setTimeout(() => placeRef.current(), 0);
   };
 
   const startCommentForSelection = () => {
@@ -616,6 +670,7 @@ export function RichTextField({
     borderRadius: 6,
     transition: "background-color 120ms ease",
     ...style,
+    ...(dropping ? { outline: "2px dashed var(--accent)", background: "var(--accent-soft-bg)" } : {}),
   };
 
   // Plain-click on a wikilink / file: / dir: / commit: anchor inside
@@ -655,6 +710,16 @@ export function RichTextField({
         // Middle-click on a link → new-tab navigate.
         if (event.button === 1) handleAnchorIntent(event, true);
       }}
+      onMouseDown={() => {
+        mouseDownRef.current = true;
+      }}
+      onDragOver={(event) => {
+        if (dragCarriesRefs(Array.from(event.dataTransfer.types))) setDropping(true);
+      }}
+      onDragLeave={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropping(false);
+      }}
+      onDrop={() => setDropping(false)}
       onMouseUp={handleSelectionMouseUp}
       onContextMenu={handleContextMenu}
     >
@@ -675,10 +740,13 @@ export function RichTextField({
         />
       ) : null}
       <EditorContent editor={editor} />
-      {comments && selToolbarRect && !pendingSel && !activeComment && (
-        <SelectionCommentToolbar
+      {editor && selToolbarRect && !pendingSel && !activeComment && (
+        <SelectionToolbar
+          editor={editor}
           rect={selToolbarRect}
-          onAdd={() => startCommentForSelection()}
+          inlineOnly={inlineOnly}
+          mentionRef={(id) => owner.current.mentionRef?.(id) ?? null}
+          onComment={comments ? () => startCommentForSelection() : undefined}
         />
       )}
       {comments && pendingSel && (

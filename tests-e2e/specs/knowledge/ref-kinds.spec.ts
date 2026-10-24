@@ -22,7 +22,7 @@ test("an extension's ref renders as a link and opens its page", async ({ page, d
   await page.goto("/");
   await searchLauncher(page, "platypus notes");
   await page.getByTestId("launcher-hit-oxplow:oxplow/wiki?slug=platypus-notes").click();
-  await page.locator('[data-testid="page-lens"]:visible').locator(`a[href="oxplow:e2e/item?id=${n}"]:visible`).click();
+  await page.locator('[data-testid="page-lens"]:visible').locator(`[data-ref-title][href="oxplow:e2e/item?id=${n}"]`).click();
   // The extension's `item` page: its lens over `v_e2e_item`.
   await expect(page.getByTestId("page-lens").getByTestId("lens-row-0")).toContainText("Platypus item");
 });
