@@ -127,13 +127,13 @@ export function addInput(threadId: string, what: { uri?: string | null; label?: 
 export async function addToContext(what: { uri?: string | null; label?: string | null; text?: string | null }): Promise<void> {
   const thread = selected;
   if (!thread) return;
-  await personCommands.run("Added to context", "oxplow.context.add", addInput(thread, what));
+  await personCommands.run("Add to Context", "oxplow.context.add", addInput(thread, what));
 }
 
 export async function removeFromContext(item: number): Promise<void> {
-  await personCommands.run("Removed from context", "oxplow.context.remove", { item });
+  await personCommands.run("Remove from Context", "oxplow.context.remove", { item });
 }
 
 export async function clearContext(threadId: string): Promise<void> {
-  await personCommands.run("Cleared the context", "oxplow.context.clear", { thread: threadId });
+  await personCommands.run("Clear Context", "oxplow.context.clear", { thread: threadId });
 }
