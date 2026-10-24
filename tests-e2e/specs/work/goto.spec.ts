@@ -113,4 +113,12 @@ test("the star offers to move a bookmark made at another filter value", async ({
   await page.getByTestId("page-nav-bookmark-update").filter({ visible: true }).click();
   await expect(star).toHaveText("★");
   await expect.poll(bookmarked).toEqual([expect.stringContaining("mode=by-commit")]);
+
+  // The move was one command, so one Undo puts the bookmark back at its old view.
+  const audit = await ipc<{ rows: number[][] }>(daemon, "query_sql", {
+    sql: "SELECT id FROM v_command_audit WHERE command = 'oxplow.command.sequence' AND outcome = 'ok' ORDER BY id DESC LIMIT 1",
+  });
+  expect(audit.rows).toHaveLength(1);
+  await ipc(daemon, "undo_command", { auditId: audit.rows[0]![0], confirmed: true });
+  await expect.poll(bookmarked).toEqual([before]);
 });
