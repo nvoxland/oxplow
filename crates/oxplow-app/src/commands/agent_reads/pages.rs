@@ -182,7 +182,24 @@ async fn open(svc: &Services, input: OpenPageInput) -> Result<Value, CommandErro
         }
         None => match pages.first() {
             Some(p) => (p.page_id.clone(), p.kind.clone(), p.detail_json.clone()),
-            None => return Ok(json!({ "open": null, "others": [] })),
+            None => {
+                // Say why nothing is open, so a null isn't read as "the person
+                // has nothing open": no window reports this thread, or its
+                // window has no tab selected in it — and where the person is.
+                let reported = svc.client_reports.reported_threads(now);
+                let shown: Vec<Value> = svc
+                    .client_reports
+                    .shown(now)
+                    .into_iter()
+                    .map(|(t, tab)| json!({ "thread": refs::thread_uri(t), "selected": tab }))
+                    .collect();
+                let reason = if !reported.contains(&thread) {
+                    "no window reports this thread's tabs (none is open on it, or none has told oxplow since it started); `shown` lists the threads the person's windows are looking at"
+                } else {
+                    "a window reports this thread's tabs but none is selected in it"
+                };
+                return Ok(json!({ "open": null, "others": [], "reason": reason, "shown": shown }));
+            }
         },
     };
     let detail: Value = detail

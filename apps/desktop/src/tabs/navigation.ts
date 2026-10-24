@@ -26,18 +26,33 @@ function streamIdOf(ref: string): string {
   return idOf(ref, "oxplow/stream") ?? ref;
 }
 
+/** What the window can look up when its own state isn't there yet: a request
+ *  can arrive before the first stream and its threads have loaded. */
+export interface WindowLookup {
+  /** The stream the window shows (the daemon's current one). */
+  current(): Promise<string | null>;
+  /** A stream's thread list. */
+  threads(streamId: string): Promise<ThreadList | undefined>;
+}
+
 /** What `input` (`{ uri, stream? }`) asks for, given the window's `states`
- *  and the stream it `shown`: where the ref opens (`refOpener`). Throws
- *  what it can't reach. */
+ *  and the stream it `shown`: where the ref opens (`refOpener`). A window
+ *  that hasn't loaded its stream yet looks it up (`lookup`). Throws what it
+ *  can't reach. */
 export async function planNavigation(
   input: unknown,
   states: Record<string, ThreadList | undefined>,
   shown: string | null,
   resolve: (ref: string) => Promise<RefTarget> = refTarget,
+  lookup?: WindowLookup,
 ): Promise<NavigationPlan> {
   const { uri: ref, stream } = (input ?? {}) as { uri?: unknown; stream?: unknown };
   if (typeof ref !== "string") throw new Error("`uri` is the URI of what to show");
-  const known = (id: string) => {
+  const known = async (id: string) => {
+    if (!states[id]) {
+      const loaded = await lookup?.threads(id);
+      if (loaded) states = { ...states, [id]: loaded };
+    }
     if (!states[id]) throw new Error(`no stream \`${id}\``);
     return id;
   };
@@ -45,7 +60,7 @@ export async function planNavigation(
 
   const target = await resolve(ref);
   if ("stream" in target) {
-    const streamId = known(target.stream);
+    const streamId = await known(target.stream);
     return { streamId, threadId: selected(streamId), selectThread: false, page: null };
   }
   if ("thread" in target) {
@@ -56,8 +71,8 @@ export async function planNavigation(
   }
   if ("unopenable" in target) throw new Error(target.unopenable);
   const page = target.tab;
-  const named = typeof stream === "string" ? streamIdOf(stream) : shown;
+  const named = typeof stream === "string" ? streamIdOf(stream) : (shown ?? (await lookup?.current()) ?? null);
   if (named === null) throw new Error("no stream is shown");
-  const streamId = known(named);
+  const streamId = await known(named);
   return { streamId, threadId: selected(streamId), selectThread: false, page };
 }

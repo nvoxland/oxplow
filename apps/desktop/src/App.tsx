@@ -167,14 +167,12 @@ async function pickAndCreateProject() {
  *  else the session picker if it's open, else its first tab (`homeTabOf`). */
 const HOME_TAB = "";
 
+/** How often an unchanged window repeats its tab report (the backend forgets
+ *  one that falls silent for five minutes). */
+const TAB_REPORT_HEARTBEAT_MS = 60_000;
+
 /** The tab a thread falls back to: its first agent session's, else the
  *  session picker, else its first tab. */
-/** The params a tab's label and renderer are given: an oxplow URI's, and for
- *  a web page (no oxplow URI) the page itself as `uri`. */
-function renderedParams(id: string): Record<string, string> {
-  return parseUri(id)?.params ?? { uri: id };
-}
-
 function homeTabOf(tabs: TabRef[]): string {
   return (
     tabs.find((t) => typeOf(t.id) === "oxplow/agent_session")?.id ??
@@ -182,6 +180,12 @@ function homeTabOf(tabs: TabRef[]): string {
     tabs[0]?.id ??
     HOME_TAB
   );
+}
+
+/** The params a tab's label and renderer are given: an oxplow URI's, and for
+ *  a web page (no oxplow URI) the page itself as `uri`. */
+function renderedParams(id: string): Record<string, string> {
+  return parseUri(id)?.params ?? { uri: id };
 }
 
 /** `slot`'s page in the view `view` makes of its current one (its id's
@@ -1009,6 +1013,16 @@ export function App() {
       document.removeEventListener("visibilitychange", visibility);
     };
   }, []);
+  // The last thing told, repeated while nothing changes: the backend forgets
+  // a window that stops reporting (`client_reports::FORGET_AFTER_MS`), and an
+  // idle window with tabs open is still there.
+  const lastTabReportRef = useRef<ReturnType<typeof buildTabReport> | null>(null);
+  useEffect(() => {
+    const beat = setInterval(() => {
+      if (lastTabReportRef.current) void reportTabs(lastTabReportRef.current).catch(() => {});
+    }, TAB_REPORT_HEARTBEAT_MS);
+    return () => clearInterval(beat);
+  }, []);
   useEffect(() => {
     const timer = setTimeout(() => {
       const ctx = visitContextRef.current;
@@ -1022,6 +1036,7 @@ export function App() {
         titleOf: (tab) => tabLabelByIdRef.current[tab.id] ?? pageTitles[tab.id],
         detail: shown ? getPageDetailStore().get(shown.id) : null,
       });
+      lastTabReportRef.current = report;
       void reportTabs(report).catch(() => {});
     }, 300);
     return () => clearTimeout(timer);
@@ -1400,7 +1415,10 @@ export function App() {
         // and is focused in the thread it belongs to, then the window
         // switches to that stream and thread.
         navigate: async (input) => {
-          const plan = await planNavigation(input, threadStates, stream?.id ?? null);
+          const plan = await planNavigation(input, threadStates, stream?.id ?? null, undefined, {
+            current: async () => (await getCurrentStream()).id,
+            threads: async (id) => getThreadState(id),
+          });
           const { replace, new_tab: newTab } = (input ?? {}) as { replace?: unknown; new_tab?: unknown };
           if (plan.page) {
             if (!plan.threadId) throw new Error(`stream \`${plan.streamId}\` has no thread`);

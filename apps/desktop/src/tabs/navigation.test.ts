@@ -57,3 +57,18 @@ test("a ref goes where the opener says", async () => {
   expect(page.page?.id).toBe("oxplow:oxplow/wiki?slug=overview");
   await expect(planNavigation({ uri: "oxplow:oxplow/event?id=x" }, states, "str1", async () => ({ unopenable: "no page" }))).rejects.toThrow(/no page/);
 });
+
+// A request can arrive before the window has loaded its stream: it asks for
+// the daemon's current one (and its threads) instead of failing.
+test("a window that hasn't loaded its stream looks it up", async () => {
+  const lookup = {
+    current: async () => "str2",
+    threads: async (id: string) => (id === "str2" ? { selectedThreadId: "thr5", threads: [{ id: "thr5" }] } : undefined),
+  };
+  const plan = await planNavigation({ uri: "oxplow:oxplow/wiki?slug=overview" }, {}, null, undefined, lookup);
+  expect(plan.streamId).toBe("str2");
+  expect(plan.threadId).toBe("thr5");
+  expect(plan.page?.id).toBe("oxplow:oxplow/wiki?slug=overview");
+  // Nothing to look up: it still says so.
+  await expect(planNavigation({ uri: "oxplow:oxplow/wiki?slug=overview" }, {}, null)).rejects.toThrow("no stream is shown");
+});
