@@ -111,3 +111,42 @@ pub async fn mock_sse(
     tokio::spawn(async move { axum::serve(listener, app).await.expect("mock server") });
     (format!("http://{addr}"), seen, written)
 }
+
+/// Serve each POST on `path` the next of `rounds` as a `text/event-stream`
+/// reply, all at once (the last repeats): a model asked again after a
+/// tool round answers differently. Returns the base URL and the record.
+pub async fn mock_sse_rounds(path: &'static str, rounds: Vec<Vec<String>>) -> (String, Seen) {
+    let seen: Seen = Arc::default();
+    let app = Router::new()
+        .route(
+            path,
+            post(
+                move |State(seen): State<Seen>, headers: HeaderMap, Json(body): Json<Value>| {
+                    let rounds = rounds.clone();
+                    async move {
+                        let at = {
+                            let mut seen = seen.lock().expect("mock record poisoned");
+                            seen.push((path.to_string(), headers, body));
+                            seen.len() - 1
+                        };
+                        let round = rounds
+                            .get(at)
+                            .or(rounds.last())
+                            .cloned()
+                            .unwrap_or_default();
+                        (
+                            [(axum::http::header::CONTENT_TYPE, "text/event-stream")],
+                            round.concat(),
+                        )
+                    }
+                },
+            ),
+        )
+        .with_state(seen.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind a local port");
+    let addr = listener.local_addr().expect("local address");
+    tokio::spawn(async move { axum::serve(listener, app).await.expect("mock server") });
+    (format!("http://{addr}"), seen)
+}

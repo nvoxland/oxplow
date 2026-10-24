@@ -699,46 +699,29 @@ triggered it):
 
 ### AI providers
 
-An AI provider is a Starlark script: oxplow's own (Anthropic, OpenAI,
-OpenRouter, TypeSafe) are written this way. The script builds each request
-and reads each reply; oxplow makes the HTTP call.
+An AI provider names one of oxplow's provider kinds. Each kind is Rust
+code in oxplow, built on [Rig](https://github.com/0xPlaygrounds/rig) for
+all but TypeSafe. oxplow's own extension declares one of each. Your
+extension can declare another under its own id, for example to point a
+kind at a proxy by default.
 
 ```yaml
 implementations:
   - capability: ai_provider
     id: acme                       # the `kind:` a provider in Settings → AI names
     title: Acme
-    entry: providers/acme.star
-    config: { baseUrl: "https://api.acme.example", ops: [complete] }
+    provider: openai_compatible    # the kind it is
+    config: { baseUrl: "https://llm.acme.example/v1" }
 ```
 
-```python
-def request(x):     # { op: "complete", model, system, prompt, json }
-    return {
-        "path": "/v1/chat",                                 # under the base URL
-        "headers": {"authorization": "Bearer {{key}}"},      # oxplow fills in the key
-        "body": {"model": x["model"], "prompt": x["prompt"]},
-    }
-
-def response(x):    # { op, model, body } — a 2xx reply
-    return {"text": x["body"]["text"], "usage": {"input": 0, "output": 0}}
-```
-
-- `path` is always under the base URL: the one the person configured,
-  else `baseUrl`.
-- `{{key}}` is the provider's key from the keychain. oxplow puts it in
-  after `request` returns, so the script never sees it.
-- oxplow reads the status itself: 401 and 403 are a key problem, 429 a
-  rate limit.
-- `ops: [complete, decide]` answers typed questions natively. Without
-  `decide`, oxplow asks them as a chat. For `decide`, `request` gets
-  `{ op: "decide", model, state, questions }` and returns `None` to ask a
-  given model as a chat instead; `response` returns
-  `{ answers: { <name>: { type: noul, probability } | { type: choice, choice, probabilities } | { type: score, score, probabilities } } }`.
-- A provider runs under its extension's permissions (`process`, and
-  `network` and `secrets` for what it reaches). A person approves them when
-  the extension is deployed. A changed script needs a redeploy, which asks
-  only if it adds a permission.
+- The kinds: `anthropic`, `openai`, `openai_compatible` (any server that
+  speaks OpenAI's Chat Completions), `openrouter`, `gemini`, `mistral`,
+  `groq`, `deepseek`, `xai`, `ollama`, `llamacpp` and `typesafe`.
+- `baseUrl` is the URL a provider uses when the person names none in
+  Settings → AI. It is the only `config` key.
+- The key always comes from the person's keychain.
+- Declaring a provider needs `permissions.ai`: it points a person's key
+  at its URL. A person approves it when the extension is deployed.
 
 ### Effort policies
 

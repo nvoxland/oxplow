@@ -3136,10 +3136,16 @@ export type ImplementationDecl = {
 	/**  How a person names it; the built-in's own title when absent. */
 	title: string | null,
 	/**
-	 *  The built-in it is (`oxplow:tasks`); its features are core's to
-	 *  say.
+	 *  The built-in it is (`oxplow:tasks`), or the script an effort
+	 *  policy is; its features are core's to say. `None` for an AI
+	 *  provider, which names its kind instead.
 	 */
-	entry: string,
+	entry: string | null,
+	/**
+	 *  An AI provider's Rust kind (`anthropic`, `openai_compatible`,
+	 *  `typesafe`, …: `oxplow_ai_rig::KINDS`); `None` for anything else.
+	 */
+	provider: string | null,
 	/**
 	 *  The extension's skills (`skills:`) it owns: offered only while it's
 	 *  the active implementation.

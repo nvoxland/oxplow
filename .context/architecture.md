@@ -124,7 +124,7 @@ machine until that person deploys it there.
 - **Not gated:** pure in-process Starlark/jq transforms without privileged
   host access, and the user's own global-scope config. Everything else
   runs under its extension's permissions: model-calling collectors,
-  scripted effort policies, effects, AI-provider scripts and components
+  scripted effort policies, effects, declared AI providers and components
   that invoke commands. Every script runs in its own worker process,
   killed and reaped past its time budget or memory cap, or when its run
   is cancelled ([collection.md](./collection.md) "Containing scripts").

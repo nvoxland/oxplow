@@ -2707,7 +2707,7 @@ pub(crate) mod tests {
                         let (base, _) = oxplow_ai_fake::mock(
                             "/chat/completions",
                             200,
-                            json!({ "choices": [{ "message": { "content": reply.to_string() } }], "usage": { "prompt_tokens": 4, "completion_tokens": 2 } }),
+                            json!({ "choices": [{ "index": 0, "finish_reason": "stop", "message": { "role": "assistant", "content": reply.to_string() } }], "usage": { "prompt_tokens": 4, "completion_tokens": 2 } }),
                         )
                         .await;
                         svc.ai
@@ -3128,7 +3128,7 @@ pub(crate) mod tests {
         let (base, _) = oxplow_ai_fake::mock(
             "/chat/completions",
             200,
-            json!({ "choices": [{ "message": { "content": reply.to_string() } }], "usage": { "prompt_tokens": 4, "completion_tokens": 2 } }),
+            json!({ "choices": [{ "index": 0, "finish_reason": "stop", "message": { "role": "assistant", "content": reply.to_string() } }], "usage": { "prompt_tokens": 4, "completion_tokens": 2 } }),
         )
         .await;
         // One project boundary: the layer and the model calls share it.

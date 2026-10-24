@@ -1,10 +1,8 @@
 //! Calling models through providers: the [`ModelProvider`] interface every
-//! provider implements (`oxplow-ai-providers` has the built-ins: Anthropic
-//! Messages, OpenAI-compatible chat, OpenRouter, TypeSafe), the request
-//! and answer types, and the [`ModelProviders`] registry, keyed by the
-//! declared `ai_provider` id that `ai.yaml`'s `kind:` names. Hand-rolled
-//! on reqwest: a few small request shapes, and no Rust crate speaks Jev.
-//! See `.context/ai-providers.md`.
+//! provider implements (`oxplow-ai-rig` has oxplow's kinds, over Rig, and
+//! TypeSafe's Jev), the request and answer types, and the
+//! [`ModelProviders`] registry, keyed by the declared `ai_provider` id that
+//! `ai.yaml`'s `kind:` names. See `.context/ai-providers.md`.
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, RwLock};
@@ -45,10 +43,9 @@ pub enum AiError {
     },
     #[error("{0}")]
     UnsupportedSchemaVersion(#[from] SchemaVersionError),
-    /// Its program — a provider written as a script — runs only once a
-    /// person approves it, and nothing was sent.
-    #[error("{provider}: {message} (Settings → Data → Programs)")]
-    Unapproved { provider: String, message: String },
+    /// The request can't be sent as it is, and nothing was sent.
+    #[error("{provider}: the request can't be sent: {detail}")]
+    BadRequest { provider: String, detail: String },
     /// The call was cancelled: its connection was dropped, and `partial`
     /// is what had arrived.
     #[error("{provider}: cancelled")]
@@ -64,10 +61,6 @@ pub enum AiError {
 /// How long a stream may stay silent between events before the call is
 /// given up.
 pub const STREAM_IDLE: Duration = Duration::from_secs(60);
-
-/// How long a stream's reader waits for more once an event arrived, so
-/// what arrives together is handled together.
-pub const STREAM_COALESCE: Duration = Duration::from_millis(50);
 
 /// How often a call looks at its [`Cancel`] while it waits on the wire.
 const CANCEL_POLL: Duration = Duration::from_millis(100);
@@ -463,7 +456,6 @@ pub async fn decide_via_chat<P: ModelProvider + ?Sized>(
 #[derive(Clone)]
 pub struct Http {
     client: reqwest::Client,
-    streaming: reqwest::Client,
 }
 
 impl Default for Http {
@@ -474,37 +466,18 @@ impl Default for Http {
                 .redirect(reqwest::redirect::Policy::none())
                 .build()
                 .expect("build HTTP client with redirects disabled"),
-            streaming: reqwest::Client::builder()
-                .connect_timeout(Duration::from_secs(30))
-                .redirect(reqwest::redirect::Policy::none())
-                .build()
-                .expect("build streaming HTTP client with redirects disabled"),
         }
     }
 }
 
 impl Http {
+    /// POST `body` to `url` with `headers`: the reply's JSON, or its status
+    /// as an [`AiError`].
     pub async fn post(
         &self,
         provider: &str,
         url: &str,
         headers: Vec<(&'static str, String)>,
-        body: serde_json::Value,
-    ) -> Result<serde_json::Value, AiError> {
-        let headers = headers
-            .into_iter()
-            .map(|(k, v)| (k.to_string(), v))
-            .collect();
-        self.post_with(provider, url, headers, body).await
-    }
-
-    /// [`Self::post`] with headers named at run time (a scripted
-    /// provider's).
-    pub async fn post_with(
-        &self,
-        provider: &str,
-        url: &str,
-        headers: Vec<(String, String)>,
         body: serde_json::Value,
     ) -> Result<serde_json::Value, AiError> {
         let id = || provider.to_string();
@@ -535,167 +508,6 @@ impl Http {
             }),
         }
     }
-}
-
-impl Http {
-    /// A POST whose reply is a server-sent event stream: the status is read
-    /// first (the same errors as [`Self::post_with`], the body read for
-    /// the message), then [`SseStream`] reads the events as they come. No
-    /// total timeout: a stream lasts as long as the model writes; its
-    /// reader gives up after [`STREAM_IDLE`] of silence.
-    pub async fn post_stream(
-        &self,
-        provider: &str,
-        url: &str,
-        headers: Vec<(String, String)>,
-        body: serde_json::Value,
-    ) -> Result<SseStream, AiError> {
-        let id = || provider.to_string();
-        let mut req = self
-            .streaming
-            .post(url)
-            .header("accept", "text/event-stream")
-            .json(&body);
-        for (k, v) in headers {
-            req = req.header(k, v);
-        }
-        let resp = req.send().await.map_err(|e| AiError::Transport {
-            provider: id(),
-            message: e.without_url().to_string(),
-        })?;
-        let status = resp.status().as_u16();
-        if !(200..=299).contains(&status) {
-            let text = resp.text().await.unwrap_or_default();
-            return Err(match status {
-                401 | 403 => AiError::Auth { provider: id() },
-                429 => AiError::RateLimited { provider: id() },
-                _ => AiError::Http {
-                    provider: id(),
-                    status,
-                    body: text.chars().take(300).collect(),
-                },
-            });
-        }
-        Ok(SseStream {
-            provider: id(),
-            resp,
-            buf: Vec::new(),
-            done: false,
-        })
-    }
-}
-
-/// One server-sent event: its `event:` name, if any, and its `data:`
-/// lines joined.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct SseEvent {
-    pub event: Option<String>,
-    pub data: String,
-}
-
-/// A reply read as server-sent events.
-pub struct SseStream {
-    provider: String,
-    resp: reqwest::Response,
-    buf: Vec<u8>,
-    done: bool,
-}
-
-impl SseStream {
-    /// The events that have arrived, at least one (waiting for the wire
-    /// as long as it takes); `None` once the stream ended.
-    pub async fn next_batch(&mut self) -> Result<Option<Vec<SseEvent>>, AiError> {
-        loop {
-            let events = take_events(&mut self.buf, self.done);
-            if !events.is_empty() {
-                return Ok(Some(events));
-            }
-            if self.done {
-                return Ok(None);
-            }
-            match self.resp.chunk().await.map_err(|e| AiError::Transport {
-                provider: self.provider.clone(),
-                message: e.without_url().to_string(),
-            })? {
-                Some(bytes) => self.buf.extend(bytes.iter().filter(|b| **b != b'\r')),
-                None => self.done = true,
-            }
-        }
-    }
-
-    /// [`Self::next_batch`], unless `cancel` is asked or the wire stays
-    /// silent for [`STREAM_IDLE`]. Once one event arrived, whatever else
-    /// arrives within [`STREAM_COALESCE`] joins it, so a model writing a
-    /// token at a time is read in a few batches a second, not one per token.
-    pub async fn next_batch_until(
-        &mut self,
-        cancel: &Cancel,
-    ) -> Result<Result<Option<Vec<SseEvent>>, AiError>, Stopped> {
-        let first =
-            match unless_cancelled(cancel, tokio::time::timeout(STREAM_IDLE, self.next_batch()))
-                .await?
-            {
-                Ok(Ok(Some(batch))) => batch,
-                Ok(other) => return Ok(other),
-                Err(_) => return Err(Stopped::Idle),
-            };
-        let mut batch = first;
-        let until = tokio::time::Instant::now() + STREAM_COALESCE;
-        // Reading a chunk is cancel-safe: one cut off by the deadline was
-        // never taken off the wire.
-        while let Ok(more) = tokio::time::timeout_at(until, self.next_batch()).await {
-            match more {
-                Ok(Some(more)) => batch.extend(more),
-                Ok(None) => break,
-                Err(e) => return Ok(Err(e)),
-            }
-        }
-        Ok(Ok(Some(batch)))
-    }
-}
-
-/// The whole events at the front of `buf`, taken off it (a blank line ends
-/// one). With `ended`, what is left is the last. `buf` holds no `\r`: the
-/// reader drops them, so `\r\n` reads as `\n`.
-fn take_events(buf: &mut Vec<u8>, ended: bool) -> Vec<SseEvent> {
-    let cut = buf.windows(2).rposition(|w| w == b"\n\n");
-    let whole = match cut {
-        // Cut at a blank line, which never splits a UTF-8 character: what
-        // stays may end mid-character and waits for the rest of it.
-        Some(at) => {
-            let rest = buf.split_off(at + 2);
-            let whole = String::from_utf8_lossy(&buf[..at]).into_owned();
-            *buf = rest;
-            whole
-        }
-        None if ended && !buf.is_empty() => {
-            String::from_utf8_lossy(&std::mem::take(buf)).into_owned()
-        }
-        None => return Vec::new(),
-    };
-    whole
-        .split("\n\n")
-        .filter_map(|block| {
-            let mut event = None;
-            let mut data: Vec<&str> = Vec::new();
-            for line in block.lines() {
-                if line.starts_with(':') {
-                    continue;
-                }
-                let (field, value) = line.split_once(':').unwrap_or((line, ""));
-                let value = value.strip_prefix(' ').unwrap_or(value);
-                match field {
-                    "event" => event = Some(value.to_string()),
-                    "data" => data.push(value),
-                    _ => {}
-                }
-            }
-            (!data.is_empty()).then(|| SseEvent {
-                event,
-                data: data.join("\n"),
-            })
-        })
-        .collect()
 }
 
 /// An `Authorization: Bearer` header for `key`, or none.
@@ -1127,120 +939,6 @@ mod tests {
             Err(AiError::UnsupportedSchemaVersion(_))
         ));
         assert!(p.calls.lock().unwrap().is_empty(), "nothing was sent");
-    }
-
-    fn sse(event: Option<&str>, data: &str) -> SseEvent {
-        SseEvent {
-            event: event.map(str::to_string),
-            data: data.to_string(),
-        }
-    }
-
-    /// Events are whole only at a blank line, however the bytes arrive:
-    /// comments are skipped, `data:` lines join, `\r\n` reads as `\n`,
-    /// and a character split across chunks is whole once the rest comes.
-    #[test]
-    fn events_are_cut_at_blank_lines_however_the_bytes_arrive() {
-        let mut buf = Vec::new();
-        buf.extend(b"event: a\ndata: one\n\n: keep-alive\n\ndata: tw".iter());
-        assert_eq!(take_events(&mut buf, false), [sse(Some("a"), "one")]);
-        assert_eq!(buf, b"data: tw");
-        // The rest of the event, with a character split across chunks.
-        let snow = "\u{2603}".as_bytes();
-        buf.extend(b"o\ndata: ".iter().chain(&snow[..1]));
-        assert!(take_events(&mut buf, false).is_empty());
-        buf.extend(snow[1..].iter().chain(b"\n\n"));
-        assert_eq!(take_events(&mut buf, false), [sse(None, "two\n\u{2603}")]);
-        assert!(buf.is_empty());
-        // The last event needs no blank line once the stream ended.
-        buf.extend(b"data:[DONE]");
-        assert!(take_events(&mut buf, false).is_empty());
-        assert_eq!(take_events(&mut buf, true), [sse(None, "[DONE]")]);
-    }
-
-    /// The reader hands over events as they arrive, then `None` at the end;
-    /// `\r\n` from the wire reads as `\n`.
-    #[tokio::test]
-    async fn a_stream_reads_events_as_they_arrive() {
-        let (base, seen, _) = oxplow_ai_fake::mock_sse(
-            "/s",
-            vec!["data: a\r\n\r\n".into(), "data: b\n\ndata: c\n\n".into()],
-            Duration::from_millis(20),
-            Duration::ZERO,
-        )
-        .await;
-        let mut stream = Http::default()
-            .post_stream(
-                "p",
-                &format!("{base}/s"),
-                vec![],
-                serde_json::json!({ "x": 1 }),
-            )
-            .await
-            .unwrap();
-        let mut got = Vec::new();
-        while let Some(batch) = stream.next_batch().await.unwrap() {
-            got.extend(batch.into_iter().map(|e| e.data));
-        }
-        assert_eq!(got, ["a", "b", "c"]);
-        let (_, headers, body) = seen.lock().unwrap()[0].clone();
-        assert_eq!(headers["accept"], "text/event-stream");
-        assert_eq!(body, serde_json::json!({ "x": 1 }));
-    }
-
-    /// A status that isn't 2xx is the same error a plain call gives.
-    #[tokio::test]
-    async fn a_stream_reads_the_status_first() {
-        let (base, _) = oxplow_ai_fake::mock("/s", 429, serde_json::json!({})).await;
-        let err = Http::default()
-            .post_stream("p", &format!("{base}/s"), vec![], serde_json::json!({}))
-            .await
-            .err()
-            .unwrap();
-        assert_eq!(
-            err,
-            AiError::RateLimited {
-                provider: "p".into()
-            }
-        );
-    }
-
-    /// Cancelling a stream mid-way stops the wait at once and drops the
-    /// connection: the server stops being read from.
-    #[tokio::test]
-    async fn a_cancelled_stream_stops_and_lets_go_of_the_connection() {
-        let chunks = (0..50).map(|i| format!("data: {i}\n\n")).collect();
-        let (base, _, written) = oxplow_ai_fake::mock_sse(
-            "/s",
-            chunks,
-            Duration::from_millis(50),
-            Duration::from_secs(30),
-        )
-        .await;
-        let mut stream = Http::default()
-            .post_stream("p", &format!("{base}/s"), vec![], serde_json::json!({}))
-            .await
-            .unwrap();
-        let cancel = Cancel::default();
-        let first = stream.next_batch_until(&cancel).await.unwrap().unwrap();
-        assert_eq!(first.unwrap()[0].data, "0");
-        cancel.cancel();
-        let started = std::time::Instant::now();
-        assert_eq!(
-            stream.next_batch_until(&cancel).await.err(),
-            Some(Stopped::Cancelled)
-        );
-        assert!(started.elapsed() < Duration::from_millis(500));
-        drop(stream);
-        tokio::time::sleep(Duration::from_millis(300)).await;
-        let at_drop = written.load(std::sync::atomic::Ordering::SeqCst);
-        tokio::time::sleep(Duration::from_millis(300)).await;
-        assert_eq!(
-            written.load(std::sync::atomic::Ordering::SeqCst),
-            at_drop,
-            "the server stops writing once the client let go"
-        );
-        assert!(at_drop < 50);
     }
 
     /// By default a provider "streams" its whole reply at once, at the end;

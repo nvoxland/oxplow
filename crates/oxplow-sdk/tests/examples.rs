@@ -397,7 +397,7 @@ async fn the_triage_example_reads_the_tree_the_layer_and_a_model() {
     let (base, _) = oxplow_ai_fake::mock(
         "/chat/completions",
         200,
-        serde_json::json!({ "choices": [{ "message": { "content": reply.to_string() } }], "usage": { "prompt_tokens": 4, "completion_tokens": 2 } }),
+        serde_json::json!({ "choices": [{ "index": 0, "finish_reason": "stop", "message": { "role": "assistant", "content": reply.to_string() } }], "usage": { "prompt_tokens": 4, "completion_tokens": 2 } }),
     )
     .await;
     svc.ai

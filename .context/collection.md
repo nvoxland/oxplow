@@ -519,7 +519,7 @@ without a deployed permission").
 
 **Containing scripts.** Every Starlark and jaq run — a report parser, an
 entity or fact collector, a command or effect script, an effort policy,
-an event upcast, a scripted AI provider, the MCP adapter's mappings — runs
+an event upcast, the MCP adapter's mappings — runs
 in its own **script worker process** (`oxplow-script-worker`, a sidecar
 beside the oxplow executable; `oxplow_script::worker` and `::workers`),
 never on a thread of the host. The host (`ScriptWorkers::run`, one per

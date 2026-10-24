@@ -260,8 +260,11 @@ pub enum Source {
     Core,
     /// A built-in in core's standard library, by its entry.
     BuiltIn(&'static str),
-    /// A script in an extension (an AI provider or an effort policy
-    /// written as one): its entry, the extension's folder (`tree`,
+    /// An AI provider: the Rust kind its declaration names (`provider:`,
+    /// one of `oxplow_ai_rig::KINDS`), core's code.
+    ProviderKind(&'static str),
+    /// A script in an extension (an effort policy written as one): its
+    /// entry, the extension's folder (`tree`,
     /// `bundled:<name>` for a shipped one), the script's text and the
     /// scopes it calls (`needs`).
     Script {
@@ -280,7 +283,7 @@ impl Source {
     fn as_str(&self) -> &'static str {
         match self {
             Source::Core => "core",
-            Source::BuiltIn(_) => "builtin",
+            Source::BuiltIn(_) | Source::ProviderKind(_) => "builtin",
             Source::Script { .. } => "script",
             Source::External => "external",
             Source::None => "none",
@@ -1138,10 +1141,13 @@ pub fn declared_by(extensions: &[crate::extensions::Extension]) -> Vec<Implement
         .filter(|e| e.enabled)
         .flat_map(|e| {
             e.implementations.iter().filter_map(|d| {
+                if let Some(kind) = &d.provider {
+                    return provider_implementation(e, d, kind);
+                }
                 if let Some(script) = &d.script {
                     return Some(scripted_implementation(e, d, script));
                 }
-                let b = built_in(&d.entry)?;
+                let b = built_in(d.entry.as_deref()?)?;
                 Some(Implementation {
                     capability: d.capability.clone(),
                     id: d.id.clone(),
@@ -1159,36 +1165,47 @@ pub fn declared_by(extensions: &[crate::extensions::Extension]) -> Vec<Implement
         .collect()
 }
 
-/// An implementation written as a script, as the registry holds it. An AI
-/// provider's features are what it answers natively (`ops`); an effort
-/// policy has none.
+/// An AI provider, as the registry holds it: the Rust kind it is. Its one
+/// feature is whether the kind answers typed questions natively.
+fn provider_implementation(
+    e: &crate::extensions::Extension,
+    d: &crate::extensions::implementations::ImplementationDecl,
+    kind: &str,
+) -> Option<Implementation> {
+    let kind = oxplow_ai_rig::kind(kind).ok()?;
+    Some(Implementation {
+        capability: d.capability.clone(),
+        id: d.id.clone(),
+        title: d.title.clone().unwrap_or_else(|| d.id.clone()),
+        extension: Some(e.name.clone()),
+        source: Source::ProviderKind(kind.name),
+        features: serde_json::json!({ "decide_native": kind.decides_natively }),
+        fields: serde_json::Value::Array(Vec::new()),
+        id_pattern: None,
+        icon: d.icon.clone(),
+        config: d.config.clone(),
+    })
+}
+
+/// An implementation written as a script (an effort policy), as the
+/// registry holds it; it declares no features.
 fn scripted_implementation(
     e: &crate::extensions::Extension,
     d: &crate::extensions::implementations::ImplementationDecl,
     script: &str,
 ) -> Implementation {
-    let features = match d.capability.as_str() {
-        "ai_provider" => serde_json::json!({
-            "decide_native": d
-                .config
-                .get("ops")
-                .and_then(Value::as_array)
-                .is_some_and(|ops| ops.iter().any(|o| o == "decide"))
-        }),
-        _ => serde_json::json!({}),
-    };
     Implementation {
         capability: d.capability.clone(),
         id: d.id.clone(),
         title: d.title.clone().unwrap_or_else(|| d.id.clone()),
         extension: Some(e.name.clone()),
         source: Source::Script {
-            entry: d.entry.clone(),
+            entry: d.entry.clone().unwrap_or_default(),
             tree: e.path.clone(),
             script: script.to_string(),
             needs: d.needs.clone(),
         },
-        features,
+        features: serde_json::json!({}),
         fields: serde_json::Value::Array(Vec::new()),
         id_pattern: None,
         icon: d.icon.clone(),

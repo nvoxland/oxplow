@@ -2992,7 +2992,20 @@
           "default": null
         },
         "entry": {
-          "type": "string"
+          "description": "The built-in it is (`oxplow:tasks`), or an effort policy's script.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "provider": {
+          "description": "An `ai_provider`'s Rust kind (`anthropic`, `openai`,\n`openai_compatible`, `openrouter`, `ollama`, `typesafe`, …), in place\nof `entry`.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
         },
         "skills": {
           "type": "array",
@@ -3025,8 +3038,7 @@
       "additionalProperties": false,
       "required": [
         "capability",
-        "id",
-        "entry"
+        "id"
       ]
     },
     "SkillFile": {

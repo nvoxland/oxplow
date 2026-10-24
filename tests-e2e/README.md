@@ -24,12 +24,10 @@ CORS is permissive for exactly this (`.context/remote-daemon.md`).
   lens with its page, and a resource. Private, since `providers` is still
   experimental. The effect comments on each created task; a title with
   `[fail]` makes it fail (Delivery, Retry) and one with `[delete]` makes it
-  delete the task (a proposal). It also declares a scripted model provider,
-  `sorter` (`providers/sorter.star`): it answers a choice question with
-  `bug` when the text mentions a bug, else `cleanup`; the host's one HTTP
-  call goes to the base URL a spec gives the provider (an echo server of its
-  own), so the script decides and nothing leaves the machine. Nothing in it
-  is approved until a spec approves it.
+  delete the task (a proposal). Nothing in it is approved until a spec
+  approves it. A spec that needs a model's answer (triage) points a
+  `typesafe` provider at a stand-in for Jev's API of its own, so nothing
+  leaves the machine.
 - **The github example** (`examples/extensions/github`) is copied in too,
   its `sync.sh` swapped for one that prints `fixtures/github-prs.json`
   (two pull requests) — the documented example, no GitHub.

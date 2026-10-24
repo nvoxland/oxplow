@@ -40,12 +40,21 @@ implementations:
   - { capability: agent_harness, id: claude, entry: "oxplow:claude-code", title: Claude, icon: icons/claude.svg }
   - { capability: agent_harness, id: codex, entry: "oxplow:codex-cli", title: Codex, icon: icons/codex.svg }
   - { capability: agent_harness, id: opencode, entry: "oxplow:opencode", title: OpenCode, icon: icons/opencode.svg }
-  # AI providers are scripts a person approves (Settings → Data → Programs).
-  - { capability: ai_provider, id: anthropic, title: Anthropic, entry: providers/anthropic.star, config: { baseUrl: "https://api.anthropic.com", ops: [complete, completeTyped, streamTyped] } }
-  - { capability: ai_provider, id: openai, title: OpenAI, entry: providers/openai_compatible.star, config: { baseUrl: "https://api.openai.com/v1", ops: [complete, completeTyped, streamTyped] } }
-  - { capability: ai_provider, id: openai_compatible, title: An OpenAI-compatible API, entry: providers/openai_compatible.star, config: { ops: [complete, completeTyped, streamTyped] } }
-  - { capability: ai_provider, id: openrouter, title: OpenRouter, entry: providers/openrouter.star, config: { baseUrl: "https://openrouter.ai/api/v1", ops: [complete, decide] } }
-  - { capability: ai_provider, id: typesafe, title: TypeSafe, entry: providers/typesafe.star, config: { baseUrl: "https://api.typesafe.ai", ops: [decide] } }
+  # AI providers: each the Rust kind it is (`provider:`, oxplow-ai-rig) —
+  # Rig's for all but TypeSafe — at its API's default URL. Declaring one
+  # points a person's key at that URL, so it needs `permissions.ai`.
+  - { capability: ai_provider, id: anthropic, title: Anthropic, provider: anthropic, config: { baseUrl: "https://api.anthropic.com" } }
+  - { capability: ai_provider, id: openai, title: OpenAI, provider: openai, config: { baseUrl: "https://api.openai.com/v1" } }
+  - { capability: ai_provider, id: openai_compatible, title: An OpenAI-compatible API, provider: openai_compatible }
+  - { capability: ai_provider, id: openrouter, title: OpenRouter, provider: openrouter, config: { baseUrl: "https://openrouter.ai/api/v1" } }
+  - { capability: ai_provider, id: gemini, title: Google Gemini, provider: gemini, config: { baseUrl: "https://generativelanguage.googleapis.com" } }
+  - { capability: ai_provider, id: mistral, title: Mistral, provider: mistral, config: { baseUrl: "https://api.mistral.ai" } }
+  - { capability: ai_provider, id: groq, title: Groq, provider: groq, config: { baseUrl: "https://api.groq.com/openai/v1" } }
+  - { capability: ai_provider, id: deepseek, title: DeepSeek, provider: deepseek, config: { baseUrl: "https://api.deepseek.com" } }
+  - { capability: ai_provider, id: xai, title: xAI, provider: xai, config: { baseUrl: "https://api.x.ai" } }
+  - { capability: ai_provider, id: ollama, title: Ollama, provider: ollama, config: { baseUrl: "http://localhost:11434/v1" } }
+  - { capability: ai_provider, id: llamacpp, title: llama.cpp server, provider: llamacpp, config: { baseUrl: "http://localhost:8080/v1" } }
+  - { capability: ai_provider, id: typesafe, title: TypeSafe, provider: typesafe, config: { baseUrl: "https://api.typesafe.ai" } }
 collectors:
   # The code metrics: scripts over the snapshot's tree, through the same
   # public surface (`source_files()`, `code_metrics()`, `ast_query()`) any

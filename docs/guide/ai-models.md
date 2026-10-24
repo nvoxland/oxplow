@@ -13,7 +13,10 @@ Add one per service you want to use:
 | Anthropic | an API key |
 | OpenAI | an API key |
 | OpenRouter | an API key (one key, many models) |
-| Local / OpenAI-compatible | a base URL, e.g. `http://localhost:11434/v1` for Ollama |
+| Google Gemini | an API key |
+| Mistral, Groq, DeepSeek, xAI | an API key |
+| Ollama, llama.cpp server | nothing, if it runs on this machine at its usual port |
+| Any OpenAI-compatible API | a base URL, e.g. LM Studio's or vLLM's |
 | TypeSafe (Jev) | an API key |
 
 Keys go to your OS keychain, never to a file. Oxplow only shows whether a
@@ -25,14 +28,12 @@ the key, URL and model name before using them.
 
 ### Provider permissions
 
-Each provider is a small script that shapes the calls oxplow makes to
-that service, including the ones that come with oxplow. A call carries
-your key and your prompts, so the extension that supplies a provider
-declares `permissions: { ai: true }`. You approve that when you deploy the
-extension (Settings → Extensions).
-
-A changed script needs a redeploy. It asks you again only if the new
-version adds a permission.
+Each provider kind is code in oxplow itself. The extension that declares a
+provider names its kind and the URL it calls by default. A call carries
+your key and your prompts, so that extension declares
+`permissions: { ai: true }`, including the extension that comes with
+oxplow. You approve that when you deploy the extension (Settings →
+Extensions).
 
 An extension can add a provider of its own the same way (see the
 [Extensions reference](../reference/extensions.md)).

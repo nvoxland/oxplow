@@ -205,8 +205,9 @@ pub struct ProviderConfig {
     /// Your name for it, e.g. `anthropic` or `local-ollama`. Also the
     /// keychain entry name for its key.
     pub id: String,
-    /// What it is: a declared `ai_provider` id (`anthropic`, `openai`,
-    /// `openai_compatible`, `openrouter`, `typesafe`).
+    /// What it is: a declared `ai_provider` id (foundation declares one
+    /// per Rust kind: `anthropic`, `openai`, `openai_compatible`,
+    /// `openrouter`, `ollama`, `typesafe`, …).
     pub kind: String,
     /// Its API base: required for a kind with no default
     /// (`openai_compatible`), an override for the others.

@@ -781,7 +781,7 @@ mod tests {
     }
 
     fn chat(content: &str) -> Value {
-        json!({ "choices": [{ "message": { "content": content } }], "usage": { "prompt_tokens": 7, "completion_tokens": 3 } })
+        json!({ "choices": [{ "index": 0, "finish_reason": "stop", "message": { "role": "assistant", "content": content } }], "usage": { "prompt_tokens": 7, "completion_tokens": 3 } })
     }
 
     async fn calls(svc: &crate::Services) -> Vec<(String, Option<String>)> {

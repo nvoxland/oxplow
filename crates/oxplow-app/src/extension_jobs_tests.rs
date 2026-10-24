@@ -323,3 +323,92 @@ async fn a_recorded_job_runs_after_a_restart() {
     assert!(done["result"].to_string().contains("hello"), "{done}");
     assert_eq!(seen.lock().unwrap().len(), 1, "one model call");
 }
+
+/// A streaming tool-call job end to end over a Rig-backed provider (the
+/// shipped `openai_compatible` kind) against a local stand-in for its
+/// API: the first round streams a `query_sql` call in fragments, the job
+/// runs it, and the second round — sent the call and its result — streams
+/// the answer, which is the job's result.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_streaming_tool_call_job_runs_over_a_rig_provider() {
+    let dir = project();
+    let chunk = |delta: Value, finish: Value| {
+        format!(
+            "data: {}\n\n",
+            json!({ "id": "c", "object": "chat.completion.chunk", "created": 1, "model": "m",
+                    "choices": [{ "index": 0, "delta": delta, "finish_reason": finish }] })
+        )
+    };
+    let usage = format!(
+        "data: {}\n\n",
+        json!({ "id": "c", "object": "chat.completion.chunk", "created": 1, "model": "m",
+                "choices": [], "usage": { "prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15 } })
+    );
+    let (base, seen) = oxplow_ai_fake::mock_sse_rounds(
+        "/chat/completions",
+        vec![
+            vec![
+                chunk(json!({ "role": "assistant", "content": "" }), Value::Null),
+                chunk(
+                    json!({ "tool_calls": [{ "index": 0, "id": "call-1", "type": "function",
+                        "function": { "name": "query_sql", "arguments": "{\"sql\": " } }] }),
+                    Value::Null,
+                ),
+                chunk(
+                    json!({ "tool_calls": [{ "index": 0, "function": { "arguments": "\"SELECT 41 + 1 AS answer\"}" } }] }),
+                    Value::Null,
+                ),
+                chunk(json!({}), json!("tool_calls")),
+                usage.clone(),
+                "data: [DONE]\n\n".into(),
+            ],
+            vec![
+                chunk(json!({ "role": "assistant", "content": "the answer " }), Value::Null),
+                chunk(json!({ "content": "is 42" }), json!("stop")),
+                usage,
+                "data: [DONE]\n\n".into(),
+            ],
+        ],
+    )
+    .await;
+    let svc = crate::Services::in_memory(dir.path()).await.unwrap();
+    configure(&svc, base);
+    start(&svc, true).await;
+
+    let mut lookup = ask("item-tools");
+    lookup["job"] = json!("lookup");
+    let queued = run_on(&svc, "triage.summary.ask", lookup).await;
+    let id = oxplow_domain::uri::build::id_of(
+        queued["jobRun"].as_str().unwrap(),
+        oxplow_domain::uri::resources::JOB_RUN,
+    )
+    .unwrap()
+    .to_owned();
+    let done = until_on(&svc, &id, |s| {
+        s["state"] == json!("succeeded") || s["state"] == json!("failed")
+    })
+    .await;
+    assert_eq!(done["state"], json!("succeeded"), "{done}");
+    assert!(
+        done["result"].to_string().contains("the answer is 42"),
+        "{done}"
+    );
+
+    let seen = seen.lock().unwrap();
+    assert_eq!(seen.len(), 2, "two rounds");
+    let first = &seen[0].2;
+    assert_eq!(first["stream"], true);
+    assert_eq!(first["tools"][0]["function"]["name"], "query_sql");
+    let messages = seen[1].2["messages"].as_array().unwrap().clone();
+    let call = messages
+        .iter()
+        .find(|m| m["role"] == "assistant")
+        .expect("the call is sent back");
+    assert_eq!(call["tool_calls"][0]["id"], "call-1");
+    let result = messages
+        .iter()
+        .find(|m| m["role"] == "tool")
+        .expect("its result is sent back");
+    assert_eq!(result["tool_call_id"], "call-1");
+    assert!(result["content"].to_string().contains("42"), "{result}");
+}

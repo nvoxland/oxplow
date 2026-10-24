@@ -13,18 +13,34 @@ import { openFromLauncher } from "../../support/ui.js";
 // The triage example (`examples/extensions/triage`): its `todos` collector
 // sorts the code's TODO comments with a model, and a TODO is decided from
 // the board's card form or from the `todos` lens's `Decide…` row action —
-// in Chromium and WebKit. The model is the suite extension's scripted
-// provider `e2e/sorter`, whose host call goes to an echo server here: the
-// script decides, offline.
+// in Chromium and WebKit. The model is a TypeSafe (`typesafe` kind)
+// provider at a stand-in for Jev's API here, which decides offline.
 
-/** A server that answers each POST with the body it got. */
-async function echo(): Promise<{ url: string; close(): Promise<void> }> {
+type JevQuestion = { type: string; criteria?: Record<string, null> };
+
+/** A stand-in for Jev's `/v1/systemone`: each choice question is answered
+ *  "bug" when the text mentions a bug (and "bug" is an option), else
+ *  "cleanup", else the first option. */
+async function jev(): Promise<{ url: string; close(): Promise<void> }> {
   const server: Server = createServer((req, res) => {
     const chunks: Buffer[] = [];
     req.on("data", (c: Buffer) => chunks.push(c));
     req.on("end", () => {
+      const body = JSON.parse(Buffer.concat(chunks).toString()) as {
+        state: string;
+        questions: Record<string, JevQuestion>;
+      };
+      const text = body.state.toLowerCase();
+      const answers: Record<string, { type: string; choice: string }> = {};
+      for (const [name, q] of Object.entries(body.questions)) {
+        const options = Object.keys(q.criteria ?? {});
+        let pick = options[0] ?? "";
+        if (text.includes("bug") && options.includes("bug")) pick = "bug";
+        else if (options.includes("cleanup")) pick = "cleanup";
+        answers[name] = { type: "choice", choice: pick };
+      }
       res.writeHead(200, { "content-type": "application/json" });
-      res.end(Buffer.concat(chunks));
+      res.end(JSON.stringify({ answers, usage: { input_tokens: 1, output_tokens: 1 } }));
     });
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -63,14 +79,14 @@ async function decisions(daemon: Daemon): Promise<Record<string, string>> {
   return decided;
 }
 
-test("TODOs are sorted by the scripted model, and a decision from the board or the lens survives a reload", async ({ fresh }) => {
+test("TODOs are sorted by the model, and a decision from the board or the lens survives a reload", async ({ fresh }) => {
   const { page, daemon } = fresh;
-  const model = await echo();
+  const model = await jev();
   try {
     await install(daemon);
-    // The model: the suite extension's scripted provider, at the echo server.
-    await run(daemon, "oxplow.ai.set_provider", { id: "sorter", kind: "sorter", base_url: model.url });
-    await run(daemon, "oxplow.ai.set_role", { role: "decide", provider: "sorter", model: "sorter" });
+    // The model: a TypeSafe provider at the stand-in for Jev.
+    await run(daemon, "oxplow.ai.set_provider", { id: "sorter", kind: "typesafe", base_url: model.url });
+    await run(daemon, "oxplow.ai.set_role", { role: "decide", provider: "sorter", model: "jev" });
     await until("the todos collector to be listed", 60_000, async () => {
       const collectors = await ipc<{ rows: unknown[][] }>(daemon, "query_sql", {
         sql: "SELECT 1 FROM v_collector WHERE extension = 'triage' AND id = 'todos'",

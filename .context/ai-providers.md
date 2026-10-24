@@ -63,9 +63,11 @@ What can be called, as of 2026-09:
   Saving a provider (UI-only) rebinds a kept key to its current URL. A
   pre-binding bare key counts as bound to the default URL.
 - **A provider's `kind:` is a declared model provider**: an
-  `ai_provider` implementation an extension declares (`oxplow-foundation`:
-  `anthropic`, `openai`, `openai_compatible`, `openrouter`, `typesafe`),
-  registered in `ModelProviders` under its declared id. An unknown kind is
+  `ai_provider` implementation an extension declares, registered in
+  `ModelProviders` under its declared id. `oxplow-foundation` declares one
+  per Rust kind ("Rust kinds over Rig" below): `anthropic`, `openai`,
+  `openai_compatible`, `openrouter`, `gemini`, `mistral`, `groq`,
+  `deepseek`, `xai`, `ollama`, `llamacpp`, `typesafe`. An unknown kind is
   refused by `AiService` naming the registered ones; a kind with no default
   URL (`openai_compatible`) needs a `baseUrl`, and every kind accepts one
   as an override. `AiConfig::validate` checks only the file's own shape
@@ -179,11 +181,11 @@ an id, a description, a required `fallback` built-in role and optional
   `DecideRequest`. `decide` defaults to a JSON prompt on `complete`
   (`decide_via_chat`); `test` to a one-word completion. `ModelProviders` is
   the registry (`Services.ai.providers()`), filled from the declarations by
-  `ai_service::register_built_ins` at boot and on every capabilities
-  refresh — each declared script under its extension's `ai` permission. Shared pieces
-  stay in `oxplow-ai`: the `Http` POST helper (`post_with` for headers
-  named at run time) and its error mapping, `parse_answers`,
-  `decide_via_chat`.
+  `ai_service::prepare_built_ins` at boot and on every capabilities
+  refresh: each declaration's Rust kind (`oxplow_ai_rig::provider`) under
+  its declared id, title and `baseUrl`. Shared pieces stay in
+  `oxplow-ai`: the `Http` POST helper and its error mapping,
+  `parse_answers`, `decide_via_chat`.
 - **Typed model contract (V1).** `capabilities::CapabilitySnapshotV1`
   reports per-model text, image, tool-calling and streaming support as
   `unknown`, `supported` or `unsupported`. Missing limits and token counts
@@ -221,12 +223,14 @@ an id, a description, a required `fallback` built-in role and optional
   waiting and before returning. Other hosts must supply an AI source through
   the shared router or report that discovery is unavailable.
   `ModelCatalogV1` distinguishes unknown from a known empty catalog and
-  rejects unresolved or duplicate model identities. Existing providers
-  return an unknown catalog. Scripted providers may declare `config.models`
-  as V1 capability snapshots; discovery reads that data without executing
-  `request`/`response`, checking credentials or contacting an endpoint.
-  Missing models/features/limits remain unknown. Capability metadata is
-  refreshed when the provider registry is refreshed, like its script.
+  rejects unresolved or duplicate model identities. A Rig kind reads Rig's
+  built-in model catalog (models.dev data compiled into `rig-core`): a
+  hosted kind lists its models, a local one (`ollama`, `llamacpp`,
+  `openai_compatible`) has an unknown catalog, and a model the catalog
+  doesn't list is unknown across the board. Streaming isn't a model fact
+  the catalog keeps, so it stays unknown. Rig's live model listing needs
+  the key, which discovery never reads, so it isn't used. Capability data
+  moves with the `rig-core` version.
 - **Typed collector completion.** `ai_complete(request, role = "main")`
   is an `ai.compute` builtin and requires the same `ai` permission and live run
   checks as the text helpers. Its request is `{schemaVersion: 1, messages,
@@ -253,10 +257,7 @@ an id, a description, a required `fallback` built-in role and optional
   60 s fails `AiError::Timeout`. By default a provider "streams" its
   whole reply at once, at the end (`client::stream_whole`): every
   provider can, so nothing gates on the model's `streaming` capability.
-  The transport is `Http::post_stream` → `SseStream` (server-sent events,
-  `Accept: text/event-stream`; the status is read first and mapped as
-  `post`'s; no total timeout, the idle one instead; events that arrive
-  within 50 ms are one batch). `AiService::stream_typed_on` is
+  A Rig kind streams natively ("Rust kinds over Rig"). `AiService::stream_typed_on` is
   `complete_typed_on` streamed, and records **every** exit — a cancelled
   call's `ai_call` row is `ok: false`, `error: cancelled`, its response
   the partial reply. `AiCompute::stream_typed` is the recorded
@@ -264,114 +265,95 @@ an id, a description, a required `fallback` built-in role and optional
   call; a cancelled or failed stream is never the recorded answer. A
   job's rounds use it ([extensions.md](./extensions.md) "Jobs");
   collectors don't stream.
-- **Scripted providers.** Every model provider is a Starlark script an
-  extension declares — oxplow's own too: `oxplow-foundation`'s
-  `implementations:` name `providers/{anthropic,openai_compatible,openrouter,typesafe}.star`
-  (`openai` is `openai_compatible.star` with OpenAI's `baseUrl`). There is
-  no Rust built-in any more: `crates/oxplow-ai-providers` is only
-  `scripted` (`Scripted: ModelProvider`). An `implementations:` entry whose
-  `entry` isn't `oxplow:<name>` is a script — for `ai_provider` only —
-  read and checked at load (`implementations::script_decl`: the file
-  exists, defines `request` and `response`, and `config` is `{ baseUrl?,
-  ops?, models? }`), carried as `Source::Script { entry, tree, script }`.
-  - **The contract.** `request(x)` — `{ op: complete, model, system,
-    prompt, json }` or `{ op: decide, model, state, questions }` (oxplow's
-    question shapes) — returns `{ path, headers?, body }`, or `None` for a
-    `decide` to ask as a chat. `response(x)` — `{ op, model, body }`, a 2xx
-    reply's JSON — returns `{ text, usage? }`, `{ answers, usage? }`
-    (oxplow's answer shapes, a noul as `probability`; parsed by
-    `parse_answers`) or `{ error }`. `usage` is `{ input, output }`. Both
-    are pure and sandboxed (`run_starlark_fn`, 5 s each).
-    With `ops: [completeTyped]` (or alongside the text `complete`/`decide` ops), `request`
-    receives `{op: completeTyped, model, request}` with the complete V1
-    envelope; `response` receives `{op: completeTyped, model, body}` and
-    returns a full V1 typed response, including usage provenance and finish
-    reason. The same credential substitution and transport rules
-    apply. Without that opt-in, typed completion uses the conservative
-    text adapter. The shipped Anthropic and OpenAI-compatible mappings opt into
-    `completeTyped` alongside text completion. They preserve conversation
-    history, tool definitions and tool calls/results, optional observed usage
-    (zero is retained) and finish categories. Image assets still require a host
-    resolver and are refused. Anthropic requires initial text-only system
-    messages, object tool inputs and results before user text. OpenAI chat
-    requires result-only tool messages and refuses text after a tool call in an
-    assistant message, since that transport separates content from calls.
-    Unsupported response blocks fail instead of disappearing. Neither mapping
-    executes a returned tool. OpenRouter/TypeSafe stay text-only (`complete`/`decide`).
-    With `ops: [streamTyped]` the script defines a third function,
-    `delta(x)` (checked at load): `request` gets `{ op: streamTyped,
-    model, request }` and asks the vendor for a stream (its own `stream:
-    true`); the host reads the reply's events and hands each batch to
-    `delta` as `{ op, model, events: [{ event, data }], state }`, which
-    returns `{ deltas, state }` — `deltas` are `StreamDeltaV1`s, `state`
-    the script's own fold (text so far, tool-call argument fragments,
-    usage, stop reason), carried to the next batch; at the end `response`
-    gets `{ op, model, state }` and returns the whole V1 reply. The key is
-    taken out of every event before `delta` sees it. Without
-    `streamTyped` a stream is the whole reply at once.
-    The shipped Anthropic, OpenAI and OpenAI-compatible mappings opt in
-    (`ops: [complete, completeTyped, streamTyped]`); their `request` is the
-    `completeTyped` body plus the vendor's stream switch, and `response`
-    gives what `completeTyped` gives for the same content (same finish
-    mapping and usage rules). Anthropic folds the Messages events:
-    `message_start` (input usage with cache counts), `content_block_start`
-    (a text block, or a tool_use block's id and name), `content_block_delta`
-    (`text_delta` is a `text` delta at once; `input_json_delta` fragments
-    are buffered per block), `content_block_stop` (a tool_use block's
-    buffer is decoded into one `toolCall` delta), `message_delta` (stop
-    reason, output usage) and `message_stop`; `ping` is ignored and an
-    `error` event ends the call with its message. Chat completions folds
-    `choices[0].delta.content` as text, `delta.tool_calls` fragments by
-    `index` (the calls are handed over whole when the finish reason
-    arrives), the final usage chunk (no choices; the body asks for it with
-    `stream_options.include_usage`) and `[DONE]`; a refusal, audio or
-    legacy `function_call` delta is refused as the whole reply refuses it.
-    A stream that ends before the message is whole (no `message_stop`, no
-    finish reason, a tool call still open) is an error, never a partial
-    reply. OpenRouter and TypeSafe don't stream natively.
-    Transport contracts: [OpenAI chat](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create)
-    and [Anthropic tool calls](https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls).
-  - **The host does the call.** `path` is relative to the instance's base
-    URL (its `baseUrl`, else the declaration's), so a call never leaves
-    that host — no `network:` grant is needed. `{{key}}` in a header or the
-    path is the instance's key, spliced by the host after `request`
-    returns (`oxplow_domain::template`; the script never sees it); a header
-    that needs a key the instance lacks is dropped (a local server). The
-    host maps 401/403 → `Auth`, 429 → `RateLimited`, other non-2xx →
-    `Http`.
-  - **`ops`** lists what it answers natively: `complete` (the default)
-    and `decide`, plus optional `completeTyped`. Without `decide`, a typed
-    question is asked as a chat
-    (`decide_via_chat`); one with only `decide` (TypeSafe) can't complete,
-    and its connection `test` asks a yes/no question. A script that
-    decides natively but not for every model (OpenRouter: only `jev`
-    models, at `/systemone`) returns `None` for the rest.
-  - **Permission** (decided 2026-10-08: shipped ones too, no exemption). An
-    AI provider script is a program, so its extension must declare
-    `permissions.ai` (an `ai_provider` implementation needs it; the loader
-    refuses the extension otherwise), approved when the extension is
-    deployed — oxplow-bundled's too, as shipped. There is no per-call
-    gate: the deployment is immutable, so the script that runs is the
-    script that was approved. **After an upgrade that changes a shipped provider
-    script, the new deployment asks again only if it adds a permission.**
-  - The shipped scripts speak:
-    - Anthropic Messages: `POST {base}/v1/messages`, `x-api-key`,
-      `anthropic-version: 2023-06-01`.
-    - OpenAI, OpenRouter, compatible servers: `POST {base}/chat/completions`,
-      Bearer key, `response_format: json_object` when JSON is asked for.
-    - TypeSafe Jev: `POST {base}/v1/systemone` with `{model, state,
-      questions}`. A `noul` (yes/no) question has no criteria, a `choice`
-      question's criteria are `{option: null}`, and a `score` question's
-      are its ordered levels. OpenRouter serves Jev models at `/systemone`
-      too. Each has its test in `ai_service` (`the_<name>_script_…`).
+- **Rust kinds over Rig.** Every model provider is a Rust kind in
+  `crates/oxplow-ai-rig`, and an `ai_provider` declaration names one with
+  `provider: <kind>` (`oxplow_ai_rig::KINDS`; an unknown one is a load
+  error naming the known ones). The declaration gives the id `ai.yaml`'s
+  `kind:` names, the title and `config: { baseUrl? }`, the URL an
+  instance that names none uses. Foundation's ids are the kinds' names and
+  its URLs are Rig's defaults (a test keeps them equal). Every kind but
+  `typesafe` is a `RigProvider`: oxplow's `ModelProvider` over
+  [Rig](https://github.com/0xPlaygrounds/rig) (`rig-core` `=0.45.0`, MIT),
+  one Rig provider selection each (`ProviderId::new(vendor, format)` →
+  `ProviderConfig` → `completion_model`).
+  - **Why Rig.** One maintained multi-provider layer instead of our own
+    request mapping per vendor. The Starlark form (`providers/*.star`, the
+    `oxplow-ai-providers` runner, `ops:`, `config.models`) is gone: each
+    vendor's wire (tools, system text, streaming, usage, finish reasons)
+    is Rig's to keep current, and adding a vendor Rig speaks is one row.
+  - **The kinds.** `anthropic` (Messages), `openai` (Rig's flagship route
+    for it, the Responses API), `openai_compatible` (Chat Completions at
+    the instance's URL, which it must name; a dialect of our own),
+    `openrouter`, `gemini`, `mistral`, `groq`, `deepseek`, `xai`, `ollama`
+    and `llamacpp` (local servers), each Rig's dialect of that name;
+    `typesafe` is Rust of our own (`oxplow_ai_rig::jev`), since Rig doesn't
+    speak Jev.
+  - **Keys and URLs.** The key is always the instance's (the keychain),
+    never Rig's environment lookup; the base URL is the instance's, else
+    the declaration's. With no key, an OpenAI-shaped request carries no
+    auth header (a local server). Rig sends through our own reqwest
+    clients, which never follow a redirect: one with a 120 s total timeout
+    for a whole reply, one bounded only while connecting for a stream.
+  - **Conversion** (`oxplow_ai_rig` `convert`). A system message is Rig's
+    system message; user text and tool results are a user message; a
+    `tool` message is a user message of tool results; an assistant's text
+    and tool calls are an assistant message, in order. A tool result
+    carries its call's tool name, which some wires need: it is taken from
+    the call it answers earlier in the conversation, and a result with no
+    such call is refused (`AiError::BadRequest`). A string result is
+    text, anything else JSON. Tool definitions map one to one. An image
+    part is refused (no asset resolver). The reply's text and tool calls
+    are parts in order; reasoning and provider items with no meaning here
+    are left out; an image is refused; a reply the provider marked failed
+    (a refusal) is `BadResponse`. Finish: stop, length, tool calls; a
+    content filter or any other reason is `other`; none is `unknown`.
+    Usage is observed when either count is reported; Rig's input count
+    already holds cache reads and writes.
+  - **JSON mode** (`complete { json }`) adds "Reply with a single JSON
+    object and nothing else." to the system text, and on a Chat
+    Completions kind asks `response_format: json_object` too.
+  - **Max tokens.** Rig sets a Messages request's `max_tokens` from its
+    catalog; a model it doesn't list gets 4096.
+  - **Streaming.** `stream_typed` reads Rig's stream: each text fragment
+    is a `text` delta at once, each tool call one `toolCall` delta when
+    its part ends (its arguments whole), in order; the reply is Rig's
+    folded response, the same as a whole call's. Cancel drops the stream,
+    its connection with it (`unless_cancelled`), and the error carries the
+    deltas so far. A stream silent for 60 s is `Timeout`. A reply that
+    ends before the provider ended it is `BadResponse`.
+  - **Errors** (`errors::ai_error`). 401/403 or Rig's
+    `InvalidAuthentication` → `Auth`, 429 → `RateLimited`, another
+    status → `Http` with the start of the body, a 2xx error envelope or a
+    stream's error event → `BadResponse`, a transport failure →
+    `Transport` (the URL taken out: Gemini puts the key in its query), a
+    request Rig can't build → `BadRequest`. The instance's key is taken
+    out of every body and message, as a whole token.
+  - **`decide`** keeps the trait's JSON prompt (`decide_via_chat`), except
+    OpenRouter's Jev models (a model name with `jev`), asked natively at
+    `{base}/systemone`. The `decide_native` feature of the declaration is
+    the kind's (`openrouter`, `typesafe`).
+  - **For a caller driving a model itself** (the Assistant):
+    `oxplow_ai_rig::completion_model(kind, default_base_url, instance,
+    model)` gives Rig's `DynModel<Completion>` for a resolved binding,
+    and the crate re-exports `rig_core`. TypeSafe has none.
+  - **Permission** (decided 2026-10-08). Declaring an AI provider points a
+    person's key at the URL it names, so its extension must declare
+    `permissions.ai` (the loader refuses it otherwise), approved when the
+    extension is deployed — foundation's too.
+  - TypeSafe Jev: `POST {base}/v1/systemone`, Bearer key, `{model, state,
+    questions}`. A `noul` (yes/no) question has no criteria, a `choice`
+    question's criteria are `{option: null}`, and a `score` question's are
+    its ordered levels; a `noul` answer's probability is its `noul`.
+  - Tests: each kind against a local stand-in for its API
+    (`oxplow_ai_fake::mock`, `mock_sse`), pinning the request shape and the
+    stream, in `crates/oxplow-ai-rig/src/tests.rs`; a streaming tool-call
+    job end to end in `extension_jobs_tests`.
 - Two operations: `complete` (text, optionally JSON) and `decide` (typed
   questions: `noul` → probability, `choice` → choice + probabilities,
   `score` → level index + probabilities). Non-Jev models answer `decide`
   through a JSON prompt that describes the same answer shapes. TypeSafe
   only decides (its `complete` is an error) and its connection `test` asks
   a yes/no question; OpenRouter decides natively for a `jev` model.
-- Errors: 401/403 → `Auth`, 429 → `RateLimited`, other non-2xx → `Http`
-  with the start of the body.
 - Answers are parsed from `serde_json::Value` by hand, not through the
   `Answer` derive: a dependency turns on serde_json's `arbitrary_precision`,
   which breaks numbers inside internally tagged enums.
@@ -406,9 +388,10 @@ an id, a description, a required `fallback` built-in role and optional
   (`oxplow_app::ai_calls::read`, capped at 64 KiB like an event body). What a provider adapter wraps around a request
   (`decide_via_chat`'s JSON instructions, an API's own envelope) is the
   adapter's, not part of it.
-- Tests use `oxplow_ai_fake::mock` and `mock_sse` (a reply as timed
+- Tests use `oxplow_ai_fake::mock`, `mock_sse` (a reply as timed
   server-sent event chunks, held open so a reader can be cancelled
-  mid-stream) (the dev-only `oxplow-ai-fake` crate,
+  mid-stream) and `mock_sse_rounds` (a different stream for each request,
+  for tool rounds) (the dev-only `oxplow-ai-fake` crate,
   not a feature of `oxplow-ai`, so no build compiles it two ways —
   working-in-this-repo.md "Builds and `target/`"), a local axum server
   standing in for a provider. `Services::in_memory` gets
@@ -642,15 +625,11 @@ form actions.
 
 ## Host transport and live authority
 
-The shared `Http` client refuses redirects; a provider request cannot carry
-credentials or content to a redirected destination. Transport errors strip
-URL details, including query values used by key placeholders. Scripted AI
-mappings see placeholders, never the provider key: the host substitutes only
-in transport paths/headers. Routing/proxy header overrides are refused, and
-exact credential echoes in JSON responses/error bodies are redacted before
-mapping scripts see them. A last live-owner check runs after request mapping
-and immediately before HTTP. The check is pinned to the loaded version;
-a redeployed script does not lend its authority to the old mapping.
+Every provider HTTP client (oxplow-ai's `Http`, the ones Rig sends
+through) refuses redirects; a provider request cannot carry credentials or
+content to a redirected destination. Transport errors strip
+URL details, including query values that hold a key, and an echoed key is
+taken out of error bodies.
 Collector AI calls recheck their parent run before each request, poll live
 authority while waiting and discard responses after cancellation or when the extension is disabled.
 Dropping a request future cannot retract a request already sent.

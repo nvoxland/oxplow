@@ -3,15 +3,13 @@ name: e2e
 intent:
   purpose: >-
     The browser suite's extension: a fake work-item tracker, an effect, a
-    lens with its page, and a resource, so specs drive each through the UI, and a scripted model
-    provider that sorts text by its words.
+    lens with its page, and a resource, so specs drive each through the UI.
   origin: null
   examples: []
-# Its providers run programs, its model provider asks models, its effect
-# reads with its own SQL and comments on (or deletes) work items.
+# Its providers run programs, its effect reads with its own SQL and
+# comments on (or deletes) work items.
 permissions:
   process: true
-  ai: true
   sql: read
   commands: [oxplow.work_item.comment, oxplow.work_item.delete]
 # `bin/provider` and `bin/scripted` are written when a suite daemon starts:
@@ -28,15 +26,6 @@ providers:
     capability: agent_harness
     entry: bin/scripted
     declarations: harness.json
-# A model provider for specs that need an answer from a model, offline: its
-# script sorts each TODO by its words (providers/sorter.star); the host's one
-# HTTP call goes to the spec's own echo server (its instance's baseUrl).
-implementations:
-  - capability: ai_provider
-    id: sorter
-    title: E2E sorter
-    entry: providers/sorter.star
-    config: { ops: [decide] }
 effects:
   - id: note-created
     summary: >-

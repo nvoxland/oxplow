@@ -9727,6 +9727,13 @@ commands:
                 "openai",
                 "openai_compatible",
                 "openrouter",
+                "gemini",
+                "mistral",
+                "groq",
+                "deepseek",
+                "xai",
+                "ollama",
+                "llamacpp",
                 "typesafe"
             ]
         );

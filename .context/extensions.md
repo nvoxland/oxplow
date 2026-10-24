@@ -3331,7 +3331,7 @@ its scope trace.
 - **Cancel reaches the worker.** Every script a collector, command,
   effect, policy or fact collector runs is passed its run's cancel flag;
   an exec collector's program is killed when it's set. Upcasts, report
-  parsers, scripted AI mappings and the MCP adapter's mappings still run
+  parsers and the MCP adapter's mappings still run
   under their own fixed budgets without one.
 
 ## Services
@@ -4504,14 +4504,20 @@ implementations:
   `activeProviders` like a built-in, a harness registered beside the
   built-ins under its instance id, as many as run
   ([providers.md](./providers.md) "What a provider may implement").
-- **An `ai_provider` or an `effort_policy` may be a script** instead: an
-  `entry` that isn't `oxplow:<name>` names a `.star` file of the extension
+- **An `ai_provider` names its Rust kind** with `provider:` instead of
+  `entry:` (`implementations::provider_decl`, `Source::ProviderKind`):
+  one of `oxplow_ai_rig::KINDS` (`anthropic`, `openai`,
+  `openai_compatible`, `openrouter`, `gemini`, `mistral`, `groq`,
+  `deepseek`, `xai`, `ollama`, `llamacpp`, `typesafe`), an unknown one
+  refused naming them. It takes `config: { baseUrl? }` (any other key is
+  refused), no `needs`, and needs `permissions.ai` ("Permissions"): it
+  points a person's key at that URL. Its `decide_native` feature is the
+  kind's. The kinds and why they're Rust over Rig are
+  [ai-providers.md](./ai-providers.md) "Rust kinds over Rig".
+- **An `effort_policy` may be a script** instead: an `entry` that isn't
+  `oxplow:<name>` names a `.star` file of the extension
   (`implementations::script_decl`, `Source::Script`). Nothing else is a
   script.
-  - An AI provider's takes `config: { baseUrl?, ops? }` (the contract,
-    permissions and the shipped scripts are [ai-providers.md](./ai-providers.md)
-    "Scripted providers"); it needs `permissions.ai`
-    ("Permissions").
   - An effort policy's is effects-shaped — `transform({event})` →
     `{ commands: [{ name, input }] } | { skip: "why" }` — takes no config,
     and names the scopes it calls in the entry's `needs:` (only what a
@@ -4521,9 +4527,8 @@ implementations:
     what was deployed.
 - `oxplow-foundation` declares the agent harnesses (`oxplow:claude-code`,
   `oxplow:codex-cli`, `oxplow:opencode`) and the AI
-  providers, as scripts (`providers/anthropic.star`,
-  `openai_compatible.star` — twice, `openai` with OpenAI's `baseUrl` —
-  `openrouter.star`, `typesafe.star`); foundation is required, so
+  providers, one per Rust kind under the kind's name, each at its API's
+  default URL; foundation is required, so
   `CapabilityRegistry::new` registers nothing for them. The harnesses are
   registered by declaration (`harnesses::prepare_built_ins`, published by the
   generation → `Services.harnesses`, an `oxplow_domain::agent::registry::HarnessRegistry`).

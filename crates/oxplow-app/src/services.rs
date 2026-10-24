@@ -397,10 +397,10 @@ pub fn of_extension(
         );
     }
     for i in &ext.implementations {
-        if let Some(script) = &i.script {
+        if let (Some(script), Some(entry)) = (&i.script, &i.entry) {
             push(
                 format!("{} `{}`", i.capability, i.id),
-                &i.entry,
+                entry,
                 script,
                 &i.needs,
                 &i.needs,

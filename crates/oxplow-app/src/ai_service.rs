@@ -1275,9 +1275,10 @@ impl PreparedModelProviders {
     }
 }
 
-/// Build the scripted model providers named by `declared`. This is a pure
-/// staging step: script factories and consent gates are captured, but no
-/// provider is published or called.
+/// Build the model providers named by `declared`: each declaration's
+/// Rust kind (`oxplow_ai_rig`) under its declared id, title and default
+/// base URL. This is a pure staging step: no provider is published or
+/// called.
 pub fn prepare_built_ins(
     declared: &[crate::capabilities::Implementation],
 ) -> Result<PreparedModelProviders, BTreeMap<String, String>> {
@@ -1289,32 +1290,37 @@ pub fn prepare_built_ins(
     }
 }
 
+/// The model provider an `ai_provider` implementation is, if it is one.
+fn built_in(
+    implementation: &crate::capabilities::Implementation,
+) -> Option<Result<Arc<dyn ModelProvider>, oxplow_ai_rig::UnknownKind>> {
+    let crate::capabilities::Source::ProviderKind(kind) = &implementation.source else {
+        return None;
+    };
+    let base_url = implementation
+        .config
+        .get("baseUrl")
+        .and_then(serde_json::Value::as_str);
+    Some(oxplow_ai_rig::provider(
+        kind,
+        &implementation.id,
+        &implementation.title,
+        base_url,
+    ))
+}
+
 fn build_built_ins(
     declared: &[crate::capabilities::Implementation],
 ) -> (PreparedModelProviders, BTreeMap<String, String>) {
     let mut built: Vec<Arc<dyn ModelProvider>> = Vec::new();
     let mut errors = BTreeMap::new();
     for implementation in declared.iter().filter(|i| i.capability == "ai_provider") {
-        if let crate::capabilities::Source::Script { entry, script, .. } = &implementation.source {
-            // Its extension's deployment declares `ai` (it doesn't load
-            // otherwise); a generation that drops it drops this provider.
-            let gate: crate::run_context::LiveCheck = Arc::new(|| Ok(()));
-            match oxplow_ai_providers::scripted(
-                &implementation.id,
-                &implementation.title,
-                entry,
-                script,
-                &implementation.config,
-                gate,
-            ) {
-                Ok(provider) => built.push(provider),
-                Err(_) => {
-                    errors.insert(
-                        implementation.id.clone(),
-                        "scripted model provider failed to load".to_string(),
-                    );
-                }
+        match built_in(implementation) {
+            Some(Ok(provider)) => built.push(provider),
+            Some(Err(e)) => {
+                errors.insert(implementation.id.clone(), e.to_string());
             }
+            None => {}
         }
     }
     (PreparedModelProviders { providers: built }, errors)
@@ -1344,23 +1350,14 @@ pub fn summarize_system(focus: Option<&str>) -> String {
 /// build an `AiService` without booting.
 #[cfg(test)]
 pub(crate) fn test_providers() -> ModelProviders {
-    // The shipped providers, each a script oxplow-foundation declares —
-    // open here: a test of the service isn't one of consent.
+    // The shipped providers, each a kind oxplow-foundation declares.
     let providers = ModelProviders::default();
     let bundled = crate::test_fixtures::shipped_extensions();
     let built = crate::capabilities::declared_by(&bundled)
-        .into_iter()
+        .iter()
         .filter(|i| i.capability == "ai_provider")
-        .filter_map(|i| match &i.source {
-            crate::capabilities::Source::Script { entry, script, .. } => {
-                let open: oxplow_ai_providers::Gate = Arc::new(|| Ok(()));
-                Some(
-                    oxplow_ai_providers::scripted(&i.id, &i.title, entry, script, &i.config, open)
-                        .expect("a shipped provider loads"),
-                )
-            }
-            _ => None,
-        })
+        .filter_map(built_in)
+        .map(|p| p.expect("a shipped provider loads"))
         .collect();
     providers.set(built);
     providers
@@ -1375,8 +1372,9 @@ mod tests {
     use serde_json::json;
 
     fn chat_reply() -> serde_json::Value {
-        json!({"choices": [{"message": {"content": "hello"}}],
-               "usage": {"prompt_tokens": 10, "completion_tokens": 5}})
+        json!({"id": "c", "object": "chat.completion", "created": 1, "model": "m",
+               "choices": [{"index": 0, "finish_reason": "stop", "message": {"role": "assistant", "content": "hello"}}],
+               "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}})
     }
 
     /// A service whose `summarize` role points at `base`.
@@ -1640,7 +1638,7 @@ mod tests {
         let (base, _) = mock(
             "/chat/completions",
             200,
-            json!({"choices": [{"message": {"content": reply.to_string()}}], "usage": {"prompt_tokens": 1, "completion_tokens": 1}}),
+            json!({"choices": [{"index": 0, "finish_reason": "stop", "message": {"role": "assistant", "content": reply.to_string()}}], "usage": {"prompt_tokens": 1, "completion_tokens": 1}}),
         )
         .await;
         let dir = tempfile::tempdir().unwrap();
@@ -1829,39 +1827,32 @@ mod tests {
         );
     }
 
-    /// An AI provider an extension writes as a script is a kind a person
-    /// may configure; its calls go out with the extension's `ai` permission,
-    /// and an edit to the script is used once deployed.
+    /// An extension may declare an AI provider of one of oxplow's kinds,
+    /// under its own id and default URL: a kind a person may configure. Its
+    /// calls go out with the person's key, and a redeployed default URL is
+    /// used once deployed.
     #[tokio::test]
-    async fn a_scripted_provider_calls_with_the_ai_permission() {
+    async fn an_extension_declares_a_provider_of_a_kind() {
+        let (first, seen) = mock("/chat/completions", 200, chat_reply()).await;
+        let (second, second_seen) = mock("/chat/completions", 200, chat_reply()).await;
         let dir = tempfile::tempdir().unwrap();
         crate::test_fixtures::init_git_repo(dir.path());
         let ext = dir.path().join(".oxplow/extensions/acme");
-        std::fs::create_dir_all(ext.join("providers")).unwrap();
-        std::fs::write(
-            ext.join("extension.yaml"),
-            "manifest: 2\nname: acme\nintent:\n  purpose: p\npermissions: { ai: true }\nimplementations:\n  - { capability: ai_provider, id: acme, title: Acme, entry: providers/acme.star }\n",
-        )
-        .unwrap();
-        let script = |reply: &str| {
+        std::fs::create_dir_all(&ext).unwrap();
+        let manifest = |base: &str| {
             format!(
-                "def request(x):\n    return {{\"path\": \"/chat/completions\", \"headers\": {{\"authorization\": \"Bearer {{{{key}}}}\"}}, \"body\": {{\"model\": x[\"model\"]}}}}\n\ndef response(x):\n    return {{\"text\": {reply}}}\n"
+                "manifest: 2\nname: acme\nintent:\n  purpose: p\npermissions: {{ ai: true }}\nimplementations:\n  - {{ capability: ai_provider, id: acme, title: Acme, provider: openai_compatible, config: {{ baseUrl: \"{base}\" }} }}\n"
             )
         };
-        std::fs::write(
-            ext.join("providers/acme.star"),
-            script("x[\"body\"][\"choices\"][0][\"message\"][\"content\"]"),
-        )
-        .unwrap();
+        std::fs::write(ext.join("extension.yaml"), manifest(&first)).unwrap();
         let svc = crate::Services::in_memory(dir.path()).await.unwrap();
         crate::test_fixtures::activate(&svc).await;
-        let (base, seen) = mock("/chat/completions", 200, chat_reply()).await;
         svc.ai
             .save_provider(
                 ProviderConfig {
                     id: "a".into(),
                     kind: "acme".into(),
-                    base_url: Some(base),
+                    base_url: None,
                 },
                 Some("sk-1".into()),
             )
@@ -1873,266 +1864,49 @@ mod tests {
         assert_eq!(call().await.unwrap().text, "hello");
         assert_eq!(seen.lock().unwrap()[0].1["authorization"], "Bearer sk-1");
 
-        std::fs::write(ext.join("providers/acme.star"), script("\"changed\"")).unwrap();
+        std::fs::write(ext.join("extension.yaml"), manifest(&second)).unwrap();
         crate::test_fixtures::activate(&svc).await;
-        assert_eq!(call().await.unwrap().text, "changed");
+        assert_eq!(call().await.unwrap().text, "hello");
+        assert_eq!(second_seen.lock().unwrap().len(), 1);
     }
 
-    /// The shipped providers are scripts (oxplow-foundation's
-    /// `providers/*.star`); each speaks its API as the built-in it replaced
-    /// did. `shipped(kind)` is the registered script.
-    fn shipped(kind: &str) -> Arc<dyn ModelProvider> {
-        test_providers().get(kind).expect("a shipped provider")
-    }
-
-    fn instance<'a>(
-        base: &'a str,
-        key: Option<&'a str>,
-    ) -> oxplow_ai::client::ProviderInstance<'a> {
-        oxplow_ai::client::ProviderInstance {
-            id: "p",
-            base_url: Some(base),
-            key,
-        }
-    }
-
-    fn ask(
-        model: &'static str,
-        system: Option<&'static str>,
-        json: bool,
-    ) -> CompleteRequest<'static> {
-        CompleteRequest {
-            model,
-            system,
-            prompt: "hello",
-            json,
-        }
-    }
-
-    fn questions() -> BTreeMap<String, Question> {
-        BTreeMap::from([
-            (
-                "risky".to_string(),
-                Question::Noul {
-                    instructions: "Is this change risky?".into(),
-                },
-            ),
-            (
-                "area".to_string(),
-                Question::Choice {
-                    instructions: "Which area?".into(),
-                    options: vec!["ui".into(), "db".into()],
-                },
-            ),
-        ])
-    }
-
-    /// Every AI provider oxplow ships is a script a person approves:
-    /// none is a built-in, and each loads.
+    /// Every AI provider oxplow ships is one of oxplow's Rust kinds
+    /// (oxplow-foundation declares them), each at its API's own default
+    /// URL — the one Rig uses for it.
     #[test]
-    fn every_shipped_ai_provider_is_a_script() {
+    fn every_shipped_ai_provider_is_a_rust_kind() {
         let bundled = crate::test_fixtures::shipped_extensions();
         let providers: Vec<_> = crate::capabilities::declared_by(&bundled)
             .into_iter()
             .filter(|i| i.capability == "ai_provider")
             .collect();
-        assert_eq!(
-            providers.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(),
-            vec![
-                "anthropic",
-                "openai",
-                "openai_compatible",
-                "openrouter",
-                "typesafe"
-            ]
-        );
-        assert!(providers
-            .iter()
-            .all(|i| matches!(i.source, crate::capabilities::Source::Script { .. })));
+        let mut ids: Vec<&str> = providers.iter().map(|i| i.id.as_str()).collect();
+        ids.sort();
+        let mut kinds = oxplow_ai_rig::names();
+        kinds.sort();
+        assert_eq!(ids, kinds, "foundation declares every kind");
+        for i in &providers {
+            let crate::capabilities::Source::ProviderKind(kind) = i.source else {
+                panic!("{} isn't a Rust kind: {:?}", i.id, i.source);
+            };
+            let declared = i.config.get("baseUrl").and_then(|u| u.as_str());
+            if let Some(rig) = oxplow_ai_rig::kind(kind).unwrap().rig_base_url() {
+                assert_eq!(declared, Some(rig.as_str()), "{kind}'s default URL");
+            }
+            assert_eq!(
+                i.has_feature("decide_native"),
+                oxplow_ai_rig::kind(kind).unwrap().decides_natively,
+                "{kind}"
+            );
+        }
         assert_eq!(test_providers().kinds().len(), providers.len());
-    }
-
-    #[tokio::test]
-    async fn the_anthropic_script_speaks_messages() {
-        let (base, seen) = mock(
-            "/v1/messages",
-            200,
-            json!({"content": [{"type": "text", "text": "hi"}], "usage": {"input_tokens": 7, "output_tokens": 2}}),
-        )
-        .await;
-        let c = shipped("anthropic")
-            .complete(
-                &instance(&base, Some("k1")),
-                &ask("claude-x", Some("be brief"), false),
-            )
-            .await
-            .unwrap();
         assert_eq!(
-            (c.text.as_str(), c.input_tokens, c.output_tokens),
-            ("hi", 7, 2)
-        );
-        let (_, headers, body) = seen.lock().unwrap()[0].clone();
-        assert_eq!(headers["x-api-key"], "k1");
-        assert!(headers.contains_key("anthropic-version"));
-        assert_eq!(body["model"], "claude-x");
-        assert_eq!(body["system"], "be brief");
-        assert_eq!(body["messages"][0]["content"], "hello");
-        assert_eq!(
-            shipped("anthropic").default_base_url(),
-            Some("https://api.anthropic.com")
-        );
-    }
-
-    /// An OpenAI-compatible API: a local one takes no key and gets no auth
-    /// header; JSON mode asks for an object; a typed question is asked as
-    /// a chat; a refused key and a rate limit read as such.
-    #[tokio::test]
-    async fn the_openai_compatible_script_speaks_chat() {
-        let (base, seen) = mock(
-            "/chat/completions",
-            200,
-            json!({"choices": [{"message": {"content": "{\"a\":1}"}}], "usage": {"prompt_tokens": 5, "completion_tokens": 3}}),
-        )
-        .await;
-        let local = shipped("openai_compatible");
-        assert_eq!(
-            local.default_base_url(),
+            test_providers()
+                .get("openai_compatible")
+                .unwrap()
+                .default_base_url(),
             None,
             "every instance names its URL"
-        );
-        let c = local
-            .complete(&instance(&base, None), &ask("qwen3", None, true))
-            .await
-            .unwrap();
-        assert_eq!(
-            (c.text.as_str(), c.input_tokens, c.output_tokens),
-            ("{\"a\":1}", 5, 3)
-        );
-        let (_, headers, body) = seen.lock().unwrap()[0].clone();
-        assert!(
-            !headers.contains_key("authorization"),
-            "a local server gets no auth header"
-        );
-        assert_eq!(body["response_format"]["type"], "json_object");
-        assert_eq!(body["messages"][0]["role"], "user");
-        assert_eq!(
-            shipped("openai").default_base_url(),
-            Some("https://api.openai.com/v1")
-        );
-
-        let reply = json!({"answers": {"risky": {"type": "noul", "probability": 0.3}, "area": {"type": "choice", "choice": "ui", "probabilities": {"ui": 0.7, "db": 0.3}}}});
-        let (base, seen) = mock(
-            "/chat/completions",
-            200,
-            json!({"choices": [{"message": {"content": reply.to_string()}}], "usage": {"prompt_tokens": 50, "completion_tokens": 20}}),
-        )
-        .await;
-        let qs = questions();
-        let d = local
-            .decide(
-                &instance(&base, None),
-                &oxplow_ai::client::DecideRequest {
-                    model: "qwen3",
-                    state: "diff…",
-                    questions: &qs,
-                },
-            )
-            .await
-            .unwrap();
-        assert_eq!(d.answers["risky"], Answer::Noul { probability: 0.3 });
-        assert_eq!(d.input_tokens, 50);
-        assert!(seen.lock().unwrap()[0].2["messages"]
-            .to_string()
-            .contains("Is this change risky?"));
-
-        let (base, _) = mock("/chat/completions", 401, json!({"error": "bad key"})).await;
-        assert!(matches!(
-            local
-                .complete(&instance(&base, Some("x")), &ask("m", None, false))
-                .await,
-            Err(AiError::Auth { .. })
-        ));
-        let (base, _) = mock("/chat/completions", 429, json!({})).await;
-        assert!(matches!(
-            local
-                .complete(&instance(&base, Some("x")), &ask("m", None, false))
-                .await,
-            Err(AiError::RateLimited { .. })
-        ));
-    }
-
-    /// OpenRouter chats like OpenAI; a Jev model answers typed questions
-    /// natively on `/systemone`.
-    #[tokio::test]
-    async fn the_openrouter_script_decides_natively_for_jev() {
-        let (base, seen) = mock(
-            "/systemone",
-            200,
-            json!({"answers": {"risky": {"type": "noul", "noul": 0.6}, "area": {"type": "choice", "choice": "db", "probabilities": {"ui": 0.1, "db": 0.9}}}, "usage": {"input_tokens": 3, "output_tokens": 0}}),
-        )
-        .await;
-        let qs = questions();
-        let d = shipped("openrouter")
-            .decide(
-                &instance(&base, Some("or")),
-                &oxplow_ai::client::DecideRequest {
-                    model: "typesafe/jev",
-                    state: "diff…",
-                    questions: &qs,
-                },
-            )
-            .await
-            .unwrap();
-        assert_eq!(d.answers["risky"], Answer::Noul { probability: 0.6 });
-        assert!(matches!(&d.answers["area"], Answer::Choice { choice, .. } if choice == "db"));
-        let (_, headers, body) = seen.lock().unwrap()[0].clone();
-        assert_eq!(headers["authorization"], "Bearer or");
-        assert_eq!(
-            body["questions"]["area"]["criteria"]["db"],
-            serde_json::Value::Null
-        );
-        assert_eq!(
-            shipped("openrouter").default_base_url(),
-            Some("https://openrouter.ai/api/v1")
-        );
-    }
-
-    /// TypeSafe only answers typed questions (Jev's `/v1/systemone`); it
-    /// can't chat, so its connection check asks one yes/no question.
-    #[tokio::test]
-    async fn the_typesafe_script_only_decides() {
-        let (base, seen) = mock(
-            "/v1/systemone",
-            200,
-            json!({"model": "jev-1.13.0", "answers": {"risky": {"type": "noul", "noul": 0.8}, "area": {"type": "choice", "choice": "db", "probabilities": {"ui": 0.1, "db": 0.9}, "confidence": 0.8}, "ok": {"type": "noul", "noul": 0.9}}, "usage": {"input_tokens": 1000000, "output_tokens": 0}}),
-        )
-        .await;
-        let typesafe = shipped("typesafe");
-        let qs = questions();
-        let d = typesafe
-            .decide(
-                &instance(&base, Some("tk")),
-                &oxplow_ai::client::DecideRequest {
-                    model: "jev-latest",
-                    state: "diff…",
-                    questions: &qs,
-                },
-            )
-            .await
-            .unwrap();
-        assert_eq!(d.answers["risky"], Answer::Noul { probability: 0.8 });
-        assert!(matches!(&d.answers["area"], Answer::Choice { choice, .. } if choice == "db"));
-        let (_, headers, body) = seen.lock().unwrap()[0].clone();
-        assert_eq!(headers["authorization"], "Bearer tk");
-        assert_eq!(body["state"], "diff…");
-        assert_eq!(body["questions"]["risky"]["type"], "noul");
-        assert!(typesafe
-            .complete(&instance(&base, Some("tk")), &ask("jev", None, false))
-            .await
-            .is_err());
-        assert_eq!(
-            typesafe.test(&instance(&base, None), "jev").await.unwrap(),
-            "Answered (yes: 90%)"
         );
     }
 
@@ -2262,14 +2036,77 @@ mod typed_tests {
         }
     }
 
-    /// Hands the mock's body back as the V1 response, whatever it says.
-    const PASS_THROUGH: &str = r#"
-def request(x):
-    return {"path": "/typed", "headers": {"authorization": "Bearer {{key}}"}, "body": x["request"]}
+    /// A provider with native typed transport, standing in for one: it
+    /// posts the whole typed request to its API's `/typed` with the
+    /// instance's key and hands the reply back as the V1 response,
+    /// whatever it says. `models` is the metadata it declares.
+    struct PassThrough {
+        models: oxplow_ai::capabilities::ModelCatalogV1,
+        http: oxplow_ai::client::Http,
+    }
 
-def response(x):
-    return x["body"]
-"#;
+    #[async_trait::async_trait]
+    impl ModelProvider for PassThrough {
+        fn kind(&self) -> &str {
+            "fake"
+        }
+        fn title(&self) -> &str {
+            "Fake"
+        }
+        fn default_base_url(&self) -> Option<&str> {
+            None
+        }
+        async fn discover_models(
+            &self,
+            _: &oxplow_ai::client::ProviderInstance<'_>,
+        ) -> Result<oxplow_ai::capabilities::ModelCatalogV1, AiError> {
+            Ok(self.models.clone())
+        }
+        async fn discover(
+            &self,
+            _: &oxplow_ai::client::ProviderInstance<'_>,
+            model: &str,
+        ) -> Result<oxplow_ai::capabilities::CapabilitySnapshotV1, AiError> {
+            Ok(self
+                .models
+                .models
+                .iter()
+                .find(|m| m.model.as_deref() == Some(model))
+                .cloned()
+                .unwrap_or_else(|| oxplow_ai::capabilities::CapabilitySnapshotV1::unknown(model)))
+        }
+        async fn complete_typed(
+            &self,
+            instance: &oxplow_ai::client::ProviderInstance<'_>,
+            req: &TypedRequestV1,
+        ) -> Result<TypedResponseV1, AiError> {
+            let url = format!("{}/typed", instance.base_url_or(""));
+            let body = serde_json::to_value(req).unwrap();
+            let reply = self
+                .http
+                .post(
+                    instance.id,
+                    &url,
+                    oxplow_ai::client::bearer(instance.key),
+                    body,
+                )
+                .await?;
+            serde_json::from_value(reply).map_err(|e| AiError::BadResponse {
+                provider: instance.id.into(),
+                detail: e.to_string(),
+            })
+        }
+        async fn complete(
+            &self,
+            instance: &oxplow_ai::client::ProviderInstance<'_>,
+            _: &CompleteRequest<'_>,
+        ) -> Result<oxplow_ai::client::Completion, AiError> {
+            Err(AiError::BadRequest {
+                provider: instance.id.into(),
+                detail: "typed only".into(),
+            })
+        }
+    }
 
     fn snapshot(model: &str, tools: &str, image: &str) -> Value {
         json!({ "schemaVersion": 1, "model": model, "modelKnown": true,
@@ -2286,8 +2123,8 @@ def response(x):
     }
 
     /// A service whose `summarize` role is model `m` of provider `p`
-    /// (kind `fake`, the pass-through script with `models` declared, or
-    /// the shipped `openai_compatible` when `shipped`), answering `reply`.
+    /// (kind `fake`, [`PassThrough`] with `models` declared, or the shipped
+    /// `openai_compatible`), answering `reply`.
     async fn fixture(kind: &str, models: Option<Value>, reply: Value) -> Fixture {
         let path = if kind == "fake" {
             "/typed"
@@ -2295,14 +2132,18 @@ def response(x):
             "/chat/completions"
         };
         let (base, seen) = mock(path, 200, reply).await;
-        let mut config = json!({ "ops": ["complete", "completeTyped"] });
-        if let Some(models) = models {
-            config["models"] = models;
-        }
-        let open: oxplow_ai_providers::Gate = Arc::new(|| Ok(()));
-        let fake =
-            oxplow_ai_providers::scripted("fake", "Fake", "f.star", PASS_THROUGH, &config, open)
-                .unwrap();
+        let models = match models {
+            Some(models) => oxplow_ai::capabilities::ModelCatalogV1 {
+                schema_version: 1,
+                catalog_known: true,
+                models: serde_json::from_value(models).unwrap(),
+            },
+            None => oxplow_ai::capabilities::ModelCatalogV1::unknown(),
+        };
+        let fake: Arc<dyn ModelProvider> = Arc::new(PassThrough {
+            models,
+            http: oxplow_ai::client::Http::default(),
+        });
         let providers = ModelProviders::default();
         providers.set(vec![
             fake,
@@ -2777,8 +2618,9 @@ def response(x):
     /// text-path usage as unknown-provenance counts.
     #[tokio::test]
     async fn text_helpers_and_the_typed_call_share_the_path() {
-        let reply = json!({"choices": [{"finish_reason": "stop", "message": {"role": "assistant", "content": "hello"}}],
-                           "usage": {"prompt_tokens": 10, "completion_tokens": 5}});
+        let reply = json!({"id": "c", "object": "chat.completion", "created": 1, "model": "m",
+                           "choices": [{"index": 0, "finish_reason": "stop", "message": {"role": "assistant", "content": "hello"}}],
+                           "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}});
         let fx = fixture("openai_compatible", None, reply).await;
         let c = fx
             .svc

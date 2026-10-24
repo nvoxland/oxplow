@@ -101,7 +101,7 @@ mod tests {
         let (base, _) = oxplow_ai_fake::mock(
             "/chat/completions",
             200,
-            serde_json::json!({ "choices": [{ "message": { "content": "short" } }], "usage": { "prompt_tokens": 1, "completion_tokens": 1 } }),
+            serde_json::json!({ "choices": [{ "index": 0, "finish_reason": "stop", "message": { "role": "assistant", "content": "short" } }], "usage": { "prompt_tokens": 1, "completion_tokens": 1 } }),
         )
         .await;
         fx.svc

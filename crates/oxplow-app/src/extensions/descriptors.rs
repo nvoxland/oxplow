@@ -614,17 +614,12 @@ mod tests {
              permissions: { ai: true }\n\
              implementations:\n\
              \x20 - { capability: effort_policy, id: tidy, entry: policies/tidy.star }\n\
-             \x20 - { capability: ai_provider, id: tidy, entry: providers/tidy.star }\n",
+             \x20 - { capability: ai_provider, id: tidy, provider: openai_compatible }\n",
         );
         write(
             dir.path(),
             ".oxplow/extensions/acme/policies/tidy.star",
             "def transform(x):\n    return []\n",
-        );
-        write(
-            dir.path(),
-            ".oxplow/extensions/acme/providers/tidy.star",
-            "def request(x):\n    return {}\n\ndef response(x):\n    return {}\n",
         );
         let ext = load_extensions(dir.path())
             .into_iter()

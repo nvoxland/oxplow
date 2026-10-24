@@ -1,0 +1,28 @@
+[package]
+name = "oxplow-ai-rig"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "oxplow's model providers: Rust kinds over Rig, and TypeSafe's Jev"
+
+[dependencies]
+oxplow-ai = { workspace = true }
+# One maintained multi-provider layer (MIT). Pinned: its API moves between
+# minor versions.
+rig-core = { version = "=0.45.0", default-features = false, features = ["reqwest", "rustls"] }
+rig-reqwest = { version = "=0.45.0", default-features = false, features = ["rustls"] }
+reqwest = { workspace = true }
+async-trait = { workspace = true }
+futures = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+oxplow-workspace-hack = { version = "0.1", path = "../oxplow-workspace-hack" }
+
+[dev-dependencies]
+oxplow-ai-fake = { workspace = true }
+
+[lints]
+workspace = true
