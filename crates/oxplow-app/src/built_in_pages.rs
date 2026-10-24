@@ -10,7 +10,7 @@
 //! renders exactly these.
 
 /// The built-in page components, by name.
-pub const BUILT_IN_PAGES: &[&str] = &["agent-session", "external-url", "lens", "resource"];
+pub const BUILT_IN_PAGES: &[&str] = &["agent-session", "lens", "resource"];
 
 /// The built-in named by a manifest's `component: "oxplow:<name>"`.
 pub fn built_in(component: &str) -> Option<&'static str> {

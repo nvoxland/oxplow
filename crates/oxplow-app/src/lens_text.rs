@@ -529,6 +529,7 @@ pub fn render(run: &LensRun, resolved: &Resolved) -> String {
         LensViz::Editor => editor(run, &resolved.files),
         LensViz::Answer => resolved.answer.clone().unwrap_or_else(|| table(run)),
         LensViz::Terminal => terminals(run),
+        LensViz::Embed => embed(run),
         LensViz::Diff => one_diff(run, &resolved.diffs),
         LensViz::Approvals => {
             if resolved.approvals.is_empty() {
@@ -940,6 +941,17 @@ fn editor(run: &LensRun, files: &[String]) -> String {
     )
 }
 
+/// A web page: the first row's URL, as a link line (the page itself is
+/// opened on the person's machine, never read here).
+fn embed(run: &LensRun) -> String {
+    let e = run.lens.embed.clone().unwrap_or_default();
+    let (Some(u), Some(row)) = (column(run, e.url.as_ref()), run.result.rows.first()) else {
+        return table(run);
+    };
+    let url = row.get(u).map(cell).unwrap_or_default();
+    format!("[{url}]({url}) — a web page, opened in its own window")
+}
+
 /// A fence's language for `path`: its extension, when it is one word.
 fn fence_of(path: &str) -> String {
     std::path::Path::new(path)
@@ -1239,6 +1251,7 @@ mod tests {
                 code: None,
                 diff: None,
                 editor: None,
+                embed: None,
                 answer: None,
                 terminal: None,
                 markdown: None,
@@ -2058,6 +2071,32 @@ mod tests {
         assert_eq!(
             render(&r, &Resolved::default()),
             "- Terminal Build (oxplow:oxplow/terminal?id=trm1)\n- Agent session Claude (oxplow:oxplow/agent_session?id=ses2): its output isn't readable here; read its transcript."
+        );
+    }
+
+    /// An embed lens reads as a link to its page.
+    #[tokio::test]
+    async fn an_embed_reads_as_a_link() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let root = fx.svc.layout.project_dir.clone();
+        let ctx = crate::extensions::LensContext::default();
+        let embed = with(
+            run(
+                LensViz::Embed,
+                None,
+                &["url"],
+                vec![vec![t("https://example.com/a")]],
+            ),
+            |l| {
+                l.embed = Some(crate::extensions::LensEmbed {
+                    url: Some("url".into()),
+                })
+            },
+        );
+        let text = text_of(&fx.svc, &root, &embed, &ctx).await.unwrap();
+        assert!(
+            text.contains("[https://example.com/a](https://example.com/a)"),
+            "{text}"
         );
     }
 

@@ -645,8 +645,9 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     The tab says the page's title until the lens has run and its row
     answers (`LensPage` `titleFrom` → `usePageTitle`), then the filled
     label; a lens that fails keeps the title. Either may take filters:
-    `{{param.sha|short}}` (the first 7 characters) and `|basename` (the
-    last path segment), refused if unknown. A renderer's label names
+    `{{param.sha|short}}` (the first 7 characters), `|basename` (the
+    last path segment) and `|url` (a web page's host and path, cut to 40),
+    refused if unknown. A renderer's label names
     params of what it renders, a route's its `params` (else a load error). `body` is what draws it:
     exactly one of `lens:` or `component:`. `component: oxplow:<name>`
     names a **built-in page** (`built_in_pages::BUILT_IN_PAGES`) and only
@@ -2083,7 +2084,11 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   tab's ● and Save through `useTabEditing`; refused in a spec, since an
   answer never writes as the person; an agent reads it as the file as
   saved — `lens/EditorViz.tsx`, `.context/editor-and-monaco.md` "The
-  editor viz"), `code` and `diff` (the full-size readers: a file at a
+  editor viz"), `embed` (a web page: `embed: { url }`, the first row's `http(s)`
+  URL, opened in oxplow's sandboxed window once per tab entry, its status
+  panel Open again / Open in Browser / Copy URL — `lens/EmbedViz.tsx`,
+  `.context/external-url-tabs.md`; it fills its page; refused in a spec,
+  since an answer never opens a page; an agent reads a link line), `code` and `diff` (the full-size readers: a file at a
   revision, or one file's diff, read-only, filling a lens page —
   `LensPage`'s `fill`, no in-body title; a loaded lens says whether it
   fills, `Lens.fills`: its viz does, `LensViz::fills`, or it is a

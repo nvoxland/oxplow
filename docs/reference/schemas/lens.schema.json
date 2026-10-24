@@ -146,6 +146,17 @@
       ],
       "default": null
     },
+    "embed": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/LensEmbed"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
     "answer": {
       "anyOf": [
         {
@@ -415,6 +426,11 @@
           "description": "An agent's answer (`answer.uri`, the first row's: an\n`oxplow/answer` URI), re-run live, with Keep This until it is kept\n(`answer.kept`: the lens it became) — core's component for what\n`oxplow_show_lens` showed.",
           "type": "string",
           "const": "answer"
+        },
+        {
+          "description": "A web page (`embed.url`, the first row's), opened in oxplow's\nsandboxed window: the page is a status panel with Open again, Open in\nBrowser and Copy URL — core's component for what an `http(s)` link\nopens.",
+          "type": "string",
+          "const": "embed"
         },
         {
           "description": "The extension's own web component (`custom.component`), in\na sandboxed frame; its rows are what it shows and what an agent\nreads (as a table).",
@@ -1173,6 +1189,20 @@
             "null"
           ],
           "default": null
+        }
+      },
+      "additionalProperties": false
+    },
+    "LensEmbed": {
+      "description": "`embed` viz: the web page the first row names.",
+      "type": "object",
+      "properties": {
+        "url": {
+          "description": "The column holding the page's URL (`http` or `https`).",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "additionalProperties": false

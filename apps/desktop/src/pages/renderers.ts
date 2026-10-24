@@ -99,10 +99,20 @@ export function withRenderedParams(
 }
 
 /** The filters a label applies (`{{param.sha|short}}`): `short` is the first
- *  7 characters (a sha), `basename` the last path segment. */
+ *  7 characters (a sha), `basename` the last path segment, `url` a web page's
+ *  host and path cut to 40. */
 const LABEL_FILTERS: Record<string, (v: string) => string> = {
   short: (v) => v.slice(0, 7),
   basename: (v) => v.replace(/\/+$/, "").split("/").pop() ?? v,
+  url: (v) => {
+    try {
+      const u = new URL(v);
+      const text = `${u.host}${u.pathname === "/" ? "" : u.pathname}`;
+      return text.length > 40 ? `${text.slice(0, 39)}…` : text;
+    } catch {
+      return v;
+    }
+  },
 };
 
 /** What a tab of `page` says: its `label` with each `{{param.<name>}}`

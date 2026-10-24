@@ -79,7 +79,7 @@ test("an https link opens a tab whose id is the URL", async ({ page, daemon }) =
   await ready(page);
   await navigate(daemon, "https://example.com/docs");
   await expect(page.getByTestId("center-tab-https://example.com/docs")).toBeVisible();
-  await expect(page.getByTestId("page-external-url")).toBeVisible();
+  await expect(page.getByTestId("lens-embed")).toBeVisible();
 });
 
 test("a file URI with a rev opens the read-only viewer, and without one the editor", async ({ page, daemon }) => {

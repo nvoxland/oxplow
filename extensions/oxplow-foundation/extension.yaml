@@ -197,7 +197,7 @@ pages:
   - { id: new-task, title: New Item, icon: plus, params: [parent], lens: new-task }
   - { id: stream-settings, title: Stream Settings, icon: settings, label: "{{row.title}} settings", params: [stream], lens: stream-settings }
   - { id: thread-settings, title: Thread Settings, icon: settings, label: "{{row.title}} settings", params: [thread], lens: thread-settings }
-  - { id: external-url, title: Web Page, icon: external-link, for: [https, http], default: true, component: "oxplow:external-url" }
+  - { id: external-url, title: Web Page, icon: external-link, label: "{{param.uri|url}}", for: [https, http], default: true, lens: web-page }
   - { id: diff, title: Diff, icon: git-compare, label: "{{param.path}} ({{param.label}})", params: [path, left, right, label, base], lens: diff }
   - { id: diff-view, title: Changes, icon: git-compare, for: [oxplow/snapshot, oxplow/effort, oxplow/turn], default: true, lens: changes }
   - { id: duplicate-block, title: Duplicate Block, icon: copy, label: "{{param.left}} ↔ {{param.right}}", params: [left, left_lines, left_at, right, right_lines, right_at], lens: duplicate-block }

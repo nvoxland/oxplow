@@ -118,7 +118,7 @@ Foundation declares oxplow's renderers (`agent-session`, `commit`,
 `editor`, `file-viewer`, `lens`,
 `resource`, `wiki-page`, `work-item`, and `diff-view` also for
 `oxplow/snapshot`, `oxplow/effort` and `oxplow/turn`; `custom-dashboard`
-(a lens renderer, `dashboard`) for `oxplow/dashboard`; `external-url` for `https` and `http`). Their
+(a lens renderer, `dashboard`) for `oxplow/dashboard`; `external-url`, a lens page over the `embed` viz, for `https` and `http`). Their
 bodies are listed under "Modules" and "Declared pages". An agent
 session's tab follows its row (`reconcileSessionTabs`). There is no
 `change-analysis` page.
@@ -193,7 +193,7 @@ moved into the project DB and started fresh again) — see the decision in [reso
 | metric | `oxplow:oxplow/metric?metric=<key>[#view]` (`metricRef(key, view?)`) | `oxplow:oxplow/metric?metric=oxplow.coverage.abs_pct` |
 | lens | `oxplow:oxplow/lens?lens=<extension>/<slug>[&param=value…][#view]` (params sorted; `lensRef(id, params, view)`: `params` are the lens's `resource` params, its filters and picks are the `#`) | `oxplow:oxplow/lens?lens=review/waiting-on-me`, `oxplow:oxplow/lens?effort_id=12&lens=oxplow-bundled/effort-tests` |
 | route | `oxplow:oxplow/page?page=<id>[&params]` (oxplow's) / `oxplow:oxplow/page?page=<extension>/<id>[&params]` (`pageTabRef(id, params?, view?)`, `extPageRef(ext, id, params?, view?)`, plus typed wrappers: `diffRef`, `endpointDiffRef`, `duplicateBlockRef`, `settingsRef`, `newTaskRef`, …) — a route; see "Declared pages" below | `oxplow:oxplow/page?page=tasks`, `oxplow:oxplow/page?page=symbols&path=src/lib.rs`, `oxplow:oxplow/page?page=github/open-prs`, `oxplow:oxplow/page?page=acme/pr&ref=oxplow:acme/pr?id%3D12` |
-| web page | the URL itself, `https://example.com/docs` (`externalUrlRef(url)` is `{ id: url }`) — rendered by foundation's `external-url` page, `for: [https, http]`; see [external-url-tabs.md](./external-url-tabs.md) | `https://example.com/docs` |
+| web page | the URL itself, `https://example.com/docs` (`externalUrlRef(url)` is `{ id: url }`) — rendered by foundation's `external-url` page (lens `web-page`, `viz: embed`), `for: [https, http]`, its tab labelled `{{param.uri|url}}`; see [external-url-tabs.md](./external-url-tabs.md) | `https://example.com/docs` |
 | symbol | `oxplow:oxplow/symbol?path=<path>&symbol=<name>` (`v_symbol.uri`, `symbolRef(uri)`) — no revision in the id; never a tab: opening one (`handleOpenPage`, or in-tab navigation) resolves it (`resolve_symbol`) and opens its file at the name's line (`openSymbol`). A pinned one (`rev=snap:<id>` / `rev=git:<sha>`) opens the file viewer at that revision; if the version is gone it shows a notice and opens the current symbol | `oxplow:oxplow/symbol?path=src/lib.rs&symbol=Widget::spin` |
 | agent_session | `oxplow:oxplow/agent_session?id=<ses id>` (`agentSessionRef(id)`, pinned; the one URI whose tab is pinned) — an open agent session's terminal; its tab draws its harness's declared logo (`CenterTab.icon` from `HarnessListing.icon`, `AgentIcon`; the generic robot when it declares none) | `oxplow:oxplow/agent_session?id=ses3` |
 
@@ -219,10 +219,9 @@ Data's catalog: extensions.md "A custom page's rail"). The built-ins are pinned 
 (`agent-session`, `commit`, `directory`, `editor`, `file-viewer`, `lens`,
 `resource`, `wiki-page`, `work-item`) and only shrinks
 again (a page leaves when it becomes a lens or a custom page — Explore
-Data is oxplow-foundation's custom page now, the editor and the Terminal
-lenses over the `editor` and `terminal` vizes). It ends at two:
-`agent-session` waits for its document (`external-url` for the embed
-viz); `lens` (the lens runtime, which draws every lens
+Data is oxplow-foundation's custom page now; the editor, the Terminal and
+the Web Page lenses over the `editor`, `terminal` and `embed` vizes). It
+ends at two: `agent-session` waits for its document; `lens` (the lens runtime, which draws every lens
 page) and `resource` (the fallback when nothing declares a URI) stay —
 neither can be a lens;
 `pages/declaredPages.ts`'s `BUILT_IN_PAGES` mirrors it and a test checks
@@ -271,7 +270,7 @@ oxplow's pages and their params:
   `alerts`,
   `new-task`
   (`parent`),
-  `external-url` (a renderer for `https` / `http`; the tab id is the URL), `diff` (`path`, `left`, `right`, `label`,
+  `diff` (`path`, `left`, `right`, `label`,
   `base` — the left side's name when it isn't the version's own — and
   `line`, a view param: the same diff opened at another line moves the
   tab showing it; `diffSpecOf` reads the spec back; a clipboard compare's

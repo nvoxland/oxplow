@@ -1,0 +1,8 @@
+title: Web Page
+description: "A web page, opened in oxplow's sandboxed window; this is its status panel."
+params:
+  - { name: uri }
+query: SELECT :uri AS url
+viz: embed
+embed: { url: url }
+hidden: true
