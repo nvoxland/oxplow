@@ -1,0 +1,19 @@
+title: Saved conversations
+description: The session's harness's saved conversations for its worktree, newest first; this session's own and one open in another session are said.
+hidden: true
+params:
+  - { name: uri }
+query: |
+  SELECT c.native_id AS value,
+         coalesce(nullif(c.title, ''), nullif(c.first_prompt, ''), c.native_id)
+           || CASE WHEN c.native_id = s.resume_session_id THEN ' — this session''s'
+                   WHEN o.session_uri IS NOT NULL THEN ' — open in another session'
+                   ELSE '' END AS label
+  FROM v_agent_session s
+  JOIN v_thread th ON th.id = s.thread_id
+  JOIN v_agent_conversation c ON c.stream_id = th.stream_id AND c.harness = s.harness
+  LEFT JOIN v_agent_session_binding o
+    ON o.native_id = c.native_id AND o.unbound_at IS NULL AND o.session_uri <> s.uri
+  WHERE s.uri = :uri AND c.problem IS NULL AND c.native_id IS NOT NULL
+  ORDER BY c.updated_at DESC
+viz: table

@@ -106,9 +106,13 @@ Which page draws a URI comes from declarations
 lists the renderers when there are several. Picking one is a view change
 (Back returns to the first). `App.tsx` `renderTab` draws a route
 (`oxplow:oxplow/page?page=…`) through `routeTab`, and anything else through
-its renderer: `appRenderers` by built-in name for the pages that need
-window state, `builtInPages` for the rest, a lens or a custom component
-for an extension's. Page memory (history state, scroll) is scoped by
+its renderer: a lens (`LensPage`, run with the URI), a custom component,
+or the two built-ins — `appRenderers.lens` (the lens runtime) and
+`builtInPages.resource` (the fallback). A pinned renderer's tab
+(`pinned: true`, the agent session) is pinned; an agent session's tab also
+draws its harness's logo, its status dot and what it waits on, from the
+window's session list and statuses (`centerTabs`), and a page's actions
+(`useTabActions`, `setTabActions`) are its tab's right-click menu. Page memory (history state, scroll) is scoped by
 `keyIdentityOf` for a page, lens or metric, and `resource:<resource>`
 otherwise. A tab's label and icon come from `recordedPageKind(ref)` /
 `kindForTabId`: a route's page id, else the URI's resource
@@ -221,7 +225,8 @@ Data's catalog: extensions.md "A custom page's rail"). The built-ins are pinned 
 again (a page leaves when it becomes a lens or a custom page — Explore
 Data is oxplow-foundation's custom page now; the editor, the Terminal and
 the Web Page lenses over the `editor`, `terminal` and `embed` vizes). It
-ends at two: `agent-session` waits for its document; `lens` (the lens runtime, which draws every lens
+ends at two — every page is a lens now, the agent session a document of
+`approvals` and `terminal`: `lens` (the lens runtime, which draws every lens
 page) and `resource` (the fallback when nothing declares a URI) stay —
 neither can be a lens;
 `pages/declaredPages.ts`'s `BUILT_IN_PAGES` mirrors it and a test checks

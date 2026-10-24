@@ -82,8 +82,14 @@ Two pages draw it:
   its own empty state: a terminal lens with no rows isn't "No rows."). A
   clicked file path opens in its own tab. An agent reads the lens as the
   terminals' names, never their output.
-- **An agent session's tab** (`pages/AgentSessionPage.tsx`) draws one
-  `TerminalView` on the session's URI with its `agent` parts.
+- **An agent session's page** is oxplow-foundation's `agent-session`
+  document: its `agent-session-terminal` section is a `terminal` viz of one
+  row — the session's URI, `stopped`, `conversation` and `thread` — so the
+  viz gives its `TerminalView` the `agent` parts (Start, Start Fresh, the
+  Escape interrupt in the row's thread); its `agent-session-waiting`
+  section above is the thread's `approvals`. Its actions (Rename…, Switch /
+  Fork Conversation…, Stop / Start Agent) are the nav bar's and the tab's
+  right-click menu.
 
 The backend (`commands/terminal.rs`, `open_terminal_session { uri, cols,
 rows }`) resolves the URI — a terminal, or an agent session; anything
@@ -163,17 +169,19 @@ no `||`). The pane is told what happened:
 worktree (`AgentHarness::conversations`: Claude's transcripts under its
 config dir, named by their last `custom-title` / `ai-title` record with the
 first thing the person typed; opencode's `session list --format json`;
-Codex's daemon's `thread/list`). `list_native_conversations` (UI-only)
-adds whether the session is on each and the other open session on one.
-`ConversationPicker` (opened by the banner's Choose another, or the agent
-tab's **Switch Conversation…** / **Fork Conversation…**) shows them —
-title, else first prompt, else id; ↑/↓, Enter, Escape — and runs
+Codex's daemon's `thread/list`), read as `v_agent_conversation`. The
+agent session page's **Switch Conversation…** / **Fork Conversation…**
+(offered `when` the harness declares `conversation_list` /
+`conversation_fork`) are forms whose conversation is a select from the
+`agent-session-conversations` lens — title, else first prompt, else id,
+saying "this session's" and "open in another session" (from
+`v_agent_session_binding`) — and run
 `oxplow.agent_session.resume_conversation` (refused for one open in
-another session, naming it; undo goes back) or `fork_conversation` (the
+another session, naming it; Undo goes back) or `fork_conversation` (the
 next launch forks it: `--resume <id> --fork-session`, Codex's `thread/fork`,
-`opencode -s <id> --fork`; a `conversation_fork` harness). Both stop the
-running process; the page bumps the pane's `restartKey`, and the pane
-opens the session again once that process has exited.
+`opencode -s <id> --fork`). Both stop the running process; the session's
+`conversation` (its resume id and `fork_next`, one value) changes, and its
+terminal opens again once that process has exited.
 
 **Earlier sessions: the same lists, with no session to ask.** The New
 Session page lists the thread's earlier sessions under its Start row, so a
@@ -181,8 +189,8 @@ person can bring one back without first opening a session to switch. One
 listing (the `new-session-earlier` lens, oxplow-foundation's, over
 `v_agent_session` and `v_agent_conversation`) merges the
 stream's closed oxplow sessions with every harness's saved conversations
-for the worktree (`harness_conversations`, the query
-`list_native_conversations` also builds; each harness is asked at once, one
+for the worktree (`harness_conversations`, what `v_agent_conversation`
+reads; each harness is asked at once, one
 that fails or answers `Unavailable` becomes a row with its reason and the
 rest still list), on (harness, native id), newest activity first, and
 decides each row's action itself: **reopen** (this thread's session a

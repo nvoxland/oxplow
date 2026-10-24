@@ -75,13 +75,18 @@ test("a session's tab shows its alias, and its fallback once the alias is cleare
   const rename = (title: string) => run(daemon, "oxplow.agent_session.rename", { session, title });
   await rename("My review");
   await expect(tab).toContainText("My review");
-  // Its page's bar names it too, beside its harness's logo, offers its
-  // actions, and has no back or forward: the tab is pinned.
+  // Its page (oxplow-foundation's `agent-session` document) names it too,
+  // offers its actions, and has no back or forward: the tab is pinned.
   const body = page.getByTestId(`center-tab-body-${id}`);
   await expect(body.getByTestId("page-nav-title")).toHaveText("My review");
-  await expect(body.getByTestId("page-nav-title-icon")).toBeVisible();
   await expect(body.getByTestId("page-nav-back")).toHaveCount(0);
-  await expect(body.getByTestId("action-agent-session.rename")).toBeVisible();
+  await expect(body.getByTestId("action-lens-action-rename")).toBeVisible();
+  // Rename… is a form: the title, and the box to rename it in its harness.
+  await body.getByTestId("action-lens-action-rename").click();
+  const title = page.getByTestId("lens-action-form-fields-title");
+  await title.fill("Renamed here");
+  await page.getByTestId("lens-action-form-fields-submit").click();
+  await expect(tab).toContainText("Renamed here");
   await rename("");
   await expect(tab).toContainText(/claude \d{4}-\d{2}-\d{2}/i);
 });

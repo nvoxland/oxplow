@@ -2065,6 +2065,7 @@ mod tests {
                     title: Some("title".into()),
                     stopped: None,
                     conversation: None,
+                    thread: None,
                 })
             },
         );

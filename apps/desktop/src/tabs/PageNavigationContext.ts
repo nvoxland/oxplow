@@ -3,6 +3,7 @@ import type { TabRef } from "./tabState.js";
 import type { SqlCell } from "../tauri-bridge/generated/bindings.js";
 import type { BookmarkScope } from "./bookmarks.js";
 import type { Origin } from "./session.js";
+import type { PageAction } from "../kit/actions.js";
 
 export interface NavigateOptions {
   /** Force a brand new tab (slot) instead of replacing the current page. */
@@ -98,6 +99,10 @@ export interface PageNavigation {
    *  them; `null` when it no longer edits. Through `useTabEditing`.
    *  Absent on a body that isn't the tab's current page. */
   setEditing?(editing: TabEditing | null): void;
+  /** Put the page's actions on its tab's right-click menu too (the same
+   *  ones its nav bar draws); `null` when it has none. Through
+   *  `useTabActions`. Absent on a body that isn't the tab's current page. */
+  setTabActions?(actions: readonly PageAction[] | null): void;
   /** The page this body draws: its entry's ref (`tabs/session.ts`). */
   ref?: TabRef;
   /** **View params** — this tab's address: what the page shows (its
@@ -172,6 +177,26 @@ export function useTabEditing({ dirty, save, find }: TabEditing): void {
     if (!set) return;
     set({ dirty, save: () => saveRef.current(), ...(finds ? { find: () => findRef.current?.() } : {}) });
   }, [set, dirty, finds]);
+  useEffect(() => {
+    if (!set) return;
+    return () => set(null);
+  }, [set]);
+}
+
+/**
+ * Put the page's actions on its tab's right-click menu: one source for the
+ * nav bar and the tab (an agent session's Rename…, Stop Agent). The latest
+ * actions are the ones run. A no-op outside a tab.
+ */
+export function useTabActions(actions: readonly PageAction[]): void {
+  const set = useContext(PageNavigationContext)?.setTabActions;
+  const key = actions.map((a) => `${a.id}:${a.label}:${a.disabled ? 1 : 0}`).join("|");
+  const latest = useRef(actions);
+  latest.current = actions;
+  useEffect(() => {
+    if (!set) return;
+    set(latest.current.length > 0 ? latest.current.map((a) => ({ ...a, run: () => latest.current.find((b) => b.id === a.id)?.run() })) : null);
+  }, [set, key]);
   useEffect(() => {
     if (!set) return;
     return () => set(null);

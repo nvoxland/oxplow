@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Page } from "../tabs/Page.js";
 import { useHistoryState } from "../tabs/useHistoryState.js";
-import { useOptionalPageNavigation, usePageTitle } from "../tabs/PageNavigationContext.js";
+import { useOptionalPageNavigation, usePageTitle, useTabActions } from "../tabs/PageNavigationContext.js";
 import type { TabRef } from "../tabs/tabState.js";
 import type { Stream } from "../tauri-bridge/index.js";
 import { getLens, querySql, runLens, type LensRun, type SqlCell } from "../api.js";
@@ -154,6 +154,8 @@ export function LensPage({ lensId, params, title: pageTitle, titleFrom, stream, 
 
   // The lens's own toolbar, handed up by its view for the nav bar.
   const [lensActions, setLensActions] = useState<PageAction[]>([]);
+  // The same actions on the tab's right-click menu.
+  useTabActions(lensActions);
   const actions: PageAction[] = [
     { id: "lens-refresh", label: "Refresh", run: () => void refresh() },
     ...lensActions,

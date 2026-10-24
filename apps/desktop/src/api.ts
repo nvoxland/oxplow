@@ -1,7 +1,6 @@
 import { commands } from "./tauri-bridge/generated/bindings.js";
 import type {
   BackgroundTask,
-  ListedConversation,
   TabReport,
   HookEnvelope,
   OpOutcome,
@@ -930,12 +929,6 @@ export async function openAgentSession(
   ).result as AgentSessionRecord;
 }
 
-/** The person stops an agent: its process ends, the slot and saved
- *  conversation stay, and nothing spawns it again until `startAgentSession`. */
-export async function stopAgentSession(sessionId: string): Promise<void> {
-  await runCommand("oxplow.agent_session.stop", { session: sessionId });
-}
-
 /** The person starts a stopped agent again (its tab then spawns it). */
 export async function startAgentSession(sessionId: string): Promise<void> {
   await runCommand("oxplow.agent_session.start", { session: sessionId });
@@ -945,35 +938,6 @@ export async function startAgentSession(sessionId: string): Promise<void> {
  *  Destructive: the caller confirms first. */
 export async function startAgentSessionFresh(sessionId: string, confirmed: boolean): Promise<void> {
   await runCommand("oxplow.agent_session.start_fresh", { session: sessionId }, confirmed);
-}
-
-/// The saved conversations an agent session's harness keeps for its
-/// worktree, newest first (`list_native_conversations`).
-export async function listNativeConversations(sessionId: string): Promise<ListedConversation[]> {
-  return unwrap(await commands.listNativeConversations(sessionId));
-}
-/// Move an agent session to one of its harness's saved conversations.
-export async function resumeConversation(sessionId: string, conversation: string): Promise<void> {
-  await runCommand("oxplow.agent_session.resume_conversation", { session: sessionId, conversation });
-}
-
-/// Have an agent session's next launch fork a saved conversation (the one
-/// it is on, without `conversation`).
-export async function forkConversation(sessionId: string, conversation?: string): Promise<void> {
-  await runCommand("oxplow.agent_session.fork_conversation", {
-    session: sessionId,
-    ...(conversation ? { conversation } : {}),
-  });
-}
-
-export async function renameAgentSession(sessionId: string, title: string): Promise<void> {
-  await runCommand("oxplow.agent_session.rename", { session: sessionId, title });
-}
-
-/** Name the session's conversation in its harness's own UI (Codex's thread
- *  list), where the harness can; oxplow's alias is `renameAgentSession`. */
-export async function renameNativeConversation(sessionId: string, name: string): Promise<void> {
-  unwrap(await commands.renameNativeConversation(sessionId, name));
 }
 
 export async function selectThread(streamId: string, threadId: string): Promise<ThreadState> {

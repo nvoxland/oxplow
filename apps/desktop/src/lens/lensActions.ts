@@ -121,7 +121,8 @@ export async function openAfterAction(
 /** The one text field a form action's form asks for, when that is all it
  *  asks (its fields, narrowed to `start.fields` when set, less the fixed
  *  ones): such a form is a prompt strip at the top of the lens, not a
- *  slideover. Anything else — two fields, a choice, markdown — is null.
+ *  slideover. Anything else — two fields, a choice, a field picked from a
+ *  list (`choices`), markdown — is null.
  *  `secret`: the field is a secret (`secretFields`), masked and never
  *  required. */
 export function promptField(start: FormStart): (Field & { secret: boolean }) | null {
@@ -132,6 +133,8 @@ export function promptField(start: FormStart): (Field & { secret: boolean }) | n
   const fixed = new Set(start.fixed);
   const editable = listed.filter((f) => !fixed.has(f.path));
   const only = editable.length === 1 ? editable[0]! : null;
+  // A field picked from a list is a select: the slideover's, never a strip.
+  if (only && start.choices?.[only.path]) return null;
   return only?.kind === "text" ? { ...only, secret: secretFields(schema, specs).has(only.path) } : null;
 }
 

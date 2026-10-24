@@ -261,8 +261,6 @@ macro_rules! oxplow_command_table {
                 ai_settings => $crate::commands::ai::ai_settings {} -> ::oxplow_app::ai_service::AiSettings,
                 read_ai_call => $crate::commands::ai::read_ai_call { id: ::oxplow_domain::AiCallId, body: ::oxplow_app::ai_calls::AiCallBody } -> Option<::oxplow_app::event_bodies::EventBody>,
                 report_tabs => $crate::commands::tabs::report_tabs { report: oxplow_app::client_reports::TabReport } -> (),
-                rename_native_conversation => $crate::commands::conversations::rename_native_conversation { session_id: String, name: String } -> (),
-                list_native_conversations => $crate::commands::conversations::list_native_conversations { session_id: String } -> Vec<$crate::commands::conversations::ListedConversation>,
                 // comments
                 list_comments_for_target => $crate::commands::comments::list_comments_for_target { target: String } -> Vec<::oxplow_domain::CommentThread>,
                 list_comments_for_stream => $crate::commands::comments::list_comments_for_stream { stream_id: ::oxplow_domain::StreamId } -> Vec<::oxplow_domain::CommentThread>,

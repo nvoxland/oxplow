@@ -214,7 +214,7 @@ pages:
   - { id: metric-detail, title: Metric, label: "{{row.title}}", for: oxplow/metric, default: true, lens: metric }
   - { id: lens, title: Lens, for: oxplow/lens, default: true, component: "oxplow:lens" }
   - { id: answer, title: Answer, label: "{{row.title}}", for: oxplow/answer, default: true, lens: answer }
-  - { id: agent-session, title: Agent Session, for: oxplow/agent_session, default: true, pinned: true, component: "oxplow:agent-session" }
+  - { id: agent-session, title: Agent Session, label: "{{row.display_name}}", for: oxplow/agent_session, default: true, pinned: true, lens: agent-session }
   - { id: resource, title: Resource, component: "oxplow:resource" }
 # What oxplow's URIs name (`oxplow:oxplow/<resource>?<params>`): declared
 # here like any extension's resources, so none is special

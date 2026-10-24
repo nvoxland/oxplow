@@ -8,10 +8,6 @@ import {
   markThread,
   createThread,
   openAgentSession,
-  renameAgentSession,
-  renameNativeConversation,
-  startAgentSession,
-  stopAgentSession,
   getThreadState,
   type AgentStatus,
   type AgentStatusEntry,
@@ -57,15 +53,12 @@ import { RailHud } from "./components/RailHud/RailHud.js";
 import type { TabRef } from "./tabs/tabState.js";
 import { navigationKey } from "./tabs/navigationKeys.js";
 import { PageNavigationContext, type PageNavigation, type TabEditing } from "./tabs/PageNavigationContext.js";
+import type { PageAction } from "./kit/actions.js";
 import { removeBookmark, setBookmark, useBookmarks } from "./tabs/bookmarks.js";
 import type { BookmarkScope } from "./tabs/bookmarks.js";
-import { AgentSessionPage } from "./pages/AgentSessionPage.js";
-import type { MenuItem } from "./menu.js";
-import { InlinePromptStrip } from "./components/InlinePromptStrip.js";
 import { reconcileSessionTabs } from "./tabs/sessionTabs.js";
 import { newThreadOpening } from "./newThreadSession.js";
 import { sessionLabel } from "./agentKinds.js";
-import { renameHint, renameSession } from "./sessionRename.js";
 import { useAgentHarnesses } from "./useAgentHarnesses.js";
 import { readThreadSessions, useThreadSessions } from "./agentSessions.js";
 import { rollUpAgentStatus, threadStatuses } from "./agentStatusRollup.js";
@@ -88,7 +81,6 @@ import { installContextMenuSuppressor } from "./context-menu.js";
 import { QuickOpenOverlay } from "./components/QuickOpenOverlay.js";
 import { NON_TRACKED_KINDS } from "./components/RailHud/history.js";
 import { buildTabReport } from "./tabs/tabReport.js";
-import type { PickerMode } from "./components/conversationRows.js";
 import { useTabSessions } from "./tabs/useTabSessions.js";
 import {
   activate,
@@ -222,9 +214,7 @@ export function App() {
   // the awaiting session asks.
   const [sessionStatuses, setSessionStatuses] = useState<Record<string, AgentStatusEntry>>({});
   // The agent session whose tab's Rename… strip is open.
-  const [renamingSessionId, setRenamingSessionId] = useState<string | null>(null);
   // The conversation picker open over a session's terminal, and for what.
-  const [conversationPicker, setConversationPicker] = useState<{ sessionId: string; mode: PickerMode } | null>(null);
   const openHandoffs = useOpenHandoffs();
   const { statuses: agentStatuses, questions: agentQuestions } = useMemo(
     () => threadStatuses(Object.values(sessionStatuses)),
@@ -273,6 +263,26 @@ export function App() {
       }
     };
     editingSettersRef.current[tabId] = set;
+    return set;
+  }, []);
+  // Per-tab page actions (`useTabActions`): a page's actions are its tab's
+  // right-click menu too. One setter per tab, kept.
+  const [tabActions, setTabActionsState] = useState<Record<string, readonly PageAction[]>>({});
+  const actionSettersRef = useRef<Record<string, (actions: readonly PageAction[] | null) => void>>({});
+  const actionsSetterFor = useCallback((tabId: string) => {
+    const known = actionSettersRef.current[tabId];
+    if (known) return known;
+    const set = (actions: readonly PageAction[] | null) =>
+      setTabActionsState((prev) => {
+        if (!actions) {
+          if (!(tabId in prev)) return prev;
+          const next = { ...prev };
+          delete next[tabId];
+          return next;
+        }
+        return { ...prev, [tabId]: actions };
+      });
+    actionSettersRef.current[tabId] = set;
     return set;
   }, []);
   const [error, setError] = useState<string | null>(null);
@@ -1561,92 +1571,9 @@ export function App() {
     // One renderer per page kind. `Record<PageKind, …>` makes the table
     // exhaustive: a kind without a renderer (or a renderer for a kind that
     // no longer exists) is a compile error, not a blank tab.
-    // The features a session's harness declares (`agent_harness`).
-    const harnessFeatures = (harness: string): string[] => harnesses.find((h) => h.id === harness)?.features ?? [];
     // The built-in renderers whose bodies draw on the window's own state;
     // the rest are `builtInPages`. Each reads what it shows from its URI.
     const appRenderers: Record<AppRendererName, (ref: TabRef, nav: SlotNav) => CenterTab | null> = {
-      "agent-session": (ref) => {
-        const sessionId = paramOf(ref.id, "id") ?? "";
-        const session = selectedThreadSessions?.find((candidate) => candidate.id === sessionId) ?? null;
-        const status = sessionStatuses[sessionId];
-        const label = session ? session.displayName || sessionLabel(harnesses, session) : "Agent";
-        // What can be done to the session: its tab's right-click menu and its
-        // page's actions in the nav bar.
-        const sessionMenu: MenuItem[] = [
-            {
-              id: "agent-session.rename",
-              label: "Rename…",
-              enabled: !!session,
-              run: () => setRenamingSessionId(sessionId),
-            },
-            // Its harness's saved conversations: switch to one, or fork one.
-            ...(session && harnessFeatures(session.harness).includes("conversation_list")
-              ? [
-                  {
-                    id: "agent-session.switch-conversation",
-                    label: "Switch Conversation…",
-                    enabled: true,
-                    run: () => setConversationPicker({ sessionId, mode: "resume" }),
-                  },
-                  ...(harnessFeatures(session.harness).includes("conversation_fork")
-                    ? [
-                        {
-                          id: "agent-session.fork-conversation",
-                          label: "Fork Conversation…",
-                          enabled: true,
-                          run: () => setConversationPicker({ sessionId, mode: "fork" as const }),
-                        },
-                      ]
-                    : []),
-                ]
-              : []),
-            // A terminal agent's process: stopping keeps the slot and the
-            // saved conversation, and it stays stopped until started.
-            ...(session
-              ? [
-                  session.stoppedByUser
-                    ? {
-                        id: "agent-session.start",
-                        label: "Start Agent",
-                        enabled: true,
-                        run: () => void startAgentSession(sessionId).catch(() => undefined),
-                      }
-                    : {
-                        id: "agent-session.stop",
-                        label: "Stop Agent",
-                        enabled: true,
-                        run: () => void stopAgentSession(sessionId).catch(() => undefined),
-                      },
-                ]
-              : []),
-          ];
-        return {
-          id: ref.id,
-          label,
-          closable: true,
-          pinned: true,
-          agentStatus: status?.status ?? "waiting",
-          question: status?.question,
-          icon: session ? harnesses.find((h) => h.id === session.harness)?.icon : undefined,
-          contextMenu: sessionMenu,
-          render: () => (
-            <AgentSessionPage
-              thread={selectedThread}
-              session={session}
-              title={label}
-              harnessIcon={session ? harnesses.find((h) => h.id === session.harness)?.icon : undefined}
-              actions={sessionMenu.map((m) => ({ id: m.id, label: m.label, disabled: !m.enabled, run: () => m.run?.() }))}
-              stream={stream}
-              visible={effectiveCenterActive === ref.id}
-              onOpenFile={openTerminalPath}
-              canChooseConversation={!!session && harnessFeatures(session.harness).includes("conversation_list")}
-              picker={conversationPicker?.sessionId === sessionId ? conversationPicker.mode : null}
-              onPicker={(mode) => setConversationPicker(mode ? { sessionId, mode } : null)}
-            />
-          ),
-        };
-      },
       lens: (ref, nav) => {
         const lensId = paramOf(ref.id, "lens") ?? "";
         return {
@@ -1712,6 +1639,7 @@ export function App() {
             id: ref.id,
             label: tabLabel(page, renderedParams(ref.id)),
             closable: true,
+            ...(page.pinned ? { pinned: true } : {}),
             // A renderer's lens is run with the URI it shows.
             render: () => (
               <LensPage lensId={lens} title={tabLabel(page, renderedParams(ref.id))} titleFrom={labelReadsRow(page) ? (row) => tabLabel(page, renderedParams(ref.id), row) : undefined} params={{ uri: identityOf(ref.id) ?? ref.id }} renders={ref.id} stream={stream} onOpenPage={nav.navOpen} comments={page.comments} threadId={selectedThread?.id ?? null} />
@@ -1798,6 +1726,7 @@ export function App() {
         setTitle: (t: string) => setPageTitle(tabId, t),
         title: registeredTitle,
         setEditing: isCurrent ? editingSetterFor(tabId) : undefined,
+        setTabActions: isCurrent ? actionsSetterFor(tabId) : undefined,
         ask: parseUri(ref.id) ? { ref: ref.id } : undefined,
         bookmark: {
           scope: bookmarkScope,
@@ -1849,6 +1778,25 @@ export function App() {
         tab.label = registeredTitle;
       }
       if (isCurrent && dirtyTabs[tabId]) tab.dirty = true;
+      // The page's actions are its tab's menu (ahead of the strip's own).
+      const pageActions = isCurrent ? tabActions[tabId] : undefined;
+      if (pageActions) {
+        tab.contextMenu = [
+          ...(tab.contextMenu ?? []),
+          ...pageActions.map((a) => ({ id: a.id, label: a.label, enabled: !a.disabled, run: () => void a.run() })),
+        ];
+      }
+      // An agent session's tab: its harness's logo and its status dot.
+      if (typeOf(ref.id) === "oxplow/agent_session") {
+        const sessionId = paramOf(ref.id, "id") ?? "";
+        const session = selectedThreadSessions?.find((candidate) => candidate.id === sessionId) ?? null;
+        const status = sessionStatuses[sessionId];
+        tab.pinned = true;
+        tab.agentStatus = status?.status ?? "waiting";
+        tab.question = status?.question;
+        tab.icon = session ? harnesses.find((h) => h.id === session.harness)?.icon : undefined;
+        if (session && !registeredTitle) tab.label = session.displayName || sessionLabel(harnesses, session);
+      }
       tab.render = () => (
         <PageNavigationContext.Provider value={navValue}>
           {innerRender()}
@@ -1887,6 +1835,8 @@ export function App() {
     setPageTitle,
     dirtyTabs,
     editingSetterFor,
+    tabActions,
+    actionsSetterFor,
     openTab,
     bookmarks,
     workspaceContext.vcsEnabled,
@@ -2012,41 +1962,6 @@ export function App() {
                 else closePageTab(id);
               }}
               onReorder={handleReorderCenterTabs}
-              header={renamingSessionId ? (() => {
-                const renaming = selectedThreadSessions?.find((c) => c.id === renamingSessionId);
-                const harness = renaming ? harnesses.find((h) => h.id === renaming.harness) : undefined;
-                const harnessTitle = harness?.title ?? renaming?.harness ?? "the agent";
-                const hint = renameHint({
-                  title: renaming?.title ?? "",
-                  nativeTitle: renaming?.nativeTitle ?? "",
-                  displayName: renaming?.displayName ?? "",
-                  harnessTitle,
-                  nativeRename: !!harness?.features.includes("native_rename"),
-                });
-                return (
-                  <InlinePromptStrip
-                    testId="rename-session"
-                    message={hint.message}
-                    confirmLabel="Rename"
-                    fields={[{ key: "title", initialValue: renaming?.title ?? "", placeholder: hint.placeholder, optional: true }]}
-                    toggle={hint.toggleLabel ? { key: "native", label: hint.toggleLabel } : undefined}
-                    onCancel={() => setRenamingSessionId(null)}
-                    onSubmit={(values) => {
-                      const sessionId = renamingSessionId;
-                      setRenamingSessionId(null);
-                      void renameSession({
-                        alias: values.title ?? "",
-                        native: values.native === "true",
-                        harnessTitle,
-                        setAlias: (alias) => renameAgentSession(sessionId, alias),
-                        setNative: (name) => renameNativeConversation(sessionId, name),
-                      }).catch((e: unknown) =>
-                        recordOpError({ label: "Rename session", message: e instanceof Error ? e.message : String(e) }),
-                      );
-                    }}
-                  />
-                );
-              })() : undefined}
             />
           ) : <div style={{ padding: 12 }}>loading…</div>}
           {/* Generic comment layer for every plain-DOM page. Mounted once

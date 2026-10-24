@@ -26,9 +26,19 @@ mock.module("../api.js", () => ({
     actions.push([action, row, input]);
     return { result: null, audit_id: 2, event_id: null, inverse: null };
   },
+  startAgentSession: async (id: string) => void commands.push(["start", id]),
 }));
 mock.module("../terminal/TerminalView.js", () => ({
-  TerminalView: ({ uri }: { uri: string }) => <div data-testid={`view-${uri}`}>{uri}</div>,
+  TerminalView: ({ uri, agent }: { uri: string; agent?: { stopped: boolean; conversation: string | null; onStart(): void } }) => (
+    <div data-testid={`view-${uri}`} data-stopped={agent ? String(agent.stopped) : "shell"} data-conversation={agent?.conversation ?? ""}>
+      {agent ? (
+        <button type="button" data-testid="start" onClick={agent.onStart}>
+          Start
+        </button>
+      ) : null}
+      {uri}
+    </div>
+  ),
 }));
 const { TerminalViz } = await import("./TerminalViz.js");
 const { LensStreamContext } = await import("./LensStream.js");
@@ -106,4 +116,28 @@ test("the strip's Close runs the lens's close action on that row", async () => {
   fireEvent.click(v.getByTestId("menu-item-terminal.close"));
   await waitFor(() => expect(actions[0]?.[0]).toBe("close"));
   expect(actions[0]?.[1]).toEqual({ uri: B, title: "Two", terminal: "trm2" });
+});
+
+test("an agent session's row is its agent: stopped and what it's bound to come from the row, Start runs its command", async () => {
+  const S = "oxplow:oxplow/agent_session?id=ses4";
+  const run = {
+    lens: {
+      id: "oxplow-foundation/agent-session-terminal",
+      viz: "terminal",
+      terminal: { of: "uri", title: null, stopped: "stopped", conversation: "conversation", thread: "thread" },
+      columns: [],
+      params: [],
+      actions: [],
+    },
+    params: { uri: S },
+    result: { columns: ["uri", "thread", "stopped", "conversation"], rows: [[S, "oxplow:oxplow/thread?id=thr1", 1, "abc:0"]], truncated: false, reads: { models: [], tables: [], measures: [] } },
+  } as unknown as LensRun;
+  const v = view(run);
+  const pane = v.getByTestId(`view-${S}`);
+  expect(pane.dataset.stopped).toBe("true");
+  expect(pane.dataset.conversation).toBe("abc:0");
+  fireEvent.click(v.getByTestId("start"));
+  await waitFor(() => expect(commands).toContainEqual(["start", "ses4"]));
+  // A lens of an agent's terminal never opens a shell.
+  expect(commands.some(([name]) => name === "oxplow.terminal.open")).toBe(false);
 });

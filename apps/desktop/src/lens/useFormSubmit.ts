@@ -4,6 +4,7 @@ import type { CommandOutcome } from "../tauri-bridge/generated/bindings.js";
 import { showToast } from "../components/toastStore.js";
 import { fieldErrors, needsConfirmation } from "../ipc-error.js";
 import { recordOpError } from "../opErrors.js";
+import { undoCommand } from "../api.js";
 
 /** A form submitted, as `FormViz` and `ActionForm` both submit one: the
  *  person's input runs; a command that asks is held for them to confirm;
@@ -23,7 +24,20 @@ export function useFormSubmit(
       const outcome = await run(input, confirmed);
       setPending(null);
       setServerErrors(undefined);
-      showToast({ message: `${label}: done.` });
+      // A run that came back undoable offers its Undo, as a pressed action's
+      // does (the person's click on Undo is their confirmation of it).
+      const auditId = outcome.inverse && outcome.audit_id != null ? outcome.audit_id : null;
+      showToast({
+        message: `${label}: done.`,
+        ...(auditId === null
+          ? {}
+          : {
+              onUndo: () =>
+                void undoCommand(auditId, true).catch((e: unknown) =>
+                  recordOpError({ label: `Undo ${label}`, message: e instanceof Error ? e.message : String(e) }),
+                ),
+            }),
+      });
       onDone(outcome);
     } catch (e) {
       const fields = fieldErrors(e);

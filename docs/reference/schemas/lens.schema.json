@@ -1260,6 +1260,14 @@
             "null"
           ],
           "default": null
+        },
+        "thread": {
+          "description": "The agent's thread (its URI): where its Escape interrupt is logged.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
         }
       },
       "additionalProperties": false

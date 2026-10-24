@@ -84,6 +84,11 @@ pub struct RenameInput {
     /// The session (`ses3`).
     pub session: String,
     pub title: String,
+    /// Also name the conversation in the harness's own UI (Codex's thread
+    /// list): only where the harness declares `native_rename`, while its
+    /// conversation is observed. Not undone with the rename.
+    #[serde(default)]
+    pub native: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
@@ -262,24 +267,72 @@ pub fn open_op(config: super::config_commands::ConfigTarget, harnesses: HarnessR
     )
 }
 
-/// `agent_session.rename { session, title }`; undone by renaming it back.
-pub fn rename_op() -> Op {
+/// `agent_session.rename { session, title, native? }`; undone by renaming
+/// it back. With `native`, the harness names the conversation too, once
+/// the rename commits (checked first: a harness that can't, or one not
+/// observing the conversation now, refuses the whole rename).
+pub fn rename_op(
+    chat: Arc<crate::chat::manager::ChatManager>,
+    capabilities: Arc<crate::capabilities::CapabilityRegistry>,
+) -> Op {
     Op::new(
         "agent_sessions.write",
         "rename",
         schema::<RenameInput>(),
         true,
-        Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
+        Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
             let input: RenameInput = parse(input)?;
             let session = load(ctx, &input.session)?;
             in_own_stream(ctx, session.thread_id)?;
+            let native = input.title.trim().to_string();
+            if input.native {
+                let can = capabilities
+                    .get("agent_harness", &session.harness)
+                    .is_some_and(|i| {
+                        i.features.get("native_rename").and_then(|v| v.as_bool()) == Some(true)
+                    });
+                if !can {
+                    return Err(invalid(
+                        "/native",
+                        format!(
+                            "`{}` can't rename its conversation; Rename sets oxplow's name for the session only",
+                            session.harness
+                        ),
+                    ));
+                }
+                if native.is_empty() {
+                    return Err(invalid("/title", "name the conversation"));
+                }
+                if !chat.is_open(&session.id) {
+                    return Err(invalid(
+                        "/native",
+                        "the session's conversation isn't being observed right now; open its tab and try again",
+                    ));
+                }
+            }
             let before = set_title_tx(ctx.conn, session.id, &input.title, Timestamp::now())?
                 .unwrap_or_default();
             let after = get_tx(ctx.conn, session.id)?
                 .ok_or_else(|| invalid("/session", "the session vanished"))?;
+            let mut out = result(&after);
+            out.result["native_renamed"] = json!(input.native);
+            let after_commit: Option<Box<dyn FnOnce() + Send + Sync>> = if input.native {
+                let chat = chat.clone();
+                let id = session.id;
+                Some(Box::new(move || {
+                    tokio::spawn(async move {
+                        if let Err(e) = chat.rename_native(&id, native).await {
+                            tracing::warn!(session = %id, error = %e, "the harness didn't take the conversation's name");
+                        }
+                    });
+                }))
+            } else {
+                None
+            };
             Ok(HandlerOutput {
                 inverse: call(RENAME, json!({ "session": input.session, "title": before })),
-                ..result(&after)
+                after_commit,
+                ..out
             })
         })),
     )
@@ -612,10 +665,12 @@ pub fn ops(
     config: super::config_commands::ConfigTarget,
     harnesses: HarnessRegistry,
     processes: crate::agent_sessions::SessionProcesses,
+    chat: Arc<crate::chat::manager::ChatManager>,
+    capabilities: Arc<crate::capabilities::CapabilityRegistry>,
 ) -> Vec<Op> {
     vec![
         open_op(config, harnesses),
-        rename_op(),
+        rename_op(chat, capabilities),
         close_op(processes.clone()),
         reopen_op(),
         stop_op(processes.clone()),
@@ -1165,6 +1220,42 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(get(&fx, fx.session).await.title, "");
+    }
+
+    /// `native: true` also names the conversation in the harness's own UI,
+    /// which only a harness declaring `native_rename` can, and only while
+    /// its conversation is observed: otherwise the rename is refused and
+    /// nothing changes. Without it, only oxplow's name changes.
+    #[tokio::test]
+    async fn renaming_natively_needs_a_harness_that_can() {
+        let fx = services_with_effort().await;
+        let r = fx.session.to_string();
+        let err = run(
+            &fx,
+            &Actor::Human,
+            RENAME,
+            json!({ "session": r, "title": "tests", "native": true }),
+            false,
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+        assert!(
+            err.contains("can't rename its conversation") || err.contains("isn't being observed"),
+            "{err}"
+        );
+        assert_eq!(get(&fx, fx.session).await.title, "");
+        let out = run(
+            &fx,
+            &Actor::Human,
+            RENAME,
+            json!({ "session": r, "title": "tests", "native": false }),
+            false,
+        )
+        .await
+        .unwrap();
+        assert_eq!(out.result["native_renamed"], false);
+        assert_eq!(get(&fx, fx.session).await.title, "tests");
     }
 
     /// Closing a thread closes its sessions (`thread_closed`).

@@ -1565,6 +1565,8 @@ impl Services {
             config_target.clone(),
             harnesses.clone(),
             session_processes.clone(),
+            chat.clone(),
+            capabilities.clone(),
         ))
         .chain(commands::effort::ops(work_items.clone()))
         .chain(commands::hint::ops())

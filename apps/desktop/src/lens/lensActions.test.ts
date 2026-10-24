@@ -171,6 +171,8 @@ test("promptField is null for more than one field, a fixed one, or a field that 
   expect(promptField(start({ decision: { type: "string", enum: ["fix", "wontfix"] } }))).toBeNull();
   expect(promptField(start({ body: { type: "string", contentMediaType: "text/markdown" } }))).toBeNull();
   expect(promptField(start({ n: { type: "integer" } }))).toBeNull();
+  // A field picked from a list is a select, which only the slideover draws.
+  expect(promptField(start({ session: { type: "string" }, conversation: { type: "string" } }, { fixed: ["session"], choices: { conversation: [{ value: "c1", label: "One", group: null }] } }))).toBeNull();
 });
 
 // A secret (the schema's `writeOnly`, or a form field that says `secret`)

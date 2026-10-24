@@ -140,8 +140,6 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::list_services,
             commands::generated::validate_extension,
             commands::generated::report_tabs,
-            commands::generated::list_native_conversations,
-            commands::generated::rename_native_conversation,
             // The sign-in redirect, caught by the shell (P10).
             commands::oauth_redirect::listen_for_oauth_redirect,
             commands::oauth_redirect::await_oauth_redirect,

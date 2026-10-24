@@ -738,8 +738,8 @@ that asks is never one: it runs.
    it again; its `decision` is in `v_command_proposal`). Other MCP
    tools that run a command report the same message as an error. The
    desktop shows a thread's pending proposals where the conversation is
-   (P9.A3: `ThreadWaiting` above an agent's terminal, and
-   `useThreadProposals`; usability.md
+   (P9.A3: the agent session page's `approvals` section above its
+   terminal, narrowed to the thread; usability.md
    "Agent proposals").
 
 **Deciding** is a person's (`Actor::Human`; an agent, a lens or the

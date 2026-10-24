@@ -664,6 +664,9 @@ pub struct LensTerminal {
     /// What the agent is bound to; a change opens it again.
     #[serde(default)]
     pub conversation: Option<String>,
+    /// The agent's thread (its URI): where its Escape interrupt is logged.
+    #[serde(default)]
+    pub thread: Option<String>,
 }
 
 /// `answer` viz: the answer the first row names, and the lens it was kept
@@ -6300,7 +6303,7 @@ impl Lens {
         }
         if let Some(t) = &self.terminal {
             out.extend(
-                [&t.of, &t.title, &t.stopped, &t.conversation]
+                [&t.of, &t.title, &t.stopped, &t.conversation, &t.thread]
                     .into_iter()
                     .flatten()
                     .map(|k| ("terminal", k)),
@@ -10781,6 +10784,7 @@ commands:
                 title: Some("t".into()),
                 stopped: Some("s".into()),
                 conversation: Some("c".into()),
+                thread: None,
             })
         );
         assert!(t.fills);

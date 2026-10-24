@@ -465,12 +465,13 @@ conversation, written to `agent_session.native_title`. **Two names.**
 the fallback back), `native_title` the harness's own; a tab shows
 `v_agent_session.display_name` (alias, else native, else harness and day).
 Rename can also name the conversation in the harness, only where it
-declares `native_rename`: the UI-only RPC `rename_native_conversation`
-runs `ChatManager::rename_native` → `Connection::rename` on the session's
-observer connection (an agent whose connection can't says so; a session
-whose observer isn't running is refused). The desktop does the alias first,
-then the native name; if the second fails it says the alias was saved
-and the harness didn't take the name (`sessionRename.ts`). The new name
+declares `native_rename`: `oxplow.agent_session.rename { session, title,
+native: true }` checks the feature and that the session's observer runs
+(refusing the whole rename otherwise, so nothing changes), sets the alias,
+and after commit runs `ChatManager::rename_native` → `Connection::rename`
+on the observer connection; a late failure there is logged, the alias kept
+(the result says `native_renamed`). The agent session page's **Rename…**
+is a form over it (the title, and the box). The new name
 returns through `thread/name/updated` into `native_title` like any other.
 The UI reads each
 harness's features from `list_agent_harnesses` (`HarnessListing.features`),
@@ -654,8 +655,9 @@ stream on another host (no `HOME` passed), reads as unknown.
 
 What can be resumed is listed two ways, both reads of
 `AgentHarness::conversations` (`live_models::harness_conversations`):
-for an open session, `list_native_conversations` (the picker's "Choosing
-another conversation"); for a thread with no session in hand, the
+for an open session, the `agent-session-conversations` choices lens over
+`v_agent_conversation` (the page's Switch / Fork Conversation… forms:
+"Choosing another conversation" in terminal.md); for a thread with no session in hand, the
 `new-session-earlier` lens over `v_agent_conversation` (the New Session
 page, "Earlier sessions"), which adds the stream's closed sessions and says per row whether taking it
 reopens, resumes (`agent_session.open { resume }`), switches to a tab or

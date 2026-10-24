@@ -23,7 +23,6 @@ pub mod bus;
 pub mod changes;
 pub mod comments;
 pub mod config;
-pub mod conversations;
 pub mod dashboards;
 pub mod effort;
 pub mod extensions;

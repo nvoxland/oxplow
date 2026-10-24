@@ -241,10 +241,6 @@ pub const MANIFEST: &[Capability] = &[
     ),
     both_named("validate_extension", "validate_extension", "oxplow_validate_extension"),
     ui(
-        "list_native_conversations",
-        "a harness's saved conversations, for the person choosing one to resume or fork (their selection)",
-    ),
-    ui(
         "report_tabs",
         "the tabs a window shows, which an agent reads with `list_tabs` and `get_open_page`",
     ),
@@ -457,10 +453,6 @@ pub const MANIFEST: &[Capability] = &[
     // the MCP (agent) surface: it is the human keystroke/paste transport,
     // not an automation API — part of the no-automation guard (see
     // `.context/agent-model.md`).
-    ui(
-        "rename_native_conversation",
-        "the person's rename of a session's conversation in its harness's own UI: never an automation API",
-    ),
     ui(
         "open_terminal_session",
         "the person's terminal: never an automation API",

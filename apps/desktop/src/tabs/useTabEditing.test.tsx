@@ -50,3 +50,30 @@ test("outside a tab it does nothing", () => {
   const saved: string[] = [];
   expect(() => render(<Body dirty saved={saved} />)).not.toThrow();
 });
+
+// A page's actions are its tab's right-click menu too: registered while
+// it shows them, the latest run, cleared when it goes.
+test("a body's actions reach its tab, the latest one runs, and they clear when it goes", async () => {
+  const { useTabActions } = await import("./PageNavigationContext.js");
+  const registered: (readonly { id: string; run(): void }[] | null)[] = [];
+  const nav = { ...host([]), setTabActions: (a: readonly { id: string; run(): void }[] | null) => registered.push(a) } as PageNavigation;
+  const ran: string[] = [];
+  function Actions({ tag }: { tag: string }) {
+    useTabActions([{ id: "stop", label: "Stop Agent", run: () => ran.push(tag) }]);
+    return null;
+  }
+  const { rerender, unmount } = render(
+    <PageNavigationContext.Provider value={nav}>
+      <Actions tag="first" />
+    </PageNavigationContext.Provider>,
+  );
+  rerender(
+    <PageNavigationContext.Provider value={nav}>
+      <Actions tag="second" />
+    </PageNavigationContext.Provider>,
+  );
+  registered.at(-1)![0]!.run();
+  expect(ran).toEqual(["second"]);
+  unmount();
+  expect(registered.at(-1)).toBeNull();
+});
