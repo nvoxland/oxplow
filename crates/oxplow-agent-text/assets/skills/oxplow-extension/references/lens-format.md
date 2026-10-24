@@ -181,7 +181,11 @@ empty: Nothing is waiting on you.
 - **`launcher: { category: Activity }`** lists the lens under that
   launcher heading (Work, Code, Git, Activity, Knowledge, Data, Lenses,
   System; default Lenses). **`hidden: true`** keeps it out of the
-  launcher, for lenses only a slot shows.
+  launcher, for lenses only a slot shows. **`refresh: true`** puts a
+  Refresh button in the page's nav bar. Leave it out unless the lens
+  reads outside oxplow (an integration, a file on disk): a lens re-runs
+  on its own when the oxplow data it read changes. A `pages:` entry
+  takes `refresh: true` too.
 - **Something to run from the launcher** is a command with a `ui` (`ui:
   { label, group, input? }`): it can run another command with fixed input
   (a `scope:` + `op:` over the same operation, or a script composing

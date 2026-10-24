@@ -9,7 +9,7 @@ tell you when a page breaks these rules, each with the fix.
 
 | Place | What goes there | You write |
 |---|---|---|
-| **Nav bar** (the title row) | Actions on the whole page: Refresh, Copy, Add to Agent Context, Improve with Agent, and your lens's `actions` with no `row` or `group`. | `actions:` |
+| **Nav bar** (the title row) | Actions on the whole page: Copy, Add to Context, Refresh (only with `refresh: true`), and your lens's `actions` with no `row` or `group`. | `actions:` |
 | **Body** | The title, the description, then content: sections, tables, charts, forms. The only controls are on rows: a row's `select`, a row's actions (its menu), links. | `viz`, `sections`, `columns`, `empty` |
 | **Rail** (the side panel) | Filters: every param that narrows what the page shows. Selection: the row a click picked. About this page: your extension and its source file. | `params:` |
 | **Nowhere** | A value a click on the page sets. It is page state, never an input. | `columns[].select` |

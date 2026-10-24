@@ -42,7 +42,7 @@ test("the rail's params narrow a lens, a row click shows the next section its pi
   await expect(rail.getByTestId("lens-param-commit")).toHaveCount(0);
   await expect(rail.getByTestId("lens-rail-selection")).toContainText("Click a row to select it.");
   await expect(rail.getByTestId("lens-about-source")).toHaveText(".oxplow/extensions/commit-history/lenses/history.yaml");
-  // Copy and Add to Agent Context are the page's, in its nav bar.
+  // Copy and Add to Context are the page's, in its nav bar.
   await expect(page.getByTestId("action-lens-copy").filter({ visible: true })).toBeVisible();
   await expect(lens.getByTestId("lens-actions")).toHaveCount(0);
 

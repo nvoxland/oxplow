@@ -1669,7 +1669,7 @@ export function App() {
             ...(page.pinned ? { pinned: true } : {}),
             // A renderer's lens is run with the URI it shows.
             render: () => (
-              <LensPage lensId={lens} title={tabLabel(page, renderedParams(ref.id))} titleFrom={labelReadsRow(page) ? (row) => tabLabel(page, renderedParams(ref.id), row) : undefined} params={{ uri: identityOf(ref.id) ?? ref.id }} renders={ref.id} stream={stream} onOpenPage={nav.navOpen} comments={page.comments} threadId={selectedThread?.id ?? null} />
+              <LensPage lensId={lens} title={tabLabel(page, renderedParams(ref.id))} titleFrom={labelReadsRow(page) ? (row) => tabLabel(page, renderedParams(ref.id), row) : undefined} params={{ uri: identityOf(ref.id) ?? ref.id }} renders={ref.id} stream={stream} onOpenPage={nav.navOpen} comments={page.comments} refresh={page.refresh} threadId={selectedThread?.id ?? null} />
             ),
           };
         }

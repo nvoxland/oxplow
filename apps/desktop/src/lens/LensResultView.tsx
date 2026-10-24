@@ -113,7 +113,7 @@ type CellRenderer = (row: SqlCell[], col: DisplayColumn) => ReactNode;
  * Renders a lens run's result in the lens's viz. Shared by the lens page,
  * slots and dashboard lens tiles; `maxRows` caps rows for compact views.
  * A `grid` runs its child lenses with this run's params, in `streamId`.
- * Every lens has Copy and Add to Agent Context; its declared actions run
+ * Every lens has Copy and Add to Context; its declared actions run
  * their commands as the lens (row actions from a row's right-click menu).
  */
 export function LensResultView(props: LensResultViewProps) {
@@ -237,7 +237,7 @@ interface LensResultViewProps {
   streamId?: string | null;
   /** Small inline rendering for strips (a number as plain text). */
   compact?: boolean;
-  /** Show the toolbar (Copy, Add to Agent Context, actions); a grid's
+  /** Show the toolbar (Copy, Add to Context, actions); a grid's
    *  children leave it to the grid. Default true. */
   toolbar?: boolean;
   /** For a `viz: custom` lens whose component can't be shown: told why,
@@ -255,7 +255,7 @@ interface LensResultViewProps {
    *  `select`s it, with the row it picked); without it, rows are no
    *  picks. */
   onSetParam?(name: string, value: SqlCell, row?: PickedRow): void;
-  /** Hand Copy, Add to Agent Context and the whole-lens actions to the
+  /** Hand Copy, Add to Context and the whole-lens actions to the
    *  page (its nav bar) instead of drawing them above the body. */
   toolbarTo?(actions: PageAction[]): void;
   /** A document's part or a tile has no toolbar, but its whole-lens
@@ -349,7 +349,7 @@ export function useLensActions(run: LensRun, streamId: string | null) {
 
 export type LensActionsState = ReturnType<typeof useLensActions>;
 
-/** The toolbar's actions as the page's: Copy, Add to Agent Context and
+/** The toolbar's actions as the page's: Copy, Add to Context and
  *  the whole-lens actions, handed up whenever what they say changes. */
 function HandToolbar({ run, streamId, actions, marks, to }: { run: LensRun; streamId: string | null; actions: LensActionsState; marks: Marks; to(actions: PageAction[]): void }) {
   const [copied, setCopied] = useState(false);
@@ -397,7 +397,7 @@ function HandToolbar({ run, streamId, actions, marks, to }: { run: LensRun; stre
             }
           }),
       },
-      { id: "lens-add-to-context", label: "Add to Agent Context", run: () => addLensToContext(run, insertIntoAgent) },
+      { id: "lens-add-to-context", label: "Add to Context", run: () => addLensToContext(run, insertIntoAgent) },
       ...buttons.map((a) => ({
         id: `lens-action-${a.id}`,
         label: a.label,
@@ -429,7 +429,7 @@ function PartButtons({ run, actions }: { run: LensRun; actions: LensActionsState
   );
 }
 
-/** Copy, Add to Agent Context, and the lens's whole-lens actions (a row's
+/** Copy, Add to Context, and the lens's whole-lens actions (a row's
  *  are in its menu, a group's in its heading). */
 function LensToolbar({ run, streamId, actions, marks }: { run: LensRun; streamId: string | null; actions: LensActionsState; marks: Marks }) {
   const [copied, setCopied] = useState(false);
@@ -457,7 +457,7 @@ function LensToolbar({ run, streamId, actions, marks }: { run: LensRun; streamId
         {copied ? "Copied" : "Copy"}
       </button>
       <button type="button" data-testid="lens-add-to-context" onClick={() => addLensToContext(run, insertIntoAgent)}>
-        Add to Agent Context
+        Add to Context
       </button>
       {buttons.map((a) => (
         <button

@@ -274,6 +274,11 @@
       "type": "boolean",
       "default": false
     },
+    "refresh": {
+      "description": "Offer Refresh on its page. Off by default: a lens re-runs on its\nown when oxplow's data changes; turn it on for one that reads\noutside oxplow (an integration, a file on disk).",
+      "type": "boolean",
+      "default": false
+    },
     "actions": {
       "description": "Commands the lens offers (`{ id, label, command, input, row }`).\nParsed by [`parse_actions`].",
       "type": "array",

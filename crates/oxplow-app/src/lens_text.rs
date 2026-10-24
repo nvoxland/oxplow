@@ -1265,6 +1265,7 @@ mod tests {
                 fills: false,
                 launcher_category: None,
                 hidden: false,
+                refresh: false,
                 actions: Vec::new(),
                 alert: None,
                 needs: Vec::new(),

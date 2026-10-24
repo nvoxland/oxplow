@@ -2348,6 +2348,11 @@
           "description": "Its text takes comments, anchored to its URI.",
           "type": "boolean",
           "default": false
+        },
+        "refresh": {
+          "description": "Offer Refresh on it, for a lens that reads outside oxplow.",
+          "type": "boolean",
+          "default": false
         }
       },
       "additionalProperties": false,

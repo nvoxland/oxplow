@@ -225,3 +225,24 @@ test("a lens that fills (the loader says so) draws its title in the chrome and i
   expect(getByTestId("page-lens").querySelector("h1.ox-title")).toBeNull();
   expect(getByTestId("lens-document").parentElement!.style.flexGrow).toBe("1");
 });
+
+// A lens re-runs on its own when oxplow's data changes, so Refresh is
+// opt-in: the page's `refresh: true` brings it, and Improve with Agent is gone.
+test("Refresh is in the nav bar only when the page asks for it", async () => {
+  const ref = lensRef("x/y", {});
+  const without = render(
+    <PageNavigationContext.Provider value={nav(ref, [])}>
+      <LensPage lensId="x/y" params={{}} stream={null} onOpenPage={() => {}} />
+    </PageNavigationContext.Provider>,
+  );
+  await waitFor(() => expect(without.getByTestId("action-lens-add-to-context")).toBeTruthy());
+  expect(without.queryByTestId("action-lens-refresh")).toBeNull();
+  expect(without.queryByTestId("action-lens-improve-with-agent")).toBeNull();
+  cleanup();
+  const asked = render(
+    <PageNavigationContext.Provider value={nav(ref, [])}>
+      <LensPage lensId="x/y" params={{}} stream={null} onOpenPage={() => {}} refresh />
+    </PageNavigationContext.Provider>,
+  );
+  await waitFor(() => expect(asked.getByTestId("action-lens-refresh")).toBeTruthy());
+});
