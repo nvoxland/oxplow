@@ -74,6 +74,8 @@ export function CustomPageView({
         label: a.label,
         primary: a.primary,
         prominent: a.prominent,
+        submenu: a.submenu,
+        icon: a.icon,
         disabled: a.disabled,
         run: () => hostRef.current?.action(a.id),
       })),

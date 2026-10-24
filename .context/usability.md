@@ -289,17 +289,21 @@ markdown itself, nor edits it in a `<textarea>`.
 
 ## Menus a page or row gets from extensions
 
-- **Order is fixed.** A page's nav bar's ☰: the page's actions, then Ask,
-  then one submenu per `ui.group` with the commands about the page's
-  resource (their `ui.about`; none when none apply), then Open With and the
-  panels (`.context/pages-and-tabs.md` "The nav bar is core's"). A row's right-click menu: Ask About This, the lens's row
+- **Order is fixed.** A page's nav bar's ☰: oxplow's own first (Ask, then
+  the standard actions, in their order — the same spot on every page),
+  then the page's and its extensions' own sorted by label, a submenu by
+  its name (an action's `submenu` and a command's `ui.group` of the same
+  name share one), then Open With and the panels
+  (`.context/pages-and-tabs.md` "The nav bar is core's"). A row's right-click menu: Ask About This, the lens's row
   actions, then a separator and one submenu per `ui.group` with the
   commands about the row's ref (`refCommandMenuItems`). A Board card:
   Move To, then the same tail. The Navigator's thread menu ends with the
   same tail, the commands about that thread. A submenu opens on hover
   and on click; a click never closes the one its hover opened. Each runs as any offer does (asking first
-  when the command asks). Testids (the ☰ and a row menu alike):
-  `menu-item-ref-commands-<group>`, `menu-item-ref-command-<command id>`.
+  when the command asks). Testids: a row menu's group
+  `menu-item-ref-commands-<group>`, the ☰'s submenu
+  `menu-item-page-submenu-<name>`, a command in either
+  `menu-item-ref-command-<command id>`.
 
 ## A custom component is marked
 
@@ -566,8 +570,10 @@ not a pick and isn't in the address.
   rest are items of its ☰ menu, so the bar stays short whatever a page and
   its extensions add. Mark an action prominent only when it is what a
   person comes to the page to do (a list's New, the agent's Stop/Start, a
-  timeline's Today/Fit). A section's actions are `PageAction[]` too, at
-  its heading. A primary action is the accent button; one per place.
+  timeline's Today/Fit). A button with an `icon` is the icon alone, its
+  label the hover; give a prominent action one when the icon says it
+  plainly. A section's actions are `PageAction[]` too, at its heading. A
+  primary action is the accent button; one per place.
 - **A section is a heading over a rule**, no box (`kit/Section`). A card
   is a dashboard tile's, not a page section's.
 

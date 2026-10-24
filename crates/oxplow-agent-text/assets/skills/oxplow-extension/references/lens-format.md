@@ -237,10 +237,16 @@ empty: Nothing is waiting on you.
   shows in a compact panel too; it can't be a row action. Copy and Add
   to Agent Context are on every lens already — don't declare them.
   A lens page's actions without `row` or `group` go in its nav bar's ☰
-  menu. `prominent: true` keeps one a button in the bar instead: use it
-  only for what a person comes to the page to do (a list's New Dashboard,
-  an agent's Stop Agent). Several may be prominent; a row, group, drag or
-  edit action can't be.
+  menu, sorted by label after oxplow's own (Ask, Refresh, Copy, Add to
+  Agent Context, Improve with Agent). `submenu: <name>` puts one in a
+  submenu of that name, shared with the commands whose `ui.group` is the
+  same name. `prominent: true` keeps one a button in the bar instead: use
+  it only for what a person comes to the page to do (a list's New
+  Dashboard, an agent's Stop Agent). Several may be prominent; a row,
+  group, drag or edit action can't be, and a prominent one has no
+  submenu. `icon: <name>` (one of the names `check` lists, e.g. `plus`,
+  `pencil`, `play`) draws an icon: alone on a prominent button, its label
+  the hover; beside the label in a menu.
 
   An action runs as the lens acting for whoever pressed it, so it can't do
   anything they couldn't: you can press one with `oxplow_run_lens_action`, but a

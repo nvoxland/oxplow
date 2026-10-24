@@ -118,7 +118,7 @@ async function expectPlain(view: ReturnType<typeof render>) {
   // No extension commands in the page's ☰ (core's Ask may be there).
   const menu = view.queryByTestId("page-nav-menu");
   if (menu) fireEvent.click(menu);
-  expect(view.container.querySelector('[data-testid^="menu-item-ref-commands-"]') === null).toBe(true);
+  expect(view.container.querySelector('[data-testid^="menu-item-page-submenu-"]') === null).toBe(true);
   if (menu) fireEvent.click(menu);
   expect(view.container.querySelector('[title^="from "]') === null).toBe(true);
 }

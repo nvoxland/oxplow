@@ -157,11 +157,13 @@ export function LensPage({ lensId, params, title: pageTitle, titleFrom, stream, 
   // The same actions on the tab's right-click menu.
   useTabActions(lensActions);
   const actions: PageAction[] = [
-    { id: "lens-refresh", label: "Refresh", run: () => void refresh() },
+    { id: "lens-refresh", label: "Refresh", standard: true, icon: "refresh-cw", run: () => void refresh() },
     ...lensActions,
     {
       id: "lens-improve-with-agent",
       label: "Improve with Agent",
+      standard: true,
+      icon: "sparkles",
       title: "Add this lens to the agent's context so you can ask it to change the lens",
       run: improveWithAgent,
     },

@@ -458,28 +458,39 @@ it is acted on with is in one place. The ☰'s order is fixed
 (`tabs/pageMenuItems.ts`), sections split by separators, an empty one left
 out and the ☰ itself hidden when it would be empty:
 
-1. the page's other actions (`menu-item-action-<id>`; a busy one says
-   `label…` and is greyed);
-2. **Ask** (a submenu: Ask About This, then the catalog's prompts about the
-   page's kind; `menu-item-page-ask`, `menu-item-page-ask-this`), then the
-   commands about the page's resource, one submenu per `ui.group`
-   (`menu-item-ref-commands-<group>`, `menu-item-ref-command-<id>`);
+1. **oxplow's own, always first and in their own order**, so they sit in
+   the same spot on every page: **Ask** (a submenu: Ask About This, then
+   the catalog's prompts about the page's kind; `menu-item-page-ask`,
+   `menu-item-page-ask-this`), then the page's `standard` actions (a lens
+   page's Refresh, Copy, Add to Agent Context, Improve with Agent);
+2. **the page's and its extensions' own, sorted by label** (case and
+   accents aside): each other action (`menu-item-action-<id>`; a busy one
+   says `label…` and is greyed), and each submenu by its name
+   (`menu-item-page-submenu-<name>`), which holds the actions whose
+   `submenu` and the commands about the page's resource whose `ui.group`
+   is that name (`menu-item-ref-command-<id>`), merged and sorted;
 3. **Open With** (when two or more pages render the URI);
 4. **Backlinks (N)…**, **Outbound (N)…** and **Pin to Dashboard…**, which
    open their panel under the ☰ (`page-nav-backlinks-popover`,
    `page-nav-outbound-popover`, `page-pin-menu`) rather than a submenu.
+
+An item may draw an icon (`MenuItem.icon`, a name in `src/icons.ts`'s
+`ICONS`) before its label; a bar button with one (`PageAction.icon`) is
+the icon alone, its label the hover (`title`) and its accessible name.
 
 A page says **what** goes in the bar, as data:
 
 - `title` / `usePageTitle`, `chips: PageChip[]` (a chip with `onClick`
   is pressable — a wiki page's freshness opens its report);
 - `actions: PageAction[]` (`kit/actions.ts`: `id`, `label`, `run`,
-  `primary`, `prominent`, `disabled`, `busy`, `title`). In the bar a
+  `primary`, `prominent`, `standard`, `submenu`, `icon`, `disabled`,
+  `busy`, `title`). In the bar a
   `primary` or `prominent` action is a button (`ActionButtons`, test id
   `action-<id>`) and the rest are ☰ items; a page that shows no bar draws
   them all in its header, never in the rail. A lens's whole-lens action
-  is `prominent` when its manifest says so, a custom component's when its
-  `setActions` does;
+  is `prominent`, in a `submenu` or drawn with an `icon` when its manifest
+  says so, a custom component's when its `setActions` does; only oxplow
+  marks an action `standard`;
 - `pin: { tile, onOpenPage }`: what the page would add to a dashboard —
   the ☰'s Pin to Dashboard… (`menu-item-page-pin`). A lens page pins its
   lens.

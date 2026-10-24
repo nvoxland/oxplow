@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { RESOURCE_ICONS } from "./resources.js";
+import { ICONS } from "./icons.js";
 import type { Extension } from "./tauri-bridge/generated/bindings.js";
 import { declaredPageIcon, kindForTabId, pageKindIconComponent, pageKindLabel } from "./pageKinds.js";
 
@@ -104,9 +104,9 @@ describe("a declared page", () => {
   ] as unknown as Extension[];
 
   test("draws the icon its declaration names, by its page id", () => {
-    expect(declaredPageIcon(extensions, "local-history")).toBe(RESOURCE_ICONS.history!);
-    expect(declaredPageIcon(extensions, "gh/open-prs")).toBe(RESOURCE_ICONS["git-merge"]!);
-    expect(pageKindIconComponent("gh/open-prs", extensions)).toBe(RESOURCE_ICONS["git-merge"]!);
+    expect(declaredPageIcon(extensions, "local-history")).toBe(ICONS.history!);
+    expect(declaredPageIcon(extensions, "gh/open-prs")).toBe(ICONS["git-merge"]!);
+    expect(pageKindIconComponent("gh/open-prs", extensions)).toBe(ICONS["git-merge"]!);
   });
 
   test("has no icon when it names none, isn't declared, or its extension is off", () => {

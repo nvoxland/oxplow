@@ -385,6 +385,8 @@ function HandToolbar({ run, streamId, actions, marks, to }: { run: LensRun; stre
         id: "lens-copy",
         label: copied ? "Copied" : "Copy",
         title: "Copy what the lens shows, as text",
+        standard: true,
+        icon: "copy",
         run: () =>
           void copyLens(run, streamId, {
             lensText,
@@ -397,7 +399,13 @@ function HandToolbar({ run, streamId, actions, marks, to }: { run: LensRun; stre
             }
           }),
       },
-      { id: "lens-add-to-context", label: "Add to Agent Context", run: () => addLensToContext(run, insertIntoAgent) },
+      {
+        id: "lens-add-to-context",
+        label: "Add to Agent Context",
+        standard: true,
+        icon: "at-sign",
+        run: () => addLensToContext(run, insertIntoAgent),
+      },
       ...buttons.map((a) => ({
         id: `lens-action-${a.id}`,
         label: a.label,
@@ -405,6 +413,8 @@ function HandToolbar({ run, streamId, actions, marks, to }: { run: LensRun; stre
         busy: actions.busy === a.id,
         disabled: actions.busy !== null && actions.busy !== a.id,
         prominent: a.prominent ?? false,
+        submenu: a.submenu ?? undefined,
+        icon: a.icon ?? undefined,
         run: () => pressRef.current(a, null),
       })),
     ]);

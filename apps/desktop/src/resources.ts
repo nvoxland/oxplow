@@ -11,108 +11,17 @@
  * the current list, and components that render refs of extensions' kinds subscribe with
  * `useResources` so they redraw when it changes.
  */
-import {
-  Activity,
-  Archive,
-  BarChart3,
-  Bell,
-  BookOpen,
-  Box,
-  Bug,
-  Calendar,
-  CheckSquare,
-  CircleCheck,
-  CircleDot,
-  Columns3,
-  Copy,
-  Database,
-  ExternalLink,
-  FileText,
-  Flag,
-  Folder,
-  FolderTree,
-  GitBranch,
-  GitCommit,
-  GitCompare,
-  GitMerge,
-  GitPullRequest,
-  History,
-  Inbox,
-  LayoutDashboard,
-  Link,
-  ListTree,
-  MessageSquare,
-  Package,
-  Plus,
-  Server,
-  Settings,
-  Shield,
-  Star,
-  Tag,
-  Terminal,
-  Ticket,
-  TriangleAlert,
-  User,
-  Zap,
-  type LucideIcon,
-} from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 
+import { ICONS } from "./icons.js";
 import { querySql } from "./api.js";
 import { recordOpError } from "./opErrors.js";
 import { NO_READS, useRerunOnChange } from "./lens/lensRerun.js";
 import { identityOf, resourceUri, typeOf } from "./uri/uri.js";
 import type { Reads, SqlQueryResult } from "./tauri-bridge/generated/bindings.js";
 
-/**
- * The icons a resource may name — the Rust `RESOURCE_ICONS` allowlist
- * (`extension_resources.rs`), which a Rust test keeps in step with these
- * keys.
- */
-export const RESOURCE_ICONS: Readonly<Record<string, LucideIcon>> = {
-  "activity": Activity,
-  "archive": Archive,
-  "bar-chart-3": BarChart3,
-  "bell": Bell,
-  "book-open": BookOpen,
-  "box": Box,
-  "bug": Bug,
-  "calendar": Calendar,
-  "check-square": CheckSquare,
-  "circle-check": CircleCheck,
-  "circle-dot": CircleDot,
-  "columns-3": Columns3,
-  "copy": Copy,
-  "database": Database,
-  "external-link": ExternalLink,
-  "file-text": FileText,
-  "flag": Flag,
-  "folder": Folder,
-  "folder-tree": FolderTree,
-  "git-branch": GitBranch,
-  "git-commit": GitCommit,
-  "git-compare": GitCompare,
-  "git-merge": GitMerge,
-  "git-pull-request": GitPullRequest,
-  "history": History,
-  "inbox": Inbox,
-  "layout-dashboard": LayoutDashboard,
-  "link": Link,
-  "list-tree": ListTree,
-  "message-square": MessageSquare,
-  "package": Package,
-  "plus": Plus,
-  "server": Server,
-  "settings": Settings,
-  "shield": Shield,
-  "star": Star,
-  "tag": Tag,
-  "terminal": Terminal,
-  "ticket": Ticket,
-  "triangle-alert": TriangleAlert,
-  "user": User,
-  "zap": Zap,
-};
+
 
 /** One param of a resource: whether every URI carries it and the anchored
  *  pattern its value matches. */
@@ -204,7 +113,7 @@ export function resourceInfo(resource: string): Resource | null {
 /** The icon of a resource, or null. */
 export function resourceIcon(resource: string): LucideIcon | null {
   const icon = current.get(resource)?.icon;
-  return icon ? (RESOURCE_ICONS[icon] ?? null) : null;
+  return icon ? (ICONS[icon] ?? null) : null;
 }
 
 /** Whether `id` is a value `param` of `resource` may hold. The pattern runs

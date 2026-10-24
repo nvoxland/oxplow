@@ -6,16 +6,24 @@ import { barActions, pageMenuItems } from "./pageMenuItems.js";
 const ids = (items: MenuItem[]) => items.map((i) => (i.separator ? "—" : i.id));
 const noop = () => {};
 
-test("the menu lists the page's actions, then Ask, the commands, Open With and the panels, split by separators", () => {
+test("standard actions come first in their own order, then the custom ones sorted, then Open With and the panels", () => {
   const items = pageMenuItems({
     actions: [
       { id: "save", label: "Save", run: noop, primary: true },
       { id: "new", label: "New", run: noop, prominent: true },
-      { id: "refresh", label: "Refresh", run: noop },
+      { id: "refresh", label: "Refresh", run: noop, standard: true, icon: "refresh-cw" },
+      { id: "zip", label: "zip it", run: noop },
       { id: "export", label: "Export", run: noop, busy: true },
+      { id: "copy", label: "Copy", run: noop, standard: true },
+      { id: "csv", label: "As CSV", run: noop, submenu: "Download" },
+      { id: "json", label: "As JSON", run: noop, submenu: "Download" },
     ],
     ask: { prompts: ["What changed?"], askThis: noop, askPrompt: noop },
-    commands: [{ id: "tracker.sync", label: "Sync", group: "Tracker", run: noop }],
+    commands: [
+      { id: "tracker.sync", label: "Sync", group: "Tracker", run: noop },
+      { id: "tracker.archive", label: "Archive", group: "Tracker", run: noop },
+      { id: "dl.pdf", label: "As PDF", group: "Download", run: noop },
+    ],
     openWith: { options: [{ name: "a/text", title: "Text" }, { name: "a/rich", title: "Formatted" }], current: "a/rich", pick: noop },
     backlinks: 2,
     outbound: 0,
@@ -24,11 +32,14 @@ test("the menu lists the page's actions, then Ask, the commands, Open With and t
   });
   // The primary and prominent actions stay buttons in the bar, never in the menu.
   expect(ids(items)).toEqual([
-    "action-refresh",
-    "action-export",
-    "—",
     "page-ask",
-    "ref-commands-Tracker",
+    "action-refresh",
+    "action-copy",
+    "—",
+    "page-submenu-Download",
+    "action-export",
+    "page-submenu-Tracker",
+    "action-zip",
     "—",
     "page-open-with",
     "—",
@@ -39,6 +50,13 @@ test("the menu lists the page's actions, then Ask, the commands, Open With and t
   const export_ = items.find((i) => i.id === "action-export")!;
   expect(export_.label).toBe("Export…");
   expect(export_.enabled).toBe(false);
+  expect(items.find((i) => i.id === "action-refresh")!.icon).toBe("refresh-cw");
+  // A lens action and a command naming the same submenu share it, sorted.
+  expect(items.find((i) => i.id === "page-submenu-Download")!.submenu!.map((i) => i.label)).toEqual(["As CSV", "As JSON", "As PDF"]);
+  expect(items.find((i) => i.id === "page-submenu-Tracker")!.submenu!.map((i) => i.id)).toEqual([
+    "ref-command-tracker.archive",
+    "ref-command-tracker.sync",
+  ]);
   expect(items.find((i) => i.id === "page-backlinks")!.label).toBe("Backlinks (2)…");
   expect(items.find((i) => i.id === "page-outbound")!.enabled).toBe(false);
   const openWith = items.find((i) => i.id === "page-open-with")!;

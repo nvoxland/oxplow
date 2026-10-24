@@ -14,6 +14,17 @@ export interface PageAction {
   /** In a page's nav bar, a button rather than an item of its ☰ menu
    *  (a lens action's `prominent`). Several may be. */
   prominent?: boolean;
+  /** One of oxplow's own actions every page of its kind has (a lens
+   *  page's Refresh, Copy, Add to Agent Context, Improve with Agent): the
+   *  ☰ keeps these together at the top, in the order given, and sorts the
+   *  page's other actions by label. */
+  standard?: boolean;
+  /** The ☰ submenu it is in (a lens action's `submenu`), shared with the
+   *  commands whose group has that name. */
+  submenu?: string;
+  /** An icon oxplow draws (`ICONS` in `resources.ts`): alone on its
+   *  button, the label the hover; beside its label in a menu. */
+  icon?: string;
   disabled?: boolean;
   /** Running now: shown as `label…`, and not pressable. */
   busy?: boolean;

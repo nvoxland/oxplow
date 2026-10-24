@@ -8,6 +8,8 @@ export interface MenuItem {
   /** A colour chip before the label (a CSS colour, e.g. a `var(--…)`
    *  token): the item picks that colour. */
   swatch?: string;
+  /** An icon oxplow draws (`ICONS` in `resources.ts`) before the label. */
+  icon?: string;
   submenu?: MenuItem[];
   /** One line above the submenu's items saying what they do. */
   submenuHeader?: string;

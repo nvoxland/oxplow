@@ -1,9 +1,12 @@
 /// The page nav bar's ☰ menu, as data: everything a page can be acted on
-/// with that isn't how it is navigated — the page's own actions (bar a
-/// primary and prominent ones, which stay buttons), Ask, the commands about its
-/// resource (their `ui.about`, one submenu per `ui.group`), Open With, and
-/// the panels (Backlinks, Outbound, Pin to Dashboard) it opens under the
-/// button. A section with nothing in it is left out, and so is the menu.
+/// with that isn't how it is navigated, in a fixed order — oxplow's own
+/// first (Ask, then the standard actions, in their order), then the page's
+/// and its extensions' own sorted by label (an action, or a submenu its
+/// `submenu` / a command's `ui.group` names, merged by name), then Open
+/// With, then the panels (Backlinks, Outbound, Pin to Dashboard) it opens
+/// under the button. The primary and prominent actions are buttons in the
+/// bar instead. A section with nothing in it is left out, and so is the
+/// menu.
 import type { PageAction } from "../kit/actions.js";
 import type { MenuItem } from "../menu.js";
 import type { CommandEntry } from "../components/quickOpenResults.js";
@@ -46,27 +49,30 @@ export function barActions(actions: readonly PageAction[] | undefined): PageActi
 
 const separator = (id: string): MenuItem => ({ id, label: "", enabled: false, separator: true });
 
+/** By label, as a person reads them: case and accents aside. */
+const byLabel = (a: { label: string }, b: { label: string }) => a.label.localeCompare(b.label, undefined, { sensitivity: "base" });
+
 export function pageMenuItems(source: PageMenuSource): MenuItem[] {
   const sections: MenuItem[][] = [];
+  const inMenu = (source.actions ?? []).filter((a) => !a.primary && !a.prominent);
+  const item = (a: PageAction): MenuItem => ({
+    id: `action-${a.id}`,
+    label: a.busy ? `${a.label}…` : a.label,
+    enabled: !a.disabled && !a.busy,
+    icon: a.icon,
+    run: a.run,
+  });
 
-  sections.push(
-    (source.actions ?? [])
-      .filter((a) => !a.primary && !a.prominent)
-      .map((a) => ({
-        id: `action-${a.id}`,
-        label: a.busy ? `${a.label}…` : a.label,
-        enabled: !a.disabled && !a.busy,
-        run: a.run,
-      })),
-  );
-
-  const extension: MenuItem[] = [];
+  // oxplow's own: Ask, then the standard actions, always here and in
+  // their own order, so they are in the same spot on every page.
+  const standard: MenuItem[] = [];
   if (source.ask) {
     const ask = source.ask;
-    extension.push({
+    standard.push({
       id: "page-ask",
       label: "Ask",
       enabled: true,
+      icon: "message-square",
       submenuHeader: "Fills the agent's input; nothing is sent",
       submenu: [
         { id: "page-ask-this", label: "Ask About This", enabled: true, run: ask.askThis },
@@ -74,21 +80,36 @@ export function pageMenuItems(source: PageMenuSource): MenuItem[] {
       ],
     });
   }
-  const groups: Array<{ group: string; entries: NonNullable<PageMenuSource["commands"]> }> = [];
+  standard.push(...inMenu.filter((a) => a.standard).map(item));
+  sections.push(standard);
+
+  // The page's and its extensions' own, sorted by label: an action alone,
+  // or a submenu (by its name) of the actions and commands that share it.
+  const loose: MenuItem[] = [];
+  const submenus = new Map<string, MenuItem[]>();
+  const into = (name: string, entry: MenuItem) => {
+    const list = submenus.get(name);
+    if (list) list.push(entry);
+    else submenus.set(name, [entry]);
+  };
+  for (const a of inMenu.filter((x) => !x.standard)) {
+    if (a.submenu) into(a.submenu, item(a));
+    else loose.push(item(a));
+  }
   for (const e of source.commands ?? []) {
-    const g = groups.find((x) => x.group === e.group);
-    if (g) g.entries.push(e);
-    else groups.push({ group: e.group, entries: [e] });
+    into(e.group, { id: `ref-command-${e.id}`, label: e.label, enabled: e.enabled ?? true, run: e.run });
   }
-  for (const g of groups) {
-    extension.push({
-      id: `ref-commands-${g.group}`,
-      label: g.group,
-      enabled: true,
-      submenu: g.entries.map((e) => ({ id: `ref-command-${e.id}`, label: e.label, enabled: e.enabled ?? true, run: e.run })),
-    });
-  }
-  sections.push(extension);
+  sections.push(
+    [
+      ...loose,
+      ...[...submenus].map(([name, entries]) => ({
+        id: `page-submenu-${name}`,
+        label: name,
+        enabled: true,
+        submenu: entries.sort(byLabel),
+      })),
+    ].sort(byLabel),
+  );
 
   const openWith = source.openWith;
   sections.push(

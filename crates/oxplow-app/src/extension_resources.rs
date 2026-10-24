@@ -29,10 +29,12 @@ use oxplow_domain::uri::resources::{ParamDecl, ResourceDecl};
 use crate::extensions::manifest_v2::{at, item_lines, key_line};
 use crate::extensions::CORE_NAMESPACE;
 
-/// The icons a resource or a page may name (lucide names; the desktop maps each).
-pub const RESOURCE_ICONS: &[&str] = &[
+/// The icons a resource, a page or an action may name (lucide names; the
+/// desktop maps each).
+pub const ICONS: &[&str] = &[
     "activity",
     "archive",
+    "at-sign",
     "bar-chart-3",
     "bell",
     "book-open",
@@ -42,9 +44,11 @@ pub const RESOURCE_ICONS: &[&str] = &[
     "check-square",
     "circle-check",
     "circle-dot",
+    "circle-stop",
     "columns-3",
     "copy",
     "database",
+    "download",
     "external-link",
     "file-text",
     "flag",
@@ -60,16 +64,22 @@ pub const RESOURCE_ICONS: &[&str] = &[
     "layout-dashboard",
     "link",
     "list-tree",
+    "maximize-2",
     "message-square",
     "package",
+    "pencil",
+    "play",
     "plus",
+    "refresh-cw",
     "server",
     "settings",
     "shield",
+    "sparkles",
     "star",
     "tag",
     "terminal",
     "ticket",
+    "trash-2",
     "triangle-alert",
     "user",
     "zap",
@@ -282,10 +292,10 @@ fn decl_of(
         }
     }
     if let Some(icon) = &f.icon {
-        if !RESOURCE_ICONS.contains(&icon.as_str()) {
+        if !ICONS.contains(&icon.as_str()) {
             return Err(named(format!(
                 "`icon: {icon}` isn't one oxplow draws; use one of {}",
-                RESOURCE_ICONS.join(", ")
+                ICONS.join(", ")
             )));
         }
     }
@@ -408,24 +418,24 @@ resources:
         assert_eq!(effort.decl.resolve.as_deref(), Some("v_effort"));
     }
 
-    /// The desktop draws exactly the icons a resource may name: its
-    /// `RESOURCE_ICONS` map (`apps/desktop/src/resources.ts`) has a key for
+    /// The desktop draws exactly the icons an extension may name: its
+    /// `ICONS` map (`apps/desktop/src/icons.ts`) has a key for
     /// each, and no other.
     #[test]
     fn the_desktop_draws_every_allowed_icon() {
         let ts = std::fs::read_to_string(
             std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../../apps/desktop/src/resources.ts"),
+                .join("../../apps/desktop/src/icons.ts"),
         )
         .unwrap();
-        let start = ts.find("RESOURCE_ICONS").unwrap();
+        let start = ts.find("ICONS").unwrap();
         let body = &ts[start..start + ts[start..].find("};").unwrap()];
         let mut drawn: Vec<&str> = body
             .lines()
             .filter_map(|l| l.trim().strip_prefix('"')?.split('"').next())
             .collect();
         drawn.sort();
-        let mut allowed = super::RESOURCE_ICONS.to_vec();
+        let mut allowed = super::ICONS.to_vec();
         allowed.sort();
         assert_eq!(drawn, allowed);
     }

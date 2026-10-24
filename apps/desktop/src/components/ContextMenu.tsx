@@ -8,6 +8,7 @@ import {
 } from "./contextMenuPosition.js";
 
 import type { MenuItem, MenuPosition } from "../menu.js";
+import { ICONS } from "../icons.js";
 
 interface ContextMenuProps {
   items: MenuItem[];
@@ -157,6 +158,7 @@ export function MenuList({ items, header, onAction, minWidth = 220 }: MenuListPr
             >
               <span style={checkStyle}>{item.checked ? "✓" : ""}</span>
               {item.swatch ? <span aria-hidden style={{ ...swatchStyle, background: item.swatch }} /> : null}
+              {item.icon && ICONS[item.icon] ? <MenuIcon name={item.icon} /> : null}
               <span style={{ flex: 1 }}>{item.label}</span>
               <span style={shortcutStyle}>{hasSubmenu ? "▸" : item.shortcut ?? ""}</span>
             </button>
@@ -247,6 +249,16 @@ const submenuHeaderStyle: CSSProperties = {
   maxWidth: 220,
   whiteSpace: "normal",
 };
+
+/** An item's icon (`MenuItem.icon`), before its label. */
+function MenuIcon({ name }: { name: string }) {
+  const Icon = ICONS[name]!;
+  return (
+    <span aria-hidden data-testid="menu-item-icon" style={{ display: "inline-flex", marginRight: 6, color: "var(--text-secondary)" }}>
+      <Icon size={14} />
+    </span>
+  );
+}
 
 const swatchStyle: CSSProperties = {
   width: 10,

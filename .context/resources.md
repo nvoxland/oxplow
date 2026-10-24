@@ -162,7 +162,7 @@ resources:
     resolve: pull_request       # one of its models, with `uri` and `title`
     title: title                # the column of `resolve` that titles one
     searchable: pull_request    # a model with `uri`, `title`, `body`
-    icon: git-pull-request      # one of RESOURCE_ICONS
+    icon: git-pull-request      # one of ICONS
     wikilink: { prefix: pr, param: id }   # [[pr:12]]
 ```
 

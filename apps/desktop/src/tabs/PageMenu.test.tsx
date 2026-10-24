@@ -36,25 +36,25 @@ async function openMenu(ref: string, item?: string) {
 }
 
 test("a page's ref gets its kind's commands, run with the ref bound", async () => {
-  const view = await openMenu("oxplow:oxplow/work_item?id=W-1&provider=fake", "ref-commands-Tracker");
+  const view = await openMenu("oxplow:oxplow/work_item?id=W-1&provider=fake", "page-submenu-Tracker");
   expect(view.queryByTestId("menu-item-ref-command-tracker.commit.sync")).toBeNull();
   fireEvent.click(view.getByTestId("menu-item-ref-command-tracker.item.estimate"));
   await waitFor(() => expect(ran).toEqual([["tracker.item.estimate", { uri: "oxplow:oxplow/work_item?id=W-1&provider=fake", points: 3 }]]));
   // Running one closes the menu.
-  await waitFor(() => expect(view.queryByTestId("menu-item-ref-commands-Tracker")).toBeNull());
+  await waitFor(() => expect(view.queryByTestId("menu-item-page-submenu-Tracker")).toBeNull());
 });
 
 test("no commands for the page's kind: the menu has Ask and no command groups", async () => {
   const view = await openMenu("oxplow:oxplow/wiki?slug=notes");
   await new Promise((r) => setTimeout(r, 20));
   expect(view.getByTestId("menu-item-page-ask")).toBeTruthy();
-  expect(view.container.querySelector('[data-testid^="menu-item-ref-commands-"]')).toBeNull();
+  expect(view.container.querySelector('[data-testid^="menu-item-page-submenu-"]')).toBeNull();
 });
 
 // An effort's page (its diff, `oxplow:oxplow/effort?id=effN`) offers oxplow-bundled's
 // verdicts, each run on that effort.
 test("an effort's page offers Accept Review and Request Changes", async () => {
-  const view = await openMenu("oxplow:oxplow/effort?id=eff3", "ref-commands-Review");
+  const view = await openMenu("oxplow:oxplow/effort?id=eff3", "page-submenu-Review");
   expect(view.getByTestId("menu-item-ref-command-oxplow.review.request_changes")).toBeTruthy();
   fireEvent.click(view.getByTestId("menu-item-ref-command-oxplow.review.accept"));
   await waitFor(() => expect(ran).toEqual([["oxplow.review.accept", { uri: "oxplow:oxplow/effort?id=eff3" }]]));

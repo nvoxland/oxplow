@@ -177,8 +177,9 @@ under oxplow's bar. It has no lens run (`component.run` is null);
 It reads with `component.querySql(sql, params)` (declare `sql: read` on
 the component and `permissions: { sql: read }` on the extension; read
 only, `?1` params), titles the page with `setTitle`, puts its actions in
-oxplow's bar with `setActions([{ id, label, primary?, prominent? }])`
-(the bar's ☰ holds them unless `primary` or `prominent`) and hears them
+oxplow's bar with `setActions([{ id, label, primary?, prominent?,
+submenu?, icon? }])` (the bar's ☰ holds them, sorted, unless `primary` or
+`prominent`; `submenu` and `icon` work as a lens action's) and hears them
 with `onAction`, and opens a declared command's form in oxplow with
 `openForm(command, input)`. Its view (a range, a search, what is picked)
 is its page's **view params** (the `#` of its address): change them with `setViewParams({ k: v })`

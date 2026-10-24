@@ -1574,6 +1574,15 @@ pub struct LensAction {
     /// reaches for on this page (a list's New). Several may be.
     #[serde(default)]
     pub prominent: bool,
+    /// A page action's submenu in the page's ☰ menu: the actions (and the
+    /// commands whose `ui.group` is the same name) under one item there.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub submenu: Option<String>,
+    /// An icon oxplow draws (`extension_resources::ICONS`): alone on the
+    /// action's button in the bar (its label the hover), beside its label
+    /// in a menu.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
     /// What a drop runs: the dragged row is `{{row.*}}` (a drag action is
     /// a row action), and where it landed binds `{{before.*}}` (the row
     /// below the drop), `{{after.*}}` (the row above), `{{onto.*}}` (the
@@ -1659,6 +1668,12 @@ struct ActionFile {
     /// A page action shown as a button in the nav bar, not in its ☰.
     #[serde(default)]
     prominent: bool,
+    /// The ☰ submenu a page action is in.
+    #[serde(default)]
+    submenu: Option<String>,
+    /// The icon drawn for it.
+    #[serde(default)]
+    icon: Option<String>,
     /// A row action a drop runs, binding where the row landed.
     #[serde(default)]
     drag: bool,
@@ -1777,6 +1792,32 @@ fn parse_actions(
                 || action_templates(&input)
                     .iter()
                     .any(|(scope, _)| scope == "row"));
+        if let Some(icon) = &f.icon {
+            if !crate::extension_resources::ICONS.contains(&icon.as_str()) {
+                return Err(format!(
+                    "actions: `{}`: `icon: {icon}` isn't one oxplow draws; use one of {}",
+                    f.id,
+                    crate::extension_resources::ICONS.join(", ")
+                ));
+            }
+        }
+        if let Some(name) = &f.submenu {
+            if name.trim().is_empty() {
+                return Err(format!("actions: `{}`: `submenu` needs a name", f.id));
+            }
+            if row || f.group.is_some() || f.edit {
+                return Err(format!(
+                    "actions: `{}`: `submenu` is for a page action (not `row`, `group`, `drag` or `edit`): it groups it in the page's ☰ menu",
+                    f.id
+                ));
+            }
+            if f.prominent {
+                return Err(format!(
+                    "actions: `{}`: a prominent action is a button in the bar, never in a ☰ submenu: drop `prominent` or `submenu`",
+                    f.id
+                ));
+            }
+        }
         if f.prominent && (row || f.group.is_some() || f.edit) {
             return Err(format!(
                 "actions: `{}`: `prominent` is for a page action (not `row`, `group`, `drag` or `edit`): it keeps that action a button in the page's nav bar",
@@ -1940,6 +1981,8 @@ fn parse_actions(
             when: f.when,
             primary: f.primary,
             prominent: f.prominent,
+            submenu: f.submenu.map(|n| n.trim().to_string()),
+            icon: f.icon,
             drag: f.drag,
             bulk: f.bulk,
             key: f.key,
@@ -5224,12 +5267,12 @@ fn parse_pages(
         } else if p
             .icon
             .as_deref()
-            .is_some_and(|i| !crate::extension_resources::RESOURCE_ICONS.contains(&i))
+            .is_some_and(|i| !crate::extension_resources::ICONS.contains(&i))
         {
             errors.push(err(format!(
                 "its icon `{}` isn't one oxplow draws (one of {})",
                 p.icon.as_deref().unwrap_or_default(),
-                crate::extension_resources::RESOURCE_ICONS.join(", ")
+                crate::extension_resources::ICONS.join(", ")
             )));
         } else if let Some(bad) = p.params.iter().find(|n| {
             n.is_empty()
@@ -7984,6 +8027,81 @@ mod tests {
             (
                 "{ id: a, label: A, command: x.y.z, drag: true, prominent: true }",
                 "`prominent` is for a page action",
+            ),
+        ] {
+            let err = parse(&[action]).unwrap_err();
+            assert!(err.contains(said), "{action}: {err}");
+        }
+    }
+
+    /// An action may name an icon oxplow draws (`ICONS`): alone on its
+    /// button in the bar, beside its label in a menu.
+    #[test]
+    fn an_action_names_an_icon_oxplow_draws() {
+        let parse = |actions: &[&str]| {
+            parse_actions(
+                actions
+                    .iter()
+                    .map(|a| serde_yaml::from_str(a).unwrap())
+                    .collect(),
+                &[],
+                false,
+                false,
+            )
+        };
+        let ok = parse(&[
+            "{ id: a, label: A, command: x.y.z, icon: plus, prominent: true }",
+            "{ id: b, label: B, command: x.y.z, row: true, icon: pencil }",
+        ])
+        .unwrap();
+        assert_eq!(ok[0].icon.as_deref(), Some("plus"));
+        assert_eq!(ok[1].icon.as_deref(), Some("pencil"));
+        let err = parse(&["{ id: a, label: A, command: x.y.z, icon: unicorn }"]).unwrap_err();
+        assert!(
+            err.contains("`icon: unicorn` isn't one oxplow draws"),
+            "{err}"
+        );
+    }
+
+    /// `submenu` puts a page action in a submenu of that name in the
+    /// page's ☰ menu. A row, group, drag or edit action isn't in the ☰,
+    /// and a prominent one is a button in the bar, so neither can be.
+    #[test]
+    fn submenu_groups_page_actions_in_the_menu() {
+        let parse = |actions: &[&str]| {
+            parse_actions(
+                actions
+                    .iter()
+                    .map(|a| serde_yaml::from_str(a).unwrap())
+                    .collect(),
+                &[],
+                true,
+                false,
+            )
+        };
+        let ok = parse(&[
+            "{ id: a, label: A, command: x.y.z, submenu: Export }",
+            "{ id: b, label: B, command: x.y.z }",
+        ])
+        .unwrap();
+        assert_eq!(ok[0].submenu.as_deref(), Some("Export"));
+        assert_eq!(ok[1].submenu, None);
+        for (action, said) in [
+            (
+                "{ id: a, label: A, command: x.y.z, row: true, submenu: Export }",
+                "`submenu` is for a page action",
+            ),
+            (
+                "{ id: a, label: A, command: x.y.z, group: open, submenu: Export }",
+                "`submenu` is for a page action",
+            ),
+            (
+                "{ id: a, label: A, command: x.y.z, prominent: true, submenu: Export }",
+                "a prominent action is a button in the bar",
+            ),
+            (
+                "{ id: a, label: A, command: x.y.z, submenu: '  ' }",
+                "`submenu` needs a name",
             ),
         ] {
             let err = parse(&[action]).unwrap_err();

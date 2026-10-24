@@ -1715,6 +1715,22 @@
           "type": "boolean",
           "default": false
         },
+        "submenu": {
+          "description": "The ☰ submenu a page action is in.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "icon": {
+          "description": "The icon drawn for it.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
         "drag": {
           "description": "A row action a drop runs, binding where the row landed.",
           "type": "boolean",

@@ -10,7 +10,7 @@ import type { CSSProperties, ReactElement } from "react";
 
 import { pageKindIconComponent, pageKindLabel } from "../pageKinds.js";
 import type { Extension } from "../tauri-bridge/generated/bindings.js";
-import { RESOURCE_ICONS } from "../resources.js";
+import { ICONS } from "../icons.js";
 
 /** A semantic tone, drawn with a theme variable (`.context/theming.md`). */
 export type LensTone = "accent" | "success" | "warning" | "danger" | "muted";
@@ -72,11 +72,11 @@ const KINDS: Record<string, { Icon: LucideIcon | null; label: string }> = {
 };
 
 /** Every name a column's `icon` may give: the status glyphs, the kinds,
- *  and the icons an extension's ref kind may name (`RESOURCE_ICONS`). */
+ *  and the icons an extension's ref kind may name (`ICONS`). */
 export const LENS_ICON_NAMES: readonly string[] = [
   ...Object.keys(STATUS),
   ...Object.keys(KINDS),
-  ...Object.keys(RESOURCE_ICONS).filter((n) => !(n in KINDS)),
+  ...Object.keys(ICONS).filter((n) => !(n in KINDS)),
 ];
 
 /** The icon `name` draws, or null when it isn't in the vocabulary. Past
@@ -89,7 +89,7 @@ export function lensIcon(name: unknown, extensions: Extension[] | null = null): 
   if (status) return { ...status };
   const kind = KINDS[name];
   if (kind?.Icon) return { Icon: kind.Icon, tone: null, label: kind.label };
-  const ref = RESOURCE_ICONS[name];
+  const ref = ICONS[name];
   if (ref) return { Icon: ref, tone: null, label: name };
   const page = pageKindIconComponent(name, extensions);
   return page ? { Icon: page, tone: null, label: pageKindLabel(name, extensions) } : null;

@@ -110,7 +110,12 @@ test("a page's calls parse: setTitle, setActions, openForm and querySql", () => 
     parseFrameMessage({
       id: "2",
       method: "setActions",
-      actions: [{ id: "today", label: "Today", primary: true }, { id: "fit", label: "Fit" }, { id: "zoom", label: "Zoom", prominent: true }],
+      actions: [
+        { id: "today", label: "Today", primary: true },
+        { id: "fit", label: "Fit" },
+        { id: "zoom", label: "Zoom", prominent: true, icon: "maximize-2" },
+        { id: "csv", label: "As CSV", submenu: " Download ", icon: "unicorn" },
+      ],
     }),
   ).toEqual({
     type: "request",
@@ -120,7 +125,8 @@ test("a page's calls parse: setTitle, setActions, openForm and querySql", () => 
       actions: [
         { id: "today", label: "Today", primary: true, prominent: false, disabled: false },
         { id: "fit", label: "Fit", primary: false, prominent: false, disabled: false },
-        { id: "zoom", label: "Zoom", primary: false, prominent: true, disabled: false },
+        { id: "zoom", label: "Zoom", primary: false, prominent: true, disabled: false, icon: "maximize-2" },
+        { id: "csv", label: "As CSV", primary: false, prominent: false, disabled: false, submenu: "Download" },
       ],
     },
   });

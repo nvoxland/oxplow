@@ -594,7 +594,12 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     and the whole-lens actions are handed to the nav bar
     (`toolbarTo`): in its ☰, except a whole-lens action the manifest marks
     `prominent: true`, which stays a button there (several may; a row,
-    group, drag or edit action can't be — `parse_actions`). **A lens page is a function of its tab entry**
+    group, drag or edit action can't be — `parse_actions`). In the ☰ the
+    lens's actions sort by label; `submenu: <name>` puts a page action in
+    that submenu, shared with the commands whose `ui.group` is the name (a
+    prominent one can't be in one). Any action may name an `icon` from
+    `extension_resources::ICONS` (the desktop's `src/icons.ts`): alone on
+    its button in the bar, beside its label in a menu. **A lens page is a function of its tab entry**
     (`tabs/session.ts`): its params are its URI's
     (`oxplow:oxplow/lens?lens=<ext>/<slug>&k=v#f=v`, a declared page's `oxplow:oxplow/page?page=…&k=v`): the `?`
     holds its `resource` params, the `#` its filters and picks. A change of
@@ -668,7 +673,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     `init.page`, setting its title and actions as data core draws, and
     its view params and history state kept in its tab entry
     ("Custom components", protocol 7). A
-    page's `icon` is one of the resource icons (`RESOURCE_ICONS`; an
+    page's `icon` is one of the resource icons (`ICONS`; an
     unknown one is a load error); the tab strip, launcher, Go To lists
     and backlinks draw it (`PageKindIcon` by the page's id), the lens
     icon when it declares none. A page whose lens or count lens is
@@ -2181,7 +2186,7 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   `canceled` ✗, `archived` ▣ (each with its own tone); a file's status, lettered as the file trees letter it — `added` A, `modified` M, `deleted` D, `renamed` R, `untracked` U, `conflicted` C (a `tree` row's label column takes one, and a `tree` row picks by a column's `select` like a table's: it is marked `ox-selected`); the kinds `epic`,
   `task`, `wiki`, `file`, `folder`, `commit`, `diff`, `lens`, `metric`,
   `dashboard`, `comment` (their pages' icons); and the resource icon
-  names (`bug`, `git-pull-request`, … — `RESOURCE_ICONS`); past those,
+  names (`bug`, `git-pull-request`, … — `ICONS`); past those,
   any page kind (`git-dashboard`, `alerts`, `work_item`, …) draws its
   page's icon, so a row of pages — a bookmark, a visit — can
   pass its `page_kind`. `tone`'s value
@@ -2986,7 +2991,7 @@ recorded, read-only over the published models, 1,000 rows by default),
 command's form — `component_form` — in a slideover and runs the
 submission through `invoke_component_command`; closing it answers
 `CANCELLED`), `{ id, method: setTitle, title }` and `{ id, method:
-setActions, actions: [{ id, label, primary?, prominent?, disabled? }] }`
+setActions, actions: [{ id, label, primary?, prominent?, submenu?, icon?, disabled? }] }`
 (the page's title and its nav-bar actions, data core draws: the primary
 and prominent ones as buttons, the rest in the bar's ☰; a press posts
 `{ type: action, id }` to the frame), and `{ id, method: showSpec, spec }`
@@ -3797,7 +3802,7 @@ resources:
     resolve: prs              # one of its models, with `uri` and `title` columns
     title: title              # the column of `resolve` that titles one
     searchable: found         # optional: one of its models, with `uri`, `title` and `body`
-    icon: git-pull-request    # one of RESOURCE_ICONS
+    icon: git-pull-request    # one of ICONS
     wikilink: { prefix: pr, param: id }   # optional `[[pr:12]]` sugar
 ```
 
@@ -3820,7 +3825,7 @@ engine reads as syntax), a `resolve` or `searchable` that isn't one of
 its models with the columns it needs, a `wikilink.param` that isn't one
 of its params, a `wikilink.prefix` that isn't lowercase letters, digits
 and `_`, and an icon not in
-`RESOURCE_ICONS` (lucide names the desktop maps).
+`ICONS` (lucide names the desktop maps).
 
 **Registering** is the vocabulary reactor's: oxplow-foundation's
 resources plus each enabled extension's go into one `ResourceRegistry`,
@@ -3837,7 +3842,7 @@ rows (core's too) once (`useResourcesLoader`, in `App`, re-read on
 `ModelsChanged`) into one process-wide list that the pure helpers consult
 and `useResources` subscribes to:
 - `resourceIcon` / the page-kind helpers fall back to a resource's icon
-  (`RESOURCE_ICONS`, a lucide component per allowed name — a Rust test
+  (`ICONS`, a lucide component per allowed name — a Rust test
   keeps the two lists equal) and label;
 - opening a URI of the resource (`openRef`, resources.md "The desktop")
   opens it as itself, drawn by the renderer the `pages[].for`

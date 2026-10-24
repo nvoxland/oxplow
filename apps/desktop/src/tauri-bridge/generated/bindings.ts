@@ -3340,7 +3340,17 @@ export type Lens = Lens_Serialize | Lens_Deserialize;
  *  but never grant a power. Copying the result and handing it to the
  *  agent are on every lens, not declared.
  */
-export type LensAction = {
+export type LensAction = LensAction_Serialize | LensAction_Deserialize;
+
+/**
+ *  A button on a lens: a command it runs (P6.B1, target §11.4). The
+ *  command goes through the bus as `Actor::Lens` acting for whoever
+ *  pressed it, so every policy — the agent policy, confirmation
+ *  — applies as if they had run it themselves; a lens can offer a button
+ *  but never grant a power. Copying the result and handing it to the
+ *  agent are on every lens, not declared.
+ */
+export type LensAction_Deserialize = {
 	/**  Unique within the lens; `oxplow_run_lens_action` names it. */
 	id: string,
 	label: string,
@@ -3402,6 +3412,17 @@ export type LensAction = {
 	 */
 	prominent?: boolean,
 	/**
+	 *  A page action's submenu in the page's ☰ menu: the actions (and the
+	 *  commands whose `ui.group` is the same name) under one item there.
+	 */
+	submenu?: string | null,
+	/**
+	 *  An icon oxplow draws (`extension_resources::ICONS`): alone on the
+	 *  action's button in the bar (its label the hover), beside its label
+	 *  in a menu.
+	 */
+	icon?: string | null,
+	/**
 	 *  What a drop runs: the dragged row is `{{row.*}}` (a drag action is
 	 *  a row action), and where it landed binds `{{before.*}}` (the row
 	 *  below the drop), `{{after.*}}` (the row above), `{{onto.*}}` (the
@@ -3437,6 +3458,124 @@ export type LensAction = {
 	 *  itself, and only while the lens has exactly one.
 	 */
 	oneRow?: boolean,
+};
+
+/**
+ *  A button on a lens: a command it runs (P6.B1, target §11.4). The
+ *  command goes through the bus as `Actor::Lens` acting for whoever
+ *  pressed it, so every policy — the agent policy, confirmation
+ *  — applies as if they had run it themselves; a lens can offer a button
+ *  but never grant a power. Copying the result and handing it to the
+ *  agent are on every lens, not declared.
+ */
+export type LensAction_Serialize = {
+	/**  Unique within the lens; `oxplow_run_lens_action` names it. */
+	id: string,
+	label: string,
+	/**  The command it runs (`oxplow.work_item.transition`). */
+	command: string,
+	/**
+	 *  The command's input. A string that is exactly `{{param.<name>}}`
+	 *  or `{{row.<column>}}` becomes that value (a number stays a number);
+	 *  one that contains them has them spliced in as text.
+	 */
+	input: unknown,
+	/**
+	 *  A row action: offered on each row (right-click), with `{{row.*}}`
+	 *  bound to that row. Otherwise it's a button above the result.
+	 */
+	row: boolean,
+	/**
+	 *  A group action: a button in the heading of the group whose `by`
+	 *  value (as text) this is, instead of above the result.
+	 */
+	group: string | null,
+	/**
+	 *  Opens the command's form, its fields starting from `input`, for the
+	 *  person to fill in before it runs (`lens_action_form`), instead of
+	 *  running at once.
+	 */
+	form: boolean,
+	/**
+	 *  Fields of a form action the person sees but can't change: their
+	 *  values are `input`'s, imposed again when it runs (an item's `ref`).
+	 */
+	fixed: string[],
+	/**
+	 *  A form action's fields picked from a list: each names a lens
+	 *  (`<extension>/<slug>`) run with the lens's params, whose rows are
+	 *  the choices (`value`, `label`, optional `group`).
+	 */
+	choices: { [key in string]: string },
+	/**
+	 *  What becomes of the lens's page when the command's `ui.open_after`
+	 *  names a page.
+	 */
+	then: ActionThen,
+	/**
+	 *  A row action offered only on rows whose column of this name is
+	 *  truthy (not null, 0, `""` or false): an Enable on rows that are off.
+	 */
+	when: string | null,
+	/**
+	 *  The row action a click on the row (not on a link or control in it),
+	 *  or Enter on it, runs: the one a person most often wants. The first
+	 *  `primary` action a row is offered (`when`) is the one.
+	 */
+	primary: boolean,
+	/**
+	 *  A page action (not a row, group or edit action) that stays a button
+	 *  in the page's nav bar instead of going in its ☰ menu: what a person
+	 *  reaches for on this page (a list's New). Several may be.
+	 */
+	prominent: boolean,
+	/**
+	 *  A page action's submenu in the page's ☰ menu: the actions (and the
+	 *  commands whose `ui.group` is the same name) under one item there.
+	 */
+	submenu?: string | null,
+	/**
+	 *  An icon oxplow draws (`extension_resources::ICONS`): alone on the
+	 *  action's button in the bar (its label the hover), beside its label
+	 *  in a menu.
+	 */
+	icon?: string | null,
+	/**
+	 *  What a drop runs: the dragged row is `{{row.*}}` (a drag action is
+	 *  a row action), and where it landed binds `{{before.*}}` (the row
+	 *  below the drop), `{{after.*}}` (the row above), `{{onto.*}}` (the
+	 *  row dropped on) and `{{group.value}}` (the group dropped in). A
+	 *  field that is exactly one of these with nothing there is left out.
+	 */
+	drag: boolean,
+	/**
+	 *  A row action offered for every marked row at once: it runs once per
+	 *  row, in list order, asking once.
+	 */
+	bulk: boolean,
+	/**
+	 *  A row action's key: pressed with the rows focused, it runs on the
+	 *  cursor row (or the marked rows, when `bulk`).
+	 */
+	key: string | null,
+	/**
+	 *  The Save of a `markdown` viz's editor: a form over the first row,
+	 *  the person's text laid over `edit_field`.
+	 */
+	edit: boolean,
+	/**
+	 *  An edit action's field the editor's text fills: the one input field
+	 *  bound exactly to a `{{row.<column>}}` and not `fixed`.
+	 */
+	editField: string | null,
+	/**
+	 *  A whole-lens action over a lens that holds one row, that names
+	 *  `when` or `{{row.*}}`: the lens's one row. Derived at load, not
+	 *  declared: an action without `row: true` that names `when:` or
+	 *  `{{row.*}}`. It runs on the row the server reads from the lens
+	 *  itself, and only while the lens has exactly one.
+	 */
+	oneRow: boolean,
 };
 
 /**
@@ -4348,7 +4487,7 @@ export type Lens_Deserialize = {
 	/**  Not listed in the launcher. */
 	hidden: boolean,
 	/**  Commands the lens offers, as buttons or row actions (P6.B1). */
-	actions: LensAction[],
+	actions: LensAction_Deserialize[],
 	/**  When the lens needs attention (its panel's badge). */
 	alert: LensAlert | null,
 	/**
@@ -4432,7 +4571,7 @@ export type Lens_Serialize = {
 	/**  Not listed in the launcher. */
 	hidden: boolean,
 	/**  Commands the lens offers, as buttons or row actions (P6.B1). */
-	actions: LensAction[],
+	actions: LensAction_Serialize[],
 	/**  When the lens needs attention (its panel's badge). */
 	alert: LensAlert | null,
 	/**

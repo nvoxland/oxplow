@@ -39,6 +39,7 @@
 /// the frame. The daemon serves a client library wrapping this
 /// (`/component-lib/oxplow-component.js`, `oxplow.connect()`); it checks
 /// `protocol` against the one it speaks.
+import { ICONS } from "../icons.js";
 import { IpcCallError, needsConfirmation } from "../ipc-error.js";
 import { parseUri } from "../uri/uri.js";
 import type { CommandOutcome, LensRun, LensSpec, SqlCell, SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
@@ -96,6 +97,10 @@ export interface FrameAction {
   /** A button in the bar rather than an item of its ☰ menu. */
   prominent: boolean;
   disabled: boolean;
+  /** The ☰ submenu it is in. */
+  submenu?: string;
+  /** An icon oxplow draws (`ICONS`); an unknown name draws none. */
+  icon?: string;
 }
 
 /** What a component shown as a page is told about it. */
@@ -199,7 +204,15 @@ export function parseFrameMessage(data: unknown): FrameMessage | null {
       for (const raw of m.actions as unknown[]) {
         const a = raw as Record<string, unknown> | null;
         if (!a || typeof a.id !== "string" || !a.id || typeof a.label !== "string") return null;
-        actions.push({ id: a.id, label: a.label, primary: a.primary === true, prominent: a.prominent === true, disabled: a.disabled === true });
+        actions.push({
+          id: a.id,
+          label: a.label,
+          primary: a.primary === true,
+          prominent: a.prominent === true,
+          disabled: a.disabled === true,
+          ...(typeof a.submenu === "string" && a.submenu.trim() ? { submenu: a.submenu.trim() } : {}),
+          ...(typeof a.icon === "string" && a.icon in ICONS ? { icon: a.icon } : {}),
+        });
       }
       return { type: "request", request: { id: m.id, method: "setActions", actions } };
     }
