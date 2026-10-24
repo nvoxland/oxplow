@@ -1,7 +1,7 @@
 import { afterEach, expect, mock, test } from "bun:test";
 import { cleanup, within, fireEvent, render, waitFor } from "@testing-library/react";
 
-// Everything that needs the person is counted by the status bar's bell and
+// Everything that needs the person is counted by the dock's Alerts icon and
 // announced by a toast once; the Alerts page itself is a foundation lens.
 
 const realApi = await import("../../api.js");
@@ -83,7 +83,8 @@ mock.module("../../api.js", () => ({
     return noRows;
   },
 }));
-const { AlertsIndicator } = await import("./AlertsIndicator.js");
+const { Dock } = await import("../Dock/Dock.js");
+const { dockStore } = await import("../Dock/dockStore.js");
 const { PanelRunsProvider } = await import("../Panels/PanelRunsContext.js");
 const { alertsRef } = await import("../../tabs/pageRefs.js");
 const { getToastStore } = await import("../toastStore.js");
@@ -100,17 +101,21 @@ afterEach(() => {
   saved.length = 0;
   ran.length = 0;
   opErrorRows = [];
+  dockStore.close();
   cleanup();
 });
 
-test("the bell counts everything, red for a problem, and opens Alerts", async () => {
+test("the dock's Alerts icon counts everything, red for a problem, and opens the panel", async () => {
   opErrorRows = [pushFailed];
   const opened: unknown[] = [];
-  const view = render(withRuns(<AlertsIndicator onOpenPage={(r) => opened.push(r)} />));
+  const view = render(withRuns(<Dock streamId={null} onOpenPage={(r) => opened.push(r)} />));
   // One proposal, one hint, two undelivered events, one failed operation.
-  await waitFor(() => expect(view.getByTestId("alerts-count").textContent).toBe("5"));
-  expect(view.getByTestId("alerts-indicator").getAttribute("data-tone")).toBe("danger");
-  fireEvent.click(view.getByTestId("alerts-indicator"));
+  await waitFor(() => expect(view.getByTestId("dock-alerts-badge").textContent).toBe("5"));
+  expect(view.getByTestId("dock-alerts-badge").getAttribute("data-tone")).toBe("danger");
+  fireEvent.click(view.getByTestId("dock-alerts"));
+  expect(view.getByTestId("dock-panel-alerts")).toBeTruthy();
+  await waitFor(() => expect(view.getAllByTestId("alerts-panel-item").length).toBeGreaterThan(0));
+  fireEvent.click(view.getByTestId("alerts-panel-open-page"));
   expect(opened).toEqual([alertsRef()]);
 });
 

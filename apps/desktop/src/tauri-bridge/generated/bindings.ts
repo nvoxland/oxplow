@@ -2415,6 +2415,11 @@ export type ExtensionPanel = {
 	 *  the badge's count; the badge still feeds Alerts.
 	 */
 	count: string | null,
+	/**
+	 *  The panel lives in the bottom dock (an icon with a badge that opens
+	 *  the body above the bar), not in the rail.
+	 */
+	dock?: boolean,
 };
 
 /**

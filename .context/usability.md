@@ -715,6 +715,16 @@ declaring *what it is* and mounting the generic layer.
 - `data-testid`s on the affordances: `selection-comment-button`,
   `new-comment-popover`, `comment-popover-<id>`.
 
+## Dock panels
+
+- A dock icon toggles its panel. Only one panel is open at a time.
+- The panel takes focus when it opens. Escape closes it, stops the event
+  there, and returns focus to its icon. The header × does the same.
+- A panel keeps its state in stores, not in the open body. Closing
+  unmounts the body, and opening it again shows the same data.
+- Drag the top edge to resize. The height is remembered.
+- A badge shows a count only. It does not replace the panel's own list.
+
 ## Keyboard
 
 - **A list driven from an input uses `useListNav`** (`src/kit/useListNav.ts`):

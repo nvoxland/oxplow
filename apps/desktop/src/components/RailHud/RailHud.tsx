@@ -357,7 +357,9 @@ export function RailHud({
   const width = useRailWidth();
   // One owner for every panel's lens runs, shared with the bell and the
   // Alerts page (`PanelRunsProvider`).
-  const { panels: extPanels, runs: panelRuns } = usePanelRuns();
+  const { panels: allPanels, runs: panelRuns } = usePanelRuns();
+  // A dock panel lives in the dock, not the rail.
+  const extPanels = useMemo(() => allPanels.filter((p) => !p.dock), [allPanels]);
   const available = useMemo(() => extPanels.map(extensionPanelId), [extPanels]);
   const sections = useRailSections(available);
   const addMenu = useContextMenu();

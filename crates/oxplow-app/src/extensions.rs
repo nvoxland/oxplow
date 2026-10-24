@@ -2378,6 +2378,10 @@ pub struct ExtensionPanel {
     /// header's count, without raising an alert. It wins over
     /// the badge's count; the badge still feeds Alerts.
     pub count: Option<String>,
+    /// The panel lives in the bottom dock (an icon with a badge that opens
+    /// the body above the bar), not in the rail.
+    #[serde(default)]
+    pub dock: bool,
 }
 
 /// A page an extension contributes (P6.G2, target §11.3): a lens shown
@@ -2566,6 +2570,9 @@ struct PanelFile {
     collapsed: Option<String>,
     #[serde(default)]
     count: Option<String>,
+    /// Draw the panel in the bottom dock, not in the rail.
+    #[serde(default)]
+    dock: bool,
 }
 
 /// A lens an extension mounts into a core page.
@@ -5511,7 +5518,7 @@ fn parse_panels(
         let p = match serde_yaml::from_value::<PanelFile>(v.clone()) {
             Ok(p) => p,
             Err(e) => {
-                errors.push((Some(i), format!("panels: {e} (a panel is `{{ id, title, icon?, scope: project | stream | thread, body, badge?, open?, collapsed?, count? }}`)")));
+                errors.push((Some(i), format!("panels: {e} (a panel is `{{ id, title, icon?, scope: project | stream | thread, body, badge?, open?, collapsed?, count?, dock? }}`)")));
                 continue;
             }
         };
@@ -5593,6 +5600,7 @@ fn parse_panels(
                 open: p.open,
                 collapsed: p.collapsed.map(|c| format!("{extension}/{c}")),
                 count: p.count.map(|c| format!("{extension}/{c}")),
+                dock: p.dock,
             });
         }
     }
@@ -12258,6 +12266,7 @@ commands:
                 open: None,
                 collapsed: None,
                 count: None,
+                dock: false,
             }]
         );
         // A panel may name the page its header opens (a core page,
@@ -12309,6 +12318,19 @@ commands:
             );
             assert!(ext.panels.is_empty(), "{panel}");
         }
+    }
+
+    /// `dock: true` puts the panel in the bottom dock; absent, the rail.
+    #[test]
+    fn a_panel_can_live_in_the_dock() {
+        let lenses = [("quiet", "title: Quiet\nquery: SELECT 1\n")];
+        let (_d, ext) = load_x(
+            &lenses,
+            "manifest: 2\nintent:\n  purpose: p\npanels:\n  - { id: d, title: D, scope: project, body: quiet, dock: true }\n  - { id: r, title: R, scope: project, body: quiet }\n",
+        );
+        assert!(ext.errors.is_empty(), "{:?}", ext.errors);
+        assert!(ext.panels[0].dock);
+        assert!(!ext.panels[1].dock);
     }
 
     /// A panel may name a lens its collapsed header shows (one

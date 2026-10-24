@@ -718,8 +718,10 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       (`withRenderedParams`, pushed).
   - **Panels** (P6.G1, target §11.3): `panels: [{ id, title, icon?,
     scope: project | stream | thread, body, badge?, open?, collapsed?,
-    count? }]` put a lens in the
-    left nav (`open`, a `page` URI, is the page its header opens —
+    count?, dock? }]` put a lens in the
+    left nav (with `dock: true` it goes in the bottom dock instead: an
+    icon with the count as its badge that opens the body above the bar,
+    and the rail does not draw it) (`open`, a `page` URI, is the page its header opens —
     a core page it summarizes, as Comments opens the inbox; absent, the
     body lens). `collapsed` is a lens shown compact while the
     panel is collapsed, as its summary (absent, a collapsed panel is just
@@ -736,7 +738,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     the backend to infer the thread from the selection, and runs every
     panel's lenses from one owner (`useExtensionPanelRuns`), each distinct
     lens once per refresh whatever roles it plays. The body renders compact; the badge's
-    alert count shows on the panel, and the **Alerts** page (status-bar bell) lists
+    alert count shows on the panel, and the **Alerts** panel and page (the dock's bell) list
     every firing badge. oxplow-bundled's Waiting on You is a panel
     whose badge is its own lens.
   - **Actions are commands** (P6.B1, target §11.4): `actions:` declares

@@ -53,7 +53,7 @@
   `page:` field; a URI nothing draws shows on a fallback page, not an
   error.
 - **Panels** put a lens in the left nav (`panels: [{ id, title, icon?,
-  scope, body, badge?, open?, collapsed?, count? }]`): `body` renders
+  scope, body, badge?, open?, collapsed?, count?, dock? }]`): `body` renders
   compact; `badge` (a lens with an `alert`) gives the panel's count and
   lists in the Alerts panel while it fires; `collapsed` is a lens shown
   compact while the panel is collapsed (its summary); `count` is a lens
@@ -61,6 +61,10 @@
   without an alert — it wins over the badge's. `scope` is `project`, `stream` or `thread` — a `stream` /
   `thread` panel's lenses must declare `stream_id` / `thread_id`, which the
   nav binds. The person arranges, hides and collapses panels.
+  With `dock: true` the panel is not in the left nav. It is an icon in the
+  dock at the bottom left, with its count as the badge, and the body opens
+  in a panel above the bar. Use it for a short list the person checks and
+  dismisses.
 
 ## Replacing a core view
 

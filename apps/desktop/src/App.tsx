@@ -34,6 +34,7 @@ import { buildMenuBar, buildNativeMenuSnapshots, menuItemById, OPEN_RECENT_PREFI
 import type { EditorNavigationTarget } from "./lsp.js";
 import { Navigator } from "./components/Navigator.js";
 import { StatusBar } from "./components/StatusBar.js";
+import { Dock } from "./components/Dock/Dock.js";
 import { TitleBar } from "./components/TitleBar.js";
 import { showToast } from "./components/toastStore.js";
 import { awaitGitOp, opErrorOf } from "./git-op.js";
@@ -2026,23 +2027,9 @@ export function App() {
           ) : null}
         </div>
         </div>
-        <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "flex-end",
-          gap: 8,
-          padding: "4px 10px",
-          background: "var(--bg-2)",
-          flexShrink: 0,
-          minHeight: 26,
-          // Gap above the bottom rail, matching the other panel gaps; the
-          // chrome behind shows through.
-          marginTop: 6,
-        }}
-      >
-        <StatusBar onOpenPage={handleOpenPage} />
-      </div>
+        <Dock streamId={stream?.id ?? null} onOpenPage={handleOpenPage}>
+          <StatusBar />
+        </Dock>
         </div>
       </div>
       <QuickOpenOverlay

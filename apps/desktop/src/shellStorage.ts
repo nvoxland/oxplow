@@ -21,7 +21,8 @@ export type ShellKey =
   | "oxplow.layout.v7.sessions"
   | "oxplow.remoteBase"
   | "oxplow.remoteToken"
-  | "oxplow.recentRemotes";
+  | "oxplow.recentRemotes"
+  | "oxplow.dock.height";
 
 /** This window's keys, gone when it closes. */
 export type WindowKey = "oxplow-ui-client-id";

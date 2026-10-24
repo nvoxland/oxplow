@@ -9,11 +9,13 @@ test("an effect's destructive step waits in Alerts until a person approves it", 
   const { page, daemon } = fresh;
   await page.goto("/");
   await run(daemon, "oxplow.work_item.create", { title: "Pear [delete]", thread: daemon.thread });
-  // The status bar's bell counts it once the effect has run (it runs in the
-  // background, so wait for that), and opens the Alerts page, where it waits.
-  const bell = page.getByTestId("alerts-indicator");
-  await expect(bell).toContainText("1");
+  // The dock's Alerts icon counts it once the effect has run (it runs in the
+  // background, so wait for that). It opens the Alerts panel, which links
+  // to the Alerts page, where the proposal waits.
+  const bell = page.getByTestId("dock-alerts");
+  await expect(page.getByTestId("dock-alerts-badge")).toHaveText("1");
   await bell.click();
+  await page.getByTestId("alerts-panel-open-page").click();
   const card = page.locator('[data-testid^="proposal-"]').filter({ hasText: "destructive" }).first();
   await expect(card).toBeVisible();
   const id = (await card.getAttribute("data-testid"))!.replace("proposal-", "");

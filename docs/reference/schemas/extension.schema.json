@@ -2434,6 +2434,11 @@
             "null"
           ],
           "default": null
+        },
+        "dock": {
+          "description": "Draw the panel in the bottom dock, not in the rail.",
+          "type": "boolean",
+          "default": false
         }
       },
       "additionalProperties": false,
