@@ -23,5 +23,5 @@ actions:
   - { id: rename, label: Rename…, form: true, command: oxplow.agent_session.rename, input: { session: "{{row.session}}", title: "{{row.title}}" }, fixed: [session] }
   - { id: switch, label: Switch Conversation…, form: true, command: oxplow.agent_session.resume_conversation, input: { session: "{{row.session}}" }, fixed: [session], choices: { conversation: agent-session-conversations }, when: can_choose }
   - { id: fork, label: Fork Conversation…, form: true, command: oxplow.agent_session.fork_conversation, input: { session: "{{row.session}}" }, fixed: [session], choices: { conversation: agent-session-conversations }, when: can_fork }
-  - { id: stop, label: Stop Agent, command: oxplow.agent_session.stop, input: { session: "{{row.session}}" }, when: running }
-  - { id: start, label: Start Agent, command: oxplow.agent_session.start, input: { session: "{{row.session}}" }, when: stopped }
+  - { id: stop, label: Stop Agent, command: oxplow.agent_session.stop, input: { session: "{{row.session}}" }, when: running, prominent: true }
+  - { id: start, label: Start Agent, command: oxplow.agent_session.start, input: { session: "{{row.session}}" }, when: stopped, prominent: true }

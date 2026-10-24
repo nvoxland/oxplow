@@ -93,6 +93,8 @@ export interface FrameAction {
   id: string;
   label: string;
   primary: boolean;
+  /** A button in the bar rather than an item of its ☰ menu. */
+  prominent: boolean;
   disabled: boolean;
 }
 
@@ -197,7 +199,7 @@ export function parseFrameMessage(data: unknown): FrameMessage | null {
       for (const raw of m.actions as unknown[]) {
         const a = raw as Record<string, unknown> | null;
         if (!a || typeof a.id !== "string" || !a.id || typeof a.label !== "string") return null;
-        actions.push({ id: a.id, label: a.label, primary: a.primary === true, disabled: a.disabled === true });
+        actions.push({ id: a.id, label: a.label, primary: a.primary === true, prominent: a.prominent === true, disabled: a.disabled === true });
       }
       return { type: "request", request: { id: m.id, method: "setActions", actions } };
     }

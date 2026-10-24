@@ -80,9 +80,10 @@ test("a session's tab shows its alias, and its fallback once the alias is cleare
   const body = page.getByTestId(`center-tab-body-${id}`);
   await expect(body.getByTestId("page-nav-title")).toHaveText("My review");
   await expect(body.getByTestId("page-nav-back")).toHaveCount(0);
-  await expect(body.getByTestId("action-lens-action-rename")).toBeVisible();
-  // Rename… is a form: the title, and the box to rename it in its harness.
-  await body.getByTestId("action-lens-action-rename").click();
+  // Rename… is in its ☰, and is a form: the title, and the box to rename
+  // it in its harness.
+  await body.getByTestId("page-nav-menu").click();
+  await body.getByTestId("menu-item-action-lens-action-rename").click();
   const title = page.getByTestId("lens-action-form-fields-title");
   await title.fill("Renamed here");
   await page.getByTestId("lens-action-form-fields-submit").click();

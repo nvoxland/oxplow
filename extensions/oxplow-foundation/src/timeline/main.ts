@@ -26,7 +26,7 @@ interface Component {
   querySql(sql: string, params?: Cell[]): Promise<Rows>;
   navigate(ref: string, options?: { newTab?: boolean }): Promise<null>;
   setTitle(title: string): Promise<null>;
-  setActions(actions: { id: string; label: string; primary?: boolean }[]): Promise<null>;
+  setActions(actions: { id: string; label: string; primary?: boolean; prominent?: boolean }[]): Promise<null>;
   onAction(listener: (id: string) => void): () => void;
   applyTheme(): void;
 }
@@ -270,8 +270,9 @@ oxplow.connect().then((component) => {
   };
 
   void component.setActions([
-    { id: "today", label: "Today" },
-    { id: "fit", label: "Fit" },
+    // The view's own controls: buttons in the bar, not in its ☰.
+    { id: "today", label: "Today", prominent: true },
+    { id: "fit", label: "Fit", prominent: true },
   ]);
   component.onAction((id) => {
     if (id === "today") timeline.setWindow(new Date(Date.now() - DAY / 2), new Date(Date.now() + DAY / 2));

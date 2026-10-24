@@ -5,7 +5,7 @@ import { RENDERER_VIEW_KEY, rendererFor, rendererName, renderersFor } from "../p
 import { PageNavBar } from "./PageNavBar.js";
 import { useOptionalPageNavigation } from "./PageNavigationContext.js";
 import type { BookmarkScope } from "./bookmarks.js";
-import type { AskTarget } from "../components/Prompts/AskMenu.js";
+import type { AskTarget } from "../components/Prompts/askTarget.js";
 import { chipsFor } from "../components/decorators.js";
 import { useDecorations } from "../components/useDecorations.js";
 import type { PinnedTile } from "../components/Dashboard/PinToDashboard.js";
@@ -53,7 +53,7 @@ export interface PageNavBarConfig {
    *  list) for comment-bearing pages. */
   comments?: ReactNode;
   /** The pages that render the URI shown, when there are several. */
-  openWith?: import("./OpenWith.js").OpenWithProps;
+  openWith?: import("./pageMenuItems.js").OpenWithProps;
 }
 
 export interface PageChip {

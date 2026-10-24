@@ -16,7 +16,8 @@ test("a lens re-runs when its model changes, and pins to a new dashboard", async
   // A write elsewhere changes `v_work_item`: the open lens runs again by itself.
   await run(daemon, "oxplow.work_item.create", { title: "Numbat one", thread: daemon.thread });
   await expect(lens).toContainText("Numbat one");
-  await page.getByTestId("page-pin").filter({ visible: true }).click();
+  await page.getByTestId("page-nav-menu").filter({ visible: true }).click();
+  await page.getByTestId("menu-item-page-pin").click();
   await page.getByTestId("page-pin-new").click();
   // It asks for the new dashboard's name (tsk1045); Enter creates it.
   await page.getByTestId("page-pin-new-name").fill("Numbats");

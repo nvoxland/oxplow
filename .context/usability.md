@@ -289,17 +289,17 @@ markdown itself, nor edits it in a `<textarea>`.
 
 ## Menus a page or row gets from extensions
 
-- **Order is fixed.** A page's nav bar: Ask, then **Commands** (the
-  commands about the page's resource — their `ui.about`; hidden when none
-  apply). A row's right-click menu: Ask About This, the lens's row
+- **Order is fixed.** A page's nav bar's ☰: the page's actions, then Ask,
+  then one submenu per `ui.group` with the commands about the page's
+  resource (their `ui.about`; none when none apply), then Open With and the
+  panels (`.context/pages-and-tabs.md` "The nav bar is core's"). A row's right-click menu: Ask About This, the lens's row
   actions, then a separator and one submenu per `ui.group` with the
   commands about the row's ref (`refCommandMenuItems`). A Board card:
   Move To, then the same tail. The Navigator's thread menu ends with the
   same tail, the commands about that thread. A submenu opens on hover
   and on click; a click never closes the one its hover opened. Each runs as any offer does (asking first
-  when the command asks). Testids: `page-nav-commands`,
-  `page-nav-command-<command id>`, `menu-item-ref-commands-<group>`,
-  `menu-item-ref-command-<command id>`.
+  when the command asks). Testids (the ☰ and a row menu alike):
+  `menu-item-ref-commands-<group>`, `menu-item-ref-command-<command id>`.
 
 ## A custom component is marked
 
@@ -561,9 +561,13 @@ not a pick and isn't in the address.
 ## Actions are data; core draws them
 
 - **A page's actions are `PageAction[]`** (`src/kit/actions.ts`), drawn in
-  the nav bar by core — never a page's own buttons in its chrome. A
-  section's actions are `PageAction[]` too, at its heading. A primary
-  action is the accent button; one per place.
+  the nav bar by core — never a page's own buttons in its chrome. The bar
+  shows only the primary action and the `prominent` ones as buttons; the
+  rest are items of its ☰ menu, so the bar stays short whatever a page and
+  its extensions add. Mark an action prominent only when it is what a
+  person comes to the page to do (a list's New, the agent's Stop/Start, a
+  timeline's Today/Fit). A section's actions are `PageAction[]` too, at
+  its heading. A primary action is the accent button; one per place.
 - **A section is a heading over a rule**, no box (`kit/Section`). A card
   is a dashboard tile's, not a page section's.
 
@@ -1091,7 +1095,7 @@ no caller may bypass the bus to write to the terminal.
 - **Ask About This** (P6.D1) is the conversation-first form of the
   same gesture: it puts `[oxplow uri <uri>] ` in the agent's input for
   the person to finish the question, and never sends. It's on:
-  - the page nav bar (`page-nav-ask`), for any page whose tab id is a
+  - the page nav bar's ☰ (`menu-item-page-ask`), for any page whose tab id is a
     canonical URI (`PageNavigationContext.ask`: `{ ref, streamId }`);
   - a lens row's right-click menu (`rowAsk`: the first URI the row links
     to, else the row as a lens mention);
@@ -1100,9 +1104,9 @@ no caller may bypass the bus to write to the terminal.
     only while its right side names a file (`Diff/diffAsk.ts`, a Monaco
     context key on the action's precondition); a compare with the
     clipboard has no Ask action rather than one that does nothing.
-  The nav bar's Ask is a menu (`components/Prompts/AskMenu.tsx`): Ask
-  About This, then the catalog's prompts `about` the page's resource
-  (`SuggestedPrompts`), each inserted as `[oxplow uri <uri>] <question>`.
+  The ☰'s Ask is a submenu (`tabs/pageMenuItems.ts`): Ask About This,
+  then the catalog's prompts `about` the page's resource
+  (`promptsAbout`), each inserted as `[oxplow uri <uri>] <question>`.
   The launcher's last row for any typed text is **Ask the Agent: <text>**,
   which inserts the text the same way. Nothing in oxplow sends agent
   input on its own; these only fill the draft.
@@ -1129,8 +1133,9 @@ change: **Filters** (its filter params), **Selection** (what a row click
 picked) and **About this page** (its extension and the source file to
 edit, and a line when the source changed since its deploy). Page-level
 actions — Refresh, Copy, Add to Agent Context, the lens's whole-lens
-actions, Improve with Agent — are in the nav bar, never in the rail or
-above the body (`LensResultView`'s `toolbarTo` hands them up).
+actions, Improve with Agent — are in the nav bar (its ☰, unless
+`prominent`), never in the rail or above the body (`LensResultView`'s
+`toolbarTo` hands them up).
 
 A param is a **row**, drawn by the kit's `ParamRow`
 (`src/kit/ParamControls.tsx`): its label beside its value. At rest the

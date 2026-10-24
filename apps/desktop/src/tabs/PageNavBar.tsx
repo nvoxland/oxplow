@@ -1,11 +1,12 @@
-import { OpenWith, type OpenWithProps } from "./OpenWith.js";
+import type { OpenWithProps } from "./pageMenuItems.js";
 import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
-import { AskMenu, type AskTarget } from "../components/Prompts/AskMenu.js";
-import { RefCommandsMenu } from "../components/RefCommandsMenu.js";
-import { PinToDashboard, type PinnedTile } from "../components/Dashboard/PinToDashboard.js";
+import type { AskTarget } from "../components/Prompts/askTarget.js";
+import type { PinnedTile } from "../components/Dashboard/PinToDashboard.js";
 import { ActionButtons } from "../kit/ActionButtons.js";
 import type { PageAction } from "../kit/actions.js";
+import { PageMenu } from "./PageMenu.js";
+import { barActions } from "./pageMenuItems.js";
 import type { TabRef } from "./tabState.js";
 import type { BookmarkScope } from "./bookmarks.js";
 
@@ -73,7 +74,8 @@ export interface PageNavBarProps {
    *  + orphaned list) for comment-bearing pages. Rendered before the
    *  backlinks dropdown. */
   comments?: ReactNode;
-  /** The page's actions, at the right edge; drawn here, never by the page. */
+  /** The page's actions, drawn here, never by the page: the primary and
+   *  prominent ones as buttons, the rest in the ☰ menu. */
   actions?: readonly PageAction[];
   /** What the page would add to a dashboard: a Pin to Dashboard menu. */
   pin?: { tile: PinnedTile; onOpenPage(ref: TabRef): void; disabledReason?: string | null };
@@ -85,10 +87,11 @@ export interface PageNavBarProps {
 }
 
 /**
- * Browser-style navigation bar rendered inside `Page` chrome. Carries
- * back/forward, an optional bookmark toggle, and an optional backlinks
- * dropdown. Kept dumb and props-driven — the host wires it to the
- * real navigation/bookmark/backlinks state.
+ * Browser-style navigation bar rendered inside `Page` chrome: how the page
+ * is navigated (back/forward, its list, its title), its bookmark and
+ * comments, its primary action, and one ☰ menu (`PageMenu`) with
+ * everything else it can be acted on with. Kept dumb and props-driven —
+ * the host wires it to the real navigation/bookmark/backlinks state.
  */
 export function PageNavBar({
   history = true,
@@ -108,8 +111,6 @@ export function PageNavBar({
   ask,
   openWith,
 }: PageNavBarProps) {
-  const [backlinksOpen, setBacklinksOpen] = useState(false);
-  const [outboundOpen, setOutboundOpen] = useState(false);
   const [scopeOpen, setScopeOpen] = useState(false);
   const [siblingListOpen, setSiblingListOpen] = useState(false);
   const siblingPopoverRef = useRef<HTMLDivElement | null>(null);
@@ -371,11 +372,6 @@ export function PageNavBar({
         <div style={{ flex: 1 }} />
       )}
 
-      {openWith ? <OpenWith {...openWith} style={{ ...navButtonStyle(true), color: "var(--text-secondary)", fontSize: 11 }} /> : null}
-      {ask ? <AskMenu ask={ask} buttonStyle={{ ...navButtonStyle(true), color: "var(--text-secondary)", fontSize: 11 }} /> : null}
-      {ask ? (
-        <RefCommandsMenu target={ask} buttonStyle={{ ...navButtonStyle(true), color: "var(--text-secondary)", fontSize: 11 }} />
-      ) : null}
       {bookmark ? (
         <div style={{ position: "relative", display: "inline-flex" }}>
           <button
@@ -465,90 +461,16 @@ export function PageNavBar({
 
       {comments ?? null}
 
-      {backlinks ? (
-        <div style={{ position: "relative" }}>
-          <button
-            type="button"
-            data-testid="page-nav-backlinks-toggle"
-            onClick={() => setBacklinksOpen((v) => !v)}
-            disabled={backlinks.count === 0}
-            aria-expanded={backlinksOpen}
-            style={{
-              ...navButtonStyle(backlinks.count > 0),
-              padding: "4px 10px",
-              fontSize: "var(--text-xs)",
-            }}
-          >
-            Backlinks ({backlinks.count}) {backlinksOpen ? "▾" : "▸"}
-          </button>
-          {backlinksOpen && backlinks.count > 0 ? (
-            <div
-              data-testid="page-nav-backlinks-popover"
-              style={{
-                position: "absolute",
-                top: "calc(100% + 4px)",
-                right: 0,
-                minWidth: 280,
-                maxWidth: 480,
-                maxHeight: 360,
-                overflow: "auto",
-                background: "var(--surface-card)",
-                border: "1px solid var(--border-subtle)",
-                borderRadius: 6,
-                boxShadow: "0 4px 12px rgba(0,0,0,0.18)",
-                padding: 8,
-                zIndex: 10,
-              }}
-            >
-              {backlinks.body}
-            </div>
-          ) : null}
-        </div>
-      ) : null}
-
-      {outbound ? (
-        <div style={{ position: "relative" }}>
-          <button
-            type="button"
-            data-testid="page-nav-outbound-toggle"
-            onClick={() => setOutboundOpen((v) => !v)}
-            disabled={outbound.count === 0}
-            aria-expanded={outboundOpen}
-            style={{
-              ...navButtonStyle(outbound.count > 0),
-              padding: "4px 10px",
-              fontSize: "var(--text-xs)",
-            }}
-          >
-            Outbound ({outbound.count}) {outboundOpen ? "▾" : "▸"}
-          </button>
-          {outboundOpen && outbound.count > 0 ? (
-            <div
-              data-testid="page-nav-outbound-popover"
-              style={{
-                position: "absolute",
-                top: "calc(100% + 4px)",
-                right: 0,
-                minWidth: 280,
-                maxWidth: 480,
-                maxHeight: 360,
-                overflow: "auto",
-                background: "var(--surface-card)",
-                border: "1px solid var(--border-subtle)",
-                borderRadius: 6,
-                boxShadow: "0 4px 12px rgba(0,0,0,0.18)",
-                padding: 8,
-                zIndex: 10,
-              }}
-            >
-              {outbound.body}
-            </div>
-          ) : null}
-        </div>
-      ) : null}
-
-      {pin ? <PinToDashboard tile={pin.tile} testId="page-pin" onOpenPage={pin.onOpenPage} disabledReason={pin.disabledReason ?? null} /> : null}
-      {actions && actions.length > 0 ? <ActionButtons actions={actions} /> : null}
+      {barActions(actions).length > 0 ? <ActionButtons actions={barActions(actions)} /> : null}
+      <PageMenu
+        actions={actions}
+        ask={ask}
+        openWith={openWith}
+        backlinks={backlinks}
+        outbound={outbound}
+        pin={pin}
+        buttonStyle={navButtonStyle(true)}
+      />
     </div>
   );
 }

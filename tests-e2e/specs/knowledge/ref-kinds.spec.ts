@@ -59,9 +59,10 @@ test("a URI with two renderers is opened with the other one through Open with", 
   const uri = `oxplow:e2e/item?id=${n}`;
   await navigate(daemon, uri);
   await expect(page.getByTestId("page-lens").getByTestId("lens-row-0")).toContainText("Wombat item");
-  const openWith = page.getByTestId("page-nav-open-with").filter({ visible: true });
-  await expect(openWith).toBeVisible();
-  await openWith.selectOption("e2e/item-raw");
+  await page.getByTestId("page-nav-menu").filter({ visible: true }).click();
+  await page.getByTestId("menu-item-page-open-with").click();
+  await expect(page.getByTestId("menu-item-page-open-with-e2e/item")).toContainText("✓");
+  await page.getByTestId("menu-item-page-open-with-e2e/item-raw").click();
   await expect(page.getByTestId(`center-tab-${uri}#oxplow.renderer=e2e/item-raw`)).toBeVisible();
   await expect(page.getByTestId("page-lens").filter({ visible: true })).toContainText(uri);
   await expect(page.getByTestId("page-lens").filter({ visible: true })).not.toContainText("Wombat item");

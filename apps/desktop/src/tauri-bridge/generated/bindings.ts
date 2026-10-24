@@ -2582,8 +2582,7 @@ export type Extension_Deserialize = {
 	 *  What it waits on a person for when it is on but undeployed: the
 	 *  permissions its source would add, one line each
 	 *  ([`Permissions::added_over`]), and its build command when it has one
-	 *  (`extension_deploy::build_line`); startup deploys only one that
-	 *  asks for nothing.
+	 *  (`extension_deploy::build_line`): what its deploy will ask.
 	 */
 	pending?: string[],
 	/**
@@ -2730,8 +2729,7 @@ export type Extension_Serialize = {
 	 *  What it waits on a person for when it is on but undeployed: the
 	 *  permissions its source would add, one line each
 	 *  ([`Permissions::added_over`]), and its build command when it has one
-	 *  (`extension_deploy::build_line`); startup deploys only one that
-	 *  asks for nothing.
+	 *  (`extension_deploy::build_line`): what its deploy will ask.
 	 */
 	pending: string[],
 	/**
@@ -3397,6 +3395,12 @@ export type LensAction = {
 	 *  `primary` action a row is offered (`when`) is the one.
 	 */
 	primary?: boolean,
+	/**
+	 *  A page action (not a row, group or edit action) that stays a button
+	 *  in the page's nav bar instead of going in its ☰ menu: what a person
+	 *  reaches for on this page (a list's New). Several may be.
+	 */
+	prominent?: boolean,
 	/**
 	 *  What a drop runs: the dragged row is `{{row.*}}` (a drag action is
 	 *  a row action), and where it landed binds `{{before.*}}` (the row

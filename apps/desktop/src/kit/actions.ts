@@ -8,8 +8,12 @@ export interface PageAction {
   id: string;
   label: string;
   run(): void | Promise<void>;
-  /** The one main action of its place: drawn as the accent button. */
+  /** The one main action of its place: drawn as the accent button. In a
+   *  page's nav bar it stays a button, never in the ☰ menu. */
   primary?: boolean;
+  /** In a page's nav bar, a button rather than an item of its ☰ menu
+   *  (a lens action's `prominent`). Several may be. */
+  prominent?: boolean;
   disabled?: boolean;
   /** Running now: shown as `label…`, and not pressable. */
   busy?: boolean;

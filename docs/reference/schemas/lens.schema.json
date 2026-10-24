@@ -1710,6 +1710,11 @@
           "type": "boolean",
           "default": false
         },
+        "prominent": {
+          "description": "A page action shown as a button in the nav bar, not in its ☰.",
+          "type": "boolean",
+          "default": false
+        },
         "drag": {
           "description": "A row action a drop runs, binding where the row landed.",
           "type": "boolean",

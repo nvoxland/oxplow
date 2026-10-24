@@ -55,26 +55,39 @@ function shown(id: string, patches: unknown[]) {
   );
 }
 
+/** The Open With submenu's items, once the ☰ has it. */
+async function openWith(view: ReturnType<typeof render>) {
+  fireEvent.click(await waitFor(() => view.getByTestId("page-nav-menu")));
+  fireEvent.click(await waitFor(() => view.getByTestId("menu-item-page-open-with")));
+}
+
 test("a URI with two renderers offers Open with; picking one patches the view with oxplow.renderer", async () => {
   const patches: unknown[] = [];
   const view = shown(FILE, patches);
-  const select = (await waitFor(() => view.getByTestId("page-nav-open-with"))) as HTMLSelectElement;
-  expect(select.value).toBe("oxplow-foundation/editor");
-  fireEvent.change(select, { target: { value: "acme/blame" } });
-  expect(patches).toEqual([{ "oxplow.renderer": "acme/blame" }]);
+  await openWith(view);
+  expect(view.getByTestId("menu-item-page-open-with-oxplow-foundation/editor").textContent).toContain("✓");
+  expect(view.getByTestId("menu-item-page-open-with-acme/blame").textContent).not.toContain("✓");
+  fireEvent.click(view.getByTestId("menu-item-page-open-with-acme/blame"));
+  await waitFor(() => expect(patches).toEqual([{ "oxplow.renderer": "acme/blame" }]));
 });
+
+/** Open the ☰ (when there is one) once the extensions have loaded. */
+async function menuItems(view: ReturnType<typeof render>) {
+  await new Promise((r) => setTimeout(r, 20));
+  const menu = view.queryByTestId("page-nav-menu");
+  if (menu) fireEvent.click(menu);
+}
 
 test("a URI with one renderer, or none, offers nothing", async () => {
   const patches: unknown[] = [];
   const one = shown("oxplow:oxplow/wiki?slug=a", patches);
-  // Let the extensions load before asserting absence.
-  await new Promise((r) => setTimeout(r, 20));
-  expect(one.queryByTestId("page-nav-open-with")).toBeNull();
+  await menuItems(one);
+  expect(one.queryByTestId("menu-item-page-open-with")).toBeNull();
   cleanup();
   pages = [renderer("oxplow-foundation", "editor", { default: true })];
   const solo = shown(FILE, patches);
-  await new Promise((r) => setTimeout(r, 20));
-  expect(solo.queryByTestId("page-nav-open-with")).toBeNull();
+  await menuItems(solo);
+  expect(solo.queryByTestId("menu-item-page-open-with")).toBeNull();
   pages = [renderer("oxplow-foundation", "editor", { default: true }), renderer("acme", "blame")];
 });
 

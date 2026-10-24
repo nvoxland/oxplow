@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
 import { Page } from "./Page.js";
 import { PageNavigationContext, type PageNavigation } from "./PageNavigationContext.js";
@@ -38,19 +38,30 @@ test("the width and the rail are separate: a full-width page can have a rail", (
 });
 
 // The page says what it can do; the bar draws it, in every layout.
-test("a page's actions are drawn in the nav bar, also beside a rail", () => {
+test("a page's actions are drawn in the nav bar, also beside a rail: the primary one a button, the rest in the ☰", async () => {
   const ran: string[] = [];
-  const { getByTestId } = render(
+  const { getByTestId, queryByTestId } = render(
     <PageNavigationContext.Provider value={nav()}>
-      <Page title="T" width="reading" rightRail={<p>rail</p>} actions={[{ id: "close", label: "Close", run: () => void ran.push("close") }]}>
+      <Page
+        title="T"
+        width="reading"
+        rightRail={<p>rail</p>}
+        actions={[
+          { id: "save", label: "Save", primary: true, run: () => void ran.push("save") },
+          { id: "close", label: "Close", run: () => void ran.push("close") },
+        ]}
+      >
         body
       </Page>
     </PageNavigationContext.Provider>,
   );
-  const button = getByTestId("action-close");
-  expect(getByTestId("page-rail").contains(button)).toBe(false);
-  fireEvent.click(button);
-  expect(ran).toEqual(["close"]);
+  const save = getByTestId("action-save");
+  expect(getByTestId("page-rail").contains(save)).toBe(false);
+  fireEvent.click(save);
+  expect(queryByTestId("action-close")).toBeNull();
+  fireEvent.click(getByTestId("page-nav-menu"));
+  fireEvent.click(getByTestId("menu-item-action-close"));
+  await waitFor(() => expect(ran).toEqual(["save", "close"]));
 });
 
 // A pinned page is always itself: its bar has no history to step through.

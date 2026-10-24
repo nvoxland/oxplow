@@ -8,6 +8,6 @@ columns:
   - { key: title, label: Dashboard, icon: kind, link: { kind: page, from: uri } }
   - { key: updated_at, label: Changed, format: relative, width: 120 }
 actions:
-  - { id: new, label: New Dashboard, command: oxplow.dashboard.create, input: { title: Untitled dashboard } }
+  - { id: new, label: New Dashboard, command: oxplow.dashboard.create, input: { title: Untitled dashboard }, prominent: true }
 empty: No dashboards yet. A dashboard is a grid of metric and lens tiles. Create one here, or have the agent build it.
 hidden: true

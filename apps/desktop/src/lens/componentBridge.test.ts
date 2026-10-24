@@ -107,10 +107,22 @@ test("a page's calls parse: setTitle, setActions, openForm and querySql", () => 
     request: { id: "1", method: "setTitle", title: "Oct 1 – 7" },
   });
   expect(
-    parseFrameMessage({ id: "2", method: "setActions", actions: [{ id: "today", label: "Today", primary: true }, { id: "fit", label: "Fit" }] }),
+    parseFrameMessage({
+      id: "2",
+      method: "setActions",
+      actions: [{ id: "today", label: "Today", primary: true }, { id: "fit", label: "Fit" }, { id: "zoom", label: "Zoom", prominent: true }],
+    }),
   ).toEqual({
     type: "request",
-    request: { id: "2", method: "setActions", actions: [{ id: "today", label: "Today", primary: true, disabled: false }, { id: "fit", label: "Fit", primary: false, disabled: false }] },
+    request: {
+      id: "2",
+      method: "setActions",
+      actions: [
+        { id: "today", label: "Today", primary: true, prominent: false, disabled: false },
+        { id: "fit", label: "Fit", primary: false, prominent: false, disabled: false },
+        { id: "zoom", label: "Zoom", primary: false, prominent: true, disabled: false },
+      ],
+    },
   });
   expect(parseFrameMessage({ id: "3", method: "openForm", command: "acme.item.create" })).toEqual({
     type: "request",
@@ -258,7 +270,7 @@ test("a page's title and actions reach the host, and a press reaches the frame",
   h.send({ id: "a", method: "setActions", actions: [{ id: "fit", label: "Fit" }] });
   await h.settle();
   expect(titles).toEqual(["Oct"]);
-  expect(actions).toEqual([[{ id: "fit", label: "Fit", primary: false, disabled: false }]]);
+  expect(actions).toEqual([[{ id: "fit", label: "Fit", primary: false, prominent: false, disabled: false }]]);
   expect(h.received).toEqual([
     { id: "t", ok: true, result: null },
     { id: "a", ok: true, result: null },

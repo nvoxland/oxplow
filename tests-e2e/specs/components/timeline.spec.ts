@@ -14,6 +14,7 @@ test("the Timeline page draws the project's activity and titles itself", async (
   // A fresh project has its first thread and session in the last week.
   await expect(frame.locator(".vis-item").first()).toBeVisible();
   await expect(page.getByTestId("page-nav-title")).toContainText("Timeline:");
+  // Today and Fit are prominent: buttons in the bar, not in its ☰.
   await expect(page.getByTestId("action-today")).toBeVisible();
   await expect(page.getByTestId("action-fit")).toBeVisible();
   await page.getByTestId("action-fit").click();

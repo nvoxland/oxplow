@@ -73,6 +73,7 @@ export function CustomPageView({
         id: a.id,
         label: a.label,
         primary: a.primary,
+        prominent: a.prominent,
         disabled: a.disabled,
         run: () => hostRef.current?.action(a.id),
       })),

@@ -65,7 +65,8 @@ pages are THE shell.
 | `apps/desktop/src/tabs/useTabStore.ts` | `getTabStore()` singleton + `useThreadTabs(threadId)` hook backed by `useSyncExternalStore`. |
 | `apps/desktop/src/tabs/pageRefs.ts` | Tab ids. A `TabRef` is `{ id, pinned? }`: the id is the URI the tab shows (a web page's is its URL), and there is no `kind` and no `payload`. A tab's content is read from its URI (`typeOf`, `paramOf`, `parseUri`, `fileOf(ref)`, `diffViewOf(ref)`, `resourceParamsOf(ref)`). Constructors for things are the URI builders in `uri/` (`fileRef`, `wikiPageRef`, …); route constructors are `pageTabRef(id, params?, state?)`, `extPageRef`, typed wrappers such as `newSessionRef`, `diffRef(spec)`, `endpointDiffRef`, `settingsRef`; `pagePayload(ref)` reads a route, `isPage`, `recordedPageKind`. `refFromTabId(id)` accepts every oxplow URI and every allowlisted http(s) URL, else null. `diskFilePath(id)` is the one way to ask "which working-tree file is this tab". |
 | `apps/desktop/src/tabs/Page.tsx` | Shared page chrome: title + kind chip + status chips + actions slot, optional **browser-style nav bar** (back/forward + bookmark + backlinks dropdown — auto-mounted from `PageNavigationContext` when present), body, collapsible legacy Backlinks region. Title can be passed as a `title` prop or registered programmatically by the page via `usePageTitle`; the chrome falls back to the context title when `title` is omitted. Every page shows the nav bar when it has a navigation context (a page outside one — a test — gets the plain header instead); a page doesn't opt out. `titleIcon` draws before the title (an agent's logo). **`titleInBody`** (default false) says the page renders its OWN title as an `<h1>` in the body (use the exported `pageH1Style` for consistency), so the chrome (nav bar / header) suppresses the title to avoid a duplicate — the tab-strip label via `usePageTitle` is unaffected. Adopters: `MetricDetailPage`, `DiffViewPage` (tsk137). **The body** takes `width?: "full" \| "reading"` and an independent `rightRail` (a 320px sticky control panel beside a body of either width); below ~960px the rail moves inline to the top of the body (`RailBody`) — "Body layouts" below. **Actions** are `PageAction[]` drawn in the nav bar, and `pin` adds Pin to Dashboard — "The nav bar is core's". Reads only semantic CSS variables (skin via theme). |
-| `apps/desktop/src/tabs/PageNavBar.tsx` | Dumb nav-bar component: back/forward buttons, optional bookmark toggle, optional backlinks/outbound/snapshots dropdowns (popovers), and an optional **comment navigator** slot (`comments` ReactNode, rendered before Backlinks). Mounted by `Page` when context or explicit `navBar` prop is present. |
+| `apps/desktop/src/tabs/PageNavBar.tsx` | Dumb nav-bar component: back/forward, the list stepper, the title, the bookmark star, the **comment navigator** slot (`comments` ReactNode), the primary and prominent actions as buttons, and the ☰ (`PageMenu`). Mounted by `Page` when context or explicit `navBar` prop is present. |
+| `apps/desktop/src/tabs/PageMenu.tsx`, `tabs/pageMenuItems.ts` | The nav bar's ☰: one `ContextMenu` with everything else the page can be acted on with; `pageMenuItems` (pure, unit-tested) says what and in which order, `PageMenu` draws it and the panels it opens under the button (Backlinks, Outbound, Pin to Dashboard). "The nav bar is core's". |
 | `apps/desktop/src/components/Comments/CommentNavigator.tsx` | Self-contained per-page comment navigator for the nav bar. `useCommentsForTarget(target)` (one URI) → shows "Comments (N)", steps through anchored comments with ◀ ▶ (each `requestCommentReveal`s to scroll + open inline on the surface), and a dropdown lists all comments plus an **Orphaned (M)** section. Orphaned entries are clickable too: they `requestCommentReveal`, and the surfaces open the thread popover at a fallback position (no anchor to scroll to) so the comment is readable. The popover then offers a **"Relink to selection"** button (`CommentPopover.onRelink`, wired by RichTextField + MonacoCommentLayer) that re-attaches the comment to the editor's current selection — select the intended text first. (The right-click "Relink orphaned" path still exists.) Comment-bearing pages pass it via `Page`'s `commentsNav` prop, on their URI (the editor page → the file's, WikiPage → the wiki page's, WorkItemPage → the item's); a declared page with `comments: true` gets it from `LensPage`. Renders nothing when the page has no comments. Pure helpers (`partitionPageComments`, `stepComment`) live in `pageCommentNav.ts` (unit-tested) and are shared with the per-thread stepper: `CommentPopover` takes an `onStep(dir)` prop so an open comment thread shows ◀ Prev / Next ▶ buttons that scroll to + reopen the adjacent comment (wired by RichTextField + MonacoCommentLayer via `stepComment` + `requestCommentReveal`). |
 | `apps/desktop/src/tabs/PageNavigationContext.ts` | React context exposing `{ navigate(ref, { newTab? }), goBack, goForward, canGoBack, canGoForward, setTitle, title }` to descendants of an active page tab. Wrapped around every non-agent center tab in `App.tsx`. `BacklinksList` reads it so default-click navigates in-tab. The `usePageTitle(title)` helper registers the page's current title with the host so the same string drives the chrome header AND the tab strip label — no per-page duplicate header markup. **`useTabEditing({ dirty, save })`** tells the tab its page holds unsaved edits and how to save them (`setEditing`, on the current page only): `App.tsx` keeps one setter per tab (`editingSetterFor`) and draws `CenterTab.dirty` as a ● before the label, publishes `pageDirty` (the File → Save `when`), runs the shown tab's `save` from `oxplow.editor.save` when the page isn't a file, and keeps a dirty tab from the cap's `evictions`. The editor (`FilePage`) and the `markdown` viz's editor call it. |
 | `apps/desktop/src/lens/EditorViz.tsx` | The `editor` viz that draws the working tree's file (foundation's `editor` page): its buffer from `editor/openFiles.ts`, `EditorPane` over it, `useTabEditing` for its ● / Save / Find. A renderer's lens page (`LensPage` with `renders`) shows the resource's backlinks and outbound links in the nav bar (`useBacklinks`), so wiki pages, tasks and commits that reference the file are listed there. `.context/editor-and-monaco.md` "The editor viz". |
@@ -102,8 +103,9 @@ Which page draws a URI comes from declarations
    nothing declares the resource or its model has no row. Never an
    error, never a toast.
 
-"Open with" in the nav bar (`tabs/OpenWith.tsx`, `page-nav-open-with`)
-lists the renderers when there are several. Picking one is a view change
+**Open With** in the nav bar's ☰ (a submenu, `menu-item-page-open-with`,
+each renderer `menu-item-page-open-with-<extension>/<page>`, the one
+drawing it checked) lists the renderers when there are several. Picking one is a view change
 (Back returns to the first). `App.tsx` `renderTab` draws a route
 (`oxplow:oxplow/page?page=…`) through `routeTab`, and anything else through
 its renderer: a lens (`LensPage`, run with the URI), a custom component,
@@ -446,19 +448,41 @@ full.
 
 ## The nav bar is core's
 
-The bar above every page (`tabs/PageNavBar.tsx`: back/forward, siblings,
-title, bookmark, backlinks, comments, Ask, the extensions' Commands menu,
-Pin to Dashboard, the page's actions) is laid out and drawn only by core.
-A page says **what** goes in it, as data:
+The bar above every page (`tabs/PageNavBar.tsx`) is laid out and drawn
+only by core. Left to right: back/forward, the list stepper (↑ ↓ "N of
+M"), the title, then the bookmark star, the comment navigator, the page's
+**primary and prominent actions** as buttons, and one **☰ menu**
+(`tabs/PageMenu.tsx`, `page-nav-menu`) holding everything else the page
+can be acted on with — so the bar shows how a page is navigated, and what
+it is acted on with is in one place. The ☰'s order is fixed
+(`tabs/pageMenuItems.ts`), sections split by separators, an empty one left
+out and the ☰ itself hidden when it would be empty:
+
+1. the page's other actions (`menu-item-action-<id>`; a busy one says
+   `label…` and is greyed);
+2. **Ask** (a submenu: Ask About This, then the catalog's prompts about the
+   page's kind; `menu-item-page-ask`, `menu-item-page-ask-this`), then the
+   commands about the page's resource, one submenu per `ui.group`
+   (`menu-item-ref-commands-<group>`, `menu-item-ref-command-<id>`);
+3. **Open With** (when two or more pages render the URI);
+4. **Backlinks (N)…**, **Outbound (N)…** and **Pin to Dashboard…**, which
+   open their panel under the ☰ (`page-nav-backlinks-popover`,
+   `page-nav-outbound-popover`, `page-pin-menu`) rather than a submenu.
+
+A page says **what** goes in the bar, as data:
 
 - `title` / `usePageTitle`, `chips: PageChip[]` (a chip with `onClick`
   is pressable — a wiki page's freshness opens its report);
 - `actions: PageAction[]` (`kit/actions.ts`: `id`, `label`, `run`,
-  `primary`, `disabled`, `busy`, `title`), drawn by `ActionButtons` in the
-  bar — or in the header when a page shows no bar — never in the rail;
-  each button's test id is `action-<id>`;
+  `primary`, `prominent`, `disabled`, `busy`, `title`). In the bar a
+  `primary` or `prominent` action is a button (`ActionButtons`, test id
+  `action-<id>`) and the rest are ☰ items; a page that shows no bar draws
+  them all in its header, never in the rail. A lens's whole-lens action
+  is `prominent` when its manifest says so, a custom component's when its
+  `setActions` does;
 - `pin: { tile, onOpenPage }`: what the page would add to a dashboard —
-  the bar's Pin to Dashboard menu (`page-pin`). A lens page pins its lens.
+  the ☰'s Pin to Dashboard… (`menu-item-page-pin`). A lens page pins its
+  lens.
 
 **A pinned tab has no history:** it leads the strip and is always itself,
 so its bar leaves out back and forward (`PageNavigation.pinned`, set from

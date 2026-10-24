@@ -592,7 +592,9 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     (`onSetParam` with the row, through a document's or dashboard's
     parts when the page holds the param). Copy, Add to Agent Context
     and the whole-lens actions are handed to the nav bar
-    (`toolbarTo`). **A lens page is a function of its tab entry**
+    (`toolbarTo`): in its ☰, except a whole-lens action the manifest marks
+    `prominent: true`, which stays a button there (several may; a row,
+    group, drag or edit action can't be — `parse_actions`). **A lens page is a function of its tab entry**
     (`tabs/session.ts`): its params are its URI's
     (`oxplow:oxplow/lens?lens=<ext>/<slug>&k=v#f=v`, a declared page's `oxplow:oxplow/page?page=…&k=v`): the `?`
     holds its `resource` params, the `#` its filters and picks. A change of
@@ -2984,8 +2986,9 @@ recorded, read-only over the published models, 1,000 rows by default),
 command's form — `component_form` — in a slideover and runs the
 submission through `invoke_component_command`; closing it answers
 `CANCELLED`), `{ id, method: setTitle, title }` and `{ id, method:
-setActions, actions: [{ id, label, primary?, disabled? }] }` (the page's
-title and its nav-bar actions, data core draws; a press posts
+setActions, actions: [{ id, label, primary?, prominent?, disabled? }] }`
+(the page's title and its nav-bar actions, data core draws: the primary
+and prominent ones as buttons, the rest in the bar's ☰; a press posts
 `{ type: action, id }` to the frame), and `{ id, method: showSpec, spec }`
 (protocol 10: a lens spec, as `oxplow.lens.keep` takes one, that the page
 runs checked — IPC `run_lens_spec`, `commands::lens::run_checked_spec`:
@@ -4822,7 +4825,7 @@ tool: open_work              # offered as <namespace>_open_work
     `catalog-prompts` — grouped by who offers each, with an Ask row action
     on `oxplow.agent.draft` — `catalog` over `v_model`, and
     `catalog-config-keys`, with Open Settings as a page action on
-    `oxplow.window.navigate`); the nav bar's Ask menu (suggested prompts for
+    `oxplow.window.navigate`); the nav bar ☰'s Ask (suggested prompts for
     the page's resource, `usePromptCatalog` over `v_prompt`); and
     `EmptyState`'s prompts (usability.md → "Empty states").
 - **No launcher entries.** The manifest's old `launcher:` list (a URI,

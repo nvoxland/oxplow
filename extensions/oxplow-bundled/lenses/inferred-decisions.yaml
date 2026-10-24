@@ -21,5 +21,5 @@ columns:
 actions:
   - { id: confirm, label: Confirm, command: oxplow.effort.confirm_decision, input: { decision: "{{row.decision}}" }, row: true }
   - { id: dismiss, label: Dismiss, command: oxplow.effort.dismiss_decision, input: { decision: "{{row.decision}}" }, row: true }
-  - { id: infer, label: Infer Again, command: oxplow.effort.infer_reasoning, input: { effort: "{{param.effort}}", again: true } }
+  - { id: infer, label: Infer Again, command: oxplow.effort.infer_reasoning, input: { effort: "{{param.effort}}", again: true }, prominent: true }
 empty: Nothing inferred. The agent recorded its decisions or made none worth noting; or no model serves `oxplow-bundled/reasoning` (Settings → AI); or its programs aren't approved (Settings → Data → Programs).

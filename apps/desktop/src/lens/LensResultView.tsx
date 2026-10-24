@@ -404,6 +404,7 @@ function HandToolbar({ run, streamId, actions, marks, to }: { run: LensRun; stre
         title: a.command,
         busy: actions.busy === a.id,
         disabled: actions.busy !== null && actions.busy !== a.id,
+        prominent: a.prominent ?? false,
         run: () => pressRef.current(a, null),
       })),
     ]);

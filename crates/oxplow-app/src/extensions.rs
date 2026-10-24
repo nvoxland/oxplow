@@ -1569,6 +1569,11 @@ pub struct LensAction {
     /// `primary` action a row is offered (`when`) is the one.
     #[serde(default)]
     pub primary: bool,
+    /// A page action (not a row, group or edit action) that stays a button
+    /// in the page's nav bar instead of going in its ☰ menu: what a person
+    /// reaches for on this page (a list's New). Several may be.
+    #[serde(default)]
+    pub prominent: bool,
     /// What a drop runs: the dragged row is `{{row.*}}` (a drag action is
     /// a row action), and where it landed binds `{{before.*}}` (the row
     /// below the drop), `{{after.*}}` (the row above), `{{onto.*}}` (the
@@ -1651,6 +1656,9 @@ struct ActionFile {
     /// The row action a click on the row runs.
     #[serde(default)]
     primary: bool,
+    /// A page action shown as a button in the nav bar, not in its ☰.
+    #[serde(default)]
+    prominent: bool,
     /// A row action a drop runs, binding where the row landed.
     #[serde(default)]
     drag: bool,
@@ -1769,6 +1777,12 @@ fn parse_actions(
                 || action_templates(&input)
                     .iter()
                     .any(|(scope, _)| scope == "row"));
+        if f.prominent && (row || f.group.is_some() || f.edit) {
+            return Err(format!(
+                "actions: `{}`: `prominent` is for a page action (not `row`, `group`, `drag` or `edit`): it keeps that action a button in the page's nav bar",
+                f.id
+            ));
+        }
         if f.edit && (f.drag || f.bulk || f.key.is_some() || f.group.is_some() || f.primary) {
             return Err(format!(
                 "actions: `{}`: an edit action is the editor's Save: it can't be `drag`, `bulk`, `key`, `group` or `primary`",
@@ -1925,6 +1939,7 @@ fn parse_actions(
             then: f.then,
             when: f.when,
             primary: f.primary,
+            prominent: f.prominent,
             drag: f.drag,
             bulk: f.bulk,
             key: f.key,
@@ -7928,6 +7943,52 @@ mod tests {
         assert!(ok[0].primary);
         let err = parse(&["{ id: a, label: A, command: x.y.z, primary: true }"]).unwrap_err();
         assert!(err.contains("`primary` is for a row action"), "{err}");
+    }
+
+    /// `prominent` keeps a page action a button in the page's nav bar
+    /// instead of its ☰ menu; several may be. A row, group or edit action
+    /// isn't in the nav bar, so it can't be.
+    #[test]
+    fn prominent_keeps_page_actions_in_the_bar() {
+        // Over a grouped lens, so a group action is declared as it may be.
+        let parse = |actions: &[&str]| {
+            parse_actions(
+                actions
+                    .iter()
+                    .map(|a| serde_yaml::from_str(a).unwrap())
+                    .collect(),
+                &[],
+                true,
+                false,
+            )
+        };
+        let ok = parse(&[
+            "{ id: a, label: A, command: x.y.z, prominent: true }",
+            "{ id: b, label: B, command: x.y.z, prominent: true }",
+            "{ id: c, label: C, command: x.y.z }",
+        ])
+        .unwrap();
+        assert_eq!(
+            ok.iter().map(|a| a.prominent).collect::<Vec<_>>(),
+            [true, true, false]
+        );
+        for (action, said) in [
+            (
+                "{ id: a, label: A, command: x.y.z, row: true, prominent: true }",
+                "`prominent` is for a page action",
+            ),
+            (
+                "{ id: a, label: A, command: x.y.z, group: open, prominent: true }",
+                "`prominent` is for a page action",
+            ),
+            (
+                "{ id: a, label: A, command: x.y.z, drag: true, prominent: true }",
+                "`prominent` is for a page action",
+            ),
+        ] {
+            let err = parse(&[action]).unwrap_err();
+            assert!(err.contains(said), "{action}: {err}");
+        }
     }
 
     /// A drag action is a row action a drop runs, binding where the row

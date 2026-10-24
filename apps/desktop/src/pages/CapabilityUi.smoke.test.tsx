@@ -1,5 +1,5 @@
 import { afterEach, expect, mock, test } from "bun:test";
-import { act, cleanup, render, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import type { ReactElement } from "react";
 
 // P6b.C6: the shell is complete with every enhancement off — no
@@ -115,7 +115,11 @@ async function expectPlain(view: ReturnType<typeof render>) {
   expect(view.container.querySelector("[data-slot]") === null).toBe(true);
   // No core component replaced (`Replaceable` marks one that is).
   expect(view.container.querySelector('[data-testid^="replacement-"]') === null).toBe(true);
-  expect(view.queryByTestId("page-nav-commands") === null).toBe(true);
+  // No extension commands in the page's ☰ (core's Ask may be there).
+  const menu = view.queryByTestId("page-nav-menu");
+  if (menu) fireEvent.click(menu);
+  expect(view.container.querySelector('[data-testid^="menu-item-ref-commands-"]') === null).toBe(true);
+  if (menu) fireEvent.click(menu);
   expect(view.container.querySelector('[title^="from "]') === null).toBe(true);
 }
 
