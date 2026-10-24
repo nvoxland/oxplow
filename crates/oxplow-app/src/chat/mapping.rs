@@ -1,6 +1,7 @@
-//! ACP tool calls in oxplow's vocabulary (`oxplow_domain::agent::tool`):
-//! the protocol's own tool kinds map onto oxplow's, so the policy gate and
-//! the recorders read an ACP agent's calls the way they read any harness's.
+//! A chat connection's tool calls in oxplow's vocabulary
+//! (`oxplow_domain::agent::tool`): the tool kinds in `model.rs` map onto
+//! oxplow's, so the policy gate and the recorders read a Codex thread's
+//! calls the way they read any harness's.
 //! Pure.
 //!
 //! Edit, delete and move are edits. Their paths come from `locations`, the
@@ -23,7 +24,7 @@ const PATH_KEYS: &[&str] = &[
     "new_path",
 ];
 
-/// Whether an ACP call writes files (edit, delete, move).
+/// Whether a call writes files (edit, delete, move).
 pub fn is_write(kind: ToolKind) -> bool {
     matches!(kind, ToolKind::Edit | ToolKind::Delete | ToolKind::Move)
 }

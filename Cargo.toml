@@ -33,7 +33,6 @@ members = [
     "crates/oxplow-surface-parity",
     "crates/oxplow-sdk",
     "crates/oxplow-ai",
-    "crates/oxplow-acp-fake",
     "crates/oxplow-provider-protocol",
     "crates/oxplow-provider-fake",
     "crates/oxplow-provider-mcp",
@@ -72,7 +71,10 @@ async-trait = "0.1"
 
 # Serialization & types
 serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+# `preserve_order`: JSON objects keep their insertion order (schemas, forms and
+# column lists read in the order they were written). It used to arrive by
+# feature unification from the ACP SDK; declare it so it stays.
+serde_json = { version = "1.0", features = ["preserve_order"] }
 serde_path_to_error = "0.1"
 serde_yaml = "0.9"
 # The three specta crates are version-locked to each other: move them together.
@@ -172,7 +174,6 @@ oxplow-db = { path = "crates/oxplow-db" }
 oxplow-tasks = { path = "crates/oxplow-tasks" }
 oxplow-ai = { path = "crates/oxplow-ai" }
 oxplow-ai-providers = { path = "crates/oxplow-ai-providers" }
-oxplow-acp-fake = { path = "crates/oxplow-acp-fake" }
 oxplow-provider-protocol = { path = "crates/oxplow-provider-protocol" }
 oxplow-provider-fake = { path = "crates/oxplow-provider-fake" }
 oxplow-provider-mcp = { path = "crates/oxplow-provider-mcp" }

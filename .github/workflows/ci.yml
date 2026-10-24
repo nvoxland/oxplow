@@ -213,7 +213,7 @@ jobs:
       # The suite's global setup builds these too; building them here keeps
       # the compile out of the suite's own timing.
       - name: Build the test daemon and the fakes
-        run: cargo build -p oxplow-daemon-sim -p oxplow-acp-fake -p oxplow-provider-fake
+        run: cargo build -p oxplow-daemon-sim -p oxplow-provider-fake
 
       - name: Browser suite
         run: bun run e2e

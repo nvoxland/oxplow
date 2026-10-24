@@ -1,10 +1,10 @@
-//! oxplow's own view of what an ACP agent says. `wire.rs` is the only
-//! module that sees SDK types; everything past it (mapping, transcript,
-//! the session, the UI) speaks these, so an SDK bump touches one file.
+//! oxplow's own view of what a chat agent says. A connection (`codex.rs`)
+//! is the only module that sees its wire; everything past it (mapping,
+//! transcript, the session, the UI) speaks these.
 
 use serde::{Deserialize, Serialize};
 
-/// The ACP tool categories, mirrored so the SDK's enum stays in `wire.rs`.
+/// The tool categories a connection maps its agent's tools onto.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolKind {

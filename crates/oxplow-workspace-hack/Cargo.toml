@@ -26,7 +26,6 @@ crossbeam-utils = { version = "0.8" }
 crypto-common = { version = "0.1", default-features = false, features = ["std"] }
 ctor = { version = "1" }
 deranged = { version = "0.5", features = ["serde"] }
-derive_more = { version = "2", features = ["display", "from"] }
 digest-93f6ce9d446188ac = { package = "digest", version = "0.10", features = ["mac", "std"] }
 either = { version = "1", features = ["use_std"] }
 erased-serde = { version = "0.4" }
@@ -74,7 +73,6 @@ schemars = { version = "1", features = ["chrono04"] }
 serde = { version = "1", features = ["alloc", "derive", "rc"] }
 serde_core = { version = "1", features = ["alloc", "rc"] }
 serde_json = { version = "1", features = ["alloc", "arbitrary_precision", "float_roundtrip", "preserve_order", "raw_value"] }
-serde_with = { version = "3", features = ["json", "schemars_1"] }
 simd-adler32 = { version = "0.3", default-features = false, features = ["std"] }
 smallvec = { version = "1", default-features = false, features = ["const_new"] }
 specta = { version = "2.0.0-rc.25", features = ["derive", "function", "serde_json", "time"] }
@@ -99,8 +97,6 @@ cc = { version = "1", default-features = false, features = ["parallel"] }
 crc32fast = { version = "1" }
 crypto-common = { version = "0.1", default-features = false, features = ["std"] }
 deranged = { version = "0.5" }
-derive_more = { version = "2", features = ["add", "add_assign"] }
-derive_more-impl = { version = "2", features = ["add", "add_assign", "display", "from"] }
 digest-93f6ce9d446188ac = { package = "digest", version = "0.10", features = ["std"] }
 either = { version = "1", default-features = false, features = ["use_std"] }
 erased-serde = { version = "0.4", default-features = false, features = ["alloc"] }
@@ -121,8 +117,6 @@ regex-syntax = { version = "0.8" }
 serde = { version = "1", features = ["alloc", "derive"] }
 serde_core = { version = "1", features = ["alloc"] }
 serde_json = { version = "1", features = ["alloc", "preserve_order", "unbounded_depth"] }
-serde_with = { version = "3" }
-serde_with_macros = { version = "3", default-features = false, features = ["schemars_1"] }
 simd-adler32 = { version = "0.3" }
 smallvec = { version = "1", default-features = false, features = ["const_generics"] }
 specta-macros = { version = "2.0.0-rc.25", features = ["DO_NOT_USE_function", "serde"] }
@@ -142,11 +136,11 @@ hyper = { version = "1", features = ["client", "http1", "server"] }
 hyper-util = { version = "0.1", features = ["client-legacy", "client-proxy", "client-proxy-system", "http1", "server", "service"] }
 libsqlite3-sys = { version = "0.37", features = ["bundled", "preupdate_hook"] }
 nix = { version = "0.28", features = ["fs", "ioctl", "poll", "signal", "term"] }
-rustix = { version = "1", features = ["event", "fs", "net", "pipe", "process", "time"] }
+rustix = { version = "1", features = ["fs"] }
 rustls = { version = "0.23", default-features = false, features = ["aws-lc-rs", "aws_lc_rs", "ring", "std", "tls12"] }
 rustls-webpki = { version = "0.103", default-features = false, features = ["aws-lc-rs", "ring", "std"] }
 simd-adler32 = { version = "0.3" }
-slab = { version = "0.4" }
+slab = { version = "0.4", default-features = false, features = ["std"] }
 tokio-util = { version = "0.7", default-features = false, features = ["io"] }
 tower = { version = "0.5", default-features = false, features = ["log", "make", "retry", "timeout"] }
 zerocopy = { version = "0.8", default-features = false, features = ["derive", "simd"] }

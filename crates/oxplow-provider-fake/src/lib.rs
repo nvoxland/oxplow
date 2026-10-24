@@ -1,7 +1,7 @@
 //! A scripted **work-items provider** speaking oxplow's provider protocol
 //! (P5.D2, `.context/providers.md`) — what the host, the instances and the
-//! conformance kit are tested against, the way `oxplow-acp-fake` stands in
-//! for an agent.
+//! conformance kit are tested against, the way the other
+//! test doubles stand in for theirs.
 //!
 //! It keeps items in memory (`oxplow:oxplow/work_item?id=W-<n>&provider=<id>`, `<id>` being the
 //! instance the host says it is — `OXPLOW_PROVIDER_ID`, `fake` by

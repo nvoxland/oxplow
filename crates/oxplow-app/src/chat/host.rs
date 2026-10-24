@@ -1,8 +1,8 @@
-//! What an ACP session asks of the rest of oxplow: the policy, and the
+//! What a chat session asks of the rest of oxplow: the policy, and the
 //! same recording a terminal agent's hooks get. [`ChatHost`] is the seam
 //! (tests use a recording double); [`ServicesChatHost`] is the real one,
-//! routing through `AgentPolicy`, `AgentContext` and hook ingest so an
-//! ACP turn lands in the same tables as a hooked one.
+//! routing through `AgentPolicy`, `AgentContext` and hook ingest so a
+//! chat turn lands in the same tables as a hooked one.
 
 use std::sync::{Arc, Weak};
 
@@ -157,7 +157,7 @@ impl ServicesChatHost {
 
     async fn ingest(&self, svc: &Services, env: HookEnvelope) {
         if let Err(err) = svc.hook_ingest.ingest(env).await {
-            warn!(?err, "acp: hook ingest failed");
+            warn!(?err, "chat: hook ingest failed");
         }
     }
 }
@@ -299,7 +299,7 @@ impl ChatHost for ServicesChatHost {
         let mut env = self.envelope(HookKind::Stop, thread, session_id, body, None);
         env.turn_run = run.cloned();
         if let Err(err) = svc.hook_ingest.ingest(env).await {
-            warn!(?err, "acp: hook ingest failed");
+            warn!(?err, "chat: hook ingest failed");
         }
     }
 
@@ -312,7 +312,7 @@ impl ChatHost for ServicesChatHost {
             .name_conversation(self.session, session_id.to_string(), title.to_string())
             .await
         {
-            warn!(?err, "acp: naming the conversation failed");
+            warn!(?err, "chat: naming the conversation failed");
         }
     }
 
@@ -434,7 +434,7 @@ impl ChatHost for ServicesChatHost {
             .set_status(thread, session, state, detail)
             .await
         {
-            warn!(?err, "acp: status update failed");
+            warn!(?err, "chat: status update failed");
         }
     }
 
@@ -470,7 +470,7 @@ impl ChatHost for ServicesChatHost {
             )
             .await
         {
-            warn!(?err, "acp: status update failed");
+            warn!(?err, "chat: status update failed");
         }
     }
 

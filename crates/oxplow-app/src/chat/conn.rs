@@ -1,8 +1,7 @@
 //! What a chat session's actor (`session.rs`) needs of the agent it talks
-//! to, whatever the protocol: an ACP agent over its stdio (`wire.rs`) or a
-//! thread on Codex's app-server daemon (`codex.rs`). Each speaks its own
-//! wire and hands the actor the same [`Incoming`] messages in arrival
-//! order.
+//! to: today a thread on Codex's app-server daemon (`codex.rs`). A
+//! connection speaks its own wire and hands the actor [`Incoming`]
+//! messages in arrival order.
 
 use std::path::{Path, PathBuf};
 
@@ -12,6 +11,29 @@ use oxplow_domain::hook::TurnRun;
 
 use super::human_prompt::HumanPrompt;
 use super::model::{ChatUpdate, PermissionAnswer, PermissionAsk, ToolCall};
+
+/// Text kept per content block; a runaway command output is cut here.
+pub const MAX_TEXT: usize = 64 * 1024;
+
+pub(crate) fn cap(s: &str) -> String {
+    if s.len() <= MAX_TEXT {
+        return s.to_string();
+    }
+    let mut end = MAX_TEXT;
+    while !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}… [truncated]", &s[..end])
+}
+
+pub(crate) fn cap_value(v: serde_json::Value) -> serde_json::Value {
+    match &v {
+        serde_json::Value::String(s) if s.len() > MAX_TEXT => serde_json::Value::String(cap(s)),
+        serde_json::Value::String(_) => v,
+        _ if v.to_string().len() > MAX_TEXT => serde_json::json!({ "truncated": true }),
+        _ => v,
+    }
+}
 
 /// The agent's side of one session.
 #[async_trait]
@@ -64,8 +86,7 @@ pub enum Incoming {
         ask: Box<PermissionAsk>,
         reply: PermissionReply,
     },
-    /// The agent asks oxplow to write a file for it (ACP's
-    /// `fs/write_text_file`).
+    /// The agent asks oxplow to write a file for it .
     WriteFile {
         path: PathBuf,
         content: String,
