@@ -258,7 +258,7 @@ URI's content), `sql.read/query` (`oxplow.sql.query`), `search.read/search`
 from any revision, past what `v_commit` indexes), `lsp.read/*` (`oxplow.code.*`),
 `changes.read/ensure` (`oxplow.change.ensure`: it writes only the derived
 change cache, so it stays a read), `knowledge.read/{comments,drift}`,
-`extensions.check/{validate,preview,review}` (a review clones the
+`extensions.check/{validate,preview,draft_status,review}` (`oxplow.extension.draft_status`: how a stream's source differs from what runs, `extension_deploy::source_diff`; a review clones the
 candidate into `.oxplow/tmp`; it changes no record),
 `collectors.preview/preview`, and `ai.compute/{decide,summarize}` (recorded
 calls whose caller is the asking thread). `lenses.write/run_action`

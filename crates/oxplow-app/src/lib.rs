@@ -2341,6 +2341,7 @@ mod tests {
                 // Writes the store, the settings and `.oxplow/.gitignore`.
                 "oxplow.extension.deploy",
                 "oxplow.extension.disable",
+                "oxplow.extension.draft_status",
                 "oxplow.extension.enable",
                 "oxplow.extension.preview",
                 "oxplow.extension.remove",

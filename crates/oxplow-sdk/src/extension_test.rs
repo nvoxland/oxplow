@@ -163,6 +163,7 @@ pub async fn test_extension_in(
         {
             policy_suite(root, &ext, decl, &env, &mut report).await;
         }
+        page_answers(&host, &ext, &mut report).await;
         questions(&host, &ext, &mut report).await;
         incremental_models(&host, &ext, &mut report).await;
     }
@@ -222,6 +223,11 @@ async fn examples(host: &Host, ext: &Extension, report: &mut TestReport) {
             shown: &shown,
             input: doc.get("input").cloned().unwrap_or(Value::Null),
             expect: doc.get("expect").cloned().unwrap_or(Value::Null),
+            given: doc
+                .get("given")
+                .or_else(|| doc.get("input").and_then(|i| i.get("given")))
+                .cloned()
+                .unwrap_or(Value::Null),
         };
         if let Some(why) = withheld_target(ext, &ex.input) {
             report.warnings.push(format!(
@@ -243,6 +249,9 @@ async fn examples(host: &Host, ext: &Extension, report: &mut TestReport) {
         if let Some(slug) = ex.input.get("lens").and_then(Value::as_str) {
             report.ran.push(format!("example {}", ex.name));
             lens_example(host, ext, &ex, slug, report).await;
+        } else if let Some(page) = ex.input.get("page").and_then(Value::as_str) {
+            report.ran.push(format!("example {}", ex.name));
+            page_example(host, ext, &ex, page, report).await;
         } else if let Some(slug) = ex.input.get("form").and_then(Value::as_str) {
             report.ran.push(format!("example {}", ex.name));
             form_example(host, ext, &ex, slug, report).await;
@@ -280,9 +289,9 @@ async fn examples(host: &Host, ext: &Extension, report: &mut TestReport) {
             command_example(host, &ex, cmd, report).await;
         } else if ex.input.get("command").is_none() || ext.providers.is_empty() {
             report.errors.push(format!(
-                "{shown}:1: example `{}`'s `input` names no lens, collector, command, effect, \
+                "{shown}:1: example `{}`'s `input` names no lens, page, collector, command, effect, \
                  event, job, component, form, effort policy, event type, wikilink or provider command — \
-                 fix: `{{ lens: <slug>, params?, rows? }}`, `{{ collector: <id>, rows?, event? }}`, \
+                 fix: `{{ lens: <slug>, params?, rows? }}`, `{{ page: <slug>, params? }}` (with `given:`), `{{ collector: <id>, rows?, event? }}`, \
                  `{{ command: <name>, input }}`, `{{ effect: <id>, event: {{ type, payload }} }}` \
                  (a dry run), `{{ event: {{ type, payload }} }}` (logged, and what reacts runs), \
                  `{{ job: <id>, intentKey, request }}`, `{{ component: <id>, items?, queries?, invokes? }}`, `{{ form: <lens>, params? }}`, \
@@ -579,7 +588,7 @@ async fn job_example(
             return;
         }
     }
-    if !seed_rows(host, ext, ex, report).await || !run_setup(host, ex, report).await {
+    if !seed_rows(host, ext, ex, report).await || !run_setup(host, ext, ex, report).await {
         return;
     }
     let logged = host
@@ -794,10 +803,20 @@ async fn seed_rows(
     ex: &Example<'_>,
     report: &mut TestReport,
 ) -> bool {
-    let shown = ex.shown;
-    let Some(rows) = ex.input.get("rows") else {
-        return true;
-    };
+    match ex.input.get("rows") {
+        Some(rows) => publish_rows(host, ext, ex.shown, rows, report).await,
+        None => true,
+    }
+}
+
+/// `rows: { <entity>: [ … ] }` published for the extension's own entities.
+async fn publish_rows(
+    host: &Host,
+    ext: &Extension,
+    shown: &str,
+    rows: &Value,
+    report: &mut TestReport,
+) -> bool {
     let rows = match serde_json::from_value::<std::collections::BTreeMap<String, Vec<Value>>>(
         rows.clone(),
     ) {
@@ -823,27 +842,53 @@ async fn seed_rows(
 /// contribution reads (a work item, an effort, a test run). Each runs as a
 /// person, or with `as: agent` as the agent of `oxplow:oxplow/thread?id=thr1`. `false`,
 /// with the error reported, when one fails.
-async fn run_setup(host: &Host, ex: &Example<'_>, report: &mut TestReport) -> bool {
-    let shown = ex.shown;
-    let Some(steps) = ex.input.get("setup") else {
-        return true;
-    };
+async fn run_setup(
+    host: &Host,
+    ext: &Extension,
+    ex: &Example<'_>,
+    report: &mut TestReport,
+) -> bool {
+    match ex.input.get("setup") {
+        Some(steps) => run_steps(host, ext, ex.shown, "setup", steps, report).await,
+        None => true,
+    }
+}
+
+/// `steps` (the example's `key`, `setup` or `given`), run in order on the
+/// throwaway's own database: each `{ command, input?, as? }` or, for a
+/// `given`, `{ rows: { <entity>: [ … ] } }`. `false`, with the error
+/// reported, when one fails.
+async fn run_steps(
+    host: &Host,
+    ext: &Extension,
+    shown: &str,
+    key: &str,
+    steps: &Value,
+    report: &mut TestReport,
+) -> bool {
     let Some(steps) = steps.as_array() else {
         report.errors.push(format!(
-            "{shown}:1: `setup` isn't a list — fix: `setup: [{{ command, input?, as? }}]`"
+            "{shown}:1: `{key}` isn't a list — fix: `{key}: [{{ command, input?, as? }}]`"
         ));
         return false;
     };
     if let Err(e) = host.svc.streams.ensure_primary().await {
         report
             .errors
-            .push(format!("{shown}:1: `setup`: its thread: {e}"));
+            .push(format!("{shown}:1: `{key}`: its thread: {e}"));
         return false;
     }
     for (index, step) in steps.iter().enumerate() {
+        if let Some(rows) = step.get("rows") {
+            if !publish_rows(host, ext, shown, rows, report).await {
+                return false;
+            }
+            continue;
+        }
         let Some(command) = step.get("command").and_then(Value::as_str) else {
             report.errors.push(format!(
-                "{shown}:1: `setup[{index}]` names no command — fix: `{{ command, input?, as? }}`"
+                "{shown}:1: `{key}[{index}]` names no command — fix: `{{ command, input?, as? }}` \
+                 or `{{ rows: {{ <entity>: [..] }} }}`"
             ));
             return false;
         };
@@ -856,7 +901,7 @@ async fn run_setup(host: &Host, ex: &Example<'_>, report: &mut TestReport) -> bo
             },
             Some(other) => {
                 report.errors.push(format!(
-                    "{shown}:1: `setup[{index}]`: `as: {other}` — fix: `person` or `agent`"
+                    "{shown}:1: `{key}[{index}]`: `as: {other}` — fix: `person` or `agent`"
                 ));
                 return false;
             }
@@ -864,7 +909,7 @@ async fn run_setup(host: &Host, ex: &Example<'_>, report: &mut TestReport) -> bo
         let input = step.get("input").cloned().unwrap_or_else(|| json!({}));
         if let Err(e) = host.svc.commands.run(&actor, command, input, false).await {
             report.errors.push(format!(
-                "{shown}:1: `setup[{index}]` `{command}` failed: {e} — fix: its input, or the steps \
+                "{shown}:1: `{key}[{index}]` `{command}` failed: {e} — fix: its input, or the steps \
                  before it"
             ));
             return false;
@@ -1066,6 +1111,8 @@ struct Example<'a> {
     shown: &'a str,
     input: Value,
     expect: Value,
+    /// Steps run before it (`given:`, beside `input`, or inside it).
+    given: Value,
 }
 
 /// Run lens `slug` with the fixture's params; its columns and row count
@@ -1118,6 +1165,213 @@ async fn lens_example(
             "{shown}:1: lens `{slug}` returned {got} at `{path}`, the example expects {want} — \
              fix: the lens, or the example's `expect` (`{{ columns?, rows: n | $any }}`)"
         ));
+    }
+}
+
+/// A page run's node ids (`<embed>/<id>` inside an embed) with their kinds.
+fn run_nodes(run: &oxplow_app::pages::runner::PageRun) -> Vec<(String, String)> {
+    fn walk(
+        run: &oxplow_app::pages::runner::PageRun,
+        node: &oxplow_app::pages::runner::RunNode,
+        prefix: &str,
+        out: &mut Vec<(String, String)>,
+    ) {
+        let kind = run
+            .page
+            .nodes()
+            .into_iter()
+            .find(|n| n.id == node.id)
+            .and_then(|n| serde_json::to_value(n).ok())
+            .and_then(|v| v.get("kind").and_then(Value::as_str).map(str::to_string))
+            .unwrap_or_default();
+        out.push((format!("{prefix}{}", node.id), kind));
+        if let Some(sub) = &node.embed {
+            walk(sub, &sub.tree, &format!("{prefix}{}/", node.id), out);
+        }
+        for child in &node.children {
+            walk(run, child, prefix, out);
+        }
+    }
+    let mut out = Vec::new();
+    walk(run, &run.tree, "", &mut out);
+    if let Some(rail) = &run.rail {
+        walk(run, rail, "", &mut out);
+    }
+    out
+}
+
+/// Run page `id` (`<extension>/<slug>`) with `params` as a person would
+/// open it; the failure to run, or a loader that failed, as a message.
+async fn run_page(
+    host: &Host,
+    id: &str,
+    params: &Value,
+) -> Result<oxplow_app::pages::runner::PageRun, String> {
+    use oxplow_app::pages::runner::{PageRunner, RunRequest, RunTarget};
+    let params = params
+        .as_object()
+        .map(|o| {
+            o.iter()
+                .map(|(k, v)| (k.clone(), oxplow_db::SqlCell::from(v.clone())))
+                .collect()
+        })
+        .unwrap_or_default();
+    let run = PageRunner::of(&host.svc)
+        .run(RunRequest {
+            target: RunTarget::Page(id.to_string()),
+            params,
+            ctx: oxplow_app::extensions::LensContext::default(),
+            viewer: Actor::Human,
+        })
+        .await
+        .map_err(|e| e.to_string())?;
+    if let Some((name, error)) = run
+        .loaders
+        .iter()
+        .find_map(|(name, l)| l.error.as_ref().map(|e| (name, e)))
+    {
+        return Err(format!("loader `{name}` failed: {error}"));
+    }
+    Ok(run)
+}
+
+/// Run page `page` after the fixture's `given` steps, with its `params`;
+/// the run against `expect: { loaders?: { <name>: { rows: n | $any | [ { col:
+/// val } | [ val, … ] ], columns? } }, nodes?: [{ id, kind? }] }`. A row
+/// map matches when every column it names equals; a row list matches the
+/// loader's rows in order.
+async fn page_example(
+    host: &Host,
+    ext: &Extension,
+    ex: &Example<'_>,
+    page: &str,
+    report: &mut TestReport,
+) {
+    let shown = ex.shown;
+    if !ex.given.is_null() && !run_steps(host, ext, shown, "given", &ex.given, report).await {
+        return;
+    }
+    if !seed_rows(host, ext, ex, report).await {
+        return;
+    }
+    let id = if page.contains('/') {
+        page.to_string()
+    } else {
+        format!("{}/{page}", ext.name)
+    };
+    let params = ex.input.get("params").cloned().unwrap_or(Value::Null);
+    let run = match run_page(host, &id, &params).await {
+        Ok(run) => run,
+        Err(e) => {
+            report.errors.push(format!(
+                "{shown}:1: page `{page}`: {e} — fix: the page, or the example's `params` and `given`"
+            ));
+            return;
+        }
+    };
+    if let Some(loaders) = ex.expect.get("loaders").and_then(Value::as_object) {
+        for (name, want) in loaders {
+            let Some(loader) = run.loaders.get(name) else {
+                report.errors.push(format!(
+                    "{shown}:1: page `{page}` has no loader `{name}` — fix: the example's `expect.loaders`"
+                ));
+                continue;
+            };
+            let rows = &loader.result.rows;
+            let cells = |row: &Vec<oxplow_db::SqlCell>| json!(row);
+            let by_column = |row: &Vec<oxplow_db::SqlCell>, want: &Value| -> Value {
+                let named: serde_json::Map<String, Value> = want
+                    .as_object()
+                    .into_iter()
+                    .flatten()
+                    .map(|(column, _)| {
+                        let at = loader.result.columns.iter().position(|c| c == column);
+                        (
+                            column.clone(),
+                            at.and_then(|i| row.get(i))
+                                .map_or(Value::Null, |c| json!(c)),
+                        )
+                    })
+                    .collect();
+                Value::Object(named)
+            };
+            let mut got = json!({ "rows": rows.len() });
+            if let Some(list) = want.get("rows").and_then(Value::as_array) {
+                got["rows"] = Value::Array(
+                    rows.iter()
+                        .enumerate()
+                        .map(|(i, row)| match list.get(i) {
+                            Some(w) if w.is_object() => by_column(row, w),
+                            _ => cells(row),
+                        })
+                        .collect(),
+                );
+            }
+            if want.get("columns").is_some() {
+                got["columns"] = json!(loader.result.columns);
+            }
+            if let Some((path, want, got)) = first_mismatch(want, &got) {
+                report.errors.push(format!(
+                    "{shown}:1: page `{page}` loader `{name}` returned {got} at `{path}`, the example \
+                     expects {want} — fix: the page, or the example's `expect.loaders.{name}` \
+                     (`{{ rows: n | $any | [..], columns? }}`)"
+                ));
+            }
+        }
+    }
+    if let Some(nodes) = ex.expect.get("nodes").and_then(Value::as_array) {
+        let present = run_nodes(&run);
+        for want in nodes {
+            let Some(id) = want.get("id").and_then(Value::as_str) else {
+                report.errors.push(format!(
+                    "{shown}:1: `expect.nodes` entries are `{{ id, kind? }}`"
+                ));
+                continue;
+            };
+            match present.iter().find(|(have, _)| have == id) {
+                None => report.errors.push(format!(
+                    "{shown}:1: page `{page}` has no node `{id}` in this run (it has {}) — fix: the \
+                     example, or the page's view",
+                    present
+                        .iter()
+                        .map(|(n, _)| format!("`{n}`"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )),
+                Some((_, kind)) => {
+                    if let Some(k) = want.get("kind").and_then(Value::as_str) {
+                        if k != kind {
+                            report.errors.push(format!(
+                                "{shown}:1: page `{page}` node `{id}` is a `{kind}`, the example expects `{k}`"
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Every page's `answers:` entry runs with its params: the page opens and
+/// none of its loaders fails.
+async fn page_answers(host: &Host, ext: &Extension, report: &mut TestReport) {
+    let rel = ext.path.trim_end_matches('/').to_string();
+    let mut any = false;
+    for page in &ext.page_files {
+        for answer in &page.answers {
+            any = true;
+            let params = json!(answer.params);
+            if let Err(e) = run_page(host, &page.id, &params).await {
+                report.errors.push(format!(
+                    "{rel}/pages/{}.yaml:1: the answer to \"{}\" doesn't run: {e} — fix: the \
+                     answer's `params`, or the page",
+                    page.slug, answer.question
+                ));
+            }
+        }
+    }
+    if any {
+        report.ran.push("answers".into());
     }
 }
 
@@ -3440,6 +3694,124 @@ intent:
             errors.contains(
                 ".oxplow/extensions/editor/fixtures/edit.yaml:1: form `edit-item` opened with"
             ),
+            "{errors}"
+        );
+    }
+
+    /// A page with a work-item loader, one param and an answer.
+    fn pager(root: &Path, query: &str, answer_params: &str, expect: &str) {
+        write(
+            root,
+            ".oxplow/extensions/pager/extension.yaml",
+            "manifest: 2
+name: pager
+intent:
+  purpose: Show work items.
+  examples:
+    - { name: created, input: { page: items }, expect: the created item is listed }
+",
+        );
+        write(
+            root,
+            ".oxplow/extensions/pager/pages/items.yaml",
+            &format!(
+                "title: Items
+params: [{{ name: state }}]
+data:
+  items: {{ sql: \"{query}\" }}
+view:
+  stack:
+    - {{ id: list, viz: table, from: items }}
+answers:
+  - {{ question: \"What is open?\", params: {answer_params} }}
+"
+            ),
+        );
+        write(
+            root,
+            ".oxplow/extensions/pager/fixtures/created.yaml",
+            &format!(
+                "given:
+  - {{ command: oxplow.work_item.create, input: {{ title: Write the page test }} }}
+input: {{ page: items }}
+expect: {expect}
+"
+            ),
+        );
+    }
+
+    const LIST: &str = "SELECT title FROM v_work_item WHERE title = 'Write the page test'";
+
+    /// A page fixture runs `given` steps first, then the page, and checks
+    /// its loaders and nodes; the answers run too.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn extension_test_runs_a_page_after_its_given_steps() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        pager(
+            root,
+            LIST,
+            "{}",
+            "{ loaders: { items: { rows: [{ title: Write the page test }], columns: [title] } }, nodes: [{ id: list, kind: viz }] }",
+        );
+        let report = test_extension(root, "pager", false).await.unwrap();
+        assert_eq!(report.errors, Vec::<String>::new());
+        assert!(
+            report.ran.contains(&"example created".to_string()),
+            "{:?}",
+            report.ran
+        );
+        assert!(
+            report.ran.contains(&"answers".to_string()),
+            "{:?}",
+            report.ran
+        );
+    }
+
+    /// A row that differs is a finding that names the loader, the place and
+    /// both values.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn extension_test_names_the_page_row_that_differs() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        pager(
+            root,
+            LIST,
+            "{}",
+            "{ loaders: { items: { rows: [{ title: Something else }] } } }",
+        );
+        let errors = test_extension(root, "pager", false)
+            .await
+            .unwrap()
+            .errors
+            .join("\n");
+        assert!(
+            errors.contains("fixtures/created.yaml:1: page `items` loader `items` returned")
+                && errors.contains("Something else")
+                && errors.contains("Write the page test"),
+            "{errors}"
+        );
+    }
+
+    /// An answer whose params break the page's query fails, naming the
+    /// page and the question.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn extension_test_fails_an_answer_that_breaks_the_page() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        pager(
+            root,
+            "SELECT title FROM v_work_item WHERE state = :state AND nope = 1",
+            "{ state: open }",
+            "{ loaders: { items: { rows: $any } } }",
+        );
+        let errors = test_extension(root, "pager", false)
+            .await
+            .unwrap()
+            .errors
+            .join("\n");
+        assert!(
+            errors.contains("pages/items.yaml:1: the answer to \"What is open?\" doesn't run"),
             "{errors}"
         );
     }

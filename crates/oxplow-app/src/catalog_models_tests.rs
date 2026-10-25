@@ -111,6 +111,93 @@ async fn lenses_and_extensions_are_models_that_follow_the_catalog() {
         .is_empty());
 }
 
+const PAGE: &str = "title: Acme PR\ndescription: One acme PR.\nparams:\n  - { name: number, label: PR }\n  - { name: view, options: [{ value: all, label: All }, { value: open, label: Open }], default: all }\ndata:\n  a: { sql: \"SELECT 1 AS n\" }\nview: { viz: table, from: a }\nanswers:\n  - { question: \"Which checks failed on this PR?\", params: { number: 12 } }\n";
+
+/// A page file is a `v_page` row with its params and answers as rows, and
+/// a disabled extension lists none.
+#[tokio::test]
+async fn pages_are_models_that_follow_the_catalog() {
+    let fx = services_with_effort().await;
+    let root = fx.svc.layout.project_dir.clone();
+    write(&root, "extension.yaml", MANIFEST);
+    write(&root, "pages/pr.yaml", PAGE);
+    crate::test_fixtures::activate(&fx.svc).await;
+
+    assert_eq!(
+        rows(
+            &fx,
+            "SELECT uri, extension, id, title, description, hidden FROM v_page WHERE extension = 'acme'"
+        )
+        .await,
+        vec![vec![
+            json!("oxplow:oxplow/page?page=acme/pr"),
+            json!("acme"),
+            json!("acme/pr"),
+            json!("Acme PR"),
+            json!("One acme PR."),
+            json!(0),
+        ]]
+    );
+    assert_eq!(
+        rows(
+            &fx,
+            "SELECT position, name, type, role, label, \"default\" FROM v_page_param
+             WHERE page_uri = 'oxplow:oxplow/page?page=acme/pr' ORDER BY position"
+        )
+        .await,
+        vec![
+            vec![
+                json!(1),
+                json!("number"),
+                json!("text"),
+                json!("resource"),
+                json!("PR"),
+                Value::Null
+            ],
+            vec![
+                json!(2),
+                json!("view"),
+                json!("choice"),
+                json!("resource"),
+                Value::Null,
+                json!("\"all\"")
+            ],
+        ]
+    );
+    assert_eq!(
+        rows(
+            &fx,
+            "SELECT position, question, about, params FROM v_page_answer
+             WHERE page_uri = 'oxplow:oxplow/page?page=acme/pr'"
+        )
+        .await,
+        vec![vec![
+            json!(1),
+            json!("Which checks failed on this PR?"),
+            Value::Null,
+            json!(r#"{"number":12}"#)
+        ]]
+    );
+
+    crate::extension_deploy::set_enabled(&fx.svc, "acme", false, true)
+        .await
+        .unwrap();
+    for model in ["v_page", "v_page_answer", "v_page_param"] {
+        assert!(
+            rows(
+                &fx,
+                &format!(
+                    "SELECT 1 FROM {model} WHERE {} LIKE '%acme/pr'",
+                    if model == "v_page" { "uri" } else { "page_uri" }
+                )
+            )
+            .await
+            .is_empty(),
+            "{model}"
+        );
+    }
+}
+
 /// What a loaded extension warns about is on its row; one that fails to
 /// load blocks the generation, so it is not a row (`oxplow_validate_extension`
 /// says why).

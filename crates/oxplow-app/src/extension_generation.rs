@@ -122,6 +122,10 @@ impl PreparedExtensionDatabase {
             .filter(|extension| extension.enabled)
             .flat_map(|extension| extension.lenses.iter().map(lens_row))
             .collect();
+        let (mut pages, mut page_answers, mut page_params) = (Vec::new(), Vec::new(), Vec::new());
+        for extension in snapshot.extensions().iter().filter(|e| e.enabled) {
+            page_rows(extension, &mut pages, &mut page_answers, &mut page_params);
+        }
         let listed = snapshot.extensions().iter().map(extension_row).collect();
         let prompts = crate::prompt_catalog::prompt_catalog(snapshot.extensions())
             .into_iter()
@@ -151,6 +155,9 @@ impl PreparedExtensionDatabase {
             contributions,
             listing: oxplow_db::catalog_listing_store::CatalogListing {
                 lenses,
+                pages,
+                page_answers,
+                page_params,
                 extensions: listed,
                 prompts,
                 config_keys,
@@ -294,6 +301,76 @@ fn lens_row(lens: &crate::extensions::Lens) -> oxplow_db::catalog_listing_store:
     }
 }
 
+/// An extension's page files as listed rows, with their answers and
+/// params, pushed onto the three lists.
+fn page_rows(
+    extension: &crate::extensions::Extension,
+    pages: &mut Vec<oxplow_db::catalog_listing_store::PageRow>,
+    answers: &mut Vec<oxplow_db::catalog_listing_store::PageAnswerRow>,
+    params: &mut Vec<oxplow_db::catalog_listing_store::PageParamRow>,
+) {
+    use oxplow_db::catalog_listing_store::{PageAnswerRow, PageParamRow, PageRow};
+    for page in &extension.page_files {
+        let uri = if extension.namespace == crate::extensions::CORE_NAMESPACE {
+            oxplow_domain::uri::build::page_uri(&page.slug, &[])
+        } else {
+            oxplow_domain::uri::build::extension_page_uri(&page.extension, &page.slug)
+        };
+        pages.push(PageRow {
+            uri: uri.clone(),
+            extension: page.extension.clone(),
+            id: page.id.clone(),
+            title: page.title.clone(),
+            description: page.description.clone(),
+            label: page.label.clone(),
+            icon: page.icon.clone(),
+            category: page.category.as_ref().map(variant_name),
+            keywords: page.keywords.clone(),
+            params_json: json_text(&page.params),
+            renders_json: json_text(&page.renders),
+            is_default: page.default,
+            pinned: page.pinned,
+            hidden: page.hidden,
+            tool: page.tool.clone(),
+            needs_json: json_text(&page.needs),
+            source: page.origin.source.clone(),
+            deployment: deployment_name(&extension.deployment).to_string(),
+        });
+        answers.extend(page.answers.iter().enumerate().map(|(i, a)| PageAnswerRow {
+            page_uri: uri.clone(),
+            position: i as i64 + 1,
+            question: a.question.clone(),
+            about: a.about.clone(),
+            params_json: json_text(&a.params),
+        }));
+        params.extend(page.params.iter().enumerate().map(|(i, p)| {
+            PageParamRow {
+                page_uri: uri.clone(),
+                position: i as i64 + 1,
+                name: p.name.clone(),
+                r#type: variant_name(&p.kind()),
+                role: p
+                    .role
+                    .as_ref()
+                    .map_or_else(|| "resource".to_string(), variant_name),
+                label: p.label.clone(),
+                default_json: p.default.as_ref().map(json_text),
+                options_json: json_text(&p.options),
+            }
+        }));
+    }
+}
+
+fn deployment_name(deployment: &crate::extensions::Deployment) -> &'static str {
+    match deployment {
+        crate::extensions::Deployment::Source => "source",
+        crate::extensions::Deployment::Shipped { .. } => "shipped",
+        crate::extensions::Deployment::Deployed { .. } => "deployed",
+        crate::extensions::Deployment::Undeployed => "undeployed",
+        crate::extensions::Deployment::NotHere => "not_here",
+    }
+}
+
 pub(crate) fn extension_row(
     extension: &crate::extensions::Extension,
 ) -> oxplow_db::catalog_listing_store::ExtensionRow {
@@ -309,14 +386,7 @@ pub(crate) fn extension_row(
             .intent
             .as_ref()
             .map(|intent| intent.purpose.clone()),
-        deployment: match &extension.deployment {
-            crate::extensions::Deployment::Source => "source",
-            crate::extensions::Deployment::Shipped { .. } => "shipped",
-            crate::extensions::Deployment::Deployed { .. } => "deployed",
-            crate::extensions::Deployment::Undeployed => "undeployed",
-            crate::extensions::Deployment::NotHere => "not_here",
-        }
-        .to_string(),
+        deployment: deployment_name(&extension.deployment).to_string(),
         hash: match &extension.deployment {
             crate::extensions::Deployment::Shipped { hash }
             | crate::extensions::Deployment::Deployed { hash } => Some(hash.clone()),

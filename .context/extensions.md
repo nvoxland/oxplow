@@ -100,7 +100,11 @@ invalid-named folder, which still loads).
 restates the `contribution` table (V47, `oxplow_db::contribution_store`)
 from every enabled extension's descriptors, read as `v_contribution`.
 The same transaction restates `lens` and `extension_listing` (V74,
-`oxplow_db::catalog_listing_store`), read as `v_lens` and `v_extension`.
+`oxplow_db::catalog_listing_store`), read as `v_lens` and `v_extension`, and
+(V110) `page`, `page_answer` and `page_param` from every enabled extension's
+page files (`extension_generation::page_rows`), read as `v_page`,
+`v_page_answer` and `v_page_param`. A page's URI is `oxplow:oxplow/page?page=<extension>/<slug>`
+(`page=<slug>` for an extension in the `oxplow` namespace), stored in the row.
 Two kinds of listing row follow something other than a generation: those
 for an extension with no deployment running (`undeployed`, `not_here`) follow
 its *source on disk*. The config watcher (`config_watch.rs`) watches
@@ -1254,6 +1258,11 @@ source directly: an edit changes nothing until it is deployed.
   stream's agent edits, checks and tests it there, and it deploys once the
   change reaches the primary's branch. A source outside the project has one
   copy, so any stream deploys it (`extension_deploy::refuse_draft_deploy`).
+  `oxplow.extension.draft_status { name, stream_id? }` (a read,
+  `extension_deploy::source_diff`) says how a stream's source differs from
+  the running version: pages (lenses and page files) and commands added,
+  removed and changed, and whether the checkout is a draft. A deploy that
+  removes a page or command still goes, with a warning naming them.
 - **Deployment:** `.oxplow/runtime/extensions/<name>/<hash>/`, where
   `<hash>` is the hash of the source (`extension_store::source_hash`: sha256
   over each file's relative path and bytes, dot entries skipped, cut to 16
@@ -1805,7 +1814,7 @@ and one calling MCP read identical `file:line: what — fix` lines.
   replies }` is what it answers, in turn. No paid call, no provider.
   It runs `check`, then every intent example with a fixture
   (`fixtures/<name>.yaml`: `input`, `expect`, `$any` matching anything):
-  a lens (`{ lens, params?, rows? }` — `rows` seeds the extension's
+  a page (`{ page, params? }` with `given:` steps, below), a lens (`{ lens, params?, rows? }` — `rows` seeds the extension's
   entities, `collector_runner::publish_declared_rows`), an event (`{ event
   }`: appended to the throwaway's log and delivered; the extension's
   effects react for real — `expect: { effects: [{ id,
@@ -1904,6 +1913,19 @@ model call). It never opens the project's database. It runs `check` there
 `intent.examples[*]` by its fixture `fixtures/<name>.yaml` (the event,
 job and component forms are in "The SDK"):
 
+- `input: { page: <slug | ext/slug>, params? }` with an optional
+  `given: [..]` beside `input`, `expect: { loaders?: { <name>: { rows: n |
+  $any | [ { col: val } | [ val, … ] ], columns? } }, nodes?: [{ id, kind? }]
+  }` — the page runs (`PageRunner`, as a person) after the `given` steps,
+  each `{ command, input?, as? }` or `{ rows: { <entity>: [..] } }`, run in
+  order on the extension's one throwaway database (so a later fixture sees
+  what an earlier one made). A row map matches when every column it names
+  equals (`$any` matches anything); a row list matches in order; `nodes`
+  ids are in the run's tree (`<embed>/<id>` inside an embed). A loader that
+  fails is a finding naming it. After the examples every page's `answers:`
+  entry runs (`ran: answers`): the page opens with its params and no loader
+  fails, else the finding names the page file and the question. (A `text`
+  expectation waits on `page_text` reaching the SDK.)
 - `input: { lens: <slug>, params? }`, `expect: { columns?, rows: n |
   $any }` — the lens runs; its row count (and columns, when expected)
   must match;

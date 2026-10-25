@@ -1,4 +1,5 @@
-//! `lens` and `extension_listing` (V74), `catalog_prompt` and `config_key`
+//! `lens` and `extension_listing` (V74), `page`, `page_answer` and
+//! `page_param` (V110), `catalog_prompt` and `config_key`
 //! (V85): the lenses and extensions the catalog holds, what a person can
 //! ask and what they can configure, restated whole by the app with each
 //! extension generation and read as `v_lens`, `v_extension`, `v_prompt`
@@ -25,6 +26,56 @@ pub struct LensRow {
     pub needs_json: String,
     /// Its source file, the one to edit; none when no source is here.
     pub source: Option<String>,
+}
+
+/// One page file, as `v_page` lists it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PageRow {
+    pub uri: String,
+    pub extension: String,
+    /// `<extension>/<slug>`.
+    pub id: String,
+    pub title: String,
+    pub description: String,
+    pub label: Option<String>,
+    pub icon: Option<String>,
+    pub category: Option<String>,
+    pub keywords: Option<String>,
+    pub params_json: String,
+    pub renders_json: String,
+    pub is_default: bool,
+    pub pinned: bool,
+    pub hidden: bool,
+    pub tool: Option<String>,
+    pub needs_json: String,
+    /// Its source file, the one to edit; none when no source is here.
+    pub source: Option<String>,
+    pub deployment: String,
+}
+
+/// One question a page answers, as `v_page_answer` lists it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PageAnswerRow {
+    pub page_uri: String,
+    /// From 1, in the page's order.
+    pub position: i64,
+    pub question: String,
+    pub about: Option<String>,
+    pub params_json: String,
+}
+
+/// One param a page takes, as `v_page_param` lists it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PageParamRow {
+    pub page_uri: String,
+    /// From 1, in the page's order.
+    pub position: i64,
+    pub name: String,
+    pub r#type: String,
+    pub role: String,
+    pub label: Option<String>,
+    pub default_json: Option<String>,
+    pub options_json: String,
 }
 
 /// One extension, as `v_extension` lists it.
@@ -73,6 +124,9 @@ pub struct ConfigKeyRow {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct CatalogListing {
     pub lenses: Vec<LensRow>,
+    pub pages: Vec<PageRow>,
+    pub page_answers: Vec<PageAnswerRow>,
+    pub page_params: Vec<PageParamRow>,
     pub extensions: Vec<ExtensionRow>,
     /// In catalog order: each row's position is its index, from 1.
     pub prompts: Vec<PromptRow>,
@@ -139,7 +193,85 @@ fn insert_extensions(
     Ok(())
 }
 
-/// Replace every lens, extension, prompt and config key row.
+fn insert_pages(conn: &rusqlite::Connection, listing: &CatalogListing) -> Result<(), DomainError> {
+    for table in ["page", "page_answer", "page_param"] {
+        conn.execute(&format!("DELETE FROM {table}"), [])
+            .map_err(map_sql_err)?;
+    }
+    let mut page = conn
+        .prepare(
+            "INSERT OR REPLACE INTO page
+               (uri, extension, id, title, description, label, icon, category, keywords,
+                params_json, renders_json, is_default, pinned, hidden, tool, needs_json,
+                source, deployment)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+        )
+        .map_err(map_sql_err)?;
+    for p in &listing.pages {
+        page.execute(params![
+            p.uri,
+            p.extension,
+            p.id,
+            p.title,
+            p.description,
+            p.label,
+            p.icon,
+            p.category,
+            p.keywords,
+            p.params_json,
+            p.renders_json,
+            p.is_default,
+            p.pinned,
+            p.hidden,
+            p.tool,
+            p.needs_json,
+            p.source,
+            p.deployment,
+        ])
+        .map_err(map_sql_err)?;
+    }
+    let mut answer = conn
+        .prepare(
+            "INSERT OR REPLACE INTO page_answer (page_uri, position, question, about, params_json)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+        )
+        .map_err(map_sql_err)?;
+    for a in &listing.page_answers {
+        answer
+            .execute(params![
+                a.page_uri,
+                a.position,
+                a.question,
+                a.about,
+                a.params_json
+            ])
+            .map_err(map_sql_err)?;
+    }
+    let mut param = conn
+        .prepare(
+            "INSERT OR REPLACE INTO page_param
+               (page_uri, position, name, type, role, label, default_json, options_json)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        )
+        .map_err(map_sql_err)?;
+    for p in &listing.page_params {
+        param
+            .execute(params![
+                p.page_uri,
+                p.position,
+                p.name,
+                p.r#type,
+                p.role,
+                p.label,
+                p.default_json,
+                p.options_json
+            ])
+            .map_err(map_sql_err)?;
+    }
+    Ok(())
+}
+
+/// Replace every lens, page, extension, prompt and config key row.
 pub fn reset_tx(conn: &rusqlite::Connection, listing: &CatalogListing) -> Result<(), DomainError> {
     let (lenses, extensions) = (&listing.lenses, &listing.extensions);
     conn.execute("DELETE FROM lens", []).map_err(map_sql_err)?;
@@ -169,6 +301,7 @@ pub fn reset_tx(conn: &rusqlite::Connection, listing: &CatalogListing) -> Result
         ])
         .map_err(map_sql_err)?;
     }
+    insert_pages(conn, listing)?;
     insert_extensions(conn, extensions)?;
     conn.execute("DELETE FROM catalog_prompt", [])
         .map_err(map_sql_err)?;

@@ -1426,6 +1426,55 @@
   tests:
     - { not_null: uri }
     - { unique: uri }
+- name: page
+  version: 1
+  key: [uri]
+  description: "Every page file of every enabled extension: a page's metadata, what it renders and how an agent finds it. Restated with each extension generation, beside `v_lens` (which stays until lenses are gone). Its params are `v_page_param`, the questions it answers `v_page_answer`."
+  columns:
+    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/page?page=<extension>/<slug>`; `page=<slug>` for an extension whose namespace is `oxplow`." }
+    - { name: "extension", type: "TEXT", doc: "The extension that declares it (v_extension.name)." }
+    - { name: "id", type: "TEXT", doc: "`<extension>/<slug>`: the page file's name under the extension." }
+    - { name: "title", type: "TEXT", doc: "What the person sees." }
+    - { name: "description", type: "TEXT", doc: "What it shows; empty when it says nothing." }
+    - { name: "label", type: "TEXT", doc: "What its tab says, a template over its params, when not its title; NULL otherwise." }
+    - { name: "icon", type: "TEXT", doc: "Its icon; NULL for the default." }
+    - { name: "category", type: "TEXT", doc: "The launcher section it is listed under (`Work`, `Code`, `Activity`, `Data`, …); NULL when it is opened only from elsewhere." }
+    - { name: "keywords", type: "TEXT", doc: "Extra words the launcher matches; NULL for none." }
+    - { name: "params", type: "TEXT", doc: "Its params as a JSON array (see `v_page_param` for them as rows)." }
+    - { name: "renders", type: "TEXT", doc: "The resource kinds it renders (`oxplow/commit`), as a JSON array; `[]` for a route." }
+    - { name: "default", type: "INTEGER", doc: "1 when it is the default page of the kinds it renders." }
+    - { name: "pinned", type: "INTEGER", doc: "1 when it is pinned in the rail." }
+    - { name: "hidden", type: "INTEGER", doc: "1 when the launcher doesn't list it." }
+    - { name: "tool", type: "TEXT", doc: "The MCP tool it is also offered as, namespaced; NULL for none." }
+    - { name: "needs", type: "TEXT", doc: "The capabilities (or features) it needs, as a JSON array." }
+    - { name: "source", type: "TEXT", doc: "Its source file, the one to edit, relative to the project; NULL when no source is here (it ships with oxplow)." }
+    - { name: "deployment", type: "TEXT", doc: "Where its extension's files come from: `deployed`, `shipped`, `source`, `undeployed` or `not_here` (`v_extension.deployment`)." }
+  tests:
+    - { not_null: uri }
+    - { unique: uri }
+- name: page_answer
+  version: 1
+  key: [page_uri, position]
+  description: "Each question a page answers, with the params that answer it: what an agent finds a page by and what a person is offered on the pages of `about`'s kind. Restated with each extension generation."
+  columns:
+    - { name: "page_uri", type: "TEXT", doc: "The page (`v_page.uri`)." }
+    - { name: "position", type: "INTEGER", doc: "Its place among the page's answers, from 1." }
+    - { name: "question", type: "TEXT", doc: "The question, as the person would ask it." }
+    - { name: "about", type: "TEXT", doc: "The resource kind whose pages offer it; NULL when it is about nothing in particular." }
+    - { name: "params", type: "TEXT", doc: "The params that answer it, as a JSON object." }
+- name: page_param
+  version: 1
+  key: [page_uri, position]
+  description: "Each param a page takes, typed, in the order it declares them. Restated with each extension generation."
+  columns:
+    - { name: "page_uri", type: "TEXT", doc: "The page (`v_page.uri`)." }
+    - { name: "position", type: "INTEGER", doc: "Its place among the page's params, from 1." }
+    - { name: "name", type: "TEXT", doc: "The param's name." }
+    - { name: "type", type: "TEXT", doc: "What it holds: `text`, `choice`, `bool`, `date_range`, `branch` or `search`." }
+    - { name: "role", type: "TEXT", doc: "What it is to the page: `resource` (names what it shows), `filter` (narrows how) or `selection`." }
+    - { name: "label", type: "TEXT", doc: "What the control says; NULL for the name." }
+    - { name: "default", type: "TEXT", doc: "Its default, as JSON; NULL for none." }
+    - { name: "options", type: "TEXT", doc: "The values a choice takes, as a JSON array of `{value, label}`; `[]` when fixed by a lens (`options_from`) or not a choice." }
 - name: extension
   version: 7
   key: [uri]

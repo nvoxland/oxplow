@@ -62,18 +62,177 @@ fn provenance_text(commit: Option<&str>, dirty: bool) -> Option<String> {
 /// Where `source` came from: the checkout's HEAD and whether `source` had
 /// uncommitted changes (untracked files included). Both empty for a
 /// source outside `project`, or a project that isn't a repository.
-fn provenance(project: &Path, source: &Path) -> (Option<String>, bool) {
+async fn provenance(svc: &Services, project: &Path, source: &Path) -> (Option<String>, bool) {
     let Ok(rel) = source.strip_prefix(project) else {
         return (None, false);
     };
-    let Some(commit) = oxplow_git::head_commit_sha(project) else {
+    let Some(commit) = svc.vcs.head(project).await.ok().and_then(|h| h.revision) else {
         return (None, false);
     };
     let rel = rel.to_string_lossy();
-    let dirty = oxplow_git::list_git_statuses(project)
-        .keys()
-        .any(|path| path.starts_with(rel.as_ref()));
+    let dirty = svc.vcs.status(project).await.is_ok_and(|status| {
+        status
+            .entries
+            .iter()
+            .any(|e| e.path.starts_with(rel.as_ref()))
+    });
     (Some(commit), dirty)
+}
+
+/// What differs between two versions of an extension, by id.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct Changes {
+    pub added: Vec<String>,
+    pub removed: Vec<String>,
+    /// Same id, a different definition.
+    pub changed: Vec<String>,
+}
+
+impl Changes {
+    fn between(
+        running: &std::collections::BTreeMap<String, String>,
+        source: &std::collections::BTreeMap<String, String>,
+    ) -> Changes {
+        Changes {
+            added: source
+                .keys()
+                .filter(|k| !running.contains_key(*k))
+                .cloned()
+                .collect(),
+            removed: running
+                .keys()
+                .filter(|k| !source.contains_key(*k))
+                .cloned()
+                .collect(),
+            changed: source
+                .iter()
+                .filter(|(k, v)| running.get(*k).is_some_and(|old| old != *v))
+                .map(|(k, _)| k.clone())
+                .collect(),
+        }
+    }
+}
+
+/// How an extension's source differs from the version that runs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SourceDiff {
+    pub name: String,
+    /// The hash of the deployment that runs; `None` when none does.
+    pub deployed_hash: Option<String>,
+    pub source_hash: String,
+    pub differs: bool,
+    /// Lenses and page files, by id.
+    pub pages: Changes,
+    /// Commands, by name (`changed` is filled too).
+    pub commands: Changes,
+}
+
+/// An item's definition as text, leaving out where it was loaded from.
+fn definition(item: &impl Serialize) -> String {
+    let mut value = serde_json::to_value(item).unwrap_or_default();
+    if let Some(object) = value.as_object_mut() {
+        object.remove("origin");
+    }
+    value.to_string()
+}
+
+type Definitions = std::collections::BTreeMap<String, String>;
+
+/// An extension's pages (lenses and page files) and commands, each by id
+/// with its definition.
+fn definitions(ext: &crate::extensions::Extension) -> (Definitions, Definitions) {
+    let pages = ext
+        .lenses
+        .iter()
+        .map(|l| (l.id.clone(), definition(l)))
+        .chain(ext.page_files.iter().map(|p| (p.id.clone(), definition(p))))
+        .collect();
+    let commands = ext
+        .commands
+        .iter()
+        .map(|c| (c.name.clone(), definition(c)))
+        .collect();
+    (pages, commands)
+}
+
+/// What `source` adds, removes and changes over `running` (nothing running:
+/// everything is added).
+fn compare(
+    running: Option<&crate::extensions::Extension>,
+    source: &crate::extensions::Extension,
+) -> (Changes, Changes) {
+    let (old_pages, old_commands) = running.map(definitions).unwrap_or_default();
+    let (pages, commands) = definitions(source);
+    (
+        Changes::between(&old_pages, &pages),
+        Changes::between(&old_commands, &commands),
+    )
+}
+
+fn removal_warning(pages: &Changes, commands: &Changes) -> Option<String> {
+    let list = |ids: &[String]| {
+        ids.iter()
+            .map(|id| format!("`{id}`"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let mut parts = Vec::new();
+    if !pages.removed.is_empty() {
+        parts.push(format!("page(s) {}", list(&pages.removed)));
+    }
+    if !commands.removed.is_empty() {
+        parts.push(format!("command(s) {}", list(&commands.removed)));
+    }
+    (!parts.is_empty()).then(|| {
+        format!(
+            "deploying removes {} that the running version has",
+            parts.join(" and ")
+        )
+    })
+}
+
+/// How `name`'s source in `checkout` differs from what runs: the draft in
+/// a stream's worktree against the running version.
+pub async fn source_diff(
+    svc: &Arc<Services>,
+    checkout: &Path,
+    name: &str,
+) -> Result<SourceDiff, DomainError> {
+    valid(name)?;
+    let dir = oxplow_config::extension_settings(&svc.layout.project_dir).source(checkout, name);
+    if !dir.join("extension.yaml").is_file() {
+        return Err(invalid(format!(
+            "no source for extension `{name}`: {} has no extension.yaml",
+            dir.display()
+        )));
+    }
+    let (hash, loaded) = {
+        let (dir, owned) = (dir.clone(), name.to_string());
+        tokio::task::spawn_blocking(move || {
+            Ok::<_, std::io::Error>((
+                extension_store::source_hash(&dir)?,
+                crate::extensions::load_extension_at(&dir, &owned),
+            ))
+        })
+        .await
+        .map_err(storage)?
+        .map_err(|e| invalid(format!("extension `{name}`: {e}")))?
+    };
+    let running = running(svc, name);
+    let deployed_hash = running.as_ref().and_then(|e| match &e.deployment {
+        crate::extensions::Deployment::Deployed { hash }
+        | crate::extensions::Deployment::Shipped { hash } => Some(hash.clone()),
+        _ => None,
+    });
+    let (pages, commands) = compare(running.as_ref(), &loaded);
+    Ok(SourceDiff {
+        name: name.to_string(),
+        differs: deployed_hash.as_deref() != Some(hash.as_str()),
+        deployed_hash,
+        source_hash: hash,
+        pages,
+        commands,
+    })
 }
 
 /// An extension this big says so when it deploys: each deployment is a
@@ -411,12 +570,7 @@ pub async fn deploy(
     valid(name)?;
     let project = svc.layout.project_dir.clone();
     let source = source_of(&project, name)?;
-    let (commit, dirty) = {
-        let (project, source) = (project.clone(), source.clone());
-        tokio::task::spawn_blocking(move || provenance(&project, &source))
-            .await
-            .map_err(storage)?
-    };
+    let (commit, dirty) = provenance(svc, &project, &source).await;
     let (hash, size, loaded) = {
         let (source, owned) = (source.clone(), name.to_string());
         tokio::task::spawn_blocking(move || {
@@ -463,6 +617,10 @@ pub async fn deploy(
             confirmed,
         )?;
     }
+    let removal = running(svc, name).and_then(|now| {
+        let (pages, commands) = compare(Some(&now), &loaded);
+        removal_warning(&pages, &commands)
+    });
     let enabled_now = turn_on(svc, name)?;
     if live_now {
         return Ok(Deployed {
@@ -558,7 +716,12 @@ pub async fn deploy(
         name: name.to_string(),
         hash,
         already: false,
-        warnings: [loaded.warnings, size_warnings(name, size)].concat(),
+        warnings: [
+            loaded.warnings,
+            size_warnings(name, size),
+            removal.into_iter().collect(),
+        ]
+        .concat(),
         commit,
         dirty,
     })
@@ -1377,20 +1540,113 @@ mod tests {
         assert_eq!((back.commit.as_deref(), back.dirty), (Some(&*head), false));
     }
 
+    /// A copy of the acme source in another checkout, with `lenses`
+    /// (slug, query).
+    fn draft(root: &Path, lenses: &[(&str, &str)]) {
+        let dir = root.join(".oxplow/extensions/acme");
+        write(
+            &dir,
+            "extension.yaml",
+            "manifest: 2\nname: acme\nintent:\n  purpose: test\n",
+        );
+        for (slug, query) in lenses {
+            write(
+                &dir,
+                &format!("lenses/{slug}.yaml"),
+                &format!("title: {slug}\nquery: \"{query}\"\n"),
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn source_diff_of_an_undeployed_source_adds_everything() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        let root = svc.layout.project_dir.clone();
+        source(svc, "One");
+        let diff = source_diff(svc, &root, "acme").await.unwrap();
+        assert_eq!(diff.deployed_hash, None);
+        assert!(diff.differs);
+        assert_eq!(diff.pages.added, vec!["acme/one".to_string()]);
+        assert!(diff.pages.removed.is_empty() && diff.pages.changed.is_empty());
+    }
+
+    #[tokio::test]
+    async fn source_diff_of_what_runs_does_not_differ() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        let root = svc.layout.project_dir.clone();
+        source(svc, "One");
+        let deployed = deploy(svc, "acme", true).await.unwrap();
+        let diff = source_diff(svc, &root, "acme").await.unwrap();
+        assert_eq!(diff.deployed_hash.as_deref(), Some(deployed.hash.as_str()));
+        assert!(!diff.differs);
+        assert_eq!(diff.pages, Changes::default());
+    }
+
+    #[tokio::test]
+    async fn source_diff_of_a_worktree_copy_names_added_removed_and_changed() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        source(svc, "One");
+        write(
+            &svc.layout.project_dir.join(".oxplow/extensions/acme"),
+            "lenses/keep.yaml",
+            "title: keep\nquery: \"SELECT 1 AS n\"\n",
+        );
+        deploy(svc, "acme", true).await.unwrap();
+        let other = tempfile::tempdir().unwrap();
+        draft(
+            other.path(),
+            &[("keep", "SELECT 2 AS n"), ("two", "SELECT 1 AS n")],
+        );
+        let diff = source_diff(svc, other.path(), "acme").await.unwrap();
+        assert!(diff.differs);
+        assert_eq!(diff.pages.added, vec!["acme/two".to_string()]);
+        assert_eq!(diff.pages.removed, vec!["acme/one".to_string()]);
+        assert_eq!(diff.pages.changed, vec!["acme/keep".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn a_deploy_that_removes_a_page_warns() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        source(svc, "One");
+        let first = deploy(svc, "acme", true).await.unwrap();
+        assert!(!first.warnings.iter().any(|w| w.contains("removes")));
+        let dir = svc.layout.project_dir.join(".oxplow/extensions/acme");
+        std::fs::remove_file(dir.join("lenses/one.yaml")).unwrap();
+        write(
+            &dir,
+            "lenses/two.yaml",
+            "title: two\nquery: \"SELECT 1 AS n\"\n",
+        );
+        let second = deploy(svc, "acme", true).await.unwrap();
+        assert!(
+            second.warnings.contains(
+                &"deploying removes page(s) `acme/one` that the running version has".to_string()
+            ),
+            "{:?}",
+            second.warnings
+        );
+    }
+
     /// A source outside the project has no commit to record.
-    #[test]
-    fn a_source_outside_the_project_has_no_provenance() {
-        let project = tempfile::tempdir().unwrap();
+    #[tokio::test]
+    async fn a_source_outside_the_project_has_no_provenance() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        let project = svc.layout.project_dir.clone();
         let elsewhere = tempfile::tempdir().unwrap();
-        write(project.path(), "a.txt", "a");
-        commit_files(project.path(), &["a.txt"]);
-        assert_eq!(provenance(project.path(), elsewhere.path()), (None, false));
+        write(&project, "a.txt", "a");
+        let head = commit_files(&project, &["a.txt"]);
         assert_eq!(
-            provenance(project.path(), &project.path().join("a.txt")),
-            (
-                Some(oxplow_git::head_commit_sha(project.path()).unwrap()),
-                false
-            )
+            provenance(svc, &project, elsewhere.path()).await,
+            (None, false)
+        );
+        assert_eq!(
+            provenance(svc, &project, &project.join("a.txt")).await,
+            (Some(head), false)
         );
     }
 

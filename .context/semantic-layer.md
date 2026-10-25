@@ -502,7 +502,7 @@ have parted and the commits between them (`v_branch_divergence`,
 the pair the query pins — one side pinned, the other ranges over every
 branch; neither, every local branch against the default) and every
 metric's series (`v_metric_point`: the engine computes it, one row per
-capture, narrowed to the `metric` and `dimension` the query pins). A restated table (as `v_lens` and `v_extension` are, in the
+capture, narrowed to the `metric` and `dimension` the query pins). A restated table (as `v_lens`, `v_extension`, `v_page`, `v_page_answer` and `v_page_param` are, in the
 extension-generation transaction) would be wrong between the change and the
 next restatement, and nothing says when that is. So these are **live
 models** (`crates/oxplow-app/src/live_models.rs`, `LiveModels::NAMES`): the

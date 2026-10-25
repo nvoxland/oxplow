@@ -1,6 +1,8 @@
 //! `extensions.check` operations: look at an extension before it ships —
 //! validate a folder (`oxplow.extension.validate`), preview it in a
-//! throwaway oxplow (`oxplow.extension.preview`). Neither changes a record.
+//! throwaway oxplow (`oxplow.extension.preview`), and say how a stream's
+//! draft differs from what runs (`oxplow.extension.draft_status`). None
+//! changes a record.
 
 use std::path::Path;
 use std::sync::{Arc, OnceLock};
@@ -71,6 +73,14 @@ pub struct ValidateExtensionParams {
     pub stream_id: Option<String>,
 }
 
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct DraftStatusParams {
+    /// Extension folder name under `.oxplow/extensions/`.
+    pub name: String,
+    /// Stream whose worktree holds the draft; omit for your own.
+    pub stream_id: Option<String>,
+}
+
 fn not_found(name: &str) -> CommandError {
     invalid(
         "/name",
@@ -102,6 +112,31 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
                     .validate(&svc, &root, &p.name)
                     .await
                     .map_err(|e| check_failed(&p.name, e))?;
+                result_of(report)
+            },
+        ),
+        read_op(
+            "extensions.check",
+            "draft_status",
+            services.clone(),
+            |svc, actor, p: DraftStatusParams| async move {
+                check_optional_stream("oxplow_draft_status", "/stream_id", p.stream_id.as_deref())?;
+                let stream = stream_or_actors(&svc, &actor, p.stream_id.clone()).await?;
+                let checkout = svc
+                    .worktrees
+                    .resolve(stream.as_deref())
+                    .await
+                    .into_local_path();
+                let diff = crate::extension_deploy::source_diff(&svc, &checkout, &p.name)
+                    .await
+                    .map_err(|e| match e {
+                        oxplow_domain::DomainError::Invalid { .. } => not_found(&p.name),
+                        other => failed(other),
+                    })?;
+                let mut report = serde_json::to_value(&diff).map_err(failed)?;
+                report["stream"] = stream.into();
+                report["checkout"] = checkout.to_string_lossy().into_owned().into();
+                report["draft"] = (checkout != svc.layout.project_dir).into();
                 result_of(report)
             },
         ),
@@ -229,6 +264,96 @@ mod tests {
             .run(
                 &in_other,
                 "oxplow.extension.validate",
+                json!({ "name": "nope" }),
+                false,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&err, CommandError::Invalid { message, .. } if message.contains("no extension `nope`")),
+            "{err:?}"
+        );
+    }
+
+    /// A stream's draft is compared with what runs: a worktree's is a
+    /// draft that adds and removes a lens; the primary's is not.
+    #[tokio::test]
+    async fn draft_status_compares_the_streams_checkout_with_what_runs() {
+        use oxplow_domain::stores::StreamStore as _;
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        let ext = svc.layout.project_dir.join(".oxplow/extensions/acme");
+        let write = |dir: &Path, rel: &str, text: &str| {
+            let path = dir.join(rel);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, text).unwrap();
+        };
+        let manifest = "manifest: 2\nname: acme\nintent:\n  purpose: test\n";
+        write(&ext, "extension.yaml", manifest);
+        write(
+            &ext,
+            "lenses/one.yaml",
+            "title: one\nquery: \"SELECT 1 AS n\"\n",
+        );
+        crate::extension_deploy::deploy(svc, "acme", true)
+            .await
+            .unwrap();
+
+        let elsewhere = tempfile::tempdir().unwrap();
+        let draft = elsewhere.path().join(".oxplow/extensions/acme");
+        write(&draft, "extension.yaml", manifest);
+        write(
+            &draft,
+            "lenses/two.yaml",
+            "title: two\nquery: \"SELECT 1 AS n\"\n",
+        );
+        let mut other = svc.stream_store.list().await.unwrap().pop().unwrap();
+        other.id = oxplow_domain::StreamId::placeholder();
+        other.title = "other".into();
+        other.branch = "other".into();
+        other.kind = oxplow_domain::StreamKind::Worktree;
+        other.worktree_path = elsewhere.path().to_string_lossy().into_owned();
+        let other_id = svc.stream_store.upsert(&other).await.unwrap();
+        let in_other = Actor::Agent {
+            session_id: None,
+            thread_id: None,
+            stream_id: Some(other_id),
+        };
+        let report = svc
+            .commands
+            .run(
+                &in_other,
+                "oxplow.extension.draft_status",
+                json!({ "name": "acme" }),
+                false,
+            )
+            .await
+            .unwrap();
+        assert!(report.audit_id.is_none());
+        let r = &report.result;
+        assert_eq!(r["draft"], json!(true), "{r}");
+        assert_eq!(r["checkout"], json!(elsewhere.path().to_string_lossy()));
+        assert_eq!(r["pages"]["added"], json!(["acme/two"]));
+        assert_eq!(r["pages"]["removed"], json!(["acme/one"]));
+
+        let primary = svc
+            .commands
+            .run(
+                &Actor::Human,
+                "oxplow.extension.draft_status",
+                json!({ "name": "acme" }),
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(primary.result["draft"], json!(false), "{}", primary.result);
+        assert_eq!(primary.result["differs"], json!(false));
+
+        let err = svc
+            .commands
+            .run(
+                &in_other,
+                "oxplow.extension.draft_status",
                 json!({ "name": "nope" }),
                 false,
             )

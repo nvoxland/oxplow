@@ -19,7 +19,9 @@ edits change nothing on the person's screen until you deploy.
    and commit once they are happy with it. In another (worktree) stream,
    your copy of an extension that lives in the repo is a draft: check and
    test it there; it is refused for deploy and goes live once your change
-   reaches the main stream's branch. The deploy checks the
+   reaches the main stream's branch. `oxplow.extension.draft_status { name }`
+   says how your draft differs from what runs (pages and commands added,
+   removed, changed). The deploy checks the
    source, runs its `build:`, copies it into the store, migrates its
    settings, and replaces what runs in the running app. It returns once the
    new deployment runs, with `warnings` worth fixing. Pages that show the
