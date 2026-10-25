@@ -1111,6 +1111,31 @@ async fn the_session_notes_example_adds_a_section_to_the_new_session_page() {
         })
     );
     assert!(ext.warnings.is_empty(), "{:?}", ext.warnings);
+    // The New Session page runs it at its `sections` slot, after `start`.
+    let svc = common::booted(root).await;
+    svc.extension_activation
+        .activate(svc.clone())
+        .await
+        .unwrap();
+    let run = run_page(
+        &svc,
+        "oxplow-foundation/new-session",
+        vec![
+            ("stream_id", oxplow_db::SqlCell::Int(1)),
+            ("thread_id", oxplow_db::SqlCell::Int(1)),
+        ],
+    )
+    .await;
+    let ids: Vec<&str> = run.tree.children.iter().map(|c| c.id.as_str()).collect();
+    let at = ids
+        .iter()
+        .position(|id| *id == "start")
+        .unwrap_or_else(|| panic!("{ids:?}"));
+    let mounted = run.tree.children[at + 1]
+        .embed
+        .as_ref()
+        .unwrap_or_else(|| panic!("the mount runs after `start`: {ids:?}"));
+    assert_eq!(mounted.page.id, "session-notes/thread-notes");
 }
 
 /// The commit-history example is a page of typed params and a row that

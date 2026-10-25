@@ -174,3 +174,4 @@ view:
       when: can_resume
       primary: true
       then: replace
+  - slot: sections
