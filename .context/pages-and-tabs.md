@@ -1248,3 +1248,18 @@ session tab (`tabs/session.ts`).
   conditions.
 - Replace a legacy panel with a Page-wrapped renderer: tick the
   migration status row above and link the new page module.
+
+## Writing a page
+
+`oxplow.extension.write_page { extension, page, spec, deploy? }` is how the
+app saves a page (Save as Page, Pin to Dashboard, a dashboard's reorder,
+rename, tile removal and new dashboards). `spec` is the page's YAML text,
+kept as written so comments and key order survive. It goes to
+`pages/<page>.yaml` in the extension's source in the primary checkout
+(`extension_deploy::write_page`), after `pages::schema::parse_page` accepts
+it and the extension still loads with it; the extension is created with a
+scaffolded manifest when it is missing (the app's default is the personal
+`my-pages`). An existing page is replaced. A bundled extension is refused,
+and so is a caller in another stream when the source is inside the project
+(`refuse_draft_deploy`). `deploy: true` deploys it right away; otherwise
+the page waits for a deploy like any source edit.

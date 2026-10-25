@@ -17,8 +17,9 @@
      `input` — steps run first, in order, on the extension's throwaway
      database: `{ command, input?, as? }` or `{ rows: { <entity>: [..] } }`.
      `expect: { loaders: { <name>: { rows: n | $any | [ { col: val } ],
-     columns? } }, nodes: [{ id, kind? }] }` (a row map compares only the
-     columns it names). Every page's `answers:` entry also runs: the page
+     columns? } }, nodes: [{ id, kind? }], text: { contains: [..] } | "<exact>" }`
+     (a row map compares only the columns it names; `text` is the page's
+     text, as `oxplow_run_page` shows it). Every page's `answers:` entry also runs: the page
      must open with its params and no failing loader. Example:
      `given: [{ command: oxplow.work_item.create, input: { title: T } }]`,
      `input: { page: items }`, `expect: { loaders: { items: { rows: [{

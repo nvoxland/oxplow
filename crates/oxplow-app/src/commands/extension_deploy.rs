@@ -26,6 +26,20 @@ pub struct DeployInput {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+pub struct WritePageInput {
+    /// The extension whose source gets the page; created when missing.
+    pub extension: String,
+    /// The page's name: the file `pages/<page>.yaml`.
+    pub page: String,
+    /// The page's YAML text.
+    pub spec: String,
+    /// Deploy the extension afterwards.
+    #[serde(default)]
+    pub deploy: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct RollbackInput {
     /// The extension's name.
     pub name: String,
@@ -82,6 +96,7 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
     vec![
         deploy_op(services.clone()),
         rollback_op(services.clone()),
+        write_page_op(services.clone()),
         enable_op(services.clone(), "enable", true),
         enable_op(services.clone(), "disable", false),
         remove_op(services.clone()),
@@ -114,6 +129,41 @@ fn deploy_op(services: ServicesSlot) -> Op {
                         .await
                         .map_err(deploy_error("oxplow.extension.deploy", &raw))?;
                 Ok(output(deployed))
+            })
+        })),
+    )
+}
+
+fn write_page_op(services: ServicesSlot) -> Op {
+    Op::new(
+        "pages.author",
+        "write_page",
+        schema::<WritePageInput>(),
+        false,
+        Handler::External(Arc::new(move |invocation: Invocation, input| {
+            let services = services.clone();
+            Box::pin(async move {
+                let raw = input.clone();
+                let input: WritePageInput = parse(input)?;
+                let svc = services.get()?;
+                let stream = actor_stream(&svc, invocation.actor())
+                    .await?
+                    .as_deref()
+                    .and_then(oxplow_domain::StreamId::try_from_str);
+                crate::extension_deploy::refuse_draft_deploy(&svc, stream, &input.extension)
+                    .await
+                    .map_err(domain)?;
+                let written = crate::extension_deploy::write_page(
+                    &svc,
+                    &input.extension,
+                    &input.page,
+                    &input.spec,
+                    input.deploy,
+                    invocation.confirmed,
+                )
+                .await
+                .map_err(deploy_error("oxplow.extension.write_page", &raw))?;
+                Ok(output(written))
             })
         })),
     )
