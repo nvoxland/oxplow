@@ -182,6 +182,9 @@ pub enum Loader {
     Command {
         command: String,
         args: BTreeMap<String, ArgSource>,
+        /// The field of its result whose list is the rows; none: the
+        /// result itself (a list of objects, an object, a table).
+        items: Option<String>,
     },
     /// Another page's loader, run with `params`.
     Page {
@@ -323,6 +326,8 @@ struct LoaderFile {
     command: Option<String>,
     #[serde(default)]
     args: BTreeMap<String, ArgSource>,
+    #[serde(default)]
+    items: Option<String>,
     #[serde(default)]
     page: Option<String>,
     #[serde(default)]
@@ -798,6 +803,7 @@ fn parse_loaders(
             Loader::Command {
                 command,
                 args: file.args,
+                items: file.items,
             }
         } else if let Some(page) = file.page {
             let loader = file.loader.ok_or_else(|| {

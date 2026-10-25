@@ -226,9 +226,16 @@ extension, three parts (`crates/oxplow-app/src/pages/schema.rs`):
   before it: `sql` (binds `:param`s; an earlier loader reads as a table of
   its name), `command` (a read-only command run as the viewer, `args`
   each `{ param }`, `{ from: <loader>.<column> }` or a literal; it must
-  say `reads` (models) or `refresh` (`manual`, `{ every }`)), `page`
+  say `reads` (models) or `refresh` (`manual`, `{ every }`); `items:
+  <field>` takes a list inside its result as the rows, as the `definition`
+  page reads `oxplow.page.definition`'s `nodes`), `page`
   (another page's `loader`, with `params`) or `rows` (inline). A loader's
   name is a plain identifier, never a model's (`v_*`, `m_*`).
+- **Show Definition** is foundation's hidden `definition` page (params
+  `of`, the page id, and `params`, its params as JSON text): the page's
+  extension, file and deployment, its node tree from
+  `oxplow.page.definition` (each node's parent, page, file and loader;
+  embeds and slot mounts included) and its YAML as written.
 - **`view:`** (and an optional `rail:`) — a tree of nodes: `stack`,
   `grid` (children with `size`), `switch` (`{ param, children }`: the
   child whose id is the param's value), `viz` (+ `from: <loader>`, the

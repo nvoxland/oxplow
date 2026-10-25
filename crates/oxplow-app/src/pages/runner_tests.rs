@@ -79,6 +79,29 @@ async fn a_command_loader_runs_a_read_command_and_refuses_any_other() {
     assert!(err.contains("isn't a read"), "{err}");
 }
 
+/// `items:` takes a list inside a command's result as the rows: the
+/// definition's `nodes`, one row per node.
+#[tokio::test]
+async fn a_command_loaders_items_are_a_list_in_its_result() {
+    let (_dir, svc) = fixture().await;
+    let r = run(&svc, "acme/listed", &[]).await;
+    assert_eq!(r.loaders["nodes"].error, None);
+    let result = &r.loaders["nodes"].result;
+    let id = result
+        .columns
+        .iter()
+        .position(|c| c == "id")
+        .expect("an id column");
+    let ids: Vec<String> = result
+        .rows
+        .iter()
+        .map(|row| format!("{:?}", row[id]))
+        .collect();
+    assert_eq!(ids.len(), 3, "{ids:?}");
+    let err = r.loaders["missing"].error.as_deref().unwrap_or_default();
+    assert!(err.contains("returned no `nope`"), "{err}");
+}
+
 #[tokio::test]
 async fn an_unknown_param_is_refused() {
     let (_dir, svc) = fixture().await;

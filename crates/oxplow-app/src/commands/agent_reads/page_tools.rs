@@ -67,11 +67,41 @@ pub struct PageDefinitionInput {
     /// The page: `<extension>/<slug>`.
     pub page: String,
     /// Param values by name, as for `oxplow.page.run`: which embeds and
-    /// switch children it resolves to depend on them.
-    #[serde(default)]
+    /// switch children it resolves to depend on them. A JSON object, or
+    /// that object as a string (as a page's param carries it).
+    #[serde(default, deserialize_with = "object_or_json_text")]
+    #[schemars(with = "Option<ParamsArg>")]
     pub params: Option<BTreeMap<String, Value>>,
     #[serde(default)]
     pub stream_id: Option<String>,
+}
+
+/// The schema of [`object_or_json_text`]'s input.
+#[derive(JsonSchema)]
+#[allow(dead_code)]
+#[serde(untagged)]
+enum ParamsArg {
+    Values(BTreeMap<String, Value>),
+    /// The object as JSON text.
+    Text(String),
+}
+
+/// An object, or the same object written as JSON text (empty text: none).
+fn object_or_json_text<'de, D>(d: D) -> Result<Option<BTreeMap<String, Value>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::Error;
+    match Option::<Value>::deserialize(d)? {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(text)) if text.trim().is_empty() => Ok(None),
+        Some(Value::String(text)) => serde_json::from_str(&text)
+            .map(Some)
+            .map_err(|e| D::Error::custom(format!("`params` text isn't a JSON object: {e}"))),
+        Some(other) => serde_json::from_value(other)
+            .map(Some)
+            .map_err(D::Error::custom),
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
@@ -578,6 +608,8 @@ struct DefinitionRow {
     depth: usize,
     /// Its id as `#node=` names it (`<embed>/<id>` inside an embed).
     id: String,
+    /// The node it sits in (none at the root).
+    parent: Option<String>,
     kind: &'static str,
     title: Option<String>,
     /// The page it belongs to (an embed's own page for its nodes).
@@ -608,6 +640,7 @@ fn definition_rows(
     run: &PageRun,
     at: &RunNode,
     prefix: &str,
+    parent: Option<&str>,
     depth: usize,
     out: &mut Vec<DefinitionRow>,
 ) {
@@ -616,7 +649,7 @@ fn definition_rows(
         // A page another extension mounted at a slot.
         if let Some(e) = &at.embed {
             let id = format!("{prefix}{}", at.id);
-            definition_rows(e, &e.tree, &format!("{id}/"), depth + 1, out);
+            definition_rows(e, &e.tree, &format!("{id}/"), parent, depth + 1, out);
         }
         return;
     };
@@ -636,6 +669,7 @@ fn definition_rows(
     out.push(DefinitionRow {
         depth,
         id: id.clone(),
+        parent: parent.map(str::to_string),
         kind: kind_name(&def.kind),
         title: def.title.clone(),
         page: run.page.id.clone(),
@@ -651,10 +685,10 @@ fn definition_rows(
         source,
     });
     for c in &at.children {
-        definition_rows(run, c, prefix, depth + 1, out);
+        definition_rows(run, c, prefix, Some(&id), depth + 1, out);
     }
     if let Some(e) = &at.embed {
-        definition_rows(e, &e.tree, &format!("{id}/"), depth + 1, out);
+        definition_rows(e, &e.tree, &format!("{id}/"), Some(&id), depth + 1, out);
     }
 }
 
@@ -680,8 +714,11 @@ fn definition_op(services: ServicesSlot) -> Op {
                     .await
                     .map_err(|e| page_error(&p.page, e))?;
                 let mut rows = Vec::new();
-                definition_rows(&run, &run.tree, "", 0, &mut rows);
+                definition_rows(&run, &run.tree, "", None, 0, &mut rows);
                 let page = &run.page;
+                // The file it runs from, as written.
+                let yaml =
+                    std::fs::read_to_string(svc.layout.project_dir.join(&page.origin.running)).ok();
                 Ok(HandlerOutput {
                     result: json!({
                         "page": page.id,
@@ -693,6 +730,7 @@ fn definition_op(services: ServicesSlot) -> Op {
                         "bundled": page.origin.bundled,
                         "params": page.params,
                         "loaders": page.loaders,
+                        "yaml": yaml,
                         "nodes": rows,
                     }),
                     ..HandlerOutput::default()
@@ -861,6 +899,22 @@ mod tests {
                 .ends_with("pages/picked.yaml"),
             "{picked}"
         );
+        // Each node names the node it sits in; the root none.
+        assert_eq!(nodes[0]["parent"], json!(null));
+        assert!(nodes[1..].iter().all(|n| n["parent"].is_string()), "{def}");
+        // The file as written.
+        assert!(
+            def["yaml"].as_str().unwrap_or_default().contains("title:"),
+            "{def}"
+        );
+        // Params as a page's param carries them: JSON text.
+        let def = run(
+            &svc,
+            "oxplow.page.definition",
+            json!({ "page": "acme/numbers", "params": "{\"n\": 3}" }),
+        )
+        .await;
+        assert_eq!(def["page"], json!("acme/numbers"));
     }
 
     #[tokio::test]
@@ -1015,5 +1069,66 @@ mod show_tests {
             matches!(bad, oxplow_domain::CommandError::Invalid { .. }),
             "{bad:?}"
         );
+    }
+}
+
+#[cfg(test)]
+mod definition_page_tests {
+    use oxplow_db::SqlCell;
+
+    /// Foundation's `definition` page (Show Definition): a page's info,
+    /// its node tree with each node's parent, and its YAML.
+    #[tokio::test]
+    async fn the_definition_page_shows_what_a_page_is_made_of() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let run = crate::pages::runner::PageRunner::of(&f.svc)
+            .run(crate::pages::runner::RunRequest {
+                target: crate::pages::runner::RunTarget::Page(
+                    "oxplow-foundation/definition".into(),
+                ),
+                params: [
+                    (
+                        "of".to_string(),
+                        SqlCell::Text("oxplow-foundation/commit".into()),
+                    ),
+                    (
+                        "params".to_string(),
+                        SqlCell::Text(r#"{"sha":"abc1234"}"#.into()),
+                    ),
+                ]
+                .into(),
+                ctx: crate::extensions::LensContext::default(),
+                viewer: oxplow_domain::Actor::Human,
+            })
+            .await
+            .unwrap();
+        for (name, loader) in &run.loaders {
+            assert_eq!(loader.error, None, "{name}");
+        }
+        let cell = |loader: &str, column: &str| {
+            let r = &run.loaders[loader].result;
+            let at = r.columns.iter().position(|c| c == column).unwrap();
+            r.rows[0][at].clone()
+        };
+        assert_eq!(cell("about", "title"), SqlCell::Text("Commit".into()));
+        assert_eq!(
+            cell("about", "extension"),
+            SqlCell::Text("oxplow-foundation".into())
+        );
+        let nodes = &run.loaders["nodes"].result;
+        assert!(nodes.rows.len() > 3, "{:?}", nodes.rows);
+        let id = nodes.columns.iter().position(|c| c == "id").unwrap();
+        assert!(
+            nodes
+                .rows
+                .iter()
+                .any(|r| r[id] == SqlCell::Text("files".into())),
+            "{:?}",
+            nodes.rows
+        );
+        match cell("yaml", "text") {
+            SqlCell::Text(t) => assert!(t.starts_with("```yaml\ntitle: Commit"), "{t}"),
+            other => panic!("{other:?}"),
+        }
     }
 }
