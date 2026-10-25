@@ -1,4 +1,3 @@
-# TODO(convert): `integrations`'s component `integrations` reads oxplow's data itself: decide what its loader is
 title: Settings
 description: What shapes this project, and the direct controls for what only a person may set.
 icon: settings

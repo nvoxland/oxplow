@@ -46,7 +46,7 @@ view:
   - id: data
     title: What data there is
     embed:
-      page: oxplow-foundation/catalog-lens
+      page: oxplow-foundation/data-catalog
   - id: configure
     title: What you can configure
     from: configure

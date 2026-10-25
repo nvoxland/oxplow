@@ -1,4 +1,3 @@
-# TODO(convert): lens `catalog` is named like page entry `catalog`, so its page is `catalog-lens`: rename one
 title: Data catalog
 description: 'What oxplow''s data holds: every model (`v_*` view) with its owner, what it holds and its columns (name and type); name one (`v_effort` or `effort`) for its columns'' docs and key. Query them with `oxplow_query_sql`; metrics are read with `MEASURE(''<key>'')` over `metric_grid()` (their units and aggregation are in `v_metric_spec`).'
 hidden: true
