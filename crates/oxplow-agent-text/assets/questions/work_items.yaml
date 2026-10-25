@@ -34,16 +34,6 @@
   reaches:
     sql: SELECT path, change_kind FROM v_effort_file WHERE effort_id = 1
   shape: { columns: [path, change_kind] }
-- question: What should I pick up next on this thread?
-  skill: work-items
-  reaches:
-    tool: oxplow_work_next
-    input: { thread: "thr1" }
-- question: What is on this thread's list, by state?
-  skill: work-items
-  reaches:
-    tool: oxplow_thread_work
-    input: { thread: "thr1" }
 - question: What notes were recorded on this thread?
   skill: work-items
   reaches:

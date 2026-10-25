@@ -79,7 +79,7 @@ Link types:
 - `oxplow_query_sql` over `v_work_item` (`uri`, `title`, `body`, `state`,
   `native_state`, `native`, `parent_uri`, `thread_id` — NULL on the
   backlog — `rank`, `closed_at`), `v_work_item_link` and
-  `v_work_item_comment` for anything else: a list's items in order are
+  `v_work_item_comment` for anything else (`thread_id` joins `v_thread`): a list's items in order are
   `WHERE thread_id = … ORDER BY rank IS NULL, rank, created_at`.
 
 What's been done on an item is its efforts: `v_effort` where `work_item`

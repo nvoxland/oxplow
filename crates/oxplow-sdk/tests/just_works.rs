@@ -1034,3 +1034,20 @@ async fn the_bundled_extensions_runs_lens_example_runs_and_passes() {
         report.ran
     );
 }
+
+/// The shipped extensions pass `extension test`, their pages' answers run.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_shipped_extensions_pass_their_own_test() {
+    let dir = project().await;
+    for name in ["oxplow-foundation", "oxplow-bundled"] {
+        let report = test_extension(dir.path(), name, false).await.unwrap();
+        assert_eq!(report.errors, Vec::<String>::new(), "{name}");
+        if name == "oxplow-foundation" {
+            assert!(
+                report.ran.contains(&"answers".to_string()),
+                "{:?}",
+                report.ran
+            );
+        }
+    }
+}

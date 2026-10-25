@@ -5,6 +5,8 @@ tool: work_next
 params:
 - name: thread
   label: Thread (`thr3`)
+answers:
+- {"question":"What should I pick up next on this thread?","params":{"thread":"thr1"},"skill":"work-items"}
 data:
   work_next:
     sql: |

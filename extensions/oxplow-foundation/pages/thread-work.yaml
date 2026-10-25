@@ -5,6 +5,8 @@ tool: thread_work
 params:
 - name: thread
   label: Thread (`thr3`)
+answers:
+- {"question":"What is on this thread's list, by state?","params":{"thread":"thr1"},"skill":"work-items"}
 data:
   thread_work:
     sql: |
