@@ -27,13 +27,6 @@
       SELECT extension, id, trigger, enabled, state, last_run_at, error
       FROM v_collector ORDER BY extension, id
   shape: { columns: [extension, id, trigger, enabled, state, last_run_at, error] }
-- question: Which events couldn't be delivered to their consumer?
-  skill: oxplow-extension
-  reaches:
-    sql: >-
-      SELECT consumer, event_type, error, attempts
-      FROM v_event_dead_letter WHERE state = 'pending'
-  shape: { columns: [consumer, event_type, error, attempts] }
 - question: Run my fixed collector again to see that it works.
   skill: oxplow-extension
   reaches:
@@ -44,11 +37,6 @@
   reaches:
     sql: SELECT uri, extension, title, viz, hidden FROM v_lens ORDER BY extension, slug
   shape: { columns: [uri, extension, title, viz, hidden] }
-- question: Which extensions are loaded, are they enabled, and did they load cleanly?
-  skill: oxplow-extension
-  reaches:
-    sql: SELECT name, version, origin, enabled, errors, warnings FROM v_extension
-  shape: { columns: [name, version, origin, enabled, errors, warnings] }
 - question: What does this extension contribute?
   skill: oxplow-extension
   reaches:
@@ -63,11 +51,6 @@
       SELECT role, effective_provider, effective_model, key_set
       FROM v_ai_role ORDER BY role
   shape: { columns: [role, effective_provider, effective_model, key_set] }
-- question: Which extensions wait on a person to approve their permissions?
-  skill: oxplow-extension
-  reaches:
-    sql: SELECT name, pending FROM v_extension WHERE pending != '[]'
-  shape: { columns: [name, pending] }
 - question: Which credentials has a collector declared that have no value yet?
   skill: oxplow-extension
   reaches:
@@ -99,23 +82,3 @@
       SELECT harness, native_id, title, updated_at FROM v_agent_conversation
       WHERE native_id IS NOT NULL ORDER BY updated_at DESC
   shape: { columns: [harness, native_id, title, updated_at] }
-- question: Which agents does the project enable, and which is a new session's default?
-  skill: oxplow-extension
-  reaches:
-    sql: SELECT id, title FROM v_agent_harness WHERE enabled = 1 ORDER BY position
-  shape: { columns: [id, title] }
-- question: Which worktrees of this repository could a new stream adopt?
-  skill: oxplow-extension
-  reaches:
-    sql: SELECT path, branch FROM v_vcs_workspace WHERE NOT is_main AND stream_id IS NULL
-  shape: { columns: [path, branch] }
-- question: What is in the src folder of this stream's worktree, and which of its files changed?
-  skill: oxplow-extension
-  reaches:
-    sql: SELECT name, kind, status FROM v_workspace_file WHERE parent = 'src' ORDER BY kind, name
-  shape: { columns: [name, kind, status] }
-- question: Which terminals are open in this stream?
-  skill: oxplow-extension
-  reaches:
-    sql: SELECT title, uri FROM v_terminal WHERE stream_id = 1 ORDER BY position
-  shape: { columns: [title, uri] }

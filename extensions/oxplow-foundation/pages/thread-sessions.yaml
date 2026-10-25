@@ -6,6 +6,8 @@ params:
 - name: thread
   label: Thread (`thr3`)
   default: ''
+answers:
+- {"question":"Which agent sessions are on this thread, and what are their subagents doing?","about":"oxplow/thread","params":{"thread":"thr1"},"skill":"oxplow-runtime"}
 data:
   thread_sessions:
     sql: |

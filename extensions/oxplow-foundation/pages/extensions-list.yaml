@@ -1,6 +1,9 @@
 title: Extensions
 description: 'Each extension, from its listing (v_extension) and its source as it is now (v_extension_source): running a deployment, out of date when its source changed since, and what it may reach (its permissions, approved when it was deployed). A deploy that adds permissions asks you first.'
 hidden: true
+answers:
+- {"question":"Which extensions are loaded, are they enabled, and did they load cleanly?","params":{},"skill":"oxplow-extension"}
+- {"question":"Which extensions wait on a person to approve their permissions?","params":{},"skill":"oxplow-extension"}
 data:
   extensions_list:
     sql: |

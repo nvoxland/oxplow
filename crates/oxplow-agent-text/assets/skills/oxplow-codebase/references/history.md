@@ -32,3 +32,5 @@ compared with the default branch. A side is any revision git resolves
   `short_sha`, `author`, `email`, `committed_at`, `subject`), newest
   first, 100 per pair at most: what is unpushed or unmerged. Whole
   histories are `v_commit`.
+- `v_snapshot_op` — the log of snapshots a stream took (why each ran, its
+  parent, how long it took): what `oxplow_snapshots` reads.

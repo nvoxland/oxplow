@@ -19,6 +19,8 @@ params:
 - name: branch
   type: branch
   role: filter
+answers:
+- {"question":"What is this metric's latest value in each group of a dimension?","about":"oxplow/metric","params":{"key":"oxplow.todos","slice":"oxplow.language"},"skill":"oxplow-metrics"}
 data:
   metrics_slices:
     sql: |

@@ -10,6 +10,8 @@ params:
   role: filter
   label: Snapshots
   default: 20
+answers:
+- {"question":"What snapshots has this stream taken lately?","params":{},"skill":"oxplow-codebase"}
 data:
   snapshots:
     sql: |

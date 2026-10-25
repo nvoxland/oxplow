@@ -57,3 +57,7 @@ in `v_contribution_health` (`extension`, `contribution`, `kind`, `state` = `ok` 
   secrets it reads): the deploy asks the person to approve them.
   Do not hand-edit a clone you want to update
   later; copy it into a new extension instead.
+
+`v_extension_source` is each source as it is now, with the hash a deploy of
+it would give: one unlike `v_extension.hash` has changed since it was
+deployed.

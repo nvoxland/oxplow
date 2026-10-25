@@ -11,6 +11,9 @@ params:
   role: filter
   label: Name contains
   default: ''
+answers:
+- {"question":"Where is the function `main` defined?","params":{"stream_id":1,"filter":"main"},"skill":"oxplow-codebase"}
+- {"question":"What does this file declare, in order?","about":"oxplow/file","params":{"stream_id":1,"path":"src/lib.rs"},"skill":"oxplow-codebase"}
 data:
   symbols:
     sql: |

@@ -5,6 +5,8 @@ tool: effort_summary
 params:
 - name: effort
   label: Effort (`eff9`)
+answers:
+- {"question":"Give me a summary of this effort.","about":"oxplow/effort","params":{"effort":"eff1"},"skill":"oxplow-runtime"}
 data:
   effort_summary:
     sql: |

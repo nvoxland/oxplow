@@ -19,6 +19,8 @@ params:
     label: Information
   - value: hint
     label: Hints
+answers:
+- {"question":"Which files have compiler errors right now?","params":{"stream_id":1,"severity":"error"},"skill":"oxplow-codebase"}
 data:
   problems:
     sql: |

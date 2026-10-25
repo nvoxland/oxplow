@@ -34,7 +34,6 @@ pub const ANSWERABILITY_QUESTIONS: &[(&str, &str)] = &[
         "extensions",
         include_str!("../assets/questions/extensions.yaml"),
     ),
-    ("metrics", include_str!("../assets/questions/metrics.yaml")),
 ];
 
 /// An answerability question as the person sees it: offered with an

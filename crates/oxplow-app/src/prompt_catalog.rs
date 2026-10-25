@@ -37,15 +37,27 @@ pub fn prompt_catalog(extensions: &[Extension]) -> Vec<CatalogPrompt> {
         });
     let mut exts: Vec<&Extension> = extensions.iter().filter(|e| e.enabled).collect();
     exts.sort_by(|a, b| a.name.cmp(&b.name));
+    // An extension's own prompts, then what its pages say they answer.
     let from_extensions = exts.into_iter().flat_map(|e| {
-        e.intent
+        let prompts = e
+            .intent
             .iter()
             .flat_map(|i| i.prompts.iter())
             .map(|p| CatalogPrompt {
                 prompt: p.prompt.clone(),
                 about: p.about.clone(),
                 source: PromptSource::Extension(e.name.clone()),
-            })
+            });
+        let answers = e
+            .page_files
+            .iter()
+            .flat_map(|page| page.answers.iter())
+            .map(|a| CatalogPrompt {
+                prompt: a.question.clone(),
+                about: a.about.clone(),
+                source: PromptSource::Extension(e.name.clone()),
+            });
+        prompts.chain(answers)
     });
     core.chain(from_extensions).collect()
 }
@@ -106,5 +118,36 @@ mod tests {
         assert!(!catalog.iter().any(|p| p.prompt == "Hidden?"));
         // Core first.
         assert!(matches!(catalog[0].source, PromptSource::Area(_)));
+    }
+
+    /// What a page says it answers is offered like an extension's prompt.
+    #[test]
+    fn a_pages_answers_are_prompts_of_its_extension() {
+        let mut e = ext("gh", true, &[("Own?", None)]);
+        e.page_files.push(
+            crate::pages::schema::parse_page(
+                "gh",
+                "gh",
+                "prs",
+                "pages/prs.yaml",
+                "title: PRs\nanswers:\n  - { question: \"Which PRs are open?\", about: oxplow/commit }\ndata:\n  a: { sql: \"SELECT 1 AS n\" }\nview: { viz: table, from: a }\n",
+            )
+            .unwrap(),
+        );
+        let mine: Vec<_> = prompt_catalog(&[e])
+            .into_iter()
+            .filter(|p| p.source == PromptSource::Extension("gh".into()))
+            .map(|p| (p.prompt, p.about))
+            .collect();
+        assert_eq!(
+            mine,
+            vec![
+                ("Own?".to_string(), None),
+                (
+                    "Which PRs are open?".to_string(),
+                    Some("oxplow/commit".to_string())
+                )
+            ]
+        );
     }
 }

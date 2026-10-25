@@ -7,6 +7,8 @@ params:
   role: filter
   label: Commits
   default: 20
+answers:
+- {"question":"What were the latest commits on this stream?","params":{},"skill":"oxplow-codebase"}
 data:
   recent_commits:
     sql: |

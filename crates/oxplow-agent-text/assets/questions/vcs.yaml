@@ -3,15 +3,6 @@
 # `.context/extensions.md` "Answerability"). Each question names the
 # skill that should lead the agent to its answer; everything `reaches`
 # names must be in that skill's text.
-- question: Which commits touched this file, newest first?
-  about: oxplow/file
-  skill: oxplow-codebase
-  reaches:
-    sql: >-
-      SELECT c.sha, c.subject, c.committed_at FROM v_commit c
-      JOIN v_commit_file f ON f.sha = c.sha
-      WHERE f.path = 'src/lib.rs' ORDER BY c.committed_at DESC LIMIT 20
-  shape: { columns: [sha, subject, committed_at] }
 - question: Who has changed this file the most?
   about: oxplow/file
   skill: oxplow-codebase
@@ -21,11 +12,6 @@
       JOIN v_commit_file f ON f.sha = c.sha
       WHERE f.path = 'src/lib.rs' GROUP BY c.author ORDER BY commits DESC
   shape: { columns: [author, commits] }
-- question: Which branches exist, and which is the default?
-  skill: oxplow-codebase
-  reaches:
-    sql: SELECT name, kind, is_default FROM v_branch ORDER BY is_default DESC, name
-  shape: { columns: [name, kind, is_default] }
 - question: Which local branches have commits their upstream lacks, or lack its commits?
   skill: oxplow-codebase
   reaches:
@@ -40,45 +26,14 @@
       SELECT ahead, behind, readiness, overlapping_files FROM v_branch_divergence
       WHERE base = 'main' AND head = 'feature'
   shape: { columns: [ahead, behind, readiness, overlapping_files] }
-- question: Which commits does this branch have that main lacks?
-  skill: oxplow-codebase
-  reaches:
-    sql: >-
-      SELECT sha, author, committed_at, subject FROM v_commit_between
-      WHERE base = 'main' AND head = 'feature'
-  shape: { columns: [sha, author, committed_at, subject] }
 - question: Which commit is each stream's workspace on?
   skill: oxplow-codebase
   reaches:
     sql: SELECT id, branch, head_sha FROM v_stream WHERE archived_at IS NULL
   shape: { columns: [id, branch, head_sha] }
-- question: Which uncommitted files are staged, and which does git not track yet?
-  skill: oxplow-codebase
-  reaches:
-    sql: >-
-      SELECT f.path, f.staged, f.untracked FROM v_change c
-      JOIN v_change_file f ON f.change_id = c.id
-      WHERE c.kind = 'working' AND c.stream_id = 1
-  shape: { columns: [path, staged, untracked] }
 - question: What did this commit change?
   about: oxplow/commit
   skill: oxplow-codebase
   reaches:
     sql: SELECT path, status, additions, deletions FROM v_commit_file WHERE sha = 'abc123'
   shape: { columns: [path, status, additions, deletions] }
-- question: What is the recent history of this file?
-  about: oxplow/file
-  skill: oxplow-codebase
-  reaches:
-    tool: oxplow_file_history
-    input: { path: src/lib.rs, limit: 10 }
-- question: What were the latest commits on this stream?
-  skill: oxplow-codebase
-  reaches:
-    tool: oxplow_recent_commits
-    input: { limit: 10 }
-- question: What snapshots has this stream taken lately?
-  skill: oxplow-codebase
-  reaches:
-    tool: oxplow_snapshots
-    input: { limit: 10 }

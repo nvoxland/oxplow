@@ -3,6 +3,8 @@ description: The repository's local branches, the default one first, for a new s
 hidden: true
 needs:
 - vcs
+answers:
+- {"question":"Which branches exist, and which is the default?","params":{},"skill":"oxplow-codebase"}
 data:
   new_stream_branches:
     sql: |

@@ -9,6 +9,9 @@ params:
   role: filter
   label: Commits
   default: 20
+answers:
+- {"question":"Which commits touched this file, newest first?","about":"oxplow/file","params":{"path":"src/lib.rs"},"skill":"oxplow-codebase"}
+- {"question":"What is the recent history of this file?","about":"oxplow/file","params":{"path":"src/lib.rs"},"skill":"oxplow-codebase"}
 data:
   file_history:
     sql: |
