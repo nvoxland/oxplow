@@ -248,7 +248,11 @@ pub fn refuse_duplicate_tools(extensions: &mut [Extension]) {
             .lenses
             .iter()
             .filter_map(|l| Some((l.tool.clone()?, format!("lens `{}`", l.id))));
-        for (tool, owner) in commands.chain(lenses) {
+        let pages = e
+            .page_files
+            .iter()
+            .filter_map(|p| Some((p.tool.clone()?, format!("page `{}`", p.id))));
+        for (tool, owner) in commands.chain(lenses).chain(pages) {
             owners.entry(tool).or_default().push((i, owner));
         }
     }
@@ -283,6 +287,11 @@ pub fn refuse_duplicate_tools(extensions: &mut [Extension]) {
             for l in &mut ext.lenses {
                 if l.tool.as_deref() == Some(tool.as_str()) {
                     l.tool = None;
+                }
+            }
+            for p in &mut ext.page_files {
+                if p.tool.as_deref() == Some(tool.as_str()) {
+                    p.tool = None;
                 }
             }
         }

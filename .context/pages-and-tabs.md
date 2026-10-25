@@ -215,7 +215,11 @@ extension, three parts (`crates/oxplow-app/src/pages/schema.rs`):
   `keywords`, typed `params` (`role: resource | filter`; a `switch`'s param
   is a filter by default), `for` / `accepts` / `default` / `pinned` (a
   renderer), `comments`, `refresh`, `hidden`, `needs`, whole-page
-  `actions`, `alert`, `tool`, `answers` (`{ question, about?, params,
+  `actions`, `alert`, `tool` (an MCP tool `<namespace>_<tool>` whose
+  input is the params and whose call is `oxplow.page.run`; kept for the
+  few questions agents ask every session — foundation's `thread_work`,
+  `work_next`, `effort_summary`, `catalog` — everything else is
+  `find_page` → `run_page`), `answers` (`{ question, about?, params,
   skill? }`: what agents find it by and what tests run) and `badge`
   (`{ loader, column? }`).
 - **`data:`** — named **loaders**, in order; a loader reads only the ones

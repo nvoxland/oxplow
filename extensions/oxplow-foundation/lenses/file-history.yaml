@@ -17,4 +17,3 @@ columns:
   - { key: status, label: Change }
 empty: No indexed commit touched it.
 hidden: true
-tool: file_history

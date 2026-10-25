@@ -19,4 +19,3 @@ columns:
   - { key: file_count, label: Files }
 empty: No snapshots yet.
 hidden: true
-tool: snapshots

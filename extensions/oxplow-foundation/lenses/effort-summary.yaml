@@ -28,4 +28,3 @@ columns:
   - { key: detail, label: Detail }
 empty: No such effort.
 hidden: true
-tool: effort_summary

@@ -250,7 +250,7 @@ Every tool foundation declares is named below
 | Ask a model | `oxplow_ai_decide` (typed questions about some text, on the `decide` role), `oxplow_ai_summarize` (on `summarize`): recorded computations paid with the person's key, as the asking thread ([ai-providers.md](./ai-providers.md)) |
 | Pages | `oxplow_show_page` (shows the person a page beside the conversation — a page with params, or a `spec` of your own kept as an ephemeral view `oxplow:oxplow/view?id=…`; returns its text and whether a window opened it), `oxplow_find_page` (the pages that answer a question, best first, each with its params; `about` a uri keeps the pages that show that kind of thing and binds its uri), `oxplow_run_page` (a page's text, each node under `[node <id>]`, or its loaders' rows; `page` or an inline `spec`), `oxplow_run_page_action` (a page's action as the page acting for you; a row action on one of the node's rows); `oxplow.page.definition` through `run_command` (what a page is made of and where each node comes from) — [pages-and-tabs.md](./pages-and-tabs.md) "Page files" |
 | Show the person | `oxplow_show_lens`, `oxplow_run_lens`, `oxplow_run_lens_action`, `oxplow_navigate` (takes them to any URI's page, switching stream when needed; by default the shown tab goes there, pushed; `replace` rewrites its entry, `new_tab` opens another) |
-| Common questions, typed | foundation lenses with `tool:`: `oxplow_thread_work`, `oxplow_work_next`, `oxplow_effort_files`, `oxplow_effort_summary`, `oxplow_file_history`, `oxplow_recent_commits`, `oxplow_snapshots`, `oxplow_thread_notes`, `oxplow_thread_sessions` (a thread's sessions with their subagents beneath), `oxplow_session_transcript` (a session's turns and notes oldest first, 50 a page, optionally from a turn) — each returns what its lens shows, for a model that shouldn't have to write SQL for them |
+| Common questions, typed | foundation pages with `tool:`: `oxplow_thread_work`, `oxplow_work_next`, `oxplow_effort_summary`, `oxplow_catalog` (each runs `oxplow.page.run` on its page, its params the tool's input: `agent_tools::ToolTarget::Page`), and the lens tool `oxplow_thread_notes` until thread notes go. Every other page is `oxplow_find_page` → `oxplow_run_page` (`effort-files`, `file-history`, `recent-commits`, `snapshots`, `thread-sessions`, `session-transcript`) |
 | What the person has | `oxplow_list_tabs` (the tabs each of their windows shows, per thread, stream or project: selected, on screen, stale), `oxplow_get_open_page` (the page open in a thread in the window they were in last, the others' beside it, or one listed tab: `page` is its identity, `view` its `#`; a lens re-run with their params), `oxplow_list_comments` (their anchored comments, hydrated) |
 | Wiki | `oxplow_wiki_ref_drift` (one stale ref's diff against its pin) |
 | Extension authoring | `oxplow_validate_extension`, `oxplow_preview_extension`, `oxplow_preview_collector` |
@@ -1326,12 +1326,12 @@ calls name it. That last one is what **opencode children give**: they bracket no
 content on `agent.subagent.finished` (`result`) and read back as
 `oxplow_read subagent:ses3/<id>#result`. A background subagent's
 hand-back finishes it before its `SubagentStop`, so that one has no
-result (the dedupe keeps the first). The foundation lens
-`thread-sessions` (`oxplow_thread_sessions`) lists a thread's sessions
+result (the dedupe keeps the first). The foundation page
+`thread-sessions` (`oxplow_run_page { page: thread-sessions }`) lists a thread's sessions
 with their subagents beneath each.
 
-**A session's transcript** is the foundation lens `session-transcript`
-(`oxplow_session_transcript { session, turn?, page? }`): the session's
+**A session's transcript** is the foundation page `session-transcript`
+(`oxplow_run_page { page: session-transcript, params: { session, turn?, page? } }`): the session's
 turns from `v_agent_turn` oldest first with the thread's notes where
 they fall, a subagent's hand-back marked (a turn with no prompt), each
 row a turn URI. A turn URI opens it at that turn (`v_agent_turn

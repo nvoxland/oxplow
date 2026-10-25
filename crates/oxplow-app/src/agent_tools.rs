@@ -27,6 +27,9 @@ pub enum ToolTarget {
     /// A lens, by id (`oxplow-foundation/thread-work`), through
     /// [`LENS_RUN`].
     Lens(String),
+    /// A page, by id (`oxplow-foundation/thread-work`), through
+    /// [`PAGE_RUN`].
+    Page(String),
 }
 
 /// One tool an agent is offered.
@@ -48,6 +51,9 @@ pub struct AgentTool {
 /// The command a lens tool runs.
 pub const LENS_RUN: &str = "oxplow.lens.run";
 
+/// The command a page tool runs.
+pub const PAGE_RUN: &str = "oxplow.page.run";
+
 impl AgentTool {
     /// The command a call runs and its input.
     pub fn call(&self, input: Value) -> (String, Value) {
@@ -63,6 +69,18 @@ impl AgentTool {
                     LENS_RUN.to_string(),
                     json!({ "id": id, "params": params, "format": format }),
                 )
+            }
+            ToolTarget::Page(id) => {
+                let mut params = match input {
+                    Value::Object(map) => map,
+                    _ => Map::new(),
+                };
+                let mut call = json!({ "page": id, "params": {} });
+                if let Some(format) = params.remove("format").filter(|f| !f.is_null()) {
+                    call["format"] = format;
+                }
+                call["params"] = Value::Object(params);
+                (PAGE_RUN.to_string(), call)
             }
         }
     }
@@ -119,6 +137,19 @@ pub fn tools_of(
                 });
             }
         }
+        for page in &ext.page_files {
+            if let Some(name) = &page.tool {
+                tools.push(AgentTool {
+                    name: name.clone(),
+                    description: page_description(page),
+                    input_schema: params_schema(&page.params),
+                    // What a page tool returns depends on its `format`.
+                    output_schema: None,
+                    read_only: true,
+                    target: ToolTarget::Page(page.id.clone()),
+                });
+            }
+        }
     }
     tools.sort_by(|a, b| a.name.cmp(&b.name));
     tools
@@ -150,15 +181,35 @@ fn lens_description(lens: &Lens) -> String {
 /// out takes its default or what the caller's context binds
 /// (`thread_id`, `stream_id`).
 fn lens_schema(lens: &Lens) -> Value {
+    params_schema(&lens.params)
+}
+
+fn page_description(page: &crate::pages::schema::Page) -> String {
+    let about = if page.description.is_empty() {
+        page.title.clone()
+    } else {
+        format!("{}: {}", page.title, page.description)
+    };
+    format!(
+        "{about} Returns what the person would see on the page, as text; \
+         `format: \"json\"` returns its loaders' rows."
+    )
+}
+
+/// A page's (or lens's) params as a tool's input: one property per param
+/// (its label, its choices, its default) and `format`. None is required:
+/// a param left out takes its default or what the caller's context binds
+/// (`thread_id`, `stream_id`).
+fn params_schema(params: &[crate::extensions::LensParam]) -> Value {
     let mut properties = Map::new();
-    for param in &lens.params {
+    for param in params {
         let mut property = Map::new();
         // Options a lens lists aren't known until it runs: the agent runs
         // that lens to see them.
         let from = param
             .options_from
             .as_ref()
-            .map(|lens| format!("one of the `value`s lens `{lens}` lists (run it to see them)"));
+            .map(|from| format!("one of the `value`s `{from}` lists (run it to see them)"));
         let description = match (&param.label, from) {
             (Some(label), Some(from)) => Some(format!("{label} — {from}")),
             (Some(label), None) => Some(label.clone()),
@@ -182,7 +233,7 @@ fn lens_schema(lens: &Lens) -> Value {
         json!({
             "type": "string",
             "enum": ["text", "json"],
-            "description": "`text` (default): what the lens shows. `json`: the full run, rows included."
+            "description": "`text` (default): what it shows. `json`: the full run, rows included."
         }),
     );
     json!({ "type": "object", "properties": properties, "additionalProperties": false })
@@ -222,10 +273,8 @@ mod tests {
                 "oxplow_code_symbols",
                 "oxplow_code_workspace_symbols",
                 "oxplow_diff",
-                "oxplow_effort_files",
                 "oxplow_effort_summary",
                 "oxplow_ensure_change",
-                "oxplow_file_history",
                 "oxplow_find_page",
                 "oxplow_get_open_page",
                 "oxplow_get_skill",
@@ -236,18 +285,14 @@ mod tests {
                 "oxplow_preview_extension",
                 "oxplow_query_sql",
                 "oxplow_read",
-                "oxplow_recent_commits",
                 "oxplow_run_lens",
                 "oxplow_run_lens_action",
                 "oxplow_run_page",
                 "oxplow_run_page_action",
                 "oxplow_search",
-                "oxplow_session_transcript",
                 "oxplow_show_lens",
                 "oxplow_show_page",
-                "oxplow_snapshots",
                 "oxplow_thread_notes",
-                "oxplow_thread_sessions",
                 "oxplow_thread_work",
                 "oxplow_validate_extension",
                 "oxplow_vcs_blame",
@@ -263,18 +308,17 @@ mod tests {
         assert!(query.read_only);
         assert!(query.input_schema["properties"]["sql"].is_object());
         assert!(query.input_schema["examples"].is_array(), "its example");
-        // A lens tool's params are its input's properties.
-        let history = tools
+        // A page tool's params are its input's properties.
+        let work = tools
             .iter()
-            .find(|t| t.name == "oxplow_file_history")
+            .find(|t| t.name == "oxplow_thread_work")
             .unwrap();
         assert_eq!(
-            history.target,
-            ToolTarget::Lens("oxplow-foundation/file-history".into())
+            work.target,
+            ToolTarget::Page("oxplow-foundation/thread-work".into())
         );
-        assert!(history.read_only);
-        assert!(history.input_schema["properties"]["path"].is_object());
-        assert!(history.input_schema["properties"]["limit"].is_object());
+        assert!(work.read_only);
+        assert!(work.input_schema["properties"]["thread"].is_object());
         let show = tools.iter().find(|t| t.name == "oxplow_show_lens").unwrap();
         assert!(!show.read_only, "it records the answer in the thread");
     }
@@ -372,7 +416,7 @@ mod tests {
         // the description says which lens to run to see them.
         assert_eq!(
             lens.input_schema["properties"]["owner"],
-            json!({ "description": "Owner — one of the `value`s lens `acme/owners` lists (run it to see them)" })
+            json!({ "description": "Owner — one of the `value`s `acme/owners` lists (run it to see them)" })
         );
         assert!(lens
             .description
@@ -388,6 +432,61 @@ mod tests {
             acme[0].call(json!({ "sql": "SELECT 1" })),
             ("acme.work.count".to_string(), json!({ "sql": "SELECT 1" }))
         );
+    }
+
+    /// A page asks to be a tool the same way (`tool:`): its params are the
+    /// input, and a call runs `oxplow.page.run` on it.
+    #[tokio::test]
+    async fn an_extensions_page_is_a_tool() {
+        let fx = services_with_task_effort().await;
+        let root = fx._dir.path().join(".oxplow/extensions/acme");
+        std::fs::create_dir_all(root.join("pages")).unwrap();
+        std::fs::write(
+            root.join("extension.yaml"),
+            "manifest: 2\nname: acme\nintent:\n  purpose: p\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("pages/open.yaml"),
+            "title: Open Work\ndescription: The items still open.\n\
+             params:\n  - { name: state, label: State, default: todo, options: [{ value: todo, label: To do }, { value: done, label: Done }] }\n\
+             data:\n  items:\n    sql: SELECT :state AS state\n\
+             view:\n  viz: table\n  from: items\n\
+             tool: open_work\n",
+        )
+        .unwrap();
+        let problems = activate_with_problems(&fx.svc).await;
+        assert!(problems.is_empty(), "{problems:?}");
+        let tools = offered(&fx.svc, &agent(&fx)).await.unwrap();
+        let page = tools
+            .iter()
+            .find(|t| t.name == "acme_open_work")
+            .expect("the page's tool");
+        assert_eq!(page.target, ToolTarget::Page("acme/open".into()));
+        assert!(page.read_only);
+        assert_eq!(
+            page.input_schema["properties"]["state"],
+            json!({ "description": "State", "enum": ["todo", "done"], "default": "todo" })
+        );
+        assert!(page
+            .description
+            .starts_with("Open Work: The items still open."));
+        assert_eq!(
+            page.call(json!({ "state": "done", "format": "json" })),
+            (
+                PAGE_RUN.to_string(),
+                json!({ "page": "acme/open", "params": { "state": "done" }, "format": "json" })
+            )
+        );
+        let (command, input) = page.call(json!({ "state": "done" }));
+        let out = fx
+            .svc
+            .commands
+            .run(&agent(&fx), &command, input, false)
+            .await
+            .unwrap();
+        let out = format!("{out:?}");
+        assert!(out.contains("done"), "{out}");
     }
 
     /// The agent model doc's tool table names every tool oxplow offers.

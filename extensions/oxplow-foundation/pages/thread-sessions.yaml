@@ -1,7 +1,6 @@
 title: Thread sessions
 description: The agent sessions of a thread (every open thread's open sessions when none is named), each with its name, harness, status, how its conversation was bound, when it was last active, the efforts it worked in and its stream — and beneath each, the subagents that acted in it.
 hidden: true
-tool: thread_sessions
 params:
 - name: thread
   label: Thread (`thr3`)

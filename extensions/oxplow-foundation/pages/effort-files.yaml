@@ -1,7 +1,6 @@
 title: Effort files
 description: The files an effort changed, with how.
 hidden: true
-tool: effort_files
 params:
 - name: effort
   label: Effort (`eff9`)

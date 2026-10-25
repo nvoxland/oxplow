@@ -13,4 +13,3 @@ columns:
   - { key: source, label: Seen by }
 empty: The effort changed no files.
 hidden: true
-tool: effort_files

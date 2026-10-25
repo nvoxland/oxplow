@@ -1,7 +1,6 @@
 title: Session transcript
 description: What happened in an agent session, oldest first, 50 a page — each turn's prompt and answer, how many tool calls it made and whether it was a subagent's hand-back, with the thread's notes where they fall. Reopen the session if you closed it, or resume its conversation in a new session, from here.
 hidden: true
-tool: session_transcript
 params:
 - name: session
   label: Session (`ses3`)
