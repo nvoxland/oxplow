@@ -17,6 +17,11 @@
 //! returns exactly `shape.columns`; a command's or tool's input validates
 //! against its spec (a tool must be one foundation, or the extension,
 //! declares).
+//! A page's `answers:` (`{ question, about?, params, skill? }`) are the same
+//! check from the page's side ([`check_pages`]): the named skill names
+//! every model a `sql` loader reads and every command a `command` loader
+//! runs (an answer with no `skill`, a user extension's, skips that), and
+//! the page runs with the answer's params with no loader failing.
 //! With `OXPLOW_LIVE_ANSWERABILITY=1`, [`live`] also asks the `decide`
 //! model, given only the skill text and the catalog, what it would reach
 //! for — it must pick the same model or command.
@@ -351,28 +356,8 @@ pub async fn live(
         let (Some(want), Some(text)) = (want, skill_text(&q.skill)) else {
             continue;
         };
-        let state = format!(
-            "You are a coding agent. This is the guidance you have:\n\n{text}\n\n\
-             The question you must answer: {}",
-            q.question
-        );
-        let questions = BTreeMap::from([(
-            "reach".to_string(),
-            Ask::Choice {
-                instructions: "Which model, command or tool would you use first to answer it?"
-                    .into(),
-                options: catalog.to_vec(),
-            },
-        )]);
-        match ai
-            .decide(&Role::DECIDE, "answerability", &state, &questions)
-            .await
-        {
-            Ok(d) => {
-                let got = match d.answers.get("reach") {
-                    Some(oxplow_app::ai_service::Answer::Choice { choice, .. }) => choice.clone(),
-                    other => format!("{other:?}"),
-                };
+        match reached(ai, &text, &q.question, catalog).await {
+            Ok(got) => {
                 if got != want {
                     out.push(format!(
                         "{file}: question {} ({:?}): given skill `{}`, the model reached for \
@@ -387,6 +372,173 @@ pub async fn live(
                 "{file}: question {}: the model call failed: {e}",
                 i + 1
             )),
+        }
+    }
+    out
+}
+
+/// What the `decide` model, given only `text` and the list of what
+/// exists, would reach for first to answer `question`.
+async fn reached(
+    ai: &AiService,
+    text: &str,
+    question: &str,
+    catalog: &[String],
+) -> Result<String, String> {
+    let state = format!(
+        "You are a coding agent. This is the guidance you have:\n\n{text}\n\n\
+         The question you must answer: {question}"
+    );
+    let questions = BTreeMap::from([(
+        "reach".to_string(),
+        Ask::Choice {
+            instructions: "Which model, command or tool would you use first to answer it?".into(),
+            options: catalog.to_vec(),
+        },
+    )]);
+    let d = ai
+        .decide(&Role::DECIDE, "answerability", &state, &questions)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(match d.answers.get("reach") {
+        Some(oxplow_app::ai_service::Answer::Choice { choice, .. }) => choice.clone(),
+        other => format!("{other:?}"),
+    })
+}
+
+/// What a page's answers reach: the models its `sql` loaders read and the
+/// commands its `command` loaders run, in loader order.
+fn page_reaches(page: &oxplow_app::pages::schema::Page) -> Vec<String> {
+    use oxplow_app::pages::schema::Loader;
+    page.loaders
+        .iter()
+        .flat_map(|l| match &l.loader {
+            Loader::Sql { sql, .. } => models_in(sql),
+            Loader::Command { command, .. } => vec![command.clone()],
+            _ => Vec::new(),
+        })
+        .collect()
+}
+
+/// Check every page `answers:` entry of `extensions` (loaded from their
+/// sources): the named skill names what the page's loaders reach, and with
+/// `svc` the page runs with the answer's params and no loader fails.
+pub async fn check_pages(
+    extensions: &[oxplow_app::extensions::Extension],
+    skill_text: &(dyn Fn(&str) -> Option<String> + Sync),
+    svc: Option<&oxplow_app::Services>,
+) -> Checked {
+    use oxplow_app::pages::runner::{PageRunner, RunRequest, RunTarget};
+    let mut out = Checked::default();
+    for ext in extensions {
+        let rel = ext.path.trim_end_matches('/');
+        for page in &ext.page_files {
+            for (i, answer) in page.answers.iter().enumerate() {
+                let at = format!(
+                    "{rel}/pages/{}.yaml: answer {} ({:?})",
+                    page.slug,
+                    i + 1,
+                    answer.question
+                );
+                if let Some(about) = &answer.about {
+                    if let Some(why) = oxplow_app::extension_resources::resource_problem(about) {
+                        out.errors.push(format!(
+                            "{at}: `about: {about}`: {why} — fix: a resource kind"
+                        ));
+                    }
+                }
+                if let Some(skill) = &answer.skill {
+                    match skill_text(skill) {
+                        None => out.errors.push(format!(
+                            "{at}: no skill `{skill}` — fix: name a skill that exists"
+                        )),
+                        Some(text) => {
+                            for reach in page_reaches(page) {
+                                if !names(&text, &reach) {
+                                    out.errors.push(format!(
+                                        "{at}: skill `{skill}` never names `{reach}` — fix: say in \
+                                         the skill what `{reach}` answers"
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+                let Some(svc) = svc else {
+                    continue;
+                };
+                let params = answer
+                    .params
+                    .iter()
+                    .map(|(k, v)| (k.clone(), oxplow_db::SqlCell::from(v.clone())))
+                    .collect();
+                let ran = PageRunner::of(svc)
+                    .run(RunRequest {
+                        target: RunTarget::Spec(std::sync::Arc::new(page.clone())),
+                        params,
+                        ctx: oxplow_app::extensions::LensContext::default(),
+                        viewer: oxplow_domain::Actor::Human,
+                    })
+                    .await;
+                match ran {
+                    Err(e) => out.errors.push(format!(
+                        "{at}: the page doesn't run with its params: {e} — fix: the params, or the page"
+                    )),
+                    Ok(run) => {
+                        if let Some((name, e)) = run
+                            .loaders
+                            .iter()
+                            .find_map(|(n, l)| l.error.as_ref().map(|e| (n, e)))
+                        {
+                            out.errors.push(format!(
+                                "{at}: loader `{name}` fails with its params: {e} — fix: the \
+                                 params, or the page"
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+/// The live half for pages: given the answer's skill, the model must reach
+/// for the page's first loader's model or command.
+pub async fn live_pages(
+    extensions: &[oxplow_app::extensions::Extension],
+    skill_text: &(dyn Fn(&str) -> Option<String> + Sync),
+    catalog: &[String],
+    ai: &AiService,
+) -> Vec<String> {
+    let mut out = Vec::new();
+    for ext in extensions {
+        for page in &ext.page_files {
+            let Some(want) = page_reaches(page).into_iter().next() else {
+                continue;
+            };
+            for answer in &page.answers {
+                let Some(skill) = &answer.skill else { continue };
+                let Some(text) = skill_text(skill) else {
+                    continue;
+                };
+                match reached(ai, &text, &answer.question, catalog).await {
+                    Ok(got) if got == want => {}
+                    Ok(got) => out.push(format!(
+                        "{}/pages/{}.yaml: answer ({:?}): given skill `{skill}`, the model reached \
+                         for `{got}`, not `{want}` — fix: make the skill point there",
+                        ext.path.trim_end_matches('/'),
+                        page.slug,
+                        answer.question
+                    )),
+                    Err(e) => out.push(format!(
+                        "{}/pages/{}.yaml: answer ({:?}): the model call failed: {e}",
+                        ext.path.trim_end_matches('/'),
+                        page.slug,
+                        answer.question
+                    )),
+                }
+            }
         }
     }
     out
@@ -486,6 +638,111 @@ mod tests {
         }
         assert!(asked >= 12, "{asked}");
         assert_eq!(errors, Vec::<String>::new());
+    }
+
+    /// Every page `answers:` entry of the shipped extensions reaches what
+    /// its skill names and runs with its params (none yet: it passes on
+    /// zero).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn every_page_answer_reaches_what_its_skill_names() {
+        let tmp = tempfile::tempdir().unwrap();
+        oxplow_app::vcs::GitProvider
+            .init_repository(tmp.path())
+            .await
+            .unwrap();
+        let svc = oxplow_app::Services::in_memory(tmp.path()).await.unwrap();
+        let text = oxplow_app::capabilities::agent_text(&svc);
+        let skill = |name: &str| {
+            text.skill_full_text(name).or_else(|| {
+                oxplow_app::bundled_extensions::BUNDLED
+                    .iter()
+                    .find_map(|b| b.file(name).map(str::to_string))
+            })
+        };
+        let shipped: Vec<_> = svc
+            .extension_catalog
+            .snapshot(tmp.path())
+            .extensions()
+            .iter()
+            .filter(|e| oxplow_app::bundled_extensions::is_reserved(&e.name))
+            .cloned()
+            .collect();
+        let checked = check_pages(&shipped, &skill, Some(&svc)).await;
+        let mut errors = checked.errors;
+        if std::env::var("OXPLOW_LIVE_ANSWERABILITY").as_deref() == Ok("1") {
+            let ai = AiService::for_this_machine(
+                std::sync::Arc::new(oxplow_db::SqliteAiCallStore::new(svc.db.clone())),
+                svc.ai.providers().clone(),
+            );
+            errors.extend(live_pages(&shipped, &skill, &catalog(&svc).await, &ai).await);
+        }
+        assert_eq!(errors, Vec::<String>::new());
+    }
+
+    /// The mechanism: a page whose answer's skill names its model passes;
+    /// one whose skill doesn't fails naming the model; params that break
+    /// the query fail too; an answer with no skill skips the naming.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_page_answer_must_be_named_by_its_skill_and_run() {
+        let tmp = tempfile::tempdir().unwrap();
+        oxplow_app::vcs::GitProvider
+            .init_repository(tmp.path())
+            .await
+            .unwrap();
+        let svc = oxplow_app::Services::in_memory(tmp.path()).await.unwrap();
+        let extension = |answer: &str, query: &str| {
+            let dir = tmp.path().join("acme");
+            std::fs::create_dir_all(dir.join("pages")).unwrap();
+            std::fs::write(
+                dir.join("extension.yaml"),
+                "manifest: 2\nname: acme\nintent:\n  purpose: test\n",
+            )
+            .unwrap();
+            std::fs::write(
+                dir.join("pages/items.yaml"),
+                format!(
+                    "title: Items\nparams: [{{ name: state }}]\ndata:\n  items: {{ sql: \"{query}\" }}\nview: {{ viz: table, from: items }}\nanswers:\n  - {{ question: \"What is open?\", {answer} }}\n"
+                ),
+            )
+            .unwrap();
+            oxplow_app::extensions::load_extension_at(&dir, "acme")
+        };
+        let skill = |name: &str| {
+            (name == "acme-skill").then(|| "Use v_work_item to list work.".to_string())
+        };
+        let list = "SELECT title FROM v_work_item WHERE state = :state";
+
+        let ok = extension("params: { state: open }, skill: acme-skill", list);
+        let checked = check_pages(&[ok], &skill, Some(&svc)).await;
+        assert_eq!(checked.errors, Vec::<String>::new());
+
+        let unnamed = extension(
+            "params: { state: open }, skill: acme-skill",
+            "SELECT uri FROM v_effort",
+        );
+        let checked = check_pages(&[unnamed], &skill, Some(&svc)).await;
+        assert!(
+            checked
+                .errors
+                .iter()
+                .any(|e| e.contains("never names `v_effort`")),
+            "{:?}",
+            checked.errors
+        );
+
+        let broken = extension(
+            "params: { state: open }",
+            "SELECT title FROM v_work_item WHERE nope = :state",
+        );
+        let checked = check_pages(&[broken], &skill, Some(&svc)).await;
+        assert!(
+            checked
+                .errors
+                .iter()
+                .any(|e| e.contains("loader `items` fails")),
+            "{:?}",
+            checked.errors
+        );
     }
 
     /// P7.C5: a bundled extension's `questions.yaml` reaches what its

@@ -14,6 +14,8 @@ mod actions_tests;
 #[cfg(test)]
 mod convert_tests;
 #[cfg(test)]
+mod doc_examples_tests;
+#[cfg(test)]
 mod open_runs_tests;
 #[cfg(test)]
 mod runner_tests;

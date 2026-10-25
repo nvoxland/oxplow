@@ -171,7 +171,13 @@ const OXPLOW_SKILLS: &[SkillFiles] = &[
             "lenses-in-use",
             "repair-and-sharing",
             "reading-data",
-            "dashboards"
+            "dashboards",
+            "page-format",
+            "loaders",
+            "view-nodes",
+            "markdown-blocks",
+            "dashboards-as-pages",
+            "recipes"
         ]
     ),
     skill!("oxplow-codebase", ["code", "history"]),
@@ -290,11 +296,29 @@ mod tests {
             for t in std::iter::once(&skill).chain(&skill.references) {
                 assert!(!names_a_task(&t.body), "{} names a task id", t.name);
             }
+            // A reference is reached from `SKILL.md`, or from one that is
+            // (a family of references has one entry point).
+            let mut reached: Vec<&str> = skill
+                .references
+                .iter()
+                .map(|r| r.name.as_str())
+                .filter(|name| skill.body.contains(&format!("references/{name}.md")))
+                .collect();
+            let mut i = 0;
+            while i < reached.len() {
+                let from = skill.references.iter().find(|r| r.name == reached[i]);
+                for next in &skill.references {
+                    if !reached.contains(&next.name.as_str())
+                        && from.is_some_and(|f| f.body.contains(&format!("{}.md", next.name)))
+                    {
+                        reached.push(next.name.as_str());
+                    }
+                }
+                i += 1;
+            }
             for reference in &skill.references {
                 assert!(
-                    skill
-                        .body
-                        .contains(&format!("references/{}.md", reference.name)),
+                    reached.contains(&reference.name.as_str()),
                     "{} never sends the agent to `references/{}.md`",
                     skill.name,
                     reference.name
