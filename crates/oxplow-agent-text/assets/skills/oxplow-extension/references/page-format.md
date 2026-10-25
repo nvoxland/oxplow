@@ -11,7 +11,7 @@ More: `loaders.md` (the `data:` block), `view-nodes.md` (the `view:` tree),
 `dashboards-as-pages.md`, `recipes.md` (worked examples). Lenses still
 work and are in `lens-format.md`; write new things as pages.
 
-```yaml
+```yaml page
 title: Failing tests
 description: Test cases that failed in the last run.
 params: [{ name: suite, default: all }]

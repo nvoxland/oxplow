@@ -6,7 +6,7 @@ extension (`my-pages` by default), so it can be kept, shared and tested
 like any page. (The older dashboard store in `dashboards.md` still works
 until it is migrated.)
 
-```yaml
+```yaml page
 title: Work at a glance
 params: []
 answers:

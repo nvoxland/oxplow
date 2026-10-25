@@ -7,7 +7,7 @@ Each recipe: write the file, check it, deploy, test.
 1. Find the columns: `v_model`, `v_model_column`, `oxplow_query_sql`.
 2. Write `.oxplow/extensions/<name>/pages/<slug>.yaml`:
 
-   ```yaml
+   ```yaml page
    title: Open items
    params: [{ name: state, default: todo }]
    answers:
@@ -32,7 +32,7 @@ Each recipe: write the file, check it, deploy, test.
 
 ## A page with a form
 
-```yaml
+```yaml page
 title: New item
 params: [{ name: t, default: "" }]
 data:
