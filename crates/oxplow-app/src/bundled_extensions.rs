@@ -1491,7 +1491,7 @@ mod tests {
             serde_json::json!({ "comment": format!("cmt{last}").to_string(), "status": "resolved" }),
         )
         .await;
-        let rows = run_bundled_page(&f, "oxplow-bundled/comments", &[("stream_id", 1)]).await;
+        let rows = run_bundled_page(&f, "oxplow-bundled/comments-panel", &[("stream_id", 1)]).await;
         assert_eq!(
             rows,
             serde_json::json!([
@@ -1499,7 +1499,7 @@ mod tests {
                 ["For the agent", 1, "oxplow:oxplow/page?page=comments"]
             ])
         );
-        let none = run_bundled_page(&f, "oxplow-bundled/comments", &[("stream_id", 2)]).await;
+        let none = run_bundled_page(&f, "oxplow-bundled/comments-panel", &[("stream_id", 2)]).await;
         assert_eq!(none, serde_json::json!([]));
     }
 
@@ -3578,7 +3578,7 @@ mod tests {
             async move {
                 let rows = run_bundled_page_with(
                     f,
-                    "oxplow-bundled/go-to",
+                    "oxplow-bundled/go-to-panel",
                     &[("thread_id", tid), ("mode", mode)],
                 )
                 .await;
