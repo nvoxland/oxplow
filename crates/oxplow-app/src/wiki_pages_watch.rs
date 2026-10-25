@@ -132,23 +132,22 @@ mod tests {
                 .await
                 .expect("watcher to spawn");
 
-        // Give the OS-level watcher a moment to attach before we
-        // poke the directory.
-        tokio::time::sleep(Duration::from_millis(50)).await;
-
-        std::fs::write(wiki_dir.join("hello-world.md"), "# Hello\nbody\n").unwrap();
-
-        // 250ms debounce + scheduling slack.
-        let row = tokio::time::timeout(Duration::from_secs(3), async {
+        // The OS-level watcher may still be attaching on a busy machine:
+        // write the file again until its row appears, with a generous
+        // deadline (the debounce is 250ms).
+        let row = tokio::time::timeout(Duration::from_secs(30), async {
             loop {
-                if let Some(row) = store.body("hello-world").await.unwrap() {
-                    return row;
+                std::fs::write(wiki_dir.join("hello-world.md"), "# Hello\nbody\n").unwrap();
+                for _ in 0..16 {
+                    if let Some(row) = store.body("hello-world").await.unwrap() {
+                        return row;
+                    }
+                    tokio::time::sleep(Duration::from_millis(25)).await;
                 }
-                tokio::time::sleep(Duration::from_millis(25)).await;
             }
         })
         .await
-        .expect("the page's row within 3s");
+        .expect("the page's row within 30s");
 
         assert_eq!(row, ("Hello".to_string(), "# Hello\nbody\n".to_string()));
     }

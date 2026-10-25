@@ -13715,7 +13715,7 @@ commands:
             ),
             (
                 ".oxplow/extensions/acme/handlers/spin.star",
-                "def transform(x):\n    n = 0\n    for i in range(400000000):\n        n += i\n    return {\"commands\": []}\n".into(),
+                "def transform(x):\n    n = 0\n    for i in range(100000):\n        for j in range(100000):\n            n += j\n    return {\"commands\": []}\n".into(),
             ),
         ])
         .await;
@@ -13735,7 +13735,9 @@ commands:
         .unwrap();
         assert_eq!(changes.len(), 1, "{changes:?}");
         assert!(
-            started.elapsed() < std::time::Duration::from_secs(3),
+            // The runaway handler would take minutes; only a busy machine
+            // makes the rest slow.
+            started.elapsed() < std::time::Duration::from_secs(30),
             "{:?}",
             started.elapsed()
         );

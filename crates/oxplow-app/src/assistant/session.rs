@@ -103,8 +103,10 @@ struct State {
     asks: HashMap<String, (oneshot::Sender<bool>, u64)>,
     next_ask: u64,
     next_call: u64,
-    /// The running turn's stop.
-    turn: Option<oneshot::Sender<()>>,
+    /// The running turn: its number and its stop.
+    turn: Option<(u64, oneshot::Sender<()>)>,
+    /// The number the last turn started with.
+    turns: u64,
     closed: bool,
 }
 
@@ -142,6 +144,7 @@ impl Session {
                 next_ask: 0,
                 next_call: 0,
                 turn: None,
+                turns: 0,
                 closed: false,
             }),
         }
@@ -309,7 +312,7 @@ impl Session {
             .add_hook(hook)
             .build();
         let (stop, stopped) = oneshot::channel();
-        let history = self.with(|s| {
+        let (turn, history) = self.with(|s| {
             if s.problem
                 .as_ref()
                 .is_some_and(|p| p.kind == AssistantProblemKind::Model)
@@ -320,23 +323,33 @@ impl Session {
                 text: text.to_string(),
                 context: None,
             });
-            s.turn = Some(stop);
-            s.history.clone()
+            s.turns += 1;
+            s.turn = Some((s.turns, stop));
+            (s.turns, s.history.clone())
         });
         self.changed();
         let session = self.clone();
         let text = text.to_string();
         tokio::spawn(async move {
             let ended = run_turn(&agent, &text, history, stopped).await;
-            session.finish(ended);
+            session.finish(Some(turn), ended);
         });
         Ok(())
     }
 
     /// A turn is over: keep what it answered, say why it failed, and close
     /// what it left open (its cards, its unfinished calls).
-    fn finish(&self, ended: Ended) {
-        self.with(|s| {
+    ///
+    /// `turn` is the turn that ended on its own; a stopped turn is settled
+    /// by [`Session::cancel`] (`None`) at once, and its task ending later
+    /// finds its turn gone and leaves the next turn alone.
+    fn finish(&self, turn: Option<u64>, ended: Ended) {
+        let settled = self.with(|s| {
+            if let Some(turn) = turn {
+                if s.turn.as_ref().map(|t| t.0) != Some(turn) {
+                    return false;
+                }
+            }
             s.turn = None;
             for (_, (_, item)) in s.asks.drain() {
                 s.transcript.update(item, |b| {
@@ -374,13 +387,17 @@ impl Session {
                 // model's history gets nothing of it.
                 Ended::Stopped => {}
             }
+            true
         });
-        self.changed();
+        if settled {
+            self.changed();
+        }
     }
 
     pub(super) fn cancel(&self) {
-        if let Some(stop) = self.with(|s| s.turn.take()) {
+        if let Some((_, stop)) = self.with(|s| s.turn.take()) {
             let _ = stop.send(());
+            self.finish(None, Ended::Stopped);
         }
     }
 

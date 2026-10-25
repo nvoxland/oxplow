@@ -304,6 +304,42 @@ mod tests {
     use tempfile::tempdir;
     use tokio::time::timeout;
 
+    type Events = tokio::sync::broadcast::Receiver<crate::events::OxplowEvent>;
+
+    /// Waits until a `WorkspaceChanged` for a path ending in `name` arrives,
+    /// calling `poke` before each wait: the OS watcher may still be
+    /// settling on a busy machine, so the change is made again rather than
+    /// waited on once. Each path heard goes to `seen`. `false` at the
+    /// (generous) deadline.
+    async fn heard_after(
+        rx: &mut Events,
+        name: &str,
+        mut poke: impl FnMut(u32),
+        mut seen: impl FnMut(&str),
+    ) -> bool {
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        let mut attempt = 0;
+        while std::time::Instant::now() < deadline {
+            poke(attempt);
+            attempt += 1;
+            let wait = std::time::Instant::now() + Duration::from_millis(400);
+            while let Ok(Ok(event)) = timeout(
+                wait.saturating_duration_since(std::time::Instant::now()),
+                rx.recv(),
+            )
+            .await
+            {
+                if let crate::events::OxplowEvent::WorkspaceChanged { path, .. } = event {
+                    seen(&path);
+                    if path.ends_with(name) {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
     #[tokio::test]
     async fn spawn_for_stream_skips_target_and_node_modules() {
         let dir = tempdir().unwrap();
@@ -334,35 +370,34 @@ mod tests {
         )
         .expect("watchers");
 
-        // Give notify a moment to settle the cache walk before writing.
-        tokio::time::sleep(Duration::from_millis(200)).await;
-
-        std::fs::write(root.join("target").join("ignored.txt"), b"x").unwrap();
-        std::fs::write(root.join("node_modules").join("ignored.txt"), b"x").unwrap();
-        std::fs::write(root.join("src").join("seen.txt"), b"y").unwrap();
-
-        let mut seen_src = false;
-        let deadline = std::time::Instant::now() + Duration::from_secs(3);
-        while std::time::Instant::now() < deadline {
-            match timeout(Duration::from_millis(500), rx.recv()).await {
-                Ok(Ok(crate::events::OxplowEvent::WorkspaceChanged { path, .. })) => {
-                    if path.contains("target") || path.contains("node_modules") {
-                        panic!("unexpected event for excluded path: {path}");
-                    }
-                    if path.contains("seen.txt") {
-                        seen_src = true;
-                        // Drain a moment longer to ensure no excluded events sneak in.
-                    }
-                }
-                Ok(Ok(_)) => {}
-                _ => {
-                    if seen_src {
-                        break;
-                    }
-                }
+        // The watcher may still be settling: keep changing the files until
+        // the visible one is heard. An event for an excluded path, at any
+        // point, fails.
+        let excluded = |path: &str| {
+            assert!(
+                !path.contains("target") && !path.contains("node_modules"),
+                "unexpected event for excluded path: {path}"
+            );
+        };
+        let seen_src = heard_after(
+            &mut rx,
+            "seen.txt",
+            |n| {
+                std::fs::write(root.join("target").join("ignored.txt"), n.to_string()).unwrap();
+                std::fs::write(root.join("node_modules").join("ignored.txt"), n.to_string())
+                    .unwrap();
+                std::fs::write(root.join("src").join("seen.txt"), n.to_string()).unwrap();
+            },
+            excluded,
+        )
+        .await;
+        assert!(seen_src, "expected WorkspaceChanged event for src/seen.txt");
+        // Anything excluded still on its way arrives soon after.
+        while let Ok(Ok(event)) = timeout(Duration::from_millis(500), rx.recv()).await {
+            if let crate::events::OxplowEvent::WorkspaceChanged { path, .. } = event {
+                excluded(&path);
             }
         }
-        assert!(seen_src, "expected WorkspaceChanged event for src/seen.txt");
 
         // Keep arc alive to avoid drop ordering surprises.
         drop(_watchers);
@@ -399,30 +434,38 @@ mod tests {
             filter,
         )
         .expect("watchers");
-        tokio::time::sleep(Duration::from_millis(200)).await;
 
-        async fn heard(
-            name: &str,
-            rx: &mut tokio::sync::broadcast::Receiver<crate::events::OxplowEvent>,
-        ) -> bool {
-            let deadline = std::time::Instant::now() + Duration::from_secs(4);
-            while std::time::Instant::now() < deadline {
-                if let Ok(Ok(crate::events::OxplowEvent::WorkspaceChanged { path, .. })) =
-                    timeout(Duration::from_millis(300), rx.recv()).await
-                {
-                    if path.ends_with(name) {
-                        return true;
-                    }
-                }
-            }
-            false
-        }
+        // Ignored at first: a probe in the same directory, changed until
+        // it is heard (so the watcher is up), arrives after any event the
+        // ignored file would have made.
+        let mut hidden_heard = false;
         std::fs::write(root.join("src/hidden.txt"), b"1").unwrap();
-        assert!(!heard("hidden.txt", &mut rx).await, "ignored at first");
+        assert!(
+            heard_after(
+                &mut rx,
+                "probe.txt",
+                |n| std::fs::write(root.join("src/probe.txt"), n.to_string()).unwrap(),
+                |path| hidden_heard |= path.ends_with("hidden.txt"),
+            )
+            .await,
+            "the watcher never came up"
+        );
+        assert!(!hidden_heard, "ignored at first");
         std::fs::write(root.join(".gitignore"), "").unwrap();
-        assert!(heard(".gitignore", &mut rx).await);
-        std::fs::write(root.join("src/hidden.txt"), b"2").unwrap();
-        assert!(heard("hidden.txt", &mut rx).await, "heard once un-ignored");
+        assert!(
+            heard_after(&mut rx, ".gitignore", |_| {}, |_| {}).await,
+            ".gitignore edit never announced"
+        );
+        assert!(
+            heard_after(
+                &mut rx,
+                "hidden.txt",
+                |n| std::fs::write(root.join("src/hidden.txt"), (n + 2).to_string()).unwrap(),
+                |_| {},
+            )
+            .await,
+            "heard once un-ignored"
+        );
     }
 
     #[tokio::test]
