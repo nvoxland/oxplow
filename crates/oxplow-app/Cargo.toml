@@ -16,6 +16,9 @@ regex = { workspace = true }
 oxplow-domain = { workspace = true }
 oxplow-agent-text = { workspace = true }
 oxplow-ai-rig = { workspace = true }
+# Rig's agent loop, for the Assistant. Pinned with rig-core: its API moves
+# between minor versions.
+rig-agent = { version = "=0.45.0", default-features = false }
 oxplow-harnesses = { workspace = true }
 oxplow-db = { workspace = true }
 rusqlite = { workspace = true }

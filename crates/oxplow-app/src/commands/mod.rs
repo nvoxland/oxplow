@@ -19,6 +19,7 @@ pub mod agent_session;
 pub mod agent_settings;
 pub mod ai_settings;
 pub mod bookmark;
+pub mod code_rename;
 pub mod comment;
 pub mod compose;
 pub mod config_commands;

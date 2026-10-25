@@ -150,3 +150,60 @@ pub async fn mock_sse_rounds(path: &'static str, rounds: Vec<Vec<String>>) -> (S
     tokio::spawn(async move { axum::serve(listener, app).await.expect("mock server") });
     (format!("http://{addr}"), seen)
 }
+
+/// [`mock_sse_rounds`] with each round held open after its chunks for its
+/// `Duration` before the reply ends: a round that holds stands for a model
+/// still writing, so a reader can be stopped mid-turn while a later round
+/// answers at once. Returns the base URL and the record.
+pub async fn mock_sse_rounds_held(
+    path: &'static str,
+    rounds: Vec<(Vec<String>, std::time::Duration)>,
+) -> (String, Seen) {
+    let seen: Seen = Arc::default();
+    let app = Router::new()
+        .route(
+            path,
+            post(
+                move |State(seen): State<Seen>, headers: HeaderMap, Json(body): Json<Value>| {
+                    let rounds = rounds.clone();
+                    async move {
+                        let at = {
+                            let mut seen = seen.lock().expect("mock record poisoned");
+                            seen.push((path.to_string(), headers, body));
+                            seen.len() - 1
+                        };
+                        let (chunks, hold) = rounds
+                            .get(at)
+                            .or(rounds.last())
+                            .cloned()
+                            .unwrap_or_default();
+                        let stream = futures::stream::unfold(
+                            Some(chunks.concat()),
+                            move |left| async move {
+                                match left {
+                                    Some(text) => {
+                                        Some((Ok::<_, std::convert::Infallible>(text), None))
+                                    }
+                                    None => {
+                                        tokio::time::sleep(hold).await;
+                                        None
+                                    }
+                                }
+                            },
+                        );
+                        (
+                            [(axum::http::header::CONTENT_TYPE, "text/event-stream")],
+                            axum::body::Body::from_stream(stream),
+                        )
+                    }
+                },
+            ),
+        )
+        .with_state(seen.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind a local port");
+    let addr = listener.local_addr().expect("local address");
+    tokio::spawn(async move { axum::serve(listener, app).await.expect("mock server") });
+    (format!("http://{addr}"), seen)
+}

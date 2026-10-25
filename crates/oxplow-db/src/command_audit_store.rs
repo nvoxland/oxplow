@@ -84,6 +84,8 @@ pub struct CommandAudit {
     pub undone_by: Option<i64>,
     /// The scopes the run called, and how often.
     pub scopes: BTreeMap<String, u32>,
+    /// What the actor acted through (`assistant:ast3`), when not directly.
+    pub via: Option<String>,
 }
 
 /// What a run writes before its event id is known.
@@ -103,6 +105,8 @@ pub struct NewCommandAudit {
     pub scopes: BTreeMap<String, u32>,
     /// The run it was (`extension_run.run_id` when an extension's).
     pub run_id: Option<String>,
+    /// What the actor acted through (`assistant:ast3`), when not directly.
+    pub via: Option<String>,
 }
 
 /// Insert one audit row; returns its id.
@@ -114,8 +118,8 @@ pub fn insert_tx(conn: &Connection, row: &NewCommandAudit) -> Result<i64, Domain
     conn.execute(
         "INSERT INTO command_audit
            (at, command, actor_kind, actor_id, thread_id, input_json, outcome, error, inverse_json,
-            result_json, scopes_json, session_id, run_id)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+            result_json, scopes_json, session_id, run_id, via)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
         params![
             ts_to_string(Timestamp::now()),
             row.command,
@@ -133,6 +137,7 @@ pub fn insert_tx(conn: &Connection, row: &NewCommandAudit) -> Result<i64, Domain
                 .then(|| { serde_json::to_string(&row.scopes).expect("scopes serialize") }),
             row.session_id.map(|s| s.value()),
             row.run_id,
+            row.via,
         ],
     )
     .map_err(map_sql_err)?;
@@ -206,6 +211,7 @@ fn row_to_audit(row: &rusqlite::Row<'_>) -> rusqlite::Result<CommandAudit> {
             .transpose()
             .map_err(|e| conv(DomainError::Storage(format!("scopes json: {e}"))))?
             .unwrap_or_default(),
+        via: row.get("via")?,
     })
 }
 
@@ -285,6 +291,7 @@ mod tests {
                             }),
                             scopes: [("sql.read".to_string(), 2)].into(),
                             run_id: None,
+                            via: Some("assistant:ast1".into()),
                         },
                     )?;
                     set_event_id_tx(tx, id, &event)?;
@@ -303,6 +310,7 @@ mod tests {
                             inverse: None,
                             scopes: BTreeMap::new(),
                             run_id: None,
+                            via: None,
                         },
                     )?;
                     mark_undone_tx(tx, id, undo_id)?;
@@ -313,6 +321,8 @@ mod tests {
             .unwrap();
         let row = store.get(id).await.unwrap().unwrap();
         assert_eq!(row.session_id, Some(AgentSessionId::new(5)));
+        assert_eq!(row.via.as_deref(), Some("assistant:ast1"));
+        assert_eq!(store.get(undo_id).await.unwrap().unwrap().via, None);
         assert_eq!(store.get(undo_id).await.unwrap().unwrap().session_id, None);
         assert_eq!(row.command, "oxplow.work_item.transition");
         assert_eq!(row.actor_kind, ActorKind::Agent);
@@ -352,6 +362,7 @@ mod tests {
                     inverse: None,
                     scopes: BTreeMap::new(),
                     run_id: None,
+                    via: None,
                 },
             )
         })

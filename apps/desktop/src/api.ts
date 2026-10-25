@@ -26,6 +26,9 @@ import {
 import { IpcCallError, ipcErrorCode, ipcErrorDetails, ipcErrorField, ipcErrorMessage } from "./ipc-error.js";
 import type {
   AiSettings,
+  AssistantContext,
+  AssistantModel,
+  AssistantSnapshot,
   HarnessListing,
   PanelPlacement,
   UiPreference,
@@ -1512,6 +1515,68 @@ export function subscribeOxplowEvents(
     stopped = true;
     void unlistenPromise.then((u) => u());
   };
+}
+
+// ---- The Assistant (`oxplow_app::assistant`) ------------------------------
+// A short-lived agent in oxplow's own panel. `assistantPrompt` is the
+// prompt box's Enter and nothing else. A session lives in memory: gone on
+// restart.
+
+/** Open a session in `stream` (and `thread`) on what was asked about. */
+export async function assistantOpen(
+  stream: string,
+  thread: string | null,
+  context: AssistantContext | null,
+): Promise<string> {
+  return unwrap(await commands.assistantOpen(stream, thread, context)).id;
+}
+
+/** Send what the person typed. Fails `BUSY` while a turn runs and
+ *  `NO_MODEL` with no model bound. */
+export async function assistantPrompt(id: string, text: string): Promise<void> {
+  unwrap(await commands.assistantPrompt(id, text));
+}
+
+/** Stop the running turn. */
+export async function assistantCancel(id: string): Promise<void> {
+  unwrap(await commands.assistantCancel(id));
+}
+
+/** Change the session's settings; a field left out stays as it is.
+ *  `model: null` goes back to the `assistant` role's model. */
+export async function assistantSet(
+  id: string,
+  change: { model?: AssistantModel | null; allowChanges?: boolean },
+): Promise<void> {
+  const model = change.model === undefined ? null : change.model === null ? "default" : change.model;
+  unwrap(await commands.assistantSet(id, model, change.allowChanges ?? null));
+}
+
+/** Answer approval card `ask` (its `requestId`). */
+export async function assistantAnswer(id: string, ask: string, allow: boolean): Promise<void> {
+  unwrap(await commands.assistantAnswer(id, ask, allow));
+}
+
+/** The session, with the transcript items changed after `since`. */
+export async function assistantSnapshot(id: string, since: number): Promise<AssistantSnapshot> {
+  return unwrap(await commands.assistantSnapshot(id, since));
+}
+
+/** Continue in thread `toThread` (`thr3`): hand it the condensed transcript. */
+export async function assistantHandoff(id: string, toThread: string): Promise<void> {
+  unwrap(await commands.assistantHandoff(id, toThread));
+}
+
+/** Close the session, stopping its turn. */
+export async function assistantClose(id: string): Promise<void> {
+  unwrap(await commands.assistantClose(id));
+}
+
+/** Call `onChange(seq)` whenever session `id` changed. */
+export function subscribeAssistant(id: string, onChange: (seq: number) => void): () => void {
+  return subscribeOxplowEvents((event) => {
+    if (event.kind === "assistantChanged" && event.id === id) onChange(event.seq);
+  });
 }
 
 export function subscribeWorkspaceContext(

@@ -555,6 +555,14 @@ released if it fails — so two concurrent undos can't both apply it
 already undone", `lost_race`) and leaves **no audit row**: it didn't
 fail, it was beaten to it. An approval's lost race is the same.
 
+**Acting through.** A run may say what its actor acted through:
+`RunContext::acting_through("assistant:ast3")` (`RunContext::via`), when
+a person's command was run for them by something they direct — the
+Assistant, after they allowed the call on its card. It changes nothing
+about who may run what: the actor is still `Actor::Human`. Its audit
+row keeps it (`command_audit.via`, V108; `v_command_audit.via`, v2), and
+a nested run inherits it.
+
 **Agent rules follow the agent.** An `Actor::Lens { on_behalf_of }` —
 or an `Actor::Component { component, on_behalf_of }`, a custom component
 acting for whoever uses it ("Custom components") — whose chain ends at an

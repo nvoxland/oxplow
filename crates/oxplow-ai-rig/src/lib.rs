@@ -44,21 +44,27 @@ pub fn provider(
     })
 }
 
-/// A Rig model handle for `model` of the Rust kind `kind` on `instance`
-/// (its key and base URL, else `default_base_url`): what a resolved role
-/// binding gives a caller that drives the model itself (an agent loop).
-/// TypeSafe has none: it only decides.
+/// A Rig model handle for `model` on `instance` (its key and base URL,
+/// else the declaration's) of a declared provider: what a resolved role
+/// binding gives a caller that drives the model itself (the Assistant's
+/// agent loop). Only a Rig kind has one: TypeSafe only decides, and a
+/// host's provider (the fixture model) speaks no wire.
 pub fn completion_model(
-    kind: &str,
-    default_base_url: Option<&str>,
+    provider: &dyn ModelProvider,
     instance: &ProviderInstance<'_>,
     model: &str,
 ) -> Result<DynModel<Completion>, AiError> {
-    let found = kinds::kind(kind).map_err(|e| AiError::BadRequest {
-        provider: instance.id.into(),
-        detail: e.to_string(),
-    })?;
-    RigProvider::new(found, kind, kind, default_base_url).completion_model(instance, model)
+    provider
+        .as_any()
+        .and_then(|any| any.downcast_ref::<RigProvider>())
+        .ok_or_else(|| AiError::BadRequest {
+            provider: instance.id.into(),
+            detail: format!(
+                "the `{}` provider can't drive an agent: it isn't a kind Rig speaks",
+                provider.kind()
+            ),
+        })?
+        .completion_model(instance, model)
 }
 
 #[cfg(test)]

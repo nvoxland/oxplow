@@ -120,6 +120,7 @@ fn discover(
         Err(
             e @ (AiServiceError::NotConfigured(_)
             | AiServiceError::ProfileNotConfigured { .. }
+            | AiServiceError::RoleNotConfigured { .. }
             | AiServiceError::UndeclaredProfile(_)),
         ) => Ok(serde_json::json!({
             "role": role.to_string(),

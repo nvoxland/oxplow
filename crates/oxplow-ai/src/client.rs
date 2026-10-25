@@ -213,6 +213,12 @@ pub trait ModelProvider: Send + Sync {
     /// Its API base when an instance names none; `None` when every instance
     /// must (`baseUrl`).
     fn default_base_url(&self) -> Option<&str>;
+    /// Itself, for a caller that needs its concrete type: a Rig kind gives a
+    /// caller driving a model itself its handle (`oxplow_ai_rig`). `None`
+    /// for a provider nothing needs to look into.
+    fn as_any(&self) -> Option<&dyn std::any::Any> {
+        None
+    }
     /// Enumerate locally available metadata. This must not make paid probes
     /// or use credentials; a provider that only supports text completion and
     /// decide has no known catalog.

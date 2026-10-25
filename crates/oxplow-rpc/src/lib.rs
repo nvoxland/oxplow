@@ -260,6 +260,15 @@ macro_rules! oxplow_command_table {
                 // ai (Settings → AI)
                 ai_settings => $crate::commands::ai::ai_settings {} -> ::oxplow_app::ai_service::AiSettings,
                 read_ai_call => $crate::commands::ai::read_ai_call { id: ::oxplow_domain::AiCallId, body: ::oxplow_app::ai_calls::AiCallBody } -> Option<::oxplow_app::event_bodies::EventBody>,
+                // the Assistant's panel (UI-only)
+                assistant_open => $crate::commands::assistant::assistant_open { stream: ::oxplow_domain::StreamId, thread: Option<::oxplow_domain::ThreadId>, context: Option<::oxplow_app::assistant::AssistantContext> } -> ::oxplow_app::assistant::AssistantOpened,
+                assistant_prompt => $crate::commands::assistant::assistant_prompt { id: String, text: String } -> (),
+                assistant_cancel => $crate::commands::assistant::assistant_cancel { id: String } -> (),
+                assistant_set => $crate::commands::assistant::assistant_set { id: String, model: Option<::oxplow_app::assistant::AssistantModelChoice>, allow_changes: Option<bool> } -> (),
+                assistant_answer => $crate::commands::assistant::assistant_answer { id: String, ask: String, allow: bool } -> (),
+                assistant_snapshot => $crate::commands::assistant::assistant_snapshot { id: String, since: u32 } -> ::oxplow_app::assistant::AssistantSnapshot,
+                assistant_handoff => $crate::commands::assistant::assistant_handoff { id: String, to_thread: String } -> ::oxplow_domain::Json,
+                assistant_close => $crate::commands::assistant::assistant_close { id: String } -> (),
                 report_tabs => $crate::commands::tabs::report_tabs { report: oxplow_app::client_reports::TabReport } -> (),
                 // comments
                 list_comments_for_target => $crate::commands::comments::list_comments_for_target { target: String } -> Vec<::oxplow_domain::CommentThread>,

@@ -948,7 +948,7 @@ pub fn extension_settings(project_dir: impl AsRef<Path>) -> ExtensionSettings {
 /// The built-in role names `ai.roles` accepts beside extension AI
 /// profiles (`<extension>/<profile>`). Must match
 /// `oxplow_ai::config::BuiltinRole` (a test in oxplow-app checks).
-pub const AI_ROLE_NAMES: [&str; 3] = ["main", "summarize", "decide"];
+pub const AI_ROLE_NAMES: [&str; 4] = ["main", "summarize", "decide", "assistant"];
 
 /// Roles oxplow dropped because nothing asked them (`oxplow_ai`'s
 /// `DROPPED_ROLES`): naming one fails saying so.

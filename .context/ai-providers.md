@@ -105,6 +105,15 @@ ai:
 | `main` | general reasoning: `extract` (a collector's `ai_extract`); the fallback of oxplow-bundled's `decisions` profile (inferred decisions) |
 | `summarize` | summaries of sessions, efforts, changes (`summarize`) |
 | `decide` | typed questions with probabilities, Jev-shaped (`classify`, `score`, `decide`) |
+| `assistant` | the Assistant ("The Assistant" below); falls back to `main` and needs tool calling and streaming |
+
+A built-in role may fall back to another while it has no binding of its
+own (`BuiltinRole::fallback`: `assistant` → `main`), as a profile does,
+and may need model features (`BuiltinRole::features`). Settings shows
+its `fallback`, and its `problem` when its model lacks a feature it needs
+or its binding forbids one. Unbound with an unbound fallback is
+`RoleNotConfigured`: "no model is assigned to the `assistant` role or the
+`main` role it falls back to".
 
 A role exists only once something asks it. A config naming a role oxplow
 dropped (`fast`, `embed`, `review`: nothing asked them) fails to load,
@@ -333,9 +342,14 @@ an id, a description, a required `fallback` built-in role and optional
     `{base}/systemone`. The `decide_native` feature of the declaration is
     the kind's (`openrouter`, `typesafe`).
   - **For a caller driving a model itself** (the Assistant):
-    `oxplow_ai_rig::completion_model(kind, default_base_url, instance,
-    model)` gives Rig's `DynModel<Completion>` for a resolved binding,
-    and the crate re-exports `rig_core`. TypeSafe has none.
+    `oxplow_ai_rig::completion_model(provider, instance, model)` gives
+    Rig's `DynModel<Completion>` for a declared provider (the registry's
+    `dyn ModelProvider`, found through `ModelProvider::as_any`), and the
+    crate re-exports `rig_core`. Only a Rig kind has one: TypeSafe and
+    the fixture model are refused, naming the provider.
+    `AiService::agent_model(role, choice)` is the app's way in: the
+    person's pick or the role's binding, refused when the binding forbids
+    what the role needs, with the key read for that handle only.
   - **Permission** (decided 2026-10-08). Declaring an AI provider points a
     person's key at the URL it names, so its extension must declare
     `permissions.ai` (the loader refuses it otherwise), approved when the
@@ -400,6 +414,78 @@ an id, a description, a required `fallback` built-in role and optional
 - `oxplow_app::ai_service` re-exports the `oxplow-ai` types the adapters
   need (`Role`, `ProviderConfig`, `Question`, …), so `oxplow-rpc`,
   `oxplow-tauri-ipc` and `oxplow-mcp` depend only on `oxplow-app`.
+
+## The Assistant (current)
+
+A short-lived agent in oxplow's own panel, for questions and small,
+scoped tasks (`crates/oxplow-app/src/assistant/`, `Services.assistant`).
+It is not an agent session: it never touches the thread's sessions, its
+context basket or its handoffs (it may send one, when the person asks).
+Sessions live in memory by id (`ast<n>`) and are gone on restart.
+
+- **Loop.** Rig's agent (`rig-agent` `=0.45.0`) over the `assistant`
+  role's model (`AiService::agent_model`), or the model the person
+  picked. One prompt runs one turn, up to 16 model calls
+  (`default_max_turns`; Rig's default is one). The history is ours: each
+  finished turn's messages are appended and sent with the next prompt.
+  A prompt during a turn is refused (`TurnInFlight`). Stop drops Rig's
+  stream (the model's connection, and any call it awaits): the transcript
+  keeps what it shows, the history gets nothing of that turn.
+- **Transcript.** `chat/transcript.rs` items, written from the turn's
+  hook (`AgentHook`), not from the stream: Rig reports a tool call on
+  its stream only once it is committed, so live status comes from
+  `on_dispatch` / `on_outcome`; text and thoughts from `on_text_delta`
+  / `on_reasoning_delta`. Each change emits `assistantChanged { id, seq }`;
+  the panel reads `assistant_snapshot { id, since }`.
+- **Tools** (`assistant/tools.rs`). Every bus command the person may run
+  (`CommandBus::list(&Actor::Human)`) that only reads (`View`, `Read`)
+  is a tool of its own, named by its id with `.` → `_`, its summary and
+  input schema the tool's. `oxplow.sql.query`, `oxplow.records.read` and
+  `oxplow.search.find` are among them (left out: `sql.query` when the
+  binding forbids `sql`). With "Allow changes" on, changes (`Record`,
+  `Write`) go through two tools, not one each: `oxplow_find_command`
+  lists them with their input schemas, `oxplow_run_command { command,
+  input }` runs one. Every change as its own tool would be about 200
+  tools and 170 KB of schema per request, and some wires take at most
+  128. A result is cut at 64 KiB, as a job's.
+- **Approval.** A `oxplow_run_command` call adds a permission card and
+  waits in `on_dispatch` for the person's answer (`assistant_answer`):
+  allowed, it runs; declined, it is skipped and the model reads "the
+  person declined". Reads never ask. Stop or close answers every open
+  card `cancelled`.
+- **Runs are the person's.** `Actor::Human`, `confirmed` by the card,
+  through a run that is `acting_through("assistant:<id>")`, so its audit
+  row's `via` names the session ([commands.md](./commands.md) "Acting
+  through"). The run's `audit_id` lands on the tool item (`ToolCall.auditId`,
+  passed from the executor on Rig's tool result context), so the panel
+  undoes a call through the existing undo.
+- **Model calls are recorded.** Each completion is an `ai_call` row
+  (`AiService::record_agent_call`): role `assistant`, caller
+  `assistant:<id>`, its tokens, latency and outcome; the request kept is
+  the conversation and the tools' names.
+- **No model.** `assistant_open` still succeeds; the snapshot's `problem`
+  is `{ kind: no_model }` and a prompt is refused `NO_MODEL`. Picking a
+  model clears it.
+- **System prompt** (`assistant/prompt.rs`): what it is, how its tools
+  work, the stream (id, branch, worktree) and thread, and the opening
+  context (a page's URI, or the selected text and where it came from).
+- **Continue in session.** `assistant_handoff { id, to_thread }` runs
+  `oxplow.handoff.send` from the session's thread with a condensed
+  transcript: the opening context's ref, the person's prompts, each
+  turn's final answer and one line per tool call.
+- **IPC** (UI-only, `oxplow-rpc` `commands/assistant.rs`):
+  `assistant_open { stream, thread?, context? } -> { id }`,
+  `assistant_prompt { id, text }`, `assistant_cancel { id }`,
+  `assistant_set { id, model?, allow_changes? }` (on the wire `model` is
+  a model or `"default"`; `api.ts`'s `assistantSet` maps its `null` to
+  `"default"` and leaves out what it isn't given),
+  `assistant_answer { id, ask, allow }`, `assistant_snapshot { id, since }
+  -> { status, items, seq, model, models, allowChanges, problem }`,
+  `assistant_handoff { id, to_thread }`, `assistant_close { id }`.
+  Errors carry codes `NOT_FOUND`, `BUSY`, `NO_MODEL`, `INVALID`.
+- **Tests** (`assistant/tests.rs`) run the shipped `openai_compatible`
+  kind against `oxplow_ai_fake::mock_sse_rounds_held`, a local stand-in
+  that scripts each request's stream and can hold one open.
 
 ## Recorded computations (current, P5.E1)
 

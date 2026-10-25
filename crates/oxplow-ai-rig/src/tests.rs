@@ -585,7 +585,8 @@ async fn discovery_reads_the_catalog_without_a_call() {
     }
 }
 
-/// Every kind but TypeSafe yields a Rig model handle from an instance.
+/// Every declared provider but TypeSafe yields a Rig model handle from an
+/// instance; one that isn't a Rig kind is refused, naming it.
 #[test]
 fn every_rig_kind_builds_a_model_handle() {
     let instance = ProviderInstance {
@@ -594,15 +595,19 @@ fn every_rig_kind_builds_a_model_handle() {
         key: Some("k"),
     };
     for kind in KINDS {
-        let built = completion_model(kind.name, None, &instance, "some-model");
+        let declared = provider(kind.name, "mine", "Mine", None).unwrap();
+        let built = completion_model(declared.as_ref(), &instance, "some-model");
         if kind.name == "typesafe" {
-            assert!(built.is_err());
+            let Err(err) = built else {
+                panic!("TypeSafe has no handle");
+            };
+            let err = err.to_string();
+            assert!(err.contains("mine"), "{err}");
         } else {
             let model = built.unwrap_or_else(|e| panic!("{}: {e}", kind.name));
             assert_eq!(model.id(), Some("some-model"), "{}", kind.name);
         }
     }
-    assert!(completion_model("nope", None, &instance, "m").is_err());
 }
 
 /// An unknown kind names the known ones; each hosted kind's Rig default

@@ -72,7 +72,7 @@ pub struct RenameInput {
 /// The stream an input names, if `invocation` may change its files: a
 /// person any; anyone else only their own — an agent's tools' rule (an
 /// effect has none).
-fn stream_of(invocation: &Invocation, named: &str) -> Result<StreamId, CommandError> {
+pub(super) fn stream_of(invocation: &Invocation, named: &str) -> Result<StreamId, CommandError> {
     let stream: StreamId = bare_id(named, oxplow_domain::uri::resources::STREAM, "/stream")?;
     if !invocation.actor().may_confirm() && invocation.actor().stream_id() != Some(stream) {
         return Err(CommandError::Denied {
@@ -85,7 +85,7 @@ fn stream_of(invocation: &Invocation, named: &str) -> Result<StreamId, CommandEr
     Ok(stream)
 }
 
-fn failed(e: WorkspaceError) -> CommandError {
+pub(super) fn failed(e: WorkspaceError) -> CommandError {
     match e {
         WorkspaceError::Io(_) => CommandError::Failed {
             message: e.to_string(),
@@ -98,7 +98,7 @@ fn failed(e: WorkspaceError) -> CommandError {
 }
 
 /// `event`, anchored on `stream` and about `subject`.
-fn logged(mut event: Envelope, stream: StreamId, subject: &str) -> Envelope {
+pub(super) fn logged(mut event: Envelope, stream: StreamId, subject: &str) -> Envelope {
     event.anchors.stream_id = Some(stream);
     event.with_subject([oxplow_domain::uri::build::file_uri(subject)])
 }

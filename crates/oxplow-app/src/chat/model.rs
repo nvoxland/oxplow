@@ -63,6 +63,10 @@ pub struct ToolCall {
     pub diffs: Vec<ToolDiff>,
     /// Text content blocks (command output, messages).
     pub text: Vec<String>,
+    /// The audit row of the command run it made, when it was one that is
+    /// audited (the Assistant's write tools): what Undo undoes.
+    #[specta(type = Option<oxplow_domain::JsNumber>)]
+    pub audit_id: Option<i64>,
 }
 
 /// The fields a `tool_call_update` changes; `None` leaves one as is.

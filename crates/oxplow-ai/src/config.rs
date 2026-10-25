@@ -22,13 +22,15 @@ pub enum BuiltinRole {
     Main,
     Summarize,
     Decide,
+    Assistant,
 }
 
 impl BuiltinRole {
-    pub const ALL: [BuiltinRole; 3] = [
+    pub const ALL: [BuiltinRole; 4] = [
         BuiltinRole::Main,
         BuiltinRole::Summarize,
         BuiltinRole::Decide,
+        BuiltinRole::Assistant,
     ];
 
     pub fn name(self) -> &'static str {
@@ -36,6 +38,24 @@ impl BuiltinRole {
             BuiltinRole::Main => "main",
             BuiltinRole::Summarize => "summarize",
             BuiltinRole::Decide => "decide",
+            BuiltinRole::Assistant => "assistant",
+        }
+    }
+
+    /// The built-in role it uses while it has no binding of its own.
+    pub fn fallback(self) -> Option<BuiltinRole> {
+        match self {
+            BuiltinRole::Assistant => Some(BuiltinRole::Main),
+            _ => None,
+        }
+    }
+
+    /// What its model must support.
+    pub fn features(self) -> &'static [crate::capabilities::ModelFeature] {
+        use crate::capabilities::ModelFeature;
+        match self {
+            BuiltinRole::Assistant => &[ModelFeature::ToolCalling, ModelFeature::Streaming],
+            _ => &[],
         }
     }
 
@@ -52,6 +72,10 @@ impl BuiltinRole {
             }
             BuiltinRole::Summarize => "Summaries of sessions, efforts and changes",
             BuiltinRole::Decide => "Typed yes/no, choice and score questions (e.g. Jev)",
+            BuiltinRole::Assistant => {
+                "The Assistant: questions and small tasks in its panel (needs tool calling and \
+                 streaming)"
+            }
         }
     }
 }
@@ -74,6 +98,7 @@ impl Role {
     pub const MAIN: Role = Role::Builtin(BuiltinRole::Main);
     pub const SUMMARIZE: Role = Role::Builtin(BuiltinRole::Summarize);
     pub const DECIDE: Role = Role::Builtin(BuiltinRole::Decide);
+    pub const ASSISTANT: Role = Role::Builtin(BuiltinRole::Assistant);
 
     /// A role as a person writes it in `ai.yaml` or `project.yaml`: a
     /// built-in name or `<extension>/<profile>`.
@@ -340,21 +365,19 @@ impl AiConfig {
     }
 
     /// The provider and binding `role` uses, if it's configured: its own
-    /// binding, else — for a profile — its fallback's. A profile none of
+    /// binding, else its fallback's (a profile's, the Assistant's Main). A profile none of
     /// `profiles` declares resolves to nothing, bound or not.
     pub fn resolve(
         &self,
         role: &Role,
         profiles: &[AiProfile],
     ) -> Option<(&ProviderConfig, &RoleBinding)> {
-        let binding = match role {
-            Role::Builtin(_) => self.roles.get(role)?,
-            Role::Profile { .. } => {
-                let profile = profiles.iter().find(|p| &p.role() == role)?;
-                self.roles
-                    .get(role)
-                    .or_else(|| self.roles.get(&Role::Builtin(profile.fallback)))?
-            }
+        let fallback = match role {
+            Role::Builtin(builtin) => builtin.fallback(),
+            Role::Profile { .. } => Some(profiles.iter().find(|p| &p.role() == role)?.fallback),
+        };
+        let Some(binding) = self.roles.get(role) else {
+            return self.resolve(&Role::Builtin(fallback?), profiles);
         };
         let provider = self.providers.iter().find(|p| p.id == binding.provider)?;
         Some((provider, binding))
@@ -446,6 +469,32 @@ roles:
         assert_eq!(p.kind, "openai_compatible");
         assert_eq!(b.model, "qwen3:14b");
         assert!(AiConfig::default().resolve(&Role::MAIN, &[]).is_none());
+    }
+
+    /// The Assistant uses its own binding when it has one, else Main's;
+    /// it needs a model that calls tools and streams.
+    #[test]
+    fn the_assistant_role_falls_back_to_main() {
+        let c = cfg();
+        let (_, b) = c.resolve(&Role::ASSISTANT, &[]).unwrap();
+        assert_eq!(b.model, "claude-opus-5-5", "Main's binding");
+        let mut own = cfg();
+        own.roles
+            .insert(Role::ASSISTANT, RoleBinding::new("local", "qwen3:14b"));
+        assert_eq!(
+            own.resolve(&Role::ASSISTANT, &[]).unwrap().1.model,
+            "qwen3:14b"
+        );
+        assert_eq!(BuiltinRole::Assistant.fallback(), Some(BuiltinRole::Main));
+        assert_eq!(BuiltinRole::Main.fallback(), None);
+        assert_eq!(
+            BuiltinRole::Assistant.features(),
+            &[
+                crate::capabilities::ModelFeature::ToolCalling,
+                crate::capabilities::ModelFeature::Streaming
+            ]
+        );
+        assert!(AiConfig::default().resolve(&Role::ASSISTANT, &[]).is_none());
     }
 
     #[test]
