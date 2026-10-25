@@ -1,7 +1,8 @@
 import type { CSSProperties, ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useExtensions } from "../extensionsStore.js";
-import { RENDERER_VIEW_KEY, rendererFor, rendererName, renderersFor } from "../pages/renderers.js";
+import { RENDERER_VIEW_KEY, rendererName } from "../pages/renderers.js";
+import { chooseRenderer, openWithOptions } from "../pages/pageFiles.js";
 import { PageNavBar } from "./PageNavBar.js";
 import { useOptionalPageNavigation } from "./PageNavigationContext.js";
 import type { BookmarkScope } from "./bookmarks.js";
@@ -195,12 +196,13 @@ export function Page({ title, titleIcon, kind, chips: ownChips, actions, pin, ch
   const patchView = ctxNav?.patchViewParams;
   const openWith = useMemo(() => {
     if (!shownId || !patchView) return undefined;
-    const pages = (extensions ?? []).filter((e) => e.enabled).flatMap((e) => e.pages);
-    const options = renderersFor(shownId, pages);
-    const current = rendererFor(shownId, pages, shownView ?? {});
+    if (!extensions) return undefined;
+    const options = openWithOptions(extensions, shownId);
+    const drawer = chooseRenderer(extensions, shownId, shownView ?? {});
+    const current = drawer.file ?? drawer.declared;
     if (options.length < 2 || !current) return undefined;
     return {
-      options: options.map((p) => ({ name: rendererName(p), title: p.title })),
+      options,
       current: rendererName(current),
       pick: (name: string) => patchView({ [RENDERER_VIEW_KEY]: name }),
     };

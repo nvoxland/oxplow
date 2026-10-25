@@ -94,7 +94,7 @@ test("the alerts are the badges that fire, from the same runs", () => {
     "x/r": { body: null, badge: quiet, collapsed: null, count: null },
     "x/p": { body: null, badge: null, collapsed: null, count: null },
   });
-  expect(alerts).toEqual([{ id: "x/q-badge", title: "Q", message: "2 rows" }]);
+  expect(alerts).toEqual([{ id: "x/q-badge", title: "Q", message: "2 rows", open: "oxplow:oxplow/lens?lens=x/q-badge" }]);
 });
 
 // A panel's header opens the page it names (Comments opens the
@@ -161,4 +161,61 @@ test("the toggle shows each choice param at the pick, else its default", () => {
   // A pick the lens no longer offers falls back to the default.
   expect(panelChoices(body, { mode: "gone" })[0]!.value).toBe("recent");
   expect(panelChoices(null, {})).toEqual([]);
+});
+
+// A panel whose parts name pages (`pages: true`): one open page run per
+// part, bound to its scope; the badge page's alert or badge is the count
+// and the Alerts row, and a count page wins.
+test("a page-backed panel opens a run per part, bound to its scope, the body with the picks", async () => {
+  const { fakePage, fakeRun, node, decl, loader } = await import("../../pages/testing/fakeRun.js");
+  const { createPageRuns } = await import("../../pageRuns.js");
+  const opened: { page?: string; params: Record<string, SqlCell> }[] = [];
+  const runOf = (page: string) => {
+    const base = fakeRun(fakePage(node.viz("rows", "rows"), { id: page, extension: "y", slug: page.slice(2), title: page, loaders: [decl("rows")] }), { loaders: { rows: loader(["a"], [["x"], ["y"]]) } });
+    if (page === "y/badge") return { ...base, alert: { firing: true, count: 4, value: null, message: "4 waiting" } };
+    if (page === "y/count") return { ...base, badge: 9 };
+    return base;
+  };
+  const store = createPageRuns({
+    open: async (key) => {
+      opened.push({ page: key.page, params: key.params });
+      return { runId: `run-${key.page}`, run: runOf(key.page!) as never };
+    },
+    close: async () => {},
+    fetch: async () => ({}),
+    setParams: async () => Promise.reject(new Error("no")),
+    rerun: async () => Promise.reject(new Error("no")),
+    onChange: () => () => {},
+    onReconnect: () => () => {},
+  });
+  const panels = [
+    panel("thread", { id: "y/p", pages: true, body: "y/body", badge: "y/badge", collapsed: "y/line" }),
+    panel("project", { id: "y/q", pages: true, body: "y/body2", badge: "y/badge", count: "y/count" }),
+  ];
+  const view = renderHook(() => useExtensionPanelRuns(panels, "str2", "thr7", { "y/p": { mode: "top" } }, store));
+  await waitFor(() => expect(view.result.current["y/p"]?.page?.collapsed?.run.page.id).toBe("y/line"));
+  // No lens runs for a page-backed panel.
+  expect(runs.some((r) => r.id.startsWith("y/"))).toBe(false);
+  const of = (page: string) => opened.find((o) => o.page === page)?.params;
+  expect(of("y/body")).toEqual({ thread_id: 7, mode: "top" });
+  expect(of("y/line")).toEqual({ thread_id: 7 });
+  expect(of("y/body2")).toEqual({});
+  await waitFor(() => expect(view.result.current["y/p"]?.count).toBe(4));
+  await waitFor(() => expect(view.result.current["y/q"]?.count).toBe(9));
+  expect(view.result.current["y/p"]?.page?.body?.runId).toBe("run-y/body");
+
+  const exts = [{ name: "y", namespace: "y", enabled: true }] as never;
+  const alerts = panelAlerts(panels, view.result.current, exts);
+  expect(alerts[0]).toEqual({ id: "y/badge", title: "y/badge", message: "4 waiting", open: "oxplow:oxplow/page?page=y/badge" });
+  view.unmount();
+  cleanup();
+});
+
+test("a count page's number: its badge, else its first loader's rows", async () => {
+  const { pageCount } = await import("./usePanelRuns.js");
+  const { fakePage, fakeRun, node, decl, loader } = await import("../../pages/testing/fakeRun.js");
+  const run = fakeRun(fakePage(node.viz("rows", "rows"), { loaders: [decl("rows")] }), { loaders: { rows: loader(["a"], [["x"], ["y"], ["z"]]) } });
+  expect(pageCount(run)).toBe(3);
+  expect(pageCount({ ...run, badge: "5" })).toBe(5);
+  expect(pageCount(null)).toBeNull();
 });

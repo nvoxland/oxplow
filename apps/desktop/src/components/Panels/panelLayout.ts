@@ -3,7 +3,8 @@
 /// extension's `panels:` — core has none of its own — ordered, hidden and
 /// collapsed as `panel_layout` says. Pure: the rail reads and writes the
 /// layout through `get_panel_layout` / `set_panel_layout`.
-import type { ExtensionPanel, PanelPlacement } from "../../tauri-bridge/generated/bindings.js";
+import type { Extension, ExtensionPanel, PanelPlacement } from "../../tauri-bridge/generated/bindings.js";
+import { pageFileOf, pageFileUri } from "../../pages/pageFiles.js";
 import { lensRef, refFromTabId } from "../../tabs/pageRefs.js";
 import type { TabRef } from "../../tabs/tabState.js";
 
@@ -17,9 +18,20 @@ export function extensionPanelId(panel: ExtensionPanel): string {
 }
 
 /** What an extension panel's header opens: the page it names (`open`,
- *  as Comments opens the inbox), else its body lens. */
-export function panelOpenRef(panel: ExtensionPanel): TabRef {
-  return (panel.open ? refFromTabId(panel.open) : null) ?? lensRef(panel.body);
+ *  as Comments opens the inbox), else its body page (`pages: true`) or
+ *  body lens. */
+export function panelOpenRef(panel: ExtensionPanel, extensions: Extension[] | null = null): TabRef {
+  const named = panel.open ? refFromTabId(panel.open) : null;
+  if (named) return named;
+  if (panel.pages) {
+    const slash = panel.body.indexOf("/");
+    const ext = (extensions ?? []).find((e) => e.name === panel.body.slice(0, slash));
+    const route = ext?.namespace === "oxplow" ? { extension: null, page: panel.body.slice(slash + 1), params: {} } : { extension: panel.body.slice(0, slash), page: panel.body.slice(slash + 1), params: {} };
+    const body = pageFileOf(extensions, route);
+    const ref = body ? refFromTabId(pageFileUri(extensions ?? [], body)) : null;
+    if (ref) return ref;
+  }
+  return lensRef(panel.body);
 }
 
 export interface ResolvedLayout {

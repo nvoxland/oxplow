@@ -5,10 +5,10 @@ import { run } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
 import { openFromLauncher } from "../../support/ui.js";
 
-// A folder's page is the foundation's `directory` lens, the renderer of
+// A folder's page is the foundation's `directory` page, the renderer of
 // `oxplow/dir`: folders first, each row opens its folder or file, and the
 // tab is labelled with the path.
-test("a folder's URI opens its lens: rows open folders and files, the tab is its path", async ({ page, daemon }) => {
+test("a folder's URI opens its page: rows open folders and files, the tab is its path", async ({ page, daemon }) => {
   mkdirSync(join(daemon.project, "pond", "reeds"), { recursive: true });
   writeFileSync(join(daemon.project, "pond", "frog.txt"), "ribbit\n");
   await page.goto("/");
@@ -21,7 +21,7 @@ test("a folder's URI opens its lens: rows open folders and files, the tab is its
   await expect(tab).toBeVisible();
   await expect(tab).toContainText("pond");
 
-  const body = page.locator('[data-testid="page-lens"]:visible');
+  const body = page.locator('[data-testid="page-host"]:visible');
   await expect(body.getByTestId("lens-row-0")).toContainText("reeds");
   await expect(body.getByTestId("lens-row-1")).toContainText("frog.txt");
 

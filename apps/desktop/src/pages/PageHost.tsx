@@ -4,15 +4,28 @@
 /// its whole-page actions and Refresh in the nav bar, its filters and
 /// `rail:` tree in the rail, its view as a `PageTree`. New params keep the
 /// run on screen until the new one answers (no Loading flash).
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 
 import { CommandConfirm } from "../components/CommandConfirm.js";
+import { CommentNavigator } from "../components/Comments/CommentNavigator.js";
+import { contextNodeProps } from "../components/Comments/contextNodes.js";
+import { requestCommentReveal } from "../comment-reveal-bus.js";
+import { PageCommentsContext, type PageComments } from "../lens/pageComments.js";
+import { BacklinksList } from "../tabs/BacklinksList.js";
+import { getPageDetailStore } from "../tabs/openPageDetail.js";
+import { useBacklinks, usePageOutbound } from "../tabs/useBacklinks.js";
+import { useHistoryState } from "../tabs/useHistoryState.js";
+import { Contents } from "../lens/Contents.js";
+import { LensStreamContext } from "../lens/LensStream.js";
+import type { Stream } from "../api.js";
+import { identityOf } from "../uri/uri.js";
+import { useOutOfDate, type PickedRow } from "./railGroups.js";
 import type { PageAction } from "../kit/actions.js";
 import { Loading } from "../kit/Loading.js";
 import { useLensActions } from "../lens/LensResultView.js";
-import { windowPageRuns, usePageRunWith, type PageKey, type PageRuns } from "../pageRuns.js";
+import { usePageRunsStore, usePageRunWith, type PageKey, type PageRuns } from "../pageRuns.js";
 import { Page } from "../tabs/Page.js";
-import { usePageTitle, useTabActions } from "../tabs/PageNavigationContext.js";
+import { useOptionalPageNavigation, usePageTitle, useTabActions } from "../tabs/PageNavigationContext.js";
 import type { TabRef } from "../tabs/tabState.js";
 import type { Node, PageRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
 import { PageRail } from "./PageRail.js";
@@ -27,14 +40,35 @@ export interface PageHostProps {
   /** The node a link lands on (`#node=<id>`). */
   focus?: string | null;
   onOpenPage?(ref: TabRef, opts?: { newTab?: boolean }): void;
+  /** In a tab, a change of params (a filter, a pick, a switch) goes here:
+   *  the tab's entry is what the page shows, and the run follows it
+   *  (`PageFileView`). Outside a tab the open run takes the new params. */
+  onChange?(patch: Record<string, SqlCell>): void;
+  /** The resource URI it renders (a renderer's): what links to it and
+   *  what it links to are listed. */
+  renders?: string | null;
+  /** The stream it runs for, whole: what a viz that needs more than its
+   *  id reads (the editor: the worktree its files are under). */
+  stream?: Stream | null;
 }
 
 /** How long a page may take before it says it is reading. */
 export const LOADING_AFTER_MS = 150;
 
-export function PageHost({ pageKey, runs, focus = null, onOpenPage }: PageHostProps) {
-  const { runId, run, error, stale, setParams, rerun } = usePageRunWith(runs ?? windowPageRuns(), pageKey);
+export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, renders = null, stream = null }: PageHostProps) {
+  const store = usePageRunsStore();
+  const state = usePageRunWith(runs ?? store, pageKey);
+  const { error, setParams, rerun } = state;
+  // A tab re-keys its run when its view changes: the last run of the same
+  // page stays on screen, marked, until the new one answers.
+  const held = useRef<{ runId: string | null; run: PageRun } | null>(null);
+  if (state.run) held.current = { runId: state.runId, run: state.run };
+  const keep = !state.run && !error && held.current !== null && held.current.run.page.id === (pageKey.page ?? held.current.run.page.id);
+  const run = state.run ?? (keep ? held.current!.run : null);
+  const runId = state.run ? state.runId : keep ? held.current!.runId : null;
+  const stale = state.stale || (keep && run !== null);
   const streamId = pageKey.streamId;
+  const nav = useOptionalPageNavigation();
   const page = run?.page ?? null;
   const title = page ? tabLabel(page, run!.params, labelRow(run!)) : "";
   usePageTitle(title || null);
@@ -66,11 +100,49 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage }: PageHostPr
   ];
   useTabActions(pageActions);
 
-  const apply = (name: string, value: SqlCell) => void setParams({ [name]: value });
+  // What an agent asking "what am I looking at" (`get_open_page`) reads:
+  // the open run and the node landed on, under the id the tab shows.
+  const pageId = nav?.ref?.id ?? null;
+  useEffect(() => {
+    if (!pageId) return;
+    const store = getPageDetailStore();
+    store.publish(pageId, { runId, focus: { node: focus } });
+    return () => store.publish(pageId, null);
+  }, [pageId, runId, focus]);
+
+  // The rows picked for its selection params, kept in the entry's history
+  // state so Back and a restart still show the row's facts.
+  const [picked, setPicked] = useHistoryState<Record<string, PickedRow>>("picked", NO_PICKED);
+  const apply = (name: string, value: SqlCell, row?: PickedRow) => {
+    if (onChange) onChange({ [name]: value });
+    else void setParams({ [name]: value });
+    if (page?.params.some((p) => p.name === name && p.role === "selection")) {
+      const { [name]: _, ...rest } = picked;
+      setPicked(row ? { ...rest, [name]: row } : rest);
+    }
+  };
+
+  // Comments are the page's when it declares them, on its URI (its tab's
+  // identity): the nav bar steps through them, its vizes anchor them, and
+  // `#comment=<id>` reveals one.
+  const commentTarget = page?.comments && nav?.ref ? (identityOf(nav.ref.id) ?? nav.ref.id) : null;
+  const pageComments: PageComments | null = useMemo(
+    () => (commentTarget && streamId ? { target: commentTarget, streamId, threadId: pageKey.threadId } : null),
+    [commentTarget, streamId, pageKey.threadId],
+  );
+  const reveal = page?.comments ? nav?.viewParams?.comment : null;
+  useEffect(() => {
+    if (typeof reveal === "string" && reveal !== "") requestCommentReveal(reveal);
+  }, [reveal]);
+  // A page showing a resource lists what links to it and what it links to.
+  const linksIn = useBacklinks({ id: renders ?? "" });
+  const linksOut = usePageOutbound({ id: renders ?? "" });
+  // The body, for the rail's Contents.
+  const [body, setBody] = useState<HTMLDivElement | null>(null);
+  const outOfDate = useOutOfDate(page?.origin.extension ?? null, page?.origin.deployment ?? null);
   const reading = useDelayed(!run && !error, LOADING_AFTER_MS);
   const fills = run ? anyFills(run) : false;
-  const full = fills || run?.page.view.kind === "grid";
-  const hasRail = !!run && (run.rail !== null || run.page.params.some((p) => p.role !== "resource" && p.role !== "selection"));
+  const full = fills || (run ? wide(run) : false);
 
   return (
     <Page
@@ -80,10 +152,29 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage }: PageHostPr
       width={full ? "full" : "reading"}
       fill={fills}
       actions={pageActions}
-      rightRail={hasRail ? <PageRail run={run!} runId={runId} onApply={apply} streamId={streamId} onOpenPage={onOpenPage} /> : undefined}
+      rightRail={
+        run ? (
+          <>
+            <Contents root={body} />
+            <PageRail run={run} runId={runId} onApply={apply} picked={picked} outOfDate={outOfDate} streamId={streamId} onOpenPage={onOpenPage} />
+          </>
+        ) : undefined
+      }
+      backlinks={linksIn.length > 0 ? { count: linksIn.length, body: <BacklinksList entries={linksIn} /> } : undefined}
+      outbound={linksOut.length > 0 ? { count: linksOut.length, body: <BacklinksList entries={linksOut} /> } : undefined}
+      commentsNav={pageComments ? <CommentNavigator target={pageComments.target} /> : undefined}
     >
       <NodeRegistryContext.Provider value={registry}>
-        <div data-testid="page-file" data-stale={stale ? "true" : undefined} aria-busy={stale || undefined} style={fills ? fillStyle : undefined}>
+      <LensStreamContext.Provider value={stream}>
+      <PageCommentsContext.Provider value={pageComments}>
+        <div
+          ref={setBody}
+          data-testid="page-file"
+          data-stale={stale ? "true" : undefined}
+          aria-busy={stale || undefined}
+          style={fills ? fillStyle : undefined}
+          {...(pageComments ? contextNodeProps(pageComments.target) : {})}
+        >
           {page && !fills ? <h1 className="ox-title">{title}</h1> : null}
           {page?.description && !fills ? <p className="ox-intro">{page.description}</p> : null}
           {actions.pending ? (
@@ -111,17 +202,20 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage }: PageHostPr
             </div>
           ) : null}
           {run ? (
-            <PageTree run={run} runId={runId} streamId={streamId} onOpenPage={onOpenPage} onSetParam={(name, value) => apply(name, value)} />
+            <PageTree run={run} runId={runId} streamId={streamId} onOpenPage={onOpenPage} onSetParam={apply} />
           ) : reading ? (
             <Loading what="the page" />
           ) : null}
         </div>
+      </PageCommentsContext.Provider>
+      </LensStreamContext.Provider>
       </NodeRegistryContext.Provider>
     </Page>
   );
 }
 
 const NO_PARAMS: Record<string, SqlCell> = {};
+const NO_PICKED: Record<string, PickedRow> = {};
 const fillStyle: CSSProperties = { display: "flex", flexDirection: "column", flex: 1, minHeight: 0 };
 
 /** Whether one of the run's viz nodes fills (a file, a diff: its lens
@@ -129,6 +223,17 @@ const fillStyle: CSSProperties = { display: "flex", flexDirection: "column", fle
 function anyFills(run: PageRun): boolean {
   const walk = (n: Node): boolean =>
     n.kind === "viz" ? n.lens.fills : n.kind === "stack" || n.kind === "grid" || n.kind === "switch" ? n.children.some(walk) : false;
+  return walk(run.page.view);
+}
+
+/** Whether the page wants the full width: a grid, or a board or a
+ *  dashboard anywhere in it (a lens page's rule); everything else reads as
+ *  a document. */
+function wide(run: PageRun): boolean {
+  const walk = (n: Node): boolean =>
+    n.kind === "grid" ||
+    (n.kind === "viz" && (n.lens.viz === "board" || n.lens.viz === "dashboard")) ||
+    ((n.kind === "stack" || n.kind === "switch") && n.children.some(walk));
   return walk(run.page.view);
 }
 

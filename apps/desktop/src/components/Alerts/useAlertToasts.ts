@@ -1,7 +1,7 @@
 /// A toast as each new thing needs the person: a proposal or a
 /// failed operation as it arrives, delivery or a reaction as it starts
 /// failing, a badge as it starts firing. Once per item; its only action
-/// is Review (the Alerts page, or a badge's lens) — never Approve: a
+/// is Review (the Alerts page, or a badge's lens or page) — never Approve: a
 /// decision is made where its preview is. What's already there in the first moments after the
 /// app opens is taken as seen, not announced.
 
@@ -13,8 +13,8 @@ import { alertKeys, newAlerts, type AlertItems } from "./alertsModel.js";
 /** How long after mount what loads counts as already there. */
 export const SETTLE_MS = 3000;
 
-/** `lens`: the panel lens a badge opens, when the alert is one. */
-export function useAlertToasts(items: AlertItems, onReview: (lens?: string) => void, now: () => number = Date.now) {
+/** `open`: the URI a badge opens (its lens or page), when the alert is one. */
+export function useAlertToasts(items: AlertItems, onReview: (open?: string) => void, now: () => number = Date.now) {
   const mounted = useRef(now());
   const seen = useRef<Set<string>>(new Set());
   const review = useRef(onReview);
@@ -26,7 +26,7 @@ export function useAlertToasts(items: AlertItems, onReview: (lens?: string) => v
     }
     for (const a of newAlerts(seen.current, items)) {
       seen.current.add(a.key);
-      showToast({ message: a.message, actionLabel: "Review", onUndo: () => review.current(a.lens) });
+      showToast({ message: a.message, actionLabel: "Review", onUndo: () => review.current(a.open) });
     }
     // A key that's gone (a proposal decided, delivery recovered) may be
     // announced again if it comes back.

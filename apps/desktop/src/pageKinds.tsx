@@ -37,8 +37,9 @@ import { ICONS } from "./icons.js";
 import { resourceIcon, resourceInfo } from "./resources.js";
 import { useExtensions } from "./extensionsStore.js";
 import { recordedPageKind, refFromTabId } from "./tabs/pageRefs.js";
-import type { Extension, ExtensionPage } from "./tauri-bridge/generated/bindings.js";
+import type { Extension } from "./tauri-bridge/generated/bindings.js";
 import { extPageUri, pageUri as corePageRef } from "./uri/uri.js";
+import { pageFileOf } from "./pages/pageFiles.js";
 
 /**
  * Map a page-kind string to its icon component. Returns `null`
@@ -106,11 +107,15 @@ export function pageKindIconComponent(kind: string, extensions: Extension[] | nu
   }
 }
 
-/** The declared page a page kind names (`tasks`, `gh/open-prs`). */
-function declaredPageOf(extensions: Extension[] | null, kind: string): ExtensionPage | null {
+/** The page a page kind names (`tasks`, `gh/open-prs`): its page file,
+ *  else its `pages:` entry. */
+function declaredPageOf(extensions: Extension[] | null, kind: string): { icon: string | null; title: string } | null {
   if (!extensions) return null;
   // A page kind is the page's id, `<extension>/` first for any but oxplow's.
   const slash = kind.indexOf("/");
+  const route = slash === -1 ? { extension: null, page: kind, params: {} } : { extension: kind.slice(0, slash), page: kind.slice(slash + 1), params: {} };
+  const file = pageFileOf(extensions, route);
+  if (file) return file;
   const pageRef = slash === -1 ? corePageRef(kind) : extPageUri(kind.slice(0, slash), kind.slice(slash + 1));
   for (const e of extensions) {
     const found = e.enabled ? e.pages.find((p) => p.pageRef === pageRef) : undefined;

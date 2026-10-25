@@ -91,7 +91,8 @@ pages are THE shell.
 A URI names a thing; a **page** is one **renderer** of it. A tab's id is
 the URI it shows, and nothing in the desktop keeps a list of page kinds.
 Which page draws a URI comes from declarations
-(`pages/renderers.ts`):
+(`pages/renderers.ts`, over the page files first — `chooseRenderer` in
+`pages/pageFiles.ts`, "The desktop host"):
 
 1. The pages whose `for` names the URI's resource (an oxplow resource
    `<extension>/<name>`, or the scheme `https` / `http` for a web page)
@@ -338,17 +339,58 @@ that one), `submit_page_form` submits it as the page for the person, and
 start. A whole-page action may read `{{row.x}}` / `when:`: the first
 loader's one row.
 
-**The desktop host** (`apps/desktop/src/pages/PageHost.tsx`, built and
-tested, not wired into `App.tsx` yet: lens pages still draw every tab).
-`PageHost` takes a `PageKey`, holds its run (`usePageRunWith`; `RunState`
-carries the `runId`, `rerun` is Refresh) and draws `tabs/Page.tsx`
-chrome: the title is `tabLabel` over the run's params and `labelRow(run)`
+**The desktop host** (`apps/desktop/src/pages/PageHost.tsx`). `App.tsx`
+draws a tab from its page file first (`pages/pageFiles.ts`):
+`chooseRoute` finds a route's page by id (`pageFileOf`: oxplow's — the
+`oxplow` namespace, `CORE_NAMESPACE` — by its slug, any other's by
+`<extension>/<slug>`), `chooseRenderer` a resource URI's among the page
+files' `for` / `accepts` / `#oxplow.renderer=` / `default`
+(`rendererFor` works over a page file or a `pages:` entry alike). A
+`pages:` entry draws a tab only when no page file does, or when the file
+needs what the host can't draw yet (`drawsAsFile` is false: a form, a
+`component` node, a `custom` viz, a lazy tree, an `expand` column, an
+`options_from` param or an action that opens a form), or when an enabled
+extension still mounts a *lens* into its slots (`hasLensMounts`: a
+`ui.slots` entry at `<page>.<name>` or at its `pages:` lens's
+`<lens>.<name>` — a page file's slot shows only mounted pages) — that
+lens path is removed with the lenses. oxplow-foundation and
+oxplow-bundled both have `namespace: oxplow`, so a core-named slug can
+name a page file of each (bundled's panel bodies `comments`, `go-to`,
+`uncommitted`, `work`); `pageFileOf` takes the one whose extension also
+declares that id under `pages:`, else the first. Open With lists every renderer by name, page
+files first (`openWithOptions`). The tab body is `PageFileView`: its run's
+params are the entry's URI (`pageRunParams`: the `?` params — a
+renderer's `uri` and its resource's own — and the `#` params the page
+declares as a filter or a selection; a param with no role is a resource),
+so a view change is a new key and Back/Forward show each entry's run; the
+host keeps the last run of the same page on screen, `data-stale`, until
+the new key answers. A change the page makes goes back through the tab
+(`pageViewChange`, the lens rule: a filter replaces the entry, a pick or
+a switch's section pushes, another resource navigates —
+`withRenderedParams` for a renderer, `withResourceParams` for a route);
+`#node=<id>` is the host's `focus`. Outside a tab (`onChange` absent) the
+run takes new params itself (`setParams`). `PageHost` takes a `PageKey`,
+holds its run (`usePageRunWith` over `usePageRunsStore()`: the
+`PageRunsContext`'s store, else the window's; `RunState` carries the
+`runId`, `rerun` is Refresh) and draws `tabs/Page.tsx` chrome as a lens
+page's: Contents, Selection (the rows picked, `picked` history state) and
+About this page (`page.origin`, out of date) in the rail
+(`pages/railGroups.tsx`, shared with `LensRail`); `comments: true` → the
+`CommentNavigator`, `PageCommentsContext` and `#comment=` on the tab's
+identity; a renderer's backlinks and outbound links; the stream as
+`LensStreamContext`; full width for a grid, a board or a dashboard; and
+the open page's detail `{ runId, focus: { node } }` for
+`get_open_page`. A page node's link column's live origin
+(`<page>#<node>`) runs the page and reads that node (`liveOriginRun`).
+The chrome: the title is `tabLabel` over the run's params and `labelRow(run)`
 (the first declared loader's first row), whole-page actions and Refresh
 (`page.refresh`) are page actions, pressed through `useLensActions` with
 a runner that calls `run_page_action` with no node, so a command that
 asks is confirmed as a lens action's is. `PageRail` lists the filter
 params (`ParamList`; a change is `setParams`) and draws `run.rail`.
-`PageTree` draws a `RunNode` tree: stack → `Section`s, grid → `TileGrid`
+`PageTree` draws a `RunNode` tree (`compact` in a rail panel): a node
+with `replaceable: <target>` is wrapped in `Replaceable` as a lens part
+is; stack → `Section`s, grid → `TileGrid`
 at each child's `size`, switch → its one child, viz → `LensResultView`
 over `nodeRunOf` (`lens/nodeRun.ts`, the server's `node_run`), embed → a
 nested tree with ids `<embed>/<id>`, slot → its children, markdown → the
@@ -413,9 +455,12 @@ built-in straight away. Icons and labels come from the declaration too:
 URI's resource as its kind,
 which is also what visits and bookmarks record (`recordedPageKind`),
 and `PageKindIcon` / `lensIcon` / `pageKindLabel` resolve it to the
-page's icon and title. The launcher lists the declared pages with a
-category (`launcherPages`), each `count:` lens run when it opens
-(`useLauncherCounts`); a view document's page also lists each of its other sections.
+page's icon and title. The launcher lists the page files with a
+category that aren't `hidden` (`launcherPages`, by `pageFileUri`), then
+any `pages:` entry with no file; a page file's count is one
+`run_page` when the launcher opens (`launcherCounts`: its `run.badge`), a
+`pages:` entry's its `count:` lens; a page whose view is a switch (a view
+document's, a lens's `view:`) also lists each of its other sections.
 
 oxplow's pages and their params:
 
@@ -463,7 +508,14 @@ lens compact; the header's count — the `count` lens's row count (or
 `number`), else the badge lens's alert count while it fires
 (`panelCount`); collapsed, the `collapsed` lens compact as its summary,
 else nothing; the header's ↗
-opening the panel's `open` page or else its body lens, `panelOpenRef`).
+opening the panel's `open` page or else its body page or lens, `panelOpenRef`).
+A panel with `pages: true` names pages for its parts: `usePagePanelRuns`
+holds one open page run per part (params its scope's, the body's with the
+viewer's picks), the body and collapsed pages drawn compact by
+`PageTree`, the header count the count page's `badge` (else its first
+loader's rows) or the badge page's alert count while it fires (else its
+`badge`), and the badge page's alert an Alerts row whose Review opens that
+page (`PanelAlert.open`, a URI, as a lens badge's opens its lens).
 A compact lens keeps its `group` headings and group actions (the
 toolbar is hidden), and its linked rows drag into the agent's context.
 The rail's panels are moving out of core into `oxplow-bundled`: only their UI moves, as lenses over the existing views and
@@ -983,7 +1035,7 @@ a page's own title, else its kind's label), each tab's `back` and
 selected in each, the thread it shows,
 whether it is focused and visible, and the detail the shown page
 publishes through `tabs/openPageDetail.ts` (a lens's `{lensId, params}`,
-an editor's `{path, caret, selection}`). A window is its renderer's
+a page file's `{runId, focus: {node}}`, an editor's `{path, caret, selection}`). A window is its renderer's
 `getUiClientId()`. The backend keeps the reports in memory
 (`oxplow_app::client_reports`): a window not heard from for 5 minutes is
 forgotten, a report older than a minute is listed as stale.

@@ -40,7 +40,9 @@ import { showToast } from "./components/toastStore.js";
 import { awaitGitOp, opErrorOf } from "./git-op.js";
 import { UndoToastStack } from "./components/UndoToast.js";
 import { identityOf, keyOf, paramOf, parseUri, typeOf } from "./uri/uri.js";
-import { labelReadsRow, rendererFor, shellView, tabLabel } from "./pages/renderers.js";
+import { labelReadsRow, shellView, tabLabel } from "./pages/renderers.js";
+import { chooseRenderer, chooseRoute } from "./pages/pageFiles.js";
+import { PageFileView } from "./pages/PageFileView.js";
 import { PersonCommandConfirm } from "./components/PersonCommandConfirm.js";
 import { RemoteConnectionBanner } from "./components/RemoteConnectionBanner.js";
 import { subscribeUiError } from "./ui-error.js";
@@ -69,7 +71,7 @@ import { insertIntoAgent } from "./agent-input-bus.js";
 import { getPageDetailStore } from "./tabs/openPageDetail.js";
 import { DeclaredPageView } from "./pages/DeclaredPageView.js";
 import { kindForTabId } from "./pageKinds.js";
-import { declaredPage, isAppRenderer, isBuiltInPage, type AppRendererName } from "./pages/declaredPages.js";
+import { isAppRenderer, isBuiltInPage, type AppRendererName } from "./pages/declaredPages.js";
 import { useExtensions } from "./extensionsStore.js";
 import { foundationDown, FOUNDATION, RECOVERY_COMMAND } from "./foundationDown.js";
 import { PanelRunsProvider } from "./components/Panels/PanelRunsContext.js";
@@ -114,7 +116,7 @@ import {
 } from "./tabs/session.js";
 import { openProject, createProject, listRecentProjects, shellAvailable } from "./api.js";
 import { onRemoteReconnect, triggerRemoteResync } from "./api.js";
-import type { CommandOutcome, ExtensionPage, RecentProjectView } from "./tauri-bridge/generated/bindings.js";
+import type { CommandOutcome, ExtensionPage, Page as PageFile, RecentProjectView } from "./tauri-bridge/generated/bindings.js";
 import { pickFolder } from "./tauri-bridge/nativeDialog.js";
 import { WORKING } from "./revision.js";
 import { isDirty } from "./editor/buffers.js";
@@ -1629,7 +1631,11 @@ export function App() {
     // draw it) a built-in page.
     const routeTab = (ref: TabRef, nav: SlotNav): CenterTab | null => {
         const page = pagePayload(ref)!;
-        const declared = declaredPage(extensions, page);
+        // Its page file first (`pages/pageFiles.ts`); its `pages:` entry
+        // only while the host can't draw that file yet.
+        const drawer = extensions === null ? null : chooseRoute(extensions, page);
+        if (drawer?.file) return pageFileTab(drawer.file, ref, nav, page.params, null);
+        const declared = extensions === null ? undefined : (drawer?.declared ?? null);
         const builtIn =
           declared?.body.kind === "builtIn"
             ? declared.body.name
@@ -1658,11 +1664,33 @@ export function App() {
       if (typeOf(ref.id) === "oxplow/symbol") return null;
       // Until the extensions load, nothing says what renders it.
       if (extensions === null) return { id: ref.id, label: "", closable: true, render: () => null };
-      const page = rendererFor(ref.id, declaredPages, viewParamsOf(ref)) ?? fallbackRenderer;
+      const drawer = chooseRenderer(extensions, ref.id, viewParamsOf(ref));
+      // A renderer's page file runs with the URI it shows and the
+      // resource's own params.
+      if (drawer.file) return pageFileTab(drawer.file, ref, nav, { ...renderedParams(ref.id), uri: identityOf(ref.id) ?? ref.id }, ref.id);
+      const page = drawer.declared ?? fallbackRenderer;
       if (!page) return null;
       const tab = renderBody(page, ref, nav);
       return tab ? { ...tab, label: tab.label || tabLabel(page, renderedParams(ref.id)), ...(page.pinned ? { pinned: true } : {}) } : null;
     };
+    // A page file, drawn by the page host: its run's params are the
+    // entry's URI (`PageFileView`).
+    const pageFileTab = (file: PageFile, ref: TabRef, nav: SlotNav, resource: Record<string, SqlCell>, renders: string | null): CenterTab => ({
+      id: ref.id,
+      label: tabLabel(file, resource),
+      closable: true,
+      ...(file.pinned ? { pinned: true } : {}),
+      render: () => (
+        <PageFileView
+          page={file}
+          resource={resource}
+          renders={renders}
+          stream={stream}
+          threadId={selectedThread?.id ?? null}
+          onOpenPage={nav.navOpen}
+        />
+      ),
+    });
     const renderBody = (page: ExtensionPage, ref: TabRef, nav: SlotNav): CenterTab | null => {
       switch (page.body.kind) {
         case "builtIn": {
@@ -1907,7 +1935,7 @@ export function App() {
         />
       ) : null;
     })}
-    <AlertToasts onReview={(lens) => handleOpenPage(lens ? lensRef(lens) : alertsRef())} />
+    <AlertToasts onReview={(open) => handleOpenPage((open ? refFromTabId(open) : null) ?? alertsRef())} />
     <div style={{ display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden" }}>
       {/* macOS uses an Overlay titlebar (transparent, hidden title), so the
           webview reaches the top edge: the title bar is the window's top,
@@ -2069,7 +2097,7 @@ export function App() {
 }
 
 /** A toast as each new thing needs the person; Review opens Alerts (a badge's, its lens). */
-function AlertToasts({ onReview }: { onReview(lens?: string): void }) {
+function AlertToasts({ onReview }: { onReview(open?: string): void }) {
   const { items } = useAlerts();
   useAlertToasts(items, onReview);
   return null;

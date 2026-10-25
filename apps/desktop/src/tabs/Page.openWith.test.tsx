@@ -25,12 +25,28 @@ const renderer = (extension: string, id: string, more: object = {}) => ({
   ...more,
 });
 let pages = [renderer("oxplow-foundation", "editor", { default: true }), renderer("acme", "blame")];
+// Page files (`pages/*.yaml`): their id is `<extension>/<slug>`.
+let files: object[] = [];
+const file = (extension: string, slug: string, more: object = {}) => ({
+  id: `${extension}/${slug}`,
+  extension,
+  slug,
+  title: slug,
+  for: ["oxplow/file"],
+  accepts: {},
+  default: false,
+  actions: [],
+  params: [],
+  view: { id: "v", kind: "markdown", text: "" },
+  rail: null,
+  ...more,
+});
 
 const realApi = await import("../api.js");
 const pristineApi = { ...realApi };
 mock.module("../api.js", () => ({
   ...realApi,
-  listExtensions: async () => [{ name: "ext", enabled: true, pages, ui: { slots: [], commands: [], decorators: [] } }],
+  listExtensions: async () => [{ name: "ext", enabled: true, pages, pageFiles: files, ui: { slots: [], commands: [], decorators: [] } }],
 }));
 const { Page } = await import("./Page.js");
 
@@ -89,6 +105,21 @@ test("a URI with one renderer, or none, offers nothing", async () => {
   await menuItems(solo);
   expect(solo.queryByTestId("menu-item-page-open-with")).toBeNull();
   pages = [renderer("oxplow-foundation", "editor", { default: true }), renderer("acme", "blame")];
+});
+
+test("page files' renderers are offered, the one drawing it checked", async () => {
+  pages = [];
+  files = [file("oxplow-foundation", "editor", { default: true }), file("acme", "blame", { title: "Blame" })];
+  try {
+    const patches: unknown[] = [];
+    const view = shown(FILE, patches);
+    await openWith(view);
+    expect(view.getByTestId("menu-item-page-open-with-oxplow-foundation/editor").textContent).toContain("✓");
+    expect(view.getByTestId("menu-item-page-open-with-acme/blame").textContent).toContain("Blame");
+  } finally {
+    files = [];
+    pages = [renderer("oxplow-foundation", "editor", { default: true }), renderer("acme", "blame")];
+  }
 });
 
 // `mock.module` is process-wide: put the real module back so the files that

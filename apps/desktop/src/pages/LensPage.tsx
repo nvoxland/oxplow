@@ -4,7 +4,7 @@ import { useHistoryState } from "../tabs/useHistoryState.js";
 import { useOptionalPageNavigation, usePageTitle, useTabActions } from "../tabs/PageNavigationContext.js";
 import type { TabRef } from "../tabs/tabState.js";
 import type { Stream } from "../tauri-bridge/index.js";
-import { getLens, querySql, runLens, type LensRun, type SqlCell } from "../api.js";
+import { getLens, runLens, type LensRun, type SqlCell } from "../api.js";
 import { lensRef, withResourceParams } from "../tabs/pageRefs.js";
 import { getPageDetailStore } from "../tabs/openPageDetail.js";
 import { pageView, shellView, withRenderedParams } from "./renderers.js";
@@ -27,6 +27,7 @@ import { contextNodeProps } from "../components/Comments/contextNodes.js";
 import { Contents } from "../lens/Contents.js";
 import { PageCommentsContext, type PageComments } from "../lens/pageComments.js";
 import { identityOf } from "../uri/uri.js";
+import { useOutOfDate } from "./railGroups.js";
 
 export interface LensPageProps {
   /** `<extension>/<slug>`. */
@@ -353,28 +354,6 @@ function useMemoObject<T extends object>(value: T): T {
 }
 const NO_KEYS: string[] = [];
 const NO_PICKED: Record<string, PickedRow> = {};
-
-/** Whether an extension's source changed after the deployment that runs:
- *  its live source hash against the deployed one. False with no
- *  deployment, or when it can't be read. */
-function useOutOfDate(extension: string | null, deployment: string | null): boolean {
-  const [out, setOut] = useState(false);
-  useEffect(() => {
-    setOut(false);
-    if (!extension || !deployment) return;
-    let live = true;
-    querySql("SELECT hash FROM v_extension_source WHERE name = ?1", [extension])
-      .then((r) => {
-        const hash = r.rows[0]?.[0];
-        if (live) setOut(typeof hash === "string" && hash !== deployment);
-      })
-      .catch(() => {});
-    return () => {
-      live = false;
-    };
-  }, [extension, deployment]);
-  return out;
-}
 
 const errorStyle: CSSProperties = {
   border: "1px solid var(--border-subtle)",

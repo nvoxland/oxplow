@@ -10,6 +10,8 @@ afterEach(cleanup);
 const page = fakePage(node.viz("items", "items"), {
   params: [
     { name: "uri", role: "resource", type: "text" },
+    // No role: a resource, as the server reads it.
+    { name: "path", type: "text" },
     { name: "q", label: "Query", role: "filter", type: "text", default: null },
     { name: "picked", role: "selection", type: "text" },
   ],
@@ -21,6 +23,7 @@ test("the rail lists the page's filters, never its resource or selection", () =>
   const { queryByTestId } = render(<PageRail run={run} runId="run-1" onApply={() => {}} />);
   expect(queryByTestId("lens-param-q")).not.toBeNull();
   expect(queryByTestId("lens-param-uri")).toBeNull();
+  expect(queryByTestId("lens-param-path")).toBeNull();
   expect(queryByTestId("lens-param-picked")).toBeNull();
 });
 

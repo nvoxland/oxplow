@@ -16,6 +16,7 @@ import { ContextDockBody, useContextBadge } from "../Context/ContextDockPanel.js
 import { AlertsDockBody, useAlertsBadge } from "../Alerts/AlertsDockPanel.js";
 import { usePanelRuns } from "../Panels/PanelRunsContext.js";
 import { badgeCount } from "../Panels/usePanelRuns.js";
+import { PageTree } from "../../pages/PageTree.js";
 
 export interface DockBodyProps {
   /** Open a page (or focus it) in the active thread's tab area. */
@@ -81,6 +82,14 @@ export function extensionDockPanel(panel: ExtensionPanel): DockPanelDef {
     },
     Body({ onOpenPage, streamId }) {
       const runs = usePanelRuns().runs[panel.id];
+      const page = runs?.page?.body;
+      if (page) {
+        return (
+          <div style={{ padding: "8px 12px", fontSize: "var(--text-xs)" }}>
+            <PageTree run={page.run} runId={page.runId} streamId={streamId} onOpenPage={onOpenPage} />
+          </div>
+        );
+      }
       return runs?.body ? (
         <div style={{ padding: "8px 12px", fontSize: "var(--text-xs)" }}>
           <LensResultView run={runs.body} streamId={streamId} onOpenPage={onOpenPage} />

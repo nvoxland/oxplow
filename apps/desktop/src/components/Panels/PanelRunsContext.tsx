@@ -1,4 +1,5 @@
-/// The one owner of every extension panel's lens runs, shared by
+/// The one owner of every extension panel's runs (lens runs, or one open
+/// page run per part for a page-backed panel), shared by
 /// the rail (each panel's body, count and summary), the status bar's bell
 /// and the Alerts page (the badges that fire): each lens runs once per
 /// refresh, and the three can't disagree. Provided by the app around
@@ -10,6 +11,7 @@ import { createContext, useCallback, useContext, useMemo } from "react";
 import { panelScope, useRememberedStore } from "../../prefs/remembered.js";
 
 import { useExtensions } from "../../extensionsStore.js";
+import type { PageRuns } from "../../pageRuns.js";
 import type { ExtensionPanel } from "../../tauri-bridge/generated/bindings.js";
 import {
   NO_CHOICES,
@@ -43,10 +45,13 @@ const PanelRunsContext = createContext<PanelRunsValue>(EMPTY);
 export function PanelRunsProvider({
   streamId,
   threadId,
+  pageRuns,
   children,
 }: {
   streamId: string | null;
   threadId: string | null;
+  /** The page runs page-backed panels open (the window's; a test's fake). */
+  pageRuns?: PageRuns;
   children: ReactNode;
 }) {
   const exts = useExtensions();
@@ -69,10 +74,10 @@ export function PanelRunsProvider({
     },
     [store],
   );
-  const runs = useExtensionPanelRuns(panels, streamId, threadId, choices);
+  const runs = useExtensionPanelRuns(panels, streamId, threadId, choices, pageRuns);
   const value = useMemo(
-    () => ({ panels, runs, alerts: panelAlerts(panels, runs), choices, choose }),
-    [panels, runs, choices, choose],
+    () => ({ panels, runs, alerts: panelAlerts(panels, runs, exts ?? []), choices, choose }),
+    [panels, runs, choices, choose, exts],
   );
   return <PanelRunsContext.Provider value={value}>{children}</PanelRunsContext.Provider>;
 }

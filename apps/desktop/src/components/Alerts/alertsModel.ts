@@ -14,8 +14,9 @@ export interface AlertItems {
   /** Extensions with errors (held back or not running as they should),
    *  each with the line to show. */
   extensionProblems: { name: string; message: string }[];
-  /** Extension panel badges that fire. */
-  badges: { id: string; title: string; message: string }[];
+  /** Extension panel badges that fire, each with what it opens (a URI:
+   *  its badge's lens or page). */
+  badges: { id: string; title: string; message: string; open: string }[];
   /** Hints raised to the person, until they dismiss one. */
   hints: { id: number; message: string }[];
 }
@@ -27,7 +28,7 @@ export type AlertTone = "none" | "accent" | "danger";
 export function alertsSummary(items: AlertItems): { count: number; tone: AlertTone } {
   const problems = items.opErrors.length + items.undelivered + items.failedReactions + items.extensionProblems.length;
   // A panel's badges are its own (its panel, and a toast that opens its
-  // lens); the Alerts page doesn't list them, so the bell doesn't count them.
+  // lens or page); the Alerts page doesn't list them, so the bell doesn't count them.
   const count = items.proposals.length + items.hints.length + problems;
   return { count, tone: problems > 0 ? "danger" : count > 0 ? "accent" : "none" };
 }
@@ -48,11 +49,12 @@ export function alertKeys(items: AlertItems): Set<string> {
 
 /** What to toast: the items whose key `seen` doesn't hold, in the page's
  *  order. A toast only ever offers Review — a decision is made where its
- *  preview is. */
-export function newAlerts(seen: Set<string>, items: AlertItems): { key: string; message: string; lens?: string }[] {
-  const out: { key: string; message: string; lens?: string }[] = [];
-  const add = (key: string, message: string, lens?: string) => {
-    if (!seen.has(key)) out.push({ key, message, ...(lens ? { lens } : {}) });
+ *  preview is: `open` (a URI) when the item has its own page, else the
+ *  Alerts page. */
+export function newAlerts(seen: Set<string>, items: AlertItems): { key: string; message: string; open?: string }[] {
+  const out: { key: string; message: string; open?: string }[] = [];
+  const add = (key: string, message: string, open?: string) => {
+    if (!seen.has(key)) out.push({ key, message, ...(open ? { open } : {}) });
   };
   for (const p of items.proposals) add(proposalUri(p.id), p.title);
   for (const e of items.opErrors) add(`op:${e.id}`, e.label);
@@ -63,7 +65,7 @@ export function newAlerts(seen: Set<string>, items: AlertItems): { key: string; 
     add("reactions", items.failedReactions === 1 ? "An effect failed to react" : `${items.failedReactions} effects failed to react`);
   }
   for (const x of items.extensionProblems) add(`ext-problem:${x.name}`, x.message);
-  for (const b of items.badges) add(`badge:${b.id}`, `${b.title}: ${b.message}`, b.id);
+  for (const b of items.badges) add(`badge:${b.id}`, `${b.title}: ${b.message}`, b.open);
   for (const h of items.hints) add(`hint:${h.id}`, h.message);
   return out;
 }

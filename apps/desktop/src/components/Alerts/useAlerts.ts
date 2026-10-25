@@ -30,7 +30,7 @@ export function useAlerts() {
       undelivered: undelivered.length,
       failedReactions: failedReactions.length,
       extensionProblems: extensionProblems.map((x) => ({ name: x.name, message: extensionProblemLine(x) })),
-      badges: badges.map((b) => ({ id: b.id, title: b.title, message: b.message })),
+      badges: badges.map((b) => ({ id: b.id, title: b.title, message: b.message, open: b.open })),
       hints: hints.map((h) => ({ id: h.id, message: h.message })),
     }),
     [proposals, opErrors, undelivered, failedReactions, extensionProblems, badges, hints],

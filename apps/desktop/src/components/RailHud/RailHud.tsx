@@ -5,6 +5,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { TabRef } from "../../tabs/tabState.js";
 import { getPanelLayout, setPanelLayout } from "../../api.js";
 import { LensResultView } from "../../lens/LensResultView.js";
+import { useExtensions } from "../../extensionsStore.js";
 import type { ExtensionPanel, LensRun, PanelPlacement } from "../../tauri-bridge/generated/bindings.js";
 import {
   extensionPanelId,
@@ -19,7 +20,8 @@ import {
   type LayoutEdit,
   type LayoutSync,
 } from "../Panels/panelLayout.js";
-import { panelChoices, type PanelChoice, type PanelRuns } from "../Panels/usePanelRuns.js";
+import { panelChoices, type OpenPanelRun, type PanelChoice, type PanelRuns } from "../Panels/usePanelRuns.js";
+import { PageTree } from "../../pages/PageTree.js";
 import { usePanelRuns } from "../Panels/PanelRunsContext.js";
 import { useContextMenu } from "../useRowContextMenu.js";
 import { recordOpError } from "../../opErrors.js";
@@ -512,19 +514,29 @@ function ExtensionPanelSection({
   onOpenPage(ref: TabRef): void;
 }) {
   const { choices, choose } = usePanelRuns();
-  const toggles = panelChoices(runs.body, choices[panel.id] ?? {});
+  const extensions = useExtensions();
+  const page = runs.page;
+  const toggles = panelChoices(page ? (page.body?.run ?? null) : runs.body, choices[panel.id] ?? {});
   const compact = (run: LensRun, testId: string) => (
     <div data-testid={testId} style={{ padding: "4px 10px 8px", fontSize: "var(--text-xs)" }}>
       <LensResultView run={run} compact maxRows={8} streamId={streamId} onOpenPage={onOpenPage} />
     </div>
   );
+  // A page-backed panel's part: its page drawn small.
+  const compactPage = (open: OpenPanelRun, testId: string) => (
+    <div data-testid={testId} style={{ padding: "4px 10px 8px", fontSize: "var(--text-xs)" }}>
+      <PageTree run={open.run} runId={open.runId} compact streamId={streamId} onOpenPage={onOpenPage} />
+    </div>
+  );
+  const body = page ? (page.body ? compactPage(page.body, "rail-panel-body") : null) : runs.body ? compact(runs.body, "rail-panel-body") : null;
+  const collapsed = page ? (page.collapsed ? compactPage(page.collapsed, "rail-panel-collapsed") : undefined) : runs.collapsed ? compact(runs.collapsed, "rail-panel-collapsed") : undefined;
   return (
     <RailSection
       id={extensionPanelId(panel)}
       title={panel.title}
       count={runs.count ?? undefined}
-      collapsedContent={runs.collapsed ? compact(runs.collapsed, "rail-panel-collapsed") : undefined}
-      onOpen={() => onOpenPage(panelOpenRef(panel))}
+      collapsedContent={collapsed}
+      onOpen={() => onOpenPage(panelOpenRef(panel, extensions))}
       openTitle={`Open ${panel.title}`}
       headerAction={
         toggles.length > 0 ? (
@@ -536,8 +548,8 @@ function ExtensionPanelSection({
         ) : undefined
       }
     >
-      {runs.body ? (
-        compact(runs.body, "rail-panel-body")
+      {body ? (
+        body
       ) : (
         <div style={{ padding: "4px 10px 8px", fontSize: "var(--text-xs)" }}>
           <RailEmpty label="Loading…" />

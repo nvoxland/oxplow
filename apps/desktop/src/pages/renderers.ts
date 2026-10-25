@@ -36,24 +36,37 @@ export function renderedResourceOf(id: string): string | null {
   return scheme && SCHEMES.includes(scheme) ? scheme : null;
 }
 
+/** What renders a resource, a page file (`Page`, its `id` already
+ *  `<extension>/<slug>`) or a manifest's `pages:` entry (`ExtensionPage`,
+ *  its `id` the bare name): the same match rules for both. */
+export interface RendererDecl {
+  id: string;
+  extension: string;
+  /** A page file's slug; a `pages:` entry has none. */
+  slug?: string;
+  for: string[];
+  accepts: Partial<Record<string, string>>;
+  default: boolean;
+}
+
 /** A renderer's name in a view (`<extension>/<page>`). */
-export function rendererName(page: ExtensionPage): string {
-  return `${page.extension}/${page.id}`;
+export function rendererName(page: RendererDecl): string {
+  return `${page.extension}/${page.slug ?? page.id}`;
 }
 
 /** Whether `page`'s `accepts` hold for `params`: each named param present,
  *  absent, or matching its pattern. */
-function takes(page: ExtensionPage, params: Record<string, string>): boolean {
+function takes(page: RendererDecl, params: Record<string, string>): boolean {
   return Object.entries(page.accepts).every(([key, rule]) => {
     const value = params[key];
     if (rule === "present") return value !== undefined;
     if (rule === "absent") return value === undefined;
-    return value !== undefined && new RegExp(rule).test(value);
+    return value !== undefined && new RegExp(rule ?? "").test(value);
   });
 }
 
 /** The pages that render `id`, in the order the extensions list them. */
-export function renderersFor(id: string, pages: readonly ExtensionPage[]): ExtensionPage[] {
+export function renderersFor<P extends RendererDecl>(id: string, pages: readonly P[]): P[] {
   const resource = renderedResourceOf(id);
   if (resource === null) return [];
   const params = parseUri(id)?.params ?? {};
@@ -61,11 +74,11 @@ export function renderersFor(id: string, pages: readonly ExtensionPage[]): Exten
 }
 
 /** The page that renders `id` in `view`, or null when no page does. */
-export function rendererFor(
+export function rendererFor<P extends RendererDecl>(
   id: string,
-  pages: readonly ExtensionPage[],
+  pages: readonly P[],
   view: Record<string, unknown>,
-): ExtensionPage | null {
+): P | null {
   const candidates = renderersFor(id, pages);
   const named = view[RENDERER_VIEW_KEY];
   return (

@@ -121,3 +121,16 @@ describe("a declared page", () => {
     expect(pageKindLabel("gh/open-prs", extensions)).toBe("open prs");
   });
 });
+
+describe("a page file's icon and label", () => {
+  const extensions = [
+    { name: "oxplow-foundation", namespace: "oxplow", enabled: true, pages: [], pageFiles: [{ id: "oxplow-foundation/timeline", extension: "oxplow-foundation", slug: "timeline", title: "Time Line", icon: "history" }] },
+    { name: "gh", namespace: "gh", enabled: true, pages: [], pageFiles: [{ id: "gh/open-prs", extension: "gh", slug: "open-prs", title: "Open PRs", icon: "git-merge" }] },
+  ] as unknown as Extension[];
+
+  test("come from its file, by its page id", () => {
+    expect(declaredPageIcon(extensions, "timeline")).toBe(ICONS.history!);
+    expect(declaredPageIcon(extensions, "gh/open-prs")).toBe(ICONS["git-merge"]!);
+    expect(pageKindLabel("timeline", extensions)).toBe("time line");
+  });
+});

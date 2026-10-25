@@ -73,7 +73,7 @@ test("the history graph's filter is the page's: in the address and kept on a rel
 
   // Oxplow's own list, given the same address, filters by it.
   await run(daemon, "oxplow.extension.disable", { name: "oxplow-bundled" });
-  await expect(page.getByTestId("lens-part-history").filter({ visible: true }).getByText("Side work")).toBeVisible();
+  await expect(page.locator('[data-node="history"]:visible').getByText("Side work")).toBeVisible();
   await expect(page.getByTestId("lens-param-q-value").filter({ visible: true })).toContainText("side");
 });
 
@@ -83,6 +83,6 @@ test("without oxplow-bundled, Git History is oxplow's plain list", async ({ fres
   await run(daemon, "oxplow.extension.disable", { name: "oxplow-bundled" });
   await page.goto("/");
   await openFromLauncher(page, "Git History");
-  await expect(page.getByTestId("lens-part-history").filter({ visible: true }).getByText("Merge side")).toBeVisible();
+  await expect(page.locator('[data-node="history"]:visible').getByText("Merge side")).toBeVisible();
   await expect(page.locator('[data-testid^="replacement-"]')).toHaveCount(0);
 });

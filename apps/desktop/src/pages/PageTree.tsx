@@ -11,6 +11,7 @@
 import { createContext, useCallback, useContext, useEffect, type CSSProperties, type ReactNode } from "react";
 
 import { Markdown } from "../components/Markdown/Markdown.js";
+import { Replaceable } from "../components/Replaceable.js";
 import { Section } from "../kit/Section.js";
 import { Tile, TileGrid, TileSlot } from "../kit/Tiles.js";
 import type { PickedRow } from "../lens/LensRail.js";
@@ -105,6 +106,8 @@ export interface PageTreeProps {
   /** Set one of the page's params (a row that picks); without it rows
    *  are no picks. */
   onSetParam?(name: string, value: SqlCell, row?: PickedRow): void;
+  /** Drawn small (a rail panel): its vizes compact, a few rows each. */
+  compact?: boolean;
 }
 
 /** How a node sits in its parent: on its own, a stack's section, a
@@ -125,7 +128,14 @@ function NodeView(props: NodeViewProps) {
   const { run, at, prefix = "", placement } = props;
   const def = nodeById(run.page, at.id);
   const id = `${prefix}${at.id}`;
-  const body = at.error ? <NodeError message={at.error} /> : def ? <NodeBody {...props} def={def} id={id} /> : <Unknown {...props} />;
+  const own = at.error ? <NodeError message={at.error} /> : def ? <NodeBody {...props} def={def} id={id} /> : <Unknown {...props} />;
+  // A node another extension's provider may take the place of
+  // (`replaceable: work_item.board`): the same choice as a lens part's.
+  const body = def?.replaceable ? (
+    <Replaceable target={def.replaceable} props={valued(run.params)} streamId={props.streamId ?? null} onOpenPage={props.onOpenPage} fallback={own} />
+  ) : (
+    own
+  );
   const title = def?.title ?? null;
   const fills = def?.kind === "viz" && def.lens.fills;
   return (
@@ -196,7 +206,7 @@ function Unknown(props: NodeViewProps) {
 }
 
 function VizNode(props: NodeViewProps & { def: Node; id: string }) {
-  const { run, def, id, runId, streamId = null, onOpenPage, onSetParam } = props;
+  const { run, def, id, runId, streamId = null, onOpenPage, onSetParam, compact = false } = props;
   const runner = useNodeActions(runId, id);
   const lensRun = nodeRunOf(run, def);
   if (!lensRun || def.kind !== "viz") return null;
@@ -204,7 +214,15 @@ function VizNode(props: NodeViewProps & { def: Node; id: string }) {
   if (failed) return <NodeError message={failed} />;
   return (
     <LensActionRunnerContext.Provider value={runner}>
-      <LensResultView run={lensRun} streamId={streamId} onOpenPage={onOpenPage} onSetParam={onSetParam} toolbar={false} partButtons />
+      <LensResultView
+        run={lensRun}
+        streamId={streamId}
+        onOpenPage={onOpenPage}
+        onSetParam={onSetParam}
+        toolbar={false}
+        partButtons={!compact}
+        {...(compact ? { compact: true, maxRows: COMPACT_ROWS } : {})}
+      />
     </LensActionRunnerContext.Provider>
   );
 }
@@ -216,5 +234,15 @@ function NodeError({ message }: { message: string }) {
     </div>
   );
 }
+
+/** The params that hold a value: what a replacement is given, so one the
+ *  page left empty (`head_sha` before it resolves) resolves from the
+ *  viewer's context there too rather than binding NULL. */
+function valued(params: Record<string, SqlCell>): Record<string, SqlCell> {
+  return Object.fromEntries(Object.entries(params).filter(([, v]) => v !== null && v !== undefined));
+}
+
+/** How many rows a compact viz shows. */
+const COMPACT_ROWS = 8;
 
 const fillStyle: CSSProperties = { display: "flex", flexDirection: "column", flex: 1, minHeight: 0 };

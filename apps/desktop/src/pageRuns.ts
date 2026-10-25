@@ -8,7 +8,7 @@
 /// Runs are shared by key (the page, its params, its stream and thread):
 /// two hosts showing the same page open one run, and it closes when the
 /// last lets go.
-import { useEffect, useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
 
 import { subscribeOxplowEvents, unwrapResult } from "./api.js";
 import { getUiClientId } from "./logger.js";
@@ -301,6 +301,14 @@ let shared: PageRuns | null = null;
 export function windowPageRuns(): PageRuns {
   shared ??= createPageRuns(daemonTransport());
   return shared;
+}
+
+/** The page runs below it (a test's fake); none: the window's. */
+export const PageRunsContext = createContext<PageRuns | null>(null);
+
+/** The page runs in force: the context's, else the window's. */
+export function usePageRunsStore(): PageRuns {
+  return useContext(PageRunsContext) ?? windowPageRuns();
 }
 
 /** A host's run of `key` in this window (none: no run). */

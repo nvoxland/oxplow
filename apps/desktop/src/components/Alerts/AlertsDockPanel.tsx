@@ -2,7 +2,7 @@
 /// action, and a link to the Alerts page. The icon's badge is the same
 /// count the bell showed (`alertsSummary`).
 
-import { alertsRef, lensRef } from "../../tabs/pageRefs.js";
+import { alertsRef, refFromTabId } from "../../tabs/pageRefs.js";
 import type { DockBadge, DockBodyProps } from "../Dock/dockPanels.js";
 import { alertsSummary, newAlerts } from "./alertsModel.js";
 import { useAlerts } from "./useAlerts.js";
@@ -27,7 +27,7 @@ export function AlertsDockBody({ onOpenPage }: DockBodyProps) {
             <button
               type="button"
               data-testid="alerts-panel-review"
-              onClick={() => onOpenPage(r.lens ? lensRef(r.lens) : alertsRef())}
+              onClick={() => onOpenPage((r.open ? refFromTabId(r.open) : null) ?? alertsRef())}
               style={linkButton}
             >
               Review

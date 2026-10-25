@@ -146,7 +146,7 @@ export function decl(name: string): LoaderDecl {
 
 export function loader(columns: string[], rows: SqlCell[][], error: string | null = null): LoaderRun {
   return {
-    result: { columns, rows, truncated: false, reads: { models: [], tables: [] } as never, freshness: [] },
+    result: { columns, rows, truncated: false, reads: { models: [], tables: [], measures: [] } as never, freshness: [] },
     error,
     key: JSON.stringify([columns, rows]),
   };

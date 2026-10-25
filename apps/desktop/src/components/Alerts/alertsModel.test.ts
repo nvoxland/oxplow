@@ -9,7 +9,7 @@ test("the bell counts what the Alerts page lists, red for a problem, accent for 
   expect(alertsSummary(none)).toEqual({ count: 0, tone: "none" });
   expect(alertsSummary({ ...none, proposals: [{ id: "oxplow:oxplow/proposal?id=1", title: "x" }] })).toEqual({ count: 1, tone: "accent" });
   // A panel's badge is shown by its panel and toasted; the page doesn't list it, so the bell doesn't count it.
-  expect(alertsSummary({ ...none, badges: [{ id: "x/b", title: "B", message: "2" }] })).toEqual({ count: 0, tone: "none" });
+  expect(alertsSummary({ ...none, badges: [{ id: "x/b", title: "B", message: "2", open: "oxplow:oxplow/lens?lens=x/b" }] })).toEqual({ count: 0, tone: "none" });
   expect(
     alertsSummary({
       ...none,
@@ -33,15 +33,15 @@ test("new alerts are the items not seen before, once each", () => {
     ],
     opErrors: [{ id: "oe-1", label: "Push failed" }],
     undelivered: 5,
-    badges: [{ id: "x/b", title: "Waiting on You", message: "2 items" }],
+    badges: [{ id: "x/b", title: "Waiting on You", message: "2 items", open: "oxplow:oxplow/page?page=x/b" }],
   };
   expect(newAlerts(before, now).map((a) => a.message)).toEqual([
     "Your agent wants to run oxplow.config.set",
     "Push failed",
     "Waiting on You: 2 items",
   ]);
-  // A badge's Review opens the panel's lens; the others open Alerts.
-  expect(newAlerts(before, now).map((a) => a.lens ?? null)).toEqual([null, null, "x/b"]);
+  // A badge's Review opens its lens or page; the others open Alerts.
+  expect(newAlerts(before, now).map((a) => a.open ?? null)).toEqual([null, null, "oxplow:oxplow/page?page=x/b"]);
   expect(newAlerts(alertKeys(now), now)).toEqual([]);
   // Delivery: a toast when it starts failing, not on each new letter.
   expect(newAlerts(alertKeys(none), { ...none, undelivered: 1 }).map((a) => a.message)).toEqual([
