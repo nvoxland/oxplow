@@ -176,7 +176,7 @@ pub async fn services_developing_oxplow() -> EffortFixture {
     )
     .unwrap();
     let svc = crate::Services::in_memory(dir.path()).await.unwrap();
-    crate::extension_deploy::deploy(&svc, "oxplow-foundation", dir.path(), None, true)
+    crate::extension_deploy::deploy(&svc, "oxplow-foundation", true)
         .await
         .expect("foundation deploys from its source");
     with_effort(dir, svc).await

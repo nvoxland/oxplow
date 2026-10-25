@@ -91,25 +91,6 @@ fn domain(e: DomainError) -> CommandError {
     }
 }
 
-/// The worktree of `thread`'s stream; `Invalid` for an unknown thread.
-fn thread_root_tx(
-    conn: &rusqlite::Connection,
-    project_dir: &Path,
-    thread: i64,
-) -> Result<PathBuf, DomainError> {
-    let path: Option<String> = conn
-        .query_row(
-            "SELECT s.worktree_path FROM threads t JOIN streams s ON s.id = t.stream_id
-             WHERE t.id = ?1",
-            [thread],
-            |r| r.get(0),
-        )
-        .optional()
-        .map_err(|e| DomainError::Storage(e.to_string()))?;
-    let path = path.ok_or_else(|| DomainError::Invalid(format!("no thread `thr{thread}`")))?;
-    Ok(crate::worktrees::workspace_path(project_dir, &path))
-}
-
 fn thread_stream_tx(conn: &rusqlite::Connection, thread: i64) -> Result<Option<i64>, DomainError> {
     conn.query_row(
         "SELECT stream_id FROM threads WHERE id = ?1",
@@ -321,11 +302,7 @@ fn record_answer_tx(
 /// What `oxplow.lens.keep` writes for answer `id`: its spec with the shown
 /// params as defaults, the worktree it goes in, and its thread. Read in
 /// one transaction; refuses an answer that's kept already.
-fn kept_lens_tx(
-    tx: &rusqlite::Connection,
-    project_dir: &Path,
-    id: i64,
-) -> Result<(LensSpec, PathBuf, i64), DomainError> {
+fn kept_lens_tx(tx: &rusqlite::Connection, id: i64) -> Result<(LensSpec, i64), DomainError> {
     let answer = answers::get_tx(tx, id)?.ok_or(DomainError::NotFound)?;
     if let Some(kept) = &answer.kept_lens {
         return Err(DomainError::Invalid(format!(
@@ -349,14 +326,12 @@ fn kept_lens_tx(
             }
         }
     }
-    let root = thread_root_tx(tx, project_dir, answer.thread_id)?;
-    Ok((spec, root, answer.thread_id))
+    Ok((spec, answer.thread_id))
 }
 
 /// What `oxplow.lens.keep` writes, where, and what it keeps.
 struct Keeping {
     spec: LensSpec,
-    root: PathBuf,
     /// The thread it came from: the answer's, or the caller's.
     thread: Option<i64>,
     answer: Option<i64>,
@@ -364,10 +339,9 @@ struct Keeping {
 
 /// What keeping the answer `id` writes (see [`kept_lens_tx`]).
 async fn keeping_answer(target: &LensTarget, id: i64) -> Result<Keeping, CommandError> {
-    let project_dir = target.project_dir.clone();
-    let (spec, root, thread) = target
+    let (spec, thread) = target
         .db
-        .read(move |tx| kept_lens_tx(tx, &project_dir, id))
+        .read(move |tx| kept_lens_tx(tx, id))
         .await
         .map_err(|e| match e {
             DomainError::NotFound => invalid(
@@ -379,7 +353,6 @@ async fn keeping_answer(target: &LensTarget, id: i64) -> Result<Keeping, Command
         })?;
     Ok(Keeping {
         spec,
-        root,
         thread: Some(thread),
         answer: Some(id),
     })
@@ -404,7 +377,7 @@ async fn keeping_spec(
                 Some(t) => thread_stream_tx(tx, t)?,
                 None => None,
             };
-            let (stream_id, root) = match stream.as_deref() {
+            let stream_id = match stream.as_deref() {
                 Some(raw) => match stream_root_tx(tx, &project_dir, raw) {
                     // An agent writes in its own thread's stream only, as
                     // the agent policy keeps its edits there (tsk988).
@@ -416,13 +389,13 @@ async fn keeping_spec(
                             ),
                         )));
                     }
-                    Ok((id, root)) => (Some(id), root),
+                    Ok((id, _)) => Some(id),
                     Err(DomainError::Invalid(m)) => return Ok(Err(invalid("/stream", m))),
                     Err(e) => return Err(e),
                 },
                 None => match thread {
-                    Some(t) => (own, thread_root_tx(tx, &project_dir, t)?),
-                    None => (None, project_dir.clone()),
+                    Some(_) => own,
+                    None => None,
                 },
             };
             let lens_ctx = LensContext {
@@ -433,7 +406,6 @@ async fn keeping_spec(
             Ok(
                 check_spec_shape(&spec, &BTreeMap::new(), &lens_ctx).map(|_| Keeping {
                     spec,
-                    root,
                     thread,
                     answer: None,
                 }),
@@ -479,10 +451,12 @@ fn keep(target: LensTarget) -> Op {
             };
             let Keeping {
                 spec,
-                root,
                 thread,
                 answer,
             } = keeping;
+            // A kept lens goes where its extension deploys from: the
+            // primary checkout, whichever stream the thread is in.
+            let root = target.project_dir.clone();
             let extension = input.extension.unwrap_or_else(|| "my-lenses".into());
             let slug = input
                 .slug
@@ -532,9 +506,7 @@ fn keep(target: LensTarget) -> Op {
             let svc = target.services.get()?;
             // Keeping a lens adds no permission; one the extension's source
             // gained since its last deploy waits for a person to deploy it.
-            if let Err(e) =
-                crate::extension_deploy::deploy(&svc, &extension, &root, None, false).await
-            {
+            if let Err(e) = crate::extension_deploy::deploy(&svc, &extension, false).await {
                 let _ = std::fs::remove_file(root.join(&lens.origin.running));
                 if let Some(id) = answer {
                     let lens_id = claim.clone();
@@ -1179,9 +1151,9 @@ mod tests {
         assert_eq!(events_of(&fx, "lens.shown").await.len(), 2);
     }
 
-    /// tsk988: an agent keeps a lens only in its own thread's stream — the
-    /// agent policy keeps it out of other streams' worktrees — while a
-    /// person may name any stream.
+    /// An agent keeps a lens only from its own thread's stream, while a
+    /// person may name any stream; either way it is written to the primary
+    /// checkout, the one source its extension deploys from.
     #[tokio::test]
     async fn an_agent_keeps_a_lens_only_in_its_own_stream() {
         use oxplow_domain::stores::StreamStore as _;
@@ -1234,11 +1206,13 @@ mod tests {
             .extension_catalog
             .find_lens(&project, "kept/mine")
             .is_ok());
+        // Whichever stream it names, it is written where its extension
+        // deploys from: the primary checkout.
         keep(Actor::Human, "str2", "theirs").await.unwrap();
-        assert!(wt
-            .path()
+        assert!(project
             .join(".oxplow/extensions/kept/lenses/theirs.yaml")
             .exists());
+        assert!(!wt.path().join(".oxplow/extensions/kept").exists());
     }
 
     /// `oxplow.lens.keep` keeps an answer or a spec: neither, or both, is refused;

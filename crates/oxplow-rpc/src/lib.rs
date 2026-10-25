@@ -390,8 +390,7 @@ pub(crate) mod test_support {
             .collect();
         names.sort();
         for name in names {
-            let _ =
-                oxplow_app::extension_deploy::deploy(&ctx.services, &name, &root, None, true).await;
+            let _ = oxplow_app::extension_deploy::deploy(&ctx.services, &name, true).await;
         }
         ctx.services
             .extension_activation

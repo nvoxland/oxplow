@@ -185,7 +185,7 @@ async fn deploy_from_outside(project: &Path, name: Option<&String>) -> Result<St
     let mut out = Vec::new();
     let mut failed = Vec::new();
     for name in &names {
-        match oxplow_app::extension_deploy::deploy(&svc, name, project, None, true).await {
+        match oxplow_app::extension_deploy::deploy(&svc, name, true).await {
             Ok(deployed) => {
                 out.push(format!(
                     "{name}: {} {}",

@@ -641,7 +641,7 @@ effects:
         let before = log().await;
         assert_eq!(gate_at(svc, before).await, Gate::NotStarted);
 
-        crate::extension_deploy::deploy(svc, "acme", &root, None, true)
+        crate::extension_deploy::deploy(svc, "acme", true)
             .await
             .unwrap();
         assert_eq!(gate_at(svc, before).await, Gate::BeforeStart);
@@ -649,7 +649,7 @@ effects:
         assert_eq!(gate_at(svc, after).await, Gate::Runs);
 
         write_acme(&root, MANIFEST, &format!("{SCRIPT}# edited\n"));
-        crate::extension_deploy::deploy(svc, "acme", &root, None, true)
+        crate::extension_deploy::deploy(svc, "acme", true)
             .await
             .unwrap();
         assert_eq!(gate_at(svc, after).await, Gate::Runs);

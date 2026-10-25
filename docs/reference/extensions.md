@@ -50,8 +50,14 @@ until you deploy it.
   makes it live. It returns once the extension runs. If the extension does
   not load, the deploy fails and the old deployment keeps running.
   `oxplow.extension.rollback { name, to? }` makes an earlier one live.
-- Oxplow starts every enabled extension that has no deployment on this
-  machine, so a fresh clone runs without a manual deploy.
+- A source inside the project deploys only from the main checkout (the
+  one the project was opened from), uncommitted changes included. A copy in
+  another worktree is a draft: check and test it there; it deploys once the
+  change reaches the main checkout's branch. A source outside the project
+  has one copy and deploys from anywhere.
+- Oxplow deploys nothing at start: it runs the deployments recorded on this
+  machine. An extension that is on but never deployed here runs nothing
+  until someone deploys it.
 - Which extensions are on: `extensions: [..]` in `.oxplow/project.yaml`
   (absent means `[oxplow-bundled]`), plus `enableExtensions` and
   `disableExtensions` in `.oxplow/personal.yaml`.

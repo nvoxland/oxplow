@@ -104,9 +104,7 @@ impl Host {
                 .run
                 .is_some();
             if copied.is_dir() && (builds || !built) {
-                if let Err(e) =
-                    oxplow_app::extension_deploy::deploy(&svc, name, &root, None, true).await
-                {
+                if let Err(e) = oxplow_app::extension_deploy::deploy(&svc, name, true).await {
                     deploys.push(format!("{name}: {e}"));
                 }
             }

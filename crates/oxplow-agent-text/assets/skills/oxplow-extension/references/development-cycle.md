@@ -14,8 +14,12 @@ edits change nothing on the person's screen until you deploy.
    `oxplow_show_lens` with a `spec`. These read the source and dry-run, so
    they need no deploy.
 3. When a step is complete, run `oxplow.extension.deploy { name }` with
-   `run_command`. Pass `stream` when you work in a worktree stream (the
-   source is read from that stream's checkout). The deploy checks the
+   `run_command`. It deploys the source in the main stream's checkout,
+   uncommitted changes included: deploy to let the person see a change,
+   and commit once they are happy with it. In another (worktree) stream,
+   your copy of an extension that lives in the repo is a draft: check and
+   test it there; it is refused for deploy and goes live once your change
+   reaches the main stream's branch. The deploy checks the
    source, runs its `build:`, copies it into the store, migrates its
    settings, and replaces what runs in the running app. It returns once the
    new deployment runs, with `warnings` worth fixing. Pages that show the

@@ -289,10 +289,11 @@ fn problems_of(error: TxError<VocabularyErrors>) -> DomainError {
     }
 }
 
-/// Where `name`'s source is, in the checkout at `root`, checked to hold a
-/// manifest.
-fn source_of(project: &Path, root: &Path, name: &str) -> Result<PathBuf, DomainError> {
-    let dir = oxplow_config::extension_settings(project).source(root, name);
+/// Where `name`'s one deployable source is: in the primary checkout (the
+/// project's), checked to hold a manifest. Another stream's checkout holds
+/// a draft of it, never deployed ([`refuse_draft_deploy`]).
+fn source_of(project: &Path, name: &str) -> Result<PathBuf, DomainError> {
+    let dir = oxplow_config::extension_settings(project).source(project, name);
     if dir.join("extension.yaml").is_file() {
         Ok(dir)
     } else {
@@ -301,6 +302,50 @@ fn source_of(project: &Path, root: &Path, name: &str) -> Result<PathBuf, DomainE
             dir.display()
         )))
     }
+}
+
+/// Refuse a deploy asked from a stream other than the primary when
+/// `name`'s source lies inside the project: that stream's checkout holds a
+/// draft of it, which is checked, previewed and tested there, and deploys
+/// from the primary once the change is on its branch. A source outside
+/// the project (`~/` or an absolute `extensionSources` entry) has one copy,
+/// so any stream may deploy it. `stream` is the asking stream, `None` for
+/// a person or a caller with none.
+pub async fn refuse_draft_deploy(
+    svc: &Services,
+    stream: Option<oxplow_domain::StreamId>,
+    name: &str,
+) -> Result<(), DomainError> {
+    use oxplow_domain::stores::StreamStore as _;
+    let Some(stream) = stream else {
+        return Ok(());
+    };
+    let project = &svc.layout.project_dir;
+    let source = oxplow_config::extension_settings(project).source(project, name);
+    if !source.starts_with(project) {
+        return Ok(());
+    }
+    let Some(asking) = svc.stream_store.get(&stream).await? else {
+        return Ok(());
+    };
+    if asking.kind == oxplow_domain::StreamKind::Primary {
+        return Ok(());
+    }
+    let main_branch = svc
+        .stream_store
+        .primary()
+        .await?
+        .map(|p| p.branch)
+        .unwrap_or_default();
+    Err(invalid(format!(
+        "`{name}` deploys only from the main stream ({}, on `{main_branch}`); this thread's \
+         stream `{stream}` (on `{}`) holds a draft of it. Check it with \
+         `oxplow_validate_extension` and test it with `oxplow_preview_extension` there. \
+         It deploys once the change is on `{main_branch}`: from a main-stream thread, or \
+         Settings → Extensions.",
+        project.display(),
+        asking.branch,
+    )))
 }
 
 /// The live-set change that runs `hash`: none when it is the hash of the
@@ -313,21 +358,19 @@ fn target_of(
     (shipped.as_deref() != Some(hash)).then(|| hash.to_string())
 }
 
-/// Deploy `name` from its source in the checkout at `root`, made from
-/// `from_stream` (`None`: no stream, `oxplow-dev`). Turns it on in the
-/// person's layer when nothing turns it on yet. A source that declares
-/// permissions beyond what runs now goes live only `confirmed` by a
-/// person; otherwise nothing changes and it says what it would add.
+/// Deploy `name` from its one deployable source, in the primary checkout
+/// (uncommitted changes included). Turns it on in the person's layer when
+/// nothing turns it on yet. A source that declares permissions beyond what
+/// runs now goes live only `confirmed` by a person; otherwise nothing
+/// changes and it says what it would add.
 pub async fn deploy(
     svc: &Arc<Services>,
     name: &str,
-    root: &Path,
-    from_stream: Option<i64>,
     confirmed: bool,
 ) -> Result<Deployed, DeployError> {
     valid(name)?;
     let project = svc.layout.project_dir.clone();
-    let source = source_of(&project, root, name)?;
+    let source = source_of(&project, name)?;
     let (hash, size, loaded) = {
         let (source, owned) = (source.clone(), name.to_string());
         tokio::task::spawn_blocking(move || {
@@ -446,7 +489,7 @@ pub async fn deploy(
             name: name.to_string(),
             hash: hash.clone(),
             deployed_at: Timestamp::now().to_string(),
-            from_stream,
+            from_stream: None,
             source: source.to_string_lossy().into_owned(),
             active: false,
             permissions: loaded.permissions.clone(),
@@ -689,8 +732,7 @@ pub async fn set_enabled(
         && shipped_of(svc, name).is_none()
         && !svc.extension_catalog.live().contains_key(name);
     if undeployed {
-        let root = svc.layout.project_dir.clone();
-        deploy(svc, name, &root, None, confirmed).await?;
+        deploy(svc, name, confirmed).await?;
         return Ok(());
     }
     Ok(activate(svc, &LiveChanges::new()).await?)
@@ -1192,14 +1234,13 @@ mod tests {
     async fn a_deploy_within_the_active_permissions_goes_live_at_once() {
         let fx = crate::test_fixtures::services_with_effort().await;
         let svc = &fx.svc;
-        let root = svc.layout.project_dir.clone();
         source_with(svc, "One", AI);
-        deploy(svc, "acme", &root, None, true).await.unwrap();
+        deploy(svc, "acme", true).await.unwrap();
         source_with(svc, "Two", AI);
-        deploy(svc, "acme", &root, None, false).await.unwrap();
+        deploy(svc, "acme", false).await.unwrap();
         assert_eq!(lens_title(svc).as_deref(), Some("Two"));
         source_with(svc, "Three", "");
-        deploy(svc, "acme", &root, None, false).await.unwrap();
+        deploy(svc, "acme", false).await.unwrap();
         assert_eq!(lens_title(svc).as_deref(), Some("Three"));
     }
 
@@ -1209,17 +1250,16 @@ mod tests {
     async fn a_deploy_that_adds_a_permission_pauses_until_confirmed() {
         let fx = crate::test_fixtures::services_with_effort().await;
         let svc = &fx.svc;
-        let root = svc.layout.project_dir.clone();
         source(svc, "One");
-        deploy(svc, "acme", &root, None, false).await.unwrap();
+        deploy(svc, "acme", false).await.unwrap();
         source_with(svc, "Two", AI);
         assert_eq!(
-            asked(deploy(svc, "acme", &root, None, false).await),
+            asked(deploy(svc, "acme", false).await),
             vec!["ai — may call your AI provider with your key"]
         );
         assert_eq!(lens_title(svc).as_deref(), Some("One"));
         assert_eq!(rows(svc).await.len(), 1);
-        deploy(svc, "acme", &root, None, true).await.unwrap();
+        deploy(svc, "acme", true).await.unwrap();
         assert_eq!(lens_title(svc).as_deref(), Some("Two"));
         let recorded = svc
             .db
@@ -1234,11 +1274,10 @@ mod tests {
     async fn rollback_to_a_wider_deployment_asks_too() {
         let fx = crate::test_fixtures::services_with_effort().await;
         let svc = &fx.svc;
-        let root = svc.layout.project_dir.clone();
         source_with(svc, "One", AI);
-        deploy(svc, "acme", &root, None, true).await.unwrap();
+        deploy(svc, "acme", true).await.unwrap();
         source_with(svc, "Two", "");
-        deploy(svc, "acme", &root, None, false).await.unwrap();
+        deploy(svc, "acme", false).await.unwrap();
         assert_eq!(
             asked(rollback(svc, "acme", None, false).await),
             vec!["ai — may call your AI provider with your key"]
@@ -1273,7 +1312,7 @@ mod tests {
         let root = svc.layout.project_dir.clone();
         other(svc, "tracker", "");
         source_with(svc, "One", "requires: [tracker]\n");
-        let e = deploy(svc, "acme", &root, None, true).await.unwrap_err();
+        let e = deploy(svc, "acme", true).await.unwrap_err();
         assert!(
             e.to_string()
                 .contains("`acme` requires `tracker`, which is off (turn it on first)"),
@@ -1281,8 +1320,8 @@ mod tests {
         );
         assert!(rows(svc).await.is_empty());
         assert!(!oxplow_config::extension_settings(&root).is_enabled("acme"));
-        deploy(svc, "tracker", &root, None, true).await.unwrap();
-        deploy(svc, "acme", &root, None, true).await.unwrap();
+        deploy(svc, "tracker", true).await.unwrap();
+        deploy(svc, "acme", true).await.unwrap();
         assert_eq!(lens_title(svc).as_deref(), Some("One"));
     }
 
@@ -1296,8 +1335,8 @@ mod tests {
         let root = svc.layout.project_dir.clone();
         other(svc, "tracker", "");
         source_with(svc, "One", "requires: [tracker]\n");
-        deploy(svc, "tracker", &root, None, true).await.unwrap();
-        deploy(svc, "acme", &root, None, true).await.unwrap();
+        deploy(svc, "tracker", true).await.unwrap();
+        deploy(svc, "acme", true).await.unwrap();
         let refused = "`tracker` is required by `acme`; turn that off first";
         let e = set_enabled(svc, "tracker", false, true).await.unwrap_err();
         assert!(e.to_string().contains(refused), "{e}");
@@ -1350,7 +1389,7 @@ mod tests {
         let svc = &fx.svc;
         let root = svc.layout.project_dir.clone();
         let dir = source_built(svc, "One", BUILD);
-        let first = deploy(svc, "acme", &root, None, true).await.unwrap();
+        let first = deploy(svc, "acme", true).await.unwrap();
         let deployed = extension_store::deployment_dir(&root, "acme", &first.hash);
         assert!(deployed.join("dist/widget/index.html").is_file());
         assert!(deployed.join("src/widget.html").is_file());
@@ -1364,14 +1403,9 @@ mod tests {
         assert_eq!(recorded[0].build_run.as_deref(), Some(BUILD));
 
         write(&dir, "dist/widget/index.html", "edited by hand");
-        assert!(
-            deploy(svc, "acme", &root, None, true)
-                .await
-                .unwrap()
-                .already
-        );
+        assert!(deploy(svc, "acme", true).await.unwrap().already);
         source_built(svc, "One", &format!("{BUILD} && true"));
-        let second = deploy(svc, "acme", &root, None, true).await.unwrap();
+        let second = deploy(svc, "acme", true).await.unwrap();
         assert!(!second.already);
         assert_ne!(first.hash, second.hash);
     }
@@ -1386,22 +1420,22 @@ mod tests {
         let root = svc.layout.project_dir.clone();
         source_built(svc, "One", BUILD);
         assert_eq!(
-            asked(deploy(svc, "acme", &root, None, false).await),
+            asked(deploy(svc, "acme", false).await),
             vec![build_line(BUILD)]
         );
         assert!(rows(svc).await.is_empty());
         assert!(!root.join(".oxplow/extensions/acme/dist").exists());
-        deploy(svc, "acme", &root, None, true).await.unwrap();
+        deploy(svc, "acme", true).await.unwrap();
         source_built(svc, "Two", BUILD);
-        deploy(svc, "acme", &root, None, false).await.unwrap();
+        deploy(svc, "acme", false).await.unwrap();
         assert_eq!(lens_title(svc).as_deref(), Some("Two"));
         let changed = format!("{BUILD} && true");
         source_built(svc, "Three", &changed);
         assert_eq!(
-            asked(deploy(svc, "acme", &root, None, false).await),
+            asked(deploy(svc, "acme", false).await),
             vec![build_line(&changed)]
         );
-        deploy(svc, "acme", &root, None, true).await.unwrap();
+        deploy(svc, "acme", true).await.unwrap();
         assert_eq!(
             asked(rollback(svc, "acme", None, false).await),
             vec![build_line(BUILD)]
@@ -1418,10 +1452,7 @@ mod tests {
         let svc = &fx.svc;
         let root = svc.layout.project_dir.clone();
         source_built(svc, "One", "echo broken >&2; exit 3");
-        let e = deploy(svc, "acme", &root, None, true)
-            .await
-            .unwrap_err()
-            .to_string();
+        let e = deploy(svc, "acme", true).await.unwrap_err().to_string();
         assert!(
             e.contains("building `acme`") && e.contains("exited 3") && e.contains("broken"),
             "{e}"
@@ -1443,10 +1474,7 @@ mod tests {
             "One",
             "mkdir -p dist/elsewhere && touch dist/elsewhere/a",
         );
-        let e = deploy(svc, "acme", &root, None, true)
-            .await
-            .unwrap_err()
-            .to_string();
+        let e = deploy(svc, "acme", true).await.unwrap_err().to_string();
         assert!(
             e.contains("extension `acme` doesn't load once built"),
             "{e}"
@@ -1465,7 +1493,7 @@ mod tests {
         let svc = &fx.svc;
         let root = svc.layout.project_dir.clone();
         source_built(svc, "One", BUILD);
-        deploy(svc, "acme", &root, None, true).await.unwrap();
+        deploy(svc, "acme", true).await.unwrap();
         let ignored = |rel: &str| {
             std::process::Command::new("git")
                 .args(["check-ignore", "-q", rel])
@@ -1649,9 +1677,7 @@ mod tests {
             "lenses/extra.yaml",
             "title: Extra\nquery: \"SELECT 1 AS n\"\n",
         );
-        let deployed = deploy(svc, "oxplow-bundled", &root, None, false)
-            .await
-            .unwrap();
+        let deployed = deploy(svc, "oxplow-bundled", false).await.unwrap();
         assert!(!deployed.already);
     }
 
@@ -1661,9 +1687,8 @@ mod tests {
     async fn v_extension_lists_each_extensions_permissions() {
         let fx = crate::test_fixtures::services_with_effort().await;
         let svc = &fx.svc;
-        let root = svc.layout.project_dir.clone();
         source(svc, "One");
-        deploy(svc, "acme", &root, None, true).await.unwrap();
+        deploy(svc, "acme", true).await.unwrap();
         let listed = svc
             .sql
             .query_sql(
@@ -1698,7 +1723,6 @@ mod tests {
     async fn v_extension_marks_a_source_that_moved_on_and_a_shared_one() {
         let fx = crate::test_fixtures::services_with_effort().await;
         let svc = &fx.svc;
-        let root = svc.layout.project_dir.clone();
         let row = || async {
             svc.sql
                 .query_sql(
@@ -1714,7 +1738,7 @@ mod tests {
         let int = |n| oxplow_db::SqlCell::Int(n);
         let path = oxplow_db::SqlCell::Text(".oxplow/extensions/acme".into());
         source(svc, "One");
-        deploy(svc, "acme", &root, None, true).await.unwrap();
+        deploy(svc, "acme", true).await.unwrap();
         assert_eq!(row().await, vec![vec![int(0), int(0), path.clone()]]);
         // An edit changes nothing that runs; the source is read as it is.
         source(svc, "Two");
@@ -1735,7 +1759,7 @@ mod tests {
         let svc = &fx.svc;
         let root = svc.layout.project_dir.clone();
         source(svc, "One");
-        deploy(svc, "acme", &root, None, true).await.unwrap();
+        deploy(svc, "acme", true).await.unwrap();
         let acme = || async {
             let run = crate::extensions::run_lens(
                 &svc.sql,
@@ -1777,7 +1801,7 @@ mod tests {
         let svc = &fx.svc;
         let root = svc.layout.project_dir.clone();
         source(svc, "One");
-        deploy(svc, "acme", &root, None, true).await.unwrap();
+        deploy(svc, "acme", true).await.unwrap();
         let press = |action: &str| crate::lens_actions::LensActionCall {
             lens_id: "oxplow-foundation/extensions-list".into(),
             action_id: action.into(),
@@ -1824,7 +1848,7 @@ mod tests {
         assert_eq!(lens_title(svc), None);
         assert_eq!(acme(svc).unwrap().deployment, Deployment::Undeployed);
 
-        let deployed = deploy(svc, "acme", &root, Some(1), true).await.unwrap();
+        let deployed = deploy(svc, "acme", true).await.unwrap();
         assert!(!deployed.already);
         assert_eq!(lens_title(svc).as_deref(), Some("One"));
         assert_eq!(
@@ -1840,7 +1864,7 @@ mod tests {
         assert_eq!(rows(svc).await, [(deployed.hash.clone(), true)]);
         assert!(extension_store::deployment_dir(&root, "acme", &deployed.hash).is_dir());
 
-        let again = deploy(svc, "acme", &root, Some(1), true).await.unwrap();
+        let again = deploy(svc, "acme", true).await.unwrap();
         assert!(again.already);
         assert_eq!(again.hash, deployed.hash);
 
@@ -1851,7 +1875,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(lens_title(svc).as_deref(), Some("One"));
-        let second = deploy(svc, "acme", &root, Some(1), true).await.unwrap();
+        let second = deploy(svc, "acme", true).await.unwrap();
         assert_eq!(lens_title(svc).as_deref(), Some("Uno"));
         assert_eq!(
             rows(svc).await,
@@ -1876,7 +1900,7 @@ mod tests {
         let root = svc.layout.project_dir.clone();
         let dir = source(svc, "One");
         write(&dir, "extension.yaml", "manifest: 2\nname: acme\n");
-        let err = deploy(svc, "acme", &root, None, true).await.unwrap_err();
+        let err = deploy(svc, "acme", true).await.unwrap_err();
         assert!(err.to_string().contains("doesn't load"), "{err}");
         assert!(!oxplow_config::extension_settings(&root).is_enabled("acme"));
         assert!(rows(svc).await.is_empty());
@@ -1891,7 +1915,7 @@ mod tests {
         let svc = &fx.svc;
         let root = svc.layout.project_dir.clone();
         let dir = source(svc, "One");
-        let deployed = deploy(svc, "acme", &root, None, true).await.unwrap();
+        let deployed = deploy(svc, "acme", true).await.unwrap();
 
         set_enabled(svc, "acme", false, true).await.unwrap();
         assert_eq!(lens_title(svc), None);
@@ -1914,7 +1938,7 @@ mod tests {
         let svc = &fx.svc;
         let root = svc.layout.project_dir.clone();
         source(svc, "One");
-        deploy(svc, "acme", &root, None, true).await.unwrap();
+        deploy(svc, "acme", true).await.unwrap();
         let ignored = |rel: &str| {
             std::process::Command::new("git")
                 .args(["check-ignore", "-q", rel])
@@ -2007,9 +2031,7 @@ mod tests {
 
         // A deploy of the unchanged source is the one running; nothing
         // ships to roll back to.
-        let again = deploy(svc, "oxplow-foundation", &root, None, false)
-            .await
-            .unwrap();
+        let again = deploy(svc, "oxplow-foundation", false).await.unwrap();
         assert!(again.already);
         let e = rollback(svc, "oxplow-foundation", None, true)
             .await
@@ -2026,9 +2048,7 @@ mod tests {
             manifest.replacen("\ncommands:\n", "\ncommands:\n  - name: test.draft_again\n    summary: \"A second draft command.\"\n    scope: agent_input.write\n    op: draft\n", 1),
         )
         .unwrap();
-        let edited = deploy(svc, "oxplow-foundation", &root, None, false)
-            .await
-            .unwrap();
+        let edited = deploy(svc, "oxplow-foundation", false).await.unwrap();
         assert!(!edited.already);
         assert!(svc.commands.spec("oxplow.test.draft_again").is_some());
         rollback(svc, "oxplow-foundation", None, true)
@@ -2072,7 +2092,7 @@ mod tests {
         .unwrap();
         assert!(svc.commands.spec("oxplow.test.draft_again").is_none());
 
-        deploy(svc, name, &root, None, true).await.unwrap();
+        deploy(svc, name, true).await.unwrap();
         assert!(svc.commands.spec("oxplow.test.draft_again").is_some());
         // Its other commands are still there, with core's authority: a
         // person's config read runs.
@@ -2336,8 +2356,7 @@ mod tests {
                 .await
                 .unwrap();
         }
-        let root = svc.layout.project_dir.clone();
-        deploy(&svc, "acme", &root, None, true).await.unwrap();
+        deploy(&svc, "acme", true).await.unwrap();
         assert!(running(&svc, "acme").is_some());
     }
 
@@ -2590,10 +2609,9 @@ mod tests {
     async fn a_big_extension_deploys_with_a_warning() {
         let fx = crate::test_fixtures::services_with_effort().await;
         let svc = &fx.svc;
-        let root = svc.layout.project_dir.clone();
         let dir = source(svc, "One");
         std::fs::write(dir.join("data.bin"), vec![0u8; 26 * 1024 * 1024]).unwrap();
-        let deployed = deploy(svc, "acme", &root, None, true).await.unwrap();
+        let deployed = deploy(svc, "acme", true).await.unwrap();
         assert!(
             deployed
                 .warnings
@@ -2603,7 +2621,7 @@ mod tests {
             deployed.warnings
         );
         std::fs::remove_file(dir.join("data.bin")).unwrap();
-        let small = deploy(svc, "acme", &root, None, true).await.unwrap();
+        let small = deploy(svc, "acme", true).await.unwrap();
         assert!(
             !small.warnings.iter().any(|w| w.contains("MiB")),
             "{:?}",
@@ -2618,9 +2636,8 @@ mod tests {
     async fn a_deploy_returns_the_extension_s_warnings() {
         let fx = crate::test_fixtures::services_with_effort().await;
         let svc = &fx.svc;
-        let root = svc.layout.project_dir.clone();
         source(svc, "One");
-        let deployed = deploy(svc, "acme", &root, None, true).await.unwrap();
+        let deployed = deploy(svc, "acme", true).await.unwrap();
         assert!(
             deployed
                 .warnings
@@ -2637,9 +2654,8 @@ mod tests {
     async fn a_restart_keeps_what_was_deployed() {
         let fx = crate::test_fixtures::services_with_effort().await;
         let svc = &fx.svc;
-        let root = svc.layout.project_dir.clone();
         source(svc, "One");
-        deploy(svc, "acme", &root, None, true).await.unwrap();
+        deploy(svc, "acme", true).await.unwrap();
         source(svc, "Uno");
         svc.extension_catalog.set_live(Default::default());
         svc.extension_activation

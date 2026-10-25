@@ -2335,7 +2335,7 @@ async fn suite_host(
     )
     .await
     .map_err(|e| e.to_string())?;
-    oxplow_app::extension_deploy::deploy(&svc, &ext.name, tmp.path(), None, true)
+    oxplow_app::extension_deploy::deploy(&svc, &ext.name, true)
         .await
         .map_err(|e| e.to_string())?;
     let hosted = svc

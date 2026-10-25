@@ -1243,6 +1243,14 @@ source directly: an edit changes nothing until it is deployed.
   sources are ordinary repo files. A personal source outside every checkout
   (`~/oxplow-extensions/x`) is how an agent in any stream edits it: the write
   guard only blocks paths inside another stream's checkout.
+- **One deployable source.** The settings (which names are on, their
+  `extensionSources`) are always the primary checkout's. A source inside the
+  project is deployed only from the **primary** stream's checkout (the one
+  the project was opened from, whichever branch it is on), uncommitted
+  changes included. Another stream's checkout holds a **draft** of it: that
+  stream's agent edits, checks and tests it there, and it deploys once the
+  change reaches the primary's branch. A source outside the project has one
+  copy, so any stream deploys it (`extension_deploy::refuse_draft_deploy`).
 - **Deployment:** `.oxplow/runtime/extensions/<name>/<hash>/`, where
   `<hash>` is the hash of the source (`extension_store::source_hash`: sha256
   over each file's relative path and bytes, dot entries skipped, cut to 16
@@ -1325,18 +1333,20 @@ error, so a teammate's personal extension in the team list breaks nothing.
   lists it (`extensions::sources_on`) — what the author's sources would do.
   `extensions::load_extensions`.
 
-**Deploy** (`oxplow.extension.deploy { name, stream? }`, the agent's
+**Deploy** (`oxplow.extension.deploy { name }`, the agent's
 `run_command`; the CLI has no way to reach the running daemon yet, so it
-has no deploy; `extension_deploy::deploy`): source in the stream's checkout (the
-caller's when not named) → hash → already active is `already: true` →
+has no deploy; `extension_deploy::deploy`): a caller in a stream other than
+the primary is refused when the source lies inside the project
+(`refuse_draft_deploy`, naming the check and test tools and the branch it
+deploys from) → the source in the primary checkout → hash → already active is `already: true` →
 source load, whose errors refuse it → copy into the store and record the
 row → turn it on in the person's layer when nothing turns it on → stage the
 live set with it in (`ExtensionCatalog::stage_changes`, which every staging
 check's `snapshot()` then reads) and publish. An extension the staging holds
 back (it doesn't prepare) keeps its previous deployment and the deploy
 fails with its problems; a candidate overtaken by another change is staged
-again. The command returns once the deployment runs. Any stream may
-deploy; restart starts from the recorded live set. Nothing caps an
+again. The command returns once the deployment runs; restart starts from
+the recorded live set. Nothing caps an
 extension's size: a deployment over 25 MiB goes live with a warning in the
 result's `warnings` (every deployment copies the whole folder).
 `oxplow.extension.rollback { name, to? }` makes an earlier deployment
@@ -1456,8 +1466,8 @@ names no contract: it is for composing another extension's commands or
 reading its models without an export.
 
 **Keep This** (`oxplow.lens.keep`) writes the lens into the extension's
-source (`my-lenses` unless named; created when missing) in the stream's
-checkout and deploys it; it returns once the lens is live. A failed deploy
+source (`my-lenses` unless named; created when missing) in the primary
+checkout, whichever stream it names, and deploys it; it returns once the lens is live. A failed deploy
 takes the lens file back out.
 
 A malformed extension shows an error for that extension only; it never

@@ -23,7 +23,7 @@ read the columns, never guess) → write the files → `oxplow_validate_extensio
 after every edit → `oxplow_run_lens` → run `oxplow.extension.deploy { name }`
 when a step is complete (it replaces what runs, live; never ask for a
 restart) → tell the user the title and how to open it (Cmd+P).
-Pass your own `stream_id` when in a worktree stream. `check`,
+Deploys run the main stream's copy; a worktree's is a draft. `check`,
 `oxplow_preview_extension`, `oxplow_run_lens` and `oxplow_show_lens` with a
 `spec` read the source and dry-run, so no deploy is needed first.
 

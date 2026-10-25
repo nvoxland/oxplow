@@ -685,7 +685,7 @@ mod tests {
             .collect();
         names.sort();
         for name in names {
-            oxplow_app::extension_deploy::deploy(svc, &name, &root, None, true)
+            oxplow_app::extension_deploy::deploy(svc, &name, true)
                 .await
                 .unwrap_or_else(|e| panic!("deploy `{name}`: {e}"));
         }

@@ -62,8 +62,10 @@ or exact mechanics.
     `oxplow-extension` skill says — the same skill users' agents get. Its
     `references/development-cycle.md` is the loop: edit the source, check
     it, then `oxplow.extension.deploy { name }` replaces what runs in the
-    running app. Never restart oxplow for an extension change, and never
-    ask the person to.
+    running app. It deploys the main stream's copy, uncommitted changes
+    included (deploy for the person to look, commit when they're happy);
+    a worktree stream's copy is a draft that never deploys. Never restart
+    oxplow for an extension change, and never ask the person to.
   - **Core** (any Rust crate, `apps/desktop/src`): it runs only after the
     person quits oxplow and runs `bun run run:dev` (build, deploy, start):
     say so when you finish. That also deploys foundation when its source

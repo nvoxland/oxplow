@@ -235,7 +235,7 @@ async fn a_provider_launched_session_is_recorded_canonically() {
     assert_eq!(ext.errors, Vec::<String>::new());
     // Deployed (which turns it on, reloading the config), then its
     // instance enabled as a person would, then activated.
-    oxplow_app::extension_deploy::deploy(&svc, "relay", &root, None, true)
+    oxplow_app::extension_deploy::deploy(&svc, "relay", true)
         .await
         .expect("the extension deploys");
     svc.config.write().unwrap().extension_instances.insert(
