@@ -23,16 +23,16 @@ intent:
   origin: null
   examples:
     - name: an effort that claimed passing tests without a run
-      input: { lens: unverified-claims, params: { effort_id: 1 } }
+      input: { page: unverified-claims, params: { effort_id: 1 } }
       expect: the claim listed with no verifying test run
     - name: a stream with blocked tasks and open follow-ups
-      input: { lens: waiting-on-me, params: { stream_id: 1 } }
+      input: { page: waiting-on-me, params: { stream_id: 1 } }
       expect: the blocked tasks and open follow-up comments, and the Waiting panel's badge firing
     - name: an effort whose changed lines are under-covered
-      input: { lens: effort-tests, params: { effort_id: 1 } }
+      input: { page: effort-tests, params: { effort_id: 1 } }
       expect: the effort's test runs, its diff coverage and the uncovered changed lines
     - name: extension runs over the last week
-      input: { lens: runs, params: {} }
+      input: { page: runs, params: {} }
       expect: each extension's runs, failures, denials, mean CPU and model calls, the ones needing attention first
     - name: a metric pushed past its warn threshold during an effort
       input: { advisory: threshold-crossed, effort_id: 1 }

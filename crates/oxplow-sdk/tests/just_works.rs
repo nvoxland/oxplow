@@ -1017,10 +1017,10 @@ async fn a_scaffolded_panel_checks_tests_and_shows_its_lens() {
 }
 
 /// A bundled extension's examples run too, from the fixtures embedded with
-/// it: `extension test oxplow-bundled` runs the `runs` lens over a throwaway
+/// it: `extension test oxplow-bundled` runs the `runs` page over a throwaway
 /// oxplow and passes.
 #[tokio::test(flavor = "multi_thread")]
-async fn the_bundled_extensions_runs_lens_example_runs_and_passes() {
+async fn the_bundled_extensions_runs_page_example_runs_and_passes() {
     let dir = project().await;
     let report = test_extension(dir.path(), "oxplow-bundled", false)
         .await
