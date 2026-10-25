@@ -1,7 +1,8 @@
 /// The open dock panel: it rises from the bar over the page area (absolute,
 /// anchored above the bar, so the page does not reflow). A header with the
 /// title and ×, a drag handle on the top edge, Escape closes and returns
-/// focus to the panel's icon. Only the open panel's body is mounted.
+/// focus to the panel's icon. Opening a page from the panel closes it (the
+/// page would be behind it). Only the open panel's body is mounted.
 
 import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent, PointerEvent } from "react";
@@ -114,7 +115,14 @@ export function DockPanel({ streamId, onOpenPage }: { streamId: string | null; o
         </button>
       </div>
       <div data-testid={`dock-panel-${panel.id}`} style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
-        <Body streamId={streamId} onOpenPage={onOpenPage} />
+        <Body
+          streamId={streamId}
+          onOpenPage={(ref) => {
+            // A page opened from a panel would sit behind it.
+            dockStore.close();
+            onOpenPage(ref);
+          }}
+        />
       </div>
     </div>
   );

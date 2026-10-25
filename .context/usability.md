@@ -723,6 +723,9 @@ declaring *what it is* and mounting the generic layer.
 - A panel keeps its state in stores, not in the open body. Closing
   unmounts the body, and opening it again shows the same data.
 - Drag the top edge to resize. The height is remembered.
+- Opening a page from a panel (an "Open … page" link, a Review) closes
+  the panel: the page would be behind it. `DockPanel` does this for every
+  body through the `onOpenPage` it hands down.
 - A badge shows a count only. It does not replace the panel's own list.
 
 ## Keyboard

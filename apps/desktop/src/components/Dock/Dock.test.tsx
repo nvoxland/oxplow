@@ -41,13 +41,21 @@ test("the bell's icon opens the Alerts panel, and clicking it again closes it", 
   expect(view.queryByTestId("dock-panel")).toBeNull();
 });
 
-test("the panel offers Open Alerts page, and × closes it", () => {
+test("× closes the panel", () => {
+  const view = mount();
+  fireEvent.click(view.getByTestId("dock-alerts"));
+  fireEvent.click(view.getByTestId("dock-panel-close"));
+  expect(view.queryByTestId("dock-panel")).toBeNull();
+});
+
+// A page opened from a panel would sit behind it: opening one closes the
+// panel, so the page is what the person sees.
+test("opening a page from a panel closes the panel", () => {
   const opened: unknown[] = [];
   const view = mount((r) => opened.push(r));
   fireEvent.click(view.getByTestId("dock-alerts"));
   fireEvent.click(view.getByTestId("alerts-panel-open-page"));
   expect(opened).toEqual([alertsRef()]);
-  fireEvent.click(view.getByTestId("dock-panel-close"));
   expect(view.queryByTestId("dock-panel")).toBeNull();
 });
 
