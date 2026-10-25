@@ -27,6 +27,7 @@ command):
 | select a thread, switch stream, report the tabs a window shows | UI selection pointers, not project facts |
 | page visits, usage recording, forgetting a page | implicit navigation telemetry, not an intent: an audit row per tab switch would flood `command_audit`. Their views re-read `v_page_visit` / `v_usage_event` on `ModelsChanged` (P8.A10) |
 | background-task progress | in memory and transient |
+| the Assistant's prompt, stop, settings and card answers (`assistant_*`) | an in-memory conversation the person drives, gone on restart; what its tools change runs on the bus as the person (`via` the session) |
 | hook ingest, chat prompt / cancel / permission answers, terminal input | agent-session activity, born as `agent.*` events ([data-model.md](./data-model.md) "event_log"); oxplow never synthesizes agent input |
 | terminal / chat session open and close, LSP restart and requests | process control and protocol passthrough: an agent session's *process*. Its slot — opening, renaming, closing an `agent_session` — is a command (`oxplow.agent_session.*`), and closing it stops the process |
 | the left-nav panel layout (`set_panel_layout`) | a UI layout pointer, like the selection pointers |

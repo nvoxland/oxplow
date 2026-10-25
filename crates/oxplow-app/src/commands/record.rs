@@ -49,6 +49,7 @@ impl CommandBus {
             inverse: None,
             scopes: Default::default(),
             run_id: Some(run.run().to_string()),
+            via: run.via().map(str::to_string),
         };
         // An extension's run that was refused or failed is its run's end.
         let ended = match outcome {
@@ -290,6 +291,7 @@ pub(super) fn record_tx(
             inverse: inverse.clone(),
             scopes,
             run_id: Some(run.run().to_string()),
+            via: run.via().map(str::to_string),
         },
     )?;
     // An extension's run (its command's, a policy's call) ends with it.

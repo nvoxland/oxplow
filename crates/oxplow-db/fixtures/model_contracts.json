@@ -18151,6 +18151,63 @@
       "key": [
         "id"
       ]
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Audit row id, in run order."
+        },
+        {
+          "name": "at",
+          "type": "TEXT",
+          "doc": "When it ran (RFC 3339)."
+        },
+        {
+          "name": "command",
+          "type": "TEXT",
+          "doc": "The command id (`oxplow.work_item.create`)."
+        },
+        {
+          "name": "actor_kind",
+          "type": "TEXT",
+          "doc": "Who ran it: `human`, `agent`, `lens`, `system`, `effect` or `job`."
+        },
+        {
+          "name": "actor_id",
+          "type": "TEXT",
+          "doc": "The actor, by kind: an agent's thread (`thr3`), a lens's or effect's id; NULL for a person or the system."
+        },
+        {
+          "name": "outcome",
+          "type": "TEXT",
+          "doc": "`ok`; `invalid` (its input was refused); `denied` (the actor may not run it); `error` (it ran and failed)."
+        },
+        {
+          "name": "error",
+          "type": "TEXT",
+          "doc": "What went wrong, for an outcome other than `ok`."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "The thread it ran on, if any (v_thread.id)."
+        },
+        {
+          "name": "session_id",
+          "type": "INTEGER",
+          "doc": "The agent session that ran it, if any (v_agent_session.id)."
+        },
+        {
+          "name": "via",
+          "type": "TEXT",
+          "doc": "What the actor ran it through, when not directly: `assistant:ast3` for a command the Assistant ran for the person, which they approved. Assistant sessions live in memory, so an id may repeat after a restart. NULL otherwise. (v2)"
+        }
+      ],
+      "key": [
+        "id"
+      ]
     }
   },
   "lens": {

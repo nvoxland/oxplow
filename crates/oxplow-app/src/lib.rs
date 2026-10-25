@@ -20,6 +20,7 @@ pub mod ai_calls;
 pub mod ai_compute;
 pub mod ai_service;
 pub mod assets;
+pub mod assistant;
 pub mod attribution;
 pub mod background_task;
 pub mod blob_store;
@@ -740,6 +741,8 @@ pub struct Services {
     /// Open ACP agent sessions (tsk281). Sessions get a
     /// `chat::host::ServicesChatHost` holding `Services` weakly.
     pub chat: Arc<chat::manager::ChatManager>,
+    /// The Assistant's sessions, in memory (`assistant`).
+    pub assistant: Arc<assistant::AssistantManager>,
     pub lsp_installer: lsp_installer::LspInstallerService,
     pub terminal_sessions: terminal_sessions::TerminalSessionRegistry,
     /// Shared per-thread PTY liveness, written by the terminal forwarder
@@ -2001,6 +2004,7 @@ impl Services {
             agent_context: Arc::new(agent_context::AgentContext::default()),
             context_changes,
             chat,
+            assistant: Arc::new(assistant::AssistantManager::new()),
             lsp_installer: lsp_installer_svc,
             terminal_sessions,
             output_activity,

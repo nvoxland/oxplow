@@ -50,8 +50,8 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(st["providers"], json!([]));
-        // The three built-ins, then oxplow-bundled's `decisions` profile.
-        assert_eq!(st["roles"].as_array().unwrap().len(), 4);
+        // The four built-ins, then oxplow-bundled's `decisions` profile.
+        assert_eq!(st["roles"].as_array().unwrap().len(), 5);
     }
 
     #[tokio::test]

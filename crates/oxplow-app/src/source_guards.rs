@@ -158,6 +158,8 @@ fn emitters() -> BTreeSet<(String, String)> {
 #[rustfmt::skip]
 const EMITTERS: &[(&str, &str)] = &[
     ("AgentStatusChanged", "crates/oxplow-app/src/agent_stall_watch.rs"),
+    // An Assistant session lives in memory: no model to re-read.
+    ("AssistantChanged", "crates/oxplow-app/src/assistant/session.rs"),
     ("AgentStatusChanged", "crates/oxplow-app/src/hook_ingest.rs"),
     ("BackgroundTasksChanged", "crates/oxplow-app/src/lib.rs"),
     // A call to the window (`client_host.rs`): not a change to re-read but

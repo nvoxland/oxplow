@@ -1530,7 +1530,7 @@
     - { not_null: capability }
     - { not_null: provider }
 - name: command_audit
-  version: 1
+  version: 2
   key: [id]
   description: "Every command run on the bus, as audited: who ran it, how it ended, and the error when it didn't. The record of how agents, people, lenses and effects use oxplow's commands — count them by `command`, `actor_kind` and `outcome`. A run refused before it started (`invalid`: its input didn't match the command's schema; `denied`: the actor may not run it) is a row too."
   columns:
@@ -1543,6 +1543,7 @@
     - { name: "error", type: "TEXT", doc: "What went wrong, for an outcome other than `ok`." }
     - { name: "thread_id", type: "INTEGER", doc: "The thread it ran on, if any (v_thread.id)." }
     - { name: "session_id", type: "INTEGER", doc: "The agent session that ran it, if any (v_agent_session.id)." }
+    - { name: "via", type: "TEXT", doc: "What the actor ran it through, when not directly: `assistant:ast3` for a command the Assistant ran for the person, which they approved. Assistant sessions live in memory, so an id may repeat after a restart. NULL otherwise. (v2)" }
   tests:
     - { accepted_values: { column: outcome, values: [ok, invalid, denied, error] } }
     - { accepted_values: { column: actor_kind, values: [human, agent, lens, component, system, effect, job] } }

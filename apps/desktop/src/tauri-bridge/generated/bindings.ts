@@ -291,6 +291,50 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
+	assistantOpen: (stream: StreamId, thread: string | null, context: 
+/**  A page, by its URI. */
+{ kind: "page"; uri: string; label: string | null } | 
+/**  Selected text, and where it came from when known. */
+{ kind: "selection"; uri: string | null; text: string; label: string | null } | null) => typedError<AssistantOpened, IpcError_Serialize>(__TAURI_INVOKE("assistant_open", { stream, thread, context })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	assistantPrompt: (id: string, text: string) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("assistant_prompt", { id, text })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	assistantCancel: (id: string) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("assistant_cancel", { id })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	assistantSet: (id: string, model: RoleDefault | AssistantModel | null, allowChanges: boolean | null) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("assistant_set", { id, model, allowChanges })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	assistantAnswer: (id: string, ask: string, allow: boolean) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("assistant_answer", { id, ask, allow })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	assistantSnapshot: (id: string, since: number) => typedError<AssistantSnapshot, IpcError_Serialize>(__TAURI_INVOKE("assistant_snapshot", { id, since })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	assistantHandoff: (id: string, toThread: string) => typedError<unknown, IpcError_Serialize>(__TAURI_INVOKE("assistant_handoff", { id, toThread })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	assistantClose: (id: string) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("assistant_close", { id })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	listThreadNotes: (threadId: ThreadId) => typedError<ThreadNote[], IpcError_Serialize>(__TAURI_INVOKE("list_thread_notes", { threadId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -936,6 +980,67 @@ export type AppVersion = {
 	version: string,
 };
 
+/**  What the Assistant was opened on: a page, or a selection of text. */
+export type AssistantContext = 
+/**  A page, by its URI. */
+{ kind: "page"; uri: string; label: string | null } | 
+/**  Selected text, and where it came from when known. */
+{ kind: "selection"; uri: string | null; text: string; label: string | null };
+
+/**  A provider's model. */
+export type AssistantModel = {
+	provider: string,
+	model: string,
+};
+
+/**
+ *  `assistant_set`'s `model` on the wire: a model, or `"default"` (back to
+ *  the `assistant` role's binding). `api.ts`'s `assistantSet` sends
+ *  `"default"` for its `model: null`.
+ */
+export type AssistantModelChoice = RoleDefault | AssistantModel;
+
+/**  A model the person may pick, as the picker shows it. */
+export type AssistantModelOption = {
+	provider: string,
+	model: string,
+	label: string,
+};
+
+/**  What `assistant_open` answers. */
+export type AssistantOpened = {
+	id: string,
+};
+
+export type AssistantProblem = {
+	kind: AssistantProblemKind,
+	message: string,
+};
+
+/**  Why the Assistant can't answer now. */
+export type AssistantProblemKind = 
+/**  No model is bound to the `assistant` role or to Main. */
+"no_model" | 
+/**  The model couldn't be used (its key, its provider, a restriction). */
+"model";
+
+/**  A session as the panel reads it: the items changed after `since`. */
+export type AssistantSnapshot = {
+	status: AssistantStatus,
+	/**  Items created or changed after `since`, oldest first; upsert by `id`. */
+	items: TranscriptItem[],
+	/**  The highest `seq` so far: ask `since` it next time. */
+	seq: number,
+	/**  The model a prompt runs on: the person's pick, else the role's. */
+	model: AssistantModel | null,
+	models: AssistantModelOption[],
+	allowChanges: boolean,
+	problem: AssistantProblem | null,
+};
+
+/**  Whether a turn is running. */
+export type AssistantStatus = "idle" | "running";
+
 /**
  *  Whether the handler runs inside the bus's transaction (with the audit
  *  row and `command.executed`), or outside it, against a system the bus
@@ -1103,7 +1208,7 @@ export type Build_Serialize = {
  *  The jobs oxplow itself gives models. Every extension can name them,
  *  and each extension AI profile falls back to one.
  */
-export type BuiltinRole = "main" | "summarize" | "decide";
+export type BuiltinRole = "main" | "summarize" | "decide" | "assistant";
 
 /**  A size in bytes (the blob store's total, say). */
 export type ByteSize = number;
@@ -3286,6 +3391,21 @@ export type IpcError_Serialize = {
 	details?: string[],
 };
 
+export type ItemBody = 
+/**
+ *  What the human sent. `context` is the oxplow block attached to it,
+ *  shown behind a disclosure.
+ */
+{ type: "user"; text: string; context: string | null } | { type: "agent"; text: string } | { type: "thought"; text: string } | { type: "tool"; call: ToolCall } | { type: "plan"; entries: PlanEntry[] } | 
+/**  A permission request waiting on (or answered by) the human. */
+{ type: "permission"; requestId: string; toolCallId: string; title: string; options: PermissionOption[]; answer: PermissionAnswer | null } | 
+/**  oxplow's policy rejected the call without asking the human. */
+{ type: "policy_denied"; toolCallId: string; label: string; reason: string } | 
+/**  A write the policy would deny ran without asking first. */
+{ type: "bypass"; toolCallId: string; label: string; reason: string } | 
+/**  Something failed: the prompt, the agent process, the protocol. */
+{ type: "error"; message: string };
+
 /**  A host-recognized operation owned by one extension contribution. */
 export type JobDecl = {
 	id: string,
@@ -5237,6 +5357,12 @@ detail: string | null } |
  */
 { kind: "snapshotTaken"; streamId: StreamId; snapshotId: number; fileCount: number; trigger: SnapshotTrigger; threadId: ThreadId | null; turnId: number | null; effortId: EffortId | null } | 
 /**
+ *  An Assistant session changed (`assistant/`): its transcript, its
+ *  status or its settings. The panel asks `assistant_snapshot { id,
+ *  since }` for what changed. In memory only: no model holds it.
+ */
+{ kind: "assistantChanged"; id: string; seq: number } | 
+/**
  *  Published models (views) changed: a commit touched a table one of
  *  them reads, directly or through other models (P4.6). A lens re-runs
  *  when a model it read is listed.
@@ -5434,6 +5560,17 @@ export type ParamType =
  */
 "search";
 
+/**  How a permission request was answered. */
+export type PermissionAnswer = { type: "selected"; optionId: string } | { type: "cancelled" };
+
+export type PermissionKind = "allow_once" | "allow_always" | "reject_once" | "reject_always";
+
+export type PermissionOption = {
+	id: string,
+	name: string,
+	kind: PermissionKind,
+};
+
 /**
  *  What an extension may do beyond the baseline. Absent fields grant
  *  nothing.
@@ -5505,6 +5642,13 @@ export type PersonalExtensions = {
 	/**  Turned off for this person, whoever listed them. */
 	disable: string[],
 };
+
+export type PlanEntry = {
+	content: string,
+	status: PlanStatus,
+};
+
+export type PlanStatus = "pending" | "in_progress" | "completed";
 
 /**  A `command_proposal` row: an agent's run waiting on a person. */
 export type ProposalId = number;
@@ -5781,6 +5925,9 @@ export type RoleBinding = {
 	 */
 	restrict?: AiRestriction[],
 };
+
+/**  The `"default"` of [`AssistantModelChoice`]. */
+export type RoleDefault = "default";
 
 export type RoleStatus = {
 	role: string,
@@ -6341,6 +6488,32 @@ export type TileSize = "small" | "wide" | "tall" | "full";
 export type Timestamp = string;
 
 /**
+ *  A tool call as last reported: the initial `tool_call` with every
+ *  `tool_call_update` for its id applied.
+ */
+export type ToolCall = {
+	id: string,
+	title: string,
+	/**  The agent's programmatic tool name, when it sends one. */
+	name: string | null,
+	kind: ToolKind,
+	status: ToolStatus,
+	/**  Paths from `locations` (absolute, per the protocol). */
+	locations: string[],
+	/**  The agent's own JSON for the call; `unknown` to the renderer. */
+	rawInput: unknown | null,
+	rawOutput: unknown | null,
+	diffs: ToolDiff[],
+	/**  Text content blocks (command output, messages). */
+	text: string[],
+	/**
+	 *  The audit row of the command run it made, when it was one that is
+	 *  audited (the Assistant's write tools): what Undo undoes.
+	 */
+	auditId: number | null,
+};
+
+/**
  *  What the agent policy decided about a tool call (PreToolUse), carried
  *  on the envelope so the log records it.
  */
@@ -6348,6 +6521,25 @@ export type ToolDecision = {
 	allowed: boolean,
 	reason: string | null,
 };
+
+/**  One file change a tool call reports. `old_text: None` means a new file. */
+export type ToolDiff = {
+	path: string,
+	oldText: string | null,
+	newText: string,
+};
+
+/**  The tool categories a connection maps its agent's tools onto. */
+export type ToolKind = "read" | "edit" | "delete" | "move" | "search" | "execute" | "think" | "fetch" | "switch_mode" | 
+/**  The agent drives a child agent (Codex's collab tools). */
+"subagent" | "other";
+
+export type ToolStatus = "pending" | "in_progress" | "completed" | "failed";
+
+export type TranscriptItem = {
+	id: number,
+	seq: number,
+} & ItemBody;
 
 /**  When a collector runs by itself. */
 export type Trigger = 

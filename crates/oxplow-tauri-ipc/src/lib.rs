@@ -148,6 +148,15 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::ensure_change,
             commands::generated::ai_settings,
             commands::generated::read_ai_call,
+            // the Assistant's panel
+            commands::generated::assistant_open,
+            commands::generated::assistant_prompt,
+            commands::generated::assistant_cancel,
+            commands::generated::assistant_set,
+            commands::generated::assistant_answer,
+            commands::generated::assistant_snapshot,
+            commands::generated::assistant_handoff,
+            commands::generated::assistant_close,
             // notes (task / thread)
             commands::generated::list_thread_notes,
             // comments

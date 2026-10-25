@@ -232,6 +232,10 @@ pub struct RunContext {
     authority_guard: Option<AuthorityGuard>,
     host_generation: Option<HostGenerationPin>,
     decided: Arc<std::sync::Mutex<Vec<crate::grant::Decided>>>,
+    /// What the actor acts through, when not directly: the Assistant
+    /// session running a command for a person (`assistant:ast3`). Its
+    /// audit rows say so (`command_audit.via`).
+    via: Option<String>,
 }
 
 impl RunContext {
@@ -255,6 +259,7 @@ impl RunContext {
             authority_guard: None,
             host_generation: None,
             decided: Arc::default(),
+            via: None,
         }
     }
 
@@ -311,6 +316,18 @@ impl RunContext {
             ..anchors
         };
         self
+    }
+
+    /// Acting through `via` (`assistant:ast3`): the actor's own run, made
+    /// for them by something they direct.
+    pub fn acting_through(mut self, via: impl Into<String>) -> Self {
+        self.via = Some(via.into());
+        self
+    }
+
+    /// What the actor acts through, when not directly.
+    pub fn via(&self) -> Option<&str> {
+        self.via.as_deref()
     }
 
     /// What it's about.
@@ -472,6 +489,7 @@ impl RunContext {
             authority_guard: self.authority_guard.clone(),
             host_generation: self.host_generation.clone(),
             decided,
+            via: self.via.clone(),
         }
     }
 

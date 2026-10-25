@@ -103,6 +103,14 @@ pub enum OxplowEvent {
         turn_id: Option<i64>,
         effort_id: Option<oxplow_domain::EffortId>,
     },
+    /// An Assistant session changed (`assistant/`): its transcript, its
+    /// status or its settings. The panel asks `assistant_snapshot { id,
+    /// since }` for what changed. In memory only: no model holds it.
+    AssistantChanged {
+        id: String,
+        #[specta(type = oxplow_domain::JsNumber)]
+        seq: u64,
+    },
     /// Published models (views) changed: a commit touched a table one of
     /// them reads, directly or through other models (P4.6). A lens re-runs
     /// when a model it read is listed.
