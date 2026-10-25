@@ -87,7 +87,7 @@ test("TODOs are sorted by the model, and a decision from the board or the lens s
     // The model: a TypeSafe provider at the stand-in for Jev.
     await run(daemon, "oxplow.ai.set_provider", { id: "sorter", kind: "typesafe", base_url: model.url });
     await run(daemon, "oxplow.ai.set_role", { role: "decide", provider: "sorter", model: "jev" });
-    await until("the todos collector to be listed", 60_000, async () => {
+    await until("the todos collector to be listed", 20_000, async () => {
       const collectors = await ipc<{ rows: unknown[][] }>(daemon, "query_sql", {
         sql: "SELECT 1 FROM v_collector WHERE extension = 'triage' AND id = 'todos'",
       });
@@ -99,8 +99,13 @@ test("TODOs are sorted by the model, and a decision from the board or the lens s
       join(daemon.project, "src", "lib.rs"),
       "// TODO: fix the bug in the parser\nfn a() {}\n// TODO: tidy the module\nfn b() {}\n",
     );
-    await run(daemon, "oxplow.collector.sync", { collector: "triage/todos" });
-    await until("the TODOs to be sorted", 60_000, async () => (await facts(daemon)).length === 2);
+    // A collector reads the stream's latest snapshot, and a file written now
+    // reaches one only when the watcher's quiet trigger takes it (seconds
+    // later, and later still under load). Take one here instead of waiting:
+    // the rebuild takes a snapshot of the tree as it is and runs the
+    // collectors over it.
+    await run(daemon, "oxplow.metric.rebuild", {});
+    await until("the TODOs to be sorted", 30_000, async () => (await facts(daemon)).length === 2);
     expect(await facts(daemon)).toEqual([
       ["src/lib.rs", 1, "bug"],
       ["src/lib.rs", 3, "cleanup"],
