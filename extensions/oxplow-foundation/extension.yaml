@@ -978,6 +978,11 @@ commands:
     scope: extensions.deploy
     op: deploy
     example: {"name": "my-extension"}
+  - name: extension.write_page
+    summary: "Write a page file into an extension's source. The `spec` is the page's YAML text; it must parse as a page or nothing is written. Creates the extension when it is missing and replaces the page when it exists. With `deploy: true` it then deploys. Refused for a bundled extension, and from another stream when the source is inside the project. Returns `{ page, path, deployed }`."
+    scope: pages.author
+    op: write_page
+    example: {"extension": "my-pages", "page": "overview", "spec": "title: Overview\ndata:\n  a: { sql: \"SELECT 1 AS n\" }\nview: { viz: table, from: a }\n", "deploy": true}
   - name: extension.rollback
     summary: "Make an earlier deployment of an extension the one oxplow runs: `to` (a hash or its start, from `v_extension_deployment`), else the one before the active one. A bundled extension with nothing older returns to the deployment that ships with oxplow. Rolling back to one with more `permissions:` than what runs asks a person first, as a deploy does."
     scope: extensions.deploy

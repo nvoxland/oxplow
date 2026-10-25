@@ -1924,8 +1924,8 @@ job and component forms are in "The SDK"):
   ids are in the run's tree (`<embed>/<id>` inside an embed). A loader that
   fails is a finding naming it. After the examples every page's `answers:`
   entry runs (`ran: answers`): the page opens with its params and no loader
-  fails, else the finding names the page file and the question. (A `text`
-  expectation waits on `page_text` reaching the SDK.)
+  fails, else the finding names the page file and the question. `expect.text`
+  is `{ contains: [..] }` or the exact text, against `page_text`.
 - `input: { lens: <slug>, params? }`, `expect: { columns?, rows: n |
   $any }` — the lens runs; its row count (and columns, when expected)
   must match;

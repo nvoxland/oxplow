@@ -235,6 +235,108 @@ pub async fn source_diff(
     })
 }
 
+/// What writing a page did.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PageWritten {
+    /// `<extension>/<slug>`.
+    pub page: String,
+    /// The file, relative to the project when inside it.
+    pub path: String,
+    /// The deploy that followed, when asked for.
+    pub deployed: Option<Deployed>,
+}
+
+/// Write `spec` (a page's YAML text) as `pages/<page>.yaml` in `extension`'s
+/// source in the primary checkout, creating the extension (a scaffolded
+/// manifest) when it is missing and replacing the page when it is there.
+/// The text must parse as a page and the extension must still load with
+/// it; otherwise nothing stays written. With `deploy_now` it then deploys.
+pub async fn write_page(
+    svc: &Arc<Services>,
+    extension: &str,
+    page: &str,
+    spec: &str,
+    deploy_now: bool,
+    confirmed: bool,
+) -> Result<PageWritten, DeployError> {
+    let project = svc.layout.project_dir.clone();
+    let dir = crate::extensions::writable_extension_dir(&project, &project, extension)?;
+    if !crate::extensions::is_valid_name(page) {
+        return Err(invalid(format!(
+            "page `{page}` must start with a letter and be lowercase letters, digits and single dashes"
+        ))
+        .into());
+    }
+    let file = dir.join("pages").join(format!("{page}.yaml"));
+    let shown = crate::extensions::shown(&project, &file);
+    crate::pages::schema::parse_page(extension, &extension.replace('-', "_"), page, &shown, spec)
+        .map_err(|e| invalid(format!("page `{extension}/{page}` doesn't parse: {e}")))?;
+    let manifest = dir.join("extension.yaml");
+    let made_manifest = !manifest.exists();
+    let before = std::fs::read_to_string(&file).ok();
+    let (name, slug, text) = (extension.to_string(), page.to_string(), spec.to_string());
+    let (dir_, file_, manifest_) = (dir.clone(), file.clone(), manifest.clone());
+    let loaded = tokio::task::spawn_blocking(move || -> std::io::Result<_> {
+        std::fs::create_dir_all(file_.parent().unwrap_or(&dir_))?;
+        if made_manifest {
+            std::fs::write(
+                &manifest_,
+                crate::extensions::scaffold_manifest(&crate::extensions::ManifestScaffold {
+                    name: &name,
+                    description: "Pages written from the app",
+                    purpose: "Pages saved from answers and dashboards",
+                    origin: None,
+                    example_name: &slug,
+                    example_input: &format!("{{ page: {slug} }}"),
+                    example_expect: "the page opens",
+                }),
+            )?;
+        }
+        std::fs::write(&file_, &text)?;
+        Ok(crate::extensions::load_extension_at(&dir_, &name))
+    })
+    .await
+    .map_err(storage)?
+    .map_err(|e| storage(format!("write page: {e}")))?;
+    if !loaded.page_files.iter().any(|p| p.slug == page) {
+        match before {
+            Some(old) => {
+                let _ = std::fs::write(&file, old);
+            }
+            None => {
+                let _ = std::fs::remove_file(&file);
+                if made_manifest {
+                    let _ = std::fs::remove_file(&manifest);
+                }
+            }
+        }
+        let why: Vec<String> = loaded
+            .errors
+            .into_iter()
+            .filter(|e| e.contains(&format!("{page}.yaml")))
+            .collect();
+        return Err(invalid(format!(
+            "the page `{extension}/{page}` doesn't load: {}",
+            if why.is_empty() {
+                "no reason given".to_string()
+            } else {
+                why.join("; ")
+            }
+        ))
+        .into());
+    }
+    let deployed = if deploy_now {
+        Some(deploy(svc, extension, confirmed).await?)
+    } else {
+        None
+    };
+    Ok(PageWritten {
+        page: format!("{extension}/{page}"),
+        path: shown,
+        deployed,
+    })
+}
+
 /// An extension this big says so when it deploys: each deployment is a
 /// whole copy of its folder.
 const BIG_DEPLOYMENT: u64 = 25 * 1024 * 1024;
@@ -1374,6 +1476,8 @@ pub(crate) async fn stage_sources(svc: &Arc<Services>) -> LiveChanges {
 mod tests {
     use super::*;
     use crate::extensions::Deployment;
+    use oxplow_domain::Actor;
+    use serde_json::json;
 
     fn write(dir: &Path, rel: &str, text: &str) {
         let path = dir.join(rel);
@@ -1629,6 +1733,109 @@ mod tests {
             "{:?}",
             second.warnings
         );
+    }
+
+    const PAGE_SPEC: &str =
+        "title: Overview\ndata:\n  a: { sql: \"SELECT 1 AS n\" }\nview: { viz: table, from: a }\n";
+
+    /// A page written into a new extension scaffolds its manifest, loads,
+    /// and is deployed when asked.
+    #[tokio::test]
+    async fn write_page_creates_the_extension_and_deploys_when_asked() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        let written = write_page(svc, "my-pages", "overview", PAGE_SPEC, true, true)
+            .await
+            .unwrap();
+        assert_eq!(written.page, "my-pages/overview");
+        assert!(written.deployed.is_some());
+        let dir = svc.layout.project_dir.join(".oxplow/extensions/my-pages");
+        assert!(dir.join("extension.yaml").is_file());
+        assert_eq!(
+            std::fs::read_to_string(dir.join("pages/overview.yaml")).unwrap(),
+            PAGE_SPEC
+        );
+        let ext = running(svc, "my-pages").expect("it runs");
+        assert_eq!(ext.page_files.len(), 1);
+        // Replacing it keeps one file, and without `deploy` nothing deploys.
+        let again = write_page(svc, "my-pages", "overview", PAGE_SPEC, false, true)
+            .await
+            .unwrap();
+        assert!(again.deployed.is_none());
+    }
+
+    /// A spec that doesn't parse is refused and nothing is written.
+    #[tokio::test]
+    async fn write_page_refuses_a_spec_that_does_not_parse() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        let err = write_page(
+            svc,
+            "my-pages",
+            "bad",
+            "title: T\nnot_a_key: 1\n",
+            false,
+            true,
+        )
+        .await
+        .unwrap_err();
+        assert!(err.to_string().contains("doesn't parse"), "{err}");
+        assert!(!svc
+            .layout
+            .project_dir
+            .join(".oxplow/extensions/my-pages")
+            .exists());
+    }
+
+    /// A bundled extension is never written to.
+    #[tokio::test]
+    async fn write_page_refuses_a_bundled_extension() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let err = write_page(&fx.svc, "oxplow-bundled", "x", PAGE_SPEC, false, true)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("bundled"), "{err}");
+    }
+
+    /// An agent in a worktree stream may not write into an in-project
+    /// source; the primary's caller may.
+    #[tokio::test]
+    async fn write_page_is_refused_from_a_worktree_stream() {
+        use oxplow_domain::stores::StreamStore as _;
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        let mut other = svc.stream_store.list().await.unwrap().pop().unwrap();
+        other.id = oxplow_domain::StreamId::placeholder();
+        other.title = "other".into();
+        other.branch = "other".into();
+        other.kind = oxplow_domain::StreamKind::Worktree;
+        other.worktree_path = tempfile::tempdir()
+            .unwrap()
+            .keep()
+            .to_string_lossy()
+            .into_owned();
+        let other_id = svc.stream_store.upsert(&other).await.unwrap();
+        let agent = Actor::Agent {
+            session_id: None,
+            thread_id: Some(fx.thread),
+            stream_id: Some(other_id),
+        };
+        let input = json!({ "extension": "my-pages", "page": "overview", "spec": PAGE_SPEC });
+        let err = svc
+            .commands
+            .run(&agent, "oxplow.extension.write_page", input.clone(), false)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("main stream"), "{err}");
+        assert!(!svc
+            .layout
+            .project_dir
+            .join(".oxplow/extensions/my-pages")
+            .exists());
+        svc.commands
+            .run(&Actor::Human, "oxplow.extension.write_page", input, false)
+            .await
+            .unwrap();
     }
 
     /// A source outside the project has no commit to record.

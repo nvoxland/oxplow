@@ -1319,6 +1319,42 @@ async fn page_example(
             }
         }
     }
+    if let Some(want) = ex.expect.get("text") {
+        match oxplow_app::pages::text::page_text(
+            &host.svc,
+            &host.root,
+            &run,
+            &oxplow_app::extensions::LensContext::default(),
+        )
+        .await
+        {
+            Err(e) => report.errors.push(format!(
+                "{shown}:1: page `{page}` has no text: {e} — fix: the page"
+            )),
+            Ok(text) => {
+                let missing: Vec<&str> = want
+                    .get("contains")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .filter(|needle| !text.contains(*needle))
+                    .collect();
+                if matches!(want, Value::String(exact) if *exact != text) {
+                    report.errors.push(format!(
+                        "{shown}:1: page `{page}`'s text is {text:?}, the example expects {want} — \
+                         fix: the page, or `expect.text` (`{{ contains: [..] }}` or the exact text)"
+                    ));
+                }
+                for needle in missing {
+                    report.errors.push(format!(
+                        "{shown}:1: page `{page}`'s text doesn't contain {needle:?} — fix: the \
+                         page, or `expect.text.contains`; the text is:\n{text}"
+                    ));
+                }
+            }
+        }
+    }
     if let Some(nodes) = ex.expect.get("nodes").and_then(Value::as_array) {
         let present = run_nodes(&run);
         for want in nodes {
@@ -3812,6 +3848,43 @@ expect: {expect}
             .join("\n");
         assert!(
             errors.contains("pages/items.yaml:1: the answer to \"What is open?\" doesn't run"),
+            "{errors}"
+        );
+    }
+
+    /// `expect.text` checks a page's text: `contains` and the exact form.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn extension_test_checks_a_pages_text() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        pager(
+            root,
+            LIST,
+            "{}",
+            "{ text: { contains: [Items, Write the page test] } }",
+        );
+        let report = test_extension(root, "pager", false).await.unwrap();
+        assert_eq!(report.errors, Vec::<String>::new());
+
+        pager(root, LIST, "{}", "{ text: { contains: [Nowhere] } }");
+        let errors = test_extension(root, "pager", false)
+            .await
+            .unwrap()
+            .errors
+            .join("\n");
+        assert!(
+            errors.contains("text doesn't contain \"Nowhere\""),
+            "{errors}"
+        );
+
+        pager(root, LIST, "{}", "{ text: nothing like it }");
+        let errors = test_extension(root, "pager", false)
+            .await
+            .unwrap()
+            .errors
+            .join("\n");
+        assert!(
+            errors.contains("the example expects \"nothing like it\""),
             "{errors}"
         );
     }

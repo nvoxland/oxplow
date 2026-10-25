@@ -2351,6 +2351,7 @@ mod tests {
                 "oxplow.extension.share",
                 "oxplow.extension.unshare",
                 "oxplow.extension.validate",
+                "oxplow.extension.write_page",
                 "oxplow.file.create",
                 "oxplow.file.create_directory",
                 "oxplow.file.delete",

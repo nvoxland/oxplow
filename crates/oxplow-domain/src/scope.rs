@@ -397,6 +397,13 @@ pub const SCOPES: &[Scope] = &[
         summary: "Enable, record and rebuild metrics (changes the configuration and the facts).",
     },
     Scope {
+        id: "pages.author",
+        access: Access::Write,
+        host: Host::Daemon,
+        spends: false,
+        summary: "Write a page file into an extension's source.",
+    },
+    Scope {
         id: "pages.read",
         access: Access::Read,
         host: Host::Daemon,
