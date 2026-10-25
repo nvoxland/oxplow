@@ -1,0 +1,102 @@
+title: Agent Session
+description: An agent's session — its terminal, and what it asked for that waits on you. Rename it, move it to another of its saved conversations or fork one, or stop and start it.
+label: '{{row.display_name}}'
+for: oxplow/agent_session
+default: true
+pinned: true
+params:
+- name: uri
+- name: stopped
+- name: conversation
+data:
+  row:
+    sql: |
+      SELECT s.uri, 'ses' || s.id AS session, s.display_name, s.title, th.uri AS thread,
+             s.stopped_by_user_at IS NOT NULL AS stopped,
+             s.stopped_by_user_at IS NULL AS running,
+             coalesce(s.resume_session_id, '') || ':' || coalesce(s.fork_next, 0) AS conversation,
+             coalesce(json_extract(p.features, '$.conversation_list'), 0) = 1 AS can_choose,
+             coalesce(json_extract(p.features, '$.conversation_fork'), 0) = 1 AS can_fork
+      FROM v_agent_session s
+      JOIN v_thread th ON th.id = s.thread_id
+      LEFT JOIN v_capability_provider p ON p.capability = 'agent_harness' AND p.provider = s.harness
+      WHERE s.uri = :uri
+    columns:
+    - key: display_name
+    - key: uri
+    - key: thread
+  agent_session_waiting:
+    sql: |
+      SELECT :thread AS thread
+    params:
+      thread:
+        from: row.thread
+  agent_session_terminal:
+    sql: |
+      SELECT :uri AS uri, :thread AS thread, :stopped AS stopped, :conversation AS conversation
+    params:
+      thread:
+        from: row.thread
+view:
+  stack:
+  - id: agent-session-waiting
+    title: ''
+    from: agent_session_waiting
+    viz: approvals
+  - id: agent-session-terminal
+    title: ''
+    from: agent_session_terminal
+    viz: terminal
+    terminal:
+      of: uri
+      stopped: stopped
+      conversation: conversation
+      thread: thread
+actions:
+- id: rename
+  label: Rename…
+  form: true
+  command: oxplow.agent_session.rename
+  input:
+    session: '{{row.session}}'
+    title: '{{row.title}}'
+  fixed:
+  - session
+- id: switch
+  label: Switch Conversation…
+  form: true
+  command: oxplow.agent_session.resume_conversation
+  input:
+    session: '{{row.session}}'
+  fixed:
+  - session
+  choices:
+    conversation: oxplow-foundation/agent-session-conversations
+  when: can_choose
+- id: fork
+  label: Fork Conversation…
+  form: true
+  command: oxplow.agent_session.fork_conversation
+  input:
+    session: '{{row.session}}'
+  fixed:
+  - session
+  choices:
+    conversation: oxplow-foundation/agent-session-conversations
+  when: can_fork
+- id: stop
+  label: Stop Agent
+  command: oxplow.agent_session.stop
+  input:
+    session: '{{row.session}}'
+  when: running
+  prominent: true
+  icon: circle-stop
+- id: start
+  label: Start Agent
+  command: oxplow.agent_session.start
+  input:
+    session: '{{row.session}}'
+  when: stopped
+  prominent: true
+  icon: play

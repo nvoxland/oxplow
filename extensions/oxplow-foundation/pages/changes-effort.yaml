@@ -1,0 +1,66 @@
+title: Effort
+description: 'The effort this is of: its title, the task it is linked to and whether it is open. Rename… and Link to task… are buttons; Unlink and Close effort are on the right-click menu.'
+hidden: true
+params:
+- name: effort_id
+- name: effort
+data:
+  changes_effort:
+    sql: |
+      SELECT e.title, e.work_item AS item_ref, w.title AS item,
+             CASE WHEN e.ended_at IS NULL THEN 'Open'
+                  ELSE CASE e.closed_by WHEN 'commit' THEN 'Closed by a commit' WHEN 'switch' THEN 'Closed when the thread moved on'
+                                        WHEN 'person' THEN 'Closed by you' WHEN 'agent' THEN 'Closed by the agent'
+                                        WHEN 'system' THEN 'Closed by oxplow' ELSE 'Closed' END END AS state,
+             (e.work_item IS NOT NULL) AS linked, (e.ended_at IS NULL) AS open
+      FROM v_effort e LEFT JOIN v_work_item w ON w.uri = e.work_item
+      WHERE e.id = :effort_id
+view:
+  from: changes_effort
+  viz: detail
+  columns:
+  - key: title
+    label: Title
+  - key: item
+    label: Linked to
+    link:
+      kind: page
+      from: item_ref
+  - key: state
+    label: State
+  empty: ''
+  actions:
+  - id: unlink
+    label: Unlink
+    command: oxplow.effort.link
+    row: true
+    when: linked
+    input:
+      effort: '{{param.effort}}'
+      work_item: null
+  - id: close
+    label: Close effort
+    command: oxplow.effort.close
+    row: true
+    when: open
+    input:
+      effort: '{{param.effort}}'
+actions:
+- id: rename
+  label: Rename…
+  command: oxplow.effort.update
+  form: true
+  fixed:
+  - effort
+  input:
+    effort: '{{param.effort}}'
+- id: link
+  label: Link to task…
+  command: oxplow.effort.link
+  form: true
+  fixed:
+  - effort
+  choices:
+    work_item: oxplow-foundation/changes-link-items
+  input:
+    effort: '{{param.effort}}'

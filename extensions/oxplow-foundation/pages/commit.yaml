@@ -1,0 +1,100 @@
+title: Commit
+description: 'One commit: its message and who made it, its changed files, and the analysis other extensions add. The renderer of oxplow''s `commit` resource.'
+label: '{{param.sha|short}}'
+for: oxplow/commit
+default: true
+params:
+- name: uri
+  label: Commit
+- name: sha
+- name: stream_id
+data:
+  row:
+    sql: |
+      SELECT id AS change_id, base_revision, head_revision
+      FROM v_change WHERE kind = 'commit' AND target = :sha
+    columns:
+    - key: change_id
+    - key: base_revision
+    - key: head_revision
+  detail:
+    sql: |
+      SELECT subject, body, author || CASE WHEN email = '' THEN '' ELSE ' <' || email || '>' END AS author,
+             committed_at, sha, parents
+      FROM v_commit WHERE sha = :sha
+  files:
+    sql: |
+      WITH RECURSIVE f(path, status, additions, deletions) AS (
+        SELECT path, status, additions, deletions FROM v_commit_file WHERE sha = :sha
+      ), d(path) AS (
+        SELECT substr(path, 1, length(rtrim(path, replace(path, '/', ''))) - 1) FROM f WHERE instr(path, '/') > 0
+        UNION
+        SELECT substr(path, 1, length(rtrim(path, replace(path, '/', ''))) - 1) FROM d WHERE instr(path, '/') > 0
+      )
+      SELECT path AS id,
+             CASE WHEN instr(path, '/') > 0 THEN substr(path, 1, length(rtrim(path, replace(path, '/', ''))) - 1) END AS parent,
+             substr(path, length(rtrim(path, replace(path, '/', ''))) + 1) AS name,
+             'folder' AS icon, NULL AS file, :base_revision AS base_revision, :head_revision AS head_revision
+      FROM d
+      UNION ALL
+      SELECT path, CASE WHEN instr(path, '/') > 0 THEN substr(path, 1, length(rtrim(path, replace(path, '/', ''))) - 1) END,
+             substr(path, length(rtrim(path, replace(path, '/', ''))) + 1), status, path, :base_revision, :head_revision
+      FROM f
+      ORDER BY 1
+    params:
+      base_revision:
+        from: row.base_revision
+      head_revision:
+        from: row.head_revision
+view:
+  stack:
+  - id: detail
+    title: Commit
+    from: detail
+    viz: detail
+    columns:
+    - key: subject
+      label: Subject
+    - key: body
+      label: Message
+    - key: author
+      label: Author
+    - key: committed_at
+      label: Date
+    - key: sha
+      label: Version
+    - key: parents
+      label: Parents
+    empty: Commit not found.
+    actions:
+    - id: cherry-pick
+      label: Cherry-pick
+      command: oxplow.git.cherry_pick
+      input:
+        stream: str{{param.stream_id}}
+        rev: '{{param.sha}}'
+    - id: revert
+      label: Revert
+      command: oxplow.git.revert
+      input:
+        stream: str{{param.stream_id}}
+        rev: '{{param.sha}}'
+  - id: files
+    title: Files
+    from: files
+    viz: tree
+    tree:
+      id: id
+      parent: parent
+      label: name
+    columns:
+    - key: name
+      label: File
+      icon: icon
+      link:
+        kind: diff-at
+        from: file
+        base: base_revision
+        head: head_revision
+    empty: The commit changed no files.
+  - slot: sections

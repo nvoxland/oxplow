@@ -1,0 +1,32 @@
+title: Thread work
+description: The thread's work items, in progress first, then to do and blocked, then the finished ones newest first, with the efforts that worked on each.
+hidden: true
+tool: thread_work
+params:
+- name: thread
+  label: Thread (`thr3`)
+data:
+  thread_work:
+    sql: |
+      SELECT w.uri, w.title, w.state,
+             coalesce((SELECT group_concat(e.uri, ' ') FROM v_effort e WHERE e.work_item = w.uri), '') AS efforts
+      FROM v_work_item w
+      WHERE w.thread_id = (SELECT id FROM v_thread WHERE uri = uri('oxplow/thread', 'id', :thread))
+      ORDER BY CASE w.state WHEN 'in_progress' THEN 0 WHEN 'todo' THEN 1 WHEN 'blocked' THEN 2 WHEN 'done' THEN 3 ELSE 4 END,
+               CASE WHEN w.state IN ('done', 'canceled') THEN w.closed_at END DESC,
+               coalesce(w.rank, 1e18),
+               w.created_at
+view:
+  from: thread_work
+  viz: table
+  columns:
+  - key: title
+    label: Item
+    link:
+      kind: page
+      from: uri
+  - key: state
+    label: State
+  - key: efforts
+    label: Efforts
+  empty: The thread has no work items.

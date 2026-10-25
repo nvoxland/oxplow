@@ -1,0 +1,66 @@
+title: Catalog
+description: What oxplow knows and can do — what you can ask its agent, the data behind the answers, and what you can configure.
+icon: book-open
+category: System
+keywords: ask prompts questions what can i help data config
+data:
+  ask:
+    sql: |
+      SELECT p.prompt, p.about,
+             CASE WHEN p.source_kind = 'extension' THEN p.source
+                  WHEN p.source = 'code_intel' THEN 'Code'
+                  WHEN p.source = 'knowledge' THEN 'Wiki'
+                  WHEN p.source = 'extensions' THEN 'Extensions'
+                  WHEN p.source = 'vcs' THEN 'Version control'
+                  WHEN p.source = 'work_items' THEN 'Work items'
+                  ELSE p.source END AS offered_by
+      FROM v_prompt p
+      ORDER BY p.position
+  configure:
+    sql: |
+      SELECT key, doc
+      FROM v_config_key
+      ORDER BY key
+view:
+  stack:
+  - id: ask
+    title: What you can ask
+    from: ask
+    viz: table
+    group:
+      by: offered_by
+    columns:
+    - key: prompt
+      label: Question
+    - key: about
+      label: Also offered on
+      width: 140
+    empty: No questions to suggest.
+    actions:
+    - id: ask
+      label: Ask
+      command: oxplow.agent.draft
+      input:
+        text: '{{row.prompt}}'
+      row: true
+  - id: data
+    title: What data there is
+    embed:
+      page: oxplow-foundation/catalog-lens
+  - id: configure
+    title: What you can configure
+    from: configure
+    viz: table
+    columns:
+    - key: key
+      label: Setting
+      width: 220
+    - key: doc
+      label: What it does
+    empty: Nothing to configure.
+actions:
+- id: settings
+  label: Open Settings
+  command: oxplow.window.navigate
+  input:
+    uri: oxplow:oxplow/page?page=settings

@@ -1,0 +1,101 @@
+title: Alerts
+description: 'Everything that needs you, in one place: decisions waiting on you, hints raised to you, operations that failed, events and reactions that couldn''t be delivered, and extensions that aren''t running as they should. Opened from the status bar''s bell or a toast''s Review.'
+icon: bell
+data:
+  decisions:
+    sql: |
+      SELECT 1
+  hints:
+    sql: |
+      SELECT n.id, n.message,
+             (SELECT title FROM v_thread th WHERE th.id = n.thread_id) AS thread
+      FROM v_agent_nudge n
+      WHERE n.audience = 'person' AND n.delivered_at IS NULL
+      ORDER BY n.id DESC
+  operations:
+    sql: |
+      SELECT event_id, label, at, seen, (NOT seen) AS unseen, CASE WHEN seen THEN 'muted' ELSE 'danger' END AS tone
+      FROM v_op_error WHERE dismissed = 0 ORDER BY at DESC
+  extensions:
+    sql: |
+      SELECT name,
+             '`' || name || '` isn''t running as it should: ' || coalesce(json_extract(errors, '$[0]'), 'unknown error')
+               || CASE WHEN json_array_length(errors) > 1 THEN ' (+' || (json_array_length(errors) - 1) || ' more)' ELSE '' END AS what,
+             'Open Extensions' AS open,
+             'oxplow:oxplow/page?page=settings#area=extensions' AS settings
+      FROM v_extension WHERE json_array_length(errors) > 0 ORDER BY name
+view:
+  stack:
+  - id: decisions
+    title: Needs your decision
+    from: decisions
+    viz: approvals
+  - id: hints
+    title: Hints for you
+    from: hints
+    viz: list
+    columns:
+    - key: message
+      label: Hint
+    - key: thread
+      label: Thread
+    empty: No hints for you.
+    actions:
+    - id: dismiss
+      label: Dismiss
+      command: oxplow.hint.dismiss
+      input:
+        nudge: '{{row.id}}'
+      row: true
+  - id: operations
+    title: Failed operations
+    from: operations
+    viz: table
+    columns:
+    - key: label
+      label: Operation
+      tone: tone
+      expand: oxplow-foundation/alerts-operation
+    - key: at
+      label: When
+      format: relative
+      width: 130
+    empty: No failed operations.
+    actions:
+    - id: seen
+      label: Mark Seen
+      command: oxplow.op_error.mark_seen
+      input:
+        event: '{{row.event_id}}'
+      row: true
+      when: unseen
+    - id: dismiss
+      label: Dismiss
+      command: oxplow.op_error.dismiss
+      input:
+        event: '{{row.event_id}}'
+      row: true
+    - id: clear
+      label: Clear failed operations
+      command: oxplow.op_error.dismiss_all
+      input: {}
+  - id: deliveries
+    embed:
+      page: oxplow-foundation/alerts-deliveries
+  - id: reactions
+    embed:
+      page: oxplow-foundation/alerts-reactions
+  - id: extensions
+    title: Extensions with problems
+    from: extensions
+    viz: table
+    columns:
+    - key: what
+      label: Problem
+    - key: open
+      label: ''
+      width: 140
+      link:
+        kind: page
+        from: settings
+    empty: Every extension is running as it should.

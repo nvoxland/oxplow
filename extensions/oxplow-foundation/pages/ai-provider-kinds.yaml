@@ -1,0 +1,11 @@
+title: AI provider kinds
+description: The registered model providers a provider can be.
+hidden: true
+data:
+  ai_provider_kinds:
+    sql: |
+      SELECT provider AS value, coalesce(title, provider) AS label
+      FROM v_capability_provider WHERE capability = 'ai_provider' ORDER BY provider
+view:
+  from: ai_provider_kinds
+  viz: table

@@ -1,0 +1,29 @@
+title: Recent commits
+description: The newest commits in the indexed history. For another branch or history past the index, use `oxplow_vcs_log`.
+hidden: true
+tool: recent_commits
+params:
+- name: limit
+  role: filter
+  label: Commits
+  default: 20
+data:
+  recent_commits:
+    sql: |
+      SELECT c.sha, c.committed_at, c.author, c.subject
+      FROM v_commit c
+      ORDER BY c.committed_at DESC
+      LIMIT :limit
+view:
+  from: recent_commits
+  viz: table
+  columns:
+  - key: sha
+    label: Commit
+  - key: committed_at
+    label: When
+  - key: author
+    label: Author
+  - key: subject
+    label: Subject
+  empty: No commits are indexed.

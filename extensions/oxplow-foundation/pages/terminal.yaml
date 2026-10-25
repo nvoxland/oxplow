@@ -1,0 +1,45 @@
+title: Terminal
+description: The stream's terminals — shells in its worktree — each kept running while you're elsewhere. The strip picks one; its menu renames or closes it.
+icon: terminal
+category: System
+params:
+- name: stream_id
+- name: terminal
+data:
+  terminal:
+    sql: |
+      SELECT uri, title, 'trm' || id AS terminal
+      FROM v_terminal WHERE stream_id = :stream_id
+      ORDER BY position, id
+view:
+  from: terminal
+  viz: terminal
+  terminal:
+    of: uri
+    title: title
+  columns:
+  - key: title
+    select: terminal
+  actions:
+  - id: rename
+    label: Rename…
+    row: true
+    form: true
+    command: oxplow.terminal.rename
+    input:
+      terminal: '{{row.terminal}}'
+      title: '{{row.title}}'
+    fixed:
+    - terminal
+  - id: close
+    label: Close terminal
+    row: true
+    command: oxplow.terminal.close
+    input:
+      terminal: '{{row.terminal}}'
+actions:
+- id: new
+  label: New Terminal
+  command: oxplow.terminal.open
+  input:
+    stream: '{{param.stream_id}}'

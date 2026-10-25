@@ -1,0 +1,13 @@
+title: Agents to start
+description: The agents the project enables, its first choice first.
+hidden: true
+data:
+  new_session_harnesses:
+    sql: |
+      SELECT h.id AS value, h.title AS label
+      FROM v_agent_harness h
+      WHERE h.enabled = 1
+      ORDER BY h.position
+view:
+  from: new_session_harnesses
+  viz: table

@@ -1,0 +1,37 @@
+title: Quality
+description: Duplicated code the scans found. Open a row to compare both copies side by side.
+category: Code
+data:
+  duplicate_blocks:
+    sql: |
+      SELECT f.path, f.start_line, f.end_line - f.start_line + 1 AS lines,
+             json_extract(f.extra_json, '$.peerPath') AS peer,
+             f.path || ':' || f.start_line || '-' || f.end_line || '|'
+               || json_extract(f.extra_json, '$.peerPath') || ':'
+               || json_extract(f.extra_json, '$.peerStartLine') || '-'
+               || json_extract(f.extra_json, '$.peerEndLine') AS pair,
+             s.revision AS version
+      FROM v_code_quality_finding f JOIN v_code_quality_scan s ON s.id = f.scan_id
+      WHERE f.kind = 'duplicate-block'
+      ORDER BY f.id DESC
+      LIMIT 100
+view:
+  stack:
+  - id: duplicate-blocks
+    title: Duplicate Blocks
+    from: duplicate_blocks
+    viz: table
+    columns:
+    - key: path
+      label: File
+      link:
+        kind: compare
+        from: pair
+        head: version
+    - key: start_line
+      label: Line
+    - key: lines
+      label: Lines
+    - key: peer
+      label: Copy Of
+    empty: No duplicate blocks reported.

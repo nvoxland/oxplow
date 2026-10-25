@@ -1,0 +1,30 @@
+title: Work (collapsed)
+description: The thread's work in one glance — the item in progress (with its epic), or else what finished last.
+hidden: true
+params:
+- name: thread_id
+  label: Thread
+data:
+  work_line:
+    sql: |
+      SELECT title, icon, uri, depth, active
+      FROM v_oxplow_bundled_thread_work w
+      WHERE thread_id = :thread_id
+        AND (grp = 'In progress'
+             OR (grp = 'Finished' AND ord = 1
+                 AND NOT EXISTS (SELECT 1 FROM v_oxplow_bundled_thread_work x
+                                 WHERE x.thread_id = :thread_id AND x.grp = 'In progress')))
+      ORDER BY g, ord
+view:
+  from: work_line
+  viz: list
+  emphasis: active
+  depth: depth
+  columns:
+  - key: title
+    label: Item
+    icon: icon
+    link:
+      kind: page
+      from: uri
+  empty: No active work

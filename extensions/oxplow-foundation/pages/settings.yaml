@@ -1,0 +1,922 @@
+# TODO(convert): `integrations`'s component `integrations` reads oxplow's data itself: decide what its loader is
+title: Settings
+description: What shapes this project, and the direct controls for what only a person may set.
+icon: settings
+category: System
+keywords: every setting config preferences
+refresh: true
+params:
+- name: area
+  default: overview
+- name: q
+  type: search
+  role: filter
+  label: Search settings
+  default: ''
+data:
+  settings_proposals:
+    sql: |
+      SELECT 1
+  settings_values:
+    sql: |
+      WITH s AS (
+        SELECT c.key, c.doc, c.origin, c.extension,
+               CASE
+                 WHEN c.value IS NULL OR c.value = 'null' THEN '—'
+                 WHEN json_type(c.value) = 'text' THEN
+                   CASE WHEN json_extract(c.value, '$') = '' THEN '""' ELSE json_extract(c.value, '$') END
+                 WHEN length(c.value) > 80 THEN substr(c.value, 1, 77) || '…'
+                 ELSE c.value
+               END AS shown,
+               CASE
+                 WHEN c.key IN ('projectName', 'zones', 'iconTint') THEN 1
+                 WHEN c.key IN ('agents', 'agentConfig', 'agentPromptAppend', 'injectSessionContext', 'personal.newThreadSession') THEN 2
+                 WHEN c.key = 'ai' OR c.key LIKE 'ai.%' THEN 3
+                 WHEN c.key LIKE 'snapshot%' OR c.key = 'generated' THEN 4
+                 WHEN c.key = 'testing' THEN 5
+                 WHEN c.key = 'lsp' THEN 6
+                 WHEN c.key IN ('extensions', 'extensionInstances') THEN 7
+                 WHEN c.key LIKE 'metric%' OR c.key LIKE 'dimension%' OR c.key IN ('collectors', 'measures') THEN 8
+                 ELSE 9
+               END AS rank,
+               CASE
+                 WHEN c.key IN ('agents', 'agentConfig', 'agentPromptAppend', 'personal.newThreadSession') THEN 'agents'
+                 WHEN c.key = 'ai' OR c.key LIKE 'ai.%' THEN 'ai'
+                 WHEN c.key = 'lsp' THEN 'lsp'
+                 WHEN c.key = 'extensions' THEN 'extensions'
+                 WHEN c.key IN ('extensionInstances', 'activeProviders') THEN 'integrations'
+               END AS area,
+               c.value AS raw
+        FROM v_config_value c
+      )
+      SELECT key,
+             CASE rank WHEN 1 THEN 'Project' WHEN 2 THEN 'Agents' WHEN 3 THEN 'AI' WHEN 4 THEN 'Snapshots'
+                       WHEN 5 THEN 'Testing' WHEN 6 THEN 'Language Servers' WHEN 7 THEN 'Extensions'
+                       WHEN 8 THEN 'Metrics & Data' ELSE 'Other' END AS grp,
+             CASE origin WHEN 'default' THEN 'default' WHEN 'global' THEN 'your global config'
+                         WHEN 'project' THEN 'project' WHEN 'personal' THEN 'just for you'
+                         ELSE 'extension' END
+               || CASE WHEN extension IS NOT NULL THEN ': ' || extension ELSE '' END AS source,
+             shown AS value, doc,
+             CASE WHEN area IS NULL THEN NULL ELSE 'Change It Here' END AS control,
+             CASE WHEN area IS NULL THEN NULL
+                  ELSE 'oxplow:oxplow/page?page=settings#area=' || area END AS control_page,
+             'Change the setting `' || key || '`'
+               || CASE WHEN origin = 'extension' AND extension IS NOT NULL THEN ' from the `' || extension || '` extension' ELSE '' END
+               || ' — ' || CASE WHEN doc IS NULL OR doc = '' THEN 'no description' ELSE doc END
+               || ' It is now ' || shown || CASE WHEN origin = 'default' THEN ' (the default)' ELSE '' END
+               || '. Change it to: ' || char(10)
+               || CASE WHEN instr(key, '.') > 0
+                       THEN '(It comes from ' || CASE WHEN origin = 'default' THEN 'the defaults' ELSE 'the ' || origin || ' config' END
+                            || '; tell me how you''d change it.)'
+                       ELSE '(Use oxplow.config.set; tell me what you changed.)' END AS ask
+      FROM s
+      WHERE coalesce(:q, '') = ''
+         OR instr(lower(key), lower(:q)) > 0
+         OR instr(lower(coalesce(doc, '')), lower(:q)) > 0
+         OR instr(lower(coalesce(raw, '')), lower(:q)) > 0
+      ORDER BY rank, key
+  agents_list:
+    sql: |
+      SELECT h.id, h.title,
+             CASE WHEN h.enabled THEN 'on' ELSE 'off' END AS state,
+             CASE WHEN h.enabled THEN h.position + 1 END AS priority,
+             h.enabled AND (SELECT count(*) FROM v_agent_harness WHERE enabled = 1) > 1 AS can_disable,
+             NOT h.enabled AS can_enable,
+             h.enabled AND h.position > 0 AS can_up,
+             h.enabled AND h.position < (SELECT count(*) FROM v_agent_harness WHERE enabled = 1) - 1 AS can_down,
+             json_insert((SELECT json_group_array(x.id ORDER BY x.position) FROM v_agent_harness x WHERE x.enabled = 1), '$[#]', h.id) AS with_it,
+             (SELECT json_group_array(x.id ORDER BY x.position) FROM v_agent_harness x WHERE x.enabled = 1 AND x.id <> h.id) AS without_it,
+             (SELECT json_group_array(x.id ORDER BY CASE WHEN x.id = h.id THEN x.position - 1.5 ELSE x.position END)
+                FROM v_agent_harness x WHERE x.enabled = 1) AS moved_up,
+             (SELECT json_group_array(x.id ORDER BY CASE WHEN x.id = h.id THEN x.position + 1.5 ELSE x.position END)
+                FROM v_agent_harness x WHERE x.enabled = 1) AS moved_down
+      FROM v_agent_harness h
+      ORDER BY h.position
+  agents_settings:
+    sql: |
+      SELECT h.id AS agent, json_extract(s.value, '$.key') AS key,
+             h.title || ' — ' || json_extract(s.value, '$.title') AS setting,
+             coalesce(json_extract(json_extract(c.value, '$'), '$.' || h.id || '.' || json_extract(s.value, '$.key')), '') AS value,
+             json_extract(s.value, '$.hint') AS hint
+      FROM v_agent_harness h, json_each(h.settings) s
+      LEFT JOIN v_config_value c ON c.key = 'agentConfig'
+      WHERE h.enabled = 1
+      ORDER BY h.position, s.key
+  agents_new_thread:
+    sql: |
+      WITH cur(choice) AS (
+        SELECT coalesce((SELECT json_extract(value, '$') FROM v_config_value WHERE key = 'personal.newThreadSession'), 'ask')
+      )
+      SELECT v.value, v.label, (v.value = cur.choice) AS current,
+             (v.value <> cur.choice) AND v.value = 'ask' AS can_ask,
+             (v.value <> cur.choice) AND v.value <> 'ask' AS can_use
+      FROM cur, (
+        SELECT 'ask' AS value, 'Ask (the session picker)' AS label, 0 AS ord
+        UNION ALL SELECT 'none', 'No session', 1
+        UNION ALL SELECT id, title, 2 + position FROM v_agent_harness WHERE enabled = 1
+      ) v
+      ORDER BY v.ord
+  agents_prompt:
+    sql: |
+      SELECT coalesce((SELECT json_extract(value, '$') FROM v_config_value WHERE key = 'agentPromptAppend'), '') AS text
+  lsp_servers:
+    sql: |
+      SELECT s.language_id AS language,
+             replace(s.command, rtrim(s.command, replace(s.command, '/', '')), '') AS program,
+             CASE s.source WHEN 'yaml' THEN 'project.yaml'
+                           ELSE 'installed' || CASE WHEN s.version IS NULL THEN '' ELSE ' ' || s.version END END AS source,
+             CASE WHEN j.value IS NULL THEN '' ELSE 'running in ' || j.value END AS state,
+             CASE WHEN s.binary_exists THEN '' ELSE 'binary missing' END AS problem,
+             s.package_name AS package,
+             j.value AS stream,
+             (j.value IS NOT NULL) AS can_restart,
+             (s.source = 'installed' AND s.package_name IS NOT NULL AND (j.key IS NULL OR j.key = 0)) AS can_remove
+      FROM v_lsp_server s LEFT JOIN json_each(s.running_streams) j
+      ORDER BY s.language_id, j.key
+  lsp_suggestions:
+    sql: |
+      WITH suggested(language, package) AS (VALUES
+        ('rust', 'rust-analyzer'), ('go', 'gopls'),
+        ('typescript', 'typescript-language-server'), ('javascript', 'typescript-language-server'),
+        ('typescriptreact', 'typescript-language-server'), ('javascriptreact', 'typescript-language-server'),
+        ('python', 'pyright'), ('lua', 'lua-language-server'), ('c', 'clangd'), ('cpp', 'clangd'),
+        ('json', 'json-lsp'), ('yaml', 'yaml-language-server'), ('html', 'html-lsp'), ('css', 'css-lsp'),
+        ('bash', 'bash-language-server'), ('shell', 'bash-language-server'),
+        ('ruby', 'ruby-lsp'), ('zig', 'zls'))
+      SELECT package, group_concat(language, ', ') AS languages
+      FROM suggested
+      WHERE language NOT IN (SELECT language_id FROM v_lsp_server)
+      GROUP BY package
+      ORDER BY package
+  extensions_health:
+    sql: |
+      SELECT h.extension, h.kind, h.contribution,
+             CASE h.state
+               WHEN 'disabled' THEN 'Disabled: ' || coalesce(h.reason, 'no reason recorded')
+               WHEN 'failing' THEN 'Failing (' || h.consecutive_failures || ' in a row)'
+                                   || CASE WHEN h.last_error IS NULL THEN '' ELSE ': ' || h.last_error END
+               ELSE 'OK' || CASE WHEN h.mean_ms IS NULL THEN '' ELSE ' · ' || CAST(round(h.mean_ms) AS INTEGER) || ' ms on average' END
+                         || CASE WHEN h.fresh THEN '' ELSE ' · missed its schedule' END
+                         || CASE WHEN h.dead_letters > 0 THEN ' · ' || h.dead_letters || ' undelivered' ELSE '' END
+             END AS status,
+             CASE h.state WHEN 'disabled' THEN 'danger' WHEN 'failing' THEN 'warn'
+                  ELSE CASE WHEN h.fresh AND h.dead_letters = 0 THEN 'muted' ELSE 'warn' END END AS tone,
+             (h.state = 'disabled') AS can_enable,
+             (h.state = 'disabled' AND h.repair_item IS NOT NULL) AS can_repair,
+             'Repair the extension described in [oxplow uri ' || coalesce(h.repair_item, '') || '] — read it first.' AS ask
+      FROM v_contribution_health h
+      ORDER BY h.extension, h.contribution
+  extensions_credentials:
+    sql: |
+      SELECT substr(uri_param(c.collector, 'collector'), 1, instr(uri_param(c.collector, 'collector'), '/') - 1) AS extension,
+             c.name, min(c.collector) AS collector, max(c.is_set) AS is_set,
+             CASE WHEN max(c.is_set) THEN 'Saved in keychain' ELSE 'Not set' END AS status
+      FROM v_collector_credential c
+      GROUP BY 1, c.name
+      ORDER BY 1, c.name
+  extensions_secrets:
+    sql: |
+      SELECT s.extension, s.provider, s.name, s.reference, s.is_set,
+             CASE WHEN s.is_set THEN 'Set' ELSE 'Not set' END AS status
+      FROM v_extension_secret s
+      ORDER BY s.extension, s.provider, s.name
+  data_entities:
+    sql: |
+      SELECT name, owner, kind, description FROM v_data_entity ORDER BY owner <> 'core', owner, name
+  data_sources:
+    sql: |
+      SELECT c.uri, c.extension || '/' || c.id AS collector, c.extension, c.id,
+             CASE c.trigger WHEN 'call' THEN 'manual' WHEN 'schedule' THEN 'scheduled' WHEN 'events' THEN 'on events' ELSE 'after a run' END AS trigger,
+             CASE c.state WHEN 'disabled' THEN 'Off on this machine' WHEN 'failing' THEN 'Failed' WHEN 'never_run' THEN 'Never run' ELSE 'Ok' END AS state,
+             CASE c.state WHEN 'disabled' THEN 'warning' WHEN 'failing' THEN 'danger' WHEN 'ok' THEN 'success' END AS tone,
+             c.last_run_at,
+             (SELECT group_concat(j.value || ' ' || j.key, ' · ') FROM json_each(coalesce(c.row_counts_json, '{}')) j) AS rows,
+             coalesce(c.disabled_reason, c.error) AS problem,
+             (SELECT 'Needs ' || group_concat(k.name, ', ') || ' (set it under Extensions).' FROM v_collector_credential k
+               WHERE k.collector = c.uri AND NOT k.is_set) AS missing,
+             (c.enabled = 0) AS can_enable_again
+      FROM v_collector c ORDER BY c.extension, c.id
+  data_effects:
+    sql: |
+      SELECT extension || '/' || local AS effect, extension FROM v_contribution WHERE kind = 'effect' ORDER BY 1
+  capabilities:
+    sql: |
+      WITH proj AS (SELECT coalesce((SELECT value FROM v_config_value WHERE key = 'activeProviders' AND origin = 'project'), '{}') AS j),
+           me AS (SELECT coalesce((SELECT value FROM v_config_value WHERE key = 'personal.activeProviders'), '{}') AS j),
+           p AS (SELECT * FROM v_capability_provider WHERE choosable = 1)
+      SELECT p.capability, p.capability_title AS capability_title, p.provider, p.title,
+             CASE
+               WHEN p.capability = 'knowledge' AND p.source = 'builtin' THEN 'pages as Markdown under .oxplow/wiki, pinned to snapshots'
+               WHEN p.capability = 'snapshots' AND json_extract(p.features, '$.contents') = 1 THEN 'reads any file at any point; grows the blob store'
+               WHEN p.capability = 'snapshots' THEN 'what changed, never what it said; no blob store growth'
+             END AS hint,
+             (SELECT group_concat(key, ', ') FROM json_each(p.features) WHERE value = 1) AS features,
+             CASE WHEN p.source = 'none' THEN
+               (SELECT group_concat(l.title, ', ') FROM v_lens l WHERE EXISTS
+                  (SELECT 1 FROM json_each(l.needs) n WHERE n.value = p.capability OR n.value LIKE p.capability || '.%'))
+             END AS turns_off,
+             trim(CASE WHEN p.active = 1 THEN 'Active. ' || CASE p.chosen_by WHEN 'personal' THEN 'Your own choice.' WHEN 'project' THEN 'The project''s choice.'
+                         WHEN 'fallback' THEN 'The chosen one isn''t available (its extension is disabled or its instance isn''t running).' ELSE 'The default.' END
+                       ELSE '' END
+                  || CASE WHEN json_extract((SELECT j FROM proj), '$.' || p.capability) = p.provider THEN ' The project uses it.' ELSE '' END
+                  || CASE WHEN json_extract((SELECT j FROM me), '$.' || p.capability) = p.provider THEN ' You use it.' ELSE '' END) AS standing,
+             CASE WHEN p.active = 1 THEN 'success' END AS tone,
+             1 AS can_choose, 0 AS is_default
+      FROM p WHERE p.available = 1
+      UNION ALL
+      SELECT d.capability, d.capability_title, '', 'The default', NULL, NULL, NULL,
+             'Resets a choice.', NULL, 0, 1
+      FROM (SELECT DISTINCT capability, capability_title FROM p) d
+      ORDER BY 1, 11 DESC, 4
+  replacements:
+    sql: |
+      SELECT target, label, extension AS whose, extension AS title,
+             CASE WHEN chosen = extension THEN 'In use' WHEN chosen IS NULL THEN '' ELSE '' END AS standing,
+             CASE WHEN chosen = extension THEN 'success' END AS tone,
+             (chosen IS NULL OR chosen <> extension) AND bound_to_provider = 0 AS can_choose, 0 AS is_default
+      FROM v_replacement
+      UNION ALL
+      SELECT DISTINCT target, label, 'oxplow', 'oxplow''s own',
+             CASE WHEN chosen = 'oxplow' THEN 'In use' ELSE '' END,
+             CASE WHEN chosen = 'oxplow' THEN 'success' END,
+             (chosen IS NULL OR chosen <> 'oxplow') AS can_choose, 0
+      FROM v_replacement
+      UNION ALL
+      SELECT DISTINCT target, label, '', 'Default',
+             CASE WHEN chosen IS NULL THEN 'In use' ELSE '' END,
+             CASE WHEN chosen IS NULL THEN 'success' END,
+             0, (chosen IS NOT NULL)
+      FROM v_replacement
+      ORDER BY 1, 8 DESC, 4
+  integrations:
+    sql: |
+      SELECT i.instance, i.state, i.detail, i.enabled, i.scope, i.overridden, i.config,
+             i.consecutive_failures, i.last_ok_at, i.rate_limited_until, i.activity,
+             (SELECT group_concat(c.name || ':' || c.is_set || ':' || coalesce(c.sign_in_state, ''), ',')
+                FROM v_provider_credential c WHERE c.instance = i.instance) AS credentials,
+             (SELECT group_concat(k.name || ':' || k.status || ':' || k.records || ':' || coalesce(k.last_read_at, ''), ',')
+                FROM v_provider_collector k WHERE k.instance = i.instance) AS collectors
+      FROM v_provider_instance i
+      ORDER BY i.instance
+  ai_providers:
+    sql: |
+      SELECT p.id, coalesce(k.title, p.kind) AS kind,
+             coalesce(p.base_url, '') AS base_url,
+             CASE WHEN p.key_set THEN 'Key saved' ELSE 'No key' END AS key,
+             coalesce((SELECT r.model FROM v_ai_role r WHERE r.provider = p.id AND r.model IS NOT NULL LIMIT 1), '') AS test_model
+      FROM v_ai_provider p
+      LEFT JOIN v_capability_provider k ON k.capability = 'ai_provider' AND k.provider = p.kind
+      ORDER BY p.id
+  ai_provider_form:
+    sql: |
+      SELECT '' AS id
+  ai_roles:
+    sql: |
+      SELECT role, description,
+             CASE WHEN provider IS NULL THEN
+                    CASE WHEN fallback IS NOT NULL THEN 'Falls back to ' || fallback || coalesce(' (' || effective_model || ')', '')
+                         ELSE 'Not assigned' END
+                  ELSE provider || ' · ' || model END AS bound,
+             coalesce(problem, '') AS problem,
+             provider, coalesce(model, '') AS model, coalesce(restrict, '[]') AS restrict,
+             NOT overridden AS can_assign,
+             (NOT overridden) AND provider IS NOT NULL AS can_unassign
+      FROM v_ai_role
+  ai_calls:
+    sql: |
+      SELECT role, caller, count(*) AS calls, sum(1 - ok) AS failed,
+             sum(input_tokens) AS input_tokens, sum(output_tokens) AS output_tokens, max(at) AS last_at
+      FROM v_ai_call
+      WHERE at >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-7 days')
+      GROUP BY role, caller
+      ORDER BY last_at DESC
+view:
+  switch:
+    param: area
+    children:
+    - id: overview
+      title: Every Setting
+      stack:
+      - id: settings-proposals
+        title: Waiting for you
+        from: settings_proposals
+        viz: approvals
+      - id: settings-values
+        title: Every setting
+        from: settings_values
+        viz: list
+        group:
+          by: grp
+        columns:
+        - key: key
+          label: Setting
+          highlight: q
+        - key: source
+          label: From
+          width: 170
+        - key: value
+          label: Value
+        - key: doc
+          label: What it does
+        - key: control
+          label: Change
+          width: 120
+          link:
+            kind: page
+            from: control_page
+        empty: No settings match.
+        actions:
+        - id: ask
+          label: Ask the Agent to Change This
+          command: oxplow.agent.draft
+          input:
+            text: '{{row.ask}}'
+          row: true
+    - id: agents
+      title: Agents
+      stack:
+      - id: agents-list
+        title: Agents
+        from: agents_list
+        viz: table
+        columns:
+        - key: title
+          label: Agent
+        - key: state
+          label: State
+          width: 80
+        - key: priority
+          label: Priority
+          width: 90
+        empty: No agents are registered.
+        actions:
+        - id: enable
+          label: Enable
+          command: oxplow.agent.set_agents
+          input:
+            agents: '{{row.with_it|json}}'
+          row: true
+          when: can_enable
+        - id: disable
+          label: Disable
+          command: oxplow.agent.set_agents
+          input:
+            agents: '{{row.without_it|json}}'
+          row: true
+          when: can_disable
+        - id: up
+          label: Move Up
+          command: oxplow.agent.set_agents
+          input:
+            agents: '{{row.moved_up|json}}'
+          row: true
+          when: can_up
+        - id: down
+          label: Move Down
+          command: oxplow.agent.set_agents
+          input:
+            agents: '{{row.moved_down|json}}'
+          row: true
+          when: can_down
+      - id: agents-settings
+        title: Agent settings
+        from: agents_settings
+        viz: table
+        columns:
+        - key: setting
+          label: Setting
+        - key: value
+          label: Value
+        - key: hint
+          label: What it does
+        empty: No enabled agent declares a setting.
+        actions:
+        - id: change
+          label: Change…
+          command: oxplow.agent.set_setting
+          form: true
+          row: true
+          fixed:
+          - agent
+          - key
+          input:
+            agent: '{{row.agent}}'
+            key: '{{row.key}}'
+            value: '{{row.value}}'
+      - id: agents-new-thread
+        title: New threads
+        from: agents_new_thread
+        viz: table
+        emphasis: current
+        columns:
+        - key: label
+          label: Start with
+        actions:
+        - id: use
+          label: Use This
+          command: oxplow.config.set
+          input:
+            key: newThreadSession
+            value: '{{row.value}}'
+            layer: personal
+          row: true
+          when: can_use
+        - id: ask
+          label: Use This
+          command: oxplow.config.unset
+          input:
+            key: newThreadSession
+            layer: personal
+          row: true
+          when: can_ask
+      - id: agents-prompt
+        title: Agent prompt additions
+        from: agents_prompt
+        viz: form
+        form:
+          command: oxplow.agent.set_prompt_append
+          mode: edit
+          fields:
+          - text
+    - id: lsp
+      title: Language Servers
+      stack:
+      - id: lsp-servers
+        title: Language servers
+        from: lsp_servers
+        viz: table
+        columns:
+        - key: language
+          label: Language
+          width: 130
+        - key: program
+          label: Program
+        - key: source
+          label: From
+          width: 140
+        - key: state
+          label: Running
+          width: 150
+        - key: problem
+          label: Problem
+          width: 110
+        empty: No language servers configured. Install one below, or add an `lsp.servers` entry to `.oxplow/project.yaml`.
+        actions:
+        - id: restart
+          label: Restart
+          command: oxplow.lsp.restart_server
+          input:
+            stream: '{{row.stream}}'
+            language: '{{row.language}}'
+          row: true
+          when: can_restart
+        - id: remove
+          label: Remove…
+          command: oxplow.lsp.remove_server
+          input:
+            package: '{{row.package}}'
+          row: true
+          when: can_remove
+      - id: lsp-install
+        title: Install a language server
+        viz: form
+        form:
+          command: oxplow.lsp.install_server
+          fields:
+          - package
+      - id: lsp-suggestions
+        title: Suggested language servers
+        from: lsp_suggestions
+        viz: table
+        columns:
+        - key: package
+          label: Package
+        - key: languages
+          label: For
+        empty: Every language with a suggested server has one.
+        actions:
+        - id: install
+          label: Install
+          command: oxplow.lsp.install_server
+          input:
+            package: '{{row.package}}'
+          row: true
+    - id: extensions
+      title: Extensions
+      stack:
+      - id: extensions-list
+        embed:
+          page: oxplow-foundation/extensions-list
+      - id: extensions-deployments
+        embed:
+          page: oxplow-foundation/extensions-deployments
+      - id: extensions-health
+        title: Health
+        from: extensions_health
+        viz: table
+        group:
+          by: extension
+        columns:
+        - key: contribution
+          label: Contribution
+        - key: kind
+          label: Kind
+          width: 90
+        - key: status
+          label: State
+          tone: tone
+        empty: Nothing to repair.
+        actions:
+        - id: enable
+          label: Enable Again
+          command: oxplow.contribution.enable
+          row: true
+          when: can_enable
+          input:
+            extension: '{{row.extension}}'
+            kind: '{{row.kind}}'
+            contribution: '{{row.contribution}}'
+        - id: repair
+          label: Repair with the Agent
+          command: oxplow.agent.draft
+          row: true
+          when: can_repair
+          input:
+            text: '{{row.ask}}'
+        - id: enable-all
+          label: Enable All Disabled
+          command: oxplow.contribution.enable_all
+          input: {}
+      - id: extensions-credentials
+        title: Credentials
+        from: extensions_credentials
+        viz: table
+        group:
+          by: extension
+        columns:
+        - key: name
+          label: Credential
+        - key: status
+          label: Value
+          width: 160
+        empty: No extension asks for a credential.
+        actions:
+        - id: set
+          label: Set…
+          command: oxplow.collector.set_credential
+          row: true
+          form: true
+          fixed:
+          - collector
+          - name
+          input:
+            collector: '{{row.collector}}'
+            name: '{{row.name}}'
+        - id: clear
+          label: Clear
+          command: oxplow.collector.set_credential
+          row: true
+          when: is_set
+          input:
+            collector: '{{row.collector}}'
+            name: '{{row.name}}'
+      - id: extensions-secrets
+        title: Provider secrets
+        from: extensions_secrets
+        viz: table
+        group:
+          by: extension
+        columns:
+        - key: name
+          label: Secret
+        - key: provider
+          label: Provider
+          width: 160
+        - key: status
+          label: Value
+          width: 100
+        empty: No provider keeps a secret.
+        actions:
+        - id: set
+          label: Set…
+          command: oxplow.extension.set_secret
+          row: true
+          form: true
+          fixed:
+          - extension
+          - reference
+          input:
+            extension: '{{row.extension}}'
+            reference: '{{row.reference|json}}'
+        - id: revoke
+          label: Revoke
+          command: oxplow.extension.revoke_secret
+          row: true
+          when: is_set
+          input:
+            extension: '{{row.extension}}'
+            reference: '{{row.reference|json}}'
+    - id: data
+      title: Data
+      stack:
+      - id: data-entities
+        title: Entities
+        from: data_entities
+        viz: table
+        columns:
+        - key: name
+          label: Entity
+          expand: oxplow-foundation/data-entity-rows
+        - key: owner
+          label: From
+          width: 140
+        - key: kind
+          label: Kind
+          width: 90
+        - key: description
+          label: What it holds
+        empty: Nothing is published yet.
+        actions:
+        - id: explore
+          label: Explore Data
+          command: oxplow.window.navigate
+          input:
+            uri: oxplow:oxplow/page?page=explore-data
+      - id: data-sources
+        title: Collectors
+        from: data_sources
+        viz: table
+        columns:
+        - key: collector
+          label: Collector
+        - key: trigger
+          label: Runs
+          width: 100
+        - key: state
+          label: State
+          tone: tone
+          format: badge
+          width: 130
+        - key: last_run_at
+          label: Last run
+          format: relative
+          width: 110
+        - key: rows
+          label: Rows
+        - key: problem
+          label: Problem
+          tone: tone
+        - key: missing
+          label: Credentials
+        empty: No collectors. An extension can declare one to bring in outside data.
+        actions:
+        - id: sync
+          label: Sync Now
+          command: oxplow.collector.sync
+          row: true
+          primary: true
+          input:
+            collector: '{{row.collector}}'
+        - id: enable-again
+          label: Enable Again
+          command: oxplow.contribution.enable
+          row: true
+          when: can_enable_again
+          input:
+            extension: '{{row.extension}}'
+            kind: collector
+            contribution: '{{row.id}}'
+        - id: enable-all
+          label: Enable All Disabled
+          command: oxplow.contribution.enable_all
+          input: {}
+      - id: data-effects
+        title: Effects
+        from: data_effects
+        viz: table
+        columns:
+        - key: effect
+          label: Effect
+          expand: oxplow-foundation/data-effect-backfill
+        - key: extension
+          label: From
+          width: 160
+        empty: No effects. An extension can declare one to react to what happens.
+      - id: alerts-reactions
+        title: Failed reactions
+        embed:
+          page: oxplow-foundation/alerts-reactions
+      - id: alerts-deliveries
+        title: Undelivered events
+        embed:
+          page: oxplow-foundation/alerts-deliveries
+    - id: integrations
+      title: Integrations
+      stack:
+      - id: capabilities
+        title: Capabilities
+        from: capabilities
+        viz: table
+        group:
+          by: capability_title
+        columns:
+        - key: title
+          label: Implementation
+        - key: standing
+          label: Standing
+          tone: tone
+        - key: hint
+          label: What it means
+        - key: features
+          label: Features
+        - key: turns_off
+          label: Turns off
+        empty: Nothing to choose here.
+        actions:
+        - id: use-project
+          label: Use for the Project
+          command: oxplow.capability.choose
+          row: true
+          when: can_choose
+          input:
+            capability: '{{row.capability}}'
+            provider: '{{row.provider}}'
+            layer: project
+        - id: use-mine
+          label: Use Just for Me
+          command: oxplow.capability.choose
+          row: true
+          when: can_choose
+          input:
+            capability: '{{row.capability}}'
+            provider: '{{row.provider}}'
+            layer: personal
+        - id: default-project
+          label: Use the Default for the Project
+          command: oxplow.capability.choose
+          row: true
+          when: is_default
+          input:
+            capability: '{{row.capability}}'
+            layer: project
+        - id: same-as-project
+          label: Same as the Project for Me
+          command: oxplow.capability.choose
+          row: true
+          when: is_default
+          input:
+            capability: '{{row.capability}}'
+            layer: personal
+      - id: replacements
+        title: Replaced components
+        from: replacements
+        viz: table
+        group:
+          by: label
+        columns:
+        - key: target
+          label: Component
+        - key: title
+          label: Shows
+        - key: standing
+          label: Standing
+          tone: tone
+        empty: No extension replaces a core component.
+        actions:
+        - id: use
+          label: Use This
+          command: oxplow.replacement.choose
+          row: true
+          when: can_choose
+          input:
+            target: '{{row.target}}'
+            whose: '{{row.whose}}'
+        - id: default
+          label: Use the Default
+          command: oxplow.replacement.choose
+          row: true
+          when: is_default
+          input:
+            target: '{{row.target}}'
+      - id: integrations-integrations
+        title: Integrations
+        from: integrations
+        viz: custom
+        custom:
+          component: integrations
+    - id: ai
+      title: AI
+      stack:
+      - id: ai-providers
+        title: AI providers
+        from: ai_providers
+        viz: table
+        columns:
+        - key: id
+          label: Name
+        - key: kind
+          label: Kind
+        - key: base_url
+          label: Base URL
+        - key: key
+          label: Key
+          width: 100
+        empty: No AI providers yet. Add one below — an API key for a hosted service, or the URL of a local server.
+        actions:
+        - id: test
+          label: Test…
+          command: oxplow.ai.test_provider
+          form: true
+          row: true
+          fixed:
+          - id
+          input:
+            id: '{{row.id}}'
+            model: '{{row.test_model}}'
+        - id: remove
+          label: Remove…
+          command: oxplow.ai.remove_provider
+          input:
+            id: '{{row.id}}'
+          row: true
+      - id: ai-provider-form
+        title: Add or update a provider
+        from: ai_provider_form
+        viz: form
+        form:
+          command: oxplow.ai.set_provider
+          fields:
+          - id
+          - kind
+          - base_url
+          - name: key
+            secret: true
+          choices:
+            kind: oxplow-foundation/ai-provider-kinds
+      - id: ai-roles
+        title: Roles
+        from: ai_roles
+        viz: table
+        columns:
+        - key: role
+          label: Role
+          width: 160
+        - key: description
+          label: Used for
+        - key: bound
+          label: Bound to
+        - key: problem
+          label: Problem
+        actions:
+        - id: assign
+          label: Assign…
+          command: oxplow.ai.set_role
+          form: true
+          row: true
+          when: can_assign
+          fixed:
+          - role
+          input:
+            role: '{{row.role}}'
+            provider: '{{row.provider}}'
+            model: '{{row.model}}'
+            restrict: '{{row.restrict|json}}'
+          choices:
+            provider: oxplow-foundation/ai-provider-choices
+        - id: unassign
+          label: Unassign
+          command: oxplow.ai.set_role
+          input:
+            role: '{{row.role}}'
+          row: true
+          when: can_unassign
+      - id: ai-calls
+        title: Recent calls
+        from: ai_calls
+        viz: table
+        columns:
+        - key: role
+          label: Role
+          width: 110
+        - key: caller
+          label: Asked by
+        - key: calls
+          label: Calls
+          width: 70
+        - key: failed
+          label: Failed
+          width: 70
+        - key: input_tokens
+          label: In
+          format: integer
+          width: 90
+        - key: output_tokens
+          label: Out
+          format: integer
+          width: 90
+        - key: last_at
+          label: Last
+          format: relative
+          width: 110
+        empty: No calls in the last 7 days.

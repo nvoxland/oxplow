@@ -1,0 +1,22 @@
+title: Hand Off Work
+description: Hand work to another open thread, any stream's. Its agent gets it at the start of its next prompt, and nothing wakes it. Taking it moves the work item there.
+hidden: true
+params:
+- name: uri
+  label: From thread
+view:
+  viz: form
+  form:
+    command: oxplow.handoff.send
+    defaults:
+      from_thread: '{{param.uri.id}}'
+    fixed:
+    - from_thread
+    fields:
+    - from_thread
+    - to_thread
+    - work_item
+    - body
+    choices:
+      to_thread: oxplow-foundation/handoff-recipients
+      work_item: oxplow-foundation/handoff-items

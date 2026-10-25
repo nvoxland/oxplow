@@ -1,0 +1,11 @@
+title: Timeline
+icon: history
+category: Activity
+keywords: efforts sessions commits threads time axis history
+params:
+- name: from
+- name: to
+- name: thread
+view:
+  component:
+    id: timeline

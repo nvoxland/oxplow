@@ -1,0 +1,24 @@
+title: File at a Revision
+description: A file read-only at a revision (a commit, a branch, a snapshot), filling the page; `#lines=12-40` marks and reveals lines. The renderer of oxplow's `file` resource when its URI names a `rev`.
+label: '{{param.path|basename}} ({{param.rev}})'
+for: oxplow/file
+accepts:
+  rev: present
+comments: true
+params:
+- name: uri
+- name: path
+- name: rev
+- name: lines
+  role: filter
+data:
+  file_viewer:
+    sql: |
+      SELECT :path AS path, :rev AS rev, :lines AS lines
+view:
+  from: file_viewer
+  viz: code
+  code:
+    path: path
+    revision: rev
+    lines: lines

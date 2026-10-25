@@ -1,0 +1,229 @@
+title: Change Analysis
+description: What changed and where to look first — files by review priority, churn by zone, changed functions, tests, and co-change, duplication and import surprises.
+hidden: true
+params:
+- name: change_id
+data:
+  change_summary:
+    sql: |
+      WITH f AS (
+        SELECT count(*) AS n,
+               coalesce(sum(additions), 0) AS a, coalesce(sum(deletions), 0) AS d,
+               coalesce(sum(status = 'added'), 0) AS na,
+               coalesce(sum(status = 'modified'), 0) AS nm,
+               coalesce(sum(status = 'deleted'), 0) AS nd,
+               coalesce(sum(is_test), 0) AS nt,
+               coalesce(sum(CASE WHEN is_test = 1 THEN additions + deletions ELSE 0 END), 0) AS test_lines,
+               coalesce(sum(CASE WHEN is_test = 1 THEN 0 ELSE additions + deletions END), 0) AS code_lines
+        FROM v_change_file WHERE change_id = :change_id
+      )
+      SELECT CASE c.status
+               WHEN 'failed' THEN 'Change analysis failed: ' || coalesce(c.error, 'unknown error')
+               WHEN 'done' THEN
+                 printf('**%d file%s** · +%d −%d · %d added, %d modified, %d deleted · %d test file%s',
+                        f.n, CASE f.n WHEN 1 THEN '' ELSE 's' END, f.a, f.d, f.na, f.nm, f.nd,
+                        f.nt, CASE f.nt WHEN 1 THEN '' ELSE 's' END)
+                 || CASE WHEN f.code_lines > 0
+                         THEN printf(' · test/code lines %d%%', f.test_lines * 100 / f.code_lines)
+                         ELSE '' END
+               ELSE '_Analyzing this change…_'
+             END AS summary
+      FROM v_change c, f
+      WHERE c.id = :change_id
+  change_look_here:
+    sql: |
+      SELECT i.path, round(i.interest, 1) AS interest, i.reasons,
+             c.base_revision, c.head_revision
+      FROM v_oxplow_bundled_change_interest i JOIN v_change c ON c.id = i.change_id
+      WHERE i.change_id = :change_id AND i.interest > 0
+      ORDER BY i.interest DESC, i.path
+      LIMIT 10
+  change_treemap:
+    sql: |
+      SELECT f.path, f.additions + f.deletions AS churn, f.zone, c.base_revision, c.head_revision
+      FROM v_change_file f JOIN v_change c ON c.id = f.change_id
+      WHERE f.change_id = :change_id AND f.additions + f.deletions > 0
+  change_functions:
+    sql: |
+      SELECT fn.path,
+             CASE WHEN fn.container <> '' THEN fn.container || '::' ELSE '' END || fn.name AS function,
+             fn.status,
+             CASE WHEN fn.signature_changed = 1 THEN 'signature'
+                  WHEN fn.body_changed = 1 THEN 'body' END AS what,
+             fn.complexity, fn.complexity_delta, fn.length_delta,
+             fn.added_lines + fn.deleted_lines AS churn,
+             fn.start_line, c.base_revision, c.head_revision, fn.uri
+      FROM v_change_function fn JOIN v_change c ON c.id = fn.change_id
+      WHERE fn.change_id = :change_id AND fn.is_test = 0
+      ORDER BY churn DESC, fn.path, fn.start_line
+  change_test_files:
+    sql: |
+      SELECT f.path, f.status, f.additions, f.deletions, c.base_revision, c.head_revision
+      FROM v_change_file f JOIN v_change c ON c.id = f.change_id
+      WHERE f.change_id = :change_id AND f.is_test = 1
+      ORDER BY f.path
+  change_co_change:
+    sql: |
+      SELECT x.path,
+             CASE x.reason
+               WHEN 'usual-co-changers-absent' THEN 'Usual partners unchanged'
+               WHEN 'dormant' THEN printf('Untouched for %d days', x.dormant_days)
+               ELSE x.reason
+             END AS why,
+             x.expected, c.base_revision, c.head_revision
+      FROM v_oxplow_bundled_change_co_change x JOIN v_change c ON c.id = x.change_id
+      WHERE x.change_id = :change_id
+      ORDER BY x.reason, x.path
+  change_duplicates:
+    sql: |
+      SELECT d.path, d.start_line, d.lines, d.peer_path,
+             d.path || ':' || d.start_line || '-' || d.end_line || '|'
+               || d.peer_path || ':' || d.peer_start_line || '-' || d.peer_end_line AS pair,
+             c.head_revision
+      FROM v_change_duplicate d JOIN v_change c ON c.id = d.change_id
+      WHERE d.change_id = :change_id
+      ORDER BY d.lines DESC, d.path, d.start_line
+  change_cross_zone_imports:
+    sql: |
+      SELECT i.path, i.module, i.from_zone, i.to_zone, i.start_line, c.base_revision, c.head_revision
+      FROM v_change_import i JOIN v_change c ON c.id = i.change_id
+      WHERE i.change_id = :change_id AND i.cross_zone = 1
+      ORDER BY i.path, i.start_line
+view:
+  stack:
+  - id: change-summary
+    title: Summary
+    from: change_summary
+    viz: markdown
+  - id: change-look-here
+    title: Look Here First
+    from: change_look_here
+    viz: table
+    columns:
+    - key: path
+      label: File
+      link:
+        kind: diff-at
+        base: base_revision
+        head: head_revision
+    - key: reasons
+      label: Why
+    - key: interest
+      label: Score
+    empty: Nothing stands out.
+  - id: change-treemap
+    title: Churn
+    from: change_treemap
+    viz: treemap
+    chart:
+      label: path
+      size: churn
+      group: zone
+    columns:
+    - key: path
+      link:
+        kind: diff-at
+        base: base_revision
+        head: head_revision
+    empty: No changed lines.
+  - id: change-functions
+    title: Function Changes
+    from: change_functions
+    viz: table
+    columns:
+    - key: function
+      label: Function
+      link:
+        kind: page
+        from: uri
+    - key: path
+      label: File
+      link:
+        kind: diff-at
+        line: start_line
+        base: base_revision
+        head: head_revision
+    - key: status
+      label: Status
+    - key: what
+      label: Changed
+    - key: complexity
+      label: Complexity
+    - key: complexity_delta
+      label: Δ Complexity
+    - key: length_delta
+      label: Δ Length
+    - key: churn
+      label: Churn
+    empty: No functions changed outside tests.
+  - id: change-test-files
+    title: Test Changes
+    from: change_test_files
+    viz: table
+    columns:
+    - key: path
+      label: File
+      link:
+        kind: diff-at
+        base: base_revision
+        head: head_revision
+    - key: status
+      label: Status
+    - key: additions
+      label: +
+    - key: deletions
+      label: −
+    empty: No test files changed.
+  - id: change-co-change
+    title: Co-change Surprises
+    from: change_co_change
+    viz: table
+    columns:
+    - key: path
+      label: File
+      link:
+        kind: diff-at
+        base: base_revision
+        head: head_revision
+    - key: why
+      label: Why
+    - key: expected
+      label: Usually Changes With
+    empty: No co-change surprises.
+  - id: change-duplicates
+    title: Duplication
+    from: change_duplicates
+    viz: table
+    columns:
+    - key: path
+      label: File
+      link:
+        kind: compare
+        from: pair
+        head: head_revision
+    - key: start_line
+      label: Line
+    - key: lines
+      label: Lines
+    - key: peer_path
+      label: Copy Of
+    empty: No duplicated blocks.
+  - id: change-cross-zone-imports
+    title: New Cross-zone Imports
+    from: change_cross_zone_imports
+    viz: table
+    columns:
+    - key: path
+      label: File
+      link:
+        kind: diff-at
+        line: start_line
+        base: base_revision
+        head: head_revision
+    - key: module
+      label: Imports
+    - key: from_zone
+      label: From
+    - key: to_zone
+      label: To
+    empty: No new cross-zone imports.

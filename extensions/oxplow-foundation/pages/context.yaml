@@ -1,0 +1,82 @@
+title: Context
+description: 'What you collected for this thread''s agents: pages from a page''s ☰ and text from a selection''s right-click. The next prompt to any agent in the thread carries what waits here, then it moves to Delivered.'
+icon: at-sign
+category: Work
+keywords: basket collected agent prompt
+params:
+- name: thread_id
+data:
+  waiting:
+    sql: |
+      SELECT c.id, c.kind,
+             coalesce(c.label, c.source_uri, substr(c.text, 1, 80)) AS what,
+             c.source_uri, substr(c.text, 1, 200) AS preview, c.added_at
+      FROM v_thread_context c
+      WHERE c.thread_id = :thread_id AND c.delivered_at IS NULL
+      ORDER BY c.id
+  delivered:
+    sql: |
+      SELECT c.id, c.kind,
+             coalesce(c.label, c.source_uri, substr(c.text, 1, 80)) AS what,
+             c.source_uri, substr(c.text, 1, 200) AS preview, c.delivered_at
+      FROM v_thread_context c
+      WHERE c.thread_id = :thread_id AND c.delivered_at IS NOT NULL
+      ORDER BY c.delivered_at DESC, c.id DESC
+      LIMIT 20
+view:
+  stack:
+  - id: waiting
+    title: Waiting
+    from: waiting
+    viz: table
+    columns:
+    - key: what
+      label: Collected
+      link:
+        kind: page
+        from: source_uri
+    - key: kind
+      label: Kind
+      width: 70
+    - key: preview
+      label: Text
+    - key: added_at
+      label: Added
+      format: relative
+      width: 110
+    empty: Nothing collected yet. Add a page from its ☰ and text from a selection's right-click; the next prompt to an agent in this thread carries it.
+    actions:
+    - id: remove
+      label: Remove
+      command: oxplow.context.remove
+      input:
+        item: '{{row.id}}'
+      row: true
+  - id: delivered
+    title: Delivered
+    from: delivered
+    viz: table
+    columns:
+    - key: what
+      label: Collected
+      link:
+        kind: page
+        from: source_uri
+    - key: kind
+      label: Kind
+      width: 70
+    - key: preview
+      label: Text
+    - key: delivered_at
+      label: Delivered
+      format: relative
+      width: 110
+    empty: Nothing delivered yet.
+actions:
+- id: clear
+  label: Clear
+  command: oxplow.context.clear
+  input:
+    thread: thr{{param.thread_id}}
+  prominent: true
+  icon: trash-2

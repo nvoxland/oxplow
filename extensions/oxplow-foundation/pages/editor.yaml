@@ -1,0 +1,23 @@
+title: Editor
+description: 'A file of the working tree, edited: its unsaved edits shared with every tab showing it, Save writing it (`oxplow.file.save`); `#lines=12` lands on a line. The renderer of oxplow''s `file` resource when its URI names no `rev`.'
+label: '{{param.path|basename}}'
+for: oxplow/file
+accepts:
+  rev: absent
+default: true
+comments: true
+params:
+- name: uri
+- name: path
+- name: lines
+  role: filter
+data:
+  editor:
+    sql: |
+      SELECT :path AS path, :lines AS lines
+view:
+  from: editor
+  viz: editor
+  editor:
+    path: path
+    lines: lines

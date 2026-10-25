@@ -1,0 +1,10 @@
+title: AI provider choices
+description: The configured providers, for a role to be bound to.
+hidden: true
+data:
+  ai_provider_choices:
+    sql: |
+      SELECT id AS value, id AS label FROM v_ai_provider ORDER BY id
+view:
+  from: ai_provider_choices
+  viz: table

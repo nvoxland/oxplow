@@ -1,0 +1,31 @@
+title: Stream Settings
+description: A stream's settings — today its custom prompt.
+label: '{{row.title}} settings'
+icon: settings
+params:
+- name: stream
+  label: Stream
+data:
+  row:
+    sql: |
+      SELECT s.title AS title FROM v_stream s WHERE s.uri = uri('oxplow/stream', 'id', :stream)
+    columns:
+    - key: title
+  prompt:
+    sql: |
+      SELECT uri_param(s.uri, 'id') AS stream, coalesce(s.prompt, '') AS prompt
+      FROM v_stream s
+      WHERE s.uri = uri('oxplow/stream', 'id', :stream)
+view:
+  stack:
+  - id: hint
+    markdown: Appended to the agent's system prompt for every thread inside this stream. Applies to agent sessions started after Save — existing sessions keep the prompt they launched with.
+  - id: prompt
+    title: Custom Prompt
+    from: prompt
+    viz: form
+    form:
+      command: oxplow.stream.set_prompt
+      mode: edit
+      fields:
+      - prompt

@@ -1,0 +1,19 @@
+title: Web Page
+description: A web page, opened in oxplow's sandboxed window; this is its status panel.
+label: '{{param.uri|url}}'
+icon: external-link
+for:
+- https
+- http
+default: true
+params:
+- name: uri
+data:
+  web_page:
+    sql: |
+      SELECT :uri AS url
+view:
+  from: web_page
+  viz: embed
+  embed:
+    url: url

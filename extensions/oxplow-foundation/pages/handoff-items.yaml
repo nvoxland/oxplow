@@ -1,0 +1,17 @@
+title: Items to Hand Off
+description: A thread's work items that aren't done or canceled — what a handoff from it can hand over.
+hidden: true
+params:
+- name: uri
+  label: From thread
+data:
+  handoff_items:
+    sql: |
+      SELECT w.uri AS value, w.title AS label
+      FROM v_work_item w
+      JOIN v_thread t ON t.id = w.thread_id
+      WHERE t.uri = :uri AND w.state NOT IN ('done', 'canceled')
+      ORDER BY w.rank, w.uri
+view:
+  from: handoff_items
+  viz: table

@@ -1,0 +1,338 @@
+title: Tasks
+description: 'The work items on a thread, on every thread of a stream or on all of them, by state: drag to reorder, onto another row to nest it, mark rows for a bulk change, and right-click for the rest.'
+icon: check-square
+category: Work
+keywords: dashboard work list
+needs:
+- work_items
+- work_items.lists
+params:
+- name: show
+  type: choice
+  role: filter
+  label: Show
+  default: thread
+  options:
+  - value: thread
+    label: One thread
+  - value: stream
+    label: Its stream
+  - value: all
+    label: Everything
+- name: priority
+  type: choice
+  role: filter
+  label: Priority
+  default: any
+  options:
+  - value: any
+    label: Any
+  - value: urgent
+    label: Urgent
+  - value: high
+    label: High
+  - value: medium
+    label: Medium
+  - value: low
+    label: Low
+- name: thread_id
+- name: stream_id
+data:
+  row:
+    sql: |
+      SELECT CASE :show WHEN 'stream' THEN 'stream' WHEN 'all' THEN 'all' ELSE 'thread' END AS scope
+    columns:
+    - key: scope
+  list:
+    sql: |
+      WITH feat AS (
+        SELECT p.features AS f, p.fields AS fields FROM v_capability_provider p WHERE p.capability = 'work_items' AND p.active = 1
+      ),
+      scoped AS (
+        SELECT w.*, json_extract(w.native, '$.priority') AS prio
+        FROM v_work_item w
+        WHERE w.state <> 'canceled'
+          AND CASE :scope WHEN 'thread' THEN w.thread_id = :thread_id
+                          WHEN 'stream' THEN w.thread_id IN (SELECT t.id FROM v_thread t WHERE t.stream_id = :stream_id)
+                          ELSE w.thread_id IS NOT NULL END
+      ),
+      shown AS (
+        SELECT s.*,
+               CASE WHEN s.state = 'done' THEN row_number() OVER (PARTITION BY s.state ORDER BY s.closed_at DESC) END AS done_rank
+        FROM scoped s
+        WHERE :priority = 'any' OR s.prio = :priority
+           OR EXISTS (SELECT 1 FROM scoped c WHERE c.parent_uri = s.uri AND c.prio = :priority)
+      )
+      , item_rows AS (
+        SELECT w.uri, w.title, w.state, 1 AS is_item,
+               (SELECT group_concat(n.value, ' · ')
+                  FROM json_each(CASE WHEN json_valid(w.native) THEN w.native ELSE '{}' END) n
+                 WHERE n.key IN (SELECT json_extract(f.value, '$.name')
+                                   FROM json_each(CASE WHEN json_valid((SELECT fields FROM feat)) THEN (SELECT fields FROM feat) ELSE '[]' END) f
+                                  WHERE json_extract(f.value, '$.kind') = 'enum'
+                                    AND coalesce(json_extract(f.value, '$.read_only'), 0) = 0)
+                   AND n.value IS NOT NULL) AS fields,
+               (SELECT t.title FROM v_thread t WHERE t.id = w.thread_id) AS thread,
+               CASE WHEN w.parent_uri IS NOT NULL AND EXISTS (SELECT 1 FROM shown p WHERE p.uri = w.parent_uri) THEN 1 ELSE 0 END AS depth,
+               CASE WHEN coalesce(json_extract((SELECT f FROM feat), '$.hierarchy'), 0) = 1
+                    THEN uri('oxplow/page', 'page', 'new-task', 'parent', w.uri) END AS add_child,
+               CASE WHEN coalesce(json_extract((SELECT f FROM feat), '$.hierarchy'), 0) = 1 THEN '+' END AS plus,
+               w.state <> 'todo' AS not_todo, w.state <> 'in_progress' AS not_in_progress,
+               w.state <> 'blocked' AS not_blocked, w.state <> 'done' AS not_done,
+               coalesce(json_extract((SELECT f FROM feat), '$.ordering'), 0) AS can_order,
+               coalesce(json_extract((SELECT f FROM feat), '$.delete'), 0) AS can_delete,
+               coalesce(json_extract((SELECT f FROM feat), '$.hierarchy'), 0) AS can_nest,
+               (coalesce(json_extract((SELECT f FROM feat), '$.hierarchy'), 0) = 1 AND w.parent_uri IS NOT NULL) AS has_parent,
+               (w.thread_id IS NOT NULL AND coalesce(json_extract((SELECT f FROM feat), '$.lists'), 0) = 1) AS can_shelve,
+               EXISTS (SELECT 1 FROM json_each(CASE WHEN json_valid((SELECT fields FROM feat)) THEN (SELECT fields FROM feat) ELSE '[]' END) f
+                        WHERE json_extract(f.value, '$.name') = 'priority' AND json_extract(f.value, '$.kind') = 'enum') AS can_prioritize,
+               coalesce((SELECT t.sort_index FROM v_thread t WHERE t.id = w.thread_id), 0) AS k1,
+               coalesce((SELECT p.rank FROM shown p WHERE p.uri = w.parent_uri), w.rank) AS k2,
+               w.rank AS k3
+        FROM shown w
+        WHERE w.done_rank IS NULL OR w.done_rank <= 5
+      )
+      SELECT uri, title, state, is_item, fields, thread, depth, add_child, plus, not_todo, not_in_progress, not_blocked, not_done,
+             can_order, can_delete, can_nest, has_parent, can_shelve, can_prioritize
+      FROM (
+        SELECT i.*, 0 AS k0 FROM item_rows i
+        UNION ALL
+        -- A turn the agent has open on the thread is a live row at the top of In progress.
+        SELECT NULL, 'Agent is working: ' || CASE WHEN instr(trim(t.prompt), char(10)) > 0
+                                                  THEN substr(trim(t.prompt), 1, instr(trim(t.prompt), char(10)) - 1)
+                                                  ELSE trim(t.prompt) END,
+               'in_progress', 0, NULL, NULL, 0, NULL, NULL, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1, -1, -1, 1
+        FROM v_agent_turn t WHERE :scope = 'thread' AND t.thread_id = :thread_id AND t.ended_at IS NULL
+      )
+      ORDER BY k0 DESC, k1, k2, depth, k3
+    params:
+      scope:
+        from: row.scope
+  summary:
+    sql: |
+      WITH scoped AS (
+        SELECT w.* FROM v_work_item w
+        WHERE CASE :scope WHEN 'thread' THEN w.thread_id = :thread_id
+                          WHEN 'stream' THEN w.thread_id IN (SELECT t.id FROM v_thread t WHERE t.stream_id = :stream_id)
+                          ELSE w.thread_id IS NOT NULL END
+      )
+      SELECT (SELECT count(*) FROM scoped WHERE state = 'in_progress') AS in_progress,
+             (SELECT count(*) FROM scoped WHERE state = 'todo') AS ready,
+             (SELECT count(*) FROM scoped WHERE state = 'blocked') AS blocked,
+             (SELECT count(*) FROM scoped WHERE state = 'done') AS done,
+             (SELECT b.title FROM scoped b WHERE b.state = 'blocked' ORDER BY b.updated_at LIMIT 1) AS oldest_blocked,
+             (SELECT b.uri FROM scoped b WHERE b.state = 'blocked' ORDER BY b.updated_at LIMIT 1) AS oldest_blocked_ref,
+             (SELECT group_concat(d.title, ' · ') FROM (SELECT title FROM scoped WHERE state = 'done' ORDER BY coalesce(closed_at, updated_at) DESC LIMIT 3) d) AS recently_done
+    params:
+      scope:
+        from: row.scope
+  backlog:
+    sql: |
+      SELECT count(*) AS waiting, uri('oxplow/page', 'page', 'backlog') AS backlog FROM v_work_item WHERE thread_id IS NULL
+view:
+  stack:
+  - id: list
+    replaceable: work_item.list
+    title: Tasks
+    from: list
+    viz: list
+    group:
+      by: state
+      values:
+      - in_progress
+      - todo
+      - blocked
+      - done
+    depth: depth
+    columns:
+    - key: title
+      label: Item
+      link:
+        kind: page
+        from: uri
+      icon: state
+    - key: fields
+      label: Fields
+    - key: thread
+      label: Thread
+    - key: plus
+      label: ''
+      link:
+        kind: page
+        from: add_child
+      width: 40
+    empty: Nothing here. File an item with New Task….
+    actions:
+    - id: reorder
+      label: Reorder
+      command: oxplow.work_item.reorder
+      row: true
+      drag: true
+      when: can_order
+      input:
+        uri: '{{row.uri}}'
+        before: '{{before.uri}}'
+    - id: nest
+      label: Nest under
+      command: oxplow.work_item.update
+      row: true
+      drag: true
+      when: can_nest
+      input:
+        uri: '{{row.uri}}'
+        parent_uri: '{{onto.uri}}'
+    - id: move
+      label: Move to the state
+      command: oxplow.work_item.transition
+      row: true
+      drag: true
+      when: is_item
+      input:
+        uri: '{{row.uri}}'
+        to: '{{group.value}}'
+    - id: to-todo
+      label: Mark Ready
+      command: oxplow.work_item.transition
+      row: true
+      bulk: true
+      key: r
+      when: not_todo
+      input:
+        uri: '{{row.uri}}'
+        to: todo
+    - id: to-in-progress
+      label: Mark In Progress
+      command: oxplow.work_item.transition
+      row: true
+      bulk: true
+      key: i
+      when: not_in_progress
+      input:
+        uri: '{{row.uri}}'
+        to: in_progress
+    - id: to-blocked
+      label: Mark Blocked
+      command: oxplow.work_item.transition
+      row: true
+      bulk: true
+      key: b
+      when: not_blocked
+      input:
+        uri: '{{row.uri}}'
+        to: blocked
+    - id: to-done
+      label: Mark Done
+      command: oxplow.work_item.transition
+      row: true
+      bulk: true
+      key: d
+      when: not_done
+      input:
+        uri: '{{row.uri}}'
+        to: done
+    - id: to-canceled
+      label: Mark Canceled
+      command: oxplow.work_item.transition
+      row: true
+      bulk: true
+      when: is_item
+      input:
+        uri: '{{row.uri}}'
+        to: canceled
+    - id: priority-urgent
+      label: Priority Urgent
+      command: oxplow.work_item.update
+      row: true
+      bulk: true
+      when: can_prioritize
+      input:
+        uri: '{{row.uri}}'
+        native:
+          priority: urgent
+    - id: priority-high
+      label: Priority High
+      command: oxplow.work_item.update
+      row: true
+      bulk: true
+      when: can_prioritize
+      input:
+        uri: '{{row.uri}}'
+        native:
+          priority: high
+    - id: priority-medium
+      label: Priority Medium
+      command: oxplow.work_item.update
+      row: true
+      bulk: true
+      when: can_prioritize
+      input:
+        uri: '{{row.uri}}'
+        native:
+          priority: medium
+    - id: priority-low
+      label: Priority Low
+      command: oxplow.work_item.update
+      row: true
+      bulk: true
+      when: can_prioritize
+      input:
+        uri: '{{row.uri}}'
+        native:
+          priority: low
+    - id: unparent
+      label: Make top-level
+      command: oxplow.work_item.update
+      row: true
+      bulk: true
+      when: has_parent
+      input:
+        uri: '{{row.uri}}'
+        parent_uri: ''
+    - id: shelve
+      label: Send to backlog
+      command: oxplow.work_item.move
+      row: true
+      bulk: true
+      when: can_shelve
+      input:
+        uri: '{{row.uri}}'
+        to: backlog
+    - id: delete
+      label: Delete
+      command: oxplow.work_item.delete
+      row: true
+      bulk: true
+      when: can_delete
+      input:
+        uri: '{{row.uri}}'
+  - id: summary
+    title: Summary
+    from: summary
+    viz: detail
+    columns:
+    - key: in_progress
+      label: In progress
+    - key: ready
+      label: To do
+    - key: blocked
+      label: Blocked
+    - key: done
+      label: Done
+    - key: oldest_blocked
+      label: Oldest blocked
+      link:
+        kind: page
+        from: oldest_blocked_ref
+    - key: recently_done
+      label: Recently completed
+  - id: backlog
+    title: Backlog
+    from: backlog
+    viz: detail
+    columns:
+    - key: waiting
+      label: Waiting
+      link:
+        kind: page
+        from: backlog
+  - slot: sections

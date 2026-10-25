@@ -1,0 +1,45 @@
+title: Next
+description: What to pick up next on a thread's list. Ready means `todo` with no open blocker. When the first ready item is an epic (an item with children), it and its ready descendants, as one unit; otherwise every ready item that isn't an epic.
+hidden: true
+tool: work_next
+params:
+- name: thread
+  label: Thread (`thr3`)
+data:
+  work_next:
+    sql: |
+      WITH items AS (
+        SELECT * FROM v_work_item
+        WHERE thread_id = (SELECT id FROM v_thread WHERE uri = uri('oxplow/thread', 'id', :thread))),
+      held AS (
+        SELECT l.to_uri FROM v_work_item_link l JOIN v_work_item b ON b.uri = l.from_uri
+        WHERE l.link_type = 'blocks' AND b.state NOT IN ('done', 'canceled')),
+      epics AS (SELECT DISTINCT parent_uri AS uri FROM items WHERE parent_uri IS NOT NULL),
+      ready AS (
+        SELECT * FROM items WHERE state = 'todo' AND uri NOT IN (SELECT to_uri FROM held)),
+      head AS (
+        SELECT uri FROM ready ORDER BY rank IS NULL, rank, created_at LIMIT 1),
+      below(uri) AS (
+        SELECT i.uri FROM items i JOIN head h ON i.parent_uri = h.uri
+        UNION SELECT i.uri FROM items i JOIN below b ON i.parent_uri = b.uri)
+      SELECT r.uri, r.title,
+             CASE WHEN r.uri IN (SELECT uri FROM head) AND r.uri IN (SELECT uri FROM epics) THEN 'epic'
+                  WHEN r.uri IN (SELECT uri FROM below) THEN 'child'
+                  ELSE 'ready' END AS role
+      FROM ready r
+      WHERE CASE WHEN (SELECT uri FROM head) IN (SELECT uri FROM epics)
+                 THEN r.uri IN (SELECT uri FROM head) OR r.uri IN (SELECT uri FROM below)
+                 ELSE r.uri NOT IN (SELECT uri FROM epics) END
+      ORDER BY role = 'child', r.rank IS NULL, r.rank, r.created_at
+view:
+  from: work_next
+  viz: table
+  columns:
+  - key: title
+    label: Item
+    link:
+      kind: page
+      from: uri
+  - key: role
+    label: ''
+  empty: Nothing is ready.

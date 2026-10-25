@@ -1,0 +1,36 @@
+title: Directory
+description: A workspace folder's contents, folders first; each row opens its folder or file. The renderer of oxplow's `dir` resource (`[[dir:src]]`).
+label: '{{param.path|basename}}'
+for: oxplow/dir
+accepts:
+  rev: absent
+default: true
+params:
+- name: uri
+  label: Folder
+- name: path
+  label: Path
+- name: stream_id
+data:
+  directory:
+    sql: |
+      SELECT name, kind, status,
+             CASE kind WHEN 'dir' THEN 'folder' ELSE 'file' END AS icon,
+             uri(CASE kind WHEN 'dir' THEN 'oxplow/dir' ELSE 'oxplow/file' END, 'path', path) AS target
+      FROM v_workspace_file
+      WHERE stream_id = :stream_id AND parent = :path
+      ORDER BY kind = 'dir' DESC, name
+view:
+  from: directory
+  viz: list
+  columns:
+  - key: name
+    label: Name
+    link:
+      kind: page
+      from: target
+    icon: icon
+  - key: status
+    label: Change
+    format: badge
+  empty: (empty)

@@ -1,0 +1,98 @@
+title: Agent Interface
+description: How agents use oxplow's interface over the last 30 days — which tools they call, which commands they run and how often those are refused or fail, and which hints fire.
+category: Activity
+data:
+  interface_tool_calls:
+    sql: |
+      SELECT replace(t.tool, 'mcp__oxplow__', '') AS tool,
+             coalesce(s.harness, 'unknown') AS harness,
+             count(*) AS calls,
+             sum(t.ok = 0) AS failed
+      FROM v_tool_call t LEFT JOIN v_agent_session s ON s.id = t.agent_session_id
+      WHERE t.kind = 'mcp' AND substr(t.tool, 1, 13) = 'mcp__oxplow__'
+        AND t.at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-30 days')
+      GROUP BY t.tool, coalesce(s.harness, 'unknown')
+      ORDER BY calls DESC, tool, harness
+  interface_commands:
+    sql: |
+      SELECT command,
+             uri('oxplow/lens', 'lens', 'oxplow-bundled/interface-command-errors', 'command', command) AS errors_ref,
+             count(*) AS runs,
+             sum(outcome = 'invalid') AS invalid,
+             sum(outcome = 'denied') AS denied,
+             sum(outcome = 'error') AS errors,
+             round(100.0 * sum(outcome <> 'ok') / count(*), 1) AS refused_pct
+      FROM v_command_audit
+      WHERE actor_kind = 'agent'
+        AND at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-30 days')
+      GROUP BY command
+      ORDER BY sum(outcome <> 'ok') DESC, runs DESC, command
+  interface_hints:
+    sql: |
+      SELECT hint,
+             sum(evaluated) AS evaluated,
+             sum(fired) AS fired,
+             sum(delivered) AS delivered,
+             sum(held) AS held,
+             sum(muted) AS muted,
+             max(last_evaluated_at) AS last_evaluated_at
+      FROM v_hint_stat
+      GROUP BY hint
+      ORDER BY fired = 0 DESC, evaluated DESC, hint
+view:
+  grid:
+  - id: interface-tool-calls
+    title: Tool Calls
+    from: interface_tool_calls
+    viz: table
+    columns:
+    - key: tool
+      label: Tool
+    - key: harness
+      label: Harness
+    - key: calls
+      label: Calls
+    - key: failed
+      label: Failed
+    empty: No agent has called oxplow's tools in the last 30 days.
+  - id: interface-commands
+    title: Command Runs
+    from: interface_commands
+    viz: table
+    columns:
+    - key: command
+      label: Command
+      link:
+        kind: page
+        from: errors_ref
+    - key: runs
+      label: Runs
+    - key: invalid
+      label: Invalid
+    - key: denied
+      label: Denied
+    - key: errors
+      label: Failed
+    - key: refused_pct
+      label: Not ok (%)
+    empty: No agent has run a command in the last 30 days.
+  - id: interface-hints
+    title: Hints
+    from: interface_hints
+    viz: table
+    columns:
+    - key: hint
+      label: Hint
+    - key: evaluated
+      label: Evaluated
+    - key: fired
+      label: Fired
+    - key: delivered
+      label: Delivered
+    - key: held
+      label: Waiting
+    - key: muted
+      label: Muted
+    - key: last_evaluated_at
+      label: Last evaluated
+    empty: No hint has been evaluated yet.

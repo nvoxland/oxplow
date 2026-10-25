@@ -1,0 +1,161 @@
+title: Comments
+description: Every comment thread in this stream, grouped by the page it is anchored to. Pick one to read its conversation; resolve it, reply, or change who should act on it. The agent reads the same threads with `oxplow_list_comments`.
+icon: inbox
+category: Activity
+params:
+- name: stream_id
+- name: days
+  type: choice
+  role: filter
+  label: Show
+  default: '0'
+  options:
+  - value: '0'
+    label: Unresolved only
+  - value: '1'
+    label: Resolved in the last day
+  - value: '3'
+    label: Resolved in the last 3 days
+  - value: '7'
+    label: Resolved in the last 7 days
+  - value: '14'
+    label: Resolved in the last 2 weeks
+  - value: '28'
+    label: Resolved in the last 4 weeks
+  - value: '60'
+    label: Resolved in the last 2 months
+  - value: '90'
+    label: Resolved in the last 3 months
+  - value: '365'
+    label: Resolved in the last year
+- name: comment
+data:
+  threads:
+    sql: |
+      SELECT 'cmt' || c.id AS cid, c.uri, c.target,
+             CASE c.target_resource
+               WHEN 'oxplow/file' THEN uri_param(c.target, 'path')
+               WHEN 'oxplow/wiki' THEN 'wiki/' || uri_param(c.target, 'slug')
+               WHEN 'oxplow/work_item' THEN uri_param(c.target, 'id')
+               WHEN 'oxplow/agent_session' THEN 'an agent session''s terminal'
+               ELSE c.target END AS target_label,
+             CASE c.intent WHEN 'followup' THEN 'follow-up' ELSE 'note' END AS kind,
+             trim(CASE WHEN c.status = 'resolved' THEN 'resolved ' ELSE '' END
+                  || CASE WHEN c.orphaned THEN 'orphaned' ELSE '' END) AS state,
+             c.quote,
+             (SELECT m.author || ': ' || m.body FROM v_comment_message m
+               WHERE m.comment = c.uri ORDER BY m.position DESC LIMIT 1) AS latest,
+             CASE WHEN c.orphaned THEN 'Go to page' ELSE 'Go to location' END AS go,
+             CASE WHEN c.orphaned THEN c.target
+                  ELSE c.target || CASE WHEN instr(c.target, '#') > 0 THEN '&' ELSE '#' END || 'comment=cmt' || c.id END AS go_ref,
+             (c.status = 'open') AS is_open,
+             (c.status = 'resolved') AS is_resolved,
+             (c.intent = 'note') AS is_note,
+             (c.intent = 'followup') AS is_followup
+      FROM v_comment c
+      WHERE c.stream_id = :stream_id
+        AND (c.status = 'open'
+             OR (CAST(coalesce(:days, '0') AS INTEGER) > 0
+                 AND julianday(c.resolved_at) >= julianday('now') - CAST(:days AS INTEGER)))
+      ORDER BY target_label, c.created_at
+  conversation:
+    sql: |
+      SELECT m.position, m.author, m.body, m.created_at
+      FROM v_comment_message m
+      WHERE m.comment = CASE WHEN coalesce(:comment, '') = '' THEN NULL ELSE uri('oxplow/comment', 'id', :comment) END
+      ORDER BY m.position
+view:
+  stack:
+  - id: threads
+    title: Threads
+    from: threads
+    viz: table
+    group:
+      by: target_label
+      link:
+        kind: page
+        from: target
+    columns:
+    - key: cid
+      label: Thread
+      width: 80
+      select: comment
+    - key: kind
+      label: For
+      width: 90
+    - key: state
+      label: State
+      width: 120
+    - key: quote
+      label: Quote
+    - key: latest
+      label: Latest
+    - key: go
+      label: ''
+      width: 130
+      link:
+        kind: page
+        from: go_ref
+    empty: No unresolved comments. Select text in a wiki page, file, work item or the agent's output to add one; the agent can answer them.
+    actions:
+    - id: reply
+      label: Reply…
+      command: oxplow.knowledge.reply_comment
+      form: true
+      input:
+        comment: '{{row.cid}}'
+        body: ''
+      row: true
+    - id: resolve
+      label: Resolve
+      command: oxplow.knowledge.update_comment
+      input:
+        comment: '{{row.cid}}'
+        status: resolved
+      row: true
+      when: is_open
+    - id: reopen
+      label: Reopen
+      command: oxplow.knowledge.update_comment
+      input:
+        comment: '{{row.cid}}'
+        status: open
+      row: true
+      when: is_resolved
+    - id: followup
+      label: Make It a Follow-Up
+      command: oxplow.knowledge.update_comment
+      input:
+        comment: '{{row.cid}}'
+        intent: followup
+      row: true
+      when: is_note
+    - id: note
+      label: Make It a Note
+      command: oxplow.knowledge.update_comment
+      input:
+        comment: '{{row.cid}}'
+        intent: note
+      row: true
+      when: is_followup
+    - id: delete
+      label: Delete
+      command: oxplow.knowledge.delete_comment
+      input:
+        comment: '{{row.cid}}'
+      row: true
+  - id: conversation
+    title: Conversation
+    from: conversation
+    viz: list
+    columns:
+    - key: author
+      label: Who
+      width: 90
+    - key: body
+      label: Says
+    - key: created_at
+      label: When
+      format: relative
+      width: 110
+    empty: Pick a thread above to read its conversation.

@@ -1,0 +1,35 @@
+# TODO(convert): lens `catalog` is named like page entry `catalog`, so its page is `catalog-lens`: rename one
+title: Data catalog
+description: 'What oxplow''s data holds: every model (`v_*` view) with its owner, what it holds and its columns (name and type); name one (`v_effort` or `effort`) for its columns'' docs and key. Query them with `oxplow_query_sql`; metrics are read with `MEASURE(''<key>'')` over `metric_grid()` (their units and aggregation are in `v_metric_spec`).'
+hidden: true
+tool: catalog
+params:
+- name: model
+  label: Model (`v_effort`); empty for all
+  default: ''
+data:
+  catalog:
+    sql: |
+      SELECT m.view, m.owner, m.description,
+             (SELECT group_concat(
+                       c.name || ' ' || coalesce(c.sql_type, '')
+                       || CASE WHEN :model <> '' AND c.doc IS NOT NULL THEN ' — ' || c.doc ELSE '' END
+                       || CASE WHEN :model <> '' AND c.key_part IS NOT NULL THEN ' (key)' ELSE '' END,
+                       CASE WHEN :model <> '' THEN char(10) ELSE ', ' END)
+                FROM (SELECT * FROM v_model_column c WHERE c.view = m.view ORDER BY c.position) c) AS columns
+      FROM v_model m
+      WHERE :model = '' OR m.view = :model OR m.name = :model
+      ORDER BY m.owner <> 'core', m.owner, m.view
+view:
+  from: catalog
+  viz: table
+  columns:
+  - key: view
+    label: Model
+  - key: owner
+    label: Owner
+  - key: description
+    label: Holds
+  - key: columns
+    label: Columns
+  empty: No model by that name; leave `model` empty to list them all.

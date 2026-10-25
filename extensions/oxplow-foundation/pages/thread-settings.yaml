@@ -1,0 +1,55 @@
+title: Thread Settings
+description: A thread's settings — its open agent sessions and its custom prompt.
+label: '{{row.title}} settings'
+icon: settings
+params:
+- name: thread
+  label: Thread
+data:
+  row:
+    sql: |
+      SELECT t.title AS title FROM v_thread t WHERE t.uri = uri('oxplow/thread', 'id', :thread)
+    columns:
+    - key: title
+  sessions:
+    sql: |
+      SELECT coalesce(nullif(a.display_name, ''), nullif(a.title, ''), a.harness) AS name, a.harness, a.opened_at, a.uri
+      FROM v_agent_session a
+      WHERE a.thread_id = (SELECT id FROM v_thread WHERE uri = uri('oxplow/thread', 'id', :thread)) AND a.closed_at IS NULL
+      ORDER BY a.opened_at, a.id
+  prompt:
+    sql: |
+      SELECT uri_param(t.uri, 'id') AS thread, coalesce(t.prompt, '') AS prompt
+      FROM v_thread t
+      WHERE t.uri = uri('oxplow/thread', 'id', :thread)
+view:
+  stack:
+  - id: sessions
+    title: Agent sessions
+    from: sessions
+    viz: table
+    columns:
+    - key: name
+      label: Session
+      link:
+        kind: page
+        from: uri
+    - key: harness
+      label: Agent
+      width: 120
+    - key: opened_at
+      label: Opened
+      format: relative
+      width: 120
+    empty: None open. New session… on the thread's menu starts one.
+  - id: hint
+    markdown: Appended to the agent's system prompt for this thread (on top of any stream-level prompt). Applies to agent sessions started after Save — existing sessions keep the prompt they launched with.
+  - id: prompt
+    title: Custom Prompt
+    from: prompt
+    viz: form
+    form:
+      command: oxplow.thread.set_prompt
+      mode: edit
+      fields:
+      - prompt

@@ -1,0 +1,12 @@
+title: States of a new item
+description: The states a new item may start in; every work list takes them.
+hidden: true
+data:
+  new_task_states:
+    sql: |
+      SELECT 'todo' AS value, 'Ready' AS label
+      UNION ALL
+      SELECT 'blocked', 'Blocked'
+view:
+  from: new_task_states
+  viz: table

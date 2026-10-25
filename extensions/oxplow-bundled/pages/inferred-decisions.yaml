@@ -1,0 +1,54 @@
+title: Decisions Oxplow Noticed
+description: Forks the agent seems to have resolved without recording them, proposed by a model from the effort's conversation and tool calls — the one bound to `oxplow-bundled/reasoning`, else your Main model. Guesses, not the agent's word; check the ones that matter.
+hidden: true
+params:
+- name: effort_id
+  label: Effort
+- name: effort
+  label: Effort id
+data:
+  inferred_decisions:
+    sql: |
+      SELECT question, choice,
+             (SELECT group_concat(value, '; ') FROM json_each(alternatives)) AS alternatives,
+             confidence, why, id AS decision
+      FROM v_decision
+      WHERE effort_id = :effort_id AND provenance = 'inferred'
+      ORDER BY id
+view:
+  from: inferred_decisions
+  viz: table
+  columns:
+  - key: question
+    label: Decision
+  - key: choice
+    label: Chose
+  - key: alternatives
+    label: Over
+  - key: confidence
+    label: How Sure
+  - key: why
+    label: Why
+  empty: Nothing inferred. The agent recorded its decisions or made none worth noting; or no model serves `oxplow-bundled/reasoning` (Settings → AI); or its programs aren't approved (Settings → Data → Programs).
+  actions:
+  - id: confirm
+    label: Confirm
+    command: oxplow.effort.confirm_decision
+    input:
+      decision: '{{row.decision}}'
+    row: true
+  - id: dismiss
+    label: Dismiss
+    command: oxplow.effort.dismiss_decision
+    input:
+      decision: '{{row.decision}}'
+    row: true
+actions:
+- id: infer
+  label: Infer Again
+  command: oxplow.effort.infer_reasoning
+  input:
+    effort: '{{param.effort}}'
+    again: true
+  prominent: true
+  icon: sparkles

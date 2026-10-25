@@ -1,0 +1,25 @@
+title: Duplicate Block
+description: A duplicated block, its two sides read-only and side by side at the version the scan ran against, each range marked and revealed, scrolling together. The page the duplicate-block findings and the change analysis's compare links open.
+label: '{{param.left}} ↔ {{param.right}}'
+icon: copy
+params:
+- name: left
+- name: left_lines
+- name: left_at
+- name: right
+- name: right_lines
+- name: right_at
+data:
+  duplicate_block:
+    sql: |
+      SELECT :left AS path, coalesce(:left_at, 'working') AS rev, :left_lines AS lines
+      UNION ALL
+      SELECT :right, coalesce(:right_at, 'working'), :right_lines
+view:
+  from: duplicate_block
+  viz: code
+  code:
+    path: path
+    revision: rev
+    lines: lines
+    sync: true

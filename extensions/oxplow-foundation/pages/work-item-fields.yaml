@@ -1,0 +1,18 @@
+title: Fields of the work list
+description: The active work list's own fields (priority, labels, ...), one row each, for a form to ask for. Read-only ones are marked.
+hidden: true
+needs:
+- work_items
+data:
+  work_item_fields:
+    sql: |
+      SELECT json_extract(f.value, '$.name') AS name,
+             json_extract(f.value, '$.title') AS title,
+             json_extract(f.value, '$.kind') AS kind,
+             json_extract(f.value, '$.values') AS "values",
+             coalesce(json_extract(f.value, '$.read_only'), 0) AS read_only
+      FROM v_capability_provider p, json_each(p.fields) f
+      WHERE p.capability = 'work_items' AND p.active = 1
+view:
+  from: work_item_fields
+  viz: table

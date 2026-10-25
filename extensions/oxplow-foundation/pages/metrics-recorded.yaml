@@ -1,0 +1,103 @@
+title: Metrics
+description: Every metric this project can record, by section, with its trend, its latest value judged against its target, scoped to a time range and a branch. Open a metric for its page; expand one to see its biggest groups when you slice.
+icon: bar-chart-3
+category: Data
+keywords: recorded catalog
+params:
+- name: q
+  type: search
+  role: filter
+  label: Search
+- name: range
+  type: date_range
+  role: filter
+  label: Range
+  default: 7d
+  presets:
+  - 1d
+  - 7d
+  - 30d
+  - all
+- name: branch
+  type: branch
+  role: filter
+  label: Branch
+- name: show
+  type: choice
+  role: filter
+  label: Show
+  default: enabled
+  options:
+  - value: enabled
+    label: Enabled
+  - value: all
+    label: All
+- name: slice
+  type: choice
+  role: filter
+  label: Slice by
+  options_from: oxplow-foundation/metrics-dimensions
+  default: ''
+data:
+  metrics:
+    sql: |
+      WITH pts AS (
+        SELECT p.metric, p.captured_at, p.value FROM v_metric_point p
+        WHERE (:branch IS NULL OR p.branch = :branch)
+          AND (:range_from IS NULL OR p.captured_at >= :range_from)
+          AND (:range_to IS NULL OR p.captured_at <= :range_to)
+      ), m AS (
+        SELECT c.key, c.title, c.category, c.language, s.unit, s.direction, s.target, s.warn_at, s.fail_at,
+               (SELECT t.value FROM pts t WHERE t.metric = c.key ORDER BY t.captured_at DESC LIMIT 1) AS latest,
+               (SELECT json_group_array(t.value) FROM (SELECT value FROM pts WHERE metric = c.key ORDER BY captured_at) t) AS trend
+        FROM v_metric_catalog c LEFT JOIN v_metric_spec s ON s.key = c.key
+        WHERE (c.enabled = 1 OR :show = 'all')
+          AND (:q IS NULL OR lower(c.title) LIKE '%' || lower(:q) || '%' OR lower(c.key) LIKE '%' || lower(:q) || '%')
+      )
+      SELECT m.key, m.title, uri('oxplow/metric', 'metric', m.key) AS metric_ref,
+             CASE m.category
+               WHEN 'custom' THEN 'Code metrics' WHEN 'testing' THEN 'Tests' WHEN 'coverage' THEN 'Coverage'
+               WHEN 'operational' THEN 'Operational'
+               WHEN 'static-quality' THEN
+                 CASE lower(coalesce(trim(m.language), ''))
+                   WHEN '' THEN 'General' WHEN 'rust' THEN 'Rust' WHEN 'typescript' THEN 'TypeScript'
+                   WHEN 'javascript' THEN 'JavaScript' WHEN 'python' THEN 'Python' WHEN 'go' THEN 'Go'
+                   WHEN 'csharp' THEN 'C#' WHEN 'cpp' THEN 'C++' WHEN 'c' THEN 'C' WHEN 'java' THEN 'Java'
+                   WHEN 'kotlin' THEN 'Kotlin' WHEN 'ruby' THEN 'Ruby' WHEN 'php' THEN 'PHP'
+                   WHEN 'swift' THEN 'Swift' WHEN 'clojure' THEN 'Clojure'
+                   ELSE upper(substr(m.language, 1, 1)) || substr(m.language, 2) END
+               ELSE coalesce(m.category, 'Other') END AS section,
+             m.trend, m.latest, m.unit, :slice AS slice, :range AS range, :branch AS branch,
+             CASE WHEN m.latest IS NULL OR coalesce(m.direction, 'neutral') = 'neutral' THEN NULL
+                  WHEN coalesce(m.target, m.warn_at) IS NOT NULL
+                       AND (CASE WHEN m.direction = 'higher-better' THEN m.latest >= coalesce(m.target, m.warn_at)
+                                 ELSE m.latest <= coalesce(m.target, m.warn_at) END) THEN 'success'
+                  WHEN m.fail_at IS NOT NULL
+                       AND NOT (CASE WHEN m.direction = 'higher-better' THEN m.latest >= m.fail_at
+                                     ELSE m.latest <= m.fail_at END) THEN 'danger'
+                  WHEN coalesce(m.target, m.warn_at) IS NOT NULL OR m.fail_at IS NOT NULL THEN 'warning'
+             END AS tone
+      FROM m ORDER BY section COLLATE NOCASE, m.title COLLATE NOCASE
+view:
+  from: metrics
+  viz: list
+  group:
+    by: section
+  columns:
+  - key: title
+    label: Metric
+    link:
+      kind: page
+      from: metric_ref
+    highlight: q
+    expand: oxplow-foundation/metrics-slices
+  - key: trend
+    label: Trend
+    format: sparkline
+    width: 150
+  - key: latest
+    label: Latest
+    unit: unit
+    tone: tone
+    width: 140
+  empty: No metrics match. Run tests, coverage or static analysis and oxplow records them here automatically; Show All lists metrics this project has not enabled.
