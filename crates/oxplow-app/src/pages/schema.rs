@@ -462,6 +462,28 @@ pub fn parse_page(
         .as_ref()
         .map(|r| parse_node(r, &mut ctx))
         .transpose()?;
+    // A param a column `select:`s is the page's selection (in the `#`).
+    let mut nodes = Vec::new();
+    view.walk(&mut nodes);
+    if let Some(r) = &rail {
+        r.walk(&mut nodes);
+    }
+    let selected: Vec<String> = nodes
+        .iter()
+        .filter_map(|n| match &n.kind {
+            NodeKind::Viz { lens, .. } => {
+                Some(lens.columns.iter().filter_map(|c| c.select.clone()))
+            }
+            _ => None,
+        })
+        .flatten()
+        .collect();
+    let mut params = params;
+    for p in &mut params {
+        if selected.contains(&p.name) {
+            p.role = Some(ParamRole::Selection);
+        }
+    }
     // A whole-page action may read a row (`{{row.x}}`, `when:`): the first
     // loader's one row, as a document's row once was.
     let actions = parse_actions(file.actions, &params, false, true)?;

@@ -213,7 +213,8 @@ extension, three parts (`crates/oxplow-app/src/pages/schema.rs`):
 
 - **Metadata**: `title`, `description`, `label`, `icon`, `category`,
   `keywords`, typed `params` (`role: resource | filter`; a `switch`'s param
-  is a filter by default), `for` / `accepts` / `default` / `pinned` (a
+  is a filter by default; a param a column `select:`s is a `selection`),
+  `for` / `accepts` / `default` / `pinned` (a
   renderer), `comments`, `refresh`, `hidden`, `needs`, whole-page
   `actions`, `alert`, `tool` (an MCP tool `<namespace>_<tool>` whose
   input is the params and whose call is `oxplow.page.run`; kept for the

@@ -480,3 +480,33 @@ fn two_core_named_extensions_cannot_declare_one_page() {
         "{errors}"
     );
 }
+
+/// A param a viz node's column `select:`s is the page's selection: it
+/// rides in the URI's `#`, so a pick is a history entry, not a new page.
+#[test]
+fn a_param_a_column_selects_is_a_selection() {
+    let p = page(
+        r#"
+title: Commits
+params:
+  - { name: commit }
+  - { name: path }
+data:
+  commits:
+    sql: SELECT sha FROM v_commit
+view:
+  stack:
+    - id: list
+      viz: table
+      from: commits
+      columns: [{ key: sha, select: commit }]
+"#,
+    )
+    .unwrap();
+    let role = |name: &str| p.params.iter().find(|q| q.name == name).unwrap().role;
+    assert_eq!(
+        role("commit"),
+        Some(crate::extensions::ParamRole::Selection)
+    );
+    assert_eq!(role("path"), None);
+}

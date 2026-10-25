@@ -1158,14 +1158,14 @@ async fn the_commit_history_example_narrows_with_typed_params_and_selects_a_comm
         .map(|p| (p.name.as_str(), p.kind, p.role))
         .collect();
     // The rest filter; `commit` is the one the commits column selects
-    // (below). A page param takes no `selection` role yet.
+    // (below): the page's selection.
     assert_eq!(
         params,
         vec![
             ("range", Some(ParamType::DateRange), Some(ParamRole::Filter)),
             ("q", Some(ParamType::Search), Some(ParamRole::Filter)),
             ("merges", Some(ParamType::Bool), Some(ParamRole::Filter)),
-            ("commit", Some(ParamType::Text), None),
+            ("commit", Some(ParamType::Text), Some(ParamRole::Selection)),
         ]
     );
     assert!(
