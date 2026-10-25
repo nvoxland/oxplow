@@ -16,7 +16,7 @@ data:
   interface_commands:
     sql: |
       SELECT command,
-             uri('oxplow/lens', 'lens', 'oxplow-bundled/interface-command-errors', 'command', command) AS errors_ref,
+             uri('oxplow/page', 'page', 'interface-command-errors', 'command', command) AS errors_ref,
              count(*) AS runs,
              sum(outcome = 'invalid') AS invalid,
              sum(outcome = 'denied') AS denied,

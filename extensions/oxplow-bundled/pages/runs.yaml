@@ -5,7 +5,7 @@ data:
   runs:
     sql: |
       SELECT extension,
-             uri('oxplow/lens', 'lens', 'oxplow-bundled/extension-runs', 'extension', extension) AS runs_ref,
+             uri('oxplow/page', 'page', 'extension-runs', 'extension', extension) AS runs_ref,
              count(*) AS runs,
              sum(outcome = 'failed') AS failures,
              sum(outcome = 'denied') AS denials,

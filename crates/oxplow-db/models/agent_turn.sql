@@ -3,8 +3,8 @@ SELECT t.id, t.thread_id, t.agent_session_id, t.prompt, t.answer, t.session_id, 
        CAST(uri('oxplow/turn', 'id', 'trn' || t.id) AS TEXT) AS uri,
        -- The session's transcript (its `session`), shown from this turn (its
        -- view's `turn`): where a turn opens. NULL for a turn no session claims.
-       CAST(CASE WHEN t.agent_session_id IS NULL THEN NULL ELSE uri_view(uri('oxplow/lens',
-         'lens', 'oxplow-foundation/session-transcript',
+       CAST(CASE WHEN t.agent_session_id IS NULL THEN NULL ELSE uri_view(uri('oxplow/page',
+         'page', 'session-transcript',
          'session', (SELECT uri_param(s.uri, 'id') FROM ref('agent_session') s
                       WHERE s.id = t.agent_session_id)),
          'turn', 'trn' || t.id) END AS TEXT) AS transcript_page,

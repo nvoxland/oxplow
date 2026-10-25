@@ -2058,14 +2058,11 @@ mod tests {
             oxplow_db::SqlCell::Text(t) => t.clone(),
             other => panic!("{other:?}"),
         };
-        // The session is what it shows (bare, as the lens takes it); the
+        // The session is what it shows (bare, as the page takes it); the
         // turn it starts from is its view.
-        let shows = oxplow_domain::uri::oxplow_uri::OxplowUri::parse(
-            &oxplow_domain::uri::build::lens_uri_with(
-                "oxplow-foundation/session-transcript",
-                &[("session", Some(&format!("ses{session}")))],
-            ),
-        )
+        let shows = oxplow_domain::uri::oxplow_uri::OxplowUri::parse(&format!(
+            "oxplow:oxplow/page?page=session-transcript&session=ses{session}"
+        ))
         .unwrap();
         assert_eq!(
             page,

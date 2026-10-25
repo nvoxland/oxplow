@@ -5,7 +5,7 @@ data:
   job_runs:
     sql: |
       SELECT uri,
-             uri('oxplow/lens', 'lens', 'oxplow-bundled/job-run-output', 'job_run', uri_param(uri, 'id')) AS output_ref,
+             uri('oxplow/page', 'page', 'job-run-output', 'job_run', uri_param(uri, 'id')) AS output_ref,
              job,
              intent_key,
              state,

@@ -86,7 +86,7 @@ data:
                      WHERE g.key = 'generated' AND e.value = r.name)) AS can_mark,
              EXISTS (SELECT 1 FROM v_config_value g, json_each(json_extract(g.value, '$.exclude')) e
                      WHERE g.key = 'generated' AND e.value = r.name) AS marked,
-             uri('oxplow/lens', 'lens', 'oxplow-foundation/file-history', 'path', r.path) AS history_uri
+             uri('oxplow/page', 'page', 'file-history', 'path', r.path) AS history_uri
       FROM rows r
       ORDER BY (r.kind = 'dir') DESC, r.path
     params:
