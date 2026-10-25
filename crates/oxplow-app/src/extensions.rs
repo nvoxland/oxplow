@@ -262,7 +262,7 @@ fn fmt_number(v: f64) -> String {
 }
 
 /// Evaluate `alert` against a run's result.
-fn evaluate_alert(alert: &LensAlert, result: &SqlQueryResult) -> AlertState {
+pub(crate) fn evaluate_alert(alert: &LensAlert, result: &SqlQueryResult) -> AlertState {
     let count = result.rows.len() as i64;
     if let Some(min) = alert.min_rows {
         let message = match &alert.label {
@@ -1414,14 +1414,20 @@ fn binds(
     params: &BTreeMap<String, SqlCell>,
     now: time::OffsetDateTime,
 ) -> Vec<(String, SqlCell)> {
+    bind_params(&lens.params, params, now)
+}
+
+/// What a query binds: the values of `declared` params, and each
+/// date_range's `<name>_from` / `<name>_to`.
+pub(crate) fn bind_params(
+    declared: &[LensParam],
+    params: &BTreeMap<String, SqlCell>,
+    now: time::OffsetDateTime,
+) -> Vec<(String, SqlCell)> {
     let mut out: Vec<(String, SqlCell)> =
         params.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
     let text = |t: Option<String>| t.map_or(SqlCell::Null(()), SqlCell::Text);
-    for p in lens
-        .params
-        .iter()
-        .filter(|p| p.kind() == ParamType::DateRange)
-    {
+    for p in declared.iter().filter(|p| p.kind() == ParamType::DateRange) {
         let (from, to) = match params.get(&p.name) {
             Some(SqlCell::Text(v)) => range_ends(v, now).unwrap_or((None, None)),
             _ => (None, None),
@@ -6544,7 +6550,7 @@ impl LensContext {
     }
 
     /// The implicit value for a param named `name`, if it is one.
-    fn value(&self, name: &str) -> Option<SqlCell> {
+    pub(crate) fn value(&self, name: &str) -> Option<SqlCell> {
         match name {
             "stream_id" => self.stream_id.map(SqlCell::Int),
             "thread_id" => self.thread_id.map(SqlCell::Int),
@@ -6867,14 +6873,25 @@ pub fn resolve_params(
     supplied: &BTreeMap<String, SqlCell>,
     ctx: &LensContext,
 ) -> Result<BTreeMap<String, SqlCell>, DomainError> {
+    resolve_param_values(&format!("lens {}", lens.id), &lens.params, supplied, ctx)
+}
+
+/// `declared`'s values for a run: supplied, else the viewer's context,
+/// else the default, else NULL. An unknown or malformed supplied value is
+/// refused, named by `whose` (`lens acme/x`, `page acme/y`).
+pub(crate) fn resolve_param_values(
+    whose: &str,
+    declared: &[LensParam],
+    supplied: &BTreeMap<String, SqlCell>,
+    ctx: &LensContext,
+) -> Result<BTreeMap<String, SqlCell>, DomainError> {
     if let Some(unknown) = supplied
         .keys()
-        .find(|k| !lens.params.iter().any(|p| &p.name == *k))
+        .find(|k| !declared.iter().any(|p| &p.name == *k))
     {
-        let known: Vec<&str> = lens.params.iter().map(|p| p.name.as_str()).collect();
+        let known: Vec<&str> = declared.iter().map(|p| p.name.as_str()).collect();
         return Err(DomainError::Invalid(format!(
-            "lens {}: unknown param `{unknown}` (params: {})",
-            lens.id,
+            "{whose}: unknown param `{unknown}` (params: {})",
             if known.is_empty() {
                 "none".to_string()
             } else {
@@ -6883,10 +6900,10 @@ pub fn resolve_params(
         )));
     }
     let mut params = BTreeMap::new();
-    for p in &lens.params {
+    for p in declared {
         let v = match supplied.get(&p.name) {
             Some(v) => p.take(v).map_err(|why| {
-                DomainError::Invalid(format!("lens {}: param `{}` {why}", lens.id, p.name))
+                DomainError::Invalid(format!("{whose}: param `{}` {why}", p.name))
             })?,
             None => ctx
                 .value(&p.name)
@@ -6963,7 +6980,7 @@ pub async fn run_lenses(layer: &crate::sql_gateway::SqlGateway, ext: &Extension)
 }
 
 /// The HEAD commit of stream `stream_id`, when it is known.
-async fn stream_head(
+pub(crate) async fn stream_head(
     layer: &crate::sql_gateway::SqlGateway,
     stream_id: i64,
 ) -> Result<Option<String>, DomainError> {
