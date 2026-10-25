@@ -1842,6 +1842,7 @@ impl Services {
                 commands::file::create_directory_op(workspace_files.clone()),
                 commands::file::rename_op(workspace_files.clone()),
                 commands::file::delete_op(workspace_files.clone()),
+                commands::code_rename::rename_symbol_op(services_slot.clone()),
             ])
         {
             commands.add_op(op).expect("core ops register");
@@ -2312,6 +2313,7 @@ mod tests {
                 "oxplow.code.definition",
                 "oxplow.code.hover",
                 "oxplow.code.references",
+                "oxplow.code.rename",
                 "oxplow.code.symbols",
                 "oxplow.code.workspace_symbols",
                 "oxplow.collector.preview",

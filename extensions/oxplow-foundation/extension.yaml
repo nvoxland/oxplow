@@ -1047,6 +1047,11 @@ commands:
     scope: files.write
     op: save
     example: {"stream": "str1", "path": "src/main.rs", "content": "fn main() {\n    println!(\"hello\");\n}\n"}
+  - name: code.rename
+    summary: "Rename a symbol in every file. Its language server finds the symbol at a place in a file (`uri`, 1-based `line` and `col`); its edits are written into the stream's worktree. Logs `file.saved` per file changed. Undo puts the files back, unless the server also created, renamed or deleted files."
+    scope: files.write
+    op: rename_symbol
+    example: {"stream": "str1", "uri": "oxplow:oxplow/file?path=src/lib.rs", "line": 10, "col": 5, "new_name": "Gadget"}
   # handoffs.write
   - name: handoff.send
     summary: "Hand work to another open thread (any stream's): what it is and what its agent needs to know, and the work item it hands over, if any. The thread's agent is given it at its next prompt; the person sees it at once. Nothing wakes an agent. Returns the handoff and `link_warnings`."

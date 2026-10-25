@@ -129,7 +129,15 @@ registrations). Install/remove emit `OxplowEvent::LspServersChanged`.
   caller (tsk557). `rename`
   returns the edits — from `documentChanges` when the server sends it,
   with its file creates / renames / deletes as `WorkspaceEdit.operations`
-  in order, else from `changes` (tsk571) — and nothing applies them. A
+  in order, else from `changes` (tsk571) — and applies nothing itself.
+  **`oxplow.code.rename { stream, uri, line, col, new_name }`**
+  (`commands/code_rename.rs`, scope `files.write`, op `rename_symbol`)
+  applies them: it asks the server, reads and edits every file first (an
+  edit that doesn't fit changes nothing; columns are UTF-16 units, as
+  the servers count them), writes them through `WorkspaceFiles`, logs
+  `file.saved` per file, then does the file operations in order. Undo
+  puts each file back (`oxplow.file.save`, a sequence for several); an
+  edit with file operations has no undo. A
   `Symbol` carries `location` (its name: `selectionRange`, what to jump
   to) and `extent` (the whole symbol: `range`). Subscribing to diagnostics is
   the event log's `code.diagnostics.changed`.
