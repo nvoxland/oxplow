@@ -24,7 +24,7 @@ import {
 import { CommandConfirm } from "../components/CommandConfirm.js";
 import { openRefInWindow } from "../tabs/openRef.js";
 import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
-import type { LensRun, LensSpec, SignInCompletion } from "../tauri-bridge/generated/bindings.js";
+import type { SignInCompletion } from "../tauri-bridge/generated/bindings.js";
 import { createSignInHost } from "./hostSignIn.js";
 import { lensDefinitionChanged } from "./lensRerun.js";
 import {
@@ -35,6 +35,7 @@ import {
   tokensFromStyle,
   componentBundleUrl,
   type FrameAction,
+  type HostedData,
   type OwnForm,
   type PageInit,
   type ShownRows,
@@ -57,8 +58,8 @@ export interface FormDeps {
 export interface PageDeps {
   setTitle(title: string): void;
   setActions(actions: FrameAction[]): void;
-  /** Run and draw a lens spec under the frame (null clears it). */
-  showSpec(spec: LensSpec | null): Promise<ShownRows | null>;
+  /** Run and draw an inline page under the frame (null clears it). */
+  showView(spec: string | null): Promise<ShownRows | null>;
   /** The frame's content height, as it changes. */
   size(height: number): void;
 }
@@ -111,15 +112,16 @@ export function CustomBadge({ extension }: { extension: string }) {
   );
 }
 
-/** One frame at one bundle URL and its bridge. A lens passes its `run`; a
- *  page passes `page` (and `pageDeps`), with a null `run`. A host that
+/** One frame at one bundle URL and its bridge, fed `data` (`lensData`
+ *  for a lens's component, `pageData` for a page's). A page's own
+ *  component passes `page` (and `pageDeps`). A host that
  *  shares its view (a page, a replacement, a lens's own page) passes
  *  `view` (`useHostedView`). */
 export function ComponentFrame({
   src,
   version,
   component,
-  run,
+  data,
   streamId,
   title,
   page = null,
@@ -138,7 +140,8 @@ export function ComponentFrame({
   version: string;
   /** `<extension>/<component id>`: what every call names. */
   component: string;
-  run: LensRun | null;
+  /** What it is fed; a change reaches it as `update`. */
+  data: HostedData;
   streamId: string | null;
   /** The frame's accessible title and the confirm's label. */
   title: string;
@@ -170,8 +173,8 @@ export function ComponentFrame({
   const ownHostRef = useRef<BridgeHost | null>(null);
   const hostRef = hostRefProp ?? ownHostRef;
   const loadsRef = useRef(0);
-  const runRef = useRef(run);
-  runRef.current = run;
+  const dataRef = useRef(data);
+  dataRef.current = data;
   const pageDepsRef = useRef(pageDeps);
   pageDepsRef.current = pageDeps;
   const formDepsRef = useRef(formDeps);
@@ -179,12 +182,12 @@ export function ComponentFrame({
   const viewRef = useRef(view);
   viewRef.current = view;
 
-  // A re-run reaches a ready component as `update` (the host posts only a
-  // result it hasn't shown).
+  // New data reaches a ready component as `update` (the host posts only
+  // what it hasn't shown).
   useEffect(() => {
-    if (run) hostRef.current?.update(run);
+    hostRef.current?.update(data);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [run]);
+  }, [data]);
   // Its host's view params or history state changed (Back, Forward, an
   // echo of its own set): the frame hears them.
   const viewKey = view ? JSON.stringify(view.viewParams) : null;
@@ -225,7 +228,7 @@ export function ComponentFrame({
     // Unreachable, it can't say `ready`; the timer reports it.
     if (!frame) return;
     channel = new MessageChannel();
-    const initial = runRef.current;
+    const initial = dataRef.current;
     const hosted = viewRef.current;
     const sentView = hosted ? { viewParams: hosted.viewParams, historyState: hosted.historyState } : null;
     // Signing in is the host's to run (the browser, the shell's listener):
@@ -290,7 +293,7 @@ export function ComponentFrame({
           ? {
               setTitle: (t: string) => pageDepsRef.current?.setTitle(t),
               setActions: (a: FrameAction[]) => pageDepsRef.current?.setActions(a),
-              showSpec: (spec: LensSpec | null) => pageDepsRef.current?.showSpec(spec) ?? Promise.resolve(null),
+              showView: (spec: string | null) => pageDepsRef.current?.showView(spec) ?? Promise.resolve(null),
               size: (h: number) => pageDepsRef.current?.size(h),
             }
           : fit

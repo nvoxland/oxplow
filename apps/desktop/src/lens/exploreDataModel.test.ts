@@ -92,7 +92,18 @@ test("the view reads back from the tab's address, a chart viz only by name", () 
   expect(v).toMatchObject({ model: "v_effort", sql: "SELECT 1", viz: "bar", chart: { x: "a", y: "b" } });
   expect(readView({ viz: "pie" }).viz).toBe("table");
   expect(sampleSql("v_work_item")).toBe("SELECT * FROM v_work_item LIMIT 50");
-  expect(specOf("SELECT 1", "table", null)).toEqual({ title: "Explore", query: "SELECT 1", viz: "table" });
+});
+
+// What the host draws under the explorer (`showView`) is an inline page:
+// its query as a `sql` loader, its viz (and chart) over it. JSON is YAML.
+test("the view shown is an inline page of the query's viz over one sql loader", () => {
+  expect(JSON.parse(specOf("SELECT 1", "table", null))).toEqual({
+    title: "Explore",
+    data: { rows: { sql: "SELECT 1" } },
+    view: { id: "rows", viz: "table", from: "rows" },
+  });
+  const chart = { x: "day", y: "n", series: null };
+  expect(JSON.parse(specOf("SELECT day, n FROM t", "line", chart)).view).toEqual({ id: "rows", viz: "line", from: "rows", chart });
 });
 
 describe("metrics read through SQL", () => {

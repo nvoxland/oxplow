@@ -33,15 +33,22 @@ export interface OxplowPage {
   threadId: string | null;
 }
 
-/** A lens spec a page shows (`showSpec`), as `oxplow.lens.keep` takes one. */
-export interface OxplowSpec {
-  title: string;
-  query: string;
-  /** `table`, `list`, `number`, `markdown`, `bar`, `line`, `treemap`, … */
-  viz: string;
-  /** A chart's columns: `x`, `y`, `series`, `label`, `size`, `group`. */
-  chart?: Record<string, string | null>;
-  description?: string;
+/** One loader's rows, as a component is fed them. */
+export interface OxplowLoaderRows extends OxplowRows {
+  /** Why it has none: the loader failed. */
+  error?: string;
+}
+
+/** New data: what `onUpdate` hears. */
+export interface OxplowUpdate {
+  /** A `viz: custom`'s own rows as a lens run; null for a component node. */
+  run: OxplowRun | null;
+  /** Each loader's rows, by name. */
+  data: Record<string, OxplowLoaderRows>;
+  /** The params they ran with. */
+  params: Record<string, OxplowCell>;
+  /** The loaders whose rows differ from the last data. */
+  changed: string[];
 }
 
 /** An action drawn in the page's bar. */
@@ -56,19 +63,23 @@ export interface OxplowAction {
 }
 
 export interface OxplowComponent {
-  /** The lens's latest run; null for a component that is a page. */
+  /** Its loaders' rows, by name (a lens's own rows as `rows`). */
+  readonly data: Record<string, OxplowLoaderRows>;
+  /** The params its data ran with. */
+  readonly params: Record<string, OxplowCell>;
+  /** A `viz: custom`'s own rows as a lens run; null for a page's component node. */
   readonly run: OxplowRun | null;
-  /** The page it is, or null when a lens shows it. */
+  /** The page it is (a page's component), or null. */
   readonly page: OxplowPage | null;
-  /** The lens's `custom.props`, or null. */
+  /** Its props — a component node's `props`, a viz's `custom.props` — or null. */
   readonly props: unknown;
   /** The theme's CSS variables, by name (`--text-primary`). */
   readonly tokens: Record<string, string>;
   /** The protocol the host speaks. */
   readonly protocol: number;
-  /** Hear each re-run of the lens; returns how to stop. */
-  onUpdate(listener: (run: OxplowRun) => void): () => void;
-  /** Run a lens this component declares in `assets`. Rejects with an {@link OxplowError}. */
+  /** Hear new data each time it changes; returns how to stop. */
+  onUpdate(listener: (update: OxplowUpdate) => void): () => void;
+  /** Run a lens this component declares in `assets` (a lens's component). Rejects with an {@link OxplowError}. */
   query(asset: string, params?: Record<string, OxplowCell>): Promise<OxplowRun>;
   /** Run a command this component declares in `commands`, as the person
    *  looking at it; one that asks is confirmed by them, in oxplow.
@@ -104,13 +115,15 @@ export interface OxplowComponent {
   cancelSignIn(instance: string, name: string): Promise<null>;
   /** The page's title, in its tab and bar. A page only. */
   setTitle(title: string): Promise<null>;
-  /** Have oxplow draw a lens spec under the page with its own components,
-   *  live, with Save as Lens and Pin to Dashboard; null clears it.
-   *  Resolves with the rows it drew (null when cleared). Rejects
-   *  `INVALID` with the `field` it is about (`/spec/query`) for a spec
-   *  oxplow refuses. A page only. While one shows, the frame sits at its
+  /** Have oxplow draw an inline page under the page with its own
+   *  components — its YAML (JSON is YAML too): `title`, read-only `sql`
+   *  loaders under `data`, a `view` — live, with Save as Lens and Pin to
+   *  Dashboard; null clears it. Resolves with its first loader's rows
+   *  (null when cleared). Rejects `INVALID` with the `field` it is about
+   *  (`/data/<loader>/sql`) for a page oxplow refuses or a loader that
+   *  failed. A page only. While one shows, the frame sits at its
    *  content's height: leave `html` and `body` at `height: auto`. */
-  showSpec(spec: OxplowSpec | null): Promise<OxplowRows | null>;
+  showView(spec?: string | null): Promise<OxplowRows | null>;
   /** The page's actions, drawn by oxplow in its bar. A page only. */
   setActions(actions: OxplowAction[]): Promise<null>;
   /** Hear each press of a page action, by id; returns how to stop. */

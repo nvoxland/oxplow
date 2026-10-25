@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 
 import { IpcCallError } from "../ipc-error.js";
 import type { LensRun } from "../tauri-bridge/generated/bindings.js";
-import { componentBundleUrl, componentMayOpen, componentRefusal, createBridgeHost, initMessage, parseFrameMessage, tokensFromStyle } from "./componentBridge.js";
+import { componentBundleUrl, componentMayOpen, componentRefusal, createBridgeHost, initMessage, lensData, parseFrameMessage, tokensFromStyle, type HostedData } from "./componentBridge.js";
 
 // P6b.D4: a custom component talks to the host over a MessageChannel —
 // three requests (query, invoke, navigate) and a `ready`; everything else
@@ -75,12 +75,17 @@ test("theme tokens carry the root's color-scheme, so the frame paints no opaque 
 // page (`page`, a null `run`) and the calls a page makes, 5; a host's view
 // (`view`), apart from the page, 8; the view as the URI's `#` and
 // `navigate`'s `replace`, 9.
-test("init carries the run, props and tokens, at protocol 10", () => {
-  const r = { lens: { id: "x/b", custom: { component: "b", props: { a: 1 } } }, params: {}, result: { columns: [], rows: [], truncated: false } } as unknown as LensRun;
-  expect(initMessage(r, { "--accent": "#08f" })).toEqual({
+// 12: `init` and `update` carry the page's data — each loader's rows by
+// name, its params and props — and `update` says which loaders changed; a
+// page shows an inline page under it (`showView`) in place of a lens spec.
+test("init carries the run, the data, params, props and tokens, at protocol 12", () => {
+  const r = { lens: { id: "x/b", custom: { component: "b", props: { a: 1 } } }, params: { n: 2 }, result: { columns: ["k"], rows: [[1]], truncated: false } } as unknown as LensRun;
+  expect(initMessage(lensData(r), { "--accent": "#08f" })).toEqual({
     type: "init",
-    protocol: 11,
+    protocol: 12,
     run: r,
+    data: { rows: { columns: ["k"], rows: [[1]], truncated: false } },
+    params: { n: 2 },
     props: { a: 1 },
     page: null,
     view: null,
@@ -88,17 +93,28 @@ test("init carries the run, props and tokens, at protocol 10", () => {
   });
 });
 
-test("a component shown as a page gets its page and its view, and no run", () => {
+test("a component shown as a page gets its page, its view and the page's data, and no run", () => {
   const page = { streamId: "str1", threadId: "thr2" };
   const view = { viewParams: { from: "2026-10-01" }, historyState: { scroll: 3 } };
-  expect(initMessage(null, {}, page, view)).toEqual({ type: "init", protocol: 11, run: null, props: null, page, view, tokens: {} });
+  const data: HostedData = { run: null, data: { items: { columns: ["id"], rows: [["a"]], truncated: false } }, params: { from: null }, props: { size: 3 } };
+  expect(initMessage(data, {}, page, view)).toEqual({
+    type: "init",
+    protocol: 12,
+    run: null,
+    data: data.data,
+    params: { from: null },
+    props: { size: 3 },
+    page,
+    view,
+    tokens: {},
+  });
 });
 
 // A replacement or a lens page's component: a lens's run, and its host's view.
 test("a component shown by a lens may have its host's view", () => {
   const r = { lens: { id: "x/b" }, params: {}, result: { columns: [], rows: [], truncated: false } } as unknown as LensRun;
   const view = { viewParams: { q: "fix" }, historyState: {} };
-  expect(initMessage(r, {}, null, view)).toMatchObject({ run: r, page: null, view });
+  expect(initMessage(lensData(r), {}, null, view)).toMatchObject({ run: r, page: null, view });
 });
 
 test("a page's calls parse: setTitle, setActions, openForm and querySql", () => {
@@ -149,6 +165,7 @@ test("a page's calls parse: setTitle, setActions, openForm and querySql", () => 
 });
 
 const run = { lens: { id: "x/burn" }, params: {}, result: { columns: [], rows: [], truncated: false } } as unknown as LensRun;
+const sent = lensData(run);
 
 /** A host over a real channel; what the frame side receives. */
 function harness(deps: Partial<Parameters<typeof createBridgeHost>[1]> = {}) {
@@ -173,7 +190,7 @@ function harness(deps: Partial<Parameters<typeof createBridgeHost>[1]> = {}) {
     confirm: async () => true,
     onReady: () => calls.push(["ready"]),
     ...deps,
-  }, run);
+  }, sent);
   const send = (data: unknown) => channel.port2.postMessage(data);
   const settle = () => new Promise((r) => setTimeout(r, 20));
   return { received, calls, send, settle, channel, host };
@@ -225,32 +242,40 @@ test("navigate opens the ref; a malformed request is answered with an error when
   h.channel.port1.close();
 });
 
-test("ready is heard once; an update posts only a result the frame hasn't seen", async () => {
+test("ready is heard once; an update posts only what the frame hasn't seen, naming the loaders that changed", async () => {
   const h = harness();
+  const page: HostedData = {
+    run: null,
+    data: { a: { columns: ["n"], rows: [[1]], truncated: false }, b: { columns: ["m"], rows: [], truncated: false } },
+    params: { p: 1 },
+    props: null,
+  };
   const host = createBridgeHost(h.channel.port1, {
     query: async () => run,
     invoke: async () => ({ result: null, audit_id: 1, event_id: null, inverse: null }),
     navigate: () => {},
     confirm: async () => true,
     onReady: () => h.calls.push(["ready"]),
-  }, run);
+  }, page);
   h.send({ type: "ready" });
   h.send({ type: "ready" });
   await h.settle();
   expect(h.calls).toEqual([["ready"]]);
-  host.update({ ...run });
+  host.update({ ...page, data: { ...page.data } });
   await h.settle();
-  expect(h.received).toEqual([], "the run init carried");
-  const next = { ...run, result: { ...run.result, rows: [[1]] } } as LensRun;
+  expect(h.received).toEqual([], "the data init carried");
+  const next: HostedData = { ...page, data: { ...page.data, b: { columns: ["m"], rows: [[2]], truncated: false } } };
   host.update(next);
   host.update({ ...next });
   await h.settle();
-  expect(h.received).toEqual([{ type: "update", run: next }]);
+  expect(h.received).toEqual([{ type: "update", run: null, data: next.data, params: { p: 1 }, changed: ["b"] }]);
+  // New params alone: an update naming no loader.
+  host.update({ ...next, params: { p: 2 } });
+  await h.settle();
+  expect(h.received.at(-1)).toEqual({ type: "update", run: null, data: next.data, params: { p: 2 }, changed: [] });
   h.channel.port1.close();
 });
 
-// A component reaches no network, so it may not open an outside URL by
-// navigating the host: only app pages, and a refused navigate is answered.
 test("a component navigates to app pages only", async () => {
   expect(componentMayOpen("oxplow:oxplow/work_item?id=tsk1&provider=oxplow")).toBe(true);
   expect(componentMayOpen("oxplow:oxplow/handoff?id=hnd1")).toBe(true);
@@ -355,15 +380,15 @@ test("shown by a lens, a component sets no page title, actions or form", async (
   h.send({ id: "t", method: "setTitle", title: "Oct" });
   h.send({ id: "a", method: "setActions", actions: [] });
   h.send({ id: "f", method: "openForm", command: "x.y.z" });
-  h.send({ id: "s", method: "showSpec", spec: null });
+  h.send({ id: "s", method: "showView", spec: null });
   h.send({ id: "o", method: "openForm", form: { title: "T", schema: { type: "object" }, values: {} } });
   h.send({ id: "i", method: "signIn", instance: "t/x", name: "TOKEN" });
   await h.settle();
   expect(h.received.map((m) => (m as { error?: { message: string } }).error?.message)).toEqual([
-    "Only a component shown as a page sets its title, actions or the spec it shows.",
-    "Only a component shown as a page sets its title, actions or the spec it shows.",
+    "Only a component shown as a page sets its title, actions or the view it shows.",
+    "Only a component shown as a page sets its title, actions or the view it shows.",
     "This host shows no forms and signs in for no component.",
-    "Only a component shown as a page sets its title, actions or the spec it shows.",
+    "Only a component shown as a page sets its title, actions or the view it shows.",
     "This host shows no forms and signs in for no component.",
     "This host shows no forms and signs in for no component.",
   ]);
@@ -423,42 +448,41 @@ test("componentRefusal is a refused invoke's reason, and nothing else's", () => 
   expect(componentRefusal(new Error("boom"))).toBeNull();
 });
 
-// A page shows a lens spec the host draws (protocol 10), and says how
-// tall its content is.
-test("showSpec and size parse; anything else in their place doesn't", () => {
-  const spec = { title: "Explore", query: "SELECT 1 AS n", viz: "number" };
-  expect(parseFrameMessage({ id: "1", method: "showSpec", spec })).toEqual({ type: "request", request: { id: "1", method: "showSpec", spec } });
-  expect(parseFrameMessage({ id: "2", method: "showSpec", spec: null })).toEqual({ type: "request", request: { id: "2", method: "showSpec", spec: null } });
-  expect(parseFrameMessage({ id: "3", method: "showSpec", spec: [1] })).toBeNull();
+// A page shows an inline page the host draws (`showView`, protocol 12),
+// and says how tall its content is.
+test("showView and size parse; anything else in their place doesn't", () => {
+  const spec = "title: Explore\ndata: { rows: { sql: SELECT 1 AS n } }\nview: { viz: number, from: rows }\n";
+  expect(parseFrameMessage({ id: "1", method: "showView", spec })).toEqual({ type: "request", request: { id: "1", method: "showView", spec } });
+  expect(parseFrameMessage({ id: "2", method: "showView", spec: null })).toEqual({ type: "request", request: { id: "2", method: "showView", spec: null } });
+  expect(parseFrameMessage({ id: "3", method: "showView", spec: { title: "E" } })).toBeNull();
+  expect(parseFrameMessage({ id: "4", method: "showSpec", spec: null })).toBeNull();
   expect(parseFrameMessage({ type: "size", height: 320 })).toEqual({ type: "size", height: 320 });
   expect(parseFrameMessage({ type: "size", height: -1 })).toBeNull();
   expect(parseFrameMessage({ type: "size", height: "tall" })).toBeNull();
 });
 
-test("a page's showSpec answers ok once drawn, or the host's refusal with its field; size reaches the host", async () => {
+test("a page's showView answers its first loader's rows once drawn, or the host's refusal with its field; size reaches the host", async () => {
   const shown: unknown[] = [];
   const heights: number[] = [];
   const h = harness({
-    showSpec: async (spec) => {
-      if (spec && (spec as { query?: string }).query === "bad") {
-        throw Object.assign(new Error("no such table: nope"), { code: "INVALID", field: "/spec/query" });
-      }
+    showView: async (spec) => {
+      if (spec?.includes("bad")) throw Object.assign(new Error("no such table: nope"), { code: "INVALID", field: "/data/rows/sql" });
       shown.push(spec);
       return spec ? { columns: ["n"], rows: [[1]], truncated: false } : null;
     },
     size: (height) => heights.push(height),
   });
-  h.send({ id: "a", method: "showSpec", spec: { title: "E", query: "SELECT 1", viz: "table" } });
-  h.send({ id: "b", method: "showSpec", spec: { title: "E", query: "bad", viz: "table" } });
-  h.send({ id: "c", method: "showSpec", spec: null });
+  h.send({ id: "a", method: "showView", spec: "good" });
+  h.send({ id: "b", method: "showView", spec: "bad" });
+  h.send({ id: "c", method: "showView", spec: null });
   h.send({ type: "size", height: 240 });
   await h.settle();
   expect(h.received).toEqual([
     { id: "a", ok: true, result: { columns: ["n"], rows: [[1]], truncated: false } },
-    { id: "b", ok: false, error: { code: "INVALID", message: "no such table: nope", field: "/spec/query" } },
+    { id: "b", ok: false, error: { code: "INVALID", message: "no such table: nope", field: "/data/rows/sql" } },
     { id: "c", ok: true, result: null },
   ]);
-  expect(shown).toEqual([{ title: "E", query: "SELECT 1", viz: "table" }, null]);
+  expect(shown).toEqual(["good", null]);
   expect(heights).toEqual([240]);
   h.channel.port1.close();
 });

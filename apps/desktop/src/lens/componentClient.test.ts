@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 
 import type { LensRun } from "../tauri-bridge/generated/bindings.js";
-import { BRIDGE_PROTOCOL, createBridgeHost, initMessage, type BridgeDeps } from "./componentBridge.js";
+import { BRIDGE_PROTOCOL, createBridgeHost, initMessage, lensData, type BridgeDeps, type HostedData } from "./componentBridge.js";
 // The library the daemon serves to component bundles (P9.A4): the one
 // place it and the host are proven to speak the same protocol. It is a
 // classic script — loading it defines the global `oxplow`.
@@ -29,7 +29,7 @@ function harness(deps: Partial<BridgeDeps> = {}, protocol: unknown = BRIDGE_PROT
       },
       ...deps,
     },
-    run(1),
+    lensData(run(1)),
   );
   const frame = new EventTarget();
   // The `init` the host really sends (`CustomComponentViz` posts this
@@ -38,7 +38,7 @@ function harness(deps: Partial<BridgeDeps> = {}, protocol: unknown = BRIDGE_PROT
   const init = () =>
     frame.dispatchEvent(
       Object.assign(new Event("message"), {
-        data: { ...initMessage(first, { "--accent": "#08f" }), protocol },
+        data: { ...initMessage(lensData(first), { "--accent": "#08f" }), protocol },
         ports: [channel.port2],
       }),
     );
@@ -56,6 +56,8 @@ test("connect resolves with what init carried and says ready once", async () => 
   h.init();
   const c = await connecting;
   expect(c.run.result.rows).toEqual([[1]]);
+  expect(c.data).toEqual({ rows: { columns: ["n"], rows: [[1]], truncated: false } });
+  expect(c.params).toEqual({});
   expect(c.props).toEqual({ color: "accent" });
   expect(c.tokens).toEqual({ "--accent": "#08f" });
   // The kit is a stylesheet the bundle links (tsk961), not text in `init`.
@@ -149,20 +151,22 @@ test("an invalid input's refusal names its field", async () => {
   h.close();
 });
 
-test("onUpdate hears a re-run until it unsubscribes", async () => {
+test("onUpdate hears new data until it unsubscribes, with the loaders that changed", async () => {
   const h = harness();
   const connecting = connect({ target: h.frame });
   h.init();
   const c = await connecting;
   const seen: unknown[] = [];
-  const off = c.onUpdate((r: LensRun) => seen.push(r.result.rows));
-  h.host.update(run(2));
+  const off = c.onUpdate((u: { run: LensRun; data: HostedData["data"]; changed: string[] }) => seen.push([u.run.result.rows, u.data.rows?.rows, u.changed]));
+  h.host.update(lensData(run(2)));
   await settle();
-  expect(seen).toEqual([[[2]]]);
+  expect(seen).toEqual([[[[2]], [[2]], ["rows"]]]);
+  expect(c.run.result.rows).toEqual([[2]]);
+  expect(c.data.rows.rows).toEqual([[2]]);
   off();
-  h.host.update(run(3));
+  h.host.update(lensData(run(3)));
   await settle();
-  expect(seen).toEqual([[[2]]]);
+  expect(seen.length).toBe(1);
   h.close();
 });
 
@@ -183,6 +187,8 @@ test("connect gives up when no init arrives", async () => {
 
 /** A component shown as a page: its `init` has the page and no run, and
  *  the host answers the page's own calls. */
+const pageData: HostedData = { run: null, data: { items: { columns: ["id"], rows: [["a"]], truncated: false } }, params: { from: "2026-10-01" }, props: { size: 2 } };
+
 function pageHarness(deps: Partial<BridgeDeps> = {}) {
   const view = { viewParams: { from: "2026-10-01" }, historyState: { scroll: 3 } };
   const channel = new MessageChannel();
@@ -201,13 +207,13 @@ function pageHarness(deps: Partial<BridgeDeps> = {}) {
       openForm: async () => ({ result: { made: true } }),
       ...deps,
     },
-    null,
+    pageData,
     view,
   );
   const frame = new EventTarget();
   const page = { streamId: "str1", threadId: null };
   const init = () =>
-    frame.dispatchEvent(Object.assign(new Event("message"), { data: initMessage(null, {}, page, view), ports: [channel.port2] }));
+    frame.dispatchEvent(Object.assign(new Event("message"), { data: initMessage(pageData, {}, page, view), ports: [channel.port2] }));
   return { frame, init, host, titles, close: () => channel.port1.close() };
 }
 
@@ -217,6 +223,9 @@ test("a page's component gets its page, runs its own SQL, opens a form and sets 
   h.init();
   const c = await connecting;
   expect(c.run).toBeNull();
+  expect(c.data).toEqual(pageData.data);
+  expect(c.params).toEqual({ from: "2026-10-01" });
+  expect(c.props).toEqual({ size: 2 });
   expect(c.page).toEqual({ streamId: "str1", threadId: null });
   expect(c.viewParams).toEqual({ from: "2026-10-01" });
   expect(c.historyState).toEqual({ scroll: 3 });
@@ -305,12 +314,12 @@ test("a component shown by a lens with its host's view reads, sets and hears it"
       setViewParams: (p) => views.push(p),
       setHistoryState: () => {},
     },
-    run(1),
+    lensData(run(1)),
     view,
   );
   const frame = new EventTarget();
   const connecting = connect({ target: frame });
-  frame.dispatchEvent(Object.assign(new Event("message"), { data: initMessage(run(1), {}, null, view), ports: [channel.port2] }));
+  frame.dispatchEvent(Object.assign(new Event("message"), { data: initMessage(lensData(run(1)), {}, null, view), ports: [channel.port2] }));
   const c = await connecting;
   expect(c.run.result.rows).toEqual([[1]]);
   expect(c.page).toBeNull();
@@ -336,27 +345,26 @@ test("a component shown by a lens with no view has none", async () => {
   h.close();
 });
 
-// Protocol 10: a page hands oxplow a spec to draw under it.
-test("showSpec resolves once the host drew it, and rejects with the host's refusal and its field", async () => {
+// Protocol 12: a page hands oxplow an inline page to draw under it.
+test("showView resolves with its first loader's rows once the host drew it, and rejects with the host's refusal and its field", async () => {
+  const shown: unknown[] = [];
   const h = harness({
-    showSpec: async (spec) => {
-      if (spec && (spec as { query?: string }).query === "bad") {
-        throw Object.assign(new Error("no such table: nope"), { code: "INVALID", field: "/spec/query" });
-      }
+    showView: async (spec) => {
+      if (spec?.includes("bad")) throw Object.assign(new Error("no such table: nope"), { code: "INVALID", field: "/data/rows/sql" });
+      shown.push(spec);
       return spec ? { columns: ["n"], rows: [[1]], truncated: false } : null;
     },
   });
   const connecting = connect({ target: h.frame });
   h.init();
   const c = await connecting;
-  expect(await c.showSpec({ title: "Explore", query: "SELECT 1 AS n", viz: "number" })).toEqual({ columns: ["n"], rows: [[1]], truncated: false });
-  expect(await c.showSpec(null)).toBeNull();
-  const refused = await c.showSpec({ title: "Explore", query: "bad", viz: "table" }).catch((e: unknown) => e);
-  expect(refused).toEqual({
-    code: "INVALID",
-    message: "no such table: nope",
-    field: "/spec/query",
-  });
+  expect(await c.showView("title: E\ndata: { rows: { sql: SELECT 1 AS n } }\nview: { viz: number, from: rows }\n")).toEqual({ columns: ["n"], rows: [[1]], truncated: false });
+  expect(await c.showView(null)).toBeNull();
+  expect(await c.showView()).toBeNull();
+  const refused = await c.showView("bad").catch((e: unknown) => e);
+  expect(refused).toEqual({ code: "INVALID", message: "no such table: nope", field: "/data/rows/sql" });
+  expect(shown.length).toBe(3);
+  expect("showSpec" in c).toBe(false);
   h.close();
 });
 

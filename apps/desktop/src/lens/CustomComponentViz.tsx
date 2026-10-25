@@ -7,10 +7,11 @@
 /// lens's table shows instead — as it does with no daemon to serve the
 /// bundle. Marked "custom" so the person knows it isn't oxplow's own.
 import type { ReactNode } from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { remoteBaseUrl } from "../tauri-bridge/transport.js";
 import type { LensRun } from "../tauri-bridge/generated/bindings.js";
+import { lensData, type HostedData } from "./componentBridge.js";
 import { ComponentFrame, CustomBadge, noteStyle, useComponentBundle } from "./ComponentFrame.js";
 import { useFrameForms } from "./frameForms.js";
 import type { HostedView } from "./hostedView.js";
@@ -23,6 +24,7 @@ export function CustomComponentViz({
   onReady,
   view = null,
   fit = false,
+  data,
   base = remoteBaseUrl(),
   readyTimeoutMs = 3000,
 }: {
@@ -42,11 +44,15 @@ export function CustomComponentViz({
   view?: HostedView | null;
   /** The frame is as tall as its content says: a section of a document. */
   fit?: boolean;
+  /** What it is fed (a page node's: every loader of its page); none: the
+   *  lens's own rows. */
+  data?: HostedData | null;
   /** The daemon that serves bundles; none means no component. */
   base?: string | null;
   readyTimeoutMs?: number;
 }) {
   const component = run.lens.custom?.component ?? null;
+  const fed = useMemo(() => data ?? lensData(run), [data, run]);
   // The component itself names every call: it acts as itself wherever
   // it is shown.
   const componentKey = component ? `${run.lens.extension}/${component}` : null;
@@ -98,7 +104,7 @@ export function CustomComponentViz({
         src={src}
         version={version}
         component={componentKey ?? ""}
-        run={run}
+        data={fed}
         title={run.lens.title}
         streamId={streamId}
         readyTimeoutMs={readyTimeoutMs}

@@ -1193,6 +1193,8 @@ function LensViz({
   componentView: HostedView | null;
   fitCustom: boolean;
 }) {
+  // A page file's `custom` viz is fed its page's loaders.
+  const fed = useVizPages()?.componentData ?? null;
   switch (lens.viz) {
     case "bar":
       return (
@@ -1260,6 +1262,7 @@ function LensViz({
           onReady={onCustomReady}
           view={componentView}
           fit={fitCustom}
+          data={fed}
         />
       );
     case "table":

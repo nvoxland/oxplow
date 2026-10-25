@@ -5,16 +5,18 @@
 /// (`setTitle`, `setActions`), asks for a declared command's form
 /// (`openForm`, shown here as a lens's form action is) and is told the
 /// page's params, stream and thread. Marked "custom". The frame may hand
-/// the page a lens spec (`showSpec`): the page runs it and draws it under
-/// the frame with the kit, live, with Save as Lens and Pin to Dashboard,
-/// the frame then at its content's height (`size`). A page declaring a
+/// the page an inline page (`showView`): the page runs it and draws it
+/// under the frame with the kit, live, with Save as Lens and Pin to
+/// Dashboard (`pages/PageComponent.tsx` `ShownView`), the frame then at its
+/// content's height (`size`). A page declaring a
 /// `rail:` lens draws it in its rail, run with the page's view; a row's
 /// pick writes the view (pushed, so Back un-picks), which the frame hears.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { getLens, runLens, runLensSpec, type LensRun, type SqlCell } from "../api.js";
-import { PinToDashboard } from "../components/Dashboard/PinToDashboard.js";
-import { SaveAsLens } from "../components/SaveAsLens.js";
+import { usePageRunsStore } from "../pageRuns.js";
+import { ShownView, useInlineView } from "./PageComponent.js";
+
+import { getLens, runLens, type LensRun, type SqlCell } from "../api.js";
 import { LensResultView } from "../lens/LensResultView.js";
 import { childParams, lensViewChange } from "../lens/lensModel.js";
 import { NO_READS, useRerunOnChange } from "../lens/lensRerun.js";
@@ -22,7 +24,7 @@ import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
 import { EmptyState } from "../components/Prompts/EmptyState.js";
 import type { PageAction } from "../kit/actions.js";
 import { ComponentFrame, CustomBadge, noteStyle, useComponentBundle, type BridgeHost } from "../lens/ComponentFrame.js";
-import type { FrameAction, PageInit } from "../lens/componentBridge.js";
+import { type FrameAction, type HostedData, type PageInit } from "../lens/componentBridge.js";
 import { useFrameForms } from "../lens/frameForms.js";
 import { useHostedView } from "../lens/hostedView.js";
 import { Page } from "../tabs/Page.js";
@@ -30,7 +32,7 @@ import { usePageTitle } from "../tabs/PageNavigationContext.js";
 import type { PagePayload } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { remoteBaseUrl } from "../tauri-bridge/transport.js";
-import type { ExtensionPage, Lens, LensSpec, Stream } from "../tauri-bridge/generated/bindings.js";
+import type { ExtensionPage, Lens, Stream } from "../tauri-bridge/generated/bindings.js";
 
 
 export function CustomPageView({
@@ -60,9 +62,8 @@ export function CustomPageView({
   const hostRef = useRef<BridgeHost | null>(null);
   // Why the frame at `src` was given up on; a new `src` starts afresh.
   const [failed, setFailed] = useState<{ src: string; reason: string } | null>(null);
-  // The spec the frame asked the page to draw, with its first run (a
-  // refused one never gets here), and the frame's content height.
-  const [shown, setShown] = useState<{ spec: LensSpec; run: LensRun } | null>(null);
+  // The inline page the frame asked the page to draw (a refused one never
+  // gets here), and the frame's content height.
   const [height, setHeight] = useState<number | null>(null);
 
   usePageTitle(frameTitle ?? declared.title);
@@ -83,8 +84,8 @@ export function CustomPageView({
   );
 
   const streamId = stream?.id ?? null;
-  const streamRef = useRef(streamId);
-  streamRef.current = streamId;
+  const inline = useInlineView(usePageRunsStore(), streamId, threadId);
+  const shown = inline.shown;
   // Its view params and history state are its tab entry's, whole: a view
   // change replaces the entry (a component has no selection to push;
   // going somewhere is `navigate`).
@@ -94,19 +95,11 @@ export function CustomPageView({
     () => ({
       setTitle: setFrameTitle,
       setActions: setFrameActions,
-      // A refused spec rejects with its code and field: the frame shows it.
-      showSpec: async (spec: LensSpec | null) => {
-        if (spec === null) {
-          setShown(null);
-          return null;
-        }
-        const run = await runLensSpec(spec, {}, streamRef.current);
-        setShown({ spec, run });
-        return { columns: run.result.columns, rows: run.result.rows, truncated: run.result.truncated };
-      },
+      // A refused page rejects with its code and field: the frame shows it.
+      showView: inline.showView,
       size: (h: number) => setHeight(h),
     }),
-    [],
+    [inline.showView],
   );
 
   let body;
@@ -145,7 +138,7 @@ export function CustomPageView({
           src={src}
           version={bundle.version}
           component={componentKey}
-          run={null}
+          data={NO_DATA}
           page={init}
           pageDeps={pageDeps}
           formDeps={frameForms.forms}
@@ -157,7 +150,7 @@ export function CustomPageView({
           readyTimeoutMs={readyTimeoutMs}
           onFail={(why) => setFailed({ src, reason: why })}
         />
-        {shown ? <ShownSpec key={JSON.stringify(shown.spec)} spec={shown.spec} first={shown.run} stream={stream} onOpenPage={onOpenPage} /> : null}
+        {shown ? <ShownView key={shown} specYaml={shown} stream={stream} threadId={threadId} onOpenPage={onOpenPage} /> : null}
       </div>
     );
   }
@@ -169,50 +162,6 @@ export function CustomPageView({
       {body}
       {frameForms.element}
     </Page>
-  );
-}
-
-/** The spec the frame asked the page to draw: the kit draws its run,
- *  live (run again when what it read changes), with Save as Lens and Pin
- *  to Dashboard above it. */
-function ShownSpec({
-  spec,
-  first,
-  stream,
-  onOpenPage,
-}: {
-  spec: LensSpec;
-  first: LensRun;
-  stream: Stream | null;
-  onOpenPage(ref: TabRef): void;
-}) {
-  const [run, setRun] = useState(first);
-  const [error, setError] = useState<string | null>(null);
-  const streamId = stream?.id ?? null;
-  const refresh = useCallback(() => {
-    runLensSpec(spec, {}, streamId).then(
-      (next) => {
-        setRun(next);
-        setError(null);
-      },
-      (e: unknown) => setError(e instanceof Error ? e.message : String(e)),
-    );
-  }, [spec, streamId]);
-  useRerunOnChange(run.result.reads ?? NO_READS, refresh);
-  const chart = spec.chart ?? null;
-  return (
-    <div data-testid="custom-page-spec" style={specStyle}>
-      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginBottom: 8 }}>
-        <PinToDashboard
-          tile={{ kind: "query", sql: spec.query ?? "", display: spec.viz ?? "table", optionsJson: JSON.stringify(chart ? { size: "wide", chart } : { size: "wide" }) }}
-          testId="custom-page-pin"
-          onOpenPage={onOpenPage}
-        />
-        <SaveAsLens query={spec.query ?? ""} viz={spec.viz ?? "table"} chart={chart} stream={stream} onOpenPage={onOpenPage} />
-      </div>
-      {error ? <p className="ox-error">{error}</p> : null}
-      <LensResultView run={run} onOpenPage={onOpenPage} toolbar={false} streamId={streamId} />
-    </div>
   );
 }
 
@@ -269,6 +218,8 @@ function RailLens({
 }
 
 const NO_VIEW: Record<string, SqlCell> = {};
+/** A declared component page is fed nothing: it reads what it shows. */
+const NO_DATA: HostedData = { run: null, data: {}, params: {}, props: null };
 
 /** Lens `id` as loaded, or why it couldn't be; none for no id. */
 function useLensOf(id: string | null): { lens: Lens | null; error: string | null } {
@@ -287,4 +238,3 @@ function useLensOf(id: string | null): { lens: Lens | null; error: string | null
   }, [id]);
   return out;
 }
-const specStyle = { padding: "12px 16px", borderTop: "1px solid var(--border-subtle)" } as const;

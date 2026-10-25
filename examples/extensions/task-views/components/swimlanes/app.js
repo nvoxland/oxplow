@@ -78,7 +78,7 @@
         ordering = false;
       },
     );
-    component.onUpdate((run) => {
+    component.onUpdate(({ run }) => {
       current = run;
       if (!editing) draw();
     });

@@ -1,11 +1,12 @@
-// Explore Data (oxplow-foundation, `pages: [{ id: explore-data, component:
-// explore-data, rail: explore-catalog }]`): an editable SQL box over
-// oxplow's models — metrics too, through `metric_grid()` — with a viz
-// picker. oxplow draws the result under it with its own components
-// (`showSpec`), live, with Save as Lens and Pin to Dashboard; the catalog
-// is the page's rail (a lens), whose pick sets the view's `model`. What it
-// shows is its view (the tab's address): `model`, `sql`, `viz`, `chart`,
-// `template`; the SQL being edited, not yet run, is its history state.
+// Explore Data (oxplow-foundation's `explore-data` page, whose view is
+// this component): an editable SQL box over oxplow's models — metrics
+// too, through `metric_grid()` — with a viz picker. oxplow draws the
+// result under it with its own components (`showView`: an inline page of
+// the query), live, with Save as Lens and Pin to Dashboard; the catalog is
+// the page's rail, whose pick sets the page's `model` param (heard as an
+// update's `params`). What it shows is its view (the tab's address):
+// `sql`, `viz`, `chart`, `template` (and `model`, as it last picked one);
+// the SQL being edited, not yet run, is its history state.
 import {
   CHART_ROLES,
   chartDefaults,
@@ -47,7 +48,11 @@ interface Component {
   querySql(sql: string, params?: Cell[]): Promise<Rows>;
   invoke(command: string, input?: unknown): Promise<unknown>;
   setTitle(title: string): Promise<null>;
-  showSpec(spec: { title: string; query: string; viz: string; chart?: Chart } | null): Promise<Rows | null>;
+  /** Draw an inline page (its YAML) under the explorer; its first loader's rows. */
+  showView(spec: string | null): Promise<Rows | null>;
+  /** The page's params: `model`, as the rail picked it. */
+  params: Record<string, Cell>;
+  onUpdate(listener: (update: { params: Record<string, Cell> }) => void): () => void;
   applyTheme(): void;
 }
 declare const oxplow: { connect(): Promise<Component> };
@@ -69,6 +74,9 @@ void oxplow.connect().then((c) => {
   c.applyTheme();
   void c.setTitle("Explore Data");
   let view: ExploreView = readView(c.viewParams ?? {});
+  // The model the rail picked: the page's `model` param.
+  const pageModel = (params: Record<string, Cell>) => (typeof params.model === "string" ? params.model : "");
+  let picked = pageModel(c.params ?? {});
   // The columns of what was drawn last: the chart's pickers offer them.
   let columns: string[] = [];
 
@@ -113,7 +121,7 @@ void oxplow.connect().then((c) => {
   const showError = (message: string | null, field: string | null = null) => {
     error.hidden = message === null;
     error.textContent = message ?? "";
-    sql.setAttribute("aria-invalid", field === "/spec/query" ? "true" : "false");
+    sql.setAttribute("aria-invalid", field === "/data/rows/sql" ? "true" : "false");
   };
   const drawControls = () => {
     if (document.activeElement !== sql) sql.value = draft() ?? view.sql;
@@ -172,20 +180,20 @@ void oxplow.connect().then((c) => {
   const show = async () => {
     if (view.sql.trim() === "") {
       columns = [];
-      await c.showSpec(null);
+      await c.showView(null);
       showError(null);
       drawControls();
       return;
     }
     try {
-      const rows = await c.showSpec(specOf(view.sql, view.viz, view.chart));
+      const rows = await c.showView(specOf(view.sql, view.viz, view.chart));
       columns = rows?.columns ?? [];
       showError(null);
       if (rows && CHART_ROLES[view.viz] && !(view.chart && chartFits(view.chart, rows.columns))) {
         const chart = chartDefaults(view.viz, rows);
         if (chart) {
           set({ chart });
-          await c.showSpec(specOf(view.sql, view.viz, chart));
+          await c.showView(specOf(view.sql, view.viz, chart));
         }
       }
     } catch (e) {
@@ -291,6 +299,14 @@ void oxplow.connect().then((c) => {
     void show();
   });
 
+  // The rail picked a model: the page's `model` param changed.
+  c.onUpdate(({ params }) => {
+    const next = pageModel(params);
+    if (next === picked) return;
+    picked = next;
+    if (next !== "" && next !== view.model) pick(next);
+  });
+
   // The metric pickers: what can be charted and sliced.
   void Promise.all([c.querySql(METRICS_SQL), c.querySql(DIMENSIONS_SQL)])
     .then(([metrics, dimensions]) => {
@@ -304,6 +320,11 @@ void oxplow.connect().then((c) => {
     });
 
   drawControls();
-  void describe(view.model);
-  if (view.sql) void show();
+  if (picked !== "" && picked !== view.model && view.sql === "") {
+    // Opened on a model the rail picked, with nothing of its own yet.
+    pick(picked);
+  } else {
+    void describe(view.model);
+    if (view.sql) void show();
+  }
 });

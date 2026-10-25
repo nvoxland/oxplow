@@ -43,6 +43,17 @@ mock.module("../api.js", () => ({
 }));
 
 const { CustomPageView } = await import("./CustomPageView.js");
+const { PageRunsContext } = await import("../pageRuns.js");
+const { decl, fakePage, fakePageRunsBy, fakeRun, loader, node } = await import("./testing/fakeRun.js");
+
+/** The inline pages a frame shows (`showView`): a table of titles, or —
+ *  for a spec naming `bad` — a loader that failed. */
+const inlineRuns = fakePageRunsBy((key) => {
+  specRuns.push([key.specYaml, key.streamId]);
+  const page = fakePage(node.viz("rows", "rows", { columns: [{ key: "title" }] }), { id: "inline", loaders: [decl("rows")] });
+  const bad = key.specYaml?.includes("bad");
+  return fakeRun(page, { loaders: { rows: bad ? loader([], [], "no such table: nope") : loader(["title"], [["Echidna"]]) } });
+});
 const { DeclaredPageView } = await import("./DeclaredPageView.js");
 
 afterEach(() => {
@@ -82,9 +93,11 @@ function setup(over: Partial<ExtensionPage> = {}) {
     setHistoryState: () => {},
   } as unknown as PageNavigation;
   const view = render(
-    <PageNavigationContext.Provider value={nav}>
-      <CustomPageView page={page} declared={{ ...declared, ...over } as ExtensionPage} stream={{ id: "str2" } as never} threadId="thr1" onOpenPage={() => {}} base="http://127.0.0.1:9" />
-    </PageNavigationContext.Provider>,
+    <PageRunsContext.Provider value={inlineRuns.runs}>
+      <PageNavigationContext.Provider value={nav}>
+        <CustomPageView page={page} declared={{ ...declared, ...over } as ExtensionPage} stream={{ id: "str2" } as never} threadId="thr1" onOpenPage={() => {}} base="http://127.0.0.1:9" />
+      </PageNavigationContext.Provider>
+    </PageRunsContext.Provider>,
   );
   return { view, titles, patched };
 }
@@ -154,25 +167,24 @@ test("DeclaredPageView shows a component page through CustomPageView", () => {
   expect(view.queryByTestId("page-missing")).toBeNull();
 });
 
-// The frame hands the page a spec: the page runs it and draws it with the
-// kit under the frame, with Save as Lens and Pin to Dashboard.
-test("a frame's showSpec is drawn under it; a refused one answers INVALID with its field; null clears it", async () => {
+// The frame hands the page an inline page: the page runs it and draws it
+// with the kit under the frame (Save as Lens and Pin to Dashboard only for
+// one viz over one `sql` loader).
+test("a frame's showView is drawn under it; a failed loader answers INVALID with its field; null clears it", async () => {
   const { view } = setup();
   const { port, received } = await startFrame(view);
-  port.postMessage({ id: "1", method: "showSpec", spec: { title: "Explore", query: "SELECT title FROM v_work_item", viz: "table" } });
+  port.postMessage({ id: "1", method: "showView", spec: "title: Explore" });
   const shown = await view.findByTestId("custom-page-spec");
   await waitFor(() => expect(shown.textContent).toContain("Echidna"));
-  expect(view.getByTestId("explore-save-open")).toBeTruthy();
-  expect(view.getByTestId("custom-page-pin")).toBeTruthy();
-  expect(specRuns[0]).toEqual([{ title: "Explore", query: "SELECT title FROM v_work_item", viz: "table" }, "str2"]);
+  expect(specRuns[0]).toEqual(["title: Explore", "str2"]);
   await waitFor(() => expect(received).toContainEqual({ id: "1", ok: true, result: { columns: ["title"], rows: [["Echidna"]], truncated: false } }));
-  port.postMessage({ id: "2", method: "showSpec", spec: { title: "Explore", query: "bad", viz: "table" } });
+  port.postMessage({ id: "2", method: "showView", spec: "title: bad" });
   await waitFor(() =>
-    expect(received).toContainEqual({ id: "2", ok: false, error: { code: "INVALID", message: "no such table: nope", field: "/spec/query" } }),
+    expect(received).toContainEqual({ id: "2", ok: false, error: { code: "INVALID", message: "no such table: nope", field: "/data/rows/sql" } }),
   );
   // A refusal leaves what was shown.
   expect(view.getByTestId("custom-page-spec")).toBeTruthy();
-  port.postMessage({ id: "3", method: "showSpec", spec: null });
+  port.postMessage({ id: "3", method: "showView", spec: null });
   await waitFor(() => expect(view.queryByTestId("custom-page-spec")).toBeNull());
 });
 
@@ -197,15 +209,15 @@ test("a frame's own form is drawn by the host and answers the submitted values, 
   );
 });
 
-test("with a spec shown, the frame sits at the height its content says", async () => {
+test("with a view shown, the frame sits at the height its content says", async () => {
   const { view } = setup();
   const { port } = await startFrame(view);
   const frame = view.getByTestId("custom-component-frame");
   port.postMessage({ type: "size", height: 260 });
   await new Promise((r) => setTimeout(r, 20));
-  // No spec yet: the frame fills the page.
+  // Nothing shown yet: the frame fills the page.
   expect(frame.style.height).toBe("");
-  port.postMessage({ id: "1", method: "showSpec", spec: { title: "Explore", query: "SELECT 1", viz: "table" } });
+  port.postMessage({ id: "1", method: "showView", spec: "title: Explore" });
   await view.findByTestId("custom-page-spec");
   await waitFor(() => expect(frame.style.height).toBe("260px"));
 });

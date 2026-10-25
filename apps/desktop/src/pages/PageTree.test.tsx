@@ -22,9 +22,10 @@ test("every node kind draws with its id; an embed's nodes are prefixed with the 
   // The viz shows its loader's rows; the embed its own page's.
   expect(container.querySelector('[data-node="items"]')!.textContent).toContain("a");
   expect(container.querySelector('[data-node="notes/notes"]')!.textContent).toContain("inner note");
-  // An empty slot draws nothing; a component is a placeholder naming it.
+  // An empty slot draws nothing; a component with no daemon to serve it
+  // says so in its place.
   expect(container.querySelector('[data-node="more"]')!.textContent).toBe("");
-  expect(container.querySelector('[data-node="chart"] [data-component]')?.getAttribute("data-component")).toBe("acme:chart");
+  expect(container.querySelector('[data-node="chart"] [data-testid="custom-component-fallback"]')).not.toBeNull();
 });
 
 test("a switch draws only the child the server put in view", () => {

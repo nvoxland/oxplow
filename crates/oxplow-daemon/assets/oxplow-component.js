@@ -13,21 +13,26 @@
 // and, in app.js:
 //
 //   oxplow.connect().then((component) => {
-//     render(component.run);                 // the lens's own rows
-//     component.onUpdate(render);            // the lens re-ran
+//     render(component.data);                          // its loaders' rows, by name
+//     component.onUpdate(({ data }) => render(data));  // they changed
 //   });
 //
-// A component that is a page has no run (`run` is null); `page` carries
-// its params, stream and thread, and it reads with `querySql` (when it
+// A component is fed its page's data: `data` holds each loader's
+// `{ columns, rows, truncated }` by name (a lens's own rows as `rows`),
+// `params` what they ran with and `props` its own config; `onUpdate`
+// hears new data with the loaders that `changed`. A `viz: custom`'s own
+// rows are also `run` (a lens run); a page's component node has none.
+// A component that is a page (`page` carries its stream and thread)
+// reads more with `querySql` (when it
 // declares `sql: read`), titles its page with `setTitle`, puts actions in
 // the page's bar with `setActions` and hears them with `onAction`, and
 // opens a command's form, or a form of its own schema, in oxplow with
 // `openForm`, and signs in for a provider's credential with `signIn`. A page may also hand
-// oxplow a lens spec to draw under it with the kit (`showSpec`): oxplow
-// runs it, keeps it live and offers Save as Lens and Pin to Dashboard; the
-// library tells oxplow the page's content height, so the frame sits at
-// its content's height above what oxplow draws (leave `html` and `body`
-// at `height: auto` for that).
+// oxplow an inline page (its YAML) to draw under it with the kit
+// (`showView`): oxplow runs it, keeps it live and offers Save as Lens and
+// Pin to Dashboard; the library tells oxplow the page's content height, so
+// the frame sits at its content's height above what oxplow draws (leave
+// `html` and `body` at `height: auto` for that).
 //
 // A component keeps no state of its own (a frame has no storage); oxplow
 // keeps each kind, named by its scope:
@@ -52,11 +57,13 @@
   "use strict";
 
   // The protocol this library speaks; `init` says which one the host does.
-  const PROTOCOL = 11;
+  const PROTOCOL = 12;
 
   function component(port, init) {
     let next = 0;
-    let run = init.run;
+    let run = init.run === undefined ? null : init.run;
+    let fed = init.data || {};
+    let params = init.params || {};
     const pending = new Map();
     const listeners = new Set();
     const actionListeners = new Set();
@@ -71,8 +78,11 @@
       const data = event.data;
       if (!data || typeof data !== "object") return;
       if (data.type === "update") {
-        run = data.run;
-        for (const listener of Array.from(listeners)) listener(run);
+        run = data.run === undefined ? null : data.run;
+        fed = data.data || {};
+        params = data.params || {};
+        const update = { run, data: fed, params, changed: data.changed || [] };
+        for (const listener of Array.from(listeners)) listener(update);
         return;
       }
       if (data.type === "action") {
@@ -121,8 +131,17 @@
       observer.observe(root);
     }
     return {
-      // The lens's latest run: `{ lens, params, result: { columns, rows } }`;
-      // null for a component that is a page.
+      // Its loaders' rows, by name: `{ columns, rows, truncated, error? }`
+      // each (a lens's own rows as `rows`).
+      get data() {
+        return fed;
+      },
+      // The params its data ran with.
+      get params() {
+        return params;
+      },
+      // A `viz: custom`'s own rows as a lens run: `{ lens, params, result:
+      // { columns, rows } }`; null for a page's component node.
       get run() {
         return run;
       },
@@ -139,19 +158,20 @@
       get historyState() {
         return historyState;
       },
-      // The lens's `custom.props`, or null.
+      // Its props — a component node's `props`, a viz's `custom.props` — or null.
       props: init.props === undefined ? null : init.props,
       // The theme's CSS variables, by name (`--text-primary`).
       tokens,
       protocol: init.protocol,
-      // Hear each re-run of the lens; returns how to stop.
+      // Hear new data — `{ run, data, params, changed }`, `changed` the
+      // loaders whose rows differ — each time it changes; returns how to stop.
       onUpdate(listener) {
         listeners.add(listener);
         return () => {
           listeners.delete(listener);
         };
       },
-      // Run a lens this component declares in `assets`.
+      // Run a lens this component declares in `assets` (a lens's component).
       query: (asset, params) => call({ method: "query", asset, params: params || {} }),
       // Run a command this component declares in `commands`, as the person
       // looking at it; one that asks is confirmed by them, in oxplow.
@@ -193,13 +213,14 @@
       cancelSignIn: (instance, name) => call({ method: "cancelSignIn", instance, name }),
       // The page's title. A page only.
       setTitle: (title) => call({ method: "setTitle", title }),
-      // Have oxplow draw a lens spec under the page — `{ title, query, viz,
-      // chart? }`, as `oxplow.lens.keep` takes one — live, with Save as Lens
-      // and Pin to Dashboard; null clears it. Resolves with the rows it drew
-      // (`{ columns, rows, truncated }`; null when cleared), for the page's
-      // own controls. Rejects `INVALID` with the `field` it is about
-      // (`/spec/query`) for a spec oxplow refuses. A page only.
-      showSpec: (spec) => call({ method: "showSpec", spec: spec === undefined ? null : spec }),
+      // Have oxplow draw an inline page under the page — its YAML (JSON is
+      // YAML too): `title`, `data` (read-only `sql` loaders), `view` — live,
+      // with Save as Lens and Pin to Dashboard; null clears it. Resolves with
+      // its first loader's rows (`{ columns, rows, truncated }`; null when
+      // cleared), for the page's own controls. Rejects `INVALID` with the
+      // `field` it is about (`/data/<loader>/sql`) for a page oxplow refuses
+      // or a loader that failed. A page only.
+      showView: (spec) => call({ method: "showView", spec: spec === undefined ? null : spec }),
       // The page's actions — `[{ id, label, primary?, disabled? }]` — drawn
       // by oxplow in the page's bar. A page only.
       setActions: (actions) => call({ method: "setActions", actions }),

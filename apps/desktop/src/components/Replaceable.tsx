@@ -2,7 +2,7 @@ import type { CSSProperties, ReactNode } from "react";
 
 import type { SqlCell } from "../api.js";
 import { LensResultView } from "../lens/LensResultView.js";
-import { useHostedView } from "../lens/hostedView.js";
+import { HostedViewContext, useHostedView } from "../lens/hostedView.js";
 import { useReplacement } from "../lens/useReplacement.js";
 import { usePageRunsStore, usePageRunWith, type PageRuns } from "../pageRuns.js";
 import { PageTree } from "../pages/PageTree.js";
@@ -47,7 +47,7 @@ export function Replaceable({
   // (the run is shared by key, so a fresh key object each render is fine).
   const store = usePageRunsStore();
   const pageRun = usePageRunWith(runs ?? store, r.state === "page" ? { page: r.page, params: props, streamId, threadId: null } : null);
-  const view = useHostedView({ keys: r.state === "replaced" ? r.replacement.view : NO_KEYS, scope: target });
+  const view = useHostedView({ keys: r.state === "replaced" || r.state === "page" ? r.replacement.view : NO_KEYS, scope: target });
   if (r.state === "pending") return null;
   if (r.state === "core") return <>{fallback}</>;
   const extension = r.replacement.extension;
@@ -65,7 +65,12 @@ export function Replaceable({
     return (
       <div data-testid={`replacement-${target}`} style={replacedStyle}>
         {badge(extension, r.replacement.label)}
-        {pageRun.run ? <PageTree run={pageRun.run} runId={pageRun.runId} streamId={streamId} onOpenPage={onOpenPage} /> : null}
+        {pageRun.run ? (
+          // Its components share the view its target's contract lists.
+          <HostedViewContext.Provider value={view}>
+            <PageTree run={pageRun.run} runId={pageRun.runId} streamId={streamId} onOpenPage={onOpenPage} />
+          </HostedViewContext.Provider>
+        ) : null}
       </div>
     );
   }

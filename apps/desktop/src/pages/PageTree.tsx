@@ -23,8 +23,11 @@ import type { TabRef } from "../tabs/tabState.js";
 import type { Node, Page, PageRun, RunNode, SqlCell } from "../tauri-bridge/generated/bindings.js";
 import { PageActionContext, PageFormsContext, useNodeActions, useNodeForms } from "./useNodeActions.js";
 import { usePageBranches } from "./pageBranches.js";
+import { ComponentNode } from "./PageComponent.js";
+import { pageData } from "../lens/componentBridge.js";
 import { declaredParams, namedLoader, parsePageRef, usePageReads } from "./pageReads.js";
 import { VizPagesContext, type ExpansionProps, type VizPages } from "../lens/vizPages.js";
+import { HostedViewContext } from "../lens/hostedView.js";
 import { usePageRunsStore, usePageRunWith } from "../pageRuns.js";
 
 // --- The registry --------------------------------------------------------
@@ -194,8 +197,8 @@ function NodeBody(props: NodeViewProps & { def: Node; id: string }) {
     case "markdown":
       return <Markdown value={def.text} />;
     case "component":
-      // The custom component bridge comes with a later step.
-      return <div data-component={def.component} />;
+      // The page's extension's component, fed the page's loaders.
+      return <ComponentNode run={props.run} def={def} streamId={props.streamId ?? null} />;
     case "embed":
       return at.embed ? <PageTree {...props} run={at.embed} root={at.embed.tree} prefix={`${id}/`} onSetParam={undefined} /> : null;
     case "viz":
@@ -215,6 +218,7 @@ function VizNode(props: NodeViewProps & { def: Node; id: string }) {
   const runner = useNodeActions(runId, id);
   const forms = useNodeForms(runId, id);
   const pages = useNodePages(run, def);
+  const componentView = useContext(HostedViewContext);
   const lensRun = nodeRunOf(run, def);
   if (!lensRun || def.kind !== "viz") return null;
   const failed = def.from !== null ? run.loaders[def.from]?.error : null;
@@ -230,6 +234,7 @@ function VizNode(props: NodeViewProps & { def: Node; id: string }) {
         onSetParam={onSetParam}
         toolbar={false}
         partButtons={!compact}
+        componentView={componentView}
         {...(compact ? { compact: true, maxRows: COMPACT_ROWS } : {})}
       />
     </VizPagesContext.Provider>
@@ -246,9 +251,12 @@ function useNodePages(run: PageRun, def: Node): VizPages {
   const forms = useContext(PageFormsContext);
   return useMemo(() => {
     const host = { pageRun: run, node: def, store, press, forms };
+    const custom = def.kind === "viz" && def.lens.viz === "custom";
     return {
       Expansion: PageExpansion,
       useBranches: (lensRun, open, streamId, maxRows) => usePageBranches(host, lensRun, open, streamId, maxRows),
+      // A `custom` viz is fed every loader of its page, its own rows its run.
+      componentData: custom ? pageData(run, def.lens.custom?.props ?? null, nodeRunOf(run, def)) : null,
     };
   }, [run, def, store, press, forms]);
 }

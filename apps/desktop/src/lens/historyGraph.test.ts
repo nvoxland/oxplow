@@ -157,7 +157,7 @@ test("the revealed commit is marked, and a re-run keeps the filters", async () =
   const query = document.getElementById("query") as HTMLInputElement;
   query.value = "subject n";
   query.dispatchEvent(new Event("input"));
-  updates[0]!(run([{ sha: "n", parents: ["c"] }, { sha: "c", parents: ["a"] }, { sha: "a" }]));
+  updates[0]!({ run: run([{ sha: "n", parents: ["c"] }, { sha: "c", parents: ["a"] }, { sha: "a" }]) });
   expect(rows().map((r) => r.dataset.sha)).toEqual(["n", "c", "a"]);
   expect(rows().filter((r) => !r.classList.contains("dimmed")).map((r) => r.dataset.sha)).toEqual(["n"]);
 });

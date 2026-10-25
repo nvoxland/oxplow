@@ -6,7 +6,8 @@
 /// `window` messages anyone could send:
 ///
 ///   frame → host  { type: "ready" }
-///                 { id, method: "query", asset, params }     a declared lens's run
+///                 { type: "size", height }                   its content's height
+///                 { id, method: "query", asset, params }     a declared lens's run (a lens's component)
 ///                 { id, method: "invoke", command, input }   a declared command
 ///                 { id, method: "navigate", uri, newTab, replace }    open a page
 ///                 { id, method: "querySql", sql, params }    its own SQL (`sql: read`)
@@ -20,16 +21,22 @@
 ///                 { id, method: "setHistoryState", patch }   this step of its tab (a host with a view)
 ///                 { id, method: "pageMemoryGet", key }       its own memory, for the person
 ///                 { id, method: "pageMemorySet", key, value } (null forgets it)
-///   host → frame  { type: "init", protocol, run, props, page, view, tokens }
-///                 { type: "update", run }                    the lens re-ran
+///                 { id, method: "showView", spec }           an inline page's YAML to draw under it (null clears; a page only)
+///   host → frame  { type: "init", protocol, run, data, params, props, page, view, tokens }
+///                 { type: "update", run, data, params, changed } its data changed
 ///                 { type: "action", id }                     a page action was pressed
 ///                 { type: "viewParams", params }             its view params changed (Back, Forward)
 ///                 { type: "historyState", state }            its history state changed (Back, Forward)
 ///                 { id, ok: true, result } | { id, ok: false, error: { code, message, field? } }
 ///
-/// Shown by a lens, `init` carries the lens's run and `page` is null; shown
-/// as a page (`pages[].component`), `run` is null and `page` carries the
-/// page's stream and thread. `view` is its host's view — view params and
+/// `data` is what it is fed, each loader's `{ columns, rows, truncated }`
+/// by name (a page's loaders; a lens's own rows as `rows`), with the
+/// `params` they ran with and its `props` (a page's component node's, a
+/// `custom` viz's `custom.props`); `update` says which loaders `changed`.
+/// `run` is a `custom` viz's own rows as a lens run (a lens's, or a page
+/// node's), null for a page's component node. `page` carries the page's
+/// stream and thread when it is a page's component, else null. `view` is
+/// its host's view — view params and
 /// history state — or null: a page has one (the whole tab entry), so does
 /// a replacement (the keys its target's contract lists) and a lens's own
 /// page's component (the lens's params); a tile, a slot or the rail gives
@@ -42,7 +49,7 @@
 import { ICONS } from "../icons.js";
 import { IpcCallError, needsConfirmation } from "../ipc-error.js";
 import { parseUri } from "../uri/uri.js";
-import type { CommandOutcome, LensRun, LensSpec, SqlCell, SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
+import type { CommandOutcome, LensRun, PageRun, SqlCell, SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
 
 /// The protocol above, by number: bumped when a message's shape changes,
 /// with the served library (`crates/oxplow-daemon/assets/`). 2: `init`
@@ -68,14 +75,51 @@ import type { CommandOutcome, LensRun, LensSpec, SqlCell, SqlQueryResult } from 
 /// for a provider instance's credential (`signIn`, `cancelSignIn`: the host
 /// runs the whole redirect flow and answers how it ended), and `openForm`
 /// also takes a form of its own (`{ title, schema, values }`) and answers
-/// the values submitted.
-export const BRIDGE_PROTOCOL = 11;
+/// the values submitted. 12: a component is fed its page's data — `init`
+/// and `update` carry `data` (each loader's rows), `params` and `props`,
+/// `update` the loaders that `changed` — and a page shows an inline page
+/// under it (`showView`, its YAML) where it showed a lens spec.
+export const BRIDGE_PROTOCOL = 12;
 
-/** What a page's `showSpec` answers: the rows the host drew. */
+/** One loader's rows as a component reads them (and what `showView`
+ *  answers: the inline page's first loader's). */
 export interface ShownRows {
   columns: string[];
   rows: SqlCell[][];
   truncated: boolean;
+  /** Why it has none: the loader failed. */
+  error?: string;
+}
+
+/** What a component is fed: its loaders' rows by name, the params they
+ *  ran with, its props, and a `custom` viz's own rows as a lens run. */
+export interface HostedData {
+  run: LensRun | null;
+  data: Record<string, ShownRows>;
+  params: Record<string, SqlCell>;
+  props: unknown;
+}
+
+const rowsOf = (r: SqlQueryResult, error: string | null = null): ShownRows => ({
+  columns: r.columns,
+  rows: r.rows,
+  truncated: r.truncated,
+  ...(error ? { error } : {}),
+});
+
+/** A lens's component's data: its own rows (`rows`), its params, its
+ *  `custom.props`. */
+export function lensData(run: LensRun): HostedData {
+  return { run, data: { rows: rowsOf(run.result) }, params: run.params, props: run.lens.custom?.props ?? null };
+}
+
+/** A page's component's data: every loader of `run`, its params, and
+ *  `props` (a component node's own, or a `custom` viz's); `own` is a
+ *  `custom` viz node's rows as a lens run. */
+export function pageData(run: PageRun, props: unknown, own: LensRun | null = null): HostedData {
+  const data: Record<string, ShownRows> = {};
+  for (const [name, l] of Object.entries(run.loaders)) if (l) data[name] = rowsOf(l.result, l.error);
+  return { run: own, data, params: run.params, props: props ?? null };
 }
 
 /** A form of the component's own, shown by the host: a JSON Schema for
@@ -133,7 +177,7 @@ export type BridgeRequest =
   | { id: string; method: "setHistoryState"; patch: Record<string, unknown> }
   | { id: string; method: "pageMemoryGet"; key: string }
   | { id: string; method: "pageMemorySet"; key: string; value: unknown }
-  | { id: string; method: "showSpec"; spec: LensSpec | null };
+  | { id: string; method: "showView"; spec: string | null };
 
 export type FrameMessage = { type: "ready" } | { type: "size"; height: number } | { type: "request"; request: BridgeRequest };
 
@@ -233,11 +277,11 @@ export function parseFrameMessage(data: unknown): FrameMessage | null {
     case "pageMemorySet":
       if (typeof m.key !== "string" || !m.key) return null;
       return { type: "request", request: { id: m.id, method: "pageMemorySet", key: m.key, value: m.value ?? null } };
-    case "showSpec": {
-      // The host checks the spec itself; here only that it is one.
+    case "showView": {
+      // The host checks the page itself; here only that it is text.
       const spec = m.spec ?? null;
-      if (spec !== null && (typeof spec !== "object" || Array.isArray(spec))) return null;
-      return { type: "request", request: { id: m.id, method: "showSpec", spec: spec as LensSpec | null } };
+      if (spec !== null && typeof spec !== "string") return null;
+      return { type: "request", request: { id: m.id, method: "showView", spec: spec as string | null } };
     }
     default:
       return null;
@@ -271,21 +315,17 @@ export function tokensFromStyle(style: {
 }
 
 /** The `init` the host posts to a component's frame: the protocol it
- *  speaks, the first run and the lens's `custom.props` (a lens shows it)
- *  or the page it is (`page`), its host's view (`view`), and the theme's
- *  tokens. One builder, so the library's tests read the message the host
- *  really sends. */
-export function initMessage(
-  run: LensRun | null,
-  tokens: Record<string, string>,
-  page: PageInit | null = null,
-  view: ViewInit | null = null,
-) {
+ *  speaks, what it is fed (`HostedData`), the page it is (`page`), its
+ *  host's view (`view`), and the theme's tokens. One builder, so the
+ *  library's tests read the message the host really sends. */
+export function initMessage(fed: HostedData, tokens: Record<string, string>, page: PageInit | null = null, view: ViewInit | null = null) {
   return {
     type: "init" as const,
     protocol: BRIDGE_PROTOCOL,
-    run,
-    props: run?.lens.custom?.props ?? null,
+    run: fed.run,
+    data: fed.data,
+    params: fed.params,
+    props: fed.props ?? null,
     page,
     view,
     tokens,
@@ -333,10 +373,11 @@ export interface BridgeDeps {
   /** Keep `value` (JSON) as its page memory's `key`, null forgetting it;
    *  throws `{ code: "INVALID" }` past the size caps. */
   pageMemorySet?(key: string, value: unknown): void;
-  /** Run `spec` and draw it under the frame (null clears it): its rows,
-   *  for the frame's own controls (a chart's column pickers); rejects
-   *  `{ code: "INVALID", field? }` for a spec it refuses. A page only. */
-  showSpec?(spec: LensSpec | null): Promise<ShownRows | null>;
+  /** Run inline page `spec` (its YAML) and draw it under the frame (null
+   *  clears it): its first loader's rows, for the frame's own controls (a
+   *  chart's column pickers); rejects `{ code: "INVALID", field? }` for a
+   *  page it refuses or a loader that failed. A page only. */
+  showView?(spec: string | null): Promise<ShownRows | null>;
   /** The frame's content height, as it changes. */
   size?(height: number): void;
 }
@@ -356,33 +397,32 @@ export function componentMayOpen(ref: string): boolean {
   return parseUri(ref) !== null;
 }
 
-/** What a run shows the frame: an `update` repeats none of it. */
-const shown = (run: LensRun | null) => (run ? JSON.stringify([run.params, run.result]) : "");
-
 /** What a component shown by a lens may not do: the page is its host's. */
-const PAGE_ONLY = "Only a component shown as a page sets its title, actions or the spec it shows.";
+const PAGE_ONLY = "Only a component shown as a page sets its title, actions or the view it shows.";
 /** What a component in a host that draws no slideover may not do. */
 const NO_FORMS = "This host shows no forms and signs in for no component.";
 /** What a component in a host with no view may not do. */
 const NO_VIEW = "This host gives the component no view: only a page, a replacement or a lens's own page does.";
 
-/** Answer the frame's requests arriving on `port`. `sent` is the run the
- *  `init` message carried and `sentView` the view it told; `update`,
+/** Answer the frame's requests arriving on `port`. `sent` is what the
+ *  `init` message fed it and `sentView` the view it told; `update`,
  *  `viewParams` and `historyState` post only what the frame hasn't seen,
  *  and `ready` is heard once. */
 export function createBridgeHost(
   port: MessagePort,
   deps: BridgeDeps,
-  sent: LensRun | null,
+  sent: HostedData,
   sentView: ViewInit | null = null,
 ): {
-  update(run: LensRun): void;
+  update(fed: HostedData): void;
   viewParams(params: Record<string, string>): void;
   historyState(state: Record<string, unknown>): void;
   action(id: string): void;
   close(): void;
 } {
-  let last = shown(sent);
+  let lastData = Object.fromEntries(Object.entries(sent.data).map(([k, v]) => [k, JSON.stringify(v)]));
+  let lastParams = JSON.stringify(sent.params);
+  let lastRun = JSON.stringify(sent.run ? [sent.run.params, sent.run.result] : null);
   let lastView = sentView ? JSON.stringify(sentView.viewParams) : null;
   let lastState = sentView ? JSON.stringify(sentView.historyState) : null;
   let ready = false;
@@ -500,10 +540,10 @@ export function createBridgeHost(
           failWith(r.id, e);
         }
         return;
-      case "showSpec":
-        if (!deps.showSpec) return fail(r.id, "INVALID", PAGE_ONLY);
+      case "showView":
+        if (!deps.showView) return fail(r.id, "INVALID", PAGE_ONLY);
         try {
-          reply(r.id, (await deps.showSpec(r.spec)) ?? null);
+          reply(r.id, (await deps.showView(r.spec)) ?? null);
         } catch (e) {
           failWith(r.id, e);
         }
@@ -540,11 +580,16 @@ export function createBridgeHost(
     if (typeof id === "string" && id) fail(id, "BAD_REQUEST", "Not a request this host knows.");
   };
   return {
-    update: (run) => {
-      const key = shown(run);
-      if (key === last) return;
-      last = key;
-      port.postMessage({ type: "update", run });
+    update: (fed) => {
+      const data = Object.fromEntries(Object.entries(fed.data).map(([k, v]) => [k, JSON.stringify(v)]));
+      const changed = [...new Set([...Object.keys(data), ...Object.keys(lastData)])].filter((k) => data[k] !== lastData[k]);
+      const params = JSON.stringify(fed.params);
+      const run = JSON.stringify(fed.run ? [fed.run.params, fed.run.result] : null);
+      if (changed.length === 0 && params === lastParams && run === lastRun) return;
+      lastData = data;
+      lastParams = params;
+      lastRun = run;
+      port.postMessage({ type: "update", run: fed.run, data: fed.data, params: fed.params, changed });
     },
     viewParams: (params) => {
       const key = JSON.stringify(params);

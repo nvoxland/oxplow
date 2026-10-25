@@ -31,6 +31,9 @@ import { useOptionalPageNavigation, usePageTitle, useTabActions } from "../tabs/
 import type { TabRef } from "../tabs/tabState.js";
 import type { Node, PageRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
 import { PageRail } from "./PageRail.js";
+import { ComponentPage, type ComponentPageHost } from "./PageComponent.js";
+import type { BridgeHost } from "../lens/ComponentFrame.js";
+import type { FrameAction } from "../lens/componentBridge.js";
 import { NodeRegistryContext, PageTree, createNodeRegistry, useNodeFocus } from "./PageTree.js";
 import { labelRow, tabLabel } from "./renderers.js";
 import { useNodeActions, useNodeForms } from "./useNodeActions.js";
@@ -72,7 +75,14 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
   const streamId = pageKey.streamId;
   const nav = useOptionalPageNavigation();
   const page = run?.page ?? null;
-  const title = page ? tabLabel(page, run!.params, labelRow(run!)) : "";
+  // A page whose view is one component *is* that component: it says the
+  // title and the actions, which core draws.
+  const whole = page?.view.kind === "component";
+  const [frameTitle, setFrameTitle] = useState<string | null>(null);
+  const [frameActions, setFrameActions] = useState<FrameAction[]>([]);
+  const frameHost = useRef<BridgeHost | null>(null);
+  const componentHost: ComponentPageHost = useMemo(() => ({ onTitle: setFrameTitle, onActions: setFrameActions, hostRef: frameHost }), []);
+  const title = page ? ((whole ? frameTitle : null) ?? tabLabel(page, run!.params, labelRow(run!))) : "";
   usePageTitle(title || null);
 
   const registry = useMemo(createNodeRegistry, []);
@@ -100,6 +110,18 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
       icon: a.icon ?? undefined,
       run: () => actions.run(a, null),
     })),
+    ...(whole
+      ? frameActions.map((a) => ({
+          id: a.id,
+          label: a.label,
+          primary: a.primary,
+          prominent: a.prominent,
+          submenu: a.submenu,
+          icon: a.icon,
+          disabled: a.disabled,
+          run: () => frameHost.current?.action(a.id),
+        }))
+      : []),
   ];
   useTabActions(pageActions);
 
@@ -144,7 +166,7 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
   const [body, setBody] = useState<HTMLDivElement | null>(null);
   const outOfDate = useOutOfDate(page?.origin.extension ?? null, page?.origin.deployment ?? null);
   const reading = useDelayed(!run && !error, LOADING_AFTER_MS);
-  const fills = run ? anyFills(run) : false;
+  const fills = run ? whole || anyFills(run) : false;
   const full = fills || (run ? wide(run) : false);
 
   return (
@@ -203,7 +225,9 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
               {error}
             </div>
           ) : null}
-          {run ? (
+          {run && whole ? (
+            <ComponentPage run={run} stream={stream} streamId={streamId} threadId={pageKey.threadId} onOpenPage={onOpenPage} host={componentHost} />
+          ) : run ? (
             <PageTree run={run} runId={runId} streamId={streamId} onOpenPage={onOpenPage} onSetParam={apply} />
           ) : reading ? (
             <Loading what="the page" />

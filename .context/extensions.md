@@ -947,9 +947,11 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     of its own writes, so only a real move (Back) redraws. "Ask your agent
     to build one…" invokes `oxplow.lens.draft_with_agent`, the one command
     it declares.
-  - **The result** is core's: the component hands the page a spec
-    (`showSpec`, protocol 10), the page runs it checked (`run_lens_spec`)
-    and draws it under the frame with `LensResultView`, live, with **Pin
+  - **The result** is core's: the component hands the page an inline
+    page (`showView`, protocol 12: its query as one `sql` loader, its viz
+    over it — `specOf` in `src/explore-data/model.ts`), the page opens it
+    (`open_page { specYaml }`) and draws it under the frame with
+    `PageTree` (`pages/PageComponent.tsx` `ShownView`), live, with **Pin
     to Dashboard** (a `query` tile with the chart) and **Save as Lens**
     (`components/SaveAsLens.tsx`: `oxplow.lens.keep` with the spec, on the
     bus like Keep This, in the stream's worktree — its shape and its query
@@ -3065,14 +3067,22 @@ submission through `invoke_component_command`; closing it answers
 setActions, actions: [{ id, label, primary?, prominent?, submenu?, icon?, disabled? }] }`
 (the page's title and its nav-bar actions, data core draws: the primary
 and prominent ones as buttons, the rest in the bar's ☰; a press posts
-`{ type: action, id }` to the frame), and `{ id, method: showSpec, spec }`
-(protocol 10: a lens spec, as `oxplow.lens.keep` takes one, that the page
-runs checked — IPC `run_lens_spec`, `commands::lens::run_checked_spec`:
-its shape at `/spec`, its query at `/spec/query`, metric functions
-resolved, in the stream's lens context — and draws under the frame with
-the kit, live, with Pin to Dashboard and Save as Lens; it answers the rows
-it drew, for the frame's own pickers, or `INVALID` with the field; null
-clears it). While a spec shows, the frame sits at its content's height:
+`{ type: action, id }` to the frame), and `{ id, method: showView, spec }`
+(protocol 12, replacing protocol 10's `showSpec`: an inline page's YAML —
+read-only, `parse_inline_page` — that the page opens as a run of its own
+(`useInlineView`: held open while it shows, so it stays live) and draws
+under the frame with `PageTree`, with Pin to Dashboard and Save as Lens
+when it is one viz over one `sql` loader (`inlineLensSpec`); it answers its
+first loader's rows, for the frame's own pickers, or `INVALID` — the open's
+refusal, or a failed loader with `field: /data/<loader>/sql`; null clears
+it). Protocol 12 also feeds a component its page's data: `init` is `{
+protocol, run, data, params, props, page, view, tokens }` — `data` each
+loader's `{ columns, rows, truncated, error? }` by name (`pageData`: a
+page's loaders; `lensData`: a lens's own rows as `rows`), `run` a `custom`
+viz's own rows as a lens run (null for a page's `component` node), `props`
+a component node's `props` or a viz's `custom.props` — and `{ type:
+update, run, data, params, changed }` follows each change, `changed` the
+loaders whose rows differ (posted only when something did). While a view shows, the frame sits at its content's height:
 the library posts `{ type: size, height }` (a message, not a request,
 from a `ResizeObserver` on its root; a component leaves `html` and
 `body` at `height: auto`). Protocol 11: `{ id, method: openForm, form: {
@@ -3089,7 +3099,7 @@ cancelled }`. Each step is a command the component must declare
 (`oxplow.provider.begin_sign_in`, `complete_sign_in`, `cancel_sign_in`),
 run as the component; without the desktop app it answers `INVALID`; a newer
 sign-in of the credential, a `cancelSignIn` or closing the frame ends the one
-under way. `setTitle`, `setActions` and `showSpec` are a custom page's;
+under way. `setTitle`, `setActions` and `showView` are a custom page's;
 `openForm`, `signIn` and `cancelSignIn` are any host's that draws a
 slideover — a custom page and a lens's own component, a settings section
 included (`lens/frameForms.tsx`, `useFrameForms`); a host with none answers `INVALID`. A document's
@@ -3172,10 +3182,11 @@ It is a **classic script that defines the
 global `oxplow`**, not a module: module scripts are fetched with CORS,
 which an opaque origin never passes and nothing served to a frame allows
 — the same reason a bundle's own scripts are classic. `oxplow.connect()`
-waits for `init`, answers `ready`, and resolves with `{ run (the latest),
-page, props, tokens, protocol, onUpdate(fn) → unsubscribe, query(asset,
-params), invoke(command, input), navigate(uri, { newTab, replace }), querySql,
-openForm (a command's, or `{ title, schema, values }`), signIn, cancelSignIn, setTitle, setActions, showSpec, onAction, viewParams, setViewParams,
+waits for `init`, answers `ready`, and resolves with `{ data, params, run
+(the latest of each), page, props, tokens, protocol, onUpdate(fn({ run,
+data, params, changed })) → unsubscribe, query(asset, params) (a lens's
+component's declared lenses), invoke(command, input), navigate(uri, { newTab, replace }), querySql,
+openForm (a command's, or `{ title, schema, values }`), signIn, cancelSignIn, setTitle, setActions, showView, onAction, viewParams, setViewParams,
 onViewParams, historyState, setHistoryState, onHistoryState, pageMemory,
 applyTheme(doc?) }` (the `.d.ts` beside it is the reference;
 `viewParams` / `historyState` are null where the host gives no view); a

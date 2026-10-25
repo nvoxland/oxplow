@@ -64,7 +64,7 @@
     draw();
     // The host runs the lens again when a commit lands or a ref moves (or
     // the page asks to reveal another commit); the filters stay as set.
-    component.onUpdate((run) => {
+    component.onUpdate(({ run }) => {
       history = read(run);
       refill();
       draw();

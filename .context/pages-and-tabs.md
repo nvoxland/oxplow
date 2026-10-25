@@ -395,8 +395,22 @@ is; stack → `Section`s, grid → `TileGrid`
 at each child's `size`, switch → its one child, viz → `LensResultView`
 over `nodeRunOf` (`lens/nodeRun.ts`, the server's `node_run`), embed → a
 nested tree with ids `<embed>/<id>`, slot → its children, markdown → the
-`Markdown` component, component → a placeholder (the bridge comes
-later), a node or loader error → an inline `ox-error`. Every node's root
+`Markdown` component, component → its extension's component in a frame
+at its content's height (`pages/PageComponent.tsx` `ComponentNode`), a
+node or loader error → an inline `ox-error`. A component is fed its
+page's data over the bridge (protocol 12, `.context/extensions.md`
+"Custom components": `pageData` — every loader's rows by name, the
+params, its props — and an `update` naming the loaders that changed); a
+`custom` viz is fed the same (`VizPages.componentData`), its own rows also
+its `run`, and in a page replacement shares the view its target lists
+(`HostedViewContext`). A page whose `view:` is one component node *is* the
+component (`ComponentPage`, drawn by `PageHost` in place of the tree):
+it fills the page, its `setTitle` / `setActions` are the tab's title and
+nav-bar actions, the tab entry's whole `#` is its view, and what it hands
+over with `showView` (an inline page's YAML) opens as a run of its own and
+is drawn under it (`ShownView`, with Save as Lens and Pin to Dashboard for
+one viz over one `sql` loader); its `rail:` is drawn in the rail as any
+page's. Every node's root
 has `data-node` and registers in a `NodeRegistry`; `useNodeFocus` lands
 on `#node=<id>` (scroll, `data-focused` for 1.5 s). Viz components press
 their actions through `LensActionRunnerContext`

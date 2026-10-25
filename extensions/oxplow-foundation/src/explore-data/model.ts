@@ -222,7 +222,13 @@ export function readView(params: Record<string, string>): ExploreView {
   };
 }
 
-/** The spec the host draws for a query: what Save as Lens keeps. */
-export function specOf(sql: string, viz: Viz, chart: Chart | null): { title: string; query: string; viz: Viz; chart?: Chart } {
-  return { title: "Explore", query: sql, viz, ...(chart ? { chart } : {}) };
+/** The inline page the host draws for a query (`showView`): the query as
+ *  one `sql` loader and its viz over it — what Save as Lens keeps. JSON is
+ *  YAML, so it goes as is. */
+export function specOf(sql: string, viz: Viz, chart: Chart | null): string {
+  return JSON.stringify({
+    title: "Explore",
+    data: { rows: { sql } },
+    view: { id: "rows", viz, from: "rows", ...(chart ? { chart } : {}) },
+  });
 }

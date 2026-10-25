@@ -12,7 +12,7 @@
  * is its own object in the entry (`component:<scope>`), so it never
  * overwrites its page's.
  */
-import { useMemo, useRef } from "react";
+import { createContext, useMemo, useRef } from "react";
 
 import type { SqlCell } from "../tauri-bridge/generated/bindings.js";
 import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
@@ -99,3 +99,8 @@ export function useHostedView({
 }
 
 const NONE: Record<string, unknown> = {};
+
+/** The view a page drawn inside another host gives its `custom` vizzes
+ *  (a page replacement: the keys its target's contract lists); none: the
+ *  page's components share no view. */
+export const HostedViewContext = createContext<HostedView | null>(null);

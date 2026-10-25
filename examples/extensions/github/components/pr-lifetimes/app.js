@@ -27,7 +27,7 @@
     show(component.run);
     // The host runs the lens again when what it reads changes — at its own
     // params, so with a filter selected it's asked again with the filter.
-    component.onUpdate((run) => ((run.params || {}).state === state ? show(run) : refresh()));
+    component.onUpdate(({ run }) => ((run.params || {}).state === state ? show(run) : refresh()));
     for (const button of document.querySelectorAll("[data-state]")) {
       button.addEventListener("click", () => {
         state = button.dataset.state;
