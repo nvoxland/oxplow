@@ -28,7 +28,7 @@ view:
     label: Signal
   - key: duration_ms
     label: Took
-    unit: ms
+    format: duration
   - key: output_note
     label: Output
   - key: stderr

@@ -17,7 +17,7 @@ columns:
   - { key: message, label: Message }
   - { key: exit_code, label: Exit code }
   - { key: signal, label: Signal }
-  - { key: duration_ms, label: Took, unit: ms }
+  - { key: duration_ms, label: Took, format: duration }
   - { key: output_note, label: Output }
   - { key: stderr, label: stderr }
   - { key: stdout, label: stdout }
