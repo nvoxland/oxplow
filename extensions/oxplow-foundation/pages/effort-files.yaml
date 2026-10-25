@@ -5,6 +5,8 @@ tool: effort_files
 params:
 - name: effort
   label: Effort (`eff9`)
+answers:
+- {"question":"List this effort's files without writing SQL.","about":"oxplow/effort","params":{"effort":"eff1"},"skill":"oxplow-runtime"}
 data:
   effort_files:
     sql: |

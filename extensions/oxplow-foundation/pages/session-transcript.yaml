@@ -13,6 +13,8 @@ params:
   role: filter
   label: Page
   default: 1
+answers:
+- {"question":"What happened in this agent session, turn by turn?","params":{"session":"ses1"},"skill":"oxplow-runtime"}
 data:
   session_transcript:
     sql: |

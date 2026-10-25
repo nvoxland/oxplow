@@ -39,3 +39,9 @@ runs, claims and decisions in one call.
   oldest first, 50 a page, with the thread's notes where they fall and a
   subagent's hand-back marked; each row is a turn URI. A subagent's last
   message is `oxplow_read { uri: "oxplow:oxplow/subagent?agent=<id>&session=ses3#part=result" }`.
+
+In SQL the same history is `v_agent_session` (the slots opened on a
+thread), `v_agent_session_status` (each open session's last status),
+`v_agent_turn` (each prompt and answer), `v_tool_call` and `v_subagent`.
+An effort's evidence is `v_effort_observation`, its claims `v_claim`, its decisions
+`v_decision`, and its work item a `v_work_item` row.

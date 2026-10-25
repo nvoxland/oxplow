@@ -4,6 +4,8 @@ hidden: true
 params:
 - name: base
 - name: head
+answers:
+- {"question":"Which commits does this branch have that main lacks?","params":{"base":"main","head":"feature"},"skill":"oxplow-codebase"}
 data:
   git_dashboard_between:
     sql: |

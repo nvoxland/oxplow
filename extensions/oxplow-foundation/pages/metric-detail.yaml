@@ -28,6 +28,8 @@ params:
   label: Slice by
   options_from: oxplow-foundation/metrics-dimensions
   default: ''
+answers:
+- {"question":"How has this metric moved, newest capture first?","about":"oxplow/metric","params":{"metric":"oxplow.todos"},"skill":"oxplow-metrics"}
 data:
   row:
     sql: |

@@ -91,3 +91,6 @@ provenance and the git version. It is read live, so pin `metric` and `dimension`
 - If a fact doesn't appear, check the run: every run logs a `collector.synced`
   event and a `collector_run` row (a failed one with its error) — or re-run
   `oxplow.collector.sync` and read the return.
+- `v_capture_exclusion` lists the snapshot files a capture's scan was not
+  given (over the size limit, binary, unreadable): their facts stay stale
+  rather than reading clean.

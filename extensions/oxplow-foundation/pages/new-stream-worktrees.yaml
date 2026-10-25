@@ -3,6 +3,8 @@ description: The repository's worktrees that are not a stream yet.
 hidden: true
 needs:
 - vcs
+answers:
+- {"question":"Which worktrees of this repository could a new stream adopt?","params":{},"skill":"oxplow-extension"}
 data:
   new_stream_worktrees:
     sql: |

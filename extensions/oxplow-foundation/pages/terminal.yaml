@@ -5,6 +5,8 @@ category: System
 params:
 - name: stream_id
 - name: terminal
+answers:
+- {"question":"Which terminals are open in this stream?","params":{"stream_id":1},"skill":"oxplow-extension"}
 data:
   terminal:
     sql: |

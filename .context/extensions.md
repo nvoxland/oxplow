@@ -1909,8 +1909,11 @@ an extension, exists for. A questions file is a list of `{ question, skill, reac
   `every_page_answer_reaches_what_its_skill_names` covers the shipped
   extensions; `a_page_answer_must_be_named_by_its_skill_and_run` the
   mechanism. `oxplow extension test` runs the second half for every
-  extension's pages (`ran: answers`). The questions files stay readable
-  until they are migrated onto pages.
+  extension's pages (`ran: answers`). The questions files stay readable;
+  the sql- and tool-shaped core questions with a page that answers them live
+  on the page now (`answers:` in oxplow-foundation's pages, offered as the
+  extension's prompts in `prompt_catalog`), and what stays in
+  `assets/questions/` is the command-shaped ones and the ones no page answers.
 - **An extension's own** `questions.yaml` runs in `oxplow extension test`:
   `skill` is a markdown file in the extension, SQL runs on the test's
   throwaway oxplow, and a command is one on its bus — core's or the
