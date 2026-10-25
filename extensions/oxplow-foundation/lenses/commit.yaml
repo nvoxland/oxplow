@@ -7,7 +7,7 @@ params:
 query: |
   SELECT id AS change_id, base_revision, head_revision
   FROM v_change WHERE kind = 'commit' AND target = :sha
-columns: [{ key: change_id }, { key: base_revision }, { key: head_revision }]
+columns: [{ key: base_revision }, { key: head_revision }]
 viz: document
 sections:
   - { id: detail, lens: commit-detail }

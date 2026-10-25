@@ -354,10 +354,11 @@ extension still mounts a *lens* into its slots (`hasLensMounts`: a
 `ui.slots` entry at `<page>.<name>` or at its `pages:` lens's
 `<lens>.<name>` — a page file's slot shows only mounted pages) — that
 lens path is removed with the lenses. oxplow-foundation and
-oxplow-bundled both have `namespace: oxplow`, so a core-named slug can
-name a page file of each (bundled's panel bodies `comments`, `go-to`,
-`uncommitted`, `work`); `pageFileOf` takes the one whose extension also
-declares that id under `pages:`, else the first. Open With lists every renderer by name, page
+oxplow-bundled both have `namespace: oxplow` and share the core page
+names, so a slug one of them declares the other may not
+(`pages::schema::refuse_shared_core_pages`: the later in load order loses
+that page with a load error; bundled's panel bodies are
+`comments-panel` and `go-to-panel` for that reason). Open With lists every renderer by name, page
 files first (`openWithOptions`). The tab body is `PageFileView`: its run's
 params are the entry's URI (`pageRunParams`: the `?` params — a
 renderer's `uri` and its resource's own — and the `#` params the page

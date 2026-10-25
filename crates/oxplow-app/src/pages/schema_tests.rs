@@ -444,3 +444,39 @@ fn a_panel_names_its_extensions_pages() {
         loaded.errors
     );
 }
+
+/// oxplow's own extensions share the core page names
+/// (`oxplow:oxplow/page?page=<slug>`): two declaring one slug would make
+/// that URI ambiguous, so the later one loses its page and is told.
+#[test]
+fn two_core_named_extensions_cannot_declare_one_page() {
+    let d = tempfile::tempdir().unwrap();
+    for name in ["first", "second"] {
+        super::test_support::write(
+            d.path(),
+            &format!(".oxplow/extensions/{name}/extension.yaml"),
+            &format!("manifest: 2\nname: {name}\nintent:\n  purpose: p\n"),
+        );
+        super::test_support::write(
+            d.path(),
+            &format!(".oxplow/extensions/{name}/pages/comments.yaml"),
+            "title: Comments\ndata:\n  rows:\n    sql: SELECT 1 AS n\nview:\n  viz: table\n  from: rows\n",
+        );
+    }
+    let mut exts: Vec<crate::extensions::Extension> = crate::extensions::load_extensions(d.path())
+        .into_iter()
+        .filter(|e| e.origin == "project")
+        .collect();
+    for e in &mut exts {
+        e.namespace = oxplow_domain::OXPLOW_NAMESPACE.into();
+    }
+    refuse_shared_core_pages(&mut exts);
+    assert_eq!(exts[0].page_files.len(), 1, "the first keeps it");
+    assert!(exts[0].errors.is_empty(), "{:?}", exts[0].errors);
+    assert!(exts[1].page_files.is_empty(), "the second loses it");
+    let errors = exts[1].errors.join("\n");
+    assert!(
+        errors.contains("page `comments` is also `first`'s"),
+        "{errors}"
+    );
+}

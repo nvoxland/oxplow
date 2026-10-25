@@ -1155,3 +1155,32 @@ fn check_page(page: &Page) -> Result<(), String> {
     }
     Ok(())
 }
+
+/// oxplow's own extensions (`namespace: oxplow`) share the core page names
+/// — `oxplow:oxplow/page?page=<slug>` names a page without its extension —
+/// so a slug two of them declare is ambiguous. The first in load order
+/// keeps it; each later one loses that page and says why.
+pub fn refuse_shared_core_pages(extensions: &mut [crate::extensions::Extension]) {
+    let mut owner: std::collections::BTreeMap<String, String> = Default::default();
+    for ext in extensions.iter_mut() {
+        if !ext.enabled || ext.namespace != oxplow_domain::OXPLOW_NAMESPACE {
+            continue;
+        }
+        let mut errors = Vec::new();
+        ext.page_files.retain(|page| match owner.get(&page.slug) {
+            Some(first) => {
+                errors.push(format!(
+                    "{}/pages/{}.yaml: page `{}` is also `{first}`'s, and oxplow's own \
+                     extensions share page names; rename one",
+                    ext.path, page.slug, page.slug
+                ));
+                false
+            }
+            None => true,
+        });
+        for page in &ext.page_files {
+            owner.insert(page.slug.clone(), ext.name.clone());
+        }
+        ext.errors.extend(errors);
+    }
+}

@@ -92,38 +92,38 @@ skills:
   - { name: work-next, kind: command, file: commands/work-next.md }
 ui:
   slots:
-    - { slot: oxplow-foundation/changes.sections, lens: change-review }
-    - { slot: oxplow-foundation/commit.sections, lens: change-review }
-    - { slot: oxplow-foundation/uncommitted.sections, lens: change-review }
-    - { slot: oxplow-foundation/changes.sections, lens: effort-tests }
-    - { slot: oxplow-foundation/changes.sections, lens: effort-metric-deltas }
-    - { slot: oxplow-foundation/changes.sections, lens: effort-nudges }
-    - { slot: oxplow-foundation/changes.sections, lens: effort-plan }
-    - { slot: oxplow-foundation/work-item.sections, lens: task-tokens }
-    - { slot: oxplow-foundation/tasks.sections, lens: thread-tokens, at: { before: list } }
-    - { slot: oxplow-foundation/tasks.sections, lens: thread-plan, at: { before: list } }
-    - { slot: oxplow-foundation/tasks.sections, lens: thread-shared-work, at: { before: list } }
-    - { slot: oxplow-foundation/work-item.sections, lens: item-shared-work }
+    - { slot: oxplow-foundation/diff-view.sections, page: change-review }
+    - { slot: oxplow-foundation/commit.sections, page: change-review }
+    - { slot: oxplow-foundation/uncommitted-changes.sections, page: change-review }
+    - { slot: oxplow-foundation/diff-view.sections, page: effort-tests }
+    - { slot: oxplow-foundation/diff-view.sections, page: effort-metric-deltas }
+    - { slot: oxplow-foundation/diff-view.sections, page: effort-nudges }
+    - { slot: oxplow-foundation/diff-view.sections, page: effort-plan }
+    - { slot: oxplow-foundation/work-item.sections, page: task-tokens }
+    - { slot: oxplow-foundation/tasks.sections, page: thread-tokens, at: { before: list } }
+    - { slot: oxplow-foundation/tasks.sections, page: thread-plan, at: { before: list } }
+    - { slot: oxplow-foundation/tasks.sections, page: thread-shared-work, at: { before: list } }
+    - { slot: oxplow-foundation/work-item.sections, page: item-shared-work }
     - { slot: diff.file.header, lens: file-co-change }
-    - { slot: oxplow-foundation/changes.sections, lens: decisions }
-    - { slot: oxplow-foundation/changes.sections, lens: inferred-decisions }
-    - { slot: oxplow-foundation/changes.sections, lens: unverified-claims }
-    - { slot: oxplow-foundation/changes.sections, lens: what-deviated }
-    - { slot: oxplow-foundation/changes.sections, lens: tests-weakened }
-    - { slot: oxplow-foundation/commit.sections, lens: tests-weakened }
-    - { slot: oxplow-foundation/uncommitted.sections, lens: tests-weakened }
-    - { slot: oxplow-foundation/changes.sections, lens: struggled }
-    - { slot: oxplow-foundation/changes.sections, lens: session-files }
-    - { slot: oxplow-foundation/changes.sections, lens: context-read }
-    - { slot: oxplow-foundation/changes.sections, lens: review-prompt }
+    - { slot: oxplow-foundation/diff-view.sections, page: decisions }
+    - { slot: oxplow-foundation/diff-view.sections, page: inferred-decisions }
+    - { slot: oxplow-foundation/diff-view.sections, page: unverified-claims }
+    - { slot: oxplow-foundation/diff-view.sections, page: what-deviated }
+    - { slot: oxplow-foundation/diff-view.sections, page: tests-weakened }
+    - { slot: oxplow-foundation/commit.sections, page: tests-weakened }
+    - { slot: oxplow-foundation/uncommitted-changes.sections, page: tests-weakened }
+    - { slot: oxplow-foundation/diff-view.sections, page: struggled }
+    - { slot: oxplow-foundation/diff-view.sections, page: session-files }
+    - { slot: oxplow-foundation/diff-view.sections, page: context-read }
+    - { slot: oxplow-foundation/diff-view.sections, page: review-prompt }
   # Git History's commits drawn as a graph, in place of oxplow's plain
   # list (`vcs.history.graph`, a target no provider binds). It only shows
   # and opens commits, so it isn't a program to approve.
   replacements:
-    - { target: vcs.history.graph, lens: history-graph, version: 2 }
+    - { target: vcs.history.graph, page: history-graph, version: 2 }
     # The effort's verdict on its page (`effort.verdict`): core has none;
     # this is oxplow's default review policy's, and another may replace it.
-    - { target: effort.verdict, lens: effort-verdict, version: 1 }
+    - { target: effort.verdict, page: effort-verdict, version: 1 }
   # The verdict where the effort is shown: it shows; it never acts.
   decorators:
     - { model: verdict, resource: oxplow/effort, placement: ref-chip, label: label, color: color }
@@ -131,9 +131,9 @@ ui:
 custom_components:
   - { id: history-graph, title: History graph }
 panels:
-  - { id: go-to, title: Go To, icon: compass, scope: thread, body: go-to, collapsed: go-to-bookmarks, open: 'oxplow:oxplow/page?page=go-to' }
+  - { id: go-to, title: Go To, icon: compass, scope: thread, body: go-to-panel, collapsed: go-to-bookmarks, open: 'oxplow:oxplow/page?page=go-to' }
   - { id: waiting, title: Waiting on You, icon: bell, scope: project, body: waiting-on-me, badge: waiting-on-me }
-  - { id: comments, title: Comments, icon: message-square, scope: stream, body: comments, open: 'oxplow:oxplow/page?page=comments' }
+  - { id: comments, title: Comments, icon: message-square, scope: stream, body: comments-panel, open: 'oxplow:oxplow/page?page=comments' }
   - { id: uncommitted, title: Uncommitted, icon: git-branch, scope: stream, body: uncommitted, collapsed: uncommitted-line, count: uncommitted-count, open: 'oxplow:oxplow/page?page=uncommitted-changes' }
   - { id: work, title: Work, icon: list-checks, scope: thread, body: work, collapsed: work-line, count: work-count, open: 'oxplow:oxplow/page?page=tasks' }
 advisories:

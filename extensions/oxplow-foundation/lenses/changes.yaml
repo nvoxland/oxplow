@@ -51,7 +51,6 @@ columns:
   - { key: effort }
   - { key: in_progress }
   - { key: range_change_id }
-  - { key: change_id }
 viz: document
 sections:
   - { id: effort, lens: changes-effort }

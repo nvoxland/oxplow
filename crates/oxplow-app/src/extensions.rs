@@ -3287,6 +3287,7 @@ pub(super) fn resolve_catalog(
         .collect();
     public_contracts::stage(&mut out);
     crate::extension_commands::refuse_shared_namespaces(&mut out);
+    crate::pages::schema::refuse_shared_core_pages(&mut out);
     crate::extension_commands::refuse_duplicate_tools(&mut out);
     for ext in &mut out {
         ext.contributions.retain(|descriptor| {
@@ -5696,10 +5697,9 @@ fn parse_panels(
                 ok = false;
             }
         }
-        // A panel's parts are its extension's pages (or, until they are
-        // gone, its lenses): all one or the other.
-        let of_pages =
-            pages.iter().any(|pg| pg.slug == p.body) && !lenses.iter().any(|l| l.slug == p.body);
+        // A panel's parts are its extension's pages (or, until lenses are
+        // gone, its lenses when its body is no page): all one or the other.
+        let of_pages = pages.iter().any(|pg| pg.slug == p.body);
         for (role, slug) in [
             ("body", Some(&p.body)),
             ("badge", p.badge.as_ref()),
@@ -9918,41 +9918,31 @@ commands:
         assert!(b.warnings.is_empty(), "{:?}", b.warnings);
         assert_eq!(b.manifest_version, 2);
         assert!(!b.intent.as_ref().unwrap().examples.is_empty());
-        // The review packet and the analytics lenses, mounted together.
-        for (slot, lens) in [
+        // The review packet and the analytics pages, mounted together.
+        for (host, slot, page) in [
+            ("oxplow-foundation/diff-view", "sections", "decisions"),
             (
-                "oxplow-foundation/changes.sections",
-                "oxplow-bundled/decisions",
+                "oxplow-foundation/diff-view",
+                "sections",
+                "inferred-decisions",
             ),
-            (
-                "oxplow-foundation/changes.sections",
-                "oxplow-bundled/inferred-decisions",
-            ),
-            (
-                "oxplow-foundation/changes.sections",
-                "oxplow-bundled/change-review",
-            ),
-            (
-                "oxplow-foundation/changes.sections",
-                "oxplow-bundled/effort-tests",
-            ),
-            (
-                "oxplow-foundation/commit.sections",
-                "oxplow-bundled/tests-weakened",
-            ),
-            (
-                "oxplow-foundation/work-item.sections",
-                "oxplow-bundled/task-tokens",
-            ),
-            ("diff.file.header", "oxplow-bundled/file-co-change"),
+            ("oxplow-foundation/diff-view", "sections", "change-review"),
+            ("oxplow-foundation/diff-view", "sections", "effort-tests"),
+            ("oxplow-foundation/commit", "sections", "tests-weakened"),
+            ("oxplow-foundation/work-item", "sections", "task-tokens"),
         ] {
             assert!(
-                b.ui.slots
-                    .iter()
-                    .any(|s| s.slot == slot && s.lens_id == lens),
-                "{slot} {lens}"
+                b.ui.page_slots.iter().any(|s| s.host == host
+                    && s.slot == slot
+                    && s.page == format!("oxplow-bundled/{page}")),
+                "{host}.{slot} {page}"
             );
         }
+        assert!(b
+            .ui
+            .slots
+            .iter()
+            .any(|s| s.slot == "diff.file.header" && s.lens_id == "oxplow-bundled/file-co-change"));
         assert!(b.panels.iter().any(|p| p.id == "oxplow-bundled/waiting"));
         let commands: Vec<&str> = b.commands.iter().map(|c| c.name.as_str()).collect();
         assert_eq!(

@@ -1449,7 +1449,7 @@ mod tests {
         assert_eq!(
             (panel.body.as_str(), panel.open.as_deref()),
             (
-                "oxplow-bundled/comments",
+                "oxplow-bundled/comments-panel",
                 Some("oxplow:oxplow/page?page=comments")
             )
         );
@@ -3526,7 +3526,7 @@ mod tests {
                 panel.open.as_deref()
             ),
             (
-                "oxplow-bundled/go-to",
+                "oxplow-bundled/go-to-panel",
                 Some("oxplow-bundled/go-to-bookmarks"),
                 Some("oxplow:oxplow/page?page=go-to")
             )
