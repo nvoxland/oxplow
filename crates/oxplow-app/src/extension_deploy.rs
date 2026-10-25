@@ -34,6 +34,46 @@ pub struct Deployed {
     pub already: bool,
     /// What the person should know, the deployment went live regardless.
     pub warnings: Vec<String>,
+    /// The primary checkout's HEAD the deployed source was at; `None` for
+    /// a source outside the project, or a shipped copy.
+    pub commit: Option<String>,
+    /// The deployed source had uncommitted changes.
+    pub dirty: bool,
+}
+
+impl Deployed {
+    /// Where the deployment came from, for a message: `commit abc1234`,
+    /// with `(uncommitted changes)` when dirty; `None` when it has no commit.
+    pub fn provenance(&self) -> Option<String> {
+        provenance_text(self.commit.as_deref(), self.dirty)
+    }
+}
+
+fn provenance_text(commit: Option<&str>, dirty: bool) -> Option<String> {
+    let commit = commit?;
+    let short = &commit[..commit.len().min(7)];
+    Some(if dirty {
+        format!("commit {short} (uncommitted changes)")
+    } else {
+        format!("commit {short}")
+    })
+}
+
+/// Where `source` came from: the checkout's HEAD and whether `source` had
+/// uncommitted changes (untracked files included). Both empty for a
+/// source outside `project`, or a project that isn't a repository.
+fn provenance(project: &Path, source: &Path) -> (Option<String>, bool) {
+    let Ok(rel) = source.strip_prefix(project) else {
+        return (None, false);
+    };
+    let Some(commit) = oxplow_git::head_commit_sha(project) else {
+        return (None, false);
+    };
+    let rel = rel.to_string_lossy();
+    let dirty = oxplow_git::list_git_statuses(project)
+        .keys()
+        .any(|path| path.starts_with(rel.as_ref()));
+    (Some(commit), dirty)
 }
 
 /// An extension this big says so when it deploys: each deployment is a
@@ -371,6 +411,12 @@ pub async fn deploy(
     valid(name)?;
     let project = svc.layout.project_dir.clone();
     let source = source_of(&project, name)?;
+    let (commit, dirty) = {
+        let (project, source) = (project.clone(), source.clone());
+        tokio::task::spawn_blocking(move || provenance(&project, &source))
+            .await
+            .map_err(storage)?
+    };
     let (hash, size, loaded) = {
         let (source, owned) = (source.clone(), name.to_string());
         tokio::task::spawn_blocking(move || {
@@ -424,6 +470,8 @@ pub async fn deploy(
             hash,
             already: true,
             warnings: loaded.warnings,
+            commit,
+            dirty,
         });
     }
     if target.is_some() {
@@ -489,7 +537,8 @@ pub async fn deploy(
             name: name.to_string(),
             hash: hash.clone(),
             deployed_at: Timestamp::now().to_string(),
-            from_stream: None,
+            commit: commit.clone(),
+            dirty,
             source: source.to_string_lossy().into_owned(),
             active: false,
             permissions: loaded.permissions.clone(),
@@ -510,6 +559,8 @@ pub async fn deploy(
         hash,
         already: false,
         warnings: [loaded.warnings, size_warnings(name, size)].concat(),
+        commit,
+        dirty,
     })
 }
 
@@ -581,17 +632,22 @@ pub async fn rollback(
             .map(extension_store::shipped_hash)
             .unwrap_or_default()
     });
+    let target_row = hash
+        .as_ref()
+        .and_then(|hash| rows.iter().find(|r| &r.hash == hash));
+    let (commit, dirty) = target_row
+        .map(|r| (r.commit.clone(), r.dirty))
+        .unwrap_or_default();
     if live == hash {
         return Ok(Deployed {
             name: name.to_string(),
             hash: shown,
             already: true,
             warnings: Vec::new(),
+            commit,
+            dirty,
         });
     }
-    let target_row = hash
-        .as_ref()
-        .and_then(|hash| rows.iter().find(|r| &r.hash == hash));
     let target_permissions = match &hash {
         Some(_) => target_row
             .map(|r| r.permissions.clone())
@@ -617,6 +673,8 @@ pub async fn rollback(
         hash: shown,
         already: false,
         warnings: Vec::new(),
+        commit,
+        dirty,
     })
 }
 
@@ -887,7 +945,6 @@ async fn stage(
     svc: &Arc<Services>,
     name: &str,
     source: &Path,
-    from_stream: Option<i64>,
     permissions: Permissions,
     build_run: Option<String>,
 ) -> Result<Option<String>, DomainError> {
@@ -916,7 +973,8 @@ async fn stage(
         name: name.to_string(),
         hash: target.clone(),
         deployed_at: Timestamp::now().to_string(),
-        from_stream,
+        commit: None,
+        dirty: false,
         source: source.to_string_lossy().into_owned(),
         active: false,
         permissions,
@@ -1079,7 +1137,12 @@ pub async fn next_boot(project: &Path, rows: &[DeploymentRow]) -> Result<NextBoo
                     let at = rows
                         .iter()
                         .find(|r| r.name == name && r.hash == hash)
-                        .map(|r| format!(" of {}", r.deployed_at))
+                        .map(|r| {
+                            let from = provenance_text(r.commit.as_deref(), r.dirty)
+                                .map(|p| format!(", {p}"))
+                                .unwrap_or_default();
+                            format!(" of {}{from}", r.deployed_at)
+                        })
                         .unwrap_or_default();
                     format!("its deployment {hash}{at}")
                 }
@@ -1127,7 +1190,7 @@ pub(crate) async fn stage_sources(svc: &Arc<Services>) -> LiveChanges {
             continue;
         }
         let declared = crate::extensions::load_extension_at(&source, &name).permissions;
-        let target = stage(svc, &name, &source, None, declared, None)
+        let target = stage(svc, &name, &source, declared, None)
             .await
             .expect("a source stages");
         if svc.extension_catalog.live().get(&name) != target.as_ref() {
@@ -1242,6 +1305,93 @@ mod tests {
         source_with(svc, "Three", "");
         deploy(svc, "acme", false).await.unwrap();
         assert_eq!(lens_title(svc).as_deref(), Some("Three"));
+    }
+
+    /// Commits `files` (relative to `root`) in a repository at `root`.
+    fn commit_files(root: &Path, files: &[&str]) -> String {
+        let repo = git2::Repository::init(root).unwrap();
+        let mut idx = repo.index().unwrap();
+        for file in files {
+            idx.add_path(Path::new(file)).unwrap();
+        }
+        idx.write().unwrap();
+        let tree = repo.find_tree(idx.write_tree().unwrap()).unwrap();
+        let sig = git2::Signature::now("test", "t@example.com").unwrap();
+        let parents: Vec<git2::Commit> = repo
+            .head()
+            .ok()
+            .and_then(|h| h.peel_to_commit().ok())
+            .into_iter()
+            .collect();
+        let parents: Vec<&git2::Commit> = parents.iter().collect();
+        repo.commit(Some("HEAD"), &sig, &sig, "x", &tree, &parents)
+            .unwrap()
+            .to_string()
+    }
+
+    /// A deployment records the primary checkout's HEAD and whether its
+    /// source had uncommitted changes; rollback names the target's.
+    #[tokio::test]
+    async fn a_deployment_records_the_commit_and_whether_it_was_dirty() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let svc = &fx.svc;
+        let files = [
+            ".oxplow/extensions/acme/extension.yaml",
+            ".oxplow/extensions/acme/lenses/one.yaml",
+        ];
+        source(svc, "One");
+        let head = commit_files(&svc.layout.project_dir, &files);
+        let first = deploy(svc, "acme", true).await.unwrap();
+        assert_eq!(
+            (first.commit.as_deref(), first.dirty),
+            (Some(&*head), false)
+        );
+        assert_eq!(first.provenance(), Some(format!("commit {}", &head[..7])));
+
+        source(svc, "Two");
+        write(
+            &svc.layout.project_dir.join(".oxplow/extensions/acme"),
+            "lenses/new.yaml",
+            "title: N\nquery: \"SELECT 1 AS n\"\n",
+        );
+        let second = deploy(svc, "acme", true).await.unwrap();
+        assert_eq!(
+            (second.commit.as_deref(), second.dirty),
+            (Some(&*head), true)
+        );
+        assert_eq!(
+            second.provenance(),
+            Some(format!("commit {} (uncommitted changes)", &head[..7]))
+        );
+        let rows = svc
+            .db
+            .read(|c| store_rows::list_tx(c, Some("acme")))
+            .await
+            .unwrap();
+        let by_hash = |hash: &str| rows.iter().find(|r| r.hash == hash).unwrap();
+        assert!(by_hash(&second.hash).dirty);
+        assert!(!by_hash(&first.hash).dirty);
+
+        let back = rollback(svc, "acme", None, true).await.unwrap();
+        assert_eq!(back.hash, first.hash);
+        assert_eq!((back.commit.as_deref(), back.dirty), (Some(&*head), false));
+    }
+
+    /// A source outside the project has no commit to record.
+    #[test]
+    fn a_source_outside_the_project_has_no_provenance() {
+        let project = tempfile::tempdir().unwrap();
+        let elsewhere = tempfile::tempdir().unwrap();
+        write(project.path(), "a.txt", "a");
+        commit_files(project.path(), &["a.txt"]);
+        assert_eq!(provenance(project.path(), elsewhere.path()), (None, false));
+        assert_eq!(
+            provenance(project.path(), &project.path().join("a.txt")),
+            (
+                Some(oxplow_git::head_commit_sha(project.path()).unwrap()),
+                false
+            )
+        );
     }
 
     /// A deploy that adds a permission asks before anything changes: it
@@ -2132,7 +2282,8 @@ mod tests {
             name: name.into(),
             hash: hash.into(),
             deployed_at: "2026-10-19T00:00:00Z".into(),
-            from_stream: None,
+            commit: None,
+            dirty: false,
             source: "extensions/oxplow-foundation".into(),
             active: false,
             permissions: Permissions::default(),
@@ -2195,7 +2346,8 @@ mod tests {
             name: name.into(),
             hash: hash.into(),
             deployed_at: "2026-10-19T00:00:00Z".into(),
-            from_stream: None,
+            commit: None,
+            dirty: false,
             source: format!("extensions/{name}"),
             active: false,
             permissions: Permissions::default(),
@@ -2388,7 +2540,8 @@ mod tests {
             name: "oxplow-foundation".into(),
             hash: hash.into(),
             deployed_at: "2026-10-19T00:00:00Z".into(),
-            from_stream: None,
+            commit: None,
+            dirty: false,
             source: source.display().to_string(),
             active: true,
             permissions: Permissions::default(),

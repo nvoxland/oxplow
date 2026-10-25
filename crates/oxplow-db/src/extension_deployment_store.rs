@@ -16,7 +16,12 @@ pub struct DeploymentRow {
     pub name: String,
     pub hash: String,
     pub deployed_at: String,
-    pub from_stream: Option<i64>,
+    /// The primary checkout's HEAD when `source` lies inside the project;
+    /// `None` for a source outside it.
+    pub commit: Option<String>,
+    /// `source` had uncommitted changes (untracked files included) when it
+    /// was deployed.
+    pub dirty: bool,
     /// The source folder it was copied from.
     pub source: String,
     pub active: bool,
@@ -32,13 +37,14 @@ pub struct DeploymentRow {
 pub fn record_tx(conn: &rusqlite::Connection, row: &DeploymentRow) -> Result<(), DomainError> {
     conn.execute(
         "INSERT OR IGNORE INTO extension_deployment
-           (name, hash, deployed_at, from_stream, source, active, permissions_json, build_run)
-         VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6, ?7)",
+           (name, hash, deployed_at, \"commit\", dirty, source, active, permissions_json, build_run)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, ?7, ?8)",
         params![
             row.name,
             row.hash,
             row.deployed_at,
-            row.from_stream,
+            row.commit,
+            row.dirty,
             row.source,
             serde_json::to_string(&row.permissions).expect("permissions serialize"),
             row.build_run
@@ -72,7 +78,7 @@ pub fn list_tx(
 ) -> Result<Vec<DeploymentRow>, DomainError> {
     let mut stmt = conn
         .prepare(
-            "SELECT name, hash, deployed_at, from_stream, source, active, permissions_json,
+            "SELECT name, hash, deployed_at, \"commit\", dirty, source, active, permissions_json,
                     build_run
              FROM extension_deployment
              WHERE ?1 IS NULL OR name = ?1
@@ -85,11 +91,12 @@ pub fn list_tx(
                 name: r.get(0)?,
                 hash: r.get(1)?,
                 deployed_at: r.get(2)?,
-                from_stream: r.get(3)?,
-                source: r.get(4)?,
-                active: r.get::<_, i64>(5)? != 0,
-                permissions: serde_json::from_str(&r.get::<_, String>(6)?).unwrap_or_default(),
-                build_run: r.get(7)?,
+                commit: r.get(3)?,
+                dirty: r.get::<_, i64>(4)? != 0,
+                source: r.get(5)?,
+                active: r.get::<_, i64>(6)? != 0,
+                permissions: serde_json::from_str(&r.get::<_, String>(7)?).unwrap_or_default(),
+                build_run: r.get(8)?,
             })
         })
         .map_err(map_sql_err)?
@@ -134,7 +141,8 @@ mod tests {
             name: name.into(),
             hash: hash.into(),
             deployed_at: at.into(),
-            from_stream: Some(1),
+            commit: None,
+            dirty: false,
             source: format!("/src/{name}"),
             active: false,
             permissions: Default::default(),
@@ -152,6 +160,8 @@ mod tests {
                 tx,
                 &DeploymentRow {
                     build_run: Some("make".into()),
+                    commit: Some("abc1234".into()),
+                    dirty: true,
                     ..row("b", "h3", "2026-10-18T09:00:00Z")
                 },
             )?;
@@ -163,6 +173,20 @@ mod tests {
         .unwrap();
         let b = db.read(|c| list_tx(c, Some("b"))).await.unwrap();
         assert_eq!(b[0].build_run.as_deref(), Some("make"));
+        assert_eq!(b[0].commit.as_deref(), Some("abc1234"));
+        assert!(b[0].dirty);
+        let model_provenance: (Option<String>, i64) = db
+            .read(|c| {
+                c.query_row(
+                    "SELECT \"commit\", dirty FROM v_extension_deployment WHERE name = 'b'",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .map_err(map_sql_err)
+            })
+            .await
+            .unwrap();
+        assert_eq!(model_provenance, (Some("abc1234".into()), 1));
         let built: Option<String> = db
             .read(|c| {
                 c.query_row(

@@ -9,6 +9,7 @@ query: |
                       WHEN 'true' THEN p.key
                       ELSE p.key || ': ' || (SELECT group_concat(v.value, ' ') FROM json_each(p.value) v) END, ', ')
             FROM json_each(d.permissions) p WHERE p.type != 'false'), '') AS permissions,
+         COALESCE(substr(d."commit", 1, 7) || CASE WHEN d.dirty THEN ' (uncommitted)' ELSE '' END, '') AS version,
          d.source
   FROM v_extension_deployment d
   ORDER BY d.deployed_at DESC
@@ -17,6 +18,7 @@ columns:
   - { key: deployment, label: Deployment, width: 90 }
   - { key: deployed_at, label: Deployed, format: relative, width: 120 }
   - { key: running, label: Runs, width: 60 }
+  - { key: version, label: Commit, width: 150 }
   - { key: permissions, label: Permissions }
   - { key: source, label: From }
 actions:

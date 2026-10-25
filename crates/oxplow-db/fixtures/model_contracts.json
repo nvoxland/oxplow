@@ -21932,6 +21932,68 @@
       "key": [
         "uri"
       ]
+    },
+    "7": {
+      "columns": [
+        {
+          "name": "uri",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/extension_deployment?hash=<hash>&name=<name>`."
+        },
+        {
+          "name": "extension_uri",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/extension?name=<name>`: the extension it is a deployment of; NULL when the catalog no longer lists it."
+        },
+        {
+          "name": "name",
+          "type": "TEXT",
+          "doc": "The extension's name."
+        },
+        {
+          "name": "hash",
+          "type": "TEXT",
+          "doc": "The hash of the source it was copied from: its identity."
+        },
+        {
+          "name": "deployed_at",
+          "type": "TEXT",
+          "doc": "When it was first deployed."
+        },
+        {
+          "name": "commit",
+          "type": "TEXT",
+          "doc": "The primary checkout's HEAD when the source lies inside it; NULL for a source outside the project. (v7)"
+        },
+        {
+          "name": "dirty",
+          "type": "INTEGER",
+          "doc": "1 when the source had uncommitted changes, untracked files included, when it was deployed. (v7)"
+        },
+        {
+          "name": "source",
+          "type": "TEXT",
+          "doc": "The source folder it was copied from."
+        },
+        {
+          "name": "active",
+          "type": "INTEGER",
+          "doc": "1 for the deployment chosen to run: the one the extension runs now, or one that is held (it doesn't load or activate against this oxplow), which every activation and boot tries again, its problems in `v_extension.errors`, until another is deployed or rolled back to."
+        },
+        {
+          "name": "permissions",
+          "type": "TEXT",
+          "doc": "What it declares it may reach beyond the baseline, as a JSON object (`v_extension.permissions`'s shape): what a person approved when it was deployed. (v2)"
+        },
+        {
+          "name": "build",
+          "type": "TEXT",
+          "doc": "The command it was built with (its manifest's `build.run`), which a person approved when it was deployed; NULL when it has no build. (v3)"
+        }
+      ],
+      "key": [
+        "uri"
+      ]
     }
   },
   "extension_source": {

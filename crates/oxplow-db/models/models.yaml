@@ -1451,7 +1451,7 @@
     - { not_null: uri }
     - { unique: uri }
 - name: extension_deployment
-  version: 6
+  version: 7
   key: [uri]
   description: "Each deployment of an extension: an immutable copy of its source in the store (`.oxplow/runtime/extensions/<name>/<hash>/`), named by the hash of the source it was copied from, and which one runs now (`active`). `oxplow.extension.deploy` makes one; `oxplow.extension.rollback` makes an older one active again. The store keeps the active one and the five newest. A bundled extension with no active row runs the copy that ships with oxplow."
   columns:
@@ -1460,7 +1460,8 @@
     - { name: "name", type: "TEXT", doc: "The extension's name." }
     - { name: "hash", type: "TEXT", doc: "The hash of the source it was copied from: its identity." }
     - { name: "deployed_at", type: "TEXT", doc: "When it was first deployed." }
-    - { name: "stream_id", type: "INTEGER", doc: "The stream whose checkout it was deployed from; NULL when it was deployed from outside oxplow (`oxplow-dev extension deploy`)." }
+    - { name: "commit", type: "TEXT", doc: "The primary checkout's HEAD when the source lies inside it; NULL for a source outside the project. (v7)" }
+    - { name: "dirty", type: "INTEGER", doc: "1 when the source had uncommitted changes, untracked files included, when it was deployed. (v7)" }
     - { name: "source", type: "TEXT", doc: "The source folder it was copied from." }
     - { name: "active", type: "INTEGER", doc: "1 for the deployment chosen to run: the one the extension runs now, or one that is held (it doesn't load or activate against this oxplow), which every activation and boot tries again, its problems in `v_extension.errors`, until another is deployed or rolled back to." }
     - { name: "permissions", type: "TEXT", doc: "What it declares it may reach beyond the baseline, as a JSON object (`v_extension.permissions`'s shape): what a person approved when it was deployed. (v2)" }

@@ -1307,7 +1307,11 @@ source directly: an edit changes nothing until it is deployed.
   removed.
 - **The live set:** each extension's active deployment, in the
   `extension_deployment` table (`v_extension_deployment`: name, hash,
-  deployed_at, stream, source, active). The publish transaction of every
+  deployed_at, commit, dirty, source, active). `commit` is the primary
+  checkout's HEAD when the source lies inside the project (NULL outside it)
+  and `dirty` says the source had uncommitted changes, untracked files
+  included: an uncommitted deploy is normal, and rollback names the
+  target's commit. The publish transaction of every
   activation marks the active rows from what it published, so the table
   and what runs never disagree. The store keeps the active deployment and
   the five newest (`extension_store::KEEP`); deploy prunes the rest.

@@ -188,13 +188,17 @@ async fn deploy_from_outside(project: &Path, name: Option<&String>) -> Result<St
         match oxplow_app::extension_deploy::deploy(&svc, name, true).await {
             Ok(deployed) => {
                 out.push(format!(
-                    "{name}: {} {}",
+                    "{name}: {} {}{}",
                     if deployed.already {
                         "already runs"
                     } else {
                         "deployed"
                     },
-                    deployed.hash
+                    deployed.hash,
+                    deployed
+                        .provenance()
+                        .map(|p| format!(" ({p})"))
+                        .unwrap_or_default()
                 ));
                 out.extend(deployed.warnings.iter().map(|w| format!("  warning: {w}")));
             }
@@ -884,7 +888,8 @@ mod tests {
             name: "oxplow-foundation".into(),
             hash: hash.into(),
             deployed_at: "2026-10-19T00:00:00Z".into(),
-            from_stream: None,
+            commit: None,
+            dirty: false,
             source: "extensions/oxplow-foundation".into(),
             active: false,
             permissions: Default::default(),
