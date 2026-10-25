@@ -32,22 +32,22 @@ with `name: oxplow-extension` and `reference: <name>`):
 
 - `references/development-cycle.md`: source and deployment, when to deploy, held deployments.
 - `references/scaffolding.md`: the kinds `extension new` makes, the words used exactly.
-- `references/semantic-layer.md`: finding data, URIs in SQL and scripts, publishing and
-  importing models.
-- `references/lens-format.md`: manifest, lens keys, viz, params, links, row styling, alerts, actions.
+- `references/semantic-layer.md`: finding data, URIs in SQL and scripts, models.
+- `references/lens-format.md`: manifest, lens keys, viz, params, links, styling, alerts, actions.
 - `references/page-layout.md`: where things go on a page (nav bar, body, rail) and what check warns about.
 - `references/ui-contributions.md`: slots, pages, panels, decorators, replacing a core view.
 - `references/commands-and-forms.md`: your own commands, custom components, forms.
 - `references/collectors.md`: outside or derived data, credentials, host services, `ai_*`.
 - `references/metrics.md`: measures, metrics, dimensions, fact collectors.
 - `references/jobs-and-ai.md`: model jobs with tools, `ai_profiles`.
-- `references/check.md`: what `check` covers, `oxplow_run_lens`, the extension's `questions.yaml`.
+- `references/check.md`: what `check` covers, `oxplow_run_lens`, `questions.yaml`.
 - `references/testing.md`: `oxplow_preview_extension` and the fixture shape of every kind.
-- `references/providers.md`: external providers: testing, credentials, MCP adapters.
-- `references/lenses-in-use.md`: `oxplow_show_lens` details, changing "this lens", handing over.
+- `references/providers.md`: external providers: testing, credentials, adapters.
+- `references/lenses-in-use.md`: `oxplow_show_lens`, changing "this lens", handing over.
 - `references/repair-and-sharing.md`: disabled contributions and repair, deploy, share.
-- `references/reading-data.md`: before you report numbers: `truncated`, `coverage`, metric folds, scope, example queries.
-- `references/dashboards.md`: choosing a lens, dashboard, component or snapshot; building a dashboard; adapting outside HTML into a component.
+- `references/reading-data.md`: before reporting numbers: `truncated`, `coverage`, folds, scope.
+- `references/dashboards.md`: choosing a lens, dashboard, component or snapshot; building a dashboard; outside HTML into a component.
+- `references/page-format.md`: page files (`pages/<slug>.yaml`); the entry to loaders, nodes, recipes.
 
 Rules that live in other skills: wikilinks and URIs in prose, see
 `oxplow-wiki-capture`; waiting on the person, `oxplow-runtime`; test
