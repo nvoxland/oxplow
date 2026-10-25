@@ -51,6 +51,20 @@ pub fn is_git_worktree(path: impl AsRef<Path>) -> bool {
     }
 }
 
+/// The main checkout of the repository `path` is a checkout of: `path`'s
+/// own top level for a main checkout, the repository a secondary worktree
+/// was added from, `None` outside a repository. Canonical.
+pub fn main_checkout(path: impl AsRef<Path>) -> Option<std::path::PathBuf> {
+    let repo = git2::Repository::open(path.as_ref()).ok()?;
+    let top = if repo.is_worktree() {
+        // A worktree's common dir is the main repository's `.git`.
+        repo.commondir().parent()?.to_path_buf()
+    } else {
+        repo.workdir()?.to_path_buf()
+    };
+    std::fs::canonicalize(&top).ok()
+}
+
 /// Current branch name, or `None` when HEAD is detached or not a
 /// git repo.
 pub fn detect_current_branch(path: impl AsRef<Path>) -> Option<String> {
@@ -104,6 +118,23 @@ mod tests {
         repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
             .unwrap();
         dir
+    }
+
+    /// A secondary worktree's main checkout is the repository it was
+    /// added from; a main checkout is its own; a plain folder has none.
+    #[test]
+    fn main_checkout_of_a_worktree_is_the_repository_it_was_added_from() {
+        let dir = make_repo();
+        let main = std::fs::canonicalize(dir.path()).unwrap();
+        assert_eq!(main_checkout(dir.path()), Some(main.clone()));
+        let parent = tempdir().unwrap();
+        let wt = parent.path().join("wt");
+        git2::Repository::open(dir.path())
+            .unwrap()
+            .worktree("wt", &wt, None)
+            .unwrap();
+        assert_eq!(main_checkout(&wt), Some(main));
+        assert_eq!(main_checkout(tempdir().unwrap().path()), None);
     }
 
     #[test]

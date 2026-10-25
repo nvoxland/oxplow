@@ -42,14 +42,17 @@ Rules:
 - `v_collector_run` shows each collector's last run and error, and
   `v_collector_state` whether this OS enforces its `network` list
   (`network_enforced`) and why failures disabled it, if they did.
-- **Check a collector before you deploy it** with
-  `oxplow_preview_collector(owner, id, stream_id)`: it runs your worktree's
-  version and returns the rows it would store, storing nothing. For a
-  fact collector (`facts:`) it returns the facts it would record
-  (`{ owner, id, facts }`), computed over the stream's latest snapshot.
-  `oxplow.collector.sync` always runs the primary's copy (collected data is
-  shared by the whole project), so in a worktree stream it won't see your
-  changes. An exec collector's preview needs the same `permissions.process`.
+- **Check a collector before you deploy it** with `oxplow_preview_extension`:
+  it runs your source (a worktree's draft included) in a throwaway oxplow,
+  through the examples you wrote for it. Your source's code runs nowhere
+  else until it is deployed from the main stream.
+- `oxplow_preview_collector(owner, id, stream_id)` dry-runs the **deployed**
+  entity collector against a stream's files and data and returns the rows
+  it would store, storing nothing. A fact collector (`facts:`, Starlark or
+  jaq: it only computes) runs that stream's own script over its latest
+  snapshot and returns the facts it would record (`{ owner, id, facts }`). `oxplow.collector.sync` runs it for real
+  (collected data is shared by the whole project). An exec collector's
+  preview needs the same `permissions.process`.
 - A declared entity's view exists once its collector first runs.
 
 **Deriving data you already have (starlark / jaq collectors).** When the
