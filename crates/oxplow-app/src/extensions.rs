@@ -7428,6 +7428,19 @@ pub async fn lens_overlay(
     model_overlay(layer, &candidate).await.0
 }
 
+/// The temp views `draft`'s models (and the other enabled extensions')
+/// compile to, read from `root`: what a draft page's queries read through,
+/// published nowhere.
+pub(crate) async fn draft_overlay(
+    layer: &crate::sql_gateway::SqlGateway,
+    catalog: &crate::extension_catalog::ExtensionCatalog,
+    root: &Path,
+    draft: Extension,
+) -> Vec<oxplow_db::TempView> {
+    let candidate = catalog.candidate(root, draft);
+    model_overlay(layer, &candidate).await.0
+}
+
 async fn read_side(
     layer: &crate::sql_gateway::SqlGateway,
     catalog: &crate::extension_catalog::ExtensionCatalog,

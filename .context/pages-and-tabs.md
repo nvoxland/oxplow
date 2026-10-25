@@ -277,6 +277,14 @@ props contract. Which replacement shows is still decided in the window
 read a changed model (a command loader's are its `reads`) or bind a
 changed param, and everything downstream of them.
 
+**Drafts** (`PageRunner::draft(svc, checkout, extension)`): the
+extension's source in another stream's checkout, run over live data —
+its pages found first, its models read through an overlay of temp views
+(`extensions::draft_overlay`), its commands whatever is deployed (a
+draft's code never acts). `oxplow.page.run { page, draft: true }` reads
+the caller's stream's draft; its text starts `Draft of <page> (stream
+strN, not deployed)` and its json carries `draft: { stream, checkout }`.
+
 **Open runs** (`pages/open_runs.rs`, `Services.page_runs`): a window opens
 a run (`open_page { page | specYaml, params, streamId, threadId, client }`
 → `{ runId, run }`) and closes it (`close_page`); a pick, filter or

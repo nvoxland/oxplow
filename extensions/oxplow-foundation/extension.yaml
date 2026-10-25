@@ -1262,7 +1262,7 @@ commands:
     example: {"key": "complex_fns.count", "value": 12, "subject": "oxplow:oxplow/file?path=src/auth.rs"}
   # pages.read
   - name: page.run
-    summary: "Read what a page shows. `page` (`<extension>/<slug>`, from `oxplow.page.find` or `v_page`) or `spec` (an inline page of your own as YAML: `title`, `data:` with sql / rows / page loaders, `view:`; it only reads), `params` by name (the rest take your thread's context or their defaults). `format: \"text\"` (default) is the page's text, each node under `[node <id>]` (an embedded page's nodes `[node <embed>/<id>]`), so you can point the person at one with `oxplow_navigate` and `#node=<id>`; `format: \"json\"` is each loader's columns and rows (up to 200, with `truncated`) and the tree; `loader` narrows json to one loader."
+    summary: "Read what a page shows. `page` (`<extension>/<slug>`, from `oxplow.page.find` or `v_page`) or `spec` (an inline page of your own as YAML: `title`, `data:` with sql / rows / page loaders, `view:`; it only reads), `params` by name (the rest take your thread's context or their defaults). `format: \"text\"` (default) is the page's text, each node under `[node <id>]` (an embedded page's nodes `[node <embed>/<id>]`), so you can point the person at one with `oxplow_navigate` and `#node=<id>`; `format: \"json\"` is each loader's columns and rows (up to 200, with `truncated`) and the tree; `loader` narrows json to one loader. `draft: true` reads your stream's draft of the page's extension (its source in your worktree, not deployed) over live data; its commands are the deployed ones."
     scope: pages.read
     op: run
     tool: run_page

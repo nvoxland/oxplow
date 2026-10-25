@@ -88,11 +88,24 @@ pub struct RunNode {
 
 /// Runs pages over one oxplow's data.
 pub struct PageRunner<'a> {
-    pub sql: &'a crate::sql_gateway::SqlGateway,
+    pub sql: crate::sql_gateway::SqlGateway,
     pub catalog: &'a crate::extension_catalog::ExtensionCatalog,
     pub commands: &'a crate::commands::CommandBus,
     /// The checkout whose catalog pages are found in.
     pub root: &'a Path,
+    /// A draft's own pages, found before the catalog's.
+    pub draft: Option<Draft>,
+}
+
+/// An extension's draft: its source in a checkout other than the one that
+/// deploys, read over live data. Its queries read its models through an
+/// overlay; its commands are whatever is deployed (a draft's code never
+/// acts).
+#[derive(Debug, Clone)]
+pub struct Draft {
+    pub extension: String,
+    pub checkout: std::path::PathBuf,
+    pub pages: Vec<Page>,
 }
 
 type Memo = HashMap<String, LoaderRun>;
@@ -101,11 +114,49 @@ impl<'a> PageRunner<'a> {
     /// The runner over `svc`'s data, finding pages in its project.
     pub fn of(svc: &'a crate::Services) -> Self {
         PageRunner {
-            sql: &svc.sql,
+            sql: svc.sql.clone(),
             catalog: &svc.extension_catalog,
             commands: svc.commands.as_ref(),
             root: &svc.layout.project_dir,
+            draft: None,
         }
+    }
+
+    /// The runner over `svc`'s data with `extension`'s draft in `checkout`:
+    /// its pages and its models as that checkout has them.
+    pub async fn draft(
+        svc: &'a crate::Services,
+        checkout: &Path,
+        extension: &str,
+    ) -> Result<Self, DomainError> {
+        let settings = oxplow_config::extension_settings(&svc.layout.project_dir);
+        let source = settings.source(checkout, extension);
+        let loaded = {
+            let (source, name) = (source.clone(), extension.to_string());
+            tokio::task::spawn_blocking(move || {
+                crate::extensions::load_extension_at(&source, &name)
+            })
+            .await
+            .map_err(|e| DomainError::Storage(e.to_string()))?
+        };
+        if !source.join("extension.yaml").is_file() {
+            return Err(DomainError::Invalid(format!(
+                "no draft of `{extension}` in {}",
+                checkout.display()
+            )));
+        }
+        let pages = loaded.page_files.clone();
+        let overlay =
+            crate::extensions::draft_overlay(&svc.sql, &svc.extension_catalog, checkout, loaded)
+                .await;
+        let mut runner = Self::of(svc);
+        runner.sql = svc.sql.with_overlay(overlay);
+        runner.draft = Some(Draft {
+            extension: extension.to_string(),
+            checkout: checkout.to_path_buf(),
+            pages,
+        });
+        Ok(runner)
     }
 
     pub async fn run(&self, req: RunRequest) -> Result<PageRun, DomainError> {
@@ -119,6 +170,13 @@ impl<'a> PageRunner<'a> {
     }
 
     fn find(&self, id: &str) -> Result<Page, DomainError> {
+        if let Some(page) = self
+            .draft
+            .as_ref()
+            .and_then(|d| d.pages.iter().find(|p| p.id == id))
+        {
+            return Ok(page.clone());
+        }
         self.catalog
             .find_page(self.root, id)
             .map_err(|_| DomainError::Invalid(format!("no page `{id}`")))
@@ -204,7 +262,7 @@ impl<'a> PageRunner<'a> {
             resolve_param_values(&format!("page {}", page.id), &page.params, supplied, ctx)?;
         let stream = stream_of(&params, ctx);
         if let (Some(SqlCell::Null(())), Some(stream_id)) = (params.get("head_sha"), stream) {
-            if let Some(head) = stream_head(self.sql, stream_id).await? {
+            if let Some(head) = stream_head(&self.sql, stream_id).await? {
                 params.insert("head_sha".into(), SqlCell::Text(head));
             }
         }

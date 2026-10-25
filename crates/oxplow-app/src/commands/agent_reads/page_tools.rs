@@ -54,6 +54,11 @@ pub struct RunPageInput {
     /// Your thread (`thr…`), bound into a `thread_id` param.
     #[serde(default)]
     pub thread_id: Option<String>,
+    /// Read your stream's draft of the page's extension (its source in
+    /// your worktree, not yet deployed) over live data, instead of what
+    /// runs. Its commands are the deployed ones.
+    #[serde(default)]
+    pub draft: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
@@ -368,7 +373,30 @@ fn run_op(services: ServicesSlot) -> Op {
                 let ctx =
                     context(&svc, &invocation, p.stream_id.clone(), p.thread_id.clone()).await?;
                 let name = p.page.clone().unwrap_or_else(|| "inline".into());
-                let run = PageRunner::of(&svc)
+                // A draft: the page's extension as the caller's stream's
+                // checkout has it.
+                let mut draft_of: Option<(String, std::path::PathBuf)> = None;
+                let runner = if p.draft.unwrap_or(false) {
+                    let page = p.page.as_deref().ok_or_else(|| {
+                        invalid("/draft", "a draft is of a page: give `page`".to_string())
+                    })?;
+                    let extension = page.split_once('/').map_or(page, |(e, _)| e).to_string();
+                    let stream =
+                        stream_or_actors(&svc, invocation.actor(), p.stream_id.clone()).await?;
+                    let checkout = svc
+                        .worktrees
+                        .resolve(stream.as_deref())
+                        .await
+                        .into_local_path();
+                    let runner = PageRunner::draft(&svc, &checkout, &extension)
+                        .await
+                        .map_err(|e| page_error(&name, e))?;
+                    draft_of = Some((stream.unwrap_or_default(), checkout));
+                    runner
+                } else {
+                    PageRunner::of(&svc)
+                };
+                let run = runner
                     .run(RunRequest {
                         target: target(p.page, p.spec)?,
                         params: cells(p.params),
@@ -385,7 +413,7 @@ fn run_op(services: ServicesSlot) -> Op {
                         ));
                     }
                 }
-                let result = match format {
+                let mut result = match format {
                     "json" => json!({
                         "page": run.page.id,
                         "title": run.page.title,
@@ -393,20 +421,33 @@ fn run_op(services: ServicesSlot) -> Op {
                         "loaders": loaders_json(&run, p.loader.as_deref()),
                         "tree": run.tree,
                     }),
-                    _ => json!({
-                        "page": run.page.id,
-                        "title": run.page.title,
-                        "params": run.params,
-                        "text": crate::pages::text::page_text(
+                    _ => {
+                        let mut text = crate::pages::text::page_text(
                             &svc,
                             &svc.layout.project_dir,
                             &run,
                             &ctx,
                         )
                         .await
-                        .map_err(|e| page_error(&name, e))?,
-                    }),
+                        .map_err(|e| page_error(&name, e))?;
+                        if let Some((stream, _)) = &draft_of {
+                            text = format!(
+                                "Draft of {} (stream {stream}, not deployed)\n{text}",
+                                run.page.id
+                            );
+                        }
+                        json!({
+                            "page": run.page.id,
+                            "title": run.page.title,
+                            "params": run.params,
+                            "text": text,
+                        })
+                    }
                 };
+                if let Some((stream, checkout)) = &draft_of {
+                    result["draft"] =
+                        json!({ "stream": stream, "checkout": checkout.to_string_lossy() });
+                }
                 Ok(HandlerOutput {
                     result,
                     ..HandlerOutput::default()
@@ -719,5 +760,74 @@ mod tests {
             titles.rows,
             vec![vec![oxplow_db::SqlCell::Text("alpha".into())]]
         );
+    }
+}
+
+#[cfg(test)]
+mod draft_tests {
+    use oxplow_domain::stores::StreamStore as _;
+    use oxplow_domain::{Actor, StreamId, StreamKind};
+    use serde_json::json;
+
+    use crate::pages::test_support::{fixture, write};
+
+    /// An agent in a worktree reads its draft of a page — the copy in its
+    /// checkout, over live data — and the live page without `draft`.
+    #[tokio::test]
+    async fn an_agent_reads_its_worktrees_draft_of_a_page() {
+        let (_dir, svc) = fixture().await;
+        let wt = tempfile::tempdir().unwrap();
+        write(
+            wt.path(),
+            ".oxplow/extensions/acme/extension.yaml",
+            "manifest: 2\nname: acme\nintent:\n  purpose: test\n",
+        );
+        write(
+            wt.path(),
+            ".oxplow/extensions/acme/pages/numbers.yaml",
+            "title: Numbers Draft\ndata:\n  big: { sql: \"SELECT 99 AS n\" }\nview: { viz: table, from: big }\n",
+        );
+        let mut other = svc.stream_store.list().await.unwrap().pop().unwrap();
+        other.id = StreamId::placeholder();
+        other.title = "other".into();
+        other.branch = "draft".into();
+        other.kind = StreamKind::Worktree;
+        other.worktree_path = wt.path().to_string_lossy().into_owned();
+        let stream = svc.stream_store.upsert(&other).await.unwrap();
+        let thread = crate::test_fixtures::new_thread(&svc, stream, "t").await;
+        let agent = Actor::Agent {
+            session_id: None,
+            thread_id: Some(thread.id),
+            stream_id: Some(stream),
+        };
+        let run = |input| {
+            let svc = svc.clone();
+            let agent = agent.clone();
+            async move {
+                svc.commands
+                    .run(&agent, "oxplow.page.run", input, false)
+                    .await
+                    .unwrap()
+                    .result
+            }
+        };
+        let draft = run(json!({ "page": "acme/numbers", "draft": true, "format": "json" })).await;
+        assert_eq!(draft["title"], json!("Numbers Draft"), "{draft}");
+        assert_eq!(draft["loaders"]["big"]["rows"], json!([[99]]), "{draft}");
+        assert_eq!(
+            draft["draft"]["stream"],
+            json!(stream.to_string()),
+            "{draft}"
+        );
+        let text = run(json!({ "page": "acme/numbers", "draft": true })).await;
+        assert!(
+            text["text"]
+                .as_str()
+                .unwrap()
+                .starts_with("Draft of acme/numbers"),
+            "{text}"
+        );
+        let live = run(json!({ "page": "acme/numbers", "format": "json" })).await;
+        assert_eq!(live["title"], json!("Numbers"), "{live}");
     }
 }
