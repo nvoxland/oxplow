@@ -47,7 +47,9 @@ view:
     assert_eq!(p.title, "Problems");
     assert_eq!(p.loaders.len(), 1);
     assert_eq!(p.loaders[0].name, "problems");
-    assert!(matches!(&p.loaders[0].loader, Loader::Sql { sql } if sql.contains("v_diagnostic")));
+    assert!(
+        matches!(&p.loaders[0].loader, Loader::Sql { sql, .. } if sql.contains("v_diagnostic"))
+    );
     let NodeKind::Viz { from, lens } = &p.view.kind else {
         panic!("{:?}", p.view)
     };
@@ -376,4 +378,28 @@ fn an_extensions_page_files_load_and_a_broken_one_names_its_file() {
         "{:?}",
         loaded.errors
     );
+}
+
+/// A query binds an earlier loader's column (or a literal) by name, as
+/// a composite's row once reached its sections.
+#[test]
+fn a_sql_loader_binds_named_values_from_earlier_loaders() {
+    let p = page(
+        "title: T\ndata:\n  row: { sql: SELECT 'abc' AS head }\n  files:\n    sql: SELECT :head AS h\n    params: { head: { from: row.head } }\nview: { viz: table, from: files }\n",
+    )
+    .unwrap();
+    let Loader::Sql { params, .. } = &p.loaders[1].loader else {
+        panic!()
+    };
+    assert_eq!(
+        params.get("head"),
+        Some(&ArgSource::Column {
+            from: "row.head".into()
+        })
+    );
+    assert_eq!(p.loaders[1].reads_loaders, ["row"]);
+    let e = refused(
+        "title: T\ndata:\n  a: { sql: SELECT :x, params: { x: { from: b.x } } }\n  b: { sql: SELECT 1 AS x }\nview: { viz: table, from: a }\n",
+    );
+    assert!(e.contains("loader `a`") && e.contains("`b`"), "{e}");
 }

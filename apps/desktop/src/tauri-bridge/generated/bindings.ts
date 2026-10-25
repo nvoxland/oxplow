@@ -236,6 +236,57 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
+	openPage: (page: string | null, specYaml: string | null, params: { [key in string]: SqlCell } | null, streamId: string | null, threadId: string | null, client: string) => typedError<OpenedRun_Serialize, IpcError_Serialize>(__TAURI_INVOKE("open_page", { page, specYaml, params, streamId, threadId, client })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	closePage: (runId: string) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("close_page", { runId })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	setPageParams: (runId: string, params: { [key in string]: SqlCell }) => typedError<PageRun_Serialize, IpcError_Serialize>(__TAURI_INVOKE("set_page_params", { runId, params })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	rerunPage: (runId: string) => typedError<PageRun_Serialize, IpcError_Serialize>(__TAURI_INVOKE("rerun_page", { runId })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	fetchPageRuns: (runIds: string[]) => typedError<{ [key in string]: PageRun_Serialize }, IpcError_Serialize>(__TAURI_INVOKE("fetch_page_runs", { runIds })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	runPage: (page: string | null, specYaml: string | null, params: { [key in string]: SqlCell } | null, streamId: string | null) => typedError<PageRun_Serialize, IpcError_Serialize>(__TAURI_INVOKE("run_page", { page, specYaml, params, streamId })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	pageText: (runId: string) => typedError<string, IpcError_Serialize>(__TAURI_INVOKE("page_text", { runId })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	getPage: (id: string) => typedError<Page_Serialize, IpcError_Serialize>(__TAURI_INVOKE("get_page", { id })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	runPageAction: (runId: string, node: string | null, action: string, row: { [key in string]: SqlCell } | null, input: unknown | null, drop: {
+	before?: { [key in string]: SqlCell } | null,
+	after?: { [key in string]: SqlCell } | null,
+	onto?: { [key in string]: SqlCell } | null,
+	group?: SqlCell | null,
+	order?: { [key in string]: SqlCell }[] | null,
+} | null, confirmed: boolean) => typedError<CommandOutcome, IpcError_Serialize>(__TAURI_INVOKE("run_page_action", { runId, node, action, row, input, drop, confirmed })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	validateExtension: (name: string, streamId: string | null) => typedError<CheckReport_Serialize, IpcError_Serialize>(__TAURI_INVOKE("validate_extension", { name, streamId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -980,6 +1031,18 @@ export type AppVersion = {
 	version: string,
 };
 
+/**
+ *  A value flowing into a command's arg or another page's param:
+ *  declarative, never an expression.
+ */
+export type ArgSource = 
+/**  One of the page's params. */
+({ param: string }) & { from?: never } | 
+/**  An earlier loader's column, from its first row (`<loader>.<col>`). */
+({ from: string }) & { param?: never } | 
+/**  A literal value. */
+unknown;
+
 /**  What the Assistant was opened on: a page, or a selection of text. */
 export type AssistantContext = 
 /**  A page, by its URI. */
@@ -1117,6 +1180,15 @@ export type BacklinkEdge = {
 	 *  a dead link the renderer shows as its raw text.
 	 */
 	resolved: boolean,
+};
+
+/**
+ *  What a page's badge counts: a loader's first row's `column` (else
+ *  its first), or its row count when the column isn't a number.
+ */
+export type Badge = {
+	loader: string,
+	column?: string | null,
 };
 
 /**  Who last changed one line. */
@@ -2581,6 +2653,11 @@ export type Extension_Deserialize = {
 	/**  Why it exists (required; `None` only when the manifest didn't load). */
 	intent: Intent | null,
 	lenses: Lens_Deserialize[],
+	/**
+	 *  Its page files (`pages/*.yaml`; valid ones — invalid ones are in
+	 *  `errors`).
+	 */
+	pageFiles?: Page_Deserialize[],
 	/**  Declared collectors (valid ones; invalid ones are in `errors`). */
 	collectors: CollectorSpec[],
 	/**  Declared providers (valid ones — invalid ones are in `errors`). */
@@ -2733,6 +2810,11 @@ export type Extension_Serialize = {
 	/**  Why it exists (required; `None` only when the manifest didn't load). */
 	intent: Intent | null,
 	lenses: Lens_Serialize[],
+	/**
+	 *  Its page files (`pages/*.yaml`; valid ones — invalid ones are in
+	 *  `errors`).
+	 */
+	pageFiles: Page_Serialize[],
 	/**  Declared collectors (valid ones; invalid ones are in `errors`). */
 	collectors: CollectorSpec[],
 	/**  Declared providers (valid ones — invalid ones are in `errors`). */
@@ -4737,6 +4819,64 @@ export type Lens_Serialize = {
 
 export type Lifecycle = "stable" | "experimental";
 
+export type Loader = 
+/**
+ *  A read-only query over the published models, binding `:param`s
+ *  (the page's, and `params`: named values from earlier loaders or
+ *  literals); an earlier loader reads as a table of its name.
+ */
+{ kind: "sql"; sql: string; params: { [key in string]: ArgSource } } | 
+/**  A read-only command (`View` / `Read` access), run as the viewer. */
+{ kind: "command"; command: string; args: { [key in string]: ArgSource } } | 
+/**  Another page's loader, run with `params`. */
+{ kind: "page"; page: string; loader: string; params: { [key in string]: ArgSource } } | 
+/**  Rows written inline. */
+{ kind: "rows"; columns: string[]; rows: SqlCell[][] };
+
+/**  One of a page's named sources of rows. */
+export type LoaderDecl = {
+	name: string,
+	loader: Loader,
+	/**
+	 *  Column metadata its nodes default to, and the row columns it
+	 *  declares (what an embed or a slot mount may take by name).
+	 */
+	columns: LensColumn[],
+	/**
+	 *  The models a `command` loader reads, so it runs again when they
+	 *  change (a `sql` loader's are what its query read).
+	 */
+	reads: string[],
+	refresh: LoaderRefresh | null,
+	empty: string | null,
+	/**
+	 *  The earlier loaders it reads: as tables (`sql`) or through an
+	 *  arg's `from` (`command`, `page`).
+	 */
+	readsLoaders: string[],
+	/**  The page params it binds. */
+	readsParams: string[],
+};
+
+/**  When a loader that reads outside the published models runs again. */
+export type LoaderRefresh = 
+/**  `manual`: only when the person refreshes the page. */
+RefreshKeyword | 
+/**  `{ every: 30s }`. */
+{ every: string };
+
+/**  A loader's result in a run. */
+export type LoaderRun = {
+	result: SqlQueryResult,
+	/**  Why it has no rows when it failed: the rest of the page still shows. */
+	error: string | null,
+	/**
+	 *  Its definition and inputs, hashed: two loaders with the same key
+	 *  are the same rows.
+	 */
+	key: string,
+};
+
 export type LspServerConfig = {
 	languageId: string,
 	extensions: string[],
@@ -5052,6 +5192,87 @@ export type ModelSource = {
 	twin: Twin | null,
 };
 
+/**  A node of a page's view. */
+export type Node = Node_Serialize | Node_Deserialize;
+
+export type NodeKind = NodeKind_Serialize | NodeKind_Deserialize;
+
+export type NodeKind_Deserialize = 
+/**  Its children one after another (sections). */
+({ kind: "stack"; children: Node_Deserialize[] }) & { component?: never; from?: never; lens?: never; name?: never; page?: never; param?: never; params?: never; props?: never; text?: never } | 
+/**  Its children as tiles, each at its `size`. */
+({ kind: "grid"; children: Node_Deserialize[] }) & { component?: never; from?: never; lens?: never; name?: never; page?: never; param?: never; params?: never; props?: never; text?: never } | 
+/**  The one child whose id is `param`'s value. */
+({ kind: "switch"; param: string; children: Node_Deserialize[] }) & { component?: never; from?: never; lens?: never; name?: never; page?: never; params?: never; props?: never; text?: never } | 
+/**
+ *  A loader's rows through a viz. `from` is none only for a viz that
+ *  reads no rows (a form, approvals).
+ */
+({ kind: "viz"; from: string | null; lens: Lens_Deserialize }) & { children?: never; component?: never; name?: never; page?: never; param?: never; params?: never; props?: never; text?: never } | 
+/**
+ *  Another page, inline: its params by name from this page's params
+ *  and its loaders' first rows, `params` naming any explicitly.
+ */
+({ kind: "embed"; page: string; params: { [key in string]: ArgSource } }) & { children?: never; component?: never; from?: never; lens?: never; name?: never; param?: never; props?: never; text?: never } | 
+/**  Where other extensions' pages are mounted (`<page>.<name>`). */
+({ kind: "slot"; name: string }) & { children?: never; component?: never; from?: never; lens?: never; page?: never; param?: never; params?: never; props?: never; text?: never } | 
+/**  Static markdown. */
+({ kind: "markdown"; text: string }) & { children?: never; component?: never; from?: never; lens?: never; name?: never; page?: never; param?: never; params?: never; props?: never } | 
+/**  One of the extension's custom components, given the page's data. */
+({ kind: "component"; component: string; props: unknown | null }) & { children?: never; from?: never; lens?: never; name?: never; page?: never; param?: never; params?: never; text?: never };
+
+export type NodeKind_Serialize = 
+/**  Its children one after another (sections). */
+({ kind: "stack"; children: Node_Serialize[] }) & { component?: never; from?: never; lens?: never; name?: never; page?: never; param?: never; params?: never; props?: never; text?: never } | 
+/**  Its children as tiles, each at its `size`. */
+({ kind: "grid"; children: Node_Serialize[] }) & { component?: never; from?: never; lens?: never; name?: never; page?: never; param?: never; params?: never; props?: never; text?: never } | 
+/**  The one child whose id is `param`'s value. */
+({ kind: "switch"; param: string; children: Node_Serialize[] }) & { component?: never; from?: never; lens?: never; name?: never; page?: never; params?: never; props?: never; text?: never } | 
+/**
+ *  A loader's rows through a viz. `from` is none only for a viz that
+ *  reads no rows (a form, approvals).
+ */
+({ kind: "viz"; from: string | null; lens: Lens_Serialize }) & { children?: never; component?: never; name?: never; page?: never; param?: never; params?: never; props?: never; text?: never } | 
+/**
+ *  Another page, inline: its params by name from this page's params
+ *  and its loaders' first rows, `params` naming any explicitly.
+ */
+({ kind: "embed"; page: string; params: { [key in string]: ArgSource } }) & { children?: never; component?: never; from?: never; lens?: never; name?: never; param?: never; props?: never; text?: never } | 
+/**  Where other extensions' pages are mounted (`<page>.<name>`). */
+({ kind: "slot"; name: string }) & { children?: never; component?: never; from?: never; lens?: never; page?: never; param?: never; params?: never; props?: never; text?: never } | 
+/**  Static markdown. */
+({ kind: "markdown"; text: string }) & { children?: never; component?: never; from?: never; lens?: never; name?: never; page?: never; param?: never; params?: never; props?: never } | 
+/**  One of the extension's custom components, given the page's data. */
+({ kind: "component"; component: string; props: unknown | null }) & { children?: never; from?: never; lens?: never; name?: never; page?: never; param?: never; params?: never; text?: never };
+
+/**  A node of a page's view. */
+export type Node_Deserialize = {
+	/**  Unique in its page; `#node=<id>` points at it. */
+	id: string,
+	title: string | null,
+	/**
+	 *  A contract another extension's active provider may take its place
+	 *  under (`work_item.board`).
+	 */
+	replaceable: string | null,
+	/**  A grid child's size. */
+	size: TileSize | null,
+} & NodeKind_Deserialize;
+
+/**  A node of a page's view. */
+export type Node_Serialize = {
+	/**  Unique in its page; `#node=<id>` points at it. */
+	id: string,
+	title: string | null,
+	/**
+	 *  A contract another extension's active provider may take its place
+	 *  under (`work_item.board`).
+	 */
+	replaceable: string | null,
+	/**  A grid child's size. */
+	size: TileSize | null,
+} & NodeKind_Serialize;
+
 export type NoteId = string;
 
 /**
@@ -5111,6 +5332,30 @@ export type OpOutcome = {
 export type OpRef = {
 	scope: string,
 	op: string,
+};
+
+/**
+ *  A run a window opened: its id (what it closes, fetches and acts by)
+ *  and its first result.
+ */
+export type OpenedRun = OpenedRun_Serialize | OpenedRun_Deserialize;
+
+/**
+ *  A run a window opened: its id (what it closes, fetches and acts by)
+ *  and its first result.
+ */
+export type OpenedRun_Deserialize = {
+	runId: string,
+	run: PageRun_Deserialize,
+};
+
+/**
+ *  A run a window opened: its id (what it closes, fetches and acts by)
+ *  and its first result.
+ */
+export type OpenedRun_Serialize = {
+	runId: string,
+	run: PageRun_Serialize,
 };
 
 /**  Who contributed it. */
@@ -5314,12 +5559,12 @@ export type OxplowConfig = {
  */
 export type OxplowEvent = 
 /**  Background task progress. */
-{ kind: "backgroundTasksChanged" } | 
+({ kind: "backgroundTasksChanged" }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; models?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } | 
 /**
  *  The set of known language servers changed (Mason package
  *  installed or removed). Renderer refetches `list_lsp_servers`.
  */
-{ kind: "lspServersChanged" } | 
+({ kind: "lspServersChanged" }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; models?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } | 
 /**
  *  Per-thread per-pane agent status changed. `state` carries the
  *  derived status so the renderer can update without a refetch
@@ -5327,7 +5572,7 @@ export type OxplowEvent =
  *  PreToolUse/PostToolUse, where the renderer used to refetch and
  *  re-derive) compute it inline before emitting.
  */
-{ kind: "agentStatusChanged"; threadId: ThreadId; 
+({ kind: "agentStatusChanged"; threadId: ThreadId; 
 /**
  *  The thread's stream, so a view over every stream (the Git
  *  dashboard) files it without a lookup.
@@ -5345,7 +5590,7 @@ agentSessionId: AgentSessionId | null; state: AgentStatusState;
  *  asked) when `state` is `AwaitingUser`, so the rail dot's tooltip
  *  can show it — `None` for every other transition.
  */
-detail: string | null } | 
+detail: string | null }) & { actor?: never; changeKind?: never; client?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; models?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } | 
 /**
  *  A snapshot take recorded something new: a new snapshot (its
  *  `file_count` rows), or — `trigger: HeadMoved`, 0 files — the
@@ -5355,19 +5600,27 @@ detail: string | null } |
  *  `snapshot_op` row and the `snapshot.taken` / `vcs.head.moved`
  *  event in the log; this is the UI / reactor wake-up.
  */
-{ kind: "snapshotTaken"; streamId: StreamId; snapshotId: number; fileCount: number; trigger: SnapshotTrigger; threadId: ThreadId | null; turnId: number | null; effortId: EffortId | null } | 
+({ kind: "snapshotTaken"; streamId: StreamId; snapshotId: number; fileCount: number; trigger: SnapshotTrigger; threadId: ThreadId | null; turnId: number | null; effortId: EffortId | null }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; detail?: never; error?: never; id?: never; input?: never; instance?: never; measures?: never; models?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; state?: never; title?: never; vcsEnabled?: never } | 
 /**
  *  An Assistant session changed (`assistant/`): its transcript, its
  *  status or its settings. The panel asks `assistant_snapshot { id,
  *  since }` for what changed. In memory only: no model holds it.
  */
-{ kind: "assistantChanged"; id: string; seq: number } | 
+({ kind: "assistantChanged"; id: string; seq: number }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; input?: never; instance?: never; measures?: never; models?: never; name?: never; op?: never; path?: never; scope?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } | 
 /**
  *  Published models (views) changed: a commit touched a table one of
  *  them reads, directly or through other models (P4.6). A lens re-runs
  *  when a model it read is listed.
  */
-{ kind: "modelsChanged"; models: string[] } | 
+({ kind: "modelsChanged"; models: string[] }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } | 
+/**
+ *  An open page run re-ran (a model one of its loaders read changed):
+ *  the loaders whose rows differ, for the window that opened it to
+ *  fetch (`fetch_page_runs`). Never the rows themselves.
+ */
+{
+	kind: "pageRunChanged",
+} & RunChange | 
 /**
  *  One or more metric samples landed in `stream_id` (unified metric
  *  substrate, tsk213). `measures` names the measure keys the write touched
@@ -5375,13 +5628,13 @@ detail: string | null } |
  *  list is fail-open — "unknown, refresh anyway" — which is what the
  *  low-frequency emit sites still send. See `.context/metrics.md`.
  */
-{ kind: "metricSamplesChanged"; streamId: StreamId; measures?: string[] } | 
+({ kind: "metricSamplesChanged"; streamId: StreamId; measures?: string[] }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; models?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } | 
 /**
  *  `.oxplow/project.yaml` was reloaded from disk (external edit, e.g. the agent
  *  running `/oxplow:configure`). The in-memory config has been swapped;
  *  the renderer refetches `get_config`.
  */
-{ kind: "configChanged" } | 
+({ kind: "configChanged" }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; models?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } | 
 /**
  *  The extension catalog may have changed: a file under the primary
  *  worktree's `.oxplow/extensions/` did, or the `extensions` config key
@@ -5389,38 +5642,38 @@ detail: string | null } |
  *  extensions contribute — the launcher, pages, panels, slots —
  *  reloads, and a lens re-runs its definition.
  */
-{ kind: "extensionsChanged" } | 
+({ kind: "extensionsChanged" }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; models?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } | 
 /**
  *  A command running on the daemon calls a scope the window
  *  hosts (`client_host.rs`): the window does `scope`'s `op` with
  *  `input` — in `thread_id`'s tabs, or the one it shows when `None` —
  *  and answers `answer_client_call { id, … }`.
  */
-{ kind: "clientCall"; id: string; 
+({ kind: "clientCall"; id: string; 
 /**
  *  The window it's for (its `register_client_host` id): only that
  *  one does it and answers.
  */
 client: string; threadId: ThreadId | null; 
 /**  Who ran the command (`agent:thr3`, `human`). */
-actor: string; scope: string; op: string; input: unknown } | 
+actor: string; scope: string; op: string; input: unknown }) & { agentSessionId?: never; changeKind?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; instance?: never; measures?: never; models?: never; name?: never; path?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } | 
 /**
  *  `.git` directory appeared/disappeared at the project root —
  *  "is this a git workspace" flipped. Renderer hides/restores the
  *  git-aware UI on receipt.
  */
-{ kind: "workspaceContextChanged"; vcsEnabled: boolean } | 
+({ kind: "workspaceContextChanged"; vcsEnabled: boolean }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; models?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never } | 
 /**
  *  A worktree file changed on disk. Renderer-wide: file tree, quick
  *  open, project panel, git dashboard, uncommitted changes view all
  *  refresh in response.
  */
-{ kind: "workspaceChanged"; streamId: StreamId; changeKind: WorkspaceChangeKind; path: string } | 
+({ kind: "workspaceChanged"; streamId: StreamId; changeKind: WorkspaceChangeKind; path: string }) & { actor?: never; agentSessionId?: never; client?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; models?: never; name?: never; op?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } | 
 /**
  *  A ref under `.git/refs/` changed. Drives history, branch list,
  *  and ahead/behind refreshes. Coarse per stream.
  */
-{ kind: "vcsRefsChanged"; streamId: StreamId } | 
+({ kind: "vcsRefsChanged"; streamId: StreamId }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; models?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } | 
 /**
  *  A non-primary stream's backing worktree was deleted out from
  *  under us (externally `rm -rf`'d, `git worktree remove`'d, etc.).
@@ -5429,7 +5682,7 @@ actor: string; scope: string; op: string; input: unknown } |
  *  rail row vanished. `title` carries the archived stream's display
  *  name.
  */
-{ kind: "streamOrphaned"; streamId: StreamId; title: string } | 
+({ kind: "streamOrphaned"; streamId: StreamId; title: string }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; models?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; threadId?: never; trigger?: never; turnId?: never; vcsEnabled?: never } | 
 /**
  *  A sign-in for provider instance `instance`'s credential `name`
  *  finished (P9.B3): its token is in the keychain and the instance
@@ -5437,13 +5690,13 @@ actor: string; scope: string; op: string; input: unknown } |
  *  The keychain is no model, so there is nothing to re-read but the
  *  instances themselves (`v_provider_instance`).
  */
-{ kind: "credentialChanged"; instance: string; name: string; 
+({ kind: "credentialChanged"; instance: string; name: string; 
 /**
  *  The sign-in this news is about, when it is about one (tsk929):
  *  a row waiting on another sign-in of the same credential
  *  ignores it.
  */
-signIn: number | null; error: string | null };
+signIn: number | null; error: string | null }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; detail?: never; effortId?: never; fileCount?: never; id?: never; input?: never; measures?: never; models?: never; op?: never; path?: never; scope?: never; seq?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never };
 
 /**
  *  When an `on:` collector runs after a triggering event. Empty,
@@ -5466,6 +5719,25 @@ export type Pacing = {
 	force: string[],
 };
 
+/**  A loaded page. */
+export type Page = Page_Serialize | Page_Deserialize;
+
+/**
+ *  A question a page answers, with the params that answer it: what an
+ *  agent finds the page by, what the person is offered (on the pages of
+ *  `about`'s resource), and a test (`oxplow extension test` runs it).
+ */
+export type PageAnswer = {
+	question: string,
+	about?: string | null,
+	params?: { [key in string]: unknown },
+	/**
+	 *  The shipped skill whose text must name what the page reads (oxplow's
+	 *  own extensions).
+	 */
+	skill?: string | null,
+};
+
 /**
  *  What draws a page: a lens core renders through the kit, or — for the
  *  required bundled extension only, and shrinking — a built-in component
@@ -5484,6 +5756,37 @@ name: string } |
 /**  `<extension>/<component id>`. */
 component: string };
 
+/**  A run of a page. */
+export type PageRun = PageRun_Serialize | PageRun_Deserialize;
+
+/**  A run of a page. */
+export type PageRun_Deserialize = {
+	page: Page_Deserialize,
+	/**  The values its params took. */
+	params: { [key in string]: SqlCell },
+	/**  Each loader that ran, by name. */
+	loaders: { [key in string]: LoaderRun },
+	tree: RunNode_Deserialize,
+	rail: RunNode_Deserialize | null,
+	alert: AlertState | null,
+	/**  The badge's value, when the page has one. */
+	badge: SqlCell | null,
+};
+
+/**  A run of a page. */
+export type PageRun_Serialize = {
+	page: Page_Serialize,
+	/**  The values its params took. */
+	params: { [key in string]: SqlCell },
+	/**  Each loader that ran, by name. */
+	loaders: { [key in string]: LoaderRun },
+	tree: RunNode_Serialize,
+	rail: RunNode_Serialize | null,
+	alert: AlertState | null,
+	/**  The badge's value, when the page has one. */
+	badge: SqlCell | null,
+};
+
 export type PageVisit = {
 	id: string,
 	page_kind: string,
@@ -5497,6 +5800,104 @@ export type PageVisit = {
 	visited_at: Timestamp,
 	duration_ms: number | null,
 	thread_id: string | null,
+};
+
+/**  A loaded page. */
+export type Page_Deserialize = {
+	/**  `<extension>/<slug>`. */
+	id: string,
+	extension: string,
+	slug: string,
+	title: string,
+	description: string,
+	/**
+	 *  What its tab says, when not its title: `{{param.<name>}}` and
+	 *  `{{row.<column>}}` (its first loader's first row), with `|short`,
+	 *  `|basename`, `|url`.
+	 */
+	label: string | null,
+	icon: string | null,
+	/**  Its launcher section; none: opened only from elsewhere. */
+	category: LauncherCategory | null,
+	keywords: string | null,
+	/**
+	 *  Its params, typed, each with its role (`resource` names what it
+	 *  shows, in its URI's `?`; `filter` and `selection` ride in the `#`).
+	 */
+	params: LensParam[],
+	/**  The resources it renders (`oxplow/commit`); empty: a route. */
+	for: string[],
+	accepts: { [key in string]: string },
+	default: boolean,
+	pinned: boolean,
+	comments: boolean,
+	refresh: boolean,
+	hidden: boolean,
+	needs: string[],
+	/**
+	 *  Its whole-page actions (a row action goes on the viz node that
+	 *  shows the row).
+	 */
+	actions: LensAction_Deserialize[],
+	alert: LensAlert | null,
+	/**  The MCP tool it is also offered as, namespaced. */
+	tool: string | null,
+	answers: PageAnswer[],
+	badge: Badge | null,
+	loaders: LoaderDecl[],
+	view: Node_Deserialize,
+	/**  A second tree drawn in the page's rail. */
+	rail: Node_Deserialize | null,
+	origin: LensProvenance,
+};
+
+/**  A loaded page. */
+export type Page_Serialize = {
+	/**  `<extension>/<slug>`. */
+	id: string,
+	extension: string,
+	slug: string,
+	title: string,
+	description: string,
+	/**
+	 *  What its tab says, when not its title: `{{param.<name>}}` and
+	 *  `{{row.<column>}}` (its first loader's first row), with `|short`,
+	 *  `|basename`, `|url`.
+	 */
+	label: string | null,
+	icon: string | null,
+	/**  Its launcher section; none: opened only from elsewhere. */
+	category: LauncherCategory | null,
+	keywords: string | null,
+	/**
+	 *  Its params, typed, each with its role (`resource` names what it
+	 *  shows, in its URI's `?`; `filter` and `selection` ride in the `#`).
+	 */
+	params: LensParam[],
+	/**  The resources it renders (`oxplow/commit`); empty: a route. */
+	for: string[],
+	accepts: { [key in string]: string },
+	default: boolean,
+	pinned: boolean,
+	comments: boolean,
+	refresh: boolean,
+	hidden: boolean,
+	needs: string[],
+	/**
+	 *  Its whole-page actions (a row action goes on the viz node that
+	 *  shows the row).
+	 */
+	actions: LensAction_Serialize[],
+	alert: LensAlert | null,
+	/**  The MCP tool it is also offered as, namespaced. */
+	tool: string | null,
+	answers: PageAnswer[],
+	badge: Badge | null,
+	loaders: LoaderDecl[],
+	view: Node_Serialize,
+	/**  A second tree drawn in the page's rail. */
+	rail: Node_Serialize | null,
+	origin: LensProvenance,
 };
 
 /**  One panel's place in the layout. */
@@ -5830,6 +6231,8 @@ export type Records =
 /**  Linter/analyzer findings (a `static-analysis` capture). */
 "analysis";
 
+export type RefreshKeyword = "manual";
+
 export type Relationship = {
 	column: string,
 	/**  The model the column points into. */
@@ -5972,8 +6375,54 @@ export type RowSample = {
 	after: unknown | null,
 };
 
+/**
+ *  What a re-run changed: the loaders whose rows differ (embedded pages'
+ *  as `<embed id>/<loader>`), and whether its tree did.
+ */
+export type RunChange = {
+	runId: string,
+	/**
+	 *  Counts up with each change, so a window drops a fetch older than
+	 *  one it applied.
+	 */
+	seq: number,
+	loaders: string[],
+	tree: boolean,
+};
+
 /**  The kind of run a report collector reads after. */
 export type RunKind = "test" | "analysis";
+
+/**  A node of a run's tree: the page's node by id, and what it resolved to. */
+export type RunNode = RunNode_Serialize | RunNode_Deserialize;
+
+/**  A node of a run's tree: the page's node by id, and what it resolved to. */
+export type RunNode_Deserialize = {
+	id: string,
+	/**
+	 *  The children shown: a switch's one in view, a stack's or grid's
+	 *  all.
+	 */
+	children: RunNode_Deserialize[],
+	/**  An embed's run. */
+	embed: PageRun_Deserialize | null,
+	/**  Why it shows nothing (an embed that didn't run). */
+	error: string | null,
+};
+
+/**  A node of a run's tree: the page's node by id, and what it resolved to. */
+export type RunNode_Serialize = {
+	id: string,
+	/**
+	 *  The children shown: a switch's one in view, a stack's or grid's
+	 *  all.
+	 */
+	children: RunNode_Serialize[],
+	/**  An embed's run. */
+	embed: PageRun_Serialize | null,
+	/**  Why it shows nothing (an embed that didn't run). */
+	error: string | null,
+};
 
 /**  How a contribution comes to run. */
 export type RunsOn = 

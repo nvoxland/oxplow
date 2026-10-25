@@ -72,6 +72,11 @@ export type { Extension, Lens, LensRun, LensViz, LensSpec, SearchHit, SqlCell, S
 /// message/code, but arg-deserialization failures and panics arrive as
 /// a plain string — `ipcErrorMessage` surfaces the real reason verbatim
 /// instead of collapsing to a generic "ipc error" (see ipc-error.ts).
+/** A generated command's result, or its error thrown. */
+export function unwrapResult<T>(result: { status: "ok"; data: T } | { status: "error"; error: unknown }): T {
+  return unwrap(result);
+}
+
 function unwrap<T>(result: { status: "ok"; data: T } | { status: "error"; error: unknown }): T {
   if (result.status === "ok") return result.data;
   throw new IpcCallError(
@@ -1956,3 +1961,4 @@ export async function listBacklinks(target: string, limit: number | null = null)
 export async function listPageOutbound(source: string, limit: number | null = null): Promise<BacklinkEdge[]> {
   return unwrap(await commands.listOutbound(source, limit));
 }
+

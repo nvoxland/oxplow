@@ -5175,6 +5175,7 @@ mod tests {
             f.svc.events.clone(),
             f.svc.assets.clone(),
             f.svc.event_pump.clone(),
+            crate::pages::open_runs::PageRuns::default(),
         );
         let shown = || async {
             f.svc

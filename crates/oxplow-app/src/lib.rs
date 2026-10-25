@@ -575,6 +575,9 @@ pub struct Services {
     /// The assets (P7.B1): derived data recomputed when its input tables
     /// change — the metric cube; `models_changed::spawn` tells them.
     pub assets: assets::Assets,
+    /// The page runs windows have open, re-run as the change loop says
+    /// what changed (`pages::open_runs`).
+    pub page_runs: pages::open_runs::PageRuns,
     /// Every event `type@v` the log accepts, with its schema. Core types
     /// at boot; extension types join when their manifests load.
     pub vocabulary: VocabularyHandle,
@@ -1932,6 +1935,7 @@ impl Services {
             event_log_store,
             sql,
             model_watermarks,
+            page_runs: pages::open_runs::PageRuns::default(),
             assets,
             vocabulary,
             event_pump,
@@ -2378,8 +2382,13 @@ mod tests {
                 "oxplow.metric.rebuild",
                 // The agent's reads of live state are read-scope operations
                 // (`commands/agent_reads`): they change no record.
+                "oxplow.page.definition",
                 "oxplow.page.list_tabs",
                 "oxplow.page.open",
+                "oxplow.page.run",
+                // A page's action runs its command through the bus as the
+                // page acting for the presser: the command's own record.
+                "oxplow.page.run_action",
                 // Settings → Integrations: a provider's process starts, stops
                 // and is checked, and its credentials are in the OS keychain.
                 "oxplow.provider.add_instance",

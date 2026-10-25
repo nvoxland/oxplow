@@ -26,6 +26,7 @@ pub mod ids;
 pub mod knowledge;
 pub mod lens;
 pub mod lsp;
+pub mod page_tools;
 pub mod pages;
 pub mod records;
 pub mod search;
@@ -40,6 +41,7 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
     ops.extend(sql::ops(services.clone()));
     ops.extend(search::ops(services.clone()));
     ops.extend(pages::ops(services.clone()));
+    ops.extend(page_tools::ops(services.clone()));
     ops.extend(skill::ops(services.clone()));
     ops.extend(lens::ops(services.clone()));
     ops.extend(lsp::ops(services.clone()));

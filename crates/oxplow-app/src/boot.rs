@@ -405,7 +405,9 @@ pub async fn run_boot_orchestration(
         event_bus.clone(),
         state.assets.clone(),
         state.event_pump.clone(),
+        state.page_runs.clone(),
     );
+    state.page_runs.start(state);
 
     // Event retention (P3.11): expire old agent/test payloads and bodies
     // per `.context/data-model.md` "event_log" — a while after boot (the

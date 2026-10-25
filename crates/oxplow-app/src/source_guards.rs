@@ -176,6 +176,8 @@ const EMITTERS: &[(&str, &str)] = &[
     ("LspServersChanged", "crates/oxplow-app/src/commands/lsp.rs"),
     ("MetricSamplesChanged", "crates/oxplow-app/src/models_changed.rs"),
     ("ModelsChanged", "crates/oxplow-app/src/models_changed.rs"),
+    // An open page run's loaders re-ran: names only, the window fetches.
+    ("PageRunChanged", "crates/oxplow-app/src/pages/open_runs.rs"),
     ("SnapshotTaken", "crates/oxplow-app/src/ui_push.rs"),
     ("StreamOrphaned", "crates/oxplow-app/src/workspace_watch.rs"),
     ("VcsRefsChanged", "crates/oxplow-app/src/ref_moves.rs"),

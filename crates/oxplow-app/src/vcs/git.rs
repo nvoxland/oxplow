@@ -36,6 +36,16 @@ impl GitProvider {
         .await
     }
 
+    /// The main checkout of the repository `path` is a checkout of: its own
+    /// top level, or the repository a secondary worktree was added from.
+    pub async fn main_checkout(&self, path: &Path) -> Option<std::path::PathBuf> {
+        let path = path.to_path_buf();
+        blocking(move || Ok(oxplow_git::main_checkout(&path)))
+            .await
+            .ok()
+            .flatten()
+    }
+
     /// Replay the workspace's branch onto `onto`; oxplow's smart merge
     /// then settles the conflicts it can.
     pub async fn rebase(&self, ws: &Path, onto: &str) -> Result<OpOutcome, VcsError> {

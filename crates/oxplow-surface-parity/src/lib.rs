@@ -201,6 +201,18 @@ pub const MANIFEST: &[Capability] = &[
         "lens_text",
         "Copy's text on every lens; an agent reads the same text through `run_lens`",
     ),
+    // A window's open page runs: it opens one, hears which loaders
+    // changed and fetches them. An agent runs a page once (P1.7 adds the
+    // agent's `run_page`).
+    ui("open_page", "a window keeps a page run open to hear its changes"),
+    ui("close_page", "a window drops a page run it no longer shows"),
+    ui("set_page_params", "a pick, filter or switch in the page a window shows"),
+    ui("rerun_page", "Refresh on the page a window shows"),
+    ui("fetch_page_runs", "a window fetches the open runs it heard changed"),
+    both_named("run_page", "run_page", "oxplow_run_page"),
+    ui("page_text", "Copy's text on the page a window shows"),
+    ui("get_page", "the page a window draws; an agent reads a page's ref with `read`"),
+    both_named("run_page_action", "run_page_action", "oxplow_run_page_action"),
     // An agent's answers: it shows one (the `oxplow.lens.show` command).
     agent("oxplow_show_lens"),
     ui(

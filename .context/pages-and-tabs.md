@@ -264,6 +264,36 @@ order. `dirty_loaders` is what a change makes run again: loaders that
 read a changed model (a command loader's are its `reads`) or bind a
 changed param, and everything downstream of them.
 
+**Open runs** (`pages/open_runs.rs`, `Services.page_runs`): a window opens
+a run (`open_page { page | specYaml, params, streamId, threadId, client }`
+→ `{ runId, run }`) and closes it (`close_page`); a pick, filter or
+switch is `set_page_params`, Refresh `rerun_page`. The change loop
+(`models_changed::spawn`) signals `PageRuns` as it tells the assets
+(never a second bus listener): models changed, measures landed, or
+everything (it lagged). A worker started at boot coalesces signals for
+100 ms and re-runs each open run one of whose loaders (embeds included)
+read a changed model or measure — a command loader's are its `reads` —
+then emits `OxplowEvent::PageRunChanged { runId, seq, loaders, tree }`
+for each that changed: the loaders whose rows differ (an embed's as
+`<embed>/<loader>`), never the rows. The window fetches what changed in
+one `fetch_page_runs` batch and drops a reply older than a `seq` it
+applied (`apps/desktop/src/pageRuns.ts`: runs shared by key, closed
+250 ms after the last host lets go, every run opened again after a
+reconnect). Runs belong to their window's `client` and go with it
+(`keep_only_clients`). A re-run runs the whole page today; running only
+the dirty loaders (`dirty_loaders`) comes once this is end to end.
+
+**Actions** (`pages/actions.rs`, `run_page_action { runId, node?, action,
+row?, input?, drop?, confirmed }`): pressed on an open run. A whole-page
+action binds the run's params; a node's row action runs on the row the
+presser names, which must be one the run holds (matched on the columns
+given: a row that changed under the press is refused); a holds-one-row
+action on its node's one row, read by the server. The checks and input
+binding are the lens ones (`lens_actions::prepare_resolved`), and it runs
+as the page acting for the presser. An agent presses with
+`oxplow.page.run_action { page, params, node?, action, row? }`, which
+holds a run of its own for the press.
+
 ## Declared pages
 
 Every page is a `pages:` entry in an extension's manifest

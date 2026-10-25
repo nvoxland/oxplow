@@ -621,6 +621,7 @@ resources:
             svc.events.clone(),
             assets.clone(),
             svc.event_pump.clone(),
+            crate::pages::open_runs::PageRuns::default(),
         );
         assert_eq!(
             found(svc, "widget", &["12"]).await,
@@ -925,6 +926,7 @@ mod core_tests {
             svc.events.clone(),
             assets.clone(),
             svc.event_pump.clone(),
+            crate::pages::open_runs::PageRuns::default(),
         );
         assets
     }

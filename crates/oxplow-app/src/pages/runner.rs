@@ -239,7 +239,7 @@ impl<'a> PageRunner<'a> {
             return hit.clone();
         }
         let outcome = match &decl.loader {
-            Loader::Sql { sql } => {
+            Loader::Sql { sql, params: given } => {
                 let temp = decl
                     .reads_loaders
                     .iter()
@@ -252,7 +252,11 @@ impl<'a> PageRunner<'a> {
                         })
                     })
                     .collect::<Vec<_>>();
-                let named = bind_params(&page.params, params, time::OffsetDateTime::now_utc());
+                let mut named = bind_params(&page.params, params, time::OffsetDateTime::now_utc());
+                for (k, v) in bind_args(given, params, earlier) {
+                    named.retain(|(n, _)| n != &k);
+                    named.push((k, SqlCell::from(v)));
+                }
                 let mut query = oxplow_db::SqlQuery::new(sql)
                     .named(named)
                     .limit(None)

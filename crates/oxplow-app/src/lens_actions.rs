@@ -108,7 +108,7 @@ pub async fn run_lens_action(
 /// that activates (an extension's deploy, enable, disable or remove) waits
 /// for every reader of the generation it replaces, and would wait on its
 /// own.
-struct Prepared {
+pub(crate) struct Prepared {
     actor: Actor,
     command: String,
     input: Value,
@@ -116,7 +116,7 @@ struct Prepared {
 }
 
 impl Prepared {
-    async fn run(self, svc: &crate::Services) -> Result<CommandOutcome, CommandError> {
+    pub(crate) async fn run(self, svc: &crate::Services) -> Result<CommandOutcome, CommandError> {
         svc.commands
             .run(&self.actor, &self.command, self.input, self.confirmed)
             .await
@@ -204,14 +204,45 @@ fn prepare_lens_action(
         confirmed,
     } = call;
     let (lens_id, action_id, row) = (lens_id.as_str(), action_id.as_str(), row.as_ref());
-    let invalid = |field: &str, message: String| CommandError::Invalid {
-        field: Some(field.into()),
-        message,
-    };
     let lens = svc
         .extension_catalog
         .find_lens(lens_root, lens_id)
         .map_err(CommandError::from)?;
+    let params = extensions::resolve_params(&lens, &params, ctx).map_err(CommandError::from)?;
+    prepare_resolved(
+        &lens,
+        lens_id,
+        action_id,
+        &params,
+        row,
+        given,
+        drop,
+        on_behalf_of,
+        confirmed,
+    )
+}
+
+/// The command `action_id` of `lens` runs, its input bound from `params`
+/// (already resolved), `row` and `drop`, acting as `actor_id` for
+/// `on_behalf_of`: the checks a press passes (a row action on a row, a
+/// drag on a drop, `when`, a form's input) — shared by lenses and pages.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn prepare_resolved(
+    lens: &extensions::Lens,
+    actor_id: &str,
+    action_id: &str,
+    params: &BTreeMap<String, SqlCell>,
+    row: Option<&BTreeMap<String, SqlCell>>,
+    given: Option<Value>,
+    drop: Option<Drop>,
+    on_behalf_of: Actor,
+    confirmed: bool,
+) -> Result<Prepared, CommandError> {
+    let lens_id = lens.id.as_str();
+    let invalid = |field: &str, message: String| CommandError::Invalid {
+        field: Some(field.into()),
+        message,
+    };
     let action = lens
         .actions
         .iter()
@@ -269,8 +300,7 @@ fn prepare_lens_action(
             ));
         }
     }
-    let params = extensions::resolve_params(&lens, &params, ctx).map_err(CommandError::from)?;
-    let bound = bind_input(&action.input, &params, row, drop.as_ref())?;
+    let bound = bind_input(&action.input, params, row, drop.as_ref())?;
     let input = match given {
         None => bound,
         Some(_) if !action.form => {
@@ -285,7 +315,7 @@ fn prepare_lens_action(
     };
     Ok(Prepared {
         actor: Actor::Lens {
-            lens_id: lens_id.to_string(),
+            lens_id: actor_id.to_string(),
             on_behalf_of: Box::new(on_behalf_of),
         },
         command: action.command,

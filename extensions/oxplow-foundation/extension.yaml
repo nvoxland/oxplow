@@ -732,7 +732,7 @@ commands:
     example: {}
   # config.write
   - name: config.set
-    summary: "Set one .oxplow/project.yaml key — or, with `layer: personal`, a person's own choice in .oxplow/personal.yaml (`activeProviders`, `newThreadSession`, `enableExtensions`, `disableExtensions`, `extensionSources`, `enableBundledExtensions`). The value is validated against the key's schema and the file's own rules, written to the file, and logged as config.changed; undo restores the prior value."
+    summary: "Set one .oxplow/project.yaml key, or with `layer: personal` a person's own choice in .oxplow/personal.yaml. Those are (`activeProviders`, `newThreadSession`, `enableExtensions`, `disableExtensions`, `extensionSources`, `enableBundledExtensions`). The value is validated against the key's schema and the file's own rules, written to the file, and logged as config.changed; undo restores the prior value."
     scope: config.write
     op: set
     example: {"key": "metricRetentionDays", "value": 30}
@@ -773,7 +773,7 @@ commands:
     example: {"key": "metricRetentionDays"}
   # dashboards.write
   - name: dashboard.add_item
-    summary: "Add a tile to a dashboard: `query` (pinned `sql`, checked like oxplow_query_sql, shown per `display` — a lens viz, or `metric` for the metric card, which needs only its key as `metric`: the tile pins that metric's captures), `lens` (`lens_id`) or `text` (`options_json` `{\"text\": …}`). `options_json` may also set its size and title; `position` where it goes."
+    summary: "Add a tile to a dashboard. Its kind: `query` (pinned `sql`, checked like oxplow_query_sql, shown per `display` — a lens viz, or `metric` for the metric card, which needs only its key as `metric`: the tile pins that metric's captures), `lens` (`lens_id`) or `text` (`options_json` `{\"text\": …}`). `options_json` may also set its size and title; `position` where it goes."
     scope: dashboards.write
     op: add_item
     example: {"dashboard": "dsh3", "kind": "query", "sql": "SELECT count(*) AS open FROM v_work_item WHERE state = 'todo'", "display": "number"}
@@ -905,7 +905,7 @@ commands:
     op: replace_inferred_claims
     example: {"effort": "eff12", "claims": [{"statement": "The parser tests pass.", "kind": "tests_pass", "evidence": "oxplow:oxplow/run?id=42"}]}
   - name: effort.report
-    summary: "Optional: describe the thread's current (else latest) effort — a `summary` of what shipped, any `impacts` beyond the edits (a wiki page, a work item, a commit, a finding), and the `claims` you can back (each `{ statement, kind, evidence? }`; they replace the ones an earlier report stated that nobody reviewed). Without one, the summary is your last turn's final message; files and test runs are observed. Returns `{ effort, link_warnings }`."
+    summary: "Optional: describe the thread's current (else latest) effort. It takes a `summary` of what shipped, any `impacts` beyond the edits (a wiki page, a work item, a commit, a finding), and the `claims` you can back (each `{ statement, kind, evidence? }`; they replace the ones an earlier report stated that nobody reviewed). Without one, the summary is your last turn's final message; files and test runs are observed. Returns `{ effort, link_warnings }`."
     scope: efforts.write
     op: report
     example: {"summary": "Fixed the login redirect loop: the callback kept the stale `next` parameter.", "impacts": [{"kind": "file", "id": "src/auth.rs", "action": "updated"}, {"kind": "work_item", "id": "oxplow:oxplow/work_item?id=tsk42&provider=oxplow", "action": "completed"}], "claims": [{"statement": "the auth tests pass", "kind": "tests_pass", "evidence": "oxplow:oxplow/run?id=12"}]}
@@ -1256,6 +1256,23 @@ commands:
     op: record
     example: {"key": "complex_fns.count", "value": 12, "subject": "oxplow:oxplow/file?path=src/auth.rs"}
   # pages.read
+  - name: page.run
+    summary: "Read what a page shows. `page` (`<extension>/<slug>`, from `oxplow.page.find` or `v_page`) or `spec` (an inline page of your own as YAML: `title`, `data:` with sql / rows / page loaders, `view:`; it only reads), `params` by name (the rest take your thread's context or their defaults). `format: \"text\"` (default) is the page's text, each node under `[node <id>]` (an embedded page's nodes `[node <embed>/<id>]`), so you can point the person at one with `oxplow_navigate` and `#node=<id>`; `format: \"json\"` is each loader's columns and rows (up to 200, with `truncated`) and the tree; `loader` narrows json to one loader."
+    scope: pages.read
+    op: run
+    tool: run_page
+    example: {"page": "oxplow-foundation/problems", "format": "text"}
+  - name: page.definition
+    summary: "What a page is made of. Its extension, source file and deployment, its params, its loaders (each one's sql, command, page or rows) and its node tree, each node with the page and file it comes from and the loader it shows — embedded pages and mounted slots included: what the person sees under Show Definition."
+    scope: pages.read
+    op: definition
+    example: {"page": "oxplow-foundation/commit", "params": {"sha": "abc1234"}}
+  - name: page.run_action
+    summary: "Press a page's action as the page acting for you. A whole-page action (the page's `actions`), or a node's (`node`, as `[node <id>]` names it in the page's text) — for a row action, `row` is the row it runs on (column → value, as `oxplow.page.run` returned it; it must be one of the node's rows). The command it declares runs as the page for you, so the same rules apply as if you ran it yourself."
+    scope: pages.write
+    op: run_action
+    tool: run_page_action
+    example: {"page": "acme/review", "node": "items", "action": "finish", "row": {"id": "tsk12"}}
   - name: page.open
     summary: "What the person is looking at in a thread. It is the page the thread has open in the window they were in last (`pageId` such as `oxplow:oxplow/work_item?id=tsk42&provider=oxplow`, `oxplow:oxplow/file?path=src/a.rs`, `oxplow:oxplow/lens?lens=review/waiting`; its kind; the detail the page publishes; which window, whether it's on screen, how fresh), and `others`, the page each other window has open there. When it's a lens, `lens` is that lens re-run with the person's params, as text: what is on their screen. `tab` reads one of the thread's tabs instead (an id `oxplow_list_tabs` listed). Use it when the person says \"this\", \"what I'm looking at\" or \"this lens\". `open` is null when no window reported one."
     scope: pages.read
@@ -1466,7 +1483,7 @@ commands:
     example: {"from": "git:main", "to": "working", "since_fork": true}
   # vcs.remote
   - name: vcs.log
-    summary: "A stream's history from a revision, newest first, paged, with no horizon and any branch: `from` (a branch, tag or id; the head by default), `path` (only revisions that changed it), `limit` (50, at most 500), `cursor` (the previous page's `next_cursor`). Past what `v_commit` indexes, this is the way."
+    summary: "A stream's history from a revision, newest first, paged, with no horizon and any branch. It takes `from` (a branch, tag or id; the head by default), `path` (only revisions that changed it), `limit` (50, at most 500), `cursor` (the previous page's `next_cursor`). Past what `v_commit` indexes, this is the way."
     scope: vcs.read
     op: log
     tool: vcs_log
@@ -1601,7 +1618,7 @@ commands:
     needs: [work_items.delete]
     example: {"uri": "oxplow:oxplow/work_item?id=tsk12&provider=oxplow"}
   - name: work_item.link
-    summary: "Link a work item to another of the same provider, or to any uri it is `about` (`oxplow:oxplow/collector?collector=triage/hot`, `oxplow:oxplow/effort?id=eff12`, `oxplow:oxplow/file?path=src/a.rs`), by a link type the provider names (oxplow: blocks, relates_to, discovered_from, duplicates, supersedes, replies_to, about). Only an item target must exist; a uri may name something since gone. Undone by work_item.unlink."
+    summary: "Link a work item to another of the same provider, or to any uri it is about. The uri: (`oxplow:oxplow/collector?collector=triage/hot`, `oxplow:oxplow/effort?id=eff12`, `oxplow:oxplow/file?path=src/a.rs`), by a link type the provider names (oxplow: blocks, relates_to, discovered_from, duplicates, supersedes, replies_to, about). Only an item target must exist; a uri may name something since gone. Undone by work_item.unlink."
     scope: work_items.write
     op: link
     needs: [work_items.links]

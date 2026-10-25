@@ -45,8 +45,10 @@ impl Host {
     ) -> Result<Host, String> {
         let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
         let root = dir.path().to_path_buf();
-        let project =
-            &oxplow_git::main_checkout(checkout).unwrap_or_else(|| checkout.to_path_buf());
+        let project = &oxplow_app::vcs::GitProvider
+            .main_checkout(checkout)
+            .await
+            .unwrap_or_else(|| checkout.to_path_buf());
         let settings = oxplow_config::extension_settings(project);
         for name in oxplow_app::extensions::known_names(checkout, &settings) {
             let source = settings.source(checkout, &name);

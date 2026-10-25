@@ -238,6 +238,8 @@ mod tests {
                 "oxplow_recent_commits",
                 "oxplow_run_lens",
                 "oxplow_run_lens_action",
+                "oxplow_run_page",
+                "oxplow_run_page_action",
                 "oxplow_search",
                 "oxplow_session_transcript",
                 "oxplow_show_lens",

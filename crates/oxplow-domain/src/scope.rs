@@ -401,7 +401,14 @@ pub const SCOPES: &[Scope] = &[
         access: Access::Read,
         host: Host::Daemon,
         spends: false,
-        summary: "Read the page a thread's person has open.",
+        summary: "Read pages: the one a thread's person has open, what a page shows, what it is made of.",
+    },
+    Scope {
+        id: "pages.write",
+        access: Access::Write,
+        host: Host::Daemon,
+        spends: false,
+        summary: "Press a page's action, as the page acting for you.",
     },
     Scope {
         id: "projects.write",

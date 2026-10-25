@@ -171,9 +171,13 @@ pub struct LoaderDecl {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum Loader {
-    /// A read-only query over the published models, binding `:param`s;
-    /// an earlier loader reads as a table of its name.
-    Sql { sql: String },
+    /// A read-only query over the published models, binding `:param`s
+    /// (the page's, and `params`: named values from earlier loaders or
+    /// literals); an earlier loader reads as a table of its name.
+    Sql {
+        sql: String,
+        params: BTreeMap<String, ArgSource>,
+    },
     /// A read-only command (`View` / `Read` access), run as the viewer.
     Command {
         command: String,
@@ -745,7 +749,15 @@ fn parse_loaders(
             }
             Ok(())
         };
+        if !file.params.is_empty() && file.command.is_some() {
+            return Err(format!(
+                "loader `{name}`: a command loader takes `args`, not `params`"
+            ));
+        }
         let loader = if let Some(sql) = file.sql {
+            for arg in file.params.values() {
+                check_arg(arg, &mut reads_loaders, &mut reads_params)?;
+            }
             for word in sql_names(&sql) {
                 if word == name {
                     continue;
@@ -760,8 +772,15 @@ fn parse_loaders(
                     reads_loaders.push(word);
                 }
             }
-            reads_params = sql_params(&sql);
-            Loader::Sql { sql }
+            for p in sql_params(&sql) {
+                if !reads_params.contains(&p) && !file.params.contains_key(&p) {
+                    reads_params.push(p);
+                }
+            }
+            Loader::Sql {
+                sql,
+                params: file.params,
+            }
         } else if let Some(command) = file.command {
             oxplow_domain::CommandSpec::validate_id(&command)
                 .map_err(|e| format!("loader `{name}`: {e}"))?;

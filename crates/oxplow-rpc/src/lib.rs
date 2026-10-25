@@ -255,6 +255,16 @@ macro_rules! oxplow_command_table {
                 run_lens_spec => $crate::commands::extensions::run_lens_spec { spec: ::oxplow_app::extensions::LensSpec, params: Option<::std::collections::BTreeMap<String, ::oxplow_db::SqlCell>>, stream_id: Option<String> } -> ::oxplow_app::extensions::LensRun,
                 lens_text => $crate::commands::extensions::lens_text { id: String, params: Option<::std::collections::BTreeMap<String, ::oxplow_db::SqlCell>>, stream_id: Option<String> } -> String,
                 list_services => $crate::commands::extensions::list_services {} -> Vec<$crate::commands::extensions::ServiceListing>,
+                // pages: a window's open runs
+                open_page => $crate::commands::pages::open_page { page: Option<String>, spec_yaml: Option<String>, params: Option<::std::collections::BTreeMap<String, ::oxplow_db::SqlCell>>, stream_id: Option<String>, thread_id: Option<String>, client: String } -> $crate::commands::pages::OpenedRun,
+                close_page => $crate::commands::pages::close_page { run_id: String } -> (),
+                set_page_params => $crate::commands::pages::set_page_params { run_id: String, params: ::std::collections::BTreeMap<String, ::oxplow_db::SqlCell> } -> ::oxplow_app::pages::runner::PageRun,
+                rerun_page => $crate::commands::pages::rerun_page { run_id: String } -> ::oxplow_app::pages::runner::PageRun,
+                fetch_page_runs => $crate::commands::pages::fetch_page_runs { run_ids: Vec<String> } -> ::std::collections::BTreeMap<String, ::oxplow_app::pages::runner::PageRun>,
+                run_page => $crate::commands::pages::run_page { page: Option<String>, spec_yaml: Option<String>, params: Option<::std::collections::BTreeMap<String, ::oxplow_db::SqlCell>>, stream_id: Option<String> } -> ::oxplow_app::pages::runner::PageRun,
+                page_text => $crate::commands::pages::page_text { run_id: String } -> String,
+                get_page => $crate::commands::pages::get_page { id: String } -> ::oxplow_app::pages::schema::Page,
+                run_page_action => $crate::commands::pages::run_page_action { run_id: String, node: Option<String>, action: String, row: Option<::std::collections::BTreeMap<String, ::oxplow_db::SqlCell>>, input: Option<::oxplow_domain::Json>, drop: Option<::oxplow_app::lens_actions::Drop>, confirmed: bool } -> ::oxplow_domain::CommandOutcome,
                 validate_extension => $crate::commands::extensions::validate_extension { name: String, stream_id: Option<String> } -> ::oxplow_sdk::CheckReport,
                 ensure_change => $crate::commands::changes::ensure_change { target: ::oxplow_app::change_analysis::ChangeTarget } -> ::oxplow_db::ChangeRow,
                 // ai (Settings → AI)
