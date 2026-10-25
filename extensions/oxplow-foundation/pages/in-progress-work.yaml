@@ -1,0 +1,9 @@
+title: "Work in progress"
+description: "The work in progress across every provider."
+hidden: true
+answers:
+- {"question":"What work is in progress, across every provider?","params":{},"skill":"work-items"}
+data:
+  items:
+    sql: "SELECT uri, provider, title FROM v_work_item WHERE state = 'in_progress'"
+view: { viz: table, from: items }

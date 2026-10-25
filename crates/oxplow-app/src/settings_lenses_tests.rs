@@ -390,8 +390,8 @@ async fn the_uncommitted_page_lists_the_working_tree_with_untracked_marked() {
     std::fs::write(root.join("loose.txt"), "n\n").unwrap();
     let stream = fx.svc.streams.ensure_primary().await.unwrap().id.value();
 
-    let doc = run_as_lens(
-        &fx.svc,
+    let doc = run(
+        &fx,
         "uncommitted",
         vec![("stream_id", SqlCell::Int(stream))],
     )
@@ -405,14 +405,11 @@ async fn the_uncommitted_page_lists_the_working_tree_with_untracked_marked() {
     // Its files are listed by the change's analysis, a moment later.
     let mut icons = Vec::new();
     for _ in 0..50 {
-        let files = run_as_lens(
-            &fx.svc,
+        let files = run(
+            &fx,
             "uncommitted-files",
-            vec![
-                ("change_id", change.clone()),
-                ("base_revision", at("base_revision")),
-                ("head_revision", at("head_revision")),
-            ],
+            // The page finds its own change from the stream.
+            vec![("stream_id", SqlCell::Int(stream))],
         )
         .await;
         icons = files
@@ -439,8 +436,8 @@ async fn the_uncommitted_page_lists_the_working_tree_with_untracked_marked() {
     );
 
     // The commit form shows once there are files to commit.
-    let form = run_as_lens(
-        &fx.svc,
+    let form = run(
+        &fx,
         "uncommitted-commit",
         vec![("stream_id", SqlCell::Int(stream)), ("change_id", change)],
     )

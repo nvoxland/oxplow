@@ -272,7 +272,7 @@ async fn page_ref_edges_are_a_model_in_both_directions() {
 }
 
 /// What a person can ask and what they can configure are models too:
-/// core's questions and every enabled extension's `intent.prompts` in
+/// what every enabled extension's pages answer and its `intent.prompts` in
 /// `v_prompt`, project.yaml's keys in `v_config_key`.
 #[tokio::test]
 async fn prompts_and_config_keys_are_models() {
@@ -298,13 +298,13 @@ async fn prompts_and_config_keys_are_models() {
             json!("oxplow/file")
         ]]
     );
-    // Core's areas come first, in the catalog's order.
-    let first = rows(
+    // What oxplow's own pages say they answer is offered as foundation's.
+    let ours = rows(
         &fx,
-        "SELECT source_kind FROM v_prompt ORDER BY position LIMIT 1",
+        "SELECT DISTINCT source_kind FROM v_prompt WHERE source = 'oxplow-foundation'",
     )
     .await;
-    assert_eq!(first, vec![vec![json!("area")]]);
+    assert_eq!(ours, vec![vec![json!("extension")]]);
 
     let keys = rows(&fx, "SELECT key, doc <> '' FROM v_config_key ORDER BY key").await;
     let mut want: Vec<String> = oxplow_config::keys::config_keys()

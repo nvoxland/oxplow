@@ -1,9 +1,10 @@
 //! The agent-answerability check (`.context/extensions.md`
 //! "Answerability"): can an agent that reads the right skill answer the
-//! questions an area of oxplow, or an extension, exists for?
+//! questions oxplow, or an extension, exists for?
 //!
-//! A questions file (`crates/oxplow-agent-text/assets/questions/<area>.yaml`,
-//! or an extension's own `questions.yaml`) lists entries:
+//! Core's questions are its pages' `answers:` ([`check_pages`], below); an
+//! extension may also have its own `questions.yaml` ([`check`]) listing
+//! entries:
 //!
 //! ```yaml
 //! - question: Which commits touched src/lib.rs?
@@ -417,6 +418,9 @@ fn page_reaches(page: &oxplow_app::pages::schema::Page) -> Vec<String> {
             Loader::Command { command, .. } => vec![command.clone()],
             _ => Vec::new(),
         })
+        // The commands its whole-page actions run: how a page answers
+        // "do this".
+        .chain(page.actions.iter().map(|a| a.command.clone()))
         .collect()
 }
 
@@ -467,6 +471,27 @@ pub async fn check_pages(
                 let Some(svc) = svc else {
                     continue;
                 };
+                // A page answers "do this" with an action: its command
+                // exists and the input it gives fits the command.
+                for action in &page.actions {
+                    match svc.commands.spec(&action.command) {
+                        None => out.errors.push(format!(
+                            "{at}: action `{}` runs no command `{}` — fix: name a registered one",
+                            action.id, action.command
+                        )),
+                        Some(spec) => {
+                            let valid = InputValidator::compile(&spec.input_schema)
+                                .map_err(|e| e.to_string())
+                                .and_then(|v| v.check(&action.input).map_err(|e| e.to_string()));
+                            if let Err(e) = valid {
+                                out.errors.push(format!(
+                                    "{at}: action `{}`'s input doesn't fit `{}`: {e} — fix: the input",
+                                    action.id, action.command
+                                ));
+                            }
+                        }
+                    }
+                }
                 let params = answer
                     .params
                     .iter()
@@ -592,57 +617,8 @@ mod tests {
         );
     }
 
-    /// Every answerability question reaches something its skill
-    /// names — the SQL runs with its declared columns and a command's
-    /// input fits its spec.
-    #[tokio::test]
-    async fn every_answerability_question_reaches_what_its_skill_names() {
-        let tmp = tempfile::tempdir().unwrap();
-        oxplow_app::vcs::GitProvider
-            .init_repository(tmp.path())
-            .await
-            .unwrap();
-        let svc = oxplow_app::Services::in_memory(tmp.path()).await.unwrap();
-        // Core's skills and what the bundled extension offers by default.
-        let text = oxplow_app::capabilities::agent_text(&svc);
-        let skill = |name: &str| text.skill_full_text(name);
-        let command = |name: &str| svc.commands.spec(name).map(|s| s.input_schema);
-        let tools = tool_schemas(&svc).await;
-        let tool = |name: &str| tools.get(name).cloned();
-        let checker = Checker {
-            skill_text: &skill,
-            sql: Some(&svc.sql),
-            command_schema: &command,
-            tool_schema: &tool,
-        };
-        let mut errors = Vec::new();
-        let mut asked = 0;
-        for (area, yaml) in oxplow_agent_text::ANSWERABILITY_QUESTIONS {
-            let file = format!("questions/{area}.yaml");
-            let questions = parse(yaml).unwrap_or_else(|e| panic!("{file}: {e}"));
-            assert!(!questions.is_empty(), "{file} asks nothing");
-            asked += questions.len();
-            let checked = check(&file, &questions, &checker).await;
-            assert_eq!(checked.warnings, Vec::<String>::new());
-            errors.extend(checked.errors);
-            if std::env::var("OXPLOW_LIVE_ANSWERABILITY").as_deref() == Ok("1") {
-                // This machine's roles and keys; the throwaway services'
-                // are empty.
-                let ai = AiService::for_this_machine(
-                    std::sync::Arc::new(oxplow_db::SqliteAiCallStore::new(svc.db.clone())),
-                    svc.ai.providers().clone(),
-                );
-                let catalog = catalog(&svc).await;
-                errors.extend(live(&file, &questions, &skill, &catalog, &ai).await);
-            }
-        }
-        assert!(asked >= 12, "{asked}");
-        assert_eq!(errors, Vec::<String>::new());
-    }
-
     /// Every page `answers:` entry of the shipped extensions reaches what
-    /// its skill names and runs with its params (none yet: it passes on
-    /// zero).
+    /// its skill names and runs with its params.
     #[tokio::test(flavor = "multi_thread")]
     async fn every_page_answer_reaches_what_its_skill_names() {
         let tmp = tempfile::tempdir().unwrap();
@@ -677,6 +653,24 @@ mod tests {
             errors.extend(live_pages(&shipped, &skill, &catalog(&svc).await, &ai).await);
         }
         assert_eq!(errors, Vec::<String>::new());
+        // The questions the person is offered about the kinds of thing
+        // pages show come from these answers.
+        let answers: Vec<_> = shipped
+            .iter()
+            .flat_map(|e| e.page_files.iter().flat_map(|p| p.answers.iter()))
+            .collect();
+        assert!(answers.len() >= 40, "{}", answers.len());
+        for kind in [
+            "oxplow/file",
+            "oxplow/commit",
+            "oxplow/effort",
+            "oxplow/work_item",
+        ] {
+            assert!(
+                answers.iter().any(|a| a.about.as_deref() == Some(kind)),
+                "no answer about `{kind}`"
+            );
+        }
     }
 
     /// The mechanism: a page whose answer's skill names its model passes;

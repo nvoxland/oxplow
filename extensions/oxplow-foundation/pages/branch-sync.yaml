@@ -1,0 +1,9 @@
+title: "Branches out of step with their upstream"
+description: "The local branches with commits their upstream lacks, or that lack its commits."
+hidden: true
+answers:
+- {"question":"Which local branches have commits their upstream lacks, or lack its commits?","params":{},"skill":"oxplow-codebase"}
+data:
+  branches:
+    sql: "SELECT name, upstream, ahead, behind FROM v_branch WHERE kind = 'local' AND upstream IS NOT NULL AND (ahead > 0 OR behind > 0)"
+view: { viz: table, from: branches }

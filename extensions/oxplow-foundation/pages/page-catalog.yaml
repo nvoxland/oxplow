@@ -1,0 +1,9 @@
+title: "Pages"
+description: "Every page of every enabled extension and the extension that declares it."
+hidden: true
+answers:
+- {"question":"Which pages exist, and which extension declares each?","params":{},"skill":"oxplow-extension"}
+data:
+  pages:
+    sql: "SELECT uri, extension, title, hidden FROM v_page ORDER BY extension, id"
+view: { viz: table, from: pages }

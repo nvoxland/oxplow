@@ -1,0 +1,12 @@
+title: "Efforts on a work item"
+description: "What has been done on a work item so far."
+hidden: true
+params:
+- name: work_item
+  default: ""
+answers:
+- {"question":"What has been done on this work item so far?","about":"oxplow/work_item","params":{"work_item":"work_item:oxplow:tsk1"},"skill":"work-items"}
+data:
+  efforts:
+    sql: "SELECT id, started_at, ended_at, summary FROM v_effort WHERE work_item = :work_item ORDER BY started_at"
+view: { viz: table, from: efforts }

@@ -1030,6 +1030,16 @@ pub async fn run_as_page_in(
             plain(&l.name) == plain(&loader_name) || (named.is_none() && l.name == slug)
         })
         .map(|l| l.name.clone())
+        // An inlined part is a node of that id, showing a loader.
+        .or_else(|| {
+            named?;
+            page.nodes().into_iter().find_map(|n| match &n.kind {
+                crate::pages::schema::NodeKind::Viz {
+                    from: Some(from), ..
+                } if n.id == loader_name => Some(from.clone()),
+                _ => None,
+            })
+        })
         .or_else(|| page.loaders.first().map(|l| l.name.clone()))
         .expect("a loader");
     // A loader only a switch's child shows runs when the switch's param

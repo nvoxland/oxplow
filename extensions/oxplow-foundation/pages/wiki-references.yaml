@@ -1,0 +1,21 @@
+title: "Wiki references"
+description: "The wiki pages that cite files that changed, those that talk about a file, and saving a page."
+hidden: true
+params:
+- name: path
+  default: ""
+answers:
+- {"question":"Which wiki pages cite files that changed since they were written?","params":{},"skill":"oxplow-wiki-capture"}
+- {"question":"Which wiki pages talk about this file?","about":"oxplow/file","params":{"path":"src/lib.rs"},"skill":"oxplow-wiki-capture"}
+- {"question":"Save what I just learned as a wiki page.","params":{},"skill":"oxplow-wiki-capture"}
+actions:
+- {"id":"save","label":"Save as a wiki page","command":"oxplow.knowledge.write_page","input":{"slug":"auth-flow","body":"# Auth flow\n\nHow a login becomes a session."}}
+data:
+  stale:
+    sql: "SELECT uri, title, stale_ref_count FROM v_knowledge_page WHERE stale_ref_count > 0"
+  about_file:
+    sql: "SELECT page, stale FROM v_knowledge_ref WHERE path = :path"
+view:
+  stack:
+  - { id: stale, viz: table, from: stale }
+  - { id: about_file, viz: table, from: about_file }

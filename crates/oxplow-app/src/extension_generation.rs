@@ -273,10 +273,8 @@ fn variant_name(value: &impl serde::Serialize) -> String {
 fn prompt_row(
     p: crate::prompt_catalog::CatalogPrompt,
 ) -> oxplow_db::catalog_listing_store::PromptRow {
-    let (source_kind, source) = match p.source {
-        crate::prompt_catalog::PromptSource::Area(a) => ("area", a),
-        crate::prompt_catalog::PromptSource::Extension(e) => ("extension", e),
-    };
+    let crate::prompt_catalog::PromptSource::Extension(source) = p.source;
+    let source_kind = "extension";
     oxplow_db::catalog_listing_store::PromptRow {
         source_kind: source_kind.to_string(),
         source,

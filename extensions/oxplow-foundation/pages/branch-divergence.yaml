@@ -1,0 +1,14 @@
+title: "Branch divergence"
+description: "How far a branch has moved from a base and whether it would merge cleanly."
+hidden: true
+params:
+- name: base
+  default: "main"
+- name: head
+  default: ""
+answers:
+- {"question":"How far has this branch moved from main, and would it merge cleanly?","params":{"base":"main","head":"feature"},"skill":"oxplow-codebase"}
+data:
+  divergence:
+    sql: "SELECT ahead, behind, readiness, overlapping_files FROM v_branch_divergence WHERE base = :base AND head = :head"
+view: { viz: table, from: divergence }

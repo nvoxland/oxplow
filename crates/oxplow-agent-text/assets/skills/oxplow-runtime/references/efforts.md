@@ -45,3 +45,5 @@ thread), `v_agent_session_status` (each open session's last status),
 `v_agent_turn` (each prompt and answer), `v_tool_call` and `v_subagent`.
 An effort's evidence is `v_effort_observation`, its claims `v_claim`, its decisions
 `v_decision`, and its work item a `v_work_item` row.
+A session whose process ended is opened again with
+`oxplow.agent_session.reopen { session }`; the transcript page offers it.

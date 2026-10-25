@@ -8,6 +8,8 @@ params:
   label: Commit
 - name: sha
 - name: stream_id
+answers:
+- {"question":"What did this commit change?","about":"oxplow/commit","params":{"sha":"abc123","stream_id":1},"skill":"oxplow-codebase"}
 data:
   row:
     sql: |

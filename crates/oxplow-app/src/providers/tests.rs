@@ -2528,20 +2528,12 @@ async fn provider_instances_are_managed_by_commands_and_read_as_a_model() {
 
     // The Integrations component re-reads when this lens's rows change: one
     // row per instance, naming its state and what it holds.
-    let lens = crate::extensions::run_lens(
-        &fx.svc.sql,
-        &fx.svc.extension_catalog,
-        fx._dir.path(),
-        "oxplow-foundation/integrations",
-        Default::default(),
-        &crate::extensions::LensContext::default(),
-    )
-    .await
-    .unwrap();
-    assert_eq!(lens.result.rows.len(), 2);
-    assert_eq!(lens.result.columns[0], "instance");
-    assert!(lens.result.columns.contains(&"credentials".to_string()));
-    assert!(lens.result.columns.contains(&"collectors".to_string()));
+    let lens =
+        crate::test_fixtures::run_as_page(&fx.svc, "oxplow-foundation/integrations", &[]).await;
+    assert_eq!(lens.rows.len(), 2);
+    assert_eq!(lens.columns[0], "instance");
+    assert!(lens.columns.contains(&"credentials".to_string()));
+    assert!(lens.columns.contains(&"collectors".to_string()));
 
     // A refusal is at the field, and nothing was written.
     let refused = run(
