@@ -57,16 +57,36 @@ export function setAssistantScope(next: { stream: string | null; thread: string 
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
+// The backend announces a change on every text delta: fetches are
+// coalesced, at most one in flight and one more after it if anything
+// arrived meanwhile.
+let fetching: Promise<void> | null = null;
+let again = false;
+
 /** Fetch what changed in the session since the last seq. */
-export async function refreshAssistant(): Promise<void> {
-  const id = view.id;
-  if (!id) return;
-  try {
-    const snap = await assistantApi.snapshot(id, view.state.headSeq);
-    if (view.id === id) set({ state: mergeSnapshot(view.state, snap), error: null });
-  } catch (e) {
-    if (view.id === id) set({ error: message(e) });
+export function refreshAssistant(): Promise<void> {
+  if (fetching) {
+    again = true;
+    return fetching;
   }
+  fetching = (async () => {
+    try {
+      do {
+        again = false;
+        const id = view.id;
+        if (!id) return;
+        try {
+          const snap = await assistantApi.snapshot(id, view.state.headSeq);
+          if (view.id === id) set({ state: mergeSnapshot(view.state, snap), error: null });
+        } catch (e) {
+          if (view.id === id) set({ error: message(e) });
+        }
+      } while (again);
+    } finally {
+      fetching = null;
+    }
+  })();
+  return fetching;
 }
 
 /** Open a session about `context` (none: a bare one). */
@@ -80,9 +100,7 @@ async function openSession(context: AssistantContext | null): Promise<void> {
   try {
     const { id } = await assistantApi.open({ stream: scope.stream, thread: scope.thread, context });
     set({ id, opening: false });
-    unsubscribe = assistantApi.subscribe((changed) => {
-      if (changed === id) void refreshAssistant();
-    });
+    unsubscribe = assistantApi.subscribe(id, () => void refreshAssistant());
     await refreshAssistant();
   } catch (e) {
     set({ opening: false, error: message(e) });

@@ -43,7 +43,7 @@ export function PageMenu({ actions, ask, label, openWith, backlinks, outbound, p
   const thread = useSelectedThreadId();
   const items = pageMenuItems({
     actions,
-    ask: ask ? { askAssistant: () => void askAssistant({ kind: "page", uri: ask.ref, ...(label ? { label } : {}) }) } : undefined,
+    ask: ask ? { askAssistant: () => void askAssistant({ kind: "page", uri: ask.ref, label: label ?? null }) } : undefined,
     context: ask
       ? { add: () => void addToContext({ uri: ask.ref, label }), disabledReason: addDisabledReason(thread) }
       : undefined,

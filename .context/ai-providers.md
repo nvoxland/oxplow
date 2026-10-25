@@ -463,6 +463,9 @@ Sessions live in memory by id (`ast<n>`) and are gone on restart.
   (`AiService::record_agent_call`): role `assistant`, caller
   `assistant:<id>`, its tokens, latency and outcome; the request kept is
   the conversation and the tools' names.
+- **A picked model keeps the role's `restrict`.** `agent_model` gives a
+  person's pick the `assistant` binding's restrictions (no SQL tool, …), so
+  picking another model doesn't lift what the person forbade for the role.
 - **No model.** `assistant_open` still succeeds; the snapshot's `problem`
   is `{ kind: no_model }` and a prompt is refused `NO_MODEL`. Picking a
   model clears it.

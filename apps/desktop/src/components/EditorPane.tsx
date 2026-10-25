@@ -515,7 +515,7 @@ export function EditorPane({
         const sel = editor?.getSelection?.();
         const model = editor?.getModel();
         if (!editor || !model || !sel || sel.isEmpty() || !filePath) return;
-        void askAssistant({ kind: "selection", uri: selectionUri(filePath, sel), text: model.getValueInRange(sel) });
+        void askAssistant({ kind: "selection", uri: selectionUri(filePath, sel), text: model.getValueInRange(sel), label: null });
       },
     },
     {

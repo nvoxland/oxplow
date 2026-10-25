@@ -1029,7 +1029,19 @@ impl AiService {
                                 choice.provider
                             ))
                         })?;
-                    (provider, choice.clone())
+                    // A picked model is still the role's: the person's
+                    // restrictions on the role's binding bind it too.
+                    let restrict = self
+                        .resolve(&Role::Builtin(role))
+                        .map(|(_, b)| b.restrict)
+                        .unwrap_or_default();
+                    (
+                        provider,
+                        RoleBinding {
+                            restrict,
+                            ..choice.clone()
+                        },
+                    )
                 }
                 None => self.resolve(&Role::Builtin(role))?,
             };
@@ -2677,6 +2689,38 @@ mod typed_tests {
                 }),
             )
             .unwrap();
+    }
+
+    /// A model the person picks for the Assistant is still under the
+    /// `assistant` binding's `restrict`: the pick doesn't lift it (here, no
+    /// SQL tool).
+    #[tokio::test]
+    async fn a_picked_model_obeys_the_roles_restrictions() {
+        use oxplow_domain::ai::AiRestriction;
+        let fx = fixture("openai_compatible", None, typed_reply("observed")).await;
+        let pick = RoleBinding::new("p", "other");
+        let free = fx
+            .svc
+            .agent_model(BuiltinRole::Assistant, Some(&pick))
+            .await
+            .unwrap();
+        assert!(!free.binding.forbids(AiRestriction::Sql));
+        fx.svc
+            .set_role(
+                &Role::ASSISTANT,
+                Some(RoleBinding {
+                    restrict: [AiRestriction::Sql].into_iter().collect(),
+                    ..RoleBinding::new("p", "m")
+                }),
+            )
+            .unwrap();
+        let picked = fx
+            .svc
+            .agent_model(BuiltinRole::Assistant, Some(&pick))
+            .await
+            .unwrap();
+        assert_eq!(picked.binding.model, "other");
+        assert!(picked.binding.forbids(AiRestriction::Sql));
     }
 
     /// A person's restriction on a binding refuses a typed request needing

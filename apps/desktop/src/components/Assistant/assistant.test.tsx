@@ -24,7 +24,8 @@ const model = await import("./assistantModel.js");
 let snap: AssistantSnapshot;
 const calls: string[] = [];
 let opened: unknown[] = [];
-let notify: (id: string, seq: number) => void = () => {};
+let notify: (seq: number) => void = () => {};
+let snapshots = 0;
 const backend: AssistantBackend = {
   open: async (a) => {
     opened.push(a);
@@ -34,10 +35,13 @@ const backend: AssistantBackend = {
   cancel: async () => void calls.push("cancel"),
   set: async (_id, c) => void calls.push(`set:${JSON.stringify(c)}`),
   answer: async (_id, ask, allow) => void calls.push(`answer:${ask}:${allow}`),
-  snapshot: async (_id, since) => ({ ...snap, items: snap.items.filter((i) => i.seq > since) }),
+  snapshot: async (_id, since) => {
+    snapshots++;
+    return { ...snap, items: snap.items.filter((i) => i.seq > since) };
+  },
   handoff: async (_id, to) => void calls.push(`handoff:${to}`),
   close: async () => void calls.push("close"),
-  subscribe: (f) => {
+  subscribe: (_id, f) => {
     notify = f;
     return () => {};
   },
@@ -46,6 +50,7 @@ const backend: AssistantBackend = {
 const idleSnap = (items: AssistantItem[] = []): AssistantSnapshot => ({
   status: "idle",
   items,
+  seq: items.reduce((m, i) => Math.max(m, i.seq), 0),
   model: { provider: "p", model: "m" },
   models: [{ provider: "p", model: "m", label: "p · m" }],
   allowChanges: false,
@@ -58,6 +63,7 @@ beforeEach(() => {
   snap = idleSnap();
   calls.length = 0;
   opened = [];
+  snapshots = 0;
   undone.length = 0;
   setAssistantBackend(backend);
   setAssistantScope({ stream: "str1", thread: "thr1" });
@@ -99,7 +105,7 @@ test("only the latest turn's completed, audited calls undo together, newest firs
     id,
     seq: id,
     type: "tool",
-    call: { id: `c${id}`, title: "t", name: null, kind: "other", status: "completed", locations: [], rawInput: null, rawOutput: null, text: [], auditId: audit },
+    call: { id: `c${id}`, title: "t", name: null, kind: "other", status: "completed", locations: [], rawInput: null, rawOutput: null, diffs: [], text: [], auditId: audit },
   });
   const s = { ...model.initialState(), items: [user(1, "a"), tool(2, 10), user(3, "b"), tool(4, 11), tool(5, null), tool(6, 12)] };
   expect(model.lastTurnUndoable(s).map((c) => c.auditId)).toEqual([12, 11]);
@@ -172,7 +178,7 @@ test("a waiting card is answered with Allow or Decline", async () => {
 test("a finished call can be undone, and the turn's calls together", async () => {
   snap = idleSnap([
     user(1, "tidy"),
-    { id: 2, seq: 2, type: "tool", call: { id: "c", title: "Rename", name: null, kind: "other", status: "completed", locations: [], rawInput: null, rawOutput: null, text: ["done"], auditId: 42 } },
+    { id: 2, seq: 2, type: "tool", call: { id: "c", title: "Rename", name: null, kind: "other", status: "completed", locations: [], rawInput: null, rawOutput: null, diffs: [], text: ["done"], auditId: 42 } },
     agent(3, "Renamed."),
   ]);
   await askAssistant(null);
@@ -193,7 +199,7 @@ test("the transcript follows backend changes, and the badge counts a running tur
   );
   await waitFor(() => view.getByTestId("assistant-input"));
   snap = { ...idleSnap([user(1, "hi"), agent(2, "hello")]), status: "running" };
-  notify("ast1", 2);
+  notify(2);
   await waitFor(() => expect(view.getByTestId("assistant-item-2").textContent).toContain("hello"));
   expect(view.getByTestId("badge").textContent).toBe("1");
 });
@@ -205,4 +211,16 @@ test("asking about something new starts a new session when the current one has t
   expect(opened.length).toBe(2);
   expect(calls).toContain("close");
   expect(dockStore.get().open).toBe("assistant");
+});
+
+test("a flood of changes fetches at most one snapshot in flight and one after", async () => {
+  await askAssistant(null);
+  const view = render(body());
+  await waitFor(() => view.getByTestId("assistant-input"));
+  const before = snapshots;
+  snap = idleSnap([user(1, "hi"), agent(2, "hello")]);
+  for (let seq = 1; seq <= 50; seq++) notify(seq);
+  await waitFor(() => expect(view.getByTestId("assistant-item-2")).toBeTruthy());
+  await new Promise((r) => setTimeout(r, 30));
+  expect(snapshots - before).toBeLessThanOrEqual(2);
 });

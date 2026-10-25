@@ -326,9 +326,11 @@ describe("rowMention", () => {
 describe("rowAssistantContext", () => {
   test("Ask the Assistant on a row asks about the page it links to, else the row as text", () => {
     const linked = lens({ columns: [{ key: "sha", label: null, link: { kind: "commit", from: null, line: null } }] });
-    expect(rowAssistantContext(linked, ["sha", "subject"], ["abc123", "Fix"])).toEqual({ kind: "page", uri: "oxplow:oxplow/commit?sha=abc123" });
+    expect(rowAssistantContext(linked, ["sha", "subject"], ["abc123", "Fix"])).toEqual({ kind: "page", uri: "oxplow:oxplow/commit?sha=abc123", label: null });
     expect(rowAssistantContext(lens(), ["id", "title"], [42, "Fix it"])).toEqual({
       kind: "selection",
+      uri: null,
+      label: null,
       text: '[oxplow lens review/waiting row: id=42, title="Fix it"]',
     });
   });

@@ -610,7 +610,7 @@ export function rowRef(lens: Lens, columns: string[], row: SqlCell[]): string | 
  *  or — a row that links nowhere — the row itself as text (a lens mention). */
 export function rowAssistantContext(lens: Lens, columns: string[], row: SqlCell[]): AssistantContext {
   const c = rowContext(lens, columns, row);
-  return "uri" in c ? { kind: "page", uri: c.uri } : { kind: "selection", text: c.text };
+  return "uri" in c ? { kind: "page", uri: c.uri, label: null } : { kind: "selection", uri: null, text: c.text, label: null };
 }
 
 /** Add to Context on a lens row: the first page the row links to, else

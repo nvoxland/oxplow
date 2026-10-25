@@ -12,7 +12,7 @@ export interface AssistantState {
   model: ModelChoice | null;
   models: AssistantSnapshot["models"];
   allowChanges: boolean;
-  problem: { kind: string; message: string } | null;
+  problem: AssistantSnapshot["problem"];
 }
 
 export function initialState(): AssistantState {
@@ -34,7 +34,7 @@ export function mergeSnapshot(state: AssistantState, s: AssistantSnapshot): Assi
   return {
     status: s.status,
     items,
-    headSeq: items.reduce((m, i) => Math.max(m, i.seq), state.headSeq),
+    headSeq: Math.max(state.headSeq, s.seq),
     model: s.model,
     models: s.models,
     allowChanges: s.allowChanges,

@@ -109,7 +109,7 @@ export function DiffPane({ streamId, spec, visible, onJumpToSource }: Props) {
           const sel = ed.getSelection();
           const model = ed.getModel();
           if (!sel || sel.isEmpty() || !model || !target) return;
-          void askAssistant({ kind: "selection", uri: selectionUri(target.path, sel, target.rev), text: model.getValueInRange(sel) });
+          void askAssistant({ kind: "selection", uri: selectionUri(target.path, sel, target.rev), text: model.getValueInRange(sel), label: null });
         },
       });
       modified.addAction({
