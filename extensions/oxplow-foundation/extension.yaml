@@ -956,6 +956,11 @@ commands:
     op: preview
     tool: preview_extension
     example: {"name": "my-extension"}
+  - name: extension.draft_status
+    summary: "How a stream's draft of an extension differs from what runs. Reads the extension's source in the stream's checkout (yours unless `stream_id` names another) and compares it with the running version: `differs`, the running `deployed_hash` (null when none runs) and the draft's `source_hash`, and for `pages` (lenses and page files, by id) and `commands` (by name) the `added`, `removed` and `changed` ones. `draft` is true when that checkout is not the main stream's: a draft deploys only once its change is on the main branch. A deploy that would remove a page or command warns about it."
+    scope: extensions.check
+    op: draft_status
+    example: {"name": "my-extension"}
   - name: extension.validate
     summary: "Check an extension after editing it. The same report as `oxplow extension check`: manifest and lifecycle errors with file:line, unresolved cross-references, plus a dry run of every lens and advisory (SQL errors, `columns` keys the query doesn't return). `ok: true` means it works; `warnings` are worth fixing but don't block."
     scope: extensions.check

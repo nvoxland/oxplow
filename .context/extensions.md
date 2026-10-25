@@ -1254,6 +1254,11 @@ source directly: an edit changes nothing until it is deployed.
   stream's agent edits, checks and tests it there, and it deploys once the
   change reaches the primary's branch. A source outside the project has one
   copy, so any stream deploys it (`extension_deploy::refuse_draft_deploy`).
+  `oxplow.extension.draft_status { name, stream_id? }` (a read,
+  `extension_deploy::source_diff`) says how a stream's source differs from
+  the running version: pages (lenses and page files) and commands added,
+  removed and changed, and whether the checkout is a draft. A deploy that
+  removes a page or command still goes, with a warning naming them.
 - **Deployment:** `.oxplow/runtime/extensions/<name>/<hash>/`, where
   `<hash>` is the hash of the source (`extension_store::source_hash`: sha256
   over each file's relative path and bytes, dot entries skipped, cut to 16
