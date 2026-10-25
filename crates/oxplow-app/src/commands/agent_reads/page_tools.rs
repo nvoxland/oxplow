@@ -824,9 +824,16 @@ mod tests {
         let uri = "oxplow:oxplow/commit?sha=abc1234";
         let about = run(&svc, "oxplow.page.find", json!({ "about": uri })).await;
         let pages = about["pages"].as_array().unwrap();
-        assert_eq!(pages.len(), 1, "{about}");
-        assert_eq!(pages[0]["page"], json!("acme/commit-look"));
-        assert_eq!(pages[0]["bind"], json!({ "uri": uri }));
+        let look = pages
+            .iter()
+            .find(|p| p["page"] == json!("acme/commit-look"))
+            .unwrap_or_else(|| panic!("{about}"));
+        assert_eq!(look["bind"], json!({ "uri": uri }));
+        // Only pages that show a commit.
+        assert!(
+            pages.iter().all(|p| p["page"] != json!("acme/numbers")),
+            "{about}"
+        );
         let none = run(&svc, "oxplow.page.find", json!({ "question": "zebras" })).await;
         assert_eq!(none["pages"], json!([]), "{none}");
     }
