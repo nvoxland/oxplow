@@ -7,8 +7,8 @@
    <name>` (the collector over the fixture returns the expected facts).
 2. **Run the collector now:** the `oxplow.collector.sync` command,
    `{ "collector": "<extension name>/<ns>.scan" }` (`project/<id>`
-   for a project collector) — runs it against the latest snapshot and records its
-   facts; returns the `facts` count. `oxplow.metric.rebuild`
+   for a project collector) — runs it against the tree as it is now (it takes a snapshot first, so a file you
+   just wrote is read) and records its facts; returns the `facts` count. `oxplow.metric.rebuild`
    (`{ "force": true }` to redo everything) runs every snapshot collector's
    whole-tree baseline.
 3. **Read the metric back** with `oxplow_query_sql` and the metric function; slice it

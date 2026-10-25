@@ -99,12 +99,7 @@ test("TODOs are sorted by the model, and a decision from the board or the lens s
       join(daemon.project, "src", "lib.rs"),
       "// TODO: fix the bug in the parser\nfn a() {}\n// TODO: tidy the module\nfn b() {}\n",
     );
-    // A collector reads the stream's latest snapshot, and a file written now
-    // reaches one only when the watcher's quiet trigger takes it (seconds
-    // later, and later still under load). Take one here instead of waiting:
-    // the rebuild takes a snapshot of the tree as it is and runs the
-    // collectors over it.
-    await run(daemon, "oxplow.metric.rebuild", {});
+    await run(daemon, "oxplow.collector.sync", { collector: "triage/todos" });
     await until("the TODOs to be sorted", 30_000, async () => (await facts(daemon)).length === 2);
     expect(await facts(daemon)).toEqual([
       ["src/lib.rs", 1, "bug"],

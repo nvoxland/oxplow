@@ -1356,7 +1356,13 @@ reached through `run_command`, audited like every command):
 
 Running one fact collector now is **`oxplow.collector.sync { collector }`** (the
 one manual run for every collector; `metric.run` is deleted) — it reaches
-`MetricsService::run_collector_by_key` and returns the `facts` count (see
+`MetricsService::run_collector_by_key` and returns the `facts` count. **It reads
+the tree as it is now:** a fact collector's sync first takes a `manual` snapshot
+of the primary worktree (`MetricsService::snapshot_now`, the same stat-diff and
+drain `oxplow.metric.rebuild` uses), so a file written a moment ago is in what
+the collector reads rather than waiting for the watcher's quiet trigger (3 s after
+the last change). Nothing changed since the latest snapshot → `request_snapshot`
+takes none and the latest is read. Pinned by `collector_sync_sees_a_file_written_just_before_it` (see
 "Producers" below and [commands.md](./commands.md)).
 
 A stream defaults to the caller's, else the primary; an agent may only

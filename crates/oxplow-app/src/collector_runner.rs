@@ -1834,6 +1834,12 @@ impl CollectorRunner {
                      again (`oxplow.contribution.enable`, Settings → Extensions)."
                 )));
             }
+            // It reads the tree as it is now, not the last snapshot the
+            // watcher happened to take.
+            self.metrics
+                .snapshot_now()
+                .await
+                .map_err(RunCollectorError::Failed)?;
             let facts = self
                 .metrics
                 .run_collector_by_key(owner, id, None, run)

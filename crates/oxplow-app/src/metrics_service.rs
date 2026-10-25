@@ -1021,6 +1021,42 @@ impl MetricsService {
         stale
     }
 
+    /// A snapshot of the primary worktree as it is now: the one way a
+    /// caller that must see just-written files gets one (`rebuild_baseline`
+    /// and `oxplow.collector.sync` both). It waits for the startup sweep,
+    /// runs the ordinary stat-diff (which marks only files whose content
+    /// changed since their last capture, not the whole tree) and drains the
+    /// dirty set into a `manual` snapshot: real authored edits the fs-watch
+    /// would capture anyway, so attribution is correct by construction.
+    /// Nothing changed → no snapshot is taken (`request_snapshot` answers
+    /// `None`) and the latest existing one is the answer. `None` only when
+    /// the stream has no snapshot at all.
+    pub(crate) async fn snapshot_now(&self) -> Result<Option<i64>, String> {
+        let Some(captures) = &self.snapshot_captures else {
+            return Err("no snapshot captures wired".into());
+        };
+        let Some(capture) = captures.primary() else {
+            return Err("no primary snapshot capture registered".into());
+        };
+        capture.await_initial_ready().await;
+        capture
+            .enqueue_startup_diff()
+            .await
+            .map_err(|e| e.to_string())?;
+        let drained = capture
+            .request_snapshot(oxplow_domain::snapshot::SnapshotTrigger::Manual)
+            .await
+            .map_err(|e| e.to_string())?;
+        match drained {
+            Some(id) => Ok(Some(id)),
+            None => self
+                .snapshot_store
+                .latest_snapshot_id_for_stream(*capture.stream_id())
+                .await
+                .map_err(|e| e.to_string()),
+        }
+    }
+
     /// Bring every `per-path` metric up to date over the WHOLE tree (tsk50).
     ///
     /// A baseline no longer fabricates a full-tree snapshot (tsk71 — that
@@ -1079,34 +1115,7 @@ impl MetricsService {
             }
         }
 
-        let Some(capture) = captures.primary() else {
-            return Err("no primary snapshot capture registered".into());
-        };
-        // Make sure the tree we anchor on is current: wait for the startup
-        // sweep, run the ordinary stat-diff (which marks only files whose
-        // content actually changed since their last capture — NOT the old
-        // pretend-everything-is-dirty full-tree enqueue), and drain the dirty
-        // set into a normal snapshot. Those rows are real authored edits the
-        // fs-watch would capture anyway — attribution is correct-by-
-        // construction. `None` = nothing changed; fall back to the latest
-        // existing snapshot.
-        capture.await_initial_ready().await;
-        capture
-            .enqueue_startup_diff()
-            .await
-            .map_err(|e| e.to_string())?;
-        let drained = capture
-            .request_snapshot(oxplow_domain::snapshot::SnapshotTrigger::Manual)
-            .await
-            .map_err(|e| e.to_string())?;
-        let snapshot_id = match drained {
-            Some(id) => Some(id),
-            None => self
-                .snapshot_store
-                .latest_snapshot_id_for_stream(oxplow_domain::StreamId::new(stream_val))
-                .await
-                .map_err(|e| e.to_string())?,
-        };
+        let snapshot_id = self.snapshot_now().await?;
         let Some(snapshot_id) = snapshot_id else {
             // Fresh project with no snapshot at all — nothing to baseline on.
             return Ok(BaselineReport {
@@ -4100,6 +4109,46 @@ def transform(input):
                 .await
                 .unwrap(),
             Some(2.0)
+        );
+    }
+
+    /// `oxplow.collector.sync` runs a snapshot collector over the tree as it
+    /// is now: a file written just before it, which no snapshot holds yet
+    /// (the watcher's quiet trigger is seconds away), is in what it reads.
+    /// A sync with nothing changed takes no snapshot of its own.
+    #[tokio::test]
+    async fn collector_sync_sees_a_file_written_just_before_it() {
+        let (svc, dir) = fixture().await;
+        enable(&svc, &["oxplow.rust.unsafe_blocks".into()], true).await;
+        let sync = || {
+            svc.commands.run(
+                &oxplow_domain::Actor::Human,
+                crate::collector_runner::SYNC,
+                serde_json::json!({ "collector": "oxplow-foundation/oxplow.rust.unsafe_blocks" }),
+                false,
+            )
+        };
+        let latest = || async {
+            svc.snapshot_store
+                .latest_snapshot_id_for_stream(oxplow_domain::StreamId::new(1))
+                .await
+                .unwrap()
+        };
+        std::fs::create_dir_all(dir.path().join("src")).unwrap();
+        std::fs::write(dir.path().join("src/a.rs"), "fn a() { unsafe { x(); } }\n").unwrap();
+        let out = sync().await.unwrap();
+        assert_eq!(
+            out.result["facts"], 1,
+            "the file written just before is read: {out:?}"
+        );
+        // Nothing changed since: the sync reads that snapshot and takes none.
+        let before = latest().await;
+        assert!(before.is_some(), "the first sync took a snapshot");
+        sync().await.unwrap();
+        assert_eq!(
+            latest().await,
+            before,
+            "an unchanged tree takes no snapshot"
         );
     }
 

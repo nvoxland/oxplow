@@ -715,7 +715,7 @@ commands:
     example: {"extension": "linear", "reference": {"schemaVersion": 1, "id": "0197a1c2-7b3e-7c4d-8a5f-1b2c3d4e5f60"}}
   # collectors.sync
   - name: collector.sync
-    summary: "Run an approved collector now, refreshing what it collects (runs the collector's program or script, which the bus doesn't own). It never approves: an unapproved exec collector is refused. A project report collector (`records:`) reads its report now and records what it parses in `thread` (an agent's own): point at the report, never report numbers yourself."
+    summary: "Run an approved collector now over the tree as it is (a fact collector takes a snapshot first, so a file just written is read), refreshing what it collects (runs the collector's program or script, which the bus doesn't own). It never approves: an unapproved exec collector is refused. A project report collector (`records:`) reads its report now and records what it parses in `thread` (an agent's own): point at the report, never report numbers yourself."
     scope: collectors.sync
     op: sync
     example: {"collector": "work/hot"}
