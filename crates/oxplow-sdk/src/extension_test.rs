@@ -317,6 +317,7 @@ fn withheld_target(ext: &Extension, input: &Value) -> Option<String> {
     let target = [
         (Kind::Lens, named("lens")),
         (Kind::Lens, named("form")),
+        (Kind::Page, named("page")),
         (Kind::Job, named("job")),
         (Kind::CustomComponent, named("component")),
         (Kind::Effect, named("effect")),

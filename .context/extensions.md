@@ -179,16 +179,18 @@ Manifest declarations are `exports: [{contribution, version, visibility}]`,
 `version` is optional: absent, whatever version the producer exports
 binds; given, it must equal the export's. The binding records the version
 it bound (`publicContracts.bindings[].version`). Guards name this
-extension's models, lenses, collectors, commands, effects, advisories, skills
-or providers. A guard's bindings must be declared and nonempty; unknown or
-duplicate names are errors. Models and lenses can read a public model with
-`import_ref('binding')`; tokenized calls infer a guard automatically. Strings,
+extension's models, lenses, pages, collectors, commands, effects, advisories,
+skills or providers. A guard's bindings must be declared and nonempty; unknown or
+duplicate names are errors. Models, lenses and a page's `sql` loaders can read
+a public model with `import_ref('binding')`; tokenized calls infer a guard automatically. Strings,
 comments and qualified function names are untouched. A model's binding becomes
 an ordinary `ref('<producer>/<model>')`, retaining lineage and native contract
-checks; a lens's becomes its quoted published view. SQL grants still apply.
+checks; a lens's or a page loader's becomes its quoted published view. An
+unavailable import withholds the page (and its slot mounts), and
+`extension test` skips the examples that run it. SQL grants still apply.
 `examples/extensions/effort-review` (producer: `exports` its `reviews`
 model) and `examples/extensions/review-badges` (consumer: an optional
-import read by a lens and a slot) are the working pair; their tests in
+import read by its pages and a slot mount) are the working pair; their tests in
 `crates/oxplow-sdk/tests/examples.rs` cover available, disabled, missing
 and another version. `extension check` and `extension test` print one line per binding from
 `public_contracts.bindings` (`oxplow_sdk::import_lines`: available, or the

@@ -87,7 +87,21 @@ pub fn describe(ext: &Extension) -> Vec<Descriptor> {
         };
         out.push(d);
     }
-    for p in &ext.pages {
+    for p in &ext.page_files {
+        let mut d = new(ContributionKind::Page, &p.slug, RunsOn::Mount);
+        d.needs = p.needs.clone();
+        d.source = DeclaredAt {
+            file: p.origin.running.clone(),
+            line: None,
+        };
+        out.push(d);
+    }
+    // A manifest `pages:` entry with no page file (until those entries go).
+    for p in ext
+        .pages
+        .iter()
+        .filter(|p| !ext.page_files.iter().any(|f| f.slug == p.id))
+    {
         let d = new(ContributionKind::Page, &p.id, RunsOn::Mount);
         out.push(d);
     }
@@ -100,6 +114,14 @@ pub fn describe(ext: &Extension) -> Vec<Descriptor> {
     }
     for (n, slot) in ext.ui.slots.iter().enumerate() {
         let d = new(ContributionKind::Slot, &slot.local_id(n), RunsOn::Mount);
+        out.push(d);
+    }
+    for (n, slot) in ext.ui.page_slots.iter().enumerate() {
+        let d = new(
+            ContributionKind::Slot,
+            &slot.local_id(ext.ui.slots.len() + n),
+            RunsOn::Mount,
+        );
         out.push(d);
     }
     for dec in &ext.ui.decorators {

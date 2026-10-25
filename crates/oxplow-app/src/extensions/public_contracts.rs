@@ -262,6 +262,16 @@ pub(super) fn prepare(ext: &mut Extension) {
                 lens.query.clone(),
             )
         }))
+        .chain(ext.page_files.iter().flat_map(|page| {
+            page.loaders.iter().filter_map(|decl| match &decl.loader {
+                crate::pages::schema::Loader::Sql { sql, .. } => Some((
+                    ContributionId::new(&ext.name, ContributionKind::Page, &page.slug),
+                    page.origin.running.clone(),
+                    sql.clone(),
+                )),
+                _ => None,
+            })
+        }))
         .collect();
     for (contribution, file, sql) in queries {
         if !sql.to_ascii_lowercase().contains("import_ref") {
@@ -320,6 +330,7 @@ pub(super) fn prepare(ext: &mut Extension) {
             guard.contribution.kind,
             ContributionKind::Model
                 | ContributionKind::Lens
+                | ContributionKind::Page
                 | ContributionKind::Collector
                 | ContributionKind::Command
                 | ContributionKind::Job
@@ -328,7 +339,7 @@ pub(super) fn prepare(ext: &mut Extension) {
                 | ContributionKind::Skill
                 | ContributionKind::Provider
         ) {
-            invalid(ext, &guard.source, format!("import guard `{}` must name a model, lens, collector, command, job, effect, advisory, skill or provider", guard.contribution));
+            invalid(ext, &guard.source, format!("import guard `{}` must name a model, lens, page, collector, command, job, effect, advisory, skill or provider", guard.contribution));
         }
         if guard.imports.is_empty() {
             invalid(
@@ -649,6 +660,10 @@ fn remove_guarded(ext: &mut Extension, id: &ContributionId) {
             model.decl.name != local && model.twin.as_ref().is_none_or(|twin| twin.of != local)
         }),
         ContributionKind::Lens => ext.lenses.retain(|lens| lens.slug != local),
+        ContributionKind::Page => {
+            ext.page_files.retain(|page| page.slug != local);
+            ext.pages.retain(|page| page.id != local);
+        }
         ContributionKind::Collector => ext.collectors.retain(|collector| collector.id != local),
         ContributionKind::Command => ext.commands.retain(|command| command.name != local),
         ContributionKind::Job => ext.jobs.retain(|job| job.id != local),
@@ -768,6 +783,18 @@ fn prune_mounts(
                     removed.insert(id.clone());
                 }
             }
+            let lens_slots = ext.ui.slots.len();
+            let mut n = 0;
+            ext.ui.page_slots.retain(|slot| {
+                let id = slot.local_id(lens_slots + n);
+                n += 1;
+                if pages.contains(&slot.page) {
+                    true
+                } else {
+                    removed.insert(ContributionId::new(&ext.name, ContributionKind::Slot, &id));
+                    false
+                }
+            });
             ext.ui.replacements.retain(|replacement| {
                 let present = match &replacement.page_id {
                     Some(page) => pages.contains(page),
@@ -839,6 +866,13 @@ fn bind_sql(ext: &mut Extension) {
     }
     for lens in &mut ext.lenses {
         lens.query = rewrite_sql(&lens.query, bindings, false);
+    }
+    for page in &mut ext.page_files {
+        for decl in &mut page.loaders {
+            if let crate::pages::schema::Loader::Sql { sql, .. } = &mut decl.loader {
+                *sql = rewrite_sql(sql, bindings, false);
+            }
+        }
     }
 }
 

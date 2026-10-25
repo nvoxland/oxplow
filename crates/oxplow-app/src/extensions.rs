@@ -2913,6 +2913,14 @@ pub struct PageSlot {
     pub size: Option<TileSize>,
 }
 
+impl PageSlot {
+    /// Its contribution id among the extension's slot mounts: the
+    /// `n`th, after its lens mounts (`<host>.<slot>-<n>`, `/` → `.`).
+    pub fn local_id(&self, n: usize) -> String {
+        format!("{}.{}-{n}", self.host.replace('/', "."), self.slot)
+    }
+}
+
 /// What an extension adds to the core UI (`ui:` in its manifest).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
