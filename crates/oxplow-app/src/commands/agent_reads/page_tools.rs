@@ -343,8 +343,122 @@ fn loaders_json(run: &PageRun, only: Option<&str>) -> Value {
     Value::Object(out)
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ShowPageInput {
+    /// A page to show: `<extension>/<slug>` (see `oxplow.page.find`).
+    #[serde(default)]
+    pub page: Option<String>,
+    /// Its param values by name (as for `oxplow.page.run`).
+    #[serde(default)]
+    pub params: Option<BTreeMap<String, Value>>,
+    /// Or a page of your own as YAML (`title`, `data:` with sql / rows /
+    /// page loaders, `view:`; it only reads): kept as a view the person
+    /// can save to the wiki or as a page.
+    #[serde(default)]
+    pub spec: Option<String>,
+}
+
+/// A param value as a uri carries it.
+fn uri_value(v: &Value) -> String {
+    match v {
+        Value::String(s) => s.clone(),
+        other => other.to_string(),
+    }
+}
+
+fn show_op(services: ServicesSlot) -> Op {
+    Op::new(
+        "pages.show",
+        "show",
+        schema::<ShowPageInput>(),
+        false,
+        Handler::External(Arc::new(move |invocation: Invocation, input| {
+            let services = services.clone();
+            Box::pin(async move {
+                let p: ShowPageInput = parse(input)?;
+                let svc = services.get()?;
+                let ctx = context(&svc, &invocation, None, None).await?;
+                let (uri, target) = match (&p.page, &p.spec) {
+                    (Some(page), None) => {
+                        let (ext, slug) = page.split_once('/').ok_or_else(|| {
+                            invalid("/page", format!("`{page}` isn't `<extension>/<slug>`"))
+                        })?;
+                        let core = svc
+                            .extension_catalog
+                            .named(&svc.layout.project_dir, ext)
+                            .is_ok_and(|e| e.namespace == crate::extensions::CORE_NAMESPACE);
+                        let named = if core { slug.to_string() } else { page.clone() };
+                        let values: Vec<(String, String)> = p
+                            .params
+                            .iter()
+                            .flatten()
+                            .map(|(k, v)| (k.clone(), uri_value(v)))
+                            .collect();
+                        let pairs: Vec<(&str, &str)> = values
+                            .iter()
+                            .map(|(k, v)| (k.as_str(), v.as_str()))
+                            .collect();
+                        (
+                            oxplow_domain::uri::build::page_uri(&named, &pairs),
+                            RunTarget::Page(page.clone()),
+                        )
+                    }
+                    (None, Some(yaml)) => {
+                        let page = parse_inline_page(yaml).map_err(|m| invalid("/spec", m))?;
+                        let thread = invocation.actor().thread_id().map(|t| t.to_string());
+                        let id = svc.page_runs.keep_view(&page.title, thread, yaml);
+                        (
+                            oxplow_domain::uri::build::view_uri(&id),
+                            RunTarget::Spec(Arc::new(page)),
+                        )
+                    }
+                    _ => {
+                        return Err(invalid(
+                            "/page",
+                            "give `page` or `spec`, one of them".to_string(),
+                        ))
+                    }
+                };
+                let run = PageRunner::of(&svc)
+                    .run(RunRequest {
+                        target,
+                        params: cells(p.params.clone()),
+                        ctx: ctx.clone(),
+                        viewer: invocation.actor().clone(),
+                    })
+                    .await
+                    .map_err(|e| page_error(p.page.as_deref().unwrap_or("inline"), e))?;
+                let text = crate::pages::text::page_text(&svc, &svc.layout.project_dir, &run, &ctx)
+                    .await
+                    .map_err(failed)?;
+                // Beside the conversation: a tab of the caller's thread in
+                // its window, if one is open.
+                let opened = svc
+                    .client_host
+                    .call(
+                        invocation.actor(),
+                        "tabs.write",
+                        "open",
+                        json!({ "uri": uri }),
+                    )
+                    .await;
+                let mut result = json!({ "uri": uri, "text": text, "opened": opened.is_ok() });
+                if let Err(e) = opened {
+                    result["why"] = json!(e.to_string());
+                }
+                Ok(HandlerOutput {
+                    result,
+                    ..HandlerOutput::default()
+                })
+            })
+        })),
+    )
+}
+
 pub fn ops(services: ServicesSlot) -> Vec<Op> {
     vec![
+        show_op(services.clone()),
         run_op(services.clone()),
         find_op(services.clone()),
         definition_op(services.clone()),
@@ -829,5 +943,70 @@ mod draft_tests {
         );
         let live = run(json!({ "page": "acme/numbers", "format": "json" })).await;
         assert_eq!(live["title"], json!("Numbers"), "{live}");
+    }
+}
+
+#[cfg(test)]
+mod show_tests {
+    use oxplow_domain::Actor;
+    use serde_json::json;
+
+    use crate::pages::test_support::fixture;
+
+    /// An agent shows an inline page: it is kept as an ephemeral view
+    /// (`oxplow:oxplow/view?id=…`) a window opens like a page; a page by
+    /// id is shown at its own uri. With no window to open it in, it says
+    /// so and is still there to open.
+    #[tokio::test]
+    async fn an_agent_shows_an_inline_page_as_a_view() {
+        let (_dir, svc) = fixture().await;
+        let out = svc
+            .commands
+            .run(
+                &Actor::Human,
+                "oxplow.page.show",
+                json!({ "spec": "title: Mine\ndata:\n  a: { sql: SELECT 5 AS five }\nview: { viz: number, from: a }\n" }),
+                false,
+            )
+            .await
+            .unwrap()
+            .result;
+        let uri = out["uri"].as_str().unwrap().to_string();
+        assert!(uri.starts_with("oxplow:oxplow/view?id="), "{out}");
+        assert_eq!(out["opened"], json!(false), "{out}");
+        assert!(out["text"].as_str().unwrap().contains("# Mine"), "{out}");
+        let id = uri.rsplit('=').next().unwrap();
+        let view = svc.page_runs.view(id).expect("kept");
+        assert_eq!(view.title, "Mine");
+        let page = svc
+            .commands
+            .run(
+                &Actor::Human,
+                "oxplow.page.show",
+                json!({ "page": "acme/numbers", "params": { "n": 3 } }),
+                false,
+            )
+            .await
+            .unwrap()
+            .result;
+        assert_eq!(
+            page["uri"],
+            json!("oxplow:oxplow/page?n=3&page=acme/numbers"),
+            "{page}"
+        );
+        let bad = svc
+            .commands
+            .run(
+                &Actor::Human,
+                "oxplow.page.show",
+                json!({ "spec": "title: Bad\nview: { slot: s }\n" }),
+                false,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(bad, oxplow_domain::CommandError::Invalid { .. }),
+            "{bad:?}"
+        );
     }
 }

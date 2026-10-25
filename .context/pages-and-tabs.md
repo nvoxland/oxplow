@@ -285,6 +285,14 @@ draft's code never acts). `oxplow.page.run { page, draft: true }` reads
 the caller's stream's draft; its text starts `Draft of <page> (stream
 strN, not deployed)` and its json carries `draft: { stream, checkout }`.
 
+**Showing a page** (`oxplow.page.show { page, params } | { spec }`,
+the agent's `oxplow_show_page`): a page by id opens at its uri; an
+inline `spec` is kept in memory as a **view** (`PageRuns::keep_view`,
+`oxplow:oxplow/view?id=<id>`), opened with `open_page { view }` — gone
+with a daemon restart. It opens as a tab of the caller's thread when a
+window is open (`tabs.write/open`; `opened`, else `why`) and returns the
+page's text.
+
 **Open runs** (`pages/open_runs.rs`, `Services.page_runs`): a window opens
 a run (`open_page { page | specYaml, params, streamId, threadId, client }`
 → `{ runId, run }`) and closes it (`close_page`); a pick, filter or

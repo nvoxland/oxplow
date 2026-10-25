@@ -2391,6 +2391,8 @@ mod tests {
                 // A page's action runs its command through the bus as the
                 // page acting for the presser: the command's own record.
                 "oxplow.page.run_action",
+                // Keeps a view in memory and opens a tab in the window.
+                "oxplow.page.show",
                 // Settings → Integrations: a provider's process starts, stops
                 // and is checked, and its credentials are in the OS keychain.
                 "oxplow.provider.add_instance",

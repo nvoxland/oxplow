@@ -404,6 +404,13 @@ pub const SCOPES: &[Scope] = &[
         summary: "Read pages: the one a thread's person has open, what a page shows, what it is made of.",
     },
     Scope {
+        id: "pages.show",
+        access: Access::Record,
+        host: Host::Daemon,
+        spends: false,
+        summary: "Show a page beside the conversation: a page by id, or an inline page of your own.",
+    },
+    Scope {
         id: "pages.write",
         access: Access::Write,
         host: Host::Daemon,

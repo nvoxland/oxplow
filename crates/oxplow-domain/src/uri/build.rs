@@ -302,6 +302,11 @@ pub fn page_uri(page: &str, params: &[(&str, &str)]) -> String {
     of(r::PAGE, &all)
 }
 
+/// An ephemeral page an agent showed, by its id.
+pub fn view_uri(id: &str) -> String {
+    keyed(r::VIEW, id)
+}
+
 /// An extension's page (`<extension>/<id>`).
 pub fn extension_page_uri(extension: &str, page: &str) -> String {
     page_uri(&format!("{extension}/{page}"), &[])

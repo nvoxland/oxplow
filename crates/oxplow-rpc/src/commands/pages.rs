@@ -46,15 +46,29 @@ async fn context(svc: &Services, stream_id: Option<&str>, thread_id: Option<&str
 }
 
 /// Run a page and keep it open for `client` (the window's id).
+#[allow(clippy::too_many_arguments)]
 pub async fn open_page(
     svc: &Services,
     page: Option<String>,
     spec_yaml: Option<String>,
+    view: Option<String>,
     params: Option<BTreeMap<String, SqlCell>>,
     stream_id: Option<String>,
     thread_id: Option<String>,
     client: String,
 ) -> Result<OpenedRun, IpcError> {
+    // A view an agent showed: its page, as it was kept.
+    let spec_yaml = match view {
+        Some(id) => Some(
+            svc.page_runs
+                .view(&id)
+                .ok_or_else(|| {
+                    DomainError::Invalid(format!("no view `{id}` (it went with a restart)"))
+                })?
+                .spec_yaml,
+        ),
+        None => spec_yaml,
+    };
     let req = RunRequest {
         target: target(page, spec_yaml)?,
         params: params.unwrap_or_default(),

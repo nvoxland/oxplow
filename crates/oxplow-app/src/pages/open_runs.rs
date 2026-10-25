@@ -44,10 +44,23 @@ struct OpenRun {
     seq: u64,
 }
 
+/// An ephemeral page an agent showed (`oxplow.page.show { spec }`): its
+/// YAML, kept in memory so a window can open it by id.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct View {
+    pub id: String,
+    pub title: String,
+    /// The thread that showed it.
+    pub thread: Option<String>,
+    pub spec_yaml: String,
+}
+
 /// The open runs.
 #[derive(Clone, Default)]
 pub struct PageRuns {
     runs: Arc<Mutex<HashMap<String, OpenRun>>>,
+    views: Arc<Mutex<HashMap<String, View>>>,
     /// Where the change loop's signals go once [`PageRuns::start`] ran.
     signals: Arc<Mutex<Option<tokio::sync::mpsc::UnboundedSender<Signal>>>>,
 }
@@ -140,6 +153,26 @@ impl PageRuns {
             },
         );
         Ok((id, run))
+    }
+
+    /// Keep an inline page an agent showed; its id is what its uri names.
+    pub fn keep_view(&self, title: &str, thread: Option<String>, spec_yaml: &str) -> String {
+        let id = uuid::Uuid::now_v7().simple().to_string();
+        self.views.lock().insert(
+            id.clone(),
+            View {
+                id: id.clone(),
+                title: title.to_string(),
+                thread,
+                spec_yaml: spec_yaml.to_string(),
+            },
+        );
+        id
+    }
+
+    /// The view kept as `id`.
+    pub fn view(&self, id: &str) -> Option<View> {
+        self.views.lock().get(id).cloned()
     }
 
     pub fn close(&self, id: &str) {

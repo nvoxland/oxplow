@@ -19,6 +19,8 @@ import { onRemoteReconnect } from "./tauri-bridge/transport.js";
 export interface PageKey {
   page?: string;
   specYaml?: string;
+  /** An ephemeral view an agent showed (`oxplow:oxplow/view?id=…`). */
+  view?: string;
   params: Record<string, SqlCell>;
   streamId: string | null;
   threadId: string | null;
@@ -88,7 +90,7 @@ export function keyOf(key: PageKey): string {
   const params = Object.keys(key.params)
     .sort()
     .map((k) => [k, key.params[k]]);
-  return JSON.stringify([key.page ?? null, key.specYaml ?? null, params, key.streamId, key.threadId]);
+  return JSON.stringify([key.page ?? null, key.specYaml ?? null, key.view ?? null, params, key.streamId, key.threadId]);
 }
 
 export function createPageRuns(transport: PageRunsTransport) {
@@ -270,6 +272,7 @@ export function daemonTransport(): PageRunsTransport {
         await commands.openPage(
           key.page ?? null,
           key.specYaml ?? null,
+          key.view ?? null,
           key.params,
           key.streamId,
           key.threadId,

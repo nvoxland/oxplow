@@ -509,6 +509,11 @@ resources:
     params: { page: { required: true } }
     additional: true
     icon: file-text
+  - name: view
+    label: View
+    params: { id: { required: true } }
+    additional: true
+    icon: sparkles
   - name: panel
     label: Panel
     params: { panel: { required: true, pattern: '^[a-z][a-z0-9-]*/[a-z][a-z0-9_.-]*$' } }
@@ -1273,6 +1278,12 @@ commands:
     op: find
     tool: find_page
     example: {"question": "which tests failed this week"}
+  - name: page.show
+    summary: "Show the person a page beside the conversation. Give `page` (`<extension>/<slug>`, from `oxplow.page.find`) with `params`, or `spec`: a page of your own as YAML (`title`, `data:` with sql / rows / page loaders, `view:` with table, list, chart, tree, number or markdown nodes; it only reads) — kept as a view (`oxplow:oxplow/view?id=…`) the person can save to the wiki or as a page. It opens as a tab of your thread when their window is open (`opened`), and returns the page's text so you can keep your prose short."
+    scope: pages.show
+    op: show
+    tool: show_page
+    example: {"spec": "title: Failing tests\ndata:\n  t: { sql: \"SELECT name, status FROM v_test_case WHERE status = 'failed'\" }\nview: { viz: table, from: t }\n"}
   - name: page.definition
     summary: "What a page is made of. Its extension, source file and deployment, its params, its loaders (each one's sql, command, page or rows) and its node tree, each node with the page and file it comes from and the loader it shows — embedded pages and mounted slots included: what the person sees under Show Definition."
     scope: pages.read

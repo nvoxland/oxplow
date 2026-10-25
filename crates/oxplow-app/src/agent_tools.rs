@@ -244,6 +244,7 @@ mod tests {
                 "oxplow_search",
                 "oxplow_session_transcript",
                 "oxplow_show_lens",
+                "oxplow_show_page",
                 "oxplow_snapshots",
                 "oxplow_thread_notes",
                 "oxplow_thread_sessions",
