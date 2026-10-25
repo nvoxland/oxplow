@@ -790,6 +790,9 @@ impl Builder<'_, '_> {
             ));
         }
         let mut rows = rows.clone();
+        // A page action reads the page's first loader's one row: this
+        // document's row, when it is the page's and comes first.
+        let mut row_first = false;
         let query = get_str(lens, "query").unwrap_or("").trim().to_string();
         if !query.is_empty() {
             let mut body = Mapping::new();
@@ -807,15 +810,20 @@ impl Builder<'_, '_> {
                 _ => "row".to_string(),
             };
             let name = self.add_loader(&want, body);
+            row_first = top && self.loaders.len() == 1;
             rows.push((name, cols));
         }
         for a in get_seq(lens, "actions") {
             let a = self.rewrite_action(a);
             let m = a.as_mapping().cloned().unwrap_or_default();
-            if reads_row(&m) || is_row_action(&m) {
-                let id = get_str(&m, "id").unwrap_or_default();
+            let id = get_str(&m, "id").unwrap_or_default();
+            if is_row_action(&m) {
                 self.todos.push(format!(
-                    "`{slug}`'s action `{id}` reads the document's row, which no node shows: put it on a node that holds that row"
+                    "`{slug}`'s action `{id}` is a row action on a document, which has no rows to offer it on"
+                ));
+            } else if reads_row(&m) && !row_first {
+                self.todos.push(format!(
+                    "`{slug}`'s action `{id}` reads the document's row, which isn't the page's first loader"
                 ));
             }
             self.actions.push(a);

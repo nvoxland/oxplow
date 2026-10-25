@@ -492,3 +492,24 @@ fn a_part_restating_part_of_a_param_is_the_same_param() {
     assert_eq!(p.params.len(), 1);
     assert_eq!(p.params[0].options.len(), 1);
 }
+
+#[test]
+fn a_document_action_reading_its_row_is_a_page_action_over_the_first_loader() {
+    let manifest = format!("{ACME}pages:\n  - {{ id: s, title: S, lens: s }}\n");
+    let c = run(
+        &manifest,
+        &[
+            (
+                "s",
+                "title: S\nparams:\n  - { name: id }\nquery: SELECT :id AS session, 1 AS can_stop\ncolumns: [{ key: session }, { key: can_stop }]\nviz: document\nsections:\n  - { lens: s-part }\nactions:\n  - { id: stop, label: Stop, command: acme.session.stop, input: { session: \"{{row.session}}\" }, when: can_stop }\n",
+            ),
+            ("s-part", "title: Part\nquery: SELECT 1 AS a\n"),
+        ],
+    );
+    let p = page(&c, "s");
+    assert_eq!(p.loaders[0].name, "row");
+    assert_eq!(
+        p.actions.iter().map(|a| a.id.as_str()).collect::<Vec<_>>(),
+        ["stop"]
+    );
+}
