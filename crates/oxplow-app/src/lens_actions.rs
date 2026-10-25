@@ -392,41 +392,81 @@ async fn subfields_for(
         .await
         .map_err(CommandError::from)?;
         reads.push(run.result.reads.clone());
-        let col = |name: &str| run.result.columns.iter().position(|c| c == name);
-        let (Some(name), Some(title), Some(kind)) = (col("name"), col("title"), col("kind")) else {
-            return Err(CommandError::Invalid {
-                field: Some(format!("/{}", field.name())),
-                message: format!(
-                    "`from` lens `{lens_id}` needs `name`, `title` and `kind` columns"
-                ),
-            });
-        };
-        let (values, read_only) = (col("values"), col("read_only"));
-        let text = |c: &SqlCell| match c {
-            SqlCell::Text(t) => Some(t.clone()),
-            _ => None,
-        };
-        let rows = run
-            .result
-            .rows
-            .iter()
-            .filter_map(|r| {
-                Some(Subfield {
-                    name: text(&r[name])?,
-                    title: text(&r[title])?,
-                    kind: text(&r[kind])?,
-                    values: values
-                        .and_then(|v| text(&r[v]))
-                        .and_then(|t| serde_json::from_str(&t).ok())
-                        .unwrap_or_default(),
-                    read_only: read_only
-                        .is_some_and(|c| matches!(&r[c], SqlCell::Int(n) if *n != 0)),
-                })
-            })
-            .collect();
+        let rows = subfields_from(&run.result, field.name(), lens_id)?;
         out.insert(field.name().to_string(), rows);
     }
     Ok((out, oxplow_db::Reads::union(&reads)))
+}
+
+/// An object field's children from the rows its `from` source returned:
+/// `name`, `title`, `kind`, `values` (a JSON array) and `read_only`.
+pub(crate) fn subfields_from(
+    result: &oxplow_db::SqlQueryResult,
+    field: &str,
+    source: &str,
+) -> Result<Vec<Subfield>, CommandError> {
+    let col = |name: &str| result.columns.iter().position(|c| c == name);
+    let (Some(name), Some(title), Some(kind)) = (col("name"), col("title"), col("kind")) else {
+        return Err(CommandError::Invalid {
+            field: Some(format!("/{field}")),
+            message: format!("`from` source `{source}` needs `name`, `title` and `kind` columns"),
+        });
+    };
+    let (values, read_only) = (col("values"), col("read_only"));
+    let text = |c: &SqlCell| match c {
+        SqlCell::Text(t) => Some(t.clone()),
+        _ => None,
+    };
+    Ok(result
+        .rows
+        .iter()
+        .filter_map(|r| {
+            Some(Subfield {
+                name: text(&r[name])?,
+                title: text(&r[title])?,
+                kind: text(&r[kind])?,
+                values: values
+                    .and_then(|v| text(&r[v]))
+                    .and_then(|t| serde_json::from_str(&t).ok())
+                    .unwrap_or_default(),
+                read_only: read_only.is_some_and(|c| matches!(&r[c], SqlCell::Int(n) if *n != 0)),
+            })
+        })
+        .collect())
+}
+
+/// A field's choices from the rows its source returned: `value`, `label`
+/// and an optional `group`.
+pub(crate) fn choices_from(
+    result: &oxplow_db::SqlQueryResult,
+    field: &str,
+    source: &str,
+) -> Result<Vec<Choice>, CommandError> {
+    let col = |name: &str| result.columns.iter().position(|c| c == name);
+    let (Some(value), Some(label)) = (col("value"), col("label")) else {
+        return Err(CommandError::Invalid {
+            field: Some(format!("/{field}")),
+            message: format!("choices source `{source}` needs `value` and `label` columns"),
+        });
+    };
+    let group = col("group");
+    let text = |c: &SqlCell| match c {
+        SqlCell::Text(t) => Some(t.clone()),
+        SqlCell::Int(i) => Some(i.to_string()),
+        SqlCell::Real(r) => Some(r.to_string()),
+        _ => None,
+    };
+    Ok(result
+        .rows
+        .iter()
+        .filter_map(|r| {
+            Some(Choice {
+                value: text(&r[value])?,
+                label: text(&r[label])?,
+                group: group.and_then(|g| text(&r[g])),
+            })
+        })
+        .collect())
 }
 
 /// One choice for a form field: the value it submits, what the person
@@ -468,32 +508,7 @@ async fn choices_for(
         )
         .await
         .map_err(CommandError::from)?;
-        let col = |name: &str| run.result.columns.iter().position(|c| c == name);
-        let (Some(value), Some(label)) = (col("value"), col("label")) else {
-            return Err(CommandError::Invalid {
-                field: Some(format!("/{field}")),
-                message: format!("choices lens `{lens_id}` needs `value` and `label` columns"),
-            });
-        };
-        let group = col("group");
-        let text = |c: &SqlCell| match c {
-            SqlCell::Text(t) => Some(t.clone()),
-            SqlCell::Int(i) => Some(i.to_string()),
-            SqlCell::Real(r) => Some(r.to_string()),
-            _ => None,
-        };
-        let rows = run
-            .result
-            .rows
-            .iter()
-            .filter_map(|r| {
-                Some(Choice {
-                    value: text(&r[value])?,
-                    label: text(&r[label])?,
-                    group: group.and_then(|g| text(&r[g])),
-                })
-            })
-            .collect();
+        let rows = choices_from(&run.result, field, lens_id)?;
         out.insert(field.clone(), rows);
     }
     Ok(out)
@@ -501,7 +516,7 @@ async fn choices_for(
 
 /// `given` (what a person filled in, a map) laid over `start`, with the
 /// `fixed` fields put back to `start`'s values: what a form runs with.
-fn filled(start: Value, given: Value, fixed: &[String]) -> Result<Value, CommandError> {
+pub(crate) fn filled(start: Value, given: Value, fixed: &[String]) -> Result<Value, CommandError> {
     let Value::Object(given) = given else {
         return Err(CommandError::Invalid {
             field: Some("/input".into()),

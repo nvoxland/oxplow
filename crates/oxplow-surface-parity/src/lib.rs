@@ -216,6 +216,9 @@ pub const MANIFEST: &[Capability] = &[
     ui("page_text", "Copy's text on the page a window shows"),
     ui("get_page", "the page a window draws; an agent reads a page's ref with `read`"),
     both_named("run_page_action", "run_page_action", "oxplow_run_page_action"),
+    ui("page_form", "a form node is the person's form; an agent runs the command itself"),
+    ui("submit_page_form", "a form node is the person's form; an agent runs the command itself"),
+    ui("page_action_form", "a form action's form is the person's; an agent runs the command itself"),
     // An agent's answers: it shows one (the `oxplow.lens.show` command).
     agent("oxplow_show_lens"),
     ui(

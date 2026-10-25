@@ -287,6 +287,21 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
+	pageForm: (runId: string, node: string) => typedError<FormStart_Serialize, IpcError_Serialize>(__TAURI_INVOKE("page_form", { runId, node })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	submitPageForm: (runId: string, node: string, input: unknown, confirmed: boolean) => typedError<CommandOutcome, IpcError_Serialize>(__TAURI_INVOKE("submit_page_form", { runId, node, input, confirmed })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	pageActionForm: (runId: string, node: string | null, action: string, row: { [key in string]: SqlCell } | null) => typedError<FormStart_Serialize, IpcError_Serialize>(__TAURI_INVOKE("page_action_form", { runId, node, action, row })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	validateExtension: (name: string, streamId: string | null) => typedError<CheckReport_Serialize, IpcError_Serialize>(__TAURI_INVOKE("validate_extension", { name, streamId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the

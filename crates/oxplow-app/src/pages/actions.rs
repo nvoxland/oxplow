@@ -284,3 +284,306 @@ fn empty_lens(run: &PageRun) -> crate::extensions::Lens {
         tool: None,
     }
 }
+
+/// The rows a form's choice or object field reads: page `source`
+/// (`<extension>/<slug>`, its first loader, or `…#<loader>`), run with the
+/// form's params that page declares.
+async fn page_rows(
+    svc: &crate::Services,
+    source: &str,
+    params: &BTreeMap<String, SqlCell>,
+    viewer: &Actor,
+) -> Result<oxplow_db::SqlQueryResult, CommandError> {
+    let (page_id, loader) = match source.split_once('#') {
+        Some((p, l)) => (p, Some(l)),
+        None => (source, None),
+    };
+    let page = svc
+        .extension_catalog
+        .find_page(&svc.layout.project_dir, page_id)
+        .map_err(|_| invalid("/source", format!("no page `{page_id}`")))?;
+    let given = params
+        .iter()
+        .filter(|(k, _)| page.params.iter().any(|p| &p.name == *k))
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+    let name = match loader {
+        Some(l) => l.to_string(),
+        None => page
+            .loaders
+            .first()
+            .map(|l| l.name.clone())
+            .ok_or_else(|| invalid("/source", format!("page `{page_id}` has no loader")))?,
+    };
+    let run = super::runner::PageRunner::of(svc)
+        .run(super::runner::RunRequest {
+            target: super::runner::RunTarget::Spec(std::sync::Arc::new(page)),
+            params: given,
+            ctx: crate::extensions::LensContext::default(),
+            viewer: viewer.clone(),
+        })
+        .await
+        .map_err(CommandError::from)?;
+    let l = run.loaders.get(&name).ok_or_else(|| {
+        invalid(
+            "/source",
+            format!("page `{page_id}` ran no loader `{name}`"),
+        )
+    })?;
+    match &l.error {
+        Some(e) => Err(invalid("/source", e.clone())),
+        None => Ok(l.result.clone()),
+    }
+}
+
+/// Each choice field's choices and each object field's children, from the
+/// pages they name.
+async fn form_sources(
+    svc: &crate::Services,
+    choices: &BTreeMap<String, String>,
+    fields: &[crate::extensions::LensFormField],
+    params: &BTreeMap<String, SqlCell>,
+    viewer: &Actor,
+) -> Result<
+    (
+        BTreeMap<String, Vec<crate::lens_actions::Choice>>,
+        BTreeMap<String, Vec<crate::lens_actions::Subfield>>,
+        oxplow_db::Reads,
+    ),
+    CommandError,
+> {
+    let mut out_choices = BTreeMap::new();
+    for (field, source) in choices {
+        let rows = page_rows(svc, source, params, viewer).await?;
+        out_choices.insert(
+            field.clone(),
+            crate::lens_actions::choices_from(&rows, field, source)?,
+        );
+    }
+    let mut subfields = BTreeMap::new();
+    let mut reads = Vec::new();
+    for field in fields {
+        let Some(source) = field.from() else { continue };
+        let rows = page_rows(svc, source, params, viewer).await?;
+        reads.push(rows.reads.clone());
+        subfields.insert(
+            field.name().to_string(),
+            crate::lens_actions::subfields_from(&rows, field.name(), source)?,
+        );
+    }
+    Ok((out_choices, subfields, oxplow_db::Reads::union(&reads)))
+}
+
+/// The form node `node` of open run `run_id` (a `form` viz): its command,
+/// its defaults (params bound) under its loader's first row, its choices
+/// and object fields read from the pages they name.
+pub async fn page_form(
+    svc: &crate::Services,
+    runs: &PageRuns,
+    run_id: &str,
+    node_path: &str,
+) -> Result<crate::lens_actions::FormStart, CommandError> {
+    let run = runs
+        .get(run_id)
+        .ok_or_else(|| invalid("/runId", format!("no open page run `{run_id}`")))?;
+    let (holder, id) = locate(&run, node_path)
+        .ok_or_else(|| invalid("/node", format!("no node `{node_path}`")))?;
+    let def =
+        node(&holder.page, id).ok_or_else(|| invalid("/node", format!("no node `{node_path}`")))?;
+    let lens_run = node_run(holder, def)
+        .ok_or_else(|| invalid("/node", format!("`{node_path}` isn't a viz")))?;
+    let form = match (&lens_run.lens.viz, &lens_run.lens.form) {
+        (crate::extensions::LensViz::Form, Some(f)) => f.clone(),
+        _ => return Err(invalid("/node", format!("node `{node_path}` isn't a form"))),
+    };
+    let name = form.command.clone().unwrap_or_default();
+    let command = svc
+        .commands
+        .spec(&name)
+        .ok_or_else(|| CommandError::Unknown { name: name.clone() })?;
+    let mut values = match form.defaults.as_ref() {
+        Some(d) => match crate::lens_actions::bind_input(d, &holder.params, None, None)? {
+            Value::Object(m) => m,
+            _ => serde_json::Map::new(),
+        },
+        None => serde_json::Map::new(),
+    };
+    if let Some(row) = lens_run.result.rows.first() {
+        for (col, cell) in lens_run.result.columns.iter().zip(row) {
+            if *cell != SqlCell::Null(()) {
+                values.insert(
+                    col.clone(),
+                    serde_json::to_value(cell).unwrap_or(Value::Null),
+                );
+            }
+        }
+    }
+    for field in form.fields.iter().flatten().filter(|f| f.from().is_some()) {
+        if let Some(Value::String(text)) = values.get(field.name()) {
+            if let Ok(object @ Value::Object(_)) = serde_json::from_str::<Value>(text) {
+                values.insert(field.name().to_string(), object);
+            }
+        }
+    }
+    for field in form.fields.iter().flatten().filter(|f| f.secret()) {
+        let kept = command
+            .unrecorded
+            .iter()
+            .any(|k| k == field.name() || k == "*");
+        if !kept {
+            return Err(invalid(
+                "/node",
+                format!(
+                    "`{}` is secret but `{}` records it: the command must declare it `unrecorded`",
+                    field.name(),
+                    command.id
+                ),
+            ));
+        }
+        values.remove(field.name());
+    }
+    let (choices, subfields, reads) = form_sources(
+        svc,
+        &form.choices,
+        form.fields.as_deref().unwrap_or_default(),
+        &holder.params,
+        &Actor::Human,
+    )
+    .await?;
+    Ok(crate::lens_actions::FormStart {
+        command,
+        values: Value::Object(values),
+        fixed: form.fixed,
+        fields: form.fields,
+        choices,
+        subfields,
+        reads,
+    })
+}
+
+/// A form node is submitted: its command runs as the page for whoever
+/// submitted, the form's defaults under what they filled in.
+pub async fn submit_page_form(
+    svc: &crate::Services,
+    runs: &PageRuns,
+    run_id: &str,
+    node_path: &str,
+    input: Value,
+    on_behalf_of: Actor,
+    confirmed: bool,
+) -> Result<CommandOutcome, CommandError> {
+    let run = runs
+        .get(run_id)
+        .ok_or_else(|| invalid("/runId", format!("no open page run `{run_id}`")))?;
+    let (holder, id) = locate(&run, node_path)
+        .ok_or_else(|| invalid("/node", format!("no node `{node_path}`")))?;
+    let def =
+        node(&holder.page, id).ok_or_else(|| invalid("/node", format!("no node `{node_path}`")))?;
+    let lens_run = node_run(holder, def)
+        .ok_or_else(|| invalid("/node", format!("`{node_path}` isn't a viz")))?;
+    let form = match (&lens_run.lens.viz, &lens_run.lens.form) {
+        (crate::extensions::LensViz::Form, Some(f)) => f.clone(),
+        _ => return Err(invalid("/node", format!("node `{node_path}` isn't a form"))),
+    };
+    let defaults = match form.defaults.as_ref() {
+        Some(d) => crate::lens_actions::bind_input(d, &holder.params, None, None)?,
+        None => Value::Object(serde_json::Map::new()),
+    };
+    let merged = crate::lens_actions::filled(defaults, input, &form.fixed)?;
+    svc.commands
+        .run(
+            &Actor::Lens {
+                lens_id: format!("{}#{id}", holder.page.id),
+                on_behalf_of: Box::new(on_behalf_of),
+            },
+            &form.command.unwrap_or_default(),
+            merged,
+            confirmed,
+        )
+        .await
+}
+
+/// The form a form action (`form: true`) opens: its command, its input
+/// bound (params, and the row it is pressed on) as the starting values, its
+/// `fixed` fields and its choices.
+pub async fn page_action_form(
+    svc: &crate::Services,
+    runs: &PageRuns,
+    run_id: &str,
+    node_path: Option<&str>,
+    action_id: &str,
+    row: Option<BTreeMap<String, SqlCell>>,
+) -> Result<crate::lens_actions::FormStart, CommandError> {
+    let run = runs
+        .get(run_id)
+        .ok_or_else(|| invalid("/runId", format!("no open page run `{run_id}`")))?;
+    let (actions, params, rows): (
+        Vec<crate::extensions::LensAction>,
+        BTreeMap<String, SqlCell>,
+        Option<oxplow_db::SqlQueryResult>,
+    ) = match node_path {
+        None => (run.page.actions.clone(), run.params.clone(), None),
+        Some(path) => {
+            let (holder, id) =
+                locate(&run, path).ok_or_else(|| invalid("/node", format!("no node `{path}`")))?;
+            let def = node(&holder.page, id)
+                .ok_or_else(|| invalid("/node", format!("no node `{path}`")))?;
+            let lens_run = node_run(holder, def)
+                .ok_or_else(|| invalid("/node", format!("`{path}` has no actions")))?;
+            (
+                lens_run.lens.actions,
+                holder.params.clone(),
+                Some(lens_run.result),
+            )
+        }
+    };
+    let action = actions
+        .iter()
+        .find(|a| a.id == action_id && a.form)
+        .cloned()
+        .ok_or_else(|| invalid("/action", format!("no form action `{action_id}`")))?;
+    // A row the presser names must be one the run holds.
+    let row = match (row, rows) {
+        (Some(given), Some(result)) => Some(
+            result
+                .rows
+                .iter()
+                .map(|r| {
+                    result
+                        .columns
+                        .iter()
+                        .cloned()
+                        .zip(r.iter().cloned())
+                        .collect::<BTreeMap<_, _>>()
+                })
+                .find(|r| given.iter().all(|(k, v)| r.get(k) == Some(v)))
+                .ok_or_else(|| {
+                    invalid("/row", "that row isn't one the page holds now".to_string())
+                })?,
+        ),
+        (Some(_), None) => {
+            return Err(invalid(
+                "/row",
+                format!("`{action_id}` runs on the whole page"),
+            ))
+        }
+        (None, _) => None,
+    };
+    let values = crate::lens_actions::bind_input(&action.input, &params, row.as_ref(), None)?;
+    let (choices, _, _) = form_sources(svc, &action.choices, &[], &params, &Actor::Human).await?;
+    let command = svc
+        .commands
+        .spec(&action.command)
+        .ok_or_else(|| CommandError::Unknown {
+            name: action.command.clone(),
+        })?;
+    Ok(crate::lens_actions::FormStart {
+        command,
+        values,
+        fixed: action.fixed,
+        fields: None,
+        choices,
+        subfields: BTreeMap::new(),
+        reads: oxplow_db::Reads::default(),
+    })
+}

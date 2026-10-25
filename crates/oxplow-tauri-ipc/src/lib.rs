@@ -147,6 +147,9 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::page_text,
             commands::generated::get_page,
             commands::generated::run_page_action,
+            commands::generated::page_form,
+            commands::generated::submit_page_form,
+            commands::generated::page_action_form,
             commands::generated::validate_extension,
             commands::generated::report_tabs,
             // The sign-in redirect, caught by the shell (P10).

@@ -170,3 +170,52 @@ pub async fn run_page_action(
     )
     .await?)
 }
+
+/// The form a form node of an open run shows: its command, its starting
+/// values, its choices and object fields.
+pub async fn page_form(
+    svc: &Services,
+    run_id: String,
+    node: String,
+) -> Result<oxplow_app::lens_actions::FormStart, IpcError> {
+    Ok(oxplow_app::pages::actions::page_form(svc, &svc.page_runs, &run_id, &node).await?)
+}
+
+/// A form node of an open run is submitted.
+pub async fn submit_page_form(
+    svc: &Services,
+    run_id: String,
+    node: String,
+    input: oxplow_domain::Json,
+    confirmed: bool,
+) -> Result<oxplow_domain::CommandOutcome, IpcError> {
+    Ok(oxplow_app::pages::actions::submit_page_form(
+        svc,
+        &svc.page_runs,
+        &run_id,
+        &node,
+        input.0,
+        Actor::Human,
+        confirmed,
+    )
+    .await?)
+}
+
+/// The form a form action of an open run opens (on `row` for a row action).
+pub async fn page_action_form(
+    svc: &Services,
+    run_id: String,
+    node: Option<String>,
+    action: String,
+    row: Option<BTreeMap<String, SqlCell>>,
+) -> Result<oxplow_app::lens_actions::FormStart, IpcError> {
+    Ok(oxplow_app::pages::actions::page_action_form(
+        svc,
+        &svc.page_runs,
+        &run_id,
+        node.as_deref(),
+        &action,
+        row,
+    )
+    .await?)
+}

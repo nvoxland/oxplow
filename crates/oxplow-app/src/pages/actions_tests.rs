@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use oxplow_db::SqlCell;
 use oxplow_domain::{Actor, CommandError};
 
-use super::actions::{run_page_action, PageActionCall};
+use super::actions::{page_form, run_page_action, submit_page_form, PageActionCall};
 use super::open_runs::PageRuns;
 use super::runner::{RunRequest, RunTarget};
 use super::test_support::fixture;
@@ -122,4 +122,45 @@ async fn a_page_action_reads_the_first_loaders_row() {
         .await
         .unwrap();
     assert_eq!(titles(&svc).await, ["stop sess-1"]);
+}
+
+/// A form node starts from its defaults (params bound) with its choices
+/// read from a page's loader, and submits its command for the person.
+#[tokio::test]
+async fn a_form_node_starts_from_its_defaults_and_submits() {
+    let (_dir, svc) = fixture().await;
+    let runs = PageRuns::default();
+    let (id, _) = runs
+        .open(
+            &svc,
+            RunRequest {
+                target: RunTarget::Page("acme/new-item".into()),
+                params: BTreeMap::new(),
+                ctx: LensContext::default(),
+                viewer: Actor::Human,
+            },
+            "w",
+        )
+        .await
+        .unwrap();
+    let start = page_form(&svc, &runs, &id, "view").await.unwrap();
+    assert_eq!(start.command.id, "oxplow.work_item.create");
+    assert_eq!(start.values["title"], serde_json::json!("drafted"));
+    let states: Vec<&str> = start.choices["state"]
+        .iter()
+        .map(|c| c.value.as_str())
+        .collect();
+    assert_eq!(states, ["todo", "done"]);
+    submit_page_form(
+        &svc,
+        &runs,
+        &id,
+        "view",
+        serde_json::json!({ "title": "submitted" }),
+        Actor::Human,
+        false,
+    )
+    .await
+    .unwrap();
+    assert_eq!(titles(&svc).await, ["submitted"]);
 }

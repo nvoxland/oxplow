@@ -292,7 +292,14 @@ action on its node's one row, read by the server. The checks and input
 binding are the lens ones (`lens_actions::prepare_resolved`), and it runs
 as the page acting for the presser. An agent presses with
 `oxplow.page.run_action { page, params, node?, action, row? }`, which
-holds a run of its own for the press.
+holds a run of its own for the press. Forms: `page_form { runId, node }` is a
+form node's start (its defaults with params bound, its loader's first
+row, its `choices` and object fields' `from` read from the pages they
+name: `<ext>/<page>` takes its first loader, `<ext>/<page>#<loader>`
+that one), `submit_page_form` submits it as the page for the person, and
+`page_action_form { runId, node?, action, row? }` is a form action's
+start. A whole-page action may read `{{row.x}}` / `when:`: the first
+loader's one row.
 
 **The desktop host** (`apps/desktop/src/pages/PageHost.tsx`, built and
 tested, not wired into `App.tsx` yet: lens pages still draw every tab).

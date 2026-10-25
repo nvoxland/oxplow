@@ -142,6 +142,22 @@ view: { viz: table, from: other }
 "#,
     ),
     (
+        "new-item",
+        r#"
+title: New Item
+params: [{ name: t, default: drafted }]
+data:
+  states:
+    rows: [{ value: todo, label: To do }, { value: done, label: Done }]
+view:
+  viz: form
+  form:
+    command: oxplow.work_item.create
+    defaults: { title: "{{param.t}}" }
+    choices: { state: acme/new-item#states }
+"#,
+    ),
+    (
         "writes",
         r#"
 title: Writes
