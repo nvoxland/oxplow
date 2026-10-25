@@ -357,3 +357,37 @@ test("an effort's verdict is only ever an extension's", async () => {
   await waitFor(() => expect(off.container.querySelector('[data-testid^="replacement-"]')).toBeNull());
   expect(off.container.innerHTML).toBe("");
 });
+
+// A replacement may name a page (`ui.replacements: [{ target, page }]`):
+// the same choice decides, and the page draws in the target's place, run
+// with the target's props as its params.
+test("a replacement that names a page draws that page with the target's props, running no lens", async () => {
+  const { createPageRuns } = await import("../pageRuns.js");
+  const { decl, fakePage, fakeRun, loader, node } = await import("../pages/testing/fakeRun.js");
+  const opened: unknown[] = [];
+  const runs = createPageRuns({
+    open: async (key) => {
+      opened.push(key);
+      const page = fakePage(node.viz("cards", "cards", { columns: [{ key: "title" } as never] }), { id: "x/board-page", extension: "x", slug: "board-page", loaders: [decl("cards")] });
+      return { runId: "run-1", run: fakeRun(page, { loaders: { cards: loader(["title"], [["their card"]]) } }) };
+    },
+    close: async () => {},
+    fetch: async () => ({}),
+    setParams: async () => Promise.reject(new Error("no")),
+    rerun: async () => Promise.reject(new Error("no")),
+    onChange: () => () => {},
+    onReconnect: () => () => {},
+  });
+  const ext = replacing("x");
+  ext.ui.replacements[0] = { ...ext.ui.replacements[0]!, lensId: "", pageId: "x/board-page" } as never;
+  extensions = [ext];
+  const view = render(
+    <Replaceable target="work_item.board" props={PROPS} streamId="str1" runs={runs} fallback={<div data-testid="core-board">oxplow's board</div>} />,
+  );
+  const replaced = await waitFor(() => view.getByTestId("replacement-work_item.board"));
+  expect(replaced.textContent).toContain("replaced by x");
+  await waitFor(() => expect(replaced.textContent).toContain("their card"));
+  expect(opened).toEqual([{ page: "x/board-page", params: PROPS, streamId: "str1", threadId: null }]);
+  expect(lensRuns).toEqual([]);
+  await waitFor(() => expect(usage).toEqual([{ kind: "replacement", key: "x/work_item.board", streamId: "str1" }]));
+});

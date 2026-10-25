@@ -1,7 +1,8 @@
 /**
- * Which lens, if any, stands in for a core sub-component right now
- * (P9.A1, `.context/extensions.md` → "Replacements"). An extension
- * declares `ui.replacements: [{ target, lens }]`. The person says whose
+ * Which lens or page, if any, stands in for a core sub-component right
+ * now (P9.A1, `.context/extensions.md` → "Replacements"). An extension
+ * declares `ui.replacements: [{ target, lens | page }]`. A page is run by
+ * its host (`Replaceable`); a lens is run here. The person says whose
  * shows, by target (`replacements: { <target>: <extension> | "oxplow" }`);
  * `"oxplow"` keeps oxplow's own wherever.
  *
@@ -42,6 +43,8 @@ export type Replacement =
       /** Its custom component said `ready`: it is shown. */
       shown(): void;
     }
+  /** A page stands in: its host runs it with the target's props. */
+  | { state: "page"; replacement: UiReplacement; page: string }
   /** The replacement couldn't load: oxplow's own, and why. */
   | { state: "failed"; replacement: UiReplacement; message: string };
 
@@ -126,7 +129,8 @@ export function useReplacement(
   const known = choices !== undefined && (!bound || owner !== undefined);
   const chosen =
     !known || decider === null || decider === undefined ? null : (candidates.find((c) => c.extension === decider) ?? null);
-  const lens = chosen === null ? null : ((exts ?? []).flatMap((e) => e.lenses).find((l) => l.id === chosen.lensId) ?? null);
+  const page = chosen?.pageId ?? null;
+  const lens = chosen === null || page ? null : ((exts ?? []).flatMap((e) => e.lenses).find((l) => l.id === chosen.lensId) ?? null);
 
   const [ran, setRan] = useState<{ id: string; key: string; run: LensRun | null; error: string | null } | null>(null);
   const propsKey = JSON.stringify(props);
@@ -167,7 +171,8 @@ export function useReplacement(
     [streamId],
   );
   const ranOk = ran !== null && ran.run !== null && ran.key === runKey ? ran : null;
-  const shownNow = ranOk !== null && ranOk.run?.lens.viz !== "custom" && !failedHere ? ranOk.id : null;
+  const shownNow =
+    known && chosen !== null && page ? chosen.id : ranOk !== null && ranOk.run?.lens.viz !== "custom" && !failedHere ? ranOk.id : null;
   useEffect(() => {
     if (shownNow !== null) record(shownNow);
   }, [shownNow, record]);
@@ -176,6 +181,7 @@ export function useReplacement(
   if (candidates.length === 0) return { state: "core" };
   if (!known) return { state: "pending" };
   if (chosen === null) return { state: "core" };
+  if (page) return { state: "page", replacement: chosen, page };
   if (lens === null) return { state: "failed", replacement: chosen, message: `its lens ${chosen.lensId} didn't load` };
   if (ran === null || ran.key !== runKey) return { state: "pending" };
   if (ran.run === null) return { state: "failed", replacement: chosen, message: ran.error ?? "it failed" };

@@ -4,6 +4,8 @@ import type { SqlCell } from "../api.js";
 import { LensResultView } from "../lens/LensResultView.js";
 import { useHostedView } from "../lens/hostedView.js";
 import { useReplacement } from "../lens/useReplacement.js";
+import { usePageRunsStore, usePageRunWith, type PageRuns } from "../pageRuns.js";
+import { PageTree } from "../pages/PageTree.js";
 import type { TabRef } from "../tabs/tabState.js";
 
 /**
@@ -24,6 +26,7 @@ export function Replaceable({
   provider = null,
   fallback,
   onOpenPage,
+  runs,
 }: {
   /** One of `oxplow_domain::replaceable::REPLACEABLE` (`work_item.board`). */
   target: string;
@@ -36,8 +39,14 @@ export function Replaceable({
   /** Oxplow's own component. */
   fallback: ReactNode;
   onOpenPage?(ref: TabRef, opts?: { newTab?: boolean }): void;
+  /** The page runs a page replacement opens (the window's; a test's fake). */
+  runs?: PageRuns;
 }) {
   const r = useReplacement(target, props, streamId, provider);
+  // A page replacement: one run of it, its params the target's props
+  // (the run is shared by key, so a fresh key object each render is fine).
+  const store = usePageRunsStore();
+  const pageRun = usePageRunWith(runs ?? store, r.state === "page" ? { page: r.page, params: props, streamId, threadId: null } : null);
   const view = useHostedView({ keys: r.state === "replaced" ? r.replacement.view : NO_KEYS, scope: target });
   if (r.state === "pending") return null;
   if (r.state === "core") return <>{fallback}</>;
@@ -51,15 +60,18 @@ export function Replaceable({
     </>
   );
   if (r.state === "failed") return failed(sentence(r.message));
+  if (r.state === "page") {
+    if (pageRun.error) return failed(sentence(pageRun.error));
+    return (
+      <div data-testid={`replacement-${target}`} style={replacedStyle}>
+        {badge(extension, r.replacement.label)}
+        {pageRun.run ? <PageTree run={pageRun.run} runId={pageRun.runId} streamId={streamId} onOpenPage={onOpenPage} /> : null}
+      </div>
+    );
+  }
   return (
     <div data-testid={`replacement-${target}`} style={replacedStyle}>
-      <span
-        data-testid="replacement-badge"
-        style={badgeStyle}
-        title={`${extension} replaces oxplow's ${r.replacement.label}; turn it off on Settings → Integrations`}
-      >
-        replaced by {extension}
-      </span>
+      {badge(extension, r.replacement.label)}
       {/* A custom component that can't load says so here, and the whole
           replacement gives way to oxplow's own above (tsk855). */}
       <LensResultView run={r.run} streamId={streamId} onOpenPage={onOpenPage} onCustomFailure={r.fail} onCustomReady={r.shown} componentView={view} />
@@ -68,6 +80,13 @@ export function Replaceable({
 }
 
 const NO_KEYS: string[] = [];
+
+/** The note naming whose replacement shows. */
+const badge = (extension: string, label: string) => (
+  <span data-testid="replacement-badge" style={badgeStyle} title={`${extension} replaces oxplow's ${label}; turn it off on Settings → Integrations`}>
+    replaced by {extension}
+  </span>
+);
 
 /** `message` ending as a sentence does. */
 const sentence = (message: string) => (/[.!?]$/.test(message) ? message : `${message}.`);

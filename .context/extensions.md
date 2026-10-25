@@ -2559,6 +2559,14 @@ contracts where everything else is. A declaration's optional `version:`
 must be the contract's: a changed contract refuses it rather than handing
 it props it doesn't know.
 
+A replacement may name a **page** instead (`{ target, page }`,
+`UiReplacement.pageId`): the same choice decides (`useReplacement`, state
+`page`), and `Replaceable` opens one run of that page with the target's
+props as its params and draws it with `PageTree` under the same badge; a
+run that fails shows oxplow's own and says why. A page file's node marked
+`replaceable: <target>` is a lens part's equal (`PageTree` wraps it in
+`Replaceable`, its props the run's params).
+
 | Target | Core component | Capability | Bound | Props | View |
 |---|---|---|---|---|---|
 | `work_item.board` | the Board's columns of cards (the `board-cards` part of the `board` document) | `work_items` | no | `scope` (`thread` / `backlog` / `all`), `thread_id` (the viewed thread; it applies when `scope` is `thread`) | — |
