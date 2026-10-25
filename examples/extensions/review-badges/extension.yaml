@@ -13,16 +13,16 @@ intent:
   origin: null
   examples:
     - name: review-verdicts
-      input: { lens: review-verdicts }
+      input: { page: review-verdicts }
       expect: no rows until effort-review has reviewed an effort
     - name: item-review
-      input: { lens: item-review, params: { uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" } }
+      input: { page: item-review, params: { uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" } }
       expect: nothing for an item that has no review yet
 # Optional: with effort-review missing, disabled or exporting another
-# version, the two lenses below are withheld (a warning in Settings →
+# version, the two pages below are withheld (a warning in Settings →
 # Extensions) and nothing else changes.
 imports:
   - { id: reviews, contribution: oxplow:oxplow/model?model=effort-review/reviews, version: 2, optional: true }
 ui:
   slots:
-    - { slot: oxplow-foundation/work-item.sections, lens: item-review }
+    - { slot: oxplow-foundation/work-item.sections, page: item-review }

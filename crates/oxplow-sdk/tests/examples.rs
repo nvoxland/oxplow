@@ -26,6 +26,49 @@ fn copy_dir(from: &Path, to: &Path) {
     }
 }
 
+/// Page `id` (`<extension>/<slug>`) run as the viewer, given `params`, over
+/// `svc`'s data.
+async fn run_page(
+    svc: &oxplow_app::Services,
+    id: &str,
+    params: Vec<(&str, oxplow_db::SqlCell)>,
+) -> oxplow_app::pages::runner::PageRun {
+    use oxplow_app::pages::runner::{PageRunner, RunRequest, RunTarget};
+    let run = PageRunner::of(svc)
+        .run(RunRequest {
+            target: RunTarget::Page(id.to_string()),
+            params: params
+                .into_iter()
+                .map(|(k, v)| (k.to_string(), v))
+                .collect(),
+            ctx: oxplow_app::extensions::LensContext::default(),
+            viewer: oxplow_domain::Actor::Human,
+        })
+        .await
+        .unwrap();
+    for (name, loader) in &run.loaders {
+        assert_eq!(loader.error, None, "loader `{name}` of `{id}`");
+    }
+    run
+}
+
+/// The rows of page `run`'s loader `name`, as JSON.
+fn loader_rows(
+    run: &oxplow_app::pages::runner::PageRun,
+    name: &str,
+) -> Vec<Vec<serde_json::Value>> {
+    run.loaders[name]
+        .result
+        .rows
+        .iter()
+        .map(|row| {
+            row.iter()
+                .map(|c| serde_json::to_value(c).unwrap())
+                .collect()
+        })
+        .collect()
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn the_github_example_checks_tests_and_its_pr_opens() {
     let dir = tempfile::tempdir().unwrap();
@@ -90,7 +133,7 @@ async fn the_github_example_checks_tests_and_its_pr_opens() {
         .extension_catalog
         .get(root)
         .iter()
-        .flat_map(|e| e.pages.iter())
+        .flat_map(|e| e.page_files.iter())
         .find(|p| p.renders.iter().any(|r| r == "github/pr"))
         .cloned()
         .expect("a page renders github/pr");
@@ -110,28 +153,22 @@ async fn the_github_example_checks_tests_and_its_pr_opens() {
         vec!["pr:99"],
         "{warnings:?}"
     );
-    // Its page is the `pr` lens, given `?uri=`.
-    let run = oxplow_app::extensions::run_lens(
-        &svc.sql,
-        &svc.extension_catalog,
-        root,
+    // Its page is the `pr` page, given `?uri=`.
+    let run = run_page(
+        &svc,
         "github/pr",
-        [(
-            "uri".to_string(),
+        vec![(
+            "uri",
             oxplow_db::SqlCell::Text("oxplow:github/pr?id=12".into()),
-        )]
-        .into_iter()
-        .collect(),
-        &oxplow_app::extensions::LensContext::default(),
+        )],
     )
-    .await
-    .unwrap();
-    assert_eq!(run.result.rows.len(), 1);
-    let shown = serde_json::to_string(&run.result.rows).unwrap();
+    .await;
+    assert_eq!(run.loaders["pr"].result.rows.len(), 1);
+    let shown = serde_json::to_string(&run.loaders["pr"].result.rows).unwrap();
     assert!(shown.contains("Fix the hover state"), "{shown}");
 
     // P11 (tsk962): PR Lifetimes — the component made `custom_components`
-    // stable. Its lens filters by state; the component acts (it runs the
+    // stable. Its page filters by state; the component acts (it runs the
     // sync).
     svc.db
         .transaction(|tx| {
@@ -147,29 +184,28 @@ async fn the_github_example_checks_tests_and_its_pr_opens() {
         .await
         .unwrap();
     let lifetimes = |state: &str| {
-        let params = [("state".to_string(), oxplow_db::SqlCell::Text(state.into()))]
-            .into_iter()
-            .collect();
+        let state = state.to_string();
         let svc = &svc;
         async move {
-            let run = oxplow_app::extensions::run_lens(
-                &svc.sql,
-                &svc.extension_catalog,
-                root,
+            let run = run_page(
+                svc,
                 "github/pr-lifetimes",
-                params,
-                &oxplow_app::extensions::LensContext::default(),
+                vec![("state", oxplow_db::SqlCell::Text(state))],
             )
-            .await
-            .unwrap();
-            assert_eq!(
-                run.lens.custom.as_ref().unwrap().component.as_deref(),
-                Some("pr-lifetimes")
-            );
-            run.result
-                .rows
-                .iter()
-                .map(|r| serde_json::to_value(&r[0]).unwrap())
+            .await;
+            let node = run
+                .page
+                .nodes()
+                .into_iter()
+                .find_map(|n| match &n.kind {
+                    oxplow_app::pages::schema::NodeKind::Viz { lens, .. } => lens.custom.clone(),
+                    _ => None,
+                })
+                .expect("a custom viz");
+            assert_eq!(node.component.as_deref(), Some("pr-lifetimes"));
+            loader_rows(&run, "pr_lifetimes")
+                .into_iter()
+                .map(|r| r[0].clone())
                 .collect::<Vec<_>>()
         }
     };
@@ -482,7 +518,7 @@ async fn the_triage_example_reads_the_tree_the_layer_and_a_model() {
     );
 
     // Its decisions command reads the TODOs through the metric
-    // (`metric_findings('triage.todos')`), as its board's lens does.
+    // (`metric_findings('triage.todos')`), as its board's page does.
     let listed = svc
         .commands
         .run(
@@ -540,6 +576,40 @@ async fn the_task_views_example_checks_and_its_fixtures_pass() {
             tested.ran
         );
     }
+
+    // The editor page's form (the harness's examples run a page's loaders,
+    // not its form): the item's title and body, its uri fixed.
+    let svc = common::booted(root).await;
+    let uri = "oxplow:oxplow/work_item?id=1&provider=oxplow";
+    let (run_id, _) = svc
+        .page_runs
+        .open(
+            &svc,
+            oxplow_app::pages::runner::RunRequest {
+                target: oxplow_app::pages::runner::RunTarget::Page("task-views/edit-item".into()),
+                params: [("uri".to_string(), oxplow_db::SqlCell::Text(uri.into()))]
+                    .into_iter()
+                    .collect(),
+                ctx: oxplow_app::extensions::LensContext::default(),
+                viewer: oxplow_domain::Actor::Human,
+            },
+            "test",
+        )
+        .await
+        .unwrap();
+    let form = oxplow_app::pages::actions::page_form(&svc, &svc.page_runs, &run_id, "edit_item")
+        .await
+        .unwrap();
+    assert_eq!(form.values["uri"], serde_json::json!(uri));
+    assert_eq!(form.fixed, vec!["uri".to_string()]);
+    assert_eq!(
+        form.fields
+            .unwrap()
+            .iter()
+            .map(|f| f.name().to_string())
+            .collect::<Vec<_>>(),
+        ["title", "body"]
+    );
 }
 
 /// Run `name` as a person on `svc`'s bus.
@@ -1030,8 +1100,10 @@ async fn the_session_notes_example_adds_a_section_to_the_new_session_page() {
     let ext = ExtensionCatalog::new()
         .named(root, "session-notes")
         .unwrap();
-    let mount = &ext.ui.slots[0];
-    assert_eq!(mount.slot, "oxplow-foundation/new-session.sections");
+    let mount = &ext.ui.page_slots[0];
+    assert_eq!(mount.host, "oxplow-foundation/new-session");
+    assert_eq!(mount.slot, "sections");
+    assert_eq!(mount.page, "session-notes/thread-notes");
     assert_eq!(
         mount.at,
         Some(oxplow_app::extensions::SlotAt::After {
@@ -1077,29 +1149,39 @@ async fn the_commit_history_example_narrows_with_typed_params_and_selects_a_comm
         .named(root, "commit-history")
         .unwrap();
     assert!(ext.errors.is_empty(), "{:?}", ext.errors);
-    let page = ext.lenses.iter().find(|l| l.slug == "history").unwrap();
+    assert!(ext.lenses.is_empty(), "{:?}", ext.lenses);
+    let page = ext.page_files.iter().find(|p| p.slug == "history").unwrap();
     use oxplow_app::extensions::{ParamRole, ParamType};
     let params: Vec<_> = page
         .params
         .iter()
         .map(|p| (p.name.as_str(), p.kind, p.role))
         .collect();
-    // The commit a row click sets is the page's selection; the rest filter.
+    // The rest filter; `commit` is the one the commits column selects
+    // (below). A page param takes no `selection` role yet.
     assert_eq!(
         params,
         vec![
             ("range", Some(ParamType::DateRange), Some(ParamRole::Filter)),
             ("q", Some(ParamType::Search), Some(ParamRole::Filter)),
             ("merges", Some(ParamType::Bool), Some(ParamRole::Filter)),
-            ("commit", Some(ParamType::Text), Some(ParamRole::Selection)),
+            ("commit", Some(ParamType::Text), None),
         ]
     );
-    assert_eq!(
-        page.origin.source.as_deref(),
-        Some(".oxplow/extensions/commit-history/lenses/history.yaml")
+    assert!(
+        page.origin.running.ends_with("pages/history.yaml"),
+        "{:?}",
+        page.origin
     );
-    let commits = ext.lenses.iter().find(|l| l.slug == "commits").unwrap();
-    assert_eq!(commits.columns[0].select.as_deref(), Some("commit"));
+    let commits = page
+        .nodes()
+        .into_iter()
+        .find(|n| n.id == "commits")
+        .unwrap();
+    let oxplow_app::pages::schema::NodeKind::Viz { lens, .. } = &commits.kind else {
+        panic!("commits is a viz: {commits:?}");
+    };
+    assert_eq!(lens.columns[0].select.as_deref(), Some("commit"));
 }
 
 /// Both examples copied into one project.
@@ -1125,7 +1207,7 @@ async fn review_project(with_producer: bool) -> tempfile::TempDir {
 }
 
 /// The review-badges example reads effort-review's exported `reviews`
-/// model, optionally: with the producer present its lenses and slot load;
+/// model, optionally: with the producer present its pages and slot load;
 /// with it disabled, exporting another version or missing, they are
 /// withheld, the import says why, and nothing errors.
 #[tokio::test(flavor = "multi_thread")]
@@ -1151,8 +1233,8 @@ async fn the_review_badges_example_consumes_effort_reviews_and_degrades_without_
         ["`reviews` → oxplow:oxplow/model?model=effort-review/reviews v2: available"]
     );
     for id in [
-        "oxplow:oxplow/lens?lens=review-badges/review-verdicts",
-        "oxplow:oxplow/lens?lens=review-badges/item-review",
+        "oxplow:oxplow/page?page=review-badges/review-verdicts",
+        "oxplow:oxplow/page?page=review-badges/item-review",
     ] {
         assert!(
             tested.contributes.iter().any(|c| c == id),
@@ -1178,7 +1260,7 @@ async fn the_review_badges_example_consumes_effort_reviews_and_degrades_without_
     )
     .unwrap();
     let tested = test_extension(root, "review-badges", false).await.unwrap();
-    // The lenses and the slot are withheld, named in the one warning for
+    // The pages and the slot are withheld, named in the one warning for
     // the import; the fixtures that test them are skipped, saying why.
     assert_eq!(
         tested.imports,
@@ -1200,8 +1282,8 @@ async fn the_review_badges_example_consumes_effort_reviews_and_degrades_without_
         "{warning}"
     );
     for id in [
-        "`oxplow:oxplow/lens?lens=review-badges/item-review`",
-        "`oxplow:oxplow/lens?lens=review-badges/review-verdicts`",
+        "`oxplow:oxplow/page?page=review-badges/item-review`",
+        "`oxplow:oxplow/page?page=review-badges/review-verdicts`",
         "`oxplow:oxplow/slot?slot=review-badges/oxplow-foundation.work-item.sections-0`",
     ] {
         assert!(warning.contains(id), "{id}: {warning}");
@@ -1222,7 +1304,7 @@ async fn the_review_badges_example_consumes_effort_reviews_and_degrades_without_
         assert!(
             tested.warnings.iter().any(|w| w.contains(&format!(
                 "fixtures/{example}.yaml:1: example `{example}` isn't run: \
-                 `oxplow:oxplow/lens?lens=review-badges/{lens}` is withheld because import `reviews` is \
+                 `oxplow:oxplow/page?page=review-badges/{lens}` is withheld because import `reviews` is \
                  unavailable (effort-review is disabled)"
             ))),
             "{example}: {:?}",
@@ -1231,7 +1313,11 @@ async fn the_review_badges_example_consumes_effort_reviews_and_degrades_without_
     }
     let svc = common::booted(root).await;
     let consumer = svc.extension_catalog.named(root, "review-badges").unwrap();
-    assert!(consumer.ui.slots.is_empty(), "{:?}", consumer.ui.slots);
+    assert!(
+        consumer.ui.page_slots.is_empty(),
+        "{:?}",
+        consumer.ui.page_slots
+    );
 
     // The producer exports another version.
     let dir = review_project(true).await;
@@ -1268,8 +1354,8 @@ async fn the_review_badges_example_consumes_effort_reviews_and_degrades_without_
 }
 
 /// With both examples running in one oxplow, a review effort-review's job
-/// wrote shows up in review-badges' lenses: the list, and the task page's
-/// slot lens for that item and none other.
+/// wrote shows up in review-badges' pages: the list, and the task page's
+/// slot page for that item and none other.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_review_effort_review_wrote_shows_in_review_badges() {
     use oxplow_app::ai_service::{ProviderConfig, Role, RoleBinding};
@@ -1305,7 +1391,12 @@ async fn a_review_effort_review_wrote_shows_in_review_badges() {
         .await
         .expect("it activates");
     let consumer = svc.extension_catalog.named(root, "review-badges").unwrap();
-    assert_eq!(consumer.ui.slots.len(), 1, "{:?}", consumer.ui.slots);
+    assert_eq!(
+        consumer.ui.page_slots.len(),
+        1,
+        "{:?}",
+        consumer.ui.page_slots
+    );
 
     // An effort on a work item, then the review of it asked for.
     svc.streams.ensure_primary().await.unwrap();
@@ -1347,26 +1438,16 @@ async fn a_review_effort_review_wrote_shows_in_review_badges() {
     )
     .await;
 
-    let lens = |id: &'static str, params: Vec<(&'static str, oxplow_db::SqlCell)>| {
+    let page = |id: &'static str,
+                loader: &'static str,
+                params: Vec<(&'static str, oxplow_db::SqlCell)>| {
         let svc = svc.clone();
         async move {
-            let run = oxplow_app::extensions::run_lens(
-                &svc.sql,
-                &svc.extension_catalog,
-                root,
-                id,
-                params
-                    .into_iter()
-                    .map(|(k, v)| (k.to_string(), v))
-                    .collect(),
-                &oxplow_app::extensions::LensContext::default(),
-            )
-            .await
-            .unwrap();
-            serde_json::to_value(&run.result.rows).unwrap()
+            let run = run_page(&svc, id, params).await;
+            serde_json::to_value(&run.loaders[loader].result.rows).unwrap()
         }
     };
-    let list = lens("review-badges/review-verdicts", vec![]).await;
+    let list = page("review-badges/review-verdicts", "review_verdicts", vec![]).await;
     assert_eq!(list[0][0], json!(item), "{list}");
     assert_eq!(list[0][1], json!("oxplow:oxplow/effort?id=eff1"));
     assert_eq!(list[0][2], json!("succeeded"));
@@ -1374,14 +1455,16 @@ async fn a_review_effort_review_wrote_shows_in_review_badges() {
         .as_str()
         .unwrap()
         .starts_with("The tests pass and coverage is fine"));
-    let here = lens(
+    let here = page(
         "review-badges/item-review",
+        "item_review",
         vec![("uri", oxplow_db::SqlCell::Text(item.clone()))],
     )
     .await;
     assert_eq!(here[0][0], json!("succeeded"), "{here}");
-    let elsewhere = lens(
+    let elsewhere = page(
         "review-badges/item-review",
+        "item_review",
         vec![(
             "uri",
             oxplow_db::SqlCell::Text("oxplow:oxplow/work_item?id=tsk99&provider=oxplow".into()),
@@ -1568,23 +1651,16 @@ async fn the_schema_review_example_joins_its_facts_with_core_evidence() {
         )
     );
 
-    // Its verdict lens, as the effort's page shows it in place of
+    // Its verdict page, as the effort's page shows it in place of
     // oxplow-bundled's.
-    let layer = oxplow_app::sql_gateway::SqlGateway::new(svc.db.clone());
-    let run = oxplow_app::extensions::run_lens(
-        &layer,
-        &svc.extension_catalog,
-        root,
+    let run = run_page(
+        &svc,
         "schema-review/effort-verdict",
-        [("effort_id".to_string(), oxplow_db::SqlCell::Int(1))]
-            .into_iter()
-            .collect(),
-        &oxplow_app::extensions::LensContext::default(),
+        vec![("effort_id", oxplow_db::SqlCell::Int(1))],
     )
-    .await
-    .unwrap();
+    .await;
     assert_eq!(
-        serde_json::to_value(&run.result.rows).unwrap(),
+        serde_json::to_value(&run.loaders["effort_verdict"].result.rows).unwrap(),
         json!([
             ["Schema review: changes requested", "danger"],
             ["• drops a table", "danger"],

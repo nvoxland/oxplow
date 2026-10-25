@@ -1,7 +1,7 @@
 # A thread with no notes shows no row.
 input:
-  lens: thread-notes
+  page: thread-notes
   params: { thread_id: 1 }
 expect:
-  columns: [created_at, author, body]
-  rows: 0
+  loaders:
+    thread_notes: { rows: 0, columns: [created_at, author, body] }

@@ -2,7 +2,7 @@
 // when it was merged — or to now, while it's open. The kit's charts plot
 // points and series, not ranges, which is why this is a component.
 //
-// It re-runs its own lens with another `state` (the filter buttons), opens a
+// It sets its page's `state` filter (the filter buttons), opens a
 // pull request's page when its bar is clicked, and runs the `prs` sync —
 // which oxplow refuses unless the extension is deployed and enabled.
 (function () {
@@ -20,28 +20,28 @@
 
   oxplow.connect().then((component) => {
     component.applyTheme();
-    let state = "all";
-    const show = (run) => draw(run, (ref) => component.navigate(ref).catch(say));
-    const refresh = () => component.query("pr-lifetimes", { state }).then(show, say);
+    const show = (run) => {
+      const state = (run.params || {}).state || "all";
+      for (const button of document.querySelectorAll("[data-state]")) {
+        button.classList.toggle("ox-primary", button.dataset.state === state);
+      }
+      draw(run, (ref) => component.navigate(ref).catch(say));
+    };
 
     show(component.run);
-    // The host runs the lens again when what it reads changes — at its own
-    // params, so with a filter selected it's asked again with the filter.
-    component.onUpdate(({ run }) => ((run.params || {}).state === state ? show(run) : refresh()));
+    // The host runs the page again when what it reads changes, or the
+    // filter does: the new rows come here, at the page's own params.
+    component.onUpdate(({ run }) => run && show(run));
     for (const button of document.querySelectorAll("[data-state]")) {
       button.addEventListener("click", () => {
-        state = button.dataset.state;
-        for (const other of document.querySelectorAll("[data-state]")) {
-          other.classList.toggle("ox-primary", other === button);
-        }
-        refresh();
+        component.setViewParams({ state: button.dataset.state }).catch(say);
       });
     }
     document.getElementById("sync").addEventListener("click", () => {
       status.textContent = "Syncing…";
       component.invoke("oxplow.collector.sync", { collector: "github/prs" }).then(() => {
+        // The page reads the synced rows and the host sends them on.
         status.textContent = "Synced.";
-        refresh();
       }, say);
     });
   }, (e) => say(new Error(`Couldn't connect to oxplow: ${e && e.message ? e.message : e}`)));

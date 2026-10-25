@@ -7,12 +7,12 @@ intent:
   purpose: >-
     Bring the repo's pull requests into the semantic layer as v_github_pr,
     joined to streams by branch and to work items by the item's id in the
-    title, so lenses can show what is open against each stream.
+    title, so pages can show what is open against each stream.
   origin: null
   examples:
-    - name: a stream whose branch has an open PR
-      input: { lens: open-prs, params: { stream_id: 1 } }
-      expect: the PR's number, title and author on that stream's row
+    - name: prs-by-task
+      input: { page: prs-by-task, params: { state: all } }
+      expect: each PR's number, title and author, with the work item its title names
     - name: pr-link
       input: { wikilink: "pr:12" }
       expect: the pull request's URI, `oxplow:github/pr?id=12`
@@ -62,20 +62,17 @@ models:
       - { name: uri, type: TEXT, doc: "`oxplow:github/pr?id=<number>`." }
       - { name: title, type: TEXT, doc: "Its title." }
       - { name: body, type: TEXT, doc: "Its description ('' for none)." }
-pages:
-  - { id: pr, title: Pull request, for: github/pr, default: true, lens: pr }
 # Each pull request's lifetime as a bar from opened to merged — a range the
-# kit's charts don't draw, so the `pr-lifetimes` lens renders this bundle.
-# It may re-run that lens (its filters) and run the `prs` sync; it runs the
+# kit's charts don't draw, so the `pr-lifetimes` page renders this bundle.
+# It sets that page's `state` filter and runs the `prs` sync; it runs the
 # sync with your rights, under the permissions declared above (approved
 # when the extension was deployed).
 custom_components:
   - id: pr-lifetimes
     title: PR lifetimes
-    assets: [pr-lifetimes]
     commands: [oxplow.collector.sync]
 # A pull request is a resource a URI can name: `oxplow:github/pr?id=12`, or
-# `[[pr:12]]` in any text oxplow renders. It opens on its `pr` page (`for:`).
+# `[[pr:12]]` in any text oxplow renders. It opens on its `pr` page (`for:` in pages/pr.yaml).
 resources:
   - name: pr
     label: Pull request

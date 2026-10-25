@@ -1,8 +1,10 @@
-# The editor's form: the item's title and body, its uri fixed.
+# The editor's page reads the item for its form; there is none in a fresh
+# project. (The form itself, with its uri fixed, is checked in
+# `crates/oxplow-sdk/tests/examples.rs`: a page's form isn't an example
+# input yet.)
 input:
-  form: edit-item
+  page: edit-item
   params: { uri: "oxplow:oxplow/work_item?id=1&provider=oxplow" }
 expect:
-  values: { uri: "oxplow:oxplow/work_item?id=1&provider=oxplow" }
-  fixed: [uri]
-  fields: [title, body]
+  loaders:
+    edit_item: { rows: 0, columns: [title, body] }

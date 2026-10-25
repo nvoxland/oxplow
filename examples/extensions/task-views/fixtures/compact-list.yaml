@@ -1,7 +1,7 @@
 # The list reads v_work_item; a fresh project has no items yet.
 input:
-  lens: compact-list
+  page: compact-list
   params: { scope: all }
 expect:
-  columns: [uri, title, state, updated_at]
-  rows: 0
+  loaders:
+    compact_list: { rows: 0, columns: [uri, title, state, updated_at] }

@@ -1,0 +1,25 @@
+title: TODOs
+description: The TODO comments in the code, each with what a model said it asks for (a bug, cleanup or a feature).
+category: Code
+data:
+  todos:
+    sql: |
+      SELECT path, line, rule AS kind
+      FROM metric_findings('triage.todos')
+      ORDER BY rule, path, line
+view:
+  from: todos
+  viz: table
+  actions:
+  - id: decide
+    label: Decide…
+    command: triage.todos.decide
+    row: true
+    form: true
+    fixed:
+    - path
+    - line
+    input:
+      path: '{{row.path}}'
+      line: '{{row.line}}'
+      decision: keep

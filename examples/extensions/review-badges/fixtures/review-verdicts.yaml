@@ -1,6 +1,6 @@
 # Nothing has been reviewed in a fresh project.
 input:
-  lens: review-verdicts
+  page: review-verdicts
 expect:
-  columns: [work_item, effort, state, reviewed_at, opening]
-  rows: 0
+  loaders:
+    review_verdicts: { rows: 0, columns: [work_item, effort, state, reviewed_at, opening] }

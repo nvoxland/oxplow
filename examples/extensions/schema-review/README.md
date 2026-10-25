@@ -10,7 +10,7 @@ shows its answer as the effort's verdict instead.
 |---|---|
 | **The verdict** (an effort's page, first line) | `Schema review: accepted`, or `changes requested` with a line per reason. Replaces oxplow-bundled's verdict (`effort.verdict`). |
 | **Schema Changes** (an effort's page, below) | The migration files the effort changed, and how many tables each creates, alters and drops. |
-| **A badge** (wherever a lens lists an effort) | `Schema OK` or `Schema: changes`. |
+| **A badge** (wherever a page lists an effort) | `Schema OK` or `Schema: changes`. |
 
 An effort asks for changes when:
 
@@ -34,8 +34,8 @@ Only from oxplow's public contracts, so nothing in oxplow changed for it:
   effort's files (`v_effort_file`), its latest test run (`v_test_run`, with
   its provenance), its diff coverage (`v_effort_observation`) and the
   functions its change added (`v_change_function`).
-- **oxplow's page.** The verdict lens replaces `effort.verdict`, a slot
-  lens adds the table, and a decorator badges the effort.
+- **oxplow's page.** The verdict page replaces `effort.verdict`, a slot
+  page adds the table, and a decorator badges the effort.
 
 ## Using it
 

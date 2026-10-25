@@ -1,0 +1,15 @@
+title: TODO Board
+description: The code's TODO comments as a board, a column for each thing they ask for — bugs, cleanup and features.
+category: Code
+data:
+  todo_board:
+    sql: |
+      SELECT path, line, rule AS kind
+      FROM metric_findings('triage.todos')
+      ORDER BY rule, path, line
+view:
+  from: todo_board
+  viz: custom
+  custom:
+    component: todo-board
+  empty: No TODO comments found yet; they're counted on each snapshot.

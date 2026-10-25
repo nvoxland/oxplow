@@ -1,15 +1,11 @@
-# The board reads its own lens and runs its extension's commands: a
-# decision is recorded in the extension's state and read back.
+# The board runs its extension's commands: a decision is recorded in the
+# extension's state and read back.
 input:
   component: todo-board
-  queries:
-    - { asset: todos }
   invokes:
     - { command: triage.todos.decide, input: { path: src/lib.rs, line: 1, decision: fix-now } }
     - { command: triage.todos.decisions }
 expect:
-  queries:
-    - { rows: 0 }
   invokes:
     - { ok: true }
     - { ok: true, result: { result: { decisions: { "src/lib.rs:1": fix-now } } } }

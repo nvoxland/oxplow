@@ -11,10 +11,10 @@ intent:
   origin: null
   examples:
     - name: thread-notes
-      input: { lens: thread-notes, params: { thread_id: 1 } }
+      input: { page: thread-notes, params: { thread_id: 1 } }
       expect: no rows for a thread with no notes
 # A section of a core page, placed by the page's stable section ids
 # (`start`, `earlier`), so it stays put as the page changes.
 ui:
   slots:
-    - { slot: oxplow-foundation/new-session.sections, lens: thread-notes, title: Notes on this thread, at: { after: start } }
+    - { slot: oxplow-foundation/new-session.sections, page: thread-notes, title: Notes on this thread, at: { after: start } }

@@ -21,7 +21,7 @@
   oxplow.connect().then((component) => {
     component.applyTheme();
 
-    // The TODOs from the lens's own rows, without decisions.
+    // The TODOs from the page's own rows, without decisions.
     const fromRun = (run) => {
       const columns = run.result.columns;
       const at = (row, name) => row[columns.indexOf(name)];

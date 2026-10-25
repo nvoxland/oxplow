@@ -1,6 +1,6 @@
 # effort-review/effort.review: ask for one effort's review — the one place
 # the review's prompt lives (the `review-on-finish` effect and the Efforts
-# lens both come here). The intent key names the effort, so asking again
+# page both come here). The intent key names the effort, so asking again
 # for the same effort returns the same job.
 
 SYSTEM = """You review a coding agent's finished piece of work for the person supervising it.

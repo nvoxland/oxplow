@@ -34,9 +34,9 @@ that run through public commands and the SDK only:
   refused.
   Tests: `crates/oxplow-sdk/tests/trials.rs`; the browser spec
   `tests-e2e/specs/components/triage.spec.ts` drives the board and the
-  lens form.
+  page form.
 - **Producer and consumer** (effort-review → review-badges). The import
-  resolves, reads real reviews, and degrades — lenses and the task-page
+  resolves, reads real reviews, and degrades — pages and the task-page
   slot withheld, the rest loaded, the reason printed — when the producer
   is disabled, missing or exports another version.
   Tests: the review-badges tests in `examples.rs`.
@@ -47,7 +47,7 @@ A fourth proves a review isn't oxplow's to decide:
   (DDL per migration file, by its own dimension) join core's evidence —
   the effort's files, its latest test run and its provenance, its diff
   coverage, the functions its change added — in its own model, and its
-  lens replaces the effort's verdict. A migration that starts dropping a
+  page replaces the effort's verdict. A migration that starts dropping a
   table flips it. Test:
   `the_schema_review_example_joins_its_facts_with_core_evidence`.
 
@@ -72,7 +72,7 @@ Fixed while building them:
 - Job fixtures ran on an empty throwaway, so a job's tool found no
   evidence; a job fixture's `setup` now runs oxplow's own commands first,
   and a fixture model's reply can be matched to the request (`when`).
-- Withheld contributions were reported unevenly: a lens fixture failed
+- Withheld contributions were reported unevenly: a page fixture failed
   with "not found", a dropped slot got no warning, and one cause got two
   differently worded warnings. Now each unavailable import is one warning
   naming everything it withheld, and `extension test` skips a withheld

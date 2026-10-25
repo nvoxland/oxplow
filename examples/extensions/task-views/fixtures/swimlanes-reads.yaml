@@ -1,10 +1,9 @@
-# The board reads its cards and the active provider's features.
+# The board's page reads its cards and the active provider's features,
+# which its component is fed.
 input:
-  component: swimlanes
-  queries:
-    - { asset: swimlanes, params: { scope: all } }
-    - { asset: features }
+  page: swimlanes
+  params: { scope: all }
 expect:
-  queries:
-    - { rows: 0 }
-    - { rows: 1 }
+  loaders:
+    swimlanes: { rows: 0 }
+    features: { rows: 1 }

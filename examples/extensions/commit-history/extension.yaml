@@ -12,8 +12,8 @@ intent:
   origin: null
   examples:
     - name: commits
-      input: { lens: commits, params: { range: all } }
+      input: { page: history, params: { range: all } }
       expect: no rows in a repository with no commits
     - name: files
-      input: { lens: files, params: { commit: "0000000" } }
+      input: { page: history, params: { commit: "0000000" } }
       expect: no rows for a commit that isn't there

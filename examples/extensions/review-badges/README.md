@@ -14,10 +14,10 @@ imports:
   - { id: reviews, contribution: oxplow:oxplow/model?model=effort-review/reviews, version: 2, optional: true }
 ui:
   slots:
-    - { slot: oxplow-foundation/work-item.sections, lens: item-review }
+    - { slot: oxplow-foundation/work-item.sections, page: item-review }
 ```
 
-Both lenses read `import_ref('reviews')`, which is how an extension reads
+Both pages read `import_ref('reviews')`, which is how an extension reads
 another's exported model: only what effort-review published, by the
 version it declared.
 
@@ -33,7 +33,7 @@ review-badges itself runs no program and declares no permissions.
 The import is `optional: true`, so a missing producer is not an error.
 When effort-review is missing, disabled, or exports another version:
 
-- the two lenses and the slot are **withheld**: the list isn't in the
+- the two pages and the slot are **withheld**: the list isn't in the
   launcher and nothing is mounted on the task page;
 - **Settings → Extensions** shows review-badges with a warning that says
   which import is unavailable and why;
@@ -43,12 +43,12 @@ When effort-review is missing, disabled, or exports another version:
 ``import `reviews` → oxplow:oxplow/model?model=effort-review/reviews v2: available`` or
 `unavailable (effort-review is disabled)`, `(effort-review exports v2)`,
 `(effort-review or its contribution isn't here)`. `oxplow extension test`
-prints the same, and skips the fixtures for the two lenses with a warning
+prints the same, and skips the fixtures for the two pages with a warning
 saying the import withheld them and why.
 
 ## Test it
 
-`oxplow extension test .oxplow/extensions/review-badges` runs the two lens
+`oxplow extension test .oxplow/extensions/review-badges` runs the two page
 examples (both empty in a fresh project).
 `oxplow-sdk/tests/examples.rs` also runs it beside effort-review: present,
 disabled, on another version and missing, and with a real review.

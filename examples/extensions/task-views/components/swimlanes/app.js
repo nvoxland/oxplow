@@ -2,7 +2,7 @@
 // another column to move it; drag within a column to reorder it (only when the
 // active list keeps an order); click a title to rename; click a card to open it.
 //
-// It reads `v_work_item` through its `swimlanes` lens and changes items only
+// It reads `v_work_item` through its page's `swimlanes` loader and changes items only
 // through the work-item interface commands, so it works with any work list.
 (function () {
   "use strict";
@@ -29,8 +29,8 @@
   };
 
   /** Whether the active work list keeps an order: its features say `ordering`. */
-  function hasOrdering(run) {
-    const cell = run && run.result && run.result.rows[0] ? run.result.rows[0][0] : null;
+  function hasOrdering(features) {
+    const cell = features && features.rows && features.rows[0] ? features.rows[0][0] : null;
     if (cell === null || cell === undefined) return false;
     let list = cell;
     if (typeof cell === "string") {
@@ -47,47 +47,33 @@
 
   oxplow.connect().then((component) => {
     component.applyTheme();
-    let current = component.run;
-    let ordering = false;
+    let current = component.data.swimlanes;
+    let ordering = hasOrdering(component.data.features);
     let editing = false;
     let dragRef = null;
 
-    const reload = () =>
-      component.query("swimlanes", current.params || {}).then((run) => {
-        current = run;
-        draw();
-      }, say);
-    /** Run a command; on success the lens is read again. */
+    /** Run a command; on success the host runs the page again and sends the
+     *  new rows to `onUpdate`. */
     const change = (command, input) =>
       component.invoke(command, input).then(
-        () => {
-          clearNote();
-          return reload();
-        },
+        () => clearNote(),
         (e) => {
           say(e);
           throw e;
         },
       );
 
-    component.query("features").then(
-      (run) => {
-        ordering = hasOrdering(run);
-      },
-      () => {
-        ordering = false;
-      },
-    );
-    component.onUpdate(({ run }) => {
-      current = run;
+    component.onUpdate(({ data }) => {
+      current = data.swimlanes;
+      ordering = hasOrdering(data.features);
       if (!editing) draw();
     });
     draw();
 
     function draw() {
-      const columns = current.result.columns;
+      const columns = current.columns;
       const at = (row, name) => row[columns.indexOf(name)];
-      const items = current.result.rows.map((row) => ({
+      const items = current.rows.map((row) => ({
         uri: at(row, "uri"),
         title: at(row, "title"),
         state: at(row, "state"),
@@ -188,9 +174,7 @@
       form.addEventListener("submit", (e) => {
         e.preventDefault();
         change("oxplow.work_item.update", { uri: item.uri, title: input.value }).then(
-          () => {
-            editing = false;
-          },
+          () => leave(),
           (err) => {
             if (err && err.field) {
               error.textContent = err.message;

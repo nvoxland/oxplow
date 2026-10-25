@@ -1,9 +1,9 @@
 # GitHub pull requests: an example oxplow extension
 
 Pulls your repo's 100 most recent pull requests into oxplow as `v_github_pr`,
-and adds a **Pull Requests by Work Item** lens that matches each PR to the
+and adds a **Pull Requests by Work Item** page that matches each PR to the
 work item its title mentions by id (`tsk42`, `ENG-12` — whichever work list
-is active), and a **PR Lifetimes** lens that draws
+is active), and a **PR Lifetimes** page that draws
 each one as a bar from when it was opened to when it was merged.
 
 A pull request is also a resource a URI can name: `oxplow:github/pr?id=12`,
@@ -33,12 +33,12 @@ The repo comes from `git remote get-url origin`, or set
 
 - `extension.yaml`: the `prs` source and the `pr` entity's columns.
 - `sync.sh`: fetches from the GitHub API and reshapes the result with `jq`.
-- `lenses/prs-by-task.yaml`: the lens.
-- `lenses/pr-lifetimes.yaml`, `components/pr-lifetimes/`: the lifetimes lens
+- `pages/prs-by-task.yaml`: the page.
+- `pages/pr-lifetimes.yaml`, `components/pr-lifetimes/`: the lifetimes page
   and the bundle it renders (`custom_components:` in `extension.yaml`).
-- `models/pull_request.sql`, `lenses/pr.yaml`: what a `github/pr` URI
+- `models/pull_request.sql`, `pages/pr.yaml`: what a `github/pr` URI
   resolves to, and the page it opens (`resources:` in `extension.yaml`).
 - `fixtures/pr-link.yaml`: `oxplow plugin test`'s check that `[[pr:12]]`
   names `oxplow:github/pr?id=12`.
 
-See the [Lenses guide](../../../docs/guide/lenses.md) for the format.
+See the [guide to pages](../../../docs/guide/lenses.md) for the format.

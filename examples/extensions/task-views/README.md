@@ -4,7 +4,7 @@ Three views that stand in for oxplow's own, with no work-items provider of
 their own. They read `v_work_item` and change items only through the
 work-item commands, so they work with whichever list is active.
 
-| Replaces | Lens | What it is |
+| Replaces | Page | What it is |
 |---|---|---|
 | `work_item.board` | `swimlanes` | A `viz: custom` component: a column per state, cards you drag |
 | `work_item.list` | `compact-list` | A table with title (a page link), state and updated; row actions **Done** and **Edit…** |
@@ -13,9 +13,9 @@ work-item commands, so they work with whichever list is active.
 ```yaml
 ui:
   replacements:
-    - { target: work_item.board, lens: swimlanes, version: 1 }
-    - { target: work_item.list, lens: compact-list, version: 1 }
-    - { target: work_item.detail, lens: edit-item, version: 1 }
+    - { target: work_item.board, page: swimlanes, version: 1 }
+    - { target: work_item.list, page: compact-list, version: 1 }
+    - { target: work_item.detail, page: edit-item, version: 1 }
 ```
 
 ## What the swimlanes do
@@ -25,7 +25,7 @@ ui:
   `oxplow.work_item.transition`.
 - Drag a card within its column and it runs `oxplow.work_item.reorder`,
   but only when the active provider's `features` include `ordering`
-  (read by the hidden `features` lens). Without it the drop does nothing.
+  (the page's `features` loader). Without it the drop does nothing.
 - Click a title to rename the item: an inline form (Enter saves, Escape
   puts it back) that runs `oxplow.work_item.update`. A refusal naming a
   field shows under the input.
@@ -38,9 +38,9 @@ ui:
 
 May:
 - read any published model (`v_work_item`, `v_thread`, …) through its
-  lenses;
+  pages' loaders;
 - change work items through the commands it declares in
-  `custom_components[].commands` (a table or form lens uses `actions` /
+  `custom_components[].commands` (a table or form on a page uses `actions` /
   `form`, which run as you);
 - hold forms, drag and drop and its own filters, styled with the kit
   (`ox-form`, `ox-input`, `ox-error`, `ox-drag`, `ox-drop-target`, …).
@@ -64,5 +64,5 @@ May not:
    so cards can change items.
 
 `oxplow extension check task-views` lints it and `oxplow extension test
-task-views` runs `fixtures/`: the list over some rows, the board's queries
-and a refused update, and the editor's form.
+task-views` runs `fixtures/`: the list over some rows, the board's loaders
+and a refused update, and the editor's loader.

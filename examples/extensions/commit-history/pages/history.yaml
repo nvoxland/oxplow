@@ -1,0 +1,84 @@
+title: Commit history
+description: The project's commits; click one to see its files.
+category: Git
+params:
+- name: range
+  role: filter
+  label: When
+  type: date_range
+  default: 30d
+  presets:
+  - 7d
+  - 30d
+  - 90d
+  - all
+- name: q
+  role: filter
+  label: Search subjects
+  type: search
+- name: merges
+  role: filter
+  label: Merges only
+  type: bool
+  default: false
+- name: commit
+  label: Commit
+data:
+  commits:
+    sql: |
+      SELECT sha, subject, author, committed_at
+        FROM v_commit
+       WHERE (:range_from IS NULL OR committed_at >= :range_from)
+         AND (:range_to IS NULL OR committed_at < :range_to)
+         AND (:q IS NULL OR subject LIKE '%' || :q || '%')
+         AND (:merges = 0 OR parent_count > 1)
+       ORDER BY committed_at DESC
+       LIMIT 200
+  files:
+    sql: |
+      SELECT path, status, additions, deletions
+        FROM v_commit_file
+       WHERE sha = :commit
+       ORDER BY path
+view:
+  stack:
+  - id: commits
+    title: Commits
+    from: commits
+    viz: table
+    columns:
+    - key: sha
+      label: Commit
+      width: 90
+      select: commit
+    - key: subject
+      label: Subject
+      highlight: q
+    - key: author
+      label: Author
+      width: 140
+    - key: committed_at
+      label: When
+      format: relative
+      width: 100
+    empty: No commits match.
+  - id: files
+    title: Files in the commit
+    from: files
+    viz: table
+    columns:
+    - key: path
+      label: File
+      link:
+        kind: file
+        from: path
+    - key: status
+      label: Change
+      width: 80
+    - key: additions
+      label: +
+      width: 60
+    - key: deletions
+      label: −
+      width: 60
+    empty: Click a commit to see its files.

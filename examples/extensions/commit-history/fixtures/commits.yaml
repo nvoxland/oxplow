@@ -1,7 +1,7 @@
 # A repository with no commits shows none, at any range.
 input:
-  lens: commits
+  page: history
   params: { range: all }
 expect:
-  columns: [sha, subject, author, committed_at]
-  rows: 0
+  loaders:
+    commits: { rows: 0, columns: [sha, subject, author, committed_at] }

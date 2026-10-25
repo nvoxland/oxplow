@@ -1,0 +1,7 @@
+# The board's page reads the TODOs its component draws; a fresh project has
+# none.
+input:
+  page: todo-board
+expect:
+  loaders:
+    todo_board: { rows: 0, columns: [path, line, kind] }

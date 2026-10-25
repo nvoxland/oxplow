@@ -11,11 +11,11 @@ intent:
   origin: null
   examples:
     - name: compact-list
-      input: { lens: compact-list, params: { scope: all } }
+      input: { page: compact-list, params: { scope: all } }
       expect: the work items as a table with title, state and updated
     - name: swimlanes-reads
-      input: { component: swimlanes }
-      expect: the board reads its cards and the active provider's features
+      input: { page: swimlanes, params: { scope: all } }
+      expect: the board's page reads its cards and the active provider's features
     - name: swimlanes-refuses-a-missing-item
       input: { component: swimlanes }
       expect: changing an item that isn't there is refused, with the command's reason
@@ -23,17 +23,16 @@ intent:
       input: { component: swimlanes }
       expect: renaming an item through the board goes through
     - name: edit-item
-      input: { form: edit-item, params: { uri: "oxplow:oxplow/work_item?id=1&provider=oxplow" } }
+      input: { page: edit-item, params: { uri: "oxplow:oxplow/work_item?id=1&provider=oxplow" } }
       expect: a form for the item's title and body, its uri fixed
 permissions:
   commands: [oxplow.work_item.transition, oxplow.work_item.reorder, oxplow.work_item.update]
 custom_components:
   - id: swimlanes
     title: Swimlanes
-    assets: [swimlanes, features]
     commands: [oxplow.work_item.transition, oxplow.work_item.reorder, oxplow.work_item.update]
 ui:
   replacements:
-    - { target: work_item.board, lens: swimlanes, version: 1 }
-    - { target: work_item.list, lens: compact-list, version: 1 }
-    - { target: work_item.detail, lens: edit-item, version: 1 }
+    - { target: work_item.board, page: swimlanes, version: 1 }
+    - { target: work_item.list, page: compact-list, version: 1 }
+    - { target: work_item.detail, page: edit-item, version: 1 }

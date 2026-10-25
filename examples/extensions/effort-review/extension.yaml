@@ -35,7 +35,7 @@ intent:
       input: { command: effort_review.effort.evidence }
       expect: the effort's evidence in one bounded bundle
     - name: reviews
-      input: { lens: reviews }
+      input: { page: reviews }
       expect: one row per review the job examples started
 
 # The model the review asks for: a person binds `effort-review/review` in
@@ -67,7 +67,7 @@ jobs:
 commands:
   # The job's lifecycle, through the host's jobs scope. `agent: true` is
   # what lets the `review-on-finish` effect ask (an effect acts as an
-  # agent); `lens: true` lets the Reviews and Efforts lenses' buttons.
+  # agent).
   - name: review.ask
     summary: Ask a model to review one effort; returns the job. The intent key `review:<effort uri>` makes it one job per effort.
     scope: jobs.write
@@ -81,7 +81,7 @@ commands:
     scope: jobs.write
     op: cancel
   # Ask for one effort's review: builds the job's request (the prompt) and
-  # composes `review.ask`. The effect and the Efforts lens both use it.
+  # composes `review.ask`. The effect and the Efforts page both use it.
   - name: effort.review
     summary: Ask a model to review one effort from its evidence; the review streams into the Jobs page and is commented on the effort's work item.
     entry: commands/review_effort.star

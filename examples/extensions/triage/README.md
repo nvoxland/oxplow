@@ -49,7 +49,7 @@ collector `todos` (collectors/todos.star):
 - **The TODO board** (`components/todo-board`) shows the TODOs by kind,
   each card with a form to decide on it. It runs the two commands above,
   so it works once the extension is deployed; if they are refused (not
-  deployed, or disabled) it shows the TODOs without decisions and says so. The `todos` lens (under Code in
+  deployed, or disabled) it shows the TODOs without decisions and says so. The `todos` page (under Code in
   the launcher) has the same decision as a row action, `Decide…`, which
   opens a form.
 
@@ -64,7 +64,7 @@ the last left; a write holding an old stamp is refused rather than
 overwriting. `oxplow-sdk/tests/trials.rs` runs each of these over an
 on-disk database.
 
-The commands read the TODOs as the board's lens does, through the
+The commands read the TODOs as the board's page does, through the
 metric (`metric_findings('triage.todos')`).
 
 ## Use it

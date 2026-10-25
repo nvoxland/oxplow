@@ -28,7 +28,7 @@ intent:
       expect: publish-summary writes the triage-summary page
     - name: todo-board
       input: { component: todo-board }
-      expect: the board reads its lens, records a decision on a TODO and reads it back
+      expect: the board records a decision on a TODO and reads it back
     - name: decide-a-todo
       input: { command: triage.todos.decide }
       expect: deciding composes the state write against the stamp it read
@@ -157,5 +157,4 @@ effects:
 custom_components:
   - id: todo-board
     title: TODO board
-    assets: [todos]
     commands: [triage.todos.decisions, triage.todos.decide]

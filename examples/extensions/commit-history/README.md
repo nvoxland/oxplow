@@ -1,6 +1,6 @@
 # commit-history
 
-A page of the project's commits, made only of lens files. It shows the
+A page of the project's commits, made only of one page file. It shows the
 param types and a row that selects:
 
 - Its filters are a `date_range` (`When`), a `search` (`Search subjects`)

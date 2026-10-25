@@ -1,7 +1,7 @@
 # An item with no review shows no row.
 input:
-  lens: item-review
+  page: item-review
   params: { uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" }
 expect:
-  columns: [state, reviewed_at, review]
-  rows: 0
+  loaders:
+    item_review: { rows: 0, columns: [state, reviewed_at, review] }
