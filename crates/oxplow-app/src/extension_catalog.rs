@@ -583,6 +583,20 @@ impl ExtensionCatalog {
             .ok_or(DomainError::NotFound)
     }
 
+    /// One page by `<extension>/<slug>`.
+    pub fn find_page(
+        &self,
+        root: &Path,
+        id: &str,
+    ) -> Result<crate::pages::schema::Page, DomainError> {
+        let (ext, slug) = id.split_once('/').ok_or(DomainError::NotFound)?;
+        self.named(root, ext)?
+            .page_files
+            .into_iter()
+            .find(|p| p.slug == slug)
+            .ok_or(DomainError::NotFound)
+    }
+
     /// How many full loads have run. A hit doesn't count.
     pub fn loads(&self) -> usize {
         self.loads.load(Ordering::Relaxed)

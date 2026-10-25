@@ -243,6 +243,27 @@ command. An **inline page** (`parse_inline_page`: a markdown
 ` ```oxplow-page ` block, an agent's one-off) only reads: no `command`
 loaders, no actions, forms, terminals, editors, components or slots.
 
+**Running one** (`pages/runner.rs`, `PageRunner::run`): params resolve as
+a lens's do (supplied, else the viewer's context, else the default;
+`head_sha` the viewed stream's HEAD). Loaders run in order: a `sql`
+loader gets each earlier loader it names as a temp table of that name
+(`SqlQuery.temp`, beside `metric_grid()`'s); a `command` loader runs only
+a command whose access is a read (`Access::reads_only`), as the viewer
+(`Actor::Lens { lens_id: <page>#<loader>, on_behalf_of }` until the actor
+is renamed), its result a `{ columns, rows }` table as is, objects a row
+each, else one `value`; a `page` loader runs that page and takes its
+loader. A loader that fails carries its `error` and the rest of the page
+still shows. Within one run, embeds included, a loader with the same
+definition and inputs (its `key`) runs once. A loader only a switch's
+hidden children show doesn't run; one no node shows does (it feeds an
+embed, the badge or a later loader). The tree resolves a switch to its
+child in view (the param's value, else the first) and an embed to its
+page's run, its params by name: the embed's `params`, else the host's
+param of that name, else that column of the host loaders' first rows in
+order. `dirty_loaders` is what a change makes run again: loaders that
+read a changed model (a command loader's are its `reads`) or bind a
+changed param, and everything downstream of them.
+
 ## Declared pages
 
 Every page is a `pages:` entry in an extension's manifest
