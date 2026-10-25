@@ -118,8 +118,21 @@ cargo run -q -p oxplow-dev -- wiki search burrows
 cargo run -q -p oxplow-dev -- extension status
 cargo run -q -p oxplow-dev -- extension deploy                     # everything on whose source changed
 cargo run -q -p oxplow-dev -- extension deploy oxplow-foundation   # one extension
+cargo run -q -p oxplow-dev -- pages convert extensions/oxplow-bundled [--write]  # lenses -> page files
 cargo run -q -p oxplow-dev -- --help
 ```
+
+`pages convert <ext-dir>` is the one-off move from lenses to page files
+(`crates/oxplow-app/src/pages/convert.rs`, its module doc has the
+mapping): it reads the extension's manifest and `lenses/`, and the
+extensions beside it for their mounts. Run with no flag, it prints a
+report: the files it would write, the lenses it inlined or embedded, the
+lenses it skips (the ones the migration deletes), the TODOs, and the manifest
+rewrites (`ui.slots`, `panels`, `ui.replacements`, `pages:`) as
+suggestions. `--write` writes `pages/*.yaml` and leaves the lenses and the
+manifest as they are. A file it can't convert mechanically starts with
+`# TODO(convert): <why>`. It checks every file with `parse_page`, and a
+file that doesn't parse gets a TODO that gives the error.
 
 `extension status` and `extension deploy` change what oxplow runs from
 outside it. Boot deploys nothing, so they are how a checkout gets its
