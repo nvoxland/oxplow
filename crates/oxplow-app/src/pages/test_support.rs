@@ -173,6 +173,20 @@ view:
 "#,
     ),
     (
+        "mixed",
+        r#"
+title: Mixed
+data:
+  steady: { sql: "SELECT abs(random()) AS r" }
+  models: { sql: "SELECT count(*) AS n FROM v_model" }
+  after: { sql: "SELECT n, abs(random()) AS r FROM models" }
+view:
+  stack:
+    - { viz: number, from: steady }
+    - { viz: table, from: after }
+"#,
+    ),
+    (
         "writes",
         r#"
 title: Writes

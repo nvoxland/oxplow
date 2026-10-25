@@ -160,11 +160,21 @@ impl<'a> PageRunner<'a> {
     }
 
     pub async fn run(&self, req: RunRequest) -> Result<PageRun, DomainError> {
+        self.run_seeded(req, Memo::new()).await
+    }
+
+    /// [`PageRunner::run`], reusing `seed`'s loader runs by key: what a
+    /// re-run keeps of the loaders a change didn't reach.
+    pub async fn run_seeded(
+        &self,
+        req: RunRequest,
+        seed: HashMap<String, LoaderRun>,
+    ) -> Result<PageRun, DomainError> {
         let page = match req.target {
             RunTarget::Page(id) => self.find(&id)?,
             RunTarget::Spec(page) => page.as_ref().clone(),
         };
-        let mut memo = Memo::new();
+        let mut memo = seed;
         self.run_page(page, req.params, &req.ctx, &req.viewer, &mut memo, 0)
             .await
     }
@@ -824,6 +834,60 @@ fn flow_params(
             out.insert(p.name.clone(), v);
         }
     }
+    out
+}
+
+/// The loader runs of `run` (its embeds' and mounts' included) a change
+/// to `models` / `measures` doesn't reach, by key: a loader that read none
+/// of them and reads no loader that did.
+pub fn unreached(
+    run: &PageRun,
+    models: &[String],
+    measures: &[String],
+) -> HashMap<String, LoaderRun> {
+    let mut out = HashMap::new();
+    fn walk(
+        run: &PageRun,
+        models: &[String],
+        measures: &[String],
+        out: &mut HashMap<String, LoaderRun>,
+    ) {
+        let mut dirty: Vec<&str> = Vec::new();
+        for decl in &run.page.loaders {
+            let Some(r) = run.loaders.get(&decl.name) else {
+                continue;
+            };
+            let reached = decl.reads.iter().any(|m| models.contains(m))
+                || r.result.reads.models.iter().any(|m| models.contains(m))
+                || r.result.reads.measures.iter().any(|m| measures.contains(m))
+                || decl
+                    .reads_loaders
+                    .iter()
+                    .any(|l| dirty.contains(&l.as_str()));
+            if reached {
+                dirty.push(&decl.name);
+            } else {
+                out.insert(r.key.clone(), r.clone());
+            }
+        }
+        fn nodes<'r>(n: &'r RunNode, out: &mut Vec<&'r PageRun>) {
+            if let Some(e) = &n.embed {
+                out.push(e);
+            }
+            for c in &n.children {
+                nodes(c, out);
+            }
+        }
+        let mut embedded = Vec::new();
+        nodes(&run.tree, &mut embedded);
+        if let Some(rail) = &run.rail {
+            nodes(rail, &mut embedded);
+        }
+        for e in embedded {
+            walk(e, models, measures, out);
+        }
+    }
+    walk(run, models, measures, &mut out);
     out
 }
 

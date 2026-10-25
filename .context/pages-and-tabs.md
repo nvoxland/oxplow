@@ -314,8 +314,11 @@ one `fetch_page_runs` batch and drops a reply older than a `seq` it
 applied (`apps/desktop/src/pageRuns.ts`: runs shared by key, closed
 250 ms after the last host lets go, every run opened again after a
 reconnect). Runs belong to their window's `client` and go with it
-(`keep_only_clients`). A re-run runs the whole page today; running only
-the dirty loaders (`dirty_loaders`) comes once this is end to end.
+(`keep_only_clients`). A model change keeps the loaders it didn't reach:
+the re-run is seeded (`PageRunner::run_seeded`) with every loader run —
+embeds' and mounts' too — that read none of the changed models or
+measures and reads no loader that did (`runner::unreached`), so only the
+rest query again. A param change or Refresh runs the page whole.
 
 **Actions** (`pages/actions.rs`, `run_page_action { runId, node?, action,
 row?, input?, drop?, confirmed }`): pressed on an open run. A whole-page

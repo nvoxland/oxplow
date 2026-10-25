@@ -232,7 +232,17 @@ impl PageRuns {
         id: &str,
         req: RunRequest,
     ) -> Result<(PageRun, RunChange), DomainError> {
-        let fresh = PageRunner::of(svc).run(req.clone()).await?;
+        self.rerun_seeded(svc, id, req, HashMap::new()).await
+    }
+
+    async fn rerun_seeded(
+        &self,
+        svc: &crate::Services,
+        id: &str,
+        req: RunRequest,
+        seed: HashMap<String, super::runner::LoaderRun>,
+    ) -> Result<(PageRun, RunChange), DomainError> {
+        let fresh = PageRunner::of(svc).run_seeded(req.clone(), seed).await?;
         let mut runs = self.runs.lock();
         let open = runs
             .get_mut(id)
@@ -266,7 +276,7 @@ impl PageRuns {
             .filter(|(_, r)| reads_any(&r.run, models, measures))
             .map(|(id, _)| id.clone())
             .collect();
-        self.rerun_all(svc, ids).await
+        self.rerun_changed(svc, ids, Some((models, measures))).await
     }
 
     /// Re-run every open run (the catalog changed, or the change loop
@@ -277,9 +287,36 @@ impl PageRuns {
     }
 
     async fn rerun_all(&self, svc: &crate::Services, ids: Vec<String>) -> Vec<RunChange> {
+        self.rerun_changed(svc, ids, None).await
+    }
+
+    /// Re-run `ids`; with `changed` (models, measures), keeping the loaders
+    /// the change didn't reach.
+    async fn rerun_changed(
+        &self,
+        svc: &crate::Services,
+        ids: Vec<String>,
+        changed: Option<(&[String], &[String])>,
+    ) -> Vec<RunChange> {
         let mut out = Vec::new();
         for id in ids {
-            match self.rerun(svc, &id).await {
+            let outcome = match changed {
+                None => self.rerun(svc, &id).await,
+                Some((models, measures)) => {
+                    let (req, seed) = {
+                        let runs = self.runs.lock();
+                        match runs.get(&id) {
+                            Some(open) => (
+                                open.req.clone(),
+                                super::runner::unreached(&open.run, models, measures),
+                            ),
+                            None => continue,
+                        }
+                    };
+                    self.rerun_seeded(svc, &id, req, seed).await
+                }
+            };
+            match outcome {
                 Ok((_, change)) if !change.loaders.is_empty() || change.tree => out.push(change),
                 Ok(_) => {}
                 // Its page went (a deploy removed it): it stays as it was;

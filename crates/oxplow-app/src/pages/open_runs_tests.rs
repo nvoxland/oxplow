@@ -104,3 +104,28 @@ async fn a_clients_runs_go_with_it() {
     assert!(runs.get(&a).is_none());
     assert!(runs.get(&b).is_some());
 }
+
+/// A model change re-runs only the loaders that read it and the ones
+/// downstream of them: a loader that read nothing changed keeps its rows.
+#[tokio::test]
+async fn a_model_change_re_runs_only_what_reads_it() {
+    let (_dir, svc) = fixture().await;
+    let runs = PageRuns::default();
+    let (id, before) = runs
+        .open(&svc, request("acme/mixed", &[]), "w")
+        .await
+        .unwrap();
+    runs.models_changed(&svc, &["v_model".to_string()]).await;
+    let after = runs.get(&id).unwrap();
+    let r = |run: &super::runner::PageRun, l: &str| run.loaders[l].result.rows.clone();
+    assert_eq!(
+        r(&before, "steady"),
+        r(&after, "steady"),
+        "it read nothing that changed"
+    );
+    assert_ne!(
+        r(&before, "after"),
+        r(&after, "after"),
+        "downstream of `models`, it ran again"
+    );
+}
