@@ -49,8 +49,9 @@
      frame would ask; `expect: { queries: [{ rows }], invokes: [{ ok,
      refused? }] }` (an invoke is `refused` when the command refuses it; `items` are work
      items filed first, `oxplow:oxplow/work_item?id=<id>&provider=oxplow`, …);
-   - a form lens (`viz: form`): `input: { form: <lens>, params? }` — opens
-     it as a person would; `expect: { values?, fixed?, fields? }` (the
+   - a page's form (a `viz: form` node): `input: { form: <page>, node?,
+     params? }` — opens it as a person would (`node` names the form node,
+     else the page's first); `expect: { values?, fixed?, fields? }` (the
      values its fields start from, the read-only fields, the shown ones,
      `null` for all);
    - a collector: `input: { collector: <id>, rows: [...], event? }`

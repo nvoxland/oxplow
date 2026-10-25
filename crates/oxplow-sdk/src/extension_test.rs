@@ -294,7 +294,7 @@ async fn examples(host: &Host, ext: &Extension, report: &mut TestReport) {
                  fix: `{{ lens: <slug>, params?, rows? }}`, `{{ page: <slug>, params? }}` (with `given:`), `{{ collector: <id>, rows?, event? }}`, \
                  `{{ command: <name>, input }}`, `{{ effect: <id>, event: {{ type, payload }} }}` \
                  (a dry run), `{{ event: {{ type, payload }} }}` (logged, and what reacts runs), \
-                 `{{ job: <id>, intentKey, request }}`, `{{ component: <id>, items?, queries?, invokes? }}`, `{{ form: <lens>, params? }}`, \
+                 `{{ job: <id>, intentKey, request }}`, `{{ component: <id>, items?, queries?, invokes? }}`, `{{ form: <page>, node?, params? }}`, \
                  `{{ implementation: <id>, event: {{ type, payload, anchors? }} }}`, \
                  `{{ event_type, v?, payload }}`, `{{ wikilink }}`, or (with a provider) \
                  `{{ command, input }}`",
@@ -318,6 +318,7 @@ fn withheld_target(ext: &Extension, input: &Value) -> Option<String> {
         (Kind::Lens, named("lens")),
         (Kind::Lens, named("form")),
         (Kind::Page, named("page")),
+        (Kind::Page, named("form")),
         (Kind::Job, named("job")),
         (Kind::CustomComponent, named("component")),
         (Kind::Effect, named("effect")),
@@ -1074,20 +1075,24 @@ async fn form_example(
                 .collect()
         })
         .unwrap_or_default();
-    let start = oxplow_app::lens_actions::form_start(
-        &host.svc,
-        &host.root,
-        &format!("{}/{slug}", ext.name),
-        params,
-        &oxplow_app::extensions::LensContext::default(),
-    )
-    .await;
+    let start = match ext.page_files.iter().find(|p| p.slug == slug) {
+        Some(page) => page_form_start(host, page, ex.input.get("node"), params).await,
+        None => oxplow_app::lens_actions::form_start(
+            &host.svc,
+            &host.root,
+            &format!("{}/{slug}", ext.name),
+            params,
+            &oxplow_app::extensions::LensContext::default(),
+        )
+        .await
+        .map_err(|e| e.to_string()),
+    };
     let start = match start {
         Ok(start) => start,
         Err(e) => {
             report.errors.push(format!(
-                "{shown}:1: form `{slug}` didn't open: {e} — fix: the form lens (`viz: form` with \
-                 a `form:` naming a command), or the example's params"
+                "{shown}:1: form `{slug}` didn't open: {e} — fix: the form (a `viz: form` node with \
+                 a `form:` naming a command; `node` names which), or the example's params"
             ));
             return;
         }
@@ -1103,6 +1108,50 @@ async fn form_example(
              values?, fixed?, fields? }}`)"
         ));
     }
+}
+
+/// Open a page's form: its `node` (else its first form node) on a run of
+/// the page with `params`.
+async fn page_form_start(
+    host: &Host,
+    page: &oxplow_app::pages::schema::Page,
+    node: Option<&Value>,
+    params: std::collections::BTreeMap<String, oxplow_db::SqlCell>,
+) -> Result<oxplow_app::lens_actions::FormStart, String> {
+    use oxplow_app::pages::schema::NodeKind;
+    let node = match node.and_then(Value::as_str) {
+        Some(id) => id.to_string(),
+        None => page
+            .nodes()
+            .into_iter()
+            .find(|n| {
+                matches!(&n.kind, NodeKind::Viz { lens, .. }
+                    if lens.viz == oxplow_app::extensions::LensViz::Form)
+            })
+            .map(|n| n.id.clone())
+            .ok_or_else(|| "the page has no form node".to_string())?,
+    };
+    let (run_id, _) = host
+        .svc
+        .page_runs
+        .open(
+            &host.svc,
+            oxplow_app::pages::runner::RunRequest {
+                target: oxplow_app::pages::runner::RunTarget::Page(page.id.clone()),
+                params,
+                ctx: oxplow_app::extensions::LensContext::default(),
+                viewer: oxplow_domain::Actor::Human,
+            },
+            "extension-test",
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    let start =
+        oxplow_app::pages::actions::page_form(&host.svc, &host.svc.page_runs, &run_id, &node)
+            .await
+            .map_err(|e| e.to_string());
+    host.svc.page_runs.close(&run_id);
+    start
 }
 
 /// One intent example with its fixture.

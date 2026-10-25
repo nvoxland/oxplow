@@ -1838,8 +1838,10 @@ and one calling MCP read identical `file:line: what — fix` lines.
   they ran and which of the named wiki URIs now exist), a component (`{ component, queries?,
   invokes? }`: `load_component`, `run_component_query`,
   `invoke_component_command` as its frame would — `expect: { queries:
-  [{ rows }], invokes: [{ ok, refused? }] }`), a form lens (`{ form: <lens>,
-  params? }`: `lens_actions::form_start`, as a person opening it — `expect: {
+  [{ rows }], invokes: [{ ok, refused? }] }`), a form (`{ form: <page>,
+  node?, params? }`: the page's form node — `node`, else its first — opened
+  on a run of the page with `pages::actions::page_form`, as a person opening
+  it; a lens's through `lens_actions::form_start` until lenses go — `expect: {
   values?, fixed?, fields? }`, the values the fields start from, the
   read-only ones and the shown ones, `null` for all), and the dry runs that
   stay dry (`{ effect, event }`, `{ implementation, event }`, `{ command,
