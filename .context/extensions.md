@@ -1873,50 +1873,43 @@ The `oxplow-extension` skill requires `check` after every edit.
 ## Answerability
 
 `crates/oxplow-sdk/src/answerability.rs` checks that an agent
-reading the right skill can answer the questions an area of oxplow, or
-an extension, exists for. A questions file is a list of `{ question, skill, reaches: { sql } |
-{ command, input } | { tool, input }, shape: { columns } }`:
+reading the right skill can answer the questions oxplow, or an extension,
+exists for. The questions live on the **pages** that answer them: a page's
+`answers: [{ question, about?, params, skill? }]` (an entry with `about`
+is phrased with "this" and offered on pages for that kind of ref). Core has
+no questions files: oxplow-foundation's pages carry them, including small
+hidden pages that exist to hold a question (`collectors`, `zones`,
+`branch-sync`, `work-item-actions`, …), and a question that says "do this"
+is held by a page with a whole-page action running that command.
 
-- **Core's areas**: `crates/oxplow-agent-text/assets/questions/<area>.yaml`
-  (`vcs`, `work_items`, `knowledge`, `code_intel`, `extensions` — areas
-  of oxplow, not capabilities; `oxplow_agent_text::ANSWERABILITY_QUESTIONS`),
-  each naming a shipped skill
-  (`oxplow-codebase` — history and code, added for this —
-  `oxplow-runtime`, `oxplow-wiki-capture`). The in-tree test
-  (`every_answerability_question_reaches_what_its_skill_names`) runs them
-  against a throwaway `Services::in_memory` (async, activated as boot does).
-- **Per question**: the skill's text names every model the SQL reads
-  and the command or tool it runs — as a whole word, in any case
-  (`answerability::names`: `v_commit_file` doesn't name `v_commit`); a
-  model is a table the query reads (`models_in`: after `FROM`, `JOIN` or
-  a comma in a `FROM` list), never a `v_*` word in a string, a comment
-  or an alias (tsk570); the SQL runs through the gateway and
-  returns exactly `shape.columns`; a command's or tool's input validates against
-  its schema (a `tool` is an offered agent tool by its `oxplow_<name>`; the check lists
-  them with `agent_tools::offered`). A question whose skill doesn't lead there is a finding,
-  which is the point: when a capability grows, its questions say which
-  skill must learn about it.
-- **Live** (`OXPLOW_LIVE_ANSWERABILITY=1`): `answerability::live` asks
-  this machine's `decide` model (`AiService::for_this_machine`: the
-  global `ai.yaml`, keychain read only), given only the skill text and
-  the catalog (every `v_model` view, every command an agent may run and every tool it is offered),
-  what it would reach for first; it must pick the same model or command.
-- **Pages' `answers:`** (`{ question, about?, params, skill? }` in a page
-  file) are the same check from the page's side (`answerability::check_pages`,
-  with `live_pages` for the live half): the answer's `skill` names every
-  model the page's `sql` loaders read and every command its `command`
-  loaders run (no `skill`, a user extension's, skips that), and the page
-  runs with the answer's params with no loader failing
-  (`RunTarget::Spec` over the throwaway `Services`). The in-tree test
-  `every_page_answer_reaches_what_its_skill_names` covers the shipped
-  extensions; `a_page_answer_must_be_named_by_its_skill_and_run` the
-  mechanism. `oxplow extension test` runs the second half for every
-  extension's pages (`ran: answers`). The questions files stay readable;
-  the sql- and tool-shaped core questions with a page that answers them live
-  on the page now (`answers:` in oxplow-foundation's pages, offered as the
-  extension's prompts in `prompt_catalog`), and what stays in
-  `assets/questions/` is the command-shaped ones and the ones no page answers.
-- **An extension's own** `questions.yaml` runs in `oxplow extension test`:
+- **`answerability::check_pages`** (with `live_pages` for the live half):
+  the answer's `skill` names every model the page's `sql` loaders read,
+  every command its `command` loaders run and every command its whole-page
+  actions run (no `skill`, a user extension's, skips that); the skill's text
+  is `skill_full_text`, so a model is named by the skill or any of its
+  references, as a whole word in any case (`answerability::names`:
+  `v_commit_file` doesn't name `v_commit`); a model is a table the query
+  reads (`models_in`: after `FROM`, `JOIN` or a comma in a `FROM` list),
+  never a `v_*` word in a string, a comment or an alias. An action's
+  command must exist and its input fit the command's schema. The page runs
+  with the answer's params with no loader failing (`RunTarget::Spec` over
+  the throwaway `Services`), and `about` names a declared resource. A
+  question whose skill doesn't lead there is a finding, which is the point:
+  when a capability grows, its questions say which skill must learn about
+  it.
+- **In tree:** `every_page_answer_reaches_what_its_skill_names` runs it over
+  oxplow's own extensions (and checks the kinds a person is offered
+  questions about: file, commit, effort, work item);
+  `a_page_answer_must_be_named_by_its_skill_and_run` the mechanism.
+  `oxplow extension test` runs the second half for every extension's pages
+  (`ran: answers`).
+- **Live** (`OXPLOW_LIVE_ANSWERABILITY=1`): `answerability::live_pages` asks
+  this machine's `decide` model (`AiService::for_this_machine`: the global
+  `ai.yaml`, keychain read only), given only the skill text and the catalog
+  (every `v_model` view, every command an agent may run and every tool it
+  is offered), what it would reach for first; it must pick the page's first
+  loader's model or command.
+- **An extension's own** `questions.yaml` (`answerability::check`) runs in `oxplow extension test`:
   `skill` is a markdown file in the extension, SQL runs on the test's
   throwaway oxplow, and a command is one on its bus — core's or the
   extension's own `commands:` — or one of its providers' `<id>.<name>`
@@ -4894,21 +4887,17 @@ tool: open_work              # offered as <namespace>_open_work
   the first page the row links to, else the row as text
   `[oxplow lens <id> row: col=value, …]` (`rowAssistantContext`).
 - **The prompt catalog (current):** what a person can ask.
-  - Core's are the answerability questions, by area
-    (`crates/oxplow-agent-text/assets/questions/*.yaml`,
-    `oxplow_agent_text::answerability_prompts` → `AnswerabilityPrompt {
-    area, prompt, about }`; `PromptSource::Area` in the catalog); a question with `about: <URI
-    kind>` is phrased with "this" and is offered on pages for that kind
-    (its `reaches` keeps concrete fixture values for the answerability
-    check, which also checks `about` names a declared resource).
+  - What an extension's pages answer (`answers:` in a page file, `about`
+    makes it a question on pages for that kind of ref; see "Answerability"):
+    oxplow's own questions are foundation's pages'.
   - An extension's are `intent.prompts: [{ prompt, about? }]` in its
     manifest (checked: non-empty, **one line** — a pasted line break is
     Enter in the terminal, so a multi-line prompt would send itself —
     and `about` a declared resource, `oxplow/work_item`).
-  - `prompt_catalog::prompt_catalog(extensions)` merges them (core first,
-    then enabled extensions by name), and each extension generation
+  - `prompt_catalog::prompt_catalog(extensions)` merges them (enabled
+    extensions by name; each one's `intent.prompts`, then its pages' answers), and each extension generation
     restates them as the model **`v_prompt`** (`catalog_prompt`, V85:
-    `position`, `source_kind` `area` | `extension`, `source`, `prompt`,
+    `position`, `source_kind` (always `extension` now), `source`, `prompt`,
     `about`), beside **`v_config_key`** (`config_key`: project.yaml's keys
     with their doc and value schema). An agent reads both
     with `oxplow_query_sql`; there is no catalog RPC.

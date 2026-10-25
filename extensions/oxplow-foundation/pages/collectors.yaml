@@ -1,0 +1,22 @@
+title: "Collectors"
+description: "Each collector: when it last ran, how it runs, its state, and the credentials it still lacks. Run one again."
+hidden: true
+answers:
+- {"question":"When did each collector last run, and did it fail?","params":{},"skill":"oxplow-extension"}
+- {"question":"Which collectors are enabled, how do they run, and what state are they in?","params":{},"skill":"oxplow-extension"}
+- {"question":"Run my fixed collector again to see that it works.","params":{},"skill":"oxplow-extension"}
+- {"question":"Which credentials has a collector declared that have no value yet?","params":{},"skill":"oxplow-extension"}
+actions:
+- {"id":"sync","label":"Run again","command":"oxplow.collector.sync","input":{"collector":"tracker/issues"}}
+data:
+  runs:
+    sql: "SELECT owner, id, status, last_run_at, error FROM v_collector_run"
+  collectors:
+    sql: "SELECT extension, id, trigger, enabled, state, last_run_at, error FROM v_collector ORDER BY extension, id"
+  credentials:
+    sql: "SELECT collector, name FROM v_collector_credential WHERE is_set = 0 ORDER BY collector, name"
+view:
+  stack:
+  - { id: runs, viz: table, from: runs }
+  - { id: collectors, viz: table, from: collectors }
+  - { id: credentials, viz: table, from: credentials }

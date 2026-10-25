@@ -1,0 +1,12 @@
+title: "Comment thread"
+description: "What has been said in a comment thread."
+hidden: true
+params:
+- name: comment
+  default: ""
+answers:
+- {"question":"What has been said in this comment thread?","params":{"comment":"oxplow:oxplow/comment?id=cmt1"},"skill":"oxplow-extension"}
+data:
+  messages:
+    sql: "SELECT position, author, body FROM v_comment_message WHERE comment = :comment ORDER BY position"
+view: { viz: table, from: messages }

@@ -1,75 +1,14 @@
 //! The text oxplow gives every agent: core's skills and slash commands
-//! ([`core_text`]), and the answerability questions an agent should be
-//! able to answer, by area ([`ANSWERABILITY_QUESTIONS`],
-//! [`answerability_prompts`]). Each
+//! ([`core_text`]). Each
 //! harness (`oxplow-harnesses`) writes it into its own runtime.
 
 use oxplow_domain::agent::text::{AgentText, Text};
 
-/// The answerability questions, one file per area of oxplow
-/// (`assets/questions/<area>.yaml`): what an agent should be able to
-/// answer, the skill that should lead it there, and what it reaches.
-/// `oxplow_sdk::answerability` checks them.
 /// What every agent must know of oxplow, whatever project it's in: oxplow
 /// adds it to the prompt of every session it launches (terminal and ACP),
 /// so no project repeats it in its own instruction files. The detail is in
 /// the skills, which load on demand.
 pub const WORKING_IN_OXPLOW: &str = include_str!("../assets/working-in-oxplow.md");
-
-pub const ANSWERABILITY_QUESTIONS: &[(&str, &str)] = &[
-    ("vcs", include_str!("../assets/questions/vcs.yaml")),
-    (
-        "work_items",
-        include_str!("../assets/questions/work_items.yaml"),
-    ),
-    (
-        "knowledge",
-        include_str!("../assets/questions/knowledge.yaml"),
-    ),
-    (
-        "code_intel",
-        include_str!("../assets/questions/code_intel.yaml"),
-    ),
-    (
-        "extensions",
-        include_str!("../assets/questions/extensions.yaml"),
-    ),
-];
-
-/// An answerability question as the person sees it: offered with an
-/// Ask button on the catalog page, and on a page for a ref of `about`'s
-/// kind (`file`, `commit`, `effort`, `work_item`).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AnswerabilityPrompt {
-    /// The area it's about (`vcs`, `work_items`, `knowledge`, …).
-    pub area: &'static str,
-    pub prompt: String,
-    pub about: Option<String>,
-}
-
-/// Every answerability question, in file order. The files' other keys are
-/// the answerability check's (`oxplow_sdk::answerability`).
-pub fn answerability_prompts() -> Vec<AnswerabilityPrompt> {
-    #[derive(serde::Deserialize)]
-    struct Entry {
-        question: String,
-        #[serde(default)]
-        about: Option<String>,
-    }
-    ANSWERABILITY_QUESTIONS
-        .iter()
-        .flat_map(|(area, yaml)| {
-            serde_yaml::from_str::<Vec<Entry>>(yaml)
-                .expect("a bundled questions file parses (checked by its test)")
-                .into_iter()
-                .map(|e| AnswerabilityPrompt {
-                    area,
-                    prompt: e.question,
-                    about: e.about,
-                })
-        })
-        .collect()
-}
 
 /// Core's own skills and commands.
 pub fn core_text() -> AgentText {
@@ -188,36 +127,6 @@ pub const SKILL_BODY_LIMIT: usize = 4096;
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// Each answerability question is a prompt; an `about` names a
-    /// registered kind of ref, and the entity pages have some.
-    #[test]
-    fn answerability_prompts_are_about_declared_resources() {
-        let prompts = answerability_prompts();
-        let resources = oxplow_domain::uri::resources::foundation().clone();
-        for p in &prompts {
-            if let Some(about) = &p.about {
-                let declared = about
-                    .parse()
-                    .is_ok_and(|name| resources.get(&name).is_some());
-                assert!(declared, "{}: `{about}`", p.prompt);
-            }
-        }
-        for kind in [
-            "oxplow/file",
-            "oxplow/commit",
-            "oxplow/effort",
-            "oxplow/work_item",
-        ] {
-            assert!(
-                prompts.iter().any(|p| p.about.as_deref() == Some(kind)),
-                "no prompt about `{kind}`"
-            );
-        }
-        assert!(prompts
-            .iter()
-            .any(|p| p.area == "vcs" && p.prompt == "Who has changed this file the most?"));
-    }
 
     /// "Can you see that error?": an operation that failed in front of the
     /// person is recorded (`v_op_error`, its output `read_event_content`),

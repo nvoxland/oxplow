@@ -1,0 +1,12 @@
+title: "Extension contributions"
+description: "What an extension contributes, by kind."
+hidden: true
+params:
+- name: extension
+  default: "oxplow-bundled"
+answers:
+- {"question":"What does this extension contribute?","params":{"extension":"oxplow-bundled"},"skill":"oxplow-extension"}
+data:
+  kinds:
+    sql: "SELECT kind, count(*) AS n FROM v_contribution WHERE extension = :extension GROUP BY kind"
+view: { viz: table, from: kinds }

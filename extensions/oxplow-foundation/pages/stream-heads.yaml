@@ -1,0 +1,9 @@
+title: "Stream heads"
+description: "The commit each stream's workspace is on."
+hidden: true
+answers:
+- {"question":"Which commit is each stream's workspace on?","params":{},"skill":"oxplow-codebase"}
+data:
+  streams:
+    sql: "SELECT id, branch, head_sha FROM v_stream WHERE archived_at IS NULL"
+view: { viz: table, from: streams }

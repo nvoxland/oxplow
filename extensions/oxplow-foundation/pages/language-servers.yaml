@@ -1,0 +1,9 @@
+title: "Language servers"
+description: "Which languages have a language server, whether its binary is installed and whether one runs."
+hidden: true
+answers:
+- {"question":"Which languages have a language server, is its binary installed, and is one running?","params":{},"skill":"oxplow-codebase"}
+data:
+  servers:
+    sql: "SELECT language_id, source, binary_exists, running FROM v_lsp_server ORDER BY language_id"
+view: { viz: table, from: servers }

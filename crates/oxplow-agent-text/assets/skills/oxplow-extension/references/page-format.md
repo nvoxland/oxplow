@@ -86,3 +86,6 @@ model and command the page's loaders read. Give every page at least one.
   loader's one row**. An action that acts on a row (`row: true`) belongs
   on the viz node that shows the row (`view-nodes.md`). The command runs
   as the page acting for the person.
+
+In SQL the pages are `v_page` (one row per page file: its extension, title,
+renderers), `v_page_param` and `v_page_answer`.

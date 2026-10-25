@@ -2198,8 +2198,8 @@ mod tests {
             .unwrap();
         assert_eq!(
             prompts.rows[0][offered],
-            oxplow_db::SqlCell::Text("Version control".into()),
-            "core's areas come first, by a person's name for them"
+            oxplow_db::SqlCell::Text("oxplow-foundation".into()),
+            "oxplow's own questions (its pages' answers) come first, by their extension"
         );
         let page = f
             .svc

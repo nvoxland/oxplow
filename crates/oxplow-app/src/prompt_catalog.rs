@@ -1,6 +1,5 @@
-//! What a person can ask: every area's answerability questions
-//! (`oxplow_agent_text::answerability_prompts`) and every enabled
-//! extension's `intent.prompts`, in one list, restated as `v_prompt` with
+//! What a person can ask: what every enabled extension's pages say they
+//! answer (`answers:`) and its `intent.prompts`, in one list, restated as `v_prompt` with
 //! each extension generation. The Catalog page groups it by source; a page
 //! for a ref suggests the prompts `about` that ref's kind. See
 //! `.context/extensions.md` → "The prompt catalog".
@@ -19,22 +18,12 @@ pub struct CatalogPrompt {
 /// Who offers a prompt.
 #[derive(Debug, Clone, PartialEq)]
 pub enum PromptSource {
-    /// One of core's areas (`vcs`, `work_items`, `knowledge`,
-    /// `code_intel`, `extensions`).
-    Area(String),
     /// An extension.
     Extension(String),
 }
 
-/// Core's prompts, then each enabled extension's, in name order.
+/// Each enabled extension's prompts, in name order.
 pub fn prompt_catalog(extensions: &[Extension]) -> Vec<CatalogPrompt> {
-    let core = oxplow_agent_text::answerability_prompts()
-        .into_iter()
-        .map(|p| CatalogPrompt {
-            prompt: p.prompt,
-            about: p.about,
-            source: PromptSource::Area(p.area.to_string()),
-        });
     let mut exts: Vec<&Extension> = extensions.iter().filter(|e| e.enabled).collect();
     exts.sort_by(|a, b| a.name.cmp(&b.name));
     // An extension's own prompts, then what its pages say they answer.
@@ -59,7 +48,7 @@ pub fn prompt_catalog(extensions: &[Extension]) -> Vec<CatalogPrompt> {
             });
         prompts.chain(answers)
     });
-    core.chain(from_extensions).collect()
+    from_extensions.collect()
 }
 
 #[cfg(test)]
@@ -86,7 +75,7 @@ mod tests {
     }
 
     #[test]
-    fn the_catalog_merges_core_and_enabled_extension_prompts() {
+    fn the_catalog_lists_enabled_extension_prompts() {
         let catalog = prompt_catalog(&[
             ext(
                 "gh",
@@ -98,11 +87,6 @@ mod tests {
             ),
             ext("off", false, &[("Hidden?", None)]),
         ]);
-        assert!(catalog
-            .iter()
-            .any(|p| p.prompt == "Who has changed this file the most?"
-                && p.about.as_deref() == Some("oxplow/file")
-                && p.source == PromptSource::Area("vcs".into())));
         let mine: Vec<_> = catalog
             .iter()
             .filter(|p| p.source == PromptSource::Extension("gh".into()))
@@ -116,8 +100,6 @@ mod tests {
             ]
         );
         assert!(!catalog.iter().any(|p| p.prompt == "Hidden?"));
-        // Core first.
-        assert!(matches!(catalog[0].source, PromptSource::Area(_)));
     }
 
     /// What a page says it answers is offered like an extension's prompt.
