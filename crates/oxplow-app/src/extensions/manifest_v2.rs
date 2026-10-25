@@ -80,7 +80,13 @@ pub struct IntentPrompt {
 #[serde(deny_unknown_fields)]
 pub struct SlotMount {
     pub slot: String,
-    pub lens: String,
+    /// The lens it mounts…
+    #[serde(default)]
+    pub lens: Option<String>,
+    /// … or the page (a slug of this extension), at a page's slot
+    /// (`<extension>/<page>.<slot>`).
+    #[serde(default)]
+    pub page: Option<String>,
     /// Where among the page's parts (a parts slot only): `start`, `end`,
     /// `{ after: <id> }`, `{ before: <id> }`. Default `end`.
     #[serde(default)]

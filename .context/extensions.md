@@ -2463,6 +2463,12 @@ never types into the agent.
 
 ## Slots
 
+**Pages' slots** (the page files that replace lenses): a page's `slot`
+node is a slot named `<extension>/<page>.<name>`, and a mount names a
+page — `ui.slots: [{ slot, page, at?, title?, size? }]` — instead of a
+lens. See pages-and-tabs.md "Page files". The rest of this section is the
+lens world's, until it is removed.
+
 Slots are the **only** way an extension reaches a page. Core pages
 declare them (`SLOTS` in `extensions.rs`, a `SlotSpec` each: name, params,
 and `parts`) and render whatever is mounted. With nothing mounted, the

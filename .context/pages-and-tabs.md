@@ -260,7 +260,13 @@ embed, the badge or a later loader). The tree resolves a switch to its
 child in view (the param's value, else the first) and an embed to its
 page's run, its params by name: the embed's `params`, else the host's
 param of that name, else that column of the host loaders' first rows in
-order. `dirty_loaders` is what a change makes run again: loaders that
+order. A `slot` node shows the pages enabled extensions mount there
+(`ui.slots: [{ slot: <ext>/<page>.<name>, page: <slug>, at?, title?,
+size? }]`, loaded as `ExtensionUi.page_slots`): each runs as an embed, its
+params by name from the host, its node id the mounted page's id with `.`
+for `/` (`beta.extra`); by extension name; `at: start` puts it first
+among the slot's siblings, `{ before | after: <sibling id> }` beside that
+sibling, otherwise it sits at the slot. `dirty_loaders` is what a change makes run again: loaders that
 read a changed model (a command loader's are its `reads`) or bind a
 changed param, and everything downstream of them.
 

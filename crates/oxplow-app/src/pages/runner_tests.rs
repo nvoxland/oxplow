@@ -121,3 +121,25 @@ async fn a_query_binds_an_earlier_loaders_column_by_name() {
     assert_eq!(r.loaders["echo"].error, None);
     assert_eq!(ints(&r, "echo"), [42]);
 }
+
+/// Another extension's pages mounted at a slot run as embeds there, given
+/// the host's params by name; `at: start` puts one first among the slot's
+/// siblings.
+#[tokio::test]
+async fn a_slot_runs_the_pages_mounted_at_it() {
+    let (_dir, svc) = fixture().await;
+    let r = run(&svc, "acme/slotted", &[]).await;
+    let ids: Vec<&str> = r.tree.children.iter().map(|c| c.id.as_str()).collect();
+    assert_eq!(
+        ids,
+        ["beta.early", "first", "sections", "last"],
+        "{:?}",
+        r.tree
+    );
+    let slot = &r.tree.children[2];
+    let mounted: Vec<&str> = slot.children.iter().map(|c| c.id.as_str()).collect();
+    assert_eq!(mounted, ["beta.extra"]);
+    let extra = slot.children[0].embed.as_ref().expect("it ran");
+    assert_eq!(extra.page.id, "beta/extra");
+    assert_eq!(ints(extra, "echo"), [4], "`n` flowed from the host");
+}

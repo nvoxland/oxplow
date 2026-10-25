@@ -2885,12 +2885,40 @@ impl Extension {
     }
 }
 
+/// A slot mount naming a lens (what a lens mount reads once checked).
+struct SlotMountLens {
+    slot: String,
+    lens: String,
+    at: Option<SlotAt>,
+    title: Option<String>,
+    size: Option<TileSize>,
+}
+
+/// A page another extension's page shows at one of its slots.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PageSlot {
+    /// The page whose slot it is (`<extension>/<slug>`).
+    pub host: String,
+    /// The slot's name in that page.
+    pub slot: String,
+    /// The page mounted (`<extension>/<slug>`).
+    pub page: String,
+    /// Where among the slot's siblings; none: at the slot.
+    pub at: Option<SlotAt>,
+    pub title: Option<String>,
+    pub size: Option<TileSize>,
+}
+
 /// What an extension adds to the core UI (`ui:` in its manifest).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ExtensionUi {
     /// Lenses mounted into core pages (valid ones).
     pub slots: Vec<LensSlot>,
+    /// Pages mounted at other pages' slots (valid ones).
+    #[serde(default)]
+    pub page_slots: Vec<PageSlot>,
     /// Labels from its models on core refs (valid ones).
     pub decorators: Vec<decorators::UiDecorator>,
     /// Lenses that take the place of a core sub-component while its
@@ -4884,6 +4912,59 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
     }
 
     for s in slot_files {
+        let (lens_slug, page_slug) = match (&s.lens, &s.page) {
+            (Some(l), None) => (l.clone(), None),
+            (None, Some(p)) => (String::new(), Some(p.clone())),
+            _ => {
+                ext.errors.push(at(
+                    &file,
+                    key_line(&manifest, "ui"),
+                    format!("slot `{}` mounts a `lens` or a `page`, one of them", s.slot),
+                ));
+                continue;
+            }
+        };
+        if let Some(page) = page_slug {
+            let mount_line = entry_line(&manifest, "ui", "page", &page);
+            let Some((host, slot_name)) = s.slot.rsplit_once('.') else {
+                ext.errors.push(at(
+                    &file,
+                    mount_line,
+                    format!(
+                        "slot `{}`: a page mounts at a page's slot, `<extension>/<page>.<slot>`",
+                        s.slot
+                    ),
+                ));
+                continue;
+            };
+            if !ext.page_files.iter().any(|p| p.slug == page) {
+                ext.errors.push(at(
+                    &file,
+                    mount_line,
+                    format!(
+                        "slot `{}` mounts page `{page}`, which isn't in pages/",
+                        s.slot
+                    ),
+                ));
+                continue;
+            }
+            ext.ui.page_slots.push(PageSlot {
+                host: host.to_string(),
+                slot: slot_name.to_string(),
+                page: format!("{name}/{page}"),
+                at: s.at,
+                title: s.title,
+                size: s.size,
+            });
+            continue;
+        }
+        let s = SlotMountLens {
+            slot: s.slot,
+            lens: lens_slug,
+            at: s.at,
+            title: s.title,
+            size: s.size,
+        };
         let mount_line = entry_line(&manifest, "ui", "lens", &s.lens);
         let Some(lens) = ext.lenses.iter().find(|l| l.slug == s.lens) else {
             ext.errors.push(at(

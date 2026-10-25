@@ -458,6 +458,11 @@ fn definition_rows(
 ) {
     use crate::pages::schema::Loader;
     let Some(def) = crate::pages::text::node(&run.page, &at.id) else {
+        // A page another extension mounted at a slot.
+        if let Some(e) = &at.embed {
+            let id = format!("{prefix}{}", at.id);
+            definition_rows(e, &e.tree, &format!("{id}/"), depth + 1, out);
+        }
         return;
     };
     let from = match &def.kind {

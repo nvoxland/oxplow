@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use super::schema::{ArgSource, Loader, LoaderDecl, Node, NodeKind, Page};
 use crate::extensions::{
     bind_params, evaluate_alert, resolve_param_values, stream_head, AlertState, LensContext,
+    PageSlot, SlotAt, SlotEdge,
 };
 
 /// How deep embeds and page loaders may nest before a run stops: a cycle
@@ -379,9 +380,61 @@ impl<'a> PageRunner<'a> {
             };
             match &node.kind {
                 NodeKind::Stack { children } | NodeKind::Grid { children } => {
+                    // Pages other extensions mount at a slot here go at the
+                    // slot, or where their `at` says among its siblings.
+                    let mut start = Vec::new();
+                    let mut before: Vec<(String, RunNode)> = Vec::new();
+                    let mut after: Vec<(String, RunNode)> = Vec::new();
+                    let mut resolved: Vec<RunNode> = Vec::new();
                     for c in children {
+                        let NodeKind::Slot { name } = &c.kind else {
+                            let r = self
+                                .resolve(page, c, params, loaders, ctx, viewer, memo, depth)
+                                .await;
+                            resolved.push(r);
+                            continue;
+                        };
+                        let mut slot = RunNode {
+                            id: c.id.clone(),
+                            children: Vec::new(),
+                            embed: None,
+                            error: None,
+                        };
+                        for mount in self.mounts(&page.id, name) {
+                            let r = self
+                                .run_mount(page, &mount, params, loaders, ctx, viewer, memo, depth)
+                                .await;
+                            match &mount.at {
+                                Some(SlotAt::Edge(SlotEdge::Start)) => start.push(r),
+                                Some(SlotAt::Before { before: id }) => before.push((id.clone(), r)),
+                                Some(SlotAt::After { after: id }) => after.push((id.clone(), r)),
+                                _ => slot.children.push(r),
+                            }
+                        }
+                        resolved.push(slot);
+                    }
+                    out.children = start;
+                    for r in resolved {
+                        let id = r.id.clone();
+                        out.children.extend(
+                            before
+                                .iter()
+                                .filter(|(a, _)| *a == id)
+                                .map(|(_, n)| n.clone()),
+                        );
+                        out.children.push(r);
+                        out.children.extend(
+                            after
+                                .iter()
+                                .filter(|(a, _)| *a == id)
+                                .map(|(_, n)| n.clone()),
+                        );
+                    }
+                }
+                NodeKind::Slot { name } => {
+                    for mount in self.mounts(&page.id, name) {
                         let r = self
-                            .resolve(page, c, params, loaders, ctx, viewer, memo, depth)
+                            .run_mount(page, &mount, params, loaders, ctx, viewer, memo, depth)
                             .await;
                         out.children.push(r);
                     }
@@ -410,13 +463,68 @@ impl<'a> PageRunner<'a> {
                         }
                     }
                 },
-                NodeKind::Viz { .. }
-                | NodeKind::Slot { .. }
-                | NodeKind::Markdown { .. }
-                | NodeKind::Component { .. } => {}
+                NodeKind::Viz { .. } | NodeKind::Markdown { .. } | NodeKind::Component { .. } => {}
             }
             out
         })
+    }
+}
+
+impl PageRunner<'_> {
+    /// The pages enabled extensions mount at `host`'s slot `slot`, by
+    /// extension name.
+    fn mounts(&self, host: &str, slot: &str) -> Vec<PageSlot> {
+        let extensions = self
+            .catalog
+            .unpinned(self.root, "a page's slots read one snapshot");
+        let mut out: Vec<(String, PageSlot)> = extensions
+            .iter()
+            .filter(|e| e.enabled)
+            .flat_map(|e| {
+                e.ui.page_slots
+                    .iter()
+                    .filter(|m| m.host == host && m.slot == slot)
+                    .map(|m| (e.name.clone(), m.clone()))
+            })
+            .collect();
+        out.sort_by(|a, b| a.0.cmp(&b.0));
+        out.into_iter().map(|(_, m)| m).collect()
+    }
+
+    /// A mounted page run as an embed (its params by name from the host),
+    /// its node id the page's id with `.` for `/`.
+    #[allow(clippy::too_many_arguments)]
+    async fn run_mount(
+        &self,
+        host: &Page,
+        mount: &PageSlot,
+        params: &BTreeMap<String, SqlCell>,
+        loaders: &BTreeMap<String, LoaderRun>,
+        ctx: &LensContext,
+        viewer: &Actor,
+        memo: &mut Memo,
+        depth: usize,
+    ) -> RunNode {
+        let mut out = RunNode {
+            id: mount.page.replace('/', "."),
+            children: Vec::new(),
+            embed: None,
+            error: None,
+        };
+        match self.find(&mount.page) {
+            Err(e) => out.error = Some(e.to_string()),
+            Ok(child) => {
+                let flowed = flow_params(&child, &BTreeMap::new(), params, loaders, &host.loaders);
+                match self
+                    .run_page(child, flowed, ctx, viewer, memo, depth + 1)
+                    .await
+                {
+                    Ok(run) => out.embed = Some(Box::new(run)),
+                    Err(e) => out.error = Some(e.to_string()),
+                }
+            }
+        }
+        out
     }
 }
 

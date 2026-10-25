@@ -77,12 +77,18 @@ fn write_tree<'r>(
     out: &'r mut String,
 ) -> BoxFuture<'r, Result<(), DomainError>> {
     Box::pin(async move {
-        let Some(def) = node(&run.page, &at.id) else {
-            return Ok(());
-        };
         let id = format!("{prefix}{}", at.id);
         let hashes = "#".repeat(level.min(6));
         let heading = |title: &str| format!("\n{hashes} {title} [node {id}]\n\n");
+        let Some(def) = node(&run.page, &at.id) else {
+            // A page another extension mounted at a slot: its own run.
+            if let Some(child) = &at.embed {
+                out.push_str(&heading(&child.page.title));
+                let nested = format!("{id}/");
+                write_tree(svc, root, child, &child.tree, &nested, level + 1, ctx, out).await?;
+            }
+            return Ok(());
+        };
         match &def.kind {
             NodeKind::Stack { .. } | NodeKind::Grid { .. } | NodeKind::Switch { .. } => {
                 if let Some(t) = &def.title {

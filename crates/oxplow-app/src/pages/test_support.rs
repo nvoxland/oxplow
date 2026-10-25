@@ -158,6 +158,21 @@ view:
 "#,
     ),
     (
+        "slotted",
+        r#"
+title: Slotted
+params: [{ name: n, default: 4 }]
+data:
+  first: { sql: "SELECT 1 AS a" }
+  last: { sql: "SELECT 2 AS b" }
+view:
+  stack:
+    - { viz: number, from: first }
+    - { slot: sections }
+    - { viz: number, from: last }
+"#,
+    ),
+    (
         "writes",
         r#"
 title: Writes
@@ -186,6 +201,22 @@ pub(crate) async fn fixture() -> (tempfile::TempDir, Arc<crate::Services>) {
             text,
         );
     }
+    // A second extension mounting its pages into acme's.
+    write(
+        dir.path(),
+        ".oxplow/extensions/beta/extension.yaml",
+        "manifest: 2\nname: beta\nintent:\n  purpose: test\nui:\n  slots:\n    - { slot: acme/slotted.sections, page: extra }\n    - { slot: acme/slotted.sections, page: early, at: start }\n",
+    );
+    write(
+        dir.path(),
+        ".oxplow/extensions/beta/pages/extra.yaml",
+        "title: Extra\nparams: [{ name: n }]\ndata:\n  echo: { sql: \"SELECT :n AS got\" }\nview: { viz: number, from: echo }\n",
+    );
+    write(
+        dir.path(),
+        ".oxplow/extensions/beta/pages/early.yaml",
+        "title: Early\ndata:\n  e: { sql: \"SELECT 0 AS e\" }\nview: { viz: number, from: e }\n",
+    );
     let svc = crate::Services::in_memory(dir.path()).await.unwrap();
     let problems = crate::test_fixtures::activate_with_problems(&svc).await;
     assert!(problems.is_empty(), "{problems:?}");
