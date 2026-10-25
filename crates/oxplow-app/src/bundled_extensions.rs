@@ -174,7 +174,7 @@ mod tests {
             )
             .await
             .unwrap();
-        let lens = |slug: &'static str| run_analytics_lens(&f, slug, "effort_id", f.effort.value());
+        let lens = |slug: &'static str| run_analytics_page(&f, slug, "effort_id", f.effort.value());
         assert_eq!(
             lens("effort-coverage").await,
             serde_json::json!([["**60%** of changed lines covered · 6/10"]])
@@ -446,7 +446,7 @@ mod tests {
             ])
         );
         // The verdict counts only the one still unverified.
-        let verdict = run_analytics_lens(&f, "effort-verdict", "effort_id", effort).await;
+        let verdict = run_analytics_page(&f, "effort-verdict", "effort_id", effort).await;
         assert!(
             verdict.to_string().contains("1 unverified claim"),
             "{verdict}"
@@ -460,7 +460,7 @@ mod tests {
     async fn the_effort_verdict_says_what_a_reviewer_needs_first() {
         let f = crate::test_fixtures::services_with_effort().await;
         let effort = f.effort.value();
-        let verdict = || run_analytics_lens(&f, "effort-verdict", "effort_id", effort);
+        let verdict = || run_analytics_page(&f, "effort-verdict", "effort_id", effort);
         assert_eq!(
             verdict().await,
             serde_json::json!([
@@ -610,19 +610,20 @@ mod tests {
         assert!(checked > 30, "only {checked} bundled queries found");
     }
 
-    /// Run an oxplow-bundled lens with one integer param; its rows as JSON.
-    async fn run_analytics_lens(
+    /// Run the page an oxplow-bundled lens became, with one integer param; its
+    /// rows as JSON.
+    async fn run_analytics_page(
         f: &crate::test_fixtures::EffortFixture,
         slug: &str,
         param: &str,
         value: i64,
     ) -> serde_json::Value {
-        run_bundled_lens(f, &format!("oxplow-bundled/{slug}"), &[(param, value)]).await
+        run_bundled_page(f, &format!("oxplow-bundled/{slug}"), &[(param, value)]).await
     }
 
-    /// Run any bundled lens (`<extension>/<slug>`) with integer params; its
-    /// rows as JSON.
-    async fn run_bundled_lens(
+    /// Run the page (loader) a bundled lens (`<extension>/<slug>`) became, with
+    /// integer params; its rows as JSON (`test_fixtures::run_as_page`).
+    async fn run_bundled_page(
         f: &crate::test_fixtures::EffortFixture,
         id: &str,
         params: &[(&str, i64)],
@@ -631,11 +632,26 @@ mod tests {
             .iter()
             .map(|(k, v)| (*k, oxplow_db::SqlCell::Int(*v)))
             .collect();
-        run_bundled_lens_with(f, id, &params).await
+        run_bundled_page_with(f, id, &params).await
     }
 
-    /// `run_bundled_lens`, with any param values.
-    async fn run_bundled_lens_with(
+    /// `run_bundled_page`, with any param values.
+    async fn run_bundled_page_with(
+        f: &crate::test_fixtures::EffortFixture,
+        id: &str,
+        params: &[(&str, oxplow_db::SqlCell)],
+    ) -> serde_json::Value {
+        let params: Vec<(String, oxplow_db::SqlCell)> = params
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.clone()))
+            .collect();
+        let run = crate::test_fixtures::run_as_page(&f.svc, id, &params).await;
+        serde_json::to_value(&run.rows).unwrap()
+    }
+
+    /// A lens the page conversion deletes with the lens runtime (no page
+    /// replaces it), run as a lens: its rows as JSON.
+    async fn run_deleted_lens(
         f: &crate::test_fixtures::EffortFixture,
         id: &str,
         params: &[(&str, oxplow_db::SqlCell)],
@@ -715,7 +731,7 @@ mod tests {
             })
             .await
             .unwrap();
-        let rows = run_bundled_lens(&f, "oxplow-bundled/runs", &[]).await;
+        let rows = run_bundled_page(&f, "oxplow-bundled/runs", &[]).await;
         // Each extension links to its runs, one by one.
         let runs_of = |ext: &str| {
             oxplow_domain::uri::build::lens_uri_with(
@@ -730,7 +746,7 @@ mod tests {
                 ["beta", runs_of("beta"), 2, 0, 0, 6.0, 0]
             ])
         );
-        let detail = run_bundled_lens_with(
+        let detail = run_bundled_page_with(
             &f,
             "oxplow-bundled/extension-runs",
             &[("extension", oxplow_db::SqlCell::Text("acme".into()))],
@@ -846,7 +862,7 @@ mod tests {
             .await
             .unwrap();
 
-        let tools = run_bundled_lens(&f, "oxplow-bundled/interface-tool-calls", &[]).await;
+        let tools = run_bundled_page(&f, "oxplow-bundled/interface-tool-calls", &[]).await;
         assert_eq!(
             tools,
             serde_json::json!([
@@ -856,7 +872,7 @@ mod tests {
             ])
         );
 
-        let commands = run_bundled_lens(&f, "oxplow-bundled/interface-commands", &[]).await;
+        let commands = run_bundled_page(&f, "oxplow-bundled/interface-commands", &[]).await;
         let errors_of = |c: &str| {
             oxplow_domain::uri::build::lens_uri_with(
                 "oxplow-bundled/interface-command-errors",
@@ -897,7 +913,7 @@ mod tests {
         );
 
         // The same text counts together however the choices were listed.
-        let errors = run_bundled_lens_with(
+        let errors = run_bundled_page_with(
             &f,
             "oxplow-bundled/interface-command-errors",
             &[(
@@ -929,7 +945,7 @@ mod tests {
         );
 
         // A hint that never spoke leads the list.
-        let hints = run_bundled_lens(&f, "oxplow-bundled/interface-hints", &[]).await;
+        let hints = run_bundled_page(&f, "oxplow-bundled/interface-hints", &[]).await;
         let counts: Vec<_> = hints
             .as_array()
             .unwrap()
@@ -988,7 +1004,7 @@ mod tests {
 
         let item = oxplow_tasks::work_item_ref(f.task);
         assert_eq!(
-            run_bundled_lens_with(
+            run_bundled_page_with(
                 &f,
                 "oxplow-bundled/task-token-summary",
                 &[("uri", oxplow_db::SqlCell::Text(item.clone()))],
@@ -998,7 +1014,7 @@ mod tests {
                 "**2,100** tokens · 2 turns · in 2,098 · out 2 · cache-write 0 · cache-read 0"
             ]])
         );
-        let turns = run_bundled_lens_with(
+        let turns = run_bundled_page_with(
             &f,
             "oxplow-bundled/task-turns",
             &[("uri", oxplow_db::SqlCell::Text(item.clone()))],
@@ -1006,11 +1022,11 @@ mod tests {
         .await;
         assert_eq!(turns.as_array().unwrap().len(), 2);
         assert_eq!(
-            run_analytics_lens(&f, "thread-tokens", "thread_id", f.thread.value()).await,
+            run_analytics_page(&f, "thread-tokens", "thread_id", f.thread.value()).await,
             serde_json::json!([[2110]])
         );
         assert_eq!(
-            run_analytics_lens(&f, "thread-tokens", "thread_id", 999).await,
+            run_analytics_page(&f, "thread-tokens", "thread_id", 999).await,
             serde_json::json!([]),
             "an idle thread shows nothing"
         );
@@ -1047,21 +1063,21 @@ mod tests {
         .await
         .unwrap();
 
-        let summary = run_analytics_lens(&f, "change-summary", "change_id", change.id).await;
+        let summary = run_analytics_page(&f, "change-summary", "change_id", change.id).await;
         assert_eq!(
             summary,
             serde_json::json!([[
                 "**2 files** · +7 −2 · 0 added, 2 modified, 0 deleted · 1 test file · test/code lines 12%"
             ]])
         );
-        let functions = run_analytics_lens(&f, "change-functions", "change_id", change.id).await;
+        let functions = run_analytics_page(&f, "change-functions", "change_id", change.id).await;
         assert_eq!(functions[0][1], serde_json::json!("grow"));
         assert_eq!(functions[0][3], serde_json::json!("signature"));
         assert_eq!(
             functions[0].as_array().unwrap().last().unwrap(),
             "oxplow:oxplow/symbol?path=src/lib.rs&symbol=grow"
         );
-        let tests = run_analytics_lens(&f, "change-test-files", "change_id", change.id).await;
+        let tests = run_analytics_page(&f, "change-test-files", "change_id", change.id).await;
         assert_eq!(tests[0][0], serde_json::json!("tests/it.rs"));
     }
 
@@ -1107,7 +1123,7 @@ mod tests {
                 .map(|r| r[1].clone())
                 .collect::<Vec<_>>()
         };
-        let rows = run_bundled_lens(&f, "oxplow-bundled/waiting-on-me", &[]).await;
+        let rows = run_bundled_page(&f, "oxplow-bundled/waiting-on-me", &[]).await;
         assert_eq!(waiting(rows), vec![serde_json::json!("Pick A or B?")]);
 
         // The person answers: a new turn starts.
@@ -1116,7 +1132,7 @@ mod tests {
             .ingest(hook(HookKind::UserPromptSubmit, serde_json::json!({})))
             .await
             .unwrap();
-        let rows = run_bundled_lens(&f, "oxplow-bundled/waiting-on-me", &[]).await;
+        let rows = run_bundled_page(&f, "oxplow-bundled/waiting-on-me", &[]).await;
         assert!(waiting(rows).is_empty());
     }
 
@@ -1149,7 +1165,7 @@ mod tests {
                 .map(|r| (r[1].clone(), r[3].clone()))
                 .collect::<Vec<_>>()
         };
-        let rows = run_bundled_lens(&f, "oxplow-bundled/waiting-on-me", &[]).await;
+        let rows = run_bundled_page(&f, "oxplow-bundled/waiting-on-me", &[]).await;
         assert_eq!(
             handed(rows),
             vec![(
@@ -1158,7 +1174,7 @@ mod tests {
             )]
         );
         crate::test_fixtures::open_session(&f.svc, to.id).await;
-        let rows = run_bundled_lens(&f, "oxplow-bundled/waiting-on-me", &[]).await;
+        let rows = run_bundled_page(&f, "oxplow-bundled/waiting-on-me", &[]).await;
         assert!(handed(rows).is_empty());
     }
 
@@ -1199,12 +1215,12 @@ mod tests {
         let effort = [("effort_id", f.effort.value())];
 
         describe("Fix the hover state in [[src/ui/button.ts]].").await;
-        let rows = run_bundled_lens(&f, lens, &effort).await;
+        let rows = run_bundled_page(&f, lens, &effort).await;
         assert_eq!(rows, serde_json::json!([["crates/db/store.rs", "updated"]]));
 
         // A task that names no paths states no area, so nothing deviates.
         describe("Make the buttons feel snappier.").await;
-        let rows = run_bundled_lens(&f, lens, &effort).await;
+        let rows = run_bundled_page(&f, lens, &effort).await;
         assert_eq!(rows, serde_json::json!([]));
     }
 
@@ -1235,7 +1251,7 @@ mod tests {
         )
         .await
         .unwrap();
-        let rows = run_bundled_lens(
+        let rows = run_bundled_page(
             &f,
             "oxplow-bundled/tests-weakened",
             &[("change_id", change.id)],
@@ -1297,7 +1313,7 @@ mod tests {
             )
             .await
             .unwrap();
-        let rows = run_bundled_lens(
+        let rows = run_bundled_page(
             &f,
             "oxplow-bundled/review-prompt",
             &[("effort_id", f.effort.value())],
@@ -1334,7 +1350,7 @@ mod tests {
             )
             .await
             .unwrap();
-        let rows = run_bundled_lens(
+        let rows = run_bundled_page(
             &f,
             "oxplow-bundled/review-prompt",
             &[("effort_id", effort.id.value())],
@@ -1395,24 +1411,12 @@ mod tests {
                 .await
                 .unwrap();
         }
-        let layer = crate::sql_gateway::SqlGateway::new(f.svc.db.clone());
         let ctx = crate::extensions::lens_context(&f.svc, None, None).await;
         let first = |id: &'static str, ctx: crate::extensions::LensContext| {
-            let layer = layer.clone();
-            let root = f._dir.path().to_path_buf();
-            let catalog = f.svc.extension_catalog.clone();
+            let svc = f.svc.clone();
             async move {
-                let run = crate::extensions::run_lens(
-                    &layer,
-                    &catalog,
-                    &root,
-                    id,
-                    Default::default(),
-                    &ctx,
-                )
-                .await
-                .unwrap();
-                serde_json::to_value(&run.result.rows).unwrap()
+                let run = crate::test_fixtures::run_as_page_in(&svc, id, &[], ctx).await;
+                serde_json::to_value(&run.rows).unwrap()
             }
         };
         let decisions = first("oxplow-bundled/recent-decisions", ctx.clone()).await;
@@ -1487,7 +1491,7 @@ mod tests {
             serde_json::json!({ "comment": format!("cmt{last}").to_string(), "status": "resolved" }),
         )
         .await;
-        let rows = run_bundled_lens(&f, "oxplow-bundled/comments", &[("stream_id", 1)]).await;
+        let rows = run_bundled_page(&f, "oxplow-bundled/comments", &[("stream_id", 1)]).await;
         assert_eq!(
             rows,
             serde_json::json!([
@@ -1495,7 +1499,7 @@ mod tests {
                 ["For the agent", 1, "oxplow:oxplow/page?page=comments"]
             ])
         );
-        let none = run_bundled_lens(&f, "oxplow-bundled/comments", &[("stream_id", 2)]).await;
+        let none = run_bundled_page(&f, "oxplow-bundled/comments", &[("stream_id", 2)]).await;
         assert_eq!(none, serde_json::json!([]));
     }
 
@@ -1594,7 +1598,7 @@ mod tests {
                 .collect()
         };
         assert_eq!(
-            lines(run_bundled_lens(&f, "oxplow-bundled/work", &[("thread_id", tid)]).await),
+            lines(run_bundled_page(&f, "oxplow-bundled/work", &[("thread_id", tid)]).await),
             vec![
                 // The fixture's effort, linked to nothing, by its own title.
                 ("In progress".into(), "Work in progress".into()),
@@ -1603,7 +1607,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            run_bundled_lens(&f, "oxplow-bundled/work-count", &[("thread_id", tid)]).await,
+            run_bundled_page(&f, "oxplow-bundled/work-count", &[("thread_id", tid)]).await,
             serde_json::json!([[2]]),
             "the active item and the ready one; finished isn't counted"
         );
@@ -1614,7 +1618,7 @@ mod tests {
         )
         .await;
         assert_eq!(
-            lines(run_bundled_lens(&f, "oxplow-bundled/work", &[("thread_id", tid)]).await)
+            lines(run_bundled_page(&f, "oxplow-bundled/work", &[("thread_id", tid)]).await)
                 .into_iter()
                 .map(|(g, _)| g)
                 .collect::<Vec<_>>(),
@@ -1629,7 +1633,7 @@ mod tests {
         )
         .await;
         let effort = opened.result["effort"].as_str().unwrap().to_string();
-        let work = lines(run_bundled_lens(&f, "oxplow-bundled/work", &[("thread_id", tid)]).await);
+        let work = lines(run_bundled_page(&f, "oxplow-bundled/work", &[("thread_id", tid)]).await);
         assert!(
             work.contains(&("In progress".into(), "Tidy the shell scripts".into())),
             "{work:?}"
@@ -1639,7 +1643,7 @@ mod tests {
             serde_json::json!({ "effort": effort }),
         )
         .await;
-        let work = lines(run_bundled_lens(&f, "oxplow-bundled/work", &[("thread_id", tid)]).await);
+        let work = lines(run_bundled_page(&f, "oxplow-bundled/work", &[("thread_id", tid)]).await);
         assert!(
             work.contains(&("Finished".into(), "Tidy the shell scripts".into())),
             "{work:?}"
@@ -1685,13 +1689,13 @@ mod tests {
                 .collect()
         };
         assert!(titles(
-            run_bundled_lens(&f, "oxplow-bundled/work", &[("thread_id", tid)]).await,
+            run_bundled_page(&f, "oxplow-bundled/work", &[("thread_id", tid)]).await,
             1
         )
         .contains(&"Next up".to_string()));
         assert_eq!(
             titles(
-                run_bundled_lens(&f, "oxplow-bundled/backlog-tasks", &[]).await,
+                run_bundled_page(&f, "oxplow-bundled/backlog-tasks", &[]).await,
                 1
             ),
             vec!["Someday".to_string()]
@@ -1707,7 +1711,7 @@ mod tests {
         f.svc.capabilities.publish_now(&config, &f.svc.db).unwrap();
 
         let work = titles(
-            run_bundled_lens(&f, "oxplow-bundled/work", &[("thread_id", tid)]).await,
+            run_bundled_page(&f, "oxplow-bundled/work", &[("thread_id", tid)]).await,
             1,
         );
         assert_eq!(
@@ -1716,18 +1720,18 @@ mod tests {
             "only the unlinked effort"
         );
         assert_eq!(
-            run_bundled_lens(&f, "oxplow-bundled/work-count", &[("thread_id", tid)]).await,
+            run_bundled_page(&f, "oxplow-bundled/work-count", &[("thread_id", tid)]).await,
             serde_json::json!([[1]])
         );
         for lens in ["oxplow-bundled/backlog-tasks", "oxplow-bundled/ready-tasks"] {
             assert_eq!(
-                run_bundled_lens(&f, lens, &[]).await,
+                run_bundled_page(&f, lens, &[]).await,
                 serde_json::json!([]),
                 "{lens}"
             );
         }
         let waiting = titles(
-            run_bundled_lens(&f, "oxplow-bundled/waiting-on-me", &[]).await,
+            run_bundled_page(&f, "oxplow-bundled/waiting-on-me", &[]).await,
             1,
         );
         assert!(!waiting.contains(&"Stuck".to_string()), "{waiting:?}");
@@ -1787,7 +1791,7 @@ mod tests {
                 .collect()
         };
 
-        let rows = run_bundled_lens_with(
+        let rows = run_bundled_page_with(
             &f,
             "oxplow-foundation/effort-files",
             &[("effort", effort_ref.clone())],
@@ -1796,7 +1800,7 @@ mod tests {
         assert_eq!(col(&rows, 0), ["a.rs", "b.rs"]);
         assert_eq!(col(&rows, 1), ["updated", "created"]);
 
-        let rows = run_bundled_lens_with(
+        let rows = run_bundled_page_with(
             &f,
             "oxplow-foundation/effort-summary",
             &[("effort", effort_ref)],
@@ -1806,14 +1810,14 @@ mod tests {
         assert_eq!(parts.first().map(String::as_str), Some("effort"), "{rows}");
         assert_eq!(&parts[parts.len() - 2..], ["file", "file"], "{rows}");
 
-        let rows = run_bundled_lens_with(
+        let rows = run_bundled_page_with(
             &f,
             "oxplow-foundation/file-history",
             &[("path", Text("a.rs".into())), ("limit", Int(20))],
         )
         .await;
         assert_eq!(col(&rows, 0), ["c2", "c1"]);
-        let rows = run_bundled_lens_with(
+        let rows = run_bundled_page_with(
             &f,
             "oxplow-foundation/file-history",
             &[("path", Text("a.rs".into())), ("limit", Int(1))],
@@ -1822,11 +1826,11 @@ mod tests {
         assert_eq!(col(&rows, 0), ["c2"]);
 
         let rows =
-            run_bundled_lens_with(&f, "oxplow-foundation/recent-commits", &[("limit", Int(5))])
+            run_bundled_page_with(&f, "oxplow-foundation/recent-commits", &[("limit", Int(5))])
                 .await;
         assert_eq!(col(&rows, 0), ["c2", "c1"]);
 
-        let rows = run_bundled_lens_with(
+        let rows = run_bundled_page_with(
             &f,
             "oxplow-foundation/snapshots",
             &[("stream", Text(String::new())), ("limit", Int(5))],
@@ -1838,7 +1842,7 @@ mod tests {
         assert_eq!(col(&rows, 3), ["quiet", "startup"]);
         assert_eq!(col(&rows, 4), ["1", "0"]);
 
-        let rows = run_bundled_lens_with(
+        let rows = run_deleted_lens(
             &f,
             "oxplow-foundation/thread-notes",
             &[("thread", thread_ref.clone())],
@@ -1846,7 +1850,7 @@ mod tests {
         .await;
         assert_eq!(col(&rows, 3), ["newer", "older"]);
 
-        let rows = run_bundled_lens_with(
+        let rows = run_bundled_page_with(
             &f,
             "oxplow-foundation/thread-work",
             &[("thread", thread_ref)],
@@ -1884,7 +1888,7 @@ mod tests {
             })
             .await
             .unwrap();
-        let rows = run_bundled_lens_with(
+        let rows = run_bundled_page_with(
             &f,
             "oxplow-foundation/thread-sessions",
             &[("thread", Text(f.thread.to_string()))],
@@ -1985,7 +1989,7 @@ mod tests {
             ]
         };
         let rows =
-            run_bundled_lens_with(&f, "oxplow-foundation/session-transcript", &params("", 1)).await;
+            run_bundled_page_with(&f, "oxplow-foundation/session-transcript", &params("", 1)).await;
         // ref, at, kind, ended_at, prompt, answer, tool_calls, …
         assert_eq!(
             col(&rows, 2),
@@ -2001,7 +2005,7 @@ mod tests {
             oxplow_domain::uri::resources::TURN,
         )
         .unwrap();
-        let rows = run_bundled_lens_with(
+        let rows = run_bundled_page_with(
             &f,
             "oxplow-foundation/session-transcript",
             &params(&handback, 1),
@@ -2010,7 +2014,7 @@ mod tests {
         assert_eq!(col(&rows, 2), ["hand-back", "turn"], "{rows}");
         // A second page of 50 is past them.
         let rows =
-            run_bundled_lens_with(&f, "oxplow-foundation/session-transcript", &params("", 2)).await;
+            run_bundled_page_with(&f, "oxplow-foundation/session-transcript", &params("", 2)).await;
         assert_eq!(col(&rows, 2), Vec::<String>::new(), "{rows}");
     }
 
@@ -2089,7 +2093,7 @@ mod tests {
                 })
                 .collect()
         };
-        let rows = run_bundled_lens_with(
+        let rows = run_bundled_page_with(
             &f,
             "oxplow-foundation/catalog",
             &[("model", Text(String::new()))],
@@ -2100,7 +2104,7 @@ mod tests {
             views.iter().any(|v| v == "v_effort") && views.iter().any(|v| v == "v_model"),
             "{views:?}"
         );
-        let rows = run_bundled_lens_with(
+        let rows = run_bundled_page_with(
             &f,
             "oxplow-foundation/catalog",
             &[("model", Text("effort".into()))],
@@ -2186,52 +2190,47 @@ mod tests {
         let f = crate::test_fixtures::services_with_effort().await;
         let run = |id: &'static str| {
             let svc = f.svc.clone();
-            let root = f._dir.path().to_path_buf();
-            async move {
-                crate::extensions::run_lens(
-                    &svc.sql,
-                    &svc.extension_catalog,
-                    &root,
-                    id,
-                    Default::default(),
-                    &crate::extensions::LensContext::default(),
-                )
-                .await
-                .unwrap()
-            }
+            async move { crate::test_fixtures::run_as_page(&svc, id, &[]).await }
         };
         let prompts = run("oxplow-foundation/catalog-prompts").await;
-        assert!(!prompts.result.rows.is_empty());
+        assert!(!prompts.rows.is_empty());
         let offered = prompts
-            .result
             .columns
             .iter()
             .position(|c| c == "offered_by")
             .unwrap();
         assert_eq!(
-            prompts.result.rows[0][offered],
+            prompts.rows[0][offered],
             oxplow_db::SqlCell::Text("Version control".into()),
             "core's areas come first, by a person's name for them"
         );
-        assert!(prompts
-            .lens
-            .actions
+        let page = f
+            .svc
+            .extension_catalog
+            .find_page(&f.svc.layout.project_dir, "oxplow-foundation/catalog")
+            .unwrap();
+        let ask = page
+            .nodes()
+            .into_iter()
+            .find_map(|n| match &n.kind {
+                crate::pages::schema::NodeKind::Viz { lens, .. } if n.id == "ask" => {
+                    Some(lens.actions.clone())
+                }
+                _ => None,
+            })
+            .unwrap();
+        assert!(ask
             .iter()
             .any(|a| a.id == "ask" && a.row && a.command == "oxplow.agent.draft"));
         let keys = run("oxplow-foundation/catalog-config-keys").await;
-        assert_eq!(
-            keys.result.rows.len(),
-            oxplow_config::keys::config_keys().len()
-        );
-        let page = run("oxplow-foundation/catalog-overview").await;
-        assert_eq!(
-            page.lens
-                .parts
-                .iter()
-                .map(|p| p.id.as_str())
-                .collect::<Vec<_>>(),
-            ["ask", "data", "configure"]
-        );
+        assert_eq!(keys.rows.len(), oxplow_config::keys::config_keys().len());
+        let sections = match &page.view.kind {
+            crate::pages::schema::NodeKind::Stack { children } => {
+                children.iter().map(|c| c.id.as_str()).collect::<Vec<_>>()
+            }
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(sections, ["ask", "data", "configure"]);
     }
 
     fn texts(rows: &serde_json::Value, i: usize) -> Vec<String> {
@@ -2269,7 +2268,7 @@ mod tests {
         .unwrap();
         let fixture = &f;
         let run = |severity: &'static str| async move {
-            run_bundled_lens_with(
+            run_bundled_page_with(
                 fixture,
                 "oxplow-foundation/problems",
                 &[("stream_id", Int(1)), ("severity", Text(severity.into()))],
@@ -2323,7 +2322,7 @@ mod tests {
             .unwrap();
         let fixture = &f;
         let run = |path: &'static str, filter: &'static str| async move {
-            run_bundled_lens_with(
+            run_bundled_page_with(
                 fixture,
                 "oxplow-foundation/symbols",
                 &[
@@ -2366,7 +2365,7 @@ mod tests {
             )
             .await
             .unwrap();
-        let rows = run_bundled_lens_with(
+        let rows = run_bundled_page_with(
             &f,
             "oxplow-foundation/closed-threads",
             &[("stream_id", Int(1))],
@@ -2420,7 +2419,7 @@ mod tests {
             })
             .await
             .unwrap();
-        let rows = run_bundled_lens_with(
+        let rows = run_bundled_page_with(
             &f,
             "oxplow-foundation/done-work",
             &[("thread_id", Int(f.thread.value()))],
@@ -2456,7 +2455,7 @@ mod tests {
             serde_json::json!({ "tool": "Edit", "kind": "edit", "paths": ["src/a.rs"], "ok": false }),
         )
         .await;
-        let rows = run_bundled_lens_with(
+        let rows = run_bundled_page_with(
             &f,
             "oxplow-foundation/hook-events",
             &[("stream_id", Int(1))],
@@ -2489,7 +2488,7 @@ mod tests {
             )
             .await
             .unwrap();
-        let rows = run_bundled_lens_with(
+        let rows = run_bundled_page_with(
             &f,
             "oxplow-foundation/wiki-freshness",
             &[("slug", Text("lib".into()))],
@@ -2544,7 +2543,7 @@ mod tests {
         };
         let pages = |q: String| {
             let f = &f;
-            async move { run_bundled_lens_with(f, "oxplow-foundation/wiki-pages", &filter(&q)).await }
+            async move { run_bundled_page_with(f, "oxplow-foundation/wiki-pages", &filter(&q)).await }
         };
         let rows = pages(String::new()).await;
         let mut slugs = texts(&rows, 0);
@@ -2555,9 +2554,9 @@ mod tests {
         assert!(texts(&rows, 3)[0].contains("lazy dog"), "{rows}");
         let rows = pages("beta".into()).await;
         assert_eq!(texts(&rows, 0), ["beta"], "{rows}");
-        let rows = run_bundled_lens_with(&f, "oxplow-foundation/wiki-visited", &filter("")).await;
+        let rows = run_bundled_page_with(&f, "oxplow-foundation/wiki-visited", &filter("")).await;
         assert_eq!(texts(&rows, 0), ["beta"], "{rows}");
-        let rows = run_bundled_lens_with(&f, "oxplow-foundation/wiki-visited", &filter("x")).await;
+        let rows = run_bundled_page_with(&f, "oxplow-foundation/wiki-visited", &filter("x")).await;
         assert!(texts(&rows, 0).is_empty(), "{rows}");
     }
 
@@ -2620,7 +2619,7 @@ mod tests {
         let lens = |slug: &'static str, mode: &'static str, all: i64| {
             let f = &f;
             async move {
-                run_bundled_lens_with(
+                run_bundled_page_with(
                     f,
                     &format!("oxplow-foundation/{slug}"),
                     &[
@@ -2725,7 +2724,7 @@ mod tests {
             let mut params = vec![("stream_id", Int(1))];
             params.extend(extra);
             async move {
-                run_bundled_lens_with(f, "oxplow-foundation/git-history-commits", &params).await
+                run_bundled_page_with(f, "oxplow-foundation/git-history-commits", &params).await
             }
         };
         // No head given: the stream's. The side branch isn't reachable from it.
@@ -2768,7 +2767,7 @@ mod tests {
         let lens = |slug: &'static str, param: &'static str, value: String| {
             let f = &f;
             async move {
-                run_bundled_lens_with(
+                run_bundled_page_with(
                     f,
                     &format!("oxplow-foundation/{slug}"),
                     &[(param, Text(value))],
@@ -2842,7 +2841,7 @@ mod tests {
         let lens = |slug: &'static str| {
             let f = &f;
             async move {
-                run_bundled_lens_with(
+                run_bundled_page_with(
                     f,
                     &format!("oxplow-foundation/{slug}"),
                     &[("thread_id", Int(f.thread.value()))],
@@ -2936,7 +2935,7 @@ mod tests {
             )
             .await
             .unwrap();
-        let rows = run_bundled_lens_with(&f, "oxplow-foundation/dashboards", &[]).await;
+        let rows = run_deleted_lens(&f, "oxplow-foundation/dashboards", &[]).await;
         assert_eq!(texts(&rows, 0), ["Build health"], "{rows}");
         let spec = f
             .svc
@@ -3009,7 +3008,7 @@ mod tests {
             })
             .await
             .unwrap();
-        let rows = run_bundled_lens_with(
+        let rows = run_bundled_page_with(
             &f,
             "oxplow-foundation/thread-work",
             &[("thread", Text(f.thread.to_string()))],
@@ -3056,7 +3055,7 @@ mod tests {
             }
         };
         let next = || async {
-            let rows = run_bundled_lens_with(
+            let rows = run_bundled_page_with(
                 &f,
                 "oxplow-foundation/work-next",
                 &[("thread", oxplow_db::SqlCell::Text(f.thread.to_string()))],
@@ -3151,7 +3150,7 @@ mod tests {
         let lens = |id: &'static str| {
             let id = format!("oxplow-bundled/{id}");
             let f = &f;
-            async move { run_bundled_lens(f, &id, &[]).await }
+            async move { run_bundled_page(f, &id, &[]).await }
         };
         assert_eq!(
             lens("shared-work").await.as_array().unwrap().len(),
@@ -3237,7 +3236,7 @@ mod tests {
 
         // The thread variant keeps what involves the thread; a third
         // thread sees none of it.
-        let mine = run_bundled_lens(
+        let mine = run_bundled_page(
             &f,
             "oxplow-bundled/thread-shared-work",
             &[("thread_id", beta.id.value())],
@@ -3245,7 +3244,7 @@ mod tests {
         .await;
         assert_eq!(mine.as_array().unwrap().len(), 3, "{mine}");
         let third = crate::test_fixtures::new_thread(&f.svc, stream, "Gamma").await;
-        let none = run_bundled_lens(
+        let none = run_bundled_page(
             &f,
             "oxplow-bundled/thread-shared-work",
             &[("thread_id", third.id.value())],
@@ -3253,7 +3252,7 @@ mod tests {
         .await;
         assert_eq!(none.as_array().unwrap().len(), 0, "{none}");
         // The item variant: the item's own row and the files its efforts changed.
-        let item_rows = run_bundled_lens_with(
+        let item_rows = run_bundled_page_with(
             &f,
             "oxplow-bundled/item-shared-work",
             &[("uri", oxplow_db::SqlCell::Text(item))],
@@ -3283,7 +3282,7 @@ mod tests {
             } else {
                 ("thread_id", f.thread.value())
             };
-            let rows = run_bundled_lens(&f, lens, &[param]).await;
+            let rows = run_bundled_page(&f, lens, &[param]).await;
             assert_eq!(rows.as_array().unwrap().len(), 0, "{lens}: none yet");
         }
         use oxplow_domain::hook::HookKind;
@@ -3320,7 +3319,7 @@ mod tests {
             } else {
                 ("thread_id", f.thread.value())
             };
-            let rows = run_bundled_lens(&f, lens, &[param]).await;
+            let rows = run_bundled_page(&f, lens, &[param]).await;
             let text = rows[0][0].as_str().unwrap();
             let (first, second) = (text.find("1. First"), text.find("1. Second"));
             assert!(first.is_some() && second.is_some(), "{lens}: {text}");
@@ -3370,7 +3369,7 @@ mod tests {
                 .unwrap();
         }
         turn("What does the lexer do?").await;
-        let rows = run_bundled_lens(
+        let rows = run_bundled_page(
             &f,
             "oxplow-bundled/thread-activity",
             &[("thread_id", f.thread.value())],
@@ -3448,7 +3447,7 @@ mod tests {
         };
         turn("with a window", Some(200_000), 1).await;
         turn("without one", None, 0).await;
-        let rows = run_bundled_lens(
+        let rows = run_bundled_page(
             &f,
             "oxplow-bundled/thread-activity",
             &[("thread_id", f.thread.value())],
@@ -3491,7 +3490,7 @@ mod tests {
             })
             .await
             .unwrap();
-        let rows = run_analytics_lens(&f, "session-files", "effort_id", effort).await;
+        let rows = run_analytics_page(&f, "session-files", "effort_id", effort).await;
         assert_eq!(
             rows,
             serde_json::json!([
@@ -3577,7 +3576,7 @@ mod tests {
             let mode = SqlCell::Text(mode.into());
             let f = &f;
             async move {
-                let rows = run_bundled_lens_with(
+                let rows = run_bundled_page_with(
                     f,
                     "oxplow-bundled/go-to",
                     &[("thread_id", tid), ("mode", mode)],
@@ -3608,7 +3607,7 @@ mod tests {
                 row("Most visited", "Settings", "1"),
             ]
         );
-        let collapsed = run_bundled_lens_with(
+        let collapsed = run_bundled_page_with(
             &f,
             "oxplow-bundled/go-to-bookmarks",
             &[("thread_id", tid.clone())],
@@ -3672,7 +3671,7 @@ mod tests {
         .await
         .unwrap();
         crate::test_fixtures::activate_with_problems(&f.svc).await;
-        let tree = run_bundled_lens(&f, "oxplow-bundled/uncommitted", &[("stream_id", 1)]).await;
+        let tree = run_bundled_page(&f, "oxplow-bundled/uncommitted", &[("stream_id", 1)]).await;
         // (id, parent, label) per node.
         let nodes: Vec<(String, Option<String>, String)> = tree
             .as_array()
@@ -3704,10 +3703,10 @@ mod tests {
             ]
         );
         let line =
-            run_bundled_lens(&f, "oxplow-bundled/uncommitted-line", &[("stream_id", 1)]).await;
+            run_bundled_page(&f, "oxplow-bundled/uncommitted-line", &[("stream_id", 1)]).await;
         assert_eq!(line[0][0], "1A 1M  +2 −0");
         let count =
-            run_bundled_lens(&f, "oxplow-bundled/uncommitted-count", &[("stream_id", 1)]).await;
+            run_bundled_page(&f, "oxplow-bundled/uncommitted-count", &[("stream_id", 1)]).await;
         assert_eq!(count, serde_json::json!([[2]]));
     }
 
@@ -3725,18 +3724,8 @@ mod tests {
             .iter()
             .any(|p| p.id == "oxplow-bundled/waiting"
                 && p.badge.as_deref() == Some("oxplow-bundled/waiting-on-me")));
-        let layer = crate::sql_gateway::SqlGateway::new(f.svc.db.clone());
-        let alert = |run: crate::extensions::LensRun| run.alert.unwrap();
-        let run = crate::extensions::run_lens(
-            &layer,
-            &f.svc.extension_catalog,
-            f._dir.path(),
-            "oxplow-bundled/waiting-on-me",
-            Default::default(),
-            &crate::extensions::LensContext::default(),
-        )
-        .await
-        .unwrap();
+        let alert = |run: crate::pages::runner::PageRun| run.alert.unwrap();
+        let run = crate::test_fixtures::run_page(&f.svc, "oxplow-bundled/waiting-on-me").await;
         assert!(!alert(run).firing);
         f.svc
             .task_store
@@ -3744,16 +3733,7 @@ mod tests {
             .await
             .unwrap();
         crate::test_fixtures::restate_task(&f.svc, f.task).await;
-        let run = crate::extensions::run_lens(
-            &layer,
-            &f.svc.extension_catalog,
-            f._dir.path(),
-            "oxplow-bundled/waiting-on-me",
-            Default::default(),
-            &crate::extensions::LensContext::default(),
-        )
-        .await
-        .unwrap();
+        let run = crate::test_fixtures::run_page(&f.svc, "oxplow-bundled/waiting-on-me").await;
         let a = alert(run);
         assert!(a.firing);
         assert_eq!(a.message, "Waiting on you: 1");

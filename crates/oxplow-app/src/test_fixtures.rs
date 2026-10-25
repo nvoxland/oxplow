@@ -581,3 +581,521 @@ pub fn shipped_extensions() -> Vec<crate::extensions::Extension> {
     let project = PROJECT.get_or_init(|| tempfile::tempdir().unwrap());
     crate::extensions::load_extensions(project.path())
 }
+
+/// The page a lens became, run with `params`, and the rows of the loader
+/// that carried the lens's query: `<extension>/<slug>` as a page of that
+/// name (its loader named for the slug, else the one its first viz node
+/// shows), or a loader named for the slug (`-` as `_`) in one of the
+/// extension's other pages, where the lens was inlined as a part. Only the
+/// params the page declares are given to it.
+pub async fn run_as_page(
+    svc: &crate::Services,
+    lens: &str,
+    params: &[(String, oxplow_db::SqlCell)],
+) -> oxplow_db::SqlQueryResult {
+    run_as_page_in(svc, lens, params, crate::extensions::LensContext::default()).await
+}
+
+/// [`run_as_page`] from a viewer's context (`lens_context`).
+pub async fn run_as_page_in(
+    svc: &crate::Services,
+    lens: &str,
+    params: &[(String, oxplow_db::SqlCell)],
+    ctx: crate::extensions::LensContext,
+) -> oxplow_db::SqlQueryResult {
+    use crate::pages::runner::{PageRunner, RunRequest, RunTarget};
+    let (extension, slug) = lens.split_once('/').expect("<extension>/<slug>");
+    // Lenses the conversion inlined into a page as a part named otherwise,
+    // or renamed (`pages convert` prints both).
+    const NAMED: &[(&str, &str, &str)] = &[
+        ("oxplow-foundation/tasks-list", "tasks", "list"),
+        ("oxplow-foundation/tasks-summary", "tasks", "summary"),
+        ("oxplow-foundation/tasks-backlog", "tasks", "backlog"),
+        ("oxplow-foundation/backlog-add", "backlog", "add"),
+        ("oxplow-foundation/backlog-list", "backlog", "items"),
+        ("oxplow-foundation/board-cards", "board", "board"),
+        ("oxplow-foundation/context-waiting", "context", "waiting"),
+        (
+            "oxplow-foundation/context-delivered",
+            "context",
+            "delivered",
+        ),
+        ("oxplow-foundation/go-to-bookmarks", "go-to", "bookmarks"),
+        ("oxplow-foundation/go-to-recent", "go-to", "recent"),
+        ("oxplow-foundation/go-to-top", "go-to", "top"),
+        ("oxplow-foundation/files-header", "files", "header"),
+        ("oxplow-foundation/files-tree", "files", "tree"),
+        (
+            "oxplow-foundation/git-dashboard-upstream",
+            "git-dashboard",
+            "upstream",
+        ),
+        (
+            "oxplow-foundation/git-dashboard-uncommitted",
+            "git-dashboard",
+            "uncommitted",
+        ),
+        (
+            "oxplow-foundation/git-dashboard-recent",
+            "git-dashboard",
+            "recent",
+        ),
+        (
+            "oxplow-foundation/git-dashboard-streams",
+            "git-dashboard",
+            "streams",
+        ),
+        (
+            "oxplow-foundation/git-dashboard-readiness",
+            "git-dashboard",
+            "readiness",
+        ),
+        (
+            "oxplow-foundation/git-dashboard-remotes",
+            "git-dashboard",
+            "remotes",
+        ),
+        (
+            "oxplow-foundation/git-history-commits",
+            "git-history",
+            "history",
+        ),
+        (
+            "oxplow-foundation/uncommitted-commit",
+            "uncommitted-changes",
+            "commit",
+        ),
+        (
+            "oxplow-foundation/uncommitted-files",
+            "uncommitted-changes",
+            "files",
+        ),
+        (
+            "oxplow-foundation/local-history-recent",
+            "local-history",
+            "recent",
+        ),
+        (
+            "oxplow-foundation/local-history-commits",
+            "local-history",
+            "by-commit",
+        ),
+        ("oxplow-foundation/comments-threads", "comments", "threads"),
+        (
+            "oxplow-foundation/comments-conversation",
+            "comments",
+            "conversation",
+        ),
+        ("oxplow-foundation/wiki-visited", "wiki-index", "visited"),
+        ("oxplow-foundation/wiki-pages", "wiki-index", "pages"),
+        (
+            "oxplow-foundation/settings-overview",
+            "settings",
+            "overview",
+        ),
+        (
+            "oxplow-foundation/settings-proposals",
+            "settings",
+            "settings-proposals",
+        ),
+        (
+            "oxplow-foundation/settings-values",
+            "settings",
+            "settings-values",
+        ),
+        ("oxplow-foundation/settings-agents", "settings", "agents"),
+        ("oxplow-foundation/agents-list", "settings", "agents-list"),
+        (
+            "oxplow-foundation/agents-settings",
+            "settings",
+            "agents-settings",
+        ),
+        (
+            "oxplow-foundation/agents-new-thread",
+            "settings",
+            "agents-new-thread",
+        ),
+        (
+            "oxplow-foundation/agents-prompt",
+            "settings",
+            "agents-prompt",
+        ),
+        ("oxplow-foundation/settings-lsp", "settings", "lsp"),
+        ("oxplow-foundation/lsp-servers", "settings", "lsp-servers"),
+        ("oxplow-foundation/lsp-install", "settings", "lsp-install"),
+        (
+            "oxplow-foundation/lsp-suggestions",
+            "settings",
+            "lsp-suggestions",
+        ),
+        (
+            "oxplow-foundation/settings-extensions",
+            "settings",
+            "extensions",
+        ),
+        (
+            "oxplow-foundation/extensions-health",
+            "settings",
+            "extensions-health",
+        ),
+        (
+            "oxplow-foundation/extensions-credentials",
+            "settings",
+            "extensions-credentials",
+        ),
+        (
+            "oxplow-foundation/extensions-secrets",
+            "settings",
+            "extensions-secrets",
+        ),
+        ("oxplow-foundation/settings-data", "settings", "data"),
+        (
+            "oxplow-foundation/data-entities",
+            "settings",
+            "data-entities",
+        ),
+        ("oxplow-foundation/data-sources", "settings", "data-sources"),
+        ("oxplow-foundation/data-effects", "settings", "data-effects"),
+        (
+            "oxplow-foundation/settings-integrations",
+            "settings",
+            "integrations",
+        ),
+        ("oxplow-foundation/capabilities", "settings", "capabilities"),
+        ("oxplow-foundation/replacements", "settings", "replacements"),
+        (
+            "oxplow-foundation/integrations",
+            "settings",
+            "integrations-integrations",
+        ),
+        ("oxplow-foundation/settings-ai", "settings", "ai"),
+        ("oxplow-foundation/ai-providers", "settings", "ai-providers"),
+        (
+            "oxplow-foundation/ai-provider-form",
+            "settings",
+            "ai-provider-form",
+        ),
+        ("oxplow-foundation/ai-roles", "settings", "ai-roles"),
+        ("oxplow-foundation/ai-calls", "settings", "ai-calls"),
+        ("oxplow-foundation/catalog-prompts", "catalog", "ask"),
+        (
+            "oxplow-foundation/catalog-config-keys",
+            "catalog",
+            "configure",
+        ),
+        ("oxplow-foundation/alerts-decisions", "alerts", "decisions"),
+        ("oxplow-foundation/alerts-hints", "alerts", "hints"),
+        (
+            "oxplow-foundation/alerts-operations",
+            "alerts",
+            "operations",
+        ),
+        (
+            "oxplow-foundation/alerts-extensions",
+            "alerts",
+            "extensions",
+        ),
+        (
+            "oxplow-foundation/new-session-start",
+            "new-session",
+            "start",
+        ),
+        (
+            "oxplow-foundation/new-session-earlier",
+            "new-session",
+            "earlier",
+        ),
+        (
+            "oxplow-foundation/stream-settings-prompt",
+            "stream-settings",
+            "prompt",
+        ),
+        (
+            "oxplow-foundation/thread-settings-sessions",
+            "thread-settings",
+            "sessions",
+        ),
+        (
+            "oxplow-foundation/thread-settings-prompt",
+            "thread-settings",
+            "prompt",
+        ),
+        ("oxplow-foundation/changes-header", "diff-view", "header"),
+        (
+            "oxplow-foundation/changes-description",
+            "diff-view",
+            "description",
+        ),
+        ("oxplow-foundation/changes-verdict", "diff-view", "verdict"),
+        (
+            "oxplow-foundation/changes-concurrent",
+            "diff-view",
+            "concurrent",
+        ),
+        ("oxplow-foundation/changes-files", "diff-view", "files"),
+        (
+            "oxplow-foundation/changes-extensions",
+            "diff-view",
+            "extensions",
+        ),
+        ("oxplow-foundation/wiki-page-body", "wiki-page", "body"),
+        ("oxplow-foundation/wiki-page-info", "wiki-page", "info"),
+        ("oxplow-foundation/wiki-page-refs", "wiki-page", "refs"),
+        ("oxplow-foundation/work-item-state", "work-item", "state"),
+        (
+            "oxplow-foundation/work-item-fields-form",
+            "work-item",
+            "fields",
+        ),
+        ("oxplow-foundation/work-item-body", "work-item", "body"),
+        ("oxplow-foundation/work-item-info", "work-item", "info"),
+        ("oxplow-foundation/work-item-links", "work-item", "links"),
+        (
+            "oxplow-foundation/work-item-comments",
+            "work-item",
+            "comments",
+        ),
+        (
+            "oxplow-foundation/work-item-activity",
+            "work-item",
+            "activity",
+        ),
+        ("oxplow-foundation/commit-detail", "commit", "detail"),
+        ("oxplow-foundation/commit-files", "commit", "files"),
+        ("oxplow-foundation/metric-header", "metric-detail", "header"),
+        ("oxplow-foundation/metric-chart", "metric-detail", "chart"),
+        (
+            "oxplow-foundation/metric-unchecked",
+            "metric-detail",
+            "unchecked",
+        ),
+        (
+            "oxplow-foundation/metric-recordings",
+            "metric-detail",
+            "recordings",
+        ),
+        (
+            "oxplow-foundation/agent-session-waiting",
+            "agent-session",
+            "agent-session-waiting",
+        ),
+        (
+            "oxplow-foundation/agent-session-terminal",
+            "agent-session",
+            "agent-session-terminal",
+        ),
+        (
+            "oxplow-bundled/interface-tool-calls",
+            "agent-interface",
+            "interface-tool-calls",
+        ),
+        (
+            "oxplow-bundled/interface-commands",
+            "agent-interface",
+            "interface-commands",
+        ),
+        (
+            "oxplow-bundled/interface-hints",
+            "agent-interface",
+            "interface-hints",
+        ),
+        (
+            "oxplow-bundled/change-summary",
+            "change-review",
+            "change-summary",
+        ),
+        (
+            "oxplow-bundled/change-look-here",
+            "change-review",
+            "change-look-here",
+        ),
+        (
+            "oxplow-bundled/change-treemap",
+            "change-review",
+            "change-treemap",
+        ),
+        (
+            "oxplow-bundled/change-functions",
+            "change-review",
+            "change-functions",
+        ),
+        (
+            "oxplow-bundled/change-test-files",
+            "change-review",
+            "change-test-files",
+        ),
+        (
+            "oxplow-bundled/change-co-change",
+            "change-review",
+            "change-co-change",
+        ),
+        (
+            "oxplow-bundled/change-duplicates",
+            "change-review",
+            "change-duplicates",
+        ),
+        (
+            "oxplow-bundled/change-cross-zone-imports",
+            "change-review",
+            "change-cross-zone-imports",
+        ),
+        (
+            "oxplow-bundled/effort-coverage",
+            "effort-tests",
+            "effort-coverage",
+        ),
+        (
+            "oxplow-bundled/effort-untested-files",
+            "effort-tests",
+            "effort-untested-files",
+        ),
+        (
+            "oxplow-bundled/effort-test-runs",
+            "effort-tests",
+            "effort-test-runs",
+        ),
+        (
+            "oxplow-bundled/effort-failed-tests",
+            "effort-tests",
+            "effort-failed-tests",
+        ),
+        (
+            "oxplow-bundled/effort-analysis-findings",
+            "effort-tests",
+            "effort-analysis-findings",
+        ),
+        ("oxplow-bundled/ready-tasks", "planning", "ready-tasks"),
+        ("oxplow-bundled/backlog-tasks", "planning", "backlog-tasks"),
+        ("oxplow-bundled/recent-notes", "planning", "recent-notes"),
+        (
+            "oxplow-bundled/duplicate-blocks",
+            "quality",
+            "duplicate-blocks",
+        ),
+        (
+            "oxplow-bundled/recent-snapshots",
+            "review",
+            "recent-snapshots",
+        ),
+        (
+            "oxplow-bundled/task-token-summary",
+            "task-tokens",
+            "task-token-summary",
+        ),
+        ("oxplow-bundled/task-turns", "task-tokens", "task-turns"),
+        ("oxplow-bundled/token-total", "usage", "token-total"),
+        ("oxplow-bundled/tokens-by-agent", "usage", "tokens-by-agent"),
+        ("oxplow-bundled/tokens-by-day", "usage", "tokens-by-day"),
+        (
+            "oxplow-bundled/page-visits-by-day",
+            "usage",
+            "page-visits-by-day",
+        ),
+        ("oxplow-bundled/top-pages", "usage", "top-pages"),
+        ("oxplow-foundation/catalog", "data-catalog", ""),
+        (
+            "oxplow-foundation/uncommitted",
+            "uncommitted-changes",
+            "row",
+        ),
+        ("oxplow-foundation/board", "board", "row"),
+    ];
+    let named = NAMED.iter().find(|(l, _, _)| *l == lens);
+    let (slug, loader_name) = match named {
+        Some((_, page, loader)) => (*page, loader.to_string()),
+        None => (slug, slug.replace('-', "_")),
+    };
+    let snapshot = svc.extension_catalog.snapshot(&svc.layout.project_dir);
+    let ext = snapshot
+        .extensions()
+        .iter()
+        .find(|e| e.name == extension)
+        .expect("the extension");
+    let own = ext.page_files.iter().find(|p| p.slug == slug);
+    let inlined = || {
+        ext.page_files.iter().find(|p| {
+            p.loaders
+                .iter()
+                .any(|l| l.name == slug || l.name == loader_name)
+        })
+    };
+    let page = own
+        .or_else(inlined)
+        .unwrap_or_else(|| panic!("no page for lens {lens}"));
+    let loader = page
+        .loaders
+        .iter()
+        .find(|l| {
+            let plain = |name: &str| name.replace('-', "_");
+            plain(&l.name) == plain(&loader_name) || (named.is_none() && l.name == slug)
+        })
+        .map(|l| l.name.clone())
+        .or_else(|| page.loaders.first().map(|l| l.name.clone()))
+        .expect("a loader");
+    // A loader only a switch's child shows runs when the switch's param
+    // names that child.
+    fn switch_for(node: &crate::pages::schema::Node, loader: &str) -> Option<(String, String)> {
+        use crate::pages::schema::NodeKind;
+        fn shows(node: &crate::pages::schema::Node, loader: &str) -> bool {
+            match &node.kind {
+                NodeKind::Viz { from, .. } => from.as_deref() == Some(loader),
+                NodeKind::Stack { children }
+                | NodeKind::Grid { children }
+                | NodeKind::Switch { children, .. } => children.iter().any(|c| shows(c, loader)),
+                _ => false,
+            }
+        }
+        match &node.kind {
+            NodeKind::Switch { param, children } => children
+                .iter()
+                .find(|c| shows(c, loader))
+                .map(|c| (param.clone(), c.id.clone())),
+            NodeKind::Stack { children } | NodeKind::Grid { children } => {
+                children.iter().find_map(|c| switch_for(c, loader))
+            }
+            _ => None,
+        }
+    }
+    let mut wanted: std::collections::BTreeMap<String, oxplow_db::SqlCell> = params
+        .iter()
+        .filter(|(name, _)| page.params.iter().any(|p| &p.name == name))
+        .cloned()
+        .collect();
+    if let Some((param, child)) = switch_for(&page.view, &loader) {
+        wanted
+            .entry(param)
+            .or_insert(oxplow_db::SqlCell::Text(child));
+    }
+    let run = PageRunner::of(svc)
+        .run(RunRequest {
+            target: RunTarget::Page(page.id.clone()),
+            params: wanted,
+            ctx,
+            viewer: oxplow_domain::Actor::Human,
+        })
+        .await
+        .unwrap();
+    let ran: Vec<&String> = run.loaders.keys().collect();
+    let run = run
+        .loaders
+        .get(&loader)
+        .unwrap_or_else(|| panic!("lens {lens}: loader {loader} didn't run (ran {ran:?})"));
+    if let Some(error) = &run.error {
+        panic!("page {} loader {loader}: {error}", page.id);
+    }
+    run.result.clone()
+}
+
+/// Page `id` (`<extension>/<slug>`) run as a person, with no params.
+pub async fn run_page(svc: &crate::Services, id: &str) -> crate::pages::runner::PageRun {
+    use crate::pages::runner::{PageRunner, RunRequest, RunTarget};
+    PageRunner::of(svc)
+        .run(RunRequest {
+            target: RunTarget::Page(id.to_string()),
+            params: Default::default(),
+            ctx: crate::extensions::LensContext::default(),
+            viewer: oxplow_domain::Actor::Human,
+        })
+        .await
+        .unwrap()
+}
