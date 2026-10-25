@@ -109,28 +109,22 @@ async fn list(f: &Fixture, harnesses: Vec<Arc<dyn AgentHarness>>) -> Vec<Row> {
         f.fx.svc.harnesses.register(h);
     }
     let svc = &f.fx.svc;
-    let run = crate::extensions::run_lens(
-        &svc.sql,
-        &svc.extension_catalog,
-        f.fx._dir.path(),
+    let run = crate::test_fixtures::run_as_page(
+        svc,
         "oxplow-foundation/new-session-earlier",
-        [
+        &[
             ("stream_id".to_string(), SqlCell::Int(1)),
             ("thread_id".to_string(), SqlCell::Int(f.fx.thread.value())),
-        ]
-        .into(),
-        &crate::extensions::LensContext::default(),
+        ],
     )
-    .await
-    .unwrap();
-    let col = |name: &str| run.result.columns.iter().position(|c| c == name).unwrap();
+    .await;
+    let col = |name: &str| run.columns.iter().position(|c| c == name).unwrap();
     let text = |row: &Vec<SqlCell>, name: &str| match &row[col(name)] {
         SqlCell::Text(t) => Some(t.clone()),
         _ => None,
     };
     let flag = |row: &Vec<SqlCell>, name: &str| matches!(&row[col(name)], SqlCell::Int(1));
-    run.result
-        .rows
+    run.rows
         .iter()
         .map(|row| Row {
             label: text(row, "label").unwrap_or_default(),

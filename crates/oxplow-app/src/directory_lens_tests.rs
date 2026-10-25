@@ -4,7 +4,6 @@
 
 use oxplow_db::SqlCell;
 
-use crate::extensions::{run_lens, LensContext};
 use crate::test_fixtures::services_with_effort;
 
 #[tokio::test]
@@ -17,27 +16,21 @@ async fn a_folder_lists_its_folders_then_its_files_each_with_its_uri() {
 
     let svc = &fx.svc;
     let stream = svc.streams.ensure_primary().await.unwrap().id;
-    let run = run_lens(
-        &svc.sql,
-        &svc.extension_catalog,
-        fx._dir.path(),
+    let run = crate::test_fixtures::run_as_page(
+        svc,
         "oxplow-foundation/directory",
-        [
+        &[
             ("path".to_string(), SqlCell::Text("src".into())),
             ("stream_id".to_string(), SqlCell::Int(stream.value())),
-        ]
-        .into(),
-        &LensContext::default(),
+        ],
     )
-    .await
-    .unwrap();
-    let col = |name: &str| run.result.columns.iter().position(|c| c == name).unwrap();
+    .await;
+    let col = |name: &str| run.columns.iter().position(|c| c == name).unwrap();
     let text = |row: &Vec<SqlCell>, name: &str| match &row[col(name)] {
         SqlCell::Text(t) => t.clone(),
         other => panic!("{name}: {other:?}"),
     };
     let rows: Vec<(String, String, String)> = run
-        .result
         .rows
         .iter()
         .map(|r| (text(r, "name"), text(r, "icon"), text(r, "target")))

@@ -47,10 +47,25 @@ async fn run(
     params: Vec<(&str, SqlCell)>,
 ) -> Run {
     let svc = &fx.svc;
+    let params: Vec<(String, SqlCell)> = params
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v))
+        .collect();
+    let run =
+        crate::test_fixtures::run_as_page(svc, &format!("oxplow-foundation/{lens}"), &params).await;
+    Run {
+        columns: run.columns,
+        rows: run.rows,
+    }
+}
+
+/// A lens no page replaces yet (or whose page doesn't behave like it:
+/// see the report), run as a lens.
+async fn run_as_lens(svc: &crate::Services, lens: &str, params: Vec<(&str, SqlCell)>) -> Run {
     let run = run_lens(
         &svc.sql,
         &svc.extension_catalog,
-        fx._dir.path(),
+        svc.layout.project_dir.as_path(),
         &format!("oxplow-foundation/{lens}"),
         params
             .into_iter()
@@ -375,8 +390,8 @@ async fn the_uncommitted_page_lists_the_working_tree_with_untracked_marked() {
     std::fs::write(root.join("loose.txt"), "n\n").unwrap();
     let stream = fx.svc.streams.ensure_primary().await.unwrap().id.value();
 
-    let doc = run(
-        &fx,
+    let doc = run_as_lens(
+        &fx.svc,
         "uncommitted",
         vec![("stream_id", SqlCell::Int(stream))],
     )
@@ -390,8 +405,8 @@ async fn the_uncommitted_page_lists_the_working_tree_with_untracked_marked() {
     // Its files are listed by the change's analysis, a moment later.
     let mut icons = Vec::new();
     for _ in 0..50 {
-        let files = run(
-            &fx,
+        let files = run_as_lens(
+            &fx.svc,
             "uncommitted-files",
             vec![
                 ("change_id", change.clone()),
@@ -424,8 +439,8 @@ async fn the_uncommitted_page_lists_the_working_tree_with_untracked_marked() {
     );
 
     // The commit form shows once there are files to commit.
-    let form = run(
-        &fx,
+    let form = run_as_lens(
+        &fx.svc,
         "uncommitted-commit",
         vec![("stream_id", SqlCell::Int(stream)), ("change_id", change)],
     )
@@ -705,7 +720,7 @@ async fn the_board_lists_work_items_by_scope() {
     }
     let params = |scope: &str| {
         vec![
-            ("scope", SqlCell::Text(scope.into())),
+            ("show", SqlCell::Text(scope.into())),
             ("thread_id", SqlCell::Int(fx.thread.value())),
         ]
     };
@@ -748,22 +763,15 @@ async fn run_task(
     params: Vec<(&str, SqlCell)>,
 ) -> Run {
     let svc = &fx.svc;
-    let run = run_lens(
-        &svc.sql,
-        &svc.extension_catalog,
-        svc.layout.project_dir.as_path(),
-        &format!("oxplow-foundation/{lens}"),
-        params
-            .into_iter()
-            .map(|(k, v)| (k.to_string(), v))
-            .collect(),
-        &LensContext::default(),
-    )
-    .await
-    .unwrap();
+    let params: Vec<(String, SqlCell)> = params
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v))
+        .collect();
+    let run =
+        crate::test_fixtures::run_as_page(svc, &format!("oxplow-foundation/{lens}"), &params).await;
     Run {
-        columns: run.result.columns,
-        rows: run.result.rows,
+        columns: run.columns,
+        rows: run.rows,
     }
 }
 
@@ -1181,7 +1189,7 @@ async fn the_changes_page_frames_an_effort_and_a_picked_range() {
             ("stream_id", SqlCell::Int(1)),
         ];
         params.extend(extra);
-        run_task(&fx, "changes", params)
+        run_as_lens(&fx.svc, "changes", params)
     };
     let own = page(vec![]).await;
     assert_eq!(own.rows.len(), 1, "{:?}", own.rows);
@@ -1214,12 +1222,12 @@ async fn the_changes_page_frames_an_effort_and_a_picked_range() {
     );
 
     // The route page: no URI, no end - nothing to compare yet.
-    let route = run_task(&fx, "changes", vec![("stream_id", SqlCell::Int(1))]).await;
+    let route = run_as_lens(&fx.svc, "changes", vec![("stream_id", SqlCell::Int(1))]).await;
     assert!(route.rows.is_empty());
 
     // Its parts.
-    let effort_part = run_task(
-        &fx,
+    let effort_part = run_as_lens(
+        &fx.svc,
         "changes-effort",
         vec![
             ("effort_id", SqlCell::Int(effort.value())),
@@ -1231,8 +1239,8 @@ async fn the_changes_page_frames_an_effort_and_a_picked_range() {
         effort_part.text(&effort_part.rows[0], "state").as_deref(),
         Some("Open")
     );
-    let header = run_task(
-        &fx,
+    let header = run_as_lens(
+        &fx.svc,
         "changes-header",
         vec![
             ("subject", SqlCell::Text("effort".into())),
@@ -1256,7 +1264,7 @@ async fn the_changes_page_frames_an_effort_and_a_picked_range() {
         .unwrap()
         .contains("in progress"));
     for lens in ["changes-starts", "changes-ends"] {
-        let options = run_task(&fx, lens, vec![("stream_id", SqlCell::Int(1))]).await;
+        let options = run_as_lens(&fx.svc, lens, vec![("stream_id", SqlCell::Int(1))]).await;
         assert!(!options.rows.is_empty(), "{lens}");
     }
 }
@@ -1366,8 +1374,8 @@ async fn the_dashboard_page_adds_a_metric_tile_and_edits_its_tiles() {
         .to_string();
     let by_id = vec![("id", SqlCell::Text(id.clone()))];
     // The page's row hands its parts the dashboard's id from the URI.
-    let page = run(
-        &fx,
+    let page = run_as_lens(
+        &fx.svc,
         "dashboard",
         vec![(
             "uri",
@@ -1378,12 +1386,12 @@ async fn the_dashboard_page_adds_a_metric_tile_and_edits_its_tiles() {
     assert_eq!(page.text(&page.rows[0], "id").as_deref(), Some(id.as_str()));
     assert_eq!(page.text(&page.rows[0], "title").as_deref(), Some("Health"));
 
-    let title = run(&fx, "dashboard-title", by_id.clone()).await;
+    let title = run_as_lens(&fx.svc, "dashboard-title", by_id.clone()).await;
     assert_eq!(
         title.text(&title.rows[0], "title").as_deref(),
         Some("Health")
     );
-    let metrics = run(&fx, "dashboard-metrics", vec![]).await;
+    let metrics = run_as_lens(&fx.svc, "dashboard-metrics", vec![]).await;
     assert!(!metrics.rows.is_empty(), "the catalog lists metrics");
     let metric = metrics.text(&metrics.rows[0], "value").unwrap();
     let act = |lens: &str, action: &str, row, input| LensActionCall {
@@ -1411,7 +1419,7 @@ async fn the_dashboard_page_adds_a_metric_tile_and_edits_its_tiles() {
     )
     .await
     .unwrap();
-    let tiles = run(&fx, "dashboard-tiles", by_id.clone()).await;
+    let tiles = run_as_lens(&fx.svc, "dashboard-tiles", by_id.clone()).await;
     assert_eq!(tiles.rows.len(), 1);
     let row = &tiles.rows[0];
     assert_eq!(tiles.text(row, "display").as_deref(), Some("metric"));
@@ -1441,7 +1449,7 @@ async fn the_dashboard_page_adds_a_metric_tile_and_edits_its_tiles() {
     )
     .await
     .unwrap();
-    let tiles = run(&fx, "dashboard-tiles", by_id.clone()).await;
+    let tiles = run_as_lens(&fx.svc, "dashboard-tiles", by_id.clone()).await;
     assert_eq!(tiles.text(&tiles.rows[0], "size").as_deref(), Some("wide"));
     assert_eq!(tiles.text(&tiles.rows[0], "viz").as_deref(), Some("number"));
     run_lens_action(
@@ -1457,7 +1465,10 @@ async fn the_dashboard_page_adds_a_metric_tile_and_edits_its_tiles() {
     )
     .await
     .unwrap();
-    assert!(run(&fx, "dashboard-tiles", by_id).await.rows.is_empty());
+    assert!(run_as_lens(&fx.svc, "dashboard-tiles", by_id)
+        .await
+        .rows
+        .is_empty());
 }
 
 /// The Files page: all files a folder at a time, or the changed files in

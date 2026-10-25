@@ -2370,23 +2370,14 @@ mod tests {
     async fn the_extensions_page_offers_deploy_only_when_the_source_moved_on() {
         let fx = crate::test_fixtures::services_with_effort().await;
         let svc = &fx.svc;
-        let root = svc.layout.project_dir.clone();
         source(svc, "One");
         deploy(svc, "acme", true).await.unwrap();
         let acme = || async {
-            let run = crate::extensions::run_lens(
-                &svc.sql,
-                &svc.extension_catalog,
-                &root,
-                "oxplow-foundation/extensions-list",
-                Default::default(),
-                &crate::extensions::LensContext::default(),
-            )
-            .await
-            .unwrap();
-            let col = |name: &str| run.result.columns.iter().position(|c| c == name).unwrap();
+            let run =
+                crate::test_fixtures::run_as_page(svc, "oxplow-foundation/extensions-list", &[])
+                    .await;
+            let col = |name: &str| run.columns.iter().position(|c| c == name).unwrap();
             let row = run
-                .result
                 .rows
                 .iter()
                 .find(|r| r[col("name")] == oxplow_db::SqlCell::Text("acme".into()))

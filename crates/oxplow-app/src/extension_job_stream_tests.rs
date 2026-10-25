@@ -200,20 +200,12 @@ pub(super) async fn rows(fx: &Fixture, sql: &str, params: Vec<Value>) -> Vec<Vec
 }
 
 async fn lens(fx: &Fixture, id: &str, params: Vec<(&str, oxplow_db::SqlCell)>) -> Value {
-    let run = crate::extensions::run_lens(
-        &fx.svc.sql,
-        &fx.svc.extension_catalog,
-        fx._dir.path(),
-        id,
-        params
-            .into_iter()
-            .map(|(k, v)| (k.to_string(), v))
-            .collect(),
-        &crate::extensions::LensContext::default(),
-    )
-    .await
-    .unwrap();
-    serde_json::to_value(&run.result.rows).unwrap()
+    let params: Vec<(String, oxplow_db::SqlCell)> = params
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v))
+        .collect();
+    let run = crate::test_fixtures::run_as_page(&fx.svc, id, &params).await;
+    serde_json::to_value(&run.rows).unwrap()
 }
 
 pub(super) async fn completions(fx: &Fixture, id: &str) -> Vec<String> {
