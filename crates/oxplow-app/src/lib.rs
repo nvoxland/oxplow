@@ -175,6 +175,7 @@ pub mod output_activity;
 pub mod pacing;
 pub mod page_ref_backfill;
 pub mod page_ref_consumers;
+pub mod pages;
 pub mod param_pattern;
 #[cfg(test)]
 mod plan_tests;

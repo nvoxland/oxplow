@@ -203,6 +203,46 @@ moved into the project DB and started fresh again) — see the decision in [reso
 | symbol | `oxplow:oxplow/symbol?path=<path>&symbol=<name>` (`v_symbol.uri`, `symbolRef(uri)`) — no revision in the id; never a tab: opening one (`handleOpenPage`, or in-tab navigation) resolves it (`resolve_symbol`) and opens its file at the name's line (`openSymbol`). A pinned one (`rev=snap:<id>` / `rev=git:<sha>`) opens the file viewer at that revision; if the version is gone it shows a notice and opens the current symbol | `oxplow:oxplow/symbol?path=src/lib.rs&symbol=Widget::spin` |
 | agent_session | `oxplow:oxplow/agent_session?id=<ses id>` (`agentSessionRef(id)`, pinned; the one URI whose tab is pinned) — an open agent session's terminal; its tab draws its harness's declared logo (`CenterTab.icon` from `HarnessListing.icon`, `AgentIcon`; the generic robot when it declares none) | `oxplow:oxplow/agent_session?id=ses3` |
 
+## Page files
+
+The unit replacing a lens plus its `pages:` entry (being built: they load
+beside lenses and run nothing yet; the lens runtime is deleted once
+oxplow's own extensions move over). A page is `pages/<slug>.yaml` in an
+extension, three parts (`crates/oxplow-app/src/pages/schema.rs`):
+
+- **Metadata**: `title`, `description`, `label`, `icon`, `category`,
+  `keywords`, typed `params` (`role: resource | filter`; a `switch`'s param
+  is a filter by default), `for` / `accepts` / `default` / `pinned` (a
+  renderer), `comments`, `refresh`, `hidden`, `needs`, whole-page
+  `actions`, `alert`, `tool`, `answers` (`{ question, about?, params,
+  skill? }`: what agents find it by and what tests run) and `badge`
+  (`{ loader, column? }`).
+- **`data:`** — named **loaders**, in order; a loader reads only the ones
+  before it: `sql` (binds `:param`s; an earlier loader reads as a table of
+  its name), `command` (a read-only command run as the viewer, `args`
+  each `{ param }`, `{ from: <loader>.<column> }` or a literal; it must
+  say `reads` (models) or `refresh` (`manual`, `{ every }`)), `page`
+  (another page's `loader`, with `params`) or `rows` (inline). A loader's
+  name is a plain identifier, never a model's (`v_*`, `m_*`).
+- **`view:`** (and an optional `rail:`) — a tree of nodes: `stack`,
+  `grid` (children with `size`), `switch` (`{ param, children }`: the
+  child whose id is the param's value), `viz` (+ `from: <loader>`, the
+  viz's role block, `columns`, row `actions`, `empty`), `embed`
+  (`{ page, params }`: params flow by name from the host's params and its
+  loaders' first rows, `params` naming any explicitly), `slot` (a name
+  other extensions mount pages at), `markdown` (static text) and
+  `component` (`{ id, props }`: a custom component fed the page's data).
+  Every node has an `id` (default: its loader, embedded page, slot or
+  component; else `stack`, `stack-2`, …), unique in the page; `title`,
+  `replaceable` and `size` are on any node.
+
+A viz node's config is a `Lens` with no query (its rows are its loader's),
+so the shape checks, action parsing, text renderers and the desktop's viz
+components are the lens ones. The YAML only binds: logic is SQL or a read
+command. An **inline page** (`parse_inline_page`: a markdown
+` ```oxplow-page ` block, an agent's one-off) only reads: no `command`
+loaders, no actions, forms, terminals, editors, components or slots.
+
 ## Declared pages
 
 Every page is a `pages:` entry in an extension's manifest

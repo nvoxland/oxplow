@@ -199,7 +199,7 @@ pub struct LensAlert {
 /// `alert:` as written in a lens file (snake_case keys).
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
-struct AlertFile {
+pub(crate) struct AlertFile {
     min_rows: Option<i64>,
     column: Option<String>,
     above: Option<f64>,
@@ -208,7 +208,7 @@ struct AlertFile {
 }
 
 impl AlertFile {
-    fn into_alert(self) -> Result<LensAlert, String> {
+    pub(crate) fn into_alert(self) -> Result<LensAlert, String> {
         match (&self.min_rows, &self.column) {
             (Some(_), Some(_)) => {
                 return Err("`alert` takes `min_rows` or `column`, not both".into())
@@ -1380,7 +1380,7 @@ fn view_problem(lens: &Lens) -> Option<String> {
 /// `params` with a document's view param (`view: <name>`) a `filter`
 /// choice when it doesn't say otherwise: its choices are the sections,
 /// filled once mounts are placed ([`fill_view_options`]).
-fn view_param(params: Vec<LensParam>, view: Option<&str>) -> Vec<LensParam> {
+pub(crate) fn view_param(params: Vec<LensParam>, view: Option<&str>) -> Vec<LensParam> {
     params
         .into_iter()
         .map(|p| {
@@ -1397,7 +1397,7 @@ fn view_param(params: Vec<LensParam>, view: Option<&str>) -> Vec<LensParam> {
 }
 
 /// `params` with each one's type written out, so a page never infers it.
-fn typed(params: Vec<LensParam>) -> Vec<LensParam> {
+pub(crate) fn typed(params: Vec<LensParam>) -> Vec<LensParam> {
     params
         .into_iter()
         .map(|p| LensParam {
@@ -1736,7 +1736,7 @@ fn key_problem(key: &str) -> Option<String> {
 /// extension is validated). A lens that `holds_one_row` (detail, form,
 /// markdown, a document's row) lets a whole-lens action name `when` and
 /// `{{row.*}}` too: that row.
-fn parse_actions(
+pub(crate) fn parse_actions(
     raw: Vec<serde_yaml::Value>,
     params: &[LensParam],
     grouped: bool,
@@ -2001,7 +2001,7 @@ fn parse_actions(
 
 /// Whether a lens of this `viz` holds one row, so a whole-lens action can
 /// name it: a detail, a form, a markdown, or a document with a `query:`.
-fn holds_one_row(viz: LensViz, has_query: bool) -> bool {
+pub(crate) fn holds_one_row(viz: LensViz, has_query: bool) -> bool {
     matches!(viz, LensViz::Detail | LensViz::Form | LensViz::Markdown)
         || (viz == LensViz::Document && has_query)
 }
@@ -2549,13 +2549,13 @@ struct PageFile {
 /// A page's `for`: one resource or several.
 #[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
 #[serde(untagged)]
-enum Renders {
+pub(crate) enum Renders {
     One(String),
     Many(Vec<String>),
 }
 
 impl Renders {
-    fn into_vec(self) -> Vec<String> {
+    pub(crate) fn into_vec(self) -> Vec<String> {
         match self {
             Renders::One(r) => vec![r],
             Renders::Many(rs) => rs,
@@ -2758,6 +2758,10 @@ pub struct Extension {
     /// Why it exists (required; `None` only when the manifest didn't load).
     pub intent: Option<Intent>,
     pub lenses: Vec<Lens>,
+    /// Its page files (`pages/*.yaml`; valid ones — invalid ones are in
+    /// `errors`).
+    #[serde(default)]
+    pub page_files: Vec<crate::pages::schema::Page>,
     /// Declared collectors (valid ones; invalid ones are in `errors`).
     pub collectors: Vec<oxplow_config::collectors::CollectorSpec>,
     /// Declared providers (valid ones — invalid ones are in `errors`).
@@ -4081,6 +4085,7 @@ pub(crate) fn empty_extension(name: &str, path: &str, origin: &str) -> Extension
         manifest_version: manifest_v2::CURRENT,
         intent: None,
         lenses: Vec::new(),
+        page_files: Vec::new(),
         collectors: Vec::new(),
         providers: Vec::new(),
         custom_components: Vec::new(),
@@ -4740,6 +4745,33 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                 },
             }),
             Err(e) => ext.errors.push(format!("{lens_rel}: {e}")),
+        }
+    }
+
+    let mut page_names: Vec<String> = files
+        .list("pages")
+        .into_iter()
+        .filter(|f| f.ends_with(".yaml") || f.ends_with(".yml"))
+        .collect();
+    page_names.sort();
+    for file in page_names {
+        let slug = file
+            .trim_end_matches(".yaml")
+            .trim_end_matches(".yml")
+            .to_string();
+        let page_rel = format!("{rel}/pages/{file}");
+        let parsed = files
+            .read(&format!("pages/{file}"))
+            .ok_or_else(|| "unreadable".to_string())
+            .and_then(|t| {
+                crate::pages::schema::parse_page(name, &ext.namespace, &slug, &page_rel, &t)
+            });
+        match parsed {
+            Ok(mut page) => {
+                page.origin.bundled = origin == "bundled";
+                ext.page_files.push(page);
+            }
+            Err(e) => ext.errors.push(format!("{page_rel}: {e}")),
         }
     }
 
@@ -5867,7 +5899,7 @@ fn lazy_tree_problem(lens: &Lens, t: &LensTree) -> Option<String> {
         })
 }
 
-fn shape_problem(
+pub(crate) fn shape_problem(
     lens: &Lens,
     ids_in_extension: &[String],
     components: &[String],
