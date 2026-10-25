@@ -49,4 +49,3 @@ actions:
     input: { thread: "{{row.thread_id_bare}}", harness: "{{row.harness}}", resume: "{{row.conversation}}" }
 empty: No turns are recorded for this session.
 hidden: true
-tool: session_transcript

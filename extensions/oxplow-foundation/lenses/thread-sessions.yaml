@@ -45,4 +45,3 @@ columns:
   - { key: stream, label: Stream }
 empty: No agent sessions.
 hidden: true
-tool: thread_sessions

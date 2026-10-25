@@ -1,10 +1,11 @@
 # History tools
 
-Quick answers about the repository's history, one tool each:
+Quick answers about the repository's history, one page each, read with
+`oxplow_run_page { page, params }`:
 
-- `oxplow_file_history { path, limit }` — the commits touching one file.
-- `oxplow_recent_commits { limit }` — the latest of the indexed log.
-- `oxplow_snapshots { stream?, limit }` — snapshots with parent, trigger and
+- `file-history { path, limit }` — the commits touching one file.
+- `recent-commits { limit }` — the latest of the indexed log.
+- `snapshots { stream?, limit }` — snapshots with parent, trigger and
   whether they went over their time budget (every stream's when none is named).
 
 History past the index (any revision, one path, paged) is `oxplow_vcs_log`;
@@ -33,4 +34,4 @@ compared with the default branch. A side is any revision git resolves
   first, 100 per pair at most: what is unpushed or unmerged. Whole
   histories are `v_commit`.
 - `v_snapshot_op` — the log of snapshots a stream took (why each ran, its
-  parent, how long it took): what `oxplow_snapshots` reads.
+  parent, how long it took): what the `snapshots` page reads.

@@ -88,6 +88,24 @@ view: { viz: table, from: q }
 "#,
     ),
     (
+        "listed",
+        r#"
+title: Listed
+data:
+  nodes:
+    command: oxplow.page.definition
+    args: { page: acme/numbers }
+    items: nodes
+    reads: [v_page]
+  missing:
+    command: oxplow.page.definition
+    args: { page: acme/numbers }
+    items: nope
+    reads: [v_page]
+view: { viz: table, from: nodes }
+"#,
+    ),
+    (
         "bound",
         r#"
 title: Bound

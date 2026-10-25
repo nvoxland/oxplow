@@ -138,7 +138,7 @@ answers:
 "#,
     )
     .unwrap();
-    let Loader::Command { command, args } = &p.loaders[0].loader else {
+    let Loader::Command { command, args, .. } = &p.loaders[0].loader else {
         panic!()
     };
     assert_eq!(command, "acme.ci.checks");

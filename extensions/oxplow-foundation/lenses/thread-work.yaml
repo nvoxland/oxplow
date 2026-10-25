@@ -17,4 +17,3 @@ columns:
   - { key: efforts, label: Efforts }
 empty: The thread has no work items.
 hidden: true
-tool: thread_work

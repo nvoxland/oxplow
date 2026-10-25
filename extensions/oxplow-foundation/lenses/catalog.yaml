@@ -20,4 +20,3 @@ columns:
   - { key: columns, label: Columns }
 empty: No model by that name; leave `model` empty to list them all.
 hidden: true
-tool: catalog

@@ -215,16 +215,27 @@ extension, three parts (`crates/oxplow-app/src/pages/schema.rs`):
   `keywords`, typed `params` (`role: resource | filter`; a `switch`'s param
   is a filter by default), `for` / `accepts` / `default` / `pinned` (a
   renderer), `comments`, `refresh`, `hidden`, `needs`, whole-page
-  `actions`, `alert`, `tool`, `answers` (`{ question, about?, params,
+  `actions`, `alert`, `tool` (an MCP tool `<namespace>_<tool>` whose
+  input is the params and whose call is `oxplow.page.run`; kept for the
+  few questions agents ask every session — foundation's `thread_work`,
+  `work_next`, `effort_summary`, `catalog` — everything else is
+  `find_page` → `run_page`), `answers` (`{ question, about?, params,
   skill? }`: what agents find it by and what tests run) and `badge`
   (`{ loader, column? }`).
 - **`data:`** — named **loaders**, in order; a loader reads only the ones
   before it: `sql` (binds `:param`s; an earlier loader reads as a table of
   its name), `command` (a read-only command run as the viewer, `args`
   each `{ param }`, `{ from: <loader>.<column> }` or a literal; it must
-  say `reads` (models) or `refresh` (`manual`, `{ every }`)), `page`
+  say `reads` (models) or `refresh` (`manual`, `{ every }`); `items:
+  <field>` takes a list inside its result as the rows, as the `definition`
+  page reads `oxplow.page.definition`'s `nodes`), `page`
   (another page's `loader`, with `params`) or `rows` (inline). A loader's
   name is a plain identifier, never a model's (`v_*`, `m_*`).
+- **Show Definition** is foundation's hidden `definition` page (params
+  `of`, the page id, and `params`, its params as JSON text): the page's
+  extension, file and deployment, its node tree from
+  `oxplow.page.definition` (each node's parent, page, file and loader;
+  embeds and slot mounts included) and its YAML as written.
 - **`view:`** (and an optional `rail:`) — a tree of nodes: `stack`,
   `grid` (children with `size`), `switch` (`{ param, children }`: the
   child whose id is the param's value), `viz` (+ `from: <loader>`, the

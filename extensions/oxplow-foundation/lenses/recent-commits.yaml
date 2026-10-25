@@ -14,4 +14,3 @@ columns:
   - { key: subject, label: Subject }
 empty: No commits are indexed.
 hidden: true
-tool: recent_commits

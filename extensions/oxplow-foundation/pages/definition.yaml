@@ -1,0 +1,64 @@
+title: Definition
+description: What a page is made of — its extension, source file and deployment, each node with the page and file it comes from and the loader it shows (embedded pages and mounted slots included), and its YAML. Every page's ☰ menu opens it as Show Definition.
+label: 'Definition: {{row.title}}'
+icon: file-code
+hidden: true
+params:
+- name: of
+  label: Page (`<extension>/<page>`)
+- name: params
+  label: Its params (JSON)
+- name: stream_id
+answers:
+- {"question":"What is this page made of, and where does each part come from?","params":{"of":"oxplow-foundation/commit"}}
+data:
+  page:
+    command: oxplow.page.definition
+    args: { page: { param: of }, params: { param: params }, stream_id: { param: stream_id } }
+    reads: [page, extension_deployment]
+  nodes:
+    command: oxplow.page.definition
+    args: { page: { param: of }, params: { param: params }, stream_id: { param: stream_id } }
+    items: nodes
+    reads: [page, extension_deployment]
+  about:
+    sql: |
+      SELECT title, extension, coalesce(source, running) AS file,
+             CASE WHEN deployment IS NULL THEN 'loaded from its source'
+                  ELSE 'deployment ' || substr(deployment, 1, 12) END AS runs,
+             CASE WHEN bundled THEN 'ships with oxplow' ELSE 'yours' END AS origin
+      FROM page
+  yaml:
+    sql: |
+      SELECT '```yaml' || char(10) || coalesce(yaml, '(the file is not readable here)') || char(10) || '```' AS text
+      FROM page
+view:
+  stack:
+  - id: about
+    title: Page
+    viz: detail
+    from: about
+    columns:
+    - { key: title, label: Title }
+    - { key: extension, label: Extension }
+    - { key: file, label: File }
+    - { key: runs, label: Runs }
+    - { key: origin, label: Origin }
+  - id: nodes
+    title: Nodes
+    viz: tree
+    from: nodes
+    tree: { id: id, parent: parent, label: id }
+    columns:
+    - { key: id, label: Node }
+    - { key: kind, label: Kind }
+    - { key: title, label: Title }
+    - { key: page, label: Page }
+    - { key: loader, label: Loader }
+    - { key: loader_kind, label: Reads }
+    - { key: file, label: File }
+  - id: yaml
+    title: YAML
+    viz: markdown
+    from: yaml
+    markdown: { text: text }

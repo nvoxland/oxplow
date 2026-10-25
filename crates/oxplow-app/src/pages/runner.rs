@@ -333,9 +333,22 @@ impl<'a> PageRunner<'a> {
                 query.temp = temp;
                 self.sql.run(query).await.map_err(|e| e.to_string())
             }
-            Loader::Command { command, args } => {
-                self.run_command(page, decl, command, args, params, earlier, viewer)
-                    .await
+            Loader::Command {
+                command,
+                args,
+                items,
+            } => {
+                self.run_command(
+                    page,
+                    decl,
+                    command,
+                    args,
+                    items.as_deref(),
+                    params,
+                    earlier,
+                    viewer,
+                )
+                .await
             }
             Loader::Page {
                 page: target,
@@ -397,6 +410,7 @@ impl<'a> PageRunner<'a> {
         decl: &LoaderDecl,
         command: &str,
         args: &BTreeMap<String, ArgSource>,
+        items: Option<&str>,
         params: &BTreeMap<String, SqlCell>,
         earlier: &BTreeMap<String, LoaderRun>,
         viewer: &Actor,
@@ -422,7 +436,15 @@ impl<'a> PageRunner<'a> {
             .run(&actor, command, input, false)
             .await
             .map_err(|e| e.to_string())?;
-        let mut result = rows_of(outcome.result);
+        let value = match items {
+            None => outcome.result,
+            Some(field) => outcome
+                .result
+                .get(field)
+                .cloned()
+                .ok_or_else(|| format!("`{command}` returned no `{field}`"))?,
+        };
+        let mut result = rows_of(value);
         result.reads.models = decl.reads.clone();
         Ok(result)
     }

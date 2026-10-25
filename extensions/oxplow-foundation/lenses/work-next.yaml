@@ -31,4 +31,3 @@ columns:
   - { key: role, label: "" }
 empty: Nothing is ready.
 hidden: true
-tool: work_next
