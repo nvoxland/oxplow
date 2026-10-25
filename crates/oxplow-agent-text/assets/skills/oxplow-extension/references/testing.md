@@ -13,6 +13,16 @@
    Give each example a fixture, `fixtures/<example>.yaml`, with `input`
    and `expect` (`$any` matches anything), and `model: { replies: [...] }`
    in `input` when it calls a model:
+   - a page: `input: { page: <slug>, params? }`, with `given:` beside
+     `input` — steps run first, in order, on the extension's throwaway
+     database: `{ command, input?, as? }` or `{ rows: { <entity>: [..] } }`.
+     `expect: { loaders: { <name>: { rows: n | $any | [ { col: val } ],
+     columns? } }, nodes: [{ id, kind? }] }` (a row map compares only the
+     columns it names). Every page's `answers:` entry also runs: the page
+     must open with its params and no failing loader. Example:
+     `given: [{ command: oxplow.work_item.create, input: { title: T } }]`,
+     `input: { page: items }`, `expect: { loaders: { items: { rows: [{
+     title: T }] } } }`;
    - a lens: `input: { lens: <slug>, params?, rows? }`, `expect: {
      columns?, rows: n }` — `rows: { <entity>: [ {…} ] }` fills your
      collectors' entities first (they start empty);

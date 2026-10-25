@@ -1814,7 +1814,7 @@ and one calling MCP read identical `file:line: what — fix` lines.
   replies }` is what it answers, in turn. No paid call, no provider.
   It runs `check`, then every intent example with a fixture
   (`fixtures/<name>.yaml`: `input`, `expect`, `$any` matching anything):
-  a lens (`{ lens, params?, rows? }` — `rows` seeds the extension's
+  a page (`{ page, params? }` with `given:` steps, below), a lens (`{ lens, params?, rows? }` — `rows` seeds the extension's
   entities, `collector_runner::publish_declared_rows`), an event (`{ event
   }`: appended to the throwaway's log and delivered; the extension's
   effects react for real — `expect: { effects: [{ id,
@@ -1913,6 +1913,19 @@ model call). It never opens the project's database. It runs `check` there
 `intent.examples[*]` by its fixture `fixtures/<name>.yaml` (the event,
 job and component forms are in "The SDK"):
 
+- `input: { page: <slug | ext/slug>, params? }` with an optional
+  `given: [..]` beside `input`, `expect: { loaders?: { <name>: { rows: n |
+  $any | [ { col: val } | [ val, … ] ], columns? } }, nodes?: [{ id, kind? }]
+  }` — the page runs (`PageRunner`, as a person) after the `given` steps,
+  each `{ command, input?, as? }` or `{ rows: { <entity>: [..] } }`, run in
+  order on the extension's one throwaway database (so a later fixture sees
+  what an earlier one made). A row map matches when every column it names
+  equals (`$any` matches anything); a row list matches in order; `nodes`
+  ids are in the run's tree (`<embed>/<id>` inside an embed). A loader that
+  fails is a finding naming it. After the examples every page's `answers:`
+  entry runs (`ran: answers`): the page opens with its params and no loader
+  fails, else the finding names the page file and the question. (A `text`
+  expectation waits on `page_text` reaching the SDK.)
 - `input: { lens: <slug>, params? }`, `expect: { columns?, rows: n |
   $any }` — the lens runs; its row count (and columns, when expected)
   must match;
