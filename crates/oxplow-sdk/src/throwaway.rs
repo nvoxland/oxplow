@@ -30,21 +30,26 @@ pub(crate) struct Host {
 }
 
 impl Host {
-    /// A throwaway over `project`'s extensions with `testing` on too,
-    /// activated. Its programs see `env`. With `builds`, a copied source
-    /// with a `build:` is built and deployed like the rest; without (a
-    /// check, which runs no program), it isn't deployed.
+    /// A throwaway over the extensions in `checkout` (the project's main
+    /// checkout, or a worktree holding drafts) with `testing` on too,
+    /// activated. Which are on, and where their sources are, are the
+    /// project's settings (its main checkout's), read in `checkout`. Its
+    /// programs see `env`. With `builds`, a copied source with a `build:` is
+    /// built and deployed like the rest; without (a check, which runs no
+    /// program), it isn't deployed.
     pub(crate) async fn start(
-        project: &Path,
+        checkout: &Path,
         testing: &str,
         env: HostEnv,
         builds: bool,
     ) -> Result<Host, String> {
         let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
         let root = dir.path().to_path_buf();
+        let project =
+            &oxplow_git::main_checkout(checkout).unwrap_or_else(|| checkout.to_path_buf());
         let settings = oxplow_config::extension_settings(project);
-        for name in oxplow_app::extensions::known_names(project, &settings) {
-            let source = settings.source(project, &name);
+        for name in oxplow_app::extensions::known_names(checkout, &settings) {
+            let source = settings.source(checkout, &name);
             if source.is_dir() {
                 copy_dir(&source, &root.join(EXTENSIONS_DIR).join(&name))
                     .map_err(|e| e.to_string())?;
@@ -55,8 +60,8 @@ impl Host {
         let mut on: Vec<String> = settings.enabled().into_iter().map(|(n, _)| n).collect();
         // Every source here is on unless the person turned it off, as in a
         // source load.
-        for name in oxplow_app::extensions::known_names(project, &settings) {
-            if settings.source(project, &name).is_dir()
+        for name in oxplow_app::extensions::known_names(checkout, &settings) {
+            if settings.source(checkout, &name).is_dir()
                 && !settings.personal.disable.contains(&name)
                 && !on.contains(&name)
             {
@@ -198,4 +203,62 @@ fn copy_tree(from: &Path, to: &Path, exclude: &[String], prefix: &str) -> std::i
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn write(root: &Path, rel: &str, body: &str) {
+        let p = root.join(rel);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, body).unwrap();
+    }
+
+    /// A throwaway over a worktree's sources reads which extensions are on
+    /// from the project (the main checkout): a worktree has no
+    /// `personal.yaml` of its own (git ignores it), so the person's
+    /// `disableExtensions` would otherwise be lost there.
+    #[tokio::test]
+    async fn a_worktrees_sources_are_tested_under_the_projects_settings() {
+        let main = tempfile::tempdir().unwrap();
+        oxplow_app::vcs::GitProvider
+            .init_repository(main.path())
+            .await
+            .unwrap();
+        write(
+            main.path(),
+            ".oxplow/personal.yaml",
+            "disableExtensions: [other]\n",
+        );
+        let parent = tempfile::tempdir().unwrap();
+        let wt = parent.path().join("wt");
+        let added = std::process::Command::new("git")
+            .args(["worktree", "add", "-q", "-b", "draft"])
+            .arg(&wt)
+            .current_dir(main.path())
+            .status()
+            .unwrap();
+        assert!(added.success());
+        write(
+            &wt,
+            ".oxplow/extensions/acme/extension.yaml",
+            "manifest: 2\nname: acme\nintent:\n  purpose: test\n",
+        );
+        write(
+            &wt,
+            ".oxplow/extensions/other/extension.yaml",
+            "not: [valid\n",
+        );
+
+        let host = Host::start(&wt, "acme", Arc::new(|_: &str| None), false)
+            .await
+            .unwrap();
+        assert!(
+            !host.problems.iter().any(|p| p.starts_with("other")),
+            "{:?}",
+            host.problems
+        );
+        assert!(host.root.join(EXTENSIONS_DIR).join("acme").is_dir());
+    }
 }

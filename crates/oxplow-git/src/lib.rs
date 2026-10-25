@@ -47,8 +47,8 @@ pub use refs::{
 };
 pub use refs_watch::{GitRefsWatcher, RefsChangeEvent};
 pub use repo::{
-    detect_current_branch, init_repository, is_git_repo, is_git_worktree, merge_base,
-    resolve_revision,
+    detect_current_branch, init_repository, is_git_repo, is_git_worktree, main_checkout,
+    merge_base, resolve_revision,
 };
 pub use smart_merge::{auto_resolve_conflicts, merge3, merge3_str, tokenize, AutoResolveReport};
 pub use status::{

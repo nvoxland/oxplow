@@ -561,10 +561,13 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     **source**: an omitted `stream_id` is the caller's own stream
     (its header, else its thread's; the primary only for an anonymous
     caller), so an agent in a worktree can check the extension it just
-    wrote before it deploys it — the same for `oxplow_preview_collector`,
-    `oxplow_preview_extension`, `oxplow_run_lens_action` and
-    `oxplow_ensure_change`. `oxplow.extension.deploy` takes the same
-    `stream` (default: the caller's).
+    wrote before it deploys it — the same for `oxplow_preview_extension`
+    (a throwaway over that stream's sources, under the project's
+    settings: which extensions are on come from the main checkout),
+    `oxplow_run_lens_action` and `oxplow_ensure_change`.
+    `oxplow_preview_collector` reads that stream's files and data but runs
+    the deployed entity collector. `oxplow.extension.deploy` names no
+    stream: it deploys the main stream's copy.
     `site_search` is the exception by design: omitted, it searches every
     stream.
   - **Over IPC (the UI)** they show the live set:
@@ -4883,8 +4886,10 @@ tool: open_work              # offered as <namespace>_open_work
   `oxplow.collector.sync` command over `CollectorRunner::sync`, from any caller)
   always runs the **live** copy. An agent
   writing a collector checks it with MCP
-  `oxplow_preview_collector(owner, id, stream_id)`: `collector_runner::
-  preview_collector` runs that worktree's version through the same
+  `oxplow_preview_extension` (a throwaway, through its examples); MCP
+  `oxplow_preview_collector(owner, id, stream_id)` dry-runs what is
+  deployed against that stream's files and data: `collector_runner::
+  preview_collector` runs the deployed entity collector through the same
   `produce` step (same permissions: an exec collector needs
   `permissions.process`, and so does a Starlark one that calls a
   model need `ai`; other derived collectors need neither) and returns the coerced

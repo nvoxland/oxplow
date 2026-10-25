@@ -1,5 +1,5 @@
-//! `collectors.preview/preview`: dry-run a collector from a stream's
-//! worktree and return what it would store, storing nothing
+//! `collectors.preview/preview`: dry-run a deployed collector against a
+//! stream's files and data and return what it would store, storing nothing
 //! (`oxplow.collector.preview`).
 
 use oxplow_domain::StreamId;
@@ -19,7 +19,9 @@ pub struct PreviewCollectorParams {
     pub owner: String,
     /// The collector's `id` in its `collectors:`.
     pub id: String,
-    /// Stream whose worktree to run it from; omit for your own.
+    /// Stream whose files and data it reads; omit for your own. What runs
+    /// is the deployed collector: a draft is checked with
+    /// `oxplow_preview_extension`.
     pub stream_id: Option<String>,
     /// The event an `on:` collector reacts to, as a fixture writes it:
     /// `{ type, v?, payload?, subject?, anchors? }`. The script gets it as
@@ -86,7 +88,7 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
                 RunCollectorError::NotFound => invalid(
                     "/id",
                     format!(
-                        "no collector `{}/{}` in that stream's worktree (see `v_extension`)",
+                        "no deployed collector `{}/{}` (see `v_extension`; a draft is checked with `oxplow_preview_extension`)",
                         p.owner, p.id
                     ),
                 ),
