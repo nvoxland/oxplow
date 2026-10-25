@@ -457,7 +457,9 @@ pub fn parse_page(
         .as_ref()
         .map(|r| parse_node(r, &mut ctx))
         .transpose()?;
-    let actions = parse_actions(file.actions, &params, false, false)?;
+    // A whole-page action may read a row (`{{row.x}}`, `when:`): the first
+    // loader's one row, as a document's row once was.
+    let actions = parse_actions(file.actions, &params, false, true)?;
     if let Some(a) = actions
         .iter()
         .find(|a| a.row || a.group.is_some() || a.drag)

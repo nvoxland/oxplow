@@ -94,6 +94,161 @@ pub struct RunPageActionInput {
     pub thread_id: Option<String>,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FindPageInput {
+    /// What you want to know, in words ("which tests failed this week").
+    #[serde(default)]
+    pub question: Option<String>,
+    /// A uri the page should be about (`oxplow:oxplow/commit?sha=abc1234`):
+    /// only the pages that show that kind of thing, its uri bound.
+    #[serde(default)]
+    pub about: Option<String>,
+    /// How many to return (default 10).
+    #[serde(default)]
+    pub limit: Option<usize>,
+}
+
+/// The words of `text` worth matching on: lowercase, three letters or
+/// more, the commonest words left out.
+fn words(text: &str) -> Vec<String> {
+    const COMMON: &[&str] = &[
+        "the", "and", "for", "are", "was", "what", "which", "who", "how", "this", "that", "with",
+        "from", "did", "does", "has", "have", "show", "list", "all", "any", "its", "there",
+    ];
+    text.split(|c: char| !c.is_alphanumeric())
+        .map(str::to_lowercase)
+        .filter(|w| w.len() >= 3 && !COMMON.contains(&w.as_str()))
+        .collect()
+}
+
+fn overlap(question: &[String], text: &str) -> usize {
+    let theirs = words(text);
+    question.iter().filter(|w| theirs.contains(w)).count()
+}
+
+/// The pages that answer `question` (and show `about`), best first.
+fn find_pages(svc: &Services, p: &FindPageInput) -> Result<Value, CommandError> {
+    let about = p
+        .about
+        .as_deref()
+        .map(|u| {
+            oxplow_domain::uri::OxplowUri::parse(u)
+                .map(|parsed| parsed.resource().to_string())
+                .map_err(|e| invalid("/about", format!("`{u}` isn't an oxplow uri: {e}")))
+        })
+        .transpose()?;
+    let question = p.question.as_deref().map(words).unwrap_or_default();
+    let extensions = svc.extension_catalog.unpinned(
+        &svc.layout.project_dir,
+        "an agent's find reads one snapshot",
+    );
+    let mut scored: Vec<(usize, Value)> = Vec::new();
+    for ext in extensions.iter().filter(|e| e.enabled) {
+        for page in &ext.page_files {
+            if let Some(kind) = &about {
+                let shows = page.renders.iter().any(|r| r == kind)
+                    || page
+                        .answers
+                        .iter()
+                        .any(|a| a.about.as_deref() == Some(kind));
+                if !shows {
+                    continue;
+                }
+            }
+            let matched: Vec<&str> = page
+                .answers
+                .iter()
+                .filter(|a| !question.is_empty() && overlap(&question, &a.question) > 0)
+                .map(|a| a.question.as_str())
+                .collect();
+            let score = page
+                .answers
+                .iter()
+                .map(|a| overlap(&question, &a.question) * 3)
+                .max()
+                .unwrap_or(0)
+                + overlap(&question, &page.title) * 2
+                + overlap(&question, page.keywords.as_deref().unwrap_or_default())
+                + overlap(&question, &page.description);
+            if !question.is_empty() && score == 0 {
+                continue;
+            }
+            let bind = match (&p.about, page.params.iter().any(|x| x.name == "uri")) {
+                (Some(uri), true) => json!({ "uri": uri }),
+                _ => Value::Null,
+            };
+            let params: Vec<Value> = page
+                .params
+                .iter()
+                .filter(|x| !crate::extensions::LensContext::supplies(&x.name))
+                .map(|x| {
+                    json!({
+                        "name": x.name,
+                        "type": x.kind,
+                        "role": x.role,
+                        "label": x.label,
+                        "default": x.default,
+                        "options": x.options.iter().map(|o| &o.value).collect::<Vec<_>>(),
+                    })
+                })
+                .collect();
+            let summary = page
+                .description
+                .split_inclusive(". ")
+                .next()
+                .unwrap_or_default()
+                .trim()
+                .to_string();
+            scored.push((
+                score,
+                json!({
+                    "page": page.id,
+                    "title": page.title,
+                    "summary": summary,
+                    "params": params,
+                    "bind": bind,
+                    "questions": matched,
+                    "tool": page.tool,
+                }),
+            ));
+        }
+    }
+    scored.sort_by(|a, b| {
+        b.0.cmp(&a.0)
+            .then_with(|| a.1["title"].as_str().cmp(&b.1["title"].as_str()))
+    });
+    let limit = p.limit.unwrap_or(10).clamp(1, 50);
+    let pages: Vec<Value> = scored.into_iter().take(limit).map(|(_, v)| v).collect();
+    Ok(json!({ "pages": pages }))
+}
+
+fn find_op(services: ServicesSlot) -> Op {
+    Op::new(
+        "pages.read",
+        "find",
+        schema::<FindPageInput>(),
+        false,
+        Handler::External(Arc::new(move |_invocation: Invocation, input| {
+            let services = services.clone();
+            Box::pin(async move {
+                let p: FindPageInput = parse(input)?;
+                if p.question.is_none() && p.about.is_none() {
+                    return Err(invalid(
+                        "/question",
+                        "give a `question`, an `about` uri, or both".to_string(),
+                    ));
+                }
+                let svc = services.get()?;
+                Ok(HandlerOutput {
+                    result: find_pages(&svc, &p)?,
+                    ..HandlerOutput::default()
+                })
+            })
+        })),
+    )
+}
+
 fn cells(values: Option<BTreeMap<String, Value>>) -> BTreeMap<String, SqlCell> {
     values
         .unwrap_or_default()
@@ -186,6 +341,7 @@ fn loaders_json(run: &PageRun, only: Option<&str>) -> Value {
 pub fn ops(services: ServicesSlot) -> Vec<Op> {
     vec![
         run_op(services.clone()),
+        find_op(services.clone()),
         definition_op(services.clone()),
         run_action_op(services),
     ]
@@ -483,6 +639,36 @@ mod tests {
         )
         .await;
         assert_eq!(inline["loaders"]["a"]["rows"], json!([[5]]), "{inline}");
+    }
+
+    /// An agent finds pages by what they answer: a question matches the
+    /// pages' questions first, then titles and descriptions; `about` keeps
+    /// the pages for that resource and binds its uri.
+    #[tokio::test]
+    async fn an_agent_finds_the_pages_that_answer_a_question() {
+        let (_dir, svc) = fixture().await;
+        let found = run(
+            &svc,
+            "oxplow.page.find",
+            json!({ "question": "which numbers are big" }),
+        )
+        .await;
+        let pages = found["pages"].as_array().unwrap();
+        assert_eq!(pages[0]["page"], json!("acme/numbers"), "{found}");
+        assert_eq!(
+            pages[0]["questions"],
+            json!(["Which numbers are big?"]),
+            "{found}"
+        );
+        assert_eq!(pages[0]["params"][0]["name"], json!("n"), "{found}");
+        let uri = "oxplow:oxplow/commit?sha=abc1234";
+        let about = run(&svc, "oxplow.page.find", json!({ "about": uri })).await;
+        let pages = about["pages"].as_array().unwrap();
+        assert_eq!(pages.len(), 1, "{about}");
+        assert_eq!(pages[0]["page"], json!("acme/commit-look"));
+        assert_eq!(pages[0]["bind"], json!({ "uri": uri }));
+        let none = run(&svc, "oxplow.page.find", json!({ "question": "zebras" })).await;
+        assert_eq!(none["pages"], json!([]), "{none}");
     }
 
     #[tokio::test]

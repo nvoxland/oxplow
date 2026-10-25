@@ -210,6 +210,9 @@ pub const MANIFEST: &[Capability] = &[
     ui("rerun_page", "Refresh on the page a window shows"),
     ui("fetch_page_runs", "a window fetches the open runs it heard changed"),
     both_named("run_page", "run_page", "oxplow_run_page"),
+    // An agent finds the pages that answer a question; a person has the
+    // launcher and the catalog page.
+    agent("oxplow_find_page"),
     ui("page_text", "Copy's text on the page a window shows"),
     ui("get_page", "the page a window draws; an agent reads a page's ref with `read`"),
     both_named("run_page_action", "run_page_action", "oxplow_run_page_action"),

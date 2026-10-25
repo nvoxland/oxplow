@@ -98,3 +98,28 @@ async fn a_page_action_runs_with_the_runs_params_and_a_row_action_on_its_row() {
         .unwrap_err();
     assert!(matches!(err, CommandError::Invalid { .. }), "{err:?}");
 }
+
+/// A whole-page action that reads a row runs on the page's first loader's
+/// one row, which the server reads: a document's row, as it was.
+#[tokio::test]
+async fn a_page_action_reads_the_first_loaders_row() {
+    let (_dir, svc) = fixture().await;
+    let runs = PageRuns::default();
+    let (id, _) = runs
+        .open(
+            &svc,
+            RunRequest {
+                target: RunTarget::Page("acme/session".into()),
+                params: BTreeMap::new(),
+                ctx: LensContext::default(),
+                viewer: Actor::Human,
+            },
+            "w",
+        )
+        .await
+        .unwrap();
+    run_page_action(&svc, &runs, call(&id, None, "stop", None))
+        .await
+        .unwrap();
+    assert_eq!(titles(&svc).await, ["stop sess-1"]);
+}

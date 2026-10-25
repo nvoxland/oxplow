@@ -85,12 +85,56 @@ pub async fn run_page_action(
                     format!("`{}` runs on the whole page, not a row", call.action),
                 ));
             }
+            // One that reads a row reads the first loader's one row.
+            let reads_row = run
+                .page
+                .actions
+                .iter()
+                .any(|a| a.id == call.action && a.one_row);
+            let row = if reads_row {
+                let first = run
+                    .page
+                    .loaders
+                    .first()
+                    .and_then(|l| run.loaders.get(&l.name))
+                    .map(|l| &l.result);
+                match first.map(|r| (r, r.rows.as_slice())) {
+                    Some((r, [only])) => Some(
+                        r.columns
+                            .iter()
+                            .cloned()
+                            .zip(only.iter().cloned())
+                            .collect::<BTreeMap<_, _>>(),
+                    ),
+                    Some((_, rows)) => {
+                        return Err(invalid(
+                            "/action",
+                            format!(
+                                "`{}` reads the page's row, but its first loader has {} rows",
+                                call.action,
+                                rows.len()
+                            ),
+                        ))
+                    }
+                    None => {
+                        return Err(invalid(
+                            "/action",
+                            format!(
+                                "`{}` reads the page's row, but it has no loader",
+                                call.action
+                            ),
+                        ))
+                    }
+                }
+            } else {
+                None
+            };
             prepare_resolved(
                 &lens,
                 &run.page.id,
                 &call.action,
                 &run.params,
-                None,
+                row.as_ref(),
                 call.input,
                 call.drop,
                 call.on_behalf_of,

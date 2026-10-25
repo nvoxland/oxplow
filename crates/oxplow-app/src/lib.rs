@@ -2384,6 +2384,7 @@ mod tests {
                 // The agent's reads of live state are read-scope operations
                 // (`commands/agent_reads`): they change no record.
                 "oxplow.page.definition",
+                "oxplow.page.find",
                 "oxplow.page.list_tabs",
                 "oxplow.page.open",
                 "oxplow.page.run",

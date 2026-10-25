@@ -20,7 +20,10 @@ pub(crate) const PAGES: &[(&str, &str)] = &[
         "numbers",
         r#"
 title: Numbers
+keywords: digits counting
 params: [{ name: n, default: 2 }]
+answers:
+  - { question: "Which numbers are big?", params: { n: 2 } }
 data:
   base: { sql: "SELECT 1 AS n UNION ALL SELECT 2 UNION ALL SELECT 3" }
   big: { sql: "SELECT n FROM base WHERE n >= :n ORDER BY n" }
@@ -110,6 +113,32 @@ view:
   from: names
   actions:
     - { id: add-row, label: Add this, command: oxplow.work_item.create, input: { title: "{{row.name}}" }, row: true }
+"#,
+    ),
+    (
+        "commit-look",
+        r#"
+title: Commit Look
+description: A commit, looked at.
+for: oxplow/commit
+params: [{ name: uri }, { name: sha }]
+answers:
+  - { question: "What did this commit change?", about: oxplow/commit }
+data:
+  a: { sql: "SELECT :sha AS s" }
+view: { viz: number, from: a }
+"#,
+    ),
+    (
+        "session",
+        r#"
+title: Session
+data:
+  row: { sql: "SELECT 'sess-1' AS session, 1 AS running" }
+  other: { sql: "SELECT 1 AS n UNION ALL SELECT 2" }
+actions:
+  - { id: stop, label: Stop, command: oxplow.work_item.create, input: { title: "stop {{row.session}}" }, when: running }
+view: { viz: table, from: other }
 "#,
     ),
     (

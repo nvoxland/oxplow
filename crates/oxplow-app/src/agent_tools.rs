@@ -226,6 +226,7 @@ mod tests {
                 "oxplow_effort_summary",
                 "oxplow_ensure_change",
                 "oxplow_file_history",
+                "oxplow_find_page",
                 "oxplow_get_open_page",
                 "oxplow_get_skill",
                 "oxplow_list_comments",
