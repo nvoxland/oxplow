@@ -294,6 +294,30 @@ as the page acting for the presser. An agent presses with
 `oxplow.page.run_action { page, params, node?, action, row? }`, which
 holds a run of its own for the press.
 
+**The desktop host** (`apps/desktop/src/pages/PageHost.tsx`, built and
+tested, not wired into `App.tsx` yet: lens pages still draw every tab).
+`PageHost` takes a `PageKey`, holds its run (`usePageRunWith`; `RunState`
+carries the `runId`, `rerun` is Refresh) and draws `tabs/Page.tsx`
+chrome: the title is `tabLabel` over the run's params and `labelRow(run)`
+(the first declared loader's first row), whole-page actions and Refresh
+(`page.refresh`) are page actions, pressed through `useLensActions` with
+a runner that calls `run_page_action` with no node, so a command that
+asks is confirmed as a lens action's is. `PageRail` lists the filter
+params (`ParamList`; a change is `setParams`) and draws `run.rail`.
+`PageTree` draws a `RunNode` tree: stack → `Section`s, grid → `TileGrid`
+at each child's `size`, switch → its one child, viz → `LensResultView`
+over `nodeRunOf` (`lens/nodeRun.ts`, the server's `node_run`), embed → a
+nested tree with ids `<embed>/<id>`, slot → its children, markdown → the
+`Markdown` component, component → a placeholder (the bridge comes
+later), a node or loader error → an inline `ox-error`. Every node's root
+has `data-node` and registers in a `NodeRegistry`; `useNodeFocus` lands
+on `#node=<id>` (scroll, `data-focused` for 1.5 s). Viz components press
+their actions through `LensActionRunnerContext`
+(`lens/lensActionRunner.ts`: `run_lens_action` by default); `PageTree`
+provides `useNodeActions(runId, nodePath)` per viz node, so the same
+components draw both. New params keep the old run on screen
+(`data-stale`), and Loading shows only after 150 ms without a run.
+
 ## Declared pages
 
 Every page is a `pages:` entry in an extension's manifest

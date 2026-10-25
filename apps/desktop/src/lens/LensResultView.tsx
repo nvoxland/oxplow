@@ -3,7 +3,8 @@ import { Approvals } from "../kit/Approvals.js";
 import type { PageAction } from "../kit/actions.js";
 import type { PickedRow } from "./LensRail.js";
 import { Fragment, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { commandOpenAfter, lensActionForm, lensForm, lensText, runLensAction, submitLensForm, undoCommand, type LensRun, type SqlCell } from "../api.js";
+import { commandOpenAfter, lensActionForm, lensForm, lensText, submitLensForm, undoCommand, type LensRun, type SqlCell } from "../api.js";
+import { useLensActionRunner, type LensActionRunner } from "./lensActionRunner.js";
 import { Slideover } from "../components/Slideover.js";
 import { InlinePromptStrip } from "../components/InlinePromptStrip.js";
 import type { FormStart } from "../tauri-bridge/generated/bindings.js";
@@ -89,7 +90,7 @@ import { Facts } from "../kit/Facts.js";
 import { Stat } from "../kit/Stat.js";
 import { recordOpError } from "../opErrors.js";
 import { showToast } from "../components/toastStore.js";
-import { actionOffered, copyLens, offeredWholeLens, openAfterAction, performLensAction, promptField, rowRecord } from "./lensActions.js";
+import { actionOffered, copyLens, offeredWholeLens, openAfterAction, performLensAction, promptField, rowRecord, type ActionTarget } from "./lensActions.js";
 import { useHistoryState } from "../tabs/useHistoryState.js";
 import {
   chainedDrops,
@@ -287,8 +288,12 @@ interface Press {
   drop: Drop | null;
 }
 
-export function useLensActions(run: LensRun, streamId: string | null) {
+/** `runner`: what the actions run through, when not the one the context
+ *  gives (a page file's whole-page actions, pressed outside any node). */
+export function useLensActions(run: ActionTarget, streamId: string | null, runner?: LensActionRunner) {
   const openAfter = useOpenAfter();
+  const fromContext = useLensActionRunner();
+  const runLensAction = runner ?? fromContext;
   const [busy, setBusy] = useState<string | null>(null);
   // A command that asks: what it asks about, and the runs that wait on the
   // answer (one confirmation for a bulk action's runs).
@@ -1341,6 +1346,7 @@ function ActionForm({
   const { action, row } = pressed;
   const [start, setStart] = useState<FormStart | null>(null);
   const openAfter = useOpenAfter();
+  const runLensAction = useLensActionRunner();
   const form = useFormSubmit(
     action.label,
     (input, confirmed) => runLensAction(run.lens.id, action.id, run.params, row, streamId, confirmed, input),

@@ -12,7 +12,8 @@
  */
 import { useState } from "react";
 
-import { runLensAction, type LensRun } from "../api.js";
+import type { LensRun } from "../api.js";
+import { useLensActionRunner } from "./lensActionRunner.js";
 import { CommandConfirm } from "../components/CommandConfirm.js";
 import { Markdown } from "../components/Markdown/Markdown.js";
 import type { LensAction } from "../tauri-bridge/generated/bindings.js";
@@ -50,6 +51,7 @@ function MarkdownEditor({ run, streamId, action, saved }: { run: LensRun; stream
   const shownSaved = justSaved && justSaved.over === saved ? justSaved.text : saved;
   const field = action.editField ?? "";
   const row = run.result.rows[0] ? rowRecord(run.result.columns, run.result.rows[0]) : null;
+  const runLensAction = useLensActionRunner();
   const form = useFormSubmit(
     action.label,
     (input, confirmed) => runLensAction(run.lens.id, action.id, run.params, row, streamId, confirmed, input),

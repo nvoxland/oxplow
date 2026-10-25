@@ -113,3 +113,18 @@ test("the url filter is a web page's host and path, cut to 40", () => {
   // Not a URL: kept as it is.
   expect(tabLabel(web, { uri: "nonsense" })).toBe("nonsense");
 });
+
+// A page file's `{{row.*}}` reads its first loader's first row.
+test("labelRow is a page run's first loader's first row; a page file's label fills from it", async () => {
+  const { labelRow } = await import("./renderers.js");
+  const { decl, fakePage, fakeRun, loader, node } = await import("./testing/fakeRun.js");
+  const pf = fakePage(node.viz("v", "commit"), { title: "Commit", label: "{{row.subject}} ({{param.sha|short}})", loaders: [decl("commit"), decl("files")] });
+  const run = fakeRun(pf, {
+    params: { sha: "abcdef123456" },
+    loaders: { files: loader(["subject"], [["not this"]]), commit: loader(["subject"], [["Fix it"], ["second"]]) },
+  });
+  expect(labelRow(run)).toEqual({ subject: "Fix it" });
+  expect(tabLabel(pf, run.params, labelRow(run))).toBe("Fix it (abcdef1)");
+  expect(labelRow({ ...run, loaders: { commit: loader(["subject"], []) } })).toBeNull();
+  expect(labelRow({ ...run, page: { ...pf, loaders: [] } })).toBeNull();
+});

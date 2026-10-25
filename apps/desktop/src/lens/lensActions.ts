@@ -70,9 +70,16 @@ export function offeredWholeLens(action: LensAction, result: Pick<LensRun["resul
   return actionOffered(action, rowRecord(result.columns, result.rows[0]!));
 }
 
+/** What an action is pressed on: the lens (only its id) and the params it
+ *  ran with. A page file's whole-page actions are pressed on its page. */
+export interface ActionTarget {
+  lens: Pick<LensRun["lens"], "id">;
+  params: Record<string, SqlCell>;
+}
+
 export async function performLensAction(
   action: LensAction,
-  run: LensRun,
+  run: ActionTarget,
   row: Record<string, SqlCell> | null,
   streamId: string | null,
   confirmed: boolean,

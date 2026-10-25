@@ -11,7 +11,7 @@ function fakeRun(label: string): PageRun {
 
 function fake() {
   let next = 0;
-  const calls = { open: 0, close: [] as string[], fetch: [] as string[][], setParams: 0 };
+  const calls = { open: 0, close: [] as string[], fetch: [] as string[][], setParams: 0, rerun: [] as string[] };
   let change: (c: RunChange) => void = () => {};
   let reconnect: () => void = () => {};
   const current = new Map<string, string>();
@@ -32,6 +32,10 @@ function fake() {
     setParams: async () => {
       calls.setParams += 1;
       return fakeRun("re-run");
+    },
+    rerun: async (runId) => {
+      calls.rerun.push(runId);
+      return fakeRun("refreshed");
     },
     onChange: (h) => {
       change = h;
@@ -95,6 +99,29 @@ describe("pageRuns", () => {
     await done;
     expect(a.get().stale).toBe(false);
     expect(a.get().run?.page.title).toBe("re-run");
+  });
+
+  test("a run's state names its run id once it is open", async () => {
+    const f = fake();
+    const runs = createPageRuns(f.transport);
+    const a = runs.open(key("acme/x"));
+    expect(a.get().runId).toBeNull();
+    await wait(0);
+    expect(a.get().runId).toBe("run-1");
+  });
+
+  test("Refresh re-runs it as it is, the old run shown until it answers", async () => {
+    const f = fake();
+    const runs = createPageRuns(f.transport);
+    const a = runs.open(key("acme/x"));
+    await wait(0);
+    const done = a.rerun();
+    expect(a.get().stale).toBe(true);
+    expect(a.get().run?.page.title).toBe("acme/x@1");
+    await done;
+    expect(f.calls.rerun).toEqual(["run-1"]);
+    expect(a.get().stale).toBe(false);
+    expect(a.get().run?.page.title).toBe("refreshed");
   });
 
   test("after a reconnect every run opens again", async () => {

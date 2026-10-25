@@ -7,7 +7,7 @@
  * is; else none — and the caller shows foundation's fallback (`resource`).
  * Nothing here knows a resource: the declarations say it all.
  */
-import type { ExtensionPage } from "../tauri-bridge/generated/bindings.js";
+import type { ExtensionPage, PageRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
 import { formatUri, parseUri, typeOf } from "../uri/uri.js";
 
 /** The view key that names a URI's renderer (`<extension>/<page>`). */
@@ -122,7 +122,7 @@ const LABEL_FILTERS: Record<string, (v: string) => string> = {
  *  — no label, one that fills to nothing, or one that names the row before
  *  there is one — its title. */
 export function tabLabel(
-  page: ExtensionPage,
+  page: Pick<ExtensionPage, "label" | "title">,
   params: Record<string, unknown>,
   row?: Record<string, unknown> | null,
 ): string {
@@ -140,6 +140,16 @@ export function tabLabel(
 
 /** Whether `page`'s label names a column of its lens's row, so its tab is
  *  named once the lens has run. */
-export function labelReadsRow(page: ExtensionPage): boolean {
+export function labelReadsRow(page: Pick<ExtensionPage, "label">): boolean {
   return /\{\{\s*row\./.test(page.label ?? "");
+}
+
+/** The row a page file's `{{row.*}}` reads: its first declared loader's
+ *  first row, by column; null before that loader has a row. */
+export function labelRow(run: PageRun): Record<string, SqlCell> | null {
+  const first = run.page.loaders[0]?.name;
+  const result = first ? run.loaders[first]?.result : undefined;
+  const row = result?.rows[0];
+  if (!result || !row) return null;
+  return Object.fromEntries(result.columns.map((c, i) => [c, row[i] ?? null]));
 }

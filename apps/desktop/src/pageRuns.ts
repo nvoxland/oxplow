@@ -38,6 +38,8 @@ export interface PageRunsTransport {
   close(runId: string): Promise<void>;
   fetch(runIds: string[]): Promise<Record<string, PageRun>>;
   setParams(runId: string, params: Record<string, SqlCell>): Promise<PageRun>;
+  /** Run it again as it is (Refresh). */
+  rerun(runId: string): Promise<PageRun>;
   /** `pageRunChanged` events; returns an unsubscribe. */
   onChange(handler: (change: RunChange) => void): () => void;
   /** The daemon came back (remote mode): every run is re-opened. */
@@ -45,6 +47,9 @@ export interface PageRunsTransport {
 }
 
 export interface RunState {
+  /** The open run's id (what its actions are pressed on); null until the
+   *  daemon has opened it. */
+  runId: string | null;
   run: PageRun | null;
   error: string | null;
   /** The run shown is for the previous params; the new one is on its way. */
@@ -56,6 +61,8 @@ export interface RunHandle {
   subscribe(listener: () => void): () => void;
   /** New values for some params: the run re-runs with them. */
   setParams(params: Record<string, SqlCell>): Promise<void>;
+  /** Run it again as it is (Refresh), the old run shown until it answers. */
+  rerun(): Promise<void>;
   close(): void;
 }
 
@@ -69,6 +76,8 @@ interface Entry {
   seq: number;
   closeTimer: ReturnType<typeof setTimeout> | null;
 }
+
+const NO_RUN: RunState = { runId: null, run: null, error: null, stale: false };
 
 /** How long changes gather before one fetch. */
 export const COALESCE_MS = 50;
@@ -96,12 +105,12 @@ export function createPageRuns(transport: PageRunsTransport) {
     entry.runId = transport.open(entry.key).then(
       ({ runId, run }) => {
         byRunId.set(runId, entry);
-        entry.state = { run, error: null, stale: false };
+        entry.state = { runId, run, error: null, stale: false };
         notify(entry);
         return runId;
       },
       (e: unknown) => {
-        entry.state = { run: entry.state.run, error: String(e instanceof Error ? e.message : e), stale: false };
+        entry.state = { ...entry.state, error: String(e instanceof Error ? e.message : e), stale: false };
         notify(entry);
         return null;
       },
@@ -124,9 +133,29 @@ export function createPageRuns(transport: PageRunsTransport) {
       const run = runs[runId];
       if (!entry || !run || seq < entry.seq) continue;
       entry.seq = seq;
-      entry.state = { run, error: null, stale: false };
+      entry.state = { runId, run, error: null, stale: false };
       notify(entry);
     }
+  };
+
+  // Stale at once: the host keeps the old run on screen, marked, until
+  // the new one answers.
+  const rerunWith = async (entry: Entry, rerun: (runId: string) => Promise<PageRun>) => {
+    entry.state = { ...entry.state, stale: true };
+    notify(entry);
+    const runId = await entry.runId;
+    if (!runId) {
+      entry.state = { ...entry.state, stale: false };
+      notify(entry);
+      return;
+    }
+    try {
+      const run = await rerun(runId);
+      entry.state = { runId, run, error: null, stale: false };
+    } catch (e) {
+      entry.state = { ...entry.state, error: String(e instanceof Error ? e.message : e), stale: false };
+    }
+    notify(entry);
   };
 
   transport.onChange((change) => {
@@ -157,7 +186,7 @@ export function createPageRuns(transport: PageRunsTransport) {
       entry = {
         key,
         runId: Promise.resolve(null),
-        state: { run: null, error: null, stale: false },
+        state: NO_RUN,
         listeners: new Set(),
         refs: 1,
         seq: 0,
@@ -174,25 +203,8 @@ export function createPageRuns(transport: PageRunsTransport) {
         mine.listeners.add(listener);
         return () => mine.listeners.delete(listener);
       },
-      setParams: async (params) => {
-        // Stale at once: the host keeps the old run on screen, marked,
-        // until the new one answers.
-        mine.state = { ...mine.state, stale: true };
-        notify(mine);
-        const runId = await mine.runId;
-        if (!runId) {
-          mine.state = { ...mine.state, stale: false };
-          notify(mine);
-          return;
-        }
-        try {
-          const run = await transport.setParams(runId, params);
-          mine.state = { run, error: null, stale: false };
-        } catch (e) {
-          mine.state = { ...mine.state, error: String(e instanceof Error ? e.message : e), stale: false };
-        }
-        notify(mine);
-      },
+      setParams: (params) => rerunWith(mine, (runId) => transport.setParams(runId, params)),
+      rerun: () => rerunWith(mine, (runId) => transport.rerun(runId)),
       close: () => {
         if (closed) return;
         closed = true;
@@ -224,15 +236,16 @@ export type PageRuns = ReturnType<typeof createPageRuns>;
 /** A host's run of `key` (none: no run), shared by key and kept fresh. */
 export function usePageRunWith(runs: PageRuns, key: PageKey | null): RunState & {
   setParams: (params: Record<string, SqlCell>) => Promise<void>;
+  rerun: () => Promise<void>;
 } {
   const k = key ? keyOf(key) : null;
   // The key's text names it; `key` itself is a fresh object each render.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const handle = useMemo(() => (key ? runs.open(key) : null), [runs, k]);
-  const [state, setState] = useState<RunState>(() => handle?.get() ?? { run: null, error: null, stale: false });
+  const [state, setState] = useState<RunState>(() => handle?.get() ?? NO_RUN);
   useEffect(() => {
     if (!handle) {
-      setState({ run: null, error: null, stale: false });
+      setState(NO_RUN);
       return;
     }
     setState(handle.get());
@@ -245,6 +258,7 @@ export function usePageRunWith(runs: PageRuns, key: PageKey | null): RunState & 
   return {
     ...state,
     setParams: (params) => handle?.setParams(params) ?? Promise.resolve(),
+    rerun: () => handle?.rerun() ?? Promise.resolve(),
   };
 }
 
@@ -267,6 +281,7 @@ export function daemonTransport(): PageRunsTransport {
     },
     fetch: async (runIds) => unwrapResult(await commands.fetchPageRuns(runIds)) as Record<string, PageRun>,
     setParams: async (runId, params) => unwrapResult(await commands.setPageParams(runId, params)),
+    rerun: async (runId) => unwrapResult(await commands.rerunPage(runId)),
     onChange: (handler) =>
       subscribeOxplowEvents((event) => {
         if (event.kind === "pageRunChanged") {

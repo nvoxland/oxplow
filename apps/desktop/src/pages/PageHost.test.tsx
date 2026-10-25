@@ -1,0 +1,116 @@
+import { afterEach, expect, test } from "bun:test";
+import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+
+import { PageHost } from "./PageHost.js";
+import { PageActionContext, type RunPageAction } from "./useNodeActions.js";
+import { fakeAction, fakePageRuns, gridPage, loader, tablePage } from "./testing/fakeRun.js";
+import { createPageRuns, type PageKey } from "../pageRuns.js";
+import { IpcCallError } from "../ipc-error.js";
+import type { PageRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
+
+afterEach(cleanup);
+
+const key: PageKey = { page: "acme/page", params: {}, streamId: null, threadId: null };
+const wait = (ms: number) => act(() => new Promise<void>((r) => setTimeout(r, ms)));
+
+test("the title is the page's label over its params and its first loader's first row", async () => {
+  const { runs } = fakePageRuns(tablePage());
+  const { findByText } = render(<PageHost pageKey={key} runs={runs} />);
+  expect((await findByText("Items: Alpha")).tagName).toBe("H1");
+});
+
+test("a whole-page action presses on the run, asking first when its command does", async () => {
+  const calls: unknown[][] = [];
+  const press: RunPageAction = async (...args) => {
+    calls.push(args);
+    if (!args[6]) throw new IpcCallError("Archive needs confirmation", "NEEDS_CONFIRMATION", null, []);
+    return { result: null, audit_id: null, event_id: null, inverse: null } as never;
+  };
+  const { runs } = fakePageRuns(tablePage({ actions: [fakeAction({ id: "archive", label: "Archive" })] }));
+  const { findByTestId, queryByTestId } = render(
+    <PageActionContext.Provider value={press}>
+      <PageHost pageKey={key} runs={runs} />
+    </PageActionContext.Provider>,
+  );
+  fireEvent.click(await findByTestId("action-page-action-archive"));
+  await waitFor(() => expect(calls).toEqual([["run-1", null, "archive", null, null, null, false]]));
+  fireEvent.click(await findByTestId("page-action-confirm-run"));
+  await waitFor(() => expect(calls.at(-1)).toEqual(["run-1", null, "archive", null, null, null, true]));
+  await waitFor(() => expect(queryByTestId("page-action-confirm")).toBeNull());
+});
+
+test("Refresh is offered only when the page asks for it, and re-runs the run", async () => {
+  const plain = fakePageRuns(tablePage());
+  const first = render(<PageHost pageKey={key} runs={plain.runs} />);
+  await first.findByText("Items: Alpha");
+  expect(first.queryByTestId("action-page-refresh")).toBeNull();
+  cleanup();
+  const run = tablePage();
+  const refreshing = fakePageRuns({ ...run, page: { ...run.page, refresh: true } });
+  const view = render(<PageHost pageKey={key} runs={refreshing.runs} />);
+  fireEvent.click(await view.findByTestId("action-page-refresh"));
+  await waitFor(() => expect(refreshing.calls.rerun).toBe(1));
+});
+
+test("a filter changed in the rail re-runs the page with it; the old rows stay until the new run answers", async () => {
+  let answer: (run: PageRun) => void = () => {};
+  const base = tablePage({ params: [{ name: "q", label: "Query", role: "filter", type: "text", default: null }] });
+  const { runs, calls } = fakePageRuns(base, () => new Promise<PageRun>((r) => (answer = r)));
+  const view = render(<PageHost pageKey={key} runs={runs} />);
+  fireEvent.click(await view.findByTestId("lens-param-q-value"));
+  const input = view.getByTestId("lens-param-q-edit") as HTMLInputElement;
+  fireEvent.change(input, { target: { value: "be" } });
+  fireEvent.keyDown(input, { key: "Enter" });
+  await waitFor(() => expect(calls.setParams).toEqual([{ q: "be" } as Record<string, SqlCell>]));
+  await wait(200);
+  // Stale: still the old rows, no Loading.
+  expect(view.getByTestId("lens-row-0").textContent).toContain("Alpha");
+  expect(view.container.querySelector(".ox-loading")).toBeNull();
+  expect(view.getByTestId("page-file").getAttribute("data-stale")).toBe("true");
+  await act(async () => answer({ ...base, params: { q: "be" }, loaders: { items: loader(["id", "title"], [["b", "Beta"]]) } }));
+  await waitFor(() => expect(view.getByTestId("lens-row-0").textContent).toContain("Beta"));
+  expect(view.getByTestId("page-file").hasAttribute("data-stale")).toBe(false);
+});
+
+test("Loading shows only after 150 ms without a run; an open that fails says why", async () => {
+  const runs = createPageRuns({
+    open: () => new Promise(() => {}),
+    close: async () => {},
+    fetch: async () => ({}),
+    setParams: async () => Promise.reject(new Error("no")),
+    rerun: async () => Promise.reject(new Error("no")),
+    onChange: () => () => {},
+    onReconnect: () => () => {},
+  });
+  const view = render(<PageHost pageKey={key} runs={runs} />);
+  expect(view.container.querySelector(".ox-loading")).toBeNull();
+  await wait(200);
+  expect(view.container.querySelector(".ox-loading")).not.toBeNull();
+  cleanup();
+  const failing = createPageRuns({
+    open: async () => Promise.reject(new Error("no page acme/page")),
+    close: async () => {},
+    fetch: async () => ({}),
+    setParams: async () => Promise.reject(new Error("no")),
+    rerun: async () => Promise.reject(new Error("no")),
+    onChange: () => () => {},
+    onReconnect: () => () => {},
+  });
+  const failed = render(<PageHost pageKey={key} runs={failing} />);
+  await waitFor(() => expect(failed.container.querySelector(".ox-error")?.textContent).toContain("no page acme/page"));
+});
+
+test("a grid page takes the full width; a table reads as a document", async () => {
+  const grid = render(<PageHost pageKey={key} runs={fakePageRuns(gridPage()).runs} />);
+  await waitFor(() => expect(grid.container.querySelector('[data-node="tiles"]')).not.toBeNull());
+  expect(grid.container.querySelector(".oxplow-reading-column")).toBeNull();
+  cleanup();
+  const table = render(<PageHost pageKey={key} runs={fakePageRuns(tablePage()).runs} />);
+  await table.findByText("Items: Alpha");
+  expect(table.container.querySelector(".oxplow-reading-column")).not.toBeNull();
+});
+
+test("`focus` lands on its node once the run draws it", async () => {
+  const view = render(<PageHost pageKey={key} runs={fakePageRuns(tablePage()).runs} focus="items" />);
+  await waitFor(() => expect(view.container.querySelector('[data-node="items"]')?.getAttribute("data-focused")).toBe("true"));
+});

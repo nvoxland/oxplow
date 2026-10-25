@@ -11,7 +11,8 @@
 /// the row's `thread`, and only real workspace files link.
 import { useEffect, useRef, useState } from "react";
 
-import { recordUserInterrupt, runCommand, runLensAction, startAgentSession, startAgentSessionFresh, type LensRun, type SqlCell } from "../api.js";
+import { useLensActionRunner } from "./lensActionRunner.js";
+import { recordUserInterrupt, runCommand, startAgentSession, startAgentSessionFresh, type LensRun, type SqlCell } from "../api.js";
 import { CommandConfirm } from "../components/CommandConfirm.js";
 import { recordOpError } from "../opErrors.js";
 import { TerminalTabStrip } from "../terminal/TerminalTabStrip.js";
@@ -30,6 +31,7 @@ export function TerminalViz({ run, onSetParam }: { run: LensRun; onSetParam?(nam
   const stream = useLensStream();
   const nav = useOptionalPageNavigation();
   const actions = useLensActions(run, stream?.id ?? null);
+  const runLensAction = useLensActionRunner();
   const t = run.lens.terminal;
   const { columns, rows } = run.result;
   const at = (row: SqlCell[], column: string | null | undefined) => (column ? row[columns.indexOf(column)] ?? null : null);
