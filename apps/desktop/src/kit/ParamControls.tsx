@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useId, useRef, useState } from "react";
 
-import { getLens, querySql, runLens, type LensRun, type SqlCell, type SqlQueryResult } from "../api.js";
+import { getLens, querySql, runLens, type SqlCell, type SqlQueryResult } from "../api.js";
 import { recordOpError } from "../opErrors.js";
-import { childParams, isDefaultValue, parseParamInput } from "../lens/lensModel.js";
+import { isDefaultValue, parseParamInput } from "../lens/lensModel.js";
 import { NO_READS, useRerunOnChange } from "../lens/lensRerun.js";
 import { paramKind, paramOptions, paramOptionsSql, type ParamKind, type ParamOption } from "../lens/lensParams.js";
-import type { Lens, LensParam, ParamType, Reads } from "../tauri-bridge/generated/bindings.js";
+import type { LensParam, ParamType, Reads } from "../tauri-bridge/generated/bindings.js";
 import { humanize } from "./humanize.js";
 import { Popover } from "./Popover.js";
 import { DEFAULT_RANGE_PRESETS, rangePresetLabel, splitRange } from "./rangePresets.js";
@@ -19,14 +19,22 @@ const SHOWN_ROWS = 6;
 
 type Query = (sql: string) => Promise<SqlQueryResult>;
 
-/** What a choice's `options_from` lens is read with: its definition (which
- *  of the page's params it declares) and a run of it. */
+/** What a choice's `options_from` is read with: which of the page's
+ *  params what it names takes, and its rows for them. A lens page's names
+ *  a lens (the default); a page file's names a page (`<ext>/<page>`, its
+ *  first loader, or `<ext>/<page>#<loader>`), run once — `PageRail`
+ *  provides that source. */
 export interface OptionsSource {
-  lens(id: string): Promise<Lens>;
-  run(id: string, params: Record<string, SqlCell>, streamId: string | null): Promise<LensRun>;
+  params(ref: string): Promise<string[]>;
+  list(ref: string, params: Record<string, SqlCell>, streamId: string | null): Promise<SqlQueryResult>;
 }
 
-const OPTIONS_SOURCE: OptionsSource = { lens: getLens, run: runLens };
+const LENS_OPTIONS: OptionsSource = {
+  params: async (id) => (await getLens(id)).params.map((p) => p.name),
+  list: async (id, params, streamId) => (await runLens(id, params, streamId)).result,
+};
+
+export const OptionsSourceContext = createContext<OptionsSource>(LENS_OPTIONS);
 
 export interface ParamRowProps {
   param: LensParam;
@@ -39,7 +47,8 @@ export interface ParamRowProps {
   values?: Record<string, SqlCell>;
   /** The stream the page runs for: what that lens runs for. */
   streamId?: string | null;
-  /** Reads that lens; the app's lens API unless a test injects one. */
+  /** Reads what `options_from` names; the context's (a lens's, unless a
+   *  page file's rail or a test gives another). */
   optionsSource?: OptionsSource;
 }
 
@@ -50,13 +59,14 @@ export interface ParamRowProps {
  * Escape keeps the value from before the edit, and focus comes back to
  * the value. A bool has nothing to open: its value is the checkbox.
  */
-export function ParamRow({ param, value, onApply, query = querySql, values = {}, streamId = null, optionsSource = OPTIONS_SOURCE }: ParamRowProps) {
+export function ParamRow({ param, value, onApply, query = querySql, values = {}, streamId = null, optionsSource }: ParamRowProps) {
+  const fromContext = useContext(OptionsSourceContext);
   const name = param.name;
   const label = param.label ?? humanize(name);
   const type = paramType(param);
   const kind = type === "text" ? paramKind(name) : null;
   const options = usePickerOptions(kind, query);
-  const listed = useListedOptions(type === "choice" ? (param.options_from ?? null) : null, values, streamId, optionsSource);
+  const listed = useListedOptions(type === "choice" ? (param.options_from ?? null) : null, values, streamId, optionsSource ?? fromContext);
   // What it applied shows at once; the run's echo replaces it when it comes.
   const [shown, setShown] = useState<SqlCell>(value);
   useEffect(() => setShown(value), [value]);
@@ -326,44 +336,45 @@ interface Option {
   group?: string | null;
 }
 
-/** The options of a choice whose `options_from` names a lens: that lens
- *  run for the page's stream with the page's values it declares, re-run
- *  when what it read changes (the one place a param control follows data).
- *  Rows are `value`, `label`, optional `group`. */
-function useListedOptions(lensId: string | null, values: Record<string, SqlCell>, streamId: string | null, source: OptionsSource): Option[] {
+/** The options of a choice whose `options_from` names a lens or a page:
+ *  its rows for the page's stream with the page's values it declares,
+ *  read again when what it read changes (the one place a param control
+ *  follows data). Rows are `value`, `label`, optional `group`. */
+function useListedOptions(ref: string | null, values: Record<string, SqlCell>, streamId: string | null, source: OptionsSource): Option[] {
   const [options, setOptions] = useState<Option[]>([]);
   const [reads, setReads] = useState<Reads>(NO_READS);
-  const [definition, setDefinition] = useState<Lens | null>(null);
+  const [declared, setDeclared] = useState<string[] | null>(null);
   useEffect(() => {
-    setDefinition(null);
-    if (!lensId) return;
+    setDeclared(null);
+    if (!ref) return;
     let live = true;
     source
-      .lens(lensId)
-      .then((lens) => {
-        if (live) setDefinition(lens);
+      .params(ref)
+      .then((names) => {
+        if (live) setDeclared(names);
       })
-      .catch((e: unknown) => recordOpError({ label: `Read lens ${lensId}`, message: e instanceof Error ? e.message : String(e) }));
+      .catch((e: unknown) => recordOpError({ label: `Read ${ref}`, message: e instanceof Error ? e.message : String(e) }));
     return () => {
       live = false;
     };
-  }, [lensId, source]);
-  const params = definition ? childParams(definition, values) : null;
+  }, [ref, source]);
+  const params = declared ? Object.fromEntries(declared.filter((n) => n in values).map((n) => [n, values[n] ?? null])) : null;
   const paramsKey = JSON.stringify(params);
   const live = useRef(true);
   const load = useCallback(() => {
-    if (!lensId || !params) return;
+    if (!ref || !params) return;
     const started = live;
     source
-      .run(lensId, params, streamId)
-      .then((run) => {
+      .list(ref, params, streamId)
+      .then((result) => {
         if (!started.current) return;
-        setOptions(listedOptions(run.result));
-        setReads(run.result.reads);
+        setOptions(listedOptions(result));
+        setReads(result.reads ?? NO_READS);
       })
-      .catch((e: unknown) => recordOpError({ label: `List ${lensId}`, message: e instanceof Error ? e.message : String(e) }));
+      .catch((e: unknown) => recordOpError({ label: `List ${ref}`, message: e instanceof Error ? e.message : String(e) }));
     // `params` is `paramsKey`'s content.
-  }, [lensId, paramsKey, streamId, source]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ref, paramsKey, streamId, source]);
   useEffect(() => {
     live.current = true;
     load();

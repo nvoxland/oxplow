@@ -2,11 +2,11 @@ import { afterEach, expect, test } from "bun:test";
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
 import { PageHost } from "./PageHost.js";
-import { PageActionContext, type RunPageAction } from "./useNodeActions.js";
+import { PageActionContext, PageFormsContext, type PageForms, type RunPageAction } from "./useNodeActions.js";
 import { fakeAction, fakePageRuns, gridPage, loader, tablePage } from "./testing/fakeRun.js";
 import { createPageRuns, type PageKey } from "../pageRuns.js";
 import { IpcCallError } from "../ipc-error.js";
-import type { PageRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
+import type { CommandSpec, FormStart, PageRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
 
 afterEach(cleanup);
 
@@ -37,6 +37,41 @@ test("a whole-page action presses on the run, asking first when its command does
   fireEvent.click(await findByTestId("page-action-confirm-run"));
   await waitFor(() => expect(calls.at(-1)).toEqual(["run-1", null, "archive", null, null, null, true]));
   await waitFor(() => expect(queryByTestId("page-action-confirm")).toBeNull());
+});
+
+test("a whole-page form action opens its form from page_action_form and submits it as a press", async () => {
+  const calls: unknown[][] = [];
+  const press: RunPageAction = async (...args) => {
+    calls.push(["press", ...args]);
+    return { result: null, audit_id: null, event_id: null, inverse: null } as never;
+  };
+  const command = {
+    id: "acme.add",
+    input_schema: { type: "object", properties: { title: { type: "string" }, notes: { type: "string" } } },
+  } as unknown as CommandSpec;
+  const forms: PageForms = {
+    start: async () => Promise.reject(new Error("no form node")),
+    submit: async () => Promise.reject(new Error("no form node")),
+    actionStart: async (...args) => {
+      calls.push(["actionStart", ...args]);
+      return { command, values: { title: "" }, fixed: [], fields: null, choices: {} } as unknown as FormStart;
+    },
+  };
+  const { runs } = fakePageRuns(tablePage({ actions: [fakeAction({ id: "add", label: "Add…", form: true })] }));
+  const { findByTestId, getByTestId, queryByTestId } = render(
+    <PageActionContext.Provider value={press}>
+      <PageFormsContext.Provider value={forms}>
+        <PageHost pageKey={key} runs={runs} />
+      </PageFormsContext.Provider>
+    </PageActionContext.Provider>,
+  );
+  fireEvent.click(await findByTestId("action-page-action-add"));
+  const title = (await findByTestId("lens-action-form-fields-title")) as HTMLInputElement;
+  expect(calls[0]).toEqual(["actionStart", "run-1", null, "add", null]);
+  expect(queryByTestId("page-action-form-unsupported")).toBeNull();
+  fireEvent.change(title, { target: { value: "Gamma" } });
+  fireEvent.click(getByTestId("lens-action-form-fields-submit"));
+  await waitFor(() => expect(calls.at(-1)).toEqual(["press", "run-1", null, "add", null, { title: "Gamma" }, null, false]));
 });
 
 test("Refresh is offered only when the page asks for it, and re-runs the run", async () => {

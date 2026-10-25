@@ -5,6 +5,8 @@
  * See `.context/extensions.md`.
  */
 import { humanize } from "../kit/humanize.js";
+import type { FormSource } from "./formSource.js";
+import type { LensActionRunner } from "./lensActionRunner.js";
 import type { TileSize } from "../kit/Tiles.js";
 import {
   formatBytes,
@@ -748,6 +750,10 @@ export function treeNodes(lens: Lens, result: SqlQueryResult): TreeNode[] {
 export interface BranchRun {
   run: LensRun | null;
   error: string | null;
+  /** Where its rows' actions press and their forms start, when not where
+   *  the root's do (a page's branch is a run of its own). */
+  runner?: LensActionRunner;
+  forms?: FormSource;
 }
 
 /** A cell that counts as true: not null, zero, empty or false. */

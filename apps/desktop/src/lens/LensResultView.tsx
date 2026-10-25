@@ -3,8 +3,10 @@ import { Approvals } from "../kit/Approvals.js";
 import type { PageAction } from "../kit/actions.js";
 import type { PickedRow } from "./LensRail.js";
 import { Fragment, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { commandOpenAfter, lensActionForm, lensForm, lensText, submitLensForm, undoCommand, type LensRun, type SqlCell } from "../api.js";
-import { useLensActionRunner, type LensActionRunner } from "./lensActionRunner.js";
+import { commandOpenAfter, lensText, undoCommand, type LensRun, type SqlCell } from "../api.js";
+import { FormSourceContext, useFormSource, type FormSource } from "./formSource.js";
+import { useVizPages } from "./vizPages.js";
+import { LensActionRunnerContext, useLensActionRunner, type LensActionRunner } from "./lensActionRunner.js";
 import { Slideover } from "../components/Slideover.js";
 import { InlinePromptStrip } from "../components/InlinePromptStrip.js";
 import type { FormStart } from "../tauri-bridge/generated/bindings.js";
@@ -61,6 +63,7 @@ import {
   viewedParts,
   codeRows,
   diffRow, editorRow, embedRow, answerRow,
+  type BranchRun,
   type DisplayColumn,
   type RowGroup,
   type StepStatus,
@@ -121,16 +124,57 @@ type CellRenderer = (row: SqlCell[], col: DisplayColumn) => ReactNode;
  * their commands as the lens (row actions from a row's right-click menu).
  */
 export function LensResultView(props: LensResultViewProps) {
-  const { run, streamId = null, compact = false, toolbar = true } = props;
-  const actions = useLensActions(run, streamId);
-  const marks = useMarks(run);
+  const { run, streamId = null } = props;
   // A lazy tree (`tree.lazy`): the folders open by their id, this step's
-  // history state; each runs the lens again for its rows, which are then
-  // rows of the lens like the root's — marked, dragged, counted.
+  // history state; each runs the lens (a page file's node: its page) again
+  // for its rows, which are then rows of the lens like the root's —
+  // marked, dragged, counted.
+  const pages = useVizPages();
+  const useBranches = pages?.useBranches ?? useLazyBranches;
   const lazyOpen = useCollapsedSet(`lens-tree.open:${run.lens.id}`);
   const lazy = run.lens.viz === "tree" && !!run.lens.tree?.lazy;
-  const branches = useLazyBranches(run, lazy ? lazyOpen.ids : [], streamId, props.maxRows);
-  const tree: LazyTree | null = lazy ? { nodes: lazyTreeNodes(run.lens, run.result, new Set(lazyOpen.ids), branches), open: lazyOpen } : null;
+  const branches = useBranches(run, lazy ? lazyOpen.ids : [], streamId, props.maxRows);
+  // A branch that is a run of its own (a page's) takes its rows' presses.
+  const baseRunner = useLensActionRunner();
+  const baseForms = useFormSource();
+  const routed = useMemo(() => routeBranches(baseRunner, baseForms, branches), [baseRunner, baseForms, branches]);
+  return (
+    <LensActionRunnerContext.Provider value={routed.runner}>
+      <FormSourceContext.Provider value={routed.forms}>
+        <LensResultBody {...props} lazyOpen={lazy ? lazyOpen : null} branches={branches} />
+      </FormSourceContext.Provider>
+    </LensActionRunnerContext.Provider>
+  );
+}
+
+/** The runner and form source a viz's rows press with: a row of a branch
+ *  that carries its own (a page branch's run) goes there, any other the
+ *  base's. A branch's row is found by its values. */
+function routeBranches(runner: LensActionRunner, forms: FormSource, branches: ReadonlyMap<string, BranchRun>): { runner: LensActionRunner; forms: FormSource } {
+  const own = [...branches.values()].filter((b) => b.run && (b.runner || b.forms));
+  if (own.length === 0) return { runner, forms };
+  const branchOf = (row: Record<string, SqlCell> | null) =>
+    row === null ? null : (own.find((b) => b.run!.result.rows.some((r) => sameRecord(rowRecord(b.run!.result.columns, r), row))) ?? null);
+  return {
+    runner: (lens, action, params, row, ...rest) => (branchOf(row)?.runner ?? runner)(lens, action, params, row, ...rest),
+    forms: {
+      start: forms.start,
+      submit: forms.submit,
+      actionStart: (target, action, row, streamId) => (branchOf(row)?.forms ?? forms).actionStart(target, action, row, streamId),
+    },
+  };
+}
+
+function sameRecord(a: Record<string, SqlCell>, b: Record<string, SqlCell>): boolean {
+  const keys = Object.keys(b);
+  return keys.length > 0 && keys.every((k) => (a[k] ?? null) === (b[k] ?? null));
+}
+
+function LensResultBody(props: LensResultViewProps & { lazyOpen: CollapsedSet | null; branches: ReadonlyMap<string, BranchRun> }) {
+  const { run, streamId = null, compact = false, toolbar = true, lazyOpen, branches } = props;
+  const actions = useLensActions(run, streamId);
+  const marks = useMarks(run);
+  const tree: LazyTree | null = lazyOpen ? { nodes: lazyTreeNodes(run.lens, run.result, new Set(lazyOpen.ids), branches), open: lazyOpen } : null;
   const shown = tree ? { ...run, result: { ...run.result, rows: drawnTreeRows(tree.nodes) } } : run;
   // A command's confirmation shows wherever the row is — an answer in the
   // strip, a grid child, a dashboard tile — not only where the toolbar is.
@@ -1243,11 +1287,12 @@ function FormViz({ run, streamId }: { run: LensRun; streamId: string | null }) {
   // values, whatever they are now. A secret is never in it.
   const [draft, setDraft, clearDraft] = useDraft<Drafts | null>(`form:${run.lens.id}`, null);
   const openAfter = useOpenAfter();
+  const source = useFormSource();
   const paramsKey = JSON.stringify(run.params);
   const again = run.lens.form?.again ?? null;
   const form = useFormSubmit(
     run.lens.title,
-    (input, confirmed) => submitLensForm(run.lens.id, input, run.params, streamId, confirmed),
+    (input, confirmed) => source.submit(run, input, streamId, confirmed),
     (outcome) => {
       // A fresh form for the next entry, started again from the current
       // values: an edit form shows what it saved.
@@ -1264,7 +1309,8 @@ function FormViz({ run, streamId }: { run: LensRun; streamId: string | null }) {
   );
   useEffect(() => {
     let live = true;
-    lensForm(run.lens.id, run.params, streamId)
+    source
+      .start(run, streamId)
       .then((s) => {
         if (live) setStart(s);
       })
@@ -1276,7 +1322,7 @@ function FormViz({ run, streamId }: { run: LensRun; streamId: string | null }) {
     };
     // paramsKey stands in for `run.params` (a fresh object each render).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [run.lens.id, paramsKey, streamId, round, reload]);
+  }, [run.lens.id, paramsKey, streamId, round, reload, source]);
   useRerunOnChange(start?.reads ?? NO_READS, () => setReload((n) => n + 1));
   const schema = useMemo(
     () => (start ? withSubfields(start.command.input_schema as Record<string, unknown>, start.subfields ?? {}) : null),
@@ -1332,13 +1378,13 @@ function FormViz({ run, streamId }: { run: LensRun; streamId: string | null }) {
  *  submitting runs it as the lens, for the person, and closes it. A form
  *  that is one text field is a prompt strip at the top of the lens
  *  (`promptField`); any other is a slideover. */
-function ActionForm({
+export function ActionForm({
   run,
   streamId,
   pressed,
   onClose,
 }: {
-  run: LensRun;
+  run: ActionTarget;
   streamId: string | null;
   pressed: { action: LensAction; row: Record<string, SqlCell> | null };
   onClose(): void;
@@ -1347,6 +1393,7 @@ function ActionForm({
   const [start, setStart] = useState<FormStart | null>(null);
   const openAfter = useOpenAfter();
   const runLensAction = useLensActionRunner();
+  const source = useFormSource();
   const form = useFormSubmit(
     action.label,
     (input, confirmed) => runLensAction(run.lens.id, action.id, run.params, row, streamId, confirmed, input),
@@ -1358,7 +1405,8 @@ function ActionForm({
   const rowKey = JSON.stringify(row);
   useEffect(() => {
     let live = true;
-    lensActionForm(run.lens.id, action.id, run.params, row, streamId)
+    source
+      .actionStart(run, action.id, row, streamId)
       .then((s) => {
         if (live) setStart(s);
       })
@@ -1371,7 +1419,7 @@ function ActionForm({
     };
     // rowKey stands in for `row`.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [run.lens.id, action.id, rowKey, streamId]);
+  }, [run.lens.id, action.id, rowKey, streamId, source]);
   // Which shape opens is the form's to say: nothing until it is read.
   if (!start) return null;
   const submitLabel = action.label.replace(/…$/, "");
@@ -1607,7 +1655,19 @@ const expansionStyle: CSSProperties = { padding: "4px 0 8px 20px" };
 
 /** An `expand` lens run for a row: the params it declares take the row's
  *  values, and its result is drawn in place. */
-function RowExpansion({
+function RowExpansion(props: {
+  lensId: string;
+  params: Record<string, SqlCell>;
+  streamId: string | null;
+  onOpenPage?(ref: TabRef): void;
+}) {
+  // In a page file the column names a page, which the page host draws.
+  const pages = useVizPages();
+  if (pages) return <pages.Expansion target={props.lensId} params={props.params} streamId={props.streamId} onOpenPage={props.onOpenPage} />;
+  return <LensExpansion {...props} />;
+}
+
+function LensExpansion({
   lensId,
   params,
   streamId,

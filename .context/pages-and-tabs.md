@@ -401,7 +401,27 @@ on `#node=<id>` (scroll, `data-focused` for 1.5 s). Viz components press
 their actions through `LensActionRunnerContext`
 (`lens/lensActionRunner.ts`: `run_lens_action` by default); `PageTree`
 provides `useNodeActions(runId, nodePath)` per viz node, so the same
-components draw both. New params keep the old run on screen
+components draw both. Forms go the same way: `FormViz` and `ActionForm`
+start and submit through `FormSourceContext` (`lens/formSource.ts`:
+`lens_form` / `submit_lens_form` / `lens_action_form` by default), which
+`PageTree` sets per viz node to `useNodeForms(runId, nodePath)`
+(`page_form`, `submit_page_form`, `page_action_form`; a form action's
+submit is a press with its `input`); `PageHost` draws a whole-page form
+action's `ActionForm` with no node. A form's draft is keyed by its node's
+lens id, so a re-read of the run keeps it. What a viz reads of *other*
+pages comes from `VizPagesContext` (`lens/vizPages.ts`, set per viz node
+by `PageTree`): an `expand` column's row opens the page it names
+(`<ext>/<page>`, its first loader, or `<ext>/<page>#<loader>`) as a run of
+its own — the row's values it declares (`get_page`; the server refuses an
+undeclared param), the named loader's viz node drawn compact — and a lazy
+tree's open branch is a run of the node's own page with the lazy param
+set to the branch's id (`pages/pageBranches.ts`, `usePageRunsFor`), whose
+rows press on that run (`BranchRun.runner` / `forms`: the server only
+takes a row its run holds). A filter's `options_from` in `PageRail` names a
+page too (`pageOptionsSource`, `OptionsSourceContext`): run once with the
+values it declares (`run_page`), its named loader's `value` / `label` /
+`group` the options. Other pages are read through `PageReadsContext`
+(`pages/pageReads.ts`), a test's fake in place of the daemon. New params keep the old run on screen
 (`data-stale`), and Loading shows only after 150 ms without a run.
 
 ## Declared pages

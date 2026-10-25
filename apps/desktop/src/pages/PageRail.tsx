@@ -3,11 +3,14 @@
 /// (its filter params as kit rows, Reset when one is changed), the page's
 /// own `rail:` tree, drawn as its view is, Selection (what a row picked)
 /// and About this page (its source, and whether it is out of date).
-import { isDefault, ParamList } from "../kit/ParamControls.js";
+import { useMemo } from "react";
+
+import { isDefault, OptionsSourceContext, ParamList } from "../kit/ParamControls.js";
 import { RailGroup } from "../kit/RailGroup.js";
 import type { TabRef } from "../tabs/tabState.js";
 import type { PageRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
 import { PageTree } from "./PageTree.js";
+import { pageOptionsSource, usePageReads } from "./pageReads.js";
 import { RailAbout, RailSelection, type PickedRow } from "./railGroups.js";
 
 export interface PageRailProps {
@@ -28,6 +31,9 @@ export function PageRail({ run, runId, onApply, picked = NO_PICKED, outOfDate = 
   // neither is an input.
   // No role is a resource, as the server reads it.
   const filters = run.page.params.filter((p) => p.role === "filter");
+  // A filter's `options_from` names a page here, not a lens.
+  const reads = usePageReads();
+  const options = useMemo(() => pageOptionsSource(reads), [reads]);
   const selections = run.page.params.filter((p) => p.role === "selection");
   const changed = filters.filter((p) => !isDefault(p, run.params[p.name] ?? null));
   const reset =
@@ -38,7 +44,9 @@ export function PageRail({ run, runId, onApply, picked = NO_PICKED, outOfDate = 
     <>
       {filters.length > 0 ? (
         <RailGroup title="Filters" action={reset} testId="page-rail-filters">
-          <ParamList params={filters} values={run.params} onApply={onApply} streamId={streamId} />
+          <OptionsSourceContext.Provider value={options}>
+            <ParamList params={filters} values={run.params} onApply={onApply} streamId={streamId} />
+          </OptionsSourceContext.Provider>
         </RailGroup>
       ) : null}
       {run.rail ? <PageTree run={run} runId={runId} root={run.rail} streamId={streamId} onOpenPage={onOpenPage} onSetParam={onApply} /> : null}

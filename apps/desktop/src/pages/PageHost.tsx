@@ -22,7 +22,9 @@ import { identityOf } from "../uri/uri.js";
 import { useOutOfDate, type PickedRow } from "./railGroups.js";
 import type { PageAction } from "../kit/actions.js";
 import { Loading } from "../kit/Loading.js";
-import { useLensActions } from "../lens/LensResultView.js";
+import { ActionForm, useLensActions } from "../lens/LensResultView.js";
+import { FormSourceContext } from "../lens/formSource.js";
+import { LensActionRunnerContext } from "../lens/lensActionRunner.js";
 import { usePageRunsStore, usePageRunWith, type PageKey, type PageRuns } from "../pageRuns.js";
 import { Page } from "../tabs/Page.js";
 import { useOptionalPageNavigation, usePageTitle, useTabActions } from "../tabs/PageNavigationContext.js";
@@ -31,7 +33,7 @@ import type { Node, PageRun, SqlCell } from "../tauri-bridge/generated/bindings.
 import { PageRail } from "./PageRail.js";
 import { NodeRegistryContext, PageTree, createNodeRegistry, useNodeFocus } from "./PageTree.js";
 import { labelRow, tabLabel } from "./renderers.js";
-import { useNodeActions } from "./useNodeActions.js";
+import { useNodeActions, useNodeForms } from "./useNodeActions.js";
 
 export interface PageHostProps {
   pageKey: PageKey;
@@ -80,6 +82,7 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
   // node; a command that asks is confirmed as a lens action's is.
   const target = useMemo(() => ({ lens: { id: page?.id ?? "" }, params: run?.params ?? NO_PARAMS }), [page?.id, run?.params]);
   const pageRunner = useNodeActions(runId, null);
+  const pageForms = useNodeForms(runId, null);
   const actions = useLensActions(target, streamId, pageRunner);
   const offered = (page?.actions ?? []).filter((a) => !a.row && !a.group && !a.edit);
   const pageActions: PageAction[] = [
@@ -188,12 +191,11 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
             />
           ) : null}
           {actions.form ? (
-            <div className="ox-error" role="alert" data-testid="page-action-form-unsupported">
-              {actions.form.action.label} opens a form, which a page file can't show yet.{" "}
-              <button type="button" className="ox-link" onClick={actions.closeForm}>
-                Close
-              </button>
-            </div>
+            <LensActionRunnerContext.Provider value={pageRunner}>
+              <FormSourceContext.Provider value={pageForms}>
+                <ActionForm run={target} streamId={streamId} pressed={actions.form} onClose={actions.closeForm} />
+              </FormSourceContext.Provider>
+            </LensActionRunnerContext.Provider>
           ) : null}
           {error ? (
             <div className="ox-error" role="alert">

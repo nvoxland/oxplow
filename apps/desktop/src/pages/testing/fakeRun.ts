@@ -285,3 +285,27 @@ export function fakePageRuns(run: PageRun, next?: (params: Record<string, SqlCel
   };
   return { runs: createPageRuns(transport), calls, emit: (c: RunChange) => change(c) };
 }
+
+/** A `PageRuns` store over many pages: `answer` gives each key's run (a
+ *  rejection: the open fails), each opened as `run-<n>`; what was opened
+ *  is recorded. */
+export function fakePageRunsBy(answer: (key: PageKey) => PageRun | Promise<PageRun>) {
+  const opened: { runId: string; key: PageKey }[] = [];
+  const byId = new Map<string, PageRun>();
+  const transport: PageRunsTransport = {
+    open: async (key) => {
+      const run = await answer(key);
+      const runId = `run-${opened.length + 1}`;
+      opened.push({ runId, key });
+      byId.set(runId, run);
+      return { runId, run };
+    },
+    close: async () => {},
+    fetch: async (ids) => Object.fromEntries(ids.flatMap((id) => (byId.has(id) ? [[id, byId.get(id)!]] : []))),
+    setParams: async (id) => byId.get(id)!,
+    rerun: async (id) => byId.get(id)!,
+    onChange: () => () => {},
+    onReconnect: () => () => {},
+  };
+  return { runs: createPageRuns(transport), opened };
+}
