@@ -733,7 +733,13 @@ fn prune_mounts(
                     false
                 }
             });
+            let pages: BTreeSet<String> = ext.page_files.iter().map(|p| p.id.clone()).collect();
             ext.panels.retain(|panel| {
+                let present: &dyn Fn(&String) -> bool = if panel.pages {
+                    &|id| pages.contains(id)
+                } else {
+                    &|id| lenses.contains(id)
+                };
                 if [&panel.body]
                     .into_iter()
                     .chain(
@@ -741,7 +747,7 @@ fn prune_mounts(
                             .into_iter()
                             .flatten(),
                     )
-                    .all(|lens| lenses.contains(lens))
+                    .all(present)
                 {
                     true
                 } else {
@@ -763,7 +769,11 @@ fn prune_mounts(
                 }
             }
             ext.ui.replacements.retain(|replacement| {
-                if lenses.contains(&replacement.lens_id) {
+                let present = match &replacement.page_id {
+                    Some(page) => pages.contains(page),
+                    None => lenses.contains(&replacement.lens_id),
+                };
+                if present {
                     true
                 } else {
                     removed.insert(ContributionId::new(

@@ -36,8 +36,13 @@ pub struct UiReplacement {
     /// Only while this extension's provider is the deciding one does it
     /// render; otherwise the person's choice among candidates decides.
     pub bound_to_provider: bool,
-    /// The lens that renders instead, given the target's props.
+    /// The lens that renders instead, given the target's props (empty when
+    /// a page does).
     pub lens_id: String,
+    /// The page that renders instead (`<extension>/<slug>`), given the
+    /// target's props.
+    #[serde(default)]
+    pub page_id: Option<String>,
     /// The contract's version it was written against (the table's).
     pub version: u32,
     /// The host page's view params it shares (the table's `view`).
@@ -51,7 +56,12 @@ pub struct UiReplacement {
 #[serde(deny_unknown_fields)]
 pub(crate) struct ReplacementFile {
     target: String,
-    lens: String,
+    /// The lens that renders instead…
+    #[serde(default)]
+    lens: Option<String>,
+    /// … or the page.
+    #[serde(default)]
+    page: Option<String>,
     /// The props contract's version it was written against; checked
     /// against the table's, so a changed contract refuses it rather than
     /// handing it props it doesn't know.
@@ -66,6 +76,7 @@ pub fn parse_replacements(
     extension: &str,
     capabilities: &[String],
     lenses: &[Lens],
+    pages: &[crate::pages::schema::Page],
     value: &serde_yaml::Value,
     file: &str,
     manifest: &str,
@@ -91,30 +102,58 @@ pub fn parse_replacements(
         };
         let line = item_line;
         let target = oxplow_domain::replaceable::replaceable(&r.target);
-        let lens = lenses.iter().find(|l| l.slug == r.lens);
-        let problem = match (target, lens) {
+        // What renders instead: a page, or (until lenses go) a lens. Its
+        // params are what the contract's props are checked against.
+        let (name, declared, page_id): (String, Option<Vec<String>>, Option<String>) =
+            match (&r.lens, &r.page) {
+                (Some(slug), None) => (
+                    format!("lens `{slug}`"),
+                    lenses
+                        .iter()
+                        .find(|l| &l.slug == slug)
+                        .map(|l| l.params.iter().map(|p| p.name.clone()).collect()),
+                    None,
+                ),
+                (None, Some(slug)) => {
+                    let page = pages.iter().find(|p| &p.slug == slug);
+                    (
+                        format!("page `{slug}`"),
+                        page.map(|p| p.params.iter().map(|x| x.name.clone()).collect()),
+                        page.map(|p| p.id.clone()),
+                    )
+                }
+                _ => {
+                    errors.push(at(
+                        file,
+                        line,
+                        "`ui.replacements`: give `lens` or `page`, one of them",
+                    ));
+                    continue;
+                }
+            };
+        let lens = r
+            .lens
+            .as_ref()
+            .and_then(|slug| lenses.iter().find(|l| &l.slug == slug));
+        let problem = match (target, declared.as_ref()) {
             (None, _) => Some(format!(
                 "`target: {}` isn't a replaceable component ({})",
                 r.target,
                 oxplow_domain::replaceable::targets()
             )),
-            (Some(_), None) => Some(format!(
-                "`lens: {}` isn't one of this extension's lenses",
-                r.lens
-            )),
-            (Some(t), Some(l)) => {
+            (Some(_), None) => Some(format!("{name} isn't one of this extension's")),
+            (Some(t), Some(params)) => {
                 // The contract: the replacement is given these and nothing
                 // of the host's, so it takes them all.
                 let missing: Vec<String> = t
                     .props
                     .iter()
-                    .filter(|p| !l.params.iter().any(|lp| lp.name == **p))
+                    .filter(|p| !params.iter().any(|lp| lp == **p))
                     .map(|p| format!("`{p}`"))
                     .collect();
                 if !missing.is_empty() {
                     Some(format!(
-                        "lens `{}` must declare {} (`params:`) — what `{}` gives its replacement",
-                        r.lens,
+                        "{name} must declare {} (`params:`) — what `{}` gives its replacement",
                         missing.join(", "),
                         t.target
                     ))
@@ -142,7 +181,7 @@ pub fn parse_replacements(
             errors.push(at(file, line, format!("`ui.replacements`: {p}")));
             continue;
         }
-        let (Some(t), Some(l)) = (target, lens) else {
+        let Some(t) = target else {
             continue;
         };
         out.push(UiReplacement {
@@ -151,7 +190,8 @@ pub fn parse_replacements(
             target: t.target.to_string(),
             capability: t.capability.to_string(),
             bound_to_provider: t.bound_to_provider,
-            lens_id: l.id.clone(),
+            lens_id: lens.map(|l| l.id.clone()).unwrap_or_default(),
+            page_id,
             version: t.version,
             view: t.view.iter().map(|k| k.to_string()).collect(),
             label: t.label.to_string(),
@@ -221,10 +261,48 @@ mod tests {
             ".oxplow/extensions/tracker/lenses/verdict.yaml",
             "title: Verdict\nparams: [{ name: effort_id }]\nquery: SELECT :effort_id AS effort_id\n",
         );
+        write(
+            d.path(),
+            ".oxplow/extensions/tracker/pages/board-page.yaml",
+            "title: Board\nparams: [{ name: scope }, { name: thread_id }]\ndata:\n  items: { sql: \"SELECT uri, title, state FROM v_work_item\" }\nview: { viz: table, from: items }\n",
+        );
         load_extensions(d.path())
             .into_iter()
             .find(|e| e.name == "tracker")
             .unwrap()
+    }
+
+    /// A page renders instead as a lens does, checked against the same
+    /// contract.
+    #[test]
+    fn a_page_replaces_a_target_taking_its_whole_contract() {
+        let ext = load(
+            PROVIDER,
+            "    - { target: work_item.board, page: board-page }\n",
+        );
+        assert_eq!(
+            said(&ext),
+            "",
+            "pages: {:?}, errors: {:?}",
+            ext.page_files.iter().map(|p| &p.id).collect::<Vec<_>>(),
+            ext.errors
+        );
+        assert_eq!(
+            ext.ui.replacements[0].page_id.as_deref(),
+            Some("tracker/board-page")
+        );
+        assert_eq!(ext.ui.replacements[0].lens_id, "");
+        let ext = load(PROVIDER, "    - { target: work_item.board, page: nope }\n");
+        assert!(
+            said(&ext).contains("page `nope` isn't one of this extension's"),
+            "{}",
+            said(&ext)
+        );
+        let ext = load(
+            PROVIDER,
+            "    - { target: work_item.board, page: board-page, lens: board }\n",
+        );
+        assert!(said(&ext).contains("`lens` or `page`"), "{}", said(&ext));
     }
 
     const PROVIDER: &str = "providers:\n  - { id: fake, capability: work_items, entry: bin/provider, declarations: provider.json }\n";
@@ -252,6 +330,7 @@ mod tests {
                 target: "work_item.board".into(),
                 capability: "work_items".into(),
                 lens_id: "tracker/board".into(),
+                page_id: None,
                 version: 1,
                 view: vec![],
                 label: "board".into(),
@@ -269,7 +348,7 @@ mod tests {
             ),
             (
                 "{ target: work_item.board, lens: nope }",
-                "`lens: nope` isn't one of this extension's lenses",
+                "lens `nope` isn't one of this extension's",
             ),
             (
                 "{ target: work_item.board, lens: partial }",

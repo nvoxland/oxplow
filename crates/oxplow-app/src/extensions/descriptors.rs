@@ -744,6 +744,7 @@ mod tests {
                 capability: "work_items".into(),
                 bound_to_provider: false,
                 lens_id: "tracker/board".into(),
+                page_id: None,
                 version: 1,
                 view: vec![],
                 label: "board".into(),

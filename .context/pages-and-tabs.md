@@ -266,7 +266,14 @@ size? }]`, loaded as `ExtensionUi.page_slots`): each runs as an embed, its
 params by name from the host, its node id the mounted page's id with `.`
 for `/` (`beta.extra`); by extension name; `at: start` puts it first
 among the slot's siblings, `{ before | after: <sibling id> }` beside that
-sibling, otherwise it sits at the slot. `dirty_loaders` is what a change makes run again: loaders that
+sibling, otherwise it sits at the slot. A **panel**'s parts (`body`,
+`badge`, `collapsed`, `count`) may name its extension's pages instead of
+lenses (`ExtensionPanel.pages`; a badge page declares `badge` or
+`alert`, a stream or thread panel's pages take `stream_id` /
+`thread_id`), and a **replacement** may name a page (`ui.replacements:
+[{ target, page }]`, `UiReplacement.page_id`), checked against the same
+props contract. Which replacement shows is still decided in the window
+(`useReplacement`: the item's provider and the person's choice). `dirty_loaders` is what a change makes run again: loaders that
 read a changed model (a command loader's are its `reads`) or bind a
 changed param, and everything downstream of them.
 

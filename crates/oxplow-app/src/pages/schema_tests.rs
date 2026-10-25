@@ -403,3 +403,44 @@ fn a_sql_loader_binds_named_values_from_earlier_loaders() {
     );
     assert!(e.contains("loader `a`") && e.contains("`b`"), "{e}");
 }
+
+/// A panel's parts may be its extension's pages: the body, a badge page
+/// that declares a `badge`, a stream panel's pages taking `stream_id`.
+#[test]
+fn a_panel_names_its_extensions_pages() {
+    let dir = tempfile::tempdir().unwrap();
+    let ext = dir.path().join("acme");
+    std::fs::create_dir_all(ext.join("pages")).unwrap();
+    std::fs::write(
+        ext.join("extension.yaml"),
+        "manifest: 2\nname: acme\nintent:\n  purpose: test\npanels:\n  - { id: work, title: Work, scope: stream, body: list, badge: count }\n  - { id: bad, title: Bad, scope: project, body: list, badge: list }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        ext.join("pages/list.yaml"),
+        "title: List\nparams: [{ name: stream_id }]\ndata:\n  a: { sql: SELECT 1 AS n }\nview: { viz: table, from: a }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        ext.join("pages/count.yaml"),
+        "title: Count\nparams: [{ name: stream_id }]\ndata:\n  c: { sql: SELECT 3 AS n }\nview: { viz: number, from: c }\nbadge: { loader: c }\n",
+    )
+    .unwrap();
+    let loaded = crate::extensions::load_extension_at(&ext, "acme");
+    let work = loaded
+        .panels
+        .iter()
+        .find(|p| p.id == "acme/work")
+        .unwrap_or_else(|| panic!("{:?}", loaded.errors));
+    assert!(work.pages);
+    assert_eq!(work.body, "acme/list");
+    assert_eq!(work.badge.as_deref(), Some("acme/count"));
+    assert!(
+        loaded
+            .errors
+            .iter()
+            .any(|e| e.contains("panel `bad`") && e.contains("no `badge` or `alert`")),
+        "{:?}",
+        loaded.errors
+    );
+}

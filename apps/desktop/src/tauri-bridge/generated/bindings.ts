@@ -2617,6 +2617,8 @@ export type ExtensionPanel = {
 	 *  the body above the bar), not in the rail.
 	 */
 	dock?: boolean,
+	/**  Its parts name pages (`<extension>/<slug>`), not lenses. */
+	pages?: boolean,
 };
 
 /**
@@ -2633,6 +2635,8 @@ export type ExtensionResource = {
 export type ExtensionUi = {
 	/**  Lenses mounted into core pages (valid ones). */
 	slots: LensSlot[],
+	/**  Pages mounted at other pages' slots (valid ones). */
+	pageSlots?: PageSlot[],
 	/**  Labels from its models on core refs (valid ones). */
 	decorators: UiDecorator[],
 	/**
@@ -5802,6 +5806,20 @@ export type PageRun_Serialize = {
 	badge: SqlCell | null,
 };
 
+/**  A page another extension's page shows at one of its slots. */
+export type PageSlot = {
+	/**  The page whose slot it is (`<extension>/<slug>`). */
+	host: string,
+	/**  The slot's name in that page. */
+	slot: string,
+	/**  The page mounted (`<extension>/<slug>`). */
+	page: string,
+	/**  Where among the slot's siblings; none: at the slot. */
+	at: SlotAt | null,
+	title: string | null,
+	size: TileSize | null,
+};
+
 export type PageVisit = {
 	id: string,
 	page_kind: string,
@@ -7094,8 +7112,16 @@ export type UiReplacement = {
 	 *  render; otherwise the person's choice among candidates decides.
 	 */
 	boundToProvider: boolean,
-	/**  The lens that renders instead, given the target's props. */
+	/**
+	 *  The lens that renders instead, given the target's props (empty when
+	 *  a page does).
+	 */
 	lensId: string,
+	/**
+	 *  The page that renders instead (`<extension>/<slug>`), given the
+	 *  target's props.
+	 */
+	pageId?: string | null,
 	/**  The contract's version it was written against (the table's). */
 	version: number,
 	/**  The host page's view params it shares (the table's `view`). */

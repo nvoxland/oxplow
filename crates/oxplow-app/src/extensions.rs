@@ -2393,6 +2393,9 @@ pub struct ExtensionPanel {
     /// the body above the bar), not in the rail.
     #[serde(default)]
     pub dock: bool,
+    /// Its parts name pages (`<extension>/<slug>`), not lenses.
+    #[serde(default)]
+    pub pages: bool,
 }
 
 /// A page an extension contributes (P6.G2, target §11.3): a lens shown
@@ -5025,6 +5028,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             name,
             &capabilities,
             &ext.lenses,
+            &ext.page_files,
             &v,
             &file,
             &manifest,
@@ -5074,7 +5078,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         .collect();
     ext.warnings.extend(layout);
     if let Some(v) = panel_files {
-        let (panels, errors) = parse_panels(name, &ext.lenses, v);
+        let (panels, errors) = parse_panels(name, &ext.lenses, &ext.page_files, v);
         ext.panels = panels;
         let lines = item_lines(&manifest, "panels");
         ext.errors.extend(errors.into_iter().map(|(i, e)| {
@@ -5642,6 +5646,7 @@ fn renderer_problem(
 fn parse_panels(
     extension: &str,
     lenses: &[Lens],
+    pages: &[crate::pages::schema::Page],
     raw: serde_yaml::Value,
 ) -> (Vec<ExtensionPanel>, Vec<(Option<usize>, String)>) {
     let mut panels: Vec<ExtensionPanel> = Vec::new();
@@ -5691,6 +5696,10 @@ fn parse_panels(
                 ok = false;
             }
         }
+        // A panel's parts are its extension's pages (or, until they are
+        // gone, its lenses): all one or the other.
+        let of_pages =
+            pages.iter().any(|pg| pg.slug == p.body) && !lenses.iter().any(|l| l.slug == p.body);
         for (role, slug) in [
             ("body", Some(&p.body)),
             ("badge", p.badge.as_ref()),
@@ -5698,6 +5707,28 @@ fn parse_panels(
             ("count", p.count.as_ref()),
         ] {
             let Some(slug) = slug else { continue };
+            if of_pages {
+                let Some(page) = pages.iter().find(|pg| &pg.slug == slug) else {
+                    errors.push(err(format!("its {role} page `{slug}` isn't in pages/")));
+                    ok = false;
+                    continue;
+                };
+                if role == "badge" && page.badge.is_none() && page.alert.is_none() {
+                    errors.push(err(format!(
+                        "its badge page `{slug}` declares no `badge` or `alert` (the badge is its count)"
+                    )));
+                    ok = false;
+                }
+                if let Some(param) = needs {
+                    if !page.params.iter().any(|pp| pp.name == param) {
+                        errors.push(err(format!(
+                            "a panel scoped to a stream or thread gives its pages `{param}`; page `{slug}` must declare it in `params`"
+                        )));
+                        ok = false;
+                    }
+                }
+                continue;
+            }
             let Some(lens) = lenses.iter().find(|l| &l.slug == slug) else {
                 errors.push(err(format!("its {role} lens `{slug}` isn't in lenses/")));
                 ok = false;
@@ -5736,6 +5767,7 @@ fn parse_panels(
                 collapsed: p.collapsed.map(|c| format!("{extension}/{c}")),
                 count: p.count.map(|c| format!("{extension}/{c}")),
                 dock: p.dock,
+                pages: of_pages,
             });
         }
     }
@@ -12421,6 +12453,7 @@ commands:
                 collapsed: None,
                 count: None,
                 dock: false,
+                pages: false,
             }]
         );
         // A panel may name the page its header opens (a core page,
