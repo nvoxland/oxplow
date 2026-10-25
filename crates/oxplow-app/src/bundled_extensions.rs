@@ -734,10 +734,7 @@ mod tests {
         let rows = run_bundled_page(&f, "oxplow-bundled/runs", &[]).await;
         // Each extension links to its runs, one by one.
         let runs_of = |ext: &str| {
-            oxplow_domain::uri::build::lens_uri_with(
-                "oxplow-bundled/extension-runs",
-                &[("extension", Some(ext))],
-            )
+            oxplow_domain::uri::build::page_uri("extension-runs", &[("extension", ext)])
         };
         assert_eq!(
             rows,
@@ -874,10 +871,7 @@ mod tests {
 
         let commands = run_bundled_page(&f, "oxplow-bundled/interface-commands", &[]).await;
         let errors_of = |c: &str| {
-            oxplow_domain::uri::build::lens_uri_with(
-                "oxplow-bundled/interface-command-errors",
-                &[("command", Some(c))],
-            )
+            oxplow_domain::uri::build::page_uri("interface-command-errors", &[("command", c)])
         };
         assert_eq!(
             commands,
