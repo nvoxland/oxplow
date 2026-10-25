@@ -211,6 +211,28 @@ async fn open(svc: &Services, input: OpenPageInput) -> Result<Value, CommandErro
     } else {
         Value::Null
     };
+    // A page: the window's own open run, as the person sees it.
+    let page_run = match detail.get("runId").and_then(Value::as_str) {
+        Some(run_id) => match svc.page_runs.get(run_id) {
+            Some(run) => {
+                let ctx = crate::extensions::lens_context(svc, None, Some(thread)).await;
+                let text =
+                    crate::pages::text::page_text(svc, svc.worktrees.project_dir(), &run, &ctx)
+                        .await
+                        .map_err(failed)?;
+                json!({
+                    "page": run.page.id,
+                    "title": run.page.title,
+                    "params": run.params,
+                    "focus": detail.get("focus").cloned().unwrap_or(Value::Null),
+                    "source": run.page.origin.source,
+                    "text": text,
+                })
+            }
+            None => json!({ "error": format!("the window's run `{run_id}` isn't open now") }),
+        },
+        None => Value::Null,
+    };
     let this = pages.iter().find(|p| p.page_id == page_id);
     // What it is (the URI without its `#`) and how it's viewed (the `#`'s
     // params: a filter, a pick, a line); a URI that isn't oxplow's is as it is.
@@ -245,6 +267,7 @@ async fn open(svc: &Services, input: OpenPageInput) -> Result<Value, CommandErro
         },
         "others": serde_json::to_value(others).map_err(failed)?,
         "lens": lens,
+        "pageRun": page_run,
     }))
 }
 
@@ -585,5 +608,85 @@ mod tests {
         );
         let named = run(json!({ "thread": fx.thread.to_string() })).await;
         assert_eq!(named["tabs"].as_array().unwrap().len(), 2);
+    }
+}
+
+#[cfg(test)]
+mod page_run_tests {
+    use oxplow_domain::stores::StreamStore as _;
+    use oxplow_domain::{Actor, Timestamp};
+    use serde_json::json;
+
+    use super::PAGE_OPEN;
+    use crate::client_reports::{ReportedTab, TabReport, ThreadTabs};
+    use crate::pages::runner::{RunRequest, RunTarget};
+    use crate::pages::test_support::fixture;
+
+    /// What the person has open, when it is a page: the window's own open
+    /// run as its text — what they see, with their params — and the node
+    /// in focus.
+    #[tokio::test]
+    async fn the_open_page_is_the_windows_own_run_as_text() {
+        let (_dir, svc) = fixture().await;
+        let stream = svc.stream_store.primary().await.unwrap().unwrap().id;
+        let thread = crate::test_fixtures::new_thread(&svc, stream, "t").await.id;
+        let (run_id, _) = svc
+            .page_runs
+            .open(
+                &svc,
+                RunRequest {
+                    target: RunTarget::Page("acme/numbers".into()),
+                    params: [("n".to_string(), oxplow_db::SqlCell::Int(3))].into(),
+                    ctx: crate::extensions::LensContext::default(),
+                    viewer: Actor::Human,
+                },
+                "w1",
+            )
+            .await
+            .unwrap();
+        let id = "oxplow:oxplow/page?page=acme/numbers#n=3&node=big";
+        svc.client_reports.report(
+            TabReport {
+                client: "w1".into(),
+                focused: true,
+                visible: true,
+                shown_thread: Some(thread),
+                threads: vec![ThreadTabs {
+                    thread,
+                    tabs: vec![ReportedTab {
+                        id: id.into(),
+                        kind: "acme/numbers".into(),
+                        title: "Numbers".into(),
+                        back: vec![],
+                        forward: vec![],
+                        origin: None,
+                    }],
+                    active: Some(id.into()),
+                }],
+                detail_json: Some(
+                    json!({ "runId": run_id, "focus": { "node": "big" } }).to_string(),
+                ),
+            },
+            Timestamp::now(),
+        );
+        let open = svc
+            .commands
+            .run(
+                &Actor::Human,
+                PAGE_OPEN,
+                json!({ "thread_id": thread.to_string() }),
+                false,
+            )
+            .await
+            .unwrap()
+            .result;
+        let page = &open["pageRun"];
+        assert_eq!(page["page"], json!("acme/numbers"), "{open}");
+        assert_eq!(page["focus"], json!({ "node": "big" }), "{open}");
+        let text = page["text"].as_str().unwrap();
+        assert!(
+            text.contains("[node big]") && text.contains("| 3 |"),
+            "{text}"
+        );
     }
 }

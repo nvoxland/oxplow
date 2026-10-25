@@ -285,6 +285,11 @@ draft's code never acts). `oxplow.page.run { page, draft: true }` reads
 the caller's stream's draft; its text starts `Draft of <page> (stream
 strN, not deployed)` and its json carries `draft: { stream, checkout }`.
 
+**What the person is looking at**: a window's tab report carries
+`detail_json: { runId, focus: { node } }` for a page tab, and
+`oxplow_get_open_page` returns that open run as `pageRun: { page, title,
+params, focus, source, text }` — the person's own run, not a re-run.
+
 **Showing a page** (`oxplow.page.show { page, params } | { spec }`,
 the agent's `oxplow_show_page`): a page by id opens at its uri; an
 inline `spec` is kept in memory as a **view** (`PageRuns::keep_view`,
