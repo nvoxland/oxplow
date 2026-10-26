@@ -156,7 +156,7 @@ export function summarizeProposal(p: Proposal): ProposalSummary {
         : p.preview?.summary || p.command;
   // The thread by its title, as the person knows it, never its id.
   const agent = p.threadTitle ? `The agent in “${p.threadTitle}”` : "The agent";
-  const who = p.actorKind === "lens" ? `A lens${p.actorId ? ` (${p.actorId})` : ""} for the agent` : agent;
+  const who = p.actorKind === "page" ? `A page${p.actorId ? ` (${p.actorId})` : ""} for the agent` : agent;
   const hasChange = p.dryRun != null && typeof p.dryRun === "object" && "before" in p.dryRun && "after" in p.dryRun;
   const shown = (v: unknown) => (v == null ? "(not set)" : valueText(v));
   const children = field(p.dryRun, "children");

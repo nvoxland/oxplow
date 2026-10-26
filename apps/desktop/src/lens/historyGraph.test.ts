@@ -14,7 +14,7 @@ const script = readFileSync(join(dir, "app.js"), "utf8");
 const COLUMNS = ["sha", "author", "email", "committed_at", "subject", "parents", "branches", "tags", "current_branch"];
 type Commit = { sha: string; parents?: string[]; author?: string; subject?: string; at?: string; branches?: string[]; tags?: string[] };
 const run = (commits: Commit[], reveal: string | null = null) => ({
-  lens: { id: "oxplow-bundled/history-graph" },
+  config: { id: "oxplow-bundled/history-graph" },
   params: { reveal_sha: reveal },
   result: {
     columns: COLUMNS,

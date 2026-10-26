@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, mock, test } from "bun:test";
 import { cleanup, fireEvent, render as rtlRender, waitFor } from "@testing-library/react";
 import { useState, type ReactElement, type ReactNode } from "react";
-import type { ActionThen, CommandSpec, Lens, LensRun } from "../tauri-bridge/generated/bindings.js";
+import type { ActionThen, CommandSpec, VizConfig, VizRun } from "../tauri-bridge/generated/bindings.js";
 import { IpcCallError } from "../ipc-error.js";
 import { LensActionRunnerContext, type LensActionRunner } from "./lensActionRunner.js";
 import { FormSourceContext, type FormSource } from "./formSource.js";
@@ -112,7 +112,7 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-const lens: Lens = {
+const lens: VizConfig = {
   id: "x/l",
   extension: "x",
   slug: "l",
@@ -147,12 +147,12 @@ const lens: Lens = {
   ],
   alert: null,
   origin: { extension: "", source: null, running: "", deployment: null, bundled: false },
-} as unknown as Lens;
-const run: LensRun = {
-  lens,
+} as unknown as VizConfig;
+const run: VizRun = {
+  config: lens,
   params: {},
   result: { columns: ["uri", "title"], rows: [["oxplow:oxplow/work_item?id=tsk1&provider=oxplow", "Old"]], truncated: false },
-} as unknown as LensRun;
+} as unknown as VizRun;
 
 test("a form action opens its form in a slideover and runs what the person filled in", async () => {
   actionCommand = UPDATE_WIDE;
@@ -253,11 +253,11 @@ test("a form whose one field is a choice still opens the slideover", async () =>
 
 test("a form lens shows only its fields, keeps its fixed ones, and puts errors under the field", async () => {
   invalidField = "/title";
-  const form: LensRun = {
-    lens: { ...lens, viz: "form", form: { command: "oxplow.work_item.update", defaults: null, fixed: ["uri"], fields: ["title"] }, actions: [] },
+  const form: VizRun = {
+    config: { ...lens, viz: "form", form: { command: "oxplow.work_item.update", defaults: null, fixed: ["uri"], fields: ["title"] }, actions: [] },
     params: {},
     result: { columns: [], rows: [], truncated: false },
-  } as unknown as LensRun;
+  } as unknown as VizRun;
   const view = render(<LensResultView run={form} onOpenPage={() => {}} />);
   const title = await waitFor(() => view.getByTestId("lens-form-fields-title") as HTMLInputElement);
   expect(view.queryByTestId("lens-form-fields-ref")).toBeNull();
@@ -272,11 +272,11 @@ test("a form lens shows only its fields, keeps its fixed ones, and puts errors u
 // An edit form shows what it saved: after a successful submit it starts
 // again from the models, not from the values it first opened with.
 test("a form lens starts again from the current values after it saves", async () => {
-  const form: LensRun = {
-    lens: { ...lens, viz: "form", form: { command: "oxplow.work_item.update", defaults: null, fixed: ["uri"], fields: ["title"] }, actions: [] },
+  const form: VizRun = {
+    config: { ...lens, viz: "form", form: { command: "oxplow.work_item.update", defaults: null, fixed: ["uri"], fields: ["title"] }, actions: [] },
     params: {},
     result: { columns: [], rows: [], truncated: false },
-  } as unknown as LensRun;
+  } as unknown as VizRun;
   const view = render(<LensResultView run={form} onOpenPage={() => {}} />);
   const title = await waitFor(() => view.getByTestId("lens-form-fields-title") as HTMLInputElement);
   fireEvent.change(title, { target: { value: "New" } });
@@ -290,12 +290,12 @@ test("a form lens starts again from the current values after it saves", async ()
 // did) brings the saved row: the form starts again from it, even when the
 // first start after the save raced the re-run.
 test("a form starts again when its run's rows change", async () => {
-  const at = (title: string): LensRun =>
+  const at = (title: string): VizRun =>
     ({
-      lens: { ...lens, viz: "form", form: { command: "oxplow.work_item.update", defaults: null, fixed: ["uri"], fields: ["title"] }, actions: [] },
+      config: { ...lens, viz: "form", form: { command: "oxplow.work_item.update", defaults: null, fixed: ["uri"], fields: ["title"] }, actions: [] },
       params: {},
       result: { columns: ["title"], rows: [[title]], truncated: false },
-    }) as unknown as LensRun;
+    }) as unknown as VizRun;
   const view = render(<LensResultView run={at("Old")} onOpenPage={() => {}} />);
   await waitFor(() => expect(view.getByTestId("lens-form-fields-title")).toBeTruthy());
   const before = formStarts;
@@ -305,12 +305,12 @@ test("a form starts again when its run's rows change", async () => {
   await waitFor(() => expect((view.getByTestId("lens-form-fields-title") as HTMLInputElement).value).toBe("Saved elsewhere"));
 });
 
-function formLens(then: ActionThen): LensRun {
+function formLens(then: ActionThen): VizRun {
   return {
-    lens: { ...lens, viz: "form", form: { command: "oxplow.work_item.update", defaults: null, fixed: ["uri"], fields: ["title"], then }, actions: [] },
+    config: { ...lens, viz: "form", form: { command: "oxplow.work_item.update", defaults: null, fixed: ["uri"], fields: ["title"], then }, actions: [] },
     params: {},
     result: { columns: [], rows: [], truncated: false },
-  } as unknown as LensRun;
+  } as unknown as VizRun;
 }
 
 /** Submit a form lens on a page; what it asked the page to open. */
@@ -344,9 +344,9 @@ test("`then: stay` keeps the form for the next entry", async () => {
 });
 
 /** A form lens with a second submit that keeps `keep`'s values. */
-function againLens(keep: string[]): LensRun {
+function againLens(keep: string[]): VizRun {
   return {
-    lens: {
+    config: {
       ...lens,
       viz: "form",
       form: { command: "oxplow.work_item.update", defaults: null, fixed: ["uri"], fields: ["title"], then: "open", again: { label: "Save and Another", keep } },
@@ -354,7 +354,7 @@ function againLens(keep: string[]): LensRun {
     },
     params: {},
     result: { columns: [], rows: [], truncated: false },
-  } as unknown as LensRun;
+  } as unknown as VizRun;
 }
 
 // The second submit runs the command, stays on the page (whatever `then`
@@ -407,11 +407,11 @@ function Tab({ state, children }: { state: Record<string, unknown>; children: Re
 // restart give it back, and an edit form saves only when changed.
 test("an edit form keeps its draft in the tab and saves only when changed", async () => {
   const state: Record<string, unknown> = {};
-  const edit: LensRun = {
-    lens: { ...lens, viz: "form", form: { command: "oxplow.work_item.update", defaults: null, fixed: ["uri"], fields: ["title"], mode: "edit" }, actions: [] },
+  const edit: VizRun = {
+    config: { ...lens, viz: "form", form: { command: "oxplow.work_item.update", defaults: null, fixed: ["uri"], fields: ["title"], mode: "edit" }, actions: [] },
     params: {},
     result: { columns: [], rows: [], truncated: false },
-  } as unknown as LensRun;
+  } as unknown as VizRun;
   const view = render(
     <Tab state={state}>
       <LensResultView run={edit} onOpenPage={() => {}} />

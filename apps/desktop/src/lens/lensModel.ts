@@ -7,7 +7,6 @@
 import { humanize } from "../kit/humanize.js";
 import type { FormSource } from "./formSource.js";
 import type { LensActionRunner } from "./lensActionRunner.js";
-import type { TileSize } from "../kit/Tiles.js";
 import {
   formatBytes,
   formatDateOnly,
@@ -18,7 +17,7 @@ import {
   formatRelative,
   formatShortDateTime,
 } from "../components/format.js";
-import type { ColumnFormat, Lens, PageParam, LensChart, LensLink, LensRun, LensViz, SqlCell, SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
+import type { ColumnFormat, VizConfig, PageParam, ColumnLink, VizRun, SqlCell, SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
 import { PAGE_CATEGORY_ORDER, type PageDirectoryEntry } from "../components/RailHud/sections.js";
 import { diffRef, duplicateBlockRef, effortDiffRef, fileRefAt, gitCommitRef, metricRef, wikiPageRef } from "../tabs/pageRefs.js";
 import { WORKING, parseRevision, shortRevisionLabel } from "../revision.js";
@@ -33,7 +32,7 @@ export interface DisplayColumn {
   label: string;
   /** Position in the result row. */
   index: number;
-  link: LensLink | null;
+  link: ColumnLink | null;
   /** Position of the column holding this one's unit, if it names one. */
   unitIndex: number | null;
   /** Position of the column naming the cell's icon (`lensIcons.tsx`). */
@@ -69,7 +68,7 @@ export function markParts(text: string, needle: string): { text: string; mark: b
 
 /** The columns that style rows rather than show as cells: `group.by`,
  *  `emphasis` and `depth`. */
-function stylingColumns(lens: Lens): string[] {
+function stylingColumns(lens: VizConfig): string[] {
   return [lens.group?.by, lens.emphasis, lens.depth].filter((c): c is string => !!c);
 }
 
@@ -77,7 +76,7 @@ function stylingColumns(lens: Lens): string[] {
  *  result doesn't have — `validate_extension` reports those); otherwise
  *  every result column, labelled by name. The row-styling columns are
  *  never cells. */
-export function displayColumns(lens: Lens, resultColumns: string[]): DisplayColumn[] {
+export function displayColumns(lens: VizConfig, resultColumns: string[]): DisplayColumn[] {
   const styling = stylingColumns(lens);
   const at = (key: string | null | undefined) => {
     const i = key ? resultColumns.indexOf(key) : -1;
@@ -126,7 +125,7 @@ export interface RowGroup {
  *  each first appears; the heading links through `group.link`, read from
  *  the group's first row. Null when the lens isn't grouped or the result
  *  lacks the column. */
-export function rowGroups(lens: Lens, result: SqlQueryResult): RowGroup[] | null {
+export function rowGroups(lens: VizConfig, result: SqlQueryResult): RowGroup[] | null {
   const by = lens.group?.by;
   const i = by ? result.columns.indexOf(by) : -1;
   if (!by || i === -1) return null;
@@ -162,7 +161,7 @@ function cellOf(columns: string[], row: SqlCell[], key: string | null | undefine
 
 /** Whether the row is highlighted: its `emphasis` cell is truthy (true,
  *  a non-zero number, text other than empty / `0` / `false`). */
-export function rowEmphasized(lens: Lens, columns: string[], row: SqlCell[]): boolean {
+export function rowEmphasized(lens: VizConfig, columns: string[], row: SqlCell[]): boolean {
   const v = cellOf(columns, row, lens.emphasis);
   if (typeof v === "number") return v !== 0;
   if (typeof v === "string") return v !== "" && v !== "0" && v.toLowerCase() !== "false";
@@ -171,7 +170,7 @@ export function rowEmphasized(lens: Lens, columns: string[], row: SqlCell[]): bo
 
 /** How far the row is indented: its `depth` cell as a whole number
  *  (0–8), else 0. */
-export function rowDepth(lens: Lens, columns: string[], row: SqlCell[]): number {
+export function rowDepth(lens: VizConfig, columns: string[], row: SqlCell[]): number {
   const v = cellOf(columns, row, lens.depth);
   const n = typeof v === "number" ? v : typeof v === "string" && /^\d+$/.test(v.trim()) ? Number(v) : 0;
   return Number.isInteger(n) ? Math.max(0, Math.min(8, n)) : 0;
@@ -181,7 +180,7 @@ export function rowDepth(lens: Lens, columns: string[], row: SqlCell[]): number 
  *  (named by `idOf`), however deep, and which rows have children at all:
  *  a row is a parent when the row after it is deeper. */
 export function foldedAway(
-  lens: Lens,
+  lens: VizConfig,
   columns: string[],
   rows: SqlCell[][],
   closed: ReadonlySet<string>,
@@ -208,7 +207,7 @@ export function foldedAway(
  *  its first link opens (a working-tree file and a wiki page as their
  *  `@` mentions, anything else as its ref), or null when it links
  *  nowhere. */
-export function rowContextRef(lens: Lens, columns: string[], row: SqlCell[]): ContextRef | null {
+export function rowContextRef(lens: VizConfig, columns: string[], row: SqlCell[]): ContextRef | null {
   const ref = rowRef(lens, columns, row);
   if (!ref) return null;
   const parsed = parseUri(ref);
@@ -233,7 +232,7 @@ export function linkTargetId(target: LinkTarget): string {
  *  missing. `link.from` names the column holding the target id and
  *  defaults to the cell's own column. */
 export function cellLinkRef(
-  link: LensLink,
+  link: ColumnLink,
   columnKey: string,
   row: SqlCell[],
   resultColumns: string[],
@@ -299,27 +298,6 @@ export function cellLinkRef(
       return id === null ? null : effortDiffRef(id);
     }
   }
-}
-
-/** A lens made of other lenses (a document's sections, a dashboard's
- *  tiles): it has no rows of its own. */
-export function isComposite(viz: LensViz): boolean {
-  return viz === "document" || viz === "dashboard";
-}
-
-/** Lens runs split for a page of sections: the ones to show, and the ones
- *  with nothing to show — no rows, no error, not a composite (whose parts
- *  decide), not a form (which has no rows of its own) and not one with a
- *  button above its rows (an Add that works on an empty list) — folded into
- *  one "Nothing found" line. */
-export function foldEmpty<T extends { run: LensRun | null; error: string | null }>(
-  runs: T[],
-): { shown: T[]; empty: T[] } {
-  const isEmpty = (r: T) =>
-    r.error === null && r.run !== null && !isComposite(r.run.lens.viz) && r.run.lens.viz !== "form" &&
-    r.run.result.rows.length === 0 &&
-    !r.run.lens.actions.some((a) => !a.row && a.group === null && !a.oneRow);
-  return { shown: runs.filter((r) => !isEmpty(r)), empty: runs.filter(isEmpty) };
 }
 
 /** A stored timestamp (ISO-8601 with a time and a zone), not a bare date. */
@@ -412,22 +390,13 @@ export function parseParamInput(text: string): SqlCell {
 
 /** The subset of `values` that differs from the lens's defaults — what
  *  `oxplow_run_lens` needs as overrides and what an agent mention should carry. */
-export function changedParams(lens: Lens, values: Record<string, SqlCell>): Record<string, SqlCell> {
+export function changedParams(lens: VizConfig, values: Record<string, SqlCell>): Record<string, SqlCell> {
   const out: Record<string, SqlCell> = {};
   for (const [name, value] of Object.entries(values)) {
     const param = lens.params.find((p) => p.name === name);
     if (!param || !isDefaultValue(param, value ?? null)) out[name] = value ?? null;
   }
   return out;
-}
-
-/** The filters a lens page's rail offers: every param but its picks; for
- *  a view document, not its view param (the section rail) and only the
- *  ones the section in view declares (`viewed`, none until it's known). */
-export function offeredFilters(lens: Lens, viewed: Lens | null): PageParam[] {
-  const filters = lens.params.filter((p) => p.role !== "selection");
-  if (!lens.view) return filters;
-  return filters.filter((p) => p.name !== lens.view && !!viewed?.params.some((q) => q.name === p.name));
 }
 
 /** Whether `value` is `param`'s default: a bool by truth (its echo is
@@ -468,7 +437,7 @@ export function slugify(title: string): string {
 
 /** The first canonical ref a lens row links to, if any: what the row is
  *  about (Ask About This, the row's extension commands). */
-export function rowRef(lens: Lens, columns: string[], row: SqlCell[]): string | null {
+export function rowRef(lens: VizConfig, columns: string[], row: SqlCell[]): string | null {
   for (const c of lens.columns) {
     const ref = c.link ? cellLinkRef(c.link, c.key, row, columns) : null;
     if (ref && parseUri(linkTargetId(ref))) return linkTargetId(ref);
@@ -485,14 +454,14 @@ export function rowMention(id: string, columns: string[], row: SqlCell[]): strin
 
 /** Ask the Assistant about a lens row: the first page the row links to,
  *  or — a row that links nowhere — the row itself as text (a lens mention). */
-export function rowAssistantContext(lens: Lens, columns: string[], row: SqlCell[]): AssistantContext {
+export function rowAssistantContext(lens: VizConfig, columns: string[], row: SqlCell[]): AssistantContext {
   const c = rowContext(lens, columns, row);
   return "uri" in c ? { kind: "page", uri: c.uri, label: null } : { kind: "selection", uri: null, text: c.text, label: null };
 }
 
 /** Add to Context on a lens row: the first page the row links to, else
  *  the row itself as text (a lens mention). */
-export function rowContext(lens: Lens, columns: string[], row: SqlCell[]): { uri: string } | { text: string } {
+export function rowContext(lens: VizConfig, columns: string[], row: SqlCell[]): { uri: string } | { text: string } {
   const ref = rowRef(lens, columns, row);
   return ref ? { uri: ref } : { text: rowMention(lens.id, columns, row).trim() };
 }
@@ -535,7 +504,7 @@ export interface TreeNode {
 /** `tree` viz: each row under the row whose `tree.id` its `tree.parent`
  *  names; a row with no parent, or one not in the result, is a root. A
  *  cycle is broken at the first row seen twice. */
-export function treeNodes(lens: Lens, result: SqlQueryResult): TreeNode[] {
+export function treeNodes(lens: VizConfig, result: SqlQueryResult): TreeNode[] {
   const ids = columnValues(result, lens.tree?.id);
   const parents = columnValues(result, lens.tree?.parent);
   const labels = columnValues(result, lens.tree?.label);
@@ -576,7 +545,7 @@ export function treeNodes(lens: Lens, result: SqlQueryResult): TreeNode[] {
 /** A lazy tree's run for one open branch: the lens run again with
  *  `tree.lazy` set to the branch's id (`useLazyBranches`). */
 export interface BranchRun {
-  run: LensRun | null;
+  run: VizRun | null;
   error: string | null;
   /** Where its rows' actions press and their forms start, when not where
    *  the root's do (a page's branch is a run of its own). */
@@ -594,7 +563,7 @@ function truthyCell(v: SqlCell | undefined): boolean {
  *  lazy branch, closed until its id is in `open`, then holding the rows
  *  of its run in `runs` (keyed by id, built the same way), `loading` until
  *  the run answers, or the run's error. */
-export function lazyTreeNodes(lens: Lens, result: SqlQueryResult, open: ReadonlySet<string>, runs: ReadonlyMap<string, BranchRun>): TreeNode[] {
+export function lazyTreeNodes(lens: VizConfig, result: SqlQueryResult, open: ReadonlySet<string>, runs: ReadonlyMap<string, BranchRun>): TreeNode[] {
   const branchAt = lens.tree?.branch ? result.columns.indexOf(lens.tree.branch) : -1;
   const nodesOf = (res: SqlQueryResult): TreeNode[] => treeNodes(lens, res).map(mark);
   const mark = (node: TreeNode): TreeNode => {
@@ -611,7 +580,7 @@ export function lazyTreeNodes(lens: Lens, result: SqlQueryResult, open: Readonly
 
 /** What stops a lazy tree from opening anything: its `branch` column
  *  missing from the result (a spec the loader never checked). */
-export function lazyTreeProblem(lens: Lens, result: SqlQueryResult): string | null {
+export function lazyTreeProblem(lens: VizConfig, result: SqlQueryResult): string | null {
   const branch = lens.tree?.lazy ? lens.tree.branch : null;
   if (!branch || result.columns.includes(branch)) return null;
   return `the tree's \`branch\` column \`${branch}\` isn't in the result`;
@@ -626,7 +595,7 @@ export function drawnTreeRows(nodes: readonly TreeNode[]): SqlCell[][] {
  *  at a time, through open branches whose runs are in `runs` — so a folder
  *  left open under a closed one keeps its place without running. Each
  *  with its id cell, the lazy param's value. */
-export function wantedBranches(lens: Lens, result: SqlQueryResult, open: ReadonlySet<string>, runs: ReadonlyMap<string, BranchRun>): { id: string; value: SqlCell }[] {
+export function wantedBranches(lens: VizConfig, result: SqlQueryResult, open: ReadonlySet<string>, runs: ReadonlyMap<string, BranchRun>): { id: string; value: SqlCell }[] {
   const idAt = lens.tree?.id ? result.columns.indexOf(lens.tree.id) : -1;
   const out: { id: string; value: SqlCell }[] = [];
   const walk = (nodes: readonly TreeNode[]) => {
@@ -644,7 +613,7 @@ export function wantedBranches(lens: Lens, result: SqlQueryResult, open: Readonl
 /** `timeline` viz: each row's time, label and ref (a canonical ref, when
  *  `timeline.uri` names a column and the row has one), oldest first. */
 export function timelineEntries(
-  lens: Lens,
+  lens: VizConfig,
   result: SqlQueryResult,
 ): { at: string; label: string; ref: string | null; row: SqlCell[] }[] {
   const ats = columnValues(result, lens.timeline?.at);
@@ -665,7 +634,7 @@ export type StepStatus = "done" | "active" | "failed" | "pending";
 
 /** `steps` viz: each step's label and status, in row order (a status
  *  other than done/active/failed is pending). */
-export function stepItems(lens: Lens, result: SqlQueryResult): { label: string; status: StepStatus; row: SqlCell[] }[] {
+export function stepItems(lens: VizConfig, result: SqlQueryResult): { label: string; status: StepStatus; row: SqlCell[] }[] {
   const labels = columnValues(result, lens.steps?.label);
   if (!labels) return [];
   const statuses = columnValues(result, lens.steps?.status);
@@ -678,7 +647,7 @@ export function stepItems(lens: Lens, result: SqlQueryResult): { label: string; 
 
 /** `hunks` viz: each row's file and the two revisions it diffs. Rows
  *  whose path or revisions are missing drop out. */
-export function hunkRows(lens: Lens, result: SqlQueryResult): { path: string; from: string; to: string; row: SqlCell[] }[] {
+export function hunkRows(lens: VizConfig, result: SqlQueryResult): { path: string; from: string; to: string; row: SqlCell[] }[] {
   const paths = columnValues(result, lens.hunks?.path);
   const froms = columnValues(result, lens.hunks?.from);
   const tos = columnValues(result, lens.hunks?.to);
@@ -708,7 +677,7 @@ export function parseLines(value: SqlCell | undefined): { start: number; end: nu
 
 /** `code` viz: each row's file, the revision it is read at and the lines
  *  it marks. Rows without a file or a revision are left out. */
-export function codeRows(lens: Lens, result: SqlQueryResult): { path: string; revision: string; lines: { start: number; end: number } | null; row: SqlCell[] }[] {
+export function codeRows(lens: VizConfig, result: SqlQueryResult): { path: string; revision: string; lines: { start: number; end: number } | null; row: SqlCell[] }[] {
   const paths = columnValues(result, lens.code?.path);
   const revisions = columnValues(result, lens.code?.revision);
   if (!paths || !revisions) return [];
@@ -725,7 +694,7 @@ export function codeRows(lens: Lens, result: SqlQueryResult): { path: string; re
 
 /** `diff` viz: the first row's file between its two revisions, landing on
  *  its `lines`' start; null when the first row doesn't name them. */
-export function diffRow(lens: Lens, result: SqlQueryResult): DiffSpec | null {
+export function diffRow(lens: VizConfig, result: SqlQueryResult): DiffSpec | null {
   const at = (column: string | null | undefined) => columnValues(result, column)?.[0];
   const path = at(lens.diff?.path);
   const from = parseRevision(at(lens.diff?.from));
@@ -739,7 +708,7 @@ export function diffRow(lens: Lens, result: SqlQueryResult): DiffSpec | null {
 
 /** `editor` viz: the working tree's file the first row names and the line
  *  it lands on (its `lines`' start); null when the row names no file. */
-export function editorRow(lens: Lens, result: SqlQueryResult): { path: string; line: number | null } | null {
+export function editorRow(lens: VizConfig, result: SqlQueryResult): { path: string; line: number | null } | null {
   const at = (column: string | null | undefined) => columnValues(result, column)?.[0];
   const path = at(lens.editor?.path);
   if (typeof path !== "string" || !path) return null;
@@ -747,13 +716,13 @@ export function editorRow(lens: Lens, result: SqlQueryResult): { path: string; l
 }
 
 /** `embed` viz: the web page the first row names; null when it names none. */
-export function embedRow(lens: Lens, result: SqlQueryResult): { url: string } | null {
+export function embedRow(lens: VizConfig, result: SqlQueryResult): { url: string } | null {
   const url = columnValues(result, lens.embed?.url)?.[0];
   return typeof url === "string" && url ? { url } : null;
 }
 
 /** `bar` viz rows: `chart.x` labels and `chart.y` values (NULL → 0). */
-export function barRows(lens: Lens, result: SqlQueryResult): { label: string; value: number }[] {
+export function barRows(lens: VizConfig, result: SqlQueryResult): { label: string; value: number }[] {
   const xs = columnValues(result, lens.chart?.x);
   const ys = columnValues(result, lens.chart?.y);
   if (!xs || !ys) return [];
@@ -773,7 +742,7 @@ function toTime(v: SqlCell): number | null {
 /** `line` viz: one series per `chart.series` value (a single unnamed
  *  series without it), points sorted by time. */
 export function lineSeries(
-  lens: Lens,
+  lens: VizConfig,
   result: SqlQueryResult,
 ): { name: string; points: { t: number; v: number }[]; target: number | null }[] {
   const xs = columnValues(result, lens.chart?.x);
@@ -805,7 +774,7 @@ export function lineSeries(
 /** `treemap` viz items: label, positive size, optional group, and the row
  *  (so a click can follow the lens's links). */
 export function treemapItems(
-  lens: Lens,
+  lens: VizConfig,
   result: SqlQueryResult,
 ): { label: string; size: number; group: string | null; row: SqlCell[] }[] {
   const labels = columnValues(result, lens.chart?.label);
@@ -821,88 +790,18 @@ export function treemapItems(
   return out;
 }
 
-/** What draws a dashboard's row tile: its lens, its SQL as a viz, its
- *  SQL as the metric card, or its text (a heading band). */
-export type RowTileKind = "lens" | "sql" | "metric" | "text";
 
-/** One row of a dashboard whose rows are its tiles (`tile:`), its roles
- *  read from the row. */
-export interface RowTile {
-  id: string;
-  kind: RowTileKind;
-  size: TileSize;
-  title: string | null;
-  lens: string | null;
-  sql: string | null;
-  display: string | null;
-  chart: LensChart | null;
-  metric: string | null;
-  viz: string | null;
-  text: string | null;
-  /** The row, column by column: what its actions bind as `{{row.*}}`. */
-  record: Record<string, SqlCell>;
+
+/** A page's sections split: the ones to show, and the ones with nothing to
+ *  show — no rows, no error, not a form (which has no rows of its own) and
+ *  not one with a button above its rows (an Add that works on an empty
+ *  list) — folded into one "Nothing found" line. */
+export function foldEmpty<T extends { run: VizRun | null; error: string | null }>(
+  runs: T[],
+): { shown: T[]; empty: T[] } {
+  const isEmpty = (r: T) =>
+    r.error === null && r.run !== null && r.run.config.viz !== "form" &&
+    r.run.result.rows.length === 0 &&
+    !r.run.config.actions.some((a) => !a.row && a.group === null && !a.oneRow);
+  return { shown: runs.filter((r) => !isEmpty(r)), empty: runs.filter(isEmpty) };
 }
-
-const TILE_SIZES: readonly TileSize[] = ["small", "wide", "tall", "full"];
-
-/** A row tile's size: its `size` when it is one of the four, else its
- *  kind's default (a heading band spans the row). */
-export function tileSizeOf(value: unknown, kind: RowTileKind): TileSize {
-  return TILE_SIZES.includes(value as TileSize) ? (value as TileSize) : kind === "text" ? "full" : "small";
-}
-
-/** A tile's `chart` column: the JSON of a chart display's roles. */
-function tileChart(value: string | null): LensChart | null {
-  if (!value) return null;
-  try {
-    const c = JSON.parse(value) as Record<string, unknown>;
-    if (typeof c !== "object" || c === null || Array.isArray(c)) return null;
-    const col = (k: string) => (typeof c[k] === "string" ? (c[k] as string) : null);
-    return { x: col("x"), y: col("y"), series: col("series"), label: col("label"), size: col("size"), group: col("group") } as LensChart;
-  } catch {
-    return null;
-  }
-}
-
-/** A dashboard's row tiles (`lens.tile`), one per result row in order:
- *  drawn by its `lens`, else its `sql` (`display = metric`: the metric
- *  card), else its text. None without `tile`. */
-export function rowTiles(run: Pick<LensRun, "lens" | "result">): RowTile[] {
-  const tile = run.lens.tile;
-  if (!tile) return [];
-  const { columns, rows } = run.result;
-  return rows.map((row) => {
-    const at = (role: string | null) => {
-      const i = role === null ? -1 : columns.indexOf(role);
-      const v = i === -1 ? null : (row[i] ?? null);
-      return v === null || v === "" ? null : String(v);
-    };
-    const lens = at(tile.lens);
-    const sql = at(tile.sql);
-    const display = at(tile.display);
-    const kind: RowTileKind = lens ? "lens" : sql ? (display === "metric" ? "metric" : "sql") : "text";
-    const record: Record<string, SqlCell> = {};
-    columns.forEach((c, i) => (record[c] = row[i] ?? null));
-    return {
-      id: at(tile.id) ?? "",
-      kind,
-      size: tileSizeOf(at(tile.size), kind),
-      title: at(tile.title),
-      lens,
-      sql,
-      display,
-      chart: tileChart(at(tile.chart)),
-      metric: at(tile.metric),
-      viz: at(tile.viz),
-      text: at(tile.text),
-      record,
-    };
-  });
-}
-
-
-/** The command whose draft starts a lens with the agent: "New Lens with
- *  Your Agent…" (oxplow-foundation; its prompt is its `ui.input.text`,
- *  `useCommandDraft`). The agent's oxplow-extension skill takes it from
- *  there (tsk373). */
-export const NEW_LENS_COMMAND = "oxplow.lens.draft_with_agent";

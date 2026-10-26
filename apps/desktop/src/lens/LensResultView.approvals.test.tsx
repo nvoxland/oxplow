@@ -1,7 +1,7 @@
 import { afterEach, expect, mock, test } from "bun:test";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { keyOf, proposalUri } from "../uri/uri.js";
-import type { Lens, LensRun } from "../tauri-bridge/generated/bindings.js";
+import type { VizConfig, VizRun } from "../tauri-bridge/generated/bindings.js";
 
 // `viz: approvals` draws the kit's Approvals: it reads the pending
 // proposals itself (the lens's rows are ignored), its `thread` and
@@ -65,9 +65,9 @@ const lens = {
   actions: [],
   alert: null,
   origin: { extension: "", source: null, running: "", deployment: null, bundled: false },
-} as unknown as Lens;
-const runWith = (params: Record<string, string>): LensRun =>
-  ({ lens, params, result: { columns: ["1"], rows: [[1]], truncated: false } }) as unknown as LensRun;
+} as unknown as VizConfig;
+const runWith = (params: Record<string, string>): VizRun =>
+  ({ config: lens, params, result: { columns: ["1"], rows: [[1]], truncated: false } }) as unknown as VizRun;
 
 test("an approvals lens draws every pending proposal and decides through the person's path", async () => {
   const view = render(<LensResultView run={runWith({})} onOpenPage={() => {}} />);

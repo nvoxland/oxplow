@@ -1,13 +1,13 @@
 import { afterEach, expect, test } from "bun:test";
 import { cleanup, fireEvent, render } from "@testing-library/react";
 import { PageNavigationContext, type PageNavigation } from "../tabs/PageNavigationContext.js";
-import type { Lens, LensRun } from "../tauri-bridge/generated/bindings.js";
+import type { VizConfig, VizRun } from "../tauri-bridge/generated/bindings.js";
 
 const { LensResultView } = await import("./LensResultView.js");
 
 afterEach(cleanup);
 
-const base: Lens = {
+const base: VizConfig = {
   id: "x/l",
   extension: "x",
   slug: "l",
@@ -33,8 +33,8 @@ const base: Lens = {
   origin: { extension: "", source: null, running: "", deployment: null, bundled: false },
 };
 const chart = { x: null, y: null, series: null, label: null, size: null, group: null };
-const run = (lens: Partial<Lens>, columns: string[], rows: (string | number)[][]): LensRun => ({
-  lens: { ...base, ...lens },
+const run = (lens: Partial<VizConfig>, columns: string[], rows: (string | number)[][]): VizRun => ({
+  config: { ...base, ...lens },
   params: {},
   result: { columns, rows, truncated: false },
 });

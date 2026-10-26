@@ -6,7 +6,7 @@
 import { createContext, useContext, type ComponentType } from "react";
 
 import type { TabRef } from "../tabs/tabState.js";
-import type { LensRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
+import type { VizRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
 import type { HostedData } from "./componentBridge.js";
 import type { BranchRun } from "./lensModel.js";
 
@@ -23,7 +23,7 @@ export interface VizPages {
   /** Draws what an open `expand` column's row opens. */
   Expansion: ComponentType<ExpansionProps>;
   /** A lazy tree's branch runs, by branch id (`useLazyBranches`'s shape). */
-  useBranches(run: LensRun, open: readonly string[], streamId: string | null, maxRows?: number): ReadonlyMap<string, BranchRun>;
+  useBranches(run: VizRun, open: readonly string[], streamId: string | null, maxRows?: number): ReadonlyMap<string, BranchRun>;
   /** What a `custom` viz's component is fed (its page's loaders); null:
    *  the lens's own rows. */
   componentData: HostedData | null;

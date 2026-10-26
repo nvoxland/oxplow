@@ -1,8 +1,8 @@
 /// A page run's nodes as the lens viz components take them
 /// (`.context/pages-and-tabs.md` "Page files"): a viz node is a lens with
-/// no query, its rows its loader's — the same `LensRun` a lens page draws,
+/// no query, its rows its loader's — the same `VizRun` a lens page draws,
 /// as the server's `pages::text::node_run` builds it.
-import type { LensRun, Node, Page, PageRun, RunNode, SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
+import type { VizRun, Node, Page, PageRun, RunNode, SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
 
 /** No rows: a viz that reads none (a form), or a loader that didn't run. */
 export const EMPTY_RESULT: SqlQueryResult = {
@@ -14,15 +14,12 @@ export const EMPTY_RESULT: SqlQueryResult = {
 };
 
 /** Viz node `node` of `run` as a lens run; null for any other node. */
-export function nodeRunOf(run: PageRun, node: Node): LensRun | null {
+export function nodeRunOf(run: PageRun, node: Node): VizRun | null {
   if (node.kind !== "viz") return null;
   return {
-    lens: node.lens,
+    config: node.config,
     params: run.params,
     result: (node.from !== null && run.loaders[node.from]?.result) || EMPTY_RESULT,
-    alert: null,
-    warnings: [],
-    inactive: null,
   };
 }
 

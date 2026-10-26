@@ -1,7 +1,7 @@
 import { afterAll, afterEach, expect, mock, test } from "bun:test";
 import { cleanup, fireEvent, render as rtlRender, waitFor } from "@testing-library/react";
 import type { ReactElement, ReactNode } from "react";
-import type { Lens, LensRun } from "../tauri-bridge/generated/bindings.js";
+import type { VizConfig, VizRun } from "../tauri-bridge/generated/bindings.js";
 import { IpcCallError } from "../ipc-error.js";
 import { LensActionRunnerContext, type LensActionRunner } from "./lensActionRunner.js";
 import { personSpec, recordRefOffers } from "../components/refCommandsTestSupport.js";
@@ -64,7 +64,7 @@ const render = (ui: ReactElement) => rtlRender(ui, { wrapper });
 
 afterEach(cleanup);
 
-const lens: Lens = {
+const lens: VizConfig = {
   id: "x/l",
   extension: "x",
   slug: "l",
@@ -89,8 +89,8 @@ const lens: Lens = {
   alert: null,
   origin: { extension: "", source: null, running: "", deployment: null, bundled: false },
 };
-const run: LensRun = {
-  lens,
+const run: VizRun = {
+  config: lens,
   params: {},
   result: { columns: ["uri"], rows: [["oxplow:oxplow/work_item?id=tsk1&provider=oxplow"]], truncated: false },
 };
@@ -124,8 +124,8 @@ test("rows are focusable and open their menu from the keyboard, in every row com
   expect(queryByTestId("menu-item-lens-action-finish")).not.toBeNull();
   unmount();
 
-  const steps: LensRun = {
-    lens: { ...lens, viz: "steps", steps: { label: "uri", status: null } },
+  const steps: VizRun = {
+    config: { ...lens, viz: "steps", steps: { label: "uri", status: null } },
     params: {},
     result: run.result,
   };
@@ -139,8 +139,8 @@ test("rows are focusable and open their menu from the keyboard, in every row com
 test("a row's linked ref gets its kind's commands", async () => {
   commandRuns.length = 0; // an earlier test's action reports its failure here
   recordRefOffers(commandRuns);
-  const linked: LensRun = {
-    lens: { ...lens, columns: [{ key: "uri", label: null, link: { kind: "page", from: null, line: null, base: null, head: null } }] },
+  const linked: VizRun = {
+    config: { ...lens, columns: [{ key: "uri", label: null, link: { kind: "page", from: null, line: null, base: null, head: null } }] },
     params: {},
     result: run.result,
   };
@@ -154,8 +154,8 @@ test("a row's linked ref gets its kind's commands", async () => {
 
 // P6b.C5: a decorator's label follows a cell that links to its ref.
 test("a linked cell gets its ref's badges", async () => {
-  const linked: LensRun = {
-    lens: { ...lens, columns: [{ key: "uri", label: null, link: { kind: "page", from: null, line: null, base: null, head: null } }] },
+  const linked: VizRun = {
+    config: { ...lens, columns: [{ key: "uri", label: null, link: { kind: "page", from: null, line: null, base: null, head: null } }] },
     params: {},
     result: run.result,
   };

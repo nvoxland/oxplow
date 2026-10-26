@@ -12,7 +12,7 @@
  */
 import { useState } from "react";
 
-import type { LensRun } from "../api.js";
+import type { VizRun } from "../api.js";
 import { useLensActionRunner } from "./lensActionRunner.js";
 import { CommandConfirm } from "../components/CommandConfirm.js";
 import { Markdown } from "../components/Markdown/Markdown.js";
@@ -25,26 +25,26 @@ import { useFormSubmit } from "./useFormSubmit.js";
 
 /** The text a markdown lens shows: its `text` column of the first row,
  *  else the first column. */
-export function markdownText(run: LensRun): string {
+export function markdownText(run: VizRun): string {
   const { columns, rows } = run.result;
-  const named = run.lens.markdown?.text ?? null;
+  const named = run.config.markdown?.text ?? null;
   const at = named === null ? 0 : Math.max(0, columns.indexOf(named));
   const cell = rows[0]?.[at] ?? null;
   return cell === null ? "" : String(cell);
 }
 
-export function MarkdownViz({ run, streamId }: { run: LensRun; streamId: string | null }) {
-  const edit = run.lens.actions.find((a) => a.edit) ?? null;
+export function MarkdownViz({ run, streamId }: { run: VizRun; streamId: string | null }) {
+  const edit = run.config.actions.find((a) => a.edit) ?? null;
   const text = markdownText(run);
   if (!edit) return <Markdown value={text} testId="lens-markdown" />;
   return <MarkdownEditor run={run} streamId={streamId} action={edit} saved={text} />;
 }
 
-function MarkdownEditor({ run, streamId, action, saved }: { run: LensRun; streamId: string | null; action: PageAction; saved: string }) {
+function MarkdownEditor({ run, streamId, action, saved }: { run: VizRun; streamId: string | null; action: PageAction; saved: string }) {
   const comments = usePageComments();
   // What the person typed, this step of the tab's; null: untouched, the
   // editor shows the saved text, whatever it is now.
-  const [draft, setDraft, clearDraft] = useDraft<string | null>(`markdown:${run.lens.id}`, null);
+  const [draft, setDraft, clearDraft] = useDraft<string | null>(`markdown:${run.config.id}`, null);
   // Just saved: shown until the re-read brings it, so the editor doesn't
   // flash the text from before the save.
   const [justSaved, setJustSaved] = useState<{ text: string; over: string } | null>(null);
@@ -54,7 +54,7 @@ function MarkdownEditor({ run, streamId, action, saved }: { run: LensRun; stream
   const press = useLensActionRunner();
   const form = useFormSubmit(
     action.label,
-    (input, confirmed) => press(run.lens.id, action.id, run.params, row, streamId, confirmed, input),
+    (input, confirmed) => press(run.config.id, action.id, run.params, row, streamId, confirmed, input),
     (outcome) => {
       void outcome;
       clearDraft();

@@ -4,7 +4,7 @@ import { recordOpError } from "../opErrors.js";
 import { resolveLiveOrigin } from "../lens/linkOrigin.js";
 import { nodeById, nodeRunOf } from "../lens/nodeRun.js";
 import { usePageRunsStore, usePageRunWith } from "../pageRuns.js";
-import type { LensRun, PageRun } from "../tauri-bridge/generated/bindings.js";
+import type { VizRun, PageRun } from "../tauri-bridge/generated/bindings.js";
 import { identityOf, type LiveOrigin, type Origin, type OriginItem } from "./session.js";
 import type { TabRef } from "./tabState.js";
 
@@ -35,7 +35,7 @@ export function liveItemsOf(
 /** A live origin's list (a page node's link column, `<page>#<node>`) as
  *  its node's rows in the producing page's run; null when it names no
  *  node of a page, or the page no longer has the node. */
-export function liveOriginNodeRun(live: LiveOrigin, run: PageRun): LensRun | null {
+export function liveOriginNodeRun(live: LiveOrigin, run: PageRun): VizRun | null {
   const hash = live.lens.indexOf("#");
   if (hash < 0 || run.page.id !== live.lens.slice(0, hash)) return null;
   const node = nodeById(run.page, live.lens.slice(hash + 1));

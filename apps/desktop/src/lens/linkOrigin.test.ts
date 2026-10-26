@@ -30,7 +30,7 @@ test("one page makes no collection", () => {
 
 // The live list is the lens run now: its link column's pages, in row order.
 test("a lens run resolves to its link column's pages", () => {
-  const run = { lens: { columns: [{ key: "subject", link: { kind: "page", from: "uri" } }] }, result: { columns, rows } };
+  const run = { config: { columns: [{ key: "subject", link: { kind: "page", from: "uri" } }] }, result: { columns, rows } };
   expect(resolveLiveOrigin(run as never, "subject").map((i) => [i.ref.id, i.label])).toEqual([
     ["oxplow:oxplow/snapshot?id=3", "third"],
     ["oxplow:oxplow/snapshot?id=2", "second"],

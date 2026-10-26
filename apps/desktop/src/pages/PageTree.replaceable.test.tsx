@@ -50,7 +50,7 @@ test("an extension's page replaces it, run with the page's params", async () => 
         slots: [],
         commands: [],
         decorators: [],
-        replacements: [{ id: "x/work_item.board", extension: "x", target: "work_item.board", capability: "work_items", boundToProvider: false, lensId: "", pageId: "x/board", label: "board", version: 1, view: [] }],
+        replacements: [{ id: "x/work_item.board", extension: "x", target: "work_item.board", capability: "work_items", boundToProvider: false, page: "x/board", label: "board", version: 1, view: [] }],
       },
     },
   ];

@@ -35,7 +35,7 @@ test("a page node's live origin reads the node's rows of its page's run", async 
   const run = fakeRun(page, { loaders: { rows: loader(["k"], [["oxplow:oxplow/file?path=a"], ["oxplow:oxplow/file?path=b"]]) } });
   const out = liveOriginNodeRun({ lens: "acme/list#items", params: { q: 1 }, column: "k" }, run);
   expect(out?.result.rows.length).toBe(2);
-  expect(out?.lens.columns.map((c) => c.key)).toEqual(["k"]);
+  expect(out?.config.columns.map((c) => c.key)).toEqual(["k"]);
   // Another page's run, a node it no longer has, or no node named: none.
   expect(liveOriginNodeRun({ lens: "acme/other#items", params: {}, column: "k" }, run)).toBeNull();
   expect(liveOriginNodeRun({ lens: "acme/list#gone", params: {}, column: "k" }, run)).toBeNull();

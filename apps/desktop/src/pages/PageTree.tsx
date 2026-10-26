@@ -2,7 +2,7 @@
 /// the server resolved the tree (a switch to its child in view, an embed
 /// to its page's run), so this draws what `RunNode`s it was given, each
 /// looked up by id in the run's page. A viz node is drawn by the lens viz
-/// components (`LensResultView`) as the `LensRun` `nodeRunOf` makes of it,
+/// components (`LensResultView`) as the `VizRun` `nodeRunOf` makes of it,
 /// its actions pressed on the open run (`useNodeActions`).
 ///
 /// Every node's root carries `data-node` with its id (an embed's nodes
@@ -173,7 +173,7 @@ function NodeView(props: NodeViewProps) {
  * branch: terminals only start once their surface has a visible size. */
 function fillsNode(run: PageRun, at: RunNode): boolean {
   const def = nodeById(run.page, at.id);
-  if (def?.kind === "viz") return def.lens.fills;
+  if (def?.kind === "viz") return def.config.fills;
   return (def?.kind === "stack" || def?.kind === "switch") && at.children.some((child) => fillsNode(run, child));
 }
 
@@ -254,7 +254,7 @@ function NodeBody(props: NodeViewProps & { def: Node; id: string }) {
 function EmbeddedActions({ embed, node, runId, streamId }: { embed: PageRun; node: string; runId: string | null; streamId: string | null }) {
   const runner = useNodeActions(runId, node);
   const forms = useNodeForms(runId, node);
-  const target = useMemo(() => ({ lens: { id: embed.page.id }, params: embed.params }), [embed.page.id, embed.params]);
+  const target = useMemo(() => ({ config: { id: embed.page.id }, params: embed.params }), [embed.page.id, embed.params]);
   const actions = useLensActions(target, streamId, runner);
   const first = embed.page.loaders[0]?.name;
   const firstResult = first ? embed.loaders[first]?.result : undefined;
@@ -350,12 +350,12 @@ function useNodePages(run: PageRun, def: Node): VizPages {
   const forms = useContext(PageFormsContext);
   return useMemo(() => {
     const host = { pageRun: run, node: def, store, press, forms };
-    const custom = def.kind === "viz" && def.lens.viz === "custom";
+    const custom = def.kind === "viz" && def.config.viz === "custom";
     return {
       Expansion: PageExpansion,
       useBranches: (lensRun, open, streamId, maxRows) => usePageBranches(host, lensRun, open, streamId, maxRows),
       // A `custom` viz is fed every loader of its page, its own rows its run.
-      componentData: custom ? pageData(run, def.lens.custom?.props ?? null, nodeRunOf(run, def)) : null,
+      componentData: custom ? pageData(run, def.config.custom?.props ?? null, nodeRunOf(run, def)) : null,
     };
   }, [run, def, store, press, forms]);
 }

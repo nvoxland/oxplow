@@ -93,6 +93,9 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         .typ::<oxplow_domain::work_items::WorkItemsFeatures>()
         // `oxplow.collector.sync`'s result, read through `run_command`.
         .typ::<oxplow_app::collector_runner::CollectorRunReport>()
+        // One viz node's config with its loader's rows: what the desktop's
+        // viz components draw (`lens/nodeRun.ts` builds it from a page run).
+        .typ::<oxplow_app::extensions::VizRun>()
         .commands(collect_commands![
             // app
             commands::generated::app_version,

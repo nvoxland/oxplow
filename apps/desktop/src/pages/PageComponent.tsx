@@ -116,7 +116,7 @@ export function ComponentPage({
   readyTimeoutMs = READY_MS,
 }: {
   run: PageRun;
-  /** The stream whole (Save as Lens keeps it there), when the host has it. */
+  /** The stream whole (Save as VizConfig keeps it there), when the host has it. */
   stream: Stream | null;
   streamId: string | null;
   threadId: string | null;

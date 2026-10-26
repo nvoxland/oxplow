@@ -48,7 +48,7 @@
 import { ICONS } from "../icons.js";
 import { IpcCallError, needsConfirmation } from "../ipc-error.js";
 import { parseUri } from "../uri/uri.js";
-import type { CommandOutcome, LensRun, PageRun, SqlCell, SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
+import type { CommandOutcome, VizRun, PageRun, SqlCell, SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
 
 /// The protocol above, by number: bumped when a message's shape changes,
 /// with the served library (`crates/oxplow-daemon/assets/`). 2: `init`
@@ -93,7 +93,7 @@ export interface ShownRows {
 /** What a component is fed: its loaders' rows by name, the params they
  *  ran with, its props, and a `custom` viz's own rows as a lens run. */
 export interface HostedData {
-  run: LensRun | null;
+  run: VizRun | null;
   data: Record<string, ShownRows>;
   params: Record<string, SqlCell>;
   props: unknown;
@@ -108,14 +108,14 @@ const rowsOf = (r: SqlQueryResult, error: string | null = null): ShownRows => ({
 
 /** A lens's component's data: its own rows (`rows`), its params, its
  *  `custom.props`. */
-export function lensData(run: LensRun): HostedData {
-  return { run, data: { rows: rowsOf(run.result) }, params: run.params, props: run.lens.custom?.props ?? null };
+export function lensData(run: VizRun): HostedData {
+  return { run, data: { rows: rowsOf(run.result) }, params: run.params, props: run.config.custom?.props ?? null };
 }
 
 /** A page's component's data: every loader of `run`, its params, and
  *  `props` (a component node's own, or a `custom` viz's); `own` is a
  *  `custom` viz node's rows as a lens run. */
-export function pageData(run: PageRun, props: unknown, own: LensRun | null = null): HostedData {
+export function pageData(run: PageRun, props: unknown, own: VizRun | null = null): HostedData {
   const data: Record<string, ShownRows> = {};
   for (const [name, l] of Object.entries(run.loaders)) if (l) data[name] = rowsOf(l.result, l.error);
   return { run: own, data, params: run.params, props: props ?? null };

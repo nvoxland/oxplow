@@ -12,7 +12,7 @@ import { useEffect, useMemo, useState } from "react";
 import { streamRowId, threadRowId } from "../../modelIds.js";
 import { windowPageRuns, type PageRuns } from "../../pageRuns.js";
 import { pageFileUri } from "../../pages/pageFiles.js";
-import type { Extension, ExtensionPanel, LensParamOption, PageRun, PanelScope, SqlCell } from "../../tauri-bridge/generated/bindings.js";
+import type { Extension, ExtensionPanel, ChoiceOption, PageRun, PanelScope, SqlCell } from "../../tauri-bridge/generated/bindings.js";
 
 /** A part's open page run: what its actions are pressed on and what it drew. */
 export interface OpenPanelRun {
@@ -79,7 +79,7 @@ export const NO_CHOICES: PanelChoices = {};
 export interface PanelChoice {
   name: string;
   label: string | null;
-  options: LensParamOption[];
+  options: ChoiceOption[];
   value: string;
 }
 

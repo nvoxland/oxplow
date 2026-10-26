@@ -1,10 +1,10 @@
 import { expect, test } from "bun:test";
 
 import { IpcCallError } from "../ipc-error.js";
-import type { FormStart, PageAction, LensRun } from "../tauri-bridge/generated/bindings.js";
+import type { FormStart, PageAction, VizRun } from "../tauri-bridge/generated/bindings.js";
 import { actionOffered, offeredWholeLens, openAfterAction, performLensAction, promptField, rowRecord, type LensActionDeps } from "./lensActions.js";
 
-const run = { lens: { id: "acme/prs" }, params: { repo: "x" } } as unknown as LensRun;
+const run = { config: { id: "acme/prs" }, params: { repo: "x" } } as unknown as VizRun;
 const action: PageAction = { id: "finish", label: "Finish", command: "oxplow.work_item.transition", input: {}, row: false };
 
 function deps(fail?: Error, openPage: string | null = null) {
@@ -168,7 +168,7 @@ test("promptField says when its field is a secret", () => {
 });
 
 test("a whole-lens action is offered as a button; one over the lens's one row only while it has exactly one and `when` holds", () => {
-  const result = (rows: Array<Array<string | number | null>>) => ({ columns: ["title", "open"], rows }) as unknown as LensRun["result"];
+  const result = (rows: Array<Array<string | number | null>>) => ({ columns: ["title", "open"], rows }) as unknown as VizRun["result"];
   const plain: PageAction = { ...action };
   const oneRow: PageAction = { ...action, oneRow: true, when: "open" };
   // A row, group or edit action is not a whole-lens button.

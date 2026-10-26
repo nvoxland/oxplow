@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 
 import { IpcCallError } from "../ipc-error.js";
-import type { LensRun } from "../tauri-bridge/generated/bindings.js";
+import type { VizRun } from "../tauri-bridge/generated/bindings.js";
 import { componentBundleUrl, componentMayOpen, componentRefusal, createBridgeHost, initMessage, lensData, parseFrameMessage, tokensFromStyle, type HostedData } from "./componentBridge.js";
 
 // P6b.D4: a custom component talks to the host over a MessageChannel —
@@ -75,7 +75,7 @@ test("theme tokens carry the root's color-scheme, so the frame paints no opaque 
 // name, its params and props — and `update` says which loaders changed; a
 // page shows an inline page under it (`showView`) in place of a lens spec.
 test("init carries the run, the data, params, props and tokens, at protocol 12", () => {
-  const r = { lens: { id: "x/b", custom: { component: "b", props: { a: 1 } } }, params: { n: 2 }, result: { columns: ["k"], rows: [[1]], truncated: false } } as unknown as LensRun;
+  const r = { config: { id: "x/b", custom: { component: "b", props: { a: 1 } } }, params: { n: 2 }, result: { columns: ["k"], rows: [[1]], truncated: false } } as unknown as VizRun;
   expect(initMessage(lensData(r), { "--accent": "#08f" })).toEqual({
     type: "init",
     protocol: 12,
@@ -108,7 +108,7 @@ test("a component shown as a page gets its page, its view and the page's data, a
 
 // A replacement or a lens page's component: a lens's run, and its host's view.
 test("a component shown by a lens may have its host's view", () => {
-  const r = { lens: { id: "x/b" }, params: {}, result: { columns: [], rows: [], truncated: false } } as unknown as LensRun;
+  const r = { config: { id: "x/b" }, params: {}, result: { columns: [], rows: [], truncated: false } } as unknown as VizRun;
   const view = { viewParams: { q: "fix" }, historyState: {} };
   expect(initMessage(lensData(r), {}, null, view)).toMatchObject({ run: r, page: null, view });
 });
@@ -160,7 +160,7 @@ test("a page's calls parse: setTitle, setActions, openForm and querySql", () => 
   }
 });
 
-const run = { lens: { id: "x/burn" }, params: {}, result: { columns: [], rows: [], truncated: false } } as unknown as LensRun;
+const run = { config: { id: "x/burn" }, params: {}, result: { columns: [], rows: [], truncated: false } } as unknown as VizRun;
 const sent = lensData(run);
 
 /** A host over a real channel; what the frame side receives. */

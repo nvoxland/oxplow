@@ -105,7 +105,7 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
 
   // The page's own actions bind its params, pressed on the run with no
   // node; a command that asks is confirmed as a lens action's is.
-  const target = useMemo(() => ({ lens: { id: page?.id ?? "" }, params: run?.params ?? NO_PARAMS }), [page?.id, run?.params]);
+  const target = useMemo(() => ({ config: { id: page?.id ?? "" }, params: run?.params ?? NO_PARAMS }), [page?.id, run?.params]);
   const pageRunner = useNodeActions(runId, null);
   const pageForms = useNodeForms(runId, null);
   const actions = useLensActions(target, streamId, pageRunner);
@@ -315,7 +315,7 @@ const fillStyle: CSSProperties = { display: "flex", flexDirection: "column", fle
  *  says): the page gives its body every pixel. */
 function anyFills(run: PageRun): boolean {
   const walk = (n: Node): boolean =>
-    n.kind === "viz" ? n.lens.fills : n.kind === "stack" || n.kind === "grid" || n.kind === "switch" ? n.children.some(walk) : false;
+    n.kind === "viz" ? n.config.fills : n.kind === "stack" || n.kind === "grid" || n.kind === "switch" ? n.children.some(walk) : false;
   return walk(run.page.view);
 }
 
@@ -325,7 +325,7 @@ function anyFills(run: PageRun): boolean {
 function wide(run: PageRun): boolean {
   const walk = (n: Node): boolean =>
     n.kind === "grid" ||
-    (n.kind === "viz" && (n.lens.viz === "board" || n.lens.viz === "dashboard")) ||
+    (n.kind === "viz" && n.config.viz === "board") ||
     ((n.kind === "stack" || n.kind === "switch") && n.children.some(walk));
   return walk(run.page.view);
 }

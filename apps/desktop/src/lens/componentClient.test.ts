@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import type { LensRun } from "../tauri-bridge/generated/bindings.js";
+import type { VizRun } from "../tauri-bridge/generated/bindings.js";
 import { BRIDGE_PROTOCOL, createBridgeHost, initMessage, lensData, type BridgeDeps, type HostedData } from "./componentBridge.js";
 // The library the daemon serves to component bundles (P9.A4): the one
 // place it and the host are proven to speak the same protocol. It is a
@@ -10,7 +10,7 @@ await import("../../../../crates/oxplow-daemon/assets/oxplow-component.js");
 const { connect, PROTOCOL } = (globalThis as any).oxplow;
 
 const run = (n: number) =>
-  ({ lens: { id: "x/burn" }, params: {}, result: { columns: ["n"], rows: [[n]], truncated: false } }) as unknown as LensRun;
+  ({ config: { id: "x/burn" }, params: {}, result: { columns: ["n"], rows: [[n]], truncated: false } }) as unknown as VizRun;
 
 /** A frame's window (where `init` arrives) and the host on the other end
  *  of its channel, as `CustomComponentViz` wires them. */
@@ -33,7 +33,7 @@ function harness(deps: Partial<BridgeDeps> = {}, protocol: unknown = BRIDGE_PROT
   const frame = new EventTarget();
   // The `init` the host really sends (`CustomComponentViz` posts this
   // builder's message), so the library is proven against it (tsk856).
-  const first = { ...run(1), lens: { id: "x/burn", custom: { component: "burn", props: { color: "accent" } } } } as unknown as LensRun;
+  const first = { ...run(1), config: { id: "x/burn", custom: { component: "burn", props: { color: "accent" } } } } as unknown as VizRun;
   const init = () =>
     frame.dispatchEvent(
       Object.assign(new Event("message"), {
@@ -154,7 +154,7 @@ test("onUpdate hears new data until it unsubscribes, with the loaders that chang
   h.init();
   const c = await connecting;
   const seen: unknown[] = [];
-  const off = c.onUpdate((u: { run: LensRun; data: HostedData["data"]; changed: string[] }) => seen.push([u.run.result.rows, u.data.rows?.rows, u.changed]));
+  const off = c.onUpdate((u: { run: VizRun; data: HostedData["data"]; changed: string[] }) => seen.push([u.run.result.rows, u.data.rows?.rows, u.changed]));
   h.host.update(lensData(run(2)));
   await settle();
   expect(seen).toEqual([[[[2]], [[2]], ["rows"]]]);

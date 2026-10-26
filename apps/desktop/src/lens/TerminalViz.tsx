@@ -12,7 +12,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { useLensActionRunner } from "./lensActionRunner.js";
-import { recordUserInterrupt, runCommand, startAgentSession, startAgentSessionFresh, type LensRun, type SqlCell } from "../api.js";
+import { recordUserInterrupt, runCommand, startAgentSession, startAgentSessionFresh, type VizRun, type SqlCell } from "../api.js";
 import { CommandConfirm } from "../components/CommandConfirm.js";
 import { recordOpError } from "../opErrors.js";
 import { TerminalTabStrip } from "../terminal/TerminalTabStrip.js";
@@ -27,12 +27,12 @@ import { useLensStream } from "./LensStream.js";
 
 const fail = (label: string) => (e: unknown) => recordOpError({ label, message: e instanceof Error ? e.message : String(e) });
 
-export function TerminalViz({ run, onSetParam }: { run: LensRun; onSetParam?(name: string, value: SqlCell): void }) {
+export function TerminalViz({ run, onSetParam }: { run: VizRun; onSetParam?(name: string, value: SqlCell): void }) {
   const stream = useLensStream();
   const nav = useOptionalPageNavigation();
   const actions = useLensActions(run, stream?.id ?? null);
   const press = useLensActionRunner();
-  const t = run.lens.terminal;
+  const t = run.config.terminal;
   const { columns, rows } = run.result;
   const at = (row: SqlCell[], column: string | null | undefined) => (column ? row[columns.indexOf(column)] ?? null : null);
   const list = rows
@@ -57,7 +57,7 @@ export function TerminalViz({ run, onSetParam }: { run: LensRun; onSetParam?(nam
     };
   };
   // The pick is the lens's selection param; with none, the first.
-  const select = run.lens.columns.find((c) => c.select);
+  const select = run.config.columns.find((c) => c.select);
   const picked = select?.select ? run.params[select.select] : null;
   const active = list.find((r) => String(at(r.row, select?.key) ?? "") === String(picked ?? "")) ?? list[0] ?? null;
 
@@ -79,7 +79,7 @@ export function TerminalViz({ run, onSetParam }: { run: LensRun; onSetParam?(nam
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [list.length, stream?.id]);
 
-  const action = (id: string) => run.lens.actions.find((a) => a.id === id);
+  const action = (id: string) => run.config.actions.find((a) => a.id === id);
   const pick = (uri: string) => {
     const r = list.find((x) => x.uri === uri);
     if (r && select?.select) onSetParam?.(select.select, at(r.row, select.key));
@@ -118,7 +118,7 @@ export function TerminalViz({ run, onSetParam }: { run: LensRun; onSetParam?(nam
             const r = list.find((x) => x.uri === uri);
             const rename = action("rename");
             if (!r || !rename) return;
-            void press(run.lens.id, rename.id, run.params, rowRecord(columns, r.row), stream.id, false, { title }).catch(fail(rename.label));
+            void press(run.config.id, rename.id, run.params, rowRecord(columns, r.row), stream.id, false, { title }).catch(fail(rename.label));
           }}
         />
       ) : null}

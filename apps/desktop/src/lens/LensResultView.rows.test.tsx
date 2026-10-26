@@ -2,12 +2,12 @@ import { afterEach, expect, mock, test } from "bun:test";
 import { cleanup, fireEvent, render as rtlRender, waitFor } from "@testing-library/react";
 
 import type { ReactElement, ReactNode } from "react";
-import type { Lens, LensLink, LensRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
+import type { VizConfig, ColumnLink, VizRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
 import { LensActionRunnerContext, type LensActionRunner } from "./lensActionRunner.js";
 import { CONTEXT_REF_MIME } from "../dragMimes.js";
 import { PageNavigationContext, type PageNavigation } from "../tabs/PageNavigationContext.js";
 
-// Lens rows can be grouped under headings (with actions there),
+// A viz node's rows can be grouped under headings (with actions there),
 // styled from their own columns, and dragged into the agent's context.
 
 const realApi = await import("../api.js");
@@ -29,9 +29,9 @@ const render = (ui: ReactElement) => rtlRender(ui, { wrapper });
 
 afterEach(cleanup);
 
-const link = (kind: LensLink["kind"], from: string | null = null): LensLink => ({ kind, from, line: null, base: null, head: null });
+const link = (kind: ColumnLink["kind"], from: string | null = null): ColumnLink => ({ kind, from, line: null, base: null, head: null });
 
-const base: Lens = {
+const base: VizConfig = {
   id: "x/work",
   extension: "x",
   slug: "work",
@@ -67,9 +67,9 @@ const rows: SqlCell[][] = [
   ["In progress", "oxplow:oxplow/page?page=tasks", 2, "Child", "done", "warning", 1, 1, "oxplow:oxplow/work_item?id=tsk2&provider=oxplow"],
   ["Ready", null, 3, "Next", "todo", null, 0, 0, "oxplow:oxplow/work_item?id=tsk3&provider=oxplow"],
 ];
-const runOf = (lens: Partial<Lens>): LensRun =>
-  ({ lens: { ...base, ...lens }, params: {}, result: { columns, rows, truncated: false } }) as unknown as LensRun;
-const grouped: Partial<Lens> = {
+const runOf = (lens: Partial<VizConfig>): VizRun =>
+  ({ config: { ...base, ...lens }, params: {}, result: { columns, rows, truncated: false } }) as unknown as VizRun;
+const grouped: Partial<VizConfig> = {
   group: { by: "bucket", link: link("page", "bucket_ref") },
   emphasis: "on",
   depth: "d",
@@ -120,7 +120,7 @@ test("a group's heading shows its count and folds its rows", () => {
 // latest value, a short value as a pill in the column's tone.
 test("sparkline and badge formats draw a line and a pill", () => {
   const run = {
-    lens: {
+    config: {
       ...base,
       viz: "table",
       columns: [
@@ -131,7 +131,7 @@ test("sparkline and badge formats draw a line and a pill", () => {
     },
     params: {},
     result: { columns: ["title", "trend", "level", "hue"], rows: [["a", "[1,3,2,4]", "high", "danger"], ["b", "n/a", "low", null]], truncated: false },
-  } as unknown as LensRun;
+  } as unknown as VizRun;
   const view = render(<LensResultView run={run} onOpenPage={() => {}} />);
   const first = view.getByTestId("lens-row-0");
   expect(first.querySelector("[data-testid=lens-sparkline] svg")).not.toBeNull();
@@ -147,14 +147,14 @@ test("sparkline and badge formats draw a line and a pill", () => {
 // A line chart's targets column draws a target line on its series.
 test("a line's targets column draws each series' target line", () => {
   const run = {
-    lens: { ...base, viz: "line", chart: { x: "at", y: "v", series: null, label: null, size: null, group: null, targets: "goal" } },
+    config: { ...base, viz: "line", chart: { x: "at", y: "v", series: null, label: null, size: null, group: null, targets: "goal" } },
     params: {},
     result: { columns: ["at", "v", "goal"], rows: [[1, 1, 5], [2, 3, 5], [3, 2, 5]], truncated: false },
-  } as unknown as LensRun;
+  } as unknown as VizRun;
   const view = render(<LensResultView run={run} onOpenPage={() => {}} />);
   expect(view.getByTestId("lens-line").querySelectorAll("[data-testid=trend-target]")).toHaveLength(1);
   cleanup();
-  const none = render(<LensResultView run={{ ...run, lens: { ...run.lens, chart: { ...run.lens.chart!, targets: null } } }} onOpenPage={() => {}} />);
+  const none = render(<LensResultView run={{ ...run, config: { ...run.config, chart: { ...run.config.chart!, targets: null } } }} onOpenPage={() => {}} />);
   expect(none.getByTestId("lens-line").querySelector("[data-testid=trend-target]")).toBeNull();
 });
 
@@ -231,7 +231,7 @@ test("a tree's row click sets the param its column selects and marks the picked 
       columns: [{ key: "title", label: null, link: null, unit: null, icon: null, tone: null, select: "pick" }] as never,
     }),
     params: { pick: "Child" },
-  } as LensRun;
+  } as VizRun;
   const view = render(<LensResultView run={run} onOpenPage={() => {}} onSetParam={(n, v) => picked.push([n, v])} />);
   const nodes = view.getAllByTestId("lens-tree-row");
   fireEvent.click(nodes[0]!);
@@ -242,16 +242,6 @@ test("a tree's row click sets the param its column selects and marks the picked 
   expect(nodes[0]!.className).toContain("ox-clickable");
   fireEvent.click(view.getAllByRole("button", { name: "Collapse" })[0]!);
   expect(picked).toHaveLength(1);
-});
-
-test("a lens that needs a capability that isn't active says so instead of showing rows", () => {
-  const run = {
-    ...runOf(grouped),
-    inactive: { needs: ["work_items"], message: "Needs: Work list (choose one in Settings → Capabilities)." },
-  } as LensRun;
-  const view = render(<LensResultView run={run} compact onOpenPage={() => {}} />);
-  expect(view.getByTestId("lens-inactive").textContent).toContain("Needs: Work list");
-  expect(view.queryByTestId("lens-row-0")).toBeNull();
 });
 
 // A cell or heading that links to a ref opens it where its kind's page
@@ -279,14 +269,14 @@ test("a highlighted column marks its param's value in the cell, as elements", ()
   const run = {
     ...runOf({ columns: [{ key: "title", label: null, link: null, unit: null, highlight: "filter" }], params: [{ name: "filter", label: null, default: null, options: [] }] }),
     params: { filter: "ild" },
-  } as unknown as LensRun;
+  } as unknown as VizRun;
   const view = render(<LensResultView run={run} compact onOpenPage={() => {}} />);
   const marks = view.getByTestId("lens-row-1").querySelectorAll("mark.ox-mark");
   expect(Array.from(marks).map((m) => m.textContent)).toEqual(["ild"]);
   expect(view.getByTestId("lens-row-1").textContent).toContain("Child");
   // No value: plain text.
   cleanup();
-  const plain = render(<LensResultView run={{ ...run, params: { filter: "" } } as unknown as LensRun} compact onOpenPage={() => {}} />);
+  const plain = render(<LensResultView run={{ ...run, params: { filter: "" } } as unknown as VizRun} compact onOpenPage={() => {}} />);
   expect(plain.container.querySelector("mark")).toBeNull();
 });
 
@@ -305,7 +295,7 @@ test("a row click sets the param its column selects; a link in it doesn't", () =
       ] as never,
     }),
     params: { pick: "Child" },
-  } as LensRun;
+  } as VizRun;
   const view = render(<LensResultView run={run} onOpenPage={() => {}} onSetParam={(n, v) => picked.push([n, v])} />);
   fireEvent.click(view.getByTestId("lens-row-0"));
   fireEvent.keyDown(view.getByTestId("lens-row-2"), { key: "Enter" });
@@ -335,7 +325,7 @@ test("a pick passes the row it came from, labelled as its columns are", () => {
         { key: "status", label: "State", link: null, unit: null, icon: null, tone: null },
       ] as never,
     }),
-  } as LensRun;
+  } as VizRun;
   const view = render(<LensResultView run={run} onOpenPage={() => {}} onSetParam={(_n, _v, row) => rowsPicked.push(row)} />);
   fireEvent.click(view.getByTestId("lens-row-1"));
   expect(rowsPicked).toEqual([

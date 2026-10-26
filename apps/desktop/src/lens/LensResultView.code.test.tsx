@@ -1,7 +1,7 @@
 import { afterEach, expect, mock, test } from "bun:test";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
-import type { Lens, LensRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
+import type { VizConfig, VizRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
 import { PageNavigationContext, type PageNavigation } from "../tabs/PageNavigationContext.js";
 import type { TabRef } from "../tabs/tabState.js";
 
@@ -145,12 +145,12 @@ const base = {
   tool: null,
 };
 
-function run(lens: Partial<Lens>, columns: string[], rows: SqlCell[][]): LensRun {
+function run(lens: Partial<VizConfig>, columns: string[], rows: SqlCell[][]): VizRun {
   return {
-    lens: { ...base, ...lens },
+    config: { ...base, ...lens },
     params: {},
     result: { columns, rows, truncated: false, reads: { models: [], tables: [], measures: [] }, freshness: {} },
-  } as unknown as LensRun;
+  } as unknown as VizRun;
 }
 
 function nav(navigated: TabRef[]): PageNavigation {

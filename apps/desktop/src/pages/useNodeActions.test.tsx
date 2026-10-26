@@ -71,6 +71,6 @@ test("a submitted form runs its run again", async () => {
     submit: async () => ({ result: null, audit_id: null, event_id: null, inverse: null }) as never,
     actionStart: async () => ({}) as never,
   };
-  await nodeFormSource(forms, "run-2", "form", (id) => after.push(id)).submit({ lens: { id: "x" }, params: {} }, {}, null, false);
+  await nodeFormSource(forms, "run-2", "form", (id) => after.push(id)).submit({ config: { id: "x" }, params: {} }, {}, null, false);
   expect(after).toEqual(["run-2"]);
 });

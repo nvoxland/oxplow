@@ -2,7 +2,7 @@ import { afterEach, expect, mock, test } from "bun:test";
 import { act, cleanup, fireEvent, render as rtlRender, waitFor } from "@testing-library/react";
 import { useState, type ReactElement, type ReactNode } from "react";
 
-import type { PageAction, LensRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
+import type { PageAction, VizRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
 import { LensActionRunnerContext, type LensActionRunner } from "./lensActionRunner.js";
 import { PageNavigationContext, type PageNavigation, type TabEditing } from "../tabs/PageNavigationContext.js";
 import { PageCommentsContext } from "./pageComments.js";
@@ -59,9 +59,9 @@ const save = {
   editField: "body",
 } as unknown as PageAction;
 
-const runOf = (body: string, actions: PageAction[] = [save]): LensRun =>
+const runOf = (body: string, actions: PageAction[] = [save]): VizRun =>
   ({
-    lens: {
+    config: {
       id: "x/page",
       extension: "x",
       slug: "page",
@@ -76,7 +76,7 @@ const runOf = (body: string, actions: PageAction[] = [save]): LensRun =>
     },
     params: {},
     result: { columns: ["slug", "body"], rows: [["notes", body] as SqlCell[]], truncated: false, reads: { models: [], tables: [], measures: [] } },
-  }) as unknown as LensRun;
+  }) as unknown as VizRun;
 
 /** A tab whose history state keeps the draft. */
 function Tab({ state, children, setEditing }: { state: Record<string, unknown>; children: ReactNode; setEditing?: PageNavigation["setEditing"] }) {

@@ -1,6 +1,6 @@
 import { refTargetNow } from "../tabs/refOpener.js";
 import type { Origin, OriginItem } from "../tabs/session.js";
-import type { LensRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
+import type { VizRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
 import { cellLinkRef, displayColumns, type DisplayColumn } from "./lensModel.js";
 
 /**
@@ -24,8 +24,8 @@ export function linkOrigins(
 
 /** The collection `origin` names, run now: its lens's link column's pages,
  *  in row order. A page that needs a read to name (`refTarget`) is left out. */
-export function resolveLiveOrigin(run: LensRun, column: string): OriginItem[] {
-  const shown = displayColumns(run.lens, run.result.columns).find((c) => c.key === column);
+export function resolveLiveOrigin(run: VizRun, column: string): OriginItem[] {
+  const shown = displayColumns(run.config, run.result.columns).find((c) => c.key === column);
   return shown ? originItems(shown, run.result.rows, run.result.columns).items : [];
 }
 

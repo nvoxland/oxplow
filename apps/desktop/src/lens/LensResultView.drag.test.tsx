@@ -2,7 +2,7 @@ import { afterEach, expect, mock, test } from "bun:test";
 import { cleanup, createEvent, fireEvent, render as rtlRender, waitFor } from "@testing-library/react";
 
 import type { ReactElement, ReactNode } from "react";
-import type { Lens, PageAction, LensRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
+import type { VizConfig, PageAction, VizRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
 import { LENS_ROW_DRAG_MIME } from "../dragMimes.js";
 import { LensActionRunnerContext, type LensActionRunner } from "./lensActionRunner.js";
 import { PageNavigationContext, type PageNavigation } from "../tabs/PageNavigationContext.js";
@@ -78,8 +78,8 @@ const rows: SqlCell[][] = [
   ["u2", "Two", "todo"],
   ["u3", "Three", "done"],
 ];
-const runOf = (lens: Partial<Lens>): LensRun =>
-  ({ lens: { ...base, ...lens }, params: {}, result: { columns, rows, truncated: false, reads: { models: [], tables: [], measures: [] } } }) as unknown as LensRun;
+const runOf = (lens: Partial<VizConfig>): VizRun =>
+  ({ config: { ...base, ...lens }, params: {}, result: { columns, rows, truncated: false, reads: { models: [], tables: [], measures: [] } } }) as unknown as VizRun;
 const record = (i: number) => ({ uri: rows[i]![0], title: rows[i]![1], state: rows[i]![2] });
 
 /** A drag that carries what each `setData` set, for the drop to read. */
@@ -216,7 +216,7 @@ test("a right-click on a board card's title link opens the card's menu, not its 
   const withUris = {
     ...run,
     result: { ...run.result, rows: rows.map(([, title, state], i) => [`oxplow:oxplow/work_item?id=tsk${i + 1}&provider=oxplow`, title, state]) },
-  } as LensRun;
+  } as VizRun;
   const nav = { navigate: () => {}, openRef: (ref: string) => opened.push(ref) } as unknown as PageNavigation;
   const view = render(
     <PageNavigationContext.Provider value={nav}>

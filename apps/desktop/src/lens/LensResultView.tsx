@@ -2,7 +2,7 @@ import { useCollapsedSet, useDraft, type CollapsedSet } from "../tabs/useViewPar
 import { Approvals } from "../kit/Approvals.js";
 import type { PickedRow } from "../pages/railGroups.js";
 import { Fragment, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { commandOpenAfter, undoCommand, type LensRun, type SqlCell } from "../api.js";
+import { commandOpenAfter, undoCommand, type VizRun, type SqlCell } from "../api.js";
 import { FormSourceContext, useFormSource, type FormSource } from "./formSource.js";
 import { useVizPages } from "./vizPages.js";
 import { LensActionRunnerContext, useLensActionRunner, type LensActionRunner } from "./lensActionRunner.js";
@@ -123,8 +123,8 @@ export function LensResultView(props: LensResultViewProps) {
   // marked, dragged, counted.
   const pages = useVizPages();
   const useBranches = pages?.useBranches ?? noBranches;
-  const lazyOpen = useCollapsedSet(`lens-tree.open:${run.lens.id}`);
-  const lazy = run.lens.viz === "tree" && !!run.lens.tree?.lazy;
+  const lazyOpen = useCollapsedSet(`lens-tree.open:${run.config.id}`);
+  const lazy = run.config.viz === "tree" && !!run.config.tree?.lazy;
   const branches = useBranches(run, lazy ? lazyOpen.ids : [], streamId, props.maxRows);
   // A branch that is a run of its own (a page's) takes its rows' presses.
   const baseRunner = useLensActionRunner();
@@ -174,7 +174,7 @@ function LensResultBody(props: LensResultViewProps & { lazyOpen: CollapsedSet | 
   const { run, streamId = null, compact = false, lazyOpen, branches } = props;
   const actions = useLensActions(run, streamId);
   const marks = useMarks(run);
-  const tree: LazyTree | null = lazyOpen ? { nodes: lazyTreeNodes(run.lens, run.result, new Set(lazyOpen.ids), branches), open: lazyOpen } : null;
+  const tree: LazyTree | null = lazyOpen ? { nodes: lazyTreeNodes(run.config, run.result, new Set(lazyOpen.ids), branches), open: lazyOpen } : null;
   const shown = tree ? { ...run, result: { ...run.result, rows: drawnTreeRows(tree.nodes) } } : run;
   // A command's confirmation shows wherever the row is — an answer in the
   // strip, a grid child, a dashboard tile — not only where the toolbar is.
@@ -224,21 +224,21 @@ interface Marks {
 
 const NO_MARKS: { keys: string[]; anchor: number | null } = { keys: [], anchor: null };
 
-function useMarks(run: LensRun): Marks {
-  const [state, setState] = useHistoryState(`marked:${run.lens.id}`, NO_MARKS);
+function useMarks(run: VizRun): Marks {
+  const [state, setState] = useHistoryState(`marked:${run.config.id}`, NO_MARKS);
   return { keys: state.keys, anchor: state.anchor, set: (keys, anchor) => setState({ keys, anchor }) };
 }
 
 /** The marked rows of `run`, in its order, as records. */
-function markedRecords(run: LensRun, marks: Marks): Record<string, SqlCell>[] {
+function markedRecords(run: VizRun, marks: Marks): Record<string, SqlCell>[] {
   const set = new Set(marks.keys);
   return run.result.rows.filter((r) => set.has(rowKey(r))).map((r) => rowRecord(run.result.columns, r));
 }
 
 /** The bulk actions (`bulk: true`) the marked rows are offered: an action
  *  any of them is offered (`when`), run on those. */
-function bulkOffers(run: LensRun, marked: Record<string, SqlCell>[]): { action: DeclaredPageAction; rows: Record<string, SqlCell>[] }[] {
-  return run.lens.actions
+function bulkOffers(run: VizRun, marked: Record<string, SqlCell>[]): { action: DeclaredPageAction; rows: Record<string, SqlCell>[] }[] {
+  return run.config.actions
     .filter((a) => a.bulk)
     .map((action) => ({ action, rows: marked.filter((r) => actionOffered(action, r)) }))
     .filter((o) => o.rows.length > 0);
@@ -246,7 +246,7 @@ function bulkOffers(run: LensRun, marked: Record<string, SqlCell>[]): { action: 
 
 /** While rows are marked: how many, the bulk actions, and Clear — in place
  *  of the lens's own buttons. */
-function MarksBar({ run, actions, marks }: { run: LensRun; actions: LensActionsState; marks: Marks }) {
+function MarksBar({ run, actions, marks }: { run: VizRun; actions: LensActionsState; marks: Marks }) {
   const marked = markedRecords(run, marks);
   if (marked.length === 0) return null;
   return (
@@ -267,7 +267,7 @@ function MarksBar({ run, actions, marks }: { run: LensRun; actions: LensActionsS
 }
 
 interface LensResultViewProps {
-  run: LensRun;
+  run: VizRun;
   /** Where links go; without it they navigate through the route context. */
   onOpenPage?(ref: TabRef, opts?: { newTab?: boolean }): void;
   maxRows?: number;
@@ -386,8 +386,8 @@ export type LensActionsState = ReturnType<typeof useLensActions>;
 
 /** A part's whole-lens actions as buttons: no Copy, no marks. An editor's
  *  Save is the editor's own. */
-function PartButtons({ run, actions }: { run: LensRun; actions: LensActionsState }) {
-  const buttons = run.lens.actions.filter((a) => offeredWholeLens(a, run.result));
+function PartButtons({ run, actions }: { run: VizRun; actions: LensActionsState }) {
+  const buttons = run.config.actions.filter((a) => offeredWholeLens(a, run.result));
   if (buttons.length === 0) return null;
   return (
     <div data-testid="lens-part-actions" style={{ display: "flex", gap: 6, marginBottom: 6 }}>
@@ -402,16 +402,7 @@ function PartButtons({ run, actions }: { run: LensRun; actions: LensActionsState
 
 function LensBody(props: LensResultViewProps & { actions?: LensActionsState; marks?: Marks; tree?: LazyTree | null }) {
   const { run, streamId = null } = props;
-  // It needs a capability that isn't active: it didn't run, and says what
-  // it needs rather than showing nothing.
-  if (run.inactive) {
-    return (
-      <p data-testid="lens-inactive" style={{ color: "var(--text-secondary)" }}>
-        {run.inactive.message}
-      </p>
-    );
-  }
-  if (run.lens.viz === "form") return <FormViz run={run} streamId={streamId} />;
+  if (run.config.viz === "form") return <FormViz run={run} streamId={streamId} />;
   return <RowsBody {...props} />;
 }
 
@@ -430,7 +421,7 @@ function RowsBody({
   marks,
   tree = null,
 }: LensResultViewProps & { actions?: LensActionsState; marks?: Marks; tree?: LazyTree | null }) {
-  const lens = run.lens;
+  const lens = run.config;
   const limited = limitRows(run.result, maxRows);
   // The rows under a parent folded away (a `depth` lens: an epic's
   // children), kept in this step's history state like the groups'.
@@ -439,7 +430,7 @@ function RowsBody({
     const at = limited.columns.indexOf("uri");
     return at >= 0 && typeof row[at] === "string" ? (row[at] as string) : rowKey(row);
   };
-  const folding = foldedAway(run.lens, limited.columns, limited.rows, new Set(rowsClosed.ids), rowId);
+  const folding = foldedAway(run.config, limited.columns, limited.rows, new Set(rowsClosed.ids), rowId);
   const result = folding.hidden.size === 0 ? limited : { ...limited, rows: limited.rows.filter((r) => !folding.hidden.has(r)) };
   const picks = rowPicks(run, onSetParam);
   const ctxMenu = useContextMenu();
@@ -865,7 +856,7 @@ function RowsBody({
   return (
     <>
       {compact ? null : <ResultCompleteness result={result} />}
-      <LensViz {...{ run, result, lens, cols, cell, first, compact, streamId, onOpenPage, rowMenu, rowsView, onCustomFailure, onCustomReady, componentView, fitCustom, onSetParam }} tree={treeNodesDrawn ? { nodes: treeNodesDrawn, open: tree?.open ?? null } : null} />
+      <Viz {...{ run, result, lens, cols, cell, first, compact, streamId, onOpenPage, rowMenu, rowsView, onCustomFailure, onCustomReady, componentView, fitCustom, onSetParam }} tree={treeNodesDrawn ? { nodes: treeNodesDrawn, open: tree?.open ?? null } : null} />
       {ctxMenu.menu}
     </>
   );
@@ -888,13 +879,13 @@ interface RowLookOut {
 
 /** The param a lens's rows set when clicked (its column's `select`), if
  *  it has one and there's somewhere to set it. */
-function rowPicks(run: LensRun, onSetParam: LensResultViewProps["onSetParam"]) {
-  const column = run.lens.columns.find((c) => c.select);
+function rowPicks(run: VizRun, onSetParam: LensResultViewProps["onSetParam"]) {
+  const column = run.config.columns.find((c) => c.select);
   const index = column ? run.result.columns.indexOf(column.key) : -1;
   if (!onSetParam || !column?.select || index === -1) return null;
   const name = column.select;
   const current = run.params[name] ?? null;
-  const cols = displayColumns(run.lens, run.result.columns);
+  const cols = displayColumns(run.config, run.result.columns);
   // The row as the page's rail shows it: each column's label and text.
   const facts = (row: SqlCell[]) =>
     cols.map((c) => ({ label: c.label, text: formatCell(row[c.index] ?? null, c.unitIndex === null ? undefined : (row[c.unitIndex] ?? null), c.format) }));
@@ -1001,7 +992,7 @@ type RowMenu = (row: SqlCell[]) => {
   "aria-selected"?: boolean;
 };
 
-function LensViz({
+function Viz({
   run,
   result,
   lens,
@@ -1020,9 +1011,9 @@ function LensViz({
   tree,
   onSetParam,
 }: {
-  run: LensRun;
-  result: LensRun["result"];
-  lens: LensRun["lens"];
+  run: VizRun;
+  result: VizRun["result"];
+  lens: VizRun["config"];
   /** Set one of the page's params (a terminal picked). */
   onSetParam?(name: string, value: SqlCell, row?: PickedRow): void;
   cols: DisplayColumn[];
@@ -1118,7 +1109,7 @@ function LensViz({
  *  values; submitting runs the command as the lens, for the person, then
  *  goes where the command says (`ui.open_after`) as the form's `then`
  *  says. */
-function FormViz({ run, streamId }: { run: LensRun; streamId: string | null }) {
+function FormViz({ run, streamId }: { run: VizRun; streamId: string | null }) {
   const [start, setStart] = useState<FormStart | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [round, setRound] = useState(0);
@@ -1131,16 +1122,16 @@ function FormViz({ run, streamId }: { run: LensRun; streamId: string | null }) {
   // What the person typed is this step of the tab's (Back, Forward and a
   // restart give it back); null is untouched: the form shows the saved
   // values, whatever they are now. A secret is never in it.
-  const [draft, setDraft, clearDraft] = useDraft<Drafts | null>(`form:${run.lens.id}`, null);
+  const [draft, setDraft, clearDraft] = useDraft<Drafts | null>(`form:${run.config.id}`, null);
   const openAfter = useOpenAfter();
   const source = useFormSource();
   const paramsKey = JSON.stringify(run.params);
   // Its loader's rows: a page run re-read after a save (or a change
   // elsewhere) starts it from what is saved now.
   const rowsKey = JSON.stringify(run.result.rows);
-  const again = run.lens.form?.again ?? null;
+  const again = run.config.form?.again ?? null;
   const form = useFormSubmit(
-    run.lens.title,
+    run.config.title,
     (input, confirmed) => source.submit(run, input, streamId, confirmed),
     (outcome) => {
       // A fresh form for the next entry, started again from the current
@@ -1152,7 +1143,7 @@ function FormViz({ run, streamId }: { run: LensRun; streamId: string | null }) {
       // The second submit stays: it is for the next entry.
       setCarried(second ?? {});
       if (start && !second) {
-        void openAfterAction({ label: run.lens.title, command: start.command.id, then: run.lens.form?.then ?? "open" }, outcome, openAfter);
+        void openAfterAction({ label: run.config.title, command: start.command.id, then: run.config.form?.then ?? "open" }, outcome, openAfter);
       }
     },
   );
@@ -1171,7 +1162,7 @@ function FormViz({ run, streamId }: { run: LensRun; streamId: string | null }) {
     };
     // paramsKey and rowsKey stand in for `run.params` and its rows.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [run.lens.id, paramsKey, rowsKey, streamId, round, reload, source]);
+  }, [run.config.id, paramsKey, rowsKey, streamId, round, reload, source]);
   useRerunOnChange(start?.reads ?? NO_READS, () => setReload((n) => n + 1));
   const schema = useMemo(
     () => (start ? withSubfields(start.command.input_schema as Record<string, unknown>, start.subfields ?? {}) : null),
@@ -1179,12 +1170,12 @@ function FormViz({ run, streamId }: { run: LensRun; streamId: string | null }) {
   );
   if (error) return <div style={{ color: "var(--severity-critical)", fontSize: "var(--text-sm)" }}>{error}</div>;
   if (!start || !schema) return null;
-  const mode = run.lens.form?.mode ?? "create";
+  const mode = run.config.form?.mode ?? "create";
   return (
     <div data-testid="lens-form">
       {form.pending ? (
         <CommandConfirm
-          label={run.lens.title}
+          label={run.config.title}
           command={start.command.id}
           onConfirm={() => void form.submit(form.pending!, true)}
           onCancel={form.cancel}
@@ -1200,7 +1191,7 @@ function FormViz({ run, streamId }: { run: LensRun; streamId: string | null }) {
         choices={start.choices}
         serverErrors={form.serverErrors}
         mode={mode}
-        submitLabel={mode === "edit" ? undefined : run.lens.title}
+        submitLabel={mode === "edit" ? undefined : run.config.title}
         draft={draft}
         onDraft={setDraft}
         busy={form.busy}
@@ -1245,7 +1236,7 @@ export function ActionForm({
   const source = useFormSource();
   const form = useFormSubmit(
     action.label,
-    (input, confirmed) => pressAction(run.lens.id, action.id, run.params, row, streamId, confirmed, input),
+    (input, confirmed) => pressAction(run.config.id, action.id, run.params, row, streamId, confirmed, input),
     (outcome) => {
       onClose();
       void openAfterAction(action, outcome, openAfter);
@@ -1268,7 +1259,7 @@ export function ActionForm({
     };
     // rowKey stands in for `row`.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [run.lens.id, action.id, rowKey, streamId, source]);
+  }, [run.config.id, action.id, rowKey, streamId, source]);
   // Which shape opens is the form's to say: nothing until it is read.
   if (!start) return null;
   const submitLabel = action.label.replace(/…$/, "");
@@ -1384,7 +1375,7 @@ export function FormSlideover({
 
 /** The column a tree's labels are drawn as: its declared column (so its
  *  link, icon and tone apply), else the plain `tree.label` column. */
-function treeLabelColumn(lens: LensRun["lens"], cols: DisplayColumn[], resultColumns: string[]): DisplayColumn | null {
+function treeLabelColumn(lens: VizRun["config"], cols: DisplayColumn[], resultColumns: string[]): DisplayColumn | null {
   const key = lens.tree?.label;
   if (!key) return null;
   const declared = cols.find((c) => c.key === key);
@@ -1629,8 +1620,8 @@ function HunksViz({ rows, streamId, rowMenu }: { rows: ReturnType<typeof hunkRow
 }
 
 
-function LineViz({ run }: { run: LensRun }) {
-  const series = lineSeries(run.lens, run.result);
+function LineViz({ run }: { run: VizRun }) {
+  const series = lineSeries(run.config, run.result);
   return (
     <div data-testid="lens-line">
       {series.map((s) => (
@@ -1650,9 +1641,9 @@ const TREEMAP_PALETTE = Array.from({ length: 8 }, (_, i) => `var(--chart-${i + 1
 
 /** Two-level squarified treemap: groups first (by total size), then
  *  items inside each group. A tile follows the lens's first column link. */
-function TreemapViz({ run, onOpenPage }: { run: LensRun; onOpenPage?(ref: TabRef): void }) {
+function TreemapViz({ run, onOpenPage }: { run: VizRun; onOpenPage?(ref: TabRef): void }) {
   const nav = useOptionalPageNavigation();
-  const items = treemapItems(run.lens, run.result);
+  const items = treemapItems(run.config, run.result);
   const groups = new Map<string, typeof items>();
   for (const it of items) {
     const g = it.group ?? "";
@@ -1667,7 +1658,7 @@ function TreemapViz({ run, onOpenPage }: { run: LensRun; onOpenPage?(ref: TabRef
     TREEMAP_W,
     TREEMAP_H,
   );
-  const linkCol = run.lens.columns.find((c) => c.link);
+  const linkCol = run.config.columns.find((c) => c.link);
   const open = (row: SqlCell[]) => {
     if (!linkCol?.link) return;
     const ref = cellLinkRef(linkCol.link, linkCol.key, row, run.result.columns);

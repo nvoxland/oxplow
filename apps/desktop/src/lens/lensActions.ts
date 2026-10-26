@@ -5,7 +5,7 @@
 /// `.context/extensions.md`.
 import { fieldsOf, secretFields, shownFields, type Field } from "../components/SchemaForm/schemaFormModel.js";
 import { IpcCallError, needsConfirmation } from "../ipc-error.js";
-import type { CommandOutcome, Drop, FormStart, PageAction, LensRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
+import type { CommandOutcome, Drop, FormStart, PageAction, VizRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
 
 export interface LensActionDeps {
   /** Press it on the page run the viz is in. */
@@ -64,7 +64,7 @@ export function actionOffered(action: PageAction, row: Record<string, SqlCell>):
  *  (`oneRow`: `when` or `{{row.*}}`) only while the result has exactly one
  *  row and, if it has a `when`, that column is truthy on it. The server
  *  reads and checks the same row when it runs. */
-export function offeredWholeLens(action: PageAction, result: Pick<LensRun["result"], "columns" | "rows">): boolean {
+export function offeredWholeLens(action: PageAction, result: Pick<VizRun["result"], "columns" | "rows">): boolean {
   if (action.row || action.group || action.edit) return false;
   if (!action.oneRow) return true;
   if (result.rows.length !== 1) return false;
@@ -74,7 +74,7 @@ export function offeredWholeLens(action: PageAction, result: Pick<LensRun["resul
 /** What an action is pressed on: the lens (only its id) and the params it
  *  ran with. A page file's whole-page actions are pressed on its page. */
 export interface ActionTarget {
-  lens: Pick<LensRun["lens"], "id">;
+  config: Pick<VizRun["config"], "id">;
   params: Record<string, SqlCell>;
 }
 
@@ -88,7 +88,7 @@ export async function performLensAction(
   drop: Drop | null = null,
 ): Promise<LensActionOutcome> {
   try {
-    const outcome = await deps.press(run.lens.id, action.id, run.params, row, streamId, confirmed, drop);
+    const outcome = await deps.press(run.config.id, action.id, run.params, row, streamId, confirmed, drop);
     // A run that came back undoable offers its Undo.
     const auditId = outcome.inverse && outcome.audit_id != null ? outcome.audit_id : null;
     deps.toast(`${action.label}: done.`, auditId === null ? undefined : () => void deps.undo(auditId).catch((e: unknown) => deps.recordError(`Undo ${action.label}`, e instanceof Error ? e.message : String(e))));

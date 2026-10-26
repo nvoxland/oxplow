@@ -1,7 +1,7 @@
 import { afterEach, expect, mock, test } from "bun:test";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
-import type { LensRun } from "../tauri-bridge/generated/bindings.js";
+import type { VizRun } from "../tauri-bridge/generated/bindings.js";
 
 // tsk984: the host loads the component's bundle (its version) before it
 // shows a frame, and the frame is served that version.
@@ -33,12 +33,12 @@ afterEach(() => {
   version = "v-1";
 });
 
-const run = (custom: LensRun["lens"]["custom"]) =>
+const run = (custom: VizRun["lens"]["custom"]) =>
   ({
-    lens: { id: "x/burn", extension: "x", title: "Burn", custom },
+    config: { id: "x/burn", extension: "x", title: "Burn", custom },
     params: {},
     result: { columns: [], rows: [], truncated: false },
-  }) as unknown as LensRun;
+  }) as unknown as VizRun;
 
 const fallback = <div data-testid="the-table">table</div>;
 

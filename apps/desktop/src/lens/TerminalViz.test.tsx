@@ -1,7 +1,7 @@
 import { afterAll, afterEach, expect, mock, test } from "bun:test";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
-import type { LensRun, SqlCell, Stream } from "../api.js";
+import type { VizRun, SqlCell, Stream } from "../api.js";
 
 // The terminal viz: a terminal per row, all kept, the picked one shown;
 // with several, the strip picks (the lens's selection) and its menu
@@ -56,9 +56,9 @@ const stream = { id: "str1", worktree_path: "/w" } as Stream;
 const A = "oxplow:oxplow/terminal?id=trm1";
 const B = "oxplow:oxplow/terminal?id=trm2";
 
-function runOf(rows: SqlCell[][], picked: SqlCell = null): LensRun {
+function runOf(rows: SqlCell[][], picked: SqlCell = null): VizRun {
   return {
-    lens: {
+    config: {
       id: "oxplow-foundation/terminal",
       viz: "terminal",
       terminal: { of: "uri", title: "title", stopped: null, conversation: null },
@@ -71,10 +71,10 @@ function runOf(rows: SqlCell[][], picked: SqlCell = null): LensRun {
     },
     params: { stream_id: 1, terminal: picked },
     result: { columns: ["uri", "title", "terminal"], rows, truncated: false, reads: { models: [], tables: [], measures: [] } },
-  } as unknown as LensRun;
+  } as unknown as VizRun;
 }
 
-const view = (run: LensRun, onSetParam?: (n: string, v: SqlCell) => void) =>
+const view = (run: VizRun, onSetParam?: (n: string, v: SqlCell) => void) =>
   render(
     <LensActionRunnerContext.Provider value={press}>
       <LensStreamContext.Provider value={stream}>
@@ -128,7 +128,7 @@ test("the strip's Close runs the lens's close action on that row", async () => {
 test("an agent session's row is its agent: stopped and what it's bound to come from the row, Start runs its command", async () => {
   const S = "oxplow:oxplow/agent_session?id=ses4";
   const run = {
-    lens: {
+    config: {
       id: "oxplow-foundation/agent-session-terminal",
       viz: "terminal",
       terminal: { of: "uri", title: null, stopped: "stopped", conversation: "conversation", thread: "thread" },
@@ -138,7 +138,7 @@ test("an agent session's row is its agent: stopped and what it's bound to come f
     },
     params: { uri: S },
     result: { columns: ["uri", "thread", "stopped", "conversation"], rows: [[S, "oxplow:oxplow/thread?id=thr1", 1, "abc:0"]], truncated: false, reads: { models: [], tables: [], measures: [] } },
-  } as unknown as LensRun;
+  } as unknown as VizRun;
   const v = view(run);
   const pane = v.getByTestId(`view-${S}`);
   expect(pane.dataset.stopped).toBe("true");

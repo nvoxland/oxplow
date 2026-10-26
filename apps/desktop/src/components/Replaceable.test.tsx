@@ -95,7 +95,7 @@ const replacing = (name: string) => ({
     commands: [],
     decorators: [],
     replacements: [
-      { id: `${name}/work_item.board`, extension: name, target: "work_item.board", capability: "work_items", boundToProvider: false, lensId: "", pageId: `${name}/board`, label: "board", version: 1, view: [] },
+      { id: `${name}/work_item.board`, extension: name, target: "work_item.board", capability: "work_items", boundToProvider: false, page: `${name}/board`, label: "board", version: 1, view: [] },
     ],
   },
 });
@@ -109,7 +109,7 @@ const stating = (name: string) => ({
     commands: [],
     decorators: [],
     replacements: [
-      { id: `${name}/work_item.detail.state`, extension: name, target: "work_item.detail.state", capability: "work_items", boundToProvider: true, lensId: "", pageId: `${name}/state`, label: "state control", version: 1, view: [] },
+      { id: `${name}/work_item.detail.state`, extension: name, target: "work_item.detail.state", capability: "work_items", boundToProvider: true, page: `${name}/state`, label: "state control", version: 1, view: [] },
     ],
   },
 });
@@ -236,7 +236,7 @@ test("a replacement that can't load shows the core component and says why", asyn
 // A lens replacement is gone: one that names no page falls back, and says so.
 test("a replacement that names no page shows the core component and says why", async () => {
   const ext = replacing("x");
-  ext.ui.replacements[0] = { ...ext.ui.replacements[0]!, pageId: null } as never;
+  ext.ui.replacements[0] = { ...ext.ui.replacements[0]!, page: "" } as never;
   extensions = [ext];
   const view = render(board());
   const note = await waitFor(() => view.getByTestId("replacement-fallback"));
@@ -280,7 +280,7 @@ const graphing = (name: string) => ({
     commands: [],
     decorators: [],
     replacements: [
-      { id: `${name}/vcs.history.graph`, extension: name, target: "vcs.history.graph", capability: "vcs", boundToProvider: false, lensId: "", pageId: `${name}/graph`, label: "history graph", version: 2, view: ["q", "author", "branch"] },
+      { id: `${name}/vcs.history.graph`, extension: name, target: "vcs.history.graph", capability: "vcs", boundToProvider: false, page: `${name}/graph`, label: "history graph", version: 2, view: ["q", "author", "branch"] },
     ],
   },
 });
@@ -326,7 +326,7 @@ test("an effort's verdict is only ever an extension's", async () => {
       commands: [],
       decorators: [],
       replacements: [
-        { id: `${name}/effort.verdict`, extension: name, target: "effort.verdict", capability: "effort_policy", boundToProvider: false, lensId: "", pageId: `${name}/effort-verdict`, label: "effort verdict", version: 1, view: [] },
+        { id: `${name}/effort.verdict`, extension: name, target: "effort.verdict", capability: "effort_policy", boundToProvider: false, page: `${name}/effort-verdict`, label: "effort verdict", version: 1, view: [] },
       ],
     },
   });
@@ -370,7 +370,7 @@ test("a replacement that names a page draws that page with the target's props", 
     onReconnect: () => () => {},
   });
   const ext = replacing("x");
-  ext.ui.replacements[0] = { ...ext.ui.replacements[0]!, lensId: "", pageId: "x/board-page" } as never;
+  ext.ui.replacements[0] = { ...ext.ui.replacements[0]!, page: "x/board-page" } as never;
   extensions = [ext];
   const view = render(
     <Replaceable target="work_item.board" props={PROPS} streamId="str1" runs={runs} fallback={<div data-testid="core-board">oxplow's board</div>} />,
@@ -409,7 +409,7 @@ test("a page replacement is run with only the props its page declares", async ()
     onReconnect: () => () => {},
   });
   const ext = replacing("x");
-  ext.ui.replacements[0] = { ...ext.ui.replacements[0]!, lensId: "", pageId: "x/board-page" } as never;
+  ext.ui.replacements[0] = { ...ext.ui.replacements[0]!, page: "x/board-page" } as never;
   (ext as unknown as { pageFiles: unknown[] }).pageFiles = [page];
   extensions = [ext];
   const view = render(

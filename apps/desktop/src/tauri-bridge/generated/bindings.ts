@@ -6618,6 +6618,34 @@ export type VizMarkdown = {
 	text?: string | null,
 };
 
+/**
+ *  One viz node of a page run: its viz, the page's params and the rows
+ *  of the loader it shows.
+ */
+export type VizRun = VizRun_Serialize | VizRun_Deserialize;
+
+/**
+ *  One viz node of a page run: its viz, the page's params and the rows
+ *  of the loader it shows.
+ */
+export type VizRun_Deserialize = {
+	config: VizConfig_Deserialize,
+	/**  The parameter values actually used (supplied or default). */
+	params: { [key in string]: SqlCell },
+	result: SqlQueryResult,
+};
+
+/**
+ *  One viz node of a page run: its viz, the page's params and the rows
+ *  of the loader it shows.
+ */
+export type VizRun_Serialize = {
+	config: VizConfig_Serialize,
+	/**  The parameter values actually used (supplied or default). */
+	params: { [key in string]: SqlCell },
+	result: SqlQueryResult,
+};
+
 /**  `steps` viz: each step's text and status. */
 export type VizSteps = {
 	label: string | null,

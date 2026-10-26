@@ -1,11 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import type { Extension, Lens, LensRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
-import { rowMention, markParts, treeNodes, lazyTreeNodes, lazyTreeProblem, drawnTreeRows, wantedBranches, timelineEntries, stepItems, hunkRows, codeRows, diffRow, editorRow, embedRow, parseLines, mergeDirectory, barRows, lineSeries, sparklineValues, numericRowId, treemapItems, cellLinkRef, changedParams, offeredFilters, foldEmpty, foldedAway, displayColumns, formatCell, parseParamInput, limitRows, slugify, rowAssistantContext, effortRowId, isTimestamp, rowGroups, rowEmphasized, rowDepth, rowContextRef, rowTiles, tileSizeOf } from "./lensModel.js";
+import type { Extension, VizConfig, VizRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
+import { rowMention, markParts, treeNodes, lazyTreeNodes, lazyTreeProblem, drawnTreeRows, wantedBranches, timelineEntries, stepItems, hunkRows, codeRows, diffRow, editorRow, embedRow, parseLines, mergeDirectory, barRows, lineSeries, sparklineValues, numericRowId, treemapItems, cellLinkRef, changedParams, foldEmpty, foldedAway, displayColumns, formatCell, parseParamInput, limitRows, slugify, rowAssistantContext, effortRowId, isTimestamp, rowGroups, rowEmphasized, rowDepth, rowContextRef } from "./lensModel.js";
 import { formatMetricValue, formatShortDateTime } from "../components/format.js";
 import { diffSpecOf, duplicateBlockOf, isPage, lineOf, pagePayload } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
 
-const lens = (over: Partial<Lens> = {}): Lens => ({
+const lens = (over: Partial<VizConfig> = {}): VizConfig => ({
   id: "review/waiting",
   extension: "review",
   slug: "waiting",
@@ -423,7 +423,7 @@ describe("structure components (P6.A2)", () => {
     ["src", "", "src", 1],
     ["a.rs", "", "a.rs", 0],
   ]);
-  const loaded = (rows: (string | number | null)[][]) => ({ run: { lens: lazyLens, params: {}, result: level(rows) } as unknown as LensRun, error: null });
+  const loaded = (rows: (string | number | null)[][]) => ({ run: { lens: lazyLens, params: {}, result: level(rows) } as unknown as VizRun, error: null });
   const shape = (n: { label: string; branch: boolean; lazy: boolean; children: unknown[]; state: unknown }): unknown => ({
     label: n.label,
     branch: n.branch,
@@ -604,25 +604,6 @@ describe("a column that highlights a param", () => {
   });
 });
 
-// A form has no rows of its own: it is never "nothing found".
-describe("foldEmpty", () => {
-  const part = (viz: string) => ({ run: { lens: { viz, actions: [] }, result: { rows: [] } } as unknown as import("../tauri-bridge/generated/bindings.js").LensRun, error: null });
-  test("a form part is shown with no rows; an empty table folds", () => {
-    const { shown, empty } = foldEmpty([part("form"), part("table")]);
-    expect(shown.map((r) => r.run!.lens.viz)).toEqual(["form"]);
-    expect(empty.map((r) => r.run!.lens.viz)).toEqual(["table"]);
-  });
-  test("an empty list with a button above it (an Add) is shown; one with only row actions folds", () => {
-    const withActions = (actions: Array<{ row: boolean; group: string | null }>) => ({
-      run: { lens: { viz: "table", actions }, result: { rows: [] } } as unknown as import("../tauri-bridge/generated/bindings.js").LensRun,
-      error: null,
-    });
-    const { shown, empty } = foldEmpty([withActions([{ row: false, group: null }]), withActions([{ row: true, group: null }])]);
-    expect(shown).toHaveLength(1);
-    expect(empty).toHaveLength(1);
-  });
-});
-
 describe("sparkline and badge formats", () => {
   test("a series reads as its latest value; anything else as it is", () => {
     expect(formatCell("[1,2,3.5]", undefined, "sparkline")).toBe("3.5");
@@ -644,47 +625,8 @@ describe("sparkline and badge formats", () => {
   });
 });
 
-test("a row tile's size is one of the four, else its kind's default", () => {
-  expect(tileSizeOf("wide", "sql")).toBe("wide");
-  expect(tileSizeOf("huge", "sql")).toBe("small");
-  expect(tileSizeOf(null, "lens")).toBe("small");
-  expect(tileSizeOf(null, "text")).toBe("full");
-  expect(tileSizeOf("small", "text")).toBe("small");
-});
-
-test("a dashboard's rows are its tiles, each drawn by its lens, sql, metric or text", () => {
-  const run = {
-    lens: { tile: { id: "id", title: "title", size: "size", lens: "lens", sql: "sql", display: "display", chart: "chart", metric: "metric", viz: "viz", text: "text" } },
-    params: {},
-    result: {
-      columns: ["id", "title", "size", "lens", "sql", "display", "chart", "metric", "viz", "text"],
-      rows: [
-        ["dti1", null, "wide", "x/open", null, null, null, null, null, null],
-        ["dti2", "Bars", null, null, "SELECT 1", "bar", '{"x":"a","y":"b"}', null, null, null],
-        ["dti3", null, null, null, "SELECT 2", "metric", null, "loc", "number", null],
-        ["dti4", null, null, null, null, null, null, null, null, "Section"],
-        ["dti5", null, null, null, null, null, null, null, null, null],
-      ],
-    },
-  } as unknown as LensRun;
-  const tiles = rowTiles(run);
-  expect(tiles.map((t) => [t.id, t.kind, t.size])).toEqual([
-    ["dti1", "lens", "wide"],
-    ["dti2", "sql", "small"],
-    ["dti3", "metric", "small"],
-    ["dti4", "text", "full"],
-    ["dti5", "text", "full"],
-  ]);
-  expect(tiles[0]!.lens).toBe("x/open");
-  expect(tiles[1]).toMatchObject({ title: "Bars", sql: "SELECT 1", display: "bar", chart: { x: "a", y: "b", series: null } });
-  expect(tiles[2]).toMatchObject({ metric: "loc", viz: "number" });
-  expect(tiles[3]!.text).toBe("Section");
-  expect(tiles[0]!.record).toMatchObject({ id: "dti1", lens: "x/open" });
-  expect(rowTiles({ ...run, lens: { tile: null } } as unknown as LensRun)).toEqual([]);
-});
-
 describe("foldedAway", () => {
-  const lens = { depth: "d" } as unknown as import("../tauri-bridge/generated/bindings.js").Lens;
+  const lens = { depth: "d" } as unknown as import("../tauri-bridge/generated/bindings.js").VizConfig;
   const columns = ["uri", "d"];
   const rows = [["a", 0], ["a1", 1], ["a11", 2], ["b", 0], ["b1", 1]] as import("../tauri-bridge/generated/bindings.js").SqlCell[][];
   const id = (r: unknown[]) => String(r[0]);
@@ -707,4 +649,21 @@ describe("foldedAway", () => {
 
 test("a row that links nowhere is a mention of its page node's row", () => {
   expect(rowMention("acme/list#items", ["id", "n"], ["a", 2])).toBe('[oxplow page acme/list#items row: id="a", n=2] ');
+});
+describe("foldEmpty", () => {
+  const part = (viz: string) => ({ run: { config: { viz, actions: [] }, result: { rows: [] } } as unknown as import("../tauri-bridge/generated/bindings.js").VizRun, error: null });
+  test("a form part is shown with no rows; an empty table folds", () => {
+    const { shown, empty } = foldEmpty([part("form"), part("table")]);
+    expect(shown.map((r) => r.run!.config.viz)).toEqual(["form"]);
+    expect(empty.map((r) => r.run!.config.viz)).toEqual(["table"]);
+  });
+  test("an empty list with a button above it (an Add) is shown; one with only row actions folds", () => {
+    const withActions = (actions: Array<{ row: boolean; group: string | null }>) => ({
+      run: { config: { viz: "table", actions }, result: { rows: [] } } as unknown as import("../tauri-bridge/generated/bindings.js").VizRun,
+      error: null,
+    });
+    const { shown, empty } = foldEmpty([withActions([{ row: false, group: null }]), withActions([{ row: true, group: null }])]);
+    expect(shown).toHaveLength(1);
+    expect(empty).toHaveLength(1);
+  });
 });

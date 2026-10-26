@@ -108,7 +108,7 @@ const replacing = (name: string, target: string, page: string, label: string) =>
     commands: [],
     decorators: [],
     replacements: [
-      { id: `${name}/${target}`, extension: name, target, capability: "work_items", boundToProvider: false, lensId: "", pageId: `${name}/${page}`, label, version: 1, view: [] },
+      { id: `${name}/${target}`, extension: name, target, capability: "work_items", boundToProvider: false, page: `${name}/${page}`, label, version: 1, view: [] },
     ],
   },
 });
@@ -150,7 +150,7 @@ test("a work item's own provider's extension replaces its state control, not the
       commands: [],
       decorators: [],
       replacements: [
-        { id: `${name}/work_item.detail.state`, extension: name, target: "work_item.detail.state", capability: "work_items", boundToProvider: true, lensId: "", pageId: `${name}/state`, label: "state control", version: 1, view: [] },
+        { id: `${name}/work_item.detail.state`, extension: name, target: "work_item.detail.state", capability: "work_items", boundToProvider: true, page: `${name}/state`, label: "state control", version: 1, view: [] },
       ],
     },
   });

@@ -14,7 +14,7 @@ const page = readFileSync(join(dir, "index.html"), "utf8").replace(/<script[\s\S
 const script = readFileSync(join(dir, "app.js"), "utf8");
 
 const run = {
-  lens: { id: "triage/todo-board" },
+  config: { id: "triage/todo-board" },
   params: {},
   result: { columns: ["path", "line", "kind"], rows: [["src/lib.rs", 1, "bug"]], truncated: false },
 };

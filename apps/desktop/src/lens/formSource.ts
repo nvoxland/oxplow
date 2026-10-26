@@ -9,7 +9,7 @@ import type { CommandOutcome, FormStart, SqlCell } from "../tauri-bridge/generat
 
 /** What a form names: the viz (or page) and the params it runs with. */
 export interface FormTarget {
-  lens: { id: string };
+  config: { id: string };
   params: Record<string, SqlCell>;
 }
 

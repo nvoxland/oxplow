@@ -3,19 +3,16 @@ import { expect, test } from "bun:test";
 import { embedAt, nodeById, nodeRunOf } from "./nodeRun.js";
 import { fakePage, fakeRun, loader, node, stackPage, tablePage } from "../pages/testing/fakeRun.js";
 
-test("a viz node is a lens run over its loader's rows, with the run's params", () => {
+test("a viz node is a viz run over its loader's rows, with the run's params", () => {
   const run = { ...tablePage(), params: { q: "x" } };
   const viz = nodeById(run.page, "items")!;
   const lensRun = nodeRunOf(run, viz)!;
-  expect(lensRun.lens).toBe(viz.kind === "viz" ? viz.lens : null);
+  expect(lensRun.config).toBe(viz.kind === "viz" ? viz.config : null);
   expect(lensRun.params).toEqual({ q: "x" });
   expect(lensRun.result.rows).toEqual([
     ["a", "Alpha"],
     ["b", "Beta"],
   ]);
-  expect(lensRun.alert).toBeNull();
-  expect(lensRun.warnings).toEqual([]);
-  expect(lensRun.inactive).toBeNull();
 });
 
 test("a viz with no loader, or a loader that didn't run, has no rows", () => {

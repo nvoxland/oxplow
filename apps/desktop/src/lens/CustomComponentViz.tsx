@@ -10,7 +10,7 @@ import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 
 import { remoteBaseUrl } from "../tauri-bridge/transport.js";
-import type { LensRun } from "../tauri-bridge/generated/bindings.js";
+import type { VizRun } from "../tauri-bridge/generated/bindings.js";
 import { lensData, type HostedData } from "./componentBridge.js";
 import { ComponentFrame, CustomBadge, noteStyle, useComponentBundle } from "./ComponentFrame.js";
 import { useFrameForms } from "./frameForms.js";
@@ -28,7 +28,7 @@ export function CustomComponentViz({
   base = remoteBaseUrl(),
   readyTimeoutMs = 3000,
 }: {
-  run: LensRun;
+  run: VizRun;
   streamId: string | null;
   /** The lens's table: shown when the component can't be. */
   fallback: ReactNode;
@@ -51,14 +51,14 @@ export function CustomComponentViz({
   base?: string | null;
   readyTimeoutMs?: number;
 }) {
-  const component = run.lens.custom?.component ?? null;
+  const component = run.config.custom?.component ?? null;
   const fed = useMemo(() => data ?? lensData(run), [data, run]);
   // The component itself names every call: it acts as itself wherever
   // it is shown.
-  const componentKey = component ? `${run.lens.extension}/${component}` : null;
+  const componentKey = component ? `${run.config.extension}/${component}` : null;
   const { loadKey, version, src, error } = useComponentBundle(componentKey, base);
   // A lens's component may open forms and sign in, as a page's may.
-  const frameForms = useFrameForms(componentKey, run.lens.title);
+  const frameForms = useFrameForms(componentKey, run.config.title);
   // Why the frame at `src` was given up on; a new `src` starts afresh.
   const [failed, setFailed] = useState<{ src: string; reason: string } | null>(null);
   const reason =
@@ -95,7 +95,7 @@ export function CustomComponentViz({
   }
   return (
     <div data-testid="custom-component" style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1, minHeight: 0 }}>
-      <CustomBadge extension={run.lens.extension} />
+      <CustomBadge extension={run.config.extension} />
       {/* Keyed by its URL: another version (an edited bundle) mounts a new
           frame, whose first load is its own — never the old frame
           navigating away. */}
@@ -105,7 +105,7 @@ export function CustomComponentViz({
         version={version}
         component={componentKey ?? ""}
         data={fed}
-        title={run.lens.title}
+        title={run.config.title}
         streamId={streamId}
         readyTimeoutMs={readyTimeoutMs}
         onFail={(why) => setFailed({ src, reason: why })}

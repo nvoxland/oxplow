@@ -1,7 +1,7 @@
 import { afterEach, expect, mock, test } from "bun:test";
 import { cleanup, render } from "@testing-library/react";
 
-import type { Lens, LensRun, SourceCoverage, SqlCell } from "../tauri-bridge/generated/bindings.js";
+import type { VizConfig, VizRun, SourceCoverage, SqlCell } from "../tauri-bridge/generated/bindings.js";
 
 // A result that is cut short, or fed by a collector that hasn't kept up,
 // says so above its rows, whatever the viz.
@@ -16,7 +16,7 @@ const { LensResultView } = await import("./LensResultView.js");
 
 afterEach(cleanup);
 
-const lens = (viz: Lens["viz"]): Lens => ({
+const lens = (viz: VizConfig["viz"]): VizConfig => ({
   id: "x/work",
   extension: "x",
   slug: "work",
@@ -56,8 +56,8 @@ const failed: SourceCoverage = {
   error: "rate limited",
 };
 
-const run = (viz: Lens["viz"], over: { truncated?: boolean; coverage?: SourceCoverage[] }): LensRun => ({
-  lens: lens(viz),
+const run = (viz: VizConfig["viz"], over: { truncated?: boolean; coverage?: SourceCoverage[] }): VizRun => ({
+  config: lens(viz),
   params: {},
   result: {
     columns: ["title"],

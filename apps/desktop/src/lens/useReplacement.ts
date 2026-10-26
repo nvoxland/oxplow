@@ -117,7 +117,7 @@ export function useReplacement(
   const known = choices !== undefined && (!bound || owner !== undefined);
   const chosen =
     !known || decider === null || decider === undefined ? null : (candidates.find((c) => c.extension === decider) ?? null);
-  const page = chosen?.pageId ?? null;
+  const page = chosen?.page ?? null;
   useRerunOnChange(providerReads, () => void readProviders());
 
   // Usage is the evidence a kind needs to be promoted: once per

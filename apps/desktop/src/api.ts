@@ -40,9 +40,9 @@ import type {
   CommentStatus,
   CommentThread,
   Extension,
-  Lens,
-  LensRun,
-  LensViz,
+  VizConfig,
+  VizRun,
+  Viz,
   RecentProjectView,
   RoleBinding,
   ScriptServices,
@@ -64,7 +64,7 @@ export interface ProviderConfig {
   baseUrl: string | null;
 }
 export type { ServiceListing, ScriptServices };
-export type { Extension, Lens, LensRun, LensViz, SearchHit, SqlCell, SqlQueryResult };
+export type { Extension, VizConfig, VizRun, Viz, SearchHit, SqlCell, SqlQueryResult };
 
 /// Convert the tauri-specta {status, data|error} envelope into a
 /// plain promise return. Errors are usually IpcError objects with
