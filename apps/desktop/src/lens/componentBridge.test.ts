@@ -5,15 +5,11 @@ import type { LensRun } from "../tauri-bridge/generated/bindings.js";
 import { componentBundleUrl, componentMayOpen, componentRefusal, createBridgeHost, initMessage, lensData, parseFrameMessage, tokensFromStyle, type HostedData } from "./componentBridge.js";
 
 // P6b.D4: a custom component talks to the host over a MessageChannel —
-// three requests (query, invoke, navigate) and a `ready`; everything else
+// requests (invoke, navigate, …) and a `ready`; everything else
 // is refused.
 
-test("frame messages parse into the three requests and ready; anything else is refused", () => {
+test("frame messages parse into their requests and ready; anything else is refused", () => {
   expect(parseFrameMessage({ type: "ready" })).toEqual({ type: "ready" });
-  expect(parseFrameMessage({ id: "1", method: "query", asset: "open-tasks", params: { n: 1, s: "x", z: null } })).toEqual({
-    type: "request",
-    request: { id: "1", method: "query", asset: "open-tasks", params: { n: 1, s: "x", z: null } },
-  });
   expect(parseFrameMessage({ id: "2", method: "invoke", command: "oxplow.work_item.transition", input: { to: "done" } })).toEqual({
     type: "request",
     request: { id: "2", method: "invoke", command: "oxplow.work_item.transition", input: { to: "done" } },
@@ -32,11 +28,11 @@ test("frame messages parse into the three requests and ready; anything else is r
   });
   for (const bad of [
     null,
-    "query",
-    { method: "query", asset: "a", params: {} },
+    "invoke",
+    { method: "invoke", command: "a" },
     { id: "1", method: "exec", command: "x" },
-    { id: "1", method: "query", asset: "a", params: { n: { nested: true } } },
-    { id: "1", method: "query", params: {} },
+    // The frame's `query` is gone: protocol 12 has no such request.
+    { id: "1", method: "query", asset: "a", params: {} },
     { id: "1", method: "invoke", input: {} },
   ]) {
     expect(parseFrameMessage(bad)).toBeNull();
@@ -174,10 +170,6 @@ function harness(deps: Partial<Parameters<typeof createBridgeHost>[1]> = {}) {
   channel.port2.onmessage = (e) => received.push(e.data);
   const calls: unknown[][] = [];
   const host = createBridgeHost(channel.port1, {
-    query: async (asset, params) => {
-      calls.push(["query", asset, params]);
-      return run;
-    },
     invoke: async (command, input, confirmed) => {
       calls.push(["invoke", command, input, confirmed]);
       if (!confirmed) throw new IpcCallError("needs confirmation", "NEEDS_CONFIRMATION");
@@ -195,16 +187,6 @@ function harness(deps: Partial<Parameters<typeof createBridgeHost>[1]> = {}) {
   const settle = () => new Promise((r) => setTimeout(r, 20));
   return { received, calls, send, settle, channel, host };
 }
-
-test("a query runs the declared lens through the host and answers ok", async () => {
-  const h = harness();
-  h.send({ type: "ready" });
-  h.send({ id: "q1", method: "query", asset: "open-tasks", params: { n: 1 } });
-  await h.settle();
-  expect(h.calls).toEqual([["ready"], ["query", "open-tasks", { n: 1 }]]);
-  expect(h.received).toEqual([{ id: "q1", ok: true, result: run }]);
-  h.channel.port1.close();
-});
 
 test("an invoke that asks is confirmed in the host, then runs confirmed; declined, it's CANCELLED", async () => {
   const yes = harness();
@@ -251,7 +233,6 @@ test("ready is heard once; an update posts only what the frame hasn't seen, nami
     props: null,
   };
   const host = createBridgeHost(h.channel.port1, {
-    query: async () => run,
     invoke: async () => ({ result: null, audit_id: 1, event_id: null, inverse: null }),
     navigate: () => {},
     confirm: async () => true,

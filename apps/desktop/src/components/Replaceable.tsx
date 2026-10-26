@@ -1,7 +1,6 @@
 import type { CSSProperties, ReactNode } from "react";
 
 import type { SqlCell } from "../api.js";
-import { LensResultView } from "../lens/LensResultView.js";
 import { HostedViewContext, useHostedView } from "../lens/hostedView.js";
 import { useReplacement } from "../lens/useReplacement.js";
 import { usePageRunsStore, usePageRunWith, type PageRuns } from "../pageRuns.js";
@@ -14,7 +13,7 @@ import type { TabRef } from "../tabs/tabState.js";
  * A core sub-component an extension may replace (P9.A1,
  * `.context/extensions.md` → "Replacements"): `fallback` is oxplow's own,
  * shown unless the extension of the provider it is for — `provider`, or
- * the capability's active one — replaces it; then its lens renders
+ * the capability's active one — replaces it; then its page renders
  * instead, given `props` (the target's contract) and, for a custom
  * component, the host page's view params its contract lists (`view`:
  * Git History's filters for the history graph) — nothing else of the
@@ -44,7 +43,7 @@ export function Replaceable({
   /** The page runs a page replacement opens (the window's; a test's fake). */
   runs?: PageRuns;
 }) {
-  const r = useReplacement(target, props, streamId, provider);
+  const r = useReplacement(target, streamId, provider);
   // A page replacement: one run of it, its params the target's props
   // (the run is shared by key, so a fresh key object each render is fine).
   const store = usePageRunsStore();
@@ -54,7 +53,7 @@ export function Replaceable({
   const replacementPage = r.state === "page" ? (extensions ?? []).flatMap((e) => (e.enabled ? (e.pageFiles ?? []) : [])).find((p) => p.id === r.page) : undefined;
   const pageParams = replacementPage ? declaredParams(replacementPage, props) : props;
   const pageRun = usePageRunWith(runs ?? store, r.state === "page" ? { page: r.page, params: pageParams, streamId, threadId: null } : null);
-  const view = useHostedView({ keys: r.state === "replaced" || r.state === "page" ? r.replacement.view : NO_KEYS, scope: target });
+  const view = useHostedView({ keys: r.state === "page" ? r.replacement.view : NO_KEYS, scope: target });
   if (r.state === "pending") return null;
   if (r.state === "core") return <>{fallback}</>;
   const extension = r.replacement.extension;
@@ -67,26 +66,16 @@ export function Replaceable({
     </>
   );
   if (r.state === "failed") return failed(sentence(r.message));
-  if (r.state === "page") {
-    if (pageRun.error) return failed(sentence(pageRun.error));
-    return (
-      <div data-testid={`replacement-${target}`} style={replacedStyle}>
-        {badge(extension, r.replacement.label)}
-        {pageRun.run ? (
-          // Its components share the view its target's contract lists.
-          <HostedViewContext.Provider value={view}>
-            <PageTree run={pageRun.run} runId={pageRun.runId} streamId={streamId} onOpenPage={onOpenPage} />
-          </HostedViewContext.Provider>
-        ) : null}
-      </div>
-    );
-  }
+  if (pageRun.error) return failed(sentence(pageRun.error));
   return (
     <div data-testid={`replacement-${target}`} style={replacedStyle}>
       {badge(extension, r.replacement.label)}
-      {/* A custom component that can't load says so here, and the whole
-          replacement gives way to oxplow's own above (tsk855). */}
-      <LensResultView run={r.run} streamId={streamId} onOpenPage={onOpenPage} onCustomFailure={r.fail} onCustomReady={r.shown} componentView={view} />
+      {pageRun.run ? (
+        // Its components share the view its target's contract lists.
+        <HostedViewContext.Provider value={view}>
+          <PageTree run={pageRun.run} runId={pageRun.runId} streamId={streamId} onOpenPage={onOpenPage} />
+        </HostedViewContext.Provider>
+      ) : null}
     </div>
   );
 }

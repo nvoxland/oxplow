@@ -6,7 +6,6 @@ import { selectionUri } from "../../agent-context-ref.js";
 import { addToContext } from "../../contextBasket.js";
 import { diffAskTarget } from "./diffAsk.js";
 import { askAssistant } from "../Assistant/assistantSession.js";
-import { DiffFileHeaderSlot } from "./DiffFileHeaderSlot.js";
 import { useMonacoViewState } from "../useMonacoViewState.js";
 
 export interface DiffSpec {
@@ -294,7 +293,6 @@ export function DiffPane({ streamId, spec, visible, onJumpToSource }: Props) {
           Open file
         </button>
       </div>
-      <DiffFileHeaderSlot streamId={streamId} spec={spec} />
       <div
         ref={hostRef}
         style={{

@@ -7,7 +7,6 @@
 ///
 ///   frame → host  { type: "ready" }
 ///                 { type: "size", height }                   its content's height
-///                 { id, method: "query", asset, params }     a declared lens's run (a lens's component)
 ///                 { id, method: "invoke", command, input }   a declared command
 ///                 { id, method: "navigate", uri, newTab, replace }    open a page
 ///                 { id, method: "querySql", sql, params }    its own SQL (`sql: read`)
@@ -163,7 +162,6 @@ export interface ViewInit {
 }
 
 export type BridgeRequest =
-  | { id: string; method: "query"; asset: string; params: Record<string, SqlCell> }
   | { id: string; method: "invoke"; command: string; input: unknown }
   | { id: string; method: "navigate"; uri: string; newTab: boolean; replace: boolean }
   | { id: string; method: "querySql"; sql: string; params: SqlCell[] }
@@ -194,12 +192,6 @@ export function parseFrameMessage(data: unknown): FrameMessage | null {
   }
   if (typeof m.id !== "string" || !m.id) return null;
   switch (m.method) {
-    case "query": {
-      const params = m.params ?? {};
-      if (typeof m.asset !== "string" || !params || typeof params !== "object" || Array.isArray(params)) return null;
-      if (!Object.values(params).every(isCell)) return null;
-      return { type: "request", request: { id: m.id, method: "query", asset: m.asset, params: params as Record<string, SqlCell> } };
-    }
     case "invoke":
       if (typeof m.command !== "string") return null;
       return { type: "request", request: { id: m.id, method: "invoke", command: m.command, input: m.input ?? {} } };
@@ -333,8 +325,6 @@ export function initMessage(fed: HostedData, tokens: Record<string, string>, pag
 }
 
 export interface BridgeDeps {
-  /** Run a declared lens (`run_component_query`). */
-  query(asset: string, params: Record<string, SqlCell>): Promise<LensRun>;
   /** Run a declared command as the lens for the person. */
   invoke(command: string, input: unknown, confirmed: boolean): Promise<CommandOutcome>;
   /** Open `ref`'s page, in a new tab when asked; false when it isn't one
@@ -441,13 +431,6 @@ export function createBridgeHost(
   };
   const handle = async (r: BridgeRequest) => {
     switch (r.method) {
-      case "query":
-        try {
-          reply(r.id, await deps.query(r.asset, r.params));
-        } catch (e) {
-          failWith(r.id, e);
-        }
-        return;
       case "invoke":
         try {
           reply(r.id, (await deps.invoke(r.command, r.input, false)).result);

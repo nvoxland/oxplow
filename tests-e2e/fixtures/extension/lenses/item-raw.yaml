@@ -1,7 +1,0 @@
-title: Item (raw)
-description: A second renderer of an `oxplow:e2e/item?id=<n>` URI, showing the bare URI.
-params: [{ name: uri }]
-query: SELECT :uri AS raw_uri
-viz: table
-empty: No such item.
-hidden: true

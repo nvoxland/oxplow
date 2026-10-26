@@ -2,8 +2,8 @@ manifest: 2
 name: e2e
 intent:
   purpose: >-
-    The browser suite's extension: a fake work-item tracker, an effect, a
-    lens with its page, and a resource, so specs drive each through the UI.
+    The browser suite's extension: a fake work-item tracker, an effect, its
+    pages, and a resource, so specs drive each through the UI.
   origin: null
   examples: []
 # Its providers run programs, its effect reads with its own SQL and
@@ -42,10 +42,6 @@ models:
     columns:
       - { name: uri, type: TEXT, doc: "`oxplow:e2e/item?id=<n>`." }
       - { name: title, type: TEXT, doc: "The item's title." }
-pages:
-  - { id: item, title: Item, for: e2e/item, default: true, lens: item }
-  - { id: item-raw, title: Item (raw), for: e2e/item, lens: item-raw }
-  - { id: overview, title: Item overview, category: Work, lens: overview }
 resources:
   - name: item
     label: Item

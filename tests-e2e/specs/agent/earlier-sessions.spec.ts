@@ -52,7 +52,9 @@ test("a closed session found by search opens its transcript, which can reopen it
   // Its transcript (it has no turns yet, so nothing is listed), not a tab
   // that isn't there; Reopen brings the session back.
   await expect(page.getByTestId(`center-tab-oxplow:oxplow/agent_session?id=${id}`)).toHaveCount(0);
-  await page.getByTestId("action-lens-action-reopen").click();
+  const transcript = page.locator('[data-testid^="center-tab-body-oxplow:oxplow/page?page=session-transcript"]');
+  await transcript.getByTestId("page-nav-menu").click();
+  await page.getByTestId("menu-item-action-page-action-reopen").click();
   await expect(page.getByTestId(`center-tab-oxplow:oxplow/agent_session?id=${id}`)).toBeVisible();
 });
 

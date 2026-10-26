@@ -32,13 +32,6 @@ mock.module("../../api.js", () => ({
       ui: { slots: [], commands: [], decorators: [], replacements: [] },
     },
   ],
-  runLens: async (id: string) => ({
-    lens: { id, viz: "list", params: [], columns: [], actions: [] },
-    params: {},
-    result: { columns: [], rows: [], truncated: false, reads: { models: [], tables: [], measures: [] }, freshness: [] },
-    alert: null,
-    warnings: [],
-  }),
   listCommentsForStream: async () => [],
   subscribeCommentEvents: () => () => {},
   subscribeOxplowEvents: () => () => {},

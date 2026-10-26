@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
-import { fileRef, lensRef, lineView, pageTabRef, wikiPageRef, withViewParams } from "./pageRefs.js";
-import { lensUri, pageUri, wikiUri } from "../uri/uri.js";
+import { fileRef, lineView, pageTabRef, wikiPageRef, withViewParams } from "./pageRefs.js";
+import { pageUri, wikiUri } from "../uri/uri.js";
 import {
   activate,
   back,
@@ -130,33 +130,33 @@ describe("navigate in a page's own view", () => {
   test("a filter replaces the entry in place, keeping its state, its origin and both directions", () => {
     let s = open(emptySession(), e(a));
     const slot = s.active!;
-    s = navigate(s, slot, e(lensRef("x/y"), { historyState: { scroll: 40 } }));
+    s = navigate(s, slot, e(pageTabRef("x/y"), { historyState: { scroll: 40 } }));
     s = navigate(s, slot, e(c));
     s = back(s, slot);
-    s = navigate(s, slot, e(lensRef("x/y", {}, { range: "7d" })), { replace: true });
+    s = navigate(s, slot, e(pageTabRef("x/y", {}, { range: "7d" })), { replace: true });
     const tab = s.tabs[0]!;
-    expect(current(tab).ref.id).toBe("oxplow:oxplow/lens?lens=x/y#range=7d");
+    expect(current(tab).ref.id).toBe("oxplow:oxplow/page?page=x/y#range=7d");
     expect(current(tab).historyState).toEqual({ scroll: 40 });
-    expect(tab.entries.map((x) => x.ref.id)).toEqual(["oxplow:oxplow/wiki?slug=a", "oxplow:oxplow/lens?lens=x/y#range=7d", "oxplow:oxplow/wiki?slug=c"]);
+    expect(tab.entries.map((x) => x.ref.id)).toEqual(["oxplow:oxplow/wiki?slug=a", "oxplow:oxplow/page?page=x/y#range=7d", "oxplow:oxplow/wiki?slug=c"]);
   });
 
   test("a selection's entry starts with the page's state, so open sections stay open", () => {
-    let s = open(emptySession(), e(lensRef("x/y"), { historyState: { collapsed: ["files"] } }));
-    s = navigate(s, s.active!, e(lensRef("x/y", {}, { commit: "abc" })));
+    let s = open(emptySession(), e(pageTabRef("x/y"), { historyState: { collapsed: ["files"] } }));
+    s = navigate(s, s.active!, e(pageTabRef("x/y", {}, { commit: "abc" })));
     expect(current(s.tabs[0]!).historyState).toEqual({ collapsed: ["files"] });
   });
 
   test("a selection pushes: Back returns to the page without it", () => {
-    let s = open(emptySession(), e(lensRef("x/y")));
+    let s = open(emptySession(), e(pageTabRef("x/y")));
     const slot = s.active!;
-    s = navigate(s, slot, e(lensRef("x/y", {}, { commit: "abc" })));
-    expect(ids(s)).toEqual(["oxplow:oxplow/lens?lens=x/y#commit=abc"]);
-    expect(ids(back(s, slot))).toEqual(["oxplow:oxplow/lens?lens=x/y"]);
+    s = navigate(s, slot, e(pageTabRef("x/y", {}, { commit: "abc" })));
+    expect(ids(s)).toEqual(["oxplow:oxplow/page?page=x/y#commit=abc"]);
+    expect(ids(back(s, slot))).toEqual(["oxplow:oxplow/page?page=x/y"]);
   });
 
   test("another resource of the same lens is another page, starting afresh", () => {
-    let s = open(emptySession(), e(lensRef("x/y", { stream_id: 1 }), { historyState: { scroll: 9 } }));
-    s = navigate(s, s.active!, e(lensRef("x/y", { stream_id: 2 })));
+    let s = open(emptySession(), e(pageTabRef("x/y", { stream_id: 1 }), { historyState: { scroll: 9 } }));
+    s = navigate(s, s.active!, e(pageTabRef("x/y", { stream_id: 2 })));
     expect(current(s.tabs[0]!).historyState).toBeUndefined();
     expect(bodies(s.tabs[0]!)).toHaveLength(2);
   });
@@ -213,17 +213,17 @@ describe("bodies: what stays mounted", () => {
   // Every page is a function of its entry: one body per page, whatever its
   // view params, so a filter or a pick re-renders it and never remounts it.
   test("entries of one page share one body, which shows the current one", () => {
-    let s = open(emptySession(), e(lensRef("x/y")));
+    let s = open(emptySession(), e(pageTabRef("x/y")));
     const slot = s.active!;
-    s = navigate(s, slot, e(lensRef("x/y", {}, { commit: "abc" })));
+    s = navigate(s, slot, e(pageTabRef("x/y", {}, { commit: "abc" })));
     s = navigate(s, slot, e(a));
     const out = bodies(s.tabs[0]!);
-    expect(out.map((x) => x.key)).toEqual([`${slot}/${lensUri("x/y")}`, `${slot}/${wikiUri("a")}`]);
+    expect(out.map((x) => x.key)).toEqual([`${slot}/${pageUri("x/y")}`, `${slot}/${wikiUri("a")}`]);
     // The lens body shows its nearest entry: the one with the commit.
-    expect(out[0]!.entry.ref.id).toBe("oxplow:oxplow/lens?lens=x/y#commit=abc");
+    expect(out[0]!.entry.ref.id).toBe("oxplow:oxplow/page?page=x/y#commit=abc");
     expect(out.map((x) => x.current)).toEqual([false, true]);
     s = back(s, slot);
-    expect(bodies(s.tabs[0]!)[0]!).toMatchObject({ current: true, entry: { ref: { id: "oxplow:oxplow/lens?lens=x/y#commit=abc" } } });
+    expect(bodies(s.tabs[0]!)[0]!).toMatchObject({ current: true, entry: { ref: { id: "oxplow:oxplow/page?page=x/y#commit=abc" } } });
   });
 
   test("a built-in page is one body across its view too", () => {
@@ -234,7 +234,7 @@ describe("bodies: what stays mounted", () => {
   });
 
   test("identityOf is the URI without its view", () => {
-    expect(identityOf("oxplow:oxplow/lens?lens=x/y&stream_id=2#q=a&range=7d")).toBe("oxplow:oxplow/lens?lens=x/y&stream_id=2");
+    expect(identityOf("oxplow:oxplow/page?page=x/y&stream_id=2#q=a&range=7d")).toBe("oxplow:oxplow/page?page=x/y&stream_id=2");
     expect(identityOf("not a uri")).toBe("not a uri");
   });
 });
@@ -275,7 +275,7 @@ describe("closing, ordering, eviction", () => {
 describe("persistence", () => {
   test("a session round-trips, with its history, its active tab and its JSON state", () => {
     let s = open(emptySession(), e(a, { historyState: { scroll: 3 } }));
-    s = navigate(s, s.active!, e(lensRef("x/y", { range: "7d" })));
+    s = navigate(s, s.active!, e(pageTabRef("x/y", { range: "7d" })));
     const back2 = parseSession(serializeSession(s));
     expect(back2).toEqual(s);
   });

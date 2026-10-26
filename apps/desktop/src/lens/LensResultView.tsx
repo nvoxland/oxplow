@@ -1,9 +1,8 @@
 import { useCollapsedSet, useDraft, type CollapsedSet } from "../tabs/useViewParam.js";
 import { Approvals } from "../kit/Approvals.js";
-import type { PageAction } from "../kit/actions.js";
-import type { PickedRow } from "./LensRail.js";
+import type { PickedRow } from "../pages/railGroups.js";
 import { Fragment, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { commandOpenAfter, lensText, undoCommand, type LensRun, type SqlCell } from "../api.js";
+import { commandOpenAfter, undoCommand, type LensRun, type SqlCell } from "../api.js";
 import { FormSourceContext, useFormSource, type FormSource } from "./formSource.js";
 import { useVizPages } from "./vizPages.js";
 import { LensActionRunnerContext, useLensActionRunner, type LensActionRunner } from "./lensActionRunner.js";
@@ -59,10 +58,8 @@ import {
   lazyTreeProblem,
   drawnTreeRows,
   treemapItems,
-  partParams,
-  viewedParts,
   codeRows,
-  diffRow, editorRow, embedRow, answerRow,
+  diffRow, editorRow, embedRow,
   type BranchRun,
   type DisplayColumn,
   type RowGroup,
@@ -71,7 +68,6 @@ import {
 } from "./lensModel.js";
 import { askAssistant } from "../components/Assistant/assistantSession.js";
 import { addToContext } from "../contextBasket.js";
-import { lensRef } from "../tabs/pageRefs.js";
 import { useContextMenu } from "../components/useRowContextMenu.js";
 import { refCommandMenuItems, useRefOffers } from "../components/refCommands.js";
 import { safeColor } from "../components/decorators.js";
@@ -79,21 +75,17 @@ import { useDecorations } from "../components/useDecorations.js";
 import { RefBadge } from "../components/RefBadge.js";
 import { CustomComponentViz } from "./CustomComponentViz.js";
 import type { HostedView } from "./hostedView.js";
-import { DashboardViz, DocumentViz } from "./PartsViz.js";
 import { EditorViz } from "./EditorViz.js";
 import { TerminalViz } from "./TerminalViz.js";
-import { AnswerViz } from "./AnswerViz.js";
 import { EmbedViz } from "./EmbedViz.js";
 import { CodeViz } from "./CodeViz.js";
 import { DiffViz } from "./DiffViz.js";
-import { useLensRuns } from "./useLensRuns.js";
-import { useLazyBranches } from "./useLazyBranches.js";
 import { DataTable, type DataColumn, type RowProps } from "../kit/DataTable.js";
 import { Facts } from "../kit/Facts.js";
 import { Stat } from "../kit/Stat.js";
 import { recordOpError } from "../opErrors.js";
 import { showToast } from "../components/toastStore.js";
-import { actionOffered, copyLens, offeredWholeLens, openAfterAction, performLensAction, promptField, rowRecord, type ActionTarget } from "./lensActions.js";
+import { actionOffered, offeredWholeLens, openAfterAction, performLensAction, promptField, rowRecord, type ActionTarget } from "./lensActions.js";
 import { useHistoryState } from "../tabs/useHistoryState.js";
 import {
   chainedDrops,
@@ -130,7 +122,7 @@ export function LensResultView(props: LensResultViewProps) {
   // for its rows, which are then rows of the lens like the root's —
   // marked, dragged, counted.
   const pages = useVizPages();
-  const useBranches = pages?.useBranches ?? useLazyBranches;
+  const useBranches = pages?.useBranches ?? noBranches;
   const lazyOpen = useCollapsedSet(`lens-tree.open:${run.lens.id}`);
   const lazy = run.lens.viz === "tree" && !!run.lens.tree?.lazy;
   const branches = useBranches(run, lazy ? lazyOpen.ids : [], streamId, props.maxRows);
@@ -146,6 +138,14 @@ export function LensResultView(props: LensResultViewProps) {
     </LensActionRunnerContext.Provider>
   );
 }
+
+/** No page to read branches from (a viz drawn outside a page node, a
+ *  test): a lazy tree's branches stay closed. */
+function noBranches(): ReadonlyMap<string, BranchRun> {
+  return NO_BRANCHES;
+}
+
+const NO_BRANCHES: ReadonlyMap<string, BranchRun> = new Map();
 
 /** The runner and form source a viz's rows press with: a row of a branch
  *  that carries its own (a page branch's run) goes there, any other the
@@ -171,7 +171,7 @@ function sameRecord(a: Record<string, SqlCell>, b: Record<string, SqlCell>): boo
 }
 
 function LensResultBody(props: LensResultViewProps & { lazyOpen: CollapsedSet | null; branches: ReadonlyMap<string, BranchRun> }) {
-  const { run, streamId = null, compact = false, toolbar = true, lazyOpen, branches } = props;
+  const { run, streamId = null, compact = false, lazyOpen, branches } = props;
   const actions = useLensActions(run, streamId);
   const marks = useMarks(run);
   const tree: LazyTree | null = lazyOpen ? { nodes: lazyTreeNodes(run.lens, run.result, new Set(lazyOpen.ids), branches), open: lazyOpen } : null;
@@ -193,27 +193,16 @@ function LensResultBody(props: LensResultViewProps & { lazyOpen: CollapsedSet | 
   const form = actions.form ? (
     <ActionForm run={run} streamId={streamId} pressed={actions.form} onClose={actions.closeForm} />
   ) : null;
-  // Compact strips (a number inline) have no room for buttons; a page
-  // that takes them draws them in its nav bar.
-  if (compact || !toolbar || props.toolbarTo) {
-    return (
-      <>
-        {confirm}
-        {form}
-        {props.toolbarTo && !compact ? <HandToolbar run={shown} streamId={streamId} actions={actions} marks={marks} to={props.toolbarTo} /> : null}
-        {!compact && !props.toolbarTo ? <MarksBar run={shown} actions={actions} marks={marks} /> : null}
-        {!props.toolbarTo && props.partButtons ? <PartButtons run={shown} actions={actions} /> : null}
-        <LensBody {...props} run={shown} tree={tree} actions={actions} marks={marks} />
-      </>
-    );
-  }
+  // Compact strips (a number inline) have no room for buttons; the page
+  // draws Copy and its own actions in its nav bar.
   return (
-    <div>
+    <>
       {confirm}
       {form}
-      <LensToolbar run={shown} streamId={streamId} actions={actions} marks={marks} />
+      {!compact ? <MarksBar run={shown} actions={actions} marks={marks} /> : null}
+      {props.partButtons ? <PartButtons run={shown} actions={actions} /> : null}
       <LensBody {...props} run={shown} tree={tree} actions={actions} marks={marks} />
-    </div>
+    </>
   );
 }
 
@@ -285,9 +274,6 @@ interface LensResultViewProps {
   streamId?: string | null;
   /** Small inline rendering for strips (a number as plain text). */
   compact?: boolean;
-  /** Show the toolbar (Copy, Add to Context, actions); a grid's
-   *  children leave it to the grid. Default true. */
-  toolbar?: boolean;
   /** For a `viz: custom` lens whose component can't be shown: told why,
    *  instead of the lens showing its table (a replacement falls back to
    *  the core component, outside its own frame). */
@@ -303,11 +289,8 @@ interface LensResultViewProps {
    *  `select`s it, with the row it picked); without it, rows are no
    *  picks. */
   onSetParam?(name: string, value: SqlCell, row?: PickedRow): void;
-  /** Hand Copy, Add to Context and the whole-lens actions to the
-   *  page (its nav bar) instead of drawing them above the body. */
-  toolbarTo?(actions: PageAction[]): void;
-  /** A document's part or a tile has no toolbar, but its whole-lens
-   *  actions (an Add…) show as buttons above its body. */
+  /** Its whole-viz actions (an Add…) as buttons above its body: a
+   *  page's node does; a compact one has no room. */
   partButtons?: boolean;
 }
 
@@ -337,7 +320,7 @@ interface Press {
 export function useLensActions(run: ActionTarget, streamId: string | null, runner?: LensActionRunner) {
   const openAfter = useOpenAfter();
   const fromContext = useLensActionRunner();
-  const runLensAction = runner ?? fromContext;
+  const pressOnRun = runner ?? fromContext;
   const [busy, setBusy] = useState<string | null>(null);
   // A command that asks: what it asks about, and the runs that wait on the
   // answer (one confirmation for a bulk action's runs).
@@ -345,7 +328,7 @@ export function useLensActions(run: ActionTarget, streamId: string | null, runne
   // A form action pressed: its form is open until it runs or is closed.
   const [form, setForm] = useState<{ action: DeclaredPageAction; row: Record<string, SqlCell> | null } | null>(null);
   const deps = {
-    runLensAction: (
+    press: (
       id: string,
       action: string,
       params: Record<string, SqlCell>,
@@ -353,7 +336,7 @@ export function useLensActions(run: ActionTarget, streamId: string | null, runne
       stream: string | null,
       confirmed: boolean,
       drop?: Drop | null,
-    ) => runLensAction(id, action, params, row, stream, confirmed, null, drop ?? null),
+    ) => pressOnRun(id, action, params, row, stream, confirmed, null, drop ?? null),
     toast: (message: string, undo?: () => void) => showToast({ message, onUndo: undo }),
     // The person's click on Undo is their confirmation of it.
     undo: (auditId: number) => undoCommand(auditId, true),
@@ -401,74 +384,6 @@ export function useLensActions(run: ActionTarget, streamId: string | null, runne
 
 export type LensActionsState = ReturnType<typeof useLensActions>;
 
-/** The toolbar's actions as the page's: Copy, Add to Context and
- *  the whole-lens actions, handed up whenever what they say changes. */
-function HandToolbar({ run, streamId, actions, marks, to }: { run: LensRun; streamId: string | null; actions: LensActionsState; marks: Marks; to(actions: PageAction[]): void }) {
-  const [copied, setCopied] = useState(false);
-  const buttons = run.lens.actions.filter((a) => offeredWholeLens(a, run.result));
-  const toRef = useRef(to);
-  toRef.current = to;
-  const pressRef = useRef(actions.run);
-  pressRef.current = actions.run;
-  const manyRef = useRef(actions.runMany);
-  manyRef.current = actions.runMany;
-  const marksRef = useRef(marks);
-  marksRef.current = marks;
-  const marked = markedRecords(run, marks);
-  const markedKey = marks.keys.join("\u0000");
-  useEffect(() => {
-    // While rows are marked, the page's actions are what runs on them.
-    if (marked.length > 0) {
-      toRef.current([
-        ...bulkOffers(run, marked).map(({ action, rows }) => ({
-          id: `lens-bulk-${action.id}`,
-          label: `${action.label} (${rows.length})`,
-          title: action.command,
-          busy: actions.busy === action.id,
-          disabled: actions.busy !== null && actions.busy !== action.id,
-          run: () => manyRef.current(action, rows),
-        })),
-        { id: "lens-marks-clear", label: `Clear selection (${marked.length})`, run: () => marksRef.current.set([], null) },
-      ]);
-      return;
-    }
-    toRef.current([
-      {
-        id: "lens-copy",
-        label: copied ? "Copied" : "Copy",
-        title: "Copy what the lens shows, as text",
-        standard: true,
-        icon: "copy",
-        run: () =>
-          void copyLens(run, streamId, {
-            lensText,
-            copyText: (t) => navigator.clipboard.writeText(t),
-            recordError: (label, message) => recordOpError({ label, message }),
-          }).then((ok) => {
-            if (ok) {
-              setCopied(true);
-              window.setTimeout(() => setCopied(false), 1500);
-            }
-          }),
-      },
-      ...buttons.map((a) => ({
-        id: `lens-action-${a.id}`,
-        label: a.label,
-        title: a.command,
-        busy: actions.busy === a.id,
-        disabled: actions.busy !== null && actions.busy !== a.id,
-        prominent: a.prominent ?? false,
-        submenu: a.submenu ?? undefined,
-        icon: a.icon ?? undefined,
-        run: () => pressRef.current(a, null),
-      })),
-    ]);
-    // `buttons` and `marked` follow `run` and `markedKey`.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [run, streamId, copied, actions.busy, markedKey]);
-  return null;
-}
-
 /** A part's whole-lens actions as buttons: no Copy, no marks. An editor's
  *  Save is the editor's own. */
 function PartButtons({ run, actions }: { run: LensRun; actions: LensActionsState }) {
@@ -485,55 +400,8 @@ function PartButtons({ run, actions }: { run: LensRun; actions: LensActionsState
   );
 }
 
-/** Copy, Add to Context, and the lens's whole-lens actions (a row's
- *  are in its menu, a group's in its heading). */
-function LensToolbar({ run, streamId, actions, marks }: { run: LensRun; streamId: string | null; actions: LensActionsState; marks: Marks }) {
-  const [copied, setCopied] = useState(false);
-  const buttons = run.lens.actions.filter((a) => offeredWholeLens(a, run.result));
-  if (markedRecords(run, marks).length > 0) return <MarksBar run={run} actions={actions} marks={marks} />;
-  return (
-    <>
-    <div data-testid="lens-actions" style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 6, marginBottom: 6 }}>
-      <button
-        type="button"
-        data-testid="lens-copy"
-        onClick={() => {
-          void copyLens(run, streamId, {
-            lensText,
-            copyText: (t) => navigator.clipboard.writeText(t),
-            recordError: (label, message) => recordOpError({ label, message }),
-          }).then((ok) => {
-            if (ok) {
-              setCopied(true);
-              window.setTimeout(() => setCopied(false), 1500);
-            }
-          });
-        }}
-      >
-        {copied ? "Copied" : "Copy"}
-      </button>
-      <button type="button" data-testid="lens-add-to-context" onClick={() => void addToContext({ uri: lensRef(run.lens.id, run.params).id, label: run.lens.title })}>
-        Add to Context
-      </button>
-      {buttons.map((a) => (
-        <button
-          key={a.id}
-          type="button"
-          data-testid={`lens-action-${a.id}`}
-          disabled={actions.busy !== null}
-          title={a.command}
-          onClick={() => actions.run(a, null)}
-        >
-          {actions.busy === a.id ? `${a.label}…` : a.label}
-        </button>
-      ))}
-    </div>
-    </>
-  );
-}
-
 function LensBody(props: LensResultViewProps & { actions?: LensActionsState; marks?: Marks; tree?: LazyTree | null }) {
-  const { run, onOpenPage, streamId = null } = props;
+  const { run, streamId = null } = props;
   // It needs a capability that isn't active: it didn't run, and says what
   // it needs rather than showing nothing.
   if (run.inactive) {
@@ -542,27 +410,6 @@ function LensBody(props: LensResultViewProps & { actions?: LensActionsState; mar
         {run.inactive.message}
       </p>
     );
-  }
-  // A document or dashboard composes other lenses; its query, if any, is
-  // one row its parts are given (`partParams`). Each is its own component
-  // so the row views' hooks always run in the same order.
-  if (run.lens.viz === "document") {
-    // A view document shows the one section in view (`viewedParts`).
-    return (
-      <DocumentViz
-        parts={viewedParts(run.lens, run.params)}
-        viewed={!!run.lens.view}
-        fills={run.lens.fills}
-        params={run.params}
-        given={partParams(run)}
-        streamId={streamId}
-        onOpenPage={onOpenPage}
-        onSetParam={props.onSetParam}
-      />
-    );
-  }
-  if (run.lens.viz === "dashboard") {
-    return <DashboardViz run={run} actions={props.actions} parts={run.lens.parts} params={run.params} given={partParams(run)} streamId={streamId} onOpenPage={onOpenPage} onSetParam={props.onSetParam} />;
   }
   if (run.lens.viz === "form") return <FormViz run={run} streamId={streamId} />;
   return <RowsBody {...props} />;
@@ -965,7 +812,7 @@ function RowsBody({
     return (
       <div data-testid={`lens-row-expansion-${index}`} style={expansionStyle}>
         {open.map((c) => (
-          <RowExpansion key={c.key} lensId={c.expand!} params={rowRecord(result.columns, row)} streamId={streamId} onOpenPage={onOpenPage} />
+          <RowExpansion key={c.key} target={c.expand!} params={rowRecord(result.columns, row)} streamId={streamId} onOpenPage={onOpenPage} />
         ))}
       </div>
     );
@@ -1244,10 +1091,6 @@ function LensViz({
       return <TerminalViz run={{ ...run, result }} onSetParam={onSetParam} />;
     case "embed":
       return <EmbedViz url={embedRow(lens, result)?.url ?? null} />;
-    case "answer": {
-      const row = answerRow(lens, result);
-      return <AnswerViz uri={row?.uri ?? null} kept={row?.kept ?? null} onOpenPage={onOpenPage} />;
-    }
     case "list":
       return <ListViz rows={result.rows} cols={cols} cell={cell} rowMenu={rowMenu} view={rowsView} />;
     case "board":
@@ -1292,6 +1135,9 @@ function FormViz({ run, streamId }: { run: LensRun; streamId: string | null }) {
   const openAfter = useOpenAfter();
   const source = useFormSource();
   const paramsKey = JSON.stringify(run.params);
+  // Its loader's rows: a page run re-read after a save (or a change
+  // elsewhere) starts it from what is saved now.
+  const rowsKey = JSON.stringify(run.result.rows);
   const again = run.lens.form?.again ?? null;
   const form = useFormSubmit(
     run.lens.title,
@@ -1323,9 +1169,9 @@ function FormViz({ run, streamId }: { run: LensRun; streamId: string | null }) {
     return () => {
       live = false;
     };
-    // paramsKey stands in for `run.params` (a fresh object each render).
+    // paramsKey and rowsKey stand in for `run.params` and its rows.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [run.lens.id, paramsKey, streamId, round, reload, source]);
+  }, [run.lens.id, paramsKey, rowsKey, streamId, round, reload, source]);
   useRerunOnChange(start?.reads ?? NO_READS, () => setReload((n) => n + 1));
   const schema = useMemo(
     () => (start ? withSubfields(start.command.input_schema as Record<string, unknown>, start.subfields ?? {}) : null),
@@ -1395,11 +1241,11 @@ export function ActionForm({
   const { action, row } = pressed;
   const [start, setStart] = useState<FormStart | null>(null);
   const openAfter = useOpenAfter();
-  const runLensAction = useLensActionRunner();
+  const pressAction = useLensActionRunner();
   const source = useFormSource();
   const form = useFormSubmit(
     action.label,
-    (input, confirmed) => runLensAction(run.lens.id, action.id, run.params, row, streamId, confirmed, input),
+    (input, confirmed) => pressAction(run.lens.id, action.id, run.params, row, streamId, confirmed, input),
     (outcome) => {
       onClose();
       void openAfterAction(action, outcome, openAfter);
@@ -1656,36 +1502,16 @@ function expansionKey(c: DisplayColumn, row: SqlCell[]): string {
 
 const expansionStyle: CSSProperties = { padding: "4px 0 8px 20px" };
 
-/** An `expand` lens run for a row: the params it declares take the row's
- *  values, and its result is drawn in place. */
+/** What an `expand` column's row opens: the page it names, drawn by the
+ *  page host (`VizPagesContext`); outside a page node, nothing. */
 function RowExpansion(props: {
-  lensId: string;
+  target: string;
   params: Record<string, SqlCell>;
   streamId: string | null;
   onOpenPage?(ref: TabRef): void;
 }) {
-  // In a page file the column names a page, which the page host draws.
   const pages = useVizPages();
-  if (pages) return <pages.Expansion target={props.lensId} params={props.params} streamId={props.streamId} onOpenPage={props.onOpenPage} />;
-  return <LensExpansion {...props} />;
-}
-
-function LensExpansion({
-  lensId,
-  params,
-  streamId,
-  onOpenPage,
-}: {
-  lensId: string;
-  params: Record<string, SqlCell>;
-  streamId: string | null;
-  onOpenPage?(ref: TabRef): void;
-}) {
-  const runs = useLensRuns([{ key: "expansion", lensId }], params, streamId);
-  const part = runs?.get("expansion");
-  if (!part) return <p className="ox-muted ox-small">Loading…</p>;
-  if (part.error) return <p className="ox-error">{part.error}</p>;
-  return part.run ? <LensResultView run={part.run} compact toolbar={false} partButtons streamId={streamId} onOpenPage={onOpenPage} /> : null;
+  return pages ? <pages.Expansion target={props.target} params={props.params} streamId={props.streamId} onOpenPage={props.onOpenPage} /> : null;
 }
 
 /** What a link's `onNavigate` is: a page built from the row goes to the

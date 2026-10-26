@@ -160,3 +160,41 @@ test("a stack folds its empty titled sections into one Nothing found line", () =
   expect(nodeIds(container)).toEqual(["stack", "full", "add", "form"]);
   expect(getByTestId("page-nothing-found").textContent).toBe("Nothing found: Providers, Roles.");
 });
+
+test("a page a slot mounted is a section titled by that page", () => {
+  const run = stackPage();
+  const mounted = fakeRun(
+    fakePage(node.viz("review", "review", { columns: [{ key: "note" }] }), { id: "beta/review", title: "Change Analysis" }),
+    { loaders: { review: loader(["note"], [["look here"]]) } },
+  );
+  const tree = {
+    ...run.tree,
+    children: run.tree.children.map((c) =>
+      c.id === "more" ? { ...c, children: [{ id: "beta.review", children: [], embed: mounted, error: null }] } : c,
+    ),
+  };
+  const { container } = render(<PageTree run={{ ...run, tree } as PageRun} runId="run-1" />);
+  const slot = container.querySelector('[data-node="beta.review"]')!;
+  expect(slot.querySelector(".ox-section-title")?.textContent).toBe("Change Analysis");
+  expect(slot.textContent).toContain("look here");
+});
+
+test("an embedded page's own actions are buttons above it, pressed naming the embed's node", async () => {
+  const { calls, press } = recorder();
+  const inner = fakeRun(
+    fakePage(node.viz("notes", "notes", { columns: [{ key: "note" }] }), {
+      id: "acme/notes",
+      title: "Notes",
+      actions: [fakeAction({ id: "tidy", label: "Tidy" })],
+    }),
+    { loaders: { notes: loader(["note"], [["n"]]) } },
+  );
+  const host = fakeRun(fakePage(node.stack("s", [node.embed("notes", "acme/notes")])), { embeds: { notes: inner } });
+  const { getByTestId } = render(
+    <PageActionContext.Provider value={press}>
+      <PageTree run={host} runId="run-1" />
+    </PageActionContext.Provider>,
+  );
+  fireEvent.click(getByTestId("lens-action-tidy"));
+  await waitFor(() => expect(calls).toEqual([["run-1", "notes", "tidy", null, null, null, false]]));
+});

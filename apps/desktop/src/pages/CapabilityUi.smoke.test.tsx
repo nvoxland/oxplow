@@ -1,13 +1,11 @@
 import { afterEach, expect, mock, test } from "bun:test";
-import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { cleanup, render, waitFor } from "@testing-library/react";
 import type { ReactElement } from "react";
 
-// P6b.C6: the shell is complete with every enhancement off — no
-// extensions (so no slot sections, no Commands menu, no decorations) and
-// every provider flag false (so no feature-gated action). Every command a
+// P6b.C6: the shell is complete with every enhancement off. Every command a
 // page makes goes through a Proxy over the bindings answering empty data,
-// as the page smoke tests do; then, with one extension, the
-// mounts P6b added receive their params.
+// as the page smoke tests do; then, with one extension, a replacement
+// receives the params its target's contract lists.
 
 const realTransport = await import("../tauri-bridge/transport.js");
 const realBindings = await import("../tauri-bridge/generated/bindings.js");
@@ -17,16 +15,12 @@ const reads = { models: ["v_work_item"], tables: [], measures: [] };
 const WORK_ITEM_COLUMNS = ["uri", "provider", "title", "body", "state", "parent_uri", "thread_id", "rank", "closed_at", "created_at", "updated_at", "native", "comment_count"];
 let extensions: unknown[] = [];
 let extensionLoads = 0;
-const lensRuns: Array<[string, unknown]> = [];
+const pageOpens: Array<[string, unknown]> = [];
 
 const answers: Record<string, (...args: unknown[]) => Promise<unknown>> = {
   listExtensions: async () => {
     extensionLoads++;
     return ok(extensions);
-  },
-  runLens: async (...args) => {
-    lensRuns.push([String(args[0]), args[1]]);
-    return ok({ lens: { id: args[0], title: "Mounted", columns: [], viz: "table", actions: [] }, params: args[1], result: { columns: [], rows: [], truncated: false, reads }, alert: null });
   },
   diff: async () => ok([{ path: "a.ts", status: "modified", additions: 2, deletions: 1 }]),
   vcsRevision: async () =>
@@ -73,8 +67,6 @@ mock.module("../api.js", () => ({
   listPersonCommands: viaBindings("listPersonCommands"),
   querySql: (sql: string, params: unknown[] = [], limit: number | null = null, raw = false) =>
     viaBindings("querySql")(sql, params, limit, raw),
-  runLens: viaBindings("runLens"),
-  getLens: viaBindings("getLens"),
 }));
 mock.module("../tauri-bridge/generated/bindings.js", () => ({
   ...realBindings,
@@ -82,147 +74,33 @@ mock.module("../tauri-bridge/generated/bindings.js", () => ({
 }));
 
 const { PageNavigationContext } = await import("../tabs/PageNavigationContext.js");
-const { DocumentViz } = await import("../lens/PartsViz.js");
 const { Replaceable } = await import("../components/Replaceable.js");
-const { DiffFileHeaderSlot } = await import("../components/Diff/DiffFileHeaderSlot.js");
+const { decl, fakePage, fakePageRunsBy, fakeRun, loader, node } = await import("./testing/fakeRun.js");
+
+/** The page runs a replacement opens: each page shows one row naming it. */
+const runs = fakePageRunsBy((key) => {
+  pageOpens.push([key.page, key.params]);
+  const [extension, slug] = key.page.split("/") as [string, string];
+  const page = fakePage(node.viz("rows", "rows", { columns: [{ key: "t" } as never] }), { id: key.page, extension, slug, title: "Mounted", loaders: [decl("rows")] });
+  return fakeRun(page, { params: key.params, loaders: { rows: loader(["t"], [[`${key.page} row`]]) } });
+}).runs;
 
 afterEach(() => {
   extensions = [];
   extensionLoads = 0;
-  lensRuns.length = 0;
+  pageOpens.length = 0;
   cleanup();
 });
 
 const STREAM = { id: "str1", kind: "primary", title: "Main", branch: "main" } as never;
-/** Git History's page body: a document whose one part is the commit list
- *  standing in for `vcs.history.graph`. */
-const HISTORY_PARTS = [
-  { id: "history", title: "Commits", lens: "x/commits", markdown: null, size: null, replaceable: "vcs.history.graph", from: null },
-];
-const historyPage = () => <DocumentViz parts={HISTORY_PARTS} params={{ stream_id: 1 }} streamId="str1" />;
 /** `page` inside a navigation context for `ref`, as `App` mounts pages. */
 function mount(ref: string, page: ReactElement) {
   const nav = { goBack() {}, goForward() {}, canGoBack: false, canGoForward: false, ask: { ref } };
   return render(<PageNavigationContext.Provider value={nav as never}>{page}</PageNavigationContext.Provider>);
 }
 
-/** Nothing an extension or a provider flag adds is on the page — checked
- *  once the page's extensions load has answered (and rendered). */
-async function expectPlain(view: ReturnType<typeof render>) {
-  await waitFor(() => expect(extensionLoads).toBeGreaterThan(0));
-  await act(async () => {});
-  // Any slot mount, whatever its slot (`LensSlots` marks each one).
-  expect(view.container.querySelector("[data-slot]") === null).toBe(true);
-  // No core component replaced (`Replaceable` marks one that is).
-  expect(view.container.querySelector('[data-testid^="replacement-"]') === null).toBe(true);
-  // No extension commands in the page's ☰ (core's Ask may be there).
-  const menu = view.queryByTestId("page-nav-menu");
-  if (menu) fireEvent.click(menu);
-  expect(view.container.querySelector('[data-testid^="menu-item-page-submenu-"]') === null).toBe(true);
-  if (menu) fireEvent.click(menu);
-  expect(view.container.querySelector('[title^="from "]') === null).toBe(true);
-}
-
-test("history renders plain", async () => {
-  const history = mount("oxplow:oxplow/page?page=git-history", historyPage());
-  await waitFor(() => expect(history.getByTestId("lens-document")).toBeTruthy());
-  // No slot mount, no replacement, no extension chrome: what core draws.
-  expect(history.container.querySelector("[data-slot]") === null).toBe(true);
-  expect(history.container.querySelector('[data-testid^="replacement-"]') === null).toBe(true);
-});
-
-// Git History's commits are oxplow's plain list with every enhancement
-// off; oxplow-bundled's graph replaces it (a target no provider binds),
-// given the stream's head, the commit to reveal and the limit.
-test("Git History's list is replaced by the one extension drawing the graph", async () => {
-  extensions = [
-    {
-      name: "x",
-      enabled: true,
-      ui: { slots: [], commands: [], decorators: [], replacements: [] },
-      lenses: [{ id: "x/commits", params: ["stream_id", "head_sha", "reveal_sha", "limit"].map((name) => ({ name, label: null, default: null })) }],
-    },
-    {
-      name: "oxplow-bundled",
-      enabled: true,
-      ui: {
-        slots: [],
-        commands: [],
-        decorators: [],
-        replacements: [
-          {
-            id: "oxplow-bundled/vcs.history.graph",
-            extension: "oxplow-bundled",
-            target: "vcs.history.graph",
-            capability: "vcs",
-            boundToProvider: false,
-            lensId: "oxplow-bundled/history-graph",
-            label: "history graph",
-            version: 2,
-            view: ["q", "author", "branch"],
-          },
-        ],
-      },
-      lenses: [
-        {
-          id: "oxplow-bundled/history-graph",
-          params: ["stream_id", "head_sha", "reveal_sha", "limit"].map((name) => ({ name, label: null, default: null })),
-        },
-      ],
-    },
-  ];
-  // The part's own lens is oxplow's list; it runs with the contract's props
-  // (the stream's head, resolved by the lens run).
-  const props = { stream_id: 1, head_sha: "a".repeat(40), reveal_sha: "", limit: 500 };
-  answers.runLens = async (...args) => {
-    lensRuns.push([String(args[0]), args[1]]);
-    const own = args[0] === "x/commits";
-    return ok({
-      lens: { id: args[0], title: "Commits", params: [], columns: own ? [{ key: "subject", label: "Commit" }] : [], viz: "table", actions: [] },
-      params: own ? props : args[1],
-      result: { columns: own ? ["subject"] : [], rows: own ? [["Fix"]] : [], truncated: false, reads },
-      alert: null,
-    });
-  };
-  answers.getLens = async (...args) =>
-    ok({ id: args[0], params: ["stream_id", "head_sha", "reveal_sha", "limit"].map((name) => ({ name, label: null, default: null })) });
-  const history = mount("oxplow:oxplow/page?page=git-history", historyPage());
-  await waitFor(() =>
-    expect(history.getByTestId("replacement-vcs.history.graph").textContent).toContain("replaced by oxplow-bundled"),
-  );
-  expect(lensRuns.map(([id]) => id)).toEqual(["x/commits", "oxplow-bundled/history-graph"]);
-  expect(lensRuns[1]![1]).toMatchObject({ head_sha: "a".repeat(40), reveal_sha: "", limit: 500 });
-});
-
-// P9.A2: a file diff's header strip — plain with nothing mounted; a
-// mounted lens gets the path and the two revisions it declares.
-test("the file diff's header strip is plain, and a mount gets the file and its revisions", async () => {
-  const spec = { path: "a.ts", leftVersion: "git:abc", rightVersion: "working", baseLabel: "HEAD" } as never;
-  const plain = mount("oxplow:oxplow/page?page=diff", <DiffFileHeaderSlot streamId="str1" spec={spec} />);
-  await expectPlain(plain);
-  cleanup();
-
-  answers.runLens = async (...args) => {
-    lensRuns.push([String(args[0]), args[1]]);
-    return ok({ lens: { id: args[0], title: "Usually Changes With", columns: [], viz: "table", actions: [] }, params: args[1], result: { columns: ["path"], rows: [["b.ts"]], truncated: false, reads }, alert: null });
-  };
-  extensions = [
-    {
-      name: "x",
-      enabled: true,
-      ui: { slots: [{ slot: "diff.file.header", lensId: "x/co" }], commands: [], decorators: [], replacements: [] },
-      lenses: [{ id: "x/co", params: ["path", "left_revision", "right_revision"].map((name) => ({ name, label: null, default: null })) }],
-    },
-  ];
-  const view = mount("oxplow:oxplow/page?page=diff", <DiffFileHeaderSlot streamId="str1" spec={spec} />);
-  await waitFor(() =>
-    expect(lensRuns).toContainEqual(["x/co", { path: "a.ts", left_revision: "git:abc", right_revision: "working" }]),
-  );
-  await waitFor(() => expect(view.container.innerHTML).toContain('data-testid="diff.file.header-x/co"'));
-});
-
-/** Extension `name`, replacing `target` with its `lens`, which takes `params`. */
-const replacing = (name: string, target: string, lens: string, params: string[], label: string) => ({
+/** Extension `name`, replacing `target` with its `page`. */
+const replacing = (name: string, target: string, page: string, label: string) => ({
   name,
   enabled: true,
   ui: {
@@ -230,42 +108,41 @@ const replacing = (name: string, target: string, lens: string, params: string[],
     commands: [],
     decorators: [],
     replacements: [
-      { id: `${name}/${target}`, extension: name, target, capability: "work_items", boundToProvider: false, lensId: `${name}/${lens}`, label, version: 1, view: [] },
+      { id: `${name}/${target}`, extension: name, target, capability: "work_items", boundToProvider: false, lensId: "", pageId: `${name}/${page}`, label, version: 1, view: [] },
     ],
   },
-  lenses: [{ id: `${name}/${lens}`, params: params.map((p) => ({ name: p, label: null, default: null })) }],
 });
 
 // The Board is a view of the capability as a whole: an extension replaces
 // it without bringing a provider, given the Board's props and nothing else;
 // the page's own chrome stays oxplow's.
 test("an extension's view replaces the Board, whichever list is active", async () => {
-  extensions = [replacing("views", "work_item.board", "board", ["scope", "thread_id"], "board")];
+  extensions = [replacing("views", "work_item.board", "board", "board")];
   // What the Board's document places for its one replaceable part.
   const replaced = mount(
     "oxplow:oxplow/page?page=board",
-    <Replaceable target="work_item.board" props={{ scope: "all", thread_id: null }} streamId="str1" onOpenPage={() => {}} fallback={<div data-testid="plain-board" />} />,
+    <Replaceable target="work_item.board" props={{ scope: "all", thread_id: null }} streamId="str1" runs={runs} onOpenPage={() => {}} fallback={<div data-testid="plain-board" />} />,
   );
   await waitFor(() => expect(replaced.getByTestId("replacement-work_item.board").textContent).toContain("replaced by views"));
   expect(replaced.queryByTestId("plain-board")).toBeNull();
-  expect(lensRuns).toEqual([["views/board", { scope: "all", thread_id: null }]]);
+  expect(pageOpens).toEqual([["views/board", { scope: "all", thread_id: null }]]);
 });
 
 // A work item's description editor is replaceable (the `body` part of the
 // Work Item document); the document's other parts stay oxplow's.
 test("an extension's editor replaces a work item's description", async () => {
-  extensions = [replacing("views", "work_item.detail", "edit", ["uri"], "detail editor")];
+  extensions = [replacing("views", "work_item.detail", "edit", "detail editor")];
   const uri = "oxplow:oxplow/work_item?id=W-1&provider=fake";
-  const page = mount(uri, <Replaceable target="work_item.detail" props={{ uri }} streamId="str1" onOpenPage={() => {}} fallback={<div data-testid="plain-body" />} />);
+  const page = mount(uri, <Replaceable target="work_item.detail" props={{ uri }} streamId="str1" runs={runs} onOpenPage={() => {}} fallback={<div data-testid="plain-body" />} />);
   const replaced = await waitFor(() => page.getByTestId("replacement-work_item.detail"));
   expect(replaced.textContent).toContain("replaced by views");
-  expect(lensRuns).toEqual([["views/edit", { uri }]]);
+  expect(pageOpens).toEqual([["views/edit", { uri }]]);
   expect(page.queryByTestId("plain-body")).toBeNull();
 });
 
 // provider's states (tsk918).
 test("a work item's own provider's extension replaces its state control, not the active one's", async () => {
-  const stateLens = (name: string) => ({
+  const statePage = (name: string) => ({
     name,
     enabled: true,
     ui: {
@@ -273,12 +150,11 @@ test("a work item's own provider's extension replaces its state control, not the
       commands: [],
       decorators: [],
       replacements: [
-        { id: `${name}/work_item.detail.state`, extension: name, target: "work_item.detail.state", capability: "work_items", boundToProvider: true, lensId: `${name}/state`, label: "state control", version: 1, view: [] },
+        { id: `${name}/work_item.detail.state`, extension: name, target: "work_item.detail.state", capability: "work_items", boundToProvider: true, lensId: "", pageId: `${name}/state`, label: "state control", version: 1, view: [] },
       ],
     },
-    lenses: [{ id: `${name}/state`, params: [{ name: "uri", label: null, default: null }] }],
   });
-  extensions = [stateLens("x"), stateLens("y")];
+  extensions = [statePage("x"), statePage("y")];
   const realQuery = answers.querySql!;
   // The item is `fake`'s; `lin` (extension x) is active.
   let fakeExtension: string | null = "y";
@@ -298,20 +174,20 @@ test("a work item's own provider's extension replaces its state control, not the
   };
   const uri = "oxplow:oxplow/work_item?id=W-1&provider=fake";
   const page = () =>
-    mount(uri, <Replaceable target="work_item.detail.state" props={{ uri }} provider="fake" streamId="str1" onOpenPage={() => {}} fallback={<div data-testid="plain-state" />} />);
+    mount(uri, <Replaceable target="work_item.detail.state" props={{ uri }} provider="fake" streamId="str1" runs={runs} onOpenPage={() => {}} fallback={<div data-testid="plain-state" />} />);
   try {
     const replaced = page();
     await waitFor(() => expect(replaced.getByTestId("replacement-work_item.detail.state").textContent).toContain("replaced by y"));
-    expect(lensRuns).toEqual([["y/state", { uri }]]);
+    expect(pageOpens).toEqual([["y/state", { uri }]]);
     cleanup();
-    lensRuns.length = 0;
+    pageOpens.length = 0;
 
     // A provider no extension brings: oxplow's own state control alone.
     fakeExtension = null;
     const own = page();
     await waitFor(() => expect(own.getByTestId("plain-state")).toBeTruthy());
     expect(own.container.querySelector('[data-testid^="replacement-"]')).toBeNull();
-    expect(lensRuns).toEqual([]);
+    expect(pageOpens).toEqual([]);
   } finally {
     answers.querySql = realQuery;
   }

@@ -68,7 +68,7 @@ markdown itself, nor edits it in a `<textarea>`.
   branch rename, file commit) ship as Slideovers. Do not
   add new modal call sites; route new flows through pages or
   slideovers. The page pattern to copy is
-  `apps/desktop/src/pages/LensPage.tsx` (a view document: Settings) — full Page tab, no backdrop.
+  `apps/desktop/src/pages/PageHost.tsx` (a page file; Settings is a switch page) — full Page tab, no backdrop.
 - **A long page splits into pages, and a link lands on its section.**
   Settings is one view document (`lenses/settings.yaml`: overview, Agents,
   Language Servers, Extensions, Data, Integrations, AI), an area the section
@@ -312,7 +312,7 @@ markdown itself, nor edits it in a `<textarea>`.
   isn't oxplow's. Its confirmations appear in oxplow (`CommandConfirm`
   below the frame), never inside the frame. When it can't start, a muted
   line says so and the lens's table shows.
-- A **custom page** (`pages[].component`, `pages/CustomPageView.tsx`)
+- A **custom page** (a page whose `view:` is one `component` node, `pages/PageComponent.tsx` `ComponentPage`)
   keeps oxplow's nav bar and the **custom** badge; the frame fills only
   the page body. Its title and actions are data the frame sends
   (`setTitle`, `setActions`) and core draws in the bar — never buttons of
@@ -648,8 +648,8 @@ mounts the kit's, so a page moving to a lens (`viz: approvals`, params
 Comments are not editor-only. Any page region can be commentable by
 declaring *what it is* and mounting the generic layer.
 
-- **Comments are a page's.** A declared page says `comments: true` on its
-  `pages:` entry and core does the rest (`LensPage`, `lens/pageComments.ts`):
+- **Comments are a page's.** A page file says `comments: true` and core
+  does the rest (`PageHost`, `lens/pageComments.ts`):
   its URI (its tab's identity) is the comments' target, the nav bar gets
   the `CommentNavigator`, the body carries `data-ref` (so plain text and
   the markdown viewer take selections through the app-level layer), a
@@ -1158,18 +1158,17 @@ no caller may bypass the bus to write to the terminal.
 
 ## A page's controls are in its rail
 
-A lens page has **one place for its controls: its rail** (`LensRail`). It
+A page has **one place for its controls: its rail** (`PageRail`). It
 has no toolbar, and where a control goes is not the author's to say. The
 rail stacks its groups in a fixed order, so nothing moves as values
 change: **Filters** (its filter params), **Selection** (what a row click
 picked) and **About this page** (its extension and the source file to
 edit, and a line when the source changed since its deploy). Page-level
-actions — Copy, Add to Context, the lens's whole-lens actions, and
-Refresh only for a lens that declares `refresh: true` (a lens re-runs
+actions — Copy, Add to Context, the page's whole-page actions, and
+Refresh only for a page that declares `refresh: true` (a page re-runs
 on its own when oxplow's data changes; Refresh is for one that reads
 outside oxplow) — are in the nav bar (its ☰, unless `prominent`), never
-in the rail or above the body (`LensResultView`'s `toolbarTo` hands them
-up).
+in the rail or above the body (`PageHost` hands them to `Page`).
 
 A param is a **row**, drawn by the kit's `ParamRow`
 (`src/kit/ParamControls.tsx`): its label beside its value. At rest the

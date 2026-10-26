@@ -3,8 +3,8 @@ import { cleanup, fireEvent, render } from "@testing-library/react";
 
 import type { Stream } from "../api.js";
 
-// The launcher's pages are the extensions' declared ones: one extension
-// declares Tasks.
+// The launcher's pages are the extensions' page files: one extension has
+// Tasks.
 const realApi = await import("../api.js");
 const pristineApi = { ...realApi };
 mock.module("../api.js", () => ({
@@ -14,19 +14,20 @@ mock.module("../api.js", () => ({
       name: "oxplow-foundation",
       enabled: true,
       ui: { slots: [], commands: [], decorators: [] },
-      lenses: [],
+      namespace: "oxplow",
       panels: [],
-      pages: [
+      pageFiles: [
         {
-          id: "tasks",
+          id: "oxplow-foundation/tasks",
           extension: "oxplow-foundation",
-          pageRef: "oxplow:oxplow/page?page=tasks",
+          slug: "tasks",
           title: "Tasks",
           category: "Work",
           keywords: null,
+          hidden: false,
           params: [],
-          count: null,
-          body: { kind: "lens", lens: "oxplow-foundation/tasks" },
+          badge: null,
+          view: { id: "v", kind: "markdown", text: "" },
         },
       ],
     },

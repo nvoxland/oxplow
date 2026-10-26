@@ -1,26 +1,11 @@
 import { describe, expect, test } from "bun:test";
 
-import type { ExtensionPage } from "../tauri-bridge/generated/bindings.js";
+import type { Page } from "../tauri-bridge/generated/bindings.js";
+import { fakePage, node } from "./testing/fakeRun.js";
 import { RENDERER_VIEW_KEY, pageView, renderedResourceOf, rendererFor, renderersFor, shellView, tabLabel, withRenderedParams } from "./renderers.js";
 
-const page = (id: string, more: Partial<ExtensionPage> = {}): ExtensionPage => ({
-  id,
-  extension: "oxplow-foundation",
-  pageRef: `oxplow:oxplow/page?page=${id}`,
-  title: id,
-  label: null,
-  icon: null,
-  category: null,
-  keywords: null,
-  params: [],
-  count: null,
-  for: [],
-  accepts: {},
-  default: false,
-  pinned: false,
-  body: { kind: "builtIn", name: id },
-  ...more,
-});
+const page = (id: string, more: Partial<Page> = {}): Page =>
+  fakePage(node.markdown("v", ""), { id, extension: "oxplow-foundation", slug: id, title: id, ...more });
 const editor = page("editor", { for: ["oxplow/file"], accepts: { rev: "absent" }, default: true });
 const viewer = page("file-viewer", { for: ["oxplow/file"], accepts: { rev: "present" } });
 const blame = page("blame", { extension: "acme", for: ["oxplow/file"] });

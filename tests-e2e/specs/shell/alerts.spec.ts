@@ -2,7 +2,7 @@ import { run } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
 import { openFromLauncher } from "../../support/ui.js";
 
-// Alerts is the foundation's `alerts` document: a failed operation lists
+// Alerts is the foundation's `alerts` page: a failed operation lists
 // red, opens into how it ended and its output, and Dismiss takes
 // it off the list.
 test("a failed operation is listed, opens to its output, and dismisses", async ({ page, daemon }) => {
@@ -15,7 +15,7 @@ test("a failed operation is listed, opens to its output, and dismisses", async (
   });
   await page.goto("/");
   await openFromLauncher(page, "Alerts");
-  const part = page.locator('[data-testid="lens-part-operations"]:visible');
+  const part = page.locator('[data-testid="page-file"]:visible [data-node="operations"]');
   await expect(part).toContainText("Merge bugfixes into current");
 
   // Opening the row shows how it ended and where its output is.

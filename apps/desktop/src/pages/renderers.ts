@@ -7,7 +7,7 @@
  * is; else none — and the caller shows foundation's fallback (`resource`).
  * Nothing here knows a resource: the declarations say it all.
  */
-import type { ExtensionPage, PageRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
+import type { Page, PageRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
 import { formatUri, parseUri, typeOf } from "../uri/uri.js";
 
 /** The view key that names a URI's renderer (`<extension>/<page>`). */
@@ -36,14 +36,12 @@ export function renderedResourceOf(id: string): string | null {
   return scheme && SCHEMES.includes(scheme) ? scheme : null;
 }
 
-/** What renders a resource, a page file (`Page`, its `id` already
- *  `<extension>/<slug>`) or a manifest's `pages:` entry (`ExtensionPage`,
- *  its `id` the bare name): the same match rules for both. */
+/** What renders a resource: a page file (`Page`, its `id`
+ *  `<extension>/<slug>`). */
 export interface RendererDecl {
   id: string;
   extension: string;
-  /** A page file's slug; a `pages:` entry has none. */
-  slug?: string;
+  slug: string;
   for: string[];
   accepts: Partial<Record<string, string>>;
   default: boolean;
@@ -51,7 +49,7 @@ export interface RendererDecl {
 
 /** A renderer's name in a view (`<extension>/<page>`). */
 export function rendererName(page: RendererDecl): string {
-  return `${page.extension}/${page.slug ?? page.id}`;
+  return `${page.extension}/${page.slug}`;
 }
 
 /** Whether `page`'s `accepts` hold for `params`: each named param present,
@@ -130,12 +128,12 @@ const LABEL_FILTERS: Record<string, (v: string) => string> = {
 
 /** What a tab of `page` says: its `label` with each `{{param.<name>}}`
  *  filled from `params` (what it shows: a renderer's URI params, a
- *  route's) and each `{{row.<column>}}` from `row` (the one row of the
- *  page's lens, once its run has answered), each through its filters, else
+ *  route's) and each `{{row.<column>}}` from `row` (its first loader's
+ *  first row, once its run has answered), each through its filters, else
  *  — no label, one that fills to nothing, or one that names the row before
  *  there is one — its title. */
 export function tabLabel(
-  page: Pick<ExtensionPage, "label" | "title">,
+  page: Pick<Page, "label" | "title">,
   params: Record<string, unknown>,
   row?: Record<string, unknown> | null,
 ): string {
@@ -149,12 +147,6 @@ export function tabLabel(
     return text;
   });
   return filled.trim() || page.title;
-}
-
-/** Whether `page`'s label names a column of its lens's row, so its tab is
- *  named once the lens has run. */
-export function labelReadsRow(page: Pick<ExtensionPage, "label">): boolean {
-  return /\{\{\s*row\./.test(page.label ?? "");
 }
 
 /** The row a page file's `{{row.*}}` reads: its first declared loader's

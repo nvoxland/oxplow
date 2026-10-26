@@ -359,12 +359,6 @@ export function extPageUri(extension: string, page: string, params: Params = {},
   return pageUri(`${extension}/${page}`, params, view);
 }
 
-/** A lens (`acme/blocked`): its resource params (`?`) and its view (`#`:
- *  its `filter` and `selection` params). */
-export function lensUri(lensId: string, params: Params = {}, view: Params = {}): string {
-  return resourceUri("oxplow/lens", { ...params, lens: lensId }, view);
-}
-
 /** A metric's page (`oxplow.todos`) and its view (range, branch, …). */
 export function metricUri(key: string, params: Params = {}, view: Params = {}): string {
   return resourceUri("oxplow/metric", { metric: key, ...params }, view);

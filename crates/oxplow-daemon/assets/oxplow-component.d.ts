@@ -79,8 +79,6 @@ export interface OxplowComponent {
   readonly protocol: number;
   /** Hear new data each time it changes; returns how to stop. */
   onUpdate(listener: (update: OxplowUpdate) => void): () => void;
-  /** Run a lens this component declares in `assets` (a lens's component). Rejects with an {@link OxplowError}. */
-  query(asset: string, params?: Record<string, OxplowCell>): Promise<OxplowRun>;
   /** Run a command this component declares in `commands`, as the person
    *  looking at it; one that asks is confirmed by them, in oxplow.
    *  Rejects with an {@link OxplowError} (`CANCELLED` when they decline;

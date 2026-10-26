@@ -1,8 +1,10 @@
 import { afterEach, expect, mock, test } from "bun:test";
-import { cleanup, createEvent, fireEvent, render, waitFor } from "@testing-library/react";
+import { cleanup, createEvent, fireEvent, render as rtlRender, waitFor } from "@testing-library/react";
 
+import type { ReactElement, ReactNode } from "react";
 import type { Lens, PageAction, LensRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
 import { LENS_ROW_DRAG_MIME } from "../dragMimes.js";
+import { LensActionRunnerContext, type LensActionRunner } from "./lensActionRunner.js";
 import { PageNavigationContext, type PageNavigation } from "../tabs/PageNavigationContext.js";
 
 // A lens's rows drag to where a drag action runs, mark for a bulk action,
@@ -12,14 +14,18 @@ const realApi = await import("../api.js");
 const ran: { action: string; row: unknown; drop: unknown; confirmed: boolean }[] = [];
 mock.module("../api.js", () => ({
   ...realApi,
-  runLensAction: async (_id: string, action: string, _params: unknown, row: unknown, _s: unknown, confirmed: boolean, _input: unknown, drop: unknown) => {
-    ran.push({ action, row, drop, confirmed });
-    return { result: null, audit_id: 1, event_id: null, inverse: null };
-  },
   listExtensions: async () => [],
   querySql: async () => ({ columns: [], rows: [], truncated: false, reads: { models: [], tables: [], measures: [] }, freshness: {} }),
 }));
 const { LensResultView } = await import("./LensResultView.js");
+
+// A viz presses through the page that draws it: a runner stands in for it.
+const press: LensActionRunner = async (_id, action, _params, row, _streamId, confirmed, _input, drop) => {
+  ran.push({ action, row, drop, confirmed });
+  return { result: null, audit_id: 1, event_id: null, inverse: null };
+};
+const wrapper = ({ children }: { children: ReactNode }) => <LensActionRunnerContext.Provider value={press}>{children}</LensActionRunnerContext.Provider>;
+const render = (ui: ReactElement) => rtlRender(ui, { wrapper });
 
 afterEach(() => {
   cleanup();

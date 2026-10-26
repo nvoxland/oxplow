@@ -1,7 +1,9 @@
 import { afterEach, expect, mock, test } from "bun:test";
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render as rtlRender, waitFor } from "@testing-library/react";
 
+import type { ReactElement, ReactNode } from "react";
 import type { Lens, LensLink, LensRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
+import { LensActionRunnerContext, type LensActionRunner } from "./lensActionRunner.js";
 import { CONTEXT_REF_MIME } from "../dragMimes.js";
 import { PageNavigationContext, type PageNavigation } from "../tabs/PageNavigationContext.js";
 
@@ -10,26 +12,20 @@ import { PageNavigationContext, type PageNavigation } from "../tabs/PageNavigati
 
 const realApi = await import("../api.js");
 const actionRuns: { action: string; row: unknown }[] = [];
-const expandRuns: unknown[] = [];
 mock.module("../api.js", () => ({
   ...realApi,
-  getLens: async (id: string) => ({ ...base, id, slug: id, title: "Detail", params: [{ name: "id", label: null, default: null }] }),
-  runLens: async (id: string, params: unknown) => {
-    expandRuns.push([id, params]);
-    return {
-      lens: { ...base, id, slug: id, title: "Detail", viz: "table" },
-      params,
-      result: { columns: ["note"], rows: [["opened the detail"]], truncated: false, reads: { models: [], tables: [], measures: [] } },
-    };
-  },
-  runLensAction: async (_id: string, action: string, _params: unknown, row: unknown) => {
-    actionRuns.push({ action, row });
-    return { result: null, auditId: 1, eventId: null, inverse: null };
-  },
   listExtensions: async () => [],
   querySql: async () => ({ columns: [], rows: [], truncated: false, reads: { models: [], tables: [], measures: [] }, freshness: {} }),
 }));
 const { LensResultView } = await import("./LensResultView.js");
+
+// A viz presses through the page that draws it: a runner stands in for it.
+const press: LensActionRunner = async (_id, action, _params, row) => {
+  actionRuns.push({ action, row });
+  return { result: null, audit_id: 1, event_id: null, inverse: null };
+};
+const wrapper = ({ children }: { children: ReactNode }) => <LensActionRunnerContext.Provider value={press}>{children}</LensActionRunnerContext.Provider>;
+const render = (ui: ReactElement) => rtlRender(ui, { wrapper });
 
 afterEach(cleanup);
 
@@ -162,32 +158,9 @@ test("a line's targets column draws each series' target line", () => {
   expect(none.getByTestId("lens-line").querySelector("[data-testid=trend-target]")).toBeNull();
 });
 
-// A column's `expand` opens a lens under its row, run with the row's values.
-test("an expand column opens its lens under the row with the row's values", async () => {
-  expandRuns.length = 0;
-  const run = {
-    lens: {
-      ...base,
-      viz: "table",
-      columns: [{ key: "title", label: null, link: null, unit: null, icon: null, tone: null, expand: "x/detail" }],
-    },
-    params: {},
-    result: { columns: ["id", "title"], rows: [[7, "Epic"], [8, "Child"]], truncated: false },
-  } as unknown as LensRun;
-  const view = render(<LensResultView run={run} onOpenPage={() => {}} />);
-  const toggle = view.getAllByRole("button", { name: "Expand" })[0]!;
-  expect(toggle.getAttribute("aria-expanded")).toBe("false");
-  fireEvent.click(toggle);
-  await waitFor(() => expect(view.getByTestId("lens-row-expansion-0").textContent).toContain("opened the detail"));
-  expect(expandRuns).toEqual([["x/detail", { id: 7 }]]);
-  expect(view.queryByTestId("lens-row-expansion-1")).toBeNull();
-  fireEvent.click(view.getAllByRole("button", { name: "Collapse" })[0]!);
-  expect(view.queryByTestId("lens-row-expansion-0")).toBeNull();
-});
-
-test("a group action stays out of the toolbar", () => {
-  const view = render(<LensResultView run={runOf(grouped)} onOpenPage={() => {}} />);
-  expect(view.getByTestId("lens-actions").querySelector("[data-testid=lens-action-add]")).toBeNull();
+test("a group action stays out of the whole-viz buttons", () => {
+  const view = render(<LensResultView run={runOf(grouped)} partButtons onOpenPage={() => {}} />);
+  expect(view.queryByTestId("lens-action-add")).toBeNull();
   expect(view.getAllByTestId("lens-group-action-add")).toHaveLength(1);
 });
 
@@ -380,26 +353,6 @@ test("a pick passes the row it came from, labelled as its columns are", () => {
 test("a column with no label is headed by its key in words", () => {
   const view = render(<LensResultView run={runOf({ ...grouped, viz: "table" })} onOpenPage={() => {}} />);
   expect([...view.getByTestId("lens-table").querySelectorAll("thead th")].map((th) => th.textContent)).toContain("Title");
-});
-
-// On a page, Copy and the lens's actions are the
-// page's: handed up for its nav bar, not drawn above the body.
-test("toolbarTo hands the toolbar's actions to the page instead of drawing them", async () => {
-  let handed: { id: string; label: string }[] = [];
-  const view = render(
-    <LensResultView
-      run={runOf({ actions: [{ id: "sync", label: "Sync", command: "oxplow.x", input: {}, row: false, group: null }] as never })}
-      onOpenPage={() => {}}
-      toolbarTo={(actions) => (handed = actions.map((a) => ({ id: a.id, label: a.label })))}
-    />,
-  );
-  expect(view.queryByTestId("lens-actions")).toBeNull();
-  await waitFor(() =>
-    expect(handed).toEqual([
-      { id: "lens-copy", label: "Copy" },
-      { id: "lens-action-sync", label: "Sync" },
-    ]),
-  );
 });
 
 // A table's links are one collection: the page a row opens has Up and Down

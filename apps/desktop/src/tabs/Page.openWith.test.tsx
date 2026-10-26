@@ -7,26 +7,9 @@ import { PageNavigationContext, type PageNavigation } from "./PageNavigationCont
 // there are two or more; picking one patches the URI's view with
 // `oxplow.renderer`, so the same URI stays in the tab.
 
-const renderer = (extension: string, id: string, more: object = {}) => ({
-  id,
-  extension,
-  pageRef: `oxplow:oxplow/page?page=${extension}/${id}`,
-  title: id,
-  icon: null,
-  category: null,
-  keywords: null,
-  params: [],
-  count: null,
-  for: ["oxplow/file"],
-  accepts: {},
-  default: false,
-  pinned: false,
-  body: { kind: "builtIn", name: id },
-  ...more,
-});
-let pages = [renderer("oxplow-foundation", "editor", { default: true }), renderer("acme", "blame")];
 // Page files (`pages/*.yaml`): their id is `<extension>/<slug>`.
 let files: object[] = [];
+const twoRenderers = () => [file("oxplow-foundation", "editor", { default: true }), file("acme", "blame", { title: "Blame" })];
 const file = (extension: string, slug: string, more: object = {}) => ({
   id: `${extension}/${slug}`,
   extension,
@@ -46,7 +29,7 @@ const realApi = await import("../api.js");
 const pristineApi = { ...realApi };
 mock.module("../api.js", () => ({
   ...realApi,
-  listExtensions: async () => [{ name: "ext", enabled: true, pages, pageFiles: files, ui: { slots: [], commands: [], decorators: [] } }],
+  listExtensions: async () => [{ name: "ext", enabled: true, pageFiles: files, ui: { slots: [], commands: [], decorators: [] } }],
 }));
 const { Page } = await import("./Page.js");
 
@@ -78,6 +61,7 @@ async function openWith(view: ReturnType<typeof render>) {
 }
 
 test("a URI with two renderers offers Open with; picking one patches the view with oxplow.renderer", async () => {
+  files = twoRenderers();
   const patches: unknown[] = [];
   const view = shown(FILE, patches);
   await openWith(view);
@@ -100,16 +84,15 @@ test("a URI with one renderer, or none, offers nothing", async () => {
   await menuItems(one);
   expect(one.queryByTestId("menu-item-page-open-with")).toBeNull();
   cleanup();
-  pages = [renderer("oxplow-foundation", "editor", { default: true })];
+  files = [file("oxplow-foundation", "editor", { default: true })];
   const solo = shown(FILE, patches);
   await menuItems(solo);
   expect(solo.queryByTestId("menu-item-page-open-with")).toBeNull();
-  pages = [renderer("oxplow-foundation", "editor", { default: true }), renderer("acme", "blame")];
+  files = twoRenderers();
 });
 
 test("page files' renderers are offered, the one drawing it checked", async () => {
-  pages = [];
-  files = [file("oxplow-foundation", "editor", { default: true }), file("acme", "blame", { title: "Blame" })];
+  files = twoRenderers();
   try {
     const patches: unknown[] = [];
     const view = shown(FILE, patches);
@@ -117,8 +100,7 @@ test("page files' renderers are offered, the one drawing it checked", async () =
     expect(view.getByTestId("menu-item-page-open-with-oxplow-foundation/editor").textContent).toContain("✓");
     expect(view.getByTestId("menu-item-page-open-with-acme/blame").textContent).toContain("Blame");
   } finally {
-    files = [];
-    pages = [renderer("oxplow-foundation", "editor", { default: true }), renderer("acme", "blame")];
+    files = twoRenderers();
   }
 });
 

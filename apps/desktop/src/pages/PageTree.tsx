@@ -14,10 +14,12 @@ import { Markdown } from "../components/Markdown/Markdown.js";
 import { Replaceable } from "../components/Replaceable.js";
 import { Section } from "../kit/Section.js";
 import { Tile, TileGrid, TileSlot } from "../kit/Tiles.js";
-import type { PickedRow } from "../lens/LensRail.js";
+import type { PickedRow } from "./railGroups.js";
 import { FormSourceContext } from "../lens/formSource.js";
 import { LensActionRunnerContext } from "../lens/lensActionRunner.js";
-import { LensResultView } from "../lens/LensResultView.js";
+import { ActionForm, LensResultView, useLensActions } from "../lens/LensResultView.js";
+import { offeredWholeLens } from "../lens/lensActions.js";
+import { CommandConfirm } from "../components/CommandConfirm.js";
 import { nodeById, nodeRunOf } from "../lens/nodeRun.js";
 import { foldEmpty } from "../lens/lensModel.js";
 import type { TabRef } from "../tabs/tabState.js";
@@ -118,6 +120,9 @@ export interface PageTreeProps {
   onSetParam?(name: string, value: SqlCell, row?: PickedRow): void;
   /** Drawn small (a rail panel): its vizes compact, a few rows each. */
   compact?: boolean;
+  /** Its vizes' whole-viz actions as buttons above them; default: unless
+   *  compact (an expanded row's page is compact and keeps them). */
+  partButtons?: boolean;
 }
 
 /** How a node sits in its parent: on its own, a stack's section, a
@@ -146,7 +151,8 @@ function NodeView(props: NodeViewProps) {
   ) : (
     own
   );
-  const title = def?.title ?? null;
+  // A page a slot mounted is titled by its own page.
+  const title = def ? (def.title ?? null) : (at.embed?.page.title ?? null);
   const fills = fillsNode(run, at);
   return (
     <NodeFrame id={id} fill={fills}>
@@ -231,10 +237,59 @@ function NodeBody(props: NodeViewProps & { def: Node; id: string }) {
       // The page's extension's component, fed the page's loaders.
       return <ComponentNode run={props.run} def={def} streamId={props.streamId ?? null} />;
     case "embed":
-      return at.embed ? <PageTree {...props} run={at.embed} root={at.embed.tree} prefix={`${id}/`} onSetParam={undefined} /> : null;
+      return at.embed ? (
+        <>
+          {props.compact ? null : <EmbeddedActions embed={at.embed} node={id} runId={props.runId} streamId={props.streamId ?? null} />}
+          <PageTree {...props} run={at.embed} root={at.embed.tree} prefix={`${id}/`} onSetParam={undefined} />
+        </>
+      ) : null;
     case "viz":
       return <VizNode {...props} def={def} />;
   }
+}
+
+/** An embedded page's own (whole-page) actions, as buttons above it:
+ *  pressed on the host's run naming the embed's node, which the server
+ *  runs as that page's action. */
+function EmbeddedActions({ embed, node, runId, streamId }: { embed: PageRun; node: string; runId: string | null; streamId: string | null }) {
+  const runner = useNodeActions(runId, node);
+  const forms = useNodeForms(runId, node);
+  const target = useMemo(() => ({ lens: { id: embed.page.id }, params: embed.params }), [embed.page.id, embed.params]);
+  const actions = useLensActions(target, streamId, runner);
+  const first = embed.page.loaders[0]?.name;
+  const firstResult = first ? embed.loaders[first]?.result : undefined;
+  const offered = embed.page.actions.filter((a) => offeredWholeLens(a, firstResult ?? { columns: [], rows: [] }));
+  if (offered.length === 0 && !actions.pending && !actions.form) return null;
+  return (
+    <>
+      {actions.pending ? (
+        <CommandConfirm
+          label={actions.pending.action.label}
+          command={actions.pending.action.command}
+          details={actions.pending.details}
+          onConfirm={actions.confirm}
+          onCancel={actions.cancel}
+          testIdPrefix="lens-action-confirm"
+        />
+      ) : null}
+      {actions.form ? (
+        <LensActionRunnerContext.Provider value={runner}>
+          <FormSourceContext.Provider value={forms}>
+            <ActionForm run={target} streamId={streamId} pressed={actions.form} onClose={actions.closeForm} />
+          </FormSourceContext.Provider>
+        </LensActionRunnerContext.Provider>
+      ) : null}
+      {offered.length > 0 ? (
+        <div data-testid="lens-part-actions" className="ox-toolbar">
+          {offered.map((a) => (
+            <button key={a.id} type="button" data-testid={`lens-action-${a.id}`} disabled={actions.busy !== null} title={a.command} onClick={() => actions.run(a, null)}>
+              {actions.busy === a.id ? `${a.label}…` : a.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </>
+  );
 }
 
 /** A child the page doesn't declare: what a slot mounted, an embed run. */
@@ -263,8 +318,7 @@ function VizNode(props: NodeViewProps & { def: Node; id: string }) {
         streamId={streamId}
         onOpenPage={onOpenPage}
         onSetParam={onSetParam}
-        toolbar={false}
-        partButtons={!compact}
+        partButtons={props.partButtons ?? !compact}
         componentView={componentView}
         {...(compact ? { compact: true, maxRows: COMPACT_ROWS } : {})}
       />
@@ -336,7 +390,7 @@ function PageExpansion({ target, params, streamId, onOpenPage }: ExpansionProps)
   return (
     // Its nodes are its own page's: nothing in the host lands on them.
     <NodeRegistryContext.Provider value={null}>
-      <PageTree run={state.run} runId={state.runId} root={root} streamId={streamId} onOpenPage={onOpenPage} compact />
+      <PageTree run={state.run} runId={state.runId} root={root} streamId={streamId} onOpenPage={onOpenPage} compact partButtons />
     </NodeRegistryContext.Provider>
   );
 }

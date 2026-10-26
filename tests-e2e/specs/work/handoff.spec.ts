@@ -37,7 +37,7 @@ test("work handed off is seen on the other thread, and taking it moves its item"
   // On the other thread its Tasks page shows it; Take moves the item there.
   await page.getByTestId(`navigator-strip-thread-${docsId}`).click();
   await openFromLauncher(page, "Tasks");
-  const inbound = page.getByTestId("lens-part-oxplow-foundation/thread-handoffs-in");
+  const inbound = page.locator('[data-testid="page-file"]:visible [data-node="oxplow-foundation.thread-handoffs-in"]');
   await expect(inbound).toContainText("The outline is done");
   await inbound.getByText("The outline is done").click({ button: "right" });
   await page.getByTestId("menu-item-lens-action-take").click();

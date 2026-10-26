@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Extension, Lens, LensRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
-import { markParts, treeNodes, lazyTreeNodes, lazyTreeProblem, drawnTreeRows, wantedBranches, timelineEntries, stepItems, hunkRows, codeRows, diffRow, editorRow, embedRow, answerRow, parseLines, slotRuns, mergeDirectory, barRows, childParams, partParams, lineSeries, sparklineValues, numericRowId, treemapItems, cellLinkRef, changedParams, lensViewChange, misplacedViewParams, viewedParts, viewOptions, offeredFilters, foldEmpty, foldedAway, displayColumns, formatCell, lensDirectoryEntries, parseParamInput, limitRows, slugify, adHocLens, rowMention, rowAssistantContext, effortRowId, slotExtensions, isTimestamp, rowGroups, rowEmphasized, rowDepth, rowContextRef, rowTiles, tileSizeOf } from "./lensModel.js";
+import { rowMention, markParts, treeNodes, lazyTreeNodes, lazyTreeProblem, drawnTreeRows, wantedBranches, timelineEntries, stepItems, hunkRows, codeRows, diffRow, editorRow, embedRow, parseLines, mergeDirectory, barRows, lineSeries, sparklineValues, numericRowId, treemapItems, cellLinkRef, changedParams, offeredFilters, foldEmpty, foldedAway, displayColumns, formatCell, parseParamInput, limitRows, slugify, rowAssistantContext, effortRowId, isTimestamp, rowGroups, rowEmphasized, rowDepth, rowContextRef, rowTiles, tileSizeOf } from "./lensModel.js";
 import { formatMetricValue, formatShortDateTime } from "../components/format.js";
 import { diffSpecOf, duplicateBlockOf, isPage, lineOf, pagePayload } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
@@ -167,23 +167,6 @@ describe("formatCell", () => {
   });
 });
 
-describe("lensDirectoryEntries", () => {
-  test("one launcher entry per loaded lens, under Lenses", () => {
-    const exts: Extension[] = [
-      { name: "review", description: "Review helpers", path: ".oxplow/extensions/review", errors: [], lenses: [lens()], deployment: { kind: "deployed", hash: "0123456789abcdef" }, collectors: [], origin: "project", ui: { slots: [], commands: [], decorators: [] }, enabled: true },
-      { name: "broken", description: "", path: ".oxplow/extensions/broken", errors: ["bad"], lenses: [], deployment: { kind: "deployed", hash: "0123456789abcdef" }, collectors: [], origin: "project", ui: { slots: [], commands: [], decorators: [] }, enabled: true },
-    ];
-    const entries = lensDirectoryEntries(exts);
-    expect(entries).toHaveLength(1);
-    expect(entries[0]!.id).toBe("oxplow:oxplow/lens?lens=review/waiting");
-    expect(entries[0]!.label).toBe("Waiting on me");
-    expect(entries[0]!.category).toBe("Dashboards");
-    expect(entries[0]!.ref.id).toBe("oxplow:oxplow/lens?lens=review/waiting");
-    expect(entries[0]!.keywords).toContain("review");
-    expect(entries[0]!.keywords).toContain("Blocked tasks");
-  });
-});
-
 describe("parseParamInput", () => {
   test("numbers stay numbers, everything else is text, blank is null", () => {
     expect(parseParamInput("3")).toBe(3);
@@ -191,77 +174,6 @@ describe("parseParamInput", () => {
     expect(parseParamInput("done")).toBe("done");
     expect(parseParamInput("  ")).toBeNull();
     expect(parseParamInput("007x")).toBe("007x");
-  });
-});
-
-// A lens page's params, set by its rail, a row's pick or its component,
-// apart as its URI holds them: its resource params name what it shows, its
-// filters and picks are its view. A filter replaces the entry; a pick, or
-// another resource, pushes one.
-describe("lensViewChange", () => {
-  const l = lens({
-    params: [
-      { name: "days", label: null, default: 7, role: "filter" },
-      { name: "task", label: null, default: null, role: "selection" },
-      { name: "stream_id", label: null, default: null, role: "resource" },
-    ],
-  } as never);
-  test("a filter replaces; values at their defaults leave the URI", () => {
-    expect(lensViewChange(l, { task: "tsk1" }, { days: 14 })).toEqual({ resource: {}, view: { days: 14, task: "tsk1" }, push: false });
-    expect(lensViewChange(l, { days: 14 }, { days: 7 })).toEqual({ resource: {}, view: {}, push: false });
-  });
-  test("a pick pushes; a cleared one replaces", () => {
-    expect(lensViewChange(l, {}, { task: "tsk2" })).toEqual({ resource: {}, view: { task: "tsk2" }, push: true });
-    expect(lensViewChange(l, { task: "tsk2" }, { task: null })).toEqual({ resource: {}, view: {}, push: false });
-  });
-  test("another resource is another page, pushed, keeping the view", () => {
-    expect(lensViewChange(l, { stream_id: 1, days: 14 }, { stream_id: 2 })).toEqual({ resource: { stream_id: 2 }, view: { days: 14 }, push: true });
-  });
-  test("a filter or a pick in the URI's `?` is misplaced", () => {
-    expect(misplacedViewParams(l, { stream_id: 1, days: 14, task: "t" })).toEqual(["days", "task"]);
-  });
-});
-
-// A view document: its `area` names the one section in view; the loader
-// fills `area`'s options from the sections.
-describe("a view document", () => {
-  const part = (id: string, title: string | null) => ({ id, title, lens: `x/${id}`, markdown: null, size: null, replaceable: null, from: null });
-  const settings = lens({
-    viz: "document",
-    view: "area",
-    params: [
-      { name: "area", label: null, default: "overview", role: "filter", type: "choice", options: [{ value: "overview", label: "Every Setting" }, { value: "agents", label: "Agents" }] },
-      { name: "q", label: null, default: "", role: "filter", type: "search" },
-      { name: "pick", label: null, default: null, role: "selection" },
-    ],
-    parts: [part("overview", "Every Setting"), part("agents", "Agents")],
-  } as never);
-  test("shows the viewed section, the default when unset", () => {
-    expect(viewedParts(settings, { area: "agents" }).map((p) => p.id)).toEqual(["agents"]);
-    expect(viewedParts(settings, {}).map((p) => p.id)).toEqual(["overview"]);
-    expect(viewedParts(settings, { area: "gone" })).toEqual([]);
-    const plain = lens({ viz: "document", parts: [part("a", null), part("b", null)] } as never);
-    expect(viewedParts(plain, {}).map((p) => p.id)).toEqual(["a", "b"]);
-  });
-  test("lists its sections from its view param", () => {
-    expect(viewOptions(settings)).toEqual([
-      { id: "overview", label: "Every Setting" },
-      { id: "agents", label: "Agents" },
-    ]);
-  });
-  test("the view param pushes, like a pick; the default leaves the URI", () => {
-    expect(lensViewChange(settings, {}, { area: "agents" })).toEqual({ resource: {}, view: { area: "agents" }, push: true });
-    expect(lensViewChange(settings, { area: "agents" }, { area: "overview" })).toEqual({ resource: {}, view: {}, push: true });
-    expect(lensViewChange(settings, { area: "agents" }, { q: "x" }).push).toBe(false);
-  });
-  test("its rail offers a filter only while the section in view declares it", () => {
-    const overview = lens({ params: [{ name: "q", label: null, default: "" }] } as never);
-    const agents = lens({ params: [] });
-    expect(offeredFilters(settings, overview).map((p) => p.name)).toEqual(["q"]);
-    expect(offeredFilters(settings, agents)).toEqual([]);
-    expect(offeredFilters(settings, null)).toEqual([]);
-    const plain = lens({ params: [{ name: "days", label: null, default: 7, role: "filter" }, { name: "t", label: null, default: null, role: "selection" }] } as never);
-    expect(offeredFilters(plain, null).map((p) => p.name)).toEqual(["days"]);
   });
 });
 
@@ -305,24 +217,6 @@ describe("slugify", () => {
   });
 });
 
-describe("adHocLens", () => {
-  test("wraps an Explore Data query as an unsaved lens for rendering", () => {
-    const l = adHocLens("SELECT 1", "number");
-    expect(l.query).toBe("SELECT 1");
-    expect(l.viz).toBe("number");
-    expect(l.columns).toEqual([]);
-    expect(l.id).toBe("explore/ad-hoc");
-  });
-});
-
-describe("rowMention", () => {
-  test("a lens row as a one-line agent context mention", () => {
-    expect(rowMention("review/waiting", ["id", "title", "note"], [42, "Fix it", null])).toBe(
-      '[oxplow lens review/waiting row: id=42, title="Fix it", note=null] ',
-    );
-  });
-});
-
 describe("rowAssistantContext", () => {
   test("Ask the Assistant on a row asks about the page it links to, else the row as text", () => {
     const linked = lens({ columns: [{ key: "sha", label: null, link: { kind: "commit", from: null, line: null } }] });
@@ -331,7 +225,7 @@ describe("rowAssistantContext", () => {
       kind: "selection",
       uri: null,
       label: null,
-      text: '[oxplow lens review/waiting row: id=42, title="Fix it"]',
+      text: '[oxplow page review/waiting row: id=42, title="Fix it"]',
     });
   });
 });
@@ -357,38 +251,6 @@ describe("links added for extraction", () => {
     expect(cellLinkRef({ kind: "metric", from: "key", line: null, base: null, head: null }, "key", row, cols)?.id).toBe(
       "oxplow:oxplow/metric?metric=oxplow.complexity",
     );
-  });
-});
-
-describe("launcher entries", () => {
-  const ext = (over: Partial<Extension>): Extension =>
-    ({
-      name: "x",
-      description: "",
-      path: "",
-      errors: [],
-      lenses: [],
-      deployment: { kind: "deployed", hash: "0123456789abcdef" },
-      collectors: [],
-      origin: "project",
-      ui: { slots: [], commands: [], decorators: [] },
-      enabled: true,
-      ...over,
-    }) as Extension;
-  test("hidden lenses are skipped and categories are honored", () => {
-    const entries = lensDirectoryEntries([
-      ext({
-        lenses: [
-          lens({ id: "x/a", slug: "a", launcherCategory: "Activity" }),
-          lens({ id: "x/b", slug: "b", hidden: true }),
-          lens({ id: "x/c", slug: "c" }),
-        ],
-      }),
-    ]);
-    expect(entries.map((e) => [e.ref.id, e.category])).toEqual([
-      ["oxplow:oxplow/lens?lens=x/a", "Activity"],
-      ["oxplow:oxplow/lens?lens=x/c", "Dashboards"],
-    ]);
   });
 });
 
@@ -430,11 +292,6 @@ describe("chart data", () => {
     const items = treemapItems(l, result(["p", "c", "z"], [["a.rs", 5, "core"], ["b.rs", 0, "ui"]]));
     expect(items).toEqual([{ label: "a.rs", size: 5, group: "core", row: ["a.rs", 5, "core"] }]);
   });
-});
-
-test("grid children get only the params they declare", () => {
-  const child = lens({ params: [{ name: "effort_id", label: null, default: null }] });
-  expect(childParams(child, { effort_id: 3, other: "x" })).toEqual({ effort_id: 3 });
 });
 
 test("numericRowId strips a UI id prefix", () => {
@@ -516,29 +373,6 @@ describe("change links", () => {
     });
     expect(cellLinkRef({ kind: "compare", from: "dup", line: null, base: null, head: null }, "dup", ["x", null, null, null, "garbage"], cols)).toBeNull();
   });
-});
-
-test("slot lenses get only the slot params they declare", () => {
-  const exts = [
-    {
-      name: "x",
-      enabled: true,
-      ui: { slots: [{ slot: "effort.review.details", lensId: "x/a" }] },
-      lenses: [lens({ id: "x/a", params: [{ name: "effort_id", label: null, default: null }] })],
-    },
-  ] as unknown as Extension[];
-  expect(slotRuns(exts, "effort.review.details", { effort_id: 7, change_id: 9 })).toEqual([{ id: "x/a", params: { effort_id: 7 } }]);
-});
-
-test("a slot can be narrowed to one extension, and lists who mounts there", () => {
-  const exts = [
-    { name: "a", enabled: true, ui: { slots: [{ slot: "settings.section", lensId: "a/x" }] }, lenses: [lens({ id: "a/x" })] },
-    { name: "b", enabled: true, ui: { slots: [{ slot: "settings.section", lensId: "b/y" }] }, lenses: [lens({ id: "b/y" })] },
-    { name: "c", enabled: false, ui: { slots: [{ slot: "settings.section", lensId: "c/z" }] }, lenses: [lens({ id: "c/z" })] },
-    { name: "d", enabled: true, ui: { slots: [{ slot: "thread.plan.header", lensId: "d/w" }] }, lenses: [lens({ id: "d/w" })] },
-  ] as unknown as Extension[];
-  expect(slotRuns(exts, "settings.section", {}, "b")).toEqual([{ id: "b/y", params: {} }]);
-  expect(slotExtensions(exts, "settings.section")).toEqual(["a", "b"]);
 });
 
 test("page links name any ref, which opens where its kind's page says", () => {
@@ -701,13 +535,6 @@ describe("structure components (P6.A2)", () => {
     expect(embedRow(l, r([]))).toBeNull();
   });
 
-  test("answerRow is the first row's answer and the lens it was kept as", () => {
-    const l = lens({ viz: "answer", answer: { uri: "u", kept: "k" } });
-    expect(answerRow(l, result(["u", "k"], [["oxplow:oxplow/answer?id=3", null]]))).toEqual({ uri: "oxplow:oxplow/answer?id=3", kept: null });
-    expect(answerRow(l, result(["u", "k"], [["oxplow:oxplow/answer?id=3", "my-lenses/x"]]))?.kept).toBe("my-lenses/x");
-    expect(answerRow(l, result(["u", "k"], []))).toBeNull();
-  });
-
   test("editorRow is the first row's file and the line it lands on", () => {
     const l = lens({ viz: "editor", editor: { path: "p", lines: "l" } });
     expect(editorRow(l, result(["p", "l"], [["src/a.rs", "12-14"]]))).toEqual({ path: "src/a.rs", line: 12 });
@@ -744,14 +571,6 @@ describe("structure components (P6.A2)", () => {
     expect(
       hunkRows(l, result(["p", "a", "b"], [["x.rs", "git:abc", "working"], ["y.rs", null, "working"]])),
     ).toEqual([{ path: "x.rs", from: "git:abc", to: "working", row: ["x.rs", "git:abc", "working"] }]);
-  });
-});
-
-describe("adHocLens charts", () => {
-  test("an ad-hoc chart carries its chart columns", () => {
-    const chart = { x: "day", y: "n", series: null, label: null, size: null, group: null };
-    expect(adHocLens("SELECT 1", "bar", chart).chart).toEqual(chart);
-    expect(adHocLens("SELECT 1", "table").chart).toBeNull();
   });
 });
 
@@ -825,14 +644,6 @@ describe("sparkline and badge formats", () => {
   });
 });
 
-test("a composite's parts get its row under its params, a param holding a value winning", () => {
-  const run = (sha: SqlCell, rows: SqlCell[][]) =>
-    ({ lens: { tile: null }, params: { stream_id: 1, sha }, result: { columns: ["change_id", "sha"], rows } }) as unknown as LensRun;
-  expect(partParams(run("a", [[7, "b"]]))).toEqual({ stream_id: 1, sha: "a", change_id: 7 });
-  expect(partParams(run(null, [[7, "b"]]))).toEqual({ stream_id: 1, sha: "b", change_id: 7 });
-  expect(partParams(run(null, []))).toEqual({ stream_id: 1, sha: null });
-});
-
 test("a row tile's size is one of the four, else its kind's default", () => {
   expect(tileSizeOf("wide", "sql")).toBe("wide");
   expect(tileSizeOf("huge", "sql")).toBe("small");
@@ -872,15 +683,6 @@ test("a dashboard's rows are its tiles, each drawn by its lens, sql, metric or t
   expect(rowTiles({ ...run, lens: { tile: null } } as unknown as LensRun)).toEqual([]);
 });
 
-test("a dashboard whose rows are its tiles gives its parts its params alone", () => {
-  const run = {
-    lens: { tile: { id: "id", text: "body" } },
-    params: { id: "dsh1" },
-    result: { columns: ["id", "body"], rows: [["dti1", "x"]] },
-  } as unknown as LensRun;
-  expect(partParams(run)).toEqual({ id: "dsh1" });
-});
-
 describe("foldedAway", () => {
   const lens = { depth: "d" } as unknown as import("../tauri-bridge/generated/bindings.js").Lens;
   const columns = ["uri", "d"];
@@ -901,4 +703,8 @@ describe("foldedAway", () => {
     const flat = foldedAway({ depth: null } as never, columns, rows, new Set(["a"]), id);
     expect(flat.hidden.size + flat.parents.size).toBe(0);
   });
+});
+
+test("a row that links nowhere is a mention of its page node's row", () => {
+  expect(rowMention("acme/list#items", ["id", "n"], ["a", 2])).toBe('[oxplow page acme/list#items row: id="a", n=2] ');
 });

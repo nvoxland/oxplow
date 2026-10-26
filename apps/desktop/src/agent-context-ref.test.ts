@@ -52,11 +52,4 @@ describe("formatContextMention", () => {
       kind: "work_item", ref: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", title: "x", state: "x",
     }).endsWith(" ")).toBe(true);
   });
-
-  test("lens → bracketed reference with id and non-default params", () => {
-    expect(formatContextMention({ kind: "lens", lensId: "review/waiting", params: { stream: 1, kind: "primary" } }))
-      .toBe('[oxplow lens review/waiting kind="primary" stream=1] ');
-    expect(formatContextMention({ kind: "lens", lensId: "review/waiting", params: {} }))
-      .toBe("[oxplow lens review/waiting] ");
-  });
 });

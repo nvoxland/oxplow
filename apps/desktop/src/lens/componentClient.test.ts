@@ -20,7 +20,6 @@ function harness(deps: Partial<BridgeDeps> = {}, protocol: unknown = BRIDGE_PROT
   const host = createBridgeHost(
     channel.port1,
     {
-      query: async (asset, params) => ({ ...run(7), lens: { id: asset }, params }) as unknown as LensRun,
       invoke: async () => ({ result: { done: true } }) as never,
       navigate: () => true,
       confirm: async () => true,
@@ -84,14 +83,12 @@ test("applyTheme sets each token on the document's root", async () => {
   h.close();
 });
 
-test("query, invoke and navigate resolve with the host's replies", async () => {
+test("invoke and navigate resolve with the host's replies", async () => {
   const h = harness();
   const connecting = connect({ target: h.frame });
   h.init();
   const c = await connecting;
-  const answer = await c.query("open-tasks", { n: 1 });
-  expect(answer.lens.id).toBe("open-tasks");
-  expect(answer.params).toEqual({ n: 1 });
+  expect("query" in c).toBe(false);
   expect(await c.invoke("oxplow.work_item.transition", { to: "done" })).toEqual({ done: true });
   expect(await c.navigate("oxplow:oxplow/work_item?id=tsk1&provider=oxplow")).toBeNull();
   h.close();
@@ -196,7 +193,6 @@ function pageHarness(deps: Partial<BridgeDeps> = {}) {
   const host = createBridgeHost(
     channel.port1,
     {
-      query: async () => run(0),
       invoke: async () => ({ result: null }) as never,
       navigate: () => true,
       confirm: async () => true,
@@ -306,7 +302,6 @@ test("a component shown by a lens with its host's view reads, sets and hears it"
   const host = createBridgeHost(
     channel.port1,
     {
-      query: async () => run(0),
       invoke: async () => ({ result: null }) as never,
       navigate: () => true,
       confirm: async () => true,

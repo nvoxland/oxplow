@@ -12,7 +12,7 @@ const TAB = "oxplow:oxplow/file?path=emu.txt";
 
 async function openEmu(page: import("@playwright/test").Page) {
   await openFromLauncher(page, "Files");
-  await page.getByRole("button", { name: "emu.txt" }).filter({ visible: true }).first().click();
+  await page.locator('[data-testid="page-file"]:visible').getByRole("button", { name: "emu.txt" }).filter({ visible: true }).first().click();
   const editor = page.getByTestId("lens-editor").filter({ visible: true }).locator(".monaco-editor").first();
   await expect(editor).toBeVisible();
   await expect(editor).toContainText("emu");

@@ -112,8 +112,8 @@ text laid over its edited field, and shows the text it saved until the
 re-read brings it; Discard clears the draft. The page's rail lists the
 headings (`lens/Contents.tsx`).
 
-Every markdown surface: the lens `markdown` viz and document/dashboard
-markdown parts (`LensResultView`, `PartsViz`), effort summaries
+Every markdown surface: the `markdown` viz and a page's `markdown`
+nodes (`LensResultView`, `PageTree`), effort summaries
 (`TaskDetail`, `DiffViewPage`), the wiki body (the `wiki-page-body` lens's `markdown` viz), a work
 item's body (`TaskDetail`), comment messages (`CommentPopover`) and the
 comment composer (`CommentComposer`), a form's markdown field

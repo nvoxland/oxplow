@@ -139,8 +139,8 @@ test("the editor, the list and oxplow's own, each chosen from Settings", async (
   // Only the fields the form names are shown; the item's ref is fixed, not editable.
   await expect(detail.getByTestId("lens-form-fields-uri")).toHaveCount(0);
   await expect(detail.getByTestId("lens-form-fields-title")).toHaveValue("Item to edit");
-  await expect(page.getByTestId("lens-part-state")).toBeVisible();
-  await expect(detail.getByTestId("lens-part-state")).toHaveCount(0);
+  await expect(page.locator('[data-testid="page-file"]:visible [data-node="state"]')).toBeVisible();
+  await expect(detail.locator('[data-node="state"]')).toHaveCount(0);
   // It edits what is saved: Save waits for a change; what was typed is the
   // tab's, so a reload gives it back; Discard puts the saved title back.
   const save = detail.getByTestId("lens-form-fields-submit");
@@ -176,7 +176,7 @@ test("the editor, the list and oxplow's own, each chosen from Settings", async (
   for (const target of TARGETS) await choose(page, target, "oxplow");
   await openFromLauncher(page, "Tasks");
   await expect(page.locator('[data-testid^="replacement-"]:visible')).toHaveCount(0);
-  await expect(page.getByTestId("lens-part-list").locator('[data-testid^="lens-row-"]').first()).toBeVisible();
+  await expect(page.locator('[data-testid="page-file"]:visible [data-node="list"]').locator('[data-testid^="lens-row-"]').first()).toBeVisible();
   await openFromLauncher(page, "Board");
   await expect(page.getByTestId("lens-board")).toBeVisible();
   await expect(page.locator('[data-testid^="replacement-"]:visible')).toHaveCount(0);

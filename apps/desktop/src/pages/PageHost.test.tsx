@@ -193,3 +193,38 @@ test("a switch page's sections are links in its rail; the one in view titles the
   fireEvent.click(view.getByTestId("page-section-agents"));
   expect(changes).toEqual([{ area: "agents" }]);
 });
+
+test("a custom viz shares the page's filters and picks, not what it shows", async () => {
+  const { pageViewKeys } = await import("./PageHost.js");
+  expect(
+    pageViewKeys([
+      { name: "uri", role: "resource" },
+      { name: "state", role: "filter" },
+      { name: "item", role: "selection" },
+      { name: "plain", role: null },
+    ] as never),
+  ).toEqual(["state", "item"]);
+});
+
+test("Copy puts the open run's text on the clipboard, as an agent reads it", async () => {
+  const { PageReadsContext } = await import("./pageReads.js");
+  const asked: string[] = [];
+  const written: string[] = [];
+  const clipboard = navigator.clipboard;
+  Object.defineProperty(navigator, "clipboard", { value: { writeText: async (t: string) => void written.push(t) }, configurable: true });
+  try {
+    const { runs } = fakePageRuns(tablePage());
+    const reads = { page: async () => Promise.reject(new Error("no")), run: async () => Promise.reject(new Error("no")), text: async (id: string) => (asked.push(id), "Items\n- Alpha") };
+    const view = render(
+      <PageReadsContext.Provider value={reads}>
+        <PageHost pageKey={key} runs={runs} />
+      </PageReadsContext.Provider>,
+    );
+    await waitFor(() => expect(view.getByText("Items: Alpha")).toBeTruthy());
+    fireEvent.click(view.getByTestId("action-page-copy"));
+    await waitFor(() => expect(written).toEqual(["Items\n- Alpha"]));
+    expect(asked).toEqual(["run-1"]);
+  } finally {
+    Object.defineProperty(navigator, "clipboard", { value: clipboard, configurable: true });
+  }
+});

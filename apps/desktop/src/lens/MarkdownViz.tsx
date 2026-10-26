@@ -51,10 +51,10 @@ function MarkdownEditor({ run, streamId, action, saved }: { run: LensRun; stream
   const shownSaved = justSaved && justSaved.over === saved ? justSaved.text : saved;
   const field = action.editField ?? "";
   const row = run.result.rows[0] ? rowRecord(run.result.columns, run.result.rows[0]) : null;
-  const runLensAction = useLensActionRunner();
+  const press = useLensActionRunner();
   const form = useFormSubmit(
     action.label,
-    (input, confirmed) => runLensAction(run.lens.id, action.id, run.params, row, streamId, confirmed, input),
+    (input, confirmed) => press(run.lens.id, action.id, run.params, row, streamId, confirmed, input),
     (outcome) => {
       void outcome;
       clearDraft();

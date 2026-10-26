@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 
 import { IpcCallError } from "../ipc-error.js";
 import type { FormStart, PageAction, LensRun } from "../tauri-bridge/generated/bindings.js";
-import { actionOffered, offeredWholeLens, copyLens, openAfterAction, performLensAction, promptField, rowRecord, type LensActionDeps } from "./lensActions.js";
+import { actionOffered, offeredWholeLens, openAfterAction, performLensAction, promptField, rowRecord, type LensActionDeps } from "./lensActions.js";
 
 const run = { lens: { id: "acme/prs" }, params: { repo: "x" } } as unknown as LensRun;
 const action: PageAction = { id: "finish", label: "Finish", command: "oxplow.work_item.transition", input: {}, row: false };
@@ -10,7 +10,7 @@ const action: PageAction = { id: "finish", label: "Finish", command: "oxplow.wor
 function deps(fail?: Error, openPage: string | null = null) {
   const log: string[] = [];
   const d: LensActionDeps = {
-    runLensAction: async (id, a, params, row, streamId, confirmed) => {
+    press: async (id, a, params, row, streamId, confirmed) => {
       log.push(`run ${id} ${a} ${JSON.stringify(params)} ${JSON.stringify(row)} ${streamId} ${confirmed}`);
       if (fail && !(confirmed && fail instanceof IpcCallError && fail.code === "NEEDS_CONFIRMATION")) throw fail;
       return { result: {}, audit_id: 1, event_id: null, inverse: null };
@@ -91,17 +91,6 @@ test("a refusal is recorded as the action's failure", async () => {
   expect(log.at(-1)).toBe("error Finish: denied: lens");
 });
 
-test("copy puts the lens's text rendering on the clipboard", async () => {
-  const log: string[] = [];
-  const ok = await copyLens(run, "str1", {
-    lensText: async (id, params, streamId) => `${id} ${JSON.stringify(params)} ${streamId}`,
-    copyText: async (t) => void log.push(t),
-    recordError: (l, m) => log.push(`error ${l} ${m}`),
-  });
-  expect(ok).toBe(true);
-  expect(log).toEqual([`acme/prs {"repo":"x"} str1`]);
-});
-
 test("rowRecord maps columns to the row's values", () => {
   expect(rowRecord(["id", "title"], [7, "x"])).toEqual({ id: 7, title: "x" });
 });
@@ -122,7 +111,7 @@ test("an undoable action's toast offers Undo, which undoes the run as the person
   const log: string[] = [];
   const undoable = { result: {}, audit_id: 7, event_id: null, inverse: { name: "oxplow.agent_session.close", input: {} } } as never;
   const d: LensActionDeps = {
-    runLensAction: async () => undoable,
+    press: async () => undoable,
     toast: (m, undo) => {
       log.push(`toast ${m} ${undo ? "with undo" : "without"}`);
       undo?.();

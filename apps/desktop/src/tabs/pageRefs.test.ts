@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
   agentSessionRef,
-  customDashboardRef,
   goToRef,
   dashboardsRef,
   directoryRef,
@@ -19,7 +18,6 @@ import {
   uncommittedChangesRef,
   hookEventsRef,
   pageTabRef,
-  lensRef,
   metricRef,
   newTaskRef,
   newSessionRef,
@@ -49,10 +47,6 @@ describe("pageRefs", () => {
     expect(recordedPageKind(agentSessionRef("ses3"))).toBe("oxplow/agent_session");
     expect(newSessionRef()).toEqual({ id: "oxplow:oxplow/page?page=new-session" });
     expect(pagePayload(newSessionRef())).toEqual({ extension: null, page: "new-session", params: {} });
-  });
-
-  test("a dashboard's ref is its URI", () => {
-    expect(refFromTabId("oxplow:oxplow/dashboard?id=dsh3")).toEqual(customDashboardRef("dsh3"));
   });
 
   test("fileRef encodes the path with a default disk version", () => {
@@ -107,7 +101,6 @@ describe("pageRefs", () => {
   test("routes with a subject carry it as query params", () => {
     expect(goToRef().id).toBe("oxplow:oxplow/page?page=go-to");
     expect(wikiFreshnessRef("data-model").id).toBe("oxplow:oxplow/page?page=wiki-freshness&slug=data-model");
-    expect(customDashboardRef("dsh3").id).toBe("oxplow:oxplow/dashboard?id=dsh3");
     expect(streamSettingsRef("str1").id).toBe("oxplow:oxplow/page?page=stream-settings&stream=str1");
     expect(threadSettingsRef("thr1").id).toBe("oxplow:oxplow/page?page=thread-settings&thread=thr1");
     expect(alertsRef().id).toBe("oxplow:oxplow/page?page=alerts");
@@ -271,10 +264,9 @@ describe("refFromTabId", () => {
       snapshotRef(112),
       workItemTabRef("oxplow:oxplow/work_item?id=tsk42&provider=oxplow"),
       wikiPageRef("some-slug"),
-      customDashboardRef("dsh1"),
       effortDiffRef("eff9"),
-      lensRef("acme/blocked", { stream_id: 2 }),
-      lensRef("acme/x", { path: "src/a@b.ts", q: "a=b&c" }),
+      pageTabRef("acme/blocked", { stream_id: 2 }),
+      pageTabRef("acme/x", { path: "src/a@b.ts", q: "a=b&c" }),
       fileRef("src/a@b.ts"),
       diffRef({ path: "src/a.ts", leftVersion: "working", rightVersion: "git:HEAD", baseLabel: "HEAD" }),
       alertsRef(),
@@ -305,20 +297,13 @@ describe("refFromTabId", () => {
     );
   });
 
-  test("lensRef ids the lens and round-trips through refFromTabId", () => {
-    const r = lensRef("review/waiting");
-    expect(r).toEqual({ id: "oxplow:oxplow/lens?lens=review/waiting" });
-    expect(refFromTabId(r.id)).toEqual(r);
-  });
-
-  test("lensRef carries its resource params in the `?` and its view in the `#`, and round-trips them", () => {
-    const r = lensRef("x/effort-tests", { effort_id: 12 }, { label: "a b" });
-    expect(r.id).toBe("oxplow:oxplow/lens?effort_id=12&lens=x/effort-tests#label=a%20b");
-    expect(typeOf(r.id)).toBe("oxplow/lens");
+  test("an extension's page carries its resource params in the `?` and its view in the `#`, and round-trips them", () => {
+    const r = pageTabRef("x/effort-tests", { effort_id: 12 }, { label: "a b" });
+    expect(r.id).toBe("oxplow:oxplow/page?effort_id=12&page=x/effort-tests#label=a%20b");
+    expect(typeOf(r.id)).toBe("oxplow/page");
     expect(resourceParamsOf(r)).toEqual({ effort_id: 12 });
     expect(refFromTabId(r.id)).toEqual(r);
     expect(viewParamsOf(r)).toEqual({ label: "a b" });
-    expect(lensRef("x/y", {}).id).toBe("oxplow:oxplow/lens?lens=x/y");
   });
 
   test("a metric's view rides in its URI's `#` and round-trips", () => {
@@ -347,13 +332,13 @@ test("a work item ref opens for every provider", () => {
 // same ref, what the page is (its `?`, its payload) unchanged.
 describe("view params", () => {
   test("a page's view reads from its URI's `#`", () => {
-    expect(viewParamsOf(lensRef("x/y", { stream_id: 2 }, { range: "7d", n: 3 }))).toEqual({ range: "7d", n: 3 });
+    expect(viewParamsOf(pageTabRef("x/y", { stream_id: 2 }, { range: "7d", n: 3 }))).toEqual({ range: "7d", n: 3 });
     expect(viewParamsOf(extPageRef("acme", "pulls", {}, { state: "open" }))).toEqual({ state: "open" });
     expect(viewParamsOf(wikiPageRef("home"))).toEqual({});
   });
 
   test("withViewParams writes the view into the same ref, whatever its kind", () => {
-    expect(withViewParams(lensRef("x/y", { stream_id: 2 }, { range: "7d" }), { q: "a" }).id).toBe(lensRef("x/y", { stream_id: 2 }, { q: "a" }).id);
+    expect(withViewParams(pageTabRef("x/y", { stream_id: 2 }, { range: "7d" }), { q: "a" }).id).toBe(pageTabRef("x/y", { stream_id: 2 }, { q: "a" }).id);
     expect(withViewParams(extPageRef("acme", "pulls"), { state: "open" }).id).toBe("oxplow:oxplow/page?page=acme/pulls#state=open");
     const own = pageTabRef("settings", {}, { area: "agents", section: "x" });
     expect(withViewParams(own, { area: "data" }).id).toBe("oxplow:oxplow/page?page=settings#area=data");
@@ -361,7 +346,7 @@ describe("view params", () => {
   });
 
   test("withResourceParams names another resource of the same page", () => {
-    expect(withResourceParams(lensRef("x/y", { stream_id: 1 }, { q: "a" }), { stream_id: 2 }).id).toBe("oxplow:oxplow/lens?lens=x/y&stream_id=2");
-    expect(withResourceParams(lensRef("x/y"), { stream_id: 2 }, { q: "b" })).toEqual(lensRef("x/y", { stream_id: 2 }, { q: "b" }));
+    expect(withResourceParams(pageTabRef("x/y", { stream_id: 1 }, { q: "a" }), { stream_id: 2 }).id).toBe("oxplow:oxplow/page?page=x/y&stream_id=2");
+    expect(withResourceParams(pageTabRef("x/y"), { stream_id: 2 }, { q: "b" })).toEqual(pageTabRef("x/y", { stream_id: 2 }, { q: "b" }));
   });
 });

@@ -18,9 +18,9 @@ import {
   formatRelative,
   formatShortDateTime,
 } from "../components/format.js";
-import type { ColumnFormat, Extension, Lens, PageParam, LensPart, SlotAt, LensChart, LensLink, LensRun, LensViz, SqlCell, SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
+import type { ColumnFormat, Lens, PageParam, LensChart, LensLink, LensRun, LensViz, SqlCell, SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
 import { PAGE_CATEGORY_ORDER, type PageDirectoryEntry } from "../components/RailHud/sections.js";
-import { diffRef, duplicateBlockRef, effortDiffRef, fileRefAt, gitCommitRef, lensRef, metricRef, wikiPageRef } from "../tabs/pageRefs.js";
+import { diffRef, duplicateBlockRef, effortDiffRef, fileRefAt, gitCommitRef, metricRef, wikiPageRef } from "../tabs/pageRefs.js";
 import { WORKING, parseRevision, shortRevisionLabel } from "../revision.js";
 import type { TabRef } from "../tabs/tabState.js";
 import type { DiffSpec } from "../components/Diff/DiffPane.js";
@@ -381,28 +381,6 @@ function byFormat(v: string | number, format: ColumnFormat): string | null {
   return null;
 }
 
-/** Launcher entries for every loaded lens that isn't `hidden`, under its
- *  `launcher.category` (default "Dashboards"). Broken or disabled extensions
- *  contribute nothing here (their errors surface in Settings). */
-export function lensDirectoryEntries(extensions: Extension[]): PageDirectoryEntry[] {
-  const out: PageDirectoryEntry[] = [];
-  for (const ext of extensions) {
-    if (!ext.enabled) continue;
-    for (const lens of ext.lenses) {
-      if (lens.hidden) continue;
-      const ref = lensRef(lens.id);
-      out.push({
-        id: ref.id,
-        label: lens.title,
-        ref,
-        category: lens.launcherCategory ?? "Dashboards",
-        keywords: `lens ${ext.name} ${lens.slug} ${lens.description}`,
-      });
-    }
-  }
-  return out;
-}
-
 /** The launcher directory: two lists of entries, each of `then`'s
  *  placed after `first`'s of its category, categories in
  *  `PAGE_CATEGORY_ORDER`, so every heading stays contiguous. */
@@ -443,52 +421,6 @@ export function changedParams(lens: Lens, values: Record<string, SqlCell>): Reco
   return out;
 }
 
-/** A lens page after `patch` (its rail, a row's pick, its component): the
- *  values that differ from the defaults, apart as its URI holds them — its
- *  `resource` params (the `?`: what it shows) and its `view` (the `#`: its
- *  `filter` and `selection` params) — and whether the change is somewhere
- *  to come back from: another resource, or a `selection` set (pushed), not
- *  a filter (replaced). */
-export function lensViewChange(
-  lens: Lens,
-  current: Record<string, SqlCell>,
-  patch: Record<string, SqlCell>,
-): { resource: Record<string, SqlCell>; view: Record<string, SqlCell>; push: boolean } {
-  const role = (name: string) => lens.params.find((p) => p.name === name)?.role ?? "resource";
-  const resource: Record<string, SqlCell> = {};
-  const view: Record<string, SqlCell> = {};
-  for (const [name, value] of Object.entries(changedParams(lens, { ...current, ...patch }))) {
-    (role(name) === "resource" ? resource : view)[name] = value;
-  }
-  // A view document's section is somewhere to come back from, like a pick.
-  const push = Object.entries(patch).some(
-    ([name, value]) => role(name) === "resource" || (value !== null && role(name) === "selection") || name === lens.view,
-  );
-  return { resource, view, push };
-}
-
-/** A view document's view param (`view: <name>`): the one whose value
- *  names the section in view; null for any other lens. */
-export function viewParam(lens: Lens): PageParam | null {
-  return lens.view ? (lens.params.find((p) => p.name === lens.view) ?? null) : null;
-}
-
-/** The parts a page shows with `params`: a view document's one section
- *  in view (its view param's value, else its default), every part of any
- *  other lens. Rust's `Lens::viewed_parts` is the same rule. */
-export function viewedParts(lens: Lens, params: Record<string, SqlCell>): LensPart[] {
-  const view = viewParam(lens);
-  if (!view) return lens.parts;
-  const value = params[view.name] ?? view.default ?? null;
-  return lens.parts.filter((p) => p.id === value);
-}
-
-/** A view document's sections, as its view param lists them (the loader
- *  fills its options from the parts, mounted ones too). */
-export function viewOptions(lens: Lens): { id: string; label: string }[] {
-  return (viewParam(lens)?.options ?? []).map((o) => ({ id: o.value, label: o.label }));
-}
-
 /** The filters a lens page's rail offers: every param but its picks; for
  *  a view document, not its view param (the section rail) and only the
  *  ones the section in view declares (`viewed`, none until it's known). */
@@ -496,15 +428,6 @@ export function offeredFilters(lens: Lens, viewed: Lens | null): PageParam[] {
   const filters = lens.params.filter((p) => p.role !== "selection");
   if (!lens.view) return filters;
   return filters.filter((p) => p.name !== lens.view && !!viewed?.params.some((q) => q.name === p.name));
-}
-
-/** The params of `params` a lens doesn't take in its URI's `?` (its
- *  filters and selections, which belong in the `#` view). */
-export function misplacedViewParams(lens: Lens, params: Record<string, SqlCell>): string[] {
-  return Object.keys(params).filter((name) => {
-    const role = lens.params.find((p) => p.name === name)?.role;
-    return role === "filter" || role === "selection";
-  });
 }
 
 /** Whether `value` is `param`'s default: a bool by truth (its echo is
@@ -543,61 +466,6 @@ export function slugify(title: string): string {
   return slug || "lens";
 }
 
-/** An unsaved query from Explore Data (or a pinned query tile), shaped as
- *  a lens so the shared `LensResultView` can render it; a chart viz names
- *  its columns in `chart`. */
-export function adHocLens(query: string, viz: LensViz, chart: LensChart | null = null): Lens {
-  return {
-    id: "explore/ad-hoc",
-    extension: "explore",
-    slug: "ad-hoc",
-    title: "Query",
-    description: "",
-    query,
-    viz,
-    params: [],
-    columns: [],
-    empty: "No rows.",
-    chart,
-    tree: null,
-    tile: null,
-    timeline: null,
-    steps: null,
-    hunks: null,
-    code: null,
-    diff: null,
-    markdown: null,
-    form: null,
-    custom: null,
-    group: null,
-    emphasis: null,
-    depth: null,
-    parts: [],
-    view: null,
-    editor: null,
-    embed: null,
-    answer: null,
-    terminal: null,
-    // Drawn in a tile or under an editor, never filling a page.
-    fills: false,
-    launcherCategory: null,
-    hidden: false,
-    refresh: false,
-    actions: [],
-    alert: null,
-    needs: [],
-    origin: { extension: "", source: null, running: "", deployment: null, bundled: false },
-    tool: null,
-  };
-}
-
-/** One lens row as an add-to-agent-context mention:
- *  `[oxplow lens <id> row: col=value, …] `. */
-export function rowMention(lensId: string, columns: string[], row: SqlCell[]): string {
-  const fields = columns.map((c, i) => `${c}=${JSON.stringify(row[i] ?? null)}`).join(", ");
-  return `[oxplow lens ${lensId} row: ${fields}] `;
-}
-
 /** The first canonical ref a lens row links to, if any: what the row is
  *  about (Ask About This, the row's extension commands). */
 export function rowRef(lens: Lens, columns: string[], row: SqlCell[]): string | null {
@@ -606,6 +474,13 @@ export function rowRef(lens: Lens, columns: string[], row: SqlCell[]): string | 
     if (ref && parseUri(linkTargetId(ref))) return linkTargetId(ref);
   }
   return null;
+}
+
+/** One viz row as an add-to-agent-context mention, the viz named by its
+ *  page node (`<page>#<node>`): `[oxplow page <id> row: col=value, …] `. */
+export function rowMention(id: string, columns: string[], row: SqlCell[]): string {
+  const fields = columns.map((c, i) => `${c}=${JSON.stringify(row[i] ?? null)}`).join(", ");
+  return `[oxplow page ${id} row: ${fields}] `;
 }
 
 /** Ask the Assistant about a lens row: the first page the row links to,
@@ -620,53 +495,6 @@ export function rowAssistantContext(lens: Lens, columns: string[], row: SqlCell[
 export function rowContext(lens: Lens, columns: string[], row: SqlCell[]): { uri: string } | { text: string } {
   const ref = rowRef(lens, columns, row);
   return ref ? { uri: ref } : { text: rowMention(lens.id, columns, row).trim() };
-}
-
-/** What a slot runs: each mounted lens with the slot params it declares
- *  (a slot offers several, e.g. `effort.review.details`'s `effort_id`, `effort` and
- *  `change_id`; `oxplow_run_lens` rejects undeclared ones). */
-export function slotRuns(
-  extensions: Extension[],
-  slot: string,
-  params: Record<string, SqlCell>,
-  /** Only this extension's mounts (the settings slot's per-extension sections). */
-  extension?: string,
-): { id: string; params: Record<string, SqlCell> }[] {
-  const out: { id: string; params: Record<string, SqlCell> }[] = [];
-  for (const ext of extensions) {
-    if (!ext.enabled) continue;
-    if (extension !== undefined && ext.name !== extension) continue;
-    for (const s of ext.ui.slots) {
-      if (s.slot !== slot) continue;
-      const lens = ext.lenses.find((l) => l.id === s.lensId);
-      if (lens) out.push({ id: s.lensId, params: childParams(lens, params) });
-    }
-  }
-  return out;
-}
-
-/** What extensions mount among a page's parts (`<page>.sections`), in
- *  declaration order: each lens, where it goes, its heading (its own, else
- *  its lens's title) and whose it is. */
-export function slotParts(
-  extensions: Extension[],
-  slot: string,
-): { id: string; lensId: string; at: SlotAt; title: string; extension: string }[] {
-  const out: { id: string; lensId: string; at: SlotAt; title: string; extension: string }[] = [];
-  for (const ext of extensions) {
-    if (!ext.enabled) continue;
-    for (const s of ext.ui.slots) {
-      if (s.slot !== slot) continue;
-      const lens = ext.lenses.find((l) => l.id === s.lensId);
-      if (lens) out.push({ id: s.lensId, lensId: s.lensId, at: s.at ?? "end", title: s.title ?? lens.title, extension: ext.name });
-    }
-  }
-  return out;
-}
-
-/** Enabled extensions that mount something into `slot`, in order. */
-export function slotExtensions(extensions: Extension[], slot: string): string[] {
-  return extensions.filter((e) => e.enabled && e.ui.slots.some((s) => s.slot === slot)).map((e) => e.name);
 }
 
 /** The numeric row id the `v_*` views use, from a UI effort id like
@@ -918,16 +746,6 @@ export function editorRow(lens: Lens, result: SqlQueryResult): { path: string; l
   return { path, line: parseLines(at(lens.editor?.lines))?.start ?? null };
 }
 
-/** `answer` viz: the answer the first row names and the lens it was kept
- *  as; null when the row names no answer. */
-export function answerRow(lens: Lens, result: SqlQueryResult): { uri: string; kept: string | null } | null {
-  const at = (column: string | null | undefined) => columnValues(result, column)?.[0];
-  const uri = at(lens.answer?.uri);
-  if (typeof uri !== "string" || !uri) return null;
-  const kept = at(lens.answer?.kept);
-  return { uri, kept: typeof kept === "string" && kept ? kept : null };
-}
-
 /** `embed` viz: the web page the first row names; null when it names none. */
 export function embedRow(lens: Lens, result: SqlQueryResult): { url: string } | null {
   const url = columnValues(result, lens.embed?.url)?.[0];
@@ -1080,32 +898,6 @@ export function rowTiles(run: Pick<LensRun, "lens" | "result">): RowTile[] {
       record,
     };
   });
-}
-
-/** What a `document`'s or `dashboard`'s parts are given: its query's first
- *  row, column by column, under its own params — one of its own wins when
- *  it holds a value (Rust's `extensions::part_params`). Each part takes the
- *  ones it declares (`childParams`). A dashboard whose rows are its tiles
- *  gives its params alone. */
-export function partParams(run: Pick<LensRun, "lens" | "params" | "result">): Record<string, SqlCell> {
-  const out: Record<string, SqlCell> = { ...run.params };
-  // A dashboard whose rows are its tiles has no row of params.
-  if (run.lens.tile) return out;
-  const row = run.result.rows[0];
-  if (row) {
-    run.result.columns.forEach((column, i) => {
-      if (out[column] === undefined || out[column] === null) out[column] = row[i] ?? null;
-    });
-  }
-  return out;
-}
-
-export function childParams(child: Lens, params: Record<string, SqlCell>): Record<string, SqlCell> {
-  const out: Record<string, SqlCell> = {};
-  for (const p of child.params) {
-    if (p.name in params) out[p.name] = params[p.name] ?? null;
-  }
-  return out;
 }
 
 

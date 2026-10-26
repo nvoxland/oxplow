@@ -198,8 +198,7 @@ export function Page({ title, titleIcon, kind, chips: ownChips, actions, pin, ch
     if (!shownId || !patchView) return undefined;
     if (!extensions) return undefined;
     const options = openWithOptions(extensions, shownId);
-    const drawer = chooseRenderer(extensions, shownId, shownView ?? {});
-    const current = drawer.file ?? drawer.declared;
+    const current = chooseRenderer(extensions, shownId, shownView ?? {});
     if (options.length < 2 || !current) return undefined;
     return {
       options,
