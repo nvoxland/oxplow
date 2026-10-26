@@ -248,12 +248,13 @@ lists each declared reference with Set… and Revoke.
 | `skills` | skills and slash commands for the coding agent |  |
 | `implementations` | an implementation of a capability: a built-in, or an AI provider or effort policy written as a script | below |
 | `providers` | an external program implementing a capability, such as the work list | [Provider protocol](provider-protocol.md) |
-| `pages/*.yaml` (files, not a key) | a view over SQL queries: loaders and a node tree | [Pages](../guide/pages.md) |
-| `panels` | where its pages show as panels |  |
-| `ui.slots` | a page mounted into another page's slot |  |
+| `lenses/*.yaml` (files, not a key) | a page or panel over a SQL query | [Pages](../guide/pages.md) |
+| `pages` | where its lenses show as pages |  |
+| `panels` | where its lenses show as panels |  |
+| `ui.slots` | a lens mounted into a core page |  |
 | `ui.decorators` | labels on core refs |  |
-| `ui.replacements` | a page in place of a core component |  |
-| `custom_components` | sandboxed HTML components for `component` nodes |  |
+| `ui.replacements` | a lens in place of a core component |  |
+| `custom_components` | sandboxed HTML components for `viz: custom` lenses |  |
 <!-- kinds:end -->
 
 ### Services
