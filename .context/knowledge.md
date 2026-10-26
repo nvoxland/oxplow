@@ -13,7 +13,7 @@ what it kept.
 `oxplow.knowledge.write_page { slug, title?, body, verified_files?, removed_files? }`
 (`crates/oxplow-app/src/knowledge.rs`, an `External` command: the store
 keeps the page) is how a page is written — by an agent (`run_command`),
-by the desktop editor (the `Markdown` editor; a lens's `markdown` viz saves through its `edit: true` action over this command), and by "Mark verified" on the Freshness page (`oxplow.knowledge.verify_files`, which writes through it). It:
+by the desktop editor (the `Markdown` editor; a page's `markdown` viz saves through its `edit: true` action over this command), and by "Mark verified" on the Freshness page (`oxplow.knowledge.verify_files`, which writes through it). It:
 
 1. validates the slug (kebab-case) and **every `[[link]]` the write
    adds** — a task, page, file, directory, finding or commit that doesn't
@@ -150,7 +150,7 @@ search (`resources: ["oxplow/wiki"]`, matches marked `«…»`); every read retu
 it read (`reads`) and every wiki surface re-reads it through
 `useRerunOnChange` (the title cache through `readsChanged`) when one of
 those models changes — a drifting ref re-reads the freshness rows without
-reopening the page (the Freshness lens page re-runs on what its query read). The RPCs
+reopening the page (the Freshness page re-runs the loaders whose reads changed). The RPCs
 `list_wiki_pages`, `read_wiki_page_body`, `search_wiki_titles` and
 `list_wiki_freshness` are gone.
 

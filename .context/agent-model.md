@@ -104,7 +104,7 @@ harness only delivers them.
 
 | Piece | What | Where it comes from |
 |---|---|---|
-| Preamble | How to work in oxplow: nothing to file, end with the question, reading the errors a person saw, the references oxplow puts in a prompt (`@<path>`, `[oxplow uri <uri>]`, `[oxplow <work item uri>: …]`, `[oxplow lens …]`) | `oxplow_agent_text::WORKING_IN_OXPLOW` (`crates/oxplow-agent-text/assets/working-in-oxplow.md`) |
+| Preamble | How to work in oxplow: nothing to file, end with the question, reading the errors a person saw, the references oxplow puts in a prompt (`@<path>`, `[oxplow uri <uri>]`, `[oxplow <work item uri>: …]`, `[oxplow page …]`) | `oxplow_agent_text::WORKING_IN_OXPLOW` (`crates/oxplow-agent-text/assets/working-in-oxplow.md`) |
 | Launch prompt | The preamble; the session context only for a harness without `prompt_context`; the thread's and stream's custom prompts; `agentPromptAppend`; the testing hint (`testing.agentHint`); the skill index only for a harness without `runtime_text` | `agent_prompt::assemble_system_prompt(config, stream, thread, around, harness, skills)`, given the session's declared harness (`crates/oxplow-app/src/agent_prompt.rs`) |
 | Skills | Core's (`oxplow-runtime`, `-wiki-capture`, `-mermaid`, `-collection`, `-metrics`, `-extension`, `-codebase`) and the active extensions' | `AgentText` (`oxplow_agent_text::core_text` + `capabilities::agent_text`) |
 | Slash commands | Core's (`review-comments`, `configure`, `new-metric`) and the active extensions' | Same |
@@ -112,7 +112,7 @@ harness only delivers them.
 | Handoffs | Work another thread handed this one, once, at the first prompt that takes it ("Handoffs and native messaging") | Prompt-time context |
 | Decisions | The open effort's recorded ones | Prompt-time context |
 | Nudges | Advisory hints, the collection nudge | Prompt- or tool-time context ("Nudge persistence") |
-| Server instructions | What oxplow knows, writes are commands, answer with `oxplow_show_lens` | MCP `get_info` ("The agent's tools") |
+| Server instructions | What oxplow knows, writes are commands, answer with `oxplow_find_page` / `oxplow_show_page` | MCP `get_info` ("The agent's tools") |
 
 **A project's instruction files are the harness's own business.** oxplow
 never reads or forwards `AGENTS.md`, `CLAUDE.md` or any other: each agent
@@ -232,7 +232,7 @@ plugin namespacing, hence `oxplow-` instead of Claude's `/oxplow:`.
 ## The agent's tools
 
 Core (`crates/oxplow-mcp/src/lib.rs`) builds two tools, `list_commands`
-and `run_command`. Every other tool is a foundation command or lens that
+and `run_command`. Every other tool is a foundation command or page that
 declares `tool:` and is offered as `oxplow_<name>`; any extension declares
 its own the same way, under its namespace ([extensions.md](./extensions.md)
 "Agents: the MCP surface"). With the harness's namespace on top the agent
@@ -249,16 +249,16 @@ Every tool foundation declares is named below
 | Write | `run_command`, after `list_commands` |
 | Ask a model | `oxplow_ai_decide` (typed questions about some text, on the `decide` role), `oxplow_ai_summarize` (on `summarize`): recorded computations paid with the person's key, as the asking thread ([ai-providers.md](./ai-providers.md)) |
 | Pages | `oxplow_show_page` (shows the person a page beside the conversation — a page with params, or a `spec` of your own kept as an ephemeral view `oxplow:oxplow/view?id=…`; returns its text and whether a window opened it), `oxplow_find_page` (the pages that answer a question, best first, each with its params; `about` a uri keeps the pages that show that kind of thing and binds its uri), `oxplow_run_page` (a page's text, each node under `[node <id>]`, or its loaders' rows; `page` or an inline `spec`), `oxplow_run_page_action` (a page's action as the page acting for you; a row action on one of the node's rows); `oxplow.page.definition` through `run_command` (what a page is made of and where each node comes from) — [pages-and-tabs.md](./pages-and-tabs.md) "Page files" |
-| Show the person | `oxplow_show_lens`, `oxplow_run_lens`, `oxplow_run_lens_action`, `oxplow_navigate` (takes them to any URI's page, switching stream when needed; by default the shown tab goes there, pushed; `replace` rewrites its entry, `new_tab` opens another) |
+| Show the person | `oxplow_navigate` (takes them to any URI's page, switching stream when needed; by default the shown tab goes there, pushed; `replace` rewrites its entry, `new_tab` opens another) |
 | Common questions, typed | foundation pages with `tool:`: `oxplow_thread_work`, `oxplow_work_next`, `oxplow_effort_summary`, `oxplow_catalog` (each runs `oxplow.page.run` on its page, its params the tool's input: `agent_tools::ToolTarget::Page`). Every other page is `oxplow_find_page` → `oxplow_run_page` (`effort-files`, `file-history`, `recent-commits`, `snapshots`, `thread-sessions`, `session-transcript`) |
-| What the person has | `oxplow_list_tabs` (the tabs each of their windows shows, per thread, stream or project: selected, on screen, stale), `oxplow_get_open_page` (the page open in a thread in the window they were in last, the others' beside it, or one listed tab: `page` is its identity, `view` its `#`; a lens re-run with their params), `oxplow_list_comments` (their anchored comments, hydrated) |
+| What the person has | `oxplow_list_tabs` (the tabs each of their windows shows, per thread, stream or project: selected, on screen, stale), `oxplow_get_open_page` (the page open in a thread in the window they were in last, the others' beside it, or one listed tab: `page` is its identity, `view` its `#`; the page's run as a tree with their params, and the focused node), `oxplow_list_comments` (their anchored comments, hydrated) |
 | Wiki | `oxplow_wiki_ref_drift` (one stale ref's diff against its pin) |
 | Extension authoring | `oxplow_validate_extension`, `oxplow_preview_extension`, `oxplow_preview_collector` |
 | oxplow's guidance | `oxplow_get_skill { name, reference? }` |
 
 A tool's `read_only_hint` (so a client can auto-approve) is its
-command's access: `View` and `Read` commands are hinted, `oxplow_show_lens`
-(it records the answer) and `oxplow_run_lens_action` are not, and nor are
+command's access: `View` and `Read` commands are hinted, `oxplow_show_page`
+(it opens a tab) and `oxplow_run_page_action` are not, and nor are
 `oxplow_ai_decide` and `oxplow_ai_summarize`: they change no record but spend
 the person's provider key (a scope with `spends`), so the client asks before
 they run. Each tool
@@ -269,7 +269,7 @@ lists the scopes. An anonymous connection may call the read-only ones.
 Almost every read is a published model: an agent's thread, efforts,
 work items, commits, snapshots, dashboards, diagnostics and errors are
 `v_*` rows. A tool stays a tool only where a model can't be one: file and
-revision content, live language-server answers, site search, a lens's
+revision content, live language-server answers, site search, a page's
 rendering, a dry run.
 
 **`oxplow_read { uri }`** (`oxplow_app::ref_read`) reads anything a URI names and
@@ -282,7 +282,7 @@ an event's stored body (`oxplow:oxplow/event?id=<id>#part=input`, `part=output`,
 caller's own stream's events only), a recorded model call's bodies
 (`oxplow:oxplow/ai_call?id=<id>#part=request`, `part=response`; any call but one another agent's
 thread asked for — an extension's, a collector's or a job's are the
-project's), a lens's definition (`oxplow:oxplow/lens?lens=<ext>/<slug>`). A file or lens is
+project's), a page's definition (`oxplow:oxplow/page?page=<ext>/<slug>`). A file or page is
 read in the caller's stream's worktree, or another's named by `stream`
 (`str2`). Content stops at 64 KB with `truncated: true`; ask for
 lines to read further. A captured file's row comes from
@@ -306,26 +306,27 @@ without asking. An anonymous connection may read and list but not run.
 Which commands an agent may call is its harness's to decide (its
 permission mode); an agent changes only its own stream.
 
-**Lenses.** When the person asks to see, list, compare or track
-something, the agent answers with `oxplow_show_lens` (the `oxplow.lens.show`
-command): an existing lens with params, or its own `spec` (table, chart,
-tree). It is the thread's: it opens as a tab of the thread (its page,
-the `answer` renderer of `oxplow/answer`), live, with "Keep This", and
-the thread's Answers panel lists it; the tool returns its URI and its
-text rendering. `oxplow_run_lens` reads what a
-lens shows (text by default, `format: "json"` for rows); `oxplow_run_lens_action`
-runs a lens's declared action as the lens acting for the caller, under
-the same rules as running the command directly.
+**Pages.** When the person asks to see, list, compare or track something,
+the agent looks first: `oxplow_find_page` finds the page that answers it
+(by the questions pages say they answer, `answers:`), `oxplow_run_page`
+reads one (text by default, `format: "json"` for rows; `draft: true` reads
+the caller's stream's draft of the extension), and `oxplow_show_page` shows
+it beside the conversation: an existing page with params, or its own
+`spec`, an inline page (read-only: no commands, forms or actions) kept as an
+ephemeral view tab (`oxplow:oxplow/view?id=…`) that the person can save to
+the wiki (an `oxplow-page` block) or as a page. It returns the page's text.
+`oxplow_run_page_action` presses a page's declared action as the page acting
+for the caller, under the same rules as running the command directly.
 
 **Server instructions** (`get_info`) are the one text every harness
 shows its agent: what oxplow knows (`oxplow_query_sql` over `v_*`), that every
-write is a command, and to answer "show me" with `oxplow_show_lens` rather than
-printing a table. They ship to users' projects, so they never name this
+write is a command, and to answer "show me" with `oxplow_find_page` then `oxplow_show_page` (or
+`show_page { spec }` for a one-off) rather than printing a table. They ship to users' projects, so they never name this
 repo's docs.
 
 **Tools read the interface.** No tool belongs to one implementation:
 work-item reads (`oxplow_query_sql` over `v_work_item`, `oxplow_read` of a work item's
-URI, the work-next lens) go through whichever list is active (empty with
+URI, the work-next page) go through whichever list is active (empty with
 none), so the tool list never changes with a switch. What an
 implementation owns is commands, offered only while it's active
 (`capabilities::Active::refusal`).
@@ -658,10 +659,10 @@ stream on another host (no `HOME` passed), reads as unknown.
 
 What can be resumed is listed two ways, both reads of
 `AgentHarness::conversations` (`live_models::harness_conversations`):
-for an open session, the `agent-session-conversations` choices lens over
+for an open session, the `agent-session-conversations` choices page over
 `v_agent_conversation` (the page's Switch / Fork Conversation… forms:
 "Choosing another conversation" in terminal.md); for a thread with no session in hand, the
-`new-session-earlier` lens over `v_agent_conversation` (the New Session
+`new-session-earlier` loader over `v_agent_conversation` (the New Session
 page, "Earlier sessions"), which adds the stream's closed sessions and says per row whether taking it
 reopens, resumes (`agent_session.open { resume }`), switches to a tab or
 does nothing. Nothing is adopted until a person picks a row.
@@ -960,12 +961,12 @@ from `setSelectedThread`): **Add to Context** is on every page's ☰
 (`menu-item-page-add-to-context`, beside Ask; `oxplow.context.add` with the
 page's canonical ref and title; disabled with a reason when no thread is
 selected) and on selections: an editor's and a diff's right-side selection
-(**Add Selection to Context**, text plus the `#lines=` URI), a lens row's
+(**Add Selection to Context**, text plus the `#lines=` URI), a page row's
 menu (**Add to Context**: the row's first linked page, else the row as
 text) and the floating toolbar over a selection on a commentable page.
 Each toasts with Undo. The **Context** dock panel (`@`, badge = waiting
 items) lists what waits with × per item (`oxplow.context.remove`), Clear
-(`oxplow.context.clear`) and a link to the **Context** page (foundation lens
+(`oxplow.context.clear`) and a link to the **Context** page (foundation page
 `context`: Waiting and Delivered (last 20) over `v_thread_context`, row
 action Remove, Clear in the nav bar).
 
@@ -1335,7 +1336,7 @@ with their subagents beneath each.
 turns from `v_agent_turn` oldest first with the thread's notes where
 they fall, a subagent's hand-back marked (a turn with no prompt), each
 row a turn URI. A turn URI opens it at that turn (`v_agent_turn
-.transcript_page`, built with `uri('oxplow/lens', …)`). Its action **Resume in a new session**
+.transcript_page`, built with `uri('oxplow/page', …)`). Its action **Resume in a new session**
 runs `oxplow.agent_session.open` with `resume`: a saved conversation of
 the harness, bound `chosen` in the same transaction, refused when it is
 open in another session. A person's: an agent may open a session but not
@@ -1345,7 +1346,7 @@ Subagent tool calls reach the hooks like any other, so their edits and
 test runs land in the thread's effort with nothing from them: there is
 no dispatch protocol or subagent skill.
 
-**What to pick up next** is the foundation lens `oxplow-foundation/work-next`
+**What to pick up next** is the foundation page `oxplow-foundation/work-next`
 (the tool `oxplow_work_next` with `thread: "thr3"`) over `v_work_item`, whichever
 list is active: an epic with its ready descendants, or every ready
 non-epic item, open `blocks` links holding an item back; empty with
@@ -1495,9 +1496,9 @@ project with `oxplow-bundled` off still has it):
 
 - **Hand Off Work…** is `oxplow.handoff.send`'s `ui` (`about: thread`),
   so it is on a thread's page and at the end of its Navigator menu. Its
-  form is the `hand-off` lens (`viz: form`, `from_thread` fixed to the
+  form is the `hand-off` page (`viz: form`, `from_thread` fixed to the
   thread), which picks the recipient and the item from lists (`choices`:
-  the `handoff-recipients` and `handoff-items` lenses) and takes the body
+  the `handoff-recipients` and `handoff-items` pages) and takes the body
   as Markdown.
 - The thread's Tasks page shows **Handoffs to This Thread** (Take,
   Decline… with a note) and **Handoffs From This Thread** (Withdraw) in
@@ -1614,7 +1615,7 @@ a `PlanProposed` hook with `tool.plan`; that waits on no one. opencode's
 `v_agent_plan` (thread, effort, turn, session, `proposed_at`, `text`,
 `path`, and `event_id`, the event to read with `oxplow_read event:<id>`)
 reads them; the bundled `effort-plan` (slot `oxplow-foundation/changes.sections`) and
-`thread-plan` (slot `thread.plan.header`) lenses show a plan, newest
+`thread-plan` (slot `thread.plan.header`) pages show a plan, newest
 first.
 
 **Whether the person accepted the plan is not recorded.** No hook or
@@ -1834,9 +1835,9 @@ row keyed by the event (`agent_token_usage.cause`).
 **Prompt capture is observation only.** The prompt text is read from the
 transcript the agent wrote — what the person typed into the real CLI.
 There is no second input box and no "send prompt" tool. Everything reads
-the rows through `v_token_usage`: the bundled `task-tokens` lens
+the rows through `v_token_usage`: the bundled `task-tokens` page
 (`oxplow-foundation/work-item.sections` slot), `thread-tokens` (`thread.plan.header`)
-and the usage lenses. Tables: [data-model.md](./data-model.md).
+and the usage pages. Tables: [data-model.md](./data-model.md).
 
 ### Collection command and skill
 
@@ -1874,7 +1875,7 @@ its nudges stay undelivered rather than being stamped and lost. **One-shot marks
 are durable** (`claim_once`, per effort or per thread): the report-less
 nudge fires once per effort, an advisory once per its `once_per` scope,
 across restarts. A person reads what oxplow told the agent in the bundled
-`effort-nudges` lens ("Agent Nudges", `oxplow-foundation/changes.sections` slot).
+`effort-nudges` page ("Agent Nudges", `oxplow-foundation/changes.sections` slot).
 
 ### Observe conformance
 

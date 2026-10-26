@@ -181,7 +181,7 @@ still work on the same thing, and nothing refuses it (below, "No
 gates"). It is made visible, all of it bundled over existing models
 (oxplow-bundled):
 
-- The **Shared work** lens (`shared-work` in the launcher under Work;
+- The **Shared work** page (`shared-work` in the launcher under Work;
   `thread-shared-work` on the thread page, slot `thread.plan.header`;
   `item-shared-work` on a work item, slot `oxplow-foundation/work-item.sections`): items
   with open efforts on two threads, files changed by two threads' efforts
@@ -245,7 +245,7 @@ the change analysis, metric facts, claims and what they cite), its
 attribution to efforts, its freshness, schema validation and the safe
 operations that write it. A policy reads that evidence through the `v_*`
 models, adds facts of its own (collectors, measures, dimensions), and
-says what it concluded through public contributions: a model, a lens, a
+says what it concluded through public contributions: a model, a page, a
 decorator, the `effort.verdict` replacement, commands.
 
 oxplow-bundled and oxplow-foundation are the default policy. Another
@@ -258,7 +258,7 @@ whole alternative review built that way.
 | A claim is backed (a person verified it, it cites evidence, or a latest green run backs `tests pass`); a dismissed claim counts for nothing | oxplow-bundled `claim_status`; core `v_claim` keeps only what it cites and its `review` (NULL, `verified`, `dismissed`) | fork the model |
 | Struggle (a file edited 5+ times, 3+ failed shell commands) | oxplow-bundled `struggle` | `struggle.repeatedEdits`, `struggle.failedCommands` |
 | Per-effort test outcome and time to green | oxplow-foundation collector `oxplow.effort_test_outcome` | metric specs over its facts |
-| Look here first, co-change surprise, deviation, tests weakened | oxplow-bundled models and lenses | `changeInterest.*`, `coChange.*`; the rest fork |
+| Look here first, co-change surprise, deviation, tests weakened | oxplow-bundled models and pages | `changeInterest.*`, `coChange.*`; the rest fork |
 | Metric thresholds (coverage 80/50, complexity > 10, length > 60) | oxplow-foundation metric specs | `metrics: [{ use: …, target, warnAt, failAt }]` |
 | Advisories (15-file uncommitted, threshold crossed, landed in progress, two threads on one file) | oxplow-bundled advisories | `largeUncommitted.files`, `sharedFiles.windowMinutes`; the rest fork |
 | Accept / request changes and their verdict events | oxplow-bundled commands | another extension's commands |
@@ -392,7 +392,7 @@ The four in progress:
   final message. "Waiting on you" is derived; `await_user` is gone.
   The Work panel shows the thread's open effort even when unlinked (In
   progress) and its closed ones (Finished, which opens Thread activity);
-  the Thread activity lens lists the thread's turns under the effort each
+  the Thread activity page lists the thread's turns under the effort each
   fell in, with question-only turns "Between efforts"; an effort's page
   header renames, links, unlinks and closes it.
   Hints, first cut: advisories gain a `turn-end` trigger, every param
@@ -414,7 +414,7 @@ The four in progress:
   `CapabilityRegistry` resolves the active one (personal → project →
   default; an unavailable choice falls to none, or a required
   capability's default) and restates `v_capability_provider` (v3).
-  Lenses and advisories declare `needs:`; unmet, a lens says what it
+  Pages and advisories declare `needs:`; unmet, a page says what it
   needs instead of showing empty, and an advisory doesn't run.
   Settings → Capabilities, generated from `v_capability_provider` (v4 carries
   each capability's title and whether it's choosable and optional),

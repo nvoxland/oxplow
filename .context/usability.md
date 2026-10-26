@@ -8,9 +8,9 @@ Things I keep forgetting. Read this before adding any UI.
 > per-row actions live on **right-click** menus (the redesign's kebab
 > `⋯` buttons were reverted — see "Per-row actions" below); per-stream
 > and per-thread settings
-> ship as Page tabs (the `stream-settings` and `thread-settings` lens pages); new-
+> ship as Page tabs (the `stream-settings` and `thread-settings` pages); new-
 > stream and new-task flows ship as Page tabs (the New Stream and New Item
-> lens forms); snapshot- and commit-detail Slideover wrappers
+> page forms); snapshot- and commit-detail Slideover wrappers
 > (`SnapshotDetailSlideover`, `CommitDetailSlideover`) cover the
 > cross-page open path. The rules below describe the redesigned
 > target. Phase 7 (density + visual polish) details live in
@@ -22,7 +22,7 @@ Things I keep forgetting. Read this before adding any UI.
 
 Wherever markdown is read or written — a wiki page, a work item's body,
 an effort summary, a comment and its composer, a form's markdown field,
-a lens's `markdown` viz — it is the one `Markdown` component
+a page's `markdown` viz — it is the one `Markdown` component
 (`.context/markdown.md`), so links, mermaid, code blocks with Copy,
 tables and comments behave the same everywhere. A surface never renders
 markdown itself, nor edits it in a `<textarea>`.
@@ -32,12 +32,12 @@ markdown itself, nor edits it in a `<textarea>`.
 - **A form that edits what is saved saves only when changed.** Save is
   disabled until a value differs from the saved one; Discard (and
   Escape) puts the saved values back. What the person typed is a draft
-  in the tab's history state (`useDraft`; a lens form keeps it as
-  `form:<lens id>`), so Back, Forward and a restart give it back, and a
+  in the tab's history state (`useDraft`; a page form keeps it as
+  `form:<page id>`), so Back, Forward and a restart give it back, and a
   re-read of the saved values never wipes it. A secret (a key, a token)
   is masked, never kept in a draft (history state is written to disk),
   and blank means "keep the saved one". `SchemaForm`'s `mode: "edit"`,
-  `draft` / `onDraft` and `fields` specs do all of this; a lens form
+  `draft` / `onDraft` and `fields` specs do all of this; a page form
   declares it (`form: { mode: edit }`, `fields: [{ name, secret }]`).
 - **Edit-X-in-place actions are inline, not modal.** Click the
   displayed value to swap to an input; Enter commits, Escape reverts,
@@ -56,21 +56,20 @@ markdown itself, nor edits it in a `<textarea>`.
   (`components/InlinePromptStrip.tsx`: one or more fields, a field may be
   `multiline` — Cmd/Ctrl+Enter submits there; the owner dismisses it, so
   a failed run keeps what was typed, and `error` is why, under the
-  fields). A lens's form action whose form, less its `fixed` fields, is
-  one text field is one too, at the top of the lens (`promptField`,
-  `ActionPrompt` in `lens/LensResultView.tsx`): a Rename… on a Files
-  lens is the Project panel's strip, never a one-field slideover. Same Enter-submits / Escape-cancels contract;
+  fields). A page's form action whose form, less its `fixed` fields, is
+  one text field is one too, at the top of the page (the action prompt strip): a Rename… on a Files
+  page is the Project panel's strip, never a one-field slideover. Same Enter-submits / Escape-cancels contract;
   the strip is dismissed by the panel's local `pendingPrompt` state.
 - **Form-shaped flows that warrant a focused workspace use a page tab
   or a slideover, not a centered modal.** The "+ New" flows ship as
-  Page tabs (the New Stream and New Item lens forms, the `Stream/Thread`
+  Page tabs (the New Stream and New Item page forms, the `Stream/Thread`
   settings pages); cross-page detail openings (snapshot, commit,
   branch rename, file commit) ship as Slideovers. Do not
   add new modal call sites; route new flows through pages or
   slideovers. The page pattern to copy is
-  `apps/desktop/src/pages/LensPage.tsx` (a view document: Settings) — full Page tab, no backdrop.
+  the page host (Settings is one) — full Page tab, no backdrop.
 - **A long page splits into pages, and a link lands on its section.**
-  Settings is one view document (`lenses/settings.yaml`: overview, Agents,
+  Settings is one page (`settings.yaml`, a `switch` over its areas: overview, Agents,
   Language Servers, Extensions, Data, Integrations, AI), an area the section
   in view,
   each its own URI (`settingsRef(area, section)` → `oxplow:oxplow/page?page=settings#area=…`),
@@ -81,10 +80,10 @@ markdown itself, nor edits it in a `<textarea>`.
   four sections or more lists them in its rail (Contents). A declared document does the same with `view:
   <param>`: the one section in view is the page, the others are its rail,
   a change of section is pushed (Back returns), and the launcher lists
-  each section by name. On any lens page `#section=<id>` lands on that
+  each section by name. On any page `#section=<id>` lands on that
   section. A page that shows state from outside any model
   refreshes on the event that says it changed (Data on `extensionsChanged`; Integrations'
-  lens re-runs when the `v_provider_*` models change). Integrations
+  page re-runs when the `v_provider_*` models change). Integrations
   also re-reads when an instance's health is recorded (`v_contribution_health`): Enable's own `configChanged` can be read
   before the instance has started, and nothing else says it finished
   (tsk1053).
@@ -98,7 +97,7 @@ markdown itself, nor edits it in a `<textarea>`.
   action sends the old value.
 - **A command's form follows its input schema** (`SchemaForm`): a
   string declared `contentMediaType: text/markdown` is a text area where
-  Enter adds a line and Cmd/Ctrl+Enter submits; a field a lens gives
+  Enter adds a line and Cmd/Ctrl+Enter submits; a field a page gives
   `choices` is a select of their labels, under their groups.
 - **Never call `window.prompt()`.** The Tauri webview blocks it —
   it returns `null` synchronously without
@@ -120,16 +119,16 @@ markdown itself, nor edits it in a `<textarea>`.
   bell (`components/Alerts/AlertsIndicator.tsx`) counts everything that
   needs them — red while something failed, the accent while decisions or
   notices wait, quiet otherwise — and opens the **Alerts page**
-  (the `alerts` page, the foundation's `alerts` document lens): Needs your
+  (the `alerts` page, the foundation's): Needs your
   decision (each proposal's card, Approve / Decline), Hints for you,
   Failed operations (each opening into how it ended), Undelivered events
   and Failed reactions with Retry / Discard (`oxplow.delivery.*`,
-  `oxplow.effect.retry`, as lens actions that ask first), and Extensions
+  `oxplow.effect.retry`, as page actions that ask first), and Extensions
   with problems. A firing panel badge is the panel's own: it is not on the
   page and the bell does not count it. A toast announces each new item once
   (`useAlertToasts`; what's there in the first seconds after the app opens
   counts as seen) and offers only **Review** — never Approve: consent is
-  given where the preview is. A badge's Review opens the panel's lens.
+  given where the preview is. A badge's Review opens the panel's page.
 - **Async-op failures don't `alert`.** Record them:
   `recordOpError({ label, command?, stderr?, stdout?, exitCode?,
   message? })` (`opErrors.ts`) reports it to the daemon, fire-and-forget,
@@ -141,7 +140,7 @@ markdown itself, nor edits it in a `<textarea>`.
   (below): a toast as it arrives ("<label> — Review"), the status bar's
   bell counts it (red), and the **Alerts page** lists it under Failed
   operations (`v_op_error`, those not dismissed), each row expanding
-  (`columns[].expand`, the `alerts-operation` lens) into how it ended and
+  (`columns[].expand`, the `alerts-operation` page) into how it ended and
   its output. Mark Seen runs `oxplow.op_error.mark_seen` (it stops being
   red), Dismiss `oxplow.op_error.dismiss`, "Clear failed operations"
   `dismiss_all`. For
@@ -210,7 +209,7 @@ markdown itself, nor edits it in a `<textarea>`.
   their content, so a re-read keeps what was typed.
   A command's refusal that names a field (`INVALID` with `field`, on
   `IpcCallError.field`; `fieldErrors`) is shown that way by every form
-  that runs a command — a form lens, a lens's form action (`form: true`,
+  that runs a command — a form page, a page's form action (`form: true`,
   in a `Slideover` — or a prompt strip when its form is one text field —
   never a modal; success closes it) and, through the
   bridge's `field`, a custom component's own form — never only in the
@@ -233,7 +232,7 @@ markdown itself, nor edits it in a `<textarea>`.
   element that took focus; the fix was made without seeing it in a failing
   `settings/pages.spec.ts` run.
 - **"Save and Another"** for repetitive-entry flows (see the New Work
-  Item form): a form lens declares `again: { label, keep }`, a second
+  Item form): a form page declares `again: { label, keep }`, a second
   button that files and restarts the form with the `keep` fields (state,
   thread, parent, the list's own fields) carried over and the rest
   cleared, so a series of similar items isn't re-picked. Enter keeps the
@@ -248,7 +247,7 @@ markdown itself, nor edits it in a `<textarea>`.
   ("Version control", `areaLabel`), not
   `vcs`; no plan codes ("(P5.E1)") in model docs (`model_docs_carry_no_
   plan_labels`); no `TODO:` scaffold text a person sees (Keep This's
-  `my-lenses` gets a real description); counts agree in number ("1
+  `my-pages` gets a real description); counts agree in number ("1
   note"); a status says what happened ("Recorded facts", not "0 rows").
 - **The precise technical term, not a friendlier synonym.** oxplow's
   users are software developers, so UI copy uses the same terms the code
@@ -294,7 +293,7 @@ markdown itself, nor edits it in a `<textarea>`.
   then the page's and its extensions' own sorted by label, a submenu by
   its name (an action's `submenu` and a command's `ui.group` of the same
   name share one), then Open With and the panels
-  (`.context/pages-and-tabs.md` "The nav bar is core's"). A row's right-click menu: Ask the Assistant, the lens's row
+  (`.context/pages-and-tabs.md` "The nav bar is core's"). A row's right-click menu: Ask the Assistant, the page's row
   actions, then a separator and one submenu per `ui.group` with the
   commands about the row's ref (`refCommandMenuItems`). A Board card:
   Move To, then the same tail. The Navigator's thread menu ends with the
@@ -307,11 +306,11 @@ markdown itself, nor edits it in a `<textarea>`.
 
 ## A custom component is marked
 
-- A `viz: custom` lens (an extension's own web component, sandboxed)
+- A `component` node (an extension's own web component, sandboxed)
   renders under a small **custom** badge, so the person knows the view
   isn't oxplow's. Its confirmations appear in oxplow (`CommandConfirm`
   below the frame), never inside the frame. When it can't start, a muted
-  line says so and the lens's table shows.
+  line says so and the page's table shows.
 - A **custom page** (`pages[].component`, `pages/CustomPageView.tsx`)
   keeps oxplow's nav bar and the **custom** badge; the frame fills only
   the page body. Its title and actions are data the frame sends
@@ -322,12 +321,12 @@ markdown itself, nor edits it in a `<textarea>`.
 
 ## A replaced component is marked, and falls back to oxplow's
 
-- Where an extension's lens stands in for a core component (the Board's
+- Where an extension's page stands in for a core component (the Board's
   cards — `Replaceable`, P9.A1), a small **replaced by <extension>**
   badge says whose it is; the page's own chrome stays oxplow's. When the
   replacement can't load, oxplow's own component shows, under a muted
   line saying whose couldn't load and why — never an error instead of
-  the page, and never the lens's table. A person switches back for good
+  the page, and never the page's table. A person switches back for good
   with "Always use oxplow's own <component>" on Settings → Integrations.
   Testids: `replacement-<target>`, `replacement-badge`,
   `replacement-fallback`, `integrations-replacement-<target>`,
@@ -336,7 +335,7 @@ markdown itself, nor edits it in a `<textarea>`.
 ## Decorations are additive
 
 - An extension's decorator adds a chip to a page's header (after the
-  page's own) or a badge after a lens cell; a page or row is complete
+  page's own) or a badge after a page cell; a page or row is complete
   without them, and a decorator that fails shows nothing. They're labels
   with an extension's name in their tooltip, never actions.
 
@@ -505,7 +504,7 @@ not a pick and isn't in the address.
 > buttons; we reversed that. Right-click is discoverable enough for
 > anyone who expects it and the kebab ate row space, so **per-row
 > actions are right-click only again** — no `⋯` buttons on rows. (The
-> old `Kebab.tsx` primitive is deleted.) A lens's row actions
+> old `Kebab.tsx` primitive is deleted.) A page's row actions
 > (`row: true`) are that menu, and nothing else: a declared page gets no
 > row buttons either.
 
@@ -536,7 +535,7 @@ not a pick and isn't in the address.
 - **Keyboard parity is required** — right-click is mouse-only, so the
   hook's `onKeyDown` opens the same menu on the **Menu key / Shift+F10**
   for the focused row. Wire it on focusable rows; keyboard-first users
-  must never need the mouse. (A lens row also covers this with its
+  must never need the mouse. (A page row also covers this with its
   actions' `key:`s.)
 - The `ContextMenu` popover renderer at
   `apps/desktop/src/components/ContextMenu.tsx` is unchanged. Prefer the
@@ -583,7 +582,7 @@ An agent's pending proposals are drawn by the kit's `Approvals`
 (`src/kit/Approvals.tsx`): `ProposalCard` is its card, `ProposalList` draws
 proposals a page already read (Alerts, a Settings row's compact card) and `Approvals` reads them itself, which is what
 `viz: approvals` renders. A page never draws its own Approve / Decline; it
-mounts the kit's, so a page moving to a lens (`viz: approvals`, params
+mounts the kit's, so a page moving to the kit's viz (`viz: approvals`, params
 `thread` / `setting`) changes where the cards sit, not the cards.
 
 ## Collapsible page sections
@@ -595,11 +594,11 @@ mounts the kit's, so a page moving to a lens (`viz: approvals`, params
   pair); the section itself is the kit `Section` with `collapsible` (and
   `defaultCollapsed`), which reads the provider through `useSectionCollapse`.
   Pure state + persistence live in the sibling `sectionCollapse.ts`
-  (unit-tested). Adopters: none now the Metrics page is a lens (a grouped lens list folds its headings itself).
+  (unit-tested). Adopters: none now the Metrics page is a page (a grouped page list folds its headings itself).
 - **The page places the controls; they are not pinned above the sections
   (tsk86).** `SectionCollapseControls` reads state off context, so it can render
   anywhere under the provider. Recorded Metrics puts it in the **details rail**
-  beside the filters — the rail is the page's control panel (a lens page's
+  beside the filters — the rail is the page's control panel (a page's
   too: "A page's controls are in its rail"). It **self-hides**
   when no sections are registered (loading / empty), rather than showing two dead
   buttons.
@@ -622,7 +621,7 @@ mounts the kit's, so a page moving to a lens (`viz: approvals`, params
   is the mirror: it starts closed and only the ones the person *opened* are
   stored (beside the collapsed ids). Expand all /
   Collapse all handle both kinds.
-- **A lens tree's branches**: one the result nests is open by default
+- **A page tree's branches**: one the result nests is open by default
   (the closed ones, by index path, are history state); a lazy branch
   (`tree.lazy`, a folder loaded on demand) is closed by default and the
   opened ones, by the row's id, are history state — a folder left open
@@ -648,8 +647,8 @@ mounts the kit's, so a page moving to a lens (`viz: approvals`, params
 Comments are not editor-only. Any page region can be commentable by
 declaring *what it is* and mounting the generic layer.
 
-- **Comments are a page's.** A declared page says `comments: true` on its
-  `pages:` entry and core does the rest (`LensPage`, `lens/pageComments.ts`):
+- **Comments are a page's.** A page says `comments: true` in its page
+  file and core does the rest:
   its URI (its tab's identity) is the comments' target, the nav bar gets
   the `CommentNavigator`, the body carries `data-ref` (so plain text and
   the markdown viewer take selections through the app-level layer), a
@@ -734,7 +733,7 @@ declaring *what it is* and mounting the generic layer.
   ↑/↓ move the cursor, Enter takes the row under it, Escape is the page's
   (clear the filter), the pointer moves the cursor too, and focus stays in
   the input (`aria-activedescendant`). Don't hand-roll another.
-- **Every lens table and list is keyboard-driven the same way.** Focus the
+- **Every page table and list is keyboard-driven the same way.** Focus the
   table (Tab, or click a row) and ↑/↓ move the cursor (`data-cursor`, drawn
   while the table has focus), Enter opens the cursor row's first link — with
   the column's rows as the opened page's origin — or, when the row has no
@@ -790,7 +789,7 @@ declaring *what it is* and mounting the generic layer.
   in File; Find in Edit), beside the native Edit roles (`menuBar.ts`). Every other command is a **search command** — the
   command bus's offers (`commandOffers`: Pull / Push Changes, New Task…
   (⌘⇧N), New Dashboard…, New Stream…, New Thread…, Commit Changes…, New
-  Lens with Your Agent…). **Pages aren't commands:** the View / Git /
+  Page with Your Agent…). **Pages aren't commands:** the View / Git /
   Tasks "Dashboard" items that only opened a page are gone — the
   launcher lists every page as a page row. Pull / Push run as background
   tasks (failures record an op-error and a "Show details" toast); Commit
@@ -798,22 +797,22 @@ declaring *what it is* and mounting the generic layer.
 - **Common muscle memory:** Cmd/Ctrl+S save, Cmd/Ctrl+F find,
   Cmd/Ctrl+P quick open, Cmd/Ctrl+Shift+N new task. Don't
   collide with these.
-- **Rows: marks, drags and keys** (every lens row viz, `lens/rowInteract.ts`; Tasks and Backlog are lenses).
+- **Rows: marks, drags and keys** (every page row viz; Tasks and Backlog are pages).
   Cmd/Ctrl+click toggles a row's mark, Shift+click marks the range
   from the last row clicked, Space toggles the cursor row, Escape clears
   the marks, a plain click clears them. A marked row has a stripe and a
   tint (`[data-marked]`). While rows are marked the marks bar ("N
-  selected", the bulk actions, Clear) stands in for the lens's buttons.
+  selected", the bulk actions, Clear) stands in for the page's buttons.
   Dragging a marked row drags every marked row. A drop's place shows as a
   line above or below the row, or the row or group outlined
   (`[data-drop]`). A row action's `key:` runs it on the cursor row (or
-  the marked rows). Marks are per lens and kept in the entry's history
+  the marked rows). Marks are per page and kept in the entry's history
   state, so Back keeps them. A dashboard's row tiles (`tile:`) are rows
   too: focusable, right-click and the Menu key open their row actions,
   `key:`s run them, and they drag where a drag action runs, the place
   shown as a bar in the grid gap beside the tile (a drop on the grid's
   background puts it last). Tiles take no marks.
-- **A parent row folds its children (`depth` lenses).** A row the next row is deeper than shows ▾ / ▸; it folds every deeper row after it away until the next row as shallow as itself. Folds are per lens and kept in the entry's history state, like groups'.
+- **A parent row folds its children (`depth` rows).** A row the next row is deeper than shows ▾ / ▸; it folds every deeper row after it away until the next row as shallow as itself. Folds are per page and kept in the entry's history state, like groups'.
 - **One launcher is the single discovery surface.** There is exactly
   one way to find pages, commands, files, and content: the launcher
   (`QuickOpenOverlay`), opened by **Cmd+P** (its `file.quickOpen` menu
@@ -903,7 +902,7 @@ declaring *what it is* and mounting the generic layer.
   - To open a page in a test, drive the launcher: click `title-bar-search`
     (or open it via Cmd+P), type the page name into the overlay input,
     and Enter / click the result; assert via `page-<kind>` on the body
-    (e.g. `page-git-history`, `page-lens`, etc.). The old
+    (e.g. `page-git-history`, etc.). The old
     `rail-page-<entry-id>` / `rail-pages` testids are gone — the rail no
     longer has a "Pages" section (the Go To panel's bookmarks are the
     pinned set; its rows open them). The `dock-tab-*` testids
@@ -945,7 +944,7 @@ declaring *what it is* and mounting the generic layer.
   input and never sends. `compact` is the one-line form (rail sections). A loading state isn't an empty one: "Starting the
   agent…" is plain text, and only the empty transcript is an `EmptyState`. Don't offer prompts for what needs the person's own hands
   (typing an AI provider key, approving permissions): say who does it instead. The session
-  picker (the New Session lens page, a thread with no agent session) offers **no**
+  picker (the New Session page, a thread with no agent session) offers **no**
   prompts — there is no agent here yet to hand one to — only the agent
   choice and Start, which opens the slot and nothing else. Its root
   carries `data-empty-state`, which is how a test tells an `EmptyState`
@@ -979,7 +978,7 @@ declaring *what it is* and mounting the generic layer.
   rows and Board cards: reorder, restate, multi-select moves),
   `CONTEXT_REF_MIME` ("Add to agent
   context"), `RAIL_SECTION_DRAG_MIME` (RailHud section reorder),
-  `LENS_ROW_DRAG_MIME` (a lens's rows, to where a drag action runs). Add a new
+  the row-drag MIME (a page's rows, to where a drag action runs). Add a new
   MIME there rather than overloading an existing one, and rather than
   declaring a `const` next to the component that introduced it: that was
   the old shape, and one task MIME ended up defined twice
@@ -1116,7 +1115,7 @@ no caller may bypass the bus to write to the terminal.
   - the page nav bar's ☰ (**Ask the Assistant**, `menu-item-page-ask-assistant`,
     icon `sparkles`, first in the menu), for any page whose tab id is a
     canonical URI (`PageNavigationContext.ask`: `{ ref, streamId }`);
-  - a lens row's right-click menu (`rowAssistantContext`: the first page
+  - a page row's right-click menu (`rowAssistantContext`: the first page
     the row links to, else the row as text);
   - an editor selection and a diff's right-side selection (the selected
     text, with `oxplow:oxplow/file?path=<path>[&rev=<rev>]#lines=<a>-<b>` as
@@ -1137,7 +1136,7 @@ no caller may bypass the bus to write to the terminal.
 - **Add to Context** is the collect-then-ask form, and it is universal:
   the ☰ of any page with a canonical URI (`menu-item-page-add-to-context`,
   disabled with "Select a thread first" when none is selected), a
-  selection in an editor or a diff's right side, a lens row's menu, and the
+  selection in an editor or a diff's right side, a page row's menu, and the
   floating toolbar on a commentable page's selection (**Add to Context**
   beside Add comment). It puts the page or text in the selected thread's
   basket (`oxplow.context.add`, toast with Undo); the next prompt to any
@@ -1158,17 +1157,17 @@ no caller may bypass the bus to write to the terminal.
 
 ## A page's controls are in its rail
 
-A lens page has **one place for its controls: its rail** (`LensRail`). It
+A page has **one place for its controls: its rail** (its `PageRail`). It
 has no toolbar, and where a control goes is not the author's to say. The
 rail stacks its groups in a fixed order, so nothing moves as values
 change: **Filters** (its filter params), **Selection** (what a row click
 picked) and **About this page** (its extension and the source file to
 edit, and a line when the source changed since its deploy). Page-level
-actions — Copy, Add to Context, the lens's whole-lens actions, and
-Refresh only for a lens that declares `refresh: true` (a lens re-runs
+actions — Copy, Add to Context, the page's whole-page actions, and
+Refresh only for a page that declares `refresh: true` (a page re-runs
 on its own when oxplow's data changes; Refresh is for one that reads
 outside oxplow) — are in the nav bar (its ☰, unless `prominent`), never
-in the rail or above the body (`LensResultView`'s `toolbarTo` hands them
+in the rail or above the body (the viz node hands them
 up).
 
 A param is a **row**, drawn by the kit's `ParamRow`
@@ -1190,11 +1189,11 @@ isn't the default). Clicking it, or Enter/Space on it, edits:
 filter is never hidden). Filters has **Reset** when one is changed. A
 page never draws its own param input. One range vocabulary serves every page (`kit/rangePresets.ts`): a preset
 key (`1d`…`90d`), `all`, or `a..b` (dates or date-times, either end open) —
-a lens `date_range`, the metric pages' range and a chart's brushed window. A row shows the value it applied
+a page `date_range`, the metric pages' range and a chart's brushed window. A row shows the value it applied
 at once; it never waits for the run.
 
 A param a column `select`s is the page's **selection**, never an input.
-A lens row whose column `select`s a param is a pick: it reads as
+A page row whose column `select`s a param is a pick: it reads as
 clickable (`ox-clickable`), a click or Enter sets the param, and the row
 holding its value is drawn selected (`ox-selected`, `aria-selected`). The
 rail's Selection shows the picked row as its facts, labelled as its
@@ -1206,4 +1205,4 @@ pick), and the row's menu stays on right-click and the Menu key.
 A column or param with no `label` is headed by its key in words
 (`kit/humanize.ts`: `committed_at` → "Committed at"). The page-layout
 rules extension authors follow are in the `oxplow-extension` skill
-(`references/page-layout.md`); the loader warns when a page breaks them.
+(`references/view-nodes.md`); the loader warns when a page breaks them.
