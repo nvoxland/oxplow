@@ -186,12 +186,12 @@ welded to collection.
 > fixes, cheapest read to root cause:
 > - **Reads-based refresh** (P4.7, replacing tsk197's `subscribeMetricRefresh`).
 >   Each metric reader in `api.ts` returns its rows with the query's `reads`,
->   and every metric view (`MetricTile`, the Metric lens, the Metrics lens,
+>   and every metric view (`MetricTile`, the Metric page, the Metrics page,
 >   the dashboard's spec and catalog load) re-runs through
 >   `useRerunOnChange`, so a view refreshes only when a model or measure it
 >   read changed. An enable toggle or a `project.yaml` edit arrives as
 >   `modelsChanged` for `v_metric_catalog` / `v_metric_spec`. The Metrics
->   lens reads every metric's points in one live model, `v_metric_point`,
+>   page reads every metric's points in one live model, `v_metric_point`,
 >   which follows `MetricSamplesChanged` (below).
 > - **Cube read cache** (`cube_rows_for_measure`, tsk196). The read is memoized on
 >   a new **`metric_cube_epoch.version`** counter — distinct from the `epoch`
@@ -1339,14 +1339,14 @@ reached through `run_command`, audited like every command):
   reads it, or a delta whose snapshot has it, clears it). The baseline prune
   (`prune_dominated_tree_captures`) keeps the older captures that hold such a
   file's last good facts. The metric's detail page lists the unchecked files
-  under its chart (`UNCHECKED_FILES_SQL`), and a lens or `oxplow_query_sql` can join
+  under its chart (`UNCHECKED_FILES_SQL`), and a page or `oxplow_query_sql` can join
   `v_capture_exclusion` with `v_fact`/`v_capture`. A capture before this was
   recorded has no exclusions. Oversize files can also be listed from
   `v_snapshot_file` (`storage`).
 - `oxplow extension check` against a project database resolves a metric the
   extension under check declares even when the app has not loaded it yet
   (`MetricEngine::with_declared`, `declared_metric_specs`): the store's spec
-  wins, else the extension's own, so a lens reading `metric_findings()` or
+  wins, else the extension's own, so a page reading `metric_findings()` or
   `metric_grid()` of it dry-runs.
 - `oxplow.metric.scaffold { name, language?, glob?, origin? }` — a `Read`: the
   files of a code metric extension (`{ name, dir, files: [{ path, content }] }`),
@@ -1652,7 +1652,7 @@ the change loop announces `OxplowEvent::MetricSamplesChanged` for what landed.
   `api.ts` runs them through `query_sql` and returns the rows with the
   query's `reads` (what the views subscribe to): the dashboard tiles read `metric_grid('capture'[, dim])` joined to
   `v_capture` (one row per capture, newest first), `listMetricDefinitions` reads
-  `v_metric_spec` (v2 adds `entity_json`); the Metrics and Metric pages are lenses
+  `v_metric_spec` (v2 adds `entity_json`); the Metrics and Metric pages are pages
   over `v_metric_point`, `v_metric_catalog` and `v_metric_spec`. There is no metric IPC left: the enable switch is the `oxplow.metric.enable` command. The dimension roll-up, per-capture
   findings, measure series/rollup and effort-delta IPC commands were removed
   with the UI that used them (tsk309); agents slice with `metric_grid(…, dim)`
@@ -1667,7 +1667,7 @@ the change loop announces `OxplowEvent::MetricSamplesChanged` for what landed.
 
 The metric UI is **three pages**, each with one job, all reading the one
 fact table — no per-metric UI code. Recorded Metrics is a declared page (the `metrics-recorded` page, oxplow-foundation's
-`pages:`, `lens: metrics`); Metric Detail is the `oxplow/metric` entity page and cross-links to the others in its header. (History: the
+`pages/`); Metric Detail is the `oxplow/metric` entity page and cross-links to the others in its header. (History: the
 configure surface was split off as a fourth "Metric Settings" page in
 tsk282/tsk80, then **folded back in by tsk117** — per-metric configuration now
 lives on the Metric Detail page; see "The configure surface" below.) Explorer
@@ -1702,7 +1702,7 @@ just carries a Help blurb pointing there.
 > that matches no files yields no point at all. Nothing auto-detects a project's
 > languages.
 
-- **Metrics** (the `metrics` lens, the `metrics-recorded` page,
+- **Metrics** (the `metrics-recorded` page,
   `metricsIndexRef()`) — every **catalogued** metric as a `title · trend
   sparkline · latest value` row of a grouped list (row set =
   `v_metric_catalog`, the only source that knows `use:`; `v_metric_spec`
@@ -1748,8 +1748,8 @@ just carries a Help blurb pointing there.
 > branch are the query's own `WHERE` on `captured_at` and `branch`
 > (the point's capture time sorts as text).
 
-- **Metric Detail** (the `metric` lens, the renderer of `oxplow/metric`
-  — `metricUri(key)` — in the `metric-detail` page entry) — a `document`
+- **Metric Detail** (the `metric-detail` page, the renderer of `oxplow/metric`
+  — `metricUri(key)`) — a page
   of `metric-header`, `metric-chart`, `metric-unchecked` and
   `metric-recordings`, all over `v_metric_point` (pinned to the page's
   `metric`) and the definition models. Range (a `date_range`, 7 days by
@@ -1772,7 +1772,7 @@ just carries a Help blurb pointing there.
   then add), and the enable-prompt body for a disabled metric (the header
   just shows Enabled: no and the Enable action). Targets live in config;
   breakdowns and findings are for agents (`metric_grid(…, dim)`, `v_fact`
-  through `oxplow_query_sql`) and lenses.
+  through `oxplow_query_sql`) and pages.
 
 > **Definition descriptions (tsk309).** Every metric carries a one-line
 > `description` (on `metric_definition`). It's inherent to the definition — set
@@ -1879,9 +1879,9 @@ The mechanics behind those controls (unchanged by tsk117):
 
 Metrics are also surfaced **organically off the Metrics pages** (tsk250): the
 effort review (`DiffViewPage`'s `oxplow-foundation/changes.sections` slot) shows the oxplow-bundled
-`effort-metric-deltas` lens — the metrics the effort moved, before→after with
+`effort-metric-deltas` page — the metrics the effort moved, before→after with
 Δ, better/worse and any threshold crossing, over `v_effort_metric_delta`
-(tests, coverage, analysis, tokens and nudges have their own lenses and are
+(tests, coverage, analysis, tokens and nudges have their own pages and are
 left out). A row links to the metric's detail page.
 
 Catalog reads/writes: `v_metric_catalog` (the `metric_catalog` table, V106,
@@ -1891,7 +1891,7 @@ Configure block and the Metrics rows.
 **Scaffolding is not here** (tsk122): its UI button was retired, and it is
 now the `oxplow.metric.scaffold` command (P4.8), which calls
 `MetricsService::metric_scaffold`.
-Token and page analytics are oxplow-bundled lenses (`usage`) over
+Token and page analytics are oxplow-bundled pages (`usage`) over
 `v_token_usage` / `v_page_visit`; `page_visit`/`usage_event` are deliberately
 **not** projected into the metric substrate — see the producers note above.
 
@@ -1924,7 +1924,7 @@ name with `_` for `-`):
 - `dimensions:` `<ns>.area`, which the facts' `dims` use and the metric slices by;
 - `metrics:` `<ns>.complex_functions`, `sum`, `lower-better`,
   `displayKind: findings` (its facts are located), `sliceableDims: [<ns>.area]`;
-- a Code launcher lens over `metric_findings('<ns>.complex_functions')`
+- a Code launcher page over `metric_findings('<ns>.complex_functions')`
   whose `path` column links `file` at the `line` column, and an intent
   example + `fixtures/basic.yaml` in the fact-collector form `extension
   test` runs (`input: { collector, files: {path: text} }`, `expect: {
@@ -1932,9 +1932,9 @@ name with `_` for `-`):
 
 It checks with no warnings and tests clean as written
 (`crates/oxplow-sdk/tests/just_works.rs`), and the whole loop — capture,
-carry-forward across a delta, slicing by area, the lens rows, the refusals
+carry-forward across a delta, slicing by area, the page rows, the refusals
 and an oversized file — is held by `metrics_authoring_tests.rs` in
-`oxplow-app`. Edit the collector, the fixture and the lens; the
+`oxplow-app`. Edit the collector, the fixture and the page; the
 project-config path below is for a metric that is the project's own
 (e.g. a report-derived or `exec` collector).
 
@@ -2097,7 +2097,7 @@ the measure+collector+metric trio + script + verification (`oxplow.collector.syn
 runs it now), no oxplow-team involvement.
 The skill's fast path is the **`oxplow.metric.scaffold` command** (P4.8) →
 `MetricsService::metric_scaffold`, which returns the metric extension's files
-(measure, collector, dimension, metric, lens, fixture; "Authoring surface")
+(measure, collector, dimension, metric, page, fixture; "Authoring surface")
 as a template the agent writes and adapts; `oxplow extension check` and
 `extension test` verify it before `oxplow.collector.sync` runs it. A metric
 that is the project's own (a report-derived or `exec` collector) is
@@ -2114,7 +2114,7 @@ oxplow-bundled's effort verdict judges diff coverage against its `warnAt`.
 **One rule for crossing.** A value *past* a threshold has crossed it; a value
 *at* it has not (`target: 80, warnAt: 80` means 80 is fine). The server's
 `metric_engine::threshold_state` (findings' severity, `v_effort_metric_delta.crossing`,
-the effort panel) and the Metrics lens's `tone` (three tiers) draw that same line. See
+the effort panel) and the Metrics page's `tone` (three tiers) draw that same line. See
 [theming.md](./theming.md).
 
 Feedback is **advisory — oxplow never blocks**. It lives in the bundled
@@ -2212,8 +2212,7 @@ one that deletes facts, `db.memo().invalidate_all()`.
 `v_dimension`. Choosing one re-reads the captures with
 `listMetricSamples(key, limit, groupBy)` (`metricSeriesSql`'s grouped
 `metric_grid('capture', '<dimension>')`), and the page draws one chart per
-dimension value (`seriesByGroup`, the same small multiples as a lens line
-chart).
+dimension value (`seriesByGroup`, the same small multiples as a `line` viz).
 
 The **Metrics list** has the same select in its Filters rail ("Slice by").
 Sliced, each metric's ▸ opens its **top three groups** — each group's latest

@@ -52,10 +52,10 @@ of what matters. The direction ([architecture.md](./architecture.md) →
 
 - ship **the data** as a stable, queryable layer;
 - ship **common sources** of that data;
-- let users and their agents build the **lenses** they actually want
+- let users and their agents build the **pages** they actually want
   ([extensions.md](./extensions.md)).
 
-A lens can only be as good as the data it can reach. So **nothing may be
+A page can only be as good as the data it can reach. So **nothing may be
 reachable only through a bespoke IPC**. If core has it, the semantic layer
 exposes it.
 
@@ -143,21 +143,21 @@ struggle signals (the bundled review policy's `v_oxplow_bundled_struggle`, over 
 Every connection registers three scalar functions for URIs
 (`oxplow-db/src/sql_functions.rs`): `uri(resource, key1, value1, …)` builds
 a canonical URI — the params sorted and escaped, a NULL value left out —
-so a model or lens links to another lens
-(`uri('oxplow/lens', 'lens', 'oxplow-bundled/job-run-output', 'job_run', uri)`)
+so a model or page links to another page
+(`uri('oxplow/page', 'page', 'oxplow-bundled/job-run-output', 'job_run', uri)`)
 or builds a record's URI (`uri('oxplow/effort', 'id', json_extract(e.payload, '$.effort'))`) without
 concatenating a prefix; `uri_param(uri, key)` reads one param back (NULL when
 the URI lacks it or isn't one) and `uri_resource(uri)` its resource
 (`oxplow/work_item`). Other URIs are selected from their owning model's
 `uri` column (`.context/resources.md` "Using URIs").
 
-Extension models and lenses may use `import_ref('binding')` for a model declared
+Extension models and pages may use `import_ref('binding')` for a model declared
 in the extension's explicit public `imports`. The host resolves the canonical
 target and exact native version before exposing the contribution; an unavailable
-optional binding withholds the referring model/lens. `models::import_references`
+optional binding withholds the referring model/page. `models::import_references`
 uses the shared SQL tokenizer, preserving comments, literals and quoted names.
 Model calls become ordinary `ref('<extension>/<model>')` before compilation, so
-lineage and model contract enforcement stay in the existing compiler. Lenses
+lineage and model contract enforcement stay in the existing compiler. Pages
 receive the quoted public view name. Authoring and impact overlays resolve a
 fresh candidate catalog before compiling all enabled model definitions and
 entity stubs. They use that snapshot throughout the overlay and report candidate
@@ -455,7 +455,7 @@ so the query quotes it.)
   `reads.measures` lists the measures behind it (what a subscription
   watches, P4.6). `check` resolves the metrics and compiles against an
   empty grid.
-- The series are scoped to `SqlQuery.stream` — a lens passes its
+- The series are scoped to `SqlQuery.stream` — a page passes its
   `:stream_id`.
 - **`metric_findings('<key>'[, <capture id>])`** (P4.8,
   `crates/oxplow-app/src/metric_findings.rs`) is the same mechanism for the
@@ -502,7 +502,7 @@ have parted and the commits between them (`v_branch_divergence`,
 the pair the query pins — one side pinned, the other ranges over every
 branch; neither, every local branch against the default) and every
 metric's series (`v_metric_point`: the engine computes it, one row per
-capture, narrowed to the `metric` and `dimension` the query pins). A restated table (as `v_lens`, `v_extension`, `v_page`, `v_page_answer` and `v_page_param` are, in the
+capture, narrowed to the `metric` and `dimension` the query pins). A restated table (as `v_extension`, `v_page`, `v_page_answer` and `v_page_param` are, in the
 extension-generation transaction) would be wrong between the change and the
 next restatement, and nothing says when that is. So these are **live
 models** (`crates/oxplow-app/src/live_models.rs`, `LiveModels::NAMES`): the
@@ -524,7 +524,7 @@ rows are read when a query names the model.
   rather than answer empty, and a test pins that no core model is built on a
   live one (it would read the stub).
 - **Stream-scoped:** a query runs for a stream (`SqlQuery::stream`, which a
-  lens sets from its `stream_id` param). A model of a worktree —
+  page sets from its `stream_id` param). A model of a worktree —
   `v_workspace_file`, `v_agent_conversation` — reads that stream's, and the
   primary checkout's when the query names none; its rows carry the
   `stream_id` they list. `LiveModels::materialize` takes the stream.
@@ -581,7 +581,7 @@ rows are read when a query names the model.
   that follow it (`models_changed::announced_after`, so every emitter is
   covered and no backend code listens to the bus), and the change loop adds
   the live models that read through the models a commit changed
-  (`live_models_reading`). A lens over a live model then re-runs like one
+  (`live_models_reading`). A page over a live model then re-runs like one
   over a table: its `reads.models` names it.
 - **Never a secret:** the keychain is asked whether an entry exists
   (`key_set`, `is_set`), never for its value; a test stores a key and a
@@ -631,23 +631,24 @@ What a query read is what it subscribes to.
   its own measures moved (tsk198).
 - **Assets:** the same loop tells the asset runner which tables changed
   (see "Assets").
-- **The UI** (`src/lens/lensRerun.ts`; a change announced while a run was
-  in flight, before it said what it read, is remembered and re-runs the host
-  once the run's `reads` match it — a write made while the window loaded
-  would otherwise never show): every lens host — the lens page,
-  slots, dashboard lens tiles, the rail's alerts and the explorer — keeps
-  its last run's `reads` and re-runs through `useRerunOnChange` when
-  `modelsChanged` names a model it read, `metricSamplesChanged` names one
-  of its measures (an empty list is "unknown", so it re-runs), or
-  `extensionsChanged` says the extension catalog changed (the daemon
-  relays the catalog's own signal: a change to the live deployments or the
-  `extensions` key; a file path is not the signal). Hosts that
-  list what extensions contribute (`extensionsStore`, the launcher, the
-  what pages answer) reload on it, on `configChanged`, and on a daemon
-  reconnect (a change while it was unreachable sent nothing). Nothing else re-runs it:
-  the old everything-but-two deny-list (`shouldRerunLens`) and its 750 ms
-  debounce are gone; a burst of commits coalesces into one re-run
-  (100 ms).
+- **Pages** run on the daemon as open runs (`crates/oxplow-app/src/pages/open_runs.rs`):
+  the change loop signals them as it tells the assets, a worker coalesces
+  signals for 100 ms and re-runs each open run one of whose loaders read a
+  changed model or measure (an empty list is "unknown", so everything
+  re-runs; a command loader's reads are its declared `reads`), and the
+  window fetches what changed. A change announced while a run was in flight
+  is remembered and re-runs it once the run's `reads` match it — a write made
+  while the window loaded would otherwise never show.
+- **Other UI hosts** (the rail's alerts, the explorer) keep their last run's
+  `reads` and re-run through `useRerunOnChange` when `modelsChanged` names a
+  model they read, `metricSamplesChanged` names one of its measures, or
+  `extensionsChanged` says the extension catalog changed (the daemon relays
+  the catalog's own signal: a change to the live deployments or the
+  `extensions` key; a file path is not the signal). Hosts that list what
+  extensions contribute (`extensionsStore`, the launcher, what pages
+  answer) reload on it, on `configChanged`, and on a daemon reconnect (a
+  change while it was unreachable sent nothing). A burst of commits
+  coalesces into one re-run (100 ms).
 
 ## Assets (P7.B1)
 
@@ -704,7 +705,7 @@ by `effort_evidence`): see
 ## The `v_*` contract (current)
 
 Every shipped entity is exposed as a stable **read-only SQL view**. They
-are the **versioned contract**: lenses, extensions and agents read these,
+are the **versioned contract**: pages, extensions and agents read these,
 never the physical tables, which stay internal and free to change.
 
 **Shipped today** — each a core model, `crates/oxplow-db/models/<name>.sql`
@@ -739,7 +740,7 @@ and `v_model_test` are the catalog of all of them:
 | `v_event` | the event log: every activity and state change, oldest first by `seq`, with anchors, subject URIs and payload (V94; see [data-model.md](./data-model.md) "event_log"); `payload_expired_at` since V102) |
 | `v_extension_run` | one row per finished run of extension code (V48; [data-model.md](./data-model.md) "extension_run"): `run_id`, `parent_run_id`, `extension`, `contribution`, `kind`, `version`, `generation`, `actor_kind`, `actor`, the anchors, `cause_event_id`, `mode`, `started_at`, `finished_at`, `outcome`, `error`, `wall_ms`, `cpu_ms`, `peak_bytes`, `ai_calls`, `scopes`, `decisions`, `latest` (1 on a contribution's most recent run). `v_effect_run`, `v_collector_run` and `v_ai_call` name theirs in `run_id`. Kept 90 days |
 | `v_job_run` | each job run — one execution of a job an extension declares (V56; [extensions.md](./extensions.md) "Jobs"): `id`, `job` (`job:<ext>/<id>`), `uri` (`job_run:<id>`), `extension`, `version`, `contract_version`, `operation`, `state`, `attempt`, `cancellation_requested`, `invoker`, `run_id`, `created_at`, `updated_at`, and its current attempt's `ai_calls`, `tool_calls`, `input_tokens`, `output_tokens`. Never its request or result |
-| `v_job_run_output` | what a job produced as it ran, in order (`job_id`, `attempt`, `seq`): `kind` (`text`, `tool_call`, `tool_result`, `usage`), `at`, `text` (a text row's), `data` (the row as JSON). Written as it streams, so a lens over it follows a job live |
+| `v_job_run_output` | what a job produced as it ran, in order (`job_id`, `attempt`, `seq`): `kind` (`text`, `tool_call`, `tool_result`, `usage`), `at`, `text` (a text row's), `data` (the row as JSON). Written as it streams, so a page over it follows a job live |
 | `v_job_run_observation` | what a job's worker said after its attempt was fenced (a lease recovered, a permission removed, a declaration changed): one row per late result (`id`, `job_id`, `attempt`, `fence`, `at`, `outcome`, `evidence`). Evidence only; it never changes the job |
 | `v_op_error` | operations that failed in front of the person in the app, one row per `ui.op_failed@1` event (`oxplow.ui.report_error`, tsk1072): `event_id`, `at`, `stream_id`, `thread`, `label`, `command`, `message`, `exit_code`, `signal`, `duration_ms`, `output_size`, and the person's marks `seen` / `dismissed` (v2: `ui.op_error.seen` / `ui.op_error.dismissed` events, from `oxplow.op_error.*`; the Alerts page lists those not dismissed). The stderr / stdout are the event's `output` body (`oxplow_read` `event:<id>#output`). Kept 30 days, the output 14; an expired event keeps its row with its details NULL and `payload_expired_at` set |
 | `v_op_error_output` | what each failed operation printed: `event_id`, `stream_id`, `stderr`, `stdout`, `truncated` — its `ui.op_failed` event's `output` body, read in SQL from `event_content`'s bytes (stored as JSON text). The one event body published to SQL: it is what the person saw on screen. Tool input and output and prompts stay behind `read_event_content` (`v_event_content` lists them without bytes). A failure with nothing captured, or whose body retention removed, has no row |
@@ -764,7 +765,6 @@ and `v_model_test` are the catalog of all of them:
 | `v_commit`, `v_commit_file`, `v_commit_work_item`, `v_branch`, `v_tag` | history, branches and tags (V85, V113). The commit indexer (`commit_indexer.rs`, run at boot and on each ref move, `RefMoves`) stores the commits reachable from **every stream's** head — new history whole, up to a 5000-commit horizon (`IndexDepth`), and any older commit a query names by `sha` ("Made on demand") — through the VCS capability (`Vcs::log`/`revision`, `.context/vcs.md`) — with their files (first-parent diff) as it projects them into `page_ref`; `v_commit.parents` (JSON, v2) lets a stream's history be a recursive read from its branch's head. `v_commit_work_item` reads the indexer's work-item mention edges and the work-item → commit links (declared impacts, held effort work), for the active work list's items. `refresh_refs` restates `v_branch` (`is_default`, v2) and `v_tag` from `Vcs::branches`/`tags` and maps each local branch to the stream checked out on it. The desktop's history panel, dashboard lists, branch picker and new-stream form read these models (`apps/desktop/src/vcsHistory.ts`) |
 | `v_test_case_stat` | each test's summary per stream, branch and producer (V139, tsk733): last status and duration, runs, failures, flips, last failed / passed, max and mean duration — updated with every run, the home of per-test history since a run writes change-only per-case facts |
 | `v_test_run`, `v_test_case` | test runs (V87), views only. A run IS its `metric_capture` (producer `tests`, or `test-run` for a run that measured nothing), and both views read its verbatim `test-detail` payload in `detail_json`: counts from the payload, cases by `json_each` over `suites[].cases[]`. Cases come from the payload, not the `oxplow.test_case` facts, because those are skipped while every tests metric is disabled. `effort_id` (v2) is the capture's own: the effort of the tool call that ran it. A run that only reported counts (`oxplow.test.record_run`) has no cases |
-| `v_thread_answer` | the lenses an agent showed on a thread (`oxplow_show_lens`, V124, P6.C1): `uri` `oxplow:oxplow/answer?id=<id>`, `thread_id`, `turn_id` / `effort_id` open when it was shown, `title`, either `lens` (an existing lens id) or `spec` (the `LensSpec` as JSON), `params`, `created_at`, and `kept_lens` once someone kept it (extensions.md → "Thread answers") |
 | `v_diagnostic` | what the language servers have published, right now (V86). `lsp_diagnostics.rs` subscribes to the LSP session broadcast and replaces a file's rows per `(stream, language, path)` on each `textDocument/publishDiagnostics` (paths repo-relative, positions 1-based, a URI outside the worktree dropped). Live state: the table is cleared at boot and a server's rows when it restarts, crashes or stops. Only files a server has published appear (usually the open ones, not the whole repo). A view re-runs on `ModelsChanged` when rows commit; at most every 500 ms per stream, from the first change (so a server that publishes continuously can't starve it), `code.diagnostics.changed@2` is logged per changed file (P5.C5) |
 | `v_symbol` / `v_symbol_capture` | the definitions oxplow's own tree-sitter extraction finds in each stream's files, in every supported language, no language server needed (V62) — the current tree, restated per changed file at each snapshot by the `symbols.collect` pump consumer (`uri` `oxplow:oxplow/symbol?path=<path>&symbol=<id>`, no revision, unique per stream; `kind` from one vocabulary; `container` `::`-joined; `signature` the parameter types in overloading languages; the name's `line`/`col` and the whole symbol's `start_*`..`end_*`), and what each snapshot's collection covered (`files_collected`, `files_failed`: content unreadable at the snapshot). Details: language-support.md "Symbols" |
 
@@ -789,7 +789,7 @@ An extension entity `<entity>` owned by extension `<ext>` is exposed as
 - `query_sql(sql, params?, limit?)` over IPC (`querySql` in `api.ts`) and
   MCP. **Every query goes through the SQL gateway** (P4.1, tsk486):
   `Services.sql`, `crates/oxplow-app/src/sql_gateway.rs` — MCP and IPC
-  `oxplow_query_sql`, lenses, advisories, entity metrics, extension checks
+  `oxplow_query_sql`, pages, advisories, entity metrics, extension checks
   (`oxplow_validate_extension`, `oxplow extension check`) and source inputs alike.
   It takes one `SqlQuery { sql, params (positional | named), limit,
   timeout }`; `check(sql)` prepares without running. Mechanics
@@ -825,9 +825,9 @@ An extension entity `<entity>` owned by extension `<ext>` is exposed as
     a read, select, function or recursion is refused, save the
     `query_only` pragma the session itself runs. `SqlQuery::raw` switches
     to recording only: the person's explorer, through IPC `query_sql
-    { raw: true }` — the MCP tool has no such switch — and `oxplow.lens.keep`
+    { raw: true }` — the MCP tool has no such switch — and `oxplow.page.keep`
     checks a spec's query through the enforced path (`check_query_on`, as
-    `oxplow.lens.show` does), so a raw query can't become a lens. A model's compile reads its sources in record mode. Installed before `prepare` in a `ReadSession`
+    `oxplow.page.show` does), so a raw query can't become a page. A model's compile reads its sources in record mode. Installed before `prepare` in a `ReadSession`
     that, when dropped — on every path, a panic included — clears it and
     `PRAGMA query_only`, so the pooled connection comes back writable. The
     result's `reads` is `{ models, tables }`: every view read, directly or
@@ -848,7 +848,7 @@ An extension entity `<entity>` owned by extension `<ext>` is exposed as
     coverage" below.
   - Caller mistakes (bad SQL, writes, timeouts) are `Invalid` errors: the
     IPC `INVALID` code, and MCP `invalid_params`.
-  - `reads.tables` is empty except in a raw read. Every bundled lens,
+  - `reads.tables` is empty except in a raw read. Every bundled page,
     advisory, source input and built-in entity metric reads only views —
     audit tests (`bundled_queries_read_only_published_views`,
     `builtin_entity_metrics_read_only_views`) keep it so. A missing column
@@ -859,7 +859,7 @@ An extension entity `<entity>` owned by extension `<ext>` is exposed as
 - The catalog is SQL: `v_model` (name, owner, kind, description) and
   `v_model_column` (each column's SQL type and doc). The MCP
   `describe_schema` tool and its IPC twin are gone (tsk517).
-- Lenses never call models or run collectors on render; they read what
+- Pages never call models or run collectors on render; they read what
   collectors already produced.
 - Everything an extension adds (entities, relations, dimensions, metrics)
   appears in the same models (`v_model`, `v_dimension`, `v_metric_spec`) and
@@ -883,9 +883,9 @@ The result keeps the two apart.
   `input` fails past 10 000 rows (`collectors::MAX_INPUT_ROWS`) unless it
   declares `input: { sql, limit }`; then the script gets `limit` rows
   and `input.complete` saying whether they were all of them
-  (`collector_runner::input_rows_for_run`). The lens view and Explore Data say
+  (`collector_runner::input_rows_for_run`). The page view and Explore Data say
   "Showing the first N rows" above a truncated result
-  (`apps/desktop/src/lens/completeness.ts`, `ResultCompleteness`); a
+  (`apps/desktop/src/page/completeness.ts`, `ResultCompleteness`); a
   compact strip shows nothing. Exactly the cap is allowed; SQL
   aggregation sees every matching row before the cap, and an authored
   `LIMIT` is the query's own subset.
@@ -898,12 +898,12 @@ The result keeps the two apart.
   error), `disabled` (health says so, with its
   reason), `stale` (its schedule's `next_due_at` passed) or `current`.
   Core's own models carry no entry: core keeps them current. Nothing is
-  inferred from timestamps alone. The lens view lists each entry that
+  inferred from timestamps alone. The page view lists each entry that
   isn't `current` with its last run and error.
 - **Generation: what the catalog was.** `generation` is the extension
   catalog's fingerprint (`ExtensionCatalog::generation`) when the query
   ran — an opaque string that changes when any extension does.
-- MCP and RPC `query_sql` and lens runs return the whole result (over MCP
+- MCP and RPC `query_sql` and page runs return the whole result (over MCP
   also as structured content, typed by the tool's output schema); the
   row-only script reads carry the row guarantees but not coverage.
 - `freshness` is separate: model changes observed since startup.
@@ -924,7 +924,7 @@ parses — an own extension's report collectors, tsk863), one of the three. One 
 parsed with a `Declarer { extension, namespace, own }`; `.oxplow/project.yaml`
 has no `collectors:` (it is refused). The real, tested example
 is `examples/extensions/github/` (PRs from the GitHub API via `gh` or
-`GITHUB_TOKEN`); the user guide is `docs/guide/lenses.md`.
+`GITHUB_TOKEN`); the user guide is `docs/guide/pages.md`.
 
 ```yaml
 collectors:
@@ -1042,7 +1042,7 @@ last_event_id`. The UI refreshes when `v_collector_run` changes
 ([extensions.md](./extensions.md) "Health, disable and repair"): three
 failed runs in a row disable one (`contribution_health`, key owner / id, kind
 `collector`); then nothing runs it until a person's `oxplow.contribution.enable`, and
-a lens over its view warns that its rows aren't refreshing.
+a page over its view warns that its rows aren't refreshing.
 
 **`on:` triggers** (`collector_triggers.rs`, the `collector.triggers`
 async pump consumer). When an event an enabled collector's `on:` names is
@@ -1147,8 +1147,8 @@ entities from data already in the semantic layer:
 | Settings → Data read model (`data_entities`) | `crates/oxplow-app/src/semantic_catalog.rs` |
 | `v_collector` (standing) / `v_collector_credential`; setting a credential is `run_command oxplow.collector.set_credential`, running is `run_command oxplow.collector.sync` | `crates/oxplow-app/src/collector_runner.rs` |
 | MCP `oxplow_preview_collector`; an agent syncs with `run_command oxplow.collector.sync`; standing and credentials read `v_collector_state` / `v_collector_credential` (the `oxplow.collector.sync` command as the agent) | `crates/oxplow-mcp/src/lib.rs` |
-| UI: Settings → Data (entities + counts, collector rows, Sync Now, effects, Backfill) | the foundation's `data-*` lenses (`extensions/oxplow-foundation/lenses/`) |
-| UI: credentials per extension | the foundation's `extensions-credentials` lens (`extensions/oxplow-foundation/lenses/`) |
+| UI: Settings → Data (entities + counts, collector rows, Sync Now, effects, Backfill) | the foundation's `data-*` pages (`extensions/oxplow-foundation/pages/`) |
+| UI: credentials per extension | the foundation's `extensions-credentials` page (`extensions/oxplow-foundation/pages/`) |
 | `v_data_entity` (live: models + unsynced entities; `row_count` for the pinned one), `v_effect_backfill` (live: what a backfill would react to), `v_replacement` (live: each replaceable component with its candidates and the chosen one), `v_provider_instance` / `v_provider_credential` / `v_provider_collector` (live: the provider instances, their credentials' presence and sign-in state, their collectors' reads) | `crates/oxplow-app/src/live_models.rs` |
 
 **Decisions (epic tsk289, 2026-09-27).**
@@ -1177,7 +1177,7 @@ entities from data already in the semantic layer:
   - A teammate who pulls the repo deploys the extension themselves, and a
     changed script needs a new deploy.
   - Running is the `oxplow.collector.sync { collector }` command — from the
-    UI, a lens action, the scheduler or an agent alike. It never approves
+    UI, a page action, the scheduler or an agent alike. It never approves
     anything: a deploy that adds a permission asks a person, and an
     agent's becomes a proposal.
 - **Environment.** The entry gets `PATH`, `HOME`, its declared `env`
@@ -1243,7 +1243,7 @@ entities from data already in the semantic layer:
   - `RunCollectorError` distinguishes `NotFound`, `Denied` (its extension
     lacks a permission; nothing ran), `Disabled`, `Failed` (it ran; recorded with its
     event, keeping the last good row counts) and `Storage`.
-  - A lens reading an uncollected entity gets "reads `v_x`, which hasn't
+  - A page reading an uncollected entity gets "reads `v_x`, which hasn't
     been collected yet. Run collector `ext/id`…" in place of SQLite's
     bare "no such table".
 - **Scheduling.** A background loop (`spawn_scheduler`, started from boot
@@ -1281,10 +1281,10 @@ kept current with the `working` change (below). V101 rebuilt `change` to
 widen its kind CHECK, emptying the cache first (rows are recomputed on
 demand); `V105__change_range` widened it again, keeping the rows.
 `crates/oxplow-app/src/change_analysis.rs`
-analyzes it and stores the rows behind `v_change*`; lenses (the
+analyzes it and stores the rows behind `v_change*`; pages (the
 oxplow-bundled change cards) only read them.
 
-- **Getting one.** A query that names it, `SELECT id FROM v_change WHERE kind = 'commit' AND target = :sha` (or `kind = 'working' AND target = ''`, the query's stream; or `kind = 'range' AND target = :start || '..' || :end`, the two sides as params — a `start` left NULL would make the whole value NULL, so a lens defaults it to `''`), creates it and starts its analysis ("Made on demand" above): how a declared page gets its `change_id`. `ensure_change(target)` (IPC and MCP; not hinted read-only, since it stores the analysis) returns
+- **Getting one.** A query that names it, `SELECT id FROM v_change WHERE kind = 'commit' AND target = :sha` (or `kind = 'working' AND target = ''`, the query's stream; or `kind = 'range' AND target = :start || '..' || :end`, the two sides as params — a `start` left NULL would make the whole value NULL, so a page defaults it to `''`), creates it and starts its analysis ("Made on demand" above): how a declared page gets its `change_id`. `ensure_change(target)` (IPC and MCP; not hinted read-only, since it stores the analysis) returns
   the `v_change` row, computing first if needed. It diffs its two
   revisions (`v_change.base_revision` → `head_revision`) through `Trees`
   (shared with the `diff` IPC, `.context/vcs.md`), reads the
@@ -1389,7 +1389,7 @@ oxplow-bundled change cards) only read them.
 
 Deleted / skipped tests and removed assertions are `v_change_function`
 (deleted `is_test` rows) plus `v_change_test_file`, read by the
-oxplow-bundled Tests Weakened lens. Missing co-change is oxplow-bundled's
+oxplow-bundled Tests Weakened page. Missing co-change is oxplow-bundled's
 `v_oxplow_bundled_change_co_change`.
 
 **Still target:** network enforcement off macOS; AI-role columns.
@@ -1400,9 +1400,9 @@ see extensions.md.)
 
 - [metrics.md](./metrics.md): the fact substrate this generalizes. Still
   authoritative for facts, captures, the cube and fact collectors.
-- [extensions.md](./extensions.md): how lenses and extensions consume this
+- [extensions.md](./extensions.md): how pages and extensions consume this
   layer.
-- [ai-providers.md](./ai-providers.md): the AI functions sources and lenses
+- [ai-providers.md](./ai-providers.md): the AI functions sources and pages
   can use.
 - [collection.md](./collection.md): test-run and coverage ingest, which
   becomes the tests & coverage source.

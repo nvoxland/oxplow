@@ -3,7 +3,7 @@
 ## Step 5 — verify
 
 1. **Check and test the extension:** `oxplow extension check <name>` (no
-   errors, no warnings; it dry-runs the lens) and `oxplow extension test
+   errors, no warnings; it dry-runs the page) and `oxplow extension test
    <name>` (the collector over the fixture returns the expected facts).
 2. **Run the collector now:** the `oxplow.collector.sync` command,
    `{ "collector": "<extension name>/<ns>.scan" }` (`project/<id>`
@@ -20,7 +20,7 @@
    ```
 
 4. The metric appears on the **Metrics** page automatically — no UI code — and
-   its lens in the launcher.
+   its page in the launcher.
 
 If the run fails the error says why: a fact on a measure the collector doesn't
 list in `facts:` or no measure defines ("declare it in `measures:`"), or a

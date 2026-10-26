@@ -276,7 +276,7 @@ serves a bundle to, since a browser builds its frames' URLs from the base
 it reached the daemon by (tsk1003):
 the main window's CSP (`tauri.conf.json`; with no `devCsp`, Tauri
 applies the same `csp` in dev) and, for a plain browser, a one-directive
-meta CSP in `index.html` (P11, tsk960) — `lens/frameBound.test.ts`
+meta CSP in `index.html` (P11, tsk960) — the component frame's bound test
 keeps the two one value.
 
 ## Dispatch context

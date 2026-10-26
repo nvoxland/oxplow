@@ -7,7 +7,7 @@ For the actual data shapes, see [data-model.md](./data-model.md).
 
 ## The 7-layer flow
 
-**First: is it a command?** Every write a person, agent or lens can
+**First: is it a command?** Every write a person, agent or page can
 invoke is a command on the bus ([commands.md](./commands.md)): the
 handler is layer 3 below, and the bus adds validation, policy,
 confirmation, audit, undo and the `command.executed` event, so the
@@ -156,7 +156,7 @@ bespoke IPC/MCP read. The result says what it read (`reads`), and the
 view refreshes through `useRerunOnChange` when `ModelsChanged` names a
 model it read — no per-feature event to add. A bespoke read stays for
 what SQL can't answer (a git or LSP call, a file on disk, an entity an
-extension declared but hasn't synced) is a live model when the lens layer can read it (`v_data_entity`: its row count is counted only for the one name the query pins, since one slow count would fail the whole list, tsk1065).
+extension declared but hasn't synced) is a live model when the SQL layer can read it (`v_data_entity`: its row count is counted only for the one name the query pins, since one slow count would fail the whole list, tsk1065).
 
 A new operation that the UI invokes and that mutates persistent state
 touches roughly seven files. They sit in this order:
@@ -302,7 +302,7 @@ part on its own trigger: the catalog or config change
 collectors; `useRerunOnChange` over the models the part read (`v_collector_run` for
 the collector list, `v_extension_run` for the last runs); and a model's
 row count when that model's own `ModelsChanged` names it
-(each part is its own lens run). A collector run (frequent) therefore re-lists the collectors and nothing else.
+(each loader re-runs on its own reads). A collector run (frequent) therefore re-lists the collectors and nothing else.
 The daemon still re-reads `project.yaml` on each extension-catalog call;
 serving it from the loaded copy is open.
 
@@ -366,7 +366,7 @@ both together when adding a channel.
 
 ## Git dashboard / cross-worktree IPC
 
-The Git Dashboard is a foundation document lens over the models ([vcs.md](./vcs.md)); the cross-worktree IPCs left are:
+The Git Dashboard is a foundation page over the models ([vcs.md](./vcs.md)); the cross-worktree IPCs left are:
 
 - `vcsPush(streamId, { remote, branch })` / `vcsPull(streamId, { remote,
   branch })` — the `oxplow.vcs.push` / `oxplow.vcs.pull` commands aimed at a remote
@@ -712,7 +712,7 @@ schema in [data-model.md](./data-model.md), migration `V33`).
 
 - **IPC** (UI-only — the agent never reads nudges back):
   `list_nudges_for_thread(threadId)`. Per-effort nudges are read through
-  `v_agent_nudge` (the oxplow-bundled `effort-nudges` lens)
+  `v_agent_nudge` (the oxplow-bundled `effort-nudges` page)
   (`crates/oxplow-rpc/src/commands/effort.rs`, adapters in
   `crates/oxplow-tauri-ipc/src/commands/effort.rs`, registered in the
   `rpc_dispatch!` registry and the surface-parity manifest as `ui()`).
@@ -859,8 +859,8 @@ stream purges its file rows (`purge_stream_files`). See
 
 ## Component query version
 
-`run_component_query` requires the loaded bundle `version`, alongside lens id,
-asset, parameters and stream. The renderer captures it when loading the frame
+`run_component_query` requires the loaded bundle `version`, alongside the page id,
+parameters and stream. The renderer captures it when loading the frame
 and forwards it over local/remote RPC. The host resolves the immutable bundle
 and uses its asset allowlist; missing/foreign versions require a reload. New
 manifest assets cannot widen an old running frame's query authority.

@@ -37,7 +37,7 @@ accessing other directories.
 ## Page
 
 A **page** is anything addressable inside a tab: a description, dashboard,
-lens, wiki page, task, file, diff, settings panel, or agent session.
+page, wiki page, task, file, diff, settings panel, or agent session.
 References and backlinks connect these surfaces so you can move from a
 summary to its supporting evidence.
 
@@ -49,10 +49,10 @@ can add their own entities and facts, then join them to existing data.
 **dimensions** let you compare them by project, stream, effort, or other
 relevant categories. See [Metrics](../guide/metrics.md).
 
-A **lens** queries that data and presents it as a page or a section of
-another page. You can ask an agent to build a lens or collector for your
+A **page** queries that data and presents it as tables, charts and forms,
+alone or as a section of another page. You can ask an agent to build a page or collector for your
 own questions and share its extension files with your team. See
-[Lenses](../guide/lenses.md).
+[Pages](../guide/pages.md).
 
 ## Task
 
@@ -80,7 +80,7 @@ answered without creating a page. See [Wiki pages](../guide/wiki.md).
 ## Change Analysis
 
 A **change** can be a commit, uncommitted work, or the work within an
-effort. Built-in analysis and bundled lenses help explain what changed
+effort. Built-in analysis and bundled pages help explain what changed
 and where to look, with links to files and diffs. The presentation is
 customizable; see [Change Analysis](../guide/change-analysis.md).
 
@@ -107,5 +107,5 @@ richer context than a file or task would provide on its own.
 Open a project, ask questions, and supervise work in threads. Collected
 activity, snapshots, analysis, and optional task and knowledge providers
 make the work understandable. Add collectors, metrics, dimensions, and
-lenses when your questions need more information or a different view.
+pages when your questions need more information or a different view.
 Drill into code when you need to verify the explanation.

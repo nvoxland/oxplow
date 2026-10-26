@@ -1,23 +1,22 @@
 # Scaffolding an extension and the words it uses
 
-A **lens** is a saved query over oxplow's data plus how to show it. The user
-opens it as a page (Cmd+P → Lenses), and it updates as the work changes.
-Lenses live in **extensions**: folders of plain files in
-`.oxplow/extensions/<name>/`. A source runs only after
-`oxplow.extension.deploy { name }`. The user can use a lens themselves or
-share the extension with their team (`oxplow.extension.share`).
+A **page** is named queries plus a tree that shows them. The user opens it
+(Cmd+P), and it updates as the work changes. Pages live in **extensions**:
+folders of plain files in `.oxplow/extensions/<name>/`. A source runs only
+after `oxplow.extension.deploy { name }`. The user can use a page
+themselves or share the extension with their team (`oxplow.extension.share`).
 
 You build them with your normal file tools. `oxplow extension new <kind>
 <name> --origin <your effort ref>` scaffolds the folder with a v2 manifest,
 an intent, one example and its fixture, and a working starter for the
 kind; then edit. Each passes `check` and `extension test` as written, so a
 failure after your edit is yours:
-- `lens` — a lens over open tasks with a row action (Start);
+- `page` — a page over open tasks with a row action (Start);
 - `collector` — a Starlark collector of an entity, a model over it
-  (`ref('item')`) and a lens over the model;
+  (`ref('item')`) and a page over the model;
 - `metric` — a code metric: a per-path measure, a Starlark collector
   counting each file's functions over a complexity limit, the dimension
-  its facts carry, the headline metric and a lens linking to the file and
+  its facts carry, the headline metric and a page linking to the file and
   line (`--language`, `--glob`; the `oxplow-metrics` skill teaches it);
 - `command` — a command whose script comments on a work item, on a work
   item's Commands menu;
@@ -46,8 +45,8 @@ failure after your edit is yours:
   declare, a person can cancel it, and an effect on its
   `contribution.job.completed` writes what it found (runs once a person
   under its permissions; `references/jobs-and-ai.md`);
-- `component` — a custom component (private): its `viz: custom` lens and
-  a web bundle on oxplow's client library;
+- `component` — a custom component (private): a page with its component
+  node and a web bundle on oxplow's client library;
 - `policy` — an effort policy written as a script (`implementations:`,
   `needs: [sql.read]`) that opens an item's effort when it starts on a
   thread and closes it when it ends; it passes the effort-policy suite
@@ -58,12 +57,12 @@ failure after your edit is yours:
 - `skill` — a skill (`SKILL.md` with `name:` and `description:`
   frontmatter) you load when it's relevant; `kind: command` makes it a
   slash command;
-- `page` / `panel` — a lens as a full page in the launcher, or compact in
-  the left nav (a panel's `scope` is the param its lens declares);
+- `panel` — a page compact in the left nav (a panel's `scope` is the param
+  its page declares);
 - `extension` — the manifest only.
 
 Words used exactly: an **extension** is the folder; a **contribution** is
-one thing it declares (a lens, collector, command, effect, provider …); a
+one thing it declares (a page, collector, command, effect, provider …); a
 **capability** is a swappable slot a project chooses an implementation of
 (`work_items`, `effort_policy`, `snapshots`); an **implementation** fills
 one (a built-in, a script, or a provider's instance); a **provider** is

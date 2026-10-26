@@ -20,7 +20,7 @@
   then a closing `other` row) and `v_zone_unmatched` (paths no rule matched);
   both are read live. Read the rules with `oxplow.config.get { key: "zones" }`,
   change them with `oxplow.config.set` (the whole ordered table).
-- Also read live, for the stream a lens runs for (its `stream_id`; the
+- Also read live, for the stream a page runs for (its `stream_id`; the
   primary checkout's without one): `v_workspace_file` (the worktree's files
   and folders, with each file's change; a folder's listing is `WHERE parent
   = 'src'`) and `v_agent_conversation` (every harness's saved conversations
@@ -30,12 +30,12 @@
   where it comes from) and `v_vcs_workspace` (the repository's working
   copies and the stream in each; `stream_id IS NULL` is adoptable). A stream's
   terminals — shells in its worktree, in order — are `v_terminal` (open one with
-  `oxplow.terminal.open`). A lens
+  `oxplow.terminal.open`). A page
   over a live model re-runs when what it reads changes.
 - Made when a query names it: `v_commit` / `v_commit_file` `WHERE sha =
   :sha` (the full sha) reads a commit however old, and `v_change WHERE
   kind = 'commit' AND target = :sha` (or `kind = 'working' AND target =
-  ''`, the lens's stream) creates that change and starts its analysis.
+  ''`, the page's stream) creates that change and starts its analysis.
 - Only `v_*` views can be read; a physical table is refused, naming the
   view to read instead. Metrics are read with `metric_grid()` and
   `MEASURE('<key>')` (see the `oxplow-metrics` skill).
@@ -58,16 +58,16 @@ Carry URIs; never assemble or dissect them:
   Select `uri_param(t.uri, 'id')` to feed one; `{{param.x.id}}` does the
   same in an action's input. A URI goes only where a field can name anything
   (`uri`, `target`, `subject`) and for work items.
-- **To link one lens to another from SQL**, `uri('oxplow/lens', 'lens',
+- **To link to a page from SQL**, `uri('oxplow/page', 'page',
   'oxplow-bundled/thread-activity', 'thread_id', thread_id)` gives
-  `oxplow:oxplow/lens?lens=oxplow-bundled/thread-activity&thread_id=7`
+  `oxplow:oxplow/page?page=oxplow-bundled/thread-activity&thread_id=7`
   (params escaped and sorted, a NULL value left out).
 - **In a script**, build with `uri.build("oxplow/file", path = f["path"])`
   and read with `uri.parse(r)` (`{ resource, params, view }`) /
   `uri.param(r, "path")` / `uri.id(r, resource = "oxplow/effort")` (which
   refuses a URI of another resource) / `uri.resource(r)` / `uri.is_uri(v)`.
   Never `"oxplow:oxplow/effort?id=" + id` or slicing a URI.
-- **In a lens action's input**, pass a row's uri column
+- **In a page action's input**, pass a row's uri column
   (`{ uri: "{{row.uri}}" }`), not a URI rebuilt from an id.
 - **A URI may dangle.** The thing it names can be deleted, or its
   extension removed; store the URI anyway, and expect a reader to show it
@@ -75,8 +75,8 @@ Carry URIs; never assemble or dissect them:
 
 ## Publishing models
 
-When other lenses, extensions or agents should read a shaped dataset —
-not just one lens — publish it as a **model**: a documented, versioned
+When other pages, extensions or agents should read a shaped dataset —
+not just one page — publish it as a **model**: a documented, versioned
 view. Declare it in `extension.yaml` and write its SQL in
 `models/<name>.sql`:
 
@@ -132,8 +132,8 @@ SELECT work_item, review FROM import_ref('reviews')
 ```
 
 - `optional: true`: when the producer is missing, disabled or exports
-  another version, what reads the binding (a lens, a model, a slot that
-  mounts the lens) is withheld with a warning, and the rest of your
+  another version, what reads the binding (a page, a model, a slot that
+  mounts the page) is withheld with a warning, and the rest of your
   extension still loads. Without it, your whole extension is blocked.
 - `oxplow extension check` prints how each import resolved
   (``import `reviews` → model:effort-review/reviews v2: available``, or
