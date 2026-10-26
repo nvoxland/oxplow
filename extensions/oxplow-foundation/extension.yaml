@@ -946,7 +946,7 @@ commands:
     summary: "Hand work to another open thread (any stream's): what it is and what its agent needs to know, and the work item it hands over, if any. The thread's agent is given it at its next prompt; the person sees it at once. Nothing wakes an agent. Returns the handoff and `link_warnings`."
     scope: handoffs.write
     op: send
-    ui: { label: "Hand Off Work…", group: Threads, keywords: [handoff, delegate, give], about: oxplow/thread, form: "oxplow:oxplow/lens?lens=oxplow-foundation/hand-off" }
+    ui: { label: "Hand Off Work…", group: Threads, keywords: [handoff, delegate, give], about: oxplow/thread, form: "oxplow:oxplow/page?page=hand-off" }
     example: {"to_thread": "thr4", "work_item": "oxplow:oxplow/work_item?id=tsk12&provider=oxplow", "body": "The parser fix is in; the remaining failure is the timezone case in [[src/dates.rs]]."}
   - name: handoff.resolve
     summary: "Take or decline a handoff to your thread. Taking one moves its work item onto your thread. Its sender reads the note."
@@ -1138,7 +1138,7 @@ commands:
     tool: run_page_action
     example: {"page": "acme/review", "node": "items", "action": "finish", "row": {"id": "tsk12"}}
   - name: page.open
-    summary: "What the person is looking at in a thread. It is the page the thread has open in the window they were in last (`pageId` such as `oxplow:oxplow/work_item?id=tsk42&provider=oxplow`, `oxplow:oxplow/file?path=src/a.rs`, `oxplow:oxplow/lens?lens=review/waiting`; its kind; the detail the page publishes; which window, whether it's on screen, how fresh), and `others`, the page each other window has open there. When it's a page, `pageRun` is the window's own run of it as text (each node under `[node <id>]`), with `focus`, the node they are on; when it's a lens, `lens` is that lens re-run with the person's params: what is on their screen. `tab` reads one of the thread's tabs instead (an id `oxplow_list_tabs` listed). Use it when the person says \"this\", \"what I'm looking at\" or \"this lens\". `open` is null when no window reported one."
+    summary: "What the person is looking at in a thread. It is the page the thread has open in the window they were in last (`pageId` such as `oxplow:oxplow/work_item?id=tsk42&provider=oxplow`, `oxplow:oxplow/file?path=src/a.rs`, `oxplow:oxplow/page?page=review/waiting`; its kind; the detail the page publishes; which window, whether it's on screen, how fresh), and `others`, the page each other window has open there. When it's a page, `pageRun` is the window's own run of it as text (each node under `[node <id>]`), with `focus`, the node they are on: what is on their screen. `tab` reads one of the thread's tabs instead (an id `oxplow_list_tabs` listed). Use it when the person says \"this\", \"what I'm looking at\" or \"this page\". `open` is null when no window reported one."
     scope: pages.read
     op: open
     tool: get_open_page
@@ -1225,7 +1225,7 @@ commands:
     example: {"instance": "issues/issues", "name": "TOKEN", "sign_in": 3}
   # records.read
   - name: records.read
-    summary: "Read what a uri names. Its model's row (every column), what sits beside it (a work item's links and comments, a commit's or an effort's files) and, for a body no model holds, its content. `oxplow:oxplow/file?path=src/a.rs` reads the working tree; `oxplow:oxplow/file?path=src/a.rs&rev=git:HEAD#lines=10-40` a revision's lines (`@snap:<id>` a local-history snapshot); `oxplow:oxplow/event?id=<id>#part=output` (or `#input`, `#prompt`) one of your stream's events' stored bodies; `oxplow:oxplow/lens?lens=<ext>/<slug>` a lens's definition; `stream` reads a file or lens in another stream's worktree. `oxplow:oxplow/ai_call?id=<id>#part=request` (or `#response`) a recorded model call's bodies. Any `uri` a model's column holds reads the same way (`work_item:…`, `oxplow:oxplow/commit?sha=…`, `oxplow:oxplow/effort?id=…`, `oxplow:oxplow/thread?id=…`, `oxplow:oxplow/wiki?slug=…`). Content stops at 64 KB, saying so."
+    summary: "Read what a uri names. Its model's row (every column), what sits beside it (a work item's links and comments, a commit's or an effort's files) and, for a body no model holds, its content. `oxplow:oxplow/file?path=src/a.rs` reads the working tree; `oxplow:oxplow/file?path=src/a.rs&rev=git:HEAD#lines=10-40` a revision's lines (`@snap:<id>` a local-history snapshot); `oxplow:oxplow/event?id=<id>#part=output` (or `#input`, `#prompt`) one of your stream's events' stored bodies; `oxplow:oxplow/page?page=<ext>/<slug>` a page's definition (its YAML, source and deployment); `stream` reads a file or page in another stream's worktree. `oxplow:oxplow/ai_call?id=<id>#part=request` (or `#response`) a recorded model call's bodies. Any `uri` a model's column holds reads the same way (`work_item:…`, `oxplow:oxplow/commit?sha=…`, `oxplow:oxplow/effort?id=…`, `oxplow:oxplow/thread?id=…`, `oxplow:oxplow/wiki?slug=…`). Content stops at 64 KB, saying so."
     scope: records.read
     op: read
     tool: read

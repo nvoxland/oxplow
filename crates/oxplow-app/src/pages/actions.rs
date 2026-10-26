@@ -61,6 +61,58 @@ fn find_embed<'r>(at: &'r super::runner::RunNode, id: &str) -> Option<&'r PageRu
     at.children.iter().find_map(|c| find_embed(c, id))
 }
 
+/// The embedded run an embed node at `path` holds (`<embed>`, or
+/// `<embed>/<embed>` inside one); `None` when `path` names any other node.
+fn embedded<'r>(run: &'r PageRun, path: &'r str) -> Option<&'r PageRun> {
+    let (holder, id) = match path.rsplit_once('/') {
+        None => (run, path),
+        Some((outer, id)) => (locate(run, outer).and_then(|(h, i)| embedded_at(h, i))?, id),
+    };
+    embedded_at(holder, id)
+}
+
+fn embedded_at<'r>(run: &'r PageRun, id: &str) -> Option<&'r PageRun> {
+    find_embed(&run.tree, id).or_else(|| run.rail.as_ref().and_then(|r| find_embed(r, id)))
+}
+
+/// The row a whole-page action `action` reads, when it reads one: the
+/// page's first loader's one row.
+fn page_row(
+    run: &PageRun,
+    action: &str,
+) -> Result<Option<BTreeMap<String, SqlCell>>, CommandError> {
+    let reads_row = run.page.actions.iter().any(|a| a.id == action && a.one_row);
+    if !reads_row {
+        return Ok(None);
+    }
+    let first = run
+        .page
+        .loaders
+        .first()
+        .and_then(|l| run.loaders.get(&l.name))
+        .map(|l| &l.result);
+    match first.map(|r| (r, r.rows.as_slice())) {
+        Some((r, [only])) => Ok(Some(
+            r.columns
+                .iter()
+                .cloned()
+                .zip(only.iter().cloned())
+                .collect(),
+        )),
+        Some((_, rows)) => Err(invalid(
+            "/action",
+            format!(
+                "`{action}` reads the page's row, but its first loader has {} rows",
+                rows.len()
+            ),
+        )),
+        None => Err(invalid(
+            "/action",
+            format!("`{action}` reads the page's row, but it has no loader"),
+        )),
+    }
+}
+
 /// Run `call`'s action.
 pub async fn run_page_action(
     svc: &crate::Services,
@@ -70,66 +122,27 @@ pub async fn run_page_action(
     let run = runs
         .get(&call.run_id)
         .ok_or_else(|| invalid("/runId", format!("no open page run `{}`", call.run_id)))?;
-    let prepared = match &call.node {
-        None => {
-            // Whole-page actions bind directly over the page's params
-            // and its first loader's row; no synthetic viz is involved.
+    // A whole-page action: the page's own, or an embedded page's named by
+    // its embed node.
+    let whole = match &call.node {
+        None => Some(&run),
+        Some(path) => embedded(&run, path),
+    };
+    let prepared = match (&call.node, whole) {
+        (_, Some(target)) => {
             if call.row.is_some() {
                 return Err(invalid(
                     "/row",
                     format!("`{}` runs on the whole page, not a row", call.action),
                 ));
             }
-            // One that reads a row reads the first loader's one row.
-            let reads_row = run
-                .page
-                .actions
-                .iter()
-                .any(|a| a.id == call.action && a.one_row);
-            let row = if reads_row {
-                let first = run
-                    .page
-                    .loaders
-                    .first()
-                    .and_then(|l| run.loaders.get(&l.name))
-                    .map(|l| &l.result);
-                match first.map(|r| (r, r.rows.as_slice())) {
-                    Some((r, [only])) => Some(
-                        r.columns
-                            .iter()
-                            .cloned()
-                            .zip(only.iter().cloned())
-                            .collect::<BTreeMap<_, _>>(),
-                    ),
-                    Some((_, rows)) => {
-                        return Err(invalid(
-                            "/action",
-                            format!(
-                                "`{}` reads the page's row, but its first loader has {} rows",
-                                call.action,
-                                rows.len()
-                            ),
-                        ))
-                    }
-                    None => {
-                        return Err(invalid(
-                            "/action",
-                            format!(
-                                "`{}` reads the page's row, but it has no loader",
-                                call.action
-                            ),
-                        ))
-                    }
-                }
-            } else {
-                None
-            };
+            let row = page_row(target, &call.action)?;
             prepare_resolved(
-                &run.page.id,
-                &run.page.actions,
-                &run.page.id,
+                &target.page.id,
+                &target.page.actions,
+                &target.page.id,
                 &call.action,
-                &run.params,
+                &target.params,
                 row.as_ref(),
                 call.input,
                 call.drop,
@@ -137,7 +150,8 @@ pub async fn run_page_action(
                 call.confirmed,
             )?
         }
-        Some(path) => {
+        (None, None) => unreachable!("no node is the page itself"),
+        (Some(path), None) => {
             let (holder, id) = locate(&run, path)
                 .ok_or_else(|| invalid("/node", format!("no node `{path}` in this run")))?;
             let def = node(&holder.page, id)
@@ -459,9 +473,28 @@ pub async fn page_action_form(
         Vec<crate::extensions::PageAction>,
         BTreeMap<String, SqlCell>,
         Option<oxplow_db::SqlQueryResult>,
-    ) = match node_path {
-        None => (run.page.actions.clone(), run.params.clone(), None),
-        Some(path) => {
+    ) = match (
+        node_path,
+        node_path.map_or(Some(&run), |p| embedded(&run, p)),
+    ) {
+        (_, Some(target)) => {
+            // A whole-page form action starts from the page's row, when it
+            // reads one.
+            let one = page_row(target, action_id)?;
+            if row.is_none() && one.is_some() {
+                let action = target
+                    .page
+                    .actions
+                    .iter()
+                    .find(|a| a.id == action_id && a.form)
+                    .cloned()
+                    .ok_or_else(|| invalid("/action", format!("no form action `{action_id}`")))?;
+                return form_start(svc, action, &target.params, one.as_ref()).await;
+            }
+            (target.page.actions.clone(), target.params.clone(), None)
+        }
+        (None, None) => unreachable!("no node is the page itself"),
+        (Some(path), None) => {
             let (holder, id) =
                 locate(&run, path).ok_or_else(|| invalid("/node", format!("no node `{path}`")))?;
             let def = node(&holder.page, id)
@@ -507,8 +540,19 @@ pub async fn page_action_form(
         }
         (None, _) => None,
     };
-    let values = crate::viz_actions::bind_input(&action.input, &params, row.as_ref(), None)?;
-    let (choices, _, _) = form_sources(svc, &action.choices, &[], &params, &Actor::Human).await?;
+    form_start(svc, action, &params, row.as_ref()).await
+}
+
+/// A form action's form: its input bound over `params` and `row`, its
+/// choices read.
+async fn form_start(
+    svc: &crate::Services,
+    action: crate::extensions::PageAction,
+    params: &BTreeMap<String, SqlCell>,
+    row: Option<&BTreeMap<String, SqlCell>>,
+) -> Result<crate::viz_actions::FormStart, CommandError> {
+    let values = crate::viz_actions::bind_input(&action.input, params, row, None)?;
+    let (choices, _, _) = form_sources(svc, &action.choices, &[], params, &Actor::Human).await?;
     let command = svc
         .commands
         .spec(&action.command)

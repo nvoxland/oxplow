@@ -148,6 +148,27 @@ view: { viz: number, from: a }
 "#,
     ),
     (
+        "rename",
+        r#"
+title: Rename
+data:
+  row: { sql: "SELECT 'sess-1' AS session" }
+actions:
+  - { id: rename, label: Rename…, command: oxplow.work_item.create, input: { title: "{{row.session}}" }, form: true }
+view: { viz: detail, from: row }
+"#,
+    ),
+    (
+        "hosts-rename",
+        r#"
+title: Hosts Rename
+view:
+  stack:
+    - id: inner
+      embed: { page: acme/rename }
+"#,
+    ),
+    (
         "session",
         r#"
 title: Session
