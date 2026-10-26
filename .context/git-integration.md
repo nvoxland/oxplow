@@ -47,8 +47,8 @@ full rescan every 250ms, overlapping.
 
 It was fixed with a trailing debounce **plus single-flight** (one queued
 follow-up, so the summary can't end stale); the helper (`coalesced-refresh.ts`)
-went with the last two views that used it, which are lenses now (a lens re-runs
-once per change). Write it again for any new expensive refresh fed by more
+went with the last two views that used it, which are pages now (a page re-runs
+the loaders whose reads changed, once per change). Write it again for any new expensive refresh fed by more
 than one event stream. And each scan is cheaper (tsk241): `get_change_scopes`
 (`oxplow-git/src/branch_changes.rs`) reads the branch, its base and its
 upstream in-process through `git2`, the repo opened once, so the one git
@@ -103,7 +103,7 @@ registration: we never seed cache for dirs we never care about.
 Subscribes via the **debounced** view (`subscribe_debounced(250ms)`)
 and bridges each batch onto `OxplowEvent::WorkspaceChanged`. Consumed by:
 
-- The Files page's lenses (`v_workspace_file` follows `WorkspaceChanged`).
+- The Files page's loaders (`v_workspace_file` follows `WorkspaceChanged`).
 - `EditorPane` for external-file-changed prompts.
 
 Source files mutate constantly; this watcher's job is to keep the
@@ -139,7 +139,7 @@ until restart — absent from Local History, unrecoverable by
 `tests-e2e/` had **0** `file_snapshot` rows while every pre-existing
 directory had hundreds). And the workspace watcher, which had no fix of
 its own, never saw a project's first `oxplow/` — the extension catalog
-never signalled, so the first kept lens or new extension stayed out of
+never signalled, so the first saved page or new extension stayed out of
 the launcher.
 
 So `watch_workspace` **follows the tree**: the event of a kept directory
@@ -213,19 +213,26 @@ turns them into `vcsRefsChanged` / `workspaceChanged` on the shared
 `EventBus`. Git's watcher debounces ~250ms (a single `git commit` fires a
 dozen events touching `HEAD`, `refs/*`, `logs/*`, `index`, `ORIG_HEAD`, …).
 
+File events are the fast path, not the guarantee: macOS FSEvents can
+deliver `refs/` events 15s late or not at all under load (the browser
+suite's parallel daemons showed it — commits never reached `v_commit`).
+So the watcher also checks the refs' state every second — HEAD's text and
+each ref file's and `packed-refs`' size and mtime — and announces a change
+no file event did. A file event restates what the check compares against,
+so one move is announced once.
+
 When the stream lives in a secondary worktree (the common case — oxplow
 creates worktrees as siblings of the main repo), the stream's
-`.git` is a pointer file, not a directory. The watcher reads the
-`gitdir:` line to find the per-worktree state dir (containing `HEAD`,
-`index`, `logs/HEAD`) and also follows the `commondir` pointer to watch
-the shared `.git` (where `refs/heads/*` actually update). Both dirs are
-watched; without the commondir watch, `git fetch` / ref updates from
-outside the worktree would be missed.
+`.git` is a pointer file, not a directory. The watcher asks git2 for
+the per-worktree git dir (`HEAD`, `index`, `logs/HEAD`) and the common
+dir (where `refs/heads/*` actually update): the file watch is on the
+common dir's `refs/`, and the timer's check reads both, so `git fetch` /
+ref updates from outside the worktree are heard too.
 
 Fires `vcsRefsChanged` after each debounce. Consumed silently (no
 loading spinner) by:
 
-- The Files page's lenses (`v_workspace_file`, `v_branch`, `v_change` follow it).
+- The Files page's loaders (`v_workspace_file`, `v_branch`, `v_change` follow it).
 - `SnapshotCapture::spawn_git_refs_listener` — requests a snapshot for
   the stream, so every commit lands a snapshot row stamped with the new
   HEAD (`snapshot.revision`/`branch`) even when the worktree
@@ -533,8 +540,8 @@ another tool's checkout.
 
 ## UI commit affordance
 
-The Files page (the `files` lens) has a **Commit Changes…** action in its header
-part: a form over `oxplow.vcs.commit` (message, include untracked). The
+The Files page has a **Commit Changes…** action in its header
+node: a form over `oxplow.vcs.commit` (message, include untracked). The
 Uncommitted Changes page has an inline message box, and the command's menu
 entry opens that page. These are the UI entry points for
 user-driven commits. oxplow never steers the agent to commit.
