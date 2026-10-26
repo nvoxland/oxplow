@@ -1,0 +1,11 @@
+title: Item
+description: One item — what an `oxplow:e2e/item?id=<n>` URI opens.
+for: e2e/item
+default: true
+hidden: true
+params:
+- name: uri
+data:
+  item:
+    sql: SELECT title FROM v_e2e_item WHERE uri = :uri
+view: { from: item, viz: table, empty: No such item. }

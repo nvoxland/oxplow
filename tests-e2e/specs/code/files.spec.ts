@@ -10,14 +10,14 @@ test("the Files page lists the project and renames a file from its menu", async 
   writeFileSync(join(daemon.project, "emu.txt"), "emu\n");
   await page.goto("/");
   await openFromLauncher(page, "Files");
-  const row = page.getByRole("button", { name: "emu.txt" }).filter({ visible: true });
+  const row = page.locator('[data-testid="page-file"]:visible').getByRole("button", { name: "emu.txt" }).filter({ visible: true });
   await expect(row).toBeVisible();
   await row.click({ button: "right" });
   await page.getByTestId("menu-item-lens-action-rename").click();
   const field = page.getByTestId("lens-action-form-fields-to");
   await field.fill("owl.txt");
   await field.press("Enter");
-  await expect(page.getByRole("button", { name: "owl.txt" }).filter({ visible: true })).toBeVisible();
+  await expect(page.locator('[data-testid="page-file"]:visible').getByRole("button", { name: "owl.txt" }).filter({ visible: true })).toBeVisible();
   expect(existsSync(join(daemon.project, "owl.txt"))).toBe(true);
   expect(existsSync(join(daemon.project, "emu.txt"))).toBe(false);
 });
@@ -27,7 +27,7 @@ test("New File… from a file's menu creates the file and opens it", async ({ pa
   writeFileSync(join(daemon.project, "emu.txt"), "emu\n");
   await page.goto("/");
   await openFromLauncher(page, "Files");
-  await page.getByRole("button", { name: "emu.txt" }).filter({ visible: true }).click({ button: "right" });
+  await page.locator('[data-testid="page-file"]:visible').getByRole("button", { name: "emu.txt" }).filter({ visible: true }).click({ button: "right" });
   await page.getByTestId("menu-item-lens-action-new-file").click();
   const field = page.getByTestId("lens-action-form-fields-path");
   await field.fill("kiwi.txt");
@@ -43,12 +43,12 @@ test("a folder on the Files page opens in place and lists its children", async (
   writeFileSync(join(daemon.project, "sub", "inner.txt"), "inner\n");
   await page.goto("/");
   await openFromLauncher(page, "Files");
-  await expect(page.getByRole("button", { name: "inner.txt" })).toHaveCount(0);
+  await expect(page.locator('[data-testid="page-file"]:visible').getByRole("button", { name: "inner.txt" })).toHaveCount(0);
   await page
     .locator('[data-testid="lens-tree-row"]:visible')
     .filter({ hasText: "sub" })
     .getByRole("button", { name: "Expand" })
     .click();
-  await expect(page.getByRole("button", { name: "inner.txt" }).filter({ visible: true })).toBeVisible();
+  await expect(page.locator('[data-testid="page-file"]:visible').getByRole("button", { name: "inner.txt" }).filter({ visible: true })).toBeVisible();
   await expect(page.getByRole("button", { name: ".." })).toHaveCount(0);
 });

@@ -22,10 +22,6 @@ mock.module("../api.js", () => ({
     commands.push([name, input]);
     return { result: { id: "trm9", uri: "oxplow:oxplow/terminal?id=trm9", title: "Terminal 9" }, audit_id: 1, event_id: null, inverse: null };
   },
-  runLensAction: async (_id: string, action: string, _p: unknown, row: unknown, _s: unknown, _c: boolean, input: unknown) => {
-    actions.push([action, row, input]);
-    return { result: null, audit_id: 2, event_id: null, inverse: null };
-  },
   startAgentSession: async (id: string) => void commands.push(["start", id]),
 }));
 mock.module("../terminal/TerminalView.js", () => ({
@@ -42,6 +38,13 @@ mock.module("../terminal/TerminalView.js", () => ({
 }));
 const { TerminalViz } = await import("./TerminalViz.js");
 const { LensStreamContext } = await import("./LensStream.js");
+const { LensActionRunnerContext } = await import("./lensActionRunner.js");
+
+// A viz presses through the page that draws it: a runner stands in for it.
+const press = async (_id: string, action: string, _p: unknown, row: unknown, _s: unknown, _c: boolean, input?: unknown) => {
+  actions.push([action, row, input]);
+  return { result: null, audit_id: 2, event_id: null, inverse: null } as never;
+};
 
 afterEach(() => {
   cleanup();
@@ -73,9 +76,11 @@ function runOf(rows: SqlCell[][], picked: SqlCell = null): LensRun {
 
 const view = (run: LensRun, onSetParam?: (n: string, v: SqlCell) => void) =>
   render(
-    <LensStreamContext.Provider value={stream}>
-      <TerminalViz run={run} onSetParam={onSetParam} />
-    </LensStreamContext.Provider>,
+    <LensActionRunnerContext.Provider value={press}>
+      <LensStreamContext.Provider value={stream}>
+        <TerminalViz run={run} onSetParam={onSetParam} />
+      </LensStreamContext.Provider>
+    </LensActionRunnerContext.Provider>,
   );
 
 test("two rows: two terminals kept, the first shown, and the strip picks another", async () => {
@@ -101,9 +106,11 @@ test("a stream with none opens one, once", async () => {
   const v = view(runOf([]));
   await waitFor(() => expect(commands).toEqual([["oxplow.terminal.open", { stream: "str1" }]]));
   v.rerender(
-    <LensStreamContext.Provider value={stream}>
-      <TerminalViz run={runOf([])} />
-    </LensStreamContext.Provider>,
+    <LensActionRunnerContext.Provider value={press}>
+      <LensStreamContext.Provider value={stream}>
+        <TerminalViz run={runOf([])} />
+      </LensStreamContext.Provider>
+    </LensActionRunnerContext.Provider>,
   );
   await new Promise((r) => setTimeout(r, 10));
   expect(commands.length).toBe(1);

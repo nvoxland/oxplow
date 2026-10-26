@@ -1,8 +1,8 @@
 /**
- * Which lens or page, if any, stands in for a core sub-component right
- * now (P9.A1, `.context/extensions.md` → "Replacements"). An extension
- * declares `ui.replacements: [{ target, lens | page }]`. A page is run by
- * its host (`Replaceable`); a lens is run here. The person says whose
+ * Which page, if any, stands in for a core sub-component right now (P9.A1,
+ * `.context/extensions.md` → "Replacements"). An extension declares
+ * `ui.replacements: [{ target, page }]`; its host (`Replaceable`) runs the
+ * page with the target's props. The person says whose
  * shows, by target (`replacements: { <target>: <extension> | "oxplow" }`);
  * `"oxplow"` keeps oxplow's own wherever.
  *
@@ -19,13 +19,12 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { recordUsage, runLens, subscribeOxplowEvents, type LensRun, type SqlCell } from "../api.js";
+import { recordUsage, subscribeOxplowEvents } from "../api.js";
 import { settingValue } from "../configValues.js";
 import { useExtensions } from "../extensionsStore.js";
 import type { UiReplacement } from "../tauri-bridge/generated/bindings.js";
 import { readCapabilityProviders } from "../workItems.js";
-import { childParams } from "./lensModel.js";
-import { NO_READS, unionReads, useRerunOnChange } from "./lensRerun.js";
+import { NO_READS, useRerunOnChange } from "./lensRerun.js";
 import type { Reads } from "../tauri-bridge/generated/bindings.js";
 
 export type Replacement =
@@ -33,16 +32,6 @@ export type Replacement =
   | { state: "pending" }
   /** Oxplow's own component. */
   | { state: "core" }
-  | {
-      state: "replaced";
-      replacement: UiReplacement;
-      run: LensRun;
-      /** Its custom component couldn't be shown, and why: from here it is
-       *  `failed`, and oxplow's own shows (tsk855). */
-      fail(reason: string): void;
-      /** Its custom component said `ready`: it is shown. */
-      shown(): void;
-    }
   /** A page stands in: its host runs it with the target's props. */
   | { state: "page"; replacement: UiReplacement; page: string }
   /** The replacement couldn't load: oxplow's own, and why. */
@@ -61,7 +50,6 @@ async function readChoices(): Promise<Record<string, string>> {
 
 export function useReplacement(
   target: string,
-  props: Record<string, SqlCell>,
   streamId: string | null,
   /** The provider whose thing the component shows (a bound target's
    *  decider; an unbound target takes none). */
@@ -130,49 +118,15 @@ export function useReplacement(
   const chosen =
     !known || decider === null || decider === undefined ? null : (candidates.find((c) => c.extension === decider) ?? null);
   const page = chosen?.pageId ?? null;
-  const lens = chosen === null || page ? null : ((exts ?? []).flatMap((e) => e.lenses).find((l) => l.id === chosen.lensId) ?? null);
+  useRerunOnChange(providerReads, () => void readProviders());
 
-  const [ran, setRan] = useState<{ id: string; key: string; run: LensRun | null; error: string | null } | null>(null);
-  const propsKey = JSON.stringify(props);
-  const runKey = chosen === null ? null : `${chosen.id}|${propsKey}|${streamId ?? ""}`;
-  const seq = useRef(0);
-  const run = useCallback(async () => {
-    if (chosen === null || lens === null || runKey === null) return;
-    const mine = ++seq.current;
-    try {
-      const out = await runLens(chosen.lensId, childParams(lens, JSON.parse(propsKey) as Record<string, SqlCell>), streamId);
-      if (seq.current === mine) setRan({ id: chosen.id, key: runKey, run: out, error: null });
-    } catch (e) {
-      if (seq.current === mine) {
-        setRan({ id: chosen.id, key: runKey, run: null, error: e instanceof Error ? e.message : String(e) });
-      }
-    }
-    // `runKey` stands in for `chosen`, `props` and the stream.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [runKey, lens?.id]);
-  useEffect(() => {
-    seq.current += 1;
-    void run();
-  }, [run]);
-  useRerunOnChange(unionReads([providerReads, ran?.run?.result.reads]), () => {
-    void readProviders();
-    void run();
-  });
-
-  // A custom component that couldn't be shown, for the run it failed on.
-  const [failure, setFailure] = useState<{ key: string; message: string } | null>(null);
-  const failedHere = failure !== null && failure.key === runKey;
-
-  // Usage is the evidence a kind needs to be promoted: once per replacement
-  // actually shown — a kit lens when it ran, a custom one when its
-  // component says `ready` (one that never loads isn't shown).
+  // Usage is the evidence a kind needs to be promoted: once per
+  // replacement actually shown.
   const record = useCallback(
     (id: string) => void recordUsage({ kind: "replacement", key: id, streamId }).catch(() => {}),
     [streamId],
   );
-  const ranOk = ran !== null && ran.run !== null && ran.key === runKey ? ran : null;
-  const shownNow =
-    known && chosen !== null && page ? chosen.id : ranOk !== null && ranOk.run?.lens.viz !== "custom" && !failedHere ? ranOk.id : null;
+  const shownNow = known && chosen !== null && page ? chosen.id : null;
   useEffect(() => {
     if (shownNow !== null) record(shownNow);
   }, [shownNow, record]);
@@ -182,17 +136,5 @@ export function useReplacement(
   if (!known) return { state: "pending" };
   if (chosen === null) return { state: "core" };
   if (page) return { state: "page", replacement: chosen, page };
-  if (lens === null) return { state: "failed", replacement: chosen, message: `its lens ${chosen.lensId} didn't load` };
-  if (ran === null || ran.key !== runKey) return { state: "pending" };
-  if (ran.run === null) return { state: "failed", replacement: chosen, message: ran.error ?? "it failed" };
-  if (failedHere) return { state: "failed", replacement: chosen, message: failure.message };
-  const key = runKey;
-  const id = chosen.id;
-  return {
-    state: "replaced",
-    replacement: chosen,
-    run: ran.run,
-    fail: (message) => setFailure({ key, message }),
-    shown: () => record(id),
-  };
+  return { state: "failed", replacement: chosen, message: "it names no page" };
 }

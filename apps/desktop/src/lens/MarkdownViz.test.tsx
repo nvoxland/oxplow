@@ -1,8 +1,9 @@
 import { afterEach, expect, mock, test } from "bun:test";
-import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
-import { useState, type ReactNode } from "react";
+import { act, cleanup, fireEvent, render as rtlRender, waitFor } from "@testing-library/react";
+import { useState, type ReactElement, type ReactNode } from "react";
 
 import type { PageAction, LensRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
+import { LensActionRunnerContext, type LensActionRunner } from "./lensActionRunner.js";
 import { PageNavigationContext, type PageNavigation, type TabEditing } from "../tabs/PageNavigationContext.js";
 import { PageCommentsContext } from "./pageComments.js";
 
@@ -15,10 +16,6 @@ const saves: { action: string; row: unknown; input: unknown }[] = [];
 const targets: string[] = [];
 mock.module("../api.js", () => ({
   ...realApi,
-  runLensAction: async (_id: string, action: string, _p: unknown, row: unknown, _s: unknown, _c: boolean, input: unknown) => {
-    saves.push({ action, row, input });
-    return { result: null, audit_id: 1, event_id: null, inverse: null };
-  },
   listCommentsForTarget: async (target: string) => {
     targets.push(target);
     return [];
@@ -27,6 +24,14 @@ mock.module("../api.js", () => ({
   listExtensions: async () => [],
 }));
 const { LensResultView } = await import("./LensResultView.js");
+
+// A viz presses through the page that draws it: a runner stands in for it.
+const press: LensActionRunner = async (_id, action, _p, row, _s, _c, input) => {
+  saves.push({ action, row, input });
+  return { result: null, audit_id: 1, event_id: null, inverse: null };
+};
+const wrapper = ({ children }: { children: ReactNode }) => <LensActionRunnerContext.Provider value={press}>{children}</LensActionRunnerContext.Provider>;
+const render = (ui: ReactElement) => rtlRender(ui, { wrapper });
 
 afterEach(() => {
   cleanup();

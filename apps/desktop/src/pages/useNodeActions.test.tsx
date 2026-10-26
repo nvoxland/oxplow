@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { cleanup, render } from "@testing-library/react";
 
-import { PageActionContext, nodeActionRunner, useNodeActions, type RunPageAction } from "./useNodeActions.js";
+import { PageActionContext, nodeActionRunner, nodeFormSource, useNodeActions, type RunPageAction } from "./useNodeActions.js";
 import type { LensActionRunner } from "../lens/lensActionRunner.js";
 
 afterEach(cleanup);
@@ -48,4 +48,29 @@ test("useNodeActions presses through the page's action context", async () => {
   );
   await runner!("x", "go", {}, { id: "a" }, null, false);
   expect(calls).toEqual([["run-9", "items", "go", { id: "a" }, null, null, false]]);
+});
+
+// What a command changed shows even when no model change announces it
+// (a keychain entry): the run is run again after the press.
+test("a press that ran runs its run again; one that failed doesn't", async () => {
+  const { press } = recorder();
+  const after: string[] = [];
+  await nodeActionRunner(press, "run-1", "items", (id) => after.push(id))("x", "set", {}, { id: "a" }, null, false);
+  expect(after).toEqual(["run-1"]);
+  const failing: RunPageAction = async () => {
+    throw new Error("refused");
+  };
+  await expect(nodeActionRunner(failing, "run-1", "items", (id) => after.push(id))("x", "set", {}, null, null, false)).rejects.toThrow("refused");
+  expect(after).toEqual(["run-1"]);
+});
+
+test("a submitted form runs its run again", async () => {
+  const after: string[] = [];
+  const forms = {
+    start: async () => ({}) as never,
+    submit: async () => ({ result: null, audit_id: null, event_id: null, inverse: null }) as never,
+    actionStart: async () => ({}) as never,
+  };
+  await nodeFormSource(forms, "run-2", "form", (id) => after.push(id)).submit({ lens: { id: "x" }, params: {} }, {}, null, false);
+  expect(after).toEqual(["run-2"]);
 });

@@ -1,11 +1,11 @@
 /**
- * Comments are a page's capability, not a page's code: a declared page
- * with `comments: true` (`ExtensionPage.comments`) gives its vizes this
+ * Comments are a page's capability, not a page's code: a page file
+ * with `comments: true` (`Page.comments`) gives its vizes this
  * context — the comments' target (the page's URI, its tab id), the stream
  * they belong to and the thread they come from. A markdown editor anchors
  * comments to its text through it, a `code` viz to its lines; plain text
  * and the markdown viewer take them through the app's DOM layer, since
- * the page body carries `data-ref` (`LensPage`). Outside such a page it is
+ * the page body carries `data-ref` (`PageHost`). Outside such a page it is
  * null and nothing is commentable. See `.context/usability.md` "Comments
  * are a page's".
  */

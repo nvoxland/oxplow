@@ -171,8 +171,6 @@
           listeners.delete(listener);
         };
       },
-      // Run a lens this component declares in `assets` (a lens's component).
-      query: (asset, params) => call({ method: "query", asset, params: params || {} }),
       // Run a command this component declares in `commands`, as the person
       // looking at it; one that asks is confirmed by them, in oxplow.
       invoke: (command, input) => call({ method: "invoke", command, input: input === undefined ? {} : input }),

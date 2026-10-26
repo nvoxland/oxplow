@@ -41,14 +41,12 @@ import {
   fileUri,
   formatUri,
   keyParamOf,
-  lensUri,
   paramOf,
   viewParamsOfUri,
   withUriView,
   metricUri,
   pageUri,
   parseUri,
-  resourceUri,
   snapshotUri,
   turnUri,
   typeOf,
@@ -205,17 +203,6 @@ export function gitCommitRef(sha: string): TabRef {
  *  dashboard tiles both navigate into it. */
 export function metricRef(metricKey: string, view?: Record<string, SqlCell>): TabRef {
   return { id: metricUri(metricKey, {}, cellParams(view)) };
-}
-
-/** A lens page (`oxplow:oxplow/lens?lens=<extension>/<slug>`): a query over
- *  the semantic layer. `params` are its resource params (a slot's
- *  `{ effort_id }`: what it shows, in the id's `?`); `view` its `filter`
- *  and `selection` params (the id's `#`). Tabs, history and bookmarks
- *  reopen it from the id alone. */
-export function lensRef(lensId: string, params?: Record<string, SqlCell>, view?: Record<string, SqlCell>): TabRef {
-  const own = { ...(params ?? {}) };
-  const id = lensUri(lensId, cellParams(own), cellParams(view));
-  return { id };
 }
 
 /** A ref's resource params: its id's `?` params besides the one that names
@@ -406,12 +393,6 @@ export function symbolRef(ref: string): TabRef {
 
 export function wikiFreshnessRef(slug: string): TabRef {
   return pageTabRef("wiki-freshness", { slug });
-}
-
-/** One user-created dashboard: its URI, drawn by the `custom-dashboard`
- *  renderer. */
-export function customDashboardRef(id: string): TabRef {
-  return { id: resourceUri("oxplow/dashboard", { id }) };
 }
 
 /** The Dashboards index — the list of the user's custom dashboards: the

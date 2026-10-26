@@ -5,6 +5,8 @@
 /// runner for one node, so the components draw a page's nodes unchanged.
 import { createContext, useContext, useMemo } from "react";
 
+import { usePageRunsStore } from "../pageRuns.js";
+
 import { unwrapResult } from "../api.js";
 import type { FormSource } from "../lens/formSource.js";
 import type { LensActionRunner } from "../lens/lensActionRunner.js";
@@ -27,20 +29,34 @@ const daemonRunPageAction: RunPageAction = async (runId, node, action, row, inpu
 /** How a page host presses its actions (the daemon; a test's fake). */
 export const PageActionContext = createContext<RunPageAction>(daemonRunPageAction);
 
+/** After a press on run `runId` ran: run it again, so what the command
+ *  changed shows even when no model change announces it (a keychain
+ *  entry). */
+export type AfterPress = (runId: string) => void;
+
 /** The runner for node `node` (an embed's `<embed>/<id>`; null: the
  *  page's own actions) of open run `runId`. The lens id and params a viz
  *  passes are the run's own, which the server holds. */
-export function nodeActionRunner(press: RunPageAction, runId: string | null, node: string | null): LensActionRunner {
-  return (_lens, action, _params, row, _streamId, confirmed, input = null, drop = null) => {
-    if (!runId) return Promise.reject(new Error("The page isn't open yet; try again in a moment."));
-    return press(runId, node, action, row, input, drop, confirmed);
+export function nodeActionRunner(press: RunPageAction, runId: string | null, node: string | null, after?: AfterPress): LensActionRunner {
+  return async (_lens, action, _params, row, _streamId, confirmed, input = null, drop = null) => {
+    if (!runId) throw new Error("The page isn't open yet; try again in a moment.");
+    const outcome = await press(runId, node, action, row, input, drop, confirmed);
+    after?.(runId);
+    return outcome;
   };
+}
+
+/** Re-run a run after a press on it, through the window's runs. */
+function useAfterPress(): AfterPress {
+  const store = usePageRunsStore();
+  return useMemo(() => (runId: string) => void store.refresh(runId).catch(() => {}), [store]);
 }
 
 /** `nodeActionRunner` over the page's action context. */
 export function useNodeActions(runId: string | null, node: string | null): LensActionRunner {
   const press = useContext(PageActionContext);
-  return useMemo(() => nodeActionRunner(press, runId, node), [press, runId, node]);
+  const after = useAfterPress();
+  return useMemo(() => nodeActionRunner(press, runId, node, after), [press, runId, node, after]);
 }
 
 // --- Forms ---------------------------------------------------------------
@@ -68,10 +84,15 @@ const notOpen = () => Promise.reject(new Error("The page isn't open yet; try aga
 /** The form source for node `node` (null: the page's own actions) of open
  *  run `runId`: the lens id and params a form passes are the run's own,
  *  which the server holds. A form node needs a node. */
-export function nodeFormSource(forms: PageForms, runId: string | null, node: string | null): FormSource {
+export function nodeFormSource(forms: PageForms, runId: string | null, node: string | null, after?: AfterPress): FormSource {
   return {
     start: () => (runId && node ? forms.start(runId, node) : notOpen()),
-    submit: (_t, input, _s, confirmed) => (runId && node ? forms.submit(runId, node, input, confirmed) : notOpen()),
+    submit: async (_t, input, _s, confirmed) => {
+      if (!runId || !node) return notOpen();
+      const outcome = await forms.submit(runId, node, input, confirmed);
+      after?.(runId);
+      return outcome;
+    },
     actionStart: (_t, action, row) => (runId ? forms.actionStart(runId, node, action, row) : notOpen()),
   };
 }
@@ -79,5 +100,6 @@ export function nodeFormSource(forms: PageForms, runId: string | null, node: str
 /** `nodeFormSource` over the page's forms context. */
 export function useNodeForms(runId: string | null, node: string | null): FormSource {
   const forms = useContext(PageFormsContext);
-  return useMemo(() => nodeFormSource(forms, runId, node), [forms, runId, node]);
+  const after = useAfterPress();
+  return useMemo(() => nodeFormSource(forms, runId, node, after), [forms, runId, node, after]);
 }

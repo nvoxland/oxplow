@@ -1,18 +1,28 @@
-/// How a viz component's actions reach the server. A lens page runs them
-/// as the lens (`run_lens_action`, the default); a page file's viz node
-/// runs them on its open run (`run_page_action`, `pages/useNodeActions.ts`
-/// provides that), so the same viz components draw both.
+/// How a viz component's actions reach the server. A viz is always drawn
+/// inside a page run: `pages/useNodeActions.ts` provides, per viz node, a
+/// runner that presses on the open run (`run_page_action`). Outside one
+/// there is nothing to press on.
 import { createContext, useContext } from "react";
 
-import { runLensAction } from "../api.js";
+import type { CommandOutcome, Drop, SqlCell } from "../tauri-bridge/generated/bindings.js";
 
-/** `runLensAction`'s shape: what a viz component presses with. */
-export type LensActionRunner = typeof runLensAction;
+/** What a viz component presses with: the viz (only its id, which the run
+ *  holds) and its params, the action, the row it is on, and for a form
+ *  action its input, for a drag action where the row landed. */
+export type LensActionRunner = (
+  id: string,
+  action: string,
+  params: Record<string, SqlCell>,
+  row: Record<string, SqlCell> | null,
+  streamId: string | null,
+  confirmed: boolean,
+  input?: unknown,
+  drop?: Drop | null,
+) => Promise<CommandOutcome>;
 
-// Called through, so a test's `mock.module("../api.js")` is what runs.
-const viaLens: LensActionRunner = (...args) => runLensAction(...args);
+const outsidePage: LensActionRunner = () => Promise.reject(new Error("This isn't on a page, so its actions can't run."));
 
-export const LensActionRunnerContext = createContext<LensActionRunner>(viaLens);
+export const LensActionRunnerContext = createContext<LensActionRunner>(outsidePage);
 
 /** What this viz's actions run through. */
 export function useLensActionRunner(): LensActionRunner {

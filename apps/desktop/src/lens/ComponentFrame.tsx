@@ -16,7 +16,6 @@ import {
   openInSystemBrowser,
   querySql,
   recordUsage,
-  runComponentQuery,
   runComponentSql,
   stopSignInRedirect,
   subscribeOxplowEvents,
@@ -262,7 +261,6 @@ export function ComponentFrame({
     hostRef.current = createBridgeHost(
       channel.port1,
       {
-        query: (asset, params) => runComponentQuery(component, asset, params, streamId, version),
         invoke: async (command, input, confirmed) => {
           try {
             const out = await invokeComponentCommand(component, command, input, confirmed, version);

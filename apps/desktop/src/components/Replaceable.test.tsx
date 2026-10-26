@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, expect, mock, test } from "bun:test";
 import { act, cleanup, render, waitFor } from "@testing-library/react";
 
-// A core sub-component is replaced by an extension's lens: an unbound one
+import type { PageRuns } from "../pageRuns.js";
+
+// A core sub-component is replaced by an extension's page: an unbound one
 // (the Board) by the only extension replacing it or the person's choice; a
 // bound one (a work item's state control) by its provider's extension
 // only. Oxplow's own shows otherwise, and is what a failed replacement
@@ -19,12 +21,13 @@ let extensions: unknown[] = [];
 let fakeExtension: string | null = null;
 /** The person's `replacements`, by target. */
 let chosen: Record<string, string> = {};
-let lensFails: string | null = null;
+let pageFails: string | null = null;
 /** How long each next active-provider read takes to answer (ms). */
 const providerDelays: number[] = [];
-/** The replacement lens's viz: a `custom` one is a sandboxed bundle. */
-let lensViz = "table";
-const lensRuns: Array<[string, unknown]> = [];
+/** The page runs the replacements opened: [page id, params]. */
+const pageOpens: Array<[string, unknown]> = [];
+/** The store the replacement pages run in (fresh per test). */
+let runs: PageRuns;
 const usage: Array<Record<string, unknown>> = [];
 
 const providerRows = () => [
@@ -59,34 +62,31 @@ mock.module("../api.js", () => ({
       freshness: {},
     };
   },
-  runLens: async (id: string, params: unknown) => {
-    lensRuns.push([id, params]);
-    if (lensFails) throw new Error(lensFails);
-    return {
-      lens: {
-        id,
-        extension: id.split("/")[0],
-        title: "Their Board",
-        viz: lensViz,
-        custom: lensViz === "custom" ? { component: "board", props: null } : null,
-        columns: [],
-        actions: [],
-        parts: [],
-        params: [],
-      },
-      params,
-      result: { columns: ["title"], rows: [[`${id} row`]], truncated: false, reads: { models: ["v_work_item"], tables: [], measures: [] } },
-      alert: null,
-    };
-  },
   recordUsage: async (u: Record<string, unknown>) => {
     usage.push(u);
   },
 }));
 
 const { Replaceable } = await import("./Replaceable.js");
+const { decl, fakePage, fakeRun, fakePageRunsBy, loader, node } = await import("../pages/testing/fakeRun.js");
 
-/** Extension `name`, replacing the Board with its `board` lens. */
+/** A page run store whose pages each show one row naming the page. */
+function freshRuns(): PageRuns {
+  return fakePageRunsBy((key) => {
+    pageOpens.push([key.page, key.params]);
+    if (pageFails) return Promise.reject(new Error(pageFails));
+    const page = fakePage(node.viz("cards", "cards", { columns: [{ key: "title" } as never] }), {
+      id: key.page,
+      extension: key.page.split("/")[0],
+      slug: key.page.split("/")[1],
+      title: "Their Board",
+      loaders: [decl("cards")],
+    });
+    return fakeRun(page, { params: key.params as never, loaders: { cards: loader(["title"], [[`${key.page} row`]]) } });
+  }).runs;
+}
+
+/** Extension `name`, replacing the Board with its `board` page. */
 const replacing = (name: string) => ({
   name,
   enabled: true, pages: [],
@@ -95,12 +95,9 @@ const replacing = (name: string) => ({
     commands: [],
     decorators: [],
     replacements: [
-      { id: `${name}/work_item.board`, extension: name, target: "work_item.board", capability: "work_items", boundToProvider: false, lensId: `${name}/board`, label: "board", version: 1, view: [] },
+      { id: `${name}/work_item.board`, extension: name, target: "work_item.board", capability: "work_items", boundToProvider: false, lensId: "", pageId: `${name}/board`, label: "board", version: 1, view: [] },
     ],
   },
-  lenses: [
-    { id: `${name}/board`, params: ["scope", "thread_id"].map((p) => ({ name: p, label: null, default: null })) },
-  ],
 });
 
 /** Extension `name`, replacing a work item's state control. */
@@ -112,15 +109,14 @@ const stating = (name: string) => ({
     commands: [],
     decorators: [],
     replacements: [
-      { id: `${name}/work_item.detail.state`, extension: name, target: "work_item.detail.state", capability: "work_items", boundToProvider: true, lensId: `${name}/state`, label: "state control", version: 1, view: [] },
+      { id: `${name}/work_item.detail.state`, extension: name, target: "work_item.detail.state", capability: "work_items", boundToProvider: true, lensId: "", pageId: `${name}/state`, label: "state control", version: 1, view: [] },
     ],
   },
-  lenses: [{ id: `${name}/state`, params: [{ name: "uri", label: null, default: null }] }],
 });
 
 const PROPS = { scope: "all", thread_id: null };
 const board = () => (
-  <Replaceable target="work_item.board" props={PROPS} streamId="str1" fallback={<div data-testid="core-board">oxplow's board</div>} />
+  <Replaceable target="work_item.board" props={PROPS} streamId="str1" runs={runs} fallback={<div data-testid="core-board">oxplow's board</div>} />
 );
 const STATE_PROPS = { uri: "oxplow:oxplow/work_item?id=1&provider=fake" };
 const state = (provider: string) => (
@@ -128,6 +124,7 @@ const state = (provider: string) => (
     target="work_item.detail.state"
     props={STATE_PROPS}
     streamId="str1"
+    runs={runs}
     provider={provider}
     fallback={<div data-testid="core-state">oxplow's state</div>}
   />
@@ -137,10 +134,10 @@ beforeEach(() => {
   extensions = [];
   fakeExtension = null;
   chosen = {};
-  lensFails = null;
-  lensViz = "table";
+  pageFails = null;
+  runs = freshRuns();
   providerDelays.length = 0;
-  lensRuns.length = 0;
+  pageOpens.length = 0;
   usage.length = 0;
 });
 afterEach(() => {
@@ -151,14 +148,14 @@ afterEach(() => {
   extensions = [];
   fakeExtension = null;
   chosen = {};
-  lensFails = null;
+  pageFails = null;
 });
 
-test("with nothing replacing it, the core component shows and no lens runs", async () => {
+test("with nothing replacing it, the core component shows and no page runs", async () => {
   const view = render(board());
   await waitFor(() => expect(view.getByTestId("core-board")).toBeTruthy());
   expect(view.container.querySelector('[data-testid^="replacement-"]')).toBeNull();
-  expect(lensRuns).toEqual([]);
+  expect(pageOpens).toEqual([]);
 });
 
 // The Board is a view of the capability as a whole: any extension may
@@ -170,15 +167,15 @@ test("the Board shows its one replacement, or the person's choice among several"
   const replaced = await waitFor(() => one.getByTestId("replacement-work_item.board"));
   expect(replaced.textContent).toContain("replaced by x");
   expect(replaced.textContent).toContain("x/board row");
-  expect(lensRuns).toEqual([["x/board", PROPS]]);
+  expect(pageOpens).toEqual([["x/board", PROPS]]);
   expect(usage).toEqual([{ kind: "replacement", key: "x/work_item.board", streamId: "str1" }]);
   cleanup();
 
   extensions = [replacing("x"), replacing("y")];
-  lensRuns.length = 0;
+  pageOpens.length = 0;
   const several = render(board());
   await waitFor(() => expect(several.getByTestId("core-board")).toBeTruthy());
-  expect(lensRuns).toEqual([]);
+  expect(pageOpens).toEqual([]);
 
   chosen = { "work_item.board": "y" };
   emit({ kind: "configChanged" });
@@ -198,14 +195,14 @@ test("a state control is replaced only by its item's provider's extension", asyn
   const view = render(state("fake"));
   const replaced = await waitFor(() => view.getByTestId("replacement-work_item.detail.state"));
   expect(replaced.textContent).toContain("replaced by x");
-  expect(lensRuns).toEqual([["x/state", STATE_PROPS]]);
+  expect(pageOpens).toEqual([["x/state", STATE_PROPS]]);
   cleanup();
 
   // oxplow's own item: no extension brings oxplow's provider.
-  lensRuns.length = 0;
+  pageOpens.length = 0;
   const own = render(state("oxplow"));
   await waitFor(() => expect(own.getByTestId("core-state")).toBeTruthy());
-  expect(lensRuns).toEqual([]);
+  expect(pageOpens).toEqual([]);
 });
 
 test("the provider's extension changing swaps the component with no reload, and a person can keep oxplow's", async () => {
@@ -226,7 +223,7 @@ test("the provider's extension changing swaps the component with no reload, and 
 
 test("a replacement that can't load shows the core component and says why", async () => {
   extensions = [replacing("x")];
-  lensFails = "no such view v_x_board";
+  pageFails = "no such view v_x_board";
   const view = render(board());
   const note = await waitFor(() => view.getByTestId("replacement-fallback"));
   expect(note.textContent).toContain("x");
@@ -236,19 +233,17 @@ test("a replacement that can't load shows the core component and says why", asyn
   expect(view.queryByTestId("replacement-work_item.board")).toBeNull();
 });
 
-// tsk855: a custom replacement whose bundle can't load falls back the same
-// way — outside its frame: no badge, none of the lens's toolbar, just the
-// note and oxplow's own — and isn't counted as shown.
-test("a custom replacement that can't load falls back outside its frame", async () => {
-  extensions = [replacing("x")];
-  lensViz = "custom";
+// A lens replacement is gone: one that names no page falls back, and says so.
+test("a replacement that names no page shows the core component and says why", async () => {
+  const ext = replacing("x");
+  ext.ui.replacements[0] = { ...ext.ui.replacements[0]!, pageId: null } as never;
+  extensions = [ext];
   const view = render(board());
   const note = await waitFor(() => view.getByTestId("replacement-fallback"));
-  expect(note.textContent).toContain("x's board couldn't load");
+  expect(note.textContent).toContain("it names no page");
   expect(note.textContent).toContain("Showing oxplow's");
   expect(view.getByTestId("core-board")).toBeTruthy();
-  expect(view.queryByTestId("replacement-work_item.board")).toBeNull();
-  expect(view.queryByTestId("replacement-badge")).toBeNull();
+  expect(pageOpens).toEqual([]);
   expect(usage).toEqual([]);
 });
 
@@ -285,16 +280,13 @@ const graphing = (name: string) => ({
     commands: [],
     decorators: [],
     replacements: [
-      { id: `${name}/vcs.history.graph`, extension: name, target: "vcs.history.graph", capability: "vcs", boundToProvider: false, lensId: `${name}/graph`, label: "history graph", version: 2, view: ["q", "author", "branch"] },
+      { id: `${name}/vcs.history.graph`, extension: name, target: "vcs.history.graph", capability: "vcs", boundToProvider: false, lensId: "", pageId: `${name}/graph`, label: "history graph", version: 2, view: ["q", "author", "branch"] },
     ],
   },
-  lenses: [
-    { id: `${name}/graph`, params: ["head_sha", "reveal_sha", "limit"].map((p) => ({ name: p, label: null, default: null })) },
-  ],
 });
 const GRAPH_PROPS = { head_sha: "abc", reveal_sha: null, limit: 500 };
 const graph = () => (
-  <Replaceable target="vcs.history.graph" props={GRAPH_PROPS} streamId="str1" fallback={<div data-testid="core-list">oxplow's list</div>} />
+  <Replaceable target="vcs.history.graph" props={GRAPH_PROPS} streamId="str1" runs={runs} fallback={<div data-testid="core-list">oxplow's list</div>} />
 );
 
 // A target core owns isn't bound to a provider: the one extension
@@ -304,14 +296,14 @@ test("an unbound target shows its one replacement, or the person's choice among 
   extensions = [graphing("oxplow-bundled")];
   const one = render(graph());
   await waitFor(() => expect(one.getByTestId("replacement-vcs.history.graph").textContent).toContain("replaced by oxplow-bundled"));
-  expect(lensRuns).toEqual([["oxplow-bundled/graph", GRAPH_PROPS]]);
+  expect(pageOpens).toEqual([["oxplow-bundled/graph", GRAPH_PROPS]]);
   cleanup();
 
   extensions = [graphing("oxplow-bundled"), graphing("lanes")];
-  lensRuns.length = 0;
+  pageOpens.length = 0;
   const several = render(graph());
   await waitFor(() => expect(several.getByTestId("core-list")).toBeTruthy());
-  expect(lensRuns).toEqual([]);
+  expect(pageOpens).toEqual([]);
 
   chosen = { "vcs.history.graph": "lanes" };
   emit({ kind: "configChanged" });
@@ -323,7 +315,7 @@ test("an unbound target shows its one replacement, or the person's choice among 
 });
 
 // An effort's verdict is a review policy's: oxplow has none of its own, so
-// the page shows nothing until an extension brings one — then its lens,
+// the page shows nothing until an extension brings one — then its page,
 // given the effort's `effort_id`; "oxplow" chosen shows none again.
 test("an effort's verdict is only ever an extension's", async () => {
   const judging = (name: string) => ({
@@ -334,22 +326,21 @@ test("an effort's verdict is only ever an extension's", async () => {
       commands: [],
       decorators: [],
       replacements: [
-        { id: `${name}/effort.verdict`, extension: name, target: "effort.verdict", capability: "effort_policy", boundToProvider: false, lensId: `${name}/effort-verdict`, label: "effort verdict", version: 1, view: [] },
+        { id: `${name}/effort.verdict`, extension: name, target: "effort.verdict", capability: "effort_policy", boundToProvider: false, lensId: "", pageId: `${name}/effort-verdict`, label: "effort verdict", version: 1, view: [] },
       ],
     },
-    lenses: [{ id: `${name}/effort-verdict`, params: [{ name: "effort_id", label: null, default: null }] }],
   });
-  const verdict = () => <Replaceable target="effort.verdict" props={{ effort_id: 7 }} streamId="str1" fallback={null} />;
+  const verdict = () => <Replaceable target="effort.verdict" props={{ effort_id: 7 }} streamId="str1" runs={runs} fallback={null} />;
   const none = render(verdict());
   await waitFor(() => expect(none.container.innerHTML).toBe(""));
-  expect(lensRuns).toEqual([]);
+  expect(pageOpens).toEqual([]);
   cleanup();
 
   extensions = [judging("oxplow-bundled")];
   const one = render(verdict());
   const shown = await waitFor(() => one.getByTestId("replacement-effort.verdict"));
   expect(shown.textContent).toContain("oxplow-bundled/effort-verdict row");
-  expect(lensRuns[0]).toEqual(["oxplow-bundled/effort-verdict", { effort_id: 7 }]);
+  expect(pageOpens[0]).toEqual(["oxplow-bundled/effort-verdict", { effort_id: 7 }]);
   cleanup();
 
   chosen = { "effort.verdict": "oxplow" };
@@ -361,7 +352,7 @@ test("an effort's verdict is only ever an extension's", async () => {
 // A replacement may name a page (`ui.replacements: [{ target, page }]`):
 // the same choice decides, and the page draws in the target's place, run
 // with the target's props as its params.
-test("a replacement that names a page draws that page with the target's props, running no lens", async () => {
+test("a replacement that names a page draws that page with the target's props", async () => {
   const { createPageRuns } = await import("../pageRuns.js");
   const { decl, fakePage, fakeRun, loader, node } = await import("../pages/testing/fakeRun.js");
   const opened: unknown[] = [];
@@ -388,7 +379,7 @@ test("a replacement that names a page draws that page with the target's props, r
   expect(replaced.textContent).toContain("replaced by x");
   await waitFor(() => expect(replaced.textContent).toContain("their card"));
   expect(opened).toEqual([{ page: "x/board-page", params: PROPS, streamId: "str1", threadId: null }]);
-  expect(lensRuns).toEqual([]);
+  expect(pageOpens).toEqual([]);
   await waitFor(() => expect(usage).toEqual([{ kind: "replacement", key: "x/work_item.board", streamId: "str1" }]));
 });
 

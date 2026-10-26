@@ -72,6 +72,7 @@ test("a filter's options_from runs the page it names once and lists its loader's
         loaders: { first: loader(["value"], [["nope"]]), scopes: loader(["value", "label"], [["all", "All files"], ["mine", "Mine"]]) },
       });
     },
+    text: async () => "",
   };
   const withScope = fakePage(node.viz("items", "items"), {
     params: [

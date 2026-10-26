@@ -4,13 +4,12 @@ import { dedupeEntriesByTarget, edgeToInboundEntry, edgeToOutboundEntry, graphUr
 import type { BacklinkEntry } from "./backlinkTypes.js";
 import type { BacklinkEdge } from "../api.js";
 import { setResources, type Resource } from "../resources.js";
-import { collectorUri, commitUri, dirUri, effortUri, fileUri, lensUri, pageUri, resourceUri, wikiUri, workItemUri } from "../uri/uri.js";
+import { collectorUri, commitUri, dirUri, effortUri, fileUri, pageUri, resourceUri, wikiUri, workItemUri } from "../uri/uri.js";
 import {
   directoryRef,
   effortDiffRef,
   fileRef,
   gitCommitRef,
-  lensRef,
   wikiPageRef,
   pageTabRef,
   workItemTabRef,
@@ -34,7 +33,6 @@ describe("graphUriOf", () => {
   });
 
   test("any other kind with a page is its own URI, without its view", () => {
-    expect(graphUriOf(lensRef("oxplow-bundled/findings", {}, { range: "7d" }))).toBe(lensUri("oxplow-bundled/findings"));
     expect(graphUriOf(effortDiffRef("eff12"))).toBe(effortUri("eff12"));
   });
 

@@ -376,3 +376,16 @@ describe("pageRuns", () => {
     expect(runs.runIds()).toEqual(["run-2"]);
   });
 });
+
+test("refresh runs an open run again by its id, for every host holding it; an unknown id does nothing", async () => {
+  const { fakePageRuns, fakePage, fakeRun, node } = await import("./pages/testing/fakeRun.js");
+  const { runs, calls } = fakePageRuns(fakeRun(fakePage(node.viz("items", "items"))));
+  const handle = runs.open({ page: "acme/items", params: {}, streamId: null, threadId: null });
+  await new Promise((r) => setTimeout(r, 0));
+  expect(handle.get().runId).toBe("run-1");
+  await runs.refresh("run-1");
+  expect(calls.rerun).toBe(1);
+  await runs.refresh("run-unknown");
+  expect(calls.rerun).toBe(1);
+  handle.close();
+});

@@ -1,7 +1,9 @@
 import { afterAll, afterEach, expect, mock, test } from "bun:test";
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render as rtlRender, waitFor } from "@testing-library/react";
+import type { ReactElement, ReactNode } from "react";
 import type { Lens, LensRun } from "../tauri-bridge/generated/bindings.js";
 import { IpcCallError } from "../ipc-error.js";
+import { LensActionRunnerContext, type LensActionRunner } from "./lensActionRunner.js";
 import { personSpec, recordRefOffers } from "../components/refCommandsTestSupport.js";
 
 const realApi = await import("../api.js");
@@ -13,22 +15,6 @@ const calls: boolean[] = [];
 const commandRuns: Array<[string, unknown]> = [];
 mock.module("../api.js", () => ({
   ...realApi,
-  runLensAction: async (
-    _id: string,
-    _action: string,
-    _params: unknown,
-    _row: unknown,
-    _streamId: unknown,
-    confirmed: boolean,
-  ) => {
-    calls.push(confirmed);
-    if (!confirmed) {
-      throw new IpcCallError("Finish needs confirmation", "NEEDS_CONFIRMATION", null, [
-        "process — runs programs with your authority; oxplow does not confine them",
-      ]);
-    }
-    return { result: null, auditId: 1, eventId: null, inverse: null };
-  },
   getCommand: async () => Promise.reject(new Error("no bridge in tests")),
   listPersonCommands: async () => [
     personSpec("tracker.item.flag", { label: "Flag It", group: "Tracker", about: "oxplow/work_item", input: { uri: "{{uri}}" } }),
@@ -62,6 +48,19 @@ mock.module("../api.js", () => ({
 }));
 
 const { LensResultView } = await import("./LensResultView.js");
+
+// A viz presses through the page that draws it: a runner stands in for it.
+const press: LensActionRunner = async (_id, _action, _params, _row, _streamId, confirmed) => {
+  calls.push(confirmed);
+  if (!confirmed) {
+    throw new IpcCallError("Finish needs confirmation", "NEEDS_CONFIRMATION", null, [
+      "process — runs programs with your authority; oxplow does not confine them",
+    ]);
+  }
+  return { result: null, audit_id: 1, event_id: null, inverse: null };
+};
+const wrapper = ({ children }: { children: ReactNode }) => <LensActionRunnerContext.Provider value={press}>{children}</LensActionRunnerContext.Provider>;
+const render = (ui: ReactElement) => rtlRender(ui, { wrapper });
 
 afterEach(cleanup);
 
@@ -99,8 +98,8 @@ const run: LensRun = {
 // A row action that asks for confirmation must ask wherever the row is —
 // an answer in the strip, a grid child, a dashboard tile — not only where
 // the toolbar is shown.
-test("a row action's confirmation shows when the toolbar is hidden", async () => {
-  const { getByTestId, queryByTestId } = render(<LensResultView run={run} toolbar={false} onOpenPage={() => {}} />);
+test("a row action's confirmation shows wherever the row is", async () => {
+  const { getByTestId, queryByTestId } = render(<LensResultView run={run} onOpenPage={() => {}} />);
   fireEvent.contextMenu(getByTestId("lens-row-0"));
   fireEvent.click(getByTestId("menu-item-lens-action-finish"));
   await waitFor(() => expect(calls).toEqual([false]));

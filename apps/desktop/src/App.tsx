@@ -39,8 +39,8 @@ import { TitleBar } from "./components/TitleBar.js";
 import { showToast } from "./components/toastStore.js";
 import { awaitGitOp, opErrorOf } from "./git-op.js";
 import { UndoToastStack } from "./components/UndoToast.js";
-import { identityOf, keyOf, paramOf, parseUri, typeOf } from "./uri/uri.js";
-import { labelReadsRow, shellView, tabLabel } from "./pages/renderers.js";
+import { identityOf, keyOf, pageUri, paramOf, parseUri, typeOf } from "./uri/uri.js";
+import { shellView, tabLabel } from "./pages/renderers.js";
 import { chooseRenderer, chooseRoute } from "./pages/pageFiles.js";
 import { PageFileView } from "./pages/PageFileView.js";
 import { EphemeralView } from "./pages/EphemeralView.js";
@@ -67,19 +67,17 @@ import { sessionLabel } from "./agentKinds.js";
 import { useAgentHarnesses } from "./useAgentHarnesses.js";
 import { readThreadSessions, useThreadSessions } from "./agentSessions.js";
 import { rollUpAgentStatus, threadStatuses } from "./agentStatusRollup.js";
-import { LensPage } from "./pages/LensPage.js";
 import { insertIntoAgent } from "./agent-input-bus.js";
 import { getPageDetailStore } from "./tabs/openPageDetail.js";
-import { DeclaredPageView } from "./pages/DeclaredPageView.js";
+import { MissingPage } from "./pages/MissingPage.js";
 import { kindForTabId } from "./pageKinds.js";
-import { isAppRenderer, isBuiltInPage, type AppRendererName } from "./pages/declaredPages.js";
 import { useExtensions } from "./extensionsStore.js";
 import { foundationDown, FOUNDATION, RECOVERY_COMMAND } from "./foundationDown.js";
 import { PanelRunsProvider } from "./components/Panels/PanelRunsContext.js";
 import { useAlerts } from "./components/Alerts/useAlerts.js";
 import { useAlertToasts } from "./components/Alerts/useAlertToasts.js";
 import { DomCommentLayer } from "./components/Comments/DomCommentLayer.js";
-import { agentSessionRef, diskFilePath, fileOf, lensRef, refFromTabId, directoryRef, externalUrlRef, fileRef, gitCommitRef, pagePayload, recordedPageKind, isPage, diffRef, newSessionRef, newStreamRef, alertsRef, wikiPageRef, streamSettingsRef, threadSettingsRef, viewParamsOf, withViewParams, fileRefAt, resourceParamsOf, type PagePayload } from "./tabs/pageRefs.js";
+import { agentSessionRef, diskFilePath, fileOf, refFromTabId, directoryRef, externalUrlRef, fileRef, gitCommitRef, pagePayload, recordedPageKind, isPage, diffRef, newSessionRef, newStreamRef, alertsRef, wikiPageRef, streamSettingsRef, threadSettingsRef, viewParamsOf, withViewParams, fileRefAt } from "./tabs/pageRefs.js";
 import { requestNewThread } from "./new-thread-bus.js";
 import { setAssistantScope } from "./components/Assistant/assistantSession.js";
 import { setSelectedThread } from "./contextBasket.js";
@@ -118,12 +116,11 @@ import {
 } from "./tabs/session.js";
 import { openProject, createProject, listRecentProjects, shellAvailable } from "./api.js";
 import { onRemoteReconnect, triggerRemoteResync } from "./api.js";
-import type { CommandOutcome, ExtensionPage, Page as PageFile, RecentProjectView } from "./tauri-bridge/generated/bindings.js";
+import type { CommandOutcome, Page as PageFile, RecentProjectView } from "./tauri-bridge/generated/bindings.js";
 import { pickFolder } from "./tauri-bridge/nativeDialog.js";
 import { WORKING } from "./revision.js";
 import { isDirty } from "./editor/buffers.js";
 import { buffers } from "./editor/openFiles.js";
-import { watchShownAnswers } from "./shownAnswers.js";
 import { recordPageVisit, reportTabs, resolveSymbol } from "./api.js";
 import { advanceDaemonProbeState, INITIAL_DAEMON_PROBE_STATE } from "./daemon-recovery.js";
 import { offerForShortcut } from "./keybindings.js";
@@ -1172,11 +1169,9 @@ export function App() {
         // (`reconcileSessionTabs`). A closed session, or another thread's,
         // has none: its transcript opens instead, with Reopen on it.
         const sessionId = paramOf(ref.id, "id");
-        // The transcript lens takes the session's bare id (`ses3`).
+        // The transcript page takes the session's bare id (`ses3`).
         const transcript = () =>
-          handleOpenPageRef.current?.(
-            lensRef("oxplow-foundation/session-transcript", { session: sessionId ?? keyOf(ref.id) ?? ref.id }),
-          );
+          handleOpenPageRef.current?.({ id: pageUri("session-transcript", { session: sessionId ?? keyOf(ref.id) ?? ref.id }) });
         if (sessionId && selectedThreadSessions?.some((candidate) => candidate.id === sessionId)) {
           setCenterActive(ref.id);
         } else if (sessionId && selectedThread) {
@@ -1535,20 +1530,6 @@ export function App() {
     }
   }, [sessions, selectedThreadId, stream, closePageTab, dirtyTabs]);
 
-  // What an agent shows in the shown thread (`oxplow_show_lens`) opens as
-  // a tab of it, behind what the person is on: the Answers panel counts
-  // it, and the person's terminal keeps the keys.
-  useEffect(() => {
-    if (!selectedThreadId) return;
-    const thread = selectedThreadId;
-    return watchShownAnswers(thread, (uri) => {
-      updateSession(thread, (session) => {
-        const opened = sessionOpen(session, { ref: { id: uri } });
-        return { ...opened, active: session.active, mru: [...session.mru, ...opened.mru.filter((m) => !session.mru.includes(m))] };
-      });
-    });
-  }, [selectedThreadId, updateSession]);
-
   // A file's buffer lives while a tab of any thread shows the file (any
   // step of its history): the rest close, their models disposed. Not
   // until every thread with tabs is placed in a stream, so no buffer is
@@ -1593,16 +1574,6 @@ export function App() {
 
   const extensions = useExtensions();
   const foundationErrors = foundationDown(extensions);
-  // Every enabled extension's pages: the routes and the renderers.
-  const declaredPages = useMemo(
-    () => (extensions ?? []).filter((e) => e.enabled).flatMap((e) => e.pages),
-    [extensions],
-  );
-  // What renders a URI no page is for: foundation's `resource`.
-  const fallbackRenderer = useMemo(
-    () => declaredPages.find((p) => p.body.kind === "builtIn" && p.body.name === "resource") ?? null,
-    [declaredPages],
-  );
   const centerTabs: CenterTab[] = useMemo(() => {
     const tabs: CenterTab[] = [];
     // Every tab is a session tab (`tabs/session.ts`): files, diffs, agent
@@ -1618,52 +1589,15 @@ export function App() {
     // For each rendered tab: its session tab, its entry's ref, and whether
     // it is that tab's current entry.
     const placed: { tab: Tab; ref: TabRef; entry: Entry; current: boolean }[] = [];
-    // One renderer per page kind. `Record<PageKind, …>` makes the table
-    // exhaustive: a kind without a renderer (or a renderer for a kind that
-    // no longer exists) is a compile error, not a blank tab.
-    // The built-in renderers whose bodies draw on the window's own state;
-    // the rest are `builtInPages`. Each reads what it shows from its URI.
-    const appRenderers: Record<AppRendererName, (ref: TabRef, nav: SlotNav) => CenterTab | null> = {
-      lens: (ref, nav) => {
-        const lensId = paramOf(ref.id, "lens") ?? "";
-        return {
-          id: ref.id,
-          label: lensId,
-          closable: true,
-          render: () => (
-            <LensPage lensId={lensId} params={resourceParamsOf(ref)} stream={stream} onOpenPage={nav.navOpen} />
-          ),
-        };
-      },
-    };
-    // A route (`oxplow:oxplow/page?page=…`): what its declaration says draws
-    // it — a lens, a custom component, or (oxplow's own, until the kit can
-    // draw it) a built-in page.
+    // A route (`oxplow:oxplow/page?page=…`): its page file; none, a page
+    // no enabled extension has.
     const routeTab = (ref: TabRef, nav: SlotNav): CenterTab | null => {
-        const page = pagePayload(ref)!;
-        // Its page file first (`pages/pageFiles.ts`); its `pages:` entry
-        // only while the host can't draw that file yet.
-        const drawer = extensions === null ? null : chooseRoute(extensions, page);
-        if (drawer?.file) return pageFileTab(drawer.file, ref, nav, page.params, null);
-        const declared = extensions === null ? undefined : (drawer?.declared ?? null);
-        const builtIn =
-          declared?.body.kind === "builtIn"
-            ? declared.body.name
-            : extensions === null && page.extension === null && isBuiltInPage(page.page)
-              ? page.page
-              : null;
-        if (builtIn && isBuiltInPage(builtIn)) {
-          const tab = builtInPages[builtIn]({ ref, params: page.params, nav });
-          return tab ? { ...tab, label: tab.label || (declared ? tabLabel(declared, page.params) : page.page) } : null;
-        }
-        return {
-          id: ref.id,
-          label: declared ? tabLabel(declared, page.params) : page.page,
-          closable: true,
-          render: () => (
-            <DeclaredPageView page={page} declared={declared} stream={stream} threadId={selectedThread?.id ?? null} onOpenPage={nav.navOpen} />
-          ),
-        };
+      const page = pagePayload(ref)!;
+      // Until the extensions load, nothing says what draws it.
+      if (extensions === null) return { id: ref.id, label: page.page, closable: true, render: () => null };
+      const file = chooseRoute(extensions, page);
+      if (file) return pageFileTab(file, ref, nav, page.params, null);
+      return { id: ref.id, label: page.page, closable: true, render: () => <MissingPage page={page} /> };
     };
     // What draws a tab: a route's declaration, else the page that renders
     // its URI (`pages/renderers.ts`: its resource's, as the URI's view and
@@ -1680,14 +1614,11 @@ export function App() {
       if (typeOf(ref.id) === "oxplow/symbol") return null;
       // Until the extensions load, nothing says what renders it.
       if (extensions === null) return { id: ref.id, label: "", closable: true, render: () => null };
-      const drawer = chooseRenderer(extensions, ref.id, viewParamsOf(ref));
+      const file = chooseRenderer(extensions, ref.id, viewParamsOf(ref));
       // A renderer's page file runs with the URI it shows and the
-      // resource's own params.
-      if (drawer.file) return pageFileTab(drawer.file, ref, nav, { ...renderedParams(ref.id), uri: identityOf(ref.id) ?? ref.id }, ref.id);
-      const page = drawer.declared ?? fallbackRenderer;
-      if (!page) return null;
-      const tab = renderBody(page, ref, nav);
-      return tab ? { ...tab, label: tab.label || tabLabel(page, renderedParams(ref.id)), ...(page.pinned ? { pinned: true } : {}) } : null;
+      // resource's own params; nothing renders it: foundation's fallback.
+      if (file) return pageFileTab(file, ref, nav, { ...renderedParams(ref.id), uri: identityOf(ref.id) ?? ref.id }, ref.id);
+      return builtInPages.resource({ ref, params: renderedParams(ref.id), nav });
     };
     // A page file, drawn by the page host: its run's params are the
     // entry's URI (`PageFileView`).
@@ -1707,40 +1638,6 @@ export function App() {
         />
       ),
     });
-    const renderBody = (page: ExtensionPage, ref: TabRef, nav: SlotNav): CenterTab | null => {
-      switch (page.body.kind) {
-        case "builtIn": {
-          const name = page.body.name;
-          if (isAppRenderer(name)) return appRenderers[name](ref, nav);
-          if (!isBuiltInPage(name)) return null;
-          return builtInPages[name]({ ref, params: renderedParams(ref.id), nav });
-        }
-        case "lens": {
-          const lens = page.body.lens;
-          return {
-            id: ref.id,
-            label: tabLabel(page, renderedParams(ref.id)),
-            closable: true,
-            ...(page.pinned ? { pinned: true } : {}),
-            // A renderer's lens is run with the URI it shows.
-            render: () => (
-              <LensPage lensId={lens} title={tabLabel(page, renderedParams(ref.id))} titleFrom={labelReadsRow(page) ? (row) => tabLabel(page, renderedParams(ref.id), row) : undefined} params={{ uri: identityOf(ref.id) ?? ref.id }} renders={ref.id} stream={stream} onOpenPage={nav.navOpen} comments={page.comments} refresh={page.refresh} threadId={selectedThread?.id ?? null} />
-            ),
-          };
-        }
-        case "component": {
-          const shown: PagePayload = { extension: page.extension, page: page.id, params: { uri: identityOf(ref.id) ?? ref.id } };
-          return {
-            id: ref.id,
-            label: tabLabel(page, renderedParams(ref.id)),
-            closable: true,
-            render: () => (
-              <DeclaredPageView page={shown} declared={page} stream={stream} threadId={selectedThread?.id ?? null} onOpenPage={nav.navOpen} />
-            ),
-          };
-        }
-      }
-    };
     // A currently shown page owns its navigation context. The same page
     // in an earlier tab's Back history must not claim its body first:
     // links would otherwise navigate that earlier slot instead.

@@ -59,7 +59,7 @@ test("Alt+Down steps to the next file of the list it was opened from", async ({ 
   writeFileSync(join(daemon.project, "bb.txt"), "second\n");
   await page.goto("/");
   await openFromLauncher(page, "Files");
-  await page.getByRole("button", { name: "aa.txt" }).filter({ visible: true }).click();
+  await page.locator('[data-testid="page-file"]:visible').getByRole("button", { name: "aa.txt" }).filter({ visible: true }).click();
   // The file has opened once its editor is up; focus then rests on the tab,
   // not in the editor (which keeps the keys for typing).
   await expect(page.locator(".monaco-editor").first()).toBeVisible();

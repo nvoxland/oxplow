@@ -143,13 +143,13 @@ export function useRememberedStore(): RememberedStore {
   return store;
 }
 
-/** The page-memory scope of a page: the page or lens itself, whatever it
- *  shows and however (`oxplow/page?page=tasks`, `oxplow/lens?lens=x/y`), or
+/** The page-memory scope of a page: the page or metric itself, whatever it
+ *  shows and however (`oxplow/page?page=tasks`), or
  *  its resource for an entity page (`resource:oxplow/file`: every file page
  *  shares one). */
 export function pageMemoryScope(ref: TabRef): string {
   const resource = typeOf(ref.id);
-  if (resource === "oxplow/page" || resource === "oxplow/lens" || resource === "oxplow/metric") return keyIdentityOf(ref.id) ?? ref.id;
+  if (resource === "oxplow/page" || resource === "oxplow/metric") return keyIdentityOf(ref.id) ?? ref.id;
   return `resource:${resource ?? "link"}`;
 }
 

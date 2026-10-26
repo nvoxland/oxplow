@@ -4,9 +4,8 @@ import { RAIL_SECTION_DRAG_MIME } from "../../dragMimes.js";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { TabRef } from "../../tabs/tabState.js";
 import { getPanelLayout, setPanelLayout } from "../../api.js";
-import { LensResultView } from "../../lens/LensResultView.js";
 import { useExtensions } from "../../extensionsStore.js";
-import type { ExtensionPanel, LensRun, PanelPlacement } from "../../tauri-bridge/generated/bindings.js";
+import type { ExtensionPanel, PanelPlacement } from "../../tauri-bridge/generated/bindings.js";
 import {
   extensionPanelId,
   panelOpenRef,
@@ -498,9 +497,9 @@ function RailEmpty({ label }: { label: string }) {
   );
 }
 
-/** An extension's panel (P6.G1): its body lens, compact; its count in the
- *  header (`panelCount`: the count lens's, else the badge's while it
- *  fires); and, collapsed, its collapsed lens compact as the summary. */
+/** An extension's panel (P6.G1): its body page, compact; its count in the
+ *  header (the count page's, else the badge's while it fires); and,
+ *  collapsed, its collapsed page compact as the summary. */
 function ExtensionPanelSection({
   panel,
   runs,
@@ -515,21 +514,15 @@ function ExtensionPanelSection({
 }) {
   const { choices, choose } = usePanelRuns();
   const extensions = useExtensions();
-  const page = runs.page;
-  const toggles = panelChoices(page ? (page.body?.run ?? null) : runs.body, choices[panel.id] ?? {});
-  const compact = (run: LensRun, testId: string) => (
-    <div data-testid={testId} style={{ padding: "4px 10px 8px", fontSize: "var(--text-xs)" }}>
-      <LensResultView run={run} compact maxRows={8} streamId={streamId} onOpenPage={onOpenPage} />
-    </div>
-  );
-  // A page-backed panel's part: its page drawn small.
+  const toggles = panelChoices(runs.body?.run ?? null, choices[panel.id] ?? {});
+  // A panel's part: its page drawn small.
   const compactPage = (open: OpenPanelRun, testId: string) => (
     <div data-testid={testId} style={{ padding: "4px 10px 8px", fontSize: "var(--text-xs)" }}>
       <PageTree run={open.run} runId={open.runId} compact streamId={streamId} onOpenPage={onOpenPage} />
     </div>
   );
-  const body = page ? (page.body ? compactPage(page.body, "rail-panel-body") : null) : runs.body ? compact(runs.body, "rail-panel-body") : null;
-  const collapsed = page ? (page.collapsed ? compactPage(page.collapsed, "rail-panel-collapsed") : undefined) : runs.collapsed ? compact(runs.collapsed, "rail-panel-collapsed") : undefined;
+  const body = runs.body ? compactPage(runs.body, "rail-panel-body") : null;
+  const collapsed = runs.collapsed ? compactPage(runs.collapsed, "rail-panel-collapsed") : undefined;
   return (
     <RailSection
       id={extensionPanelId(panel)}

@@ -88,7 +88,9 @@ test("pinning, reordering, removing and renaming edit the dashboard page and sur
     /Dunnart coverage evidence/, /Dunnart test evidence/,
   ]);
 
-  // Removal belongs to the tile's right-click menu, and asks inline.
+  // Removal belongs to the tile's right-click menu, and asks inline; it is
+  // offered once the reorder's save has finished (the grid isn't busy).
+  await expect(activeGrid(page)).not.toHaveAttribute("aria-busy", "true");
   await tile(first.id).click({ button: "right" });
   await page.getByTestId("menu-item-remove").click();
   await tile(first.id).getByRole("button", { name: "Cancel", exact: true }).click();

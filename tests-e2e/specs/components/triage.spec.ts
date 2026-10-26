@@ -12,7 +12,7 @@ import { openFromLauncher } from "../../support/ui.js";
 
 // The triage example (`examples/extensions/triage`): its `todos` collector
 // sorts the code's TODO comments with a model, and a TODO is decided from
-// the board's card form or from the `todos` lens's `Decide…` row action —
+// the board's card form or from the `todos` page's `Decide…` row action —
 // in Chromium and WebKit. The model is a TypeSafe (`typesafe` kind)
 // provider at a stand-in for Jev's API here, which decides offline.
 
@@ -79,7 +79,7 @@ async function decisions(daemon: Daemon): Promise<Record<string, string>> {
   return decided;
 }
 
-test("TODOs are sorted by the model, and a decision from the board or the lens survives a reload", async ({ fresh }) => {
+test("TODOs are sorted by the model, and a decision from the board or the list page survives a reload", async ({ fresh }) => {
   const { page, daemon } = fresh;
   const model = await jev();
   try {
@@ -107,7 +107,7 @@ test("TODOs are sorted by the model, and a decision from the board or the lens s
     ]);
     await page.goto("/");
     await openFromLauncher(page, "TODO Board");
-    const board = page.getByTestId("center-tab-body-oxplow:oxplow/lens?lens=triage/todo-board");
+    const board = page.getByTestId("center-tab-body-oxplow:oxplow/page?page=triage/todo-board");
     const frame = board.frameLocator('[data-testid="custom-component-frame"]');
     const card = (line: number) => frame.locator(".card", { hasText: `src/lib.rs:${line}` });
     await expect(frame.locator(".column", { hasText: "bug" }).locator(".card")).toHaveCount(1);
@@ -119,16 +119,16 @@ test("TODOs are sorted by the model, and a decision from the board or the lens s
     await card(1).getByRole("button", { name: "Save" }).click();
     await until("the board's decision to be stored", 15_000, async () => (await decisions(daemon))["src/lib.rs:1"] === "fix-now");
 
-    // A decision from the lens's `Decide…` row action, in its slideover.
+    // A decision from the `todos` page's `Decide…` row action, in its slideover.
     await openFromLauncher(page, "TODOs");
-    const lens = page.getByTestId("center-tab-body-oxplow:oxplow/lens?lens=triage/todos");
-    await lens.getByRole("row").filter({ hasText: "cleanup" }).locator("td").first().click({ button: "right" });
+    const list = page.getByTestId("center-tab-body-oxplow:oxplow/page?page=triage/todos");
+    await list.getByRole("row").filter({ hasText: "cleanup" }).locator("td").first().click({ button: "right" });
     await page.getByTestId("menu-item-lens-action-decide").click();
     const form = page.getByTestId("lens-action-form");
     await form.getByTestId("lens-action-form-fields-decision").selectOption("wontfix");
     await form.getByTestId("lens-action-form-fields-submit").click();
     await expect(form).toHaveCount(0);
-    await until("the lens's decision to be stored", 15_000, async () => (await decisions(daemon))["src/lib.rs:3"] === "wontfix");
+    await until("the page's decision to be stored", 15_000, async () => (await decisions(daemon))["src/lib.rs:3"] === "wontfix");
 
     // Both survive a reload: the board shows them again.
     await reload(page);

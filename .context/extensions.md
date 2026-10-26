@@ -588,11 +588,15 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     Agents write lens files with their normal Edit tool, under the filing
     guard, taught by the `oxplow-extension` skill.
 - **UI.**
-  - `oxplow/lens` pages (`LensPage.tsx`; the URI `oxplow:oxplow/lens?lens=<extension>/<slug>`) render `table`,
+  - The desktop draws no lens: no `oxplow/lens` tab (such a URI opens on
+    the `resource` fallback), no `getLens` / `runLens` / `run_lens_action`
+    / `lens_form` / `lens_text` call. Every page is a page file drawn by
+    the page host (pages-and-tabs.md "The desktop host"), its viz nodes by
+    the viz components below. They render `table`,
     `list`, `number` (through `formatMetricValue`) and `markdown`.
     Linked cells go through `RouteLink`, so plain-click navigates in the
     tab.
-  - The rail is the page's one place for controls (`LensRail`,
+  - The rail is the page's one place for controls (`PageRail`,
     usability.md "A page's controls are in its rail"): its filter params
     as `ParamRow`s (label beside value, click to edit in place or in a
     popover), its selection params as the picked row, and About this
@@ -660,7 +664,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     page's lens, which must be a document with a `query:` and name that
     column in its `columns:` (`label_refs`; a dashboard's `{{row.title}}`).
     The tab says the page's title until the lens has run and its row
-    answers (`LensPage` `titleFrom` → `usePageTitle`), then the filled
+    answers (`PageHost`: `tabLabel` over `labelRow` → `usePageTitle`), then the filled
     label; a lens that fails keeps the title. Either may take filters:
     `{{param.sha|short}}` (the first 7 characters), `|basename` (the
     last path segment) and `|url` (a web page's host and path, cut to 40),
@@ -678,7 +682,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     `component: <id>` names one of the extension's own
     `custom_components` (`PageBody::Component { component:
     "<ext>/<id>" }`): a **custom page**, the component filling the page
-    body under core's nav bar (`pages/CustomPageView.tsx`), told the
+    body under core's nav bar (a page whose `view:` is one component node, `ComponentPage`), told the
     page's view params, history state, stream and thread in
     `init.page`, setting its title and actions as data core draws, and
     its view params and history state kept in its tab entry
@@ -872,9 +876,10 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       may reach is its extension's `permissions:`, approved at deploy
       ("Permissions"). An agent's `run_command oxplow.collector.sync` runs it as the
       agent.
-    - UI: `LensToolbar` and the row menu in `LensResultView.tsx`; logic in
-      `lens/lensActions.ts` (`performLensAction`, `copyLens`,
-      `addLensToContext`, `rowRecord`).
+    - UI: the row menu and part buttons in `LensResultView.tsx`, pressed
+      on the page run (`run_page_action`); logic in `lens/lensActions.ts`
+      (`performLensAction`, `rowRecord`). Copy is the page host's
+      (`page_text`), Add to Context the ☰'s.
     - The GitHub example's PR lens has a Sync PRs action
       (`command: oxplow.collector.sync`).
   - **Viz** (`LensResultView.tsx`): `table`, `list`, `number`, `markdown`,
@@ -953,15 +958,12 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     page (`showView`, protocol 12: its query as one `sql` loader, its viz
     over it — `specOf` in `src/explore-data/model.ts`), the page opens it
     (`open_page { specYaml }`) and draws it under the frame with
-    `PageTree` (`pages/PageComponent.tsx` `ShownView`), live, with **Pin
-    to Dashboard** (a `query` tile with the chart) and **Save as Lens**
-    (`components/SaveAsLens.tsx`: `oxplow.lens.keep` with the spec, on the
-    bus like Keep This, in the stream's worktree — its shape and its query
-    checked as `oxplow.lens.show` checks one, so a `metric_grid()` chart
-    is kept; it deploys the extension, created when missing with the v2
-    manifest `oxplow extension new` writes, refuses to overwrite a lens,
-    then opens the lens). A refused spec answers the component `INVALID`
-    with its field, and it shows the reason under the SQL box.
+    `PageTree` (`pages/PageComponent.tsx` `ShownView`), live, with **Save
+    as Page** (`pages/SaveViewForm.tsx`: `oxplow.extension.write_page {
+    extension, page, spec, deploy: true }`, then opens the page; a saved
+    page pins to a dashboard as an embed). A refused spec answers the
+    component `INVALID` with its field, and it shows the reason under the
+    SQL box.
   - **No raw tables.** The React page's Raw tables switch read physical
     tables over IPC; a component reads models only, as every lens does.
     Raw reads stay the agent's `oxplow_query_sql`.
@@ -993,32 +995,11 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       path or reserved name never reaches the filesystem — and a failed
       deploy removes only the files it wrote (never a directory that was
       there before).
-    - **UI: an answer is the thread's.** Foundation's `answer` page (the
-      renderer of `oxplow/answer`; a document whose row, from
-      `v_thread_answer`, names the tab, and whose one bare section,
-      `answer-body`, is the kit's **`answer` viz**: `answer: { uri,
-      kept? }`, `lens/AnswerViz.tsx`) re-runs the answer through
-      `run_answer` with `useRerunOnChange` and offers **Keep This** (an
-      inline name — empty takes it from the title — Enter keeps via
-      `oxplow.lens.keep`, Escape cancels) or, once it is a lens (kept, or
-      an existing lens shown), a link to it. **Shown means opened**: the
-      window watches the shown thread's answers (`shownAnswers.ts`, over
-      `v_thread_answer`; one recorded in the ten seconds before the
-      window started watching counts) and opens each new one as a tab of
-      the thread *behind* what the person is on, so a terminal keeps its
-      keys. Foundation's thread panel **Answers** (`thread-answers`, its
-      badge `thread-answers-count`: the ones not kept) lists them. An
-      agent reads an `answer` lens as the answer's text (`lens_text`),
-      and an answer is never itself an `answer` (`spec_problem`).
-    - Explore Data's **Save as Lens** (`oxplow.lens.keep { spec, stream }`) uses
-      the lens's title as a new extension's `intent.purpose`, and the
-      caller's thread, when it has one, as its `intent.origin`.
-  - **Lens tiles.** A lens can be pinned to a dashboard: "Pin to
-    Dashboard" on a lens page, or `oxplow.dashboard.add_item { kind: "lens",
-    lens_id }`.
-    - The tile is kind `lens`, with `lensId` stored in `options_json`.
-    - A dashboard lens runs it as a part (the shared `LensResultView`), against
-      the stream the page is in.
+    - **UI.** The desktop no longer draws answers: the `answer` viz
+      (`AnswerViz`), Keep This in the window and the shown-answers watcher
+      (`shownAnswers.ts`) are gone. What an agent shows is a page or an
+      inline view (`oxplow.page.show`, pages-and-tabs.md "Showing a
+      page"), saved with Save as Page or Save to wiki.
     - The launcher's new **Data** category holds Explore Data, Metrics
       and Dashboards.
 - **Sources (collectors).** Declared under `collectors:` in `extension.yaml` (v1: `sources:`) and parsed
@@ -1061,10 +1042,9 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     `extensions.rs` names each slot and the params it **offers**; a
     mounted lens gets the ones it declares and must declare at least one,
     or the mount is an error. Loaded as `Extension.ui.slots`.
-  - `src/lens/LensSlots.tsx` renders a slot (each mount marked
-    `data-slot="<slot>"`, which the "every enhancement off" smoke test
-    looks for): every mounted lens, run with
-    the slot params it declares (`slotRuns`), re-run on data events.
+  - The desktop draws no lens slot (`LensSlots` is gone): a page's `slot`
+    node shows the pages mounted there (`ui.slots` with `page:`), each a
+    section titled by its page; a lens mount draws nothing.
     the Changes page offers `effort_id`, `effort` and `change_id` (its row); WorkItemPage `uri`
     (body and sidebar; the item's URI, whichever list); GitCommitPage and UncommittedChangesPage `change_id`, plus
     UncommittedChangesPage's strip `stream_id`.
@@ -2165,7 +2145,7 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
   `.context/external-url-tabs.md`; it fills its page; refused in a spec,
   since an answer never opens a page; an agent reads a link line), `code` and `diff` (the full-size readers: a file at a
   revision, or one file's diff, read-only, filling a lens page —
-  `LensPage`'s `fill`, no in-body title; a loaded lens says whether it
+  the page host's `fill`, no in-body title; a loaded lens says whether it
   fills, `Lens.fills`: its viz does, `LensViz::fills`, or it is a
   document — not a view document — whose last section's lens fills, so
   that section takes the height left (`fill_document_fills`, run once the
@@ -2468,9 +2448,9 @@ A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
 > (`hunks` and `steps` are built, above; `copy-review-prompt` became
 > `copy` on the Review Prompt lens.)
 
-Lenses render through one core `LensPage` / `LensSlots` in oxplow's design
-system, as an `oxplow/lens` page kind. Bookmarks, backlinks, the
-launcher and sibling navigation work unchanged. Every lens has an "Improve
+The desktop draws page files only (no `LensPage` / `LensSlots`; the
+`diff.file.header` lens slot draws nothing until it is a page slot).
+Bookmarks, backlinks, the launcher and sibling navigation work unchanged. Every lens has an "Improve
 with Agent" action that pastes `[oxplow lens <ext>/<slug>]` and its params
 into the agent's context through the existing add-to-context path; oxplow
 never types into the agent.
@@ -2525,7 +2505,7 @@ they live under `ui:`.
 | `oxplow-foundation/tasks.sections` | the Tasks page (a document: parts `list`, `summary`, `backlog`) | its params (`show`, `priority`, `thread_id`, `stream_id`) and its row (`scope`) |
 | `oxplow-foundation/commit.sections` | the commit page (a document: parts `detail`, `files`) | its params (`uri`, `sha`, `stream_id`) and its row (`change_id`, `base_revision`, `head_revision`) |
 | `oxplow-foundation/uncommitted.sections` | the Uncommitted Changes page (a document: parts `commit`, `files`) | its params (`stream_id`) and its row (`change_id`, `base_revision`, `head_revision`) |
-| `diff.file.header` | a file diff (`DiffPane`), a strip under its header (P9.A2; `DiffFileHeaderSlot`) | `path`, `left_revision`, `right_revision` (each a revision in its wire form: `working`, `snap:<id>`, `git:<sha>`), `stream_id` |
+| `diff.file.header` | not drawn by the desktop any more (its lens slot went with `DiffFileHeaderSlot`; it becomes a slot of the `diff` page) | `path`, `left_revision`, `right_revision` (each a revision in its wire form: `working`, `snap:<id>`, `git:<sha>`), `stream_id` |
 | `oxplow-foundation/settings-<area>.sections` (`overview`, `agents`, `lsp`, `extensions`, `data`, `integrations`, `ai`) and `oxplow-foundation/settings.sections` | each Settings area (a document lens `settings-<area>`, a section of the view document `settings`), and a new area | `settings-overview` takes `q`, the page's search; the others none |
 
 The launcher isn't a slot: a lens lists itself with `launcher.category`.
@@ -2643,15 +2623,14 @@ exists, what decides it:
 - no candidate, a provider no extension brings (oxplow's own), several
   unbound candidates and no choice, or `oxplow` chosen → `fallback`,
   untouched;
-- chosen → its lens runs with the props it declares (`childParams`) and
-  renders through `LensResultView` (the one render path: kit, or `viz:
-  custom` with its sandbox and "custom" badge) under a **"replaced by
+- chosen → its page (`UiReplacement.pageId`; one that names no page is
+  `failed`) runs with the props it declares and draws through `PageTree`
+  (kit vizzes, or `viz: custom` with its sandbox and "custom" badge,
+  sharing the view its target's contract lists) under a **"replaced by
   <extension>"** badge (`replacement-<target>`, `replacement-badge`),
-  re-running like any lens. The page's own chrome (the Board's scope
+  kept fresh by the daemon. The page's own chrome (the Board's scope
   picker) stays oxplow's;
-- it can't load — the lens run fails, or its custom component doesn't
-  start (`CustomComponentViz.onFailure` → `LensResultView.onCustomFailure`
-  → `useReplacement`'s `fail`, which makes the replacement `failed`) →
+- it can't load — its page run fails →
   **the core component**, under a line saying whose it was and why
   ("beads's board couldn't load: …. Showing oxplow's.",
   `replacement-fallback`) — never the lens's table, and **outside** the
@@ -3114,7 +3093,7 @@ an echo; `createBridgeHost` sends only what the frame hasn't seen);
 
 **A custom page's rail** is a declared lens (`pages: [{ component, rail:
 <slug> }]`, a lens of the page's extension; refused on a lens page, whose
-rail is its own): `CustomPageView` runs it with the params it declares
+rail is its own): the page host runs it (a page file's `rail:` tree) with the params it declares
 from the page's view, live, in the page's rail (`custom-page-rail`), and
 a row's pick writes the view by the rail's rule (`lensViewChange`: a
 selection pushes), which the frame hears. A filling page's rail stacked

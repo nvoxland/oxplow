@@ -37,11 +37,11 @@ test("Comment… and Link… add a comment and a link, and Unlink removes the li
   });
   await openItem(page, "Item with notes");
 
-  await page.locator('[data-node="comments"]').getByTestId("lens-action-comment").click();
+  await page.locator('[data-testid="page-file"]:visible [data-node="comments"]').getByTestId("lens-action-comment").click();
   const comment = page.getByTestId("lens-action-form");
   await comment.getByTestId("lens-action-form-fields-body").fill("A note for later.");
   await comment.getByTestId("lens-action-form-fields-submit").click();
-  await expect(page.locator('[data-node="comments"]')).toContainText("A note for later.");
+  await expect(page.locator('[data-testid="page-file"]:visible [data-node="comments"]')).toContainText("A note for later.");
 
   await page.locator('[data-node="links"]').getByTestId("lens-action-link").click();
   const link = page.getByTestId("lens-action-form");

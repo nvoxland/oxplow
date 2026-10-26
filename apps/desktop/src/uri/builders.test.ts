@@ -14,7 +14,6 @@ import {
   fileUri,
   idOf,
   keyedUri,
-  lensUri,
   metricUri,
   pageUri,
   proposalUri,
@@ -50,13 +49,12 @@ test("a contribution's key param is its own name, with the view's params beside 
   expect(extPageUri("acme", "board", { uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" })).toBe(
     "oxplow:oxplow/page?page=acme/board&uri=oxplow:oxplow/work_item?id%3Dtsk1%26provider%3Doxplow",
   );
-  expect(lensUri("acme/blocked", { stream_id: 2 })).toBe("oxplow:oxplow/lens?lens=acme/blocked&stream_id=2");
   expect(metricUri("oxplow.todos")).toBe("oxplow:oxplow/metric?metric=oxplow.todos");
   expect(metricUri("oxplow.todos", { range: "7d", branch: "main" })).toBe(
     "oxplow:oxplow/metric?branch=main&metric=oxplow.todos&range=7d",
   );
   expect(collectorUri("triage", "todos")).toBe("oxplow:oxplow/collector?collector=triage/todos");
-  expect(contributionOf(lensUri("acme/blocked"))).toEqual({ kind: "lens", extension: "acme", id: "blocked" });
+  expect(contributionOf(pageUri("acme/blocked"))).toEqual({ kind: "page", extension: "acme", id: "blocked" });
   expect(contributionOf(metricUri("oxplow.todos"))).toEqual({ kind: "metric", extension: null, id: "oxplow.todos" });
   expect(contributionOf(threadUri("thr3"))).toBeNull();
 });
@@ -66,7 +64,7 @@ test("idOf reads the key param of the one resource", () => {
   expect(idOf(threadUri("thr3"), "oxplow/stream")).toBeNull();
   expect(idOf("thr3", "oxplow/thread")).toBeNull();
   expect(idOf(wikiUri("a"), "oxplow/wiki")).toBe("a");
-  expect(idOf(lensUri("acme/x", { stream_id: 2 }), "oxplow/lens")).toBe("acme/x");
+  expect(idOf(pageUri("acme/x", { stream_id: 2 }), "oxplow/page")).toBe("acme/x");
   expect(idOf("oxplow:e2e/item?id=3", "e2e/item")).toBe("3");
   expect(typeOf("oxplow:e2e/item?id=3")).toBe("e2e/item");
   expect(keyedUri("oxplow/wiki", "a")).toBe(wikiUri("a"));

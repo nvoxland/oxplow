@@ -2,14 +2,11 @@
 /// "Page files", "The desktop host"): a route's page by its id, a URI's
 /// renderer among the page files' `for`, the params a tab's URI gives its
 /// run, and where a change of them goes (the `?`, or the `#` replaced or
-/// pushed). A page an enabled extension still mounts a lens into
-/// (`hasLensMounts`) opens on its `pages:` entry's lens until the mounts
-/// name pages.
-import type { Extension, ExtensionPage, Node, Page, SqlCell } from "../tauri-bridge/generated/bindings.js";
+/// pushed).
+import type { Extension, Node, Page, SqlCell } from "../tauri-bridge/generated/bindings.js";
 import type { PagePayload } from "../tabs/pageRefs.js";
 import { isDefaultValue } from "../lens/lensModel.js";
-import { declaredPage } from "./declaredPages.js";
-import { RENDERER_VIEW_KEY, rendererFor, rendererName, renderersFor } from "./renderers.js";
+import { rendererFor, rendererName, renderersFor } from "./renderers.js";
 import { extPageUri, pageUri, type Params } from "../uri/uri.js";
 
 /** The namespace whose pages are core-named (`page=<slug>`):
@@ -21,20 +18,17 @@ export const CORE_NAMESPACE = "oxplow";
  *  extensions load; null when none declares it. */
 export function pageFileOf(extensions: Extension[] | null, route: PagePayload): Page | null | undefined {
   if (extensions === null) return undefined;
-  const found: { ext: Extension; page: Page }[] = [];
+  // Two extensions share the core namespace (oxplow-foundation and
+  // oxplow-bundled); the server refuses a core slug both declare
+  // (`refuse_shared_core_pages`), so a core slug names one page.
   for (const e of extensions) {
     if (!e.enabled) continue;
     const core = e.namespace === CORE_NAMESPACE;
     if (route.extension === null ? !core : core || e.name !== route.extension) continue;
     const page = (e.pageFiles ?? []).find((p) => p.slug === route.page);
-    if (page) found.push({ ext: e, page });
+    if (page) return page;
   }
-  // Two extensions share the core namespace (oxplow-foundation and
-  // oxplow-bundled), so a core-named slug can name a page of each (a
-  // panel's body beside the page it summarizes): the one whose extension
-  // also declares that page under `pages:` is the route's.
-  const owner = found.find(({ ext, page }) => (ext.pages ?? []).some((d) => d.id === page.slug));
-  return (owner ?? found[0])?.page ?? null;
+  return null;
 }
 
 /** The route a page file opens at (`page=<slug>` for oxplow's, else
@@ -113,78 +107,23 @@ export function pageViewChange(
   return { resource, view, push };
 }
 
-/** What draws a tab: a page file, or — only for what has no page file, or
- *  one an extension still mounts a lens into — a manifest's `pages:` entry
- *  (the lens path, removed once every page draws as a file). Both null:
- *  nothing declares it. */
-export interface Drawer {
-  file: Page | null;
-  declared: ExtensionPage | null;
-}
-
-function enabledDeclared(extensions: readonly Extension[] | null): ExtensionPage[] {
-  return (extensions ?? []).filter((e) => e.enabled).flatMap((e) => e.pages ?? []);
-}
-
-/** The `pages:` entry of the same name as `file` (its fallback). */
-function declaredTwin(extensions: readonly Extension[] | null, file: Page): ExtensionPage | null {
-  return enabledDeclared(extensions).find((p) => rendererName(p) === rendererName(file)) ?? null;
-}
-
-/** Whether some enabled extension mounts a *lens* into `file`'s slots
- *  (`ui.slots: [{ slot: <page>.sections, lens }]`, named for the page or
- *  for the lens its `pages:` entry draws): a page file's slot shows only
- *  mounted pages, so until those mounts name pages the page stays on its
- *  lens rather than lose them. */
-export function hasLensMounts(extensions: readonly Extension[], file: Page): boolean {
-  const twin = declaredTwin(extensions, file);
-  const prefixes = [`${file.id}.`, ...(twin?.body.kind === "lens" ? [`${twin.body.lens}.`] : [])];
-  return extensions.some((e) => e.enabled && (e.ui?.slots ?? []).some((m) => prefixes.some((p) => m.slot.startsWith(p))));
-}
-
-/** Whether the page host draws `file` in this window today: unless a lens
- *  is mounted into its slots, which a page file's slot can't show. */
-function drawsHere(extensions: readonly Extension[], file: Page): boolean {
-  return !hasLensMounts(extensions, file);
-}
-
-/** What draws a route (`oxplow:oxplow/page?page=…`). */
-export function chooseRoute(extensions: Extension[], route: PagePayload): Drawer {
-  const file = pageFileOf(extensions, route) ?? null;
-  if (file && drawsHere(extensions, file)) return { file, declared: null };
-  const declared = declaredPage(extensions, route) ?? null;
-  if (declared) return { file: null, declared };
-  return { file, declared: null };
+/** What draws a route (`oxplow:oxplow/page?page=…`): its page file, or
+ *  null when no enabled extension has one. */
+export function chooseRoute(extensions: Extension[], route: PagePayload): Page | null {
+  return pageFileOf(extensions, route) ?? null;
 }
 
 /** What draws a resource URI: the page files' renderer (`for`, `accepts`,
- *  the view's `#oxplow.renderer=`, `default`), else a `pages:` renderer. */
-export function chooseRenderer(extensions: Extension[], id: string, view: Record<string, unknown>): Drawer {
-  const files = pageFileRenderers(extensions);
-  const declared = enabledDeclared(extensions).filter((p) => p.for.length > 0);
-  const named = view[RENDERER_VIEW_KEY];
-  const file = rendererFor(id, files, view);
-  // A view naming a renderer only a `pages:` entry declares (the lens
-  // runtime's) picks that one.
-  if (typeof named === "string" && (!file || rendererName(file) !== named)) {
-    const pick = renderersFor(id, declared).find((p) => rendererName(p) === named);
-    if (pick && !renderersFor(id, files).some((p) => rendererName(p) === named)) return { file: null, declared: pick };
-  }
-  if (file && drawsHere(extensions, file)) return { file, declared: null };
-  if (file) {
-    const twin = declaredTwin(extensions, file);
-    return twin ? { file: null, declared: twin } : { file, declared: null };
-  }
-  return { file: null, declared: rendererFor(id, declared, view) };
+ *  the view's `#oxplow.renderer=`, `default`); null: none does, and
+ *  foundation's `resource` fallback draws it. */
+export function chooseRenderer(extensions: Extension[], id: string, view: Record<string, unknown>): Page | null {
+  return rendererFor(id, pageFileRenderers(extensions), view);
 }
 
-/** Open With's choices for `id`: every page that renders it, page files
- *  first, each name once. */
+/** Open With's choices for `id`: every page file that renders it, each
+ *  name once. */
 export function openWithOptions(extensions: readonly Extension[] | null, id: string): { name: string; title: string }[] {
   const out = new Map<string, string>();
   for (const p of renderersFor(id, pageFileRenderers(extensions))) out.set(rendererName(p), p.title);
-  for (const p of renderersFor(id, enabledDeclared(extensions).filter((d) => d.for.length > 0))) {
-    if (!out.has(rendererName(p))) out.set(rendererName(p), p.title);
-  }
   return [...out].map(([name, title]) => ({ name, title }));
 }

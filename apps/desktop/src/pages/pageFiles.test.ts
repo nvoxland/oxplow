@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import type { Extension, ExtensionPage, PageParam, Page } from "../tauri-bridge/generated/bindings.js";
+import type { Extension, PageParam, Page } from "../tauri-bridge/generated/bindings.js";
 import { fakeAction, fakePage, node } from "./testing/fakeRun.js";
 import {
   chooseRenderer,
@@ -18,7 +18,7 @@ const file = (extension: string, slug: string, over: Partial<Page> = {}): Page =
   fakePage(node.viz("items", "items"), { id: `${extension}/${slug}`, extension, slug, title: slug, ...over });
 
 const ext = (name: string, namespace: string, pageFiles: Page[], enabled = true) =>
-  ({ name, namespace, enabled, pageFiles, pages: [] }) as unknown as Extension;
+  ({ name, namespace, enabled, pageFiles }) as unknown as Extension;
 
 const tasks = file("oxplow-foundation", "tasks");
 const prs = file("gh", "open-prs");
@@ -114,53 +114,33 @@ describe("a change of a page's params", () => {
 });
 
 describe("what draws a tab", () => {
-  const declared = (id: string, over: Partial<ExtensionPage> = {}): ExtensionPage =>
-    ({ id, extension: "oxplow-foundation", pageRef: `oxplow:oxplow/page?page=${id}`, title: id, label: null, icon: null, category: null, keywords: null, params: [], count: null, for: [], accepts: {}, default: false, pinned: false, comments: false, refresh: false, body: { kind: "lens", lens: `oxplow-foundation/${id}` }, rail: null, ...over }) as ExtensionPage;
   const formPage = file("oxplow-foundation", "new-task", { view: node.viz("form", null, { viz: "form" }) });
   const commit = file("oxplow-foundation", "commit", { for: ["oxplow/commit"], default: true });
   const editorFile = file("oxplow-foundation", "editor", { for: ["oxplow/file"], default: true, view: node.component("c", "x:c") });
-  const exts2 = [
-    { ...ext("oxplow-foundation", "oxplow", [tasks, formPage, commit, editorFile]), pages: [declared("tasks"), declared("new-task"), declared("commit", { for: ["oxplow/commit"], default: true }), declared("editor", { for: ["oxplow/file"], default: true }), declared("lens", { for: ["oxplow/lens"], default: true, body: { kind: "builtIn", name: "lens" } }), declared("resource", { body: { kind: "builtIn", name: "resource" } })] } as unknown as Extension,
-  ];
-  const decls = exts2.flatMap((e) => e.pages);
+  const exts2 = [ext("oxplow-foundation", "oxplow", [tasks, formPage, commit, editorFile])];
 
-  // A form, a component, a lazy tree, an expand, an options_from or a form
-  // action draws in a page file too: only a lens mounted in its slots
-  // keeps a page on its `pages:` entry.
-  test("a route: its page file — a form's too — and a `pages:` entry only for what has no file", () => {
-    expect(chooseRoute(exts2, { extension: null, page: "tasks", params: {} })).toEqual({ file: tasks, declared: null });
-    expect(chooseRoute(exts2, { extension: null, page: "new-task", params: {} })).toEqual({ file: formPage, declared: null });
-    expect(chooseRoute(exts2, { extension: null, page: "gone", params: {} })).toEqual({ file: null, declared: null });
+  test("a route: its page file — a form's too — else nothing", () => {
+    expect(chooseRoute(exts2, { extension: null, page: "tasks", params: {} })).toBe(tasks);
+    expect(chooseRoute(exts2, { extension: null, page: "new-task", params: {} })).toBe(formPage);
+    expect(chooseRoute(exts2, { extension: null, page: "gone", params: {} })).toBeNull();
   });
 
-  test("a resource: its page file renderer first — a component's too — a `pages:` renderer only for what has none", () => {
-    expect(chooseRenderer(exts2, "oxplow:oxplow/commit?sha=abc", {})).toEqual({ file: commit, declared: null });
-    expect(chooseRenderer(exts2, "oxplow:oxplow/file?path=a", {})).toEqual({ file: editorFile, declared: null });
-    expect(chooseRenderer(exts2, "oxplow:oxplow/lens?lens=a/b", {}).declared?.id).toBe("lens");
-    expect(chooseRenderer(exts2, "oxplow:oxplow/nothing?id=1", {})).toEqual({ file: null, declared: null });
+  test("a resource: its page file renderer — a component's too — else nothing (the fallback draws it)", () => {
+    expect(chooseRenderer(exts2, "oxplow:oxplow/commit?sha=abc", {})).toBe(commit);
+    expect(chooseRenderer(exts2, "oxplow:oxplow/file?path=a", {})).toBe(editorFile);
+    expect(chooseRenderer(exts2, "oxplow:oxplow/lens?lens=a/b", {})).toBeNull();
+    expect(chooseRenderer(exts2, "oxplow:oxplow/nothing?id=1", {})).toBeNull();
   });
 
-  test("Open With lists every renderer once by name, page files first", () => {
+  test("Open With lists every renderer once by name", () => {
     const blame = file("acme", "blame", { title: "Blame", for: ["oxplow/commit"] });
     const all = [...exts2, ext("acme", "acme", [blame])];
     expect(openWithOptions(all, "oxplow:oxplow/commit?sha=abc").map((o) => o.name)).toEqual(["oxplow-foundation/commit", "acme/blame"]);
   });
-});
 
-test("a core-named slug two core extensions both have is the one its `pages:` entry names", () => {
-  const bundled = { ...ext("oxplow-bundled", "oxplow", [file("oxplow-bundled", "comments", { title: "panel" })]), pages: [] } as unknown as Extension;
-  const foundation = { ...ext("oxplow-foundation", "oxplow", [file("oxplow-foundation", "comments", { title: "inbox" })]), pages: [{ id: "comments" }] } as unknown as Extension;
-  expect(pageFileOf([bundled, foundation], { extension: null, page: "comments", params: {} })?.title).toBe("inbox");
-});
-
-test("a page another extension mounts a lens into stays on its lens until the mount names a page", () => {
-  const tasksFile = file("oxplow-foundation", "tasks", { view: node.stack("s", [node.viz("list", "list"), node.slot("sections", "sections")]) });
-  const decl = { id: "tasks", extension: "oxplow-foundation", pageRef: "oxplow:oxplow/page?page=tasks", body: { kind: "lens", lens: "oxplow-foundation/tasks-doc" }, for: [], accepts: {}, default: false };
-  const foundation = { ...ext("oxplow-foundation", "oxplow", [tasksFile]), pages: [decl], ui: { slots: [] } } as unknown as Extension;
-  const mounting = (slot: string) => ({ name: "b", namespace: "b", enabled: true, pages: [], pageFiles: [], ui: { slots: [{ slot, lensId: "b/x" }] } }) as unknown as Extension;
-  const route = { extension: null, page: "tasks", params: {} };
-  expect(chooseRoute([foundation], route).file?.id).toBe("oxplow-foundation/tasks");
-  expect(chooseRoute([foundation, mounting("oxplow-foundation/tasks-doc.sections")], route).declared?.id).toBe("tasks");
-  expect(chooseRoute([foundation, mounting("oxplow-foundation/tasks.sections")], route).declared?.id).toBe("tasks");
-  expect(chooseRoute([foundation, mounting("oxplow-foundation/other.sections")], route).file?.id).toBe("oxplow-foundation/tasks");
+  // Mounts in a page's slots never move it off its file.
+  test("a page others mount into is still drawn from its file", () => {
+    const mounting = { name: "b", namespace: "b", enabled: true, pageFiles: [], ui: { slots: [{ slot: "oxplow-foundation/tasks.sections" }] } } as unknown as Extension;
+    expect(chooseRoute([...exts2, mounting], { extension: null, page: "tasks", params: {} })).toBe(tasks);
+  });
 });

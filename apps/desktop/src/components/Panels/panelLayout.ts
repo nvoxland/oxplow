@@ -5,7 +5,8 @@
 /// layout through `get_panel_layout` / `set_panel_layout`.
 import type { Extension, ExtensionPanel, PanelPlacement } from "../../tauri-bridge/generated/bindings.js";
 import { pageFileOf, pageFileUri } from "../../pages/pageFiles.js";
-import { lensRef, refFromTabId } from "../../tabs/pageRefs.js";
+import { refFromTabId } from "../../tabs/pageRefs.js";
+import { extPageUri } from "../../uri/uri.js";
 import type { TabRef } from "../../tabs/tabState.js";
 
 /** Every panel starts open: a collapsed Work hid the task a person had just
@@ -18,20 +19,15 @@ export function extensionPanelId(panel: ExtensionPanel): string {
 }
 
 /** What an extension panel's header opens: the page it names (`open`,
- *  as Comments opens the inbox), else its body page (`pages: true`) or
- *  body lens. */
+ *  as Comments opens the inbox), else its body page. */
 export function panelOpenRef(panel: ExtensionPanel, extensions: Extension[] | null = null): TabRef {
   const named = panel.open ? refFromTabId(panel.open) : null;
   if (named) return named;
-  if (panel.pages) {
-    const slash = panel.body.indexOf("/");
-    const ext = (extensions ?? []).find((e) => e.name === panel.body.slice(0, slash));
-    const route = ext?.namespace === "oxplow" ? { extension: null, page: panel.body.slice(slash + 1), params: {} } : { extension: panel.body.slice(0, slash), page: panel.body.slice(slash + 1), params: {} };
-    const body = pageFileOf(extensions, route);
-    const ref = body ? refFromTabId(pageFileUri(extensions ?? [], body)) : null;
-    if (ref) return ref;
-  }
-  return lensRef(panel.body);
+  const slash = panel.body.indexOf("/");
+  const ext = (extensions ?? []).find((e) => e.name === panel.body.slice(0, slash));
+  const route = ext?.namespace === "oxplow" ? { extension: null, page: panel.body.slice(slash + 1), params: {} } : { extension: panel.body.slice(0, slash), page: panel.body.slice(slash + 1), params: {} };
+  const body = pageFileOf(extensions, route);
+  return refFromTabId(body ? pageFileUri(extensions ?? [], body) : "") ?? { id: extPageUri(panel.body.slice(0, slash), panel.body.slice(slash + 1)) };
 }
 
 export interface ResolvedLayout {

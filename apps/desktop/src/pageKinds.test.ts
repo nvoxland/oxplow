@@ -89,17 +89,16 @@ describe("core kinds a search hit can be", () => {
 });
 
 describe("a declared page", () => {
+  const pf = (extension: string, slug: string, title: string, icon: string | null) => ({ id: `${extension}/${slug}`, extension, slug, title, icon });
   const extensions = [
     {
       name: "oxplow-foundation",
+      namespace: "oxplow",
       enabled: true,
-      pages: [
-        { id: "local-history", pageRef: "oxplow:oxplow/page?page=local-history", title: "Local History", icon: "history" },
-        { id: "plain", pageRef: "oxplow:oxplow/page?page=plain", title: "Plain", icon: null },
-      ],
+      pageFiles: [pf("oxplow-foundation", "local-history", "Local History", "history"), pf("oxplow-foundation", "plain", "Plain", null)],
     },
-    { name: "gh", enabled: true, pages: [{ id: "open-prs", pageRef: "oxplow:oxplow/page?page=gh/open-prs", title: "Open PRs", icon: "git-merge" }] },
-    { name: "off", enabled: false, pages: [{ id: "x", pageRef: "oxplow:oxplow/page?page=off/x", title: "X", icon: "bell" }] },
+    { name: "gh", namespace: "gh", enabled: true, pageFiles: [pf("gh", "open-prs", "Open PRs", "git-merge")] },
+    { name: "off", namespace: "off", enabled: false, pageFiles: [pf("off", "x", "X", "bell")] },
   ] as unknown as Extension[];
 
   test("draws the icon its declaration names, by its page id", () => {

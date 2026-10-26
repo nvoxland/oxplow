@@ -25,21 +25,21 @@ test("search finds a task and a wiki page, and opens them", async ({ page, daemo
 
 // tsk1030: an extension added while the page is open — the agent writes
 // one — shows in the launcher without a reload.
-test("a lens added while the page is open is in the launcher", async ({ page, daemon }) => {
+test("a page added while the window is open is in the launcher", async ({ page, daemon }) => {
   await page.goto("/");
   // The launcher has loaded the extensions once already.
   await searchLauncher(page, "Wombat");
   await expect(page.locator('[data-testid^="launcher-page-"]').filter({ hasText: "Wombat" })).toHaveCount(0);
   await page.keyboard.press("Escape");
   const dir = extensionSource(daemon, "wombat");
-  mkdirSync(join(dir, "lenses"), { recursive: true });
+  mkdirSync(join(dir, "pages"), { recursive: true });
   writeFileSync(
     join(dir, "extension.yaml"),
     "manifest: 2\nname: wombat\nintent:\n  purpose: Wombat tasks.\n  origin: null\n  examples: []\n",
   );
   writeFileSync(
-    join(dir, "lenses", "wombats.yaml"),
-    "title: Wombat Tasks\nquery: SELECT uri FROM v_work_item\nviz: table\nlauncher: { category: Work }\n",
+    join(dir, "pages", "wombats.yaml"),
+    "title: Wombat Tasks\ncategory: Work\ndata:\n  items: { sql: SELECT uri FROM v_work_item }\nview: { from: items, viz: table }\n",
   );
   await deploy(daemon, "wombat");
   await expect(async () => {

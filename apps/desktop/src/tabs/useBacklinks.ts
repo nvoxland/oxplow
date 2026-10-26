@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { listBacklinks, listPageOutbound, type BacklinkEdge } from "../api.js";
-import { lensRef } from "./pageRefs.js";
 import { refTargetNow } from "./refOpener.js";
 import { contributionOf, fileUri, idOf, identityOf, keyOf, pageUri, paramOf, typeOf, wikiUri } from "../uri/uri.js";
 import type { TabRef } from "./tabState.js";
@@ -213,7 +212,7 @@ function canonicalEntryKey(entry: BacklinkEntry): string {
  */
 function openFor(uri: string, resolved: boolean): string | null {
   // Findings are listed by the oxplow-bundled Findings lens.
-  if (typeOf(uri) === "oxplow/finding") return lensRef("oxplow-bundled/findings").id;
+  if (typeOf(uri) === "oxplow/finding") return pageUri("findings");
   // Where it opens by the registry, or as itself when the window shows it.
   if (!("unopenable" in refTargetNow(uri))) return uri;
   return resolved && contributionOf(uri) !== null ? pageUri("settings") : null;

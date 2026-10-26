@@ -37,7 +37,6 @@ import { resourceIcon, resourceInfo } from "./resources.js";
 import { useExtensions } from "./extensionsStore.js";
 import { recordedPageKind, refFromTabId } from "./tabs/pageRefs.js";
 import type { Extension } from "./tauri-bridge/generated/bindings.js";
-import { extPageUri, pageUri as corePageRef } from "./uri/uri.js";
 import { pageFileOf } from "./pages/pageFiles.js";
 
 /**
@@ -98,31 +97,23 @@ export function pageKindIconComponent(kind: string, extensions: Extension[] | nu
       return Gauge;
 
     // An extension's resource (`resources:`) draws its declared icon.
-    // A declared page draws the icon its `pages:` entry names.
+    // A page draws the icon its page file names.
     default:
       return resourceIcon(kind) ?? declaredPageIcon(extensions, kind);
   }
 }
 
-/** The page a page kind names (`tasks`, `gh/open-prs`): its page file,
- *  else its `pages:` entry. */
+/** The page file a page kind names (`tasks`, `gh/open-prs`). */
 function declaredPageOf(extensions: Extension[] | null, kind: string): { icon: string | null; title: string } | null {
   if (!extensions) return null;
   // A page kind is the page's id, `<extension>/` first for any but oxplow's.
   const slash = kind.indexOf("/");
   const route = slash === -1 ? { extension: null, page: kind, params: {} } : { extension: kind.slice(0, slash), page: kind.slice(slash + 1), params: {} };
-  const file = pageFileOf(extensions, route);
-  if (file) return file;
-  const pageRef = slash === -1 ? corePageRef(kind) : extPageUri(kind.slice(0, slash), kind.slice(slash + 1));
-  for (const e of extensions) {
-    const found = e.enabled ? e.pages.find((p) => p.pageRef === pageRef) : undefined;
-    if (found) return found;
-  }
-  return null;
+  return pageFileOf(extensions, route) ?? null;
 }
 
-/** The icon a declared page names (`pages: - icon:`), or null when no
- *  page has that id or it names none. */
+/** The icon a page file names (`icon:`), or null when no page has that
+ *  id or it names none. */
 export function declaredPageIcon(extensions: Extension[] | null, kind: string): LucideIcon | null {
   const icon = declaredPageOf(extensions, kind)?.icon;
   return icon ? (ICONS[icon] ?? null) : null;

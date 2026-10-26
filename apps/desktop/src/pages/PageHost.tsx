@@ -29,7 +29,7 @@ import { usePageRunsStore, usePageRunWith, type PageKey, type PageRuns } from ".
 import { Page } from "../tabs/Page.js";
 import { useOptionalPageNavigation, usePageTitle, useTabActions } from "../tabs/PageNavigationContext.js";
 import type { TabRef } from "../tabs/tabState.js";
-import type { Node, PageRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
+import type { Node, PageParam, PageRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
 import { PageRail, switchSections } from "./PageRail.js";
 import { ComponentPage, type ComponentPageHost } from "./PageComponent.js";
 import type { BridgeHost } from "../lens/ComponentFrame.js";
@@ -40,6 +40,9 @@ import { useNodeActions, useNodeForms } from "./useNodeActions.js";
 import { SaveViewForm } from "./SaveViewForm.js";
 import { definitionUri } from "./viewActions.js";
 import { PageViewContext } from "./PageViewContext.js";
+import { usePageReads } from "./pageReads.js";
+import { recordOpError } from "../opErrors.js";
+import { HostedViewContext, useHostedView } from "../lens/hostedView.js";
 
 export interface PageHostProps {
   pageKey: PageKey;
@@ -107,7 +110,22 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
   const pageForms = useNodeForms(runId, null);
   const actions = useLensActions(target, streamId, pageRunner);
   const offered = (page?.actions ?? []).filter((a) => !a.row && !a.group && !a.edit);
+  const reads = usePageReads();
+  const [copied, setCopied] = useState(false);
+  const copy = () => {
+    if (!runId) return;
+    reads
+      .text(runId)
+      .then((text) => navigator.clipboard.writeText(text))
+      .then(() => {
+        setCopied(true);
+        window.setTimeout(() => setCopied(false), 1500);
+      })
+      .catch((e: unknown) => recordOpError({ label: "Copy", message: e instanceof Error ? e.message : String(e) }));
+  };
   const pageActions: PageAction[] = [
+    // What it shows, as text, as an agent would read it.
+    ...(page ? [{ id: "page-copy", label: copied ? "Copied" : "Copy", title: "Copy what the page shows, as text", standard: true, icon: "copy", run: copy }] : []),
     ...(page ? [{ id: "page-definition", label: "Show definition", standard: true, run: () => open(definitionUri(page.id, run!.params, specYaml)) }] : []),
     ...(specYaml ? [
       { id: "view-save-wiki", label: "Save to wiki…", standard: true, run: () => setSaveAs("wiki") },
@@ -163,6 +181,19 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
       setPicked(row ? { ...rest, [name]: row } : rest);
     }
   };
+
+  // A `custom` viz shares the page's view: its filters and picks, which
+  // it sets as the rail does (a replacement inside gives its own).
+  const viewKeys = useMemo(() => pageViewKeys(page?.params ?? []), [page?.params]);
+  const hostedView = useHostedView({
+    keys: viewKeys,
+    scope: "page",
+    write: (changes) => {
+      const patch = Object.fromEntries(Object.entries(changes).map(([k, v]) => [k, v ?? null]));
+      if (onChange) onChange(patch);
+      else void setParams(patch);
+    },
+  });
 
   // Comments are the page's when it declares them, on its URI (its tab's
   // identity): the nav bar steps through them, its vizes anchor them, and
@@ -248,7 +279,9 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
           {run && whole ? (
             <ComponentPage run={run} stream={stream} streamId={streamId} threadId={pageKey.threadId} onOpenPage={onOpenPage} host={componentHost} />
           ) : run ? (
-            <PageTree run={run} runId={runId} streamId={streamId} onOpenPage={onOpenPage} onSetParam={apply} />
+            <HostedViewContext.Provider value={hostedView}>
+              <PageTree run={run} runId={runId} streamId={streamId} onOpenPage={onOpenPage} onSetParam={apply} />
+            </HostedViewContext.Provider>
           ) : reading ? (
             <Loading what="the page" />
           ) : null}
@@ -259,6 +292,12 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
       </NodeRegistryContext.Provider>
     </Page>
   );
+}
+
+/** The params a page's view holds (its filters and picks): what a
+ *  `custom` viz on it shares and sets. */
+export function pageViewKeys(params: readonly Pick<PageParam, "name" | "role">[]): string[] {
+  return params.filter((p) => (p.role ?? "resource") !== "resource").map((p) => p.name);
 }
 
 /** The title of the section a switch page shows, which titles its body

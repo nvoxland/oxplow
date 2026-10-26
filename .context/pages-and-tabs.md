@@ -67,9 +67,9 @@ pages are THE shell.
 | `apps/desktop/src/tabs/Page.tsx` | Shared page chrome: title + kind chip + status chips + actions slot, optional **browser-style nav bar** (back/forward + bookmark + backlinks dropdown — auto-mounted from `PageNavigationContext` when present), body, collapsible legacy Backlinks region. Title can be passed as a `title` prop or registered programmatically by the page via `usePageTitle`; the chrome falls back to the context title when `title` is omitted. Every page shows the nav bar when it has a navigation context (a page outside one — a test — gets the plain header instead); a page doesn't opt out. `titleIcon` draws before the title (an agent's logo). **`titleInBody`** (default false) says the page renders its OWN title as an `<h1>` in the body (use the exported `pageH1Style` for consistency), so the chrome (nav bar / header) suppresses the title to avoid a duplicate — the tab-strip label via `usePageTitle` is unaffected. Adopters: `MetricDetailPage`, `DiffViewPage` (tsk137). **The body** takes `width?: "full" \| "reading"` and an independent `rightRail` (a 320px sticky control panel beside a body of either width); below ~960px the rail moves inline to the top of the body (`RailBody`) — "Body layouts" below. **Actions** are `PageAction[]` drawn in the nav bar, and `pin` adds Pin to Dashboard — "The nav bar is core's". Reads only semantic CSS variables (skin via theme). |
 | `apps/desktop/src/tabs/PageNavBar.tsx` | Dumb nav-bar component: back/forward, the list stepper, the title, the bookmark star, the **comment navigator** slot (`comments` ReactNode), the primary and prominent actions as buttons, and the ☰ (`PageMenu`). Mounted by `Page` when context or explicit `navBar` prop is present. |
 | `apps/desktop/src/tabs/PageMenu.tsx`, `tabs/pageMenuItems.ts` | The nav bar's ☰: one `ContextMenu` with everything else the page can be acted on with; `pageMenuItems` (pure, unit-tested) says what and in which order, `PageMenu` draws it and the panels it opens under the button (Backlinks, Outbound, Pin to Dashboard). "The nav bar is core's". |
-| `apps/desktop/src/components/Comments/CommentNavigator.tsx` | Self-contained per-page comment navigator for the nav bar. `useCommentsForTarget(target)` (one URI) → shows "Comments (N)", steps through anchored comments with ◀ ▶ (each `requestCommentReveal`s to scroll + open inline on the surface), and a dropdown lists all comments plus an **Orphaned (M)** section. Orphaned entries are clickable too: they `requestCommentReveal`, and the surfaces open the thread popover at a fallback position (no anchor to scroll to) so the comment is readable. The popover then offers a **"Relink to selection"** button (`CommentPopover.onRelink`, wired by RichTextField + MonacoCommentLayer) that re-attaches the comment to the editor's current selection — select the intended text first. (The right-click "Relink orphaned" path still exists.) Comment-bearing pages pass it via `Page`'s `commentsNav` prop, on their URI (the editor page → the file's, WikiPage → the wiki page's, WorkItemPage → the item's); a declared page with `comments: true` gets it from `LensPage`. Renders nothing when the page has no comments. Pure helpers (`partitionPageComments`, `stepComment`) live in `pageCommentNav.ts` (unit-tested) and are shared with the per-thread stepper: `CommentPopover` takes an `onStep(dir)` prop so an open comment thread shows ◀ Prev / Next ▶ buttons that scroll to + reopen the adjacent comment (wired by RichTextField + MonacoCommentLayer via `stepComment` + `requestCommentReveal`). |
+| `apps/desktop/src/components/Comments/CommentNavigator.tsx` | Self-contained per-page comment navigator for the nav bar. `useCommentsForTarget(target)` (one URI) → shows "Comments (N)", steps through anchored comments with ◀ ▶ (each `requestCommentReveal`s to scroll + open inline on the surface), and a dropdown lists all comments plus an **Orphaned (M)** section. Orphaned entries are clickable too: they `requestCommentReveal`, and the surfaces open the thread popover at a fallback position (no anchor to scroll to) so the comment is readable. The popover then offers a **"Relink to selection"** button (`CommentPopover.onRelink`, wired by RichTextField + MonacoCommentLayer) that re-attaches the comment to the editor's current selection — select the intended text first. (The right-click "Relink orphaned" path still exists.) Comment-bearing pages pass it via `Page`'s `commentsNav` prop, on their URI (the editor page → the file's, WikiPage → the wiki page's, WorkItemPage → the item's); a page file with `comments: true` gets it from `PageHost`. Renders nothing when the page has no comments. Pure helpers (`partitionPageComments`, `stepComment`) live in `pageCommentNav.ts` (unit-tested) and are shared with the per-thread stepper: `CommentPopover` takes an `onStep(dir)` prop so an open comment thread shows ◀ Prev / Next ▶ buttons that scroll to + reopen the adjacent comment (wired by RichTextField + MonacoCommentLayer via `stepComment` + `requestCommentReveal`). |
 | `apps/desktop/src/tabs/PageNavigationContext.ts` | React context exposing `{ navigate(ref, { newTab? }), goBack, goForward, canGoBack, canGoForward, setTitle, title }` to descendants of an active page tab. Wrapped around every non-agent center tab in `App.tsx`. `BacklinksList` reads it so default-click navigates in-tab. The `usePageTitle(title)` helper registers the page's current title with the host so the same string drives the chrome header AND the tab strip label — no per-page duplicate header markup. **`useTabEditing({ dirty, save })`** tells the tab its page holds unsaved edits and how to save them (`setEditing`, on the current page only): `App.tsx` keeps one setter per tab (`editingSetterFor`) and draws `CenterTab.dirty` as a ● before the label, publishes `pageDirty` (the File → Save `when`), runs the shown tab's `save` from `oxplow.editor.save` when the page isn't a file, and keeps a dirty tab from the cap's `evictions`. The editor (`FilePage`) and the `markdown` viz's editor call it. |
-| `apps/desktop/src/lens/EditorViz.tsx` | The `editor` viz that draws the working tree's file (foundation's `editor` page): its buffer from `editor/openFiles.ts`, `EditorPane` over it, `useTabEditing` for its ● / Save / Find. A renderer's lens page (`LensPage` with `renders`) shows the resource's backlinks and outbound links in the nav bar (`useBacklinks`), so wiki pages, tasks and commits that reference the file are listed there. `.context/editor-and-monaco.md` "The editor viz". |
+| `apps/desktop/src/lens/EditorViz.tsx` | The `editor` viz that draws the working tree's file (foundation's `editor` page): its buffer from `editor/openFiles.ts`, `EditorPane` over it, `useTabEditing` for its ● / Save / Find. A renderer's page (`PageHost` with `renders`) shows the resource's backlinks and outbound links in the nav bar (`useBacklinks`), so wiki pages, tasks and commits that reference the file are listed there. `.context/editor-and-monaco.md` "The editor viz". |
 | `apps/desktop/src/tabs/RouteLink.tsx` | Browser-style link button + the `useRouteDispatch(ref, { onNavigate?, pinnedSlot? })` hook that powers it; `ref` / `to` is a `TabRef` or a ref string (opened through `openRef`). Click semantics: left-click → in-tab navigate via `PageNavigationContext` (or `onNavigate` fallback when no context, e.g. rail / palette), Cmd/Ctrl-click + middle-click + right-click → new tab. The hook returns `{ dispatch, handlers }` so non-button rows (file tree entries, note rows, …) can adopt the same semantics without becoming a `<button>`. |
 | `apps/desktop/src/components/RailHud/RailHud.tsx` | Persistent left rail HUD: a pinned search trigger at the top, then a set of **uniform collapsible panels** (every one an extension's — Go To, Uncommitted, Comments and Work from `oxplow-bundled`). Each renders through the shared `RailSection` wrapper — drag handle (⠿) + expand/collapse chevron + title + optional count badge + optional header action. (What needs the person — proposals, failed operations, undelivered events, firing badges — isn't a rail section: it's the dock's Alerts panel, the Alerts page and toasts; see `.context/usability.md`.) Sections **drag-to-reorder** (MIME `application/x-oxplow-rail-section`, the layout — order, collapsed, hidden — persisted in `panel_layout`; see "Left-nav panels" below). An extension panel with a `collapsed` lens (Work) keeps that summary when collapsed; the rest hide their body. Every section **always renders** (stable list) with an empty-state line ("Working tree clean", "No open comments", …) when it has no content. Passive — never auto-opens tabs. Go To is the `oxplow-bundled` panel `go-to` (bookmarks, then recent or most visited pages). |
 | `apps/desktop/src/components/Navigator.tsx` | Far-left combined **stream + thread navigator** (each stream's open threads — `get_thread_state` leaves closed ones out; they're on the Closed Threads page): a 40px always-visible strip of letter glyphs (`navigator-strip-stream-<id>` / `navigator-strip-thread-<id>`) — a stream is a tab in the guide line's grey (`--text-muted`) with dark text (`--text-on-stream-tile`), coming out of the window's left edge and rounded on the right only, with its threads as tabs under it, all flush with the left edge and butted up against each other, each filling its shorter row and stopping short of the right (in the centre tab strip's header tint, `--panel-header-bg` over `--surface-card`, like a regular tab; the selected thread's accent bar is inside its tab, down its left, not beside it; a marked thread shows its mark as a corner fold on its top-left in `var(--thread-mark-<colour>)` (`navigator-thread-mark`, title "Marked <colour>"), not an outline; stacked tabs are set apart by a 1px divider along each one's bottom but the last's, in the guide line's grey (`--text-muted`), so none falls under the stream's tab, and the strip's column is `--surface-app`); a grey guide line runs down the column's right, flush with the stream tab's right edge, from under the stream's tab, with a tick from each thread's tab into it, ending at the last, each thread's agent status dot a node where the tick meets the tab; a stack's corners are rounded only where no tab sits next to it (the stream's top, the last tab's bottom), the rest flat; the strip draws no line against the HUD rail; in the expanded panel each row's tab runs on across the row carrying the title, set off from its abbreviation by a divider line through every row and a gap (`IconColumn wide`, `IconCell label`), so the tab's colour flows into the label, the glyph kept at its strip width so the two line up; the panel's rows draw the same icon column (`IconColumn`) so the two line up; clicking a glyph navigates directly — a thread glyph selects that thread, a stream glyph switches streams via `onSwitchStream`. **Hovering a glyph shows its full title as a native tooltip and nothing else (tsk269).** The `navigator-overlay` panel (~280px, covering the strip *and* the rail HUD to its right) expands only on an explicit click: the bottom-pinned `navigator-expand` chevron, dead space in the strip (`navigator-strip-empty`, `e.target === e.currentTarget`), a stream glyph (which also switches to that stream, then shows its threads), or the already-selected thread's glyph (selecting it again would do nothing). The chevron is pinned *outside* the scroll container and is the load-bearing affordance — once the list scrolls there is no dead space left, and `+ Add stream` lives only in the panel. The open/close state machine — click-to-open, geometric pointer-leave, Escape, outside-press, background-click, and the passive-vs-explicit guard — lives in the shared `apps/desktop/src/components/useSlideoutStrip.ts` hook (chevron in `SlideoutChevron.tsx`), which the Terminal page's `TerminalTabStrip` also runs on; a new slide-out strip adopts the hook rather than re-deriving it. It dismisses on a click in its own **dead background** (anything resolving to `button/input/select/textarea/a/label/[role=button]` is left alone so controls behave normally), on the pointer leaving its bounds (180ms grace), on Escape, and on any pointerdown outside it. The last two are *explicit* dismissals and beat the mid-rename / mid-new-thread form guard; the first two don't. **Pointer departure is measured geometrically** (document `pointermove` vs. the panel's rect), never `mouseleave` — the panel covers the rail and sits in the same DOM subtree as the strip, so the pointer never "leaves" the wrapper while parked over the covered region, which is what used to strand it open on top of the rail and swallow clicks meant for it (tsk131). Each overlay row (`navigator-stream-row-<id>` / `navigator-thread-row-<id>`) — and each strip glyph, with the same menu — opens its action menu on **right-click** (Menu key / Shift+F10 for keyboard), headed by the stream's or thread's name (`context-menu-header`); Rename and Add thread open the panel for their inline field. **Thread menu:** **"Mark with…"** (`menu-item-thread.mark`) opens a submenu headed by the line "A colour on the thread's tab, for grouping threads your way. It changes nothing else." (`context-submenu-header`, the generic `MenuItem.submenuHeader`) and lists `amber`, `red`, `green`, `blue`, `violet` (each with a colour chip, `MenuItem.swatch`) and None as `menu-item-thread.mark.<colour|none>`, the current one checked; picking one runs `oxplow.thread.mark` (via `onMarkThread` → `App.handleMarkThread`). Then Rename / Settings / Close. A mark only groups threads the person's way; every open thread of a stream shares its worktree. |
@@ -96,9 +96,9 @@ browser regression checks usable terminal height before and after reload.
 
 A URI names a thing; a **page** is one **renderer** of it. A tab's id is
 the URI it shows, and nothing in the desktop keeps a list of page kinds.
-Which page draws a URI comes from declarations
-(`pages/renderers.ts`, over the page files first — `chooseRenderer` in
-`pages/pageFiles.ts`, "The desktop host"):
+Which page draws a URI comes from the page files' declarations
+(`pages/renderers.ts`, `chooseRenderer` in `pages/pageFiles.ts`, "The
+desktop host"):
 
 1. The pages whose `for` names the URI's resource (an oxplow resource
    `<extension>/<name>`, or the scheme `https` / `http` for a web page)
@@ -114,25 +114,25 @@ Which page draws a URI comes from declarations
 each renderer `menu-item-page-open-with-<extension>/<page>`, the one
 drawing it checked) lists the renderers when there are several. Picking one is a view change
 (Back returns to the first). `App.tsx` `renderTab` draws a route
-(`oxplow:oxplow/page?page=…`) through `routeTab`, and anything else through
-its renderer: a lens (`LensPage`, run with the URI), a custom component,
-or the two built-ins — the `lens` renderer (the lens runtime) and
-`builtInPages.resource` (the fallback). A pinned renderer's tab
+(`oxplow:oxplow/page?page=…`) through `routeTab` (its page file, else
+`MissingPage`), an ephemeral view (`oxplow:oxplow/view?id=…`) through
+`EphemeralView`, and anything else through its renderer's page file, else
+`builtInPages.resource` (the fallback, the one built-in). Every page draws
+in `PageFileView` / `PageHost`; there is no lens drawing path and the
+desktop reads no manifest `pages:` entry. A pinned renderer's tab
 (`pinned: true`, the agent session) is pinned; an agent session's tab also
 draws its harness's logo, its status dot and what it waits on, from the
 window's session list and statuses (`centerTabs`), and a page's actions
 (`useTabActions`, `setTabActions`) are its tab's right-click menu. Page memory (history state, scroll) is scoped by
-`keyIdentityOf` for a page, lens or metric, and `resource:<resource>`
+`keyIdentityOf` for a page or metric, and `resource:<resource>`
 otherwise. A tab's label and icon come from `recordedPageKind(ref)` /
 `kindForTabId`: a route's page id, else the URI's resource
 (`oxplow/file`), else a web page's scheme.
 
-Foundation declares oxplow's renderers (`agent-session`, `commit`,
-`editor`, `file-viewer`, `lens`,
-`resource`, `wiki-page`, `work-item`, and `diff-view` also for
-`oxplow/snapshot`, `oxplow/effort` and `oxplow/turn`; `custom-dashboard`
-(a lens renderer, `dashboard`) for `oxplow/dashboard`; `external-url`, a lens page over the `embed` viz, for `https` and `http`). Their
-bodies are listed under "Modules" and "Declared pages". An agent
+Foundation's page files are oxplow's renderers (`agent-session`,
+`commit`, `directory`, `editor`, `file-viewer`, `wiki-page`, `work-item`,
+`diff-view` for `oxplow/snapshot`, `oxplow/effort` and `oxplow/turn`, and
+`external-url`, a page over the `embed` viz, for `https` and `http`). An agent
 session's tab follows its row (`reconcileSessionTabs`). There is no
 `change-analysis` page.
 
@@ -427,19 +427,15 @@ draws a tab from its page file first (`pages/pageFiles.ts`):
 `chooseRoute` finds a route's page by id (`pageFileOf`: oxplow's — the
 `oxplow` namespace, `CORE_NAMESPACE` — by its slug, any other's by
 `<extension>/<slug>`), `chooseRenderer` a resource URI's among the page
-files' `for` / `accepts` / `#oxplow.renderer=` / `default`
-(`rendererFor` works over a page file or a `pages:` entry alike). A
-`pages:` entry draws a tab only when no page file does, or when an enabled
-extension still mounts a *lens* into its slots (`hasLensMounts`: a
-`ui.slots` entry at `<page>.<name>` or at its `pages:` lens's
-`<lens>.<name>` — a page file's slot shows only mounted pages) — that
-lens path is removed with the lenses. oxplow-foundation and
+files' `for` / `accepts` / `#oxplow.renderer=` / `default`. Nothing else
+draws a tab: no `pages:` entry, no lens, whatever is mounted in a page's
+slots (a page's slot shows only the pages mounted there). oxplow-foundation and
 oxplow-bundled both have `namespace: oxplow` and share the core page
 names, so a slug one of them declares the other may not
 (`pages::schema::refuse_shared_core_pages`: the later in load order loses
 that page with a load error; bundled's panel bodies are
-`comments-panel` and `go-to-panel` for that reason). Open With lists every renderer by name, page
-files first (`openWithOptions`). The tab body is `PageFileView`: its run's
+`comments-panel` and `go-to-panel` for that reason). Open With lists every
+page file that renders the URI by name (`openWithOptions`). The tab body is `PageFileView`: its run's
 params are the entry's URI (`pageRunParams`: the `?` params — a
 renderer's `uri` and its resource's own — and the `#` params the page
 declares as a filter or a selection; a param with no role is a resource),
@@ -456,7 +452,7 @@ holds its run (`usePageRunWith` over `usePageRunsStore()`: the
 `runId`, `rerun` is Refresh) and draws `tabs/Page.tsx` chrome as a lens
 page's: Contents, Selection (the rows picked, `picked` history state) and
 About this page (`page.origin`, out of date) in the rail
-(`pages/railGroups.tsx`, shared with `LensRail`); `comments: true` → the
+(`pages/railGroups.tsx`); `comments: true` → the
 `CommentNavigator`, `PageCommentsContext` and `#comment=` on the tab's
 identity; a renderer's backlinks and outbound links; the stream as
 `LensStreamContext`; full width for a grid, a board or a dashboard; and
@@ -467,7 +463,20 @@ The chrome: the title is `tabLabel` over the run's params and `labelRow(run)`
 (the first declared loader's first row), whole-page actions and Refresh
 (`page.refresh`) are page actions, pressed through `useLensActions` with
 a runner that calls `run_page_action` with no node, so a command that
-asks is confirmed as a lens action's is. `PageRail` lists the filter
+asks is confirmed. **Copy** (standard, `page-copy`) puts the open run's
+text on the clipboard (`page_text(runId)`, through `PageReads.text`);
+Add to Context is the ☰'s own. After a press or a form submit on a run
+ran, the window runs that run again (`PageRuns.refresh(runId)`, from
+`useNodeActions` / `useNodeForms`): a command may change what no model
+change announces (a keychain entry: a credential, an AI provider's key).
+An embedded page's own whole-page actions are buttons above its tree
+(`EmbeddedActions`, `lens-action-<id>`), pressed on the host's run naming
+the embed's node; an `expand`ed row's page keeps its vizzes' buttons
+(`partButtons`) though it is drawn compact. A page a slot mounted is a
+section titled by the mounted page's title. A `custom` viz shares the
+host's view (`HostedViewContext` from `PageHost`: its filter and selection
+params, `pageViewKeys`; a change is the rail's `onChange`), as a
+replacement's shares its target's. `PageRail` lists the filter
 params (`ParamList`; a change is `setParams`) and draws `run.rail`.
 `PageTree` draws a `RunNode` tree (`compact` in a rail panel): a node
 with `replaceable: <target>` is wrapped in `Replaceable` as a lens part
@@ -488,17 +497,15 @@ component (`ComponentPage`, drawn by `PageHost` in place of the tree):
 it fills the page, its `setTitle` / `setActions` are the tab's title and
 nav-bar actions, the tab entry's whole `#` is its view, and what it hands
 over with `showView` (an inline page's YAML) opens as a run of its own and
-is drawn under it (`ShownView`, with Save as Lens and Pin to Dashboard for
-one viz over one `sql` loader); its `rail:` is drawn in the rail as any
-page's. Every node's root
+is drawn under it (`ShownView`, with Save as Page); its `rail:` is drawn
+in the rail as any page's. Every node's root
 has `data-node` and registers in a `NodeRegistry`; `useNodeFocus` lands
 on `#node=<id>` (scroll, `data-focused` for 1.5 s). Viz components press
 their actions through `LensActionRunnerContext`
-(`lens/lensActionRunner.ts`: `run_lens_action` by default); `PageTree`
-provides `useNodeActions(runId, nodePath)` per viz node, so the same
-components draw both. Forms go the same way: `FormViz` and `ActionForm`
-start and submit through `FormSourceContext` (`lens/formSource.ts`:
-`lens_form` / `submit_lens_form` / `lens_action_form` by default), which
+(`lens/lensActionRunner.ts`; outside a page run it refuses); `PageTree`
+provides `useNodeActions(runId, nodePath)` per viz node. Forms go the same way: `FormViz` and `ActionForm`
+start and submit through `FormSourceContext` (`lens/formSource.ts`;
+outside a page run it refuses), which
 `PageTree` sets per viz node to `useNodeForms(runId, nodePath)`
 (`page_form`, `submit_page_form`, `page_action_form`; a form action's
 submit is a press with its `input`); `PageHost` draws a whole-page form
@@ -512,94 +519,61 @@ undeclared param), the named loader's viz node drawn compact — and a lazy
 tree's open branch is a run of the node's own page with the lazy param
 set to the branch's id (`pages/pageBranches.ts`, `usePageRunsFor`), whose
 rows press on that run (`BranchRun.runner` / `forms`: the server only
-takes a row its run holds). A filter's `options_from` in `PageRail` names a
-page too (`pageOptionsSource`, `OptionsSourceContext`): run once with the
-values it declares (`run_page`), its named loader's `value` / `label` /
-`group` the options. Other pages are read through `PageReadsContext`
+takes a row its run holds). A filter's `options_from` names a page
+(`pageOptionsSource`, `OptionsSourceContext`, the daemon's by default,
+`PageRail`'s over its `PageReads`): run once with the values it declares
+(`run_page`), its named loader's `value` / `label` / `group` the
+options. A live origin (Up and Down through a page node's link column,
+`<page>#<node>`) holds the producing page's run (`LiveOriginResolver`
+over the window's runs) and reads that node's rows (`liveOriginNodeRun`). Other pages are read through `PageReadsContext`
 (`pages/pageReads.ts`), a test's fake in place of the daemon. New params keep the old run on screen
 (`data-stale`), and Loading shows only after 150 ms without a run.
 
 ## Declared pages
 
-Every page is a `pages:` entry in an extension's manifest
-(`.context/extensions.md` "Pages"); oxplow's own are in
-oxplow-foundation's. A page with no `for` is a **route**
-(`oxplow:oxplow/page?page=<id>`); a page with `for` is a **renderer** of
-a resource ("Renderers"). The declaration gives the title (its name), the `label` its tab says
-(`{{param.<name>}}` over what it shows, `{{row.<column>}}` over the one row of a document lens with a `query:` once it has run, filters `|short` and `|basename`; none: the title), icon, launcher
-`category` (none: not in the launcher — a page only opened from
-elsewhere; a page whose lens is a view document also lists each section
-but the first, `<page>: <section>` at `#<view>=<id>`), `keywords`, the `params` its id carries, a `count:` lens for
-the launcher badge, and what draws it: a `lens:` (most pages) or, for
-oxplow's own until the kit can draw them, `component: oxplow:<name>`, a
-**built-in page**. A renderer also has `for`, `accepts`, `default` and
-`pinned`. A page whose body is a custom `component:` may name a `rail:`
-lens of its extension, drawn in its rail with the page's view (Explore
-Data's catalog: extensions.md "A custom page's rail"). The built-ins are pinned by
-`crates/oxplow-app/src/built_in_pages.rs` and its golden
-`fixtures/built_in_pages.json`. The list grew once with the renderers
-(`agent-session`, `commit`, `directory`, `editor`, `file-viewer`, `lens`,
-`resource`, `wiki-page`, `work-item`) and only shrinks
-again (a page leaves when it becomes a lens or a custom page — Explore
-Data is oxplow-foundation's custom page now; the editor, the Terminal and
-the Web Page lenses over the `editor`, `terminal` and `embed` vizes). It
-ends at two — every page is a lens now, the agent session a document of
-`approvals` and `terminal`: `lens` (the lens runtime, which draws every lens
-page) and `resource` (the fallback when nothing declares a URI) stay —
-neither can be a lens;
-`pages/declaredPages.ts`'s `BUILT_IN_PAGES` mirrors it and a test checks
-they match.
+The desktop reads no manifest `pages:` entry: every page it draws, lists
+or names is a page file (`Extension.pageFiles`). A page file with no `for`
+is a **route** (`oxplow:oxplow/page?page=<slug>` for oxplow's,
+`page=<extension>/<slug>` for any other's); one with `for` is a
+**renderer** of a resource ("Renderers"). Its `label` is what its tab says
+(`{{param.<name>}}` over what it shows, `{{row.<column>}}` over its first
+loader's first row once it has run, filters `|short` and `|basename`;
+none: the title); `icon`, `title`, launcher `category` (none, or
+`hidden`: not in the launcher — a page only opened from elsewhere),
+`keywords` and `badge` (the launcher's count, one `run_page` when the
+launcher opens: `launcherCounts`, its `run.badge`). The launcher lists
+the page files with a category that aren't hidden (`launcherPages`, by
+`pageFileUri`); a page whose view is a switch also lists each of its
+other sections (`<page>: <section>` at `#<param>=<id>`).
 
-`App.tsx` `renderTab` draws a route through `routeTab`: it finds the
-declaration (`declaredPage`, by tab id among the enabled extensions),
-draws a built-in from the
-`builtInPages` table (`pages/builtInPages.tsx`) by name, a lens page through
-`DeclaredPageView` (`LensPage` with the id's params), and a custom page
-(`body.kind === "component"`) through `CustomPageView`: the component's
-frame filling the body under the nav bar, told its stream and thread
-and given the whole entry as its view (`useHostedView`), its title and
-actions the frame's (`setTitle`, `setActions`). oxplow's Timeline (the `timeline` page, params `from`, `to`,
-`thread`) is one: its window is its view params, written on every change
-(not its opening default) and followed on Back/Forward. A frame's
-`setViewParams` reaches the tab as `patchViewParams` (null drops a key); both write the id's `#`. Each built-in body is a
-`(ctx) => CenterTab | null` over `{ ref, params, nav }`; `nav` is the slot's
-`SlotNav` (`pages/slotNav.ts`), so a body never reaches into App's locals. While the
-extensions load, an oxplow page whose id is a built-in's name draws the
-built-in straight away. Icons and labels come from the declaration too:
-`kindForTabId` gives a route's page id (`tasks`, `gh/open-prs`) or a
-URI's resource as its kind,
-which is also what visits and bookmarks record (`recordedPageKind`),
-and `PageKindIcon` / `lensIcon` / `pageKindLabel` resolve it to the
-page's icon and title. The launcher lists the page files with a
-category that aren't `hidden` (`launcherPages`, by `pageFileUri`), then
-any `pages:` entry with no file; a page file's count is one
-`run_page` when the launcher opens (`launcherCounts`: its `run.badge`), a
-`pages:` entry's its `count:` lens; a page whose view is a switch (a view
-document's, a lens's `view:`) also lists each of its other sections.
+`App.tsx` `renderTab` draws a route through `routeTab`: its page file in
+`PageFileView`, `MissingPage` when no enabled extension has it, nothing
+while the extensions load. The one built-in is `builtInPages.resource`
+(`pages/builtInPages.tsx`), the fallback renderer; it is a
+`(ctx) => CenterTab | null` over `{ ref, params, nav }`, `nav` the slot's
+`SlotNav` (`pages/slotNav.ts`). A page whose `view:` is one component node
+*is* that component (`ComponentPage`): oxplow's Timeline (the `timeline`
+page, params `from`, `to`, `thread`) is one — its window is its view
+params, written on every change (not its opening default) and followed on
+Back/Forward; a frame's `setViewParams` reaches the tab as
+`patchViewParams` (null drops a key). Icons and labels: `kindForTabId`
+gives a route's page id (`tasks`, `gh/open-prs`) or a URI's resource as
+its kind, which is also what visits and bookmarks record
+(`recordedPageKind`), and `PageKindIcon` / `lensIcon` / `pageKindLabel`
+resolve it to the page file's icon and title.
 
 oxplow's pages and their params:
 
-- Lens pages: `wiki-page` (the renderer of `oxplow/wiki`, tab label `{{param.slug}}`, `comments: true`: a document of `wiki-page-body` — a `markdown` viz over `v_knowledge_body` with an `edit: true` Save on `oxplow.knowledge.write_page` and a Delete Page action — `wiki-page-info`, last edited and freshness, and `wiki-page-refs`, the cited files with Mark verified; a page not yet written is a row with an empty body, made by its first Save), `board` (a document with one replaceable part, `board-cards`: a `viz: board` of `v_work_item` grouped by state; `show` — this thread, the backlog, everything — is its filter), `alerts` (a document of `alerts-decisions` (approvals), `alerts-hints`, `alerts-operations` with `expand` into `alerts-operation`, `alerts-deliveries`, `alerts-reactions` and `alerts-extensions`), `duplicate-block` (a route, params `left`, `left_lines`, `left_at`, `right`, `right_lines`, `right_at`: a `code` viz of two rows with `sync: true`, the ranges marked), `diff` (a route, params `path`, `left`, `right`, `label`, `base`, view `lines`: a `diff` viz over one file's two revisions filling the page, tab label `{{param.path}} ({{param.label}})` — `diffRef` always sets `label`, "diff" by default; a diff of literal text, Compare with Clipboard, keeps its sides in the entry's history state, which `DiffViz` reads), `file-viewer` (the renderer of `oxplow/file` with a `rev`: a `code` viz of the file at the revision, `#lines=` marked), `answer` (the renderer of `oxplow/answer`, tab label `{{row.title}}`: a document whose bare section is the `answer` viz; what an agent shows opens as one, behind the shown tab — extensions.md "Thread answers"), `editor` (the renderer of `oxplow/file` with no `rev`, tab label `{{param.path|basename}}`, `comments: true`: an `editor` viz of the working file, `#lines=` landed on — `.context/editor-and-monaco.md` "The editor viz"), `commit` (the renderer of `oxplow/commit`, tab label `{{param.sha}}`: a document whose row `SELECT id AS change_id, base_revision, head_revision FROM v_change WHERE kind = 'commit' AND target = :sha` makes the commit's change and hands it to its sections — `commit-detail`, a `detail` over `v_commit WHERE sha = :sha` with Cherry-pick and Revert through `oxplow.git.cherry_pick` / `revert`, and `commit-files`, a `tree` over `v_commit_file` with status icons linking each file's diff — and to the lenses mounted at `oxplow-foundation/commit.sections`; any sha git knows reads, by its full id) and `uncommitted` (a document on the working change, `kind = 'working' AND target = ''`: `uncommitted-commit`, a form over `oxplow.vcs.commit`, and `uncommitted-files`, a tree over `v_change_file`; mounts at `oxplow-foundation/uncommitted.sections`), `comments` (the Comments inbox: a `document` of `comments-threads` — a table over `v_comment` for the stream, grouped by the page each is anchored to, `days` a choice filter on how far back resolved ones show, a row `select`s the `comment` param — and `comments-conversation`, the picked thread's `v_comment_message` rows; row actions are `knowledge.reply_comment` (a form), `update_comment` (resolve, reopen, note / follow-up) and `delete_comment`; the Go to location column is a link to the target page and does not scroll to the anchor), `directory` (the renderer of `oxplow/dir`, `accepts: { rev: absent }`, tab label `{{param.path}}`: a folder's rows from `v_workspace_file WHERE stream_id = :stream_id AND parent = :path`, folders first, each linking to its folder or file; params `uri`, `path`, `stream_id`), `problems`, `symbols` (`path`, `filter`), `closed-threads`,
+- Pages: `wiki-page` (the renderer of `oxplow/wiki`, tab label `{{param.slug}}`, `comments: true`: a document of `wiki-page-body` — a `markdown` viz over `v_knowledge_body` with an `edit: true` Save on `oxplow.knowledge.write_page` and a Delete Page action — `wiki-page-info`, last edited and freshness, and `wiki-page-refs`, the cited files with Mark verified; a page not yet written is a row with an empty body, made by its first Save), `board` (a document with one replaceable part, `board-cards`: a `viz: board` of `v_work_item` grouped by state; `show` — this thread, the backlog, everything — is its filter), `alerts` (a document of `alerts-decisions` (approvals), `alerts-hints`, `alerts-operations` with `expand` into `alerts-operation`, `alerts-deliveries`, `alerts-reactions` and `alerts-extensions`), `duplicate-block` (a route, params `left`, `left_lines`, `left_at`, `right`, `right_lines`, `right_at`: a `code` viz of two rows with `sync: true`, the ranges marked), `diff` (a route, params `path`, `left`, `right`, `label`, `base`, view `lines`: a `diff` viz over one file's two revisions filling the page, tab label `{{param.path}} ({{param.label}})` — `diffRef` always sets `label`, "diff" by default; a diff of literal text, Compare with Clipboard, keeps its sides in the entry's history state, which `DiffViz` reads), `file-viewer` (the renderer of `oxplow/file` with a `rev`: a `code` viz of the file at the revision, `#lines=` marked), `editor` (the renderer of `oxplow/file` with no `rev`, tab label `{{param.path|basename}}`, `comments: true`: an `editor` viz of the working file, `#lines=` landed on — `.context/editor-and-monaco.md` "The editor viz"), `commit` (the renderer of `oxplow/commit`, tab label `{{param.sha}}`: a document whose row `SELECT id AS change_id, base_revision, head_revision FROM v_change WHERE kind = 'commit' AND target = :sha` makes the commit's change and hands it to its sections — `commit-detail`, a `detail` over `v_commit WHERE sha = :sha` with Cherry-pick and Revert through `oxplow.git.cherry_pick` / `revert`, and `commit-files`, a `tree` over `v_commit_file` with status icons linking each file's diff — and to the lenses mounted at `oxplow-foundation/commit.sections`; any sha git knows reads, by its full id) and `uncommitted` (a document on the working change, `kind = 'working' AND target = ''`: `uncommitted-commit`, a form over `oxplow.vcs.commit`, and `uncommitted-files`, a tree over `v_change_file`; mounts at `oxplow-foundation/uncommitted.sections`), `comments` (the Comments inbox: a `document` of `comments-threads` — a table over `v_comment` for the stream, grouped by the page each is anchored to, `days` a choice filter on how far back resolved ones show, a row `select`s the `comment` param — and `comments-conversation`, the picked thread's `v_comment_message` rows; row actions are `knowledge.reply_comment` (a form), `update_comment` (resolve, reopen, note / follow-up) and `delete_comment`; the Go to location column is a link to the target page and does not scroll to the anchor), `directory` (the renderer of `oxplow/dir`, `accepts: { rev: absent }`, tab label `{{param.path}}`: a folder's rows from `v_workspace_file WHERE stream_id = :stream_id AND parent = :path`, folders first, each linking to its folder or file; params `uri`, `path`, `stream_id`), `problems`, `symbols` (`path`, `filter`), `closed-threads`,
   `wiki-index`, `wiki-freshness` (`slug`), `go-to`, `dashboards`,
   `hook-events`, `done-work`, `catalog`, `new-stream` (a form: `visible_if` on its `source`, `oxplow.stream.create`), `stream-settings` (`stream`) and `thread-settings` (`thread`) (documents: a hint, the thread's open sessions, and the prompt as an edit form over `v_stream` / `v_thread` with `oxplow.*.set_prompt`), `git-history` (a document with one replaceable part: the commit list, or the history graph; params `q`, `author`, `branch`), `local-history` (a document of
   two lenses; params `mode` `recent` | `by-commit` and `all`, which lifts
   the caps — the rail's, so no "View all" step to go Back from).
-- Lens pages (more): `backlog` (badge: `backlog-count`; a document of `backlog-add`, a quick-add form over `oxplow.work_item.create`, and `backlog-list`, a state-grouped `list` of the items on no thread: params `q`, the search over title and fields, and `thread_id`; drag to reorder, mark rows for bulk state, priority, Bring to this thread and Delete, `r` `i` `b` `d` keys for the states).
-- Lens pages (more): `diff-view` (the Changes page, the renderer of `oxplow/snapshot`, `oxplow/effort` and `oxplow/turn`; view params `start` and `end`, each `''` / `none` / `working` / `snap:<id>` / `git:<rev>`: a picked point is a pushed view change), `tasks` (a document: `tasks-list`, the `work_item.list` replaceable; `tasks-summary`; `tasks-backlog`; view params `show` and `priority`, plus `thread_id` and `stream_id`).
-- Lens page `terminal` (the stream's terminals: a `terminal` viz over `v_terminal`, the picked one the `terminal` selection, `new` / `rename` / `close` actions over `oxplow.terminal.*`; terminal.md "The terminal viz and its host").
-- Lens page `settings` (a view document: view `area`, the overview's search `q`; `#section=<id>` lands inside an area; extensions.md "A document with a view"): a section per area, each a document lens `settings-<area>`.
-- Built-in pages: `board`,
-  `files`, `git-dashboard`, `uncommitted-changes`,
-  `comments`, `metrics-recorded`,
-  `alerts`,
-  `new-task`
-  (`parent`),
-  `diff` (`path`, `left`, `right`, `label`,
-  `base` — the left side's name when it isn't the version's own — and
-  `line`, a view param: the same diff opened at another line moves the
-  tab showing it; `diffSpecOf` reads the spec back; a clipboard compare's
-  texts are history state, `diffTextOf`), `duplicate-block` (`left`, `left_lines`,
-  `left_at`, `right`, `right_lines`, `right_at`; `duplicateBlockOf`).
+- Pages (more): `backlog` (badge: `backlog-count`; a document of `backlog-add`, a quick-add form over `oxplow.work_item.create`, and `backlog-list`, a state-grouped `list` of the items on no thread: params `q`, the search over title and fields, and `thread_id`; drag to reorder, mark rows for bulk state, priority, Bring to this thread and Delete, `r` `i` `b` `d` keys for the states).
+- Pages (more): `diff-view` (the Changes page, the renderer of `oxplow/snapshot`, `oxplow/effort` and `oxplow/turn`; view params `start` and `end`, each `''` / `none` / `working` / `snap:<id>` / `git:<rev>`: a picked point is a pushed view change), `tasks` (a document: `tasks-list`, the `work_item.list` replaceable; `tasks-summary`; `tasks-backlog`; view params `show` and `priority`, plus `thread_id` and `stream_id`).
+- Page `terminal` (the stream's terminals: a `terminal` viz over `v_terminal`, the picked one the `terminal` selection, `new` / `rename` / `close` actions over `oxplow.terminal.*`; terminal.md "The terminal viz and its host").
+- Page `settings` (a view document: view `area`, the overview's search `q`; `#section=<id>` lands inside an area; extensions.md "A document with a view"): a section per area, each a document lens `settings-<area>`.
+- Built-in page: `resource` (the fallback renderer) only.
 
 New Session (the `new-session` page) is a foundation document lens:
 **Start a new session** (a form over `oxplow.agent_session.open`: the agent
@@ -618,31 +592,26 @@ The rail's sections are **panels** (`components/Panels/panelLayout.ts`):
 every enabled extension's `panels:` — core has none of its own since Go
 To moved into `oxplow-bundled`; with it disabled the rail is
 the search box and + Add Panel
-(`ext:<extension>/<id>`, rendered by `ExtensionPanelSection`: the body
-lens compact; the header's count — the `count` lens's row count (or
-`number`), else the badge lens's alert count while it fires
-(`panelCount`); collapsed, the `collapsed` lens compact as its summary,
-else nothing; the header's ↗
-opening the panel's `open` page or else its body page or lens, `panelOpenRef`).
-A panel with `pages: true` names pages for its parts: `usePagePanelRuns`
-holds one open page run per part (params its scope's, the body's with the
-viewer's picks), the body and collapsed pages drawn compact by
-`PageTree`, the header count the count page's `badge` (else its first
-loader's rows) or the badge page's alert count while it fires (else its
-`badge`), and the badge page's alert an Alerts row whose Review opens that
-page (`PanelAlert.open`, a URI, as a lens badge's opens its lens).
-A compact lens keeps its `group` headings and group actions (the
-toolbar is hidden), and its linked rows drag into the agent's context.
-The rail's panels are moving out of core into `oxplow-bundled`: only their UI moves, as lenses over the existing views and
-commands; all three are done (`ext:oxplow-bundled/comments`, `ext:oxplow-bundled/work`, `ext:oxplow-bundled/uncommitted`). One owner
+(`ext:<extension>/<id>`, rendered by `ExtensionPanelSection`). Every
+panel's parts (`body`, `collapsed`, `badge`, `count`) are pages:
+`useExtensionPanelRuns` holds one open page run per part (params its
+scope's, the body's with the viewer's picks), the body and collapsed
+pages drawn compact by `PageTree`, the header count the count page's
+`badge` (else its first loader's rows) or the badge page's alert count
+while it fires (else its `badge`), and the badge page's alert an Alerts
+row whose Review opens that page (`PanelAlert.open`, a URI); the header's
+↗ opens the panel's `open` page, else its body page (`panelOpenRef`).
+A compact viz keeps its `group` headings and group actions, and its
+linked rows drag into the agent's context.
+The rail's panels are moving out of core into `oxplow-bundled`: only their UI moves, as pages over the existing views and
+commands; all three are done (`ext:oxplow-bundled/comments`, `ext:oxplow-bundled/work`, `ext:oxplow-bundled/uncommitted`), each a page now. One owner
 holds every panel's runs — `PanelRunsProvider`
 (`components/Panels/PanelRunsContext.tsx`, around the app),
 read by the rail, the status bar's bell and the Alerts page — through
 `components/Panels/usePanelRuns.ts` → `useExtensionPanelRuns`: it binds each panel's scope — `stream_id` /
 `thread_id` as row ids, from `panelParams` — for the stream and thread it
-shows, re-runs when either changes or when a read changes, runs each
-distinct lens of a panel once whatever roles it plays, and hands each
-section its runs. The firing badges come from the same runs
+shows, opens new runs when either changes (the daemon re-runs them when
+a read changes), and hands each section its runs. The firing badges come from the same runs
 (`panelAlerts`), so a badge never runs twice. What needs the person —
 proposals, failed operations, undelivered events — isn't a rail panel: it's
 the status bar's bell and the Alerts page (see usability.md); a firing badge
@@ -706,12 +675,12 @@ comment's time and the task panel use it, not their own copies.
 
 | Archetype | When | Core form | Extension form |
 |---|---|---|---|
-| **Document** (the default) | reading, picking, small forms, lists | `lens/PartsViz.tsx` (`DocumentViz`): title + intro in a reading column, then `Section`s (a heading over a rule, no boxes) | `viz: document` + `sections:` |
-| **Dashboard** | many numbers and charts at a glance | `TileGrid` / `TileSlot` / `Tile` at full width | `viz: dashboard` + `tiles:` |
+| **Document** (the default) | reading, picking, small forms, lists | `PageHost` / `PageTree`: title + intro in a reading column, then a `stack`'s children as `Section`s (a heading over a rule, no boxes) | `view: { stack: [...] }` |
+| **Dashboard** | many numbers and charts at a glance | `TileGrid` / `TileSlot` / `Tile` at full width | `view: { grid: [...] }` (a page in `category: Dashboards`: `DashboardGrid`) |
 | **Board** | cards by group, dragged across columns | (none) | `viz: board` + `group: { by, values }` and a `drag: true` action |
 | **Document with an edited body** | a wiki page, a work item's body: markdown read and written, with a Contents rail and comments | the `Markdown` component (`.context/markdown.md`) | `viz: markdown` + `markdown: { text }` and an `edit: true` action (its Save), the page `comments: true` |
 | **Reader** | one file, two files side by side, or one diff, at the page's whole size | `Page` with `fill` (the body stretches to the page's height) | `viz: code` / `viz: diff` |
-| **Custom** | what the kit can't express: editors, terminals, boards, git flows | a React page on `Page`, using kit parts where they fit | `viz: custom` (the sandboxed component), or a whole custom page: `pages[].component: <id>` (`CustomPageView`) |
+| **Custom** | what the kit can't express: editors, terminals, boards, git flows | a React page on `Page`, using kit parts where they fit | `viz: custom` (the sandboxed component), or a page whose `view:` is one `component` node (`ComponentPage`) |
 
 A cell's match is drawn with the kit class `.ox-mark` (a lens column's `highlight`, extensions.md "Lenses").
 
@@ -757,8 +726,8 @@ the body region differs.
 - **The rail** is the page's control panel (params, filters, collapse
   controls, a contents list): a `320px` sticky column beside a body of
   **either** width (the body is padded then), titled by `rightRailTitle`
-  ("Details" by default). A lens page's rail is `LensRail` — Filters,
-  Selection, About this page, built from `RailGroup` and `ParamList`
+  ("Details" by default). A page's rail is `PageRail` — Filters, its
+  `rail:` tree, Selection, About this page, built from `RailGroup` and `ParamList`
   (usability.md "A page's controls are in its rail").
   It is orthogonal to the archetype — a dashboard may have one for its
   filters, Git History's holds its find, author and branch.

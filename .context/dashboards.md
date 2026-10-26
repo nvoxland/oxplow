@@ -45,6 +45,12 @@ defaulting to `my-pages`. An inline view is saved as a page before pinning.
 
 ## Legacy database-backed dashboards (pending removal)
 
+The desktop no longer draws these: the `custom-dashboard` lens renderer,
+the `components/Dashboard/*` tiles, `customDashboardRef` and the
+`dashboard.*` API wrappers are gone, so an `oxplow:oxplow/dashboard?id=…`
+tab opens on the `resource` fallback. What follows describes the store
+and commands still in Rust until they are removed with the lens runtime.
+
 User-created **dashboards** — a named grid of metric **tiles** the user
 assembles to view a handful of metrics at a glance. Complements the per-metric
 **detail** page (`.context/metrics.md`) and the **Recorded Metrics** list.

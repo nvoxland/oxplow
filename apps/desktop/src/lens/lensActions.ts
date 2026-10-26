@@ -1,14 +1,15 @@
-/// A lens's actions (P6.B1): each declares a command, run as the lens
+/// A viz's actions (P6.B1): each declares a command, run as the page
 /// acting for the person who pressed it — so it asks for confirmation when
-/// the command does, and grants no power the person lacks. Copy and Add to
-/// Agent Context are on every lens (kit affordances, not declared). See
+/// the command does, and grants no power the person lacks. Copy is the
+/// page's (`page_text`), Add to Context its menu's. See
 /// `.context/extensions.md`.
 import { fieldsOf, secretFields, shownFields, type Field } from "../components/SchemaForm/schemaFormModel.js";
 import { IpcCallError, needsConfirmation } from "../ipc-error.js";
 import type { CommandOutcome, Drop, FormStart, PageAction, LensRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
 
 export interface LensActionDeps {
-  runLensAction(
+  /** Press it on the page run the viz is in. */
+  press(
     id: string,
     action: string,
     params: Record<string, SqlCell>,
@@ -87,7 +88,7 @@ export async function performLensAction(
   drop: Drop | null = null,
 ): Promise<LensActionOutcome> {
   try {
-    const outcome = await deps.runLensAction(run.lens.id, action.id, run.params, row, streamId, confirmed, drop);
+    const outcome = await deps.press(run.lens.id, action.id, run.params, row, streamId, confirmed, drop);
     // A run that came back undoable offers its Undo.
     const auditId = outcome.inverse && outcome.audit_id != null ? outcome.audit_id : null;
     deps.toast(`${action.label}: done.`, auditId === null ? undefined : () => void deps.undo(auditId).catch((e: unknown) => deps.recordError(`Undo ${action.label}`, e instanceof Error ? e.message : String(e))));
@@ -142,23 +143,4 @@ export function promptField(start: FormStart): (Field & { secret: boolean }) | n
   // A field picked from a list is a select: the slideover's, never a strip.
   if (only && start.choices?.[only.path]) return null;
   return only?.kind === "text" ? { ...only, secret: secretFields(schema, specs).has(only.path) } : null;
-}
-
-/** Copy: the lens's text rendering, as an agent would read it. */
-export async function copyLens(
-  run: LensRun,
-  streamId: string | null,
-  deps: {
-    lensText(id: string, params: Record<string, SqlCell>, streamId: string | null): Promise<string>;
-    copyText(text: string): Promise<void>;
-    recordError(label: string, message: string): void;
-  },
-): Promise<boolean> {
-  try {
-    await deps.copyText(await deps.lensText(run.lens.id, run.params, streamId));
-    return true;
-  } catch (e) {
-    deps.recordError("Copy", e instanceof Error ? e.message : String(e));
-    return false;
-  }
 }

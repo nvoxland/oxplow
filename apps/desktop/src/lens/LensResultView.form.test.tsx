@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, expect, mock, test } from "bun:test";
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
-import { useState, type ReactNode } from "react";
+import { cleanup, fireEvent, render as rtlRender, waitFor } from "@testing-library/react";
+import { useState, type ReactElement, type ReactNode } from "react";
 import type { ActionThen, CommandSpec, Lens, LensRun } from "../tauri-bridge/generated/bindings.js";
 import { IpcCallError } from "../ipc-error.js";
+import { LensActionRunnerContext, type LensActionRunner } from "./lensActionRunner.js";
+import { FormSourceContext, type FormSource } from "./formSource.js";
 import { PageNavigationContext, type PageNavigation } from "../tabs/PageNavigationContext.js";
 
 // A lens action with `form: true` opens its command's form in a slideover,
@@ -56,42 +58,45 @@ let actionCommand: CommandSpec = UPDATE;
 
 mock.module("../api.js", () => ({
   ...realApi,
-  lensActionForm: async (_id: string, _action: string, _params: unknown, row: Record<string, unknown> | null) => ({
+  commandOpenAfter: async () => openAfterPage,
+}));
+
+// A viz starts and submits its forms, and presses its actions, through the
+// page that draws it: these stand in for it.
+const formSource: FormSource = {
+  actionStart: async (_target, _action, row) => ({
     command: actionCommand,
     values: { uri: row?.uri, title: row?.title },
     fixed: ["uri"],
     fields: null,
-  }),
-  runLensAction: async (
-    _id: string,
-    action: string,
-    _params: unknown,
-    row: unknown,
-    _streamId: unknown,
-    confirmed: boolean,
-    input: unknown,
-  ) => {
-    runs.push({ action, row, input, confirmed });
-    if (invalidField) throw new IpcCallError("a title can't be empty", "INVALID", invalidField);
-    return { result: null, auditId: 1, eventId: null, inverse: null };
-  },
-  lensForm: async () => {
+  }) as never,
+  start: async () => {
     formStarts += 1;
     return {
-    command: UPDATE,
-    values: fixedStart ?? { uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", title: storedTitle },
-    fixed: ["uri"],
-    fields: ["title"],
-    };
+      command: UPDATE,
+      values: fixedStart ?? { uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", title: storedTitle },
+      fixed: ["uri"],
+      fields: ["title"],
+    } as never;
   },
-  submitLensForm: async (_id: string, input: unknown) => {
+  submit: async (_target, input) => {
     submits.push(input);
     if (!invalidField) storedTitle = (input as { title?: string }).title ?? storedTitle;
     if (invalidField) throw new IpcCallError("a title can't be empty", "INVALID", invalidField);
-    return { result: null, auditId: 1, eventId: null, inverse: null };
+    return { result: null, audit_id: 1, event_id: null, inverse: null } as never;
   },
-  commandOpenAfter: async () => openAfterPage,
-}));
+};
+const press: LensActionRunner = async (_id, action, _params, row, _streamId, confirmed, input) => {
+  runs.push({ action, row, input, confirmed });
+  if (invalidField) throw new IpcCallError("a title can't be empty", "INVALID", invalidField);
+  return { result: null, audit_id: 1, event_id: null, inverse: null };
+};
+const wrapper = ({ children }: { children: ReactNode }) => (
+  <LensActionRunnerContext.Provider value={press}>
+    <FormSourceContext.Provider value={formSource}>{children}</FormSourceContext.Provider>
+  </LensActionRunnerContext.Provider>
+);
+const render = (ui: ReactElement) => rtlRender(ui, { wrapper });
 
 const { LensResultView } = await import("./LensResultView.js");
 
@@ -279,6 +284,25 @@ test("a form lens starts again from the current values after it saves", async ()
   await waitFor(() => expect(submits).toEqual([{ uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", title: "New" }]));
   await waitFor(() => expect(formStarts).toBe(2));
   await waitFor(() => expect((view.getByTestId("lens-form-fields-title") as HTMLInputElement).value).toBe("New"));
+});
+
+// A page run re-read after a save (the server re-ran it, or the window
+// did) brings the saved row: the form starts again from it, even when the
+// first start after the save raced the re-run.
+test("a form starts again when its run's rows change", async () => {
+  const at = (title: string): LensRun =>
+    ({
+      lens: { ...lens, viz: "form", form: { command: "oxplow.work_item.update", defaults: null, fixed: ["uri"], fields: ["title"] }, actions: [] },
+      params: {},
+      result: { columns: ["title"], rows: [[title]], truncated: false },
+    }) as unknown as LensRun;
+  const view = render(<LensResultView run={at("Old")} onOpenPage={() => {}} />);
+  await waitFor(() => expect(view.getByTestId("lens-form-fields-title")).toBeTruthy());
+  const before = formStarts;
+  storedTitle = "Saved elsewhere";
+  view.rerender(<LensResultView run={at("Saved elsewhere")} onOpenPage={() => {}} />);
+  await waitFor(() => expect(formStarts).toBe(before + 1));
+  await waitFor(() => expect((view.getByTestId("lens-form-fields-title") as HTMLInputElement).value).toBe("Saved elsewhere"));
 });
 
 function formLens(then: ActionThen): LensRun {

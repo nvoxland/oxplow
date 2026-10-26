@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useId, useRef, useState } from "react";
 
-import { getLens, querySql, runLens, type SqlCell, type SqlQueryResult } from "../api.js";
+import { querySql, type SqlCell, type SqlQueryResult } from "../api.js";
 import { recordOpError } from "../opErrors.js";
 import { isDefaultValue, parseParamInput } from "../lens/lensModel.js";
 import { NO_READS, useRerunOnChange } from "../lens/lensRerun.js";
@@ -11,6 +11,7 @@ import { Popover } from "./Popover.js";
 import { DEFAULT_RANGE_PRESETS, rangePresetLabel, splitRange } from "./rangePresets.js";
 import { useHistoryState } from "../tabs/useHistoryState.js";
 import { useDebounced } from "./useDebounced.js";
+import { daemonPageReads, pageOptionsSource } from "../pages/pageReads.js";
 
 /** How long a search waits for the next keystroke before it applies. */
 const SEARCH_DEBOUNCE_MS = 250;
@@ -20,21 +21,16 @@ const SHOWN_ROWS = 6;
 type Query = (sql: string) => Promise<SqlQueryResult>;
 
 /** What a choice's `options_from` is read with: which of the page's
- *  params what it names takes, and its rows for them. A lens page's names
- *  a lens (the default); a page file's names a page (`<ext>/<page>`, its
- *  first loader, or `<ext>/<page>#<loader>`), run once — `PageRail`
- *  provides that source. */
+ *  params what it names takes, and its rows for them. It names a page
+ *  (`<ext>/<page>`, its first loader, or `<ext>/<page>#<loader>`), run
+ *  once (`pages/pageReads.ts` `pageOptionsSource`: the daemon's, or
+ *  `PageRail`'s over its page reads); a test gives another. */
 export interface OptionsSource {
   params(ref: string): Promise<string[]>;
   list(ref: string, params: Record<string, SqlCell>, streamId: string | null): Promise<SqlQueryResult>;
 }
 
-const LENS_OPTIONS: OptionsSource = {
-  params: async (id) => (await getLens(id)).params.map((p) => p.name),
-  list: async (id, params, streamId) => (await runLens(id, params, streamId)).result,
-};
-
-export const OptionsSourceContext = createContext<OptionsSource>(LENS_OPTIONS);
+export const OptionsSourceContext = createContext<OptionsSource>(pageOptionsSource(daemonPageReads));
 
 export interface ParamRowProps {
   param: PageParam;
@@ -42,13 +38,12 @@ export interface ParamRowProps {
   onApply(name: string, value: SqlCell): void;
   /** Reads the options of a branch or id picker; `querySql` unless a test injects one. */
   query?: Query;
-  /** The page's current param values: what a choice's `options_from` lens
+  /** The page's current param values: what a choice's `options_from` page
    *  is run with (the ones it declares). */
   values?: Record<string, SqlCell>;
-  /** The stream the page runs for: what that lens runs for. */
+  /** The stream the page runs for: what that page runs for. */
   streamId?: string | null;
-  /** Reads what `options_from` names; the context's (a lens's, unless a
-   *  page file's rail or a test gives another). */
+  /** Reads what `options_from` names; the context's (a page file's rail's, or a test's). */
   optionsSource?: OptionsSource;
 }
 
@@ -151,7 +146,7 @@ export interface ParamListProps {
   values: Record<string, SqlCell>;
   onApply(name: string, value: SqlCell): void;
   query?: Query;
-  /** The stream the page runs for (a choice's `options_from` lens runs for it). */
+  /** The stream the page runs for (a choice's `options_from` page runs for it). */
   streamId?: string | null;
 }
 
@@ -336,7 +331,7 @@ interface Option {
   group?: string | null;
 }
 
-/** The options of a choice whose `options_from` names a lens or a page:
+/** The options of a choice whose `options_from` names a page:
  *  its rows for the page's stream with the page's values it declares,
  *  read again when what it read changes (the one place a param control
  *  follows data). Rows are `value`, `label`, optional `group`. */

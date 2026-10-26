@@ -305,6 +305,13 @@ export function createPageRuns(transport: PageRunsTransport) {
 
   return {
     open,
+    /** Run open run `runId` again as it is, for every host holding it:
+     *  after the person's press on it, whose command may have changed
+     *  what no model change announces (a keychain entry). Unknown: nothing. */
+    refresh: async (runId: string): Promise<void> => {
+      const entry = byRunId.get(runId);
+      if (entry) await rerunWith(entry, (id) => transport.rerun(id));
+    },
     /** The open runs' ids (the window's tab report names them, so the
      *  daemon drops a run no window holds). */
     runIds: () => [...byRunId.keys()],

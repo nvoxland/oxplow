@@ -31,7 +31,7 @@ export function TerminalViz({ run, onSetParam }: { run: LensRun; onSetParam?(nam
   const stream = useLensStream();
   const nav = useOptionalPageNavigation();
   const actions = useLensActions(run, stream?.id ?? null);
-  const runLensAction = useLensActionRunner();
+  const press = useLensActionRunner();
   const t = run.lens.terminal;
   const { columns, rows } = run.result;
   const at = (row: SqlCell[], column: string | null | undefined) => (column ? row[columns.indexOf(column)] ?? null : null);
@@ -118,7 +118,7 @@ export function TerminalViz({ run, onSetParam }: { run: LensRun; onSetParam?(nam
             const r = list.find((x) => x.uri === uri);
             const rename = action("rename");
             if (!r || !rename) return;
-            void runLensAction(run.lens.id, rename.id, run.params, rowRecord(columns, r.row), stream.id, false, { title }).catch(fail(rename.label));
+            void press(run.lens.id, rename.id, run.params, rowRecord(columns, r.row), stream.id, false, { title }).catch(fail(rename.label));
           }}
         />
       ) : null}

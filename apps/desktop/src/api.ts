@@ -43,7 +43,6 @@ import type {
   Lens,
   LensRun,
   LensViz,
-  LensSpec,
   RecentProjectView,
   RoleBinding,
   ScriptServices,
@@ -65,7 +64,7 @@ export interface ProviderConfig {
   baseUrl: string | null;
 }
 export type { ServiceListing, ScriptServices };
-export type { Extension, Lens, LensRun, LensViz, LensSpec, SearchHit, SqlCell, SqlQueryResult };
+export type { Extension, Lens, LensRun, LensViz, SearchHit, SqlCell, SqlQueryResult };
 
 /// Convert the tauri-specta {status, data|error} envelope into a
 /// plain promise return. Errors are usually IpcError objects with
@@ -421,92 +420,10 @@ export async function listExtensions(): Promise<Extension[]> {
   return unwrap(await commands.listExtensions());
 }
 
-/// One lens by `<extension>/<slug>`.
-export async function getLens(id: string): Promise<Lens> {
-  return unwrap(await commands.getLens(id));
-}
-
-/// Run a lens spec a page shows without keeping it (a custom page's
-/// `showSpec`): checked first, a refusal naming its field (`/spec/query`).
-export async function runLensSpec(
-  spec: LensSpec,
-  params: Record<string, SqlCell>,
-  streamId: string | null,
-): Promise<LensRun> {
-  return unwrap(await commands.runLensSpec(spec as never, params, streamId));
-}
-
-/// Run a lens with param overrides (the rest use defaults).
-export async function runLens(
-  id: string,
-  params: Record<string, SqlCell>,
-  streamId: string | null,
-): Promise<LensRun> {
-  return unwrap(await commands.runLens(id, params, streamId));
-}
-
-/// Run one of a lens's declared buttons (never approves an exec source).
-/** A person presses a lens's action: its command runs as the lens,
- *  acting for them. Throws `NEEDS_CONFIRMATION` (see `needsConfirmation`)
- *  when the command asks; call again with `confirmed`. */
-export async function runLensAction(
-  id: string,
-  action: string,
-  params: Record<string, SqlCell>,
-  row: Record<string, SqlCell> | null,
-  streamId: string | null,
-  confirmed: boolean,
-  input: Record<string, unknown> | null = null,
-  drop: import("./tauri-bridge/generated/bindings.js").Drop | null = null,
-): Promise<CommandOutcome> {
-  return unwrap(await commands.runLensAction({ id, action, params, row, input, drop }, streamId, confirmed));
-}
-
-/** The form a lens's form action (`form: true`) opens: its command, the
- *  values it starts from and its fixed fields. */
-export async function lensActionForm(
-  id: string,
-  action: string,
-  params: Record<string, SqlCell>,
-  row: Record<string, SqlCell> | null,
-  streamId: string | null,
-): Promise<FormStart> {
-  return unwrap(await commands.lensActionForm({ id, action, params, row, input: null }, streamId));
-}
-
 /** A command's spec: what a form renders from its `input_schema`, and
  *  what a confirmation says. */
 export async function getCommand(name: string): Promise<CommandSpec> {
   return unwrap(await commands.getCommand(name));
-}
-
-/** A form lens's command and the values its fields start from. */
-export async function lensForm(id: string, params: Record<string, SqlCell>, streamId: string | null): Promise<FormStart> {
-  return unwrap(await commands.lensForm(id, params, streamId));
-}
-
-/** Submit a form lens: its command runs as the lens, acting for the
- *  person. Throws `NEEDS_CONFIRMATION` when the command asks. */
-export async function submitLensForm(
-  id: string,
-  input: Record<string, unknown>,
-  params: Record<string, SqlCell>,
-  streamId: string | null,
-  confirmed: boolean,
-): Promise<CommandOutcome> {
-  return unwrap(await commands.submitLensForm(id, input, params, streamId, confirmed));
-}
-
-/** Component `id`'s frame (`<extension>/<component id>`) reads one of its
- *  declared lenses (P6b.D2). */
-export async function runComponentQuery(
-  id: string,
-  asset: string,
-  params: Record<string, SqlCell>,
-  streamId: string | null,
-  version: string,
-): Promise<LensRun> {
-  return unwrap(await commands.runComponentQuery(id, asset, params, streamId, version));
 }
 
 /** Load component `id`'s bundle (`<extension>/<component id>`) as it is
@@ -571,17 +488,6 @@ export async function setUiPreference(scope: string, key: string, valueJson: str
   unwrap(await commands.setUiPreference(scope, key, valueJson));
 }
 
-/** Run an answer an agent showed in a thread (`answer:<id>`). */
-export async function runAnswer(answer: string): Promise<LensRun> {
-  return unwrap(await commands.runAnswer(answer));
-}
-
-/** A lens's text rendering — what Copy puts on the clipboard. */
-export async function lensText(id: string, params: Record<string, SqlCell>, streamId: string | null): Promise<string> {
-  return unwrap(await commands.lensText(id, params, streamId));
-}
-
-/// Load an extension and dry-run every lens, returning all problems.
 /** Every service a script may be given, by title (`list_services`). */
 export async function listServices(): Promise<ServiceListing[]> {
   return unwrap(await commands.listServices());
@@ -601,33 +507,6 @@ export async function reportTabs(report: TabReport): Promise<void> {
 /// needed and return its `v_change` row. See `.context/semantic-layer.md`.
 export async function ensureChange(target: ChangeTarget): Promise<ChangeRow> {
   return unwrap(await commands.ensureChange(target));
-}
-
-/** What `oxplow.lens.keep` kept: the lens id. It is live when the command
- *  returns (keep deploys its extension). */
-export interface KeptLens {
-  lens: string;
-}
-
-/** `oxplow.lens.keep`'s result as a [`KeptLens`]. */
-export function keptLens(result: unknown): KeptLens {
-  const r = (result ?? {}) as { lens?: unknown };
-  return { lens: String(r.lens ?? "") };
-}
-
-/// Keep a lens spec (`oxplow.lens.keep`) in `extension`'s source in this
-/// stream's checkout (`.oxplow/extensions/<extension>/lenses/<slug>.yaml`) and
-/// deploy it. Returns the lens id, live by then.
-export async function keepLensSpec(
-  spec: LensSpec,
-  extension: string,
-  slug: string,
-  streamId: string | null,
-): Promise<KeptLens> {
-  const input: Record<string, unknown> = { spec, extension, slug };
-  if (streamId) input.stream = streamId;
-  const outcome = await runCommand("oxplow.lens.keep", input);
-  return keptLens(outcome.result);
 }
 
 export { openInSystemBrowser } from "./tauri-bridge/systemBrowser.js";
@@ -1216,37 +1095,8 @@ export function awaitBackgroundTask(taskId: string): Promise<BackgroundTask | nu
 
 export type { MetricSpec, SeriesPoint } from "./metricsSql.js";
 
-import type { Dashboard } from "./tauri-bridge/index.js";
 import { effortUri, idOf } from "./uri/uri.js";
-export type { Dashboard } from "./tauri-bridge/index.js";
 
-// User-created dashboards (tsk138) — project-global grids of metric tiles.
-export async function listDashboards(): Promise<Dashboard[]> {
-  return unwrap(await commands.listDashboards());
-}
-// Writes are the `dashboard.*` commands (P8.A5).
-export async function createDashboard(title: string): Promise<Dashboard> {
-  return (await runCommand("oxplow.dashboard.create", { title })).result as Dashboard;
-}
-/** Add a tile: `query` (pinned `sql` shown per `display`), `lens` or `text`. */
-export async function addDashboardItem(req: {
-  dashboardId: string;
-  kind: "query" | "lens" | "text";
-  sql?: string | null;
-  display?: string | null;
-  lensId?: string | null;
-  optionsJson?: string | null;
-}): Promise<string> {
-  const outcome = await runCommand("oxplow.dashboard.add_item", {
-    dashboard: req.dashboardId,
-    kind: req.kind,
-    ...(req.sql ? { sql: req.sql } : {}),
-    ...(req.display ? { display: req.display } : {}),
-    ...(req.lensId ? { lens_id: req.lensId } : {}),
-    ...(req.optionsJson ? { options_json: req.optionsJson } : {}),
-  });
-  return (outcome.result as { id: string }).id;
-}
 /** Rows a metric reader returned, and what the query read — hand `reads` to
  *  `useRerunOnChange` so the view refreshes when (and only when) they change. */
 export interface MetricRows<T> {

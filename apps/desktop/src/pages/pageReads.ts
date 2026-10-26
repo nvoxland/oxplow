@@ -15,14 +15,17 @@ export interface PageReads {
   page(id: string): Promise<Page>;
   /** Run a page once (no open run: nothing keeps it fresh). */
   run(page: string, params: Record<string, SqlCell>, streamId: string | null): Promise<PageRun>;
+  /** An open run as text, as an agent reads it (Copy). */
+  text(runId: string): Promise<string>;
 }
 
-const daemonReads: PageReads = {
+export const daemonPageReads: PageReads = {
   page: async (id) => unwrapResult(await commands.getPage(id)) as Page,
   run: async (page, params, streamId) => unwrapResult(await commands.runPage(page, null, params, streamId)) as PageRun,
+  text: async (runId) => unwrapResult(await commands.pageText(runId)),
 };
 
-export const PageReadsContext = createContext<PageReads>(daemonReads);
+export const PageReadsContext = createContext<PageReads>(daemonPageReads);
 
 export function usePageReads(): PageReads {
   return useContext(PageReadsContext);

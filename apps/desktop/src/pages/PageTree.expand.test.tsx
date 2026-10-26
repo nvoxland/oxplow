@@ -25,6 +25,7 @@ const detail = fakePage(node.stack("stack", [node.viz("summary", "summary", { vi
 const reads = (pages: Record<string, Page>): PageReads => ({
   page: async (id) => pages[id] ?? Promise.reject(new Error(`no page ${id}`)),
   run: async () => Promise.reject(new Error("not here")),
+  text: async () => "",
 });
 
 test("an expand column's row opens the page it names, given the row's values it declares, and draws the named loader", async () => {
@@ -62,6 +63,34 @@ test("an expand that names no loader draws the page's first", async () => {
   );
   fireEvent.click(getByLabelText("Expand"));
   await findByText("42");
+});
+
+test("an expanded row's page offers its viz's own actions as buttons, pressed on that page's run", async () => {
+  const backfill = fakePage(node.viz("plan", "plan", { viz: "detail", columns: [{ key: "what" }], actions: [fakeAction({ id: "backfill", label: "Backfill" })] }), {
+    id: "acme/backfill",
+    params: [{ name: "id", role: "resource", default: null, type: null, options: [] } as never],
+    loaders: [decl("plan")],
+  });
+  const page = fakePage(node.viz("items", "items", { columns: [{ key: "id", expand: "acme/backfill" } as never] }), { loaders: [decl("items")] });
+  const run = fakeRun(page, { loaders: { items: loader(["id"], [["a"]]) } });
+  const { runs } = fakePageRunsBy((key) => fakeRun(backfill, { params: key.params, loaders: { plan: loader(["what"], [["3 to catch up"]]) } }));
+  const calls: unknown[][] = [];
+  const press: RunPageAction = async (...args) => {
+    calls.push(args);
+    return { result: null, audit_id: null, event_id: null, inverse: null } as never;
+  };
+  const { getByLabelText, findByTestId } = render(
+    <PageActionContext.Provider value={press}>
+      <PageRunsContext.Provider value={runs}>
+        <PageReadsContext.Provider value={reads({ "acme/backfill": backfill })}>
+          <PageTree run={run} runId="run-0" />
+        </PageReadsContext.Provider>
+      </PageRunsContext.Provider>
+    </PageActionContext.Provider>,
+  );
+  fireEvent.click(getByLabelText("Expand"));
+  fireEvent.click(await findByTestId("lens-action-backfill"));
+  await waitFor(() => expect(calls).toEqual([["run-1", "plan", "backfill", null, null, null, false]]));
 });
 
 function filesPage(folder: string, rows: (string | number)[][]): PageRun {

@@ -8,7 +8,6 @@
 import type { ComponentType } from "react";
 import { useMemo } from "react";
 
-import { LensResultView } from "../../lens/LensResultView.js";
 import type { ExtensionPanel } from "../../tauri-bridge/generated/bindings.js";
 import type { TabRef } from "../../tabs/tabState.js";
 import { AssistantDockBody, useAssistantBadge } from "../Assistant/AssistantDockPanel.js";
@@ -69,7 +68,7 @@ export function orderDockPanels(corePanels: DockPanelDef[], extensions: DockPane
   ];
 }
 
-/** An extension panel as a dock panel: the body lens, and the count as the badge. */
+/** An extension panel as a dock panel: the body page, and the count as the badge. */
 export function extensionDockPanel(panel: ExtensionPanel): DockPanelDef {
   return {
     id: `ext:${panel.id}`,
@@ -82,17 +81,10 @@ export function extensionDockPanel(panel: ExtensionPanel): DockPanelDef {
     },
     Body({ onOpenPage, streamId }) {
       const runs = usePanelRuns().runs[panel.id];
-      const page = runs?.page?.body;
-      if (page) {
-        return (
-          <div style={{ padding: "8px 12px", fontSize: "var(--text-xs)" }}>
-            <PageTree run={page.run} runId={page.runId} streamId={streamId} onOpenPage={onOpenPage} />
-          </div>
-        );
-      }
-      return runs?.body ? (
+      const page = runs?.body;
+      return page ? (
         <div style={{ padding: "8px 12px", fontSize: "var(--text-xs)" }}>
-          <LensResultView run={runs.body} streamId={streamId} onOpenPage={onOpenPage} />
+          <PageTree run={page.run} runId={page.runId} streamId={streamId} onOpenPage={onOpenPage} />
         </div>
       ) : (
         <div style={{ padding: "8px 12px", color: "var(--text-muted)", fontSize: "var(--text-xs)" }}>Loading…</div>

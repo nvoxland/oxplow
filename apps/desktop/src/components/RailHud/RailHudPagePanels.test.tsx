@@ -31,9 +31,6 @@ mock.module("../../api.js", () => ({
   listExtensions: async () => [
     { name: "z", namespace: "z", enabled: true, pages: [], pageFiles: [pageOf("body"), pageOf("badge")], panels: [panel], lenses: [], ui: { slots: [], commands: [], decorators: [], replacements: [] } },
   ],
-  runLens: async () => {
-    throw new Error("a page-backed panel runs no lens");
-  },
   subscribeOxplowEvents: () => () => {},
   querySql: async () => ({ columns: [], rows: [], truncated: false, reads: { models: [], tables: [], measures: [] }, freshness: {} }),
 }));
