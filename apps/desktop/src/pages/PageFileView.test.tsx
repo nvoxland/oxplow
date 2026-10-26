@@ -157,3 +157,12 @@ test("`#node=` lands on the node, and the open page publishes its run and focus"
   cleanup();
   expect(getPageDetailStore().get(ref.id)).toBeNull();
 });
+
+test("a page open on no node publishes its run with no focus", async () => {
+  const { runs } = fakePageRuns(listRun());
+  const ref = extPageRef("acme", "list", { project: "p1" });
+  const view = render(inTab(ref, moves(), <PageFileView page={listPage} resource={{ project: "p1" }} stream={null} threadId={null} runs={runs} />));
+  await view.findByText("Alpha");
+  await waitFor(() => expect(getPageDetailStore().get(ref.id)).toEqual({ runId: "run-1", focus: null }));
+  cleanup();
+});
