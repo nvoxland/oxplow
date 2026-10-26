@@ -2055,7 +2055,10 @@ Where it lives, and what is loaded:
   `effort_summary`, `catalog`); everything else is `oxplow_find_page`,
   then `oxplow_run_page`.
 - `answers: [{ question, about?, params, skill? }]` (`PageAnswer`): the
-  questions the page answers. `oxplow_find_page` matches them first; the
+  questions the page answers. `oxplow_find_page` scores shared words:
+  an answer's question x3 (the best one), the title x2, keywords and
+  description x1; ties go by title; `limit` defaults to 10 (1 to 50).
+  The tests are `find_*` in `agent_reads/page_tools.rs`. The
   pages of `about`'s resource offer them to the person; `oxplow extension
   test` opens the page with each answer's `params` and fails the page when
   it does not open or a loader fails. `skill` (oxplow's own extensions)
