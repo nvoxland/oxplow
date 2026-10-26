@@ -235,12 +235,9 @@ mod tests {
                 "oxplow_preview_extension",
                 "oxplow_query_sql",
                 "oxplow_read",
-                "oxplow_run_lens",
-                "oxplow_run_lens_action",
                 "oxplow_run_page",
                 "oxplow_run_page_action",
                 "oxplow_search",
-                "oxplow_show_lens",
                 "oxplow_show_page",
                 "oxplow_thread_work",
                 "oxplow_validate_extension",
@@ -268,8 +265,6 @@ mod tests {
         );
         assert!(work.read_only);
         assert!(work.input_schema["properties"]["thread"].is_object());
-        let show = tools.iter().find(|t| t.name == "oxplow_show_lens").unwrap();
-        assert!(!show.read_only, "it records the answer in the thread");
     }
 
     /// A tool that spends the person's money asks before it runs: a model

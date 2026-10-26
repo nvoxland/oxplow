@@ -276,7 +276,7 @@ mod tests {
     }
 
     /// A stream's draft is compared with what runs: a worktree's is a
-    /// draft that adds and removes a lens; the primary's is not.
+    /// draft that adds and removes a page; the primary's is not.
     #[tokio::test]
     async fn draft_status_compares_the_streams_checkout_with_what_runs() {
         use oxplow_domain::stores::StreamStore as _;
@@ -292,8 +292,8 @@ mod tests {
         write(&ext, "extension.yaml", manifest);
         write(
             &ext,
-            "lenses/one.yaml",
-            "title: one\nquery: \"SELECT 1 AS n\"\n",
+            "pages/one.yaml",
+            "title: one\ndata:\n  n: { sql: \"SELECT 1 AS n\" }\nview: { viz: number, from: n }\n",
         );
         crate::extension_deploy::deploy(svc, "acme", true)
             .await
@@ -304,8 +304,8 @@ mod tests {
         write(&draft, "extension.yaml", manifest);
         write(
             &draft,
-            "lenses/two.yaml",
-            "title: two\nquery: \"SELECT 1 AS n\"\n",
+            "pages/two.yaml",
+            "title: two\ndata:\n  n: { sql: \"SELECT 1 AS n\" }\nview: { viz: number, from: n }\n",
         );
         let mut other = svc.stream_store.list().await.unwrap().pop().unwrap();
         other.id = oxplow_domain::StreamId::placeholder();

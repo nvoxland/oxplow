@@ -2308,8 +2308,9 @@ mod tests {
             report.lenses.iter().map(|l| (l.id.as_str(), l)).collect();
         assert_eq!(by["x/same"].change, Change::Unchanged);
         assert_eq!(by["x/count"].change, Change::Changed);
-        assert_eq!(by["x/count"].before.as_deref(), Some("1"));
-        assert_eq!(by["x/count"].after.as_deref(), Some("2"));
+        // A page's text: its title, then each node's.
+        assert_eq!(by["x/count"].before.as_deref(), Some("### Count\n\n1"));
+        assert_eq!(by["x/count"].after.as_deref(), Some("### Count\n\n2"));
         assert_eq!(by["x/old"].change, Change::Removed);
         assert_eq!(by["x/broken"].change, Change::Added);
         assert!(

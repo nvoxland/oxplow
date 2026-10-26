@@ -2334,13 +2334,6 @@ mod tests {
                 "oxplow.knowledge.link",
                 "oxplow.knowledge.verify_files",
                 "oxplow.knowledge.write_page",
-                // VizConfig files on disk (P6 review, tsk597): a Tx handler may
-                // run twice, and a retried file write strands the first.
-                "oxplow.lens.keep",
-                "oxplow.lens.run",
-                "oxplow.lens.run_action",
-                // It returns the answer's text, rendered once it's stored.
-                "oxplow.lens.show",
                 // A download into .oxplow/lsp/, a person's call (P8.A9).
                 "oxplow.lsp.install_server",
                 "oxplow.lsp.remove_server",

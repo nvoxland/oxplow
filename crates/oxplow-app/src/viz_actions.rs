@@ -1192,17 +1192,23 @@ view:
             .unwrap_err()
             .to_string();
         assert!(err.contains("one row, which the server reads"), "{err}");
-        // A form over it starts from the row.
-        let item = work_item_ref(fx.task);
-        let form = Press::on("acme/one", Some("one"), "rename")
-            .params(&[("item", SqlCell::Text(item.clone()))])
-            .form(&svc)
-            .await
-            .unwrap();
-        assert_eq!(form.values, json!({ "uri": item, "title": "Made" }));
         // An ordinary button still runs on any node.
         press("plain", "2", None).await.unwrap();
         assert_eq!(titles().await.len(), 2);
+    }
+
+    /// A form action on a node that holds one row starts from that row,
+    /// which the server reads, as the action itself binds it.
+    #[tokio::test]
+    async fn a_one_row_nodes_form_action_starts_from_that_row() {
+        let (fx, _root) = fixture().await;
+        let item = work_item_ref(fx.task);
+        let form = Press::on("acme/one", Some("one"), "rename")
+            .params(&[("item", SqlCell::Text(item.clone()))])
+            .form(&fx.svc)
+            .await
+            .unwrap();
+        assert_eq!(form.values, json!({ "uri": item, "title": "Made" }));
     }
 
     /// Where a drop landed binds `{{before.*}}`, `{{after.*}}`, `{{onto.*}}`

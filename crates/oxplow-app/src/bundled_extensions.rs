@@ -92,34 +92,42 @@ mod tests {
         }
     }
 
-    /// A page that needs a param nobody fills in from the launcher (an
-    /// `effort_id` a slot passes) opens empty there, so it's hidden; the
-    /// viewer's `stream_id` / `thread_id` are filled in (tsk374). A
-    /// renderer (`for:`) opens on its resource, not from the launcher.
+    /// A page in the launcher (a `category`, not hidden) that needs a param
+    /// nobody fills in from there (an `effort_id` a slot passes) opens
+    /// empty, so it's hidden; the viewer's `stream_id` / `thread_id` are
+    /// filled in (tsk374), and a filter or what its own column picks starts
+    /// empty.
     #[test]
     fn launcher_pages_need_no_slot_params() {
         let exts = crate::extensions::load_extensions(tempfile::tempdir().unwrap().path());
         let mut shown = Vec::new();
+        let mut needy = Vec::new();
         for e in exts.iter().filter(|e| e.origin == "bundled") {
             assert!(e.errors.is_empty(), "{}: {:?}", e.name, e.errors);
             for page in e
                 .page_files
                 .iter()
-                .filter(|p| !p.hidden && p.renders.is_empty())
+                .filter(|p| !p.hidden && p.category.is_some())
             {
                 for p in &page.params {
-                    assert!(
-                        p.default.is_some()
-                            || p.options_from.is_some()
-                            || ["stream_id", "thread_id"].contains(&p.name.as_str()),
-                        "{} is in the launcher but needs `{}`",
-                        page.id,
-                        p.name
-                    );
+                    let filled = p.default.is_some()
+                        || p.options_from.is_some()
+                        || matches!(
+                            p.role,
+                            Some(
+                                crate::extensions::ParamRole::Selection
+                                    | crate::extensions::ParamRole::Filter
+                            )
+                        )
+                        || ["stream_id", "thread_id"].contains(&p.name.as_str());
+                    if !filled {
+                        needy.push(format!("{} needs `{}`", page.id, p.name));
+                    }
                 }
                 shown.push(page.id.clone());
             }
         }
+        assert!(needy.is_empty(), "in the launcher: {needy:#?}");
         // The review starters are there to open.
         for id in [
             "oxplow-bundled/waiting-on-me",
@@ -2111,8 +2119,10 @@ mod tests {
         ] {
             let page = f
                 .svc
-                .extension_catalog
-                .page_named(root, slug)
+                .extension_activation
+                .read(async { f.svc.extension_catalog.page_named(root, slug) })
+                .await
+                .unwrap()
                 .unwrap_or_else(|e| panic!("{slug}: {e}"));
             assert_eq!(page.id, format!("oxplow-foundation/{slug}"));
         }

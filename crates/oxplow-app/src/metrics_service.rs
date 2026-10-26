@@ -6405,7 +6405,7 @@ def transform(input):
             [
                 ".oxplow/extensions/complex-fns/extension.yaml",
                 ".oxplow/extensions/complex-fns/collectors/complex_functions.star",
-                ".oxplow/extensions/complex-fns/lenses/complex-fns.yaml",
+                ".oxplow/extensions/complex-fns/pages/complex-fns.yaml",
                 ".oxplow/extensions/complex-fns/fixtures/basic.yaml",
             ]
         );

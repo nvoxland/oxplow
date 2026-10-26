@@ -133,7 +133,27 @@ fn definition(item: &impl Serialize) -> String {
     if let Some(object) = value.as_object_mut() {
         object.remove("origin");
     }
+    without_provenance(&mut value);
     value.to_string()
+}
+
+/// `value` without where its parts were loaded from: a page's viz nodes
+/// each carry the page's provenance (`origin: { running, .. }`), which
+/// differs between a source and its deployment though nothing changed.
+fn without_provenance(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(object) => {
+            if object
+                .get("origin")
+                .is_some_and(|o| o.get("running").is_some())
+            {
+                object.remove("origin");
+            }
+            object.values_mut().for_each(without_provenance);
+        }
+        serde_json::Value::Array(items) => items.iter_mut().for_each(without_provenance),
+        _ => {}
+    }
 }
 
 type Definitions = std::collections::BTreeMap<String, String>;
