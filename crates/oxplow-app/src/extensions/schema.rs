@@ -5,7 +5,7 @@
 //! what this generates (`OXPLOW_BLESS=1` rewrites them).
 //!
 //! A schema holds the shape — the keys, their types, which are required.
-//! What the loader checks beyond it (an id's spelling, a lens that
+//! What the loader checks beyond it (an id's spelling, a page that
 //! exists, which trigger keys go together) stays the loader's to say.
 
 use schemars::generate::SchemaSettings;
@@ -74,11 +74,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn the_checked_in_lens_schema_is_the_generated_one() {
-        golden("docs/reference/schemas/lens.schema.json", &lens_schema());
-    }
-
     fn yaml_json(text: &str) -> Value {
         let yaml: serde_yaml::Value = serde_yaml::from_str(text).expect("YAML parses");
         serde_json::to_value(yaml).expect("YAML is JSON")
@@ -92,31 +87,19 @@ mod tests {
             .collect()
     }
 
-    /// Every bundled extension's manifest and lenses — and the example
-    /// extensions' — validate against the schemas an editor checks them
-    /// with.
+    /// Every bundled extension's manifest — and the example extensions'
+    /// — validates against the schema an editor checks it with.
     #[test]
-    fn every_bundled_manifest_and_lens_validates() {
+    fn every_bundled_and_example_manifest_validates() {
         let manifest = manifest_schema();
-        let lens = lens_schema();
         let mut checked = 0;
         for ext in crate::bundled_extensions::BUNDLED {
-            for (path, _) in ext.files {
-                // Only manifests and lenses: a bundle's assets may be binary.
-                let schema = if *path == "extension.yaml" {
-                    &manifest
-                } else if path.starts_with("lenses/") && path.ends_with(".yaml") {
-                    &lens
-                } else {
-                    continue;
-                };
-                let text = ext.file(path).expect("a manifest or lens is text");
-                let p = problems(schema, text);
-                assert!(p.is_empty(), "{}/{path}: {p:#?}", ext.name);
-                checked += 1;
-            }
+            let text = ext.file("extension.yaml").expect("a manifest is text");
+            let p = problems(&manifest, text);
+            assert!(p.is_empty(), "{}/extension.yaml: {p:#?}", ext.name);
+            checked += 1;
         }
-        assert!(checked > 2, "the bundled files were found");
+        assert!(checked >= 2, "the bundled manifests were found");
         let examples = repo_root().join("examples/extensions");
         for dir in std::fs::read_dir(&examples).expect("examples/extensions") {
             let dir = dir.unwrap().path();
@@ -126,11 +109,6 @@ mod tests {
             let text = std::fs::read_to_string(dir.join("extension.yaml")).unwrap();
             let p = problems(&manifest, &text);
             assert!(p.is_empty(), "{}: {p:#?}", dir.display());
-            for f in std::fs::read_dir(dir.join("lenses")).into_iter().flatten() {
-                let f = f.unwrap().path();
-                let p = problems(&lens, &std::fs::read_to_string(&f).unwrap());
-                assert!(p.is_empty(), "{}: {p:#?}", f.display());
-            }
         }
     }
 
@@ -151,9 +129,6 @@ mod tests {
         );
         let stray = "effects:\n  - { id: on-done, summary: s, on: [work_item.state_changed], entry: e.star, when: now }\n";
         assert!(!problems(&schema, &format!("{OK}{stray}")).is_empty());
-        let lens = lens_schema();
-        assert!(problems(&lens, "title: T\nquery: SELECT 1\n").is_empty());
-        assert!(!problems(&lens, "title: T\nquery: SELECT 1\nsize: big\n").is_empty());
     }
 
     /// The scaffolds point an editor at the schemas.
@@ -167,6 +142,5 @@ mod tests {
             manifest_schema()["$id"],
             Value::String(MANIFEST_SCHEMA_URL.into())
         );
-        assert_eq!(lens_schema()["$id"], Value::String(LENS_SCHEMA_URL.into()));
     }
 }

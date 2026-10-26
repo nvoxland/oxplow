@@ -1758,28 +1758,28 @@ mod tests {
         );
     }
 
-    /// A command or a lens that asks to be a tool (`tool: <name>`) is
+    /// A command or a page that asks to be a tool (`tool: <name>`) is
     /// offered to agents as `<namespace>_<name>`; a name that isn't one is
     /// an error at its entry, and two entries can't share one.
     #[test]
-    fn a_command_or_a_lens_is_offered_as_a_tool_under_its_namespace() {
+    fn a_command_or_a_page_is_offered_as_a_tool_under_its_namespace() {
         let d = tempfile::tempdir().unwrap();
-        let lens = "title: Waiting\nquery: SELECT 1 AS n\ntool: waiting\n";
+        let page = "title: Waiting\ndata:\n  n: { sql: SELECT 1 AS n }\nview: { viz: number, from: n }\ntool: waiting\n";
         write_ext(
             d.path(),
             "my-review",
             &format!("{GOOD}    tool: finish\n"),
             &[
                 ("handlers/finish_review.star", HANDLER),
-                ("lenses/waiting.yaml", lens),
+                ("pages/waiting.yaml", page),
             ],
         );
         let ext = project(d.path(), "my-review");
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
         assert_eq!(ext.commands[0].tool.as_deref(), Some("my_review_finish"));
-        assert_eq!(ext.lenses[0].tool.as_deref(), Some("my_review_waiting"));
+        assert_eq!(ext.page_files[0].tool.as_deref(), Some("my_review_waiting"));
 
-        for (command_tool, lens_tool, says) in [
+        for (command_tool, page_tool, says) in [
             ("Finish", "waiting", "tool name `Finish`"),
             ("finish", "finish-it", "tool name `finish-it`"),
             ("finish", "finish", "`my_review_finish` is offered twice"),
@@ -1792,15 +1792,18 @@ mod tests {
                 &[
                     ("handlers/finish_review.star", HANDLER),
                     (
-                        "lenses/waiting.yaml",
-                        &format!("title: Waiting\nquery: SELECT 1 AS n\ntool: {lens_tool}\n"),
+                        "pages/waiting.yaml",
+                        &format!(
+                            "title: Waiting\ndata:\n  n: {{ sql: SELECT 1 AS n }}\n\
+                             view: {{ viz: number, from: n }}\ntool: {page_tool}\n"
+                        ),
                     ),
                 ],
             );
             let errors = project(d.path(), "my-review").errors.join("\n");
             assert!(
                 errors.contains(says),
-                "{command_tool}/{lens_tool}: {errors}"
+                "{command_tool}/{page_tool}: {errors}"
             );
         }
     }
@@ -1818,8 +1821,8 @@ mod tests {
             );
             write(
                 d.path(),
-                &format!(".oxplow/extensions/{name}/lenses/waiting.yaml"),
-                "title: Waiting\nquery: SELECT 1 AS n\ntool: waiting\n",
+                &format!(".oxplow/extensions/{name}/pages/waiting.yaml"),
+                "title: Waiting\ndata:\n  n: { sql: SELECT 1 AS n }\nview: { viz: number, from: n }\ntool: waiting\n",
             );
         }
         let mut exts: Vec<Extension> = load_extensions(d.path())
@@ -1828,11 +1831,11 @@ mod tests {
             .collect();
         for e in &mut exts {
             e.namespace = "shared".into();
-            e.lenses[0].tool = Some("shared_waiting".into());
+            e.page_files[0].tool = Some("shared_waiting".into());
         }
         refuse_duplicate_tools(&mut exts);
         for e in &exts {
-            assert_eq!(e.lenses[0].tool, None, "{}", e.name);
+            assert_eq!(e.page_files[0].tool, None, "{}", e.name);
             assert!(
                 e.errors
                     .join("\n")

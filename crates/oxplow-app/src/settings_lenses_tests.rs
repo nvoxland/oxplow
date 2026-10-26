@@ -6,7 +6,10 @@
 use oxplow_config::LspServerConfig;
 use oxplow_db::SqlCell;
 
-use crate::extensions::{run_lens, ViewContext};
+use crate::extensions::ViewContext;
+use crate::pages::actions::{run_page_action, PageActionCall};
+use crate::pages::open_runs::PageRuns;
+use crate::pages::runner::{PageRun, PageRunner, RunRequest, RunTarget};
 use crate::test_fixtures::services_with_effort;
 
 type Row = Vec<SqlCell>;
@@ -59,26 +62,77 @@ async fn run(
     }
 }
 
-/// A lens no page replaces yet (or whose page doesn't behave like it:
-/// see the report), run as a lens.
-async fn run_as_lens(svc: &crate::Services, lens: &str, params: Vec<(&str, SqlCell)>) -> Run {
-    let run = run_lens(
-        &svc.sql,
-        &svc.extension_catalog,
-        svc.layout.project_dir.as_path(),
-        &format!("oxplow-foundation/{lens}"),
-        params
+fn request(page: &str, params: Vec<(&str, SqlCell)>) -> RunRequest {
+    RunRequest {
+        target: RunTarget::Page(format!("oxplow-foundation/{page}")),
+        params: params
             .into_iter()
             .map(|(k, v)| (k.to_string(), v))
             .collect(),
-        &ViewContext::default(),
+        ctx: ViewContext::default(),
+        viewer: oxplow_domain::Actor::Human,
+    }
+}
+
+/// Loader `loader` of foundation's page `page`, run as a person.
+async fn run_loader(
+    svc: &crate::Services,
+    page: &str,
+    loader: &str,
+    params: Vec<(&str, SqlCell)>,
+) -> Run {
+    let run = PageRunner::of(svc)
+        .run(request(page, params))
+        .await
+        .unwrap();
+    loader_of(&run, loader)
+}
+
+fn loader_of(run: &PageRun, loader: &str) -> Run {
+    let ran = run
+        .loaders
+        .get(loader)
+        .unwrap_or_else(|| panic!("{}: no loader {loader}", run.page.id));
+    assert_eq!(ran.error, None, "{}/{loader}", run.page.id);
+    Run {
+        columns: ran.result.columns.clone(),
+        rows: ran.result.rows.clone(),
+    }
+}
+
+/// Press `action` on node `node` (none: the whole page) of a fresh open
+/// run of foundation's page `page`, on the row whose `key` column is
+/// `value` in the node's loader `loader` (none: no row).
+async fn press(
+    svc: &crate::Services,
+    page: &str,
+    params: Vec<(&str, SqlCell)>,
+    node: Option<&str>,
+    action: &str,
+    row: Option<(&str, &str, &str)>,
+) -> Result<oxplow_domain::CommandOutcome, oxplow_domain::CommandError> {
+    let runs = PageRuns::default();
+    let (run_id, run) = runs.open(svc, request(page, params), "w").await.unwrap();
+    let row = row.map(|(loader, key, value)| {
+        let rows = loader_of(&run, loader);
+        let found = rows.keyed(key, value).clone();
+        rows.columns.iter().cloned().zip(found).collect()
+    });
+    run_page_action(
+        svc,
+        &runs,
+        PageActionCall {
+            run_id,
+            node: node.map(str::to_string),
+            action: action.into(),
+            row,
+            input: None,
+            drop: None,
+            on_behalf_of: oxplow_domain::Actor::Human,
+            confirmed: true,
+        },
     )
     .await
-    .unwrap();
-    Run {
-        columns: run.result.columns,
-        rows: run.result.rows,
-    }
 }
 
 fn q(text: &str) -> Vec<(&str, SqlCell)> {
@@ -1186,7 +1240,7 @@ async fn the_changes_page_frames_an_effort_and_a_picked_range() {
             ("stream_id", SqlCell::Int(1)),
         ];
         params.extend(extra);
-        run_as_lens(&fx.svc, "changes", params)
+        run_loader(&fx.svc, "diff-view", "row", params)
     };
     let own = page(vec![]).await;
     assert_eq!(own.rows.len(), 1, "{:?}", own.rows);
@@ -1219,13 +1273,20 @@ async fn the_changes_page_frames_an_effort_and_a_picked_range() {
     );
 
     // The route page: no URI, no end - nothing to compare yet.
-    let route = run_as_lens(&fx.svc, "changes", vec![("stream_id", SqlCell::Int(1))]).await;
+    let route = run_loader(
+        &fx.svc,
+        "diff-view",
+        "row",
+        vec![("stream_id", SqlCell::Int(1))],
+    )
+    .await;
     assert!(route.rows.is_empty());
 
     // Its parts.
-    let effort_part = run_as_lens(
+    let effort_part = run_loader(
         &fx.svc,
         "changes-effort",
+        "changes_effort",
         vec![
             ("effort_id", SqlCell::Int(effort.value())),
             ("effort", SqlCell::Text(format!("eff{}", effort.value()))),
@@ -1236,15 +1297,14 @@ async fn the_changes_page_frames_an_effort_and_a_picked_range() {
         effort_part.text(&effort_part.rows[0], "state").as_deref(),
         Some("Open")
     );
-    let header = run_as_lens(
+    // The header reads the row's frame.
+    let header = run_loader(
         &fx.svc,
-        "changes-header",
+        "diff-view",
+        "header",
         vec![
-            ("subject", SqlCell::Text("effort".into())),
-            ("start_rev", SqlCell::Text(String::new())),
-            ("end_rev", SqlCell::Text("working".into())),
-            ("work_item", SqlCell::Null(())),
-            ("in_progress", SqlCell::Int(1)),
+            ("uri", SqlCell::Text(uri.clone())),
+            ("stream_id", SqlCell::Int(1)),
         ],
     )
     .await;
@@ -1260,9 +1320,9 @@ async fn the_changes_page_frames_an_effort_and_a_picked_range() {
         .text(&header.rows[0], "note")
         .unwrap()
         .contains("in progress"));
-    for lens in ["changes-starts", "changes-ends"] {
-        let options = run_as_lens(&fx.svc, lens, vec![("stream_id", SqlCell::Int(1))]).await;
-        assert!(!options.rows.is_empty(), "{lens}");
+    for page in ["changes-starts", "changes-ends"] {
+        let options = run_task(&fx, page, vec![("stream_id", SqlCell::Int(1))]).await;
+        assert!(!options.rows.is_empty(), "{page}");
     }
 }
 
@@ -1351,121 +1411,6 @@ async fn the_git_dashboard_reads_the_branch_the_tree_and_the_recent_commits() {
     assert!(between.rows.is_empty());
     let tree = run_task(&fx, "git-dashboard-uncommitted", stream).await;
     assert_eq!(tree.rows.len(), 1);
-}
-
-/// A dashboard page: its title, a metric added from the catalog with only
-/// its key (the tile pins that metric's captures), then its tile rows,
-/// resized and removed through the tiles' own actions.
-#[tokio::test(flavor = "multi_thread")]
-async fn the_dashboard_page_adds_a_metric_tile_and_edits_its_tiles() {
-    use crate::viz_actions::{run_lens_action, LensActionCall};
-    let fx = services_with_effort().await;
-    let id = command(
-        &fx,
-        "oxplow.dashboard.create",
-        serde_json::json!({ "title": "Health" }),
-    )
-    .await["id"]
-        .as_str()
-        .unwrap()
-        .to_string();
-    let by_id = vec![("id", SqlCell::Text(id.clone()))];
-    // The page's row hands its parts the dashboard's id from the URI.
-    let page = run_as_lens(
-        &fx.svc,
-        "dashboard",
-        vec![(
-            "uri",
-            SqlCell::Text(format!("oxplow:oxplow/dashboard?id={id}")),
-        )],
-    )
-    .await;
-    assert_eq!(page.text(&page.rows[0], "id").as_deref(), Some(id.as_str()));
-    assert_eq!(page.text(&page.rows[0], "title").as_deref(), Some("Health"));
-
-    let title = run_as_lens(&fx.svc, "dashboard-title", by_id.clone()).await;
-    assert_eq!(
-        title.text(&title.rows[0], "title").as_deref(),
-        Some("Health")
-    );
-    let metrics = run_as_lens(&fx.svc, "dashboard-metrics", vec![]).await;
-    assert!(!metrics.rows.is_empty(), "the catalog lists metrics");
-    let metric = metrics.text(&metrics.rows[0], "value").unwrap();
-    let act = |lens: &str, action: &str, row, input| LensActionCall {
-        lens_id: format!("oxplow-foundation/{lens}"),
-        action_id: action.into(),
-        params: std::collections::BTreeMap::from([("id".to_string(), SqlCell::Text(id.clone()))]),
-        row,
-        input,
-        drop: None,
-        on_behalf_of: oxplow_domain::Actor::Human,
-        confirmed: false,
-    };
-    let root = fx._dir.path();
-    let ctx = ViewContext::default();
-    run_lens_action(
-        &fx.svc,
-        root,
-        act(
-            "dashboard-title",
-            "add-metric",
-            None,
-            Some(serde_json::json!({ "metric": metric })),
-        ),
-        &ctx,
-    )
-    .await
-    .unwrap();
-    let tiles = run_as_lens(&fx.svc, "dashboard-tiles", by_id.clone()).await;
-    assert_eq!(tiles.rows.len(), 1);
-    let row = &tiles.rows[0];
-    assert_eq!(tiles.text(row, "display").as_deref(), Some("metric"));
-    assert_eq!(tiles.text(row, "metric").as_deref(), Some(metric.as_str()));
-    assert_eq!(tiles.text(row, "viz").as_deref(), Some("line"));
-    let cells = |r: &Vec<SqlCell>| {
-        tiles
-            .columns
-            .iter()
-            .cloned()
-            .zip(r.clone())
-            .collect::<std::collections::BTreeMap<_, _>>()
-    };
-    run_lens_action(
-        &fx.svc,
-        root,
-        act("dashboard-tiles", "wide", Some(cells(row)), None),
-        &ctx,
-    )
-    .await
-    .unwrap();
-    run_lens_action(
-        &fx.svc,
-        root,
-        act("dashboard-tiles", "number", Some(cells(row)), None),
-        &ctx,
-    )
-    .await
-    .unwrap();
-    let tiles = run_as_lens(&fx.svc, "dashboard-tiles", by_id.clone()).await;
-    assert_eq!(tiles.text(&tiles.rows[0], "size").as_deref(), Some("wide"));
-    assert_eq!(tiles.text(&tiles.rows[0], "viz").as_deref(), Some("number"));
-    run_lens_action(
-        &fx.svc,
-        root,
-        act(
-            "dashboard-tiles",
-            "remove",
-            Some(cells(&tiles.rows[0])),
-            None,
-        ),
-        &ctx,
-    )
-    .await
-    .unwrap();
-    assert!(run_as_lens(&fx.svc, "dashboard-tiles", by_id)
-        .await
-        .rows
-        .is_empty());
 }
 
 /// The Files page: all files a folder at a time, or the changed files in
@@ -1682,10 +1627,9 @@ async fn the_data_area_lists_entities_collectors_and_what_a_backfill_would_do() 
 
 /// Settings → Integrations → Capabilities: each choosable capability's
 /// implementations and a default row; choosing writes `activeProviders`
-/// in its layer (the choices stay the lens's own rows).
+/// in its layer (the choices stay the page's own rows).
 #[tokio::test(flavor = "multi_thread")]
-async fn the_capabilities_lens_lists_the_implementations_and_choosing_one_is_a_config_write() {
-    use crate::viz_actions::{run_lens_action, LensActionCall};
+async fn the_capabilities_area_lists_the_implementations_and_choosing_one_is_a_config_write() {
     let fx = crate::test_fixtures::services_with_task_effort().await;
     let caps = run_task(&fx, "capabilities", vec![]).await;
     assert!(!caps.rows.is_empty());
@@ -1701,36 +1645,58 @@ async fn the_capabilities_lens_lists_the_implementations_and_choosing_one_is_a_c
         .iter()
         .find(|r| caps.flag(r, "can_choose") && caps.text(r, "provider").as_deref() != Some("none"))
         .expect("a choosable implementation");
-    let cells = |r: &Row| -> std::collections::BTreeMap<String, SqlCell> {
-        caps.columns.iter().cloned().zip(r.clone()).collect()
-    };
-    let press = |action: &str, row: &Row| LensActionCall {
-        lens_id: "oxplow-foundation/capabilities".into(),
-        action_id: action.into(),
-        params: Default::default(),
-        row: Some(cells(row)),
-        input: None,
-        drop: None,
-        on_behalf_of: oxplow_domain::Actor::Human,
-        confirmed: true,
-    };
-    let ctx = crate::extensions::ViewContext::default();
-    let root = fx.svc.layout.project_dir.clone();
-    run_lens_action(&fx.svc, &root, press("use-project", choice), &ctx)
-        .await
-        .unwrap();
     let capability = caps.text(choice, "capability").unwrap();
     let provider = caps.text(choice, "provider").unwrap();
+    let integrations = || vec![("area", SqlCell::Text("integrations".into()))];
+    // A capability's rows share its key: the row pressed is the one
+    // with the chosen provider (or the default one).
+    let on = |action: &'static str, provider: Option<String>| {
+        let (svc, capability, integrations) = (fx.svc.clone(), capability.clone(), integrations());
+        async move {
+            let runs = PageRuns::default();
+            let (run_id, run) = runs
+                .open(&svc, request("settings", integrations), "w")
+                .await
+                .unwrap();
+            let caps = loader_of(&run, "capabilities");
+            let row = caps
+                .rows
+                .iter()
+                .find(|r| {
+                    caps.text(r, "capability").as_deref() == Some(capability.as_str())
+                        && match &provider {
+                            Some(p) => caps.text(r, "provider").as_deref() == Some(p.as_str()),
+                            None => caps.flag(r, "is_default"),
+                        }
+                })
+                .expect("the row pressed")
+                .clone();
+            run_page_action(
+                &svc,
+                &runs,
+                PageActionCall {
+                    run_id,
+                    node: Some("capabilities".into()),
+                    action: action.into(),
+                    row: Some(caps.columns.iter().cloned().zip(row).collect()),
+                    input: None,
+                    drop: None,
+                    on_behalf_of: oxplow_domain::Actor::Human,
+                    confirmed: true,
+                },
+            )
+            .await
+            .unwrap();
+        }
+    };
+    on("use-project", Some(provider.clone())).await;
     let chosen = crate::config_service::read_config(&fx.svc.config).active_providers;
     assert_eq!(chosen.get(&capability), Some(&provider));
     // The default row resets it.
-    let default = defaults
+    assert!(defaults
         .iter()
-        .find(|r| caps.text(r, "capability").as_deref() == Some(capability.as_str()))
-        .unwrap();
-    run_lens_action(&fx.svc, &root, press("default-project", default), &ctx)
-        .await
-        .unwrap();
+        .any(|r| caps.text(r, "capability").as_deref() == Some(capability.as_str())));
+    on("default-project", None).await;
     assert!(!crate::config_service::read_config(&fx.svc.config)
         .active_providers
         .contains_key(&capability));
@@ -1746,22 +1712,26 @@ async fn the_capabilities_lens_lists_the_implementations_and_choosing_one_is_a_c
         })
         .expect("a target oxplow's own can be chosen for");
     let target = replaced.text(row, "target").unwrap();
-    let row_cells: std::collections::BTreeMap<String, SqlCell> =
-        replaced.columns.iter().cloned().zip(row.clone()).collect();
-    run_lens_action(
+    let row = row.clone();
+    let runs = PageRuns::default();
+    let (run_id, run) = runs
+        .open(&fx.svc, request("settings", integrations()), "w")
+        .await
+        .unwrap();
+    assert!(loader_of(&run, "replacements").rows.contains(&row));
+    run_page_action(
         &fx.svc,
-        &root,
-        LensActionCall {
-            lens_id: "oxplow-foundation/replacements".into(),
-            action_id: "use".into(),
-            params: Default::default(),
-            row: Some(row_cells),
+        &runs,
+        PageActionCall {
+            run_id,
+            node: Some("replacements".into()),
+            action: "use".into(),
+            row: Some(replaced.columns.iter().cloned().zip(row).collect()),
             input: None,
             drop: None,
             on_behalf_of: oxplow_domain::Actor::Human,
             confirmed: true,
         },
-        &ctx,
     )
     .await
     .unwrap();
@@ -1775,12 +1745,10 @@ async fn the_capabilities_lens_lists_the_implementations_and_choosing_one_is_a_c
 }
 
 /// The Context page: its Waiting section lists what the person collected,
-/// and Clear — a whole-lens action on the `context` document, bound to the
-/// page's `thread_id` — empties it through the lens-action path, leaving
-/// what was delivered.
+/// and Clear — a whole-page action, bound to the page's `thread_id` —
+/// empties it through the page-action path, leaving what was delivered.
 #[tokio::test]
 async fn the_context_pages_clear_empties_the_threads_basket() {
-    use crate::viz_actions::{run_lens_action, LensActionCall};
     let fx = services_with_effort().await;
     let thread = fx.thread.to_string();
     let add = |uri: &str| {
@@ -1804,17 +1772,7 @@ async fn the_context_pages_clear_empties_the_threads_basket() {
     let by_thread = || vec![("thread_id", SqlCell::Int(row_id))];
     assert_eq!(run(&fx, "context-waiting", by_thread()).await.rows.len(), 2);
 
-    let call = LensActionCall {
-        lens_id: "oxplow-foundation/context".into(),
-        action_id: "clear".into(),
-        params: std::collections::BTreeMap::from([("thread_id".to_string(), SqlCell::Int(row_id))]),
-        row: None,
-        input: None,
-        drop: None,
-        on_behalf_of: oxplow_domain::Actor::Human,
-        confirmed: false,
-    };
-    run_lens_action(&fx.svc, fx._dir.path(), call, &ViewContext::default())
+    press(&fx.svc, "context", by_thread(), None, "clear", None)
         .await
         .unwrap();
     assert!(run(&fx, "context-waiting", by_thread())

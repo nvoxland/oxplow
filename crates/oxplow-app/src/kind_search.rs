@@ -489,8 +489,6 @@ models:
       - {{ name: uri, type: TEXT, doc: The ref. }}
       - {{ name: title, type: TEXT, doc: Its title. }}
       - {{ name: body, type: TEXT, doc: Its description. }}
-pages:
-  - {{ id: pr, title: Pull request, category: Work, lens: open }}
 resources:
   - name: pr
     label: Pull request
@@ -512,8 +510,10 @@ resources:
         );
         write(
             root,
-            ".oxplow/extensions/acme/lenses/open.yaml",
-            "title: Open\nquery: \"SELECT 1 AS n\"\n",
+            ".oxplow/extensions/acme/pages/pr.yaml",
+            "title: Pull request\ncategory: Work\nfor: acme/pr\ndefault: true\n\
+             params: [{ name: id }]\n\
+             data:\n  open: { sql: \"SELECT 1 AS n\" }\nview: { viz: table, from: open }\n",
         );
     }
 
@@ -1577,70 +1577,6 @@ mod core_tests {
         for word in ["narwhal", "marmaduke", "okapi"] {
             assert!(found(&svc, word, None, "oxplow/commit").await, "{word}");
         }
-    }
-
-    /// A lens is found by its description.
-    #[tokio::test]
-    async fn a_lens_is_found_by_its_description() {
-        let (svc, _dir) = services().await;
-        svc.streams.ensure_primary().await.unwrap();
-        change_loop(&svc);
-        exec(
-            &svc,
-            "INSERT INTO lens (id, extension, slug, title, description, viz, params_json, hidden, needs_json, source)
-               VALUES ('acme/leaks', 'acme', 'leaks', 'Leak finder', 'Lists the platypus leaks', 'table',
-                       '[]', 0, '[]', 'lenses/leaks.yaml');",
-        )
-        .await;
-        eventually("found by its title", || {
-            found(&svc, "finder", None, "oxplow/lens")
-        })
-        .await;
-        assert!(
-            found(&svc, "platypus", None, "oxplow/lens").await,
-            "by its description"
-        );
-    }
-
-    /// A dashboard is found by its title, its text tiles and its query
-    /// tiles' titles; its ref opens the dashboard.
-    #[tokio::test]
-    async fn a_dashboard_is_found_by_its_title_and_its_tiles() {
-        let (svc, _dir) = services().await;
-        svc.streams.ensure_primary().await.unwrap();
-        change_loop(&svc);
-        let made = run(
-            &svc,
-            crate::commands::dashboard::CREATE,
-            serde_json::json!({ "title": "Release health" }),
-        )
-        .await;
-        let id = made["id"].as_str().unwrap().to_string();
-        run(
-            &svc,
-            crate::commands::dashboard::ADD_ITEM,
-            serde_json::json!({ "dashboard": id, "kind": "text", "options_json": "{\"text\":\"Capybara section\"}" }),
-        )
-        .await;
-        run(
-            &svc,
-            crate::commands::dashboard::ADD_ITEM,
-            serde_json::json!({ "dashboard": id, "kind": "query", "sql": "SELECT 1", "display": "table",
-                                "options_json": "{\"title\":\"Axolotl count\"}" }),
-        )
-        .await;
-        eventually("found by its title", || {
-            found(&svc, "health", None, "oxplow/dashboard")
-        })
-        .await;
-        eventually("found by a text tile", || {
-            found(&svc, "capybara", None, "oxplow/dashboard")
-        })
-        .await;
-        assert!(
-            found(&svc, "axolotl", None, "oxplow/dashboard").await,
-            "by a query tile's title"
-        );
     }
 
     /// A work item's comments are in its text.

@@ -50,17 +50,17 @@ view:
     assert!(
         matches!(&p.loaders[0].loader, Loader::Sql { sql, .. } if sql.contains("v_diagnostic"))
     );
-    let NodeKind::Viz { from, lens } = &p.view.kind else {
+    let NodeKind::Viz { from, config } = &p.view.kind else {
         panic!("{:?}", p.view)
     };
     assert_eq!(from.as_deref(), Some("problems"));
-    assert_eq!(lens.viz, Viz::Table);
-    assert_eq!(lens.columns.len(), 2);
-    assert_eq!(lens.empty.as_deref(), Some("No problems."));
+    assert_eq!(config.viz, Viz::Table);
+    assert_eq!(config.columns.len(), 2);
+    assert_eq!(config.empty.as_deref(), Some("No problems."));
     // A viz node's id defaults to the loader it shows.
     assert_eq!(p.view.id, "problems");
     // Its params are the page's, typed.
-    assert_eq!(lens.params.len(), 2);
+    assert_eq!(config.params.len(), 2);
 }
 
 /// Later loaders read earlier ones as tables; a stack holds nodes, an
@@ -432,7 +432,6 @@ fn a_panel_names_its_extensions_pages() {
         .iter()
         .find(|p| p.id == "acme/work")
         .unwrap_or_else(|| panic!("{:?}", loaded.errors));
-    assert!(work.pages);
     assert_eq!(work.body, "acme/list");
     assert_eq!(work.badge.as_deref(), Some("acme/count"));
     assert!(

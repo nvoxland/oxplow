@@ -2203,18 +2203,18 @@ mod tests {
         std::fs::write(p, body).unwrap();
     }
 
-    /// Extension `x` with `lenses` (slug, body), loaded from its own folder.
-    fn version(lenses: &[(&str, &str)]) -> (tempfile::TempDir, crate::extensions::Extension) {
+    /// Extension `x` with `pages` (slug, body), loaded from its own folder.
+    fn version(pages: &[(&str, &str)]) -> (tempfile::TempDir, crate::extensions::Extension) {
         let d = tempfile::tempdir().unwrap();
         write(
             d.path(),
             ".oxplow/extensions/x/extension.yaml",
             "manifest: 2\nname: x\nintent:\n  purpose: p\n",
         );
-        for (slug, body) in lenses {
+        for (slug, body) in pages {
             write(
                 d.path(),
-                &format!(".oxplow/extensions/x/lenses/{slug}.yaml"),
+                &format!(".oxplow/extensions/x/pages/{slug}.yaml"),
                 body,
             );
         }
@@ -2225,37 +2225,37 @@ mod tests {
         (d, ext)
     }
 
-    /// tsk795: a lens that fails the same way in both versions didn't
+    /// tsk795: a page that fails the same way in both versions didn't
     /// change; one whose failure changed did.
     #[tokio::test]
-    async fn a_lens_failing_the_same_way_on_both_sides_is_unchanged() {
+    async fn a_page_failing_the_same_way_on_both_sides_is_unchanged() {
         let layer = crate::sql_gateway::SqlGateway::new(oxplow_db::Database::in_memory());
-        let broken = "title: Broken\nquery: SELECT n FROM v_no_such_model\n";
+        let broken = "title: Broken\ndata:\n  rows: { sql: \"SELECT n FROM v_no_such_model\" }\nview: { viz: table, from: rows }\n";
         let (_b, before) = version(&[("broken", broken), ("moved", broken)]);
         let (_a, after) = version(&[
             ("broken", broken),
             (
                 "moved",
-                "title: Broken\nquery: SELECT n FROM v_another_missing_model\n",
+                "title: Broken\ndata:\n  rows: { sql: \"SELECT n FROM v_another_missing_model\" }\nview: { viz: table, from: rows }\n",
             ),
         ]);
         let none = |_: &str| None;
         let (runs_before, runs_after) = (
-            crate::extensions::run_lenses(&layer, &before).await,
-            crate::extensions::run_lenses(&layer, &after).await,
+            crate::pages::checks::dry_run_all(&layer, &before).await,
+            crate::pages::checks::dry_run_all(&layer, &after).await,
         );
         let report = impact(
             &layer,
             Some(Version {
                 extension: &before,
                 read: &none,
-                lenses: &runs_before,
+                pages: &runs_before,
                 overlay: &[],
             }),
             Version {
                 extension: &after,
                 read: &none,
-                lenses: &runs_after,
+                pages: &runs_after,
                 overlay: &[],
             },
         )
@@ -2268,38 +2268,38 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_changed_lens_renders_before_and_after_text() {
+    async fn a_changed_page_renders_before_and_after_text() {
         let layer = crate::sql_gateway::SqlGateway::new(oxplow_db::Database::in_memory());
         let (_b, before) = version(&[
-            ("same", "title: Same\nquery: SELECT 1 AS n\nviz: number\n"),
-            ("count", "title: Count\nquery: SELECT 1 AS n\nviz: number\n"),
-            ("old", "title: Old\nquery: SELECT 1 AS n\n"),
+            ("same", "title: Same\ndata:\n  rows: { sql: \"SELECT 1 AS n\" }\nview: { viz: number, from: rows }\n"),
+            ("count", "title: Count\ndata:\n  rows: { sql: \"SELECT 1 AS n\" }\nview: { viz: number, from: rows }\n"),
+            ("old", "title: Old\ndata:\n  rows: { sql: \"SELECT 1 AS n\" }\nview: { viz: table, from: rows }\n"),
         ]);
         let (_a, after) = version(&[
-            ("same", "title: Same\nquery: SELECT 1 AS n\nviz: number\n"),
-            ("count", "title: Count\nquery: SELECT 2 AS n\nviz: number\n"),
+            ("same", "title: Same\ndata:\n  rows: { sql: \"SELECT 1 AS n\" }\nview: { viz: number, from: rows }\n"),
+            ("count", "title: Count\ndata:\n  rows: { sql: \"SELECT 2 AS n\" }\nview: { viz: number, from: rows }\n"),
             (
                 "broken",
-                "title: Broken\nquery: SELECT n FROM v_no_such_model\n",
+                "title: Broken\ndata:\n  rows: { sql: \"SELECT n FROM v_no_such_model\" }\nview: { viz: table, from: rows }\n",
             ),
         ]);
         let none = |_: &str| None;
         let (runs_before, runs_after) = (
-            crate::extensions::run_lenses(&layer, &before).await,
-            crate::extensions::run_lenses(&layer, &after).await,
+            crate::pages::checks::dry_run_all(&layer, &before).await,
+            crate::pages::checks::dry_run_all(&layer, &after).await,
         );
         let report = impact(
             &layer,
             Some(Version {
                 extension: &before,
                 read: &none,
-                lenses: &runs_before,
+                pages: &runs_before,
                 overlay: &[],
             }),
             Version {
                 extension: &after,
                 read: &none,
-                lenses: &runs_after,
+                pages: &runs_after,
                 overlay: &[],
             },
         )
@@ -2327,7 +2327,7 @@ mod tests {
             Version {
                 extension: &after,
                 read: &none,
-                lenses: &runs_after,
+                pages: &runs_after,
                 overlay: &[],
             },
         )
@@ -2361,14 +2361,14 @@ mod tests {
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
         let root = d.path().join(".oxplow/extensions/x");
         let read = move |rel: &str| std::fs::read_to_string(root.join(rel)).ok();
-        let runs = crate::extensions::LensRuns::new();
+        let runs = crate::pages::checks::PageChecks::new();
         let report = impact(
             &layer,
             None,
             Version {
                 extension: &ext,
                 read: &read,
-                lenses: &runs,
+                pages: &runs,
                 overlay: &[],
             },
         )
@@ -2601,7 +2601,7 @@ mod tests {
             reader(new.path().to_path_buf()),
         );
         let layer = crate::sql_gateway::SqlGateway::new(oxplow_db::Database::in_memory());
-        let runs = crate::extensions::LensRuns::new();
+        let runs = crate::pages::checks::PageChecks::new();
         let view = |sql: &str| {
             vec![oxplow_db::TempView {
                 name: "v_acme_src".into(),
@@ -2617,13 +2617,13 @@ mod tests {
             Some(Version {
                 extension: &eb,
                 read: &rb,
-                lenses: &runs,
+                pages: &runs,
                 overlay: &ob,
             }),
             Version {
                 extension: &ea,
                 read: &ra,
-                lenses: &runs,
+                pages: &runs,
                 overlay: &oa,
             },
         )
@@ -2673,19 +2673,19 @@ mod tests {
             reader(new.path().to_path_buf()),
         );
         let layer = crate::sql_gateway::SqlGateway::new(oxplow_db::Database::in_memory());
-        let runs = crate::extensions::LensRuns::new();
+        let runs = crate::pages::checks::PageChecks::new();
         let report = impact(
             &layer,
             Some(Version {
                 extension: &eb,
                 read: &rb,
-                lenses: &runs,
+                pages: &runs,
                 overlay: &[],
             }),
             Version {
                 extension: &ea,
                 read: &ra,
-                lenses: &runs,
+                pages: &runs,
                 overlay: &[],
             },
         )
@@ -2729,7 +2729,7 @@ mod tests {
         let ext = crate::extensions::load_project_extension(root.path(), "acme");
         let read = |rel: &str| std::fs::read_to_string(dir.join(rel)).ok();
         let layer = crate::sql_gateway::SqlGateway::new(oxplow_db::Database::in_memory());
-        let runs = crate::extensions::LensRuns::new();
+        let runs = crate::pages::checks::PageChecks::new();
         let started = std::time::Instant::now();
         let report = impact_within(
             &layer,
@@ -2737,7 +2737,7 @@ mod tests {
             Version {
                 extension: &ext,
                 read: &read,
-                lenses: &runs,
+                pages: &runs,
                 overlay: &[],
             },
             std::time::Duration::from_secs(1),
@@ -2838,19 +2838,19 @@ mod tests {
             reader(new.path().to_path_buf()),
         );
         let layer = crate::sql_gateway::SqlGateway::new(oxplow_db::Database::in_memory());
-        let runs = crate::extensions::LensRuns::new();
+        let runs = crate::pages::checks::PageChecks::new();
         let report = impact(
             &layer,
             Some(Version {
                 extension: &eb,
                 read: &rb,
-                lenses: &runs,
+                pages: &runs,
                 overlay: &[],
             }),
             Version {
                 extension: &ea,
                 read: &ra,
-                lenses: &runs,
+                pages: &runs,
                 overlay: &[],
             },
         )
@@ -2916,14 +2916,14 @@ mod tests {
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
         let read = |rel: &str| std::fs::read_to_string(dir.join(rel)).ok();
         let layer = crate::sql_gateway::SqlGateway::new(oxplow_db::Database::in_memory());
-        let runs = crate::extensions::LensRuns::new();
+        let runs = crate::pages::checks::PageChecks::new();
         let report = impact(
             &layer,
             None,
             Version {
                 extension: &ext,
                 read: &read,
-                lenses: &runs,
+                pages: &runs,
                 overlay: &[],
             },
         )
@@ -2972,19 +2972,19 @@ mod tests {
             reader(new.path().to_path_buf()),
         );
         let layer = crate::sql_gateway::SqlGateway::new(oxplow_db::Database::in_memory());
-        let runs = crate::extensions::LensRuns::new();
+        let runs = crate::pages::checks::PageChecks::new();
         let report = impact(
             &layer,
             Some(Version {
                 extension: &eb,
                 read: &rb,
-                lenses: &runs,
+                pages: &runs,
                 overlay: &[],
             }),
             Version {
                 extension: &ea,
                 read: &ra,
-                lenses: &runs,
+                pages: &runs,
                 overlay: &[],
             },
         )
@@ -3449,8 +3449,8 @@ mod tests {
         let before = vec![
             kept.clone(),
             changed_before,
-            described(K::Page, "gone"),
-            described(K::Lens, "lens-has-its-own-detail"),
+            described(K::Panel, "gone"),
+            described(K::Page, "page-has-its-own-detail"),
         ];
         let after = vec![
             kept,
@@ -3477,7 +3477,7 @@ mod tests {
                     ]
                 ),
                 (
-                    "oxplow:oxplow/page?page=shared/gone".into(),
+                    "oxplow:oxplow/panel?panel=shared/gone".into(),
                     Change::Removed,
                     vec![]
                 ),
@@ -3488,7 +3488,7 @@ mod tests {
                 ),
             ]
         );
-        assert_eq!(rows[1].title, "Page");
+        assert_eq!(rows[1].title, "Panel");
         assert_eq!(rows[2].local, "new");
         // An install has nothing to compare with: everything is added.
         assert!(contributions_diff(&[], &after)

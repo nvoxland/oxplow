@@ -1522,7 +1522,7 @@ mod tests {
         std::fs::write(path, text).unwrap();
     }
 
-    /// `acme`'s source in the project, with one lens titled `title`.
+    /// `acme`'s source in the project, with one page titled `title`.
     fn source(svc: &Services, title: &str) -> PathBuf {
         let dir = svc.layout.project_dir.join(".oxplow/extensions/acme");
         write(
@@ -1532,15 +1532,17 @@ mod tests {
         );
         write(
             &dir,
-            "lenses/one.yaml",
-            &format!("title: {title}\nquery: \"SELECT 1 AS n\"\n"),
+            "pages/one.yaml",
+            &format!(
+                "title: {title}\ndata:\n  n: {{ sql: \"SELECT 1 AS n\" }}\nview: {{ viz: number, from: n }}\n"
+            ),
         );
         dir
     }
 
-    fn lens_title(svc: &Services) -> Option<String> {
+    fn page_title(svc: &Services) -> Option<String> {
         svc.extension_catalog
-            .find_lens(&svc.layout.project_dir, "acme/one")
+            .find_page(&svc.layout.project_dir, "acme/one")
             .ok()
             .map(|l| l.title)
     }
@@ -1576,7 +1578,7 @@ mod tests {
             .collect()
     }
 
-    /// `acme`'s source declaring `permissions`, its lens titled `title`.
+    /// `acme`'s source declaring `permissions`, its page titled `title`.
     fn source_with(svc: &Services, title: &str, permissions: &str) -> PathBuf {
         let dir = source(svc, title);
         write(
@@ -1605,10 +1607,10 @@ mod tests {
         deploy(svc, "acme", true).await.unwrap();
         source_with(svc, "Two", AI);
         deploy(svc, "acme", false).await.unwrap();
-        assert_eq!(lens_title(svc).as_deref(), Some("Two"));
+        assert_eq!(page_title(svc).as_deref(), Some("Two"));
         source_with(svc, "Three", "");
         deploy(svc, "acme", false).await.unwrap();
-        assert_eq!(lens_title(svc).as_deref(), Some("Three"));
+        assert_eq!(page_title(svc).as_deref(), Some("Three"));
     }
 
     /// Commits `files` (relative to `root`) in a repository at `root`.
@@ -1641,7 +1643,7 @@ mod tests {
         let svc = &fx.svc;
         let files = [
             ".oxplow/extensions/acme/extension.yaml",
-            ".oxplow/extensions/acme/lenses/one.yaml",
+            ".oxplow/extensions/acme/pages/one.yaml",
         ];
         source(svc, "One");
         let head = commit_files(&svc.layout.project_dir, &files);
@@ -1655,8 +1657,8 @@ mod tests {
         source(svc, "Two");
         write(
             &svc.layout.project_dir.join(".oxplow/extensions/acme"),
-            "lenses/new.yaml",
-            "title: N\nquery: \"SELECT 1 AS n\"\n",
+            "pages/new.yaml",
+            "title: N\ndata:\n  n: { sql: \"SELECT 1 AS n\" }\nview: { viz: table, from: n }\n",
         );
         let second = deploy(svc, "acme", true).await.unwrap();
         assert_eq!(
@@ -1681,20 +1683,22 @@ mod tests {
         assert_eq!((back.commit.as_deref(), back.dirty), (Some(&*head), false));
     }
 
-    /// A copy of the acme source in another checkout, with `lenses`
+    /// A copy of the acme source in another checkout, with `pages`
     /// (slug, query).
-    fn draft(root: &Path, lenses: &[(&str, &str)]) {
+    fn draft(root: &Path, pages: &[(&str, &str)]) {
         let dir = root.join(".oxplow/extensions/acme");
         write(
             &dir,
             "extension.yaml",
             "manifest: 2\nname: acme\nintent:\n  purpose: test\n",
         );
-        for (slug, query) in lenses {
+        for (slug, query) in pages {
             write(
                 &dir,
-                &format!("lenses/{slug}.yaml"),
-                &format!("title: {slug}\nquery: \"{query}\"\n"),
+                &format!("pages/{slug}.yaml"),
+                &format!(
+                    "title: {slug}\ndata:\n  n: {{ sql: \"{query}\" }}\nview: {{ viz: number, from: n }}\n"
+                ),
             );
         }
     }
@@ -1732,8 +1736,8 @@ mod tests {
         source(svc, "One");
         write(
             &svc.layout.project_dir.join(".oxplow/extensions/acme"),
-            "lenses/keep.yaml",
-            "title: keep\nquery: \"SELECT 1 AS n\"\n",
+            "pages/keep.yaml",
+            "title: keep\ndata:\n  n: { sql: \"SELECT 1 AS n\" }\nview: { viz: table, from: n }\n",
         );
         deploy(svc, "acme", true).await.unwrap();
         let other = tempfile::tempdir().unwrap();
@@ -1756,11 +1760,11 @@ mod tests {
         let first = deploy(svc, "acme", true).await.unwrap();
         assert!(!first.warnings.iter().any(|w| w.contains("removes")));
         let dir = svc.layout.project_dir.join(".oxplow/extensions/acme");
-        std::fs::remove_file(dir.join("lenses/one.yaml")).unwrap();
+        std::fs::remove_file(dir.join("pages/one.yaml")).unwrap();
         write(
             &dir,
-            "lenses/two.yaml",
-            "title: two\nquery: \"SELECT 1 AS n\"\n",
+            "pages/two.yaml",
+            "title: two\ndata:\n  n: { sql: \"SELECT 1 AS n\" }\nview: { viz: table, from: n }\n",
         );
         let second = deploy(svc, "acme", true).await.unwrap();
         assert!(
@@ -1971,10 +1975,10 @@ mod tests {
             asked(deploy(svc, "acme", false).await),
             vec!["ai — may call your AI provider with your key"]
         );
-        assert_eq!(lens_title(svc).as_deref(), Some("One"));
+        assert_eq!(page_title(svc).as_deref(), Some("One"));
         assert_eq!(rows(svc).await.len(), 1);
         deploy(svc, "acme", true).await.unwrap();
-        assert_eq!(lens_title(svc).as_deref(), Some("Two"));
+        assert_eq!(page_title(svc).as_deref(), Some("Two"));
         let recorded = svc
             .db
             .read(|c| store_rows::list_tx(c, Some("acme")))
@@ -1996,12 +2000,12 @@ mod tests {
             asked(rollback(svc, "acme", None, false).await),
             vec!["ai — may call your AI provider with your key"]
         );
-        assert_eq!(lens_title(svc).as_deref(), Some("Two"));
+        assert_eq!(page_title(svc).as_deref(), Some("Two"));
         rollback(svc, "acme", None, true).await.unwrap();
-        assert_eq!(lens_title(svc).as_deref(), Some("One"));
+        assert_eq!(page_title(svc).as_deref(), Some("One"));
     }
 
-    /// `name`'s source in the project with a lens and the `extra` manifest
+    /// `name`'s source in the project with a page and the `extra` manifest
     /// lines.
     fn other(svc: &Services, name: &str, extra: &str) {
         let dir = svc.layout.project_dir.join(".oxplow/extensions").join(name);
@@ -2012,8 +2016,8 @@ mod tests {
         );
         write(
             &dir,
-            "lenses/one.yaml",
-            "title: T\nquery: \"SELECT 1 AS n\"\n",
+            "pages/one.yaml",
+            "title: T\ndata:\n  n: { sql: \"SELECT 1 AS n\" }\nview: { viz: table, from: n }\n",
         );
     }
 
@@ -2036,7 +2040,7 @@ mod tests {
         assert!(!oxplow_config::extension_settings(&root).is_enabled("acme"));
         deploy(svc, "tracker", true).await.unwrap();
         deploy(svc, "acme", true).await.unwrap();
-        assert_eq!(lens_title(svc).as_deref(), Some("One"));
+        assert_eq!(page_title(svc).as_deref(), Some("One"));
     }
 
     /// While an enabled extension requires `tracker`, turning `tracker`
@@ -2108,7 +2112,7 @@ mod tests {
         assert!(deployed.join("dist/widget/index.html").is_file());
         assert!(deployed.join("src/widget.html").is_file());
         assert!(!deployed.join("node_modules").exists());
-        assert_eq!(lens_title(svc).as_deref(), Some("One"));
+        assert_eq!(page_title(svc).as_deref(), Some("One"));
         let recorded = svc
             .db
             .read(|c| store_rows::list_tx(c, Some("acme")))
@@ -2142,7 +2146,7 @@ mod tests {
         deploy(svc, "acme", true).await.unwrap();
         source_built(svc, "Two", BUILD);
         deploy(svc, "acme", false).await.unwrap();
-        assert_eq!(lens_title(svc).as_deref(), Some("Two"));
+        assert_eq!(page_title(svc).as_deref(), Some("Two"));
         let changed = format!("{BUILD} && true");
         source_built(svc, "Three", &changed);
         assert_eq!(
@@ -2155,7 +2159,7 @@ mod tests {
             vec![build_line(BUILD)]
         );
         rollback(svc, "acme", None, true).await.unwrap();
-        assert_eq!(lens_title(svc).as_deref(), Some("Two"));
+        assert_eq!(page_title(svc).as_deref(), Some("Two"));
     }
 
     /// A build that fails deploys nothing: not turned on, no row, nothing
@@ -2266,7 +2270,7 @@ mod tests {
             acme.pending,
             vec!["ai — may call your AI provider with your key"]
         );
-        assert_eq!(lens_title(svc), None);
+        assert_eq!(page_title(svc), None);
         let listed = svc
             .sql
             .query_sql(
@@ -2350,7 +2354,7 @@ mod tests {
         let oxplow_domain::CommandError::Proposed { proposal, .. } = err else {
             panic!("{err:?}");
         };
-        assert_eq!(lens_title(svc), None);
+        assert_eq!(page_title(svc), None);
         let id = proposal;
         let kept = svc
             .commands
@@ -2367,7 +2371,7 @@ mod tests {
             .approve(&oxplow_domain::Actor::Human, id)
             .await
             .unwrap();
-        assert_eq!(lens_title(svc).as_deref(), Some("One"));
+        assert_eq!(page_title(svc).as_deref(), Some("One"));
     }
 
     /// A bundled extension's source that declares what ships asks nothing:
@@ -2388,8 +2392,8 @@ mod tests {
         }
         write(
             &dir,
-            "lenses/extra.yaml",
-            "title: Extra\nquery: \"SELECT 1 AS n\"\n",
+            "pages/extra.yaml",
+            "title: Extra\ndata:\n  n: { sql: \"SELECT 1 AS n\" }\nview: { viz: table, from: n }\n",
         );
         let deployed = deploy(svc, "oxplow-bundled", false).await.unwrap();
         assert!(!deployed.already);
@@ -2498,37 +2502,60 @@ mod tests {
     }
 
     /// The Extensions page's row actions run their commands from inside a
-    /// lens action's read: disabling, enabling and removing there activate
+    /// page action's read: disabling, enabling and removing there activate
     /// all the same.
     #[tokio::test]
     async fn the_extensions_page_row_actions_disable_enable_and_remove() {
+        use crate::pages::actions::{run_page_action, PageActionCall};
+        use crate::pages::open_runs::PageRuns;
+        use crate::pages::runner::{RunRequest, RunTarget};
         let fx = crate::test_fixtures::services_with_effort().await;
         let svc = &fx.svc;
-        let root = svc.layout.project_dir.clone();
         source(svc, "One");
         deploy(svc, "acme", true).await.unwrap();
-        let press = |action: &str| crate::viz_actions::LensActionCall {
-            lens_id: "oxplow-foundation/extensions-list".into(),
-            action_id: action.into(),
-            params: Default::default(),
-            row: Some(
-                [
-                    ("name".to_string(), oxplow_db::SqlCell::Text("acme".into())),
-                    (format!("can_{action}"), oxplow_db::SqlCell::Int(1)),
-                ]
-                .into(),
-            ),
-            input: None,
-            drop: None,
-            on_behalf_of: oxplow_domain::Actor::Human,
-            confirmed: true,
-        };
+        let runs = PageRuns::default();
         for action in ["disable", "enable", "remove"] {
-            crate::viz_actions::run_lens_action(
+            // Each press is on a fresh run: the row it acts on is the one
+            // the run holds.
+            let (id, run) = runs
+                .open(
+                    svc,
+                    RunRequest {
+                        target: RunTarget::Page("oxplow-foundation/extensions-list".into()),
+                        params: Default::default(),
+                        ctx: crate::extensions::ViewContext::default(),
+                        viewer: oxplow_domain::Actor::Human,
+                    },
+                    "w",
+                )
+                .await
+                .unwrap();
+            let listed = &run.loaders["extensions_list"].result;
+            let name = listed.columns.iter().position(|c| c == "name").unwrap();
+            let acme = listed
+                .rows
+                .iter()
+                .find(|r| r[name] == oxplow_db::SqlCell::Text("acme".into()))
+                .expect("acme is listed");
+            let row = listed
+                .columns
+                .iter()
+                .cloned()
+                .zip(acme.iter().cloned())
+                .collect();
+            run_page_action(
                 svc,
-                &root,
-                press(action),
-                &crate::extensions::ViewContext::default(),
+                &runs,
+                PageActionCall {
+                    run_id: id,
+                    node: Some("extensions_list".into()),
+                    action: action.into(),
+                    row: Some(row),
+                    input: None,
+                    drop: None,
+                    on_behalf_of: oxplow_domain::Actor::Human,
+                    confirmed: true,
+                },
             )
             .await
             .unwrap_or_else(|e| panic!("{action}: {e}"));
@@ -2550,12 +2577,12 @@ mod tests {
             .activate(svc.clone())
             .await
             .unwrap();
-        assert_eq!(lens_title(svc), None);
+        assert_eq!(page_title(svc), None);
         assert_eq!(acme(svc).unwrap().deployment, Deployment::Undeployed);
 
         let deployed = deploy(svc, "acme", true).await.unwrap();
         assert!(!deployed.already);
-        assert_eq!(lens_title(svc).as_deref(), Some("One"));
+        assert_eq!(page_title(svc).as_deref(), Some("One"));
         assert_eq!(
             acme(svc).unwrap().deployment,
             Deployment::Deployed {
@@ -2579,9 +2606,9 @@ mod tests {
             .activate(svc.clone())
             .await
             .unwrap();
-        assert_eq!(lens_title(svc).as_deref(), Some("One"));
+        assert_eq!(page_title(svc).as_deref(), Some("One"));
         let second = deploy(svc, "acme", true).await.unwrap();
-        assert_eq!(lens_title(svc).as_deref(), Some("Uno"));
+        assert_eq!(page_title(svc).as_deref(), Some("Uno"));
         assert_eq!(
             rows(svc).await,
             [(second.hash.clone(), true), (deployed.hash.clone(), false)]
@@ -2589,11 +2616,11 @@ mod tests {
 
         // Back to the one before, and forward again by its hash.
         rollback(svc, "acme", None, true).await.unwrap();
-        assert_eq!(lens_title(svc).as_deref(), Some("One"));
+        assert_eq!(page_title(svc).as_deref(), Some("One"));
         rollback(svc, "acme", Some(&second.hash[..6]), true)
             .await
             .unwrap();
-        assert_eq!(lens_title(svc).as_deref(), Some("Uno"));
+        assert_eq!(page_title(svc).as_deref(), Some("Uno"));
     }
 
     /// A source that doesn't load is refused and changes nothing: not run,
@@ -2609,7 +2636,7 @@ mod tests {
         assert!(err.to_string().contains("doesn't load"), "{err}");
         assert!(!oxplow_config::extension_settings(&root).is_enabled("acme"));
         assert!(rows(svc).await.is_empty());
-        assert_eq!(lens_title(svc), None);
+        assert_eq!(page_title(svc), None);
     }
 
     /// Off for the person stops it; removing forgets its deployments and
@@ -2623,12 +2650,12 @@ mod tests {
         let deployed = deploy(svc, "acme", true).await.unwrap();
 
         set_enabled(svc, "acme", false, true).await.unwrap();
-        assert_eq!(lens_title(svc), None);
+        assert_eq!(page_title(svc), None);
         set_enabled(svc, "acme", true, true).await.unwrap();
-        assert_eq!(lens_title(svc).as_deref(), Some("One"));
+        assert_eq!(page_title(svc).as_deref(), Some("One"));
 
         remove(svc, "acme").await.unwrap();
-        assert_eq!(lens_title(svc), None);
+        assert_eq!(page_title(svc), None);
         assert!(rows(svc).await.is_empty());
         assert!(!extension_store::deployment_dir(&root, "acme", &deployed.hash).exists());
         assert!(!oxplow_config::extension_settings(&root).is_enabled("acme"));
@@ -2688,7 +2715,7 @@ mod tests {
             .initialize(svc.clone())
             .await
             .unwrap();
-        assert_eq!(lens_title(svc), None);
+        assert_eq!(page_title(svc), None);
         assert_eq!(acme(svc).unwrap().deployment, Deployment::Undeployed);
         assert!(rows(svc).await.is_empty());
         let ghost = svc
@@ -3033,8 +3060,8 @@ mod tests {
         );
         write(
             dir.path(),
-            ".oxplow/extensions/acme/lenses/one.yaml",
-            "title: One\nquery: \"SELECT 1 AS n\"\n",
+            ".oxplow/extensions/acme/pages/one.yaml",
+            "title: One\ndata:\n  n: { sql: \"SELECT 1 AS n\" }\nview: { viz: table, from: n }\n",
         );
         // Built after the files: the mode is read when it is made.
         let svc = {
@@ -3370,7 +3397,7 @@ mod tests {
             .initialize(svc.clone())
             .await
             .unwrap();
-        assert_eq!(lens_title(svc).as_deref(), Some("One"));
+        assert_eq!(page_title(svc).as_deref(), Some("One"));
     }
 
     /// The bundled extensions run their shipped deployments from the store.

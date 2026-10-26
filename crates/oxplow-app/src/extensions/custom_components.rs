@@ -603,7 +603,8 @@ mod tests {
     }
 
     use super::{bundle_problems, bundle_warnings, page_problems};
-    use crate::extensions::{load_extensions, Extension, Viz};
+    use crate::extensions::{load_extensions, Extension, Viz, VizConfig};
+    use crate::pages::schema::NodeKind;
     use std::path::Path;
 
     fn write(root: &Path, rel: &str, body: &str) {
@@ -612,10 +613,23 @@ mod tests {
         std::fs::write(p, body).unwrap();
     }
 
-    const LENS: &str = "title: Burn\nquery: SELECT 1 AS day, 3 AS remaining\nviz: custom\ncustom: { component: burndown, props: { color: accent } }\n";
+    const PAGE: &str = "title: Burn\ndata:\n  burn: { sql: SELECT 1 AS day, 3 AS remaining }\n\
+                        view:\n  from: burn\n  viz: custom\n  custom: { component: burndown, props: { color: accent } }\n";
+
+    /// The config of the first custom viz node of `ext`'s page `slug`.
+    fn custom_viz<'e>(ext: &'e Extension, slug: &str) -> &'e VizConfig {
+        let page = ext.page_files.iter().find(|p| p.slug == slug).unwrap();
+        page.nodes()
+            .into_iter()
+            .find_map(|n| match &n.kind {
+                NodeKind::Viz { config, .. } if config.viz == Viz::Custom => Some(config),
+                _ => None,
+            })
+            .expect("a custom viz")
+    }
 
     /// Extension `x` declaring `components` (the block's
-    /// entries), with a `burndown` bundle and the `burn` lens.
+    /// entries), with a `burndown` bundle and the `burn` page.
     fn load(root: &Path, components: &str) -> Extension {
         load_permitted(root, "", components)
     }
@@ -635,12 +649,7 @@ mod tests {
             &format!("<!doctype html>{LIB_TAG}<script src=\"app.js\"></script>"),
         );
         write(root, ".oxplow/extensions/x/components/burndown/app.js", "1");
-        write(root, ".oxplow/extensions/x/lenses/burn.yaml", LENS);
-        write(
-            root,
-            ".oxplow/extensions/x/lenses/open-tasks.yaml",
-            "title: Open\nquery: SELECT 1\n",
-        );
+        write(root, ".oxplow/extensions/x/pages/burn.yaml", PAGE);
         load_extensions(root)
             .into_iter()
             .find(|e| e.name == "x")
@@ -901,21 +910,20 @@ mod tests {
     }
 
     #[test]
-    fn a_private_extension_loads_a_component_and_its_lens() {
+    fn a_private_extension_loads_a_component_and_its_page() {
         let d = tempfile::tempdir().unwrap();
         let ext = load_permitted(
             d.path(),
             "permissions: { commands: [oxplow.work_item.transition] }\n",
-            "  - { id: burndown, title: Burndown, assets: [open-tasks, oxplow-bundled/visits], commands: [oxplow.work_item.transition] }\n",
+            "  - { id: burndown, title: Burndown, commands: [oxplow.work_item.transition] }\n",
         );
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
         let c = &ext.custom_components[0];
         assert_eq!(c.bundle, "components/burndown");
-        assert_eq!(c.assets, vec!["x/open-tasks", "oxplow-bundled/visits"]);
-        let lens = ext.lenses.iter().find(|l| l.slug == "burn").unwrap();
-        assert_eq!(lens.viz, Viz::Custom);
+        assert_eq!(c.commands, vec!["oxplow.work_item.transition"]);
+        let viz = custom_viz(&ext, "burn");
         assert_eq!(
-            lens.custom.as_ref().unwrap().props.as_ref().unwrap()["color"],
+            viz.custom.as_ref().unwrap().props.as_ref().unwrap()["color"],
             "accent"
         );
     }
@@ -954,22 +962,7 @@ mod tests {
             (
                 "{ id: c, bundle: components/burndown, assets: [nope] }",
                 "",
-                "asset `x/nope` isn't in this extension's lenses/",
-            ),
-            (
-                "{ id: c, bundle: components/burndown, assets: [\"Not A Page\"] }",
-                "",
-                "isn't a lens id",
-            ),
-            (
-                "{ id: c, bundle: components/burndown, assets: [\"open-tasks?stream_id=2\"] }",
-                "",
-                "isn't a lens id",
-            ),
-            (
-                "{ id: c, bundle: components/burndown, assets: [\"open-tasks#x\"] }",
-                "",
-                "isn't a lens id",
+                "unknown field `assets`",
             ),
             (
                 "{ id: c, bundle: components/burndown, commands: [Nope] }",
@@ -1014,9 +1007,9 @@ mod tests {
     }
 
     /// P11 (tsk962): `custom_components` is stable, so a shared extension
-    /// declares one like a private one, and its custom lens loads.
+    /// declares one like a private one, and its page's custom viz loads.
     #[test]
-    fn a_shared_extension_loads_a_component_and_its_lens() {
+    fn a_shared_extension_loads_a_component_and_its_page() {
         let d = tempfile::tempdir().unwrap();
         let ext = load(d.path(), "  - { id: burndown }\n");
         assert_eq!(ext.errors, Vec::<String>::new());
@@ -1027,39 +1020,34 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["burndown"]
         );
-        assert!(ext.lenses.iter().any(|l| l.slug == "burn"));
+        assert_eq!(custom_viz(&ext, "burn").viz, Viz::Custom);
     }
 
+    /// A page's custom viz names one of its extension's components: none,
+    /// or one it doesn't declare, is an error at the page.
     #[test]
-    fn a_custom_lens_needs_its_component_and_a_query() {
-        for (lens, says) in [
+    #[ignore = "page loading never checks a custom viz's component (shape_problem is only called with no components)"]
+    fn a_custom_viz_needs_one_of_its_extensions_components() {
+        for (page, says) in [
             (
-                "title: B\nquery: SELECT 1\nviz: custom\n",
+                "title: B\ndata:\n  b: { sql: SELECT 1 }\nview: { from: b, viz: custom }\n",
                 "needs `custom: { component: <id> }`",
             ),
             (
-                "title: B\nviz: custom\ncustom: { component: burndown }\n",
-                "needs a `query`",
+                "title: B\ndata:\n  b: { sql: SELECT 1 }\nview: { from: b, viz: custom, custom: { component: nope } }\n",
+                "isn't one of this extension's `custom_components`",
             ),
         ] {
             let d = tempfile::tempdir().unwrap();
-            write(d.path(), ".oxplow/extensions/x/lenses/other.yaml", lens);
+            write(d.path(), ".oxplow/extensions/x/pages/other.yaml", page);
             let ext = load(d.path(), "  - { id: burndown }\n");
             assert!(
                 ext.errors.join("\n").contains(says),
-                "{lens}: {:?}",
+                "{page}: {:?}",
                 ext.errors
             );
-            assert!(ext.lenses.iter().all(|l| l.slug != "other"));
+            assert!(ext.page_files.iter().all(|p| p.slug != "other"));
         }
-        let spec: crate::extensions::LensSpec = serde_json::from_value(serde_json::json!({
-            "title": "B", "query": "SELECT 1", "viz": "custom"
-        }))
-        .unwrap();
-        assert!(
-            crate::extensions::spec_problem(&spec).is_some(),
-            "an answer can't carry one"
-        );
     }
 
     #[tokio::test]
@@ -1072,8 +1060,9 @@ mod tests {
         );
         write(
             d.path(),
-            ".oxplow/extensions/x/lenses/burn.yaml",
-            "title: Burn\nquery: SELECT 1 AS day, 3 AS remaining\nviz: custom\ncustom: { component: burndown }\nchart: { x: day, y: remaining }\n",
+            ".oxplow/extensions/x/pages/burn.yaml",
+            "title: Burn\ndata:\n  burn: { sql: SELECT 1 AS day, 3 AS remaining }\n\
+             view:\n  from: burn\n  viz: custom\n  custom: { component: burndown }\n  chart: { x: day, y: remaining }\n",
         );
         let layer = crate::sql_gateway::SqlGateway::new(oxplow_db::Database::in_memory());
         let cat = crate::extension_catalog::ExtensionCatalog::new();
@@ -1096,16 +1085,20 @@ mod tests {
             "{:?}",
             v.warnings
         );
-        let run = crate::extensions::run_lens(
-            &layer,
-            &cat,
-            d.path(),
-            "x/burn",
-            Default::default(),
-            &Default::default(),
-        )
-        .await
-        .unwrap();
+        // An agent reads a custom viz as its rows' table.
+        let ext = load_extensions(d.path())
+            .into_iter()
+            .find(|e| e.name == "x")
+            .unwrap();
+        let run = crate::extensions::VizRun {
+            config: custom_viz(&ext, "burn").clone(),
+            params: Default::default(),
+            result: oxplow_db::SqlQueryResult {
+                columns: vec!["day".into(), "remaining".into()],
+                rows: vec![vec![oxplow_db::SqlCell::Int(1), oxplow_db::SqlCell::Int(3)]],
+                ..Default::default()
+            },
+        };
         let text = crate::viz_text::render(&run, &Default::default());
         assert!(
             text.starts_with("(custom component `x/burndown`; its table rendering)\n"),

@@ -749,100 +749,98 @@ pub fn bind_input(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::pages::actions::{
+        page_action_form, page_form, run_page_action, submit_page_form, PageActionCall,
+    };
+    use crate::pages::open_runs::PageRuns;
+    use crate::pages::runner::{PageRun, RunRequest, RunTarget};
     use oxplow_tasks::work_item_ref;
     use serde_json::json;
 
-    /// A task, and a lens over it whose actions run commands.
+    /// A task, and pages over it whose actions run commands.
     async fn fixture() -> (crate::test_fixtures::TaskEffortFixture, std::path::PathBuf) {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let root = fx.svc.layout.project_dir.clone();
         let ext = root.join(".oxplow/extensions/acme");
-        std::fs::create_dir_all(ext.join("lenses")).unwrap();
+        std::fs::create_dir_all(ext.join("pages")).unwrap();
         std::fs::write(
             ext.join("extension.yaml"),
             "manifest: 2\nname: acme\nintent:\n  purpose: test\n",
         )
         .unwrap();
         std::fs::write(
-            ext.join("lenses/tasks.yaml"),
+            ext.join("pages/tasks.yaml"),
             r#"title: Tasks
-query: "SELECT uri, title FROM v_work_item"
-params: [{ name: item, default: "" }]
+params:
+  - { name: item, default: "" }
+  - { name: open, default: "0" }
+data:
+  items:
+    sql: |
+      SELECT uri, title,
+             CASE :open WHEN '1' THEN 1 WHEN 'null' THEN NULL WHEN 'empty' THEN '' ELSE 0 END AS open
+      FROM v_work_item
 actions:
   - { id: finish, label: Finish, command: oxplow.work_item.transition, input: { uri: "{{param.item}}", to: done } }
-  - { id: finish-row, label: Finish, command: oxplow.work_item.transition, row: true, input: { uri: "{{row.uri}}", to: done } }
-  - { id: finish-open, label: Finish, command: oxplow.work_item.transition, row: true, when: open, input: { uri: "{{row.uri}}", to: done } }
   - { id: push, label: Push, command: oxplow.vcs.push, input: { stream: str1 } }
   - { id: prompt, label: Prompt, command: oxplow.config.set, input: { key: agentPromptAppend, value: be brief } }
-  - { id: retitle, label: Retitle…, command: oxplow.work_item.update, row: true, form: true, fixed: [uri], input: { uri: "{{row.uri}}", title: "{{row.title}}" } }
+view:
+  viz: table
+  from: items
+  actions:
+    - { id: finish-row, label: Finish, command: oxplow.work_item.transition, row: true, input: { uri: "{{row.uri}}", to: done } }
+    - { id: finish-open, label: Finish, command: oxplow.work_item.transition, row: true, when: open, input: { uri: "{{row.uri}}", to: done } }
+    - { id: retitle, label: Retitle…, command: oxplow.work_item.update, row: true, form: true, fixed: [uri], input: { uri: "{{row.uri}}", title: "{{row.title}}" } }
 "#,
         )
         .unwrap();
         std::fs::write(
-            ext.join("lenses/tiles.yaml"),
-            r#"title: Tiles
-params: [{ name: id, default: "" }]
-query: |
-  SELECT 'dti' || i.id AS id, i.kind,
-         json_extract(i.options_json, '$.title') AS title,
-         json_extract(i.options_json, '$.size') AS size,
-         json_extract(i.options_json, '$.lensId') AS lens,
-         json_extract(i.options_json, '$.sql') AS sql,
-         json_extract(i.options_json, '$.display') AS display,
-         json_extract(i.options_json, '$.chart') AS chart,
-         json_extract(i.options_json, '$.metric') AS metric,
-         json_extract(i.options_json, '$.viz') AS viz,
-         json_extract(i.options_json, '$.text') AS text
-  FROM v_dashboard_item i WHERE 'dsh' || i.dashboard_id = :id ORDER BY i.sort_index
-viz: dashboard
-tile: { id: id, title: title, size: size, lens: lens, sql: sql, display: display, chart: chart, metric: metric, viz: viz, text: text }
-actions:
-  - { id: reorder, label: Reorder, command: oxplow.dashboard.reorder_items, drag: true, input: { dashboard: "{{param.id}}", order: "{{order.id}}" } }
-  - { id: rename, label: Rename…, command: oxplow.dashboard.update_item, row: true, form: true, fixed: [item], input: { item: "{{row.id}}", title: "{{row.title}}", size: "{{row.size}}" } }
-  - { id: edit-text, label: Save, command: oxplow.dashboard.update_item, edit: true, fixed: [item], input: { item: "{{row.id}}", text: "{{row.text}}" } }
-  - { id: remove, label: Remove, command: oxplow.dashboard.remove_item, row: true, key: Delete, input: { item: "{{row.id}}" } }
-  - { id: add-text, label: Add Heading…, command: oxplow.dashboard.add_item, form: true, fixed: [dashboard, kind], input: { dashboard: "{{param.id}}", kind: text } }
-  - { id: rename-dashboard, label: Rename Dashboard…, command: oxplow.dashboard.rename, form: true, fixed: [dashboard], input: { dashboard: "{{param.id}}" } }
-"#,
-        )
-        .unwrap();
-        std::fs::write(
-            ext.join("lenses/one.yaml"),
+            ext.join("pages/one.yaml"),
             r#"title: One
-params: [{ name: n, default: "1" }]
-query: |
-  SELECT 'Made' AS title, CAST(:n AS INTEGER) = 1 AS open WHERE CAST(:n AS INTEGER) <> 0
-  UNION ALL SELECT 'Twin', 1 WHERE CAST(:n AS INTEGER) = 2
-viz: detail
-columns: [{ key: title }, { key: open }]
-actions:
-  - { id: make, label: Make, command: oxplow.dashboard.create, when: open, input: { title: "{{row.title}}" } }
-  - { id: plain, label: Plain, command: oxplow.dashboard.create, input: { title: Plain } }
-  - { id: rename, label: Rename, command: oxplow.dashboard.rename, form: true, fixed: [dashboard], input: { dashboard: dsh1, title: "{{row.title}}" } }
+params: [{ name: n, default: "1" }, { name: item, default: "" }]
+data:
+  one:
+    sql: |
+      SELECT 'Made' AS title, CAST(:n AS INTEGER) = 1 AS open WHERE CAST(:n AS INTEGER) <> 0
+      UNION ALL SELECT 'Twin', 1 WHERE CAST(:n AS INTEGER) = 2
+view:
+  viz: detail
+  from: one
+  columns: [{ key: title }, { key: open }]
+  actions:
+    - { id: make, label: Make, command: oxplow.work_item.create, when: open, input: { title: "{{row.title}}" } }
+    - { id: plain, label: Plain, command: oxplow.work_item.create, input: { title: Plain } }
+    - { id: rename, label: Rename, command: oxplow.work_item.update, form: true, fixed: [uri], input: { uri: "{{param.item}}", title: "{{row.title}}" } }
 "#,
         )
         .unwrap();
         std::fs::write(
-            ext.join("lenses/board.yaml"),
+            ext.join("pages/board.yaml"),
             r#"title: Board
-query: "SELECT uri, title, state FROM v_work_item"
-viz: board
-group: { by: state, values: [todo, in_progress, done] }
-actions:
-  - { id: move, label: Move, command: oxplow.work_item.transition, drag: true, input: { uri: "{{row.uri}}", to: "{{group.value}}" } }
-  - { id: reorder, label: Reorder, command: oxplow.work_item.reorder, drag: true, input: { uri: "{{row.uri}}", before: "{{before.uri}}", after: "{{after.uri}}" } }
-  - { id: finish, label: Finish, command: oxplow.work_item.transition, row: true, input: { uri: "{{row.uri}}", to: done } }
+data:
+  items: { sql: "SELECT uri, title, state FROM v_work_item" }
+view:
+  viz: board
+  from: items
+  group: { by: state, values: [todo, in_progress, done] }
+  actions:
+    - { id: move, label: Move, command: oxplow.work_item.transition, drag: true, input: { uri: "{{row.uri}}", to: "{{group.value}}" } }
+    - { id: reorder, label: Reorder, command: oxplow.work_item.reorder, drag: true, input: { uri: "{{row.uri}}", before: "{{before.uri}}", after: "{{after.uri}}" } }
+    - { id: finish, label: Finish, command: oxplow.work_item.transition, row: true, input: { uri: "{{row.uri}}", to: done } }
 "#,
         )
         .unwrap();
         std::fs::write(
-            ext.join("lenses/note.yaml"),
+            ext.join("pages/note.yaml"),
             r#"title: Note
-query: "SELECT uri, body FROM v_work_item"
-viz: markdown
-markdown: { text: body }
-actions:
-  - { id: save, label: Save, command: oxplow.work_item.update, edit: true, fixed: [uri], input: { uri: "{{row.uri}}", body: "{{row.body}}" } }
+data:
+  items: { sql: "SELECT uri, body FROM v_work_item" }
+view:
+  viz: markdown
+  from: items
+  markdown: { text: body }
+  actions:
+    - { id: save, label: Save, command: oxplow.work_item.update, edit: true, fixed: [uri], input: { uri: "{{row.uri}}", body: "{{row.body}}" } }
 "#,
         )
         .unwrap();
@@ -850,23 +848,140 @@ actions:
         (fx, root)
     }
 
-    fn call(
-        action: &str,
+    fn request(page: &str, params: BTreeMap<String, SqlCell>) -> RunRequest {
+        RunRequest {
+            target: RunTarget::Page(page.into()),
+            params,
+            ctx: extensions::ViewContext::default(),
+            viewer: Actor::Human,
+        }
+    }
+
+    /// `page` opened with `params`: its run's id among `runs`, and the run.
+    async fn open(
+        svc: &crate::Services,
+        runs: &PageRuns,
+        page: &str,
+        params: BTreeMap<String, SqlCell>,
+    ) -> (String, PageRun) {
+        runs.open(svc, request(page, params), "w").await.unwrap()
+    }
+
+    /// One press on a page: its action `action` (on node `node`, none for
+    /// a whole-page one), on the row of the node whose columns are `row`'s.
+    struct Press {
+        page: &'static str,
+        node: Option<&'static str>,
+        action: &'static str,
         params: BTreeMap<String, SqlCell>,
         row: Option<BTreeMap<String, SqlCell>>,
+        input: Option<Value>,
+        drop: Option<Drop>,
         on_behalf_of: Actor,
-        confirmed: bool,
-    ) -> LensActionCall {
-        LensActionCall {
-            lens_id: "acme/tasks".into(),
-            action_id: action.into(),
-            params,
-            row,
-            input: None,
-            drop: None,
-            on_behalf_of,
-            confirmed,
+    }
+
+    impl Press {
+        fn on(page: &'static str, node: Option<&'static str>, action: &'static str) -> Self {
+            Press {
+                page,
+                node,
+                action,
+                params: BTreeMap::new(),
+                row: None,
+                input: None,
+                drop: None,
+                on_behalf_of: Actor::Human,
+            }
         }
+        fn params(mut self, params: &[(&str, SqlCell)]) -> Self {
+            self.params = params
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.clone()))
+                .collect();
+            self
+        }
+        fn row(mut self, row: BTreeMap<String, SqlCell>) -> Self {
+            self.row = Some(row);
+            self
+        }
+
+        /// Run it on a fresh open run of its page.
+        async fn run(self, svc: &crate::Services) -> Result<CommandOutcome, CommandError> {
+            let runs = PageRuns::default();
+            let (run_id, _) = open(svc, &runs, self.page, self.params).await;
+            run_page_action(
+                svc,
+                &runs,
+                PageActionCall {
+                    run_id,
+                    node: self.node.map(str::to_string),
+                    action: self.action.into(),
+                    row: self.row,
+                    input: self.input,
+                    drop: self.drop,
+                    on_behalf_of: self.on_behalf_of,
+                    confirmed: false,
+                },
+            )
+            .await
+        }
+
+        /// The form it opens, on a fresh open run of its page.
+        async fn form(self, svc: &crate::Services) -> Result<FormStart, CommandError> {
+            let runs = PageRuns::default();
+            let (run_id, _) = open(svc, &runs, self.page, self.params).await;
+            page_action_form(svc, &runs, &run_id, self.node, self.action, self.row).await
+        }
+    }
+
+    /// The row whose `uri` is the fixture's task.
+    fn task_row(fx: &crate::test_fixtures::TaskEffortFixture) -> BTreeMap<String, SqlCell> {
+        BTreeMap::from([("uri".to_string(), SqlCell::Text(work_item_ref(fx.task)))])
+    }
+
+    /// The form node of `page`'s run with `params`: its start.
+    async fn form_of(
+        svc: &crate::Services,
+        page: &str,
+        params: BTreeMap<String, SqlCell>,
+    ) -> Result<FormStart, CommandError> {
+        let runs = PageRuns::default();
+        let (run_id, run) = open(svc, &runs, page, params).await;
+        page_form(svc, &runs, &run_id, &form_node(&run)).await
+    }
+
+    /// The id of `run`'s form node.
+    fn form_node(run: &PageRun) -> String {
+        run.page
+            .nodes()
+            .into_iter()
+            .find(|n| {
+                matches!(&n.kind, crate::pages::schema::NodeKind::Viz { config, .. }
+                    if config.viz == extensions::Viz::Form)
+            })
+            .map(|n| n.id.clone())
+            .unwrap_or_else(|| panic!("{} has no form", run.page.id))
+    }
+
+    /// Submit `page`'s form node with `input`.
+    async fn submit(
+        svc: &crate::Services,
+        page: &str,
+        params: BTreeMap<String, SqlCell>,
+        input: Value,
+    ) -> Result<CommandOutcome, CommandError> {
+        let runs = PageRuns::default();
+        let (run_id, run) = open(svc, &runs, page, params).await;
+        submit_page_form(
+            svc,
+            &runs,
+            &run_id,
+            &form_node(&run),
+            input,
+            Actor::Human,
+            false,
+        )
+        .await
     }
 
     async fn audit_actor(svc: &crate::Services) -> (String, Option<String>) {
@@ -893,56 +1008,75 @@ actions:
             .to_string()
     }
 
-    /// P6.B1's red: a person's click runs the command as the lens, acting
-    /// for them — audited as `oxplow:oxplow/lens?lens=<id>`.
-    #[tokio::test]
-    async fn an_action_runs_its_command_as_the_lens() {
-        let (fx, root) = fixture().await;
-        let item = work_item_ref(fx.task);
-        run_lens_action(
-            &fx.svc,
-            &root,
-            call(
-                "finish",
-                BTreeMap::from([("item".to_string(), SqlCell::Text(item))]),
-                None,
-                Actor::Human,
-                false,
-            ),
-            &extensions::ViewContext::default(),
-        )
-        .await
-        .unwrap();
-        assert_eq!(state(&fx.svc, fx.task).await, "done");
-        let (kind, _) = audit_actor(&fx.svc).await;
-        assert_eq!(kind, "lens");
+    async fn column(svc: &crate::Services, item: &str, column: &str) -> String {
+        let (item, sql) = (
+            item.to_string(),
+            format!("SELECT {column} FROM v_work_item WHERE uri = ?1"),
+        );
+        svc.db
+            .read(move |c| {
+                c.query_row(&sql, [item], |r| r.get(0))
+                    .map_err(|e| oxplow_domain::DomainError::Storage(e.to_string()))
+            })
+            .await
+            .unwrap()
     }
 
-    /// A row action binds the row it was invoked on; a whole-lens action
+    /// P6.B1's red: a person's click runs the command as the page, acting
+    /// for them — audited as a lens actor naming the page.
+    #[tokio::test]
+    async fn an_action_runs_its_command_as_the_page() {
+        let (fx, _root) = fixture().await;
+        let item = work_item_ref(fx.task);
+        Press::on("acme/tasks", None, "finish")
+            .params(&[("item", SqlCell::Text(item))])
+            .run(&fx.svc)
+            .await
+            .unwrap();
+        assert_eq!(state(&fx.svc, fx.task).await, "done");
+        let (kind, id) = audit_actor(&fx.svc).await;
+        assert_eq!(kind, "lens");
+        assert_eq!(id.as_deref(), Some("acme/tasks"));
+    }
+
+    /// A row action binds the row it was invoked on; a whole-page action
     /// refuses a row and a row action needs one.
     #[tokio::test]
     async fn a_row_action_binds_its_row() {
-        let (fx, root) = fixture().await;
-        let row = BTreeMap::from([(
-            "uri".to_string(),
-            SqlCell::Text(oxplow_tasks::work_item_ref(fx.task)),
-        )]);
-        let run = |action: &'static str, row: Option<BTreeMap<String, SqlCell>>| {
-            let (svc, root) = (fx.svc.clone(), root.clone());
-            async move {
-                run_lens_action(
-                    &svc,
-                    &root,
-                    call(action, BTreeMap::new(), row, Actor::Human, false),
-                    &extensions::ViewContext::default(),
-                )
-                .await
-            }
-        };
-        assert!(run("finish-row", None).await.is_err());
-        assert!(run("finish", Some(row.clone())).await.is_err());
-        run("finish-row", Some(row)).await.unwrap();
+        let (fx, _root) = fixture().await;
+        let row = task_row(&fx);
+        assert!(Press::on("acme/tasks", Some("items"), "finish-row")
+            .run(&fx.svc)
+            .await
+            .is_err());
+        assert!(Press::on("acme/tasks", None, "finish")
+            .row(row.clone())
+            .run(&fx.svc)
+            .await
+            .is_err());
+        Press::on("acme/tasks", Some("items"), "finish-row")
+            .row(row)
+            .run(&fx.svc)
+            .await
+            .unwrap();
         assert_eq!(state(&fx.svc, fx.task).await, "done");
+    }
+
+    /// A row the run doesn't hold is refused: the page changed, or the
+    /// presser made it up.
+    #[tokio::test]
+    async fn a_row_the_run_doesnt_hold_is_refused() {
+        let (fx, _root) = fixture().await;
+        let err = Press::on("acme/tasks", Some("items"), "finish-row")
+            .row(BTreeMap::from([(
+                "uri".to_string(),
+                SqlCell::Text("oxplow:oxplow/work_item?id=tsk999999&provider=oxplow".into()),
+            )]))
+            .run(&fx.svc)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("isn't one of node"), "{err}");
+        assert_ne!(state(&fx.svc, fx.task).await, "done");
     }
 
     /// A drop runs the drag action with where the row landed: the group's
@@ -951,18 +1085,13 @@ actions:
     /// isn't a drag one, or a drag action without a drop, is refused.
     #[tokio::test]
     async fn a_drop_runs_the_drag_action_with_where_the_row_landed() {
-        let (fx, root) = fixture().await;
-        let row = BTreeMap::from([(
-            "uri".to_string(),
-            SqlCell::Text(oxplow_tasks::work_item_ref(fx.task)),
-        )]);
+        let (fx, _root) = fixture().await;
         let run = |action: &'static str, drop: Option<Drop>| {
-            let (svc, root, row) = (fx.svc.clone(), root.clone(), row.clone());
+            let (svc, row) = (fx.svc.clone(), task_row(&fx));
             async move {
-                let mut c = call(action, BTreeMap::new(), Some(row), Actor::Human, false);
-                c.lens_id = "acme/board".into();
-                c.drop = drop;
-                run_lens_action(&svc, &root, c, &extensions::ViewContext::default()).await
+                let mut press = Press::on("acme/board", Some("items"), action).row(row);
+                press.drop = drop;
+                press.run(&svc).await
             }
         };
         run(
@@ -995,63 +1124,43 @@ actions:
     /// fills the edited field and the fixed `uri` keeps its row's value.
     #[tokio::test]
     async fn an_editors_save_runs_its_edit_action_with_the_text() {
-        let (fx, root) = fixture().await;
-        let item = oxplow_tasks::work_item_ref(fx.task);
-        let row = BTreeMap::from([
-            ("uri".to_string(), SqlCell::Text(item.clone())),
-            ("body".to_string(), SqlCell::Text("Old body".into())),
-        ]);
-        let mut press = call("save", BTreeMap::new(), Some(row), Actor::Human, false);
-        press.lens_id = "acme/note".into();
+        let (fx, _root) = fixture().await;
+        let item = work_item_ref(fx.task);
+        let mut press = Press::on("acme/note", Some("items"), "save").row(task_row(&fx));
         press.input = Some(json!({
             "uri": "oxplow:oxplow/work_item?id=tsk999999&provider=oxplow",
             "body": "## New\n\nThe saved text."
         }));
-        run_lens_action(&fx.svc, &root, press, &extensions::ViewContext::default())
-            .await
-            .unwrap();
-        let body: String = fx
-            .svc
-            .db
-            .read(move |c| {
-                c.query_row("SELECT body FROM v_work_item WHERE uri = ?1", [item], |r| {
-                    r.get(0)
-                })
-                .map_err(|e| oxplow_domain::DomainError::Storage(e.to_string()))
-            })
-            .await
-            .unwrap();
+        press.run(&fx.svc).await.unwrap();
         assert_eq!(
-            body, "## New\n\nThe saved text.",
+            column(&fx.svc, &item, "body").await,
+            "## New\n\nThe saved text.",
             "the fixed uri kept this item"
         );
     }
 
-    /// A whole-lens action over a lens that holds one row binds
-    /// `{{row.*}}` from that row, which the server reads from the lens
-    /// itself: offered by `when`, refused unless the lens has exactly one
-    /// row, and refused a row the caller makes up.
+    /// A node's action over a viz that holds one row binds `{{row.*}}`
+    /// from that row, which the server reads from the run itself: offered
+    /// by `when`, refused unless the node has exactly one row, and refused
+    /// a row the caller makes up.
     #[tokio::test]
-    async fn a_whole_lens_action_over_a_one_row_lens_binds_that_row() {
-        let (fx, root) = fixture().await;
+    async fn a_one_row_nodes_action_binds_that_row() {
+        let (fx, _root) = fixture().await;
         let svc = fx.svc.clone();
-        let press = |action: &str, n: &str, row: Option<BTreeMap<String, SqlCell>>| {
-            let (svc, root) = (svc.clone(), root.clone());
-            let call = LensActionCall {
-                lens_id: "acme/one".into(),
-                action_id: action.into(),
-                params: BTreeMap::from([("n".to_string(), SqlCell::Text(n.into()))]),
-                row,
-                input: None,
-                drop: None,
-                on_behalf_of: Actor::Human,
-                confirmed: false,
-            };
-            async move { run_lens_action(&svc, &root, call, &extensions::ViewContext::default()).await }
+        let press = |action: &'static str, n: &str, row: Option<BTreeMap<String, SqlCell>>| {
+            let svc = svc.clone();
+            let mut p = Press::on("acme/one", Some("one"), action)
+                .params(&[("n", SqlCell::Text(n.into()))]);
+            p.row = row;
+            async move { p.run(&svc).await }
         };
         let titles = || async {
             svc.sql
-                .query_sql("SELECT title FROM v_dashboard ORDER BY id", vec![], None)
+                .query_sql(
+                    "SELECT title FROM v_work_item WHERE title IN ('Made', 'Plain', 'Forged') ORDER BY title",
+                    vec![],
+                    None,
+                )
                 .await
                 .unwrap()
                 .rows
@@ -1066,7 +1175,7 @@ actions:
         let off = press("make", "3", None).await.unwrap_err().to_string();
         assert!(off.contains("isn't offered"), "{off}");
         // Not one row.
-        for (n, says) in [("0", "the lens has 0 rows"), ("2", "the lens has 2 rows")] {
+        for (n, says) in [("0", "has 0 rows"), ("2", "has 2 rows")] {
             let err = press("make", n, None).await.unwrap_err().to_string();
             assert!(
                 err.contains(says) && err.contains("needs one"),
@@ -1082,180 +1191,18 @@ actions:
             .await
             .unwrap_err()
             .to_string();
-        assert!(err.contains("whole lens"), "{err}");
+        assert!(err.contains("one row, which the server reads"), "{err}");
         // A form over it starts from the row.
-        let form = action_form(
-            &svc,
-            &root,
-            LensActionCall {
-                lens_id: "acme/one".into(),
-                action_id: "rename".into(),
-                params: BTreeMap::new(),
-                row: None,
-                input: None,
-                drop: None,
-                on_behalf_of: Actor::Human,
-                confirmed: false,
-            },
-            &extensions::ViewContext::default(),
-        )
-        .await
-        .unwrap();
-        assert_eq!(form.values["title"], "Made");
-        // An ordinary button still runs on any lens.
+        let item = work_item_ref(fx.task);
+        let form = Press::on("acme/one", Some("one"), "rename")
+            .params(&[("item", SqlCell::Text(item.clone()))])
+            .form(&svc)
+            .await
+            .unwrap();
+        assert_eq!(form.values, json!({ "uri": item, "title": "Made" }));
+        // An ordinary button still runs on any node.
         press("plain", "2", None).await.unwrap();
         assert_eq!(titles().await.len(), 2);
-    }
-
-    /// A dashboard lens whose rows are its tiles edits them through its
-    /// actions alone: a drag binds the whole new order, row forms rename
-    /// and resize, the edit action saves a heading, a key removes, and
-    /// whole-lens forms add a tile and rename the dashboard.
-    #[tokio::test]
-    async fn a_dashboard_lens_reorders_renames_and_removes_its_tiles() {
-        let (fx, root) = fixture().await;
-        let svc = fx.svc.clone();
-        let made = svc
-            .commands
-            .run(
-                &Actor::Human,
-                "oxplow.dashboard.create",
-                json!({ "title": "D" }),
-                false,
-            )
-            .await
-            .unwrap();
-        let dashboard = made.result["id"].as_str().unwrap().to_string();
-        for text in ["A", "B", "C"] {
-            svc.commands
-                .run(
-                    &Actor::Human,
-                    "oxplow.dashboard.add_item",
-                    json!({ "dashboard": dashboard, "kind": "text", "text": text }),
-                    false,
-                )
-                .await
-                .unwrap();
-        }
-        let params = BTreeMap::from([("id".to_string(), SqlCell::Text(dashboard.clone()))]);
-        // The tiles as the lens reads them: each row by its column.
-        let tiles = || {
-            let (svc, root, params) = (svc.clone(), root.clone(), params.clone());
-            async move {
-                let ctx = extensions::ViewContext::default();
-                let run = extensions::run_lens(
-                    &svc.sql,
-                    &svc.extension_catalog,
-                    &root,
-                    "acme/tiles",
-                    params,
-                    &ctx,
-                )
-                .await
-                .unwrap();
-                let cols = run.result.columns.clone();
-                run.result
-                    .rows
-                    .into_iter()
-                    .map(|r| {
-                        cols.iter()
-                            .cloned()
-                            .zip(r)
-                            .collect::<BTreeMap<String, SqlCell>>()
-                    })
-                    .collect::<Vec<_>>()
-            }
-        };
-        let texts = |rows: &[BTreeMap<String, SqlCell>], col: &str| {
-            rows.iter()
-                .map(|r| match &r[col] {
-                    SqlCell::Text(t) => t.clone(),
-                    _ => String::new(),
-                })
-                .collect::<Vec<_>>()
-        };
-        let act = |action: &'static str,
-                   row: Option<BTreeMap<String, SqlCell>>,
-                   input: Option<Value>,
-                   drop: Option<Drop>| {
-            let (svc, root, params) = (svc.clone(), root.clone(), params.clone());
-            async move {
-                let mut c = call(action, params, row, Actor::Human, false);
-                c.lens_id = "acme/tiles".into();
-                c.input = input;
-                c.drop = drop;
-                run_lens_action(&svc, &root, c, &extensions::ViewContext::default()).await
-            }
-        };
-
-        // C dragged to the front: the drop's order is every tile.
-        let rows = tiles().await;
-        assert_eq!(texts(&rows, "text"), ["A", "B", "C"]);
-        let order = vec![rows[2].clone(), rows[0].clone(), rows[1].clone()];
-        act(
-            "reorder",
-            Some(rows[2].clone()),
-            None,
-            Some(Drop {
-                before: Some(rows[0].clone()),
-                order: Some(order),
-                ..Drop::default()
-            }),
-        )
-        .await
-        .unwrap();
-        let rows = tiles().await;
-        assert_eq!(texts(&rows, "text"), ["C", "A", "B"]);
-
-        // Rename and resize A; edit C's heading in place.
-        act(
-            "rename",
-            Some(rows[1].clone()),
-            Some(json!({ "title": "First", "size": "wide" })),
-            None,
-        )
-        .await
-        .unwrap();
-        act(
-            "edit-text",
-            Some(rows[0].clone()),
-            Some(json!({ "text": "Sea" })),
-            None,
-        )
-        .await
-        .unwrap();
-        let rows = tiles().await;
-        assert_eq!(texts(&rows, "title"), ["", "First", ""]);
-        assert_eq!(texts(&rows, "size"), ["", "wide", ""]);
-        assert_eq!(texts(&rows, "text"), ["Sea", "A", "B"]);
-
-        // Remove B; add a heading; rename the dashboard.
-        act("remove", Some(rows[2].clone()), None, None)
-            .await
-            .unwrap();
-        act("add-text", None, Some(json!({ "text": "New" })), None)
-            .await
-            .unwrap();
-        act(
-            "rename-dashboard",
-            None,
-            Some(json!({ "title": "Board" })),
-            None,
-        )
-        .await
-        .unwrap();
-        let rows = tiles().await;
-        assert_eq!(texts(&rows, "text"), ["Sea", "A", "New"]);
-        let title = svc
-            .sql
-            .query_sql(
-                "SELECT title FROM v_dashboard WHERE 'dsh' || id = ?1",
-                vec![SqlCell::Text(dashboard.clone())],
-                None,
-            )
-            .await
-            .unwrap();
-        assert_eq!(title.rows, vec![vec![SqlCell::Text("Board".into())]]);
     }
 
     /// Where a drop landed binds `{{before.*}}`, `{{after.*}}`, `{{onto.*}}`
@@ -1317,69 +1264,42 @@ actions:
     /// truthy, and refused on any other.
     #[tokio::test]
     async fn a_row_action_with_when_is_offered_only_on_truthy_rows() {
-        let (fx, root) = fixture().await;
-        let row = |open: SqlCell| {
-            BTreeMap::from([
-                (
-                    "uri".to_string(),
-                    SqlCell::Text(oxplow_tasks::work_item_ref(fx.task)),
-                ),
-                ("open".to_string(), open),
-            ])
-        };
-        let run = |row: BTreeMap<String, SqlCell>| {
-            let (svc, root) = (fx.svc.clone(), root.clone());
+        let (fx, _root) = fixture().await;
+        let run = |open: &'static str| {
+            let (svc, row) = (fx.svc.clone(), task_row(&fx));
             async move {
-                run_lens_action(
-                    &svc,
-                    &root,
-                    call(
-                        "finish-open",
-                        BTreeMap::new(),
-                        Some(row),
-                        Actor::Human,
-                        false,
-                    ),
-                    &extensions::ViewContext::default(),
-                )
-                .await
+                Press::on("acme/tasks", Some("items"), "finish-open")
+                    .params(&[("open", SqlCell::Text(open.into()))])
+                    .row(row)
+                    .run(&svc)
+                    .await
             }
         };
-        for closed in [
-            SqlCell::Int(0),
-            SqlCell::Null(()),
-            SqlCell::Text(String::new()),
-        ] {
-            let err = run(row(closed)).await.unwrap_err();
+        for closed in ["0", "null", "empty"] {
+            let err = run(closed).await.unwrap_err();
             assert!(
                 format!("{err:?}").contains("isn't offered on this row"),
-                "{err:?}"
+                "{closed}: {err:?}"
             );
         }
         assert_ne!(state(&fx.svc, fx.task).await, "done");
-        run(row(SqlCell::Int(1))).await.unwrap();
+        run("1").await.unwrap();
         assert_eq!(state(&fx.svc, fx.task).await, "done");
     }
 
-    /// A lens acts as its presser and no more: one an agent pressed may run
+    /// A page acts as its presser and no more: one an agent pressed may run
     /// what the agent may, which is every command, and the audit names the
-    /// lens and the agent's thread that pressed it.
+    /// page and the agent's thread that pressed it.
     #[tokio::test]
-    async fn a_lens_grants_no_power() {
-        let (fx, root) = fixture().await;
-        let agent = Actor::Agent {
+    async fn a_page_grants_no_power() {
+        let (fx, _root) = fixture().await;
+        let mut press = Press::on("acme/tasks", None, "prompt");
+        press.on_behalf_of = Actor::Agent {
             session_id: None,
             thread_id: Some(fx.thread),
             stream_id: None,
         };
-        let out = run_lens_action(
-            &fx.svc,
-            &root,
-            call("prompt", BTreeMap::new(), None, agent, false),
-            &extensions::ViewContext::default(),
-        )
-        .await
-        .unwrap();
+        let out = press.run(&fx.svc).await.unwrap();
         let audit = fx
             .svc
             .commands
@@ -1402,87 +1322,47 @@ actions:
     /// input.
     #[tokio::test]
     async fn a_form_action_runs_what_the_person_filled_in_keeping_its_fixed_fields() {
-        let (fx, root) = fixture().await;
+        let (fx, _root) = fixture().await;
         let item = work_item_ref(fx.task);
-        let row = BTreeMap::from([
-            ("uri".to_string(), SqlCell::Text(item.clone())),
-            ("title".to_string(), SqlCell::Text("Old title".into())),
-        ]);
-        let start = action_form(
-            &fx.svc,
-            &root,
-            call(
-                "retitle",
-                BTreeMap::new(),
-                Some(row.clone()),
-                Actor::Human,
-                false,
-            ),
-            &extensions::ViewContext::default(),
-        )
-        .await
-        .unwrap();
+        let old_title = column(&fx.svc, &item, "title").await;
+        let start = Press::on("acme/tasks", Some("items"), "retitle")
+            .row(task_row(&fx))
+            .form(&fx.svc)
+            .await
+            .unwrap();
         assert_eq!(start.command.id, "oxplow.work_item.update");
-        assert_eq!(start.values, json!({ "uri": item, "title": "Old title" }));
+        assert_eq!(start.values, json!({ "uri": item, "title": old_title }));
         assert_eq!(start.fixed, vec!["uri".to_string()]);
 
-        let mut press = call("retitle", BTreeMap::new(), Some(row), Actor::Human, false);
+        let mut press = Press::on("acme/tasks", Some("items"), "retitle").row(task_row(&fx));
         press.input = Some(
             json!({ "uri": "oxplow:oxplow/work_item?id=tsk999999&provider=oxplow", "title": "New title" }),
         );
-        run_lens_action(&fx.svc, &root, press, &extensions::ViewContext::default())
-            .await
-            .unwrap();
-        let title: String = fx
-            .svc
-            .db
-            .read({
-                let item = item.clone();
-                move |c| {
-                    c.query_row(
-                        "SELECT title FROM v_work_item WHERE uri = ?1",
-                        [item],
-                        |r| r.get(0),
-                    )
-                    .map_err(|e| oxplow_domain::DomainError::Storage(e.to_string()))
-                }
-            })
-            .await
-            .unwrap();
+        press.run(&fx.svc).await.unwrap();
         assert_eq!(
-            title, "New title",
+            column(&fx.svc, &item, "title").await,
+            "New title",
             "the fixed ref was kept, so this item changed"
         );
 
-        let mut plain = call(
-            "finish",
-            BTreeMap::from([("item".to_string(), SqlCell::Text(item))]),
-            None,
-            Actor::Human,
-            false,
-        );
+        let mut plain =
+            Press::on("acme/tasks", None, "finish").params(&[("item", SqlCell::Text(item))]);
         plain.input = Some(json!({ "to": "canceled" }));
-        let err = run_lens_action(&fx.svc, &root, plain, &extensions::ViewContext::default())
+        let err = plain.run(&fx.svc).await.unwrap_err();
+        assert!(err.to_string().contains("only a form action"), "{err}");
+        let err = Press::on("acme/tasks", None, "finish")
+            .form(&fx.svc)
             .await
             .unwrap_err();
-        assert!(err.to_string().contains("only a form action"), "{err}");
-        let err = action_form(
-            &fx.svc,
-            &root,
-            call("finish", BTreeMap::new(), None, Actor::Human, false),
-            &extensions::ViewContext::default(),
-        )
-        .await
-        .unwrap_err();
         assert!(err.to_string().contains("no form action"), "{err}");
     }
 
     /// The foundation's hand-off form starts from its thread, fixed, and
     /// picks the recipient from the other open threads and the item from
-    /// its thread's open items — each field's choices from its lens.
+    /// its thread's open items — each field's choices from its page.
     #[tokio::test]
     async fn the_hand_off_form_picks_from_its_choices() {
-        let (fx, root) = fixture().await;
+        let (fx, _root) = fixture().await;
         let other =
             crate::test_fixtures::new_thread(&fx.svc, oxplow_domain::StreamId::new(1), "Docs")
                 .await;
@@ -1499,12 +1379,10 @@ actions:
             .await
             .unwrap();
         let me = oxplow_domain::uri::build::thread_uri(fx.thread);
-        let start = form_start(
+        let start = form_of(
             &fx.svc,
-            &root,
             "oxplow-foundation/hand-off",
             BTreeMap::from([("uri".to_string(), SqlCell::Text(me.clone()))]),
-            &extensions::ViewContext::default(),
         )
         .await
         .unwrap();
@@ -1526,22 +1404,15 @@ actions:
     }
 
     /// New Item is one form over `oxplow.work_item.create`: its `native`
-    /// field's children are the active list's own fields (read from a lens,
-    /// the read-only ones marked), its state is picked from the two a new
-    /// item may start in, and its second submit keeps what a series of
-    /// similar items shares.
+    /// field's children are the active list's own fields (read from a page,
+    /// the read-only ones marked), and its state is picked from the two a
+    /// new item may start in.
     #[tokio::test]
     async fn the_new_item_form_asks_for_the_lists_own_fields() {
-        let (fx, root) = fixture().await;
-        let start = form_start(
-            &fx.svc,
-            &root,
-            "oxplow-foundation/new-task",
-            BTreeMap::new(),
-            &extensions::ViewContext::default(),
-        )
-        .await
-        .unwrap();
+        let (fx, _root) = fixture().await;
+        let start = form_of(&fx.svc, "oxplow-foundation/new-task", BTreeMap::new())
+            .await
+            .unwrap();
         assert_eq!(start.command.id, "oxplow.work_item.create");
         assert_eq!(start.values["state"], json!("todo"));
         let priority = &start.subfields["native"]
@@ -1574,16 +1445,10 @@ actions:
     /// own fields.
     #[tokio::test]
     async fn the_new_stream_form_shows_each_sources_fields() {
-        let (fx, root) = fixture().await;
-        let start = form_start(
-            &fx.svc,
-            &root,
-            "oxplow-foundation/new-stream",
-            BTreeMap::new(),
-            &extensions::ViewContext::default(),
-        )
-        .await
-        .unwrap();
+        let (fx, _root) = fixture().await;
+        let start = form_of(&fx.svc, "oxplow-foundation/new-stream", BTreeMap::new())
+            .await
+            .unwrap();
         assert_eq!(start.command.id, "oxplow.stream.create");
         assert_eq!(start.values["source"], json!("existing"));
         assert!(
@@ -1623,19 +1488,20 @@ actions:
         let (fx, root) = fixture().await;
         let item = work_item_ref(fx.task);
         std::fs::write(
-            root.join(".oxplow/extensions/acme/lenses/leaky.yaml"),
-            "title: Leaky\nviz: form\nparams: [{ name: uri }]\nquery: SELECT title FROM v_work_item WHERE uri = :uri\nform: { command: oxplow.work_item.update, defaults: { uri: '{{param.uri}}' }, fixed: [uri], fields: [{ name: title, secret: true }] }\n",
+            root.join(".oxplow/extensions/acme/pages/leaky.yaml"),
+            "title: Leaky\nparams: [{ name: uri }]\ndata:\n  item: { sql: SELECT title FROM v_work_item WHERE uri = :uri }\n\
+             view: { viz: form, from: item, form: { command: oxplow.work_item.update, defaults: { uri: '{{param.uri}}' }, fixed: [uri], fields: [{ name: title, secret: true }] } }\n",
         )
         .unwrap();
         std::fs::write(
-            root.join(".oxplow/extensions/acme/lenses/kept.yaml"),
-            "title: Kept\nviz: form\nquery: SELECT 'notes.txt' AS path, 'what was there' AS content\nform: { command: oxplow.file.create, fields: [path, { name: content, secret: true }] }\n",
+            root.join(".oxplow/extensions/acme/pages/kept.yaml"),
+            "title: Kept\ndata:\n  file: { sql: \"SELECT 'notes.txt' AS path, 'what was there' AS content\" }\n\
+             view: { viz: form, from: file, form: { command: oxplow.file.create, fields: [path, { name: content, secret: true }] } }\n",
         )
         .unwrap();
         crate::test_fixtures::activate(&fx.svc).await;
         let params = BTreeMap::from([("uri".to_string(), SqlCell::Text(item))]);
-        let ctx = extensions::ViewContext::default();
-        let refused = form_start(&fx.svc, &root, "acme/leaky", params, &ctx)
+        let refused = form_of(&fx.svc, "acme/leaky", params)
             .await
             .unwrap_err()
             .to_string();
@@ -1643,69 +1509,43 @@ actions:
             refused.contains("`title` is secret but `oxplow.work_item.update` records it"),
             "{refused}"
         );
-        let start = form_start(&fx.svc, &root, "acme/kept", BTreeMap::new(), &ctx)
+        let start = form_of(&fx.svc, "acme/kept", BTreeMap::new())
             .await
             .unwrap();
         assert_eq!(start.values["path"], json!("notes.txt"));
         assert!(start.values.get("content").is_none(), "{:?}", start.values);
     }
 
-    /// A form lens's fixed fields keep their `defaults` on submit, and its
+    /// A form node's fixed fields keep their `defaults` on submit, and its
     /// `fields` say which to show.
     #[tokio::test]
-    async fn a_form_lens_keeps_its_fixed_fields() {
+    async fn a_form_keeps_its_fixed_fields() {
         let (fx, root) = fixture().await;
         let item = work_item_ref(fx.task);
         std::fs::write(
-            root.join(".oxplow/extensions/acme/lenses/edit.yaml"),
-            "title: Edit\nviz: form\nparams: [{ name: uri }]\nquery: SELECT title FROM v_work_item WHERE uri = :uri\nform: { command: oxplow.work_item.update, defaults: { uri: '{{param.uri}}' }, fixed: [uri], fields: [title] }\n",
+            root.join(".oxplow/extensions/acme/pages/edit.yaml"),
+            "title: Edit\nparams: [{ name: uri }]\ndata:\n  item: { sql: SELECT title FROM v_work_item WHERE uri = :uri }\n\
+             view: { viz: form, from: item, form: { command: oxplow.work_item.update, defaults: { uri: '{{param.uri}}' }, fixed: [uri], fields: [title] } }\n",
         )
         .unwrap();
         crate::test_fixtures::activate(&fx.svc).await;
         let params = BTreeMap::from([("uri".to_string(), SqlCell::Text(item.clone()))]);
-        let start = form_start(
-            &fx.svc,
-            &root,
-            "acme/edit",
-            params.clone(),
-            &extensions::ViewContext::default(),
-        )
-        .await
-        .unwrap();
+        let start = form_of(&fx.svc, "acme/edit", params.clone()).await.unwrap();
         assert_eq!(start.fixed, vec!["uri".to_string()]);
         assert_eq!(
             start.fields,
             Some(vec![crate::extensions::FormField::Name("title".into())])
         );
         assert_eq!(start.values["uri"], json!(item));
-        submit_form(
+        submit(
             &fx.svc,
-            &root,
-            FormSubmission {
-                lens_id: "acme/edit".into(),
-                input: json!({ "uri": "oxplow:oxplow/work_item?id=tsk999999&provider=oxplow", "title": "Edited" }),
-                params,
-                on_behalf_of: Actor::Human,
-                confirmed: false,
-            },
-            &extensions::ViewContext::default(),
+            "acme/edit",
+            params,
+            json!({ "uri": "oxplow:oxplow/work_item?id=tsk999999&provider=oxplow", "title": "Edited" }),
         )
         .await
         .unwrap();
-        let title: String = fx
-            .svc
-            .db
-            .read(move |c| {
-                c.query_row(
-                    "SELECT title FROM v_work_item WHERE uri = ?1",
-                    [item],
-                    |r| r.get(0),
-                )
-                .map_err(|e| oxplow_domain::DomainError::Storage(e.to_string()))
-            })
-            .await
-            .unwrap();
-        assert_eq!(title, "Edited");
+        assert_eq!(column(&fx.svc, &item, "title").await, "Edited");
     }
 
     #[test]
@@ -1769,83 +1609,65 @@ actions:
         assert_eq!(bound, json!({ "from_thread": "thr3", "t": "on thr3" }));
     }
 
-    /// P6.B2: a form lens submits its command as the lens, its defaults
-    /// under what the person filled in.
+    /// P6.B2: a form submits its command as the page, its defaults under
+    /// what the person filled in; a page with no form can't be submitted.
     #[tokio::test]
-    async fn a_form_submits_its_command_as_the_lens() {
+    async fn a_form_submits_its_command_as_the_page() {
         let (fx, root) = fixture().await;
         std::fs::write(
-            root.join(".oxplow/extensions/acme/lenses/new-task.yaml"),
-            "title: New Task\nviz: form\nparams: [{ name: body, default: from the form }]\nform: { command: oxplow.work_item.create, defaults: { body: '{{param.body}}' } }\n",
+            root.join(".oxplow/extensions/acme/pages/new-task.yaml"),
+            "title: New Task\nparams: [{ name: body, default: from the form }]\n\
+             view: { viz: form, form: { command: oxplow.work_item.create, defaults: { body: '{{param.body}}' } } }\n",
         )
         .unwrap();
         crate::test_fixtures::activate(&fx.svc).await;
-        let out = submit_form(
+        let out = submit(
             &fx.svc,
-            &root,
-            FormSubmission {
-                lens_id: "acme/new-task".into(),
-                input: json!({ "title": "Made by a form" }),
-                params: BTreeMap::new(),
-                on_behalf_of: Actor::Human,
-                confirmed: false,
-            },
-            &extensions::ViewContext::default(),
+            "acme/new-task",
+            BTreeMap::new(),
+            json!({ "title": "Made by a form" }),
         )
         .await
         .unwrap();
         let item = out.result["uri"].as_str().unwrap().to_string();
         let (kind, _) = audit_actor(&fx.svc).await;
         assert_eq!(kind, "lens");
-        let row: (String, String) = fx
-            .svc
-            .db
-            .read(move |c| {
-                c.query_row(
-                    "SELECT title, body FROM v_work_item WHERE uri = ?1",
-                    [item],
-                    |r| Ok((r.get(0)?, r.get(1)?)),
-                )
-                .map_err(|e| oxplow_domain::DomainError::Storage(e.to_string()))
-            })
-            .await
-            .unwrap();
-        assert_eq!(row, ("Made by a form".into(), "from the form".into()));
-        // A lens that isn't a form can't be submitted.
-        let err = submit_form(
+        assert_eq!(column(&fx.svc, &item, "title").await, "Made by a form");
+        assert_eq!(column(&fx.svc, &item, "body").await, "from the form");
+        // A node that isn't a form can't be submitted.
+        let runs = PageRuns::default();
+        let (run_id, _) = open(&fx.svc, &runs, "acme/tasks", BTreeMap::new()).await;
+        let err = submit_page_form(
             &fx.svc,
-            &root,
-            FormSubmission {
-                lens_id: "acme/tasks".into(),
-                input: json!({}),
-                params: BTreeMap::new(),
-                on_behalf_of: Actor::Human,
-                confirmed: false,
-            },
-            &extensions::ViewContext::default(),
+            &runs,
+            &run_id,
+            "items",
+            json!({}),
+            Actor::Human,
+            false,
         )
         .await
         .unwrap_err();
         assert!(err.to_string().contains("isn't a form"), "{err}");
     }
 
+    /// The page showing `acme/board`.
+    const VIEW_PAGE: &str = "title: View\ndata:\n  n: { sql: SELECT 1 AS n }\n\
+                             view: { viz: custom, from: n, custom: { component: board } }\n";
+
     /// P6b.D2: a private extension with a component (`board`) that may
-    /// query `acme/tasks` and invoke `oxplow.work_item.transition`.
+    /// invoke `oxplow.work_item.transition`.
     async fn component_fixture() -> (crate::test_fixtures::TaskEffortFixture, std::path::PathBuf) {
         let (fx, root) = fixture().await;
         let ext = root.join(".oxplow/extensions/acme");
         std::fs::write(
             ext.join("extension.yaml"),
-            "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: { commands: [oxplow.work_item.transition] }\ncustom_components:\n  - { id: board, assets: [tasks], commands: [oxplow.work_item.transition] }\n",
+            "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: { commands: [oxplow.work_item.transition] }\ncustom_components:\n  - { id: board, commands: [oxplow.work_item.transition] }\n",
         )
         .unwrap();
         std::fs::create_dir_all(ext.join("components/board")).unwrap();
         std::fs::write(ext.join("components/board/index.html"), "<!doctype html>").unwrap();
-        std::fs::write(
-            ext.join("lenses/view.yaml"),
-            "title: View\nquery: SELECT 1 AS n\nviz: custom\ncustom: { component: board }\n",
-        )
-        .unwrap();
+        std::fs::write(ext.join("pages/view.yaml"), VIEW_PAGE).unwrap();
         crate::test_fixtures::activate(&fx.svc).await;
         (fx, root)
     }
@@ -1956,7 +1778,7 @@ actions:
     /// A frame is served from its deployment on disk: an open frame on an
     /// older version keeps loading that version's files while its
     /// deployment is in the store, and once the deployment is pruned the
-    /// frame has nothing to load and must reload its lens.
+    /// frame has nothing to load and must reload.
     #[tokio::test(flavor = "multi_thread")]
     async fn an_open_frame_is_served_from_its_deployment_on_disk() {
         let (fx, root) = component_fixture().await;
@@ -2002,15 +1824,11 @@ actions:
         }
         std::fs::write(
             ext.join("extension.yaml"),
-            "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: { commands: [oxplow.work_item.transition] }\ncustom_components:\n  - { id: board, bundle: components/Board, assets: [tasks], commands: [oxplow.work_item.transition] }\n",
+            "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: { commands: [oxplow.work_item.transition] }\ncustom_components:\n  - { id: board, bundle: components/Board, commands: [oxplow.work_item.transition] }\n",
         )
         .unwrap();
         std::fs::write(ext.join("components/board/index.html"), "<!doctype html>").unwrap();
-        std::fs::write(
-            ext.join("lenses/view.yaml"),
-            "title: View\nquery: SELECT 1 AS n\nviz: custom\ncustom: { component: board }\n",
-        )
-        .unwrap();
+        std::fs::write(ext.join("pages/view.yaml"), VIEW_PAGE).unwrap();
         let first = load_board(&fx, &root).await;
         let served = fx.svc.component_bundles.get(&first).unwrap();
         assert_eq!(served.file("").as_deref(), Some(&b"<!doctype html>"[..]));
@@ -2018,83 +1836,31 @@ actions:
         assert_ne!(load_board(&fx, &root).await, first);
     }
 
-    /// P11 (tsk960): a component that declares no commands can only show
-    /// and query.
+    /// P11 (tsk960): a component that declares no commands can only show:
+    /// whatever it asks to run is refused.
     #[tokio::test]
-    async fn a_component_without_commands_can_query() {
+    async fn a_component_without_commands_can_only_show() {
         let (fx, root) = fixture().await;
         let ext = root.join(".oxplow/extensions/acme");
         std::fs::write(
             ext.join("extension.yaml"),
-            "manifest: 2\nname: acme\nintent:\n  purpose: test\ncustom_components:\n  - { id: board, assets: [tasks] }\n",
+            "manifest: 2\nname: acme\nintent:\n  purpose: test\ncustom_components:\n  - { id: board }\n",
         )
         .unwrap();
         std::fs::create_dir_all(ext.join("components/board")).unwrap();
         std::fs::write(ext.join("components/board/index.html"), "<!doctype html>").unwrap();
-        std::fs::write(
-            ext.join("lenses/view.yaml"),
-            "title: View\nquery: SELECT 1 AS n\nviz: custom\ncustom: { component: board }\n",
-        )
-        .unwrap();
-        let ctx = extensions::ViewContext::default();
-        run_component_query(
+        std::fs::write(ext.join("pages/view.yaml"), VIEW_PAGE).unwrap();
+        let version = load_board(&fx, &root).await;
+        let err = invoke_component_command(
             &fx.svc,
             &root,
-            "acme/board",
-            "tasks",
-            BTreeMap::new(),
-            &ctx,
-            &load_board(&fx, &root).await,
-        )
-        .await
-        .unwrap();
-    }
-
-    #[tokio::test]
-    async fn a_component_queries_only_its_declared_lenses() {
-        let (fx, root) = component_fixture().await;
-        let ctx = extensions::ViewContext::default();
-        let run = run_component_query(
-            &fx.svc,
-            &root,
-            "acme/board",
-            "tasks",
-            BTreeMap::new(),
-            &ctx,
-            &load_board(&fx, &root).await,
-        )
-        .await
-        .unwrap();
-        assert_eq!(run.lens.id, "acme/tasks");
-        let err = run_component_query(
-            &fx.svc,
-            &root,
-            "acme/board",
-            "acme/view",
-            BTreeMap::new(),
-            &ctx,
-            &load_board(&fx, &root).await,
-        )
-        .await
-        .unwrap_err();
-        assert!(
-            matches!(&err, CommandError::Invalid { message, .. } if message.contains("isn't one of component `board`'s assets (acme/tasks)")),
-            "{err:?}"
-        );
-        let err = run_component_query(
-            &fx.svc,
-            &root,
-            "acme/nope",
-            "tasks",
-            BTreeMap::new(),
-            &ctx,
-            &load_board(&fx, &root).await,
+            board_invoke(&fx, "oxplow.work_item.transition", &version),
         )
         .await
         .unwrap_err();
         assert!(
             err.to_string()
-                .contains("`acme` has no custom component `nope`"),
+                .contains("isn't one of component `board`'s commands"),
             "{err}"
         );
     }
@@ -2163,7 +1929,7 @@ actions:
         );
         std::fs::write(
             ext.join("extension.yaml"),
-            "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: { sql: read, commands: [oxplow.work_item.transition] }\ncustom_components:\n  - { id: board, assets: [tasks], commands: [oxplow.work_item.transition], sql: read }\n",
+            "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: { sql: read, commands: [oxplow.work_item.transition] }\ncustom_components:\n  - { id: board, commands: [oxplow.work_item.transition], sql: read }\n",
         )
         .unwrap();
         let version = load_board(&fx, &root).await;
@@ -2180,7 +1946,7 @@ actions:
         let ext = root.join(".oxplow/extensions/acme");
         std::fs::write(
             ext.join("extension.yaml"),
-            "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: { sql: read, commands: [oxplow.work_item.transition] }\ncustom_components:\n  - { id: board, assets: [tasks], commands: [oxplow.work_item.transition], sql: read }\n",
+            "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: { sql: read, commands: [oxplow.work_item.transition] }\ncustom_components:\n  - { id: board, commands: [oxplow.work_item.transition], sql: read }\n",
         )
         .unwrap();
         let version = load_board(&fx, &root).await;

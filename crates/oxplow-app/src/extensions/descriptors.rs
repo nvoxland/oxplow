@@ -542,11 +542,10 @@ mod tests {
             "manifest: 2\nname: {name}\nintent: {{ purpose: p, origin: null, examples: [] }}\n\
              models:\n  - name: prs\n    version: 3\n    description: Pull requests.\n    columns:\n      - {{ name: uri, type: TEXT, doc: The ref. }}\n      - {{ name: title, type: TEXT, doc: Its title. }}\n\
              event_types:\n  types:\n    - {{ type: {ns}.merged, v: 1, schema: merged.json, summary: Merged. }}\n\
-             pages:\n  - {{ id: pr, title: Pull request, category: Work, lens: open }}\n\
              panels:\n  - {{ id: inbox, title: Inbox, scope: project, body: open }}\n\
              resources:\n  - {{ name: pr, label: Pull request, params: {{ id: {{ required: true, pattern: '^[0-9]+$' }} }}, resolve: prs, icon: git-pull-request }}\n\
              custom_components:\n  - {{ id: chart }}\n\
-             ui:\n  slots:\n    - {{ slot: diff.file.header, lens: open }}\n    - {{ slot: diff.file.header, lens: open }}\n  decorators:\n    - {{ model: prs, resource: oxplow/work_item, placement: ref-chip, label: title }}\n"
+             ui:\n  slots:\n    - {{ slot: diff.file.header, page: open }}\n    - {{ slot: diff.file.header, page: open }}\n  decorators:\n    - {{ model: prs, resource: oxplow/work_item, placement: ref-chip, label: title }}\n"
         )
     }
 
@@ -560,8 +559,9 @@ mod tests {
         );
         write(
             root,
-            &format!("{dir}/lenses/open.yaml"),
-            "title: Open\nquery: \"SELECT 1 AS n WHERE :path = :path\"\nparams:\n  - { name: path, label: Path, default: \"\" }\n",
+            &format!("{dir}/pages/open.yaml"),
+            "title: Open\nparams:\n  - { name: path, label: Path, default: \"\" }\n\
+             data:\n  n: { sql: \"SELECT 1 AS n WHERE :path = :path\" }\nview: { viz: number, from: n }\n",
         );
         write(root, &format!("{dir}/merged.json"), NUMBER_SCHEMA);
         write(
@@ -671,10 +671,8 @@ mod tests {
     #[test]
     fn the_ui_kinds_are_mounted_and_claim_no_global_name() {
         let ext = acme();
-        let lens = one(&ext, K::Lens);
-        assert_eq!(lens.id.to_string(), "oxplow:oxplow/lens?lens=acme-pr/open");
         let page = one(&ext, K::Page);
-        assert_eq!(page.id.to_string(), "oxplow:oxplow/page?page=acme-pr/pr");
+        assert_eq!(page.id.to_string(), "oxplow:oxplow/page?page=acme-pr/open");
         let panel = one(&ext, K::Panel);
         assert_eq!(
             panel.id.to_string(),
@@ -685,7 +683,7 @@ mod tests {
             component.id.to_string(),
             "oxplow:oxplow/custom_component?custom_component=acme-pr/chart"
         );
-        for d in [lens, page, panel, component] {
+        for d in [page, panel, component] {
             assert_eq!(d.trigger, RunsOn::Mount, "{}", d.id);
             assert_eq!(d.global, None, "{}", d.id);
         }
@@ -739,8 +737,7 @@ mod tests {
                 target: "work_item.board".into(),
                 capability: "work_items".into(),
                 bound_to_provider: false,
-                lens_id: "tracker/board".into(),
-                page_id: None,
+                page: "tracker/board".into(),
                 version: 1,
                 view: vec![],
                 label: "board".into(),

@@ -490,11 +490,7 @@ mod tests {
     }
 
     #[test]
-    fn a_lens_or_page_carries_its_own_params() {
-        assert_eq!(
-            lens_uri_with("acme/blocked", &[("stream_id", Some("2")), ("gone", None)]),
-            "oxplow:oxplow/lens?lens=acme/blocked&stream_id=2"
-        );
+    fn a_page_carries_its_own_params() {
         assert_eq!(
             page_uri("settings", &[("area", "ai")]),
             "oxplow:oxplow/page?area=ai&page=settings"

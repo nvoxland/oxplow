@@ -159,17 +159,16 @@ mod tests {
             .is_err());
     }
 
-    /// An author's lens over a model nobody published yet answers through
-    /// the overlay — what MCP `oxplow_run_lens` reads through — where a plain run
-    /// says the view isn't there.
+    /// An author's page over a model nobody published yet answers through
+    /// its draft's overlay — what MCP `oxplow_run_page` on a draft reads
+    /// through — where a plain run says the view isn't there.
     #[tokio::test]
-    async fn a_lens_over_an_unpublished_model_answers_through_its_overlay() {
+    async fn a_page_over_an_unpublished_model_answers_through_its_overlay() {
+        use crate::pages::runner::{PageRunner, RunRequest, RunTarget};
         let f = crate::test_fixtures::services_with_effort().await;
         let svc = &f.svc;
         // An author's worktree: its extensions aren't the activated
-        // project's, so nothing of them is published. A standalone catalog
-        // reads its sources, as the author's tools do.
-        let catalog = crate::extension_catalog::ExtensionCatalog::new();
+        // project's, so nothing of them is published.
         let authoring = tempfile::tempdir().unwrap();
         let root = authoring.path().to_path_buf();
         write(
@@ -184,31 +183,31 @@ mod tests {
         );
         write(
             &root,
-            ".oxplow/extensions/late/lenses/counted.yaml",
-            "title: Counted\nquery: SELECT count(*) AS n FROM v_late_counted\n",
+            ".oxplow/extensions/late/pages/counted.yaml",
+            "title: Counted\ndata:\n  n: { sql: SELECT count(*) AS n FROM v_late_counted }\n\
+             view: { viz: number, from: n }\n",
         );
-        let ctx = crate::extensions::ViewContext::default();
-        let run = |layer: crate::sql_gateway::SqlGateway| {
-            let catalog = &catalog;
-            let root = root.clone();
-            let ctx = ctx.clone();
-            async move {
-                crate::extensions::run_lens(
-                    &layer,
-                    catalog,
-                    &root,
-                    "late/counted",
-                    Default::default(),
-                    &ctx,
-                )
-                .await
-            }
+        let draft = PageRunner::draft(svc, &root, "late").await.unwrap();
+        let page = draft.draft.as_ref().unwrap().pages[0].clone();
+        let request = |target| RunRequest {
+            target,
+            params: Default::default(),
+            ctx: crate::extensions::ViewContext::default(),
+            viewer: oxplow_domain::Actor::Human,
         };
-        let plain = run(svc.sql.clone()).await.unwrap_err().to_string();
+        let plain = PageRunner::of(svc)
+            .run(request(RunTarget::Spec(std::sync::Arc::new(page))))
+            .await
+            .unwrap();
+        let plain = plain.loaders["n"].error.clone().expect("no view, no rows");
         assert!(plain.contains("v_late_counted"), "{plain}");
-        let overlay = crate::extensions::lens_overlay(&svc.sql, &catalog, &root, "late").await;
-        let answered = run(svc.sql.with_overlay(overlay)).await.unwrap();
-        assert_eq!(answered.result.rows.len(), 1);
+        let answered = draft
+            .run(request(RunTarget::Page("late/counted".into())))
+            .await
+            .unwrap();
+        let n = &answered.loaders["n"];
+        assert_eq!(n.error, None);
+        assert_eq!(n.result.rows.len(), 1);
     }
 
     /// P4.9 (tsk494): `oxplow_validate_extension` (what `oxplow extension check`

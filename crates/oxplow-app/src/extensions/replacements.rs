@@ -174,10 +174,10 @@ mod tests {
         std::fs::write(p, body).unwrap();
     }
 
-    const BOARD: &str = "title: Board\nparams: [{ name: scope }, { name: thread_id }]\nquery: SELECT uri, title, state FROM v_work_item\n";
+    const BOARD: &str = "title: Board\nparams: [{ name: scope }, { name: thread_id }]\ndata:\n  rows: { sql: \"SELECT uri, title, state FROM v_work_item\" }\nview: { viz: table, from: rows }\n";
 
     /// Extension `tracker`, with `providers` (YAML, or none),
-    /// a `board` lens taking the Board's whole contract, a `partial` one
+    /// a `board` page taking the Board's whole contract, a `partial` one
     /// taking only `scope`, and `replacements`.
     fn load(providers: &str, replacements: &str) -> Extension {
         let d = tempfile::tempdir().unwrap();
@@ -201,28 +201,28 @@ mod tests {
         );
         write(
             d.path(),
-            ".oxplow/extensions/tracker/lenses/board.yaml",
+            ".oxplow/extensions/tracker/pages/board.yaml",
             BOARD,
         );
         write(
             d.path(),
-            ".oxplow/extensions/tracker/lenses/partial.yaml",
-            "title: Partial\nparams: [{ name: scope }]\nquery: SELECT 1 AS n\n",
+            ".oxplow/extensions/tracker/pages/partial.yaml",
+            "title: Partial\nparams: [{ name: scope }]\ndata:\n  rows: { sql: \"SELECT 1 AS n\" }\nview: { viz: table, from: rows }\n",
         );
         write(
             d.path(),
-            ".oxplow/extensions/tracker/lenses/state.yaml",
-            "title: State\nparams: [{ name: uri }]\nquery: SELECT :uri AS uri\n",
+            ".oxplow/extensions/tracker/pages/state.yaml",
+            "title: State\nparams: [{ name: uri }]\ndata:\n  rows: { sql: \"SELECT :uri AS uri\" }\nview: { viz: table, from: rows }\n",
         );
         write(
             d.path(),
-            ".oxplow/extensions/tracker/lenses/graph.yaml",
-            "title: Graph\nparams: [{ name: head_sha }, { name: reveal_sha }, { name: limit }]\nquery: SELECT :head_sha AS sha\n",
+            ".oxplow/extensions/tracker/pages/graph.yaml",
+            "title: Graph\nparams: [{ name: head_sha }, { name: reveal_sha }, { name: limit }]\ndata:\n  rows: { sql: \"SELECT :head_sha AS sha\" }\nview: { viz: table, from: rows }\n",
         );
         write(
             d.path(),
-            ".oxplow/extensions/tracker/lenses/verdict.yaml",
-            "title: Verdict\nparams: [{ name: effort_id }]\nquery: SELECT :effort_id AS effort_id\n",
+            ".oxplow/extensions/tracker/pages/verdict.yaml",
+            "title: Verdict\nparams: [{ name: effort_id }]\ndata:\n  rows: { sql: \"SELECT :effort_id AS effort_id\" }\nview: { viz: table, from: rows }\n",
         );
         write(
             d.path(),
@@ -235,8 +235,8 @@ mod tests {
             .unwrap()
     }
 
-    /// A page renders instead as a lens does, checked against the same
-    /// contract.
+    /// A page renders instead, checked against the target's contract; a
+    /// `lens:` is no longer a field.
     #[test]
     fn a_page_replaces_a_target_taking_its_whole_contract() {
         let ext = load(
@@ -250,22 +250,19 @@ mod tests {
             ext.page_files.iter().map(|p| &p.id).collect::<Vec<_>>(),
             ext.errors
         );
-        assert_eq!(
-            ext.ui.replacements[0].page_id.as_deref(),
-            Some("tracker/board-page")
-        );
-        assert_eq!(ext.ui.replacements[0].lens_id, "");
+        assert_eq!(ext.ui.replacements[0].page, "tracker/board-page");
         let ext = load(PROVIDER, "    - { target: work_item.board, page: nope }\n");
         assert!(
             said(&ext).contains("page `nope` isn't one of this extension's"),
             "{}",
             said(&ext)
         );
-        let ext = load(
-            PROVIDER,
-            "    - { target: work_item.board, page: board-page, lens: board }\n",
+        let ext = load(PROVIDER, "    - { target: work_item.board, lens: board }\n");
+        assert!(
+            said(&ext).contains("unknown field `lens`"),
+            "{}",
+            said(&ext)
         );
-        assert!(said(&ext).contains("`lens` or `page`"), "{}", said(&ext));
     }
 
     const PROVIDER: &str = "providers:\n  - { id: fake, capability: work_items, entry: bin/provider, declarations: provider.json }\n";
@@ -282,8 +279,8 @@ mod tests {
     }
 
     #[test]
-    fn a_replacement_names_a_known_target_and_a_lens_taking_its_whole_contract() {
-        let ext = load(PROVIDER, "    - { target: work_item.board, lens: board }\n");
+    fn a_replacement_names_a_known_target_and_a_page_taking_its_whole_contract() {
+        let ext = load(PROVIDER, "    - { target: work_item.board, page: board }\n");
         assert_eq!(said(&ext), "");
         assert_eq!(
             ext.ui.replacements,
@@ -292,8 +289,7 @@ mod tests {
                 extension: "tracker".into(),
                 target: "work_item.board".into(),
                 capability: "work_items".into(),
-                lens_id: "tracker/board".into(),
-                page_id: None,
+                page: "tracker/board".into(),
                 version: 1,
                 view: vec![],
                 label: "board".into(),
@@ -302,23 +298,23 @@ mod tests {
         );
         for (entry, says) in [
             (
-                "{ target: vcs.conflict.resolver, lens: board }",
+                "{ target: vcs.conflict.resolver, page: board }",
                 "isn't a replaceable component (work_item.board, work_item.list, work_item.detail, work_item.detail.state, vcs.history.graph, effort.verdict)",
             ),
             (
-                "{ target: work_item.board, lens: board, version: 2 }",
+                "{ target: work_item.board, page: board, version: 2 }",
                 "`work_item.board` is at version 1 of its props contract, not 2",
             ),
             (
-                "{ target: work_item.board, lens: nope }",
-                "lens `nope` isn't one of this extension's",
+                "{ target: work_item.board, page: nope }",
+                "page `nope` isn't one of this extension's",
             ),
             (
-                "{ target: work_item.board, lens: partial }",
+                "{ target: work_item.board, page: partial }",
                 "must declare `thread_id`",
             ),
             (
-                "{ target: work_item.board, lens: board, order: 1 }",
+                "{ target: work_item.board, page: board, order: 1 }",
                 "unknown field",
             ),
         ] {
@@ -333,34 +329,34 @@ mod tests {
     }
 
     /// P10 (K4): the second replaceable component — a work item's state
-    /// control — is given the item's `ref`, and its lens must take it.
+    /// control — is given the item's `ref`, and its page must take it.
     #[test]
     fn a_detail_state_replacement_takes_ref() {
         let ext = load(
             PROVIDER,
-            "    - { target: work_item.detail.state, lens: state }\n",
+            "    - { target: work_item.detail.state, page: state }\n",
         );
         assert_eq!(said(&ext), "");
         assert_eq!(
             ext.ui
                 .replacements
                 .iter()
-                .map(|r| (r.target.as_str(), r.lens_id.as_str()))
+                .map(|r| (r.target.as_str(), r.page.as_str()))
                 .collect::<Vec<_>>(),
             vec![("work_item.detail.state", "tracker/state")]
         );
         let ext = load(
             PROVIDER,
-            "    - { target: work_item.detail.state, lens: board }\n",
+            "    - { target: work_item.detail.state, page: board }\n",
         );
         assert!(said(&ext).contains("must declare `uri`"), "{}", said(&ext));
     }
 
     /// An effort's verdict is a review policy's: any extension may bring
-    /// one, with no provider, and its lens takes the effort's `effort_id`.
+    /// one, with no provider, and its page takes the effort's `effort_id`.
     #[test]
     fn an_effort_verdict_replacement_takes_effort_id_and_needs_no_provider() {
-        let ext = load("", "    - { target: effort.verdict, lens: verdict }\n");
+        let ext = load("", "    - { target: effort.verdict, page: verdict }\n");
         assert_eq!(said(&ext), "");
         assert_eq!(
             ext.ui
@@ -374,7 +370,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![("effort.verdict", "effort_policy", false)]
         );
-        let ext = load("", "    - { target: effort.verdict, lens: state }\n");
+        let ext = load("", "    - { target: effort.verdict, page: state }\n");
         assert!(
             said(&ext).contains("must declare `effort_id`"),
             "{}",
@@ -405,7 +401,7 @@ mod tests {
     fn only_a_bound_target_needs_the_extension_to_bring_its_provider() {
         let ext = load(
             "",
-            "    - { target: work_item.detail.state, lens: state }\n",
+            "    - { target: work_item.detail.state, page: state }\n",
         );
         let errs = said(&ext);
         assert!(
@@ -414,7 +410,7 @@ mod tests {
         );
         assert!(ext.ui.replacements.is_empty());
         let ext = load("",
-            "    - { target: work_item.board, lens: board, version: 1 }\n    - { target: work_item.list, lens: board }\n    - { target: work_item.detail, lens: state }\n",
+            "    - { target: work_item.board, page: board, version: 1 }\n    - { target: work_item.list, page: board }\n    - { target: work_item.detail, page: state }\n",
         );
         assert_eq!(said(&ext), "");
         assert_eq!(
@@ -434,7 +430,7 @@ mod tests {
     #[test]
     fn a_target_is_replaced_once_per_extension() {
         let ext = load(PROVIDER,
-            "    - { target: work_item.board, lens: board }\n    - { target: work_item.board, lens: board }\n",
+            "    - { target: work_item.board, page: board }\n    - { target: work_item.board, page: board }\n",
         );
         assert!(said(&ext).contains("already replaced"), "{:?}", ext.errors);
         assert_eq!(ext.ui.replacements.len(), 1);
@@ -447,7 +443,7 @@ mod tests {
     /// shares, Git History's filters.
     #[test]
     fn an_unbound_target_needs_no_provider_and_a_shared_extension_may_replace_it() {
-        let ext = load("", "    - { target: vcs.history.graph, lens: graph }\n");
+        let ext = load("", "    - { target: vcs.history.graph, page: graph }\n");
         assert_eq!(said(&ext), "");
         assert_eq!(
             ext.ui
@@ -500,7 +496,7 @@ mod tests {
     /// bound target still needs its provider.
     #[test]
     fn a_shared_extension_may_declare_replacements() {
-        let ext = load(PROVIDER, "    - { target: work_item.board, lens: board }\n");
+        let ext = load(PROVIDER, "    - { target: work_item.board, page: board }\n");
         assert_eq!(said(&ext), "");
         assert_eq!(ext.ui.replacements.len(), 1);
     }

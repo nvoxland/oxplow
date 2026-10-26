@@ -317,13 +317,13 @@ mod tests {
     }
 
     /// Any extension declares tools the same way: a command offered to
-    /// the caller, and a lens whose params are its input. Every command is
+    /// the caller, and a page whose params are its input. Every command is
     /// offered to an agent, so each one that names a tool is one.
     #[tokio::test]
-    async fn an_extensions_command_and_lens_are_tools() {
+    async fn an_extensions_command_and_page_are_tools() {
         let fx = services_with_task_effort().await;
         let root = fx._dir.path().join(".oxplow/extensions/acme");
-        std::fs::create_dir_all(root.join("lenses")).unwrap();
+        std::fs::create_dir_all(root.join("pages")).unwrap();
         std::fs::write(
             root.join("extension.yaml"),
             "manifest: 2\nname: acme\nintent:\n  purpose: p\ncommands:\n\
@@ -334,19 +334,23 @@ mod tests {
         )
         .unwrap();
         std::fs::write(
-            root.join("lenses/open.yaml"),
-            "title: Open Work\ndescription: The items still open.\nquery: SELECT 1 AS n\n\
+            root.join("pages/open.yaml"),
+            "title: Open Work\ndescription: The items still open.\n\
              params:\n  - { name: state, label: State, default: todo, options: [{ value: todo, label: To do }, { value: done, label: Done }] }\n\
              \x20 - { name: owner, label: Owner, options_from: owners }\n\
+             data:\n  items:\n    sql: SELECT :state AS state\n\
+             view:\n  viz: table\n  from: items\n\
              tool: open_work\n",
         )
         .unwrap();
         std::fs::write(
-            root.join("lenses/owners.yaml"),
-            "title: Owners\nquery: SELECT 'me' AS value, 'Me' AS label\n",
+            root.join("pages/owners.yaml"),
+            "title: Owners\ndata:\n  owners:\n    sql: SELECT 'me' AS value, 'Me' AS label\n\
+             view:\n  viz: table\n  from: owners\n",
         )
         .unwrap();
-        activate_with_problems(&fx.svc).await;
+        let problems = activate_with_problems(&fx.svc).await;
+        assert!(problems.is_empty(), "{problems:?}");
         let tools = offered(&fx.svc, &agent(&fx)).await.unwrap();
         let acme: Vec<&AgentTool> = tools
             .iter()
@@ -356,26 +360,12 @@ mod tests {
             acme.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(),
             ["acme_count", "acme_open_work", "acme_secret"]
         );
-        let lens = acme[1];
+        let page = acme[1];
+        // Options a page lists aren't known until it runs: no enum, and
+        // the description says which page to run to see them.
         assert_eq!(
-            lens.input_schema["properties"]["state"],
-            json!({ "description": "State", "enum": ["todo", "done"], "default": "todo" })
-        );
-        // Options a lens lists aren't known until it runs: no enum, and
-        // the description says which lens to run to see them.
-        assert_eq!(
-            lens.input_schema["properties"]["owner"],
+            page.input_schema["properties"]["owner"],
             json!({ "description": "Owner — one of the `value`s `acme/owners` lists (run it to see them)" })
-        );
-        assert!(lens
-            .description
-            .starts_with("Open Work: The items still open."));
-        assert_eq!(
-            lens.call(json!({ "state": "done", "format": "json" })),
-            (
-                LENS_RUN.to_string(),
-                json!({ "id": "acme/open", "params": { "state": "done" }, "format": "json" })
-            )
         );
         assert_eq!(
             acme[0].call(json!({ "sql": "SELECT 1" })),

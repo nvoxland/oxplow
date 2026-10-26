@@ -92,26 +92,32 @@ mod tests {
         }
     }
 
-    /// A lens that needs a param nobody fills in from the launcher (an
+    /// A page that needs a param nobody fills in from the launcher (an
     /// `effort_id` a slot passes) opens empty there, so it's hidden; the
-    /// viewer's `stream_id` / `thread_id` are filled in (tsk374).
+    /// viewer's `stream_id` / `thread_id` are filled in (tsk374). A
+    /// renderer (`for:`) opens on its resource, not from the launcher.
     #[test]
-    fn launcher_lenses_need_no_slot_params() {
+    fn launcher_pages_need_no_slot_params() {
         let exts = crate::extensions::load_extensions(tempfile::tempdir().unwrap().path());
         let mut shown = Vec::new();
         for e in exts.iter().filter(|e| e.origin == "bundled") {
             assert!(e.errors.is_empty(), "{}: {:?}", e.name, e.errors);
-            for l in e.lenses.iter().filter(|l| !l.hidden) {
-                for p in &l.params {
+            for page in e
+                .page_files
+                .iter()
+                .filter(|p| !p.hidden && p.renders.is_empty())
+            {
+                for p in &page.params {
                     assert!(
                         p.default.is_some()
+                            || p.options_from.is_some()
                             || ["stream_id", "thread_id"].contains(&p.name.as_str()),
                         "{} is in the launcher but needs `{}`",
-                        l.id,
+                        page.id,
                         p.name
                     );
                 }
-                shown.push(l.id.clone());
+                shown.push(page.id.clone());
             }
         }
         // The review starters are there to open.
@@ -546,8 +552,8 @@ mod tests {
         );
     }
 
-    /// P4.1 (tsk486): every query a bundled extension ships — lens,
-    /// advisory, collector or command input — reads only published views
+    /// P4.1 (tsk486): every query a bundled extension ships — a page's
+    /// SQL loader, advisory, collector or command input — reads only published views
     /// (its own models' included), never a physical table (what the
     /// authorizer will refuse, P4.3).
     #[tokio::test]
@@ -565,12 +571,23 @@ mod tests {
             if !bundled.contains(&ext.name.as_str()) {
                 continue;
             }
-            let queries = ext
-                .lenses
-                .iter()
-                // A grid or a form reads nothing of its own.
-                .filter(|l| !l.query.trim().is_empty())
-                .map(|l| (format!("lens {}", l.id), l.query.clone()))
+            // A loader that reads an earlier one (a table of its name) is
+            // checked only as part of its page's run; the rest stand alone.
+            let loaders = ext.page_files.iter().flat_map(|p| {
+                let names: Vec<&str> = p.loaders.iter().map(|l| l.name.as_str()).collect();
+                p.loaders.iter().filter_map(move |l| match &l.loader {
+                    crate::pages::schema::Loader::Sql { sql, .. }
+                        if !names.iter().any(|n| {
+                            sql.split(|c: char| !(c.is_alphanumeric() || c == '_'))
+                                .any(|w| w == *n)
+                        }) =>
+                    {
+                        Some((format!("page {} loader {}", p.id, l.name), sql.clone()))
+                    }
+                    _ => None,
+                })
+            });
+            let queries = loaders
                 .chain(
                     ext.advisories
                         .iter()
@@ -1477,32 +1494,35 @@ mod tests {
     /// cleared it (an extension command recording an event), grouped
     /// under headings; collapsed, just the active item; counted without
     /// an alert.
-    /// The task lenses need no work list: with none they run (and, reading
-    /// the interface, show nothing) rather than saying what's missing.
+    /// The task pages need no work list: with none they run (and, reading
+    /// the interface, show nothing) rather than failing.
     #[tokio::test]
-    async fn the_task_lenses_run_without_a_work_list() {
+    async fn the_task_pages_run_without_a_work_list() {
         let f = crate::test_fixtures::services_with_effort().await;
         let run = |svc: std::sync::Arc<crate::Services>| async move {
             let ctx = crate::extensions::view_context(&svc, None, None).await;
-            crate::extensions::run_lens(
-                &svc.sql,
-                &svc.extension_catalog,
-                &svc.layout.project_dir,
-                "oxplow-bundled/ready-tasks",
-                Default::default(),
-                &ctx,
-            )
-            .await
-            .unwrap()
+            let run = crate::pages::runner::PageRunner::of(&svc)
+                .run(crate::pages::runner::RunRequest {
+                    target: crate::pages::runner::RunTarget::Page("oxplow-bundled/planning".into()),
+                    params: Default::default(),
+                    ctx,
+                    viewer: oxplow_domain::Actor::Human,
+                })
+                .await
+                .unwrap();
+            run.loaders
+                .iter()
+                .filter_map(|(n, l)| l.error.as_ref().map(|e| format!("{n}: {e}")))
+                .collect::<Vec<_>>()
         };
-        assert!(run(f.svc.clone()).await.inactive.is_none());
+        assert_eq!(run(f.svc.clone()).await, Vec::<String>::new());
         f.svc
             .config
             .write()
             .unwrap()
             .personal_active_providers
             .insert("work_items".into(), "none".into());
-        assert!(run(f.svc.clone()).await.inactive.is_none());
+        assert_eq!(run(f.svc.clone()).await, Vec::<String>::new());
     }
 
     #[tokio::test]
@@ -2066,65 +2086,36 @@ mod tests {
         );
     }
 
-    /// The foundation declares oxplow's pages: those drawn as lenses, and
-    /// every other one as a built-in until it becomes a lens. Its pages are
-    /// core-named (`oxplow:oxplow/page?page=tasks`), as its commands are.
+    /// The foundation's page files are oxplow's pages, core-named
+    /// (`oxplow:oxplow/page?page=tasks`) as its commands are: a bare slug
+    /// finds the foundation's page.
     #[tokio::test]
     async fn the_foundation_declares_its_pages() {
         let f = crate::test_fixtures::services_with_effort().await;
-        let foundation = f
-            .svc
-            .extension_catalog
-            .named(f._dir.path(), "oxplow-foundation")
-            .expect("the foundation loads");
-        let pages: Vec<(&str, &str)> = foundation
-            .pages
-            .iter()
-            .filter_map(|p| Some((p.id.as_str(), p.lens()?)))
-            .collect();
-        for (page, lens) in [
-            ("problems", "oxplow-foundation/problems"),
-            ("symbols", "oxplow-foundation/symbols"),
-            ("closed-threads", "oxplow-foundation/closed-threads"),
-            ("hook-events", "oxplow-foundation/hook-events"),
-            ("done-work", "oxplow-foundation/done-work"),
-            ("wiki-freshness", "oxplow-foundation/wiki-freshness"),
-            ("wiki-index", "oxplow-foundation/wiki-index"),
-            ("catalog", "oxplow-foundation/catalog-overview"),
-            ("go-to", "oxplow-foundation/go-to"),
-            ("dashboards", "oxplow-foundation/dashboards"),
-            ("local-history", "oxplow-foundation/local-history"),
-            ("git-history", "oxplow-foundation/git-history"),
-            ("stream-settings", "oxplow-foundation/stream-settings"),
-            ("thread-settings", "oxplow-foundation/thread-settings"),
+        let root = f._dir.path();
+        for slug in [
+            "problems",
+            "symbols",
+            "closed-threads",
+            "hook-events",
+            "done-work",
+            "wiki-freshness",
+            "wiki-index",
+            "catalog",
+            "go-to",
+            "dashboards",
+            "local-history",
+            "git-history",
+            "stream-settings",
+            "thread-settings",
         ] {
-            assert!(pages.contains(&(page, lens)), "{page}: {pages:?}");
+            let page = f
+                .svc
+                .extension_catalog
+                .page_named(root, slug)
+                .unwrap_or_else(|e| panic!("{slug}: {e}"));
+            assert_eq!(page.id, format!("oxplow-foundation/{slug}"));
         }
-        for name in crate::built_in_pages::BUILT_IN_PAGES {
-            let page = foundation
-                .pages
-                .iter()
-                .find(|p| p.id == *name)
-                .unwrap_or_else(|| panic!("{name} isn't declared"));
-            assert_eq!(
-                page.body,
-                crate::extensions::PageBody::BuiltIn {
-                    name: name.to_string()
-                }
-            );
-        }
-        assert!(
-            foundation
-                .pages
-                .iter()
-                .all(|p| p.page_ref == oxplow_domain::uri::build::page_uri(&p.id, &[])),
-            "{:?}",
-            foundation
-                .pages
-                .iter()
-                .map(|p| &p.page_ref)
-                .collect::<Vec<_>>()
-        );
     }
 
     /// The Catalog's sections answer: what can be asked, grouped by who
@@ -2157,8 +2148,8 @@ mod tests {
             .nodes()
             .into_iter()
             .find_map(|n| match &n.kind {
-                crate::pages::schema::NodeKind::Viz { lens, .. } if n.id == "ask" => {
-                    Some(lens.actions.clone())
+                crate::pages::schema::NodeKind::Viz { config, .. } if n.id == "ask" => {
+                    Some(config.actions.clone())
                 }
                 _ => None,
             })
@@ -2819,47 +2810,56 @@ mod tests {
         assert_eq!(rows[0][3], serde_json::json!(2), "{rows}");
 
         // Moving a bookmark to the stream runs the command with the row's
-        // own values; removing it takes it off.
-        let row =
-            |rows: &serde_json::Value| -> std::collections::BTreeMap<String, oxplow_db::SqlCell> {
-                ["title", "page_kind", "uri", "scope", "thread"]
-                    .iter()
-                    .enumerate()
-                    .map(|(i, k)| {
-                        (
-                            k.to_string(),
-                            oxplow_db::SqlCell::Text(rows[0][i].as_str().unwrap().into()),
-                        )
-                    })
-                    .collect()
-            };
-        let act = |action: &'static str, row| {
+        // own values; removing it takes it off. Each press is on the first
+        // bookmark of a fresh open run of the page.
+        let act = |action: &'static str| {
             let f = &f;
             async move {
-                crate::viz_actions::run_lens_action(
+                let runs = crate::pages::open_runs::PageRuns::default();
+                let (run_id, run) = runs
+                    .open(
+                        &f.svc,
+                        crate::pages::runner::RunRequest {
+                            target: crate::pages::runner::RunTarget::Page(
+                                "oxplow-foundation/go-to".into(),
+                            ),
+                            params: [("thread_id".to_string(), Int(f.thread.value()))].into(),
+                            ctx: crate::extensions::ViewContext::default(),
+                            viewer: oxplow_domain::Actor::Human,
+                        },
+                        "w",
+                    )
+                    .await
+                    .unwrap();
+                let bookmarks = &run.loaders["bookmarks"].result;
+                let row = bookmarks
+                    .columns
+                    .iter()
+                    .cloned()
+                    .zip(bookmarks.rows[0].iter().cloned())
+                    .collect();
+                crate::pages::actions::run_page_action(
                     &f.svc,
-                    f._dir.path(),
-                    crate::viz_actions::LensActionCall {
-                        lens_id: "oxplow-foundation/go-to-bookmarks".into(),
-                        action_id: action.into(),
-                        params: [("thread_id".to_string(), Int(f.thread.value()))].into(),
+                    &runs,
+                    crate::pages::actions::PageActionCall {
+                        run_id,
+                        node: Some("bookmarks".into()),
+                        action: action.into(),
                         row: Some(row),
                         input: None,
                         drop: None,
                         on_behalf_of: oxplow_domain::Actor::Human,
                         confirmed: false,
                     },
-                    &crate::extensions::ViewContext::default(),
                 )
                 .await
                 .unwrap();
             }
         };
-        let before = lens("go-to-bookmarks").await;
-        act("to-stream", row(&before)).await;
+        act("to-stream").await;
         let moved = lens("go-to-bookmarks").await;
         assert_eq!(texts(&moved, 3), ["stream"], "{moved}");
-        act("remove", row(&moved)).await;
+        act("remove").await;
         assert!(lens("go-to-bookmarks").await.as_array().unwrap().is_empty());
     }
 
@@ -2926,10 +2926,10 @@ mod tests {
             run.page.category,
             Some(crate::extensions::LauncherCategory::Data)
         );
-        let NodeKind::Viz { lens, .. } = &run.page.view.kind else {
+        let NodeKind::Viz { config, .. } = &run.page.view.kind else {
             panic!("the dashboards index must show its loader");
         };
-        let link = lens
+        let link = config
             .columns
             .iter()
             .find(|c| c.key == "title")
@@ -4681,16 +4681,20 @@ mod tests {
     /// unverified claim, with Dismiss and Reopen beside it; Confirm and
     /// Dismiss on an inferred decision.
     #[test]
-    fn the_review_lenses_declare_their_row_actions() {
+    fn the_review_pages_declare_their_row_actions() {
         let exts = crate::test_fixtures::shipped_extensions();
         let ext = exts.iter().find(|e| e.name == "oxplow-bundled").unwrap();
         let actions = |slug: &str| {
-            ext.lenses
+            ext.page_files
                 .iter()
-                .find(|l| l.id == format!("oxplow-bundled/{slug}"))
+                .find(|p| p.id == format!("oxplow-bundled/{slug}"))
                 .unwrap_or_else(|| panic!("{slug}"))
-                .actions
-                .iter()
+                .nodes()
+                .into_iter()
+                .flat_map(|n| match &n.kind {
+                    crate::pages::schema::NodeKind::Viz { config, .. } => config.actions.clone(),
+                    _ => Vec::new(),
+                })
                 .filter(|a| a.row)
                 .map(|a| (a.label.clone(), a.command.clone()))
                 .collect::<Vec<_>>()
@@ -4726,9 +4730,9 @@ mod tests {
             ]
         );
         assert!(ext
-            .lenses
+            .page_files
             .iter()
-            .any(|l| l.id == "oxplow-bundled/verify-claim-with-evidence"));
+            .any(|p| p.id == "oxplow-bundled/verify-claim-with-evidence"));
         assert!(ext.commands.iter().any(|c| c.name == "oxplow.review.accept"
             && c.ui.as_ref().is_some_and(
                 |u| u.label == "Accept Review" && u.about.as_deref() == Some("oxplow/effort")

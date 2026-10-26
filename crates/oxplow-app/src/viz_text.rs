@@ -955,20 +955,17 @@ mod tests {
 
     fn run(viz: Viz, chart: Option<VizChart>, columns: &[&str], rows: Vec<Vec<SqlCell>>) -> VizRun {
         VizRun {
-            lens: VizConfig {
+            config: VizConfig {
                 id: "t/l".into(),
                 extension: "t".into(),
                 slug: "l".into(),
                 title: "VizConfig".into(),
-                description: String::new(),
-                query: String::new(),
                 viz,
                 params: Vec::new(),
                 columns: Vec::new(),
                 empty: None,
                 chart,
                 tree: None,
-                tile: None,
                 timeline: None,
                 steps: None,
                 hunks: None,
@@ -976,7 +973,6 @@ mod tests {
                 diff: None,
                 editor: None,
                 embed: None,
-                answer: None,
                 terminal: None,
                 markdown: None,
                 form: None,
@@ -984,31 +980,20 @@ mod tests {
                 group: None,
                 emphasis: None,
                 depth: None,
-                parts: Vec::new(),
-                view: None,
                 fills: false,
-                launcher_category: None,
-                hidden: false,
-                refresh: false,
                 actions: Vec::new(),
-                alert: None,
-                needs: Vec::new(),
                 origin: Default::default(),
-                tool: None,
             },
             params: BTreeMap::new(),
             result: SqlQueryResult {
                 columns: columns.iter().map(|c| c.to_string()).collect(),
                 rows,
                 truncated: false,
-                reads: Reads::default(),
+                reads: oxplow_db::Reads::default(),
                 freshness: Vec::new(),
                 generation: None,
                 coverage: Vec::new(),
             },
-            alert: None,
-            warnings: Vec::new(),
-            inactive: None,
         }
     }
 
@@ -1095,279 +1080,8 @@ mod tests {
         assert!(text.contains("| 49 |") && !text.contains("| 50 |"));
         let mut empty = run(Viz::Table, None, &["n"], Vec::new());
         assert_eq!(render(&empty, &Resolved::default()), "No rows.");
-        empty.lens.empty = Some("Nothing waiting.".into());
+        empty.config.empty = Some("Nothing waiting.".into());
         assert_eq!(render(&empty, &Resolved::default()), "Nothing waiting.");
-    }
-
-    /// A document reads as its parts, in order, under their titles: a
-    /// lens part its run (a part's own title wins), a markdown part its
-    /// prose.
-    #[test]
-    fn a_document_renders_its_parts_in_order() {
-        let part = |id: &str, title: Option<&str>, lens: Option<&str>, markdown: Option<&str>| {
-            crate::extensions::LensPart {
-                id: id.into(),
-                title: title.map(Into::into),
-                lens: lens.map(Into::into),
-                markdown: markdown.map(Into::into),
-                size: None,
-                replaceable: None,
-                from: None,
-            }
-        };
-        let grid = with(run(Viz::Document, None, &[], Vec::new()), |l| {
-            l.parts = vec![
-                part("open", None, Some("x/open"), None),
-                part("intro", Some("About"), None, Some("Read me.")),
-                part("note", Some("Notes"), Some("x/note"), None),
-            ]
-        });
-        let mut a = run(Viz::Number, None, &["n"], vec![vec![SqlCell::Int(5)]]);
-        a.lens.title = "Open".into();
-        let mut b = run(Viz::Markdown, None, &["m"], vec![vec![t("**ok**")]]);
-        b.lens.title = "Note".into();
-        assert_eq!(
-            render(
-                &grid,
-                &Resolved {
-                    children: vec![(a, Resolved::default()), (b, Resolved::default())],
-                    diffs: Vec::new(),
-                    files: Vec::new(),
-                    approvals: Vec::new(),
-                    row_tiles: Vec::new(),
-                    answer: None,
-                }
-            ),
-            "### Open\n\n5\n\n### About\n\nRead me.\n\n### Notes\n\n**ok**"
-        );
-    }
-
-    fn lens_part(id: &str, title: Option<&str>, lens: &str) -> crate::extensions::LensPart {
-        crate::extensions::LensPart {
-            id: id.into(),
-            title: title.map(Into::into),
-            lens: Some(lens.into()),
-            markdown: None,
-            size: None,
-            replaceable: None,
-            from: None,
-        }
-    }
-
-    fn number(title: &str, n: i64) -> VizRun {
-        let mut r = run(Viz::Number, None, &["n"], vec![vec![SqlCell::Int(n)]]);
-        r.config.title = title.into();
-        r
-    }
-
-    /// A section that is a document reads as its own sections.
-    #[test]
-    fn a_nested_document_renders_its_own_sections() {
-        let outer = with(run(Viz::Document, None, &[], Vec::new()), |l| {
-            l.parts = vec![lens_part("inner", Some("Agents"), "x/inner")]
-        });
-        let inner = with(run(Viz::Document, None, &[], Vec::new()), |l| {
-            l.parts = vec![
-                lens_part("list", None, "x/list"),
-                lens_part("prompt", None, "x/prompt"),
-            ]
-        });
-        let inner_resolved = Resolved {
-            children: vec![
-                (number("List", 2), Resolved::default()),
-                (number("Prompt", 3), Resolved::default()),
-            ],
-            ..Resolved::default()
-        };
-        assert_eq!(
-            render(
-                &outer,
-                &Resolved {
-                    children: vec![(inner, inner_resolved)],
-                    ..Resolved::default()
-                }
-            ),
-            "### Agents\n\n### List\n\n2\n\n### Prompt\n\n3"
-        );
-    }
-
-    /// A view document reads as the section in view, under a line that
-    /// names every section and how to read another.
-    #[test]
-    fn a_view_document_renders_only_the_viewed_section_naming_the_others() {
-        let mut doc = with(run(Viz::Document, None, &[], Vec::new()), |l| {
-            l.parts = vec![
-                lens_part("overview", Some("Every Setting"), "x/overview"),
-                lens_part("agents", Some("Agents"), "x/agents"),
-            ];
-            l.view = Some("area".into());
-            l.params = vec![crate::extensions::PageParam {
-                name: "area".into(),
-                default: Some(t("overview")),
-                options: vec![
-                    crate::extensions::ChoiceOption {
-                        value: "overview".into(),
-                        label: "Every Setting".into(),
-                    },
-                    crate::extensions::ChoiceOption {
-                        value: "agents".into(),
-                        label: "Agents".into(),
-                    },
-                ],
-                ..Default::default()
-            }];
-        });
-        doc.params.insert("area".into(), t("agents"));
-        assert_eq!(
-            render(
-                &doc,
-                &Resolved {
-                    children: vec![(number("Agents", 4), Resolved::default())],
-                    ..Resolved::default()
-                }
-            ),
-            "Sections: Every Setting, **Agents** — run with `area=<id>` (overview, agents) for another.\n\n### Agents\n\n4"
-        );
-    }
-
-    fn tiled(columns: &[&str], rows: Vec<Vec<SqlCell>>) -> VizRun {
-        with(run(Viz::Dashboard, None, columns, rows), |l| {
-            l.tile = Some(crate::extensions::LensTile {
-                id: Some("id".into()),
-                title: Some("title".into()),
-                lens: Some("lens".into()),
-                sql: Some("sql".into()),
-                display: Some("display".into()),
-                text: Some("text".into()),
-                ..Default::default()
-            })
-        })
-    }
-
-    /// A dashboard whose rows are its tiles reads as a section per row
-    /// after its static parts: under the row's title, else its run's; a
-    /// text tile its text, a tile that can't run why.
-    #[test]
-    fn a_row_tile_dashboard_reads_as_a_section_per_row() {
-        let n = SqlCell::Null(());
-        let mut grid = tiled(
-            &["id", "title", "lens", "sql", "display", "text"],
-            vec![
-                vec![
-                    t("dti1"),
-                    n.clone(),
-                    t("x/open"),
-                    n.clone(),
-                    n.clone(),
-                    n.clone(),
-                ],
-                vec![
-                    t("dti2"),
-                    t("Plan"),
-                    n.clone(),
-                    n.clone(),
-                    n.clone(),
-                    t("Ship it."),
-                ],
-                vec![
-                    t("dti3"),
-                    n.clone(),
-                    n.clone(),
-                    n.clone(),
-                    n.clone(),
-                    t("Just text."),
-                ],
-                vec![
-                    t("dti4"),
-                    t("Bad"),
-                    n.clone(),
-                    t("SELEC"),
-                    n.clone(),
-                    n.clone(),
-                ],
-            ],
-        );
-        grid.lens.parts = vec![crate::extensions::LensPart {
-            id: "intro".into(),
-            title: Some("About".into()),
-            lens: None,
-            markdown: Some("Read me.".into()),
-            size: None,
-            replaceable: None,
-            from: None,
-        }];
-        let mut open = run(Viz::Number, None, &["n"], vec![vec![SqlCell::Int(5)]]);
-        open.lens.title = "Open".into();
-        let resolved = Resolved {
-            row_tiles: vec![
-                Some(Ok(open)),
-                None,
-                None,
-                Some(Err("no such column".into())),
-            ],
-            ..Resolved::default()
-        };
-        assert_eq!(
-            render(&grid, &resolved),
-            "### About\n\nRead me.\n\n### Open\n\n5\n\n### Plan\n\nShip it.\n\nJust text.\n\n### Bad\n\n(can't run it: no such column)"
-        );
-    }
-
-    /// A row tile's `sql` runs as its display; a lens that isn't there, or
-    /// SQL that fails, says why and the others still run; a text tile
-    /// runs nothing.
-    #[tokio::test]
-    async fn row_tiles_resolve_their_lens_and_sql() {
-        let fx = crate::test_fixtures::services_with_effort().await;
-        let root = fx.svc.layout.project_dir.clone();
-        let n = SqlCell::Null(());
-        let grid = tiled(
-            &["id", "title", "lens", "sql", "display", "text"],
-            vec![
-                vec![
-                    t("dti1"),
-                    n.clone(),
-                    n.clone(),
-                    t("SELECT 42 AS answer"),
-                    t("number"),
-                    n.clone(),
-                ],
-                vec![
-                    t("dti2"),
-                    n.clone(),
-                    t("x/missing"),
-                    n.clone(),
-                    n.clone(),
-                    n.clone(),
-                ],
-                vec![
-                    t("dti3"),
-                    n.clone(),
-                    n.clone(),
-                    t("SELECT nope FROM nowhere"),
-                    n.clone(),
-                    n.clone(),
-                ],
-                vec![
-                    t("dti4"),
-                    n.clone(),
-                    n.clone(),
-                    n.clone(),
-                    n.clone(),
-                    t("hi"),
-                ],
-            ],
-        );
-        let ctx = crate::extensions::ViewContext::default();
-        let resolved = resolve(&fx.svc, &root, &grid, &ctx).await.unwrap();
-        assert_eq!(resolved.row_tiles.len(), 4);
-        let answer = resolved.row_tiles[0].as_ref().unwrap().as_ref().unwrap();
-        assert_eq!(answer.lens.viz, Viz::Number);
-        assert!(matches!(resolved.row_tiles[1], Some(Err(_))));
-        assert!(matches!(resolved.row_tiles[2], Some(Err(_))));
-        assert!(resolved.row_tiles[3].is_none());
-        let text = render(&grid, &resolved);
-        assert!(text.starts_with("### Query\n\n42\n\n"), "{text}");
     }
 
     fn with<F: FnOnce(&mut VizConfig)>(mut r: VizRun, f: F) -> VizRun {
@@ -1606,14 +1320,7 @@ mod tests {
                 })
             },
         );
-        let text = text_of(
-            &fx.svc,
-            &root,
-            &r,
-            &crate::extensions::ViewContext::default(),
-        )
-        .await
-        .unwrap();
+        let text = text_of(&fx.svc, &root, &r).await.unwrap();
         assert!(text.contains("-one") && text.contains("+two"), "{text}");
     }
 
@@ -1697,7 +1404,6 @@ mod tests {
         std::fs::write(root.join("c.txt"), "one\ntwo\nthree\n").unwrap();
         let sha = crate::test_fixtures::commit_all(&root, "c");
         std::fs::write(root.join("c.txt"), "uno\n").unwrap();
-        let ctx = crate::extensions::ViewContext::default();
         let code = with(
             run(
                 Viz::Code,
@@ -1717,7 +1423,7 @@ mod tests {
                 })
             },
         );
-        let text = text_of(&fx.svc, &root, &code, &ctx).await.unwrap();
+        let text = text_of(&fx.svc, &root, &code).await.unwrap();
         assert!(text.contains("```txt\ntwo\nthree\n```"), "{text}");
         assert!(text.contains("(not there at working)"), "{text}");
         let diff = with(
@@ -1737,7 +1443,7 @@ mod tests {
                 })
             },
         );
-        let text = text_of(&fx.svc, &root, &diff, &ctx).await.unwrap();
+        let text = text_of(&fx.svc, &root, &diff).await.unwrap();
         assert!(text.contains("-one") && text.contains("+uno"), "{text}");
     }
 
@@ -1748,7 +1454,6 @@ mod tests {
         let fx = crate::test_fixtures::services_with_effort().await;
         let root = fx.svc.layout.project_dir.clone();
         std::fs::write(root.join("e.txt"), "saved text\n").unwrap();
-        let ctx = crate::extensions::ViewContext::default();
         let editor = with(
             run(Viz::Editor, None, &["path"], vec![vec![t("e.txt")]]),
             |l| {
@@ -1758,7 +1463,7 @@ mod tests {
                 })
             },
         );
-        let text = text_of(&fx.svc, &root, &editor, &ctx).await.unwrap();
+        let text = text_of(&fx.svc, &root, &editor).await.unwrap();
         assert!(
             text.contains("#### e.txt, being edited (as saved; unsaved edits aren't here)\n\n```txt\nsaved text\n```"),
             "{text}"
@@ -1799,7 +1504,6 @@ mod tests {
     async fn an_embed_reads_as_a_link() {
         let fx = crate::test_fixtures::services_with_effort().await;
         let root = fx.svc.layout.project_dir.clone();
-        let ctx = crate::extensions::ViewContext::default();
         let embed = with(
             run(
                 Viz::Embed,
@@ -1813,54 +1517,11 @@ mod tests {
                 })
             },
         );
-        let text = text_of(&fx.svc, &root, &embed, &ctx).await.unwrap();
+        let text = text_of(&fx.svc, &root, &embed).await.unwrap();
         assert!(
             text.contains("[https://example.com/a](https://example.com/a)"),
             "{text}"
         );
-    }
-
-    /// An `answer` lens reads as its answer: the text showing it
-    /// returned, so an agent reading the answer's page reads the answer.
-    #[tokio::test]
-    async fn an_answer_lens_reads_as_its_answer() {
-        let fx = crate::test_fixtures::services_with_task_effort().await;
-        let agent = oxplow_domain::Actor::Agent {
-            session_id: None,
-            thread_id: Some(fx.thread),
-            stream_id: None,
-        };
-        let out = fx
-            .svc
-            .commands
-            .run(
-                &agent,
-                "oxplow.lens.show",
-                serde_json::json!({ "spec": { "title": "Busy Tasks", "query": "SELECT title FROM v_work_item", "viz": "table" } }),
-                false,
-            )
-            .await
-            .unwrap();
-        let id = out.result["answer"].as_i64().unwrap();
-        let answer = with(
-            run(
-                Viz::Answer,
-                None,
-                &["uri"],
-                vec![vec![t(&format!("oxplow:oxplow/answer?id={id}"))]],
-            ),
-            |l| {
-                l.answer = Some(crate::extensions::LensAnswer {
-                    uri: Some("uri".into()),
-                    kept: None,
-                })
-            },
-        );
-        let root = fx.svc.layout.project_dir.clone();
-        let ctx = crate::extensions::ViewContext::default();
-        let text = text_of(&fx.svc, &root, &answer, &ctx).await.unwrap();
-        let shown = out.result["text"].as_str().unwrap();
-        assert!(text.contains(shown), "{text}\n---\n{shown}");
     }
 
     /// An approvals lens reads the pending proposals itself: an agent
@@ -1877,10 +1538,7 @@ mod tests {
             }
             r
         };
-        let ctx = crate::extensions::ViewContext::default();
-        let none = text_of(&fx.svc, &root, &approvals(&[]), &ctx)
-            .await
-            .unwrap();
+        let none = text_of(&fx.svc, &root, &approvals(&[])).await.unwrap();
         assert_eq!(none, "No proposals wait for a decision.");
 
         // An effect's run that asks waits for a person.
@@ -1904,9 +1562,7 @@ mod tests {
             matches!(err, oxplow_domain::CommandError::Proposed { .. }),
             "{err:?}"
         );
-        let all = text_of(&fx.svc, &root, &approvals(&[]), &ctx)
-            .await
-            .unwrap();
+        let all = text_of(&fx.svc, &root, &approvals(&[])).await.unwrap();
         assert!(
             all.contains("waiting for a person's decision")
                 && all.contains("oxplow:oxplow/proposal?id="),
@@ -1916,7 +1572,6 @@ mod tests {
             &fx.svc,
             &root,
             &approvals(&[("thread", t("oxplow:oxplow/thread?id=thr999"))]),
-            &ctx,
         )
         .await
         .unwrap();

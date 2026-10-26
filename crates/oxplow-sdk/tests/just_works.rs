@@ -78,8 +78,8 @@ async fn a_scaffolded_page_checks_tests_and_its_row_action_binds() {
         .nodes()
         .into_iter()
         .find_map(|n| match &n.kind {
-            oxplow_app::pages::schema::NodeKind::Viz { lens, .. } => {
-                lens.actions.iter().find(|a| a.row).cloned()
+            oxplow_app::pages::schema::NodeKind::Viz { config, .. } => {
+                config.actions.iter().find(|a| a.row).cloned()
             }
             _ => None,
         })
@@ -187,8 +187,8 @@ async fn a_scaffolded_metric_checks_tests_and_declares_its_blocks() {
         .nodes()
         .into_iter()
         .find_map(|n| match &n.kind {
-            oxplow_app::pages::schema::NodeKind::Viz { lens, .. } => {
-                lens.columns.iter().find_map(|c| c.link.clone())
+            oxplow_app::pages::schema::NodeKind::Viz { config, .. } => {
+                config.columns.iter().find_map(|c| c.link.clone())
             }
             _ => None,
         })
