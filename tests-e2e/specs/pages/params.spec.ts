@@ -32,7 +32,6 @@ async function twoCommits(daemon: Daemon & { project: string }) {
 const ROUTE = "oxplow:oxplow/page?page=commit-history/history";
 
 async function openHistory(page: Page) {
-  await page.goto("/");
   await searchLauncher(page, "Commit history");
   await page.getByTestId(`launcher-page-${ROUTE}`).click();
   const host = page.getByTestId("page-host").filter({ visible: true });
@@ -50,6 +49,8 @@ async function openHistory(page: Page) {
 /// picks the param the next section reads; the tab keeps both.
 test("the rail's filters narrow a page, a row click shows the next section its pick, and the tab keeps both", async ({ fresh }) => {
   const { page, daemon } = fresh;
+  // The window is up while the commits land, as a person's is.
+  await page.goto("/");
   await twoCommits(daemon);
   const { body, commits, files, rail, filters } = await openHistory(page);
   // The rail is the page's one place for controls: its filters as rows
@@ -116,6 +117,8 @@ test("the rail's filters narrow a page, a row click shows the next section its p
 /// and pushes one. Neither remounts the page.
 test("a filter change keeps the page and replaces the entry; a pick pushes one Back undoes", async ({ fresh }) => {
   const { page, daemon } = fresh;
+  // The window is up while the commits land, as a person's is.
+  await page.goto("/");
   await twoCommits(daemon);
   const { body, commits, filters } = await openHistory(page);
   const back = page.getByTestId("page-nav-back").filter({ visible: true });
