@@ -1069,8 +1069,8 @@ fn range_ends(value: &str, now: time::OffsetDateTime) -> Option<(Option<String>,
 /// A param whose type its other fields or its default don't fit: a
 /// choice with no options or a default not among them, options or
 /// presets on another type, an unknown preset.
-fn param_problem(lens: &VizConfig) -> Option<String> {
-    lens.params.iter().find_map(|p| {
+pub(crate) fn param_problem(params: &[PageParam]) -> Option<String> {
+    params.iter().find_map(|p| {
         let kind = p.kind();
         let problem = if RESERVED_VIEW_KEYS.contains(&p.name.as_str()) {
             Some(format!(
@@ -2499,6 +2499,7 @@ pub(super) fn resolve_catalog(
         });
     }
     descriptors::check_catalog(&mut out);
+    warn_unplaced_mounts(&mut out);
     public_contracts::activate(&mut out);
     let out: Vec<Extension> = out
         .into_iter()
@@ -2510,6 +2511,51 @@ pub(super) fn resolve_catalog(
         })
         .collect();
     out
+}
+
+/// A slot mount whose host page isn't loaded, or has no slot by that name,
+/// shows nowhere: a warning on the mounting extension (the host may only
+/// be off).
+fn warn_unplaced_mounts(out: &mut [Extension]) {
+    let slots: BTreeMap<String, Vec<String>> = out
+        .iter()
+        .filter(|e| e.enabled)
+        .flat_map(|e| e.page_files.iter())
+        .map(|p| {
+            let names = p
+                .nodes()
+                .into_iter()
+                .filter_map(|n| match &n.kind {
+                    crate::pages::schema::NodeKind::Slot { name } => Some(name.clone()),
+                    _ => None,
+                })
+                .collect();
+            (p.id.clone(), names)
+        })
+        .collect();
+    for ext in out.iter_mut().filter(|e| e.enabled) {
+        let warnings: Vec<String> = ext
+            .ui
+            .page_slots
+            .iter()
+            .filter_map(|m| match slots.get(&m.host) {
+                None => Some(format!(
+                    "{}/extension.yaml: slot `{}.{}` mounts `{}` on page `{}`, which isn't loaded; it shows nowhere",
+                    ext.path, m.host, m.slot, m.page, m.host
+                )),
+                Some(names) if !names.contains(&m.slot) => Some(format!(
+                    "{}/extension.yaml: page `{}` has no slot `{}` (its slots: {}); `{}` shows nowhere",
+                    ext.path,
+                    m.host,
+                    m.slot,
+                    if names.is_empty() { "none".to_string() } else { names.join(", ") },
+                    m.page
+                )),
+                Some(_) => None,
+            })
+            .collect();
+        ext.warnings.extend(warnings);
+    }
 }
 
 /// A catalog block's error as the manifest's, not project.yaml's.
@@ -3706,7 +3752,9 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
     // After resources: a page that renders one is checked against it.
     let mut checked: Vec<crate::pages::schema::Page> = Vec::new();
     for page in std::mem::take(&mut ext.page_files) {
-        match renderer_problem(name, &ext.namespace, &ext.resources, &page, &checked) {
+        let checks = renderer_problem(name, &ext.namespace, &ext.resources, &page, &checked)
+            .and_then(|()| component_problem(&page, &ext.custom_components));
+        match checks {
             Ok(()) => checked.push(page),
             Err(e) => ext.errors.push(format!("{}: {e}", page.origin.running)),
         }
@@ -4078,6 +4126,42 @@ fn page_ref_problem(page: &crate::pages::schema::Page, slugs: &[String]) -> Opti
     })
 }
 
+/// A page's `component` node or `viz: custom` naming a component its
+/// extension doesn't declare (`custom_components:`). One of another
+/// extension's (`<extension>/<id>`) is that one's to have.
+fn component_problem(
+    page: &crate::pages::schema::Page,
+    components: &[custom_components::CustomComponent],
+) -> Result<(), String> {
+    use crate::pages::schema::NodeKind;
+    for node in page.nodes() {
+        let named = match &node.kind {
+            NodeKind::Component { component, .. } => Some(component.clone()),
+            NodeKind::Viz { config, .. } if config.viz == Viz::Custom => {
+                match config.custom.as_ref().and_then(|c| c.component.clone()) {
+                    Some(c) => Some(c),
+                    None => {
+                        return Err(format!(
+                            "node `{}`: viz `custom` needs `custom: {{ component: <id> }}`",
+                            node.id
+                        ))
+                    }
+                }
+            }
+            _ => None,
+        };
+        if let Some(id) = named.filter(|id| !id.contains('/')) {
+            if !components.iter().any(|c| c.id == id) {
+                return Err(format!(
+                    "node `{}`: `{id}` isn't one of this extension's `custom_components`",
+                    node.id
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// What's wrong with a page's `for`, `accepts`, `default` and `pinned`:
 /// each resource it renders is a scheme oxplow renders (`https`), one this
 /// extension declares, one of foundation's (`oxplow/*`) or another
@@ -4404,7 +4488,7 @@ pub(crate) fn shape_problem(lens: &VizConfig, components: &[String]) -> Option<S
         })
     };
     if let Some(problem) = row_style_problem(lens)
-        .or_else(|| param_problem(lens))
+        .or_else(|| param_problem(&lens.params))
         .or_else(|| highlight_problem(lens))
         .or_else(|| markdown_problem(lens))
     {

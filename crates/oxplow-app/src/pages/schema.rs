@@ -461,6 +461,9 @@ pub fn parse_page(
         }
     }
     let params = typed(params);
+    if let Some(why) = crate::extensions::param_problem(&params) {
+        return Err(why);
+    }
     let loaders = parse_loaders(file.data.unwrap_or_default(), &params)?;
     let mut ids = Ids::default();
     let mut ctx = NodeCtx {
@@ -594,6 +597,7 @@ fn inline_problem(page: &Page) -> Option<String> {
                 Viz::Terminal => Some("a terminal"),
                 Viz::Editor => Some("an editor"),
                 Viz::Custom => Some("a component"),
+                Viz::Embed => Some("a web page"),
                 _ => None,
             },
             _ => None,
@@ -1109,6 +1113,25 @@ fn leaf_lens(
 /// What needs the whole page: node ids, bindings, selections, switches,
 /// the badge and the answers.
 fn check_page(page: &Page) -> Result<(), String> {
+    // A node another extension's page may stand in for names a target
+    // oxplow knows, once per page.
+    let mut targets: Vec<&str> = Vec::new();
+    for node in page.nodes() {
+        let Some(target) = node.replaceable.as_deref() else {
+            continue;
+        };
+        if oxplow_domain::replaceable::replaceable(target).is_none() {
+            return Err(format!(
+                "node `{}`: `replaceable: {target}` isn't a replaceable component ({})",
+                node.id,
+                oxplow_domain::replaceable::targets()
+            ));
+        }
+        if targets.contains(&target) {
+            return Err(format!("`replaceable: {target}` is placed once on a page"));
+        }
+        targets.push(target);
+    }
     let mut seen: Vec<&str> = Vec::new();
     for node in page.nodes() {
         if seen.contains(&node.id.as_str()) {

@@ -509,3 +509,30 @@ view:
     );
     assert_eq!(role("path"), None);
 }
+
+/// A node another extension's page may stand in for names a known target,
+/// once per page.
+#[test]
+fn a_replaceable_node_names_a_known_target_once() {
+    let page_with = |a: &str, b: &str| {
+        format!(
+            "title: T\ndata:\n  q: {{ sql: \"SELECT 1 AS n\" }}\nview:\n  stack:\n    - {{ id: a, viz: table, from: q, replaceable: {a} }}\n    - {{ id: b, viz: table, from: q, replaceable: {b} }}\n"
+        )
+    };
+    assert!(refused(&page_with("nope.thing", "work_item.board"))
+        .contains("isn't a replaceable component"));
+    assert!(refused(&page_with("work_item.board", "work_item.board")).contains("placed once"));
+}
+
+/// A page's params are checked though no viz node reads them, and an
+/// inline page can't open a web page.
+#[test]
+fn params_are_checked_on_any_page_and_inline_pages_hold_no_web_page() {
+    let why = refused("title: T\nparams:\n  - { name: section }\nview:\n  markdown: hi\n");
+    assert!(why.contains("view key"), "{why}");
+    let why = parse_inline_page(
+        "title: T\ndata:\n  q: { sql: \"SELECT 'https://x' AS url\" }\nview:\n  viz: embed\n  from: q\n  embed: { url: url }\n",
+    )
+    .expect_err("refused");
+    assert!(why.contains("a web page"), "{why}");
+}
