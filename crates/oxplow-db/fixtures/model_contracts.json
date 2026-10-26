@@ -23075,5 +23075,32 @@
         "position"
       ]
     }
+  },
+  "search_page": {
+    "1": {
+      "columns": [
+        {
+          "name": "uri",
+          "type": "TEXT",
+          "doc": "The page's URI (`v_page.uri`): what a hit opens."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "The page's title."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "Its description and launcher keywords."
+        },
+        {
+          "name": "stream_id",
+          "type": "TEXT",
+          "doc": "Always NULL: pages belong to the project."
+        }
+      ],
+      "key": []
+    }
   }
 }

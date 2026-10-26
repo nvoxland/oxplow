@@ -558,7 +558,7 @@ mod tests {
         assert_eq!(resource_of(&wiki_uri("x")).as_deref(), Some("oxplow/wiki"));
         assert_eq!(resource_of("nope"), None);
         assert_eq!(key_param("acme/pr").as_deref(), Some("id"));
-        assert_eq!(key_param("oxplow/lens").as_deref(), Some("lens"));
+        assert_eq!(key_param("oxplow/page").as_deref(), Some("page"));
     }
 
     #[test]

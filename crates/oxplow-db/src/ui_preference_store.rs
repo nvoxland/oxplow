@@ -223,7 +223,7 @@ mod tests {
                 .await
         ));
         for scope in [
-            "oxplow:oxplow/lens?lens=acme/board",
+            "oxplow:oxplow/page?page=acme/board",
             "resource:oxplow/file",
             "oxplow:oxplow/panel?panel=core:work",
         ] {

@@ -1351,7 +1351,7 @@ mod tests {
             on_behalf_of: Box::new(agent.clone()),
         };
         assert_eq!(lens.invoker(), Invoker::Lens);
-        assert_eq!(lens.source(), "oxplow:oxplow/lens?lens=acme/blocked");
+        assert_eq!(lens.source(), "page:acme/blocked");
         assert_eq!(lens.thread_id(), Some(ThreadId::new(3)));
         assert_eq!(Actor::Human.source(), "human");
         assert_eq!(Actor::System.invoker(), Invoker::Human);
