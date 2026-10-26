@@ -11,10 +11,11 @@ missing `intent`, a Starlark script that doesn't parse or define
 page that isn't there, a command that doesn't exist or an input that doesn't
 fit it, a loader reading one declared after it); the models compiled without
 publishing (SQL errors, a `ref()` that doesn't resolve, columns that differ
-from the declared contract); and a dry run of every page's loaders with their
-default params, every advisory and every command example. It **always**
-dry-runs: a collector's entities stand in empty, so collector → model → page
-checks clean before the first sync. `ok: true` means it works; fix every
+from the declared contract); and a dry run of every advisory and every command
+example. It **always** dry-runs: a collector's entities stand in empty. It
+does not run a page's loaders: `oxplow_run_page` and `oxplow_preview_extension`
+(which opens each page with its `answers:` params) do, so a bad query in a
+page shows there. `ok: true` means it works; fix every
 `error`, and every `warning` unless you can say why not.
 
 Then **`oxplow_run_page { page, draft?, params? }`** returns exactly what the
