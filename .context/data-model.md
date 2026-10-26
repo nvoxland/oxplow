@@ -673,6 +673,20 @@ commands, `v_thread_note`, `v_search_thread_note` and the `oxplow/thread_note`
 resource. What an agent leaves for the next one is an effort, a decision or
 a handoff.
 
+### Lenses, answers and database dashboards (gone, V113)
+
+A page is oxplow's one unit of UI (its file in an extension,
+`.context/pages-and-tabs.md` "Page files"), so V113 dropped what the older
+units kept: `lens` (the catalog listing behind `v_lens`; pages are `page`,
+`page_answer` and `page_param`, V110), `thread_answer` (what
+`oxplow_show_lens` showed; an agent's shown page is an in-memory view now),
+and `dashboard` / `dashboard_item` (a dashboard is a page whose view is a
+grid of embeds). It deleted, without rewriting, every stored reference to
+their URIs (`oxplow/lens`, `oxplow/answer`, `oxplow/dashboard`): bookmarks,
+visits, remembered preferences, context items, page-ref edges and search
+rows. Site search indexes pages instead (`v_search_page`, the launcher's
+pages; hidden ones are left out).
+
 ### `handoff` (`handoff_store.rs`, V84)
 
 Work handed from one thread to another (`oxplow.handoff.*`,
@@ -725,7 +739,7 @@ start an effort in the past (`adopt_since`, clamped to the thread's
 previous effort's end): it then stamps itself onto the thread's
 un-efforted rows since then in the derived tables that carry an effort
 (`EFFORT_STAMPED`: `agent_tool_call`, `agent_token_usage`,
-`metric_capture`, `agent_nudge`, `claim`, `decision`, `thread_answer`).
+`metric_capture`, `agent_nudge`, `claim`, `decision`).
 `finish_tx` at a past point releases the rows after it. The event log is
 not restamped: an event keeps the anchors it was written with.
 `effort_at_tx(thread, at)` names the effort whose span covers a moment.
@@ -2077,7 +2091,7 @@ RPCs `get_panel_layout` / `set_panel_layout`.
 V96. What the person's oxplow remembers for them outside any one tab
 (`.context/pages-and-tabs.md` "Page state"): `(scope, key)` → `value_json`
 (JSON text), `updated_at`. Scopes: `app` (app preferences); a page's URI
-without its params (`oxplow:oxplow/page?page=tasks`, `…?page=acme/pulls`, `oxplow:oxplow/lens?lens=acme/board`) or
+without its params (`oxplow:oxplow/page?page=tasks`, `…?page=acme/pulls`) or
 `resource:<ext>/<name>` (page memory, shared by every tab of the page); a panel's
 URI; `component:<ext>/<id>` (a custom component's own memory). Anything
 else is refused, as is text that isn't JSON or a value over 64 KB, and a
@@ -2416,7 +2430,7 @@ enforces identity, treating global rows' `NULL` stream as `''`).
   `searchable` (oxplow's `oxplow/work_item`, `oxplow/comment`,
   `oxplow/wiki`, `oxplow/thread`,
   `oxplow/agent_session`, `oxplow/turn`, `oxplow/effort`,
-  `oxplow/decision`, `oxplow/commit`, `oxplow/lens`, `oxplow/dashboard`; an
+  `oxplow/decision`, `oxplow/commit`, `oxplow/page`; an
   extension's, P9.D3), or
   `oxplow/file`; `uri` is the thing's URI, and a hit is that URI.
   Every resource but `oxplow/file` is derived from a model by an asset per kind

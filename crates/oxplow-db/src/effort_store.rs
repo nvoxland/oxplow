@@ -154,14 +154,13 @@ pub struct EffortAtSnapshot {
 /// their thread and time columns: what an effort adopts when it opens late,
 /// and releases when it closes as of a past point. The event log keeps the
 /// anchors its events were written with; it's history, not a projection.
-const EFFORT_STAMPED: [(&str, &str); 7] = [
+const EFFORT_STAMPED: [(&str, &str); 6] = [
     ("agent_tool_call", "at"),
     ("agent_token_usage", "recorded_at"),
     ("metric_capture", "captured_at"),
     ("agent_nudge", "created_at"),
     ("claim", "created_at"),
     ("decision", "created_at"),
-    ("thread_answer", "created_at"),
 ];
 
 /// How an effort opens ([`start_tx`]).
