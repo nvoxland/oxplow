@@ -9,9 +9,9 @@ first, and why?" It shows up on three pages:
   end, or to the working tree while it's still open).
 
 Each of those pages shows the change's files. Below that sits the
-**Change Analysis** section, a grid of lenses from
+**Change Analysis** section, a grid of pages from
 `oxplow-bundled`, the extension that ships with oxplow. Turn the extension off and the pages
-keep just their file lists (see [Lenses](lenses.md)).
+keep just their file lists (see [Pages](pages.md)).
 
 ## What's in it
 
@@ -53,7 +53,7 @@ and open efforts recompute when files change.
 
 The results live in the `v_change*` views, so you and your agent can
 query them directly (`oxplow_ensure_change`, then `oxplow_query_sql`), or build your
-own lens on them.
+own page on them.
 
 ## When to use it
 

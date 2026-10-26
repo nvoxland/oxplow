@@ -64,7 +64,7 @@ local to you; ask your agent to set one.
 
 Breakdowns (a metric by package, language, or model) aren't on the
 detail page. Ask your agent: it can read any metric in SQL, sliced any
-way the data allows, and build a [lens](lenses.md) if you want to keep
+way the data allows, and build a [page](pages.md) if you want to keep
 the view. It can also
 slice a metric's history by worktree, thread, effort, task, or commit,
 and roll it up by day, week, or month, e.g. "tokens per task per week".
@@ -92,7 +92,7 @@ That writes `.oxplow/extensions/complex-fns/` with:
 - an `area` dimension, the top folder of each path, so you can split the
   metric by folder;
 - the metric itself, lower is better, split by area;
-- a lens in the launcher (Code) listing the files, each row linking to the
+- a page in the launcher (Code) listing the files, each row linking to the
   worst function's line;
 - a fixture: a small set of files and the facts the collector must return.
 
@@ -124,7 +124,7 @@ new entities and measures, and connect them to existing work and code
 records. Dimensions let you ask the same question by package, service,
 team-relevant category, or any other declared breakdown. The goal is
 understanding the software and its development, not only measuring agent
-collaboration. See [Lenses and extensions](lenses.md).
+collaboration. See [Pages and extensions](pages.md).
 
 A metric extension, including the project's own
 (`.oxplow/extensions/project/extension.yaml`), takes four blocks:

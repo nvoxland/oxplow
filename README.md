@@ -19,7 +19,7 @@ can add sources and analyses, connect them to existing data, and build
 the descriptions, reports, and workflows useful to their project.
 
 Ask an agent a question first. When an answer or workflow is worth
-keeping, have it build an extension: a collector, model, metric, lens,
+keeping, have it build an extension: a collector, model, metric, page,
 page, command, or event reaction. Extensions are ordinary project files
 that can be personal or shared with a team. The long-term goal is to
 make broader sharing practical too.
@@ -41,7 +41,7 @@ limits documented in the [extension reference](docs/reference/extensions.md).
 - **Collectors, metrics, and dimensions.** Collect raw data, derive new
   entities and facts, aggregate measures, and compare them across the
   dimensions relevant to your system and development process.
-- **Custom views and workflows.** Extensions contribute models, lenses,
+- **Custom views and workflows.** Extensions contribute models, pages,
   pages, panels, guidance, commands, effects, and sandboxed components.
   Bundled features use these mechanisms as well.
 - **Parallel streams.** A stream has its own branch and worktree. Each
@@ -69,7 +69,7 @@ computations are a separate service.
 A Tauri desktop shell opens project windows, each connected to a
 per-project Rust daemon. The daemon owns SQLite state, the event log,
 semantic models, integration services, and extension execution. The
-React frontend renders the page graph, lenses, agent sessions, and
+React frontend renders the page graph, agent sessions, and
 code drill-down. Read contracts connect data from different sources;
 commands provide the action side.
 

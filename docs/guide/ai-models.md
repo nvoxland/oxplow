@@ -117,5 +117,5 @@ It can't change providers, roles or keys.
 
 **Recent Calls** in Settings → AI shows the last week by role and caller.
 Every call is also in the `v_ai_call` view, so you can query it in Explore
-Data or build a [lens](lenses.md) over it. Oxplow doesn't track spend; use
+Data or build a [page](pages.md) over it. Oxplow doesn't track spend; use
 your provider's dashboard for that.

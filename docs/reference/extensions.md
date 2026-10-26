@@ -2,7 +2,7 @@
 
 An extension is a folder under `.oxplow/extensions/<name>/` with an
 `extension.yaml`. Everything it adds is declared there as data:
-lenses, models, collectors, commands, effects, providers and the rest.
+pages, models, collectors, commands, effects, providers and the rest.
 Each of those is a *contribution*.
 
 The goal is personal tools that agents can help you build, with useful
@@ -15,7 +15,7 @@ Declared permissions that a person approves at deploy, immutable deployments,
 command gates, and component isolation provide guardrails. Current in-process script timeouts stop
 waiting for a result but may leave computation running: they are not yet
 CPU/memory containment. External-program isolation also depends on the
-platform; see [collector limits](../guide/lenses.md#collectors-bringing-in-outside-data).
+platform; see [collector limits](../guide/pages.md#collectors-bringing-in-outside-data).
 
 ```sh
 oxplow extension new extension my-review   # scaffold one that checks clean
@@ -24,15 +24,15 @@ oxplow extension test my-review            # run its examples on a throwaway oxp
 ```
 
 `new` takes a kind instead of `extension` to start from that kind's
-starter: `lens`, `collector`, `command`, `effect`, `provider`,
-`component`, `policy`, `advisory`, `skill`, `page` or `panel`. A provider takes `--capability` for what it
+starter: `page`, `collector`, `command`, `effect`, `provider`,
+`component`, `policy`, `advisory`, `skill` or `panel`. A provider takes `--capability` for what it
 implements: `work_items` (the default), `effort_policy`,
 `agent_harness` (a harness that tells its subagents apart also declares
 the `subagents` feature; see the provider protocol), `snapshots` (its
 example marks a one-file tree under `fixtures/tree`; the `contents`
 feature adds `read_at`) or `knowledge` (its example writes a page). Each
 scaffold checks clean and passes `test` as written; an `advisory` or
-`skill` has no example `test` can run (it runs lenses, collectors,
+`skill` has no example `test` can run (it runs pages, collectors,
 commands, effects and providers), so `test` notes that and nothing more.
 
 ## Sources, deploying and sharing
@@ -81,21 +81,20 @@ keys and flags mistakes as you type:
 # yaml-language-server: $schema=https://nvoxland.github.io/oxplow/reference/schemas/extension.schema.json
 ```
 
-Lens files use [`lens.schema.json`](schemas/lens.schema.json) the same
-way. Add the line to files you wrote by hand. The loader is still the
+Add the line to files you wrote by hand. The loader is still the
 authority: `oxplow extension check` catches what a schema can't, like a
-lens naming a column its query doesn't return.
+page whose loader reads one declared after it.
 
 ## `extension.yaml`
 
 ```yaml
 manifest: 2
 name: my-review          # must equal the folder name
-description: Lenses for reviewing agent work
+description: Pages for reviewing agent work
 intent:
   purpose: What question it answers, or what job it does
   examples:
-    - { name: blocked, input: { lens: blocked } }
+    - { name: blocked, input: { page: blocked } }
 ```
 
 - `manifest: 2` and `intent` are required. Unknown keys are errors.
@@ -136,15 +135,15 @@ import_guards:
     imports: [review_items]
 ```
 
-A model or lens reads that binding with
+A model or page reads that binding with
 `SELECT * FROM import_ref('review_items')`. SQL references infer their own
 guard. An unavailable optional binding withholds the referring contribution;
 independent contributions remain usable. Explicit guards can name models,
-lenses, collectors, commands, effects, advisories, skills or providers. Their
+pages, collectors, commands, effects, advisories, skills or providers. Their
 exports and dependent mounts are withheld too. Each unavailable optional
 import is one warning naming why and everything it withheld:
 `` optional import `items` for `oxplow:oxplow/model?model=maker/items` v1 is unavailable: maker
-is disabled; withheld: `oxplow:oxplow/lens?lens=review-ui/items`, `oxplow:oxplow/slot?slot=review-ui/oxplow-foundation.work-item.sections-0` ``.
+is disabled; withheld: `oxplow:oxplow/page?page=review-ui/items`, `oxplow:oxplow/slot?slot=review-ui/oxplow-foundation.work-item.sections-0` ``.
 Missing required imports and
 dependency cycles block the extension with source-located errors.
 
@@ -249,13 +248,12 @@ lists each declared reference with Set… and Revoke.
 | `skills` | skills and slash commands for the coding agent |  |
 | `implementations` | an implementation of a capability: a built-in, or an AI provider or effort policy written as a script | below |
 | `providers` | an external program implementing a capability, such as the work list | [Provider protocol](provider-protocol.md) |
-| `lenses/*.yaml` (files, not a key) | a page or panel over a SQL query | [Lenses](../guide/lenses.md) |
-| `pages` | where its lenses show as pages |  |
-| `panels` | where its lenses show as panels |  |
-| `ui.slots` | a lens mounted into a core page |  |
+| `pages/*.yaml` (files, not a key) | a view over SQL queries: loaders and a node tree | [Pages](../guide/pages.md) |
+| `panels` | where its pages show as panels |  |
+| `ui.slots` | a page mounted into another page's slot |  |
 | `ui.decorators` | labels on core refs |  |
-| `ui.replacements` | a lens in place of a core component |  |
-| `custom_components` | sandboxed HTML components for `viz: custom` lenses |  |
+| `ui.replacements` | a page in place of a core component |  |
+| `custom_components` | sandboxed HTML components for `component` nodes |  |
 <!-- kinds:end -->
 
 ### Services
@@ -406,7 +404,7 @@ commands:
   read a param with `uri_param(uri, 'id')`. Don't concatenate
   `'oxplow:oxplow/effort?id=' || id` or slice a URI. A field named for one
   resource (a command input `thread`, `effort`, `session`, `claim`, an event
-  payload field) carries that resource's bare id, not a URI: a lens or form
+  payload field) carries that resource's bare id, not a URI: a page or form
   that feeds one selects `uri_param(x.uri, 'id')` (or the model's integer
   `id` for a claim or decision), and a script builds a URI with
   `uri.build("oxplow/effort", id = e)` only where it becomes a link target
@@ -416,7 +414,7 @@ commands:
   (`oxplow/work_item`, `acme/pr`) and offers the command on a URI of it, its page and rows. `input` binds `{{stream}}` and `{{thread}}` (bare ids),
   `{{uri}}` (the page's URI) or `{{uri.id}}` (its key), each as a whole string. `form` opens a
   page to gather the input instead; offered on a URI (`about`), the page
-  opens with `uri=<uri>`, which a `pages:` lens form prefills from with
+  opens with `uri=<uri>`, which a page's form prefills from with
   `defaults: { uri: "{{param.uri}}" }`. `open_after` opens a URI once it
   ran, taking `{{result.<field>}}` from its result.
 - A mistake in `ui` is a load error naming the field, not a menu entry
@@ -475,13 +473,13 @@ deployed.
   writes: write from an effect on its end.
 - **Output.** What the model writes, each tool call and its answer, and
   each round's tokens are the job's output as they happen: the
-  `v_job_run_output` model (a lens over it updates live), and `text` in the
+  `v_job_run_output` model (a page over it updates live), and `text` in the
   `snapshot`. `v_job_run` lists every job and its state.
 - **Its result** (`snapshot`'s `result`, once it ends): `{parts,
   finishReason, rounds, usage, aiCalls}`; a failure adds `error`; a
   cancelled job keeps what it had, with `stopped: cancelled`.
 - **Cancel** stops a running job at once — its model call is dropped —
-  and it ends `cancelled`. A person can stop any job run from the Job Runs lens.
+  and it ends `cancelled`. A person can stop any job run from the Job Runs page.
   Past its `timeout` a job fails. An attempt cut off by a restart is
   `interrupted`, unless the job says `replay: idempotent`: then it runs
   again, up to three attempts in all, and only its final end is
@@ -557,20 +555,22 @@ wikilink prefix that another extension already uses.
 
 #### Showing a resource
 
-A page with `for:` is a **renderer**: it draws the URIs of a resource.
+A page with `for:` (in its page file) is a **renderer**: it draws the URIs of a resource.
 When a person opens `oxplow:github/pr?id=12`, oxplow picks one of the
 pages that name `github/pr` in `for:`.
 
 ```yaml
-pages:
-  - id: pr
-    title: Pull request
-    icon: git-pull-request
-    for: github/pr          # a resource, or a list of them
-    default: true           # the page a plain open uses
-    accepts: { id: '^\d+$' }   # optional: only URIs whose params fit
-    label: "PR #{{param.id}}"  # optional: what its tab says
-    lens: pr-detail         # must declare a `uri` param
+# pages/pr.yaml
+title: Pull request
+icon: git-pull-request
+for: github/pr          # a resource, or a list of them
+default: true           # the page a plain open uses
+accepts: { id: '^\d+$' }   # optional: only URIs whose params fit
+label: "PR #{{param.id}}"  # optional: what its tab says
+params: [{ name: uri }, { name: id }]   # filled from the URI
+data:
+  pr: { sql: "SELECT * FROM v_github_pr WHERE number = :id" }
+view: { viz: table, from: pr }
 ```
 
 - `for` names a resource of your own, one of oxplow's (`oxplow/file`),
@@ -586,7 +586,7 @@ pages:
   `{{param.<name>}}` is replaced with that param of the URI (of a
   route page: one of its `params`). `title` stays the page's name in the
   launcher and in **Open With**.
-- A lens page that renders must declare a `uri` param. It runs with the
+- A page that renders may declare a `uri` param. It runs with the
   URI of the thing. A param it declares with the same name as one of the
   URI's params (`id`, `path`) gets that value, so the query can use it
   directly. Any other param must be a filter (`role: filter`).
@@ -595,8 +595,8 @@ pages:
 
 ### Replacing a core view
 
-A lens can stand in for one of these core views (`ui.replacements: [{
-target, lens, version? }]`). Its lens declares every prop as a `param`
+A page can stand in for one of these core views (`ui.replacements: [{
+target, page, version? }]`). Its page declares every prop as a `param`
 and gets them instead of any host state; `version`, when given, must be
 the contract's (a changed contract refuses an old declaration instead of
 handing it props it doesn't know). An unbound view may be replaced by
@@ -763,12 +763,12 @@ implementations:
 ## Checking and testing
 
 `oxplow extension check` loads the extension the way oxplow does and
-dry-runs its models, commands, lenses and advisories. Each finding is
+dry-runs its models, commands, pages and advisories. Each finding is
 one line: `file:line: what — fix`. Each of its `imports:` gets a line
 saying how it resolved here: `` import `items` → model:maker/items v1:
 available ``, or `unavailable (maker exports v2)` and the like, which is
 when an optional import's guarded contributions are withheld. `extension
-test` skips an example whose lens, job, command or other target was
+test` skips an example whose page, job, command or other target was
 withheld, with a warning saying which import withheld it and why.
 A fixture runs only when an intent
 example names it, so `check` warns about a `fixtures/<name>.yaml` no
@@ -787,11 +787,19 @@ command's fixture may check what the command answers, `expect: { result:
 {...} }`, compared on the keys you name. A job's fixture can make the
 data its tools read first: `setup: [{ command, input?, as? }]` runs
 oxplow's own commands in order (as a person, or `as: agent` for the agent
-of `oxplow:oxplow/thread?id=thr1`), and `rows` seeds your own entities as a lens fixture
+of `oxplow:oxplow/thread?id=thr1`), and `rows` seeds your own entities as a page fixture
 does. A fixture model's reply may say `when: "<text>"` to answer only the
 request whose last message carries that text, such as a tool's result;
 other replies answer in turn. `--bless` writes a provider's golden
 transcript.
+
+A page's fixture is `input: { page: <slug>, params? }`, with `given:` beside
+`input` (steps run first, in order: `{ command, input?, as? }` or `{ rows: {
+<entity>: [...] } }`) and `expect: { loaders: { <name>: { rows: n | $any |
+[ { col: val } ], columns? } }, nodes: [{ id, kind? }], text: { contains: [...]
+} }`. A form node's fixture is `input: { form: <page>, node? }`. Every page's
+`answers:` entry also runs: the page must open with its params and no loader
+may fail.
 
 Your coding agent has the same checks as MCP tools
 (`oxplow_validate_extension`, `oxplow_preview_collector`), and the

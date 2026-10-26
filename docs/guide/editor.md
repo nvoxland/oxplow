@@ -114,7 +114,7 @@ Duplicate-block detection runs as a Rust tree-sitter scanner in the
 background for each change oxplow analyzes, and the results are stored
 in the project database. It shows up in
 [Change Analysis](change-analysis.md) on the effort diff, Uncommitted,
-and commit pages. The Quality lens lists recent duplicate blocks too.
+and commit pages. The Quality page lists recent duplicate blocks too.
 An individual block opens side by side with its copy.
 
 ## What's deliberately missing
