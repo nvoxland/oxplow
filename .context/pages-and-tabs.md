@@ -377,7 +377,9 @@ everything (it lagged); the bus signals the live models an event changed
 read a changed model or measure — a command loader's are its `reads` —
 then emits `OxplowEvent::PageRunChanged { runId, seq, loaders, tree }`
 for each that changed: the loaders whose rows differ (an embed's as
-`<embed>/<loader>`), never the rows. The window fetches what changed in
+`<embed>/<loader>`), never the rows. A re-run of one run that takes 250 ms or
+more logs `slow page re-run` (run, page, loaders, `took_ms`): the place
+to look when a page, or the window around it, lags. The window fetches what changed in
 one `fetch_page_runs` batch, whose entries are `{ run, seq }` captured
 under the same lock. It drops replies older than the actual snapshot
 sequence it applied, not the triggering notice's sequence. Direct
