@@ -197,7 +197,8 @@ fn put_in(dir: &Path, e: &Ext) {
             ),
         );
         if e.mounted {
-            manifest += "ui:\n  slots:\n    - { slot: diff.file.header, page: seen }\n";
+            manifest +=
+                "ui:\n  slots:\n    - { slot: oxplow-foundation/diff.file-header, page: seen }\n";
         }
     }
     for (binding, producer, kind, version, optional) in &e.kind_imports {

@@ -182,35 +182,42 @@ mod tests {
         );
         write(
             root,
-            ".oxplow/extensions/demo/lenses/streams.yaml",
-            "title: Streams\nparams:\n  - { name: kind, default: primary }\nquery: SELECT kind FROM v_stream WHERE kind = :kind\n",
+            ".oxplow/extensions/demo/pages/streams.yaml",
+            "title: Streams\nparams:\n  - { name: kind, default: primary }\n\
+             data:\n  streams: { sql: \"SELECT kind FROM v_stream WHERE kind = :kind\" }\n\
+             view: { viz: table, from: streams }\n",
         );
     }
 
+    /// Loader `name`'s rows in a page run.
+    fn rows(run: &serde_json::Value, name: &str) -> serde_json::Value {
+        run["loaders"][name]["result"]["rows"].clone()
+    }
+
+    /// An inline page runs once; one that isn't a page is refused.
     #[tokio::test]
-    async fn a_spec_runs_checked_and_a_refusal_names_its_field() {
+    async fn an_inline_page_runs_and_a_bad_one_is_refused() {
         let (svc, _dir) = crate::test_support::services().await;
         let run = crate::dispatch(
-            "run_lens_spec",
-            json!({ "spec": { "title": "Explore", "query": "SELECT 1 AS n", "viz": "number" } }),
+            "run_page",
+            json!({ "specYaml": "title: Explore\ndata:\n  a: { sql: SELECT 1 AS n }\nview: { viz: number, from: a }\n" }),
             &svc,
         )
         .await
         .unwrap();
-        assert_eq!(run["result"]["rows"], json!([[1]]));
+        assert_eq!(rows(&run, "a"), json!([[1]]));
         let err = crate::dispatch(
-            "run_lens_spec",
-            json!({ "spec": { "title": "Explore", "query": "SELECT * FROM nope", "viz": "table" } }),
+            "run_page",
+            json!({ "specYaml": "title: Explore\nview: { viz: nonsense }\n" }),
             &svc,
         )
         .await
         .unwrap_err();
         assert_eq!(err.code, "INVALID");
-        assert_eq!(err.field.as_deref(), Some("/spec/query"));
     }
 
     #[tokio::test]
-    async fn lists_gets_runs_and_validates_lenses() {
+    async fn lists_gets_runs_and_validates_pages() {
         let (svc, _dir) = crate::test_support::services().await;
         seed(&svc.layout.project_dir);
         crate::test_support::publish(&svc).await;
@@ -224,25 +231,25 @@ mod tests {
             .iter()
             .find(|e| e["name"] == "demo")
             .expect("listed");
-        assert_eq!(demo["lenses"][0]["id"], "demo/streams");
+        assert_eq!(demo["pageFiles"][0]["id"], "demo/streams");
 
-        let lens = crate::dispatch("get_lens", json!({ "id": "demo/streams" }), &svc)
+        let page = crate::dispatch("get_page", json!({ "id": "demo/streams" }), &svc)
             .await
             .unwrap();
-        assert_eq!(lens["title"], "Streams");
+        assert_eq!(page["title"], "Streams");
 
-        let run = crate::dispatch("run_lens", json!({ "id": "demo/streams" }), &svc)
+        let run = crate::dispatch("run_page", json!({ "page": "demo/streams" }), &svc)
             .await
             .unwrap();
-        assert_eq!(run["result"]["rows"], json!([["primary"]]));
+        assert_eq!(rows(&run, "streams"), json!([["primary"]]));
         let run = crate::dispatch(
-            "run_lens",
-            json!({ "id": "demo/streams", "params": { "kind": "worktree" } }),
+            "run_page",
+            json!({ "page": "demo/streams", "params": { "kind": "worktree" } }),
             &svc,
         )
         .await
         .unwrap();
-        assert_eq!(run["result"]["rows"], json!([]));
+        assert_eq!(rows(&run, "streams"), json!([]));
 
         let v = crate::dispatch("validate_extension", json!({ "name": "demo" }), &svc)
             .await
@@ -324,32 +331,28 @@ mod tests {
         assert_eq!(bundled["enabled"], json!(false));
 
         let run = crate::dispatch(
-            "run_lens",
-            json!({ "id": "demo/streams", "streamId": stream }),
+            "run_page",
+            json!({ "page": "demo/streams", "streamId": stream }),
             &svc,
         )
         .await
         .unwrap();
-        assert_eq!(run["result"]["rows"], json!([["primary"]]));
+        assert_eq!(rows(&run, "streams"), json!([["primary"]]));
     }
 
     #[tokio::test]
-    async fn missing_lens_is_not_found_and_bad_params_are_invalid() {
+    async fn a_missing_page_is_refused() {
         let (svc, _dir) = crate::test_support::services().await;
         seed(&svc.layout.project_dir);
         crate::test_support::publish(&svc).await;
-        let err = crate::dispatch("get_lens", json!({ "id": "demo/nope" }), &svc)
+        let err = crate::dispatch("get_page", json!({ "id": "demo/nope" }), &svc)
             .await
             .unwrap_err();
         assert_eq!(err.code, "NOT_FOUND");
-        let err = crate::dispatch(
-            "run_lens",
-            json!({ "id": "demo/streams", "params": { "knd": "x" } }),
-            &svc,
-        )
-        .await
-        .unwrap_err();
-        assert_eq!(err.code, "INVALID");
+        let err = crate::dispatch("run_page", json!({ "page": "demo/nope" }), &svc)
+            .await
+            .unwrap_err();
+        assert!(err.message.contains("demo/nope"), "{err:?}");
     }
 
     fn git(dir: &std::path::Path, args: &[&str]) {

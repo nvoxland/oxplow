@@ -1081,7 +1081,7 @@ async fn page_form_start(
             .nodes()
             .into_iter()
             .find(|n| {
-                matches!(&n.kind, NodeKind::Viz { lens, .. }
+                matches!(&n.kind, NodeKind::Viz { config: lens, .. }
                     if lens.viz == oxplow_app::extensions::Viz::Form)
             })
             .map(|n| n.id.clone())
@@ -2852,7 +2852,7 @@ mod tests {
     }
 
     /// The tally extension: a starlark collector of `thing`s, a model and a
-    /// lens over them, a command noting one, a README and questions, and an
+    /// page over them, a command noting one, a README and questions, and an
     /// intent example per kind, each with its fixture.
     fn tally(root: &Path, collector_expect: &str, command_expect: &str) {
         write(
@@ -2864,7 +2864,7 @@ name: tally
 intent:
   purpose: Count things.
   examples:
-    - {{ name: labelled, input: {{ lens: labelled }}, expect: no labelled things yet }}
+    - {{ name: labelled, input: {{ page: labelled }}, expect: no labelled things yet }}
     - {{ name: things, input: {{ collector: things }}, expect: one thing per input row }}
     - {{ name: shell, input: {{ collector: shell }}, expect: whatever the shell says }}
 permissions: {{ sql: read, ai: true, process: true }}
@@ -2919,13 +2919,14 @@ commands:
         );
         write(
             root,
-            ".oxplow/extensions/tally/lenses/labelled.yaml",
-            "title: Labelled\nquery: SELECT id, label FROM v_tally_labelled\n",
+            ".oxplow/extensions/tally/pages/labelled.yaml",
+            "title: Labelled\ndata:\n  labelled: { sql: \"SELECT id, label FROM v_tally_labelled\" }\n\
+             view: { viz: table, from: labelled }\n",
         );
         write(
             root,
             ".oxplow/extensions/tally/fixtures/labelled.yaml",
-            "input: { lens: labelled }\nexpect: { columns: [id, label], rows: 0 }\n",
+            "input: { page: labelled }\nexpect: { loaders: { labelled: { columns: [id, label], rows: 0 } } }\n",
         );
         write(
             root,
@@ -2979,7 +2980,7 @@ commands:
     }
 
     /// P7.C6: `extension test` runs every kind's examples on a throwaway
-    /// oxplow — a lens's rows, a starlark collector's typed entities from
+    /// oxplow — a page's loader rows, a starlark collector's typed entities from
     /// its fixture rows, a command's composition against the real
     /// registry — and its questions may name its own commands. An exec
     /// collector's example isn't run (it needs a person's approval).
@@ -3060,8 +3061,9 @@ commands:
         );
         write(
             root,
-            ".oxplow/extensions/reader/lenses/seen.yaml",
-            "title: Seen\nquery: SELECT uri FROM import_ref('items')\n",
+            ".oxplow/extensions/reader/pages/seen.yaml",
+            "title: Seen\ndata:\n  seen: { sql: \"SELECT uri FROM import_ref('items')\" }\n\
+             view: { viz: table, from: seen }\n",
         );
     }
 
@@ -3558,8 +3560,6 @@ models:
     columns:
       - { name: uri, type: \"\", doc: The ref. }
       - { name: title, type: \"\", doc: Its title. }
-pages:
-  - { id: pr, title: Pull request, category: Work, lens: open }
 resources:
   - { name: pr, label: Pull request, params: { id: { required: true, pattern: '^[0-9]+$' } }, resolve: prs, wikilink: { prefix: pr, param: id }, icon: git-pull-request }
 ",
@@ -3586,8 +3586,9 @@ resources:
         );
         write(
             root,
-            ".oxplow/extensions/acme/lenses/open.yaml",
-            "title: Open\nquery: \"SELECT 1 AS n\"\n",
+            ".oxplow/extensions/acme/pages/pr.yaml",
+            "title: Pull request\ncategory: Work\nfor: acme/pr\ndefault: true\nparams: [{ name: id }]\n\
+             data:\n  n: { sql: \"SELECT 1 AS n\" }\nview: { viz: table, from: n }\n",
         );
         write(
             root,
@@ -3633,11 +3634,11 @@ resources:
         );
     }
 
-    /// A `viz: form` lens is opened as a person would: its defaults bound
-    /// from the params, its fixed and shown fields; a wrong expectation is
-    /// a finding at its fixture.
+    /// A page's `viz: form` node is opened as a person would: its defaults
+    /// bound from the params, its fixed and shown fields; a wrong
+    /// expectation is a finding at its fixture.
     #[tokio::test(flavor = "multi_thread")]
-    async fn extension_test_opens_a_form_lens_and_compares_what_it_starts_with() {
+    async fn extension_test_opens_a_form_page_and_compares_what_it_starts_with() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         write(
@@ -3653,8 +3654,9 @@ intent:
         );
         write(
             root,
-            ".oxplow/extensions/editor/lenses/edit-item.yaml",
-            "title: Edit\nviz: form\nparams: [{ name: uri }]\nquery: SELECT title, body FROM v_work_item WHERE uri = :uri\nform: { command: oxplow.work_item.update, defaults: { uri: '{{param.uri}}' }, fixed: [uri], fields: [title, body] }\n",
+            ".oxplow/extensions/editor/pages/edit-item.yaml",
+            "title: Edit\nparams: [{ name: uri }]\ndata:\n  item: { sql: \"SELECT title, body FROM v_work_item WHERE uri = :uri\" }\n\
+             view: { viz: form, from: item, form: { command: oxplow.work_item.update, defaults: { uri: '{{param.uri}}' }, fixed: [uri], fields: [title, body] } }\n",
         );
         write(
             root,
@@ -3790,7 +3792,9 @@ expect: {expect}
         let root = dir.path();
         pager(
             root,
-            "SELECT title FROM v_work_item WHERE state = :state AND nope = 1",
+            // Runs at the page's defaults (no state); the answer's state
+            // isn't JSON, so its run fails.
+            "SELECT title FROM v_work_item WHERE json_extract(:state, '$') IS NULL OR state = :state",
             "{ state: open }",
             "{ loaders: { items: { rows: $any } } }",
         );

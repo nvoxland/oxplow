@@ -6,7 +6,7 @@
 //!     UI calls.
 //!   - **MCP** (`oxplow-mcp`) — the tools the agent calls: core's
 //!     `list_commands` / `run_command` and the ones oxplow's extensions
-//!     declare (`tool:` on a command or a lens, `oxplow_app::agent_tools`).
+//!     declare (`tool:` on a command or a page, `oxplow_app::agent_tools`).
 //!
 //! These drifted silently: many user-meaningful ops lived on IPC but not MCP.
 //! This manifest is the single source of truth for *which* surface each
@@ -188,21 +188,8 @@ pub const MANIFEST: &[Capability] = &[
     model("get_ui_preferences", &["v_ui_preference"]),
     ui("set_ui_preference", "the person's page memory and app preferences, a UI pointer like the panel layout"),
     model("list_extensions", &["v_extension", "v_contribution"]),
-    ui("get_lens", "the lens page's definition; an agent reads the lens's ref with `read`"),
-    both_named("run_lens", "run_lens", "oxplow_run_lens"),
-    ui(
-        "run_lens_spec",
-        "a lens spec run checked for the window (a custom component now shows an inline page with `showView`, through `open_page`); an agent shows a spec with `oxplow_show_lens`",
-    ),
-    // A lens's actions: commands run as the lens, for whoever pressed.
-    both_named("run_lens_action", "run_lens_action", "oxplow_run_lens_action"),
-    ui(
-        "viz_text",
-        "Copy's text on every lens; an agent reads the same text through `run_lens`",
-    ),
     // A window's open page runs: it opens one, hears which loaders
-    // changed and fetches them. An agent runs a page once (P1.7 adds the
-    // agent's `run_page`).
+    // changed and fetches them. An agent runs a page once (`run_page`).
     ui("open_page", "a window keeps a page run open to hear its changes"),
     ui("close_page", "a window drops a page run it no longer shows"),
     ui("set_page_params", "a pick, filter or switch in the page a window shows"),
@@ -222,28 +209,6 @@ pub const MANIFEST: &[Capability] = &[
     ui("page_form", "a form node is the person's form; an agent runs the command itself"),
     ui("submit_page_form", "a form node is the person's form; an agent runs the command itself"),
     ui("page_action_form", "a form action's form is the person's; an agent runs the command itself"),
-    // An agent's answers: it shows one (the `oxplow.lens.show` command).
-    agent("oxplow_show_lens"),
-    ui(
-        "run_answer",
-        "runs an answer for its page (the `answer` viz); `show_lens` gives the agent its text",
-    ),
-    ui(
-        "lens_form",
-        "a form lens is the person's form; an agent runs the command itself",
-    ),
-    ui(
-        "submit_lens_form",
-        "a form lens is the person's form; an agent runs the command itself",
-    ),
-    ui(
-        "lens_action_form",
-        "a form action's form is the person's; an agent runs the command itself",
-    ),
-    ui(
-        "run_component_query",
-        "a custom component's bridged read, from its sandboxed frame through the host (P6b.D2)",
-    ),
     ui(
         "load_component",
         "the host loads a custom component's bundle for the frame it shows the person (tsk984)",
@@ -361,8 +326,6 @@ pub const MANIFEST: &[Capability] = &[
         "get_thread_state",
         "the person's selected and active thread; an agent reads threads in `v_thread` and has no selection",
     ),
-    // ---- dashboards: agents read the models; writes are `dashboard.*` commands ----
-    model("list_dashboards", &["v_dashboard"]),
     // ---- comments (writes are knowledge.*) ----
     model("list_comments_for_target", &["v_comment"]),
     // ---- page visits ----

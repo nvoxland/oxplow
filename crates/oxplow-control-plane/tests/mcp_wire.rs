@@ -81,7 +81,7 @@ async fn mcp_session_initializes_lists_and_calls_tools_over_http() {
     assert!(init["result"]["instructions"]
         .as_str()
         .unwrap()
-        .contains("oxplow_show_lens"));
+        .contains("oxplow_show_page"));
     let session = session.expect("server assigns an Mcp-Session-Id");
 
     post(
@@ -133,7 +133,7 @@ async fn mcp_session_initializes_lists_and_calls_tools_over_http() {
         call["result"]["content"][0]["text"]
             .as_str()
             .unwrap()
-            .contains("# Building oxplow lenses"),
+            .contains("# Building oxplow pages"),
         "{call}"
     );
 }

@@ -806,7 +806,7 @@ mod tests {
             .contains("no window reports"));
         assert_eq!(none["shown"], serde_json::json!([]));
 
-        let p = proj.path().join(".oxplow/extensions/demo/lenses");
+        let p = proj.path().join(".oxplow/extensions/demo/pages");
         std::fs::create_dir_all(&p).unwrap();
         std::fs::write(
             proj.path().join(".oxplow/extensions/demo/extension.yaml"),
@@ -815,10 +815,32 @@ mod tests {
         .unwrap();
         std::fs::write(
             p.join("kinds.yaml"),
-            "title: Kinds\nparams:\n  - { name: kind, default: worktree }\nquery: SELECT kind FROM v_stream WHERE kind = :kind\n",
+            "title: Kinds\nparams:\n  - { name: kind, default: worktree }\n\
+             data:\n  kinds: { sql: \"SELECT kind FROM v_stream WHERE kind = :kind\" }\n\
+             view: { viz: table, from: kinds }\n",
         )
         .unwrap();
         deploy_sources(&services).await;
+        // The window's own run of the page, with the person's params.
+        let (run_id, _) = services
+            .page_runs
+            .open(
+                &services,
+                oxplow_app::pages::runner::RunRequest {
+                    target: oxplow_app::pages::runner::RunTarget::Page("demo/kinds".into()),
+                    params: [(
+                        "kind".to_string(),
+                        oxplow_db::SqlCell::Text("primary".into()),
+                    )]
+                    .into(),
+                    ctx: oxplow_app::extensions::ViewContext::default(),
+                    viewer: oxplow_domain::Actor::Human,
+                },
+                "window",
+            )
+            .await
+            .unwrap();
+        let id = "oxplow:oxplow/page?page=demo/kinds#kind=primary";
         services.client_reports.report(
             oxplow_app::client_reports::TabReport {
                 runs: Vec::new(),
@@ -829,16 +851,16 @@ mod tests {
                 threads: vec![oxplow_app::client_reports::ThreadTabs {
                     thread,
                     tabs: vec![oxplow_app::client_reports::ReportedTab {
-                        id: "oxplow:oxplow/lens?lens=demo/kinds".into(),
-                        kind: "lens".into(),
+                        id: id.into(),
+                        kind: "demo/kinds".into(),
                         title: "Kinds".into(),
                         back: Vec::new(),
                         forward: Vec::new(),
                         origin: None,
                     }],
-                    active: Some("oxplow:oxplow/lens?lens=demo/kinds".into()),
+                    active: Some(id.into()),
                 }],
-                detail_json: Some(r#"{"lensId":"demo/kinds","params":{"kind":"primary"}}"#.into()),
+                detail_json: Some(serde_json::json!({ "runId": run_id }).to_string()),
             },
             oxplow_domain::Timestamp::now(),
         );
@@ -853,25 +875,22 @@ mod tests {
             .unwrap(),
         ))
         .unwrap();
-        assert_eq!(open["open"]["pageId"], "oxplow:oxplow/lens?lens=demo/kinds");
-        assert_eq!(open["open"]["detail"]["params"]["kind"], "primary");
-        // The lens is re-run with the human's params, not the defaults,
-        // and read as its text.
-        assert_eq!(open["lens"]["params"]["kind"], "primary");
-        assert_eq!(open["lens"]["rowCount"], 1);
+        assert_eq!(open["open"]["pageId"], id);
+        // The page is read as the person's run of it, as its text: their
+        // params, not the defaults.
+        assert_eq!(open["pageRun"]["page"], "demo/kinds", "{open}");
         assert!(
-            open["lens"]["text"]
+            open["pageRun"]["text"]
                 .as_str()
                 .unwrap()
                 .contains("| primary |"),
             "{}",
-            open["lens"]
+            open["pageRun"]
         );
-        assert!(open["lens"].get("result").is_none());
     }
 
     #[tokio::test]
-    async fn extension_and_lens_tools() {
+    async fn extension_and_page_tools() {
         let (proj, services, server) = boot().await;
         let root = proj.path();
         let w = |rel: &str, body: &str| {
@@ -881,41 +900,43 @@ mod tests {
         };
         w(
             ".oxplow/extensions/demo/extension.yaml",
-            "manifest: 2\nname: demo\nintent:\n  purpose: test\nui:\n  slots:\n    - { slot: diff.file.header, lens: review }\n",
+            "manifest: 2\nname: demo\nintent:\n  purpose: test\nui:\n  slots:\n    - { slot: oxplow-foundation/diff.file-header, page: review }\n",
         );
         w(
-            ".oxplow/extensions/demo/lenses/review.yaml",
-            "title: Review\nparams:\n  - { name: path }\nquery: SELECT :path AS effort\n",
+            ".oxplow/extensions/demo/pages/review.yaml",
+            "title: Review\nparams:\n  - { name: path }\ndata:\n  r: { sql: SELECT :path AS effort }\nview: { viz: table, from: r }\n",
         );
         w(
-            ".oxplow/extensions/demo/lenses/streams.yaml",
-            "title: Streams\nparams:\n  - { name: kind, default: primary }\nquery: SELECT kind FROM v_stream WHERE kind = :kind\n",
-        );
-        w(
-            ".oxplow/extensions/demo/lenses/broken.yaml",
-            "title: Broken\nquery: SELECT x FROM v_nope\n",
+            ".oxplow/extensions/demo/pages/streams.yaml",
+            "title: Streams\nparams:\n  - { name: kind, default: primary }\n\
+             data:\n  streams: { sql: \"SELECT kind FROM v_stream WHERE kind = :kind\" }\n\
+             view: { viz: table, from: streams }\n",
         );
         deploy_sources(&services).await;
 
-        // A lens's definition is what `read` gives for its URI.
+        // A page's definition is what `read` gives for its URI.
         let read: serde_json::Value = serde_json::from_str(&text_payload(
             call(
                 &server,
                 &rmcp::model::Extensions::new(),
                 "oxplow_read",
-                serde_json::json!({ "uri": "oxplow:oxplow/lens?lens=demo/streams" }),
+                serde_json::json!({ "uri": "oxplow:oxplow/page?page=demo/streams" }),
             )
             .await
             .unwrap(),
         ))
         .unwrap();
-        let lens: serde_json::Value =
+        let page: serde_json::Value =
             serde_json::from_str(read["content"].as_str().unwrap()).unwrap();
-        assert!(lens["query"].as_str().unwrap().contains("v_stream"));
+        assert_eq!(page["page"], "demo/streams");
+        assert!(
+            page["yaml"].as_str().unwrap().contains("v_stream"),
+            "{page}"
+        );
 
         let run = |format: Option<&str>| {
             let mut input = serde_json::json!({
-                "id": "demo/streams",
+                "page": "demo/streams",
                 "params": { "kind": "primary" },
             });
             if let Some(format) = format {
@@ -927,7 +948,7 @@ mod tests {
                     call(
                         server,
                         &rmcp::model::Extensions::new(),
-                        "oxplow_run_lens",
+                        "oxplow_run_page",
                         input,
                     )
                     .await
@@ -938,28 +959,35 @@ mod tests {
         };
         // By default an agent reads the text rendering, not the rows.
         let text = run(None).await;
-        assert!(text.get("result").is_none(), "{text}");
-        assert_eq!(text["rowCount"], 1);
+        assert!(text.get("loaders").is_none(), "{text}");
         assert!(
             text["text"].as_str().unwrap().contains("| primary |"),
             "{text}"
         );
         let json = run(Some("json")).await;
-        assert_eq!(json["result"]["rows"], serde_json::json!([["primary"]]));
+        assert_eq!(
+            json["loaders"]["streams"]["rows"],
+            serde_json::json!([["primary"]])
+        );
 
         let err = call(
             &server,
             &rmcp::model::Extensions::new(),
             "oxplow_read",
-            serde_json::json!({ "uri": "oxplow:oxplow/lens?lens=demo/nope" }),
+            serde_json::json!({ "uri": "oxplow:oxplow/page?page=demo/nope" }),
         )
         .await
         .unwrap_err();
         assert!(
-            err.message.contains("oxplow:oxplow/lens?lens=demo/nope"),
+            err.message.contains("oxplow:oxplow/page?page=demo/nope"),
             "{err:?}"
         );
 
+        // A page whose query fails is the check's error.
+        w(
+            ".oxplow/extensions/demo/pages/broken.yaml",
+            "title: Broken\ndata:\n  b: { sql: SELECT x FROM v_nope }\nview: { viz: table, from: b }\n",
+        );
         let v: serde_json::Value = serde_json::from_str(&text_payload(
             call(
                 &server,
@@ -972,7 +1000,11 @@ mod tests {
         ))
         .unwrap();
         assert!(
-            v["errors"][0].as_str().unwrap().contains("demo/broken"),
+            v["errors"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|e| e.as_str().unwrap().contains("broken")),
             "{v}"
         );
     }
@@ -1174,7 +1206,7 @@ mod tests {
         )
         .await
         .unwrap();
-        assert!(text_payload(r).contains("# Building oxplow lenses"));
+        assert!(text_payload(r).contains("# Building oxplow pages"));
         let err = call(
             &server,
             &anon,
@@ -1774,7 +1806,7 @@ mod tests {
         );
     }
 
-    /// The extension and lens tools without a `stream_id` read
+    /// The extension and page tools without a `stream_id` read
     /// the calling thread's stream — an agent in a worktree sees the
     /// extension it just wrote there, not the primary's.
     #[tokio::test]
@@ -1809,38 +1841,41 @@ mod tests {
         .unwrap();
     }
 
-    /// P6.C1: an agent shows an answer in its thread; the tool returns its
-    /// ref and what the person sees, as text.
+    /// An agent shows a page of its own in its thread; the tool returns
+    /// the view's ref and what the person sees, as text. With no thread
+    /// identity there's nowhere to show it.
     #[tokio::test]
-    async fn show_lens_records_an_answer_and_returns_its_text() {
+    async fn show_page_keeps_a_view_and_returns_its_text() {
         let (_proj, services, server) = boot().await;
         let out: serde_json::Value = serde_json::from_str(&text_payload(
             call(
                 &server,
                 &as_primary_thread(&services).await,
-                "oxplow_show_lens",
+                "oxplow_show_page",
                 serde_json::json!({
-                    "spec": {
-                        "title": "Streams",
-                        "query": "SELECT kind FROM v_stream",
-                    },
+                    "spec": "title: Streams\ndata:\n  s: { sql: SELECT kind FROM v_stream }\nview: { viz: table, from: s }\n",
                 }),
             )
             .await
             .unwrap(),
         ))
         .unwrap();
-        assert!(out["answer"].as_i64().is_some(), "{out}");
+        assert!(
+            out["uri"]
+                .as_str()
+                .unwrap()
+                .starts_with("oxplow:oxplow/view?id="),
+            "{out}"
+        );
         assert!(
             out["text"].as_str().unwrap().contains("| primary |"),
             "{out}"
         );
-        // Without a thread identity there's nowhere to show it.
         let err = call(
             &server,
             &rmcp::model::Extensions::new(),
-            "oxplow_show_lens",
-            serde_json::json!({ "lens": "x/y" }),
+            "oxplow_show_page",
+            serde_json::json!({ "page": "x/y" }),
         )
         .await
         .unwrap_err();
@@ -2195,8 +2230,8 @@ mod tests {
         assert!(query.read_only);
         let show = tools
             .iter()
-            .find(|t| t.name == "oxplow_show_lens")
-            .expect("oxplow_show_lens is declared");
+            .find(|t| t.name == "oxplow_show_page")
+            .expect("oxplow_show_page is declared");
         assert!(!show.read_only);
 
         let listed = mcp_tool(query);
@@ -2234,9 +2269,9 @@ mod tests {
         let err = server
             .call_declared(
                 &anon,
-                "oxplow_show_lens",
+                "oxplow_show_page",
                 serde_json::json!({
-                    "spec": { "title": "T", "query": "SELECT 1 AS n", "viz": "table" },
+                    "spec": "title: T\ndata:\n  a: { sql: SELECT 1 AS n }\nview: { viz: table, from: a }\n",
                 }),
             )
             .await
