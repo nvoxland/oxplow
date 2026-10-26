@@ -8067,11 +8067,11 @@ mod tests {
         );
     }
 
-    /// The user guide's hand-written extension loads as written, lens and
+    /// The user guide's hand-written extension loads as written, page and
     /// all: following it never makes a dead extension.
     #[test]
     fn the_guides_hand_written_extension_loads() {
-        let guide = include_str!("../../../docs/guide/lenses.md");
+        let guide = include_str!("../../../docs/guide/pages.md");
         let section = &guide[guide.find("## Writing one by hand").expect("the section")..];
         let blocks: Vec<&str> = section
             .split("```yaml\n")
@@ -8096,7 +8096,7 @@ mod tests {
             .find(|e| e.name == "review")
             .expect("it loads");
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
-        assert!(ext.lenses.iter().any(|l| l.slug == "blocked"));
+        assert!(ext.page_files.iter().any(|p| p.slug == "blocked"));
     }
 
     /// A lens action's placeholders are read by the domain's one

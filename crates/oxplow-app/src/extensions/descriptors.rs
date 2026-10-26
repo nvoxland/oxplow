@@ -845,7 +845,7 @@ mod catalog_tests {
     fn the_reference_lists_every_kind() {
         use oxplow_domain::contribution::KINDS;
         let more = |k: ContributionKind| match k {
-            ContributionKind::Lens => "[Lenses](../guide/lenses.md)",
+            ContributionKind::Lens => "[Pages](../guide/pages.md)",
             ContributionKind::Measure | ContributionKind::Metric | ContributionKind::Dimension => {
                 "[Metrics](../guide/metrics.md)"
             }
