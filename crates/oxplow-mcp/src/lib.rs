@@ -376,11 +376,13 @@ impl ServerHandler for OxplowMcp {
              them). Every write is a command (`run_command`).\n\n\
              Answering the person: when they ask to see, list, compare or \
              track something about the work or the code (\"show me\", \
-             \"which files\", \"how well\"), answer from oxplow's data and \
-             show it with `oxplow_show_lens` (an existing lens with params, or your \
-             own `spec`: a table, chart or tree). It lands beside the \
-             conversation, live, with Keep This. Keep the prose around it \
-             short, and don't repeat the table as text."
+             \"which files\", \"how well\"), find a page that answers it \
+             (`oxplow_find_page`) and show it with `oxplow_show_page` (that \
+             page with params, or your own `spec`: a table, chart or tree). \
+             It opens beside the conversation, live; the person can save it \
+             to the wiki. `oxplow_run_page` reads one yourself, and \
+             `oxplow_get_open_page` is what they are looking at. Keep the \
+             prose around it short, and don't repeat the table as text."
                 .into(),
         );
         info.capabilities = ServerCapabilities::builder().enable_tools().build();
@@ -1140,7 +1142,7 @@ mod tests {
     async fn get_info_instructions_say_to_show_answers_in_the_thread() {
         let (_proj, _svc, server) = boot().await;
         let instructions = server.get_info().instructions.unwrap_or_default();
-        assert!(instructions.contains("oxplow_show_lens"), "{instructions}");
+        assert!(instructions.contains("oxplow_show_page"), "{instructions}");
         assert!(instructions.contains("oxplow_query_sql"), "{instructions}");
     }
 
