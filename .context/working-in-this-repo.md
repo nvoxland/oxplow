@@ -135,7 +135,10 @@ be held back and why. `deploy <name>` deploys that source as the app does
 (built, copied into the store, activated, recorded active), confirming its
 permissions and build as the person running it; `deploy` with no name does
 that for every extension that is on and whose source isn't what runs,
-oxplow's required ones first. It refuses while oxplow holds the project
+oxplow's required ones first. There, one that isn't required and doesn't
+load is held back, as boot holds it: the deploy prints why and still
+succeeds, so `run:dev` starts oxplow (a required one failing, or the one
+named, fails it). It refuses while oxplow holds the project
 (the instance lock: a running daemon keeps the live set in memory and its
 next publication would undo it), so quit oxplow, deploy, then start it.
 With foundation running, deploy from inside oxplow instead

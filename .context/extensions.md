@@ -1587,6 +1587,13 @@ loaded. A page gets into the launcher through its own `category` (or
 stays out with `hidden: true`). An old-format UI folder (`lenses/`) is a
 load error that says to rewrite each file as a page.
 
+To move an old extension over: each file in `lenses/` becomes a page
+(a document's sections go into `view.stack`, its queries into named
+`data:` loaders); fixtures and `intent.examples` name `page:` instead of
+`lens:`, with table expectations under `expect.loaders.<loader>`. Then
+delete the YAML files in `lenses/`: they are what the loader refuses.
+`oxplow extension check/test <name>` says when it loads again.
+
 **What the loader checks** (`Extension.errors` / `Extension.warnings`):
 - shape: unknown keys, `manifest` version, `intent` present and
   `intent.origin` a canonical URI; an empty `intent.examples` is a
