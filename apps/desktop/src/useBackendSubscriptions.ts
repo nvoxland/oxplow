@@ -14,7 +14,7 @@ import {
   type WorkspaceContext,
 } from "./api.js";
 import { showToast } from "./components/toastStore.js";
-import { readsChanged, readsOf } from "./lens/lensRerun.js";
+import { readsChanged, readsOf } from "./viz/rerun.js";
 
 /** The thread state each stream shows is read from `v_thread`. */
 const THREAD_READS = readsOf("v_thread");

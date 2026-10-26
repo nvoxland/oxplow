@@ -15,14 +15,14 @@ oxplow.metric.scaffold { "name": "complex-fns", "language": "rust", "glob": "src
 
 Write each file with your file tools (the write guard applies), then change
 them into the metric the user asked for. The extension declares all four
-blocks, namespaced `<ns>.*` (the name with `_` for `-`), a launcher lens and
+blocks, namespaced `<ns>.*` (the name with `_` for `-`), a launcher page and
 a fixture that proves the collector:
 
 | file | what it is |
 |---|---|
 | `extension.yaml` | `measures:` (one per-path, semi-additive measure on files), `dimensions:` (`<ns>.area`), `collectors:` (a Starlark one on `snapshot.taken`), `metrics:` (the `sum`, `lower-better`, `displayKind: findings`), and the `intent` with its example |
 | `collectors/complex_functions.star` | counts each file's functions over a complexity `LIMIT` (`source_files()` + `code_metrics()`) and records **one fact per file**: `value`, `path`, the worst function's `line`, `dims: { <ns>.area: <top folder> }` |
-| `lenses/<name>.yaml` | a Code launcher lens over `metric_findings('<metric>')`; its `path` column links `file` at the `line` column |
+| `pages/<name>.yaml` | a Code launcher page over `metric_findings('<metric>')`; its `path` column links `file` at the `line` column |
 | `fixtures/basic.yaml` | the example as a fixture: `input: { collector, files: { path: text } }`, `expect: { facts: [...] }` |
 
 Change the collector to what the user asked for and **change the fixture with
@@ -69,7 +69,7 @@ four blocks of its own extension, `.oxplow/extensions/project/extension.yaml` â€
 the file with the `manifest: 2` / `name: project` / `intent:` header when it is
 missing; the collector `entry` is relative to the extension folder
 (`collectors/â€¦`), and `report.path` stays project-relative. Prefer a scaffolded
-extension for a code metric: it carries its fixture and lens.
+extension for a code metric: it carries its fixture and page.
 
 Namespace every key (`<extension namespace>.<id>`, or `<vendor>.<id>` in the project's extension: `repo.todo_count`, `acme.bundle_size`).
 

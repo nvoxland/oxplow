@@ -1,6 +1,6 @@
 //! Stored change analysis (`v_change*`): one `change` per diff plus its
 //! analyzed files, functions, imports, co-change and duplicates. Written by
-//! core's producer (`oxplow-app/src/change_analysis.rs`); read by lenses.
+//! core's producer (`oxplow-app/src/change_analysis.rs`); read by pages.
 //! See `.context/semantic-layer.md`.
 
 use oxplow_domain::vcs::Revision;

@@ -7,7 +7,9 @@ use std::collections::BTreeMap;
 use oxplow_db::SqlCell;
 use oxplow_domain::{Actor, CommandError};
 
-use super::actions::{page_form, run_page_action, submit_page_form, PageActionCall};
+use super::actions::{
+    page_action_form, page_form, run_page_action, submit_page_form, PageActionCall,
+};
 use super::open_runs::PageRuns;
 use super::runner::{RunRequest, RunTarget};
 use super::test_support::fixture;
@@ -122,6 +124,52 @@ async fn a_page_action_reads_the_first_loaders_row() {
         .await
         .unwrap();
     assert_eq!(titles(&svc).await, ["stop sess-1"]);
+}
+
+async fn open(svc: &std::sync::Arc<crate::Services>, runs: &PageRuns, page: &str) -> String {
+    runs.open(
+        svc,
+        RunRequest {
+            target: RunTarget::Page(page.into()),
+            params: BTreeMap::new(),
+            ctx: ViewContext::default(),
+            viewer: Actor::Human,
+        },
+        "w",
+    )
+    .await
+    .unwrap()
+    .0
+}
+
+/// A whole-page form action starts from the first loader's one row, as
+/// its press would run on it.
+#[tokio::test]
+async fn a_page_form_action_starts_from_the_first_loaders_row() {
+    let (_dir, svc) = fixture().await;
+    let runs = PageRuns::default();
+    let id = open(&svc, &runs, "acme/rename").await;
+    let form = page_action_form(&svc, &runs, &id, None, "rename", None)
+        .await
+        .unwrap();
+    assert_eq!(form.values["title"], serde_json::json!("sess-1"));
+}
+
+/// An embed node names the embedded page: its whole-page actions press
+/// and open on the embedded run, with that run's row.
+#[tokio::test]
+async fn an_embed_nodes_page_actions_run_on_the_embedded_run() {
+    let (_dir, svc) = fixture().await;
+    let runs = PageRuns::default();
+    let id = open(&svc, &runs, "acme/hosts-rename").await;
+    let form = page_action_form(&svc, &runs, &id, Some("inner"), "rename", None)
+        .await
+        .unwrap();
+    assert_eq!(form.values["title"], serde_json::json!("sess-1"));
+    let mut press = call(&id, Some("inner"), "rename", None);
+    press.input = Some(serde_json::json!({ "title": "renamed" }));
+    run_page_action(&svc, &runs, press).await.unwrap();
+    assert_eq!(titles(&svc).await, ["renamed"]);
 }
 
 /// A form node starts from its defaults (params bound) with its choices

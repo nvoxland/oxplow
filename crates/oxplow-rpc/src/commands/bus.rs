@@ -198,19 +198,19 @@ mod tests {
             async move {
                 crate::dispatch(
                     "command_open_after",
-                    json!({ "id": "oxplow.dashboard.create", "result": result }),
+                    json!({ "id": "oxplow.extension.new_dashboard", "result": result }),
                     &svc,
                 )
                 .await
             }
         };
         assert_eq!(
-            open(json!({ "id": 7 })).await.unwrap(),
-            json!("oxplow:oxplow/dashboard?id=7")
+            open(json!({ "page": "my-pages/health" })).await.unwrap(),
+            json!("oxplow:oxplow/page?page=my-pages/health")
         );
         let err = open(json!({})).await.unwrap_err();
         assert_eq!(err.code, "INVALID");
-        assert!(err.message.contains("`id`"), "{}", err.message);
+        assert!(err.message.contains("`page`"), "{}", err.message);
         let none = crate::dispatch(
             "command_open_after",
             json!({ "id": "oxplow.vcs.pull", "result": {} }),
@@ -243,10 +243,10 @@ mod tests {
         let new_task = by_id("oxplow.work_item.create").expect("New Task is offered");
         assert_eq!(new_task["ui"]["form"], "oxplow:oxplow/page?page=new-task");
         assert_eq!(new_task["ui"]["open_after"], "{{result.uri}}");
-        let dashboard = by_id("oxplow.dashboard.create").expect("New Dashboard is offered");
+        let dashboard = by_id("oxplow.extension.new_dashboard").expect("New Dashboard is offered");
         assert_eq!(
             dashboard["ui"]["open_after"],
-            "oxplow:oxplow/dashboard?id={{result.id}}"
+            "oxplow:oxplow/page?page={{result.page}}"
         );
         assert!(
             by_id("oxplow.config.get").is_none(),
@@ -280,20 +280,20 @@ mod tests {
                 .await
             }
         };
-        // A command that asks asks the person over IPC: a dashboard's delete.
+        // A command that asks asks the person over IPC: a work item's delete.
         let made = crate::dispatch(
             "run_command",
-            json!({ "id": "oxplow.dashboard.create", "input": { "title": "T" }, "confirmed": false }),
+            json!({ "id": "oxplow.work_item.create", "input": { "title": "T" }, "confirmed": false }),
             &svc,
         )
         .await
         .unwrap();
         let delete = |confirmed: bool| {
-            let (svc, id) = (svc.clone(), made["result"]["id"].clone());
+            let (svc, uri) = (svc.clone(), made["result"]["uri"].clone());
             async move {
                 crate::dispatch(
                     "run_command",
-                    json!({ "id": "oxplow.dashboard.delete", "input": { "dashboard": id }, "confirmed": confirmed }),
+                    json!({ "id": "oxplow.work_item.delete", "input": { "uri": uri }, "confirmed": confirmed }),
                     &svc,
                 )
                 .await
@@ -354,22 +354,22 @@ mod tests {
             .commands
             .run(
                 &oxplow_domain::Actor::Human,
-                "oxplow.dashboard.create",
-                json!({ "title": "T" }),
+                "oxplow.work_item.create",
+                json!({ "title": "Proposed away" }),
                 false,
             )
             .await
             .unwrap();
         let propose = || {
             let (svc, effect) = (svc.clone(), effect.clone());
-            let id = made.result["id"].clone();
+            let uri = made.result["uri"].clone();
             async move {
                 let err = svc
                     .commands
                     .run(
                         &effect,
-                        "oxplow.dashboard.delete",
-                        json!({ "dashboard": id }),
+                        "oxplow.work_item.delete",
+                        json!({ "uri": uri }),
                         false,
                     )
                     .await
@@ -398,7 +398,7 @@ mod tests {
                     .run(
                         &oxplow_domain::Actor::Human,
                         "oxplow.sql.query",
-                        json!({ "sql": "SELECT count(*) FROM v_dashboard" }),
+                        json!({ "sql": "SELECT count(*) FROM v_work_item WHERE title = 'Proposed away'" }),
                         false,
                     )
                     .await

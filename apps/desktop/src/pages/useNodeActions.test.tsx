@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { cleanup, render } from "@testing-library/react";
 
 import { PageActionContext, nodeActionRunner, nodeFormSource, useNodeActions, type RunPageAction } from "./useNodeActions.js";
-import type { LensActionRunner } from "../lens/lensActionRunner.js";
+import type { VizActionRunner } from "../viz/vizActionRunner.js";
 
 afterEach(cleanup);
 
@@ -18,7 +18,7 @@ const recorder = () => {
 test("a viz's press runs the node's action on the open run, with the row, input and drop", async () => {
   const { calls, press } = recorder();
   const run = nodeActionRunner(press, "run-1", "notes/items");
-  await run("ignored/lens", "finish", { p: 1 }, { id: "a" }, "stream", true, { note: "x" }, { onto: { id: "b" } });
+  await run("ignored/page", "finish", { p: 1 }, { id: "a" }, "stream", true, { note: "x" }, { onto: { id: "b" } });
   expect(calls).toEqual([["run-1", "notes/items", "finish", { id: "a" }, { note: "x" }, { onto: { id: "b" } }, true]]);
 });
 
@@ -36,7 +36,7 @@ test("before the run opens a press fails, saying so", async () => {
 
 test("useNodeActions presses through the page's action context", async () => {
   const { calls, press } = recorder();
-  let runner: LensActionRunner | null = null;
+  let runner: VizActionRunner | null = null;
   function Probe() {
     runner = useNodeActions("run-9", "items");
     return null;
@@ -71,6 +71,6 @@ test("a submitted form runs its run again", async () => {
     submit: async () => ({ result: null, audit_id: null, event_id: null, inverse: null }) as never,
     actionStart: async () => ({}) as never,
   };
-  await nodeFormSource(forms, "run-2", "form", (id) => after.push(id)).submit({ lens: { id: "x" }, params: {} }, {}, null, false);
+  await nodeFormSource(forms, "run-2", "form", (id) => after.push(id)).submit({ config: { id: "x" }, params: {} }, {}, null, false);
   expect(after).toEqual(["run-2"]);
 });

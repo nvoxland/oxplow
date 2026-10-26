@@ -98,7 +98,7 @@ test("a composite lists its children; anything else uses its summary; destructiv
   expect(s.change).toBeNull();
   expect(s.children).toEqual(["oxplow.work_item.transition", "oxplow.work_item.delete"]);
   expect(s.destructive).toBe(true);
-  expect(summarizeProposal(proposal({ actorKind: "lens", actorId: "acme/x" })).who).toBe("A lens (acme/x) for the agent");
+  expect(summarizeProposal(proposal({ actorKind: "page", actorId: "acme/x" })).who).toBe("A page (acme/x) for the agent");
 });
 
 test("a deploy's proposal lists what it adds", () => {

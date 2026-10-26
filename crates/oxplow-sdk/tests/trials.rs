@@ -8,7 +8,7 @@ mod common;
 use std::path::Path;
 use std::sync::Arc;
 
-use oxplow_app::lens_actions::{invoke_component_command, load_component, ComponentInvoke};
+use oxplow_app::viz_actions::{invoke_component_command, load_component, ComponentInvoke};
 use oxplow_domain::{Actor, CommandError};
 use serde_json::{json, Value};
 

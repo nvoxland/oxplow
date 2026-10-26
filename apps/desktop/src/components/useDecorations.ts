@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { querySql } from "../api.js";
 import { useExtensions } from "../extensionsStore.js";
-import { NO_READS, unionReads, useRerunOnChange } from "../lens/lensRerun.js";
+import { NO_READS, unionReads, useRerunOnChange } from "../viz/rerun.js";
 import { useRequestGuard } from "../request-guard.js";
 import type { DecoratorPlacement, Reads } from "../tauri-bridge/generated/bindings.js";
 import { decorationQueries, decorationsFromResult, decoratorsFor, type Decoration } from "./decorators.js";

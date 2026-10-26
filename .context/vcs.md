@@ -154,12 +154,12 @@ into VCS ids.
 The neutral RPCs are `read_at { streamId, path, revision }`, `files_at`,
 `diff { streamId, from, to }` (UI only), and, for an agent, MCP `read` of `oxplow:oxplow/file?path=<path>&rev=<revision>`. The daemon finishes every request it gets (dropping a
 result in the UI doesn't cancel the work), so a view that refreshes on
-workspace events should not start a diff per event (a lens re-runs once per
+workspace events should not start a diff per event (a page re-runs once per
 change). The MCP VCS
 reads (`oxplow_diff`, `oxplow_vcs_blame` and `oxplow_read` of a file at a revision) default
 a missing `stream_id` to the caller's own stream — its header, else its
 thread's — and to the primary only for an anonymous caller (tsk555; the
-extension, lens and change tools do the same, tsk574); they replaced
+extension, page and change tools do the same, tsk574); they replaced
 `read_file`, `read_file_at_ref` and `diff_endpoints`. Change analysis
 and the duplicate scan read through `Trees`, so a closed effort's
 snapshot head is scanned too. (The wiki's old `@<rev>` link syntax went
@@ -220,7 +220,7 @@ a rebase's parent before its child and break the graph's lanes (tsk565;
 the dashboard finds the head commit by sha, not as the first row). Git
 History's own view is that plain list (`CommitList`); the lane graph is
 oxplow-bundled's `history-graph` component, replacing it through
-`vcs.history.graph` (`.context/extensions.md` "Replacements"), whose lens
+`vcs.history.graph` (`.context/extensions.md` "Replacements"), whose page
 runs the same walk and whose script does the same `topoOrder`; the
 branch picker, compare list and new-stream form read `v_branch` /
 `v_tag`. `v_branch.stream_id` is the stream whose workspace has the
@@ -229,7 +229,7 @@ not the stream row, which the branch reconciler updates after (it
 writes only `branch`/`branch_ref`, `StreamStore::set_branch`, so a
 rename in between stays; tsk573). A `v_branch.name` is the branch's local name for both kinds
 (a remote-tracking branch's remote is its own column), so the picker
-checks out and shows `name` as is (`pickedBranch`, tsk567). What is computed stays live, as live models (`.context/semantic-layer.md` "Live models"): `v_branch_divergence` (any pair of revisions — `ahead`, `behind`, `merge_base`, `overlapping_files`, `readiness` from `Vcs::divergence`: a stream against the default branch, a remote branch against HEAD; a branch against its own upstream is `v_branch.ahead` / `behind`) and `v_commit_between` (`Vcs::revisions_between`, 100 per pair), both narrowed to the pair the query pins (`base`, `head`; one side pinned, the other ranges over `Vcs::branches`; neither, each local branch against the default) and announced on `VcsRefsChanged` and with `v_branch`. The Git Dashboard's `streams`, `readiness` and `between` lenses read them. `vcs_file_history` (the index keeps 500
+checks out and shows `name` as is (`pickedBranch`, tsk567). What is computed stays live, as live models (`.context/semantic-layer.md` "Live models"): `v_branch_divergence` (any pair of revisions — `ahead`, `behind`, `merge_base`, `overlapping_files`, `readiness` from `Vcs::divergence`: a stream against the default branch, a remote branch against HEAD; a branch against its own upstream is `v_branch.ahead` / `behind`) and `v_commit_between` (`Vcs::revisions_between`, 100 per pair), both narrowed to the pair the query pins (`base`, `head`; one side pinned, the other ranges over `Vcs::branches`; neither, each local branch against the default) and announced on `VcsRefsChanged` and with `v_branch`. The Git Dashboard's `streams`, `readiness` and `between` pages read them. `vcs_file_history` (the index keeps 500
 commits per head; a file's full history can be older) stays an IPC, and agents read `v_commit`,
 `v_commit_file`, `v_branch` and the two live models through `oxplow_query_sql`. Git-native reads keep `git_` names:
 `git_resolve_commit_ref_labels`,

@@ -3,7 +3,7 @@ import { expect, test } from "../../support/fixtures.js";
 import { openFromLauncher } from "../../support/ui.js";
 
 // Settings → Extensions lists the credentials extensions' collectors
-// declare, from the foundation's `extensions-credentials` lens. Set… asks
+// declare, from the foundation's `extensions-credentials` page. Set… asks
 // for the value in a masked field; it goes to the keychain, and the row
 // says only that one is saved.
 test("a collector's credential is set from its row and cleared again", async ({ page, daemon }) => {
@@ -15,16 +15,16 @@ test("a collector's credential is set from its row and cleared again", async ({ 
   await expect(row).toContainText("Not set");
 
   await row.click({ button: "right" });
-  await page.getByTestId("menu-item-lens-action-set").click();
-  const form = page.getByTestId("lens-action-form");
-  const value = form.getByTestId("lens-action-form-fields-value");
+  await page.getByTestId("menu-item-viz-action-set").click();
+  const form = page.getByTestId("viz-action-form");
+  const value = form.getByTestId("viz-action-form-fields-value");
   await expect(value).toHaveAttribute("type", "password");
   await value.fill("ghp_example_value");
-  await form.getByTestId("lens-action-form-fields-submit").click();
+  await form.getByTestId("viz-action-form-fields-submit").click();
   await expect(row).toContainText("Saved in keychain");
   await expect(page.locator("body")).not.toContainText("ghp_example_value");
 
   await row.click({ button: "right" });
-  await page.getByTestId("menu-item-lens-action-clear").click();
+  await page.getByTestId("menu-item-viz-action-clear").click();
   await expect(row).toContainText("Not set");
 });

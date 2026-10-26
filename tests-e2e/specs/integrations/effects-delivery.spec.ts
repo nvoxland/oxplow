@@ -41,8 +41,8 @@ test("a failed reaction is in Delivery, and a person's Retry composes it afresh"
   // item as it is now.
   await run(daemon, "oxplow.work_item.update", { uri: await refOf(daemon, "Plum [fail]"), title: "Plum" });
   await row.click({ button: "right" });
-  await page.getByTestId("menu-item-lens-action-retry").click();
-  await page.getByTestId("lens-action-confirm-run").click();
+  await page.getByTestId("menu-item-viz-action-retry").click();
+  await page.getByTestId("viz-action-confirm-run").click();
   await expect(row).toHaveCount(0);
   await expect.poll(() => notesOn(daemon, "Plum")).toBe(1);
 });
@@ -79,8 +79,8 @@ test("a person's Backfill reaches what was logged before the effect was deployed
   await openFromLauncher(page, "Settings: Data");
   // The effect's row opens on what a backfill would do; Backfill asks first.
   await page.locator("tr", { hasText: "late/note" }).getByRole("button", { name: "Expand" }).click();
-  await expect(page.getByTestId("lens-action-backfill")).toBeVisible();
-  await page.getByTestId("lens-action-backfill").click();
-  await page.getByTestId("lens-action-confirm-run").click();
+  await expect(page.getByTestId("viz-action-backfill")).toBeVisible();
+  await page.getByTestId("viz-action-backfill").click();
+  await page.getByTestId("viz-action-confirm-run").click();
   await expect.poll(late).toBe(1);
 });

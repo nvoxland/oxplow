@@ -1,5 +1,5 @@
 //! The models that restate what the catalog and the page-ref graph hold, so
-//! an agent reads them with `oxplow_query_sql` instead of a tool: `v_lens`,
+//! an agent reads them with `oxplow_query_sql` instead of a tool: `v_page`,
 //! `v_extension`, `v_config_key` and `v_page_ref`.
 
 use serde_json::{json, Value};
@@ -8,8 +8,6 @@ use crate::test_fixtures::{services_with_effort, EffortFixture};
 
 const MANIFEST: &str =
     "manifest: 2\nname: acme\nversion: 2.1.0\nintent:\n  purpose: Count things.\n";
-const LENS: &str = "title: Acme counts\ndescription: Counts acme things.\nparams: [{ name: kind }]\nquery: SELECT 1 AS n\nviz: table\nlauncher: { category: Data }\n";
-const HIDDEN: &str = "title: Detail\nquery: SELECT 1 AS n\nviz: table\nhidden: true\n";
 
 async fn rows(fx: &EffortFixture, sql: &str) -> Vec<Vec<Value>> {
     let out = fx.svc.sql.query_sql(sql, vec![], None).await.unwrap();
@@ -28,51 +26,15 @@ fn write(root: &std::path::Path, rel: &str, body: &str) {
     std::fs::write(path, body).unwrap();
 }
 
-/// A project extension's lenses and itself are rows once it activates, and
-/// the rows follow it away when it's deleted.
+/// A project extension is a row once it activates, and the row follows
+/// it away when it's deleted (its pages: `pages_are_models_that_follow_the_catalog`).
 #[tokio::test]
-async fn lenses_and_extensions_are_models_that_follow_the_catalog() {
+async fn extensions_are_models_that_follow_the_catalog() {
     let fx = services_with_effort().await;
     let root = fx.svc.layout.project_dir.clone();
     write(&root, "extension.yaml", MANIFEST);
-    write(&root, "lenses/counts.yaml", LENS);
-    write(&root, "lenses/detail.yaml", HIDDEN);
     crate::test_fixtures::activate(&fx.svc).await;
 
-    assert_eq!(
-        rows(
-            &fx,
-            "SELECT uri, extension, slug, title, description, viz, hidden, launcher_category, params
-             FROM v_lens WHERE extension = 'acme' ORDER BY slug"
-        )
-        .await,
-        vec![
-            vec![
-                json!("oxplow:oxplow/lens?lens=acme/counts"),
-                json!("acme"),
-                json!("counts"),
-                json!("Acme counts"),
-                json!("Counts acme things."),
-                json!("table"),
-                json!(0),
-                json!("Data"),
-                json!(
-                    r#"[{"name":"kind","label":null,"default":null,"options":[],"options_from":null,"type":"text","role":"resource","presets":[]}]"#
-                )
-            ],
-            vec![
-                json!("oxplow:oxplow/lens?lens=acme/detail"),
-                json!("acme"),
-                json!("detail"),
-                json!("Detail"),
-                json!(""),
-                json!("table"),
-                json!(1),
-                Value::Null,
-                json!("[]")
-            ],
-        ]
-    );
     assert_eq!(
         rows(
             &fx,
@@ -103,9 +65,6 @@ async fn lenses_and_extensions_are_models_that_follow_the_catalog() {
     crate::extension_deploy::remove(&fx.svc, "acme")
         .await
         .unwrap();
-    assert!(rows(&fx, "SELECT 1 FROM v_lens WHERE extension = 'acme'")
-        .await
-        .is_empty());
     assert!(rows(&fx, "SELECT 1 FROM v_extension WHERE name = 'acme'")
         .await
         .is_empty());
@@ -216,13 +175,17 @@ async fn an_extensions_warnings_are_on_its_row() {
         vec![vec![json!(1)]]
     );
 
-    write(&root, "lenses/bad.yaml", "title: Bad\nviz: nonsense\n");
+    write(
+        &root,
+        "pages/bad.yaml",
+        "title: Bad\ndata:\n  a: { sql: SELECT 1 }\nview: { viz: nonsense, from: a }\n",
+    );
     crate::test_fixtures::activate_with_problems(&fx.svc).await;
     assert!(
-        rows(&fx, "SELECT 1 FROM v_lens WHERE slug = 'bad'")
+        rows(&fx, "SELECT 1 FROM v_page WHERE uri LIKE '%acme/bad%'")
             .await
             .is_empty(),
-        "a lens that doesn't load is no row"
+        "a page that doesn't load is no row"
     );
 }
 

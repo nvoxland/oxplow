@@ -21,7 +21,7 @@ CORS is permissive for exactly this (`.context/remote-daemon.md`).
   then, runs the fake this checkout built; its `provider.json` is checked
   in and kept equal to the fake's declarations by
   `the_suite_fixture_declares_what_the_fake_does`), an effect, a model, a
-  lens with its page, and a resource. Private, since `providers` is still
+  page, and a resource. Private, since `providers` is still
   experimental. The effect comments on each created task; a title with
   `[fail]` makes it fail (Delivery, Retry) and one with `[delete]` makes it
   delete the task (a proposal). Nothing in it is approved until a spec
@@ -36,7 +36,7 @@ CORS is permissive for exactly this (`.context/remote-daemon.md`).
   git project, with its own `OXPLOW_HOME`, `HOME` (no rc file read, no
   shell history written), `SHELL=/bin/sh`, and no global or system git
   config. Its
-  stderr is kept in `tests-e2e/.output/daemons/` and named in a failure to
+  stderr and stdout (its log lines) are kept in `tests-e2e/.output/daemons/` and named in a failure to
   start; whatever fails before it listens, the process is killed and its
   project removed, and `stop()` returns for a daemon a signal already
   killed. `ipc()` calls
@@ -94,7 +94,7 @@ CORS is permissive for exactly this (`.context/remote-daemon.md`).
 `shell/` boot and connecting with a token; `work/` tasks, the Board
 (transition, confirm, undo) and launcher search; `knowledge/` the wiki and
 an extension's resource; `code/` a commit's diff; `data/` Explore Data
-(Save as Lens), lenses and dashboards, extension pages; `settings/`
+(Save as Page), dashboards, extension pages; `settings/`
 Programs approval and the settings pages; `integrations/` the fake tracker
 (configure, Check, Enable, active, Sync Now), Delivery (a failed reaction,
 a person's Retry, Backfill) and Approvals (an effect's destructive step);
@@ -102,7 +102,7 @@ a person's Retry, Backfill) and Approvals (an effect's destructive step);
 filters, navigation, approval-gated `invoke`, and a self-navigation off
 this machine sending no request), the task-views example (replacing the
 Board, list and editor) and the triage example (its real `todos` collector
-over the `sorter` provider, decisions from the board and the `todos` lens,
+over the `sorter` provider, decisions from the board and the `todos` page,
 surviving a reload).
 
 What stays a hand walk: the WKWebView window itself, shell-only surfaces

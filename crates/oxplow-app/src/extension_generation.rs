@@ -18,7 +18,7 @@ pub struct PreparedExtensionDatabase {
     models: Vec<ExtensionModels>,
     vocabulary: PreparedVocabulary,
     contributions: Vec<oxplow_domain::contribution::Descriptor>,
-    /// The enabled extensions' lenses, every loaded extension, what a
+    /// The enabled extensions' pages, every loaded extension, what a
     /// person can ask and what they can configure, listed.
     listing: oxplow_db::catalog_listing_store::CatalogListing,
     capabilities: Option<PreparedCapabilities>,
@@ -116,12 +116,6 @@ impl PreparedExtensionDatabase {
             .filter(|extension| extension.enabled)
             .flat_map(|extension| extension.contributions.iter().cloned())
             .collect();
-        let lenses = snapshot
-            .extensions()
-            .iter()
-            .filter(|extension| extension.enabled)
-            .flat_map(|extension| extension.lenses.iter().map(lens_row))
-            .collect();
         let (mut pages, mut page_answers, mut page_params) = (Vec::new(), Vec::new(), Vec::new());
         for extension in snapshot.extensions().iter().filter(|e| e.enabled) {
             page_rows(extension, &mut pages, &mut page_answers, &mut page_params);
@@ -150,7 +144,6 @@ impl PreparedExtensionDatabase {
             vocabulary,
             contributions,
             listing: oxplow_db::catalog_listing_store::CatalogListing {
-                lenses,
                 pages,
                 page_answers,
                 page_params,
@@ -262,22 +255,6 @@ fn variant_name(value: &impl serde::Serialize) -> String {
     match serde_json::to_value(value) {
         Ok(serde_json::Value::String(name)) => name,
         _ => String::new(),
-    }
-}
-
-fn lens_row(lens: &crate::extensions::Lens) -> oxplow_db::catalog_listing_store::LensRow {
-    oxplow_db::catalog_listing_store::LensRow {
-        id: lens.id.clone(),
-        extension: lens.extension.clone(),
-        slug: lens.slug.clone(),
-        title: lens.title.clone(),
-        description: lens.description.clone(),
-        viz: variant_name(&lens.viz),
-        params_json: json_text(&lens.params),
-        hidden: lens.hidden,
-        launcher_category: lens.launcher_category.as_ref().map(variant_name),
-        needs_json: json_text(&lens.needs),
-        source: lens.origin.source.clone(),
     }
 }
 

@@ -74,7 +74,7 @@ export function usePageOutbound(source: TabRef, version = 0): BacklinkEntry[] {
 
 /**
  * The URI a page's graph edges hang on (`.context/resources.md`): what the
- * graph stores. A file's is its path (not the revision shown), a lens's or
+ * graph stores. A file's is its path (not the revision shown), a page's or
  * metric's its key (not its view params). Null for pages that are not a
  * URI's (settings, dialogs, a declared page) so the hook short-circuits.
  */
@@ -211,7 +211,7 @@ function canonicalEntryKey(entry: BacklinkEntry): string {
  * yields null: a dead link when nothing resolves it.
  */
 function openFor(uri: string, resolved: boolean): string | null {
-  // Findings are listed by the oxplow-bundled Findings lens.
+  // Findings are listed by the oxplow-bundled Findings page.
   if (typeOf(uri) === "oxplow/finding") return pageUri("findings");
   // Where it opens by the registry, or as itself when the window shows it.
   if (!("unopenable" in refTargetNow(uri))) return uri;

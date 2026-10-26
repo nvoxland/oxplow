@@ -34,7 +34,7 @@ test("a closed session is listed on the New Session page and picking it reopens 
 });
 
 /// A closed session found by search opens its transcript, not nothing; the
-/// lens's Reopen brings the session back.
+/// page's Reopen brings the session back.
 test("a closed session found by search opens its transcript, which can reopen it", async ({ fresh }) => {
   const { page, daemon } = fresh;
   const opened = await run<Opened>(daemon, "oxplow.agent_session.open", {

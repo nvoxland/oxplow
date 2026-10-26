@@ -1006,7 +1006,7 @@ export function App() {
 
   // Report what this window shows — every thread's tabs and the one
   // selected in each, the thread it shows, its focus and visibility, and
-  // the shown page's published detail (a lens's params) — so an agent's
+  // the shown page's published detail (a page's params) — so an agent's
   // `list_tabs` / `get_open_page` see what the person sees. Best-effort
   // and debounced; see tabs/tabReport.ts and tabs/openPageDetail.ts.
   const [pageDetailTick, setPageDetailTick] = useState(0);
@@ -1324,7 +1324,7 @@ export function App() {
 
   /** Show item `index` of the collection the tab was opened from, in
    *  place: history untouched. */
-  // The pages a live origin (a lens's link column) lists now, by tab slot.
+  // The pages a live origin (a viz node's link column) lists now, by tab slot.
   const [liveItems, setLiveItems] = useState<Record<string, { key: string; items: OriginItem[] }>>({});
   const liveItemsRef = useRef(liveItems);
   liveItemsRef.current = liveItems;
@@ -2014,7 +2014,7 @@ export function App() {
   );
 }
 
-/** A toast as each new thing needs the person; Review opens Alerts (a badge's, its lens). */
+/** A toast as each new thing needs the person; Review opens Alerts (a badge's, its page). */
 function AlertToasts({ onReview }: { onReview(open?: string): void }) {
   const { items } = useAlerts();
   useAlertToasts(items, onReview);

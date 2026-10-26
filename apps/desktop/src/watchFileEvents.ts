@@ -1,6 +1,6 @@
 /// Follow a stream's file renames and deletes (`fileEvents.ts`): `onEvent`
 /// runs for each one logged after watching began, from any caller (the
-/// file tree, an agent's command, a lens). The open buffers follow them
+/// file tree, an agent's command, a page). The open buffers follow them
 /// (`editor/buffers.ts`).
 import { querySql, subscribeOxplowEvents } from "./api.js";
 import { FILE_EVENTS_CURSOR_SQL, FILE_EVENTS_SQL, fileEventsFromRows, type FileEvent } from "./fileEvents.js";

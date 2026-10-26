@@ -172,14 +172,14 @@ registrations). Install/remove emit `OxplowEvent::LspServersChanged`.
 
 ## Pages (P6.E3)
 
-The desktop reads code intelligence from the models, as foundation lens
-pages (`extensions/oxplow-foundation/lenses/`, declared under `pages:`):
+The desktop reads code intelligence from the models, as foundation
+pages (`extensions/oxplow-foundation/pages/`, declared under `pages:`):
 
-- **Problems** (the `problems` page, a lens) —
+- **Problems** (the `problems` page) —
   the stream's `v_diagnostic` rows by file (files with errors first, then
   warnings), a `severity` choice param; a problem opens its file at its
   line. It re-reads when `v_diagnostic` changes.
-- **Symbols** (the `symbols` page, a lens; params
+- **Symbols** (the `symbols` page; params
   `path` and `filter`) — the tree-sitter index, not the servers: a `tree`
   of file → container → symbol (see language-support.md "Symbols"); a
   symbol opens its file at its line.

@@ -86,11 +86,11 @@ test("a whole-page form action opens its form from page_action_form and submits 
     </PageActionContext.Provider>,
   );
   fireEvent.click(await findByTestId("action-page-action-add"));
-  const title = (await findByTestId("lens-action-form-fields-title")) as HTMLInputElement;
+  const title = (await findByTestId("viz-action-form-fields-title")) as HTMLInputElement;
   expect(calls[0]).toEqual(["actionStart", "run-1", null, "add", null]);
   expect(queryByTestId("page-action-form-unsupported")).toBeNull();
   fireEvent.change(title, { target: { value: "Gamma" } });
-  fireEvent.click(getByTestId("lens-action-form-fields-submit"));
+  fireEvent.click(getByTestId("viz-action-form-fields-submit"));
   await waitFor(() => expect(calls.at(-1)).toEqual(["press", "run-1", null, "add", null, { title: "Gamma" }, null, false]));
 });
 
@@ -112,18 +112,18 @@ test("a filter changed in the rail re-runs the page with it; the old rows stay u
   const base = tablePage({ params: [{ name: "q", label: "Query", role: "filter", type: "text", default: null }] });
   const { runs, calls } = fakePageRuns(base, () => new Promise<PageRun>((r) => (answer = r)));
   const view = render(<PageHost pageKey={key} runs={runs} />);
-  fireEvent.click(await view.findByTestId("lens-param-q-value"));
-  const input = view.getByTestId("lens-param-q-edit") as HTMLInputElement;
+  fireEvent.click(await view.findByTestId("page-param-q-value"));
+  const input = view.getByTestId("page-param-q-edit") as HTMLInputElement;
   fireEvent.change(input, { target: { value: "be" } });
   fireEvent.keyDown(input, { key: "Enter" });
   await waitFor(() => expect(calls.setParams).toEqual([{ q: "be" } as Record<string, SqlCell>]));
   await wait(200);
   // Stale: still the old rows, no Loading.
-  expect(view.getByTestId("lens-row-0").textContent).toContain("Alpha");
+  expect(view.getByTestId("viz-row-0").textContent).toContain("Alpha");
   expect(view.container.querySelector(".ox-loading")).toBeNull();
   expect(view.getByTestId("page-file").getAttribute("data-stale")).toBe("true");
   await act(async () => answer({ ...base, params: { q: "be" }, loaders: { items: loader(["id", "title"], [["b", "Beta"]]) } }));
-  await waitFor(() => expect(view.getByTestId("lens-row-0").textContent).toContain("Beta"));
+  await waitFor(() => expect(view.getByTestId("viz-row-0").textContent).toContain("Beta"));
   expect(view.getByTestId("page-file").hasAttribute("data-stale")).toBe(false);
 });
 
@@ -189,7 +189,7 @@ test("a switch page's sections are links in its rail; the one in view titles the
   expect((await view.findByRole("heading", { level: 1 })).textContent).toBe("Every Setting");
   expect(view.getByTestId("page-section-overview").getAttribute("aria-current")).toBe("page");
   // The switch's param is the sections, not a filter.
-  expect(view.queryByTestId("lens-param-area")).toBeNull();
+  expect(view.queryByTestId("page-param-area")).toBeNull();
   fireEvent.click(view.getByTestId("page-section-agents"));
   expect(changes).toEqual([{ area: "agents" }]);
 });

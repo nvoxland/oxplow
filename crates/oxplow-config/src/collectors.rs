@@ -65,7 +65,7 @@ pub struct EntityColumn {
 }
 
 /// A documented join from an entity to another view. Not executed; it
-/// tells agents and lens authors how the data connects.
+/// tells agents and page authors how the data connects.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct EntityRelation {
@@ -85,7 +85,7 @@ pub struct EntityDecl {
     pub key: String,
     pub columns: Vec<EntityColumn>,
     pub relations: Vec<EntityRelation>,
-    /// SQL name lenses and agents query: `v_<owner>_<entity>`.
+    /// SQL name pages and agents query: `v_<owner>_<entity>`.
     pub view: String,
 }
 

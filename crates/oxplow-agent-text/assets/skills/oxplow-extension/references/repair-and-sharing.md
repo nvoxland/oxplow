@@ -9,7 +9,7 @@ in `v_contribution_health` (`extension`, `contribution`, `kind`, `state` = `ok` 
 (`status`, `last_run_at`, `error`).
 
 - **Three failures in a row disable it.** A disabled collector doesn't
-  run, `oxplow.collector.sync` refuses naming the reason, and a lens over its
+  run, `oxplow.collector.sync` refuses naming the reason, and a page over its
   view carries the reason as a warning.
 - **A disable files a repair work item** (`repair_item`). Its body is the
   whole repair brief: what the extension is for, the declaration, the

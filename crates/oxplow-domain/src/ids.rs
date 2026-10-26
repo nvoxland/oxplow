@@ -32,8 +32,6 @@ pub enum EntityKind {
     CommentMessage,
     PageVisit,
     UsageEvent,
-    Dashboard,
-    DashboardItem,
     AgentSession,
     Handoff,
     Terminal,
@@ -41,7 +39,7 @@ pub enum EntityKind {
 
 impl EntityKind {
     /// Every kind, for reverse lookups.
-    pub const ALL: [EntityKind; 14] = [
+    pub const ALL: [EntityKind; 12] = [
         EntityKind::Stream,
         EntityKind::Thread,
         EntityKind::Note,
@@ -51,8 +49,6 @@ impl EntityKind {
         EntityKind::CommentMessage,
         EntityKind::PageVisit,
         EntityKind::UsageEvent,
-        EntityKind::Dashboard,
-        EntityKind::DashboardItem,
         EntityKind::AgentSession,
         EntityKind::Handoff,
         EntityKind::Terminal,
@@ -70,8 +66,6 @@ impl EntityKind {
             EntityKind::CommentMessage => "cmg",
             EntityKind::PageVisit => "pgv",
             EntityKind::UsageEvent => "usg",
-            EntityKind::Dashboard => "dsh",
-            EntityKind::DashboardItem => "dti",
             EntityKind::AgentSession => "ses",
             EntityKind::Handoff => "hnd",
             EntityKind::Terminal => "trm",
@@ -91,8 +85,6 @@ impl EntityKind {
             EntityKind::CommentMessage => "comment-message id (cmg…)",
             EntityKind::PageVisit => "page-visit id (pgv…)",
             EntityKind::UsageEvent => "usage-event id (usg…)",
-            EntityKind::Dashboard => "dashboard id (dsh…)",
-            EntityKind::DashboardItem => "dashboard-item id (dti…)",
             EntityKind::AgentSession => "agent-session id (ses…)",
             EntityKind::Handoff => "handoff id (hnd…)",
             EntityKind::Terminal => "terminal id (trm…)",
@@ -306,8 +298,6 @@ id_type!(CommentId, Comment);
 id_type!(CommentMessageId, CommentMessage);
 id_type!(PageVisitId, PageVisit);
 id_type!(UsageEventId, UsageEvent);
-id_type!(DashboardId, Dashboard);
-id_type!(DashboardItemId, DashboardItem);
 id_type!(AgentSessionId, AgentSession);
 id_type!(HandoffId, Handoff);
 id_type!(TerminalId, Terminal);

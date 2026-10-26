@@ -14,12 +14,12 @@ export async function expandRailSection(page: Page, id: string): Promise<void> {
 /** Open the New Task page the way a person does: ⇧⌘N, focus outside a
  *  text field. */
 export async function openNewTask(page: Page): Promise<void> {
-  // The page is a lens form: it opens once the extensions have loaded, and
+  // The page is a page form: it opens once the extensions have loaded, and
   // a shortcut pressed before that goes nowhere, so press until it shows.
   await expect(async () => {
     await page.getByTestId("rail-hud").click({ position: { x: 4, y: 4 } });
     await page.keyboard.press("ControlOrMeta+Shift+N");
-    await expect(page.getByTestId("lens-form-fields-title")).toBeVisible({ timeout: 2_000 });
+    await expect(page.getByTestId("viz-form-fields-title")).toBeVisible({ timeout: 2_000 });
   }).toPass({ timeout: 20_000 });
 }
 
@@ -49,7 +49,7 @@ export async function openFromLauncher(page: Page, query: string): Promise<void>
   await page.keyboard.press("Enter");
 }
 
-/** The New Session page (a lens document) the window shows. */
+/** The New Session page (a page document) the window shows. */
 export function newSessionPage(page: Page) {
   return page.locator('[data-testid^="center-tab-body-oxplow:oxplow/page?"][data-testid*="page=new-session"]:visible');
 }

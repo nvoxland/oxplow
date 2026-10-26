@@ -1888,7 +1888,7 @@ mod tests {
     }
 
     /// Writing a page names the page a person goes to next: the ref the
-    /// write's result carries (`ui.open_after`), which a lens action's
+    /// write's result carries (`ui.open_after`), which a page action's
     /// form honors like a command offer does.
     #[tokio::test]
     async fn writing_a_page_opens_that_page_after() {
@@ -1910,43 +1910,6 @@ mod tests {
         assert_eq!(
             spec.ui.unwrap().open_after_for(&out.result),
             Ok(Some("oxplow:oxplow/wiki?slug=fresh".to_string()))
-        );
-    }
-
-    /// The wiki index needs a knowledge store: with none chosen it does
-    /// not run, and says what it needs.
-    #[tokio::test]
-    async fn the_wiki_index_lens_needs_a_knowledge_store() {
-        let fx = crate::test_fixtures::services_with_effort().await;
-        let layer = crate::sql_gateway::SqlGateway::new(fx.svc.db.clone());
-        let lens = |fx: &crate::test_fixtures::EffortFixture| {
-            let layer = layer.clone();
-            let catalog = fx.svc.extension_catalog.clone();
-            let root = dir(fx);
-            let svc = fx.svc.clone();
-            async move {
-                let ctx = crate::extensions::lens_context(&svc, None, None).await;
-                crate::extensions::run_lens(
-                    &layer,
-                    &catalog,
-                    &root,
-                    "oxplow-foundation/wiki-pages",
-                    Default::default(),
-                    &ctx,
-                )
-                .await
-                .unwrap()
-            }
-        };
-        choose(&fx, "oxplow").await;
-        assert!(lens(&fx).await.inactive.is_none());
-        choose(&fx, "none").await;
-        let run = lens(&fx).await;
-        let inactive = run.inactive.expect("no store, no run");
-        assert!(
-            inactive.message.contains("Knowledge"),
-            "{}",
-            inactive.message
         );
     }
 

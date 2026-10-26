@@ -1,11 +1,11 @@
-//! Project extensions and their lenses.
+//! Project extensions and their pages.
 //!
 //! An extension is a folder `.oxplow/extensions/<name>/` in a stream's
-//! worktree with an `extension.yaml` and `lenses/<slug>.yaml` files. A
-//! lens is a query over the semantic layer (`v_*` views) plus how to
+//! worktree with an `extension.yaml` and `pages/<slug>.yaml` files. A
+//! viz node is a query over the semantic layer (`v_*` views) plus how to
 //! show it. See `.context/extensions.md`.
 //!
-//! Loading never fails as a whole: a broken extension or lens is
+//! Loading never fails as a whole: a broken extension or page is
 //! reported in that extension's `errors` and everything else still
 //! loads.
 
@@ -59,12 +59,12 @@ pub enum Deployment {
     NotHere,
 }
 
-/// How a lens renders its rows.
+/// How a viz renders its rows.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
 )]
 #[serde(rename_all = "lowercase")]
-pub enum LensViz {
+pub enum Viz {
     /// Rows and columns.
     Table,
     /// One line per row: the first column (or the first `columns` entry)
@@ -82,14 +82,6 @@ pub enum LensViz {
     /// Nested rectangles sized by `chart.size`, labelled by `chart.label`,
     /// grouped (and coloured) by `chart.group`.
     Treemap,
-    /// A page of sections (`sections`), wiki style: each another lens,
-    /// given the params it declares from this lens's, or markdown. Other
-    /// extensions add sections at `<extension>/<slug>.sections`.
-    Document,
-    /// A grid of tiles (`tiles`), each another lens (or markdown) at a
-    /// size, given the params it declares from this lens's. Other
-    /// extensions add tiles at `<extension>/<slug>.tiles`.
-    Dashboard,
     /// Rows nested by `tree.parent` (a row's parent is the row whose
     /// `tree.id` it names; none, or one not in the result, is a root),
     /// each shown as `tree.label`.
@@ -124,13 +116,13 @@ pub enum LensViz {
     Hunks,
     /// A form for command `form.command`: its fields from the command's
     /// input schema, prefilled from `form.defaults` (placeholders bound
-    /// like an action's) and the query's first row, if the lens has one.
-    /// Submitting runs the command as the lens.
+    /// like an action's) and the query's first row, if the viz has one.
+    /// Submitting runs the command as the viz.
     Form,
     /// The pending proposals an agent raised, each with Approve and
     /// Decline: core's consent component. The viz reads
     /// `v_command_proposal` itself and decides through the person-only
-    /// path, so the lens needs no query beyond `SELECT 1`; its params
+    /// path, so the viz needs no query beyond `SELECT 1`; its params
     /// `thread` (a thread ref) and `setting` (a config key) narrow the
     /// list.
     Approvals,
@@ -140,11 +132,6 @@ pub enum LensViz {
     /// several; an agent row's `stopped` and `conversation` say whether
     /// the person stopped it and what it is bound to.
     Terminal,
-    /// An agent's answer (`answer.uri`, the first row's: an
-    /// `oxplow/answer` URI), re-run live, with Keep This until it is kept
-    /// (`answer.kept`: the lens it became) — core's component for what
-    /// `oxplow_show_lens` showed.
-    Answer,
     /// A web page (`embed.url`, the first row's), opened in oxplow's
     /// sandboxed window: the page is a status panel with Open again, Open in
     /// Browser and Copy URL — core's component for what an `http(s)` link
@@ -156,23 +143,23 @@ pub enum LensViz {
     Custom,
 }
 
-impl LensViz {
+impl Viz {
     /// It takes its page's whole height (a file, a diff): the page draws
     /// it filling the body, its title in the chrome.
     pub fn fills(self) -> bool {
         matches!(
             self,
-            LensViz::Code | LensViz::Diff | LensViz::Editor | LensViz::Terminal | LensViz::Embed
+            Viz::Code | Viz::Diff | Viz::Editor | Viz::Terminal | Viz::Embed
         )
     }
 }
 
-/// A `custom` lens's component and the props it starts with.
+/// A `custom` viz's component and the props it starts with.
 #[derive(
     Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
 )]
 #[serde(deny_unknown_fields)]
-pub struct LensCustom {
+pub struct VizCustom {
     /// One of the extension's `custom_components` ids.
     pub component: Option<String>,
     /// Handed to the component as is.
@@ -181,9 +168,9 @@ pub struct LensCustom {
     pub props: Option<serde_json::Value>,
 }
 
-/// When a lens needs attention: its row count reaches `min_rows`, or the
+/// When a viz needs attention: its row count reaches `min_rows`, or the
 /// first row's `column` goes `above` / `below` a threshold. A left-nav
-/// panel's `badge` lens shows its count, and the Alerts panel lists it.
+/// panel's `badge` viz shows its count, and the Alerts panel lists it.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct PageAlert {
@@ -196,7 +183,7 @@ pub struct PageAlert {
     pub label: Option<String>,
 }
 
-/// `alert:` as written in a lens file (snake_case keys).
+/// `alert:` as written in a viz file (snake_case keys).
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct AlertFile {
@@ -230,7 +217,7 @@ impl AlertFile {
     }
 }
 
-/// A lens's alert, evaluated on one run.
+/// A viz's alert, evaluated on one run.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AlertState {
@@ -303,7 +290,7 @@ pub(crate) fn evaluate_alert(alert: &PageAlert, result: &SqlQueryResult) -> Aler
     Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
 )]
 #[serde(deny_unknown_fields)]
-pub struct LensChart {
+pub struct VizChart {
     #[serde(default)]
     pub x: Option<String>,
     #[serde(default)]
@@ -327,13 +314,13 @@ pub struct LensChart {
     Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
 )]
 #[serde(deny_unknown_fields)]
-pub struct LensTree {
+pub struct VizTree {
     pub id: Option<String>,
     pub parent: Option<String>,
     pub label: Option<String>,
-    /// A lazy tree: the lens param a branch's children are read with. The
+    /// A lazy tree: the viz param a branch's children are read with. The
     /// run's rows are one level (the param's `default` is the top level);
-    /// a branch opens by running the lens again with the param set to the
+    /// a branch opens by running the viz again with the param set to the
     /// row's `id`, its rows spliced under it. Needs `branch`.
     #[serde(default)]
     pub lazy: Option<String>,
@@ -343,60 +330,12 @@ pub struct LensTree {
     pub branch: Option<String>,
 }
 
-/// `dashboard` viz: its query's rows are tiles, one per row, each value
-/// naming a column. A row draws its `lens` (run with the page's params it
-/// declares), its pinned `sql` (shown as `display`, a chart by `chart`,
-/// the metric card by `metric` and `viz`) or its `text` (a heading band).
-#[derive(
-    Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
-)]
-#[serde(deny_unknown_fields)]
-pub struct LensTile {
-    /// The tile's id: what its actions bind as `{{row.<id column>}}`.
-    pub id: Option<String>,
-    pub title: Option<String>,
-    /// `small`, `wide`, `tall` or `full` (unknown: `small`; a text tile's
-    /// default is `full`).
-    pub size: Option<String>,
-    /// A lens id (`<extension>/<slug>`).
-    pub lens: Option<String>,
-    /// Read-only SQL over the published models.
-    pub sql: Option<String>,
-    /// How a `sql` tile shows its rows: a viz name, or `metric`.
-    pub display: Option<String>,
-    /// A `sql` tile's chart roles, as JSON (`{"x": …, "y": …}`).
-    pub chart: Option<String>,
-    /// A `metric` display's metric key.
-    pub metric: Option<String>,
-    /// A `metric` display's card: `line` or `number`.
-    pub viz: Option<String>,
-    pub text: Option<String>,
-}
-
-impl LensTile {
-    /// Each role and the column it names.
-    pub fn roles(&self) -> [(&'static str, &Option<String>); 10] {
-        [
-            ("id", &self.id),
-            ("title", &self.title),
-            ("size", &self.size),
-            ("lens", &self.lens),
-            ("sql", &self.sql),
-            ("display", &self.display),
-            ("chart", &self.chart),
-            ("metric", &self.metric),
-            ("viz", &self.viz),
-            ("text", &self.text),
-        ]
-    }
-}
-
 /// `timeline` viz: when each row happened and what it says.
 #[derive(
     Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
 )]
 #[serde(deny_unknown_fields)]
-pub struct LensTimeline {
+pub struct VizTimeline {
     pub at: Option<String>,
     pub label: Option<String>,
     /// A column holding the URI each entry links to.
@@ -409,12 +348,12 @@ pub struct LensTimeline {
     Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
 )]
 #[serde(deny_unknown_fields)]
-pub struct LensSteps {
+pub struct VizSteps {
     pub label: Option<String>,
     pub status: Option<String>,
 }
 
-/// What becomes of the page a lens is on after one of its actions (or its
+/// What becomes of the page a viz is on after one of its actions (or its
 /// form) ran a command whose `ui.open_after` names a page.
 #[derive(
     Debug,
@@ -430,16 +369,16 @@ pub struct LensSteps {
 )]
 #[serde(rename_all = "lowercase")]
 pub enum ActionThen {
-    /// The page opens in this tab; Back returns to the lens's page.
+    /// The page opens in this tab; Back returns to the viz's page.
     #[default]
     Open,
-    /// The page takes this tab and the lens's page leaves its history: Back
+    /// The page takes this tab and the viz's page leaves its history: Back
     /// never returns to a submitted form. A page that can't live in a tab
     /// (an agent session) closes this one and is focused.
     Replace,
-    /// Nothing opens; the lens's page stays (a form for the next entry).
+    /// Nothing opens; the viz's page stays (a form for the next entry).
     Stay,
-    /// The lens's page closes (it showed what the command removed).
+    /// The viz's page closes (it showed what the command removed).
     Close,
 }
 
@@ -448,7 +387,7 @@ pub enum ActionThen {
     Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
 )]
 #[serde(deny_unknown_fields)]
-pub struct LensForm {
+pub struct FormSpec {
     pub command: Option<String>,
     /// Input values the form starts with (`{{param.x}}` placeholders bound).
     #[serde(default, serialize_with = "plain_json")]
@@ -466,8 +405,8 @@ pub struct LensForm {
     /// secret }`. The rest keep their starting values and are submitted
     /// with them. None: every field.
     #[serde(default)]
-    pub fields: Option<Vec<LensFormField>>,
-    /// Fields picked from a list: each names a lens (`<extension>/<slug>`)
+    pub fields: Option<Vec<FormField>>,
+    /// Fields picked from a list: each names a viz (`<extension>/<slug>`)
     /// run with the form's params, whose rows are the choices (`value`,
     /// `label`, optional `group`).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -519,14 +458,14 @@ pub enum FormMode {
 /// One of a form's `fields`: its name, or its name and how it shows.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema)]
 #[serde(untagged)]
-pub enum LensFormField {
+pub enum FormField {
     Name(String),
-    Spec(LensFormFieldSpec),
+    Spec(FormFieldSpec),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct LensFormFieldSpec {
+pub struct FormFieldSpec {
     pub name: String,
     /// Shown only while each named field's value is one of these; hidden,
     /// it is neither required nor submitted.
@@ -536,11 +475,11 @@ pub struct LensFormFieldSpec {
     /// input; the command must keep it out of its record (`unrecorded`).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub secret: bool,
-    /// An object field whose children are the rows of this lens
+    /// An object field whose children are the rows of this viz
     /// (`<extension>/<slug>`: `name`, `title`, `kind` of `enum`, `text` or
     /// `number`, `values`, `read_only`), run with the form's params. The
     /// field's value is the object of those children; it is read again
-    /// when the lens's data changes.
+    /// when the viz's data changes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub from: Option<String>,
 }
@@ -564,33 +503,33 @@ pub enum FieldValue {
 
 static NO_CONDITIONS: BTreeMap<String, FieldValues> = BTreeMap::new();
 
-impl LensFormField {
+impl FormField {
     pub fn name(&self) -> &str {
         match self {
-            LensFormField::Name(n) => n,
-            LensFormField::Spec(s) => &s.name,
+            FormField::Name(n) => n,
+            FormField::Spec(s) => &s.name,
         }
     }
     pub fn secret(&self) -> bool {
-        matches!(self, LensFormField::Spec(s) if s.secret)
+        matches!(self, FormField::Spec(s) if s.secret)
     }
-    /// The lens its children are read from, for an object field.
+    /// The viz its children are read from, for an object field.
     pub fn from(&self) -> Option<&str> {
         match self {
-            LensFormField::Spec(s) => s.from.as_deref(),
-            LensFormField::Name(_) => None,
+            FormField::Spec(s) => s.from.as_deref(),
+            FormField::Name(_) => None,
         }
     }
     pub fn visible_if(&self) -> &BTreeMap<String, FieldValues> {
         match self {
-            LensFormField::Name(_) => &NO_CONDITIONS,
-            LensFormField::Spec(s) => &s.visible_if,
+            FormField::Name(_) => &NO_CONDITIONS,
+            FormField::Spec(s) => &s.visible_if,
         }
     }
 }
 
 /// Serialize a JSON value with its numbers as plain numbers, so a YAML
-/// lens file gets `1`, not serde_json's arbitrary-precision number map.
+/// viz file gets `1`, not serde_json's arbitrary-precision number map.
 fn plain_json<S: serde::Serializer>(
     v: &Option<serde_json::Value>,
     s: S,
@@ -637,7 +576,7 @@ fn plain_json<S: serde::Serializer>(
     Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
 )]
 #[serde(deny_unknown_fields)]
-pub struct LensCode {
+pub struct VizCode {
     pub path: Option<String>,
     pub revision: Option<String>,
     /// A column holding `12-40` (or `12`): the lines marked and revealed.
@@ -653,7 +592,7 @@ pub struct LensCode {
     Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
 )]
 #[serde(deny_unknown_fields)]
-pub struct LensTerminal {
+pub struct VizTerminal {
     /// Its URI: an `oxplow/terminal` or `oxplow/agent_session`.
     pub of: Option<String>,
     #[serde(default)]
@@ -669,24 +608,12 @@ pub struct LensTerminal {
     pub thread: Option<String>,
 }
 
-/// `answer` viz: the answer the first row names, and the lens it was kept
-/// as (once it was).
-#[derive(
-    Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
-)]
-#[serde(deny_unknown_fields)]
-pub struct LensAnswer {
-    pub uri: Option<String>,
-    #[serde(default)]
-    pub kept: Option<String>,
-}
-
 /// `embed` viz: the web page the first row names.
 #[derive(
     Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
 )]
 #[serde(deny_unknown_fields)]
-pub struct LensEmbed {
+pub struct VizEmbed {
     /// The column holding the page's URL (`http` or `https`).
     pub url: Option<String>,
 }
@@ -697,7 +624,7 @@ pub struct LensEmbed {
     Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
 )]
 #[serde(deny_unknown_fields)]
-pub struct LensEditor {
+pub struct VizEditor {
     pub path: Option<String>,
     /// A column holding `12` (or `12-40`: its start): the line revealed.
     #[serde(default)]
@@ -709,7 +636,7 @@ pub struct LensEditor {
     Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
 )]
 #[serde(deny_unknown_fields)]
-pub struct LensDiff {
+pub struct VizDiff {
     pub path: Option<String>,
     pub from: Option<String>,
     pub to: Option<String>,
@@ -724,13 +651,13 @@ pub struct LensDiff {
 }
 
 /// `markdown` viz: which column of the first row is the text. Without
-/// it, the first column. A lens with an `edit` action names it: the text
+/// it, the first column. A viz with an `edit` action names it: the text
 /// is what the editor saves.
 #[derive(
     Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
 )]
 #[serde(deny_unknown_fields)]
-pub struct LensMarkdown {
+pub struct VizMarkdown {
     #[serde(default)]
     pub text: Option<String>,
 }
@@ -740,13 +667,13 @@ pub struct LensMarkdown {
     Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
 )]
 #[serde(deny_unknown_fields)]
-pub struct LensHunks {
+pub struct VizHunks {
     pub path: Option<String>,
     pub from: Option<String>,
     pub to: Option<String>,
 }
 
-impl LensChart {
+impl VizChart {
     /// Every column this chart names.
     fn columns(&self) -> Vec<&String> {
         [
@@ -764,7 +691,7 @@ impl LensChart {
     }
 }
 
-/// Launcher (Cmd+K) sections a lens can be listed under. Mirrors the
+/// Launcher (Cmd+K) sections a viz can be listed under. Mirrors the
 /// renderer's `PageCategory`.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
@@ -780,18 +707,12 @@ pub enum LauncherCategory {
     System,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
-struct LauncherFile {
-    category: LauncherCategory,
-}
-
 /// A page a column value can link to.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
 )]
 #[serde(rename_all = "kebab-case")]
-pub enum LensLinkKind {
+pub enum LinkKind {
     /// `oxplow:oxplow/file?path=<path>`; the value is a repo-relative path.
     File,
     /// `oxplow:oxplow/wiki?slug=<slug>`.
@@ -820,8 +741,8 @@ pub enum LensLinkKind {
 /// Makes a column's cells link to a page.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct LensLink {
-    pub kind: LensLinkKind,
+pub struct ColumnLink {
+    pub kind: LinkKind,
     /// Result column holding the target id. Defaults to the column itself.
     #[serde(default)]
     pub from: Option<String>,
@@ -846,14 +767,14 @@ pub struct PageColumn {
     #[serde(default)]
     pub label: Option<String>,
     #[serde(default)]
-    pub link: Option<LensLink>,
+    pub link: Option<ColumnLink>,
     /// A column of the same row holding this one's unit (`ms`, `%`,
     /// `lines`): a number shows as a metric value in it.
     #[serde(default)]
     pub unit: Option<String>,
     /// A column of the same row naming an icon drawn before the cell
     /// (`done`, `in_progress`, `epic`, `wiki`, …; the UI's fixed
-    /// vocabulary, `lens/lensIcons.tsx` — an unknown name draws none).
+    /// vocabulary, `viz/vizIcons.tsx` — an unknown name draws none).
     #[serde(default)]
     pub icon: Option<String>,
     /// A column of the same row naming the cell's tone: `accent`,
@@ -867,16 +788,16 @@ pub struct PageColumn {
     /// local time, a number with its `unit`).
     #[serde(default)]
     pub format: Option<ColumnFormat>,
-    /// A param of the lens: the cell's text is drawn with every
+    /// A param of the viz: the cell's text is drawn with every
     /// case-insensitive occurrence of its current value marked.
     #[serde(default)]
     pub highlight: Option<String>,
-    /// A param of the lens that clicking a row sets to this column's
+    /// A param of the viz that clicking a row sets to this column's
     /// value, re-running what reads it (a document's other sections):
     /// master and detail. The row whose value it holds is drawn selected.
     #[serde(default)]
     pub select: Option<String>,
-    /// A lens (`<slug>` of this extension or `<extension>/<slug>`) the row
+    /// A viz (`<slug>` of this extension or `<extension>/<slug>`) the row
     /// opens into: run with the row's values (the params it declares), its
     /// result drawn under the row.
     #[serde(default)]
@@ -910,142 +831,17 @@ pub enum ColumnFormat {
     Badge,
 }
 
-/// One part of a `document` (a section) or a `dashboard` (a tile):
-/// another lens, or markdown.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
-#[serde(rename_all = "camelCase")]
-pub struct LensPart {
-    /// Stable within the lens: what another extension's mount names to go
-    /// beside it (`at: { after: <id> }`).
-    pub id: String,
-    /// Its heading; else its lens's title.
-    pub title: Option<String>,
-    /// The lens it shows (`<extension>/<slug>`).
-    pub lens: Option<String>,
-    /// Or prose it shows.
-    pub markdown: Option<String>,
-    /// A tile's size.
-    pub size: Option<TileSize>,
-    /// The core component its lens stands in for (a target of
-    /// `oxplow_domain::replaceable::REPLACEABLE`): its lens is oxplow's own,
-    /// shown unless an extension replaces the target.
-    pub replaceable: Option<String>,
-    /// The extension that mounted it, when it isn't the lens's own.
-    pub from: Option<String>,
-}
-
-/// A part as a lens file writes it (`sections:` / `tiles:` entries).
-#[derive(Debug, Clone, PartialEq, Deserialize, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
-struct PartFile {
-    /// Defaults to its lens's slug; required for markdown.
-    #[serde(default)]
-    id: Option<String>,
-    #[serde(default)]
-    title: Option<String>,
-    /// A lens slug in this extension, or `<ext>/<slug>`.
-    #[serde(default)]
-    lens: Option<String>,
-    #[serde(default)]
-    markdown: Option<String>,
-    /// A tile's size (`tiles:` only).
-    #[serde(default)]
-    size: Option<TileSize>,
-    /// The core component this part's lens stands in for (a lens part's).
-    #[serde(default)]
-    replaceable: Option<String>,
-}
-
-/// A lens file's `sections:` (for `document`) or `tiles:` (for
-/// `dashboard`) as parts: ids defaulted and unique, exactly one of `lens`
-/// and `markdown`, a size only on a tile. A dashboard whose rows are its
-/// tiles (`row_tiles`) may have none.
-fn parse_parts(
-    extension: &str,
-    viz: LensViz,
-    sections: Vec<PartFile>,
-    tiles: Vec<PartFile>,
-    row_tiles: bool,
-) -> Result<Vec<LensPart>, String> {
-    let (key, files) = match viz {
-        LensViz::Document if tiles.is_empty() => ("sections", sections),
-        LensViz::Dashboard if sections.is_empty() => ("tiles", tiles),
-        LensViz::Document => return Err("a `document` has `sections`, not `tiles`".into()),
-        LensViz::Dashboard => return Err("a `dashboard` has `tiles`, not `sections`".into()),
-        _ if sections.is_empty() && tiles.is_empty() => return Ok(Vec::new()),
-        _ => return Err("`sections` are a `document`'s and `tiles` a `dashboard`'s".into()),
-    };
-    if files.is_empty() && !row_tiles {
-        return Err(format!("viz `{}` needs `{key}: [...]`", viz_name(viz)));
-    }
-    let mut out: Vec<LensPart> = Vec::new();
-    for (i, f) in files.into_iter().enumerate() {
-        let lens = f.lens.map(|c| {
-            if c.contains('/') {
-                c
-            } else {
-                format!("{extension}/{c}")
-            }
-        });
-        if lens.is_some() == f.markdown.is_some() {
-            return Err(format!(
-                "{key}[{i}]: needs exactly one of `lens` and `markdown`"
-            ));
-        }
-        if let Some(target) = &f.replaceable {
-            if lens.is_none() {
-                return Err(format!("{key}[{i}]: `replaceable` is a lens part's"));
-            }
-            if oxplow_domain::replaceable::replaceable(target).is_none() {
-                return Err(format!(
-                    "{key}[{i}]: `replaceable: {target}` isn't a replaceable component ({})",
-                    oxplow_domain::replaceable::targets()
-                ));
-            }
-        }
-        if key == "sections" && f.size.is_some() {
-            return Err(format!("{key}[{i}]: `size` is a dashboard tile's"));
-        }
-        let id = match (f.id, &lens) {
-            (Some(id), _) => id,
-            (None, Some(l)) => l.rsplit('/').next().unwrap_or(l).to_string(),
-            (None, None) => return Err(format!("{key}[{i}]: a markdown part needs an `id`")),
-        };
-        if out.iter().any(|p| p.id == id) {
-            return Err(format!("{key}: two parts are `{id}`; give one an `id`"));
-        }
-        out.push(LensPart {
-            id,
-            title: f.title,
-            lens,
-            markdown: f.markdown,
-            size: f.size,
-            replaceable: f.replaceable,
-            from: None,
-        });
-    }
-    Ok(out)
-}
-
-/// A viz as a lens file names it.
-fn viz_name(viz: LensViz) -> String {
-    serde_json::to_value(viz)
-        .ok()
-        .and_then(|v| v.as_str().map(str::to_string))
-        .unwrap_or_default()
-}
-
 /// `group` on a `list` or `table`: the rows under a heading per distinct
 /// value of `by`, in the order each first appears; `link` makes the
 /// heading a link, read from the group's first row.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct LensGroup {
+pub struct VizGroup {
     /// The column whose value groups the rows (not shown as a cell).
     pub by: String,
     /// The heading's link; `from` defaults to `by`.
     #[serde(default)]
-    pub link: Option<LensLink>,
+    pub link: Option<ColumnLink>,
     /// The groups in this order, shown even when no row has the value
     /// (an empty board column is still somewhere to drop); values the
     /// rows have beyond these follow, in the order each first appears.
@@ -1053,7 +849,7 @@ pub struct LensGroup {
     pub values: Vec<String>,
 }
 
-/// A value the viewer (or an agent) can set when running the lens,
+/// A value the viewer (or an agent) can set when running the viz,
 /// bound into the query as `:name`.
 #[derive(
     Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
@@ -1067,31 +863,31 @@ pub struct PageParam {
     #[serde(default)]
     pub default: Option<SqlCell>,
     /// The values it takes, when it's a choice: a panel shows
-    /// them as a toggle in its header, a lens page as a select. Its
+    /// them as a toggle in its header, a viz page as a select. Its
     /// `default` must be one; a run supplying another is refused.
     #[serde(default)]
-    pub options: Vec<LensParamOption>,
-    /// A lens whose rows are the values it takes, when it's a choice
+    pub options: Vec<ChoiceOption>,
+    /// A viz whose rows are the values it takes, when it's a choice
     /// whose options aren't fixed (`value`, `label`, optional `group` —
     /// the form `choices` contract): a slug of this extension, or
-    /// `<extension>/<slug>`; a loaded lens has the whole id. The page runs
+    /// `<extension>/<slug>`; a loaded viz has the whole id. The page runs
     /// it with the params it declares of the page's, so an `end` picker's
-    /// lens can leave out what `start` is. Its options aren't known at
+    /// viz can leave out what `start` is. Its options aren't known at
     /// load, so no `default` is needed and any text is taken. Exclusive
     /// with `options`.
     #[serde(default)]
     pub options_from: Option<String>,
     /// What it holds, and so how a page draws it. Left out, it is a
     /// `choice` when it has `options` or `options_from`, else `text`; a
-    /// loaded lens always says.
+    /// loaded viz always says.
     #[serde(default, rename = "type")]
     pub kind: Option<ParamType>,
     /// What it is to the page, and so where it rides in the page's URI:
     /// a `resource` (the default) names what the page shows, in the URI's
     /// `?`; `filter` narrows how it shows it, in the URI's `#` view. A
     /// `selection` follows from the columns and is never written: a param
-    /// a column of the lens (or of a part of the page) selects, in the
-    /// view too. A loaded lens always says.
+    /// a column of the viz (or of a part of the page) selects, in the
+    /// view too. A loaded viz always says.
     #[serde(default)]
     pub role: Option<ParamRole>,
     /// A `date_range`'s quick picks, of `1d 2d 3d 7d 30d 90d all`; the
@@ -1100,7 +896,7 @@ pub struct PageParam {
     pub presets: Vec<String>,
 }
 
-/// What a lens param holds.
+/// What a viz param holds.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
 )]
@@ -1125,7 +921,7 @@ pub enum ParamType {
     Search,
 }
 
-/// What a lens param is to its page.
+/// What a viz param is to its page.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
 )]
@@ -1156,7 +952,7 @@ const RANGE_PRESETS: &[(&str, Option<i64>)] = &[
 /// One value a choice param takes, and what the viewer sees for it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct LensParamOption {
+pub struct ChoiceOption {
     pub value: String,
     pub label: String,
 }
@@ -1185,7 +981,7 @@ impl PageParam {
         }
         match self.kind() {
             ParamType::Text => Ok(value.clone()),
-            // Options a lens lists aren't known here: the query says what
+            // Options a viz lists aren't known here: the query says what
             // an unknown value means.
             ParamType::Choice if self.options_from.is_some() => match value {
                 SqlCell::Text(_) => Ok(value.clone()),
@@ -1273,14 +1069,9 @@ fn range_ends(value: &str, now: time::OffsetDateTime) -> Option<(Option<String>,
 /// A param whose type its other fields or its default don't fit: a
 /// choice with no options or a default not among them, options or
 /// presets on another type, an unknown preset.
-fn param_problem(lens: &Lens) -> Option<String> {
-    lens.params.iter().find_map(|p| {
+pub(crate) fn param_problem(params: &[PageParam]) -> Option<String> {
+    params.iter().find_map(|p| {
         let kind = p.kind();
-        // A document's view param is a choice of its sections, checked by
-        // `view_problem`: its options aren't filled until mounts are placed.
-        if lens.view.as_deref() == Some(p.name.as_str()) {
-            return None;
-        }
         let problem = if RESERVED_VIEW_KEYS.contains(&p.name.as_str()) {
             Some(format!(
                 "`{0}` is the page's view key (`#{0}=`): rename the param",
@@ -1310,7 +1101,7 @@ fn param_problem(lens: &Lens) -> Option<String> {
             Some(format!("unknown preset `{bad}`"))
         } else if kind == ParamType::Choice && p.default.is_none() && p.options_from.is_none() {
             // A choice with fixed options starts somewhere; one whose
-            // options a lens lists may start open.
+            // options a viz lists may start open.
             Some("a choice needs a `default`, one of its options".to_string())
         } else {
             p.default
@@ -1322,79 +1113,11 @@ fn param_problem(lens: &Lens) -> Option<String> {
     })
 }
 
-/// The keys of a page's `#` view that are the page's, never a lens
+/// The keys of a page's `#` view that are the page's, never a viz
 /// param's: `section`, the section a link lands on. (`comment` is the
-/// page's only on a page that takes comments; the Comments lenses pick a
+/// page's only on a page that takes comments; the Comments viz nodes pick a
 /// comment by that name.)
 pub const RESERVED_VIEW_KEYS: &[&str] = &["section"];
-
-/// What's wrong with a lens's `view`: it is a document's, names a declared
-/// param that rides in the `#` (a `filter`) as a choice of the sections
-/// (no `options` of its own), and starts on one of its own sections.
-fn view_problem(lens: &Lens) -> Option<String> {
-    let name = lens.view.as_deref()?;
-    if lens.viz != LensViz::Document {
-        return Some("`view` is for a document".into());
-    }
-    let Some(p) = lens.params.iter().find(|p| p.name == name) else {
-        return Some(format!(
-            "`view` names param `{name}`, which the lens doesn't declare"
-        ));
-    };
-    if p.role != Some(ParamRole::Filter) {
-        return Some(format!(
-            "`view` param `{name}` rides in the `#`: leave `role` out or say `filter`"
-        ));
-    }
-    if p.kind != Some(ParamType::Choice) {
-        return Some(format!(
-            "`view` param `{name}` is a choice of the sections: leave `type` out"
-        ));
-    }
-    if !p.options.is_empty() || p.options_from.is_some() || !p.presets.is_empty() {
-        return Some(format!(
-            "`view` param `{name}`: the sections are its choices, not `options`"
-        ));
-    }
-    let Some(default) = &p.default else {
-        return Some(format!(
-            "`view` param `{name}` needs a `default`: the section shown first"
-        ));
-    };
-    let shown = match default {
-        SqlCell::Text(t) => t.clone(),
-        other => format!("{other:?}"),
-    };
-    if !lens
-        .parts
-        .iter()
-        .any(|part| matches!(default, SqlCell::Text(t) if *t == part.id))
-    {
-        return Some(format!(
-            "`view` param `{name}`'s default `{shown}` isn't a section"
-        ));
-    }
-    None
-}
-
-/// `params` with a document's view param (`view: <name>`) a `filter`
-/// choice when it doesn't say otherwise: its choices are the sections,
-/// filled once mounts are placed ([`fill_view_options`]).
-pub(crate) fn view_param(params: Vec<PageParam>, view: Option<&str>) -> Vec<PageParam> {
-    params
-        .into_iter()
-        .map(|p| {
-            if Some(p.name.as_str()) != view {
-                return p;
-            }
-            PageParam {
-                kind: Some(p.kind.unwrap_or(ParamType::Choice)),
-                role: Some(p.role.unwrap_or(ParamRole::Filter)),
-                ..p
-            }
-        })
-        .collect()
-}
 
 /// `params` with each one's type written out, so a page never infers it.
 pub(crate) fn typed(params: Vec<PageParam>) -> Vec<PageParam> {
@@ -1405,16 +1128,6 @@ pub(crate) fn typed(params: Vec<PageParam>) -> Vec<PageParam> {
             ..p
         })
         .collect()
-}
-
-/// What a lens's query binds: its params, and each date_range's
-/// `<name>_from` / `<name>_to`.
-fn binds(
-    lens: &Lens,
-    params: &BTreeMap<String, SqlCell>,
-    now: time::OffsetDateTime,
-) -> Vec<(String, SqlCell)> {
-    bind_params(&lens.params, params, now)
 }
 
 /// What a query binds: the values of `declared` params, and each
@@ -1438,111 +1151,16 @@ pub(crate) fn bind_params(
     out
 }
 
-/// A lens file as written on disk (`lenses/<slug>.yaml`).
-#[derive(Debug, Clone, PartialEq, Deserialize, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
-struct LensFile {
-    title: String,
-    #[serde(default)]
-    description: String,
-    /// Required, except by a `form` (whose query, if any, prefills it).
-    #[serde(default)]
-    query: String,
-    #[serde(default = "default_viz")]
-    viz: LensViz,
-    #[serde(default)]
-    params: Vec<PageParam>,
-    #[serde(default)]
-    columns: Vec<PageColumn>,
-    /// Shown instead of an empty result.
-    #[serde(default)]
-    empty: Option<String>,
-    #[serde(default)]
-    chart: Option<LensChart>,
-    #[serde(default)]
-    tree: Option<LensTree>,
-    /// `dashboard` only: its rows are its tiles.
-    #[serde(default)]
-    tile: Option<LensTile>,
-    #[serde(default)]
-    timeline: Option<LensTimeline>,
-    #[serde(default)]
-    steps: Option<LensSteps>,
-    #[serde(default)]
-    hunks: Option<LensHunks>,
-    #[serde(default)]
-    code: Option<LensCode>,
-    #[serde(default)]
-    diff: Option<LensDiff>,
-    #[serde(default)]
-    editor: Option<LensEditor>,
-    #[serde(default)]
-    embed: Option<LensEmbed>,
-    #[serde(default)]
-    answer: Option<LensAnswer>,
-    #[serde(default)]
-    terminal: Option<LensTerminal>,
-    #[serde(default)]
-    markdown: Option<LensMarkdown>,
-    #[serde(default)]
-    form: Option<LensForm>,
-    #[serde(default)]
-    custom: Option<LensCustom>,
-    #[serde(default)]
-    group: Option<LensGroup>,
-    #[serde(default)]
-    emphasis: Option<String>,
-    #[serde(default)]
-    depth: Option<String>,
-    /// For `document`: its sections, each a lens (a slug in this
-    /// extension, or `<ext>/<slug>`) or markdown.
-    #[serde(default)]
-    sections: Vec<PartFile>,
-    /// For `document`: the param whose value names the one section in
-    /// view (a filter whose choices are the sections); the others are the
-    /// page's rail.
-    #[serde(default)]
-    view: Option<String>,
-    /// For `dashboard`: its tiles.
-    #[serde(default)]
-    tiles: Vec<PartFile>,
-    #[serde(default)]
-    launcher: Option<LauncherFile>,
-    /// Keep it out of the launcher (e.g. a lens only a slot shows).
-    #[serde(default)]
-    hidden: bool,
-    /// Offer Refresh on its page. Off by default: a lens re-runs on its
-    /// own when oxplow's data changes; turn it on for one that reads
-    /// outside oxplow (an integration, a file on disk).
-    #[serde(default)]
-    refresh: bool,
-    /// Commands the lens offers (`{ id, label, command, input, row }`).
-    /// Parsed by [`parse_actions`].
-    #[serde(default)]
-    #[schemars(with = "Vec<ActionFile>")]
-    actions: Vec<serde_yaml::Value>,
-    #[serde(default)]
-    alert: Option<AlertFile>,
-    /// Capabilities or features it needs (`work_items`,
-    /// `snapshots.contents`).
-    #[serde(default)]
-    needs: Vec<String>,
-    /// Offer it to agents as an MCP tool too, named `<namespace>_<tool>`;
-    /// its params are the tool's input.
-    #[serde(default)]
-    tool: Option<String>,
-}
-
-/// A button on a lens: a command it runs (P6.B1, target §11.4). The
-/// command goes through the bus as `Actor::Lens` acting for whoever
+/// A button on a viz: a command it runs (P6.B1, target §11.4). The
+/// command goes through the bus as `Actor::Page` acting for whoever
 /// pressed it, so every policy — the agent policy, confirmation
-/// — applies as if they had run it themselves; a lens can offer a button
+/// — applies as if they had run it themselves; a viz can offer a button
 /// but never grant a power. Copying the result and handing it to the
-/// agent are on every lens, not declared.
+/// agent are on every viz, not declared.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct PageAction {
-    /// Unique within the lens; `oxplow_run_lens_action` names it.
+    /// Unique within the viz; `oxplow_run_page_action` names it.
     pub id: String,
     pub label: String,
     /// The command it runs (`oxplow.work_item.transition`).
@@ -1559,17 +1177,17 @@ pub struct PageAction {
     /// value (as text) this is, instead of above the result.
     pub group: Option<String>,
     /// Opens the command's form, its fields starting from `input`, for the
-    /// person to fill in before it runs (`lens_action_form`), instead of
+    /// person to fill in before it runs (`the action form`), instead of
     /// running at once.
     pub form: bool,
     /// Fields of a form action the person sees but can't change: their
     /// values are `input`'s, imposed again when it runs (an item's `ref`).
     pub fixed: Vec<String>,
-    /// A form action's fields picked from a list: each names a lens
-    /// (`<extension>/<slug>`) run with the lens's params, whose rows are
+    /// A form action's fields picked from a list: each names a viz
+    /// (`<extension>/<slug>`) run with the viz's params, whose rows are
     /// the choices (`value`, `label`, optional `group`).
     pub choices: BTreeMap<String, String>,
-    /// What becomes of the lens's page when the command's `ui.open_after`
+    /// What becomes of the viz's page when the command's `ui.open_after`
     /// names a page.
     pub then: ActionThen,
     /// A row action offered only on rows whose column of this name is
@@ -1617,11 +1235,11 @@ pub struct PageAction {
     /// bound exactly to a `{{row.<column>}}` and not `fixed`.
     #[serde(default)]
     pub edit_field: Option<String>,
-    /// A whole-lens action over a lens that holds one row, that names
-    /// `when` or `{{row.*}}`: the lens's one row. Derived at load, not
+    /// A whole-viz action over a viz that holds one row, that names
+    /// `when` or `{{row.*}}`: the viz's one row. Derived at load, not
     /// declared: an action without `row: true` that names `when:` or
-    /// `{{row.*}}`. It runs on the row the server reads from the lens
-    /// itself, and only while the lens has exactly one.
+    /// `{{row.*}}`. It runs on the row the server reads from the viz
+    /// itself, and only while the viz has exactly one.
     #[serde(default)]
     pub one_row: bool,
 }
@@ -1637,11 +1255,11 @@ pub fn action_templates(input: &serde_json::Value) -> Vec<(String, String)> {
         .collect()
 }
 
-/// A lens action as written in a lens file.
+/// A viz action as written in a viz file.
 #[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct ActionFile {
-    /// Unique within the lens.
+    /// Unique within the viz.
     id: String,
     label: String,
     /// The command it runs (`oxplow.work_item.transition`).
@@ -1662,11 +1280,11 @@ struct ActionFile {
     /// editable).
     #[serde(default)]
     fixed: Vec<String>,
-    /// A form action's fields picked from a list: field → the lens whose
+    /// A form action's fields picked from a list: field → the viz whose
     /// rows are its choices.
     #[serde(default)]
     choices: BTreeMap<String, String>,
-    /// What becomes of the lens's page when the command opens one:
+    /// What becomes of the viz's page when the command opens one:
     /// `open` (default), `replace`, `stay` or `close`.
     #[serde(default)]
     then: ActionThen,
@@ -1736,11 +1354,11 @@ fn key_problem(key: &str) -> Option<String> {
     })
 }
 
-/// Parse a lens's `actions:`: each `{ id, label, command, input?, row? }`.
+/// Parse a viz's `actions:`: each `{ id, label, command, input?, row? }`.
 /// A placeholder must name a declared param (`{{param.x}}`) or, in a row
 /// action, a column (`{{row.x}}`, checked against the result when the
-/// extension is validated). A lens that `holds_one_row` (detail, form,
-/// markdown, a document's row) lets a whole-lens action name `when` and
+/// extension is validated). A viz that `holds_one_row` (detail, form,
+/// markdown, a document's row) lets a whole-viz action name `when` and
 /// `{{row.*}}` too: that row.
 pub(crate) fn parse_actions(
     raw: Vec<serde_yaml::Value>,
@@ -1762,7 +1380,7 @@ pub(crate) fn parse_actions(
         if let Some(g) = &f.group {
             if !grouped {
                 return Err(format!(
-                    "actions: `{}`: `group: {g}` needs the lens to have a `group`",
+                    "actions: `{}`: `group: {g}` needs the viz to have a `group`",
                     f.id
                 ));
             }
@@ -1788,7 +1406,7 @@ pub(crate) fn parse_actions(
         }
         if f.when.is_some() && !(f.row || f.drag || holds_one_row) {
             return Err(format!(
-                "actions: `{}`: `when` is for a row action (`row: true`), or a lens that holds one row (detail, form, markdown, a document's row)",
+                "actions: `{}`: `when` is for a row action (`row: true`), or a viz that holds one row (detail, form, markdown, a document's row)",
                 f.id
             ));
         }
@@ -1796,7 +1414,7 @@ pub(crate) fn parse_actions(
         // edit action is a form over the viz's row.
         let row = f.row || f.drag || f.edit;
         let form = f.form || f.edit;
-        // Derived: a whole-lens action that names `when` or the row.
+        // Derived: a whole-viz action that names `when` or the row.
         let one_row = !row
             && holds_one_row
             && (f.when.is_some()
@@ -1844,7 +1462,7 @@ pub(crate) fn parse_actions(
         if f.edit {
             if let Some(other) = out.iter().find(|a| a.edit) {
                 return Err(format!(
-                    "actions: `{}`: the lens already saves with `{}`",
+                    "actions: `{}`: the viz already saves with `{}`",
                     f.id, other.id
                 ));
             }
@@ -1927,7 +1545,7 @@ pub(crate) fn parse_actions(
                     }) => {}
                 "param" => {
                     return Err(format!(
-                        "actions: `{}`: `{{{{param.{name}}}}}` names no param of this lens",
+                        "actions: `{}`: `{{{{param.{name}}}}}` names no param of this viz",
                         f.id
                     ))
                 }
@@ -1947,7 +1565,7 @@ pub(crate) fn parse_actions(
                 }
                 "group" if !grouped => {
                     return Err(format!(
-                        "actions: `{}`: `{{{{group.value}}}}` needs the lens to have a `group`",
+                        "actions: `{}`: `{{{{group.value}}}}` needs the viz to have a `group`",
                         f.id
                     ))
                 }
@@ -1960,7 +1578,7 @@ pub(crate) fn parse_actions(
                 }
                 "row" => {
                     return Err(format!(
-                        "actions: `{}`: `{{{{row.{name}}}}}` needs `row: true`, or a lens that holds one row (detail, form, markdown, a document's row)",
+                        "actions: `{}`: `{{{{row.{name}}}}}` needs `row: true`, or a viz that holds one row (detail, form, markdown, a document's row)",
                         f.id
                     ))
                 }
@@ -2005,11 +1623,10 @@ pub(crate) fn parse_actions(
     Ok(out)
 }
 
-/// Whether a lens of this `viz` holds one row, so a whole-lens action can
-/// name it: a detail, a form, a markdown, or a document with a `query:`.
-pub(crate) fn holds_one_row(viz: LensViz, has_query: bool) -> bool {
-    matches!(viz, LensViz::Detail | LensViz::Form | LensViz::Markdown)
-        || (viz == LensViz::Document && has_query)
+/// Whether a viz of this kind holds one row, so a whole-node action can
+/// name it: a detail, a form, a markdown.
+pub(crate) fn holds_one_row(viz: Viz) -> bool {
+    matches!(viz, Viz::Detail | Viz::Form | Viz::Markdown)
 }
 
 /// An edit action's edited field: the one input field that is exactly a
@@ -2048,10 +1665,6 @@ pub fn edit_column(action: &PageAction) -> Option<String> {
     let field = action.edit_field.as_deref()?;
     let value = action.input.get(field)?.as_str()?;
     oxplow_domain::template::whole_placeholder(value).map(|p| p.name)
-}
-
-fn default_viz() -> LensViz {
-    LensViz::Table
 }
 
 /// When core runs an advisory.
@@ -2155,42 +1768,6 @@ struct AdvisoryFile {
     needs: Vec<String>,
 }
 
-/// Places in core pages an extension can mount a lens, and the params each
-/// offers (`change_id` = the page's `v_change` row). A mounted lens gets
-/// the ones it declares and must declare at least one.
-/// Slot names are one dotted namespace, `<capability>.<page>.<region>`
-/// (P6b): what a page shows a lens is named by what the page is about.
-/// A composite lens's own parts are slots too (`<extension>/<lens>.sections`,
-/// `.tiles`: `place_lens_mounts`), so core lists only the regions of its pages.
-pub const SLOTS: &[SlotSpec] = &[
-    // Uncommitted changes: a strip above them, and below the files.
-    // A file diff's header strip, above the editor: the file and the two
-    // revisions the diff reads (`working`, `snap:<id>`, `git:<sha>`).
-    SlotSpec::region(
-        "diff.file.header",
-        &["path", "left_revision", "right_revision", "stream_id"],
-    ),
-];
-
-/// A place in a core page a lens can be mounted ([`SLOTS`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct SlotSpec {
-    pub name: &'static str,
-    /// The params the page binds; a mounted lens takes the ones it declares.
-    pub params: &'static [&'static str],
-}
-
-impl SlotSpec {
-    const fn region(name: &'static str, params: &'static [&'static str]) -> Self {
-        Self { name, params }
-    }
-
-    /// The core slot named `name`.
-    pub fn core(name: &str) -> Option<&'static SlotSpec> {
-        SLOTS.iter().find(|s| s.name == name)
-    }
-}
-
 /// Where a mount goes among a page's parts: `start`, `end` (the default),
 /// or `{ after: <id> }` / `{ before: <id> }` beside one of them. An id the
 /// page no longer has means the end (and a load warning), so a page that
@@ -2254,104 +1831,8 @@ pub enum TileSize {
     Full,
 }
 
-/// What a slot holds, as a mount is checked against it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PartsKind {
-    Region,
-    Sections,
-    Tiles,
-}
-
-/// A slot naming a lens's parts — `<extension>/<slug>.sections` (a
-/// document's) or `.tiles` (a dashboard's): the lens id and which.
-fn lens_slot_target(slot: &str) -> Option<(&str, PartsKind)> {
-    let (lens, which) = slot.rsplit_once('.')?;
-    if !lens.contains('/') {
-        return None;
-    }
-    match which {
-        "sections" => Some((lens, PartsKind::Sections)),
-        "tiles" => Some((lens, PartsKind::Tiles)),
-        _ => None,
-    }
-}
-
-/// What's wrong with mounting `lens` in a slot that binds `params` and
-/// holds `kind` of parts with stable `ids`: an error, or a warning (an
-/// `at` beside a part the page doesn't have goes at the end).
-fn mount_problem(
-    mount: &LensSlot,
-    lens: &Lens,
-    params: &[&str],
-    row: &[&str],
-    kind: PartsKind,
-    ids: &[&str],
-) -> Result<Option<String>, String> {
-    // A slot offers params (and a page's query row its names); a mounted
-    // lens takes the ones it declares and must declare at least one, or it
-    // can't relate to the page.
-    let offered: Vec<&str> = params.iter().chain(row).copied().collect();
-    if !offered.is_empty()
-        && !offered
-            .iter()
-            .any(|p| lens.params.iter().any(|lp| lp.name == *p))
-    {
-        let list = |names: &[&str]| {
-            names
-                .iter()
-                .map(|p| format!("`{p}`"))
-                .collect::<Vec<_>>()
-                .join(", ")
-        };
-        let row_note = if row.is_empty() {
-            String::new()
-        } else {
-            format!(" and the page's row gives {}", list(row))
-        };
-        return Err(format!(
-            "slot `{}` passes {}{row_note}; lens `{}` must declare at least one in `params`",
-            mount.slot,
-            list(params),
-            lens.slug
-        ));
-    }
-    if kind == PartsKind::Region && mount.at.is_some() {
-        return Err(format!(
-            "slot `{}` is one region of its page; `at` places a mount among a page's \
-             sections or tiles",
-            mount.slot
-        ));
-    }
-    if kind != PartsKind::Tiles && mount.size.is_some() {
-        return Err(format!(
-            "slot `{}` holds no tiles; `size` is a dashboard tile's",
-            mount.slot
-        ));
-    }
-    Ok(mount
-        .at
-        .as_ref()
-        .and_then(SlotAt::anchor)
-        .filter(|id| !ids.contains(id))
-        .map(|id| {
-            format!(
-                "slot `{}` has no part `{id}` (it has {}); lens `{}` goes at the end",
-                mount.slot,
-                if ids.is_empty() {
-                    "none".to_string()
-                } else {
-                    ids.iter()
-                        .map(|i| format!("`{i}`"))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                },
-                lens.slug
-            )
-        }))
-}
-
 /// What a left-nav panel is bound to: the project, the current stream, or
-/// the current thread — which of `stream_id` / `thread_id` its lenses get.
+/// the current thread — which of `stream_id` / `thread_id` its viz nodes get.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
 )]
@@ -2363,7 +1844,7 @@ pub enum PanelScope {
 }
 
 /// A left-nav panel an extension contributes (P6.G1, target §11.3): its
-/// `body` lens renders compact in the nav; its `badge` lens's alert gives
+/// `body` viz renders compact in the nav; its `badge` viz's alert gives
 /// the count shown on the panel and in the Alerts panel.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
@@ -2374,18 +1855,18 @@ pub struct ExtensionPanel {
     pub title: String,
     pub icon: Option<String>,
     pub scope: PanelScope,
-    /// The body lens (`<extension>/<slug>`).
+    /// The body viz (`<extension>/<slug>`).
     pub body: String,
-    /// The badge lens, which declares an `alert`.
+    /// The badge viz, which declares an `alert`.
     pub badge: Option<String>,
     /// The page its header opens (`oxplow:oxplow/page?page=<kind>`, a canonical ref): a core
     /// page the panel summarizes, as Comments opens the inbox.
-    /// Absent, the body lens's own page.
+    /// Absent, the body viz's own page.
     pub open: Option<String>,
-    /// The lens shown, compact, while the panel is collapsed: its one-line
+    /// The viz shown, compact, while the panel is collapsed: its one-line
     /// summary. Absent, a collapsed panel shows only its header.
     pub collapsed: Option<String>,
-    /// The lens whose row count (a `number` lens: its value) is the
+    /// The viz whose row count (a `number` viz: its value) is the
     /// header's count, without raising an alert. It wins over
     /// the badge's count; the badge still feeds Alerts.
     pub count: Option<String>,
@@ -2393,68 +1874,6 @@ pub struct ExtensionPanel {
     /// the body above the bar), not in the rail.
     #[serde(default)]
     pub dock: bool,
-    /// Its parts name pages (`<extension>/<slug>`), not lenses.
-    #[serde(default)]
-    pub pages: bool,
-}
-
-/// A page an extension contributes (P6.G2, target §11.3): a lens shown
-/// full-page at `oxplow:oxplow/page?page=<extension>/<id>`, listed in the launcher under
-/// its category.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
-#[serde(rename_all = "camelCase")]
-pub struct ExtensionPage {
-    pub id: String,
-    pub extension: String,
-    /// Its tab id: `oxplow:oxplow/page?page=<id>` for the oxplow-namespace extension (its
-    /// pages are core-named, as its commands are), `oxplow:oxplow/page?page=<extension>/<id>`
-    /// for any other.
-    pub page_ref: String,
-    /// Its name: the launcher's, Open with's, a kind label's.
-    pub title: String,
-    /// What its tab says, when not its title: `{{param.<name>}}` placeholders
-    /// over the params of what it shows (`label: "{{param.path}}"`).
-    pub label: Option<String>,
-    pub icon: Option<String>,
-    /// Its launcher section; none = not in the launcher (a page only
-    /// opened from elsewhere: a diff, a form).
-    pub category: Option<LauncherCategory>,
-    /// More words the launcher matches it on.
-    pub keywords: Option<String>,
-    /// The params naming what it shows, in its URI's `?`
-    /// (`oxplow:oxplow/page?page=settings&stream=str1`); its lens's filters and
-    /// selections ride in the `#` view.
-    pub params: Vec<String>,
-    /// The lens whose value (a `number` lens) is the launcher's badge
-    /// (`<extension>/<slug>`).
-    pub count: Option<String>,
-    /// The resources it renders (`oxplow/file`, `acme/pr`; `https`, `http`
-    /// for a web page): a URI of one opens on it, the URI its tab's id.
-    /// Empty: a route, opened at `page_ref`.
-    #[serde(rename = "for")]
-    pub renders: Vec<String>,
-    /// Which URIs of those it takes, by param: `present`, `absent`, or an
-    /// anchored pattern the value matches (one form the desktop's JS and
-    /// Rust read alike). Empty: every one.
-    pub accepts: BTreeMap<String, String>,
-    /// What its resource opens on when the URI's view names no renderer
-    /// (`#oxplow.renderer=`): only a page of the extension declaring it.
-    pub default: bool,
-    /// Its tab leads the strip and isn't evicted (an agent session's).
-    pub pinned: bool,
-    /// Its text takes comments: its URI (its tab id) is their target, the
-    /// nav bar steps through them, and a selection in its text (a markdown
-    /// viz, a code viz, plain text) starts one.
-    pub comments: bool,
-    /// Its page offers Refresh (`refresh: true`), for a lens that reads
-    /// outside oxplow. The lens's own `refresh` does the same.
-    pub refresh: bool,
-    /// What draws it.
-    pub body: PageBody,
-    /// A component page's rail: a lens of its extension (`<ext>/<slug>`)
-    /// drawn beside the component, run with the page's view; a row's pick
-    /// writes the view, which the component hears.
-    pub rail: Option<String>,
 }
 
 /// The schemes a page may render besides oxplow's resources: a web page.
@@ -2463,97 +1882,6 @@ pub const RENDERED_SCHEMES: &[&str] = &["https", "http"];
 /// The namespace oxplow's own extension declares (`namespace: oxplow`): its
 /// commands are `oxplow.<area>.<verb>` and its pages `oxplow:oxplow/page?page=<id>`.
 pub const CORE_NAMESPACE: &str = "oxplow";
-
-/// What draws a page: a lens core renders through the kit, or — for the
-/// required bundled extension only, and shrinking — a built-in component
-/// core still renders (`built_in_pages::BUILT_IN_PAGES`).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
-#[serde(tag = "kind", rename_all = "camelCase")]
-pub enum PageBody {
-    Lens {
-        /// `<extension>/<slug>`.
-        lens: String,
-    },
-    BuiltIn {
-        /// A `BUILT_IN_PAGES` name.
-        name: String,
-    },
-    /// One of the extension's own custom components, filling the page
-    /// body: a custom page (`.context/extensions.md` "Pages").
-    Component {
-        /// `<extension>/<component id>`.
-        component: String,
-    },
-}
-
-impl ExtensionPage {
-    /// The lens it shows, when it is a lens page.
-    pub fn lens(&self) -> Option<&str> {
-        match &self.body {
-            PageBody::Lens { lens } => Some(lens),
-            _ => None,
-        }
-    }
-}
-
-/// A `pages:` entry as the manifest holds it.
-#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
-struct PageFile {
-    id: String,
-    title: String,
-    /// What its tab says, when not its `title`: `{{param.<name>}}` filled
-    /// from what it shows (a renderer's URI, a route's `params`).
-    #[serde(default)]
-    label: Option<String>,
-    #[serde(default)]
-    icon: Option<String>,
-    /// Its launcher section; leave it out for a page only opened from
-    /// elsewhere.
-    #[serde(default)]
-    category: Option<LauncherCategory>,
-    #[serde(default)]
-    keywords: Option<String>,
-    /// The params naming what it shows, in its URI's `?`; its lens's filters
-    /// and selections ride in the `#` view.
-    #[serde(default)]
-    params: Vec<String>,
-    /// A `number` lens of this extension whose value is the launcher badge.
-    #[serde(default)]
-    count: Option<String>,
-    /// A lens of this extension that draws the page …
-    #[serde(default)]
-    lens: Option<String>,
-    /// … or `oxplow:<name>`, a built-in (oxplow's own extension only).
-    #[serde(default)]
-    component: Option<String>,
-    /// A component page's rail: a lens of this extension drawn beside the
-    /// component, run with the page's view.
-    #[serde(default)]
-    rail: Option<String>,
-    /// The resources it renders — one or a list: `oxplow/file`, its own
-    /// `<extension>/<name>`, another extension's, or `https` / `http` (a
-    /// web page). A URI of one opens on it; without `for` it is a route.
-    #[serde(default, rename = "for")]
-    renders: Option<Renders>,
-    /// Which URIs of those it takes, by param: `present`, `absent`, or an
-    /// anchored pattern (`^git:`) the value matches.
-    #[serde(default)]
-    accepts: BTreeMap<String, String>,
-    /// What its resource opens on when the URI's view names no renderer:
-    /// only for a resource this extension declares, one per resource.
-    #[serde(default)]
-    default: bool,
-    /// Its tab leads the strip and isn't evicted (a renderer only).
-    #[serde(default)]
-    pinned: bool,
-    /// Its text takes comments, anchored to its URI.
-    #[serde(default)]
-    comments: bool,
-    /// Offer Refresh on it, for a lens that reads outside oxplow.
-    #[serde(default)]
-    refresh: bool,
-}
 
 /// A page's `for`: one resource or several.
 #[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
@@ -2595,33 +1923,7 @@ struct PanelFile {
     dock: bool,
 }
 
-/// A lens an extension mounts into a core page.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
-#[serde(rename_all = "camelCase")]
-pub struct LensSlot {
-    /// Which page region, from [`SLOTS`] (`diff.file.header`,
-    /// `vcs.commit.details`, …), or a document or dashboard lens's parts
-    /// (`<extension>/<slug>.sections`, `.tiles`); the lens takes the params
-    /// it offers.
-    pub slot: String,
-    pub lens_id: String,
-    /// Where it goes among the page's parts; `None` in a region.
-    pub at: Option<SlotAt>,
-    /// Its heading; else its lens's title.
-    pub title: Option<String>,
-    /// A tile's size; `None` outside a dashboard.
-    pub size: Option<TileSize>,
-}
-
-impl LensSlot {
-    /// Its contribution's local id, as the `n`th mount of its extension:
-    /// `<slot>-<n>`, a lens's `/` written `.` (`base.page.sections-0`).
-    pub fn local_id(&self, n: usize) -> String {
-        format!("{}-{n}", self.slot.replace('/', "."))
-    }
-}
-
-/// Where a lens comes from. An agent edits `source`, never `running`: a
+/// Where a viz comes from. An agent edits `source`, never `running`: a
 /// deployed extension runs a copy in the store that the next deploy
 /// replaces.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type)]
@@ -2642,107 +1944,51 @@ pub struct PageProvenance {
     pub bundled: bool,
 }
 
-/// A loaded lens.
+/// How a page's viz node draws its loader's rows: the viz, its role
+/// block, columns, row styling and actions. It runs no query of its own.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
-pub struct Lens {
-    /// `<extension>/<slug>`: the stable id used by `lens:` page refs,
-    /// `oxplow_run_lens` and `get_lens`.
+pub struct VizConfig {
+    /// `<extension>/<slug>`: the stable id of the page this viz is on.
     pub id: String,
     pub extension: String,
     pub slug: String,
     pub title: String,
-    pub description: String,
-    pub query: String,
-    pub viz: LensViz,
+    pub viz: Viz,
     pub params: Vec<PageParam>,
     pub columns: Vec<PageColumn>,
     pub empty: Option<String>,
     /// Columns a chart viz draws from.
-    pub chart: Option<LensChart>,
-    pub tree: Option<LensTree>,
-    /// `dashboard` only: its query's rows are its tiles.
-    pub tile: Option<LensTile>,
-    pub timeline: Option<LensTimeline>,
-    pub steps: Option<LensSteps>,
-    pub hunks: Option<LensHunks>,
-    pub code: Option<LensCode>,
-    pub diff: Option<LensDiff>,
-    pub editor: Option<LensEditor>,
-    pub embed: Option<LensEmbed>,
-    pub answer: Option<LensAnswer>,
-    pub terminal: Option<LensTerminal>,
-    pub markdown: Option<LensMarkdown>,
-    pub form: Option<LensForm>,
+    pub chart: Option<VizChart>,
+    pub tree: Option<VizTree>,
+    pub timeline: Option<VizTimeline>,
+    pub steps: Option<VizSteps>,
+    pub hunks: Option<VizHunks>,
+    pub code: Option<VizCode>,
+    pub diff: Option<VizDiff>,
+    pub editor: Option<VizEditor>,
+    pub embed: Option<VizEmbed>,
+    pub terminal: Option<VizTerminal>,
+    pub markdown: Option<VizMarkdown>,
+    pub form: Option<FormSpec>,
     /// For `custom`: the component and its props.
-    pub custom: Option<LensCustom>,
+    pub custom: Option<VizCustom>,
     /// For `list` / `table`: rows under a heading per value.
-    pub group: Option<LensGroup>,
+    pub group: Option<VizGroup>,
     /// For `list` / `table` / `tree`: a column whose truthy value
     /// highlights the row.
     pub emphasis: Option<String>,
     /// For `list` / `table`: a column whose integer value indents the row.
     pub depth: Option<String>,
-    /// For `document` its sections, for `dashboard` its tiles: its own,
-    /// then what other extensions mount, placed by their `at`.
-    pub parts: Vec<LensPart>,
-    /// For `document`: the param whose value names the one section in
-    /// view. It is a `filter` choice whose options are the sections (its
-    /// own and mounted ones, filled once mounts are placed).
-    pub view: Option<String>,
     /// It takes its page's whole height: its viz does
-    /// ([`LensViz::fills`]), or it is a document whose last section's lens
+    /// ([`Viz::fills`]), or it is a document whose last section's viz
     /// fills, so that section takes the height left (set once the catalog
     /// is placed, `fill_document_fills`).
     pub fills: bool,
-    /// Launcher section; `None` = "Dashboards".
-    pub launcher_category: Option<LauncherCategory>,
-    /// Not listed in the launcher.
-    pub hidden: bool,
-    /// Its page offers Refresh (`refresh: true`): it reads outside oxplow,
-    /// so nothing re-runs it for the person.
-    pub refresh: bool,
-    /// Commands the lens offers, as buttons or row actions (P6.B1).
+    /// Commands the viz offers, as buttons or row actions (P6.B1).
     pub actions: Vec<PageAction>,
-    /// When the lens needs attention (its panel's badge).
-    pub alert: Option<PageAlert>,
-    /// The capabilities (or their features) it needs (`needs:
-    /// [work_items]`): without them its run says so instead of running.
-    pub needs: Vec<String>,
     /// Where it comes from: the file that runs and the source to edit.
     pub origin: PageProvenance,
-    /// The MCP tool it is also offered as (`tool:`), prefixed with its
-    /// extension's namespace (`extension_commands::tool_name`): a call
-    /// runs it and returns its text rendering.
-    pub tool: Option<String>,
-}
-
-impl Lens {
-    /// The lenses its parts show (a document's sections, a dashboard's
-    /// tiles).
-    pub fn part_lenses(&self) -> impl Iterator<Item = &str> {
-        self.parts.iter().filter_map(|p| p.lens.as_deref())
-    }
-
-    /// The parts a run with `params` shows: a view document's one section
-    /// in view (its view param's value, else its default), every part of
-    /// any other lens. What its text resolves and renders, so the two stay
-    /// in step; the desktop's `viewedParts` is the same rule.
-    pub fn viewed_parts(&self, params: &BTreeMap<String, SqlCell>) -> Vec<&LensPart> {
-        let Some(view) = &self.view else {
-            return self.parts.iter().collect();
-        };
-        let default = self
-            .params
-            .iter()
-            .find(|p| &p.name == view)
-            .and_then(|p| p.default.clone());
-        let id = match params.get(view).cloned().or(default) {
-            Some(SqlCell::Text(t)) => t,
-            _ => return Vec::new(),
-        };
-        self.parts.iter().filter(|p| p.id == id).collect()
-    }
 }
 
 /// A loaded extension and anything wrong with it.
@@ -2756,8 +2002,8 @@ pub struct Extension {
     pub description: String,
     /// Repo-relative path of the extension folder.
     pub path: String,
-    /// Problems found while loading; empty when healthy. A lens that
-    /// failed to load is listed here and missing from `lenses`.
+    /// Problems found while loading; empty when healthy. A page that
+    /// failed to load is listed here and missing from `page_files`.
     pub errors: Vec<String>,
     /// Things worth fixing that don't stop it loading: an intent with no
     /// examples.
@@ -2766,7 +2012,6 @@ pub struct Extension {
     pub manifest_version: u32,
     /// Why it exists (required; `None` only when the manifest didn't load).
     pub intent: Option<Intent>,
-    pub lenses: Vec<Lens>,
     /// Its page files (`pages/*.yaml`; valid ones — invalid ones are in
     /// `errors`).
     #[serde(default)]
@@ -2775,7 +2020,7 @@ pub struct Extension {
     pub collectors: Vec<oxplow_config::collectors::CollectorSpec>,
     /// Declared providers (valid ones — invalid ones are in `errors`).
     pub providers: Vec<crate::providers::ProviderSpec>,
-    /// Web components its `custom` lenses render, sandboxed (valid ones).
+    /// Web components its `custom` viz nodes render, sandboxed (valid ones).
     pub custom_components: Vec<custom_components::CustomComponent>,
     /// Event types it declares (valid ones — the vocabulary registers
     /// them, `vocabulary_reactor`).
@@ -2822,8 +2067,6 @@ pub struct Extension {
     /// Left-nav panels it contributes (valid ones; invalid ones are in
     /// `errors`).
     pub panels: Vec<ExtensionPanel>,
-    /// Full pages it contributes (valid ones; invalid ones are in `errors`).
-    pub pages: Vec<ExtensionPage>,
     /// Commands it registers on the bus, each a Starlark script composing
     /// core commands (P6b; valid ones — invalid ones are in `errors`).
     pub commands: Vec<crate::extension_commands::ExtensionCommand>,
@@ -2888,15 +2131,6 @@ impl Extension {
     }
 }
 
-/// A slot mount naming a lens (what a lens mount reads once checked).
-struct SlotMountLens {
-    slot: String,
-    lens: String,
-    at: Option<SlotAt>,
-    title: Option<String>,
-    size: Option<TileSize>,
-}
-
 /// A page another extension's page shows at one of its slots.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
@@ -2914,8 +2148,8 @@ pub struct PageSlot {
 }
 
 impl PageSlot {
-    /// Its contribution id among the extension's slot mounts: the
-    /// `n`th, after its lens mounts (`<host>.<slot>-<n>`, `/` → `.`).
+    /// Its contribution id among the extension's slot mounts: the `n`th
+    /// (`<host>.<slot>-<n>`, `/` → `.`).
     pub fn local_id(&self, n: usize) -> String {
         format!("{}.{}-{n}", self.host.replace('/', "."), self.slot)
     }
@@ -2925,44 +2159,25 @@ impl PageSlot {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ExtensionUi {
-    /// Lenses mounted into core pages (valid ones).
-    pub slots: Vec<LensSlot>,
     /// Pages mounted at other pages' slots (valid ones).
     #[serde(default)]
     pub page_slots: Vec<PageSlot>,
     /// Labels from its models on core refs (valid ones).
     pub decorators: Vec<decorators::UiDecorator>,
-    /// Lenses that take the place of a core sub-component while its
+    /// Viz nodes that take the place of a core sub-component while its
     /// provider is the capability's active one (valid ones).
     pub replacements: Vec<replacements::UiReplacement>,
 }
 
-/// The result of running a lens.
+/// One viz node of a page run: its viz, the page's params and the rows
+/// of the loader it shows.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
-pub struct LensRun {
-    pub lens: Lens,
+pub struct VizRun {
+    pub config: VizConfig,
     /// The parameter values actually used (supplied or default).
     pub params: BTreeMap<String, SqlCell>,
     pub result: SqlQueryResult,
-    /// The lens's alert on this result, if it declares one.
-    pub alert: Option<AlertState>,
-    /// What's worth knowing about its data: a view it read comes from a
-    /// collector failures disabled (P7.C2), so it isn't being refreshed.
-    pub warnings: Vec<String>,
-    /// Set when the lens needs a capability that isn't active: it didn't
-    /// run, and says what it needs instead of showing nothing.
-    pub inactive: Option<LensInactive>,
-}
-
-/// A lens that didn't run for want of a capability.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
-#[serde(rename_all = "camelCase")]
-pub struct LensInactive {
-    /// The needs that aren't met (`work_items`, `snapshots.contents`).
-    pub needs: Vec<String>,
-    /// What a person reads.
-    pub message: String,
 }
 
 /// Load every extension of the project at `root` from its source:
@@ -3175,7 +2390,7 @@ pub fn load_deployed(
     resolve_catalog(out, settings)
 }
 
-/// Fill in where each of `ext`'s lenses comes from: the deployment it
+/// Fill in where each of `ext`'s pages comes from: the deployment it
 /// runs, and its source file when the source is here.
 fn locate(ext: &mut Extension, project: &Path, settings: &oxplow_config::ExtensionSettings) {
     let deployment = match &ext.deployment {
@@ -3194,10 +2409,18 @@ fn locate(ext: &mut Extension, project: &Path, settings: &oxplow_config::Extensi
             }
         }
     }
-    for lens in &mut ext.lenses {
-        let file = lens.origin.running.rsplit('/').next().unwrap_or_default();
-        lens.origin.source = source.as_ref().map(|dir| format!("{dir}/lenses/{file}"));
-        lens.origin.deployment = deployment.clone();
+    for page in &mut ext.page_files {
+        let file = page.origin.running.rsplit('/').next().unwrap_or_default();
+        let at = source.as_ref().map(|dir| format!("{dir}/pages/{file}"));
+        let mut place = |o: &mut PageProvenance| {
+            o.source = at.clone();
+            o.deployment = deployment.clone();
+        };
+        place(&mut page.origin);
+        page.view.for_each_origin(&mut place);
+        if let Some(rail) = page.rail.as_mut() {
+            rail.for_each_origin(&mut place);
+        }
     }
 }
 
@@ -3251,38 +2474,6 @@ pub(super) fn resolve_catalog(
     settings: &oxplow_config::ExtensionSettings,
 ) -> Vec<Extension> {
     out.sort_by(|a, b| a.name.cmp(&b.name).then(a.origin.cmp(&b.origin)));
-    // A document's or dashboard's part from ANOTHER extension resolves
-    // here, once every extension is loaded; a missing one is an error and
-    // the lens is dropped so every loaded lens renders.
-    let all_ids: Vec<String> = out
-        .iter()
-        .flat_map(|e| e.lenses.iter().map(|l| l.id.clone()))
-        .collect();
-    for ext in &mut out {
-        let mut bad = Vec::new();
-        for l in &ext.lenses {
-            for c in l.part_lenses() {
-                if !all_ids.iter().any(|id| id == c) {
-                    ext.errors.push(format!(
-                        "{}: part lens `{c}` isn't in any loaded extension",
-                        l.origin.running
-                    ));
-                    bad.push(l.id.clone());
-                }
-            }
-        }
-        ext.lenses.retain(|l| !bad.contains(&l.id));
-    }
-    refuse_part_cycles(&mut out);
-    for ext in &mut out {
-        ext.contributions.retain(|descriptor| {
-            descriptor.id.kind != oxplow_domain::contribution::ContributionKind::Lens
-                || ext
-                    .lenses
-                    .iter()
-                    .any(|lens| lens.slug == descriptor.id.local)
-        });
-    }
     refuse_requires_cycles(&mut out);
     let mut out: Vec<Extension> = out
         .into_iter()
@@ -3307,8 +2498,9 @@ pub(super) fn resolve_catalog(
         });
     }
     descriptors::check_catalog(&mut out);
+    warn_unplaced_mounts(&mut out);
     public_contracts::activate(&mut out);
-    let mut out: Vec<Extension> = out
+    let out: Vec<Extension> = out
         .into_iter()
         .map(|mut ext| {
             if ext.public_contracts.blocked {
@@ -3317,328 +2509,52 @@ pub(super) fn resolve_catalog(
             apply_disabled(ext, settings)
         })
         .collect();
-    place_lens_mounts(&mut out);
-    fill_view_options(&mut out);
-    fill_document_fills(&mut out);
-    warn_unread_row_columns(&mut out);
     out
 }
 
-/// Refuse the lenses whose parts lead back to themselves (A's section is
-/// B, B's is A): a page would hold itself without end. Each lens on a
-/// cycle is an error of its extension and is dropped.
-fn refuse_part_cycles(out: &mut [Extension]) {
-    let parts: BTreeMap<String, Vec<String>> = out
+/// A slot mount whose host page isn't loaded, or has no slot by that name,
+/// shows nowhere: a warning on the mounting extension (the host may only
+/// be off).
+fn warn_unplaced_mounts(out: &mut [Extension]) {
+    let slots: BTreeMap<String, Vec<String>> = out
         .iter()
-        .flat_map(|e| e.lenses.iter())
-        .map(|l| (l.id.clone(), l.part_lenses().map(str::to_string).collect()))
-        .collect();
-    // Whether `from` reaches `to` through parts, never walking a lens twice.
-    let reaches = |from: &str, to: &str| -> bool {
-        let mut seen = std::collections::BTreeSet::new();
-        let mut stack = vec![from.to_string()];
-        while let Some(at) = stack.pop() {
-            for next in parts.get(&at).into_iter().flatten() {
-                if next == to {
-                    return true;
-                }
-                if seen.insert(next.clone()) {
-                    stack.push(next.clone());
-                }
-            }
-        }
-        false
-    };
-    let cyclic: Vec<String> = parts.keys().filter(|id| reaches(id, id)).cloned().collect();
-    for ext in out.iter_mut() {
-        for l in ext.lenses.iter().filter(|l| cyclic.contains(&l.id)) {
-            ext.errors.push(format!(
-                "{}: its parts lead back to `{}`; a page can't hold itself",
-                l.origin.running, l.id
-            ));
-        }
-        ext.lenses.retain(|l| !cyclic.contains(&l.id));
-    }
-}
-
-/// A view document's view param takes its sections as its choices, its
-/// own and the mounted ones: each part's id, labelled by its title, else
-/// its lens's title, else its id. Replaced, never added to: a catalog is
-/// resolved again from resolved extensions.
-/// A document fills when the lens of its last part does (mounts placed,
-/// so a mounted last section counts). Documents nest, and part cycles
-/// are refused before this, so it settles in as many rounds as the
-/// deepest nesting. A view document shows one section at a time, so
-/// which part is last says nothing: it doesn't fill.
-fn fill_document_fills(out: &mut [Extension]) {
-    loop {
-        let fills: BTreeMap<String, bool> = out
-            .iter()
-            .flat_map(|e| e.lenses.iter())
-            .map(|l| (l.id.clone(), l.fills))
-            .collect();
-        let mut changed = false;
-        for lens in out.iter_mut().flat_map(|e| e.lenses.iter_mut()) {
-            if lens.viz != LensViz::Document || lens.view.is_some() || lens.fills {
-                continue;
-            }
-            let last = lens.parts.last().and_then(|p| p.lens.as_ref());
-            if last.is_some_and(|id| fills.get(id) == Some(&true)) {
-                lens.fills = true;
-                changed = true;
-            }
-        }
-        if !changed {
-            break;
-        }
-    }
-}
-
-fn fill_view_options(out: &mut [Extension]) {
-    let titles: BTreeMap<String, String> = out
-        .iter()
-        .flat_map(|e| e.lenses.iter())
-        .map(|l| (l.id.clone(), l.title.clone()))
-        .collect();
-    for lens in out.iter_mut().flat_map(|e| e.lenses.iter_mut()) {
-        let Some(view) = lens.view.clone() else {
-            continue;
-        };
-        let options: Vec<LensParamOption> = lens
-            .parts
-            .iter()
-            .map(|part| LensParamOption {
-                value: part.id.clone(),
-                label: part
-                    .title
-                    .clone()
-                    .filter(|t| !t.is_empty())
-                    .or_else(|| part.lens.as_ref().and_then(|l| titles.get(l).cloned()))
-                    .unwrap_or_else(|| part.id.clone()),
-            })
-            .collect();
-        if let Some(p) = lens.params.iter_mut().find(|p| p.name == view) {
-            p.options = options;
-        }
-    }
-}
-
-/// A composite's row names a value its parts take as params: one none of
-/// its parts (its own and the mounted ones, once placed) declares is read
-/// by nothing. Said only when every part's lens is loaded.
-fn warn_unread_row_columns(out: &mut [Extension]) {
-    let params: BTreeMap<String, Vec<String>> = out
-        .iter()
-        .flat_map(|e| e.lenses.iter())
-        .map(|l| {
-            (
-                l.id.clone(),
-                l.params.iter().map(|p| p.name.clone()).collect(),
-            )
+        .filter(|e| e.enabled)
+        .flat_map(|e| e.page_files.iter())
+        .map(|p| {
+            let names = p
+                .nodes()
+                .into_iter()
+                .filter_map(|n| match &n.kind {
+                    crate::pages::schema::NodeKind::Slot { name } => Some(name.clone()),
+                    _ => None,
+                })
+                .collect();
+            (p.id.clone(), names)
         })
         .collect();
-    for ext in out.iter_mut() {
-        // The columns a page's label reads off a lens's row.
-        let labelled: BTreeMap<String, Vec<String>> = ext
-            .pages
-            .iter()
-            .filter_map(|p| match &p.body {
-                PageBody::Lens { lens } => {
-                    Some((lens.clone(), label_row_columns(p.label.as_deref())))
-                }
-                _ => None,
-            })
-            .collect();
+    for ext in out.iter_mut().filter(|e| e.enabled) {
         let warnings: Vec<String> = ext
-            .lenses
+            .ui
+            .page_slots
             .iter()
-            .filter(|l| matches!(l.viz, LensViz::Document | LensViz::Dashboard))
-            .flat_map(|l| {
-                let parts: Option<Vec<&Vec<String>>> =
-                    l.part_lenses().map(|p| params.get(p)).collect();
-                let read_by_label = labelled.get(&l.id).cloned().unwrap_or_default();
-                let taken = move |name: &str| {
-                    read_by_label.iter().any(|x| x == name)
-                        || parts
-                            .as_deref()
-                            .is_none_or(|p| p.iter().any(|ps| ps.iter().any(|x| x == name)))
-                };
-                l.columns
-                    .iter()
-                    .filter(move |c| !taken(&c.key))
-                    .map(|c| {
-                        format!(
-                            "{}: column `{}` of the row is a param of none of its parts — \
-                             remove it, or declare it on the part that reads it",
-                            l.origin.running, c.key
-                        )
-                    })
-                    .collect::<Vec<_>>()
+            .filter_map(|m| match slots.get(&m.host) {
+                None => Some(format!(
+                    "{}/extension.yaml: slot `{}.{}` mounts `{}` on page `{}`, which isn't loaded; it shows nowhere",
+                    ext.path, m.host, m.slot, m.page, m.host
+                )),
+                Some(names) if !names.contains(&m.slot) => Some(format!(
+                    "{}/extension.yaml: page `{}` has no slot `{}` (its slots: {}); `{}` shows nowhere",
+                    ext.path,
+                    m.host,
+                    m.slot,
+                    if names.is_empty() { "none".to_string() } else { names.join(", ") },
+                    m.page
+                )),
+                Some(_) => None,
             })
             .collect();
         ext.warnings.extend(warnings);
     }
-}
-
-/// Mounts among another lens's parts (`<extension>/<slug>.sections` of a
-/// document, `.tiles` of a dashboard), once the catalog is final: each is
-/// checked against that lens and placed among its parts by its `at`, so
-/// the lens's page, its text and `get_lens` all show it. A bad one is an
-/// error of the extension that mounts it, and goes.
-fn place_lens_mounts(out: &mut [Extension]) {
-    // A catalog resolved again from resolved extensions places its mounts
-    // afresh: the ones placed before go first.
-    for lens in out.iter_mut().flat_map(|e| e.lenses.iter_mut()) {
-        lens.parts.retain(|p| p.from.is_none());
-    }
-    struct Target {
-        params: Vec<String>,
-        /// The names of its query's row (`columns:`), given to its parts.
-        row: Vec<String>,
-        kind: PartsKind,
-        ids: Vec<String>,
-        /// A view document: each section is a page of its own, so a mount
-        /// needn't read any of the document's params.
-        view: bool,
-    }
-    let targets: BTreeMap<String, Target> = out
-        .iter()
-        .flat_map(|e| e.lenses.iter())
-        .filter_map(|l| {
-            let kind = match l.viz {
-                LensViz::Document => PartsKind::Sections,
-                LensViz::Dashboard => PartsKind::Tiles,
-                _ => return None,
-            };
-            Some((
-                l.id.clone(),
-                Target {
-                    params: l.params.iter().map(|p| p.name.clone()).collect(),
-                    row: l.columns.iter().map(|c| c.key.clone()).collect(),
-                    kind,
-                    ids: l.parts.iter().map(|p| p.id.clone()).collect(),
-                    view: l.view.is_some(),
-                },
-            ))
-        })
-        .collect();
-    let mut placed: BTreeMap<String, Vec<(LensPart, SlotAt)>> = BTreeMap::new();
-    for ext in out.iter_mut() {
-        let manifest = format!("{}/extension.yaml", ext.path);
-        let mut dropped = Vec::new();
-        for (index, mount) in ext.ui.slots.iter().enumerate() {
-            let Some((target, kind)) = lens_slot_target(&mount.slot) else {
-                continue;
-            };
-            let Some(lens) = ext.lenses.iter().find(|l| l.id == mount.lens_id) else {
-                continue;
-            };
-            let checked = match targets.get(target) {
-                None => Err(format!(
-                    "slot `{}` names lens `{target}`, which isn't a loaded document or dashboard",
-                    mount.slot
-                )),
-                Some(t) if t.kind != kind => Err(format!(
-                    "slot `{}`: lens `{target}` is a {}, so its parts are at `{target}.{}`",
-                    mount.slot,
-                    if t.kind == PartsKind::Sections {
-                        "document"
-                    } else {
-                        "dashboard"
-                    },
-                    if t.kind == PartsKind::Sections {
-                        "sections"
-                    } else {
-                        "tiles"
-                    },
-                )),
-                Some(t) => {
-                    fn offered(names: &[String], view: bool) -> Vec<&str> {
-                        if view {
-                            Vec::new()
-                        } else {
-                            names.iter().map(String::as_str).collect()
-                        }
-                    }
-                    let params = offered(&t.params, t.view);
-                    let row = offered(&t.row, t.view);
-                    let ids: Vec<&str> = t.ids.iter().map(String::as_str).collect();
-                    mount_problem(mount, lens, &params, &row, kind, &ids)
-                }
-            };
-            match checked {
-                Err(problem) => {
-                    ext.errors.push(format!("{manifest}: {problem}"));
-                    dropped.push(index);
-                }
-                Ok(warning) => {
-                    ext.warnings
-                        .extend(warning.map(|w| format!("{manifest}: {w}")));
-                    placed.entry(target.to_string()).or_default().push((
-                        LensPart {
-                            id: mount.lens_id.clone(),
-                            title: mount.title.clone(),
-                            lens: Some(mount.lens_id.clone()),
-                            markdown: None,
-                            size: mount.size,
-                            replaceable: None,
-                            from: Some(ext.name.clone()),
-                        },
-                        mount.at.clone().unwrap_or_default(),
-                    ));
-                }
-            }
-        }
-        for index in dropped.into_iter().rev() {
-            let mount = ext.ui.slots.remove(index);
-            let id = oxplow_domain::contribution::ContributionId::new(
-                &ext.name,
-                oxplow_domain::contribution::ContributionKind::Slot,
-                &mount.local_id(index),
-            );
-            ext.contributions.retain(|d| d.id != id);
-        }
-    }
-    for lens in out.iter_mut().flat_map(|e| e.lenses.iter_mut()) {
-        if let Some(mounts) = placed.remove(&lens.id) {
-            lens.parts = place_parts(std::mem::take(&mut lens.parts), mounts);
-        }
-    }
-}
-
-/// A page's own parts with mounts placed among them: `start` ones first,
-/// each `before`/`after` one beside its part, `end` ones (and any beside a
-/// part the page doesn't have) last; mounts at one place keep their order.
-/// The UI places mounts into core pages the same way (`kit/placeParts.ts`).
-fn place_parts(own: Vec<LensPart>, mounts: Vec<(LensPart, SlotAt)>) -> Vec<LensPart> {
-    let ids: Vec<String> = own.iter().map(|p| p.id.clone()).collect();
-    let mounts: Vec<(LensPart, SlotAt)> = mounts
-        .into_iter()
-        .map(|(part, at)| match at.anchor() {
-            Some(id) if !ids.iter().any(|i| i == id) => (part, SlotAt::default()),
-            _ => (part, at),
-        })
-        .collect();
-    let at = |pred: &dyn Fn(&SlotAt) -> bool| -> Vec<LensPart> {
-        mounts
-            .iter()
-            .filter(|(_, a)| pred(a))
-            .map(|(p, _)| p.clone())
-            .collect()
-    };
-    let mut out = at(&|a| *a == SlotAt::Edge(SlotEdge::Start));
-    for part in own {
-        let id = part.id.clone();
-        out.extend(at(
-            &|a| matches!(a, SlotAt::Before { before } if *before == id),
-        ));
-        out.push(part);
-        out.extend(at(
-            &|a| matches!(a, SlotAt::After { after } if *after == id),
-        ));
-    }
-    out.extend(at(&|a| *a == SlotAt::default()));
-    out
 }
 
 /// A catalog block's error as the manifest's, not project.yaml's.
@@ -3725,7 +2641,7 @@ pub(crate) trait ExtensionFiles {
     fn paths(&self) -> std::io::Result<Vec<String>>;
     /// A file's bytes, by path inside the extension folder.
     fn bytes(&self, rel: &str) -> std::io::Result<Vec<u8>>;
-    /// File names directly inside `dir` (e.g. `lenses`).
+    /// File names directly inside `dir` (e.g. `pages`).
     fn list(&self, dir: &str) -> Vec<String>;
     /// What the folder `rel` holds, for a custom component's bundle;
     /// `None` when it isn't a folder (or the files aren't on disk).
@@ -4021,7 +2937,7 @@ pub struct ReviewSide<'a> {
 
 /// What going from `before` (none: a first install) to `after` would
 /// change: each side on its own overlay — `after` checked,
-/// `before` only read — then compared: lenses, models and their rows,
+/// `before` only read — then compared: viz nodes, models and their rows,
 /// collectors and their outputs, providers, config. `after.extension`
 /// gets its check's errors.
 pub async fn impact_between(
@@ -4045,13 +2961,13 @@ pub async fn impact_between(
         Some(b) => Some(read_side(layer, catalog, root, &mut b.extension).await),
         None => None,
     };
-    let no_runs = LensRuns::new();
+    let no_runs = crate::pages::checks::PageChecks::new();
     crate::extension_impact::impact(
         layer,
         before.as_ref().map(|b| crate::extension_impact::Version {
             extension: &b.extension,
             read: b.read,
-            lenses: prepared_before.as_ref().map_or(&no_runs, |p| &p.lenses),
+            pages: prepared_before.as_ref().map_or(&no_runs, |p| &p.pages),
             overlay: prepared_before
                 .as_ref()
                 .map_or(&[], |p| p.overlay.as_slice()),
@@ -4059,7 +2975,7 @@ pub async fn impact_between(
         crate::extension_impact::Version {
             extension: &after.extension,
             read: after.read,
-            lenses: &prepared_after.lenses,
+            pages: &prepared_after.pages,
             overlay: &prepared_after.overlay,
         },
     )
@@ -4130,7 +3046,6 @@ pub(crate) fn empty_extension(name: &str, path: &str, origin: &str) -> Extension
         warnings: Vec::new(),
         manifest_version: manifest_v2::CURRENT,
         intent: None,
-        lenses: Vec::new(),
         page_files: Vec::new(),
         collectors: Vec::new(),
         providers: Vec::new(),
@@ -4150,7 +3065,6 @@ pub(crate) fn empty_extension(name: &str, path: &str, origin: &str) -> Extension
         models: Vec::new(),
         metrics: Vec::new(),
         panels: Vec::new(),
-        pages: Vec::new(),
         commands: Vec::new(),
         jobs: Vec::new(),
         ai_profiles: Vec::new(),
@@ -4293,7 +3207,6 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
     let panel_files = m.panels.clone();
     let decorator_files = m.ui.decorators.clone();
     let replacement_files = m.ui.replacements.clone();
-    let page_files = m.pages.clone();
     let resource_files = m.resources.clone();
     let slot_files = {
         if let Some(v) = m.event_types.as_ref() {
@@ -4701,97 +3614,17 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         ext.errors.extend(errors);
         slots
     };
-    let mut lens_files: Vec<String> = files
+    // Lenses are pages now: an old `lenses/` folder is named, never read.
+    if files
         .list("lenses")
-        .into_iter()
-        .filter(|f| f.ends_with(".yaml") || f.ends_with(".yml"))
-        .collect();
-    lens_files.sort();
-    for file in lens_files {
-        let slug = file
-            .trim_end_matches(".yaml")
-            .trim_end_matches(".yml")
-            .to_string();
-        let lens_rel = format!("{rel}/lenses/{file}");
-        let parsed = files
-            .read(&format!("lenses/{file}"))
-            .ok_or_else(|| "unreadable".to_string())
-            .and_then(|t| serde_yaml::from_str::<LensFile>(&t).map_err(|e| e.to_string()))
-            .and_then(|mut l| {
-                let alert = l.alert.take().map(AlertFile::into_alert).transpose()?;
-                for need in &l.needs {
-                    oxplow_domain::capability::check_need(need)?;
-                }
-                let actions = parse_actions(
-                    std::mem::take(&mut l.actions),
-                    &l.params,
-                    l.group.is_some(),
-                    holds_one_row(l.viz, !l.query.trim().is_empty()),
-                )?;
-                let parts = parse_parts(
-                    name,
-                    l.viz,
-                    std::mem::take(&mut l.sections),
-                    std::mem::take(&mut l.tiles),
-                    l.tile.is_some(),
-                )?;
-                let tool = l
-                    .tool
-                    .take()
-                    .map(|t| crate::extension_commands::tool_name(&ext.namespace, &t))
-                    .transpose()?;
-                Ok((l, alert, actions, tool, parts))
-            });
-        match parsed {
-            Ok((l, alert, actions, tool, parts)) => ext.lenses.push(Lens {
-                tool,
-                id: format!("{name}/{slug}"),
-                extension: name.to_string(),
-                slug,
-                title: l.title,
-                description: l.description,
-                query: l.query,
-                viz: l.viz,
-                params: typed(view_param(l.params, l.view.as_deref())),
-                columns: l.columns,
-                empty: l.empty,
-                chart: l.chart,
-                tree: l.tree,
-                tile: l.tile,
-                timeline: l.timeline,
-                steps: l.steps,
-                hunks: l.hunks,
-                code: l.code,
-                diff: l.diff,
-                editor: l.editor,
-                embed: l.embed,
-                answer: l.answer,
-                terminal: l.terminal,
-                markdown: l.markdown,
-                form: l.form,
-                custom: l.custom,
-                group: l.group,
-                emphasis: l.emphasis,
-                depth: l.depth,
-                parts,
-                view: l.view,
-                fills: l.viz.fills(),
-                launcher_category: l.launcher.map(|la| la.category),
-                hidden: l.hidden,
-                refresh: l.refresh,
-                actions,
-                alert,
-                needs: l.needs,
-                origin: PageProvenance {
-                    extension: name.to_string(),
-                    source: None,
-                    running: lens_rel,
-                    deployment: None,
-                    bundled: origin == "bundled",
-                },
-            }),
-            Err(e) => ext.errors.push(format!("{lens_rel}: {e}")),
-        }
+        .iter()
+        .any(|f| f.ends_with(".yaml") || f.ends_with(".yml"))
+    {
+        ext.errors.push(format!(
+            "{rel}/lenses/: lenses are pages now — rewrite each as `pages/<slug>.yaml` \
+             (metadata, `data:` loaders and a `view:`; the oxplow-extension skill's \
+             page format) and remove the folder"
+        ));
     }
 
     let mut page_names: Vec<String> = files
@@ -4815,214 +3648,72 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         match parsed {
             Ok(mut page) => {
                 page.origin.bundled = origin == "bundled";
+                qualify_page_refs(&mut page);
+                ext.warnings.extend(
+                    crate::pages::checks::layout_warnings(&page)
+                        .into_iter()
+                        .map(|w| format!("{page_rel}: {w}")),
+                );
                 ext.page_files.push(page);
             }
             Err(e) => ext.errors.push(format!("{page_rel}: {e}")),
         }
     }
-
-    // A component's assets in this extension must be its lenses.
-    let ids: Vec<String> = ext.lenses.iter().map(|l| l.id.clone()).collect();
-    let mut missing_assets = Vec::new();
-    for c in &ext.custom_components {
-        let prefix = format!("{name}/");
-        if let Some(a) = c
-            .assets
-            .iter()
-            .find(|a| a.starts_with(&prefix) && !ids.contains(a))
-        {
-            ext.errors.push(at(
-                &file,
-                entry_line(&manifest, "custom_components", "id", &c.id),
-                format!(
-                    "custom component `{}`: asset `{a}` isn't in this extension's lenses/",
-                    c.id
-                ),
-            ));
-            missing_assets.push(c.id.clone());
-        }
-    }
-    ext.custom_components
-        .retain(|c| !missing_assets.contains(&c.id));
-
-    // A column's `expand` and a param's `options_from` name a lens by slug
-    // or `<extension>/<slug>`; the loaded lens has the whole id.
-    for l in &mut ext.lenses {
-        let extension = l.extension.clone();
-        for c in &mut l.columns {
-            if let Some(e) = c.expand.as_mut().filter(|e| !e.contains('/')) {
-                *e = format!("{extension}/{e}");
+    let slugs: Vec<String> = ext.page_files.iter().map(|p| p.slug.clone()).collect();
+    ext.page_files.retain(|page| {
+        match page_icon_problem(page).or_else(|| page_ref_problem(page, &slugs)) {
+            Some(e) => {
+                ext.errors.push(format!("{}: {e}", page.origin.running));
+                false
             }
+            None => true,
         }
-        for p in &mut l.params {
-            if let Some(o) = p.options_from.as_mut().filter(|o| !o.contains('/')) {
-                *o = format!("{extension}/{o}");
-            }
-        }
-    }
-    // Drop lenses whose viz lacks what it needs, so every loaded lens renders.
-    let components: Vec<String> = ext.custom_components.iter().map(|c| c.id.clone()).collect();
-    let mut bad = Vec::new();
-    for l in &ext.lenses {
-        if let Some(problem) = shape_problem(l, &ids, &components)
-            .or_else(|| choices_problem(l, &ids))
-            .or_else(|| expand_problem(l, &ids))
-            .or_else(|| options_from_problem(l, &ids))
-        {
-            ext.errors.push(format!("{}: {problem}", l.origin.running));
-            bad.push(l.id.clone());
-        }
-    }
-    ext.lenses.retain(|l| !bad.contains(&l.id));
-    let selects: Vec<(String, String)> = ext
-        .lenses
-        .iter()
-        .filter_map(|l| {
-            Some((
-                l.id.clone(),
-                format!("{}: {}", l.origin.running, selects_problem(l, &ext.lenses)?),
-            ))
-        })
-        .collect();
-    for (_, problem) in &selects {
-        ext.errors.push(problem.clone());
-    }
-    ext.lenses
-        .retain(|l| !selects.iter().any(|(id, _)| id == &l.id));
-    let replaceable: Vec<(String, String)> = ext
-        .lenses
-        .iter()
-        .filter_map(|l| {
-            Some((
-                l.id.clone(),
-                format!(
-                    "{}: {}",
-                    l.origin.running,
-                    replaceable_problem(l, &ext.lenses)?
-                ),
-            ))
-        })
-        .collect();
-    for (_, problem) in &replaceable {
-        ext.errors.push(problem.clone());
-    }
-    ext.lenses
-        .retain(|l| !replaceable.iter().any(|(id, _)| id == &l.id));
-    let selected: Vec<Vec<String>> = ext
-        .lenses
-        .iter()
-        .map(|l| selected(l, &ext.lenses))
-        .collect();
-    for (lens, names) in ext.lenses.iter_mut().zip(selected) {
-        for p in &mut lens.params {
-            p.role = Some(if names.contains(&p.name) {
-                ParamRole::Selection
-            } else {
-                p.role.unwrap_or(ParamRole::Resource)
-            });
-        }
-    }
+    });
 
     for s in slot_files {
-        let (lens_slug, page_slug) = match (&s.lens, &s.page) {
-            (Some(l), None) => (l.clone(), None),
-            (None, Some(p)) => (String::new(), Some(p.clone())),
-            _ => {
-                ext.errors.push(at(
-                    &file,
-                    key_line(&manifest, "ui"),
-                    format!("slot `{}` mounts a `lens` or a `page`, one of them", s.slot),
-                ));
-                continue;
-            }
-        };
-        if let Some(page) = page_slug {
-            let mount_line = entry_line(&manifest, "ui", "page", &page);
-            let Some((host, slot_name)) = s.slot.rsplit_once('.') else {
-                ext.errors.push(at(
-                    &file,
-                    mount_line,
-                    format!(
-                        "slot `{}`: a page mounts at a page's slot, `<extension>/<page>.<slot>`",
-                        s.slot
-                    ),
-                ));
-                continue;
-            };
-            if !ext.page_files.iter().any(|p| p.slug == page) {
-                ext.errors.push(at(
-                    &file,
-                    mount_line,
-                    format!(
-                        "slot `{}` mounts page `{page}`, which isn't in pages/",
-                        s.slot
-                    ),
-                ));
-                continue;
-            }
-            ext.ui.page_slots.push(PageSlot {
-                host: host.to_string(),
-                slot: slot_name.to_string(),
-                page: format!("{name}/{page}"),
-                at: s.at,
-                title: s.title,
-                size: s.size,
-            });
-            continue;
-        }
-        let s = SlotMountLens {
-            slot: s.slot,
-            lens: lens_slug,
-            at: s.at,
-            title: s.title,
-            size: s.size,
-        };
-        let mount_line = entry_line(&manifest, "ui", "lens", &s.lens);
-        let Some(lens) = ext.lenses.iter().find(|l| l.slug == s.lens) else {
+        let page = s.page.clone();
+        let mount_line = entry_line(&manifest, "ui", "page", &page);
+        if !ext.page_files.iter().any(|p| p.slug == page) {
             ext.errors.push(at(
                 &file,
                 mount_line,
                 format!(
-                    "slot `{}` mounts lens `{}`, which isn't in lenses/",
-                    s.slot, s.lens
+                    "slot `{}` mounts page `{page}`, which isn't in pages/",
+                    s.slot
                 ),
             ));
             continue;
-        };
-        let mount = LensSlot {
-            slot: s.slot,
-            lens_id: lens.id.clone(),
-            at: s.at,
-            title: s.title,
-            size: s.size,
-        };
-        // Another lens's parts resolve once every extension is loaded
-        // (`place_lens_mounts`).
-        if lens_slot_target(&mount.slot).is_some() {
-            ext.ui.slots.push(mount);
-            continue;
         }
-        let Some(spec) = SlotSpec::core(&mount.slot) else {
+        let Some((host, slot_name)) = s.slot.rsplit_once('.') else {
             ext.errors.push(at(
                 &file,
                 mount_line,
                 format!(
-                    "unknown slot `{}` (known: {}, or a document's `<extension>/<lens>.sections` \
-                     and a dashboard's `<extension>/<lens>.tiles`)",
-                    mount.slot,
-                    SLOTS.iter().map(|s| s.name).collect::<Vec<_>>().join(", ")
+                    "slot `{}`: a page mounts at a page's slot, `<extension>/<page>.<slot>`",
+                    s.slot
                 ),
             ));
             continue;
         };
-        match mount_problem(&mount, lens, spec.params, &[], PartsKind::Region, &[]) {
-            Err(problem) => ext.errors.push(at(&file, mount_line, problem)),
-            Ok(warning) => {
-                ext.warnings
-                    .extend(warning.map(|w| at(&file, mount_line, w)));
-                ext.ui.slots.push(mount);
-            }
+        if !host.contains('/') {
+            ext.errors.push(at(
+                &file,
+                mount_line,
+                format!(
+                    "unknown slot `{}`: a page mounts at a page's slot, `<extension>/<page>.<slot>`",
+                    s.slot
+                ),
+            ));
+            continue;
         }
+        ext.ui.page_slots.push(PageSlot {
+            host: host.to_string(),
+            slot: slot_name.to_string(),
+            page: format!("{name}/{page}"),
+            at: s.at,
+            title: s.title,
+            size: s.size,
+        });
     }
     if let Some(v) = decorator_files {
         let (decorators, errors) =
@@ -5036,7 +3727,6 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         let (replaced, errors) = replacements::parse_replacements(
             name,
             &capabilities,
-            &ext.lenses,
             &ext.page_files,
             &v,
             &file,
@@ -5058,36 +3748,19 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         ext.resources = resources;
         ext.errors.extend(errors);
     }
-    // After resources: a page renders them.
-    if let Some(v) = page_files {
-        let (pages, errors) = parse_pages(
-            name,
-            &ext.namespace,
-            &ext.lenses,
-            &ext.custom_components,
-            &ext.resources,
-            v,
-        );
-        ext.pages = pages;
-        let lines = item_lines(&manifest, "pages");
-        ext.errors.extend(errors.into_iter().map(|(i, e)| {
-            let line = i.and_then(|i| lines.get(i).copied());
-            at(&file, line.or(key_line(&manifest, "pages")), e)
-        }));
+    // After resources: a page that renders one is checked against it.
+    let mut checked: Vec<crate::pages::schema::Page> = Vec::new();
+    for page in std::mem::take(&mut ext.page_files) {
+        let checks = renderer_problem(name, &ext.namespace, &ext.resources, &page, &checked)
+            .and_then(|()| component_problem(&page, &ext.custom_components));
+        match checks {
+            Ok(()) => checked.push(page),
+            Err(e) => ext.errors.push(format!("{}: {e}", page.origin.running)),
+        }
     }
-    // Once the pages are known: a renderer's lens is told by its page.
-    let layout: Vec<String> = ext
-        .lenses
-        .iter()
-        .flat_map(|l| {
-            layout_warnings(l, &ext.lenses, renders_a_resource(&ext, l))
-                .into_iter()
-                .map(|w| format!("{}: {w}", l.origin.running))
-        })
-        .collect();
-    ext.warnings.extend(layout);
+    ext.page_files = checked;
     if let Some(v) = panel_files {
-        let (panels, errors) = parse_panels(name, &ext.lenses, &ext.page_files, v);
+        let (panels, errors) = parse_panels(name, &ext.page_files, v);
         ext.panels = panels;
         let lines = item_lines(&manifest, "panels");
         ext.errors.extend(errors.into_iter().map(|(i, e)| {
@@ -5258,19 +3931,23 @@ fn check_permissions(ext: &mut Extension, files: &dyn ExtensionFiles, file: &str
     ext.errors.extend(errors);
 }
 
-/// The SQL of `ext` that may read its own configuration — a model, a lens, an
-/// advisory — with where each is declared.
+/// The SQL of `ext` that may read its own configuration — a model, a page's
+/// loader, an advisory — with where each is declared.
 fn config_sql(ext: &Extension) -> Vec<(String, &str)> {
     let models = ext.models.iter().map(|m| (m.file.clone(), m.sql.as_str()));
-    let lenses = ext
-        .lenses
-        .iter()
-        .map(|l| (l.origin.running.clone(), l.query.as_str()));
+    let pages = ext.page_files.iter().flat_map(|p| {
+        p.loaders.iter().filter_map(|d| match &d.loader {
+            crate::pages::schema::Loader::Sql { sql, .. } => {
+                Some((p.origin.running.clone(), sql.as_str()))
+            }
+            _ => None,
+        })
+    });
     let advisories = ext
         .advisories
         .iter()
         .map(|a| (format!("advisory `{}`", a.id), a.query.as_str()));
-    models.chain(lenses).chain(advisories).collect()
+    models.chain(pages).chain(advisories).collect()
 }
 
 /// A `config('/pointer')` read names a scalar key the extension's own
@@ -5325,244 +4002,207 @@ fn config_key_type<'a>(schema: &'a serde_json::Value, pointer: &str) -> Option<&
     node.get("type")?.as_str()
 }
 
-/// Check the manifest's `pages:`: a kebab-case, unique id, a launcher
-/// category, and a lens that exists. Each error names the entry's index.
-fn parse_pages(
-    extension: &str,
-    namespace: &str,
-    lenses: &[Lens],
-    components: &[custom_components::CustomComponent],
-    resources: &[crate::extension_resources::ExtensionResource],
-    raw: serde_yaml::Value,
-) -> (Vec<ExtensionPage>, Vec<(Option<usize>, String)>) {
-    let mut pages: Vec<ExtensionPage> = Vec::new();
-    let mut errors = Vec::new();
-    let Some(list) = raw.as_sequence() else {
-        return (pages, vec![(None, "`pages` must be a list".into())]);
-    };
-    // Oxplow's own pages are core-named, as its commands are.
-    let core_named = namespace == CORE_NAMESPACE;
-    for (i, v) in list.iter().enumerate() {
-        let p = match serde_yaml::from_value::<PageFile>(v.clone()) {
-            Ok(p) => p,
-            Err(e) => {
-                errors.push((Some(i), format!(
-                    "pages: {e} (a page is `{{ id, title, icon?, category?, keywords?, params?, count?, for?, accepts?, default?, pinned?, comments?, refresh?, lens | component, rail? }}`; a category is one of Work, Code, Git, Activity, Knowledge, Data, Dashboards, System)"
-                )));
-                continue;
+/// Name each page `page` refers to by slug — a param's `options_from`, a
+/// column's `expand`, a form field's `from` — whole, as one of its own
+/// extension's: `<extension>/<slug>`, what every reader looks it up by.
+fn qualify_page_refs(page: &mut crate::pages::schema::Page) {
+    use crate::pages::schema::{Node, NodeKind};
+    fn whole(extension: &str, id: &mut String) {
+        if !id.contains('/') {
+            *id = format!("{extension}/{id}");
+        }
+    }
+    fn params(extension: &str, params: &mut [PageParam]) {
+        for p in params {
+            if let Some(from) = &mut p.options_from {
+                whole(extension, from);
             }
-        };
-        let err = |e: String| (Some(i), format!("page `{}`: {e}", p.id));
-        let body = match (&p.lens, &p.component) {
-            (Some(_), Some(_)) | (None, None) => {
-                Err("needs exactly one of `lens` and `component`".to_string())
-            }
-            (Some(lens), None) => {
-                if lenses.iter().any(|l| &l.slug == lens) {
-                    Ok(PageBody::Lens {
-                        lens: format!("{extension}/{lens}"),
-                    })
-                } else {
-                    Err(format!("its lens `{lens}` isn't in lenses/"))
+        }
+    }
+    fn walk(extension: &str, node: &mut Node) {
+        match &mut node.kind {
+            NodeKind::Stack { children }
+            | NodeKind::Grid { children }
+            | NodeKind::Switch { children, .. } => {
+                for c in children {
+                    walk(extension, c);
                 }
             }
-            (None, Some(c)) if c.starts_with("oxplow:") => {
-                if !crate::bundled_extensions::is_required(extension) {
-                    Err(format!(
-                        "`{c}` is a built-in page, which only oxplow's own extension declares; draw it with a lens"
-                    ))
-                } else {
-                    match crate::built_in_pages::built_in(c) {
-                        Some(name) => Ok(PageBody::BuiltIn {
-                            name: name.to_string(),
-                        }),
-                        None => Err(format!("`{c}` isn't a built-in page")),
+            NodeKind::Viz { config, .. } => {
+                params(extension, &mut config.params);
+                for c in &mut config.columns {
+                    if let Some(to) = &mut c.expand {
+                        whole(extension, to);
+                    }
+                }
+                let fields = config
+                    .form
+                    .iter_mut()
+                    .flat_map(|f| f.fields.iter_mut().flatten());
+                for f in fields {
+                    if let FormField::Spec(FormFieldSpec {
+                        from: Some(from), ..
+                    }) = f
+                    {
+                        whole(extension, from);
                     }
                 }
             }
-            (None, Some(c)) => {
-                if components.iter().any(|k| &k.id == c) {
-                    Ok(PageBody::Component {
-                        component: format!("{extension}/{c}"),
-                    })
-                } else {
-                    Err(format!(
-                        "`{c}` isn't one of its custom_components or a built-in page \
-                         (`oxplow:<name>`)"
-                    ))
-                }
-            }
-        };
-        if !oxplow_domain::contribution::valid_local(
-            oxplow_domain::contribution::ContributionKind::Page,
-            &p.id,
-        ) {
-            errors.push(err("a page id is lowercase letters, digits and `-`".into()));
-        } else if pages.iter().any(|q| q.id == p.id) {
-            errors.push(err("declared twice".into()));
-        } else if let Err(e) = &body {
-            errors.push(err(e.clone()));
-        } else if let Some(c) = p
-            .count
-            .as_ref()
-            .filter(|c| !lenses.iter().any(|l| &l.slug == *c))
-        {
-            errors.push(err(format!("its count lens `{c}` isn't in lenses/")));
-        } else if p.rail.is_some() && p.component.is_none() {
-            errors.push(err(
-                "`rail` is a component page's; a lens page's rail is its own".into(),
-            ));
-        } else if let Some(r) = p
-            .rail
-            .as_ref()
-            .filter(|r| !lenses.iter().any(|l| &l.slug == *r))
-        {
-            errors.push(err(format!("its rail lens `{r}` isn't in lenses/")));
-        } else if p
-            .icon
-            .as_deref()
-            .is_some_and(|i| !crate::extension_resources::ICONS.contains(&i))
-        {
-            errors.push(err(format!(
-                "its icon `{}` isn't one oxplow draws (one of {})",
-                p.icon.as_deref().unwrap_or_default(),
-                crate::extension_resources::ICONS.join(", ")
-            )));
-        } else if let Some(bad) = p.params.iter().find(|n| {
-            n.is_empty()
-                || !n
-                    .chars()
-                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
-        }) {
-            errors.push(err(format!(
-                "param `{bad}` must be lowercase letters, digits and `_`"
-            )));
-        } else if let Err(e) = renderer_problem(
-            extension,
-            namespace,
-            resources,
-            &p,
-            &pages,
-            p.lens
-                .as_ref()
-                .and_then(|l| lenses.iter().find(|x| &x.slug == l)),
-        ) {
-            errors.push(err(e));
-        } else if let Some(lens) = p
-            .lens
-            .as_ref()
-            .filter(|_| p.renders.is_some())
-            .and_then(|l| lenses.iter().find(|x| &x.slug == l))
-            .filter(|l| !l.params.iter().any(|q| q.name == "uri"))
-        {
-            // A renderer's lens is run with the URI it shows (`uri`).
-            errors.push(err(format!(
-                "its lens `{}` renders a resource, so it takes the URI: declare a `uri` param",
-                lens.slug
-            )));
-        } else {
-            let renders = p.renders.clone().map(Renders::into_vec).unwrap_or_default();
-            let accepts = p
-                .accepts
-                .iter()
-                .map(|(k, v)| {
-                    let kept = match v.as_str() {
-                        "present" | "absent" => v.clone(),
-                        pattern => crate::param_pattern::param_pattern(pattern)
-                            .expect("checked by renderer_problem"),
-                    };
-                    (k.clone(), kept)
-                })
-                .collect();
-            pages.push(ExtensionPage {
-                page_ref: if core_named {
-                    oxplow_domain::uri::build::page_uri(&p.id, &[])
-                } else {
-                    oxplow_domain::uri::build::extension_page_uri(extension, &p.id)
-                },
-                id: p.id,
-                extension: extension.to_string(),
-                title: p.title,
-                label: p.label,
-                icon: p.icon,
-                category: p.category,
-                keywords: p.keywords,
-                params: p.params,
-                count: p.count.map(|c| format!("{extension}/{c}")),
-                renders,
-                accepts,
-                default: p.default,
-                pinned: p.pinned,
-                comments: p.comments,
-                refresh: p.refresh,
-                body: body.expect("checked above"),
-                rail: p.rail.map(|r| format!("{extension}/{r}")),
-            });
+            _ => {}
         }
     }
-    (pages, errors)
+    let extension = page.extension.clone();
+    params(&extension, &mut page.params);
+    walk(&extension, &mut page.view);
+    if let Some(rail) = &mut page.rail {
+        walk(&extension, rail);
+    }
+}
+
+/// A page `icon` oxplow doesn't draw.
+fn page_icon_problem(page: &crate::pages::schema::Page) -> Option<String> {
+    let icon = page.icon.as_deref()?;
+    (!crate::extension_resources::ICONS.contains(&icon))
+        .then(|| format!("`icon: {icon}` isn't one oxplow draws"))
+}
+
+/// What `page` names by id that isn't there: a param's `options_from`, a
+/// column's `expand` and a form field's `from` name a page (by slug for
+/// one of its own extension's); one of this extension's (`slugs`) must be in
+/// pages/, and only a form field's may be the page itself.
+fn page_ref_problem(page: &crate::pages::schema::Page, slugs: &[String]) -> Option<String> {
+    // Each one: what names it, the page it names, and whether that may be
+    // the page itself (a form's own loader may list a field's choices).
+    let mut refs: Vec<(String, &str, bool)> = page
+        .params
+        .iter()
+        .filter_map(|p| {
+            Some((
+                format!("param `{}`: `options_from`", p.name),
+                p.options_from.as_deref()?,
+                false,
+            ))
+        })
+        .collect();
+    for n in page.nodes() {
+        let crate::pages::schema::NodeKind::Viz { config, .. } = &n.kind else {
+            continue;
+        };
+        refs.extend(config.columns.iter().filter_map(|c| {
+            Some((
+                format!("node `{}`: column `{}`: `expand`", n.id, c.key),
+                c.expand.as_deref()?,
+                false,
+            ))
+        }));
+        refs.extend(
+            config
+                .form
+                .iter()
+                .flat_map(|f| f.fields.iter().flatten())
+                .filter_map(|f| {
+                    Some((
+                        format!("node `{}`: form field `{}`: `from`", n.id, f.name()),
+                        f.from()?,
+                        true,
+                    ))
+                }),
+        );
+    }
+    refs.into_iter().find_map(|(what, target, self_ok)| {
+        // Qualified at load (`qualify_page_refs`): `<extension>/<slug>`.
+        let (extension, slug) = target.split_once('/')?;
+        let slug = slug.split('#').next().unwrap_or(slug);
+        if extension == page.extension && slug == page.slug && !self_ok {
+            Some(format!("{what} names the page itself"))
+        } else if extension == page.extension && !slugs.iter().any(|s| s == slug) {
+            Some(format!(
+                "{what} page `{target}` isn't in this extension's pages/"
+            ))
+        } else {
+            None
+        }
+    })
+}
+
+/// A page's `component` node or `viz: custom` naming a component its
+/// extension doesn't declare (`custom_components:`). One of another
+/// extension's (`<extension>/<id>`) is that one's to have.
+fn component_problem(
+    page: &crate::pages::schema::Page,
+    components: &[custom_components::CustomComponent],
+) -> Result<(), String> {
+    use crate::pages::schema::NodeKind;
+    for node in page.nodes() {
+        let named = match &node.kind {
+            NodeKind::Component { component, .. } => Some(component.clone()),
+            NodeKind::Viz { config, .. } if config.viz == Viz::Custom => {
+                match config.custom.as_ref().and_then(|c| c.component.clone()) {
+                    Some(c) => Some(c),
+                    None => {
+                        return Err(format!(
+                            "node `{}`: viz `custom` needs `custom: {{ component: <id> }}`",
+                            node.id
+                        ))
+                    }
+                }
+            }
+            _ => None,
+        };
+        if let Some(id) = named.filter(|id| !id.contains('/')) {
+            if !components.iter().any(|c| c.id == id) {
+                return Err(format!(
+                    "node `{}`: `{id}` isn't one of this extension's `custom_components`",
+                    node.id
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// What's wrong with a page's `for`, `accepts`, `default` and `pinned`:
 /// each resource it renders is a scheme oxplow renders (`https`), one this
 /// extension declares, one of foundation's (`oxplow/*`) or another
 /// extension's (`<extension>/<name>`); `accepts` names a param of each
-/// (when they're known) with `present`, `absent` or an id pattern; its
-/// lens takes no resource param the resource hasn't (it is run with the
-/// URI's params);
+/// (when they're known) with `present`, `absent` or an id pattern; it
+/// takes no resource param the resource hasn't (it is run with the URI's
+/// params);
 /// `default` is for a resource of this extension's, one page per resource;
 /// `pinned` and `accepts` are a renderer's.
 fn renderer_problem(
     extension: &str,
     namespace: &str,
     resources: &[crate::extension_resources::ExtensionResource],
-    p: &PageFile,
-    pages: &[ExtensionPage],
-    lens: Option<&Lens>,
+    p: &crate::pages::schema::Page,
+    pages: &[crate::pages::schema::Page],
 ) -> Result<(), String> {
-    let renders = p.renders.clone().map(Renders::into_vec).unwrap_or_default();
-    // What its lens takes from the URI it is run for: its resource params
-    // but the URI itself and the context's.
-    let takes: Vec<&str> = lens
-        .map(|l| {
-            l.params
-                .iter()
-                .filter(|q| q.role.unwrap_or(ParamRole::Resource) == ParamRole::Resource)
-                .map(|q| q.name.as_str())
-                .filter(|n| !matches!(*n, "uri" | "stream_id" | "thread_id"))
-                .collect()
-        })
-        .unwrap_or_default();
+    let renders = p.renders.clone();
+    // What it takes from the URI it is run for: its resource params but
+    // the URI itself and the context's.
+    let takes: Vec<&str> = p
+        .params
+        .iter()
+        .filter(|q| q.role.unwrap_or(ParamRole::Resource) == ParamRole::Resource)
+        .map(|q| q.name.as_str())
+        .filter(|n| !matches!(*n, "uri" | "stream_id" | "thread_id"))
+        .collect();
     let refs = label_refs(p.label.as_deref())?;
     let named: Vec<String> = refs
         .iter()
         .filter(|(from, _)| *from == LabelFrom::Param)
         .map(|(_, n)| n.clone())
         .collect();
-    // A row column is read from the one row of a document with a query.
-    for (from, name) in &refs {
-        if *from != LabelFrom::Row {
-            continue;
-        }
-        let Some(l) = lens.filter(|l| l.viz == LensViz::Document && !l.query.trim().is_empty())
-        else {
-            return Err(format!(
-                "`label` names `row.{name}`, which only a document with a `query:` has"
-            ));
-        };
-        if !l.columns.iter().any(|c| &c.key == name) {
-            return Err(format!(
-                "`label` names `row.{name}`, which isn't a column of its lens's row (its `columns:`)"
-            ));
-        }
-    }
     if renders.is_empty() {
         if p.default || p.pinned || !p.accepts.is_empty() {
             return Err(
                 "`default`, `pinned` and `accepts` are for a renderer: give it `for`".into(),
             );
         }
-        if let Some(name) = named.iter().find(|n| !p.params.contains(n)) {
+        if let Some(name) = named
+            .iter()
+            .find(|n| !p.params.iter().any(|q| &&q.name == n))
+        {
             return Err(format!(
                 "`label` names `{name}`, which isn't one of its `params`"
             ));
@@ -5604,7 +4244,7 @@ fn renderer_problem(
         };
         let has = |name: &str| match decl {
             Some(d) => d.additional || d.params.contains_key(name),
-            // A web page's lens takes the page as its `uri`.
+            // A web page's viz takes the page as its `uri`.
             None => !scheme || name == "uri",
         };
         if let Some(name) = named.iter().find(|n| !has(n)) {
@@ -5614,7 +4254,7 @@ fn renderer_problem(
         }
         if let Some(name) = takes.iter().find(|n| !has(n)) {
             return Err(format!(
-                "its lens takes `{name}`, which isn't a param of `{r}`: a renderer's lens is run with its URI's params"
+                "it takes `{name}`, which isn't a param of `{r}`: a renderer is run with its URI's params"
             ));
         }
         for (key, rule) in &p.accepts {
@@ -5648,13 +4288,12 @@ fn renderer_problem(
     Ok(())
 }
 
-/// Check the manifest's `panels:` against the extension's lenses: a panel
-/// id is kebab-case and unique, its lenses exist, a badge declares an
-/// `alert`, and a `stream` / `thread` scope's lenses declare `stream_id` /
+/// Check the manifest's `panels:` against the extension's viz nodes: a panel
+/// id is kebab-case and unique, its viz nodes exist, a badge declares an
+/// `alert`, and a `stream` / `thread` scope's viz nodes declare `stream_id` /
 /// `thread_id` (what the nav binds). Each error names the entry's index.
 fn parse_panels(
     extension: &str,
-    lenses: &[Lens],
     pages: &[crate::pages::schema::Page],
     raw: serde_yaml::Value,
 ) -> (Vec<ExtensionPanel>, Vec<(Option<usize>, String)>) {
@@ -5705,9 +4344,6 @@ fn parse_panels(
                 ok = false;
             }
         }
-        // A panel's parts are its extension's pages (or, until lenses are
-        // gone, its lenses when its body is no page): all one or the other.
-        let of_pages = pages.iter().any(|pg| pg.slug == p.body);
         for (role, slug) in [
             ("body", Some(&p.body)),
             ("badge", p.badge.as_ref()),
@@ -5715,48 +4351,21 @@ fn parse_panels(
             ("count", p.count.as_ref()),
         ] {
             let Some(slug) = slug else { continue };
-            if of_pages {
-                let Some(page) = pages.iter().find(|pg| &pg.slug == slug) else {
-                    errors.push(err(format!("its {role} page `{slug}` isn't in pages/")));
-                    ok = false;
-                    continue;
-                };
-                if role == "badge" && page.badge.is_none() && page.alert.is_none() {
-                    errors.push(err(format!(
-                        "its badge page `{slug}` declares no `badge` or `alert` (the badge is its count)"
-                    )));
-                    ok = false;
-                }
-                if let Some(param) = needs {
-                    if !page.params.iter().any(|pp| pp.name == param) {
-                        errors.push(err(format!(
-                            "a panel scoped to a stream or thread gives its pages `{param}`; page `{slug}` must declare it in `params`"
-                        )));
-                        ok = false;
-                    }
-                }
-                continue;
-            }
-            let Some(lens) = lenses.iter().find(|l| &l.slug == slug) else {
-                errors.push(err(format!("its {role} lens `{slug}` isn't in lenses/")));
+            let Some(page) = pages.iter().find(|pg| &pg.slug == slug) else {
+                errors.push(err(format!("its {role} page `{slug}` isn't in pages/")));
                 ok = false;
                 continue;
             };
-            if role == "badge" && lens.alert.is_none() {
+            if role == "badge" && page.badge.is_none() && page.alert.is_none() {
                 errors.push(err(format!(
-                    "its badge lens `{slug}` declares no `alert` (the badge is its count)"
+                    "its badge page `{slug}` declares no `badge` or `alert` (the badge is its count)"
                 )));
                 ok = false;
             }
             if let Some(param) = needs {
-                if !lens.params.iter().any(|lp| lp.name == param) {
-                    let scope = if param == "stream_id" {
-                        "stream"
-                    } else {
-                        "thread"
-                    };
+                if !page.params.iter().any(|pp| pp.name == param) {
                     errors.push(err(format!(
-                        "a `{scope}` panel's lenses get `{param}`; lens `{slug}` must declare `{param}` in `params`"
+                        "a panel scoped to a stream or thread gives its pages `{param}`; page `{slug}` must declare it in `params`"
                     )));
                     ok = false;
                 }
@@ -5775,183 +4384,14 @@ fn parse_panels(
                 collapsed: p.collapsed.map(|c| format!("{extension}/{c}")),
                 count: p.count.map(|c| format!("{extension}/{c}")),
                 dock: p.dock,
-                pages: of_pages,
             });
         }
     }
     (panels, errors)
 }
 
-/// Why `lens` can't render with its viz, if it can't.
-/// A grid's problem, if any: it names children, and each one in its own
-/// extension exists. It needs no `query` — it renders no rows of its own.
-/// A form's or a form action's `choices` naming a lens of this extension
-/// that isn't there.
-fn choices_problem(lens: &Lens, ids_in_extension: &[String]) -> Option<String> {
-    let mine = |c: &&String| {
-        c.split_once('/').map(|(e, _)| e) == Some(lens.extension.as_str())
-            && !ids_in_extension.contains(c)
-    };
-    lens.form
-        .iter()
-        .flat_map(|f| f.choices.values())
-        .find(mine)
-        .map(|c| format!("form: choices lens `{c}` isn't in this extension's lenses/"))
-        .or_else(|| {
-            lens.form
-                .iter()
-                .flat_map(|f| f.fields.iter().flatten())
-                .filter_map(|field| field.from())
-                .map(str::to_string)
-                .find(|c| mine(&c))
-                .map(|c| format!("form: `from` lens `{c}` isn't in this extension's lenses/"))
-        })
-        .or_else(|| {
-            lens.actions.iter().find_map(|a| {
-                a.choices.values().find(mine).map(|c| {
-                    format!(
-                        "actions: `{}`: choices lens `{c}` isn't in this extension's lenses/",
-                        a.id
-                    )
-                })
-            })
-        })
-}
-
-/// A column's `expand` naming a lens of this extension that isn't there
-/// (another extension's resolves with the catalog), or a lens that expands
-/// into itself.
-fn expand_problem(lens: &Lens, ids_in_extension: &[String]) -> Option<String> {
-    lens.columns.iter().find_map(|c| {
-        let target = c.expand.as_deref()?;
-        let mine = target.split_once('/').map(|(e, _)| e) == Some(lens.extension.as_str());
-        if target == lens.id {
-            Some(format!(
-                "column `{}`: `expand` names the lens itself",
-                c.key
-            ))
-        } else if mine && !ids_in_extension.iter().any(|id| id == target) {
-            Some(format!(
-                "column `{}`: `expand` lens `{target}` isn't in this extension's lenses/",
-                c.key
-            ))
-        } else {
-            None
-        }
-    })
-}
-
-/// A param's `options_from` naming a lens of this extension that isn't
-/// there (another extension's resolves with the catalog), or the lens
-/// itself.
-fn options_from_problem(lens: &Lens, ids_in_extension: &[String]) -> Option<String> {
-    lens.params.iter().find_map(|p| {
-        let target = p.options_from.as_deref()?;
-        let mine = target.split_once('/').map(|(e, _)| e) == Some(lens.extension.as_str());
-        if target == lens.id {
-            Some(format!(
-                "param `{}`: `options_from` names the lens itself",
-                p.name
-            ))
-        } else if mine && !ids_in_extension.iter().any(|id| id == target) {
-            Some(format!(
-                "param `{}`: `options_from` lens `{target}` isn't in this extension's lenses/",
-                p.name
-            ))
-        } else {
-            None
-        }
-    })
-}
-
-/// A composite's `columns:` name the row its `query` returns (what its
-/// parts and mounts may take as params): only with a query, and only their
-/// `key`s, which is all a row's name has.
-fn row_columns_problem(lens: &Lens) -> Option<String> {
-    if lens.columns.is_empty() {
-        return None;
-    }
-    if lens.tile.is_some() {
-        return Some(
-            "a dashboard whose rows are tiles names them in `tile:`, not `columns:`".into(),
-        );
-    }
-    let viz = format!("{:?}", lens.viz).to_lowercase();
-    if lens.query.trim().is_empty() {
-        return Some(format!("a `{viz}` without a query has no row to name"));
-    }
-    lens.columns
-        .iter()
-        .find(|c| {
-            c.label.is_some()
-                || c.link.is_some()
-                || c.unit.is_some()
-                || c.icon.is_some()
-                || c.tone.is_some()
-                || c.width.is_some()
-                || c.format.is_some()
-                || c.highlight.is_some()
-                || c.select.is_some()
-                || c.expand.is_some()
-        })
-        .map(|c| {
-            format!(
-                "column `{}`: a composite's column is only its `key`: it names a value of its row, not something shown",
-                c.key
-            )
-        })
-}
-
-/// A dashboard whose rows are its tiles (`tile:`): only a dashboard's,
-/// over a query, each row named by its `id` and drawn by its `lens`, `sql`
-/// or `text`; how a `sql` tile shows only with `sql`.
-fn tile_problem(lens: &Lens) -> Option<String> {
-    let t = lens.tile.as_ref()?;
-    if lens.viz != LensViz::Dashboard {
-        return Some(format!(
-            "`tile` is for viz `dashboard`, not `{}`",
-            viz_name(lens.viz)
-        ));
-    }
-    if lens.query.trim().is_empty() {
-        return Some("a `dashboard` whose rows are tiles needs a `query`".into());
-    }
-    if t.id.is_none() {
-        return Some("`tile` needs `id: <column>`".into());
-    }
-    if t.lens.is_none() && t.sql.is_none() && t.text.is_none() {
-        return Some("`tile` needs one of `lens`, `sql` or `text`".into());
-    }
-    if t.sql.is_none() {
-        let sql_only = [
-            ("display", &t.display),
-            ("chart", &t.chart),
-            ("metric", &t.metric),
-            ("viz", &t.viz),
-        ];
-        if let Some((role, _)) = sql_only.iter().find(|(_, c)| c.is_some()) {
-            return Some(format!("`tile.{role}` is a `sql` tile's"));
-        }
-    }
-    None
-}
-
-/// A document's or dashboard's part naming a lens of its own extension
-/// that isn't there (another extension's resolves with the catalog).
-fn parts_problem(lens: &Lens, ids_in_extension: &[String]) -> Option<String> {
-    if lens.part_lenses().any(|c| c == lens.id) {
-        return Some("a part names the lens itself; a page can't hold itself".into());
-    }
-    lens.part_lenses()
-        .find(|c| {
-            c.split_once('/').map(|(e, _)| e) == Some(lens.extension.as_str())
-                && !ids_in_extension.iter().any(|id| id == c)
-        })
-        .map(|c| format!("part lens `{c}` isn't in this extension's lenses/"))
-}
-
 /// What's wrong with a form's `fields`, `mode` and their conditions.
-fn form_fields_problem(f: &LensForm) -> Option<String> {
+fn form_fields_problem(f: &FormSpec) -> Option<String> {
     let Some(fields) = &f.fields else {
         return (f.mode == FormMode::Edit)
             .then(|| "form: `mode: edit` needs `fields`: the ones it edits".to_string());
@@ -5987,10 +4427,10 @@ fn form_fields_problem(f: &LensForm) -> Option<String> {
 }
 
 /// What's wrong with a lazy tree (`tree.lazy` / `tree.branch`): the param
-/// must be the lens's own, with a `default` (the top level) and not one
+/// must be the viz's own, with a `default` (the top level) and not one
 /// the context supplies; `branch` says which rows open; a column that
 /// `select`s the lazy param would re-root the page instead of opening.
-fn lazy_tree_problem(lens: &Lens, t: &LensTree) -> Option<String> {
+fn lazy_tree_problem(cfg: &VizConfig, t: &VizTree) -> Option<String> {
     let Some(lazy) = &t.lazy else {
         return t
             .branch
@@ -6002,9 +4442,9 @@ fn lazy_tree_problem(lens: &Lens, t: &LensTree) -> Option<String> {
             "`tree.lazy` can't be `{lazy}`: the context supplies it"
         ));
     }
-    let Some(param) = lens.params.iter().find(|p| p.name == *lazy) else {
+    let Some(param) = cfg.params.iter().find(|p| p.name == *lazy) else {
         return Some(format!(
-            "`tree.lazy` names param `{lazy}`, which the lens doesn't declare"
+            "`tree.lazy` names param `{lazy}`, which the viz doesn't declare"
         ));
     };
     if param.default.is_none() {
@@ -6015,7 +4455,7 @@ fn lazy_tree_problem(lens: &Lens, t: &LensTree) -> Option<String> {
     if t.branch.is_none() {
         return Some("`tree.lazy` needs `tree.branch: <column>` (the rows that open)".to_string());
     }
-    lens.columns
+    cfg.columns
         .iter()
         .find(|c| c.select.as_deref() == Some(lazy.as_str()))
         .map(|c| {
@@ -6026,12 +4466,8 @@ fn lazy_tree_problem(lens: &Lens, t: &LensTree) -> Option<String> {
         })
 }
 
-pub(crate) fn shape_problem(
-    lens: &Lens,
-    ids_in_extension: &[String],
-    components: &[String],
-) -> Option<String> {
-    // `block` names the lens key the missing columns go under.
+pub(crate) fn shape_problem(cfg: &VizConfig, components: &[String]) -> Option<String> {
+    // `block` names the viz key the missing columns go under.
     let need = |block: &str, fields: &[(&str, &Option<String>)]| -> Option<String> {
         let missing: Vec<&str> = fields
             .iter()
@@ -6041,7 +4477,7 @@ pub(crate) fn shape_problem(
         (!missing.is_empty()).then(|| {
             format!(
                 "viz `{}` needs `{block}: {{ {} }}`",
-                format!("{:?}", lens.viz).to_lowercase(),
+                format!("{:?}", cfg.viz).to_lowercase(),
                 missing
                     .iter()
                     .map(|m| format!("{m}: <column>"))
@@ -6050,74 +4486,68 @@ pub(crate) fn shape_problem(
             )
         })
     };
-    if let Some(problem) = row_style_problem(lens)
-        .or_else(|| view_problem(lens))
-        .or_else(|| param_problem(lens))
-        .or_else(|| highlight_problem(lens))
-        .or_else(|| markdown_problem(lens))
-        .or_else(|| tile_problem(lens))
+    if let Some(problem) = row_style_problem(cfg)
+        .or_else(|| param_problem(&cfg.params))
+        .or_else(|| highlight_problem(cfg))
+        .or_else(|| markdown_problem(cfg))
     {
         return Some(problem);
     }
-    let chart = lens.chart.clone().unwrap_or_default();
-    if chart.targets.is_some() && lens.viz != LensViz::Line {
+    let chart = cfg.chart.clone().unwrap_or_default();
+    if chart.targets.is_some() && cfg.viz != Viz::Line {
         return Some("chart: `targets` draws target lines on viz `line` only".to_string());
     }
-    match lens.viz {
-        LensViz::Bar | LensViz::Line => need("chart", &[("x", &chart.x), ("y", &chart.y)]),
-        LensViz::Treemap => need("chart", &[("label", &chart.label), ("size", &chart.size)]),
-        LensViz::Tree => {
-            let t = lens.tree.clone().unwrap_or_default();
+    match cfg.viz {
+        Viz::Bar | Viz::Line => need("chart", &[("x", &chart.x), ("y", &chart.y)]),
+        Viz::Treemap => need("chart", &[("label", &chart.label), ("size", &chart.size)]),
+        Viz::Tree => {
+            let t = cfg.tree.clone().unwrap_or_default();
             need(
                 "tree",
                 &[("id", &t.id), ("parent", &t.parent), ("label", &t.label)],
             )
-            .or_else(|| lazy_tree_problem(lens, &t))
+            .or_else(|| lazy_tree_problem(cfg, &t))
         }
-        LensViz::Timeline => {
-            let t = lens.timeline.clone().unwrap_or_default();
+        Viz::Timeline => {
+            let t = cfg.timeline.clone().unwrap_or_default();
             need("timeline", &[("at", &t.at), ("label", &t.label)])
         }
-        LensViz::Steps => {
-            let s = lens.steps.clone().unwrap_or_default();
+        Viz::Steps => {
+            let s = cfg.steps.clone().unwrap_or_default();
             need("steps", &[("label", &s.label)])
         }
-        LensViz::Code => {
-            let c = lens.code.clone().unwrap_or_default();
+        Viz::Code => {
+            let c = cfg.code.clone().unwrap_or_default();
             need("code", &[("path", &c.path), ("revision", &c.revision)])
         }
-        LensViz::Editor => {
-            let e = lens.editor.clone().unwrap_or_default();
+        Viz::Editor => {
+            let e = cfg.editor.clone().unwrap_or_default();
             need("editor", &[("path", &e.path)])
         }
-        LensViz::Answer => {
-            let a = lens.answer.clone().unwrap_or_default();
-            need("answer", &[("uri", &a.uri)])
-        }
-        LensViz::Terminal => {
-            let t = lens.terminal.clone().unwrap_or_default();
+        Viz::Terminal => {
+            let t = cfg.terminal.clone().unwrap_or_default();
             need("terminal", &[("of", &t.of)])
         }
-        LensViz::Embed => {
-            let e = lens.embed.clone().unwrap_or_default();
+        Viz::Embed => {
+            let e = cfg.embed.clone().unwrap_or_default();
             need("embed", &[("url", &e.url)])
         }
-        LensViz::Diff => {
-            let d = lens.diff.clone().unwrap_or_default();
+        Viz::Diff => {
+            let d = cfg.diff.clone().unwrap_or_default();
             need(
                 "diff",
                 &[("path", &d.path), ("from", &d.from), ("to", &d.to)],
             )
         }
-        LensViz::Hunks => {
-            let h = lens.hunks.clone().unwrap_or_default();
+        Viz::Hunks => {
+            let h = cfg.hunks.clone().unwrap_or_default();
             need(
                 "hunks",
                 &[("path", &h.path), ("from", &h.from), ("to", &h.to)],
             )
         }
-        LensViz::Form => {
-            let f = lens.form.clone().unwrap_or_default();
+        Viz::Form => {
+            let f = cfg.form.clone().unwrap_or_default();
             need("form", &[("command", &f.command)])
                 .or_else(|| {
                     let command = f.command.as_deref().unwrap_or_default();
@@ -6138,64 +4568,43 @@ pub(crate) fn shape_problem(
                 })
                 .or_else(|| form_fields_problem(&f))
         }
-        // A grid composes its children; it renders no rows of its own.
-        LensViz::Document | LensViz::Dashboard => {
-            parts_problem(lens, ids_in_extension).or_else(|| row_columns_problem(lens))
-        }
-        // Its rows are what the component shows and what an agent reads.
-        LensViz::Custom if lens.query.trim().is_empty() => {
-            Some("viz `custom` needs a `query`: its rows are what the component shows".into())
-        }
-        LensViz::Custom => match lens.custom.as_ref().and_then(|c| c.component.as_ref()) {
+        Viz::Custom => match cfg.custom.as_ref().and_then(|c| c.component.as_ref()) {
             None => Some("viz `custom` needs `custom: { component: <id> }`".into()),
             Some(c) if !components.contains(c) => Some(format!(
                 "viz `custom`: `{c}` isn't one of this extension's `custom_components`"
             )),
             Some(_) => None,
         },
-        _ if lens.query.trim().is_empty() => Some(format!(
-            "viz `{}` needs a `query`",
-            format!("{:?}", lens.viz).to_lowercase()
-        )),
-        LensViz::Board if lens.group.is_none() => {
+        Viz::Board if cfg.group.is_none() => {
             Some("`board` needs `group: { by: <column> }` (its columns)".to_string())
         }
-        LensViz::Table
-        | LensViz::List
-        | LensViz::Number
-        | LensViz::Markdown
-        | LensViz::Detail
-        | LensViz::Board
-        | LensViz::Approvals => None,
+        Viz::Table
+        | Viz::List
+        | Viz::Number
+        | Viz::Markdown
+        | Viz::Detail
+        | Viz::Board
+        | Viz::Approvals => None,
     }
 }
 
 /// A `markdown` block off its viz, or an edit action that doesn't save the
 /// text the viz shows: a markdown viz's text, or a row-tile dashboard's
 /// text tiles (`tile.text`, edited in place).
-fn markdown_problem(lens: &Lens) -> Option<String> {
-    let viz = format!("{:?}", lens.viz).to_lowercase();
-    if lens.markdown.is_some() && lens.viz != LensViz::Markdown {
+fn markdown_problem(cfg: &VizConfig) -> Option<String> {
+    let viz = format!("{:?}", cfg.viz).to_lowercase();
+    if cfg.markdown.is_some() && cfg.viz != Viz::Markdown {
         return Some(format!("`markdown` is for viz `markdown`, not `{viz}`"));
     }
-    let edit = lens.actions.iter().find(|a| a.edit)?;
-    if let Some(text) = lens.tile.as_ref().and_then(|t| t.text.as_deref()) {
-        let saved = edit_column(edit)?;
-        return (saved != text).then(|| {
-            format!(
-                "`{}` saves `{saved}`, but the tiles' text is `{text}`",
-                edit.id
-            )
-        });
-    }
-    if lens.viz != LensViz::Markdown {
+    let edit = cfg.actions.iter().find(|a| a.edit)?;
+    if cfg.viz != Viz::Markdown {
         return Some(format!(
             "an edit action (`{}`) is a `markdown` viz's, not `{viz}`'s",
             edit.id
         ));
     }
     let saved = edit_column(edit)?;
-    match lens.markdown.as_ref().and_then(|m| m.text.as_deref()) {
+    match cfg.markdown.as_ref().and_then(|m| m.text.as_deref()) {
         None => Some(format!(
             "`{}` saves the text: give the viz `markdown: {{ text: {saved} }}`",
             edit.id
@@ -6208,220 +4617,21 @@ fn markdown_problem(lens: &Lens) -> Option<String> {
     }
 }
 
-/// A column that highlights a param the lens doesn't declare.
-fn highlight_problem(lens: &Lens) -> Option<String> {
-    lens.columns.iter().find_map(|c| {
+/// A column that highlights a param the viz doesn't declare.
+fn highlight_problem(cfg: &VizConfig) -> Option<String> {
+    cfg.columns.iter().find_map(|c| {
         [("highlight", &c.highlight), ("select", &c.select)]
             .into_iter()
             .find_map(|(field, name)| {
                 let name = name.as_deref()?;
-                (!lens.params.iter().any(|p| p.name == name)).then(|| {
+                (!cfg.params.iter().any(|p| p.name == name)).then(|| {
                     format!(
-                        "column `{}`: `{field}: {name}` names a param the lens doesn't declare",
+                        "column `{}`: `{field}: {name}` names a param the viz doesn't declare",
                         c.key
                     )
                 })
             })
     })
-}
-
-/// The most `filter` params a page draws, `choice` options a select
-/// lists, characters a description runs, sections a document holds and
-/// columns a table shows before the layout warnings say so.
-const MAX_FILTERS: usize = 6;
-const MAX_CHOICE_OPTIONS: usize = 12;
-const MAX_DESCRIPTION: usize = 200;
-const MAX_SECTIONS: usize = 8;
-const MAX_COLUMNS: usize = 8;
-
-/// What an agent should change about a lens's page so it reads well: a
-/// warning each, with the fix after the dash. Never a reason to refuse
-/// the lens.
-fn layout_warnings(lens: &Lens, lenses: &[Lens], renderer: bool) -> Vec<String> {
-    let mut out = Vec::new();
-    // The props of a core component this lens stands in for on another
-    // lens's page: the host's to give, so neither a filter a person sets
-    // nor a param its query must read.
-    let contract: Vec<&str> = lenses
-        .iter()
-        .flat_map(|l| &l.parts)
-        .filter(|part| part.lens.as_deref() == Some(lens.id.as_str()))
-        .filter_map(|part| oxplow_domain::replaceable::replaceable(part.replaceable.as_deref()?))
-        .flat_map(|t| t.props.iter().copied())
-        .collect();
-    let filters = lens
-        .params
-        .iter()
-        .filter(|p| p.role != Some(ParamRole::Selection) && !contract.contains(&p.name.as_str()))
-        // A view document's view param is its section rail, not a filter.
-        .filter(|p| lens.view.as_deref() != Some(p.name.as_str()))
-        .count();
-    if filters > MAX_FILTERS {
-        out.push(format!(
-            "{filters} filters; a page shows {MAX_FILTERS} at most — fold related ones into one `choice` (not several `bool`s), or split the page"
-        ));
-    }
-    for p in &lens.params {
-        if p.kind == Some(ParamType::Choice) && p.options.len() > MAX_CHOICE_OPTIONS {
-            out.push(format!(
-                "param `{}` has {} options — use a `search`, or a lens that lists them",
-                p.name,
-                p.options.len()
-            ));
-        }
-    }
-    // A form, a custom component and the approvals list take their params
-    // by means other than a query.
-    if !matches!(
-        lens.viz,
-        LensViz::Custom | LensViz::Form | LensViz::Approvals
-    ) {
-        // Its own query and its parts', through parts that are composites
-        // themselves (a view document's section is often a document).
-        let mut queries: Vec<&str> = vec![lens.query.as_str()];
-        let mut seen: Vec<&str> = vec![lens.id.as_str()];
-        let mut stack: Vec<&Lens> = vec![lens];
-        while let Some(at) = stack.pop() {
-            for part in at
-                .part_lenses()
-                .filter_map(|id| lenses.iter().find(|l| l.id == id))
-            {
-                if seen.contains(&part.id.as_str()) {
-                    continue;
-                }
-                seen.push(part.id.as_str());
-                queries.push(part.query.as_str());
-                stack.push(part);
-            }
-        }
-        let templated: Vec<String> = lens
-            .actions
-            .iter()
-            .flat_map(|a| action_templates(&a.input))
-            .filter(|(scope, _)| scope == "param")
-            .map(|(_, name)| name)
-            .collect();
-        // A column that selects or highlights a param uses it.
-        let marked: Vec<&str> = lens
-            .columns
-            .iter()
-            .flat_map(|c| [c.select.as_deref(), c.highlight.as_deref()])
-            .flatten()
-            .collect();
-        // The metric cards of a dashboard's row tiles window their samples
-        // by the page's `range` and `branch`, on the page or a part of it.
-        let windowed = std::iter::once(lens)
-            .chain(
-                lens.part_lenses()
-                    .filter_map(|id| lenses.iter().find(|l| l.id == id)),
-            )
-            .any(|l| l.viz == LensViz::Dashboard && l.tile.is_some());
-        for p in &lens.params {
-            let read = |token: &str| queries.iter().any(|q| reads_param(q, token));
-            let range = p.kind == Some(ParamType::DateRange);
-            if !(read(&p.name)
-                || lens.view.as_deref() == Some(p.name.as_str())
-                || contract.contains(&p.name.as_str())
-                || range && (read(&format!("{}_from", p.name)) || read(&format!("{}_to", p.name)))
-                || templated.contains(&p.name)
-                || marked.contains(&p.name.as_str())
-                || windowed && ["range", "branch"].contains(&p.name.as_str())
-                // A renderer's lens is run with the URI it shows and the
-                // stream and thread it is shown in: the host's to give.
-                || renderer && ["uri", "stream_id", "thread_id"].contains(&p.name.as_str()))
-            {
-                out.push(format!(
-                    "param `{0}` isn't read by any query of the page — remove it, or read it as `:{0}`",
-                    p.name
-                ));
-            }
-        }
-    }
-    let described = lens.description.chars().count();
-    if described > MAX_DESCRIPTION && !lens.hidden {
-        out.push(format!(
-            "the description is {described} characters — keep it to a sentence or two; put the rest in a markdown section"
-        ));
-    }
-    // A view document shows one section at a time; the rest are its rail.
-    if lens.viz == LensViz::Document && lens.view.is_none() && lens.parts.len() > MAX_SECTIONS {
-        out.push(format!(
-            "{} sections — a page reads best with {MAX_SECTIONS} at most; split it",
-            lens.parts.len()
-        ));
-    }
-    if matches!(lens.viz, LensViz::Table | LensViz::List)
-        && lens.tool.is_none()
-        && lens.columns.len() > MAX_COLUMNS
-    {
-        out.push(format!(
-            "{} columns — show {MAX_COLUMNS} at most; put the rest in a section a row `select`s",
-            lens.columns.len()
-        ));
-    }
-    out
-}
-
-/// Whether `query` binds `:name` as a whole token (`:range` is not
-/// `:range_from`).
-fn reads_param(query: &str, name: &str) -> bool {
-    let token = format!(":{name}");
-    query.match_indices(&token).any(|(at, _)| {
-        !query[at + token.len()..]
-            .chars()
-            .next()
-            .is_some_and(|c| c.is_alphanumeric() || c == '_')
-    })
-}
-
-/// A document's or dashboard's own part whose rows select a param the
-/// page doesn't declare: the page holds the value its parts share, so a
-/// click there would reach nothing.
-fn selects_problem(lens: &Lens, lenses: &[Lens]) -> Option<String> {
-    lens.part_lenses().find_map(|id| {
-        let part = lenses.iter().find(|l| l.id == id)?;
-        part.columns
-            .iter()
-            .filter_map(|c| c.select.as_deref())
-            .find(|name| !lens.params.iter().any(|p| &p.name == name))
-            .map(|name| format!("part `{id}` selects `{name}`, a param this lens doesn't declare"))
-    })
-}
-
-/// A part standing in for a core component whose lens (one of this
-/// extension's) lacks a prop of the target's contract, or two parts
-/// standing in for the same target: the host gives a replacement exactly the
-/// contract, so the part's lens must hold all of it.
-fn replaceable_problem(lens: &Lens, lenses: &[Lens]) -> Option<String> {
-    let mut seen: Vec<&str> = Vec::new();
-    for part in &lens.parts {
-        let (Some(target), Some(id)) = (part.replaceable.as_deref(), part.lens.as_deref()) else {
-            continue;
-        };
-        if seen.contains(&target) {
-            return Some(format!("`{target}` is placed once on a page"));
-        }
-        seen.push(target);
-        let (Some(t), Some(part_lens)) = (
-            oxplow_domain::replaceable::replaceable(target),
-            lenses.iter().find(|l| l.id == id),
-        ) else {
-            continue;
-        };
-        let missing: Vec<String> = t
-            .props
-            .iter()
-            .filter(|p| !part_lens.params.iter().any(|lp| lp.name == **p))
-            .map(|p| format!("`{p}`"))
-            .collect();
-        if !missing.is_empty() {
-            return Some(format!(
-                "part lens `{id}` must declare {} (`params:`) — what `{target}` gives its replacement",
-                missing.join(", ")
-            ));
-        }
-    }
-    None
 }
 
 impl PageProvenance {
@@ -6448,34 +4658,22 @@ impl PageProvenance {
     }
 }
 
-/// The params a click on `lens`'s rows sets: its own columns' `select`s
-/// and its parts'.
-fn selected(lens: &Lens, lenses: &[Lens]) -> Vec<String> {
-    let parts = lens
-        .part_lenses()
-        .filter_map(|id| lenses.iter().find(|l| l.id == id));
-    std::iter::once(lens)
-        .chain(parts)
-        .flat_map(|l| l.columns.iter().filter_map(|c| c.select.clone()))
-        .collect()
-}
-
 /// Row styling on a viz that doesn't draw rows that way: `group` and
 /// `depth` are for `list` / `table`, `emphasis` also for `tree`.
-fn row_style_problem(lens: &Lens) -> Option<String> {
-    let rows = matches!(lens.viz, LensViz::List | LensViz::Table);
-    let viz = format!("{:?}", lens.viz).to_lowercase();
-    if lens.group.is_some() && !rows && lens.viz != LensViz::Board {
+fn row_style_problem(cfg: &VizConfig) -> Option<String> {
+    let rows = matches!(cfg.viz, Viz::List | Viz::Table);
+    let viz = format!("{:?}", cfg.viz).to_lowercase();
+    if cfg.group.is_some() && !rows && cfg.viz != Viz::Board {
         return Some(format!(
             "`group` is only for `list`, `table` and `board`, not `{viz}`"
         ));
     }
-    if lens.depth.is_some() && !rows {
+    if cfg.depth.is_some() && !rows {
         return Some(format!(
             "`depth` is only for `list` and `table`, not `{viz}`"
         ));
     }
-    if lens.emphasis.is_some() && !rows && lens.viz != LensViz::Tree {
+    if cfg.emphasis.is_some() && !rows && cfg.viz != Viz::Tree {
         return Some(format!(
             "`emphasis` is only for `list`, `table` and `tree`, not `{viz}`"
         ));
@@ -6483,8 +4681,8 @@ fn row_style_problem(lens: &Lens) -> Option<String> {
     None
 }
 
-impl Lens {
-    /// Every result column the lens's component blocks name (`chart`,
+impl VizConfig {
+    /// Every result column the viz's component blocks name (`chart`,
     /// `tree`, `tile`, `timeline`, `steps`, `hunks`) and its row styling
     /// (`group`, `emphasis`, `depth`) — what `validate` checks the query
     /// returns.
@@ -6499,14 +4697,6 @@ impl Lens {
                     .into_iter()
                     .flatten()
                     .map(|k| ("tree", k)),
-            );
-        }
-        if let Some(t) = &self.tile {
-            out.extend(
-                t.roles()
-                    .into_iter()
-                    .filter_map(|(_, k)| k.as_ref())
-                    .map(|k| ("tile", k)),
             );
         }
         if let Some(t) = &self.timeline {
@@ -6547,14 +4737,6 @@ impl Lens {
                     .into_iter()
                     .flatten()
                     .map(|k| ("terminal", k)),
-            );
-        }
-        if let Some(a) = &self.answer {
-            out.extend(
-                [&a.uri, &a.kept]
-                    .into_iter()
-                    .flatten()
-                    .map(|k| ("answer", k)),
             );
         }
         if let Some(e) = &self.embed {
@@ -6609,7 +4791,6 @@ fn apply_disabled(mut ext: Extension, settings: &oxplow_config::ExtensionSetting
 }
 
 pub(super) fn clear_contributions(ext: &mut Extension) {
-    ext.lenses.clear();
     ext.ui = ExtensionUi::default();
     ext.collectors.clear();
     ext.providers.clear();
@@ -6626,7 +4807,6 @@ pub(super) fn clear_contributions(ext: &mut Extension) {
     ext.metrics.clear();
     ext.models.clear();
     ext.panels.clear();
-    ext.pages.clear();
     ext.commands.clear();
     ext.jobs.clear();
     ext.ai_profiles.clear();
@@ -6639,24 +4819,15 @@ pub(crate) fn disabled_error(name: &str) -> DomainError {
     ))
 }
 
-/// Find one lens by `<extension>/<slug>` through the catalog cache.
-pub fn find_lens(
-    catalog: &crate::extension_catalog::ExtensionCatalog,
-    root: &Path,
-    id: &str,
-) -> Result<Lens, DomainError> {
-    catalog.find_lens(root, id)
-}
-
-/// Where a lens is being looked at from: the viewer's current stream and
-/// thread (numeric ids, as the `v_*` views use). A lens that declares a
+/// Where a viz is being looked at from: the viewer's current stream and
+/// thread (numeric ids, as the `v_*` views use). A viz that declares a
 /// `stream_id` or `thread_id` param gets these unless it's given another
 /// value (tsk375).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ViewContext {
     pub stream_id: Option<i64>,
     pub thread_id: Option<i64>,
-    /// What's active, to check a lens's needs against; `None` checks
+    /// What's active, to check a viz's needs against; `None` checks
     /// nothing.
     pub active: Option<crate::capabilities::Active>,
 }
@@ -6680,10 +4851,10 @@ impl ViewContext {
     }
 }
 
-/// The context a lens is viewed from: `stream` (else `thread`'s stream,
+/// The context a viz is viewed from: `stream` (else `thread`'s stream,
 /// else the primary) and `thread` (else that stream's selected or active
 /// thread). Lookups that fail leave the value unset.
-pub async fn lens_context(
+pub async fn view_context(
     svc: &crate::Services,
     stream: Option<oxplow_domain::StreamId>,
     thread: Option<oxplow_domain::ThreadId>,
@@ -6723,91 +4894,8 @@ pub async fn lens_context(
     }
 }
 
-/// Run a lens: bind supplied params over the viewer's context over
-/// defaults, and query the semantic layer. Unknown params are rejected,
-/// so a typo doesn't silently fall back to a default.
-/// Run a lens made from `spec` (an answer's own lens) as `id`.
-pub async fn run_spec(
-    layer: &crate::sql_gateway::SqlGateway,
-    id: &str,
-    spec: &LensSpec,
-    params: BTreeMap<String, SqlCell>,
-    ctx: &ViewContext,
-) -> Result<LensRun, DomainError> {
-    execute(layer, Lens::from_spec(id, spec), params, ctx).await
-}
-
-pub async fn run_lens(
-    layer: &crate::sql_gateway::SqlGateway,
-    catalog: &crate::extension_catalog::ExtensionCatalog,
-    root: &Path,
-    id: &str,
-    params: BTreeMap<String, SqlCell>,
-    ctx: &ViewContext,
-) -> Result<LensRun, DomainError> {
-    layer
-        .read_generation(async { run_lens_unpinned(layer, catalog, root, id, params, ctx).await })
-        .await?
-}
-
-async fn run_lens_unpinned(
-    layer: &crate::sql_gateway::SqlGateway,
-    catalog: &crate::extension_catalog::ExtensionCatalog,
-    root: &Path,
-    id: &str,
-    params: BTreeMap<String, SqlCell>,
-    ctx: &ViewContext,
-) -> Result<LensRun, DomainError> {
-    let mut lens = catalog.find_lens(root, id)?;
-    let mut params = params;
-    // Its own extension's settings, as they are stored now.
-    if let Some(ext) = catalog
-        .unpinned(root, "a lens reads its own extension's settings")
-        .iter()
-        .find(|e| e.name == lens.extension)
-    {
-        lens.query = layer.with_extension_config(ext, &lens.query).await?;
-        if renders_a_resource(ext, &lens) {
-            params = with_uri_params(&lens, params);
-        }
-    }
-    if let Some(active) = &ctx.active {
-        let unmet = active.unmet(&lens.needs);
-        if !unmet.is_empty() {
-            let params = resolve_params(&lens, &params, ctx)?;
-            return Ok(LensRun {
-                lens,
-                params,
-                result: SqlQueryResult {
-                    columns: Vec::new(),
-                    rows: Vec::new(),
-                    truncated: false,
-                    reads: Default::default(),
-                    freshness: Vec::new(),
-                    generation: None,
-                    coverage: Vec::new(),
-                },
-                alert: None,
-                warnings: Vec::new(),
-                inactive: Some(LensInactive {
-                    message: crate::capabilities::needs_message(&unmet),
-                    needs: unmet,
-                }),
-            });
-        }
-    }
-    let mut run = execute(layer, lens, params, ctx)
-        .await
-        .map_err(|e| match e {
-            DomainError::Invalid(m) => DomainError::Invalid(explain_unsynced(catalog, root, &m)),
-            other => other,
-        })?;
-    run.warnings = disabled_sources(layer, catalog, root, &run.result.reads.models).await;
-    Ok(run)
-}
-
 /// What a page's `label` fills from: its URI's params, or a column of the
-/// one row its lens returns.
+/// one row its viz returns.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum LabelFrom {
     Param,
@@ -6867,139 +4955,21 @@ fn label_refs(label: Option<&str>) -> Result<Vec<(LabelFrom, String)>, String> {
     Ok(refs)
 }
 
-/// The columns of its lens's row a page's `label` reads.
-fn label_row_columns(label: Option<&str>) -> Vec<String> {
-    label_refs(label)
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|(from, _)| *from == LabelFrom::Row)
-        .map(|(_, name)| name)
-        .collect()
-}
-
-/// Whether `lens` draws one of `ext`'s renderers (a page with `for:`): it
-/// is run for a URI, its `uri` param.
-fn renders_a_resource(ext: &Extension, lens: &Lens) -> bool {
-    ext.pages.iter().any(|p| {
-        !p.renders.is_empty() && matches!(&p.body, PageBody::Lens { lens: l } if *l == lens.id)
-    })
-}
-
-/// A renderer lens's params as run for the URI in its `uri`: each param it
-/// declares that the URI carries and the caller didn't supply takes the
-/// URI's value (supplied → URI → context → default).
-fn with_uri_params(
-    lens: &Lens,
-    mut params: BTreeMap<String, SqlCell>,
-) -> BTreeMap<String, SqlCell> {
-    let Some(SqlCell::Text(uri)) = params.get("uri") else {
-        return params;
-    };
-    let Ok(uri) = oxplow_domain::uri::oxplow_uri::OxplowUri::parse(uri) else {
-        return params;
-    };
-    for p in &lens.params {
-        if p.name != "uri" && !params.contains_key(&p.name) {
-            if let Some(v) = uri.param(&p.name) {
-                params.insert(p.name.clone(), SqlCell::Text(v.to_string()));
-            }
-        }
-    }
-    params
-}
-
-/// For each view in `models` an extension's collector writes, a warning
-/// when failures disabled that collector: its rows aren't refreshing.
-async fn disabled_sources(
-    layer: &crate::sql_gateway::SqlGateway,
-    catalog: &crate::extension_catalog::ExtensionCatalog,
-    root: &Path,
-    models: &[String],
-) -> Vec<String> {
-    let mut out = Vec::new();
-    for ext in catalog
-        .unpinned(root, "collectors are matched on their declarations")
-        .iter()
-    {
-        for c in &ext.collectors {
-            let Some(view) = c
-                .entities
-                .iter()
-                .map(|e| &e.view)
-                .find(|v| models.contains(v))
-            else {
-                continue;
-            };
-            let reason = layer
-                .query_sql(
-                    "SELECT reason FROM v_contribution_health
-                      WHERE extension = ?1 AND contribution = ?2 AND state = 'disabled'",
-                    vec![SqlCell::Text(ext.name.clone()), SqlCell::Text(c.id.clone())],
-                    Some(1),
-                )
-                .await
-                .ok()
-                .and_then(|r| r.rows.into_iter().next())
-                .and_then(|row| row.into_iter().next());
-            if let Some(SqlCell::Text(reason)) = reason {
-                out.push(format!(
-                    "`{view}` comes from the collector `{}/{}`, which is disabled ({reason}); \
-                     its rows aren't being refreshed",
-                    ext.name, c.id
-                ));
-            }
-        }
-    }
-    out
-}
-
-/// A lens reading a source entity before its first sync fails with
-/// SQLite's bare "no such table: v_x". Say which source to run instead.
-fn explain_unsynced(
-    catalog: &crate::extension_catalog::ExtensionCatalog,
-    root: &Path,
-    message: &str,
-) -> String {
-    let Some(rest) = message.split("no such table: ").nth(1) else {
-        return message.to_string();
-    };
-    let view: String = rest
-        .chars()
-        .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
-        .collect();
-    for ext in catalog
-        .unpinned(root, "collectors are matched on their declarations")
-        .iter()
-    {
-        for collector in &ext.collectors {
-            if collector.entities.iter().any(|e| e.view == view) {
-                let lens = message.split(':').next().unwrap_or("lens");
-                return format!(
-                    "{lens}: reads `{view}`, which hasn't been collected yet. Run collector \
-                     `{}/{}` (Settings → Extensions → Approve & Run, or Sync Now).",
-                    ext.name, collector.id
-                );
-            }
-        }
-    }
-    message.to_string()
-}
-
-/// The value of each of `lens`'s params: as supplied, else from the
+/// The value of each of `viz`'s params: as supplied, else from the
 /// context (`stream_id` / `thread_id`), else its default, else NULL, each
 /// as its type binds it (`PageParam::take`). An unknown supplied name, or
 /// a value its param doesn't take, is refused.
 pub fn resolve_params(
-    lens: &Lens,
+    cfg: &VizConfig,
     supplied: &BTreeMap<String, SqlCell>,
     ctx: &ViewContext,
 ) -> Result<BTreeMap<String, SqlCell>, DomainError> {
-    resolve_param_values(&format!("lens {}", lens.id), &lens.params, supplied, ctx)
+    resolve_param_values(&format!("viz {}", cfg.id), &cfg.params, supplied, ctx)
 }
 
 /// `declared`'s values for a run: supplied, else the viewer's context,
 /// else the default, else NULL. An unknown or malformed supplied value is
-/// refused, named by `whose` (`lens acme/x`, `page acme/y`).
+/// refused, named by `whose` (`viz acme/x`, `page acme/y`).
 pub(crate) fn resolve_param_values(
     whose: &str,
     declared: &[PageParam],
@@ -7036,70 +5006,6 @@ pub(crate) fn resolve_param_values(
     Ok(params)
 }
 
-/// The params a `document`'s or `dashboard`'s parts are given: its query's
-/// first row, column by column, under its own params — one of its own
-/// wins when it holds a value. Each part takes the ones it declares. A
-/// dashboard whose rows are its tiles has no row of params: its own alone.
-pub fn part_params(run: &LensRun) -> BTreeMap<String, SqlCell> {
-    let mut out = run.params.clone();
-    if run.lens.tile.is_some() {
-        return out;
-    }
-    if let Some(row) = run.result.rows.first() {
-        for (column, cell) in run.result.columns.iter().zip(row) {
-            match out.get(column) {
-                Some(v) if !matches!(v, SqlCell::Null(())) => {}
-                _ => {
-                    out.insert(column.clone(), cell.clone());
-                }
-            }
-        }
-    }
-    out
-}
-
-/// Run `lens` with its default params and no viewer context — how a
-/// review renders a lens it isn't showing anyone.
-pub async fn run_lens_spec(
-    layer: &crate::sql_gateway::SqlGateway,
-    lens: Lens,
-) -> Result<LensRun, DomainError> {
-    execute(layer, lens, BTreeMap::new(), &ViewContext::default()).await
-}
-
-/// Each of an extension's lenses run once with default params, by slug: a
-/// failure is its message. What `check_extension` checks and what the
-/// effect report renders — one run feeds both.
-pub type LensRuns = BTreeMap<String, Result<LensRun, String>>;
-
-/// [`LensRuns`] for `ext`.
-pub async fn run_lenses(layer: &crate::sql_gateway::SqlGateway, ext: &Extension) -> LensRuns {
-    let mut out = LensRuns::new();
-    for lens in &ext.lenses {
-        // A check reads no stored settings: the declared defaults.
-        let mut lens = lens.clone();
-        match oxplow_db::models::substitute_config(
-            &lens.query,
-            ext.default_configuration().as_ref(),
-        ) {
-            Ok(query) => lens.query = query,
-            Err(e) => {
-                out.insert(
-                    lens.slug.clone(),
-                    Err(e.to_string().replacen("invalid value: ", "", 1)),
-                );
-                continue;
-            }
-        }
-        let slug = lens.slug.clone();
-        let run = run_lens_spec(layer, lens)
-            .await
-            .map_err(|e| e.to_string().replacen("invalid value: ", "", 1));
-        out.insert(slug, run);
-    }
-    out
-}
-
 /// The HEAD commit of stream `stream_id`, when it is known.
 pub(crate) async fn stream_head(
     layer: &crate::sql_gateway::SqlGateway,
@@ -7118,64 +5024,7 @@ pub(crate) async fn stream_head(
     })
 }
 
-async fn execute(
-    layer: &crate::sql_gateway::SqlGateway,
-    lens: Lens,
-    supplied: BTreeMap<String, SqlCell>,
-    ctx: &ViewContext,
-) -> Result<LensRun, DomainError> {
-    let mut params = resolve_params(&lens, &supplied, ctx)?;
-    // A lens's `:stream_id` is the stream its metrics (`metric_grid()`)
-    // are read over.
-    let stream = match params.get("stream_id") {
-        Some(SqlCell::Int(id)) => Some(*id),
-        _ => None,
-    };
-    // `head_sha`, unless supplied, is the viewed stream's HEAD commit
-    // (`v_stream.head_sha`), as `stream_id` is the viewer's stream.
-    if let (Some(SqlCell::Null(())), Some(stream_id)) = (params.get("head_sha"), stream) {
-        if let Some(head) = stream_head(layer, stream_id).await? {
-            params.insert("head_sha".into(), SqlCell::Text(head));
-        }
-    }
-    let named = binds(&lens, &params, time::OffsetDateTime::now_utc());
-    // A form without a query has no rows to read.
-    let result = if lens.query.trim().is_empty() {
-        oxplow_db::SqlQueryResult {
-            columns: Vec::new(),
-            rows: Vec::new(),
-            truncated: false,
-            reads: oxplow_db::Reads::default(),
-            freshness: Vec::new(),
-            generation: None,
-            coverage: Vec::new(),
-        }
-    } else {
-        layer
-            .run(
-                oxplow_db::SqlQuery::new(&lens.query)
-                    .named(named)
-                    .limit(None)
-                    .stream(stream),
-            )
-            .await
-            .map_err(|e| match e {
-                DomainError::Invalid(m) => DomainError::Invalid(format!("lens {}: {m}", lens.id)),
-                other => other,
-            })?
-    };
-    let alert = lens.alert.as_ref().map(|a| evaluate_alert(a, &result));
-    Ok(LensRun {
-        lens,
-        params,
-        result,
-        alert,
-        warnings: Vec::new(),
-        inactive: None,
-    })
-}
-
-/// Load one extension and dry-run every lens with default params,
+/// Load one extension and dry-run every page with default params,
 /// reporting query failures and `columns` keys the query doesn't
 /// return as errors.
 pub async fn validate_extension(
@@ -7274,7 +5123,7 @@ impl<F: Fn(&str) -> Option<serde_json::Value> + Sync> RunningCommands for F {
 /// The registry a check is given.
 pub type CommandSchemas<'a> = &'a dyn RunningCommands;
 
-/// A custom component's declared commands must exist; a `custom` lens
+/// A custom component's declared commands must exist; a `custom` viz
 /// that also fills a kit role block gets a nudge — the kit may already
 /// render it (the honest extent of a "this reimplements the kit" lint).
 fn check_components(
@@ -7306,10 +5155,16 @@ fn check_components(
         }
     }
     let lookalikes: Vec<(String, &'static str)> = ext
-        .lenses
+        .page_files
         .iter()
-        .filter(|l| l.viz == LensViz::Custom)
-        .flat_map(|l| {
+        .flat_map(|p| p.nodes().into_iter().map(move |n| (p, n)))
+        .filter_map(|(p, n)| match &n.kind {
+            crate::pages::schema::NodeKind::Viz { config: cfg, .. } if cfg.viz == Viz::Custom => {
+                Some((p, cfg))
+            }
+            _ => None,
+        })
+        .flat_map(|(p, l)| {
             [
                 ("chart", l.chart.is_some()),
                 ("tree", l.tree.is_some()),
@@ -7320,17 +5175,16 @@ fn check_components(
                 ("diff", l.diff.is_some()),
                 ("editor", l.editor.is_some()),
                 ("embed", l.embed.is_some()),
-                ("answer", l.answer.is_some()),
                 ("terminal", l.terminal.is_some()),
             ]
             .into_iter()
             .filter(|(_, set)| *set)
-            .map(|(block, _)| (l.origin.running.clone(), block))
+            .map(|(block, _)| (p.origin.running.clone(), block))
         })
         .collect();
     for (path, block) in lookalikes {
         ext.warnings.push(format!(
-            "{path}: a custom lens that fills `{block}`: the kit's `{block}` viz may already cover \
+            "{path}: a custom viz that fills `{block}`: the kit's `{block}` viz may already cover \
              it — prefer the kit where it does"
         ));
     }
@@ -7354,18 +5208,18 @@ fn entity_stubs(ext: &Extension) -> Vec<oxplow_db::models::EntityStub> {
         .collect()
 }
 
-/// Dry-run a loaded extension's models, commands, advisories and lenses,
+/// Dry-run a loaded extension's models, commands, advisories and viz nodes,
 /// appending what's wrong to its `errors`. `root` names sources for an
 /// unsynced view. What it declares but hasn't published — its collectors'
 /// entities (empty), its models, the other enabled extensions' — is an
 /// overlay of temp views every query reads through (P7.C6), so a fresh
 /// extension checks clean before its first sync.
-/// An extension version checked against a layer (P8.C2): its lenses, run
+/// An extension version checked against a layer (P8.C2): its viz nodes, run
 /// through its own models, and that overlay — the temp views its models
 /// (and the other enabled extensions') compile to, published nowhere —
 /// for whatever else reads this version (a review's row counts).
 pub struct Prepared {
-    pub lenses: LensRuns,
+    pub pages: crate::pages::checks::PageChecks,
     pub overlay: Vec<oxplow_db::TempView>,
 }
 
@@ -7414,28 +5268,6 @@ async fn model_overlay(
     }
 }
 
-/// A version as a review reads it: its lenses rendered on its own models'
-/// overlay, nothing checked — the earlier side of a review is what it was,
-/// not a candidate (tsk791).
-/// The temp views a lens of extension `name` under `root` reads through:
-/// its models and the other enabled extensions' — and their collectors'
-/// entities, empty, where none is published — compiled as `check` does
-/// and published nowhere. So an author's lens over a model they haven't
-/// published yet (a worktree's, or before the next activation) answers
-/// rather than "no such table". Empty when the extension doesn't load.
-pub async fn lens_overlay(
-    layer: &crate::sql_gateway::SqlGateway,
-    catalog: &crate::extension_catalog::ExtensionCatalog,
-    root: &Path,
-    name: &str,
-) -> Vec<oxplow_db::TempView> {
-    let Ok(ext) = catalog.named(root, name) else {
-        return Vec::new();
-    };
-    let candidate = catalog.candidate(root, ext);
-    model_overlay(layer, &candidate).await.0
-}
-
 /// The temp views `draft`'s models (and the other enabled extensions')
 /// compile to, read from `root`: what a draft page's queries read through,
 /// published nowhere.
@@ -7458,14 +5290,14 @@ async fn read_side(
     let candidate = catalog.candidate(root, ext.clone());
     *ext = candidate.candidate().clone();
     let (overlay, _) = model_overlay(layer, &candidate).await;
-    let lenses = run_lenses(&layer.with_overlay(overlay.clone()), ext).await;
-    Prepared { lenses, overlay }
+    let pages = crate::pages::checks::dry_run_all(&layer.with_overlay(overlay.clone()), ext).await;
+    Prepared { pages, overlay }
 }
 
-/// Check `ext` — its commands, components, models, advisories and lenses —
+/// Check `ext` — its commands, components, models, advisories and viz nodes —
 /// reading through its own models' overlay, and report what's wrong in
 /// `ext.errors`. `read` gives the files of the version under check (a
-/// component's page is linted as that version has it). Each side of a review prepares its own, so a lens renders
+/// component's page is linted as that version has it). Each side of a review prepares its own, so a viz renders
 /// against its version's models, whichever are published.
 async fn prepare(
     layer: &crate::sql_gateway::SqlGateway,
@@ -7533,276 +5365,98 @@ async fn prepare(
             }
         }
     }
-    let runs = run_lenses(layer, ext).await;
-    for lens in ext.lenses.clone() {
-        let id = lens.id.clone();
-        match &runs[&lens.slug] {
-            Err(e) => ext.errors.push(e.clone()),
-            Ok(run) => {
-                let cols = &run.result.columns;
-                for (block, k) in run.lens.role_columns() {
-                    if !cols.contains(k) {
-                        ext.errors.push(format!(
-                            "lens {id}: {block} column `{k}` isn't in the query result (columns: {})",
-                            cols.join(", ")
-                        ));
-                    }
-                }
-                for a in &run.lens.actions {
-                    if let Some(when) = a.when.as_ref().filter(|w| !cols.contains(w)) {
-                        ext.errors.push(format!(
-                            "lens {id}: action `{}` is offered `when: {when}`, which isn't in the \
-                             query result (columns: {})",
-                            a.id,
-                            cols.join(", ")
-                        ));
-                    }
-                    for (scope, name) in action_templates(&a.input) {
-                        // A drop's neighbours and its order are rows of the
-                        // same result.
-                        let a_row = matches!(
-                            scope.as_str(),
-                            "row" | "before" | "after" | "onto" | "order"
-                        );
-                        if a_row && !cols.contains(&name) {
-                            ext.errors.push(format!(
-                                "lens {id}: action `{}` uses `{{{{{scope}.{name}}}}}`, which isn't in \
-                                 the query result (columns: {})",
-                                a.id,
-                                cols.join(", ")
-                            ));
-                        }
-                    }
-                }
-                for c in &run.lens.columns {
-                    let mut keys = vec![&c.key];
-                    keys.extend(c.unit.iter());
-                    keys.extend(c.icon.iter());
-                    keys.extend(c.tone.iter());
-                    if let Some(link) = c.link.as_ref() {
-                        keys.extend(link.from.iter());
-                        keys.extend(link.line.iter());
-                        keys.extend(link.base.iter());
-                        keys.extend(link.head.iter());
-                    }
-                    for k in keys {
-                        if !cols.contains(k) {
-                            ext.errors.push(format!(
-                                "lens {id}: column `{k}` isn't in the query result (columns: {})",
-                                cols.join(", ")
-                            ));
-                        }
-                    }
-                }
+    let pages = crate::pages::checks::dry_run_all(layer, ext).await;
+    for page in ext.page_files.clone() {
+        let Some(loaders) = pages.get(&page.slug) else {
+            continue;
+        };
+        for (name, result) in loaders {
+            if let Err(e) = result {
+                ext.errors
+                    .push(format!("{}: loader `{name}`: {e}", page.origin.running));
+            }
+        }
+        for (node, viz, result) in crate::pages::checks::viz_nodes(&page, loaders) {
+            let Ok(result) = result else { continue };
+            for problem in viz_column_problems(viz, &result.columns) {
+                ext.errors
+                    .push(format!("{}: node `{node}`: {problem}", page.origin.running));
             }
         }
     }
-    Prepared {
-        lenses: runs,
-        overlay,
-    }
+    Prepared { pages, overlay }
 }
 
-/// One extension by name, read from its source under `root` now, with
-/// `project`'s settings saying where that is — for the write paths
-/// (`save_lens`), which must see their own result.
-fn load_fresh(root: &Path, project: &Path, name: &str) -> Result<Extension, DomainError> {
-    let settings = oxplow_config::extension_settings(project);
-    let dir = settings.source(root, name);
-    if !dir.join("extension.yaml").is_file() {
-        return Err(DomainError::NotFound);
+/// What a viz names that its loader's columns lack: a role block's
+/// column, an action's `when` or row placeholder, a column's key, unit,
+/// icon, tone or link column.
+fn viz_column_problems(cfg: &VizConfig, cols: &[String]) -> Vec<String> {
+    let mut problems: Vec<String> = Vec::new();
+    for (block, k) in cfg.role_columns() {
+        if !cols.contains(k) {
+            problems.push(format!(
+                "{block} column `{k}` isn't in the query result (columns: {})",
+                cols.join(", ")
+            ));
+        }
     }
-    Ok(load_one(
-        &Disk(dir.clone()),
-        name,
-        &shown(root, &dir),
-        origin_of(name),
-    ))
+    for a in &cfg.actions {
+        if let Some(when) = a.when.as_ref().filter(|w| !cols.contains(w)) {
+            problems.push(format!(
+                "action `{}` is offered `when: {when}`, which isn't in the \
+                     query result (columns: {})",
+                a.id,
+                cols.join(", ")
+            ));
+        }
+        for (scope, name) in action_templates(&a.input) {
+            // A drop's neighbours and its order are rows of the
+            // same result.
+            let a_row = matches!(
+                scope.as_str(),
+                "row" | "before" | "after" | "onto" | "order"
+            );
+            if a_row && !cols.contains(&name) {
+                problems.push(format!(
+                    "action `{}` uses `{{{{{scope}.{name}}}}}`, which isn't in \
+                         the query result (columns: {})",
+                    a.id,
+                    cols.join(", ")
+                ));
+            }
+        }
+    }
+    for c in &cfg.columns {
+        let mut keys = vec![&c.key];
+        keys.extend(c.unit.iter());
+        keys.extend(c.icon.iter());
+        keys.extend(c.tone.iter());
+        if let Some(link) = c.link.as_ref() {
+            keys.extend(link.from.iter());
+            keys.extend(link.line.iter());
+            keys.extend(link.base.iter());
+            keys.extend(link.head.iter());
+        }
+        for k in keys {
+            if !cols.contains(k) {
+                problems.push(format!(
+                    "column `{k}` isn't in the query result (columns: {})",
+                    cols.join(", ")
+                ));
+            }
+        }
+    }
+    problems
 }
 
 /// A lowercase letter, then lowercase letters, digits and single dashes —
-/// safe as a folder name, a lens-id prefix and (dashes as underscores) a
+/// safe as a folder name, a page-id prefix and (dashes as underscores) a
 /// command namespace.
 pub fn is_valid_name(name: &str) -> bool {
     oxplow_domain::contribution::valid_extension_name(name)
 }
 
-/// What a lens shows — the view part of a lens file, and the one shape a
-/// lens is made from: a lens file's body, an agent's answer
-/// (`thread_answer.spec`, P6.C1), what Explore Data saves, and what
-/// [`save_lens`] writes. The rest of a lens file (launcher placement,
-/// actions, an alert) is added by editing it.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct LensSpec {
-    pub title: String,
-    #[serde(default)]
-    pub description: String,
-    /// SQL over the `v_*` models, with `:param` bindings. Only a `form`
-    /// may leave it empty.
-    #[serde(default)]
-    pub query: String,
-    #[serde(default = "default_viz")]
-    pub viz: LensViz,
-    #[serde(default)]
-    pub params: Vec<PageParam>,
-    #[serde(default)]
-    pub columns: Vec<PageColumn>,
-    #[serde(default)]
-    pub empty: Option<String>,
-    #[serde(default)]
-    pub chart: Option<LensChart>,
-    #[serde(default)]
-    pub tree: Option<LensTree>,
-    #[serde(default)]
-    pub timeline: Option<LensTimeline>,
-    #[serde(default)]
-    pub steps: Option<LensSteps>,
-    #[serde(default)]
-    pub hunks: Option<LensHunks>,
-    #[serde(default)]
-    pub code: Option<LensCode>,
-    #[serde(default)]
-    pub diff: Option<LensDiff>,
-    #[serde(default)]
-    pub markdown: Option<LensMarkdown>,
-    #[serde(default)]
-    pub form: Option<LensForm>,
-    #[serde(default)]
-    pub group: Option<LensGroup>,
-    #[serde(default)]
-    pub emphasis: Option<String>,
-    #[serde(default)]
-    pub depth: Option<String>,
-}
-
-impl Lens {
-    /// A lens made from `spec`, as `id` (`<extension>/<slug>`, or an
-    /// answer's `answer/<n>`); it has no actions, alert or children.
-    pub fn from_spec(id: &str, spec: &LensSpec) -> Lens {
-        let (extension, slug) = id.split_once('/').unwrap_or((id, id));
-        Lens {
-            id: id.to_string(),
-            extension: extension.to_string(),
-            slug: slug.to_string(),
-            title: spec.title.clone(),
-            description: spec.description.clone(),
-            query: spec.query.clone(),
-            viz: spec.viz,
-            params: typed(spec.params.clone()),
-            columns: spec.columns.clone(),
-            empty: spec.empty.clone(),
-            chart: spec.chart.clone(),
-            tree: spec.tree.clone(),
-            tile: None,
-            timeline: spec.timeline.clone(),
-            steps: spec.steps.clone(),
-            hunks: spec.hunks.clone(),
-            code: spec.code.clone(),
-            diff: spec.diff.clone(),
-            editor: None,
-            embed: None,
-            answer: None,
-            terminal: None,
-            markdown: spec.markdown.clone(),
-            form: spec.form.clone(),
-            custom: None,
-            group: spec.group.clone(),
-            emphasis: spec.emphasis.clone(),
-            depth: spec.depth.clone(),
-            parts: Vec::new(),
-            view: None,
-            fills: spec.viz.fills(),
-            launcher_category: None,
-            hidden: false,
-            refresh: false,
-            actions: Vec::new(),
-            alert: None,
-            needs: Vec::new(),
-            origin: PageProvenance::default(),
-            tool: None,
-        }
-    }
-
-    /// The spec this lens was made from (its view part).
-    pub fn spec(&self) -> LensSpec {
-        LensSpec {
-            title: self.title.clone(),
-            description: self.description.clone(),
-            query: self.query.clone(),
-            viz: self.viz,
-            params: self.params.clone(),
-            columns: self.columns.clone(),
-            empty: self.empty.clone(),
-            chart: self.chart.clone(),
-            tree: self.tree.clone(),
-            timeline: self.timeline.clone(),
-            steps: self.steps.clone(),
-            hunks: self.hunks.clone(),
-            code: self.code.clone(),
-            diff: self.diff.clone(),
-            markdown: self.markdown.clone(),
-            form: self.form.clone(),
-            group: self.group.clone(),
-            emphasis: self.emphasis.clone(),
-            depth: self.depth.clone(),
-        }
-    }
-}
-
-/// What's wrong with `spec` as a standalone lens, if anything: no title,
-/// or a component missing what it needs. A `document` or `dashboard`
-/// composes other lenses and a `custom` lens an extension's component, so
-/// a standalone spec can't be either; nor a `form`, whose submit runs its command as the
-/// person — an answer an agent chose never does.
-pub fn spec_problem(spec: &LensSpec) -> Option<String> {
-    if spec.title.trim().is_empty() {
-        return Some("a lens needs a `title`".into());
-    }
-    if matches!(spec.viz, LensViz::Document | LensViz::Dashboard) {
-        return Some(format!(
-            "a `{}` composes lens files; show each lens instead",
-            viz_name(spec.viz)
-        ));
-    }
-    if spec.viz == LensViz::Custom {
-        return Some(
-            "a `custom` lens renders an extension's component; write it as a lens file in a \
-             private extension that declares the component"
-                .into(),
-        );
-    }
-    if spec.viz == LensViz::Terminal {
-        return Some("a `terminal` is a page's; an answer can't open one".into());
-    }
-    if spec.viz == LensViz::Answer {
-        return Some("an `answer` shows an answer; show its lens or spec instead".into());
-    }
-    if spec.viz == LensViz::Editor {
-        return Some(
-            "an `editor` saves as whoever presses Save, and an answer never writes as the \
-             person; show the file with `code` at `working`"
-                .into(),
-        );
-    }
-    if spec.viz == LensViz::Embed {
-        return Some(
-            "an `embed` opens a web page on the person's machine, and an answer never does \
-             that; link to the page in markdown instead"
-                .into(),
-        );
-    }
-    if spec.viz == LensViz::Form {
-        return Some(
-            "a `form` runs its command as whoever submits it, and an answer never runs a \
-             command as the person; write the form as a lens file in an extension"
-                .into(),
-        );
-    }
-    shape_problem(&Lens::from_spec("spec/spec", spec), &[], &[])
-}
-
-/// A lens slug from a title: lowercase letters and digits, runs of
+/// A viz slug from a title: lowercase letters and digits, runs of
 /// anything else one dash.
 pub fn slug_of(title: &str) -> String {
     let mut out = String::new();
@@ -7815,25 +5469,16 @@ pub fn slug_of(title: &str) -> String {
     }
     let out = out.trim_end_matches('-').to_string();
     if out.is_empty() {
-        "lens".into()
+        "viz".into()
     } else {
         out
     }
 }
 
-/// Who asked for a new lens, for its extension's intent when the
-/// extension is created.
-pub struct LensOrigin<'a> {
-    /// What the lens answers (the extension's `intent.purpose`).
-    pub purpose: &'a str,
-    /// The thread or effort ref that asked for it (`intent.origin`).
-    pub origin: Option<&'a str>,
-}
-
 /// The source folder of extension `name` in the checkout at `root` (where
-/// `project`'s settings say it is), if oxplow may write lens files into it:
+/// `project`'s settings say it is), if oxplow may write viz files into it:
 /// a valid name, not a bundled extension. The one check every writer of an
-/// extension's files (`save_lens`) runs first, so a
+/// extension's files (a page save, `extension.deploy`) runs first, so a
 /// path or a reserved name never reaches the filesystem.
 pub fn writable_extension_dir(
     root: &Path,
@@ -7853,112 +5498,8 @@ pub fn writable_extension_dir(
     Ok(oxplow_config::extension_settings(project).source(root, name))
 }
 
-/// Write `spec` as a new lens file `lenses/<slug>.yaml` in extension
-/// `extension`'s source in the checkout at `root` (where `project`'s
-/// settings say it is), creating the extension (a v2 manifest whose intent
-/// is `origin`) if needed. Refuses a spec with a problem, overwriting a
-/// lens, and the bundled extensions. Nothing runs it until it is deployed.
-pub fn save_lens(
-    root: &Path,
-    project: &Path,
-    extension: &str,
-    slug: &str,
-    spec: &LensSpec,
-    origin: &LensOrigin<'_>,
-) -> Result<Lens, DomainError> {
-    let invalid = |m: String| DomainError::Invalid(m);
-    let storage = |e: std::io::Error| DomainError::Storage(format!("save lens: {e}"));
-    let dir = writable_extension_dir(root, project, extension)?;
-    if !is_valid_name(slug) {
-        return Err(invalid(format!(
-            "lens slug `{slug}` must start with a letter and be lowercase letters, digits and single dashes"
-        )));
-    }
-    if let Some(problem) = spec_problem(spec) {
-        return Err(invalid(problem));
-    }
-    let file = dir.join("lenses").join(format!("{slug}.yaml"));
-    if file.exists() {
-        return Err(invalid(format!("lens `{extension}/{slug}` already exists")));
-    }
-    let manifest = dir.join("extension.yaml");
-    std::fs::create_dir_all(file.parent().unwrap_or(&dir)).map_err(storage)?;
-    if !manifest.exists() {
-        // The same v2 manifest `oxplow extension new` writes, so a lens saved
-        // from Explore Data starts as a checkable extension with an intent.
-        std::fs::write(
-            &manifest,
-            scaffold_manifest(&ManifestScaffold {
-                name: extension,
-                description: "Lenses kept from answers in your threads",
-                purpose: origin.purpose,
-                origin: origin.origin,
-                example_name: slug,
-                example_input: &format!("{{ lens: {slug} }}"),
-                example_expect: "the rows the answer showed",
-            }),
-        )
-        .map_err(storage)?;
-    }
-    let body = lens_file_yaml(spec)?;
-    std::fs::write(&file, body).map_err(storage)?;
-    let ext = load_fresh(root, project, extension)?;
-    match ext.lenses.into_iter().find(|l| l.slug == slug) {
-        Some(lens) => Ok(lens),
-        None => {
-            // It didn't load: take it back out and say why.
-            let _ = std::fs::remove_file(&file);
-            let why: Vec<String> = ext
-                .errors
-                .into_iter()
-                .filter(|e| e.contains(&format!("{slug}.yaml")))
-                .collect();
-            Err(invalid(format!(
-                "the lens `{extension}/{slug}` doesn't load: {}",
-                if why.is_empty() {
-                    "no reason given".to_string()
-                } else {
-                    why.join("; ")
-                }
-            )))
-        }
-    }
-}
-
-/// `spec` as a lens file, naming its schema on the first line: what it
-/// sets, without the empty and absent keys at any depth (the file reads
-/// like one written by hand). Built as
-/// YAML directly — a JSON detour would carry serde_json's number
-/// representation into the file.
-fn lens_file_yaml(spec: &LensSpec) -> Result<String, DomainError> {
-    fn prune(v: serde_yaml::Value) -> Option<serde_yaml::Value> {
-        use serde_yaml::Value as Y;
-        match v {
-            Y::Null => None,
-            Y::String(s) if s.is_empty() => None,
-            Y::Sequence(items) => {
-                let items: Vec<Y> = items.into_iter().filter_map(prune).collect();
-                (!items.is_empty()).then_some(Y::Sequence(items))
-            }
-            Y::Mapping(map) => {
-                let map: serde_yaml::Mapping = map
-                    .into_iter()
-                    .filter_map(|(k, v)| prune(v).map(|v| (k, v)))
-                    .collect();
-                (!map.is_empty()).then_some(Y::Mapping(map))
-            }
-            other => Some(other),
-        }
-    }
-    let value =
-        serde_yaml::to_value(spec).map_err(|e| DomainError::Storage(format!("save lens: {e}")))?;
-    let body = serde_yaml::to_string(&prune(value).unwrap_or(serde_yaml::Value::Null))
-        .map_err(|e| DomainError::Storage(format!("save lens: {e}")))?;
-    Ok(schema::modeline(schema::LENS_SCHEMA_URL) + &body)
-}
-
 /// What a scaffolded `extension.yaml` says. One template for
-/// `oxplow extension new` and `save_lens`, so every new extension starts
+/// `oxplow extension new` and `extension.deploy`, so every new extension starts
 /// with an intent and passes `check`.
 pub struct ManifestScaffold<'a> {
     pub name: &'a str,
@@ -7967,7 +5508,7 @@ pub struct ManifestScaffold<'a> {
     /// The thread/effort ref that asked for it, when known.
     pub origin: Option<&'a str>,
     pub example_name: &'a str,
-    /// YAML flow text for the example's input (`{ lens: demo }`).
+    /// YAML flow text for the example's input (`{ page: demo }`).
     pub example_input: &'a str,
     pub example_expect: &'a str,
 }
@@ -8007,7 +5548,6 @@ mod tests {
             ("collectors:\n  - id: a\n    runtime: starlark\n    entry: c.star\n  - id: b\n    bogus: 1\n", "collector"),
             ("skills:\n  - name: a\n    file: a.md\n  - name: b\n    bogus: 1\n", "skill"),
             ("implementations:\n  - id: a\n    capability: work_items\n  - id: b\n    bogus: 1\n", "implementation"),
-            ("pages:\n  - { id: a, title: A, category: Work, lens: x }\n  - id: b\n    bogus: 1\n", "page"),
         ] {
             let d = tempfile::tempdir().unwrap();
             let manifest = format!("manifest: 2\nname: x\nintent:\n  purpose: p\n{block}");
@@ -8037,7 +5577,7 @@ mod tests {
     #[test]
     fn a_broken_nested_entry_doesnt_sink_the_manifest() {
         let d = tempfile::tempdir().unwrap();
-        let manifest = "manifest: 2\nname: x\nintent:\n  purpose: p\n  examples:\n    - { name: a }\n    - { name: b, bogus: 1 }\nui:\n  slots:\n    - { slot: diff.file.header, lens: l, bogus: 1 }\nskills:\n  - name: s\n    file: s.md\n";
+        let manifest = "manifest: 2\nname: x\nintent:\n  purpose: p\n  examples:\n    - { name: a }\n    - { name: b, bogus: 1 }\nui:\n  slots:\n    - { slot: diff.file.header, page: l, bogus: 1 }\nskills:\n  - name: s\n    file: s.md\n";
         std::fs::create_dir_all(d.path().join(".oxplow/extensions/x")).unwrap();
         std::fs::write(
             d.path().join(".oxplow/extensions/x/extension.yaml"),
@@ -8067,11 +5607,11 @@ mod tests {
         );
     }
 
-    /// The user guide's hand-written extension loads as written, lens and
+    /// The user guide's hand-written extension loads as written, page and
     /// all: following it never makes a dead extension.
     #[test]
     fn the_guides_hand_written_extension_loads() {
-        let guide = include_str!("../../../docs/guide/lenses.md");
+        let guide = include_str!("../../../docs/guide/pages.md");
         let section = &guide[guide.find("## Writing one by hand").expect("the section")..];
         let blocks: Vec<&str> = section
             .split("```yaml\n")
@@ -8096,10 +5636,10 @@ mod tests {
             .find(|e| e.name == "review")
             .expect("it loads");
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
-        assert!(ext.lenses.iter().any(|l| l.slug == "blocked"));
+        assert!(ext.page_files.iter().any(|p| p.slug == "blocked"));
     }
 
-    /// A lens action's placeholders are read by the domain's one
+    /// An action's placeholders are read by the domain's one
     /// tokenizer (`oxplow_domain::template`), a stray opener included.
     #[test]
     fn action_templates_read_the_one_tokenizer() {
@@ -8142,12 +5682,12 @@ mod tests {
         assert!(err.contains("`when` is for a row action"), "{err}");
     }
 
-    /// A lens that holds one row (detail, form, markdown, a document's row)
-    /// lets a whole-lens action name `when` and `{{row.*}}`: the lens's
-    /// one row. Derived at load as `one_row`, not declared; any other lens
-    /// refuses both.
+    /// A viz that holds one row (detail, form, markdown) — and a page's
+    /// own actions, over its first loader's row — lets an action that isn't
+    /// a row action name `when` and `{{row.*}}`: that one row. Derived at
+    /// load as `one_row`, not declared; any other viz refuses both.
     #[test]
-    fn a_whole_lens_action_over_a_one_row_lens_may_name_when_and_the_row() {
+    fn an_action_over_one_row_may_name_when_and_the_row() {
         let parse = |action: &str, holds_one_row: bool| {
             parse_actions(
                 vec![serde_yaml::from_str(action).unwrap()],
@@ -8166,7 +5706,7 @@ mod tests {
         assert!(only_when[0].one_row);
         let err = parse(named, false).unwrap_err();
         assert!(err.contains("holds one row"), "{err}");
-        // A row action stays what it was, on any lens.
+        // A row action stays what it was, on any viz.
         let row = parse(
             "{ id: a, label: A, command: x.y.z, row: true, when: open }",
             false,
@@ -8201,7 +5741,7 @@ mod tests {
     /// isn't in the nav bar, so it can't be.
     #[test]
     fn prominent_keeps_page_actions_in_the_bar() {
-        // Over a grouped lens, so a group action is declared as it may be.
+        // Over a grouped viz, so a group action is declared as it may be.
         let parse = |actions: &[&str]| {
             parse_actions(
                 actions
@@ -8354,7 +5894,7 @@ mod tests {
             (vec!["{ id: a, label: A, command: x.y.z, drag: true, primary: true }"], true, "a drag action can't be `primary`"),
             (vec!["{ id: a, label: A, command: x.y.z, row: true, input: { b: '{{before.uri}}' } }"], true, "`{{before.uri}}` needs `drag: true`"),
             (vec!["{ id: a, label: A, command: x.y.z, row: true, input: { o: '{{order.uri}}' } }"], true, "`{{order.uri}}` needs `drag: true`"),
-            (vec!["{ id: a, label: A, command: x.y.z, drag: true, input: { g: '{{group.value}}' } }"], false, "`{{group.value}}` needs the lens to have a `group`"),
+            (vec!["{ id: a, label: A, command: x.y.z, drag: true, input: { g: '{{group.value}}' } }"], false, "`{{group.value}}` needs the viz to have a `group`"),
             (vec!["{ id: a, label: A, command: x.y.z, drag: true, input: { g: '{{group.by}}' } }"], true, "`{{group.by}}` isn't `{{group.value}}`"),
             (vec!["{ id: a, label: A, command: x.y.z, bulk: true }"], true, "`bulk` is for a row action"),
             (vec!["{ id: a, label: A, command: x.y.z, key: f }"], true, "`key` is for a row action"),
@@ -8408,7 +5948,7 @@ mod tests {
                     "{ id: a, label: A, command: x.y.z, edit: true, input: { body: '{{row.body}}' } }",
                     "{ id: b, label: B, command: x.y.z, edit: true, input: { body: '{{row.body}}' } }",
                 ],
-                "`b`: the lens already saves with `a`",
+                "`b`: the viz already saves with `a`",
             ),
         ] {
             let err = parse(&actions).unwrap_err();
@@ -8421,23 +5961,55 @@ mod tests {
     #[test]
     fn a_markdown_editor_saves_the_column_it_shows() {
         let save = "actions: [{ id: save, label: Save, command: x.y.z, edit: true, fixed: [slug], input: { slug: '{{row.slug}}', body: '{{row.body}}' } }]\n";
+        let rows = "SELECT 'a' AS slug, 'hi' AS body";
         let (_d, ext) = load_x(
             &[
-                ("ok", &format!("title: O\nquery: SELECT 'a' AS slug, 'hi' AS body\nviz: markdown\nmarkdown: {{ text: body }}\n{save}")),
-                ("view", "title: V\nquery: SELECT 'hi' AS body\nviz: markdown\nmarkdown: { text: body }\n"),
-                ("notext", &format!("title: N\nquery: SELECT 'a' AS slug, 'hi' AS body\nviz: markdown\n{save}")),
-                ("other", &format!("title: T\nquery: SELECT 'a' AS slug, 'hi' AS slug2\nviz: markdown\nmarkdown: {{ text: slug2 }}\n{save}")),
-                ("table", &format!("title: T\nquery: SELECT 'a' AS slug, 'hi' AS body\nviz: table\n{save}")),
-                ("block", "title: B\nquery: SELECT 'hi' AS body\nviz: table\nmarkdown: { text: body }\n"),
+                (
+                    "ok",
+                    &viz_page(
+                        "",
+                        rows,
+                        &format!("viz: markdown\nmarkdown: {{ text: body }}\n{save}"),
+                    ),
+                ),
+                (
+                    "view",
+                    &viz_page(
+                        "",
+                        "SELECT 'hi' AS body",
+                        "viz: markdown\nmarkdown: { text: body }\n",
+                    ),
+                ),
+                (
+                    "notext",
+                    &viz_page("", rows, &format!("viz: markdown\n{save}")),
+                ),
+                (
+                    "other",
+                    &viz_page(
+                        "",
+                        "SELECT 'a' AS slug, 'hi' AS slug2",
+                        &format!("viz: markdown\nmarkdown: {{ text: slug2 }}\n{save}"),
+                    ),
+                ),
+                ("table", &viz_page("", rows, &format!("viz: table\n{save}"))),
+                (
+                    "block",
+                    &viz_page(
+                        "",
+                        "SELECT 'hi' AS body",
+                        "viz: table\nmarkdown: { text: body }\n",
+                    ),
+                ),
             ],
             "",
         );
-        let lens = |slug: &str| ext.lenses.iter().find(|l| l.slug == slug);
-        let ok = lens("ok").expect("ok loads");
+        let viz = |slug: &str| node(&ext, slug);
+        let ok = viz("ok").expect("ok loads");
         assert_eq!(ok.markdown.as_ref().unwrap().text.as_deref(), Some("body"));
-        assert!(lens("view").is_some());
+        assert!(viz("view").is_some());
         for slug in ["notext", "other", "table", "block"] {
-            assert!(lens(slug).is_none(), "{slug} is refused");
+            assert!(viz(slug).is_none(), "{slug} is refused");
         }
         let errs = ext.errors.join("\n");
         for says in [
@@ -8456,15 +6028,22 @@ mod tests {
     fn a_board_needs_a_group_and_its_values_fix_the_order() {
         let (_d, ext) = load_x(
             &[
-                ("b", "title: B\nquery: SELECT 'a' AS uri, 'todo' AS state\nviz: board\ngroup: { by: state, values: [todo, done] }\n"),
-                ("nob", "title: N\nquery: SELECT 'a' AS uri\nviz: board\n"),
+                (
+                    "b",
+                    &viz_page(
+                        "",
+                        "SELECT 'a' AS uri, 'todo' AS state",
+                        "viz: board\ngroup: { by: state, values: [todo, done] }\n",
+                    ),
+                ),
+                ("nob", &viz_page("", "SELECT 'a' AS uri", "viz: board\n")),
             ],
             "",
         );
-        let lens = |slug: &str| ext.lenses.iter().find(|l| l.slug == slug);
-        let b = lens("b").expect("b loads");
+        let viz = |slug: &str| node(&ext, slug);
+        let b = viz("b").expect("b loads");
         assert_eq!(b.group.as_ref().unwrap().values, vec!["todo", "done"]);
-        assert!(lens("nob").is_none());
+        assert!(viz("nob").is_none());
         let errs = ext.errors.join("\n");
         assert!(
             errs.contains("`board` needs `group: { by: <column> }`"),
@@ -8741,17 +6320,21 @@ mod tests {
 
     const EXT: &str =
         "manifest: 2\nname: review\nintent:\n  purpose: test\ndescription: Review helpers\n";
-    const LENS: &str = r#"
+    const PAGE: &str = r#"
 title: Items by state
 description: Every work item in a given state.
 params:
   - { name: state, label: State, default: in_progress }
-query: |
-  SELECT uri, title FROM v_work_item WHERE state = :state ORDER BY title
-viz: table
-columns:
-  - { key: title, label: Item, link: { kind: page, from: uri } }
-empty: No items.
+data:
+  items:
+    sql: |
+      SELECT uri, title FROM v_work_item WHERE state = :state ORDER BY title
+view:
+  viz: table
+  from: items
+  columns:
+    - { key: title, label: Item, link: { kind: page, from: uri } }
+  empty: No items.
 "#;
 
     async fn layer() -> crate::sql_gateway::SqlGateway {
@@ -8766,6 +6349,69 @@ empty: No items.
             .collect()
     }
 
+    /// A page whose view is one viz node over the `sql` loader `q`: `head`
+    /// is its metadata (`title: T` unless it names one), `node` the node's
+    /// keys beside `from: q`, a line each (`viz: table` unless it names one).
+    fn viz_page(head: &str, sql: &str, node: &str) -> String {
+        let title = if head.contains("title:") {
+            ""
+        } else {
+            "title: T\n"
+        };
+        let viz = if node.contains("viz:") {
+            ""
+        } else {
+            "  viz: table\n"
+        };
+        let node: String = node.lines().map(|l| format!("  {l}\n")).collect();
+        format!("{title}{head}data:\n  q:\n    sql: {sql:?}\nview:\n  from: q\n{viz}{node}")
+    }
+
+    /// Page `slug` of `ext`, when it loaded.
+    fn page_of<'a>(ext: &'a Extension, slug: &str) -> Option<&'a crate::pages::schema::Page> {
+        ext.page_files.iter().find(|p| p.slug == slug)
+    }
+
+    /// The config of page `slug`'s view, when it loaded and its view is a
+    /// viz node.
+    fn node<'a>(ext: &'a Extension, slug: &str) -> Option<&'a VizConfig> {
+        match &page_of(ext, slug)?.view.kind {
+            crate::pages::schema::NodeKind::Viz { config, .. } => Some(config),
+            _ => None,
+        }
+    }
+
+    /// Services over a git project at `dir`, its extensions active.
+    async fn services(dir: &Path) -> std::sync::Arc<crate::Services> {
+        crate::test_fixtures::init_git_repo(dir);
+        let svc = crate::Services::in_memory(dir).await.unwrap();
+        crate::test_fixtures::activate(&svc).await;
+        svc
+    }
+
+    /// Run page `id` with `params` as the person, from `ctx`.
+    async fn run_page(
+        svc: &crate::Services,
+        id: &str,
+        params: BTreeMap<String, SqlCell>,
+        ctx: ViewContext,
+    ) -> Result<crate::pages::runner::PageRun, DomainError> {
+        use crate::pages::runner::{PageRunner, RunRequest, RunTarget};
+        PageRunner::of(svc)
+            .run(RunRequest {
+                target: RunTarget::Page(id.into()),
+                params,
+                ctx,
+                viewer: oxplow_domain::Actor::Human,
+            })
+            .await
+    }
+
+    /// Loader `loader`'s rows in `run`, as JSON.
+    fn rows_of(run: &crate::pages::runner::PageRun, loader: &str) -> serde_json::Value {
+        serde_json::to_value(&run.loaders[loader].result.rows).unwrap()
+    }
+
     #[test]
     fn no_extensions_dir_means_no_project_extensions() {
         let dir = tempfile::tempdir().unwrap();
@@ -8773,13 +6419,13 @@ empty: No items.
     }
 
     #[test]
-    fn loads_an_extension_and_its_lenses() {
+    fn loads_an_extension_and_its_pages() {
         let dir = tempfile::tempdir().unwrap();
         write(dir.path(), ".oxplow/extensions/review/extension.yaml", EXT);
         write(
             dir.path(),
-            ".oxplow/extensions/review/lenses/by-status.yaml",
-            LENS,
+            ".oxplow/extensions/review/pages/by-status.yaml",
+            PAGE,
         );
 
         let exts = project_extensions(dir.path());
@@ -8789,24 +6435,25 @@ empty: No items.
         assert_eq!(e.description, "Review helpers");
         assert_eq!(e.path, ".oxplow/extensions/review");
         assert!(e.errors.is_empty(), "{:?}", e.errors);
-        assert_eq!(e.lenses.len(), 1);
-        let l = &e.lenses[0];
-        assert_eq!(l.id, "review/by-status");
-        assert_eq!(l.slug, "by-status");
-        assert_eq!(l.title, "Items by state");
-        assert_eq!(l.viz, LensViz::Table);
+        assert_eq!(e.page_files.len(), 1);
+        let p = &e.page_files[0];
+        assert_eq!(p.id, "review/by-status");
+        assert_eq!(p.slug, "by-status");
+        assert_eq!(p.title, "Items by state");
         assert_eq!(
-            l.origin.running,
-            ".oxplow/extensions/review/lenses/by-status.yaml"
+            p.origin.running,
+            ".oxplow/extensions/review/pages/by-status.yaml"
         );
         assert_eq!(
-            l.params[0].default,
+            p.params[0].default,
             Some(SqlCell::Text("in_progress".into()))
         );
+        let l = node(e, "by-status").unwrap();
+        assert_eq!(l.viz, Viz::Table);
         assert_eq!(
             l.columns[0].link,
-            Some(LensLink {
-                kind: LensLinkKind::Page,
+            Some(ColumnLink {
+                kind: LinkKind::Page,
                 from: Some("uri".into()),
                 line: None,
                 base: None,
@@ -8815,24 +6462,44 @@ empty: No items.
         );
     }
 
+    /// An extension still holding a `lenses/` folder is told to rewrite it
+    /// as pages; nothing in it loads.
+    #[test]
+    fn a_lenses_folder_is_an_error_naming_pages() {
+        let dir = tempfile::tempdir().unwrap();
+        write(dir.path(), ".oxplow/extensions/review/extension.yaml", EXT);
+        write(
+            dir.path(),
+            ".oxplow/extensions/review/lenses/old.yaml",
+            "title: Old\nquery: SELECT 1\n",
+        );
+        let e = &project_extensions(dir.path())[0];
+        let errs = e.errors.join("\n");
+        assert!(
+            errs.contains("review/lenses/") && errs.contains("pages/<slug>.yaml"),
+            "{errs}"
+        );
+        assert!(e.page_files.is_empty());
+    }
+
     #[test]
     fn a_broken_extension_reports_errors_without_hiding_others() {
         let dir = tempfile::tempdir().unwrap();
         write(dir.path(), ".oxplow/extensions/review/extension.yaml", EXT);
         write(
             dir.path(),
-            ".oxplow/extensions/review/lenses/good.yaml",
-            LENS,
+            ".oxplow/extensions/review/pages/good.yaml",
+            PAGE,
         );
         write(
             dir.path(),
-            ".oxplow/extensions/review/lenses/bad.yaml",
-            "title: x\nqueery: SELECT 1\n",
+            ".oxplow/extensions/review/pages/bad.yaml",
+            "title: x\nveiw: { markdown: hi }\n",
         );
         write(
             dir.path(),
-            ".oxplow/extensions/nomanifest/lenses/a.yaml",
-            LENS,
+            ".oxplow/extensions/nomanifest/pages/a.yaml",
+            PAGE,
         );
         write(
             dir.path(),
@@ -8850,22 +6517,22 @@ empty: No items.
         let review = by("review");
         assert_eq!(
             review
-                .lenses
+                .page_files
                 .iter()
-                .map(|l| l.slug.as_str())
+                .map(|p| p.slug.as_str())
                 .collect::<Vec<_>>(),
             vec!["good"]
         );
         assert_eq!(review.errors.len(), 1);
         assert!(
-            review.errors[0].contains("lenses/bad.yaml"),
+            review.errors[0].contains("pages/bad.yaml"),
             "{:?}",
             review.errors
         );
 
         let nm = by("nomanifest");
         assert!(nm.errors[0].contains("extension.yaml"), "{:?}", nm.errors);
-        assert!(nm.lenses.is_empty());
+        assert!(nm.page_files.is_empty());
 
         let mis = by("misnamed");
         assert!(
@@ -8876,139 +6543,109 @@ empty: No items.
     }
 
     #[test]
-    fn find_lens_by_id() {
+    fn find_page_by_id() {
         let dir = tempfile::tempdir().unwrap();
         write(dir.path(), ".oxplow/extensions/review/extension.yaml", EXT);
         write(
             dir.path(),
-            ".oxplow/extensions/review/lenses/by-status.yaml",
-            LENS,
+            ".oxplow/extensions/review/pages/by-status.yaml",
+            PAGE,
         );
         assert_eq!(
-            find_lens(&cat(), dir.path(), "review/by-status")
+            cat()
+                .find_page(dir.path(), "review/by-status")
                 .unwrap()
                 .title,
             "Items by state"
         );
         assert!(matches!(
-            find_lens(&cat(), dir.path(), "review/nope"),
+            cat().find_page(dir.path(), "review/nope"),
             Err(DomainError::NotFound)
         ));
         assert!(matches!(
-            find_lens(&cat(), dir.path(), "nope"),
+            cat().find_page(dir.path(), "nope"),
             Err(DomainError::NotFound)
         ));
     }
 
     #[tokio::test]
-    async fn run_lens_binds_defaults_and_overrides() {
+    async fn a_page_run_binds_defaults_and_overrides() {
         let dir = tempfile::tempdir().unwrap();
         write(dir.path(), ".oxplow/extensions/review/extension.yaml", EXT);
         write(
             dir.path(),
-            ".oxplow/extensions/review/lenses/echo.yaml",
-            "title: Echo\nparams:\n  - { name: a, default: 1 }\n  - { name: b, default: two }\nquery: SELECT :a AS a, :b AS b\n",
+            ".oxplow/extensions/review/pages/echo.yaml",
+            &viz_page(
+                "title: Echo\nparams:\n  - { name: a, default: 1 }\n  - { name: b, default: two }\n",
+                "SELECT :a AS a, :b AS b",
+                "",
+            ),
         );
-        let sl = layer().await;
+        let svc = services(dir.path()).await;
 
-        let run = run_lens(
-            &sl,
-            &cat(),
-            dir.path(),
-            "review/echo",
-            BTreeMap::new(),
-            &ViewContext::default(),
-        )
-        .await
-        .unwrap();
-        assert_eq!(run.result.columns, vec!["a", "b"]);
-        assert_eq!(
-            serde_json::to_value(&run.result.rows).unwrap(),
-            serde_json::json!([[1, "two"]])
-        );
+        let run = run_page(&svc, "review/echo", BTreeMap::new(), ViewContext::default())
+            .await
+            .unwrap();
+        assert_eq!(run.loaders["q"].result.columns, vec!["a", "b"]);
+        assert_eq!(rows_of(&run, "q"), serde_json::json!([[1, "two"]]));
         assert_eq!(run.params.get("b"), Some(&SqlCell::Text("two".into())));
 
-        let mut over = BTreeMap::new();
-        over.insert("b".to_string(), SqlCell::Text("three".into()));
-        let run = run_lens(
-            &sl,
-            &cat(),
-            dir.path(),
-            "review/echo",
-            over,
-            &ViewContext::default(),
-        )
-        .await
-        .unwrap();
-        assert_eq!(
-            serde_json::to_value(&run.result.rows).unwrap(),
-            serde_json::json!([[1, "three"]])
-        );
+        let over = BTreeMap::from([("b".to_string(), SqlCell::Text("three".into()))]);
+        let run = run_page(&svc, "review/echo", over, ViewContext::default())
+            .await
+            .unwrap();
+        assert_eq!(rows_of(&run, "q"), serde_json::json!([[1, "three"]]));
     }
 
-    /// A lens declaring `stream_id` / `thread_id` gets the caller's
+    /// A page declaring `stream_id` / `thread_id` gets the caller's
     /// current ones unless it's given others; a default applies only with
-    /// no current value (tsk375).
+    /// no current value.
     #[tokio::test]
-    async fn run_lens_binds_the_current_stream_and_thread() {
+    async fn a_page_run_binds_the_current_stream_and_thread() {
         let dir = tempfile::tempdir().unwrap();
         write(dir.path(), ".oxplow/extensions/review/extension.yaml", EXT);
         write(
             dir.path(),
-            ".oxplow/extensions/review/lenses/mine.yaml",
-            "title: Mine\nparams:\n  - { name: stream_id }\n  - { name: thread_id, default: 9 }\nquery: SELECT :stream_id AS s, :thread_id AS t\n",
+            ".oxplow/extensions/review/pages/mine.yaml",
+            &viz_page(
+                "title: Mine\nparams:\n  - { name: stream_id }\n  - { name: thread_id, default: 9 }\n",
+                "SELECT :stream_id AS s, :thread_id AS t",
+                "",
+            ),
         );
-        let sl = layer().await;
-        let rows = |run: LensRun| serde_json::to_value(&run.result.rows).unwrap();
-        let here = ViewContext {
+        let svc = services(dir.path()).await;
+        let here = || ViewContext {
             stream_id: Some(2),
             thread_id: Some(5),
             active: None,
         };
-        let run = run_lens(
-            &sl,
-            &cat(),
-            dir.path(),
-            "review/mine",
-            BTreeMap::new(),
-            &here,
-        )
-        .await
-        .unwrap();
-        assert_eq!(rows(run), serde_json::json!([[2, 5]]));
-
-        let mut over = BTreeMap::new();
-        over.insert("thread_id".to_string(), SqlCell::Int(7));
-        let run = run_lens(&sl, &cat(), dir.path(), "review/mine", over, &here)
+        let run = run_page(&svc, "review/mine", BTreeMap::new(), here())
             .await
             .unwrap();
+        assert_eq!(rows_of(&run, "q"), serde_json::json!([[2, 5]]));
+
+        let over = BTreeMap::from([("thread_id".to_string(), SqlCell::Int(7))]);
+        let run = run_page(&svc, "review/mine", over, here()).await.unwrap();
         assert_eq!(
-            rows(run),
+            rows_of(&run, "q"),
             serde_json::json!([[2, 7]]),
             "an explicit value wins"
         );
 
-        let run = run_lens(
-            &sl,
-            &cat(),
-            dir.path(),
-            "review/mine",
-            BTreeMap::new(),
-            &ViewContext::default(),
-        )
-        .await
-        .unwrap();
+        let run = run_page(&svc, "review/mine", BTreeMap::new(), ViewContext::default())
+            .await
+            .unwrap();
         assert_eq!(
-            rows(run),
+            rows_of(&run, "q"),
             serde_json::json!([[null, 9]]),
             "no context: defaults"
         );
     }
 
     /// The viewer's context: the given stream (else the primary) and the
-    /// given thread (else the stream's selected one) (tsk375).
+    /// given thread (else the stream's selected one).
     #[tokio::test]
-    async fn lens_context_defaults_to_the_primary_stream_and_its_thread() {
+    async fn view_context_defaults_to_the_primary_stream_and_its_thread() {
         let f = crate::test_fixtures::services_with_effort().await;
         use oxplow_domain::stores::ThreadStore as _;
         let thread = f.svc.thread_store.get(&f.thread).await.unwrap().unwrap();
@@ -9021,131 +6658,75 @@ empty: No items.
                     .snapshot(&crate::config_service::read_config(&f.svc.config)),
             ),
         };
-        assert_eq!(lens_context(&f.svc, None, None).await, expect);
-        assert_eq!(lens_context(&f.svc, None, Some(f.thread)).await, expect);
+        assert_eq!(view_context(&f.svc, None, None).await, expect);
+        assert_eq!(view_context(&f.svc, None, Some(f.thread)).await, expect);
         assert_eq!(
-            lens_context(&f.svc, Some(thread.stream_id), None).await,
+            view_context(&f.svc, Some(thread.stream_id), None).await,
             expect
         );
     }
 
+    /// A misspelt param is refused, naming it; a loader whose query fails
+    /// carries its error and the page still runs.
     #[tokio::test]
-    async fn run_lens_rejects_unknown_params_and_reports_query_errors() {
+    async fn a_page_run_refuses_unknown_params_and_carries_query_errors() {
         let dir = tempfile::tempdir().unwrap();
         write(dir.path(), ".oxplow/extensions/review/extension.yaml", EXT);
         write(
             dir.path(),
-            ".oxplow/extensions/review/lenses/by-status.yaml",
-            LENS,
+            ".oxplow/extensions/review/pages/by-status.yaml",
+            PAGE,
         );
         write(
             dir.path(),
-            ".oxplow/extensions/review/lenses/broken.yaml",
-            "title: Broken\nquery: SELECT nope FROM v_nothing\n",
+            ".oxplow/extensions/review/pages/broken.yaml",
+            &viz_page("title: Broken\n", "SELECT nope FROM v_nothing", ""),
         );
-        let sl = layer().await;
+        let svc = services(dir.path()).await;
 
-        let mut bad = BTreeMap::new();
-        bad.insert("stauts".to_string(), SqlCell::Text("done".into()));
-        let err = run_lens(
-            &sl,
-            &cat(),
-            dir.path(),
-            "review/by-status",
-            bad,
-            &ViewContext::default(),
-        )
-        .await
-        .unwrap_err();
+        let bad = BTreeMap::from([("stauts".to_string(), SqlCell::Text("done".into()))]);
+        let err = run_page(&svc, "review/by-status", bad, ViewContext::default())
+            .await
+            .unwrap_err();
         assert!(
             matches!(err, DomainError::Invalid(ref m) if m.contains("stauts")),
             "{err:?}"
         );
 
-        let err = run_lens(
-            &sl,
-            &cat(),
-            dir.path(),
+        let run = run_page(
+            &svc,
             "review/broken",
             BTreeMap::new(),
-            &ViewContext::default(),
+            ViewContext::default(),
         )
         .await
-        .unwrap_err();
-        assert!(
-            matches!(err, DomainError::Invalid(ref m) if m.contains("review/broken")),
-            "{err:?}"
-        );
-    }
-
-    /// A document's query is one row whose columns its sections take as
-    /// params: under the document's own, which win when they hold a value.
-    #[test]
-    fn a_documents_row_is_its_sections_params() {
-        let (_d, ext) = load_x(
-            &[(
-                "doc",
-                "title: D\nparams: [{ name: stream_id }, { name: sha }]\nquery: SELECT 7 AS change_id, 'b' AS sha\nviz: document\nsections: [{ markdown: hi, id: m }]\n",
-            )],
-            "",
-        );
-        let lens = ext.lenses.into_iter().find(|l| l.slug == "doc").unwrap();
-        let run = |sha: SqlCell, rows: Vec<Vec<SqlCell>>| LensRun {
-            lens: lens.clone(),
-            params: BTreeMap::from([
-                ("stream_id".to_string(), SqlCell::Int(1)),
-                ("sha".to_string(), sha),
-            ]),
-            result: oxplow_db::SqlQueryResult {
-                columns: vec!["change_id".into(), "sha".into()],
-                rows,
-                truncated: false,
-                reads: oxplow_db::Reads::default(),
-                freshness: Vec::new(),
-                generation: None,
-                coverage: Vec::new(),
-            },
-            alert: None,
-            warnings: Vec::new(),
-            inactive: None,
-        };
-        let row = vec![vec![SqlCell::Int(7), SqlCell::Text("b".into())]];
-        assert_eq!(
-            part_params(&run(SqlCell::Text("a".into()), row.clone())),
-            BTreeMap::from([
-                ("change_id".to_string(), SqlCell::Int(7)),
-                ("sha".to_string(), SqlCell::Text("a".into())),
-                ("stream_id".to_string(), SqlCell::Int(1)),
-            ])
-        );
-        assert_eq!(
-            part_params(&run(SqlCell::Null(()), row))["sha"],
-            SqlCell::Text("b".into())
-        );
-        assert_eq!(
-            part_params(&run(SqlCell::Null(()), vec![])).get("change_id"),
-            None
-        );
+        .unwrap();
+        let err = run.loaders["q"].error.as_deref().unwrap_or_default();
+        assert!(err.contains("v_nothing"), "{err}");
     }
 
     #[tokio::test]
-    async fn validate_dry_runs_every_lens() {
+    async fn validate_dry_runs_every_page() {
         let dir = tempfile::tempdir().unwrap();
         write(dir.path(), ".oxplow/extensions/review/extension.yaml", EXT);
         write(
             dir.path(),
-            ".oxplow/extensions/review/lenses/by-status.yaml",
-            LENS,
+            ".oxplow/extensions/review/pages/by-status.yaml",
+            PAGE,
         );
         write(
             dir.path(),
-            ".oxplow/extensions/review/lenses/broken.yaml",
-            "title: Broken\nquery: SELECT nope FROM v_nothing\n",
+            ".oxplow/extensions/review/pages/broken.yaml",
+            &viz_page("title: Broken\n", "SELECT nope FROM v_nothing", ""),
         );
         write(
             dir.path(),
-            ".oxplow/extensions/review/lenses/badcol.yaml",
-            "title: Bad column\nquery: SELECT 1 AS n\ncolumns:\n  - { key: missing }\n",
+            ".oxplow/extensions/review/pages/badcol.yaml",
+            &viz_page(
+                "title: Bad column\n",
+                "SELECT 1 AS n",
+                "columns:\n  - { key: missing }\n",
+            ),
         );
         let sl = layer().await;
 
@@ -9153,11 +6734,14 @@ empty: No items.
             .await
             .unwrap();
         assert_eq!(e.errors.len(), 2, "{:?}", e.errors);
-        assert!(e.errors.iter().any(|m| m.contains("review/broken")));
         assert!(e
             .errors
             .iter()
-            .any(|m| m.contains("review/badcol") && m.contains("missing")));
+            .any(|m| m.contains("pages/broken.yaml") && m.contains("loader `q`")));
+        assert!(e
+            .errors
+            .iter()
+            .any(|m| m.contains("pages/badcol.yaml") && m.contains("missing")));
 
         assert!(matches!(
             validate_extension(&sl, &cat(), dir.path(), "nope", None).await,
@@ -9165,134 +6749,10 @@ empty: No items.
         ));
     }
 
-    fn spec_base() -> LensSpec {
-        LensSpec {
-            title: String::new(),
-            description: String::new(),
-            query: String::new(),
-            viz: LensViz::Table,
-            params: Vec::new(),
-            columns: Vec::new(),
-            empty: None,
-            chart: None,
-            tree: None,
-            timeline: None,
-            steps: None,
-            hunks: None,
-            code: None,
-            diff: None,
-            markdown: None,
-            form: None,
-            group: None,
-            emphasis: None,
-            depth: None,
-        }
-    }
-
-    fn todo_origin() -> LensOrigin<'static> {
-        LensOrigin {
-            purpose: "TODO: what it answers",
-            origin: None,
-        }
-    }
-
-    /// P6.C1: a spec round-trips through a lens file, and one with a
-    /// problem is refused before anything is written.
+    /// What a scaffold writes points an editor at its schema on the first
+    /// line.
     #[test]
-    fn a_spec_is_a_lens_file() {
-        let project = tempfile::tempdir().unwrap();
-        let spec = LensSpec {
-            title: "Busy Files".into(),
-            query: "SELECT path, n FROM v_x".into(),
-            viz: LensViz::Bar,
-            chart: Some(LensChart {
-                x: Some("path".into()),
-                y: Some("n".into()),
-                ..LensChart::default()
-            }),
-            ..spec_base()
-        };
-        let origin = LensOrigin {
-            purpose: "Busy Files",
-            origin: Some("oxplow:oxplow/thread?id=thr1"),
-        };
-        let lens = save_lens(
-            project.path(),
-            project.path(),
-            "my-lenses",
-            "busy",
-            &spec,
-            &origin,
-        )
-        .unwrap();
-        assert_eq!(lens.spec(), spec);
-        let manifest = std::fs::read_to_string(
-            project
-                .path()
-                .join(".oxplow/extensions/my-lenses/extension.yaml"),
-        )
-        .unwrap();
-        assert!(
-            manifest.contains("origin: oxplow:oxplow/thread?id=thr1"),
-            "{manifest}"
-        );
-        let bad = LensSpec {
-            viz: LensViz::Bar,
-            chart: None,
-            ..spec.clone()
-        };
-        let err = save_lens(
-            project.path(),
-            project.path(),
-            "my-lenses",
-            "bad",
-            &bad,
-            &origin,
-        )
-        .unwrap_err();
-        assert!(err.to_string().contains("chart"), "{err}");
-        assert!(!project
-            .path()
-            .join(".oxplow/extensions/my-lenses/lenses/bad.yaml")
-            .exists());
-    }
-
-    /// A kept spec is never a form: its submit would run the command as
-    /// the person with defaults an agent chose.
-    #[test]
-    fn a_form_spec_isnt_kept() {
-        let project = tempfile::tempdir().unwrap();
-        let spec = LensSpec {
-            title: "New Task".into(),
-            viz: LensViz::Form,
-            form: Some(LensForm {
-                command: Some("oxplow.work_item.create".into()),
-                defaults: Some(serde_json::json!({ "title": "x" })),
-                ..LensForm::default()
-            }),
-            ..spec_base()
-        };
-        let err = save_lens(
-            project.path(),
-            project.path(),
-            "mine",
-            "new-task",
-            &spec,
-            &todo_origin(),
-        )
-        .unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("never runs a command as the person"),
-            "{err}"
-        );
-        assert!(!project.path().join(".oxplow/extensions/mine").exists());
-    }
-
-    /// What a scaffold or a kept lens writes points an editor at its
-    /// schema on the first line.
-    #[test]
-    fn written_files_name_their_schema() {
+    fn a_scaffolded_manifest_names_its_schema() {
         let manifest = scaffold_manifest(&ManifestScaffold {
             name: "mine",
             description: "d",
@@ -9306,90 +6766,10 @@ empty: No items.
             manifest.starts_with(&schema::modeline(schema::MANIFEST_SCHEMA_URL)),
             "{manifest}"
         );
-        let project = tempfile::tempdir().unwrap();
-        let spec = LensSpec {
-            title: "Open Tasks".into(),
-            query: "SELECT uri, title FROM v_work_item".into(),
-            ..spec_base()
-        };
-        save_lens(
-            project.path(),
-            project.path(),
-            "mine",
-            "open-tasks",
-            &spec,
-            &todo_origin(),
-        )
-        .unwrap();
-        let lens = fs::read_to_string(
-            project
-                .path()
-                .join(".oxplow/extensions/mine/lenses/open-tasks.yaml"),
-        )
-        .unwrap();
-        assert!(
-            lens.starts_with(&schema::modeline(schema::LENS_SCHEMA_URL)),
-            "{lens}"
-        );
     }
 
     #[test]
-    fn save_lens_creates_the_extension_and_refuses_overwrites() {
-        let project = tempfile::tempdir().unwrap();
-        let new = || LensSpec {
-            title: "Open Tasks".into(),
-            description: "From Explore Data".into(),
-            query: "SELECT uri, title FROM v_work_item".into(),
-            ..spec_base()
-        };
-        let lens = save_lens(
-            project.path(),
-            project.path(),
-            "mine",
-            "open-tasks",
-            &new(),
-            &todo_origin(),
-        )
-        .unwrap();
-        assert_eq!(lens.id, "mine/open-tasks");
-        assert_eq!(lens.title, "Open Tasks");
-        assert!(project
-            .path()
-            .join(".oxplow/extensions/mine/extension.yaml")
-            .is_file());
-        let ext = &project_extensions(project.path())[0];
-        assert!(ext.errors.is_empty(), "{:?}", ext.errors);
-
-        let err = save_lens(
-            project.path(),
-            project.path(),
-            "mine",
-            "open-tasks",
-            &new(),
-            &todo_origin(),
-        )
-        .unwrap_err();
-        assert!(
-            matches!(err, DomainError::Invalid(ref m) if m.contains("already exists")),
-            "{err:?}"
-        );
-        let err = save_lens(
-            project.path(),
-            project.path(),
-            "mine",
-            "Bad Slug",
-            &new(),
-            &todo_origin(),
-        )
-        .unwrap_err();
-        assert!(
-            matches!(err, DomainError::Invalid(ref m) if m.contains("slug")),
-            "{err:?}"
-        );
-    }
-
-    #[test]
-    fn loads_declared_sources_and_reports_bad_ones_without_dropping_lenses() {
+    fn loads_declared_sources_and_reports_bad_ones_without_dropping_pages() {
         let dir = tempfile::tempdir().unwrap();
         write(
             dir.path(),
@@ -9398,8 +6778,8 @@ empty: No items.
         );
         write(
             dir.path(),
-            ".oxplow/extensions/review/lenses/by-status.yaml",
-            LENS,
+            ".oxplow/extensions/review/pages/by-status.yaml",
+            PAGE,
         );
         write(
             dir.path(),
@@ -9415,11 +6795,13 @@ empty: No items.
             "{:?}",
             e.errors
         );
-        assert_eq!(e.lenses.len(), 1);
+        assert_eq!(e.page_files.len(), 1);
     }
 
+    /// A check stands an empty view in for an entity no sync has filled
+    /// yet: a page over it checks clean before its first sync.
     #[tokio::test]
-    async fn an_uncollected_entity_gets_a_helpful_error() {
+    async fn a_check_stands_an_empty_view_in_for_an_uncollected_entity() {
         let dir = tempfile::tempdir().unwrap();
         write(
             dir.path(),
@@ -9429,97 +6811,14 @@ empty: No items.
         write(dir.path(), ".oxplow/extensions/gh/sync.sh", "#!/bin/sh\n");
         write(
             dir.path(),
-            ".oxplow/extensions/gh/lenses/all.yaml",
-            "title: All\nquery: SELECT number FROM v_gh_pr\n",
+            ".oxplow/extensions/gh/pages/all.yaml",
+            &viz_page("title: All\n", "SELECT number FROM v_gh_pr", ""),
         );
-        let sl = layer().await;
-        let err = run_lens(
-            &sl,
-            &cat(),
-            dir.path(),
-            "gh/all",
-            BTreeMap::new(),
-            &ViewContext::default(),
-        )
-        .await
-        .unwrap_err();
-        let msg = err.to_string();
-        assert!(
-            msg.contains("v_gh_pr") && msg.contains("prs") && msg.contains("hasn't been collected"),
-            "{msg}"
-        );
-        // A check stands an empty view in for the entity (P7.C6): the
-        // lens is fine before its first sync.
-        let e = validate_extension(&sl, &cat(), dir.path(), "gh", None)
+        let e = validate_extension(&layer().await, &cat(), dir.path(), "gh", None)
             .await
             .unwrap();
         assert!(e.errors.is_empty(), "{:?}", e.errors);
     }
-
-    /// P7.C2: a lens over a disabled collector's view says so — its rows
-    /// aren't being refreshed. Nothing cascades: the lens still runs.
-    #[tokio::test]
-    async fn a_lens_over_a_disabled_collectors_view_warns() {
-        let dir = tempfile::tempdir().unwrap();
-        write(
-            dir.path(),
-            ".oxplow/extensions/gh/extension.yaml",
-            "manifest: 2\nname: gh\nintent:\n  purpose: test\ncollectors:\n  - id: prs\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - { name: pr, key: number, columns: { number: int } }\n",
-        );
-        write(dir.path(), ".oxplow/extensions/gh/sync.sh", "#!/bin/sh\n");
-        write(
-            dir.path(),
-            ".oxplow/extensions/gh/lenses/all.yaml",
-            "title: All\nquery: SELECT number FROM v_gh_pr\n",
-        );
-        let db = Database::in_memory();
-        oxplow_db::SqliteCollectorStore::new(db.clone())
-            .replace_rows(vec![(
-                oxplow_db::EntityTable {
-                    extension: "gh".into(),
-                    entity: "pr".into(),
-                    view: "v_gh_pr".into(),
-                    key: "number".into(),
-                    description: String::new(),
-                    columns: vec![oxplow_db::EntityColumn {
-                        name: "number".into(),
-                        stored: oxplow_db::StoredType::Integer,
-                        doc: String::new(),
-                    }],
-                },
-                vec![vec![SqlCell::Int(1)]],
-            )])
-            .await
-            .unwrap();
-        db.transaction(|tx| {
-            oxplow_db::contribution_health_store::disable_tx(
-                tx,
-                &crate::collector_runner::contribution_key("gh", "prs"),
-                "3 failures in a row; the last: boom",
-                "t",
-            )
-        })
-        .await
-        .unwrap();
-        let layer = crate::sql_gateway::SqlGateway::new(db);
-        let run = run_lens(
-            &layer,
-            &cat(),
-            dir.path(),
-            "gh/all",
-            BTreeMap::new(),
-            &ViewContext::default(),
-        )
-        .await
-        .unwrap();
-        assert_eq!(run.warnings.len(), 1, "{:?}", run.warnings);
-        assert!(
-            run.warnings[0].contains("gh/prs") && run.warnings[0].contains("3 failures in a row"),
-            "{:?}",
-            run.warnings
-        );
-    }
-
     const EXT_V2: &str = "manifest: 2\nname: review\ndescription: Review helpers\nintent:\n  purpose: Review agent work\n  examples:\n    - { name: one, input: {}, expect: {} }\n";
 
     fn only(root: &Path, name: &str) -> Extension {
@@ -9539,8 +6838,8 @@ empty: No items.
         );
         write(
             dir.path(),
-            ".oxplow/extensions/review/lenses/tasks.yaml",
-            LENS,
+            ".oxplow/extensions/review/pages/tasks.yaml",
+            PAGE,
         );
         let e = only(dir.path(), "review");
         assert_eq!(e.manifest_version, 2);
@@ -9552,8 +6851,8 @@ empty: No items.
             "{:?}",
             e.errors
         );
-        // The lenses still load: an intent problem is the manifest's.
-        assert_eq!(e.lenses.len(), 1);
+        // The pages still load: an intent problem is the manifest's.
+        assert_eq!(e.page_files.len(), 1);
         // A clean v2 manifest has no errors and no warnings.
         write(
             dir.path(),
@@ -9571,9 +6870,9 @@ empty: No items.
     }
 
     #[test]
-    fn a_slot_mount_to_a_missing_lens_names_its_line() {
+    fn a_slot_mount_to_a_missing_page_names_its_line() {
         let dir = tempfile::tempdir().unwrap();
-        let manifest = format!("{EXT_V2}ui:\n  slots:\n    - {{ slot: rail, lens: tasks }}\n    - {{ slot: diff.file.header, lens: nope }}\n");
+        let manifest = format!("{EXT_V2}ui:\n  slots:\n    - {{ slot: oxplow-foundation/diff.file-header, page: tasks }}\n    - {{ slot: oxplow-foundation/diff.file-header, page: nope }}\n");
         write(
             dir.path(),
             ".oxplow/extensions/review/extension.yaml",
@@ -9581,14 +6880,15 @@ empty: No items.
         );
         write(
             dir.path(),
-            ".oxplow/extensions/review/lenses/tasks.yaml",
-            LENS,
+            ".oxplow/extensions/review/pages/tasks.yaml",
+            PAGE,
         );
         let e = only(dir.path(), "review");
+        assert_eq!(e.ui.page_slots.len(), 1, "{:?}", e.errors);
         let err = e
             .errors
             .iter()
-            .find(|m| m.contains("mounts lens `nope`"))
+            .find(|m| m.contains("mounts page `nope`, which isn't in pages/"))
             .unwrap_or_else(|| panic!("{:?}", e.errors));
         assert!(
             err.starts_with(".oxplow/extensions/review/extension.yaml:11:"),
@@ -9618,7 +6918,7 @@ empty: No items.
         assert_eq!(e.metrics.len(), 2, "both specs still load");
     }
 
-    /// tsk865: a manifest says its version, or it doesn't load — there is
+    /// A manifest says its version, or it doesn't load — there is
     /// no v1 reader any more.
     #[test]
     fn a_manifest_without_a_version_is_an_error() {
@@ -9639,43 +6939,8 @@ empty: No items.
         assert!(e.intent.is_none());
     }
 
-    #[test]
-    fn a_grid_child_in_another_extension_resolves_once_everything_is_loaded() {
-        let dir = tempfile::tempdir().unwrap();
-        write(
-            dir.path(),
-            ".oxplow/extensions/review/extension.yaml",
-            EXT_V2,
-        );
-        write(
-            dir.path(),
-            ".oxplow/extensions/review/lenses/tasks.yaml",
-            LENS,
-        );
-        write(
-            dir.path(),
-            ".oxplow/extensions/board/extension.yaml",
-            "manifest: 2\nname: board\nintent:\n  purpose: x\n  examples: [{ name: a }]\n",
-        );
-        write(
-            dir.path(),
-            ".oxplow/extensions/board/lenses/all.yaml",
-            "title: All\nviz: document\nsections: [{ lens: review/tasks }, { lens: review/missing }]\n",
-        );
-        let board = only(dir.path(), "board");
-        assert!(
-            board
-                .errors
-                .iter()
-                .any(|m| m.contains("part lens `review/missing` isn't in any loaded extension")),
-            "{:?}",
-            board.errors
-        );
-        assert!(board.lenses.is_empty(), "the broken document is dropped");
-    }
-
     /// The tally extension: a starlark collector declaring entity `thing`,
-    /// a model over it, lenses over both, and a command reading the model.
+    /// a model over it, pages over both, and a command reading the model.
     fn write_tally(root: &Path, script: &str) {
         write(
             root,
@@ -9721,19 +6986,23 @@ commands:
         );
         write(
             root,
-            ".oxplow/extensions/tally/lenses/labelled.yaml",
-            "title: Labelled\nquery: SELECT id, label FROM v_tally_labelled\n",
+            ".oxplow/extensions/tally/pages/labelled.yaml",
+            &viz_page(
+                "title: Labelled\n",
+                "SELECT id, label FROM v_tally_labelled",
+                "",
+            ),
         );
         write(
             root,
-            ".oxplow/extensions/tally/lenses/things.yaml",
-            "title: Things\nquery: SELECT id, label FROM v_tally_thing\n",
+            ".oxplow/extensions/tally/pages/things.yaml",
+            &viz_page("title: Things\n", "SELECT id, label FROM v_tally_thing", ""),
         );
     }
 
     /// P7.C6: a check sees what the extension declares before it ever ran
     /// or published — its collectors' entities (empty stand-ins) and its
-    /// own models (compiled for the check) — from its lenses (and its
+    /// own models (compiled for the check) — from its pages (and its
     /// commands' examples' reads), on a database that has neither.
     #[tokio::test]
     async fn a_check_sees_the_extensions_own_models_and_unsynced_entities() {
@@ -9750,8 +7019,12 @@ commands:
         // Still a real check: a column the model doesn't have is an error.
         write(
             dir.path(),
-            ".oxplow/extensions/tally/lenses/labelled.yaml",
-            "title: Labelled\nquery: SELECT id, colour FROM v_tally_labelled\n",
+            ".oxplow/extensions/tally/pages/labelled.yaml",
+            &viz_page(
+                "title: Labelled\n",
+                "SELECT id, colour FROM v_tally_labelled",
+                "",
+            ),
         );
         let v = validate_extension(&layer().await, &cat(), dir.path(), "tally", None)
             .await
@@ -9873,8 +7146,8 @@ commands:
 
     /// Oxplow ships two extensions: `oxplow-foundation`, its own commands
     /// over the scopes' operations, and `oxplow-bundled`: the
-    /// review packet, the analytics lenses and the agent's advisories
-    /// together. They load clean and every lens's SQL runs.
+    /// review packet, the analytics pages and the agent's advisories
+    /// together. They load clean and every page's SQL runs.
     #[tokio::test]
     async fn the_bundled_extensions_ship_and_load_clean() {
         let dir = tempfile::tempdir().unwrap();
@@ -9946,11 +7219,6 @@ commands:
                 "{host}.{slot} {page}"
             );
         }
-        assert!(b
-            .ui
-            .slots
-            .iter()
-            .any(|s| s.slot == "diff.file.header" && s.lens_id == "oxplow-bundled/file-co-change"));
         assert!(b.panels.iter().any(|p| p.id == "oxplow-bundled/waiting"));
         let commands: Vec<&str> = b.commands.iter().map(|c| c.name.as_str()).collect();
         assert_eq!(
@@ -10011,14 +7279,20 @@ commands:
             .collectors
             .iter()
             .any(|c| c.id == "oxplow_bundled.effort_churn"));
-        // Every bundled lens's SQL and advisory runs against a real schema —
-        // its own models compiled for the check, nothing published.
-        let v = validate_extension(&layer().await, &cat(), dir.path(), "oxplow-bundled", None)
-            .await
-            .unwrap();
-        assert!(v.errors.is_empty(), "{:?}", v.errors);
+        // Every shipped page's SQL and advisory runs against a real schema
+        // (a running oxplow's, whose live views read its services) — its
+        // own models compiled for the check, nothing published — and every
+        // viz node's columns are its loader's.
+        let svc = services(dir.path()).await;
+        for name in ["oxplow-bundled", "oxplow-foundation"] {
+            let v = validate_extension(&svc.sql, &svc.extension_catalog, dir.path(), name, None)
+                .await
+                .unwrap();
+            assert!(v.errors.is_empty(), "{name}: {:#?}", v.errors);
+        }
         assert_eq!(
-            find_lens(&cat(), dir.path(), "oxplow-bundled/decisions")
+            cat()
+                .find_page(dir.path(), "oxplow-bundled/decisions")
                 .unwrap()
                 .title,
             "Decisions Made"
@@ -10051,168 +7325,43 @@ commands:
         // is the only one.
         assert_eq!(named.len(), 1);
         assert_eq!(named[0].origin, "bundled");
-        let err = save_lens(
-            dir.path(),
-            dir.path(),
-            "oxplow-bundled",
-            "x",
-            &LensSpec {
-                title: "X".into(),
-                query: "SELECT 1".into(),
-                viz: LensViz::Number,
-                ..spec_base()
-            },
-            &todo_origin(),
-        )
-        .unwrap_err();
-        assert!(
-            matches!(err, DomainError::Invalid(ref m) if m.contains("bundled")),
-            "{err:?}"
-        );
     }
 
+    /// A mount's slot is `<extension>/<page>.<slot>`, and its page one of
+    /// the extension's own.
     #[test]
-    fn slots_must_name_a_known_slot_and_an_existing_lens() {
+    fn slots_must_name_a_known_slot_and_an_existing_page() {
         let dir = tempfile::tempdir().unwrap();
         write(
             dir.path(),
             ".oxplow/extensions/mine/extension.yaml",
-            "manifest: 2\nname: mine\nintent:\n  purpose: test\nui:\n  slots:\n    - { slot: diff.file.header, lens: nope }\n    - { slot: sidebar, lens: a }\n    - { slot: diff.file.header, lens: a }\n",
+            "manifest: 2\nname: mine\nintent:\n  purpose: test\nui:\n  slots:\n    - { slot: acme/host.sections, page: nope }\n    - { slot: sidebar, page: a }\n    - { slot: acme/host.sections, page: a }\n",
         );
         write(
             dir.path(),
-            ".oxplow/extensions/mine/lenses/a.yaml",
-            "title: A\nparams: [{ name: path }]\nquery: SELECT :path\n",
+            ".oxplow/extensions/mine/pages/a.yaml",
+            &viz_page("params: [{ name: path }]\n", "SELECT :path AS p", ""),
         );
         let e = load_extensions(dir.path())
             .into_iter()
             .find(|e| e.name == "mine")
             .unwrap();
-        assert_eq!(e.ui.slots.len(), 1);
-        assert_eq!(e.ui.slots[0].lens_id, "mine/a");
+        let mounted: Vec<(String, &str)> =
+            e.ui.page_slots
+                .iter()
+                .map(|s| (format!("{}.{}", s.host, s.slot), s.page.as_str()))
+                .collect();
+        assert_eq!(mounted, [("acme/host.sections".to_string(), "mine/a")]);
         assert_eq!(e.errors.len(), 2, "{:?}", e.errors);
         assert!(e.errors.iter().any(|m| m.contains("nope")));
         assert!(e.errors.iter().any(|m| m.contains("sidebar")));
     }
 
-    /// A document's sections are lenses or markdown: an id defaults to the
-    /// lens's slug (a lens shown twice needs an `id`), markdown needs one,
-    /// ids are unique, a section has no
-    /// size, and `tiles` are a dashboard's.
+    /// Another extension mounts its page at a page's slot
+    /// (`<extension>/<page>.<slot>`), placed by its `at`; a slot named
+    /// without its page is an unknown slot and goes.
     #[test]
-    fn document_sections_parse_and_bad_ones_are_errors() {
-        let (_d, ext) = load_x(
-            &[
-                ("n", "title: N\nquery: SELECT 1 AS n\nviz: number\n"),
-                (
-                    "doc",
-                    "title: D\nviz: document\nsections:\n  - { id: intro, title: About, markdown: Hello }\n  - { lens: n }\n  - { lens: x/n, id: again }\n",
-                ),
-                ("md-no-id", "title: D\nviz: document\nsections: [{ markdown: hi }]\n"),
-                ("both", "title: D\nviz: document\nsections: [{ lens: n, markdown: hi }]\n"),
-                ("twice", "title: D\nviz: document\nsections: [{ lens: n }, { lens: n }]\n"),
-                ("sized", "title: D\nviz: document\nsections: [{ lens: n, size: wide }]\n"),
-                ("tiled", "title: D\nviz: document\ntiles: [{ lens: n }]\n"),
-                ("empty", "title: D\nviz: document\n"),
-                ("stray", "title: T\nquery: SELECT 1\nsections: [{ lens: n }]\n"),
-            ],
-            "",
-        );
-        let doc = ext.lenses.iter().find(|l| l.slug == "doc").unwrap();
-        let parts: Vec<_> = doc
-            .parts
-            .iter()
-            .map(|p| (p.id.as_str(), p.lens.as_deref(), p.markdown.as_deref()))
-            .collect();
-        assert_eq!(
-            parts,
-            vec![
-                ("intro", None, Some("Hello")),
-                ("n", Some("x/n"), None),
-                ("again", Some("x/n"), None),
-            ]
-        );
-        let errs = ext.errors.join("\n");
-        for (slug, want) in [
-            ("md-no-id", "needs an `id`"),
-            ("both", "exactly one of `lens` and `markdown`"),
-            ("twice", "two parts are `n`"),
-            ("sized", "`size` is a dashboard tile's"),
-            ("tiled", "has `sections`, not `tiles`"),
-            ("empty", "needs `sections: [...]`"),
-            ("stray", "`sections` are a `document`'s"),
-        ] {
-            assert!(
-                errs.lines().any(|l| l.contains(slug) && l.contains(want)),
-                "{slug}: {errs}"
-            );
-            assert!(!ext.lenses.iter().any(|l| l.slug == slug), "{slug}");
-        }
-    }
-
-    /// A part may declare the core component it stands in for
-    /// (`replaceable: <target>`): its own lens is oxplow's, shown unless an
-    /// extension replaces the target. The target must exist, the part must
-    /// be a lens, and that lens must declare every prop of the target's
-    /// contract, as a replacement lens must.
-    #[test]
-    fn a_replaceable_part_names_a_target_whose_props_its_lens_declares() {
-        let (_d, ext) = load_x(
-            &[
-                (
-                    "log",
-                    "title: L\nparams: [{ name: head_sha }, { name: reveal_sha, default: \"\" }, { name: limit, default: 500 }]\nquery: SELECT 1\n",
-                ),
-                ("short", "title: S\nparams: [{ name: head_sha }]\nquery: SELECT 1\n"),
-                ("doc", "title: D\nviz: document\nsections: [{ lens: log, replaceable: vcs.history.graph }]\n"),
-                ("doc-short", "title: D\nviz: document\nsections: [{ lens: short, replaceable: vcs.history.graph }]\n"),
-                ("doc-unknown", "title: D\nviz: document\nsections: [{ lens: log, replaceable: nope.nothing }]\n"),
-                ("doc-md", "title: D\nviz: document\nsections: [{ id: m, markdown: hi, replaceable: vcs.history.graph }]\n"),
-                ("doc-twice", "title: D\nviz: document\nsections: [{ lens: log, replaceable: vcs.history.graph }, { id: again, lens: log, replaceable: vcs.history.graph }]\n"),
-            ],
-            "",
-        );
-        let doc = ext.lenses.iter().find(|l| l.slug == "doc").unwrap();
-        assert_eq!(
-            doc.parts[0].replaceable.as_deref(),
-            Some("vcs.history.graph")
-        );
-        let errs = ext.errors.join("\n");
-        for (slug, want) in [
-            ("doc-short", "must declare `reveal_sha`, `limit`"),
-            ("doc-unknown", "isn't a replaceable component"),
-            ("doc-md", "`replaceable` is a lens part's"),
-            ("doc-twice", "`vcs.history.graph` is placed once"),
-        ] {
-            assert!(
-                errs.lines().any(|l| l.contains(slug) && l.contains(want)),
-                "{slug}: {errs}"
-            );
-            assert!(!ext.lenses.iter().any(|l| l.slug == slug), "{slug}");
-        }
-    }
-
-    /// A core region (a strip of a page) takes no `at`: it is one place.
-    /// (A composite's parts are the other kind of slot, below.)
-    #[test]
-    fn a_region_takes_no_placement() {
-        let (_d, ext) = load_x(
-            &[(
-                "region",
-                "title: R\nparams: [{ name: path }]\nquery: SELECT 1\n",
-            )],
-            "ui:\n  slots:\n    - { slot: diff.file.header, lens: region, at: start }\n",
-        );
-        assert!(ext.ui.slots.is_empty(), "the bad mount goes");
-        let errs = ext.errors.join("\n");
-        assert!(errs.contains("is one region of its page"), "{errs}");
-    }
-
-    /// Another extension adds to a document lens through its sections slot;
-    /// the lens's parts then hold it, placed by its `at` and marked with
-    /// who mounted it. A mount naming no document is an error and goes.
-    #[test]
-    fn an_extension_adds_a_section_to_another_extensions_document() {
+    fn an_extension_mounts_a_page_at_another_extensions_page_slot() {
         let dir = tempfile::tempdir().unwrap();
         let ext_yaml = |name: &str, tail: &str| {
             format!("manifest: 2\nname: {name}\nintent:\n  purpose: x\n  examples: [{{ name: a }}]\n{tail}")
@@ -10224,339 +7373,42 @@ commands:
         );
         write(
             dir.path(),
-            ".oxplow/extensions/base/lenses/a.yaml",
-            "title: A\nparams: [{ name: stream_id }]\nquery: SELECT 1\n",
-        );
-        write(
-            dir.path(),
-            ".oxplow/extensions/base/lenses/b.yaml",
-            "title: B\nquery: SELECT 1\n",
-        );
-        write(
-            dir.path(),
-            ".oxplow/extensions/base/lenses/page.yaml",
-            "title: Page\nparams: [{ name: stream_id }]\nviz: document\nsections: [{ lens: a }, { lens: b }]\n",
+            ".oxplow/extensions/base/pages/page.yaml",
+            "title: Page\nparams: [{ name: stream_id }]\ndata:\n  a: { sql: \"SELECT :stream_id AS n\" }\n  b: { sql: \"SELECT 2 AS n\" }\nview:\n  stack:\n    - { viz: number, from: a }\n    - { slot: sections }\n    - { viz: number, from: b }\n",
         );
         write(
             dir.path(),
             ".oxplow/extensions/addon/extension.yaml",
             &ext_yaml(
                 "addon",
-                "ui:\n  slots:\n    - { slot: base/page.sections, lens: extra, at: { after: a } }\n    - { slot: base/a.sections, lens: extra }\n    - { slot: base/page.tiles, lens: extra }\n",
+                "ui:\n  slots:\n    - { slot: base/page.sections, page: extra, at: { after: a }, title: More }\n    - { slot: page.sections, page: extra }\n",
             ),
         );
         write(
             dir.path(),
-            ".oxplow/extensions/addon/lenses/extra.yaml",
-            "title: Extra\nparams: [{ name: stream_id }]\nquery: SELECT 1\n",
+            ".oxplow/extensions/addon/pages/extra.yaml",
+            &viz_page(
+                "title: Extra\nparams: [{ name: stream_id }]\n",
+                "SELECT :stream_id AS n",
+                "",
+            ),
         );
         let base = only(dir.path(), "base");
-        let page = base.lenses.iter().find(|l| l.slug == "page").unwrap();
-        let parts: Vec<_> = page
-            .parts
-            .iter()
-            .map(|p| (p.id.as_str(), p.from.as_deref()))
-            .collect();
-        assert_eq!(
-            parts,
-            vec![("a", None), ("addon/extra", Some("addon")), ("b", None)]
-        );
+        assert!(base.errors.is_empty(), "{:?}", base.errors);
         let addon = only(dir.path(), "addon");
-        let errs = addon.errors.join("\n");
-        assert!(
-            errs.contains("lens `base/a`, which isn't a loaded document or dashboard"),
-            "{errs}"
-        );
-        assert!(
-            errs.contains("is a document, so its parts are at `base/page.sections`"),
-            "{errs}"
-        );
-        assert_eq!(addon.ui.slots.len(), 1, "the bad mounts go");
-    }
-
-    /// A composite's `columns:` name its query's row: only with a query,
-    /// and only their `key`s.
-    #[test]
-    fn a_composites_columns_name_its_row_and_nothing_else() {
-        let (_d, ext) = load_x(
-            &[
-                ("part", "title: Part\nparams: [{ name: change_id }]\nquery: SELECT :change_id AS n\n"),
-                ("ok", "title: Ok\nquery: SELECT 7 AS change_id\ncolumns: [{ key: change_id }]\nviz: document\nsections: [{ lens: part }]\n"),
-                ("no-query", "title: NoQuery\ncolumns: [{ key: change_id }]\nviz: document\nsections: [{ lens: part }]\n"),
-                ("shown", "title: Shown\nquery: SELECT 7 AS change_id\ncolumns: [{ key: change_id, label: Change }]\nviz: dashboard\ntiles: [{ lens: part }]\n"),
-            ],
-            "",
-        );
-        assert!(
-            ext.lenses.iter().any(|l| l.slug == "ok"),
-            "{:?}",
-            ext.errors
-        );
-        for slug in ["no-query", "shown"] {
-            assert!(ext.lenses.iter().all(|l| l.slug != slug), "{slug} loaded");
-        }
-        let errs = ext.errors.join("\n");
-        assert!(
-            errs.contains("no-query.yaml")
-                && errs.contains("a `document` without a query has no row to name"),
-            "{errs}"
-        );
-        assert!(
-            errs.contains("shown.yaml") && errs.contains("a composite's column is only its `key`"),
-            "{errs}"
-        );
-    }
-
-    /// A dashboard that names its rows' tiles in `tile:` needs no static
-    /// `tiles:`, may still have them, and its tile roles are columns its
-    /// query must return.
-    #[test]
-    fn a_dashboards_rows_are_tiles_when_it_names_them() {
-        let q =
-            "query: SELECT 'dti1' AS id, 'T' AS title, NULL AS q, 'hi' AS body\nviz: dashboard\n";
-        let (_d, ext) = load_x(
-            &[
-                ("n", "title: N\nquery: SELECT 1 AS n\nviz: number\n"),
-                (
-                    "rows",
-                    &format!(
-                        "title: Rows\n{q}tile: {{ id: id, title: title, sql: q, text: body }}\n"
-                    ),
-                ),
-                (
-                    "both",
-                    &format!(
-                        "title: Both\n{q}tile: {{ id: id, text: body }}\ntiles: [{{ lens: n }}]\n"
-                    ),
-                ),
-            ],
-            "",
-        );
-        let lens = |slug: &str| {
-            ext.lenses
-                .iter()
-                .find(|l| l.slug == slug)
-                .unwrap_or_else(|| panic!("{slug}: {:?}", ext.errors))
-        };
-        let rows = lens("rows");
-        assert!(rows.parts.is_empty());
-        assert_eq!(rows.tile.as_ref().unwrap().id.as_deref(), Some("id"));
-        let roles: Vec<(&str, &str)> = rows
-            .role_columns()
-            .into_iter()
-            .map(|(b, c)| (b, c.as_str()))
-            .collect();
         assert_eq!(
-            roles,
-            vec![
-                ("tile", "id"),
-                ("tile", "title"),
-                ("tile", "q"),
-                ("tile", "body")
-            ]
+            addon.ui.page_slots,
+            vec![PageSlot {
+                host: "base/page".into(),
+                slot: "sections".into(),
+                page: "addon/extra".into(),
+                at: Some(SlotAt::After { after: "a".into() }),
+                title: Some("More".into()),
+                size: None,
+            }]
         );
-        assert_eq!(lens("both").parts.len(), 1);
-    }
-
-    /// `tile:` is checked at load: a dashboard's, over a query, with an
-    /// `id` and something to draw, a `sql` tile's display only with `sql`,
-    /// and never beside `columns:`.
-    #[test]
-    fn a_row_tile_dashboard_is_checked_at_load() {
-        let (_d, ext) = load_x(
-            &[
-                ("table", "title: A\nquery: SELECT 1 AS id\ntile: { id: id, text: id }\n"),
-                ("no-query", "title: B\nviz: dashboard\ntile: { id: id, text: t }\n"),
-                ("no-id", "title: C\nquery: SELECT 1 AS t\nviz: dashboard\ntile: { text: t }\n"),
-                ("no-body", "title: D\nquery: SELECT 1 AS id\nviz: dashboard\ntile: { id: id, title: id }\n"),
-                ("display", "title: E\nquery: SELECT 1 AS id\nviz: dashboard\ntile: { id: id, text: id, display: id }\n"),
-                ("columns", "title: F\nquery: SELECT 1 AS id\nviz: dashboard\ncolumns: [{ key: id }]\ntile: { id: id, text: id }\n"),
-            ],
-            "",
-        );
-        assert!(
-            ext.lenses.is_empty(),
-            "{:?}",
-            ext.lenses.iter().map(|l| &l.slug).collect::<Vec<_>>()
-        );
-        let errs = ext.errors.join("\n");
-        for (slug, says) in [
-            ("table", "`tile` is for viz `dashboard`, not `table`"),
-            (
-                "no-query",
-                "a `dashboard` whose rows are tiles needs a `query`",
-            ),
-            ("no-id", "`tile` needs `id: <column>`"),
-            ("no-body", "`tile` needs one of `lens`, `sql` or `text`"),
-            ("display", "`tile.display` is a `sql` tile's"),
-            (
-                "columns",
-                "a dashboard whose rows are tiles names them in `tile:`, not `columns:`",
-            ),
-        ] {
-            assert!(
-                ext.errors
-                    .iter()
-                    .any(|e| e.contains(&format!("{slug}.yaml")) && e.contains(says)),
-                "{slug}: {errs}"
-            );
-        }
-    }
-
-    /// A row-tile dashboard's edit action edits a text tile in place: it
-    /// saves the `tile.text` column, and nothing else.
-    #[test]
-    fn a_row_tile_dashboards_edit_action_saves_its_text() {
-        let q = "query: SELECT 'dti1' AS id, 'x' AS body, 'T' AS title\nviz: dashboard\ntile: { id: id, title: title, text: body }\n";
-        let edit = |col: &str| {
-            format!(
-                "actions:\n  - {{ id: edit, label: Save, command: x.y.z, edit: true, fixed: [item], input: {{ item: '{{{{row.id}}}}', text: '{{{{row.{col}}}}}' }} }}\n"
-            )
-        };
-        let (_d, ext) = load_x(
-            &[
-                ("ok", &format!("title: Ok\n{q}{}", edit("body"))),
-                ("wrong", &format!("title: Wrong\n{q}{}", edit("title"))),
-                (
-                    "plain",
-                    &format!(
-                        "title: Plain\nviz: dashboard\ntiles: [{{ markdown: hi, id: m }}]\n{}",
-                        edit("body")
-                    ),
-                ),
-            ],
-            "",
-        );
-        assert!(
-            ext.lenses.iter().any(|l| l.slug == "ok"),
-            "{:?}",
-            ext.errors
-        );
-        let errs = ext.errors.join("\n");
-        assert!(
-            errs.contains("wrong.yaml")
-                && errs.contains("`edit` saves `title`, but the tiles' text is `body`"),
-            "{errs}"
-        );
-        assert!(
-            errs.contains("plain.yaml")
-                && errs.contains("an edit action (`edit`) is a `markdown` viz's"),
-            "{errs}"
-        );
-    }
-
-    /// A dashboard whose rows are its tiles gives its static parts its own
-    /// params alone: its first row is a tile, not a row of params.
-    #[test]
-    fn a_row_tile_dashboard_gives_its_parts_no_row() {
-        let (_d, ext) = load_x(
-            &[(
-                "dash",
-                "title: D\nparams: [{ name: id }]\nquery: SELECT 'dti1' AS tid, 'x' AS body\nviz: dashboard\ntile: { id: tid, text: body }\n",
-            )],
-            "",
-        );
-        let lens = ext.lenses.into_iter().find(|l| l.slug == "dash").unwrap();
-        let run = LensRun {
-            lens,
-            params: BTreeMap::from([("id".to_string(), SqlCell::Text("dsh1".into()))]),
-            result: oxplow_db::SqlQueryResult {
-                columns: vec!["tid".into(), "body".into()],
-                rows: vec![vec![
-                    SqlCell::Text("dti1".into()),
-                    SqlCell::Text("x".into()),
-                ]],
-                truncated: false,
-                reads: oxplow_db::Reads::default(),
-                freshness: Vec::new(),
-                generation: None,
-                coverage: Vec::new(),
-            },
-            alert: None,
-            warnings: Vec::new(),
-            inactive: None,
-        };
-        assert_eq!(
-            part_params(&run),
-            BTreeMap::from([("id".to_string(), SqlCell::Text("dsh1".into()))])
-        );
-    }
-
-    /// A mount into a document's `.sections` may take the page's own params
-    /// or a name of its row; one that takes neither is refused, the error
-    /// naming both. A row name no part takes warns.
-    #[test]
-    fn a_mount_may_take_a_documents_row_and_a_row_name_no_part_takes_warns() {
-        let dir = tempfile::tempdir().unwrap();
-        let ext_yaml = |name: &str, tail: &str| {
-            format!("manifest: 2\nname: {name}\nintent:\n  purpose: x\n  examples: [{{ name: a }}]\n{tail}")
-        };
-        write(
-            dir.path(),
-            ".oxplow/extensions/base/extension.yaml",
-            &ext_yaml("base", ""),
-        );
-        write(
-            dir.path(),
-            ".oxplow/extensions/base/lenses/a.yaml",
-            "title: A\nparams: [{ name: change_id }]\nquery: SELECT :change_id AS n\n",
-        );
-        write(
-            dir.path(),
-            ".oxplow/extensions/base/lenses/page.yaml",
-            "title: Page\nparams: [{ name: sha }]\nquery: SELECT 7 AS change_id, 1 AS stray, 2 AS taken_by_a_mount\ncolumns: [{ key: change_id }, { key: stray }, { key: taken_by_a_mount }]\nviz: document\nsections: [{ lens: a }]\n",
-        );
-        write(
-            dir.path(),
-            ".oxplow/extensions/addon/extension.yaml",
-            &ext_yaml(
-                "addon",
-                "ui:\n  slots:\n    - { slot: base/page.sections, lens: by-row }\n    - { slot: base/page.sections, lens: by-mount }\n    - { slot: base/page.sections, lens: neither }\n",
-            ),
-        );
-        write(
-            dir.path(),
-            ".oxplow/extensions/addon/lenses/by-row.yaml",
-            "title: ByRow\nparams: [{ name: change_id }]\nquery: SELECT 1\n",
-        );
-        write(
-            dir.path(),
-            ".oxplow/extensions/addon/lenses/by-mount.yaml",
-            "title: ByMount\nparams: [{ name: taken_by_a_mount }]\nquery: SELECT 1\n",
-        );
-        write(
-            dir.path(),
-            ".oxplow/extensions/addon/lenses/neither.yaml",
-            "title: Neither\nparams: [{ name: other }]\nquery: SELECT 1\n",
-        );
-        let addon = only(dir.path(), "addon");
         let errs = addon.errors.join("\n");
-        assert!(
-            errs.contains("lens `neither` must declare at least one in `params`")
-                && errs.contains("`sha`")
-                && errs.contains("`change_id`"),
-            "{errs}"
-        );
-        assert_eq!(addon.ui.slots.len(), 2, "{errs}");
-        let base = only(dir.path(), "base");
-        let stray: Vec<&String> = base
-            .warnings
-            .iter()
-            .filter(|w| w.contains("`stray`"))
-            .collect();
-        assert_eq!(stray.len(), 1, "{:?}", base.warnings);
-        assert!(
-            stray[0].contains("is a param of none of its parts"),
-            "{stray:?}"
-        );
-        assert!(
-            !base
-                .warnings
-                .iter()
-                .any(|w| w.contains("`change_id`") || w.contains("`taken_by_a_mount`")),
-            "{:?}",
-            base.warnings
-        );
+        assert!(errs.contains("unknown slot `page.sections`"), "{errs}");
     }
 
     /// The documented examples in `examples/extensions/` load cleanly, so
@@ -10588,7 +7440,7 @@ commands:
         }
     }
 
-    /// One project extension `x` with the given lens files and
+    /// One project extension `x` with the given page files and
     /// extension.yaml tail; returns its load result.
     fn load_x(files: &[(&str, &str)], manifest_tail: &str) -> (tempfile::TempDir, Extension) {
         let dir = tempfile::tempdir().unwrap();
@@ -10604,7 +7456,7 @@ commands:
         for (slug, body) in files {
             write(
                 dir.path(),
-                &format!(".oxplow/extensions/x/lenses/{slug}.yaml"),
+                &format!(".oxplow/extensions/x/pages/{slug}.yaml"),
                 body,
             );
         }
@@ -10612,57 +7464,79 @@ commands:
         (dir, ext)
     }
 
-    /// A document composes its parts and never renders rows of its own,
-    /// so it needs no `query` (like a form); every other viz still does.
+    /// A viz node shows its loader's rows, so it names one (`from`) that
+    /// the page has; a form shows none, so it needs none.
     #[test]
-    fn a_document_needs_no_query() {
+    fn a_viz_node_names_its_loader_unless_it_shows_no_rows() {
         let (_d, ext) = load_x(
             &[
-                ("n", "title: N\nquery: SELECT 1 AS n\nviz: number\n"),
                 (
-                    "all",
-                    "title: All\nviz: document\nsections: [{ lens: n }]\n",
+                    "form",
+                    "title: F\nview: { viz: form, form: { command: a.b.c } }\n",
                 ),
-                ("bare", "title: B\nviz: table\n"),
+                ("bare", "title: B\nview: { viz: table }\n"),
+                ("stray", "title: S\nview: { viz: table, from: nope }\n"),
             ],
             "",
         );
-        assert!(
-            ext.lenses.iter().any(|l| l.slug == "all"),
-            "{:?}",
-            ext.errors
-        );
-        assert!(!ext.lenses.iter().any(|l| l.slug == "bare"));
-        assert!(
-            ext.errors
-                .iter()
-                .any(|e| e.contains("viz `table` needs a `query`")),
-            "{:?}",
-            ext.errors
-        );
+        assert!(node(&ext, "form").is_some(), "{:?}", ext.errors);
+        let errs = ext.errors.join("\n");
+        for (slug, says) in [
+            ("bare", "needs `from`: the loader whose rows it shows"),
+            (
+                "stray",
+                "shows `nope`, but there is no loader `nope` in `data:`",
+            ),
+        ] {
+            assert!(page_of(&ext, slug).is_none(), "{slug} loaded");
+            assert!(
+                errs.lines()
+                    .any(|l| l.contains(&format!("{slug}.yaml")) && l.contains(says)),
+                "{slug}: {errs}"
+            );
+        }
     }
 
     #[test]
-    fn chart_lenses_parse_and_missing_fields_are_errors() {
+    fn chart_nodes_parse_and_missing_fields_are_errors() {
         let (_d, ext) = load_x(
             &[
-                ("visits", "title: V\nquery: SELECT 'a' AS day, 1 AS n\nviz: bar\nchart: { x: day, y: n }\n"),
-                ("trend", "title: T\nquery: SELECT 1 AS at, 2 AS v, 'm' AS s\nviz: line\nchart: { x: at, y: v, series: s }\n"),
-                ("map", "title: M\nquery: SELECT 'p' AS path, 3 AS churn, 'core' AS zone\nviz: treemap\nchart: { label: path, size: churn, group: zone }\n"),
-                ("all", "title: All\nviz: dashboard\ntiles: [{ lens: visits, size: wide }, { lens: trend }]\n"),
-                ("nobar", "title: N\nquery: SELECT 1\nviz: bar\n"),
-                ("badgrid", "title: G\nviz: dashboard\ntiles: [{ lens: nope }]\n"),
+                (
+                    "visits",
+                    &viz_page(
+                        "",
+                        "SELECT 'a' AS day, 1 AS n",
+                        "viz: bar\nchart: { x: day, y: n }\n",
+                    ),
+                ),
+                (
+                    "trend",
+                    &viz_page(
+                        "",
+                        "SELECT 1 AS at, 2 AS v, 'm' AS s",
+                        "viz: line\nchart: { x: at, y: v, series: s }\n",
+                    ),
+                ),
+                (
+                    "map",
+                    &viz_page(
+                        "",
+                        "SELECT 'p' AS path, 3 AS churn, 'core' AS zone",
+                        "viz: treemap\nchart: { label: path, size: churn, group: zone }\n",
+                    ),
+                ),
+                ("nobar", &viz_page("", "SELECT 1", "viz: bar\n")),
             ],
             "",
         );
-        let lens = |slug: &str| ext.lenses.iter().find(|l| l.slug == slug);
-        assert_eq!(lens("visits").unwrap().viz, LensViz::Bar);
+        let viz = |slug: &str| node(&ext, slug);
+        assert_eq!(viz("visits").unwrap().viz, Viz::Bar);
         assert_eq!(
-            lens("visits").unwrap().chart.as_ref().unwrap().y.as_deref(),
+            viz("visits").unwrap().chart.as_ref().unwrap().y.as_deref(),
             Some("n")
         );
         assert_eq!(
-            lens("trend")
+            viz("trend")
                 .unwrap()
                 .chart
                 .as_ref()
@@ -10672,59 +7546,69 @@ commands:
             Some("s")
         );
         assert_eq!(
-            lens("map")
-                .unwrap()
-                .chart
-                .as_ref()
-                .unwrap()
-                .group
-                .as_deref(),
+            viz("map").unwrap().chart.as_ref().unwrap().group.as_deref(),
             Some("zone")
         );
-        let tiles: Vec<_> = lens("all")
-            .unwrap()
-            .parts
-            .iter()
-            .map(|p| (p.id.as_str(), p.lens.as_deref(), p.size))
-            .collect();
-        assert_eq!(
-            tiles,
-            vec![
-                ("visits", Some("x/visits"), Some(TileSize::Wide)),
-                ("trend", Some("x/trend"), None)
-            ]
-        );
-        assert!(lens("nobar").is_none() && lens("badgrid").is_none());
+        assert!(viz("nobar").is_none());
         let errs = ext.errors.join("\n");
-        assert!(errs.contains("nobar") && errs.contains("chart"), "{errs}");
-        assert!(errs.contains("badgrid") && errs.contains("nope"), "{errs}");
+        assert!(
+            errs.contains("nobar.yaml") && errs.contains("`chart: { x: <column>, y: <column> }`"),
+            "{errs}"
+        );
     }
 
-    /// P6.A2: the structure components parse their blocks, and a missing
-    /// column role is refused naming the block it goes under.
+    /// The structure components parse their blocks, and a missing column
+    /// role is refused naming the block it goes under.
     #[test]
-    fn structure_lenses_parse_and_missing_roles_are_errors() {
+    fn structure_nodes_parse_and_missing_roles_are_errors() {
         let (_d, ext) = load_x(
             &[
-                ("t", "title: T\nquery: SELECT 1 AS id, NULL AS p, 'a' AS n\nviz: tree\ntree: { id: id, parent: p, label: n }\n"),
-                ("tl", "title: TL\nquery: SELECT 'x' AS at, 'y' AS w\nviz: timeline\ntimeline: { at: at, label: w }\n"),
-                ("d", "title: D\nquery: SELECT 1 AS a\nviz: detail\n"),
-                ("s", "title: S\nquery: SELECT 'a' AS l\nviz: steps\nsteps: { label: l }\n"),
-                ("h", "title: H\nquery: SELECT 'f' AS p, 'working' AS a, 'working' AS b\nviz: hunks\nhunks: { path: p, from: a, to: b }\n"),
-                ("notree", "title: N\nquery: SELECT 1\nviz: tree\ntree: { id: id, label: n }\n"),
-                ("nohunks", "title: N\nquery: SELECT 1\nviz: hunks\n"),
+                (
+                    "t",
+                    &viz_page(
+                        "",
+                        "SELECT 1 AS id, NULL AS p, 'a' AS n",
+                        "viz: tree\ntree: { id: id, parent: p, label: n }\n",
+                    ),
+                ),
+                (
+                    "tl",
+                    &viz_page(
+                        "",
+                        "SELECT 'x' AS at, 'y' AS w",
+                        "viz: timeline\ntimeline: { at: at, label: w }\n",
+                    ),
+                ),
+                ("d", &viz_page("", "SELECT 1 AS a", "viz: detail\n")),
+                (
+                    "s",
+                    &viz_page("", "SELECT 'a' AS l", "viz: steps\nsteps: { label: l }\n"),
+                ),
+                (
+                    "h",
+                    &viz_page(
+                        "",
+                        "SELECT 'f' AS p, 'working' AS a, 'working' AS b",
+                        "viz: hunks\nhunks: { path: p, from: a, to: b }\n",
+                    ),
+                ),
+                (
+                    "notree",
+                    &viz_page("", "SELECT 1", "viz: tree\ntree: { id: id, label: n }\n"),
+                ),
+                ("nohunks", &viz_page("", "SELECT 1", "viz: hunks\n")),
             ],
             "",
         );
-        let lens = |slug: &str| ext.lenses.iter().find(|l| l.slug == slug);
+        let viz = |slug: &str| node(&ext, slug);
         for slug in ["t", "tl", "d", "s", "h"] {
-            assert!(lens(slug).is_some(), "{slug}: {:?}", ext.errors);
+            assert!(viz(slug).is_some(), "{slug}: {:?}", ext.errors);
         }
         assert_eq!(
-            lens("t").unwrap().tree.as_ref().unwrap().parent.as_deref(),
+            viz("t").unwrap().tree.as_ref().unwrap().parent.as_deref(),
             Some("p")
         );
-        assert!(lens("notree").is_none() && lens("nohunks").is_none());
+        assert!(viz("notree").is_none() && viz("nohunks").is_none());
         let errs = ext.errors.join("\n");
         assert!(
             errs.contains("notree") && errs.contains("`tree: { parent: <column> }`"),
@@ -10737,252 +7621,44 @@ commands:
         );
     }
 
-    /// A settings-like document: `area` picks the section in view.
-    fn view_doc(extra: &str) -> String {
-        format!(
-            "title: Settings\nparams:\n  - {{ name: area, default: one }}\n{extra}viz: document\nview: area\nsections:\n  - {{ id: one, title: First, lens: a }}\n  - {{ id: two, lens: b }}\n"
-        )
-    }
-
-    /// A document's `view` param is a `filter` choice whose options are its
-    /// sections: each id, labelled by its title, else its lens's.
+    /// A viz node fills its page when its viz takes the page's whole
+    /// height (a file, a diff).
     #[test]
-    fn a_view_document_names_a_filter_choice_whose_options_are_its_sections() {
+    fn a_viz_node_says_whether_it_fills() {
         let (_d, ext) = load_x(
             &[
-                ("a", "title: A\nquery: SELECT 1 AS n\n"),
-                ("b", "title: Bee\nquery: SELECT 2 AS n\n"),
-                ("s", &view_doc("")),
-            ],
-            "",
-        );
-        let s = ext
-            .lenses
-            .iter()
-            .find(|l| l.slug == "s")
-            .unwrap_or_else(|| panic!("{:?}", ext.errors));
-        assert_eq!(s.view.as_deref(), Some("area"));
-        let area = s.params.iter().find(|p| p.name == "area").unwrap();
-        assert_eq!(area.role, Some(ParamRole::Filter));
-        assert_eq!(area.kind, Some(ParamType::Choice));
-        let options: Vec<(&str, &str)> = area
-            .options
-            .iter()
-            .map(|o| (o.value.as_str(), o.label.as_str()))
-            .collect();
-        assert_eq!(options, [("one", "First"), ("two", "Bee")]);
-        assert!(area.take(&SqlCell::Text("two".into())).is_ok());
-        assert!(area.take(&SqlCell::Text("nope".into())).is_err());
-    }
-
-    /// A lens fills its page when its viz takes the page's whole height
-    /// (a file, a diff), or when it is a document whose last section's
-    /// lens fills: that section takes the height left.
-    #[test]
-    fn a_lens_says_whether_it_fills() {
-        let code = "title: C\nquery: SELECT 'a.rs' AS path, 'HEAD' AS rev\nviz: code\ncode: { path: path, revision: rev }\n";
-        let (_d, ext) = load_x(
-            &[
-                ("c", code),
-                ("t", "title: T\nquery: SELECT 1 AS n\n"),
                 (
-                    "last",
-                    "title: L\nviz: document\nsections:\n  - { lens: t }\n  - { lens: c }\n",
+                    "c",
+                    &viz_page(
+                        "",
+                        "SELECT 'a.rs' AS path, 'HEAD' AS rev",
+                        "viz: code\ncode: { path: path, revision: rev }\n",
+                    ),
                 ),
-                (
-                    "first",
-                    "title: F\nviz: document\nsections:\n  - { lens: c }\n  - { lens: t }\n",
-                ),
-                (
-                    "nested",
-                    "title: N\nviz: document\nsections:\n  - { lens: t }\n  - { lens: last }\n",
-                ),
+                ("t", &viz_page("", "SELECT 1 AS n", "")),
             ],
             "",
         );
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
-        let fills = |slug: &str| ext.lenses.iter().find(|l| l.slug == slug).unwrap().fills;
-        assert!(fills("c"));
-        assert!(!fills("t"));
-        assert!(fills("last"));
-        assert!(!fills("first"));
-        assert!(fills("nested"));
+        assert!(node(&ext, "c").unwrap().fills);
+        assert!(!node(&ext, "t").unwrap().fills);
     }
 
-    /// `view` is a document's, names a declared filter choice with no
-    /// options of its own, and starts on one of its sections.
-    #[test]
-    fn a_view_is_refused_off_a_document_or_mis_declared() {
-        let a = ("a", "title: A\nquery: SELECT 1 AS n\n");
-        let b = ("b", "title: B\nquery: SELECT 2 AS n\n");
-        let doc = |params: &str| {
-            format!(
-                "title: S\nparams:\n{params}viz: document\nview: area\nsections:\n  - {{ id: one, lens: a }}\n  - {{ id: two, lens: b }}\n"
-            )
-        };
-        let cases = [
-            ("table", "title: T\nparams: [{ name: area, default: x }]\nquery: SELECT :area AS a\nview: area\n".to_string(), "`view` is for a document"),
-            ("undeclared", doc("  - { name: q, default: \"\" }\n"), "`view` names param `area`, which the lens doesn't declare"),
-            ("resource", doc("  - { name: area, role: resource, default: one }\n"), "`view` param `area` rides in the `#`: leave `role` out or say `filter`"),
-            ("text", doc("  - { name: area, type: text, default: one }\n"), "`view` param `area` is a choice of the sections: leave `type` out"),
-            ("options", doc("  - { name: area, default: one, options: [{ value: one, label: One }] }\n"), "`view` param `area`: the sections are its choices, not `options`"),
-            ("nodefault", doc("  - { name: area }\n"), "`view` param `area` needs a `default`: the section shown first"),
-            ("baddefault", doc("  - { name: area, default: three }\n"), "`view` param `area`'s default `three` isn't a section"),
-        ];
-        let mut files = vec![a, b];
-        files.extend(cases.iter().map(|(slug, body, _)| (*slug, body.as_str())));
-        let (_d, ext) = load_x(&files, "");
-        let errs = ext.errors.join("\n");
-        for (slug, _, says) in &cases {
-            assert!(ext.lenses.iter().all(|l| l.slug != *slug), "{slug} loaded");
-            assert!(
-                errs.lines()
-                    .any(|l| l.contains(&format!("{slug}.yaml")) && l.contains(says)),
-                "{slug}: {errs}"
-            );
-        }
-    }
-
-    /// A section another extension mounts is one of the view's choices,
-    /// and it needn't read the document's params: each section of a view
-    /// document is a page of its own.
-    #[test]
-    fn a_view_documents_options_include_mounted_sections_and_take_parameterless_mounts() {
-        let (_d, ext) = load_x(
-            &[
-                ("a", "title: A\nquery: SELECT 1 AS n\n"),
-                ("b", "title: B\nquery: SELECT 2 AS n\n"),
-                ("more", "title: More Things\nquery: SELECT 3 AS n\n"),
-                (
-                    "s",
-                    &view_doc("  - { name: q, type: search, role: filter, default: \"\" }\n"),
-                ),
-            ],
-            "ui:\n  slots:\n    - { slot: x/s.sections, lens: more, at: { after: one } }\n",
-        );
-        assert!(ext.errors.is_empty(), "{:?}", ext.errors);
-        let s = ext.lenses.iter().find(|l| l.slug == "s").unwrap();
-        let area = s.params.iter().find(|p| p.name == "area").unwrap();
-        let options: Vec<(&str, &str)> = area
-            .options
-            .iter()
-            .map(|o| (o.value.as_str(), o.label.as_str()))
-            .collect();
-        assert_eq!(
-            options,
-            [("one", "First"), ("x/more", "More Things"), ("two", "B")]
-        );
-    }
-
-    /// Resolving a resolved catalog again (a setting turned off) places
-    /// its mounts once, and its view's choices stay the same.
-    #[test]
-    fn a_catalog_resolved_again_places_its_mounts_once() {
-        let (_d, ext) = load_x(
-            &[
-                ("a", "title: A\nquery: SELECT 1 AS n\n"),
-                ("b", "title: B\nquery: SELECT 2 AS n\n"),
-                ("more", "title: More\nquery: SELECT 3 AS n\n"),
-                ("s", &view_doc("")),
-            ],
-            "ui:\n  slots:\n    - { slot: x/s.sections, lens: more }\n",
-        );
-        let mut again = vec![ext.clone()];
-        place_lens_mounts(&mut again);
-        fill_view_options(&mut again);
-        let parts = |e: &Extension| {
-            let s = e.lenses.iter().find(|l| l.slug == "s").unwrap();
-            (
-                s.parts.len(),
-                s.params
-                    .iter()
-                    .find(|p| p.name == "area")
-                    .unwrap()
-                    .options
-                    .len(),
-            )
-        };
-        assert_eq!(parts(&ext), (3, 3));
-        assert_eq!(parts(&again[0]), (3, 3));
-    }
-
-    /// A view document doesn't warn for its view param (read by no query),
-    /// for its sections' count, or for a filter a section two levels down
-    /// reads.
-    #[test]
-    fn a_view_document_warns_for_neither_its_view_nor_its_section_count_and_sees_filters_read_below(
-    ) {
-        let mut files: Vec<(String, String)> = (0..9)
-            .map(|i| {
-                (
-                    format!("l{i}"),
-                    format!("title: L{i}\nquery: SELECT {i} AS n\n"),
-                )
-            })
-            .collect();
-        files.push(("leaf".into(), "title: Leaf\nparams: [{ name: q, type: search, role: filter, default: \"\" }]\nquery: SELECT :q AS n\n".into()));
-        files.push(("inner".into(), "title: Inner\nparams: [{ name: q, type: search, role: filter, default: \"\" }]\nviz: document\nsections: [{ lens: leaf }]\n".into()));
-        let sections: String = (0..9)
-            .map(|i| format!("  - {{ id: s{i}, lens: l{i} }}\n"))
-            .chain(std::iter::once(
-                "  - { id: inner, lens: inner }\n".to_string(),
-            ))
-            .collect();
-        files.push((
-            "s".into(),
-            format!("title: S\nparams:\n  - {{ name: area, default: s0 }}\n  - {{ name: q, type: search, role: filter, default: \"\" }}\nviz: document\nview: area\nsections:\n{sections}"),
-        ));
-        let refs: Vec<(&str, &str)> = files
-            .iter()
-            .map(|(a, b)| (a.as_str(), b.as_str()))
-            .collect();
-        let (_d, ext) = load_x(&refs, "");
-        assert!(ext.errors.is_empty(), "{:?}", ext.errors);
-        let warns: Vec<String> = layout_only(&ext.warnings)
-            .into_iter()
-            .filter(|w| w.contains("s.yaml"))
-            .collect();
-        assert!(warns.is_empty(), "{warns:?}");
-    }
-
-    /// A part that names its own lens, or parts that lead back round, would
-    /// make a page that holds itself: refused.
-    #[test]
-    fn a_part_that_names_its_own_lens_or_a_cycle_is_refused() {
-        let (_d, ext) = load_x(
-            &[
-                ("me", "title: Me\nviz: document\nsections: [{ lens: me }]\n"),
-                (
-                    "ping",
-                    "title: Ping\nviz: document\nsections: [{ lens: pong }]\n",
-                ),
-                (
-                    "pong",
-                    "title: Pong\nviz: document\nsections: [{ lens: ping }]\n",
-                ),
-                ("fine", "title: Fine\nquery: SELECT 1 AS n\n"),
-            ],
-            "",
-        );
-        let errs = ext.errors.join("\n");
-        assert!(errs.contains("a part names the lens itself"), "{errs}");
-        assert!(errs.contains("its parts lead back to `x/ping`"), "{errs}");
-        assert!(errs.contains("its parts lead back to `x/pong`"), "{errs}");
-        let slugs: Vec<&str> = ext.lenses.iter().map(|l| l.slug.as_str()).collect();
-        assert_eq!(slugs, ["fine"]);
-    }
-
-    /// `section` is the page's view key: no lens param may take it.
+    /// `section` is the page's view key: no param may take it.
     #[test]
     fn section_is_the_pages_view_key_not_a_param() {
         let (_d, ext) = load_x(
             &[(
                 "a",
-                "title: A\nparams: [{ name: section, default: x }]\nquery: SELECT :section AS n\n",
+                &viz_page(
+                    "params: [{ name: section, default: x }]\n",
+                    "SELECT :section AS n",
+                    "",
+                ),
             )],
             "",
         );
-        assert!(ext.lenses.is_empty());
+        assert!(ext.page_files.is_empty());
         let errs = ext.errors.join("\n");
         assert!(
             errs.contains("`section` is the page's view key (`#section=`): rename the param"),
@@ -10996,50 +7672,43 @@ commands:
     /// column that `select`s the lazy param would re-root the page instead.
     #[test]
     fn a_lazy_tree_names_its_param_and_its_branch_column() {
-        let tree = |extra: &str| {
-            format!(
-                "title: T\nquery: SELECT 'a' AS id, '' AS p, 'a' AS n, 1 AS d\nviz: tree\n{extra}"
+        let tree = |params: &str, node: &str| {
+            viz_page(
+                params,
+                "SELECT 'a' AS id, '' AS p, 'a' AS n, 1 AS d",
+                &format!("viz: tree\n{node}"),
             )
         };
         let folder = "params:\n  - { name: folder, default: \"\" }\n";
         let (_d, ext) = load_x(
             &[
-                ("lazy", &tree(&format!("{folder}tree: {{ id: id, parent: p, label: n, lazy: folder, branch: d }}\n"))),
-                ("undeclared", &tree("tree: { id: id, parent: p, label: n, lazy: nope, branch: d }\n")),
-                ("nodefault", &tree("params:\n  - { name: folder }\ntree: { id: id, parent: p, label: n, lazy: folder, branch: d }\n")),
-                ("context", &tree("params:\n  - { name: stream_id, default: 1 }\ntree: { id: id, parent: p, label: n, lazy: stream_id, branch: d }\n")),
-                ("nobranch", &tree(&format!("{folder}tree: {{ id: id, parent: p, label: n, lazy: folder }}\n"))),
-                ("branchonly", &tree("tree: { id: id, parent: p, label: n, branch: d }\n")),
-                ("selectlazy", &tree(&format!("{folder}tree: {{ id: id, parent: p, label: n, lazy: folder, branch: d }}\ncolumns: [{{ key: n, select: folder }}]\n"))),
+                ("lazy", &tree(folder, "tree: { id: id, parent: p, label: n, lazy: folder, branch: d }\n")),
+                ("undeclared", &tree("", "tree: { id: id, parent: p, label: n, lazy: nope, branch: d }\n")),
+                ("nodefault", &tree("params:\n  - { name: folder }\n", "tree: { id: id, parent: p, label: n, lazy: folder, branch: d }\n")),
+                ("context", &tree("params:\n  - { name: stream_id, default: 1 }\n", "tree: { id: id, parent: p, label: n, lazy: stream_id, branch: d }\n")),
+                ("nobranch", &tree(folder, "tree: { id: id, parent: p, label: n, lazy: folder }\n")),
+                ("branchonly", &tree("", "tree: { id: id, parent: p, label: n, branch: d }\n")),
+                ("selectlazy", &tree(folder, "tree: { id: id, parent: p, label: n, lazy: folder, branch: d }\ncolumns: [{ key: n, select: folder }]\n")),
             ],
             "",
         );
-        let lens = |slug: &str| ext.lenses.iter().find(|l| l.slug == slug);
-        let lazy = lens("lazy").unwrap_or_else(|| panic!("{:?}", ext.errors));
+        let viz = |slug: &str| node(&ext, slug);
+        let lazy = viz("lazy").unwrap_or_else(|| panic!("{:?}", ext.errors));
         let t = lazy.tree.as_ref().unwrap();
         assert_eq!(
             (t.lazy.as_deref(), t.branch.as_deref()),
             (Some("folder"), Some("d"))
         );
-        for slug in [
-            "undeclared",
-            "nodefault",
-            "context",
-            "nobranch",
-            "branchonly",
-            "selectlazy",
-        ] {
-            assert!(lens(slug).is_none(), "{slug} loaded");
-        }
         let errs = ext.errors.join("\n");
         for (slug, says) in [
-            ("undeclared", "`tree.lazy` names param `nope`, which the lens doesn't declare"),
+            ("undeclared", "`tree.lazy` names param `nope`, which the viz doesn't declare"),
             ("nodefault", "`tree.lazy` param `folder` needs a `default`: the top level"),
             ("context", "`tree.lazy` can't be `stream_id`: the context supplies it"),
             ("nobranch", "`tree.lazy` needs `tree.branch: <column>` (the rows that open)"),
             ("branchonly", "`tree.branch` is for a lazy tree (`tree.lazy: <param>`)"),
             ("selectlazy", "column `n`: `select` names the tree's `lazy` param; a click opens the branch instead"),
         ] {
+            assert!(viz(slug).is_none(), "{slug} loaded");
             assert!(
                 errs.lines().any(|l| l.contains(slug) && l.contains(says)),
                 "{slug}: {errs}"
@@ -11051,34 +7720,58 @@ commands:
     /// file between two: each needs its block's columns, and the rest of
     /// the block is optional.
     #[test]
-    fn code_and_diff_lenses_name_their_columns() {
+    fn code_and_diff_nodes_name_their_columns() {
         let (_d, ext) = load_x(
             &[
-                ("c", "title: C\nquery: SELECT 'f' AS p, 'working' AS r, '3-8' AS l\nviz: code\ncode: { path: p, revision: r, lines: l, sync: true }\n"),
-                ("c2", "title: C\nquery: SELECT 'f' AS p, 'working' AS r\nviz: code\ncode: { path: p, revision: r }\n"),
-                ("df", "title: D\nquery: SELECT 'f' AS p, 'git:HEAD' AS a, 'working' AS b\nviz: diff\ndiff: { path: p, from: a, to: b }\n"),
-                ("nocode", "title: N\nquery: SELECT 'f' AS p\nviz: code\ncode: { path: p }\n"),
-                ("nodiff", "title: N\nquery: SELECT 1\nviz: diff\n"),
+                (
+                    "c",
+                    &viz_page(
+                        "",
+                        "SELECT 'f' AS p, 'working' AS r, '3-8' AS l",
+                        "viz: code\ncode: { path: p, revision: r, lines: l, sync: true }\n",
+                    ),
+                ),
+                (
+                    "c2",
+                    &viz_page(
+                        "",
+                        "SELECT 'f' AS p, 'working' AS r",
+                        "viz: code\ncode: { path: p, revision: r }\n",
+                    ),
+                ),
+                (
+                    "df",
+                    &viz_page(
+                        "",
+                        "SELECT 'f' AS p, 'git:HEAD' AS a, 'working' AS b",
+                        "viz: diff\ndiff: { path: p, from: a, to: b }\n",
+                    ),
+                ),
+                (
+                    "nocode",
+                    &viz_page("", "SELECT 'f' AS p", "viz: code\ncode: { path: p }\n"),
+                ),
+                ("nodiff", &viz_page("", "SELECT 1", "viz: diff\n")),
             ],
             "",
         );
-        let lens = |slug: &str| ext.lenses.iter().find(|l| l.slug == slug);
-        let c = lens("c").expect("c loads");
+        let viz = |slug: &str| node(&ext, slug);
+        let c = viz("c").expect("c loads");
         assert_eq!(
             c.code,
-            Some(LensCode {
+            Some(VizCode {
                 path: Some("p".into()),
                 revision: Some("r".into()),
                 lines: Some("l".into()),
                 sync: true,
             })
         );
-        assert!(!lens("c2").unwrap().code.as_ref().unwrap().sync);
+        assert!(!viz("c2").unwrap().code.as_ref().unwrap().sync);
         assert_eq!(
-            lens("df").unwrap().diff.as_ref().unwrap().to.as_deref(),
+            viz("df").unwrap().diff.as_ref().unwrap().to.as_deref(),
             Some("b")
         );
-        assert!(lens("nocode").is_none() && lens("nodiff").is_none());
+        assert!(viz("nocode").is_none() && viz("nodiff").is_none());
         let errs = ext.errors.join("\n");
         assert!(errs.contains("`code: { revision: <column> }`"), "{errs}");
         assert!(
@@ -11087,82 +7780,93 @@ commands:
         );
     }
 
-    /// `embed` opens the web page its first row names, filling the page; it
-    /// needs the URL's column, and an answer never opens a page.
+    /// `embed` opens the web page its first row names, filling the page;
+    /// it needs the URL's column.
     #[test]
-    fn an_embed_lens_names_its_url_and_fills() {
+    fn an_embed_node_names_its_url_and_fills() {
         let (_d, ext) = load_x(
             &[
-                ("e", "title: E\nquery: SELECT 'https://a.test/x' AS u\nviz: embed\nembed: { url: u }\n"),
-                ("noembed", "title: N\nquery: SELECT 1\nviz: embed\n"),
+                (
+                    "e",
+                    &viz_page(
+                        "",
+                        "SELECT 'https://a.test/x' AS u",
+                        "viz: embed\nembed: { url: u }\n",
+                    ),
+                ),
+                ("noembed", &viz_page("", "SELECT 1", "viz: embed\n")),
             ],
             "",
         );
-        let e = ext.lenses.iter().find(|l| l.slug == "e").expect("e loads");
+        let e = node(&ext, "e").expect("e loads");
         assert_eq!(
             e.embed,
-            Some(LensEmbed {
+            Some(VizEmbed {
                 url: Some("u".into())
             })
         );
         assert!(e.fills);
-        assert!(!ext.lenses.iter().any(|l| l.slug == "noembed"));
+        assert!(node(&ext, "noembed").is_none());
         let errs = ext.errors.join("\n");
         assert!(errs.contains("`embed: { url: <column> }`"), "{errs}");
-        let spec: LensSpec = serde_json::from_value(serde_json::json!({
-            "title": "E", "query": "SELECT 'a' AS u", "viz": "embed"
-        }))
-        .unwrap();
-        assert!(spec_problem(&spec).unwrap().contains("opens a web page"));
     }
 
     /// `editor` edits the working tree's file its first row names (its
     /// `lines` revealed), filling the page; it needs the path's column,
-    /// and an agent's answer is never one (it would save as the person).
+    /// and an inline page never holds one (it would save as the person).
     #[test]
-    fn an_editor_lens_names_its_file_and_fills() {
+    fn an_editor_node_names_its_file_and_fills() {
         let (_d, ext) = load_x(
             &[
-                ("e", "title: E\nquery: SELECT 'src/a.rs' AS p, '3' AS l\nviz: editor\neditor: { path: p, lines: l }\n"),
-                ("noeditor", "title: N\nquery: SELECT 1\nviz: editor\n"),
+                (
+                    "e",
+                    &viz_page(
+                        "",
+                        "SELECT 'src/a.rs' AS p, '3' AS l",
+                        "viz: editor\neditor: { path: p, lines: l }\n",
+                    ),
+                ),
+                ("noeditor", &viz_page("", "SELECT 1", "viz: editor\n")),
             ],
             "",
         );
-        let e = ext.lenses.iter().find(|l| l.slug == "e").expect("e loads");
+        let e = node(&ext, "e").expect("e loads");
         assert_eq!(
             e.editor,
-            Some(LensEditor {
+            Some(VizEditor {
                 path: Some("p".into()),
                 lines: Some("l".into()),
             })
         );
         assert!(e.fills);
-        assert!(!ext.lenses.iter().any(|l| l.slug == "noeditor"));
+        assert!(node(&ext, "noeditor").is_none());
         let errs = ext.errors.join("\n");
         assert!(errs.contains("`editor: { path: <column> }`"), "{errs}");
-        let spec: LensSpec = serde_json::from_value(serde_json::json!({
-            "title": "E", "query": "SELECT 'a' AS p", "viz": "editor"
-        }))
-        .unwrap();
-        assert!(spec_problem(&spec).unwrap().contains("saves as whoever"));
+        let inline = crate::pages::schema::parse_inline_page(&viz_page(
+            "",
+            "SELECT 'a' AS p",
+            "viz: editor\neditor: { path: p }\n",
+        ))
+        .unwrap_err();
+        assert!(inline.contains("can't hold an editor"), "{inline}");
     }
 
     /// `terminal` draws a terminal per row (a shell's URI, or an agent
     /// session's), filling the page; it needs the URI's column, and an
-    /// answer is never one.
+    /// inline page never holds one.
     #[test]
-    fn a_terminal_lens_names_its_rows() {
+    fn a_terminal_node_names_its_rows() {
         let (_d, ext) = load_x(
             &[
-                ("t", "title: T\nquery: SELECT 'oxplow:oxplow/terminal?id=trm1' AS u, 'One' AS t, 0 AS s, NULL AS c\nviz: terminal\nterminal: { of: u, title: t, stopped: s, conversation: c }\n"),
-                ("noterminal", "title: N\nquery: SELECT 1\nviz: terminal\n"),
+                ("t", &viz_page("", "SELECT 'oxplow:oxplow/terminal?id=trm1' AS u, 'One' AS t, 0 AS s, NULL AS c", "viz: terminal\nterminal: { of: u, title: t, stopped: s, conversation: c }\n")),
+                ("noterminal", &viz_page("", "SELECT 1", "viz: terminal\n")),
             ],
             "",
         );
-        let t = ext.lenses.iter().find(|l| l.slug == "t").expect("t loads");
+        let t = node(&ext, "t").expect("t loads");
         assert_eq!(
             t.terminal,
-            Some(LensTerminal {
+            Some(VizTerminal {
                 of: Some("u".into()),
                 title: Some("t".into()),
                 stopped: Some("s".into()),
@@ -11171,42 +7875,18 @@ commands:
             })
         );
         assert!(t.fills);
-        assert!(!ext.lenses.iter().any(|l| l.slug == "noterminal"));
+        assert!(node(&ext, "noterminal").is_none());
         assert!(ext
             .errors
             .join("\n")
             .contains("`terminal: { of: <column> }`"));
-        let spec: LensSpec = serde_json::from_value(serde_json::json!({
-            "title": "T", "query": "SELECT 1", "viz": "terminal"
-        }))
-        .unwrap();
-        assert!(spec_problem(&spec).is_some());
-    }
-
-    /// `answer` shows the answer its first row names; it needs the
-    /// URI's column, and an answer is never itself one.
-    #[test]
-    fn an_answer_lens_names_its_uri() {
-        let (_d, ext) = load_x(
-            &[
-                ("a", "title: A\nquery: SELECT 'oxplow:oxplow/answer?id=1' AS u, NULL AS k\nviz: answer\nanswer: { uri: u, kept: k }\n"),
-                ("noanswer", "title: N\nquery: SELECT 1\nviz: answer\n"),
-            ],
+        let inline = crate::pages::schema::parse_inline_page(&viz_page(
             "",
-        );
-        let a = ext.lenses.iter().find(|l| l.slug == "a").expect("a loads");
-        assert_eq!(a.answer.as_ref().and_then(|x| x.kept.as_deref()), Some("k"));
-        assert!(!a.fills);
-        assert!(!ext.lenses.iter().any(|l| l.slug == "noanswer"));
-        assert!(ext
-            .errors
-            .join("\n")
-            .contains("`answer: { uri: <column> }`"));
-        let spec: LensSpec = serde_json::from_value(serde_json::json!({
-            "title": "A", "query": "SELECT 1", "viz": "answer"
-        }))
-        .unwrap();
-        assert!(spec_problem(&spec).is_some());
+            "SELECT 'u' AS u",
+            "viz: terminal\nterminal: { of: u }\n",
+        ))
+        .unwrap_err();
+        assert!(inline.contains("can't hold a terminal"), "{inline}");
     }
 
     /// A param's `options` are the values it takes: its default
@@ -11215,20 +7895,17 @@ commands:
     fn param_options_bound_their_values() {
         let (_d, ext) = load_x(
             &[
-                ("ok", "title: OK\nquery: SELECT :mode AS m\nviz: list\nparams:\n  - { name: mode, default: recent, options: [{ value: recent, label: Recent }, { value: top, label: Most visited }] }\n"),
-                ("bad", "title: Bad\nquery: SELECT :mode AS m\nviz: list\nparams:\n  - { name: mode, default: all, options: [{ value: recent, label: Recent }] }\n"),
+                ("ok", &viz_page("params:\n  - { name: mode, default: recent, options: [{ value: recent, label: Recent }, { value: top, label: Most visited }] }\n", "SELECT :mode AS m", "viz: list\n")),
+                ("bad", &viz_page("params:\n  - { name: mode, default: all, options: [{ value: recent, label: Recent }] }\n", "SELECT :mode AS m", "viz: list\n")),
             ],
             "",
         );
-        let ok = ext
-            .lenses
-            .iter()
-            .find(|l| l.slug == "ok")
-            .expect("ok loads");
+        let ok = page_of(&ext, "ok").expect("ok loads");
         assert_eq!(ok.params[0].options[1].label, "Most visited");
-        assert!(ext.lenses.iter().all(|l| l.slug != "bad"));
+        assert!(page_of(&ext, "bad").is_none());
         let errs = ext.errors.join("\n");
         assert!(errs.contains("`mode`") && errs.contains("`all`"), "{errs}");
+        let ok = node(&ext, "ok").unwrap();
         let supplied = BTreeMap::from([("mode".to_string(), SqlCell::Text("top".into()))]);
         assert!(resolve_params(ok, &supplied, &ViewContext::default()).is_ok());
         let supplied = BTreeMap::from([("mode".to_string(), SqlCell::Text("all".into()))]);
@@ -11240,29 +7917,27 @@ commands:
     /// its type is refused at load.
     #[test]
     fn typed_params_are_checked_at_load() {
+        let one = |params: &str| viz_page(params, "SELECT 1 AS a", "");
         let (_d, ext) = load_x(
             &[
-                ("ok", "title: OK\nquery: SELECT 1 AS a\nparams:\n  - { name: range, type: date_range, presets: [7d, all], default: 7d }\n  - { name: flag, type: bool, default: true }\n  - { name: q, type: search }\n  - { name: br, type: branch }\n  - { name: mode, default: a, options: [{ value: a, label: A }] }\n  - { name: free }\n  - { name: end, options_from: ends }\n  - { name: start, type: choice, options_from: other/ends, default: anything }\n"),
-                ("ends", "title: Ends\nquery: SELECT 'snap:1' AS value, 'One' AS label\n"),
-                ("choice_without_options", "title: X\nquery: SELECT 1 AS a\nparams: [{ name: m, type: choice }]\n"),
-                ("both_option_sources", "title: X\nquery: SELECT 1 AS a\nparams: [{ name: m, options_from: ends, options: [{ value: a, label: A }] }]\n"),
-                ("options_from_on_text", "title: X\nquery: SELECT 1 AS a\nparams: [{ name: m, type: text, options_from: ends }]\n"),
-                ("options_from_missing", "title: X\nquery: SELECT 1 AS a\nparams: [{ name: m, options_from: nowhere }]\n"),
-                ("options_on_text", "title: X\nquery: SELECT 1 AS a\nparams: [{ name: m, type: text, options: [{ value: a, label: A }] }]\n"),
-                ("presets_on_text", "title: X\nquery: SELECT 1 AS a\nparams: [{ name: m, presets: [7d] }]\n"),
-                ("unknown_preset", "title: X\nquery: SELECT 1 AS a\nparams: [{ name: m, type: date_range, presets: [5y] }]\n"),
-                ("bad_range", "title: X\nquery: SELECT 1 AS a\nparams: [{ name: m, type: date_range, default: soon }]\n"),
-                ("bad_bool", "title: X\nquery: SELECT 1 AS a\nparams: [{ name: m, type: bool, default: maybe }]\n"),
-                ("placed", "title: X\nquery: SELECT 1 AS a\nparams: [{ name: m, place: toolbar }]\n"),
-                ("roled", "title: X\nquery: SELECT 1 AS a\nparams: [{ name: m, role: selection }]\n"),
+                ("ok", &one("params:\n  - { name: range, type: date_range, presets: [7d, all], default: 7d }\n  - { name: flag, type: bool, default: true }\n  - { name: q, type: search }\n  - { name: br, type: branch }\n  - { name: mode, default: a, options: [{ value: a, label: A }] }\n  - { name: free }\n  - { name: end, options_from: ends }\n  - { name: start, type: choice, options_from: other/ends, default: anything }\n")),
+                ("ends", &viz_page("title: Ends\n", "SELECT 'snap:1' AS value, 'One' AS label", "")),
+                ("choice_without_options", &one("params: [{ name: m, type: choice }]\n")),
+                ("both_option_sources", &one("params: [{ name: m, options_from: x/ends, options: [{ value: a, label: A }] }]\n")),
+                ("options_from_on_text", &one("params: [{ name: m, type: text, options_from: x/ends }]\n")),
+                ("options_from_missing", &one("params: [{ name: m, options_from: nowhere }]\n")),
+                ("options_from_itself", &one("params: [{ name: m, options_from: x/options_from_itself }]\n")),
+                ("options_on_text", &one("params: [{ name: m, type: text, options: [{ value: a, label: A }] }]\n")),
+                ("presets_on_text", &one("params: [{ name: m, presets: [7d] }]\n")),
+                ("unknown_preset", &one("params: [{ name: m, type: date_range, presets: [5y] }]\n")),
+                ("bad_range", &one("params: [{ name: m, type: date_range, default: soon }]\n")),
+                ("bad_bool", &one("params: [{ name: m, type: bool, default: maybe }]\n")),
+                ("placed", &one("params: [{ name: m, place: toolbar }]\n")),
+                ("roled", &one("params: [{ name: m, role: selection }]\n")),
             ],
             "",
         );
-        let ok = ext
-            .lenses
-            .iter()
-            .find(|l| l.slug == "ok")
-            .expect("ok loads");
+        let ok = page_of(&ext, "ok").expect("ok loads");
         let kinds: Vec<_> = ok.params.iter().map(|p| p.kind).collect();
         assert_eq!(
             kinds,
@@ -11278,8 +7953,9 @@ commands:
             ]
             .map(Some)
         );
-        // A dynamic choice's lens is qualified as `expand` is; its options
-        // aren't known at load, so its default (if any) isn't checked.
+        // A dynamic choice's page is named whole, as `expand`'s is; its
+        // options aren't known at load, so its default (if any) isn't
+        // checked, and another extension's page isn't either.
         let from: Vec<_> = ok
             .params
             .iter()
@@ -11303,7 +7979,11 @@ commands:
             ),
             (
                 "options_from_missing",
-                "`options_from` lens `x/nowhere` isn't in this extension's lenses/",
+                "`options_from` page `x/nowhere` isn't in this extension's pages/",
+            ),
+            (
+                "options_from_itself",
+                "`options_from` names the page itself",
             ),
             ("options_on_text", "`options` are only for a choice"),
             ("presets_on_text", "`presets` are only for a date_range"),
@@ -11315,7 +7995,7 @@ commands:
             ("placed", "unknown field `place`"),
             ("roled", "`role: selection` follows from the columns"),
         ] {
-            assert!(ext.lenses.iter().all(|l| l.slug != slug), "{slug} loaded");
+            assert!(page_of(&ext, slug).is_none(), "{slug} loaded");
             assert!(
                 errs.lines()
                     .any(|e| e.contains(&format!("{slug}.yaml")) && e.contains(says)),
@@ -11323,8 +8003,7 @@ commands:
             );
         }
     }
-
-    /// A choice whose options come from a lens takes any text (the query
+    /// A choice whose options come from a page takes any text (the query
     /// says what an unknown value means) and NULL, as every param.
     #[test]
     fn a_dynamic_choice_takes_any_text() {
@@ -11357,34 +8036,28 @@ commands:
         write(dir.path(), ".oxplow/extensions/review/extension.yaml", EXT);
         write(
             dir.path(),
-            ".oxplow/extensions/review/lenses/typed.yaml",
-            "title: Typed\nparams:\n  - { name: flag, type: bool, default: false }\n  - { name: q, type: search }\n  - { name: range, type: date_range, default: all }\nquery: SELECT :flag AS flag, :q AS q, :range AS range, :range_from AS f, :range_to AS t\n",
+            ".oxplow/extensions/review/pages/typed.yaml",
+            &viz_page(
+                "title: Typed\nparams:\n  - { name: flag, type: bool, default: false }\n  - { name: q, type: search }\n  - { name: range, type: date_range, default: all }\n",
+                "SELECT :flag AS flag, :q AS q, :range AS range, :range_from AS f, :range_to AS t",
+                "",
+            ),
         );
-        let sl = layer().await;
+        let svc = services(dir.path()).await;
         let run = |over: Vec<(&str, &str)>| {
             let supplied: BTreeMap<String, SqlCell> = over
                 .into_iter()
                 .map(|(k, v)| (k.to_string(), SqlCell::Text(v.to_string())))
                 .collect();
-            let sl = &sl;
-            let root = dir.path();
-            async move {
-                run_lens(
-                    sl,
-                    &cat(),
-                    root,
-                    "review/typed",
-                    supplied,
-                    &ViewContext::default(),
-                )
-                .await
-            }
+            let svc = svc.clone();
+            async move { run_page(&svc, "review/typed", supplied, ViewContext::default()).await }
         };
-        let rows = |r: &LensRun| serde_json::to_value(&r.result.rows).unwrap();
+        let cell =
+            |r: &crate::pages::runner::PageRun, i: usize| r.loaders["q"].result.rows[0][i].clone();
 
         let first = run(vec![]).await.unwrap();
         assert_eq!(
-            rows(&first),
+            rows_of(&first, "q"),
             serde_json::json!([[0, null, "all", null, null]])
         );
         assert!(!first.params.contains_key("range_from"));
@@ -11397,7 +8070,7 @@ commands:
         .await
         .unwrap();
         assert_eq!(
-            rows(&custom),
+            rows_of(&custom, "q"),
             serde_json::json!([[
                 1,
                 "fix",
@@ -11407,16 +8080,16 @@ commands:
             ]])
         );
         assert_eq!(
-            run(vec![("q", "  ")]).await.unwrap().result.rows[0][1],
+            cell(&run(vec![("q", "  ")]).await.unwrap(), 1),
             SqlCell::Null(())
         );
 
         let week = run(vec![("range", "7d")]).await.unwrap();
-        let SqlCell::Text(from) = &week.result.rows[0][3] else {
-            panic!("7d binds a from: {:?}", week.result.rows)
+        let SqlCell::Text(from) = cell(&week, 3) else {
+            panic!("7d binds a from: {:?}", week.loaders["q"].result.rows)
         };
         let from =
-            time::OffsetDateTime::parse(from, &time::format_description::well_known::Rfc3339)
+            time::OffsetDateTime::parse(&from, &time::format_description::well_known::Rfc3339)
                 .expect("an RFC 3339 time");
         let back = time::OffsetDateTime::now_utc() - from;
         assert!(
@@ -11424,7 +8097,7 @@ commands:
                 && back < time::Duration::days(7) + time::Duration::minutes(1),
             "{back}"
         );
-        assert_eq!(week.result.rows[0][4], SqlCell::Null(()));
+        assert_eq!(cell(&week, 4), SqlCell::Null(()));
 
         for (k, v) in [
             ("flag", "maybe"),
@@ -11435,37 +8108,36 @@ commands:
         }
     }
 
-    /// A column's `select` names a param the lens declares; a document's
-    /// own section that selects needs the document to hold that param, or
-    /// a click in it couldn't reach the other sections.
+    /// A column's `select` names a param the page declares.
     #[test]
     fn a_select_names_a_param_its_page_holds() {
         let (_d, ext) = load_x(
             &[
-                ("rows", "title: Rows\nquery: SELECT 'a' AS sha\nparams: [{ name: commit }]\ncolumns: [{ key: sha, select: commit }]\n"),
-                ("nope", "title: Nope\nquery: SELECT 'a' AS sha\ncolumns: [{ key: sha, select: commit }]\n"),
-                ("holds", "title: Holds\nviz: document\nparams: [{ name: commit }]\nsections: [{ lens: rows }]\n"),
-                ("lacks", "title: Lacks\nviz: document\nsections: [{ lens: rows }]\n"),
+                (
+                    "rows",
+                    &viz_page(
+                        "params: [{ name: commit }]\n",
+                        "SELECT 'a' AS sha",
+                        "columns: [{ key: sha, select: commit }]\n",
+                    ),
+                ),
+                (
+                    "nope",
+                    &viz_page(
+                        "",
+                        "SELECT 'a' AS sha",
+                        "columns: [{ key: sha, select: commit }]\n",
+                    ),
+                ),
             ],
             "",
         );
-        let rows = ext
-            .lenses
-            .iter()
-            .find(|l| l.slug == "rows")
-            .expect("rows loads");
+        let rows = node(&ext, "rows").expect("rows loads");
         assert_eq!(rows.columns[0].select.as_deref(), Some("commit"));
-        assert!(ext.lenses.iter().any(|l| l.slug == "holds"));
-        for slug in ["nope", "lacks"] {
-            assert!(ext.lenses.iter().all(|l| l.slug != slug), "{slug} loaded");
-        }
+        assert!(page_of(&ext, "nope").is_none());
         let errs = ext.errors.join("\n");
         assert!(
             errs.contains("nope.yaml") && errs.contains("`select: commit`"),
-            "{errs}"
-        );
-        assert!(
-            errs.contains("lacks.yaml") && errs.contains("x/rows") && errs.contains("`commit`"),
             "{errs}"
         );
     }
@@ -11475,17 +8147,13 @@ commands:
     fn an_action_placeholder_may_only_filter_with_json() {
         let (_d, ext) = load_x(
             &[
-                ("ok", "title: Ok\nquery: SELECT '[1]' AS order_json\nactions:\n  - { id: a, label: A, command: oxplow.agent.set_agents, row: true, input: { agents: \"{{row.order_json|json}}\" } }\n"),
-                ("bad", "title: Bad\nquery: SELECT 1 AS n\nactions:\n  - { id: a, label: A, command: oxplow.agent.set_agents, row: true, input: { agents: \"{{row.n|upper}}\" } }\n"),
+                ("ok", &viz_page("", "SELECT '[1]' AS order_json", "actions:\n  - { id: a, label: A, command: oxplow.agent.set_agents, row: true, input: { agents: \"{{row.order_json|json}}\" } }\n")),
+                ("bad", &viz_page("", "SELECT 1 AS n", "actions:\n  - { id: a, label: A, command: oxplow.agent.set_agents, row: true, input: { agents: \"{{row.n|upper}}\" } }\n")),
             ],
             "",
         );
-        assert!(
-            ext.lenses.iter().any(|l| l.slug == "ok"),
-            "{:?}",
-            ext.errors
-        );
-        assert!(ext.lenses.iter().all(|l| l.slug != "bad"));
+        assert!(page_of(&ext, "ok").is_some(), "{:?}", ext.errors);
+        assert!(page_of(&ext, "bad").is_none());
         assert!(
             ext.errors
                 .join("\n")
@@ -11495,41 +8163,61 @@ commands:
         );
     }
 
-    /// A column's `expand` names a lens of the extension (by slug or whole
-    /// id); one that isn't there, or the lens itself, fails the load.
+    /// A column's `expand` names a page (by slug or whole id); one of this
+    /// extension's must be in pages/ and not be the page itself (another
+    /// extension's is found when it runs).
     #[test]
-    fn an_expand_names_a_lens_of_its_extension() {
+    fn an_expand_names_a_page() {
+        let expands = |to: &str| {
+            viz_page(
+                "",
+                "SELECT 1 AS id",
+                &format!("columns: [{{ key: id, expand: {to} }}]\n"),
+            )
+        };
         let (_d, ext) = load_x(
             &[
-                ("detail", "title: Detail\nquery: SELECT 1 AS n\nparams: [{ name: id }]\n"),
-                ("by-slug", "title: By slug\nquery: SELECT 1 AS id\ncolumns: [{ key: id, expand: detail }]\n"),
-                ("by-id", "title: By id\nquery: SELECT 1 AS id\ncolumns: [{ key: id, expand: x/detail }]\n"),
-                ("missing", "title: Missing\nquery: SELECT 1 AS id\ncolumns: [{ key: id, expand: gone }]\n"),
-                ("itself", "title: Itself\nquery: SELECT 1 AS id\ncolumns: [{ key: id, expand: itself }]\n"),
+                (
+                    "detail",
+                    &viz_page("params: [{ name: id }]\n", "SELECT :id AS n", ""),
+                ),
+                ("by-id", &expands("x/detail")),
+                ("elsewhere", &expands("other/detail")),
+                ("by-slug", &expands("detail")),
+                ("missing", &expands("gone")),
+                ("itself", &expands("itself")),
             ],
             "",
         );
-        for slug in ["by-slug", "by-id"] {
-            let lens = ext
-                .lenses
-                .iter()
-                .find(|l| l.slug == slug)
-                .unwrap_or_else(|| panic!("{slug} didn't load: {:?}", ext.errors));
-            // Named whole, whichever way it was written.
-            assert_eq!(lens.columns[0].expand.as_deref(), Some("x/detail"));
+        for slug in ["by-id", "by-slug", "elsewhere"] {
+            assert!(
+                node(&ext, slug).is_some(),
+                "{slug} didn't load: {:?}",
+                ext.errors
+            );
         }
-        for slug in ["missing", "itself"] {
-            assert!(ext.lenses.iter().all(|l| l.slug != slug), "{slug} loaded");
+        // Named whole, whichever way it was written.
+        for slug in ["by-id", "by-slug"] {
+            assert_eq!(
+                node(&ext, slug).unwrap().columns[0].expand.as_deref(),
+                Some("x/detail")
+            );
         }
         let errs = ext.errors.join("\n");
-        assert!(
-            errs.contains("missing.yaml") && errs.contains("`expand` lens `x/gone`"),
-            "{errs}"
-        );
-        assert!(
-            errs.contains("itself.yaml") && errs.contains("names the lens itself"),
-            "{errs}"
-        );
+        for (slug, says) in [
+            (
+                "missing",
+                "`expand` page `x/gone` isn't in this extension's pages/",
+            ),
+            ("itself", "`expand` names the page itself"),
+        ] {
+            assert!(page_of(&ext, slug).is_none(), "{slug} loaded");
+            assert!(
+                errs.lines()
+                    .any(|e| e.contains(&format!("{slug}.yaml")) && e.contains(says)),
+                "{slug}: {errs}"
+            );
+        }
     }
 
     /// `targets` draws target lines on a `line` chart; on another viz it is
@@ -11540,27 +8228,32 @@ commands:
             &[
                 (
                     "trend",
-                    "title: Trend\nquery: SELECT 1 AS at, 2 AS v, 3 AS goal, '[1,2]' AS s, 'ok' AS level\nviz: line\nchart: { x: at, y: v, targets: goal }\ncolumns: [{ key: s, format: sparkline }, { key: level, format: badge }]\n",
+                    &viz_page(
+                        "",
+                        "SELECT 1 AS at, 2 AS v, 3 AS goal, '[1,2]' AS s, 'ok' AS level",
+                        "viz: line\nchart: { x: at, y: v, targets: goal }\ncolumns: [{ key: s, format: sparkline }, { key: level, format: badge }]\n",
+                    ),
                 ),
                 (
                     "bars",
-                    "title: Bars\nquery: SELECT 1 AS at, 2 AS v, 3 AS goal\nviz: bar\nchart: { x: at, y: v, targets: goal }\n",
+                    &viz_page(
+                        "",
+                        "SELECT 1 AS at, 2 AS v, 3 AS goal",
+                        "viz: bar\nchart: { x: at, y: v, targets: goal }\n",
+                    ),
                 ),
             ],
             "",
         );
-        let trend = ext
-            .lenses
-            .iter()
-            .find(|l| l.slug == "trend")
-            .unwrap_or_else(|| panic!("trend didn't load: {:?}", ext.errors));
+        let trend =
+            node(&ext, "trend").unwrap_or_else(|| panic!("trend didn't load: {:?}", ext.errors));
         assert_eq!(
             trend.chart.as_ref().unwrap().targets.as_deref(),
             Some("goal")
         );
         assert_eq!(trend.columns[0].format, Some(ColumnFormat::Sparkline));
         assert_eq!(trend.columns[1].format, Some(ColumnFormat::Badge));
-        assert!(ext.lenses.iter().all(|l| l.slug != "bars"));
+        assert!(page_of(&ext, "bars").is_none());
         let errs = ext.errors.join("\n");
         assert!(
             errs.contains("bars.yaml") && errs.contains("`targets`"),
@@ -11568,35 +8261,42 @@ commands:
         );
     }
 
-    /// A param a column selects is a selection, on the lens whose rows
-    /// set it and on the page that holds it for its parts; one that says
-    /// `role: filter` is a filter; every other param names the resource.
+    /// A param a column selects is a selection, on the page and on the
+    /// node whose rows set it; one that says `role: filter` is a filter;
+    /// every other param names the resource, and says no role.
     #[test]
     fn a_params_role_is_resource_unless_it_filters_or_a_column_selects_it() {
         let (_d, ext) = load_x(
-            &[
-                ("rows", "title: Rows\nquery: SELECT 'a' AS sha\nparams: [{ name: commit }, { name: q, type: search, role: filter }, { name: stream_id }]\ncolumns: [{ key: sha, select: commit }]\n"),
-                ("page", "title: Page\nviz: document\nparams: [{ name: q, type: search, role: filter }, { name: commit }, { name: stream_id }]\nsections: [{ lens: rows }]\n"),
-            ],
+            &[(
+                "rows",
+                &viz_page(
+                    "params: [{ name: commit }, { name: q, type: search, role: filter }, { name: stream_id }]\n",
+                    "SELECT 'a' AS sha, :q AS q, :stream_id AS s",
+                    "columns: [{ key: sha, select: commit }]\n",
+                ),
+            )],
             "",
         );
-        for slug in ["rows", "page"] {
-            let lens = ext.lenses.iter().find(|l| l.slug == slug).expect(slug);
-            let role = |name: &str| lens.params.iter().find(|p| p.name == name).unwrap().role;
-            assert_eq!(role("commit"), Some(ParamRole::Selection), "{slug}");
-            assert_eq!(role("q"), Some(ParamRole::Filter), "{slug}");
-            assert_eq!(role("stream_id"), Some(ParamRole::Resource), "{slug}");
-        }
+        let page = page_of(&ext, "rows").unwrap_or_else(|| panic!("{:?}", ext.errors));
+        let role = |name: &str| page.params.iter().find(|p| p.name == name).unwrap().role;
+        assert_eq!(role("commit"), Some(ParamRole::Selection));
+        assert_eq!(role("q"), Some(ParamRole::Filter));
+        // No role is the resource's (a renderer takes it from its URI).
+        assert_eq!(role("stream_id"), None);
     }
 
-    /// A selection follows from the columns: a lens that writes one is
+    /// A selection follows from the columns: a page that writes one is
     /// refused.
     #[test]
     fn a_written_selection_role_is_refused() {
         let (_d, ext) = load_x(
             &[(
                 "rows",
-                "title: Rows\nquery: SELECT 1 AS n\nparams: [{ name: commit, role: selection }]\n",
+                &viz_page(
+                    "params: [{ name: commit, role: selection }]\n",
+                    "SELECT 1 AS n",
+                    "",
+                ),
             )],
             "",
         );
@@ -11607,28 +8307,28 @@ commands:
         );
     }
 
-    /// A lens says where it comes from: the source file to edit, relative
+    /// A page says where it comes from: the source file to edit, relative
     /// to the project, and the copy that runs. Loaded from its source,
     /// they are the same file.
     #[test]
-    fn a_lens_from_its_source_names_that_file() {
-        let (_d, ext) = load_x(&[("ok", "title: OK\nquery: SELECT 1 AS a\n")], "");
-        let origin = &ext.lenses[0].origin;
+    fn a_page_from_its_source_names_that_file() {
+        let (_d, ext) = load_x(&[("ok", &viz_page("", "SELECT 1 AS a", ""))], "");
+        let origin = &ext.page_files[0].origin;
         assert_eq!(origin.extension, "x");
         assert_eq!(
             origin.source.as_deref(),
-            Some(".oxplow/extensions/x/lenses/ok.yaml")
+            Some(".oxplow/extensions/x/pages/ok.yaml")
         );
-        assert_eq!(origin.running, ".oxplow/extensions/x/lenses/ok.yaml");
+        assert_eq!(origin.running, ".oxplow/extensions/x/pages/ok.yaml");
         assert_eq!(origin.deployment, None);
         assert!(!origin.bundled);
     }
 
-    /// A deployed lens runs from its copy in the store, but its origin
+    /// A deployed page runs from its copy in the store, but its origin
     /// names the source to edit and the deployment it came from.
     #[test]
-    fn a_deployed_lens_names_its_source_and_its_deployment() {
-        let (d, _) = load_x(&[("ok", "title: OK\nquery: SELECT 1 AS a\n")], "");
+    fn a_deployed_page_names_its_source_and_its_deployment() {
+        let (d, _) = load_x(&[("ok", &viz_page("", "SELECT 1 AS a", ""))], "");
         let source = d.path().join(".oxplow/extensions/x");
         let hash = crate::extension_store::source_hash(&source).unwrap();
         crate::extension_store::copy_into_store(d.path(), "x", &source, &hash).unwrap();
@@ -11639,47 +8339,44 @@ commands:
             .into_iter()
             .find(|e| e.name == "x")
             .unwrap();
-        let origin = &ext.lenses[0].origin;
+        let origin = &ext.page_files[0].origin;
         assert_eq!(
             origin.source.as_deref(),
-            Some(".oxplow/extensions/x/lenses/ok.yaml")
+            Some(".oxplow/extensions/x/pages/ok.yaml")
         );
         assert!(
-            origin
-                .running
-                .ends_with(&format!("x/{hash}/lenses/ok.yaml")),
+            origin.running.ends_with(&format!("x/{hash}/pages/ok.yaml")),
             "{}",
             origin.running
         );
         assert_eq!(origin.deployment.as_deref(), Some(hash.as_str()));
         assert!(!origin.bundled);
+        // A node's config names the same origin as its page.
+        assert_eq!(&node(&ext, "ok").unwrap().origin, origin);
         // An edit to the source shows until it is deployed.
         assert!(!origin.out_of_date(d.path()));
         write(
             d.path(),
-            ".oxplow/extensions/x/lenses/ok.yaml",
-            "title: Edited\nquery: SELECT 1 AS a\n",
+            ".oxplow/extensions/x/pages/ok.yaml",
+            &viz_page("title: Edited\n", "SELECT 1 AS a", ""),
         );
         assert!(origin.out_of_date(d.path()));
         assert_eq!(origin.to_json(d.path())["outOfDate"], true);
     }
 
-    /// The layout warnings of one lens file: its loaded extension's
-    /// warnings, and whether the lens still loaded.
-    fn layout_of(lens_body: &str) -> (Vec<String>, bool) {
-        let (_d, ext) = load_x(&[("p", lens_body)], "");
+    /// The layout warnings of one page file: its loaded extension's
+    /// warnings, and whether the page still loaded.
+    fn layout_of(page: &str) -> (Vec<String>, bool) {
+        let (_d, ext) = load_x(&[("p", page)], "");
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
-        (
-            layout_only(&ext.warnings),
-            ext.lenses.iter().any(|l| l.slug == "p"),
-        )
+        (layout_only(&ext.warnings), page_of(&ext, "p").is_some())
     }
 
     /// The layout warnings among `warnings`.
     fn layout_only(warnings: &[String]) -> Vec<String> {
         const MARKS: [&str; 6] = [
             " filters; ",
-            "isn't read by any query",
+            "isn't read by any loader",
             " options — ",
             "the description is",
             " sections — ",
@@ -11693,12 +8390,14 @@ commands:
     }
 
     fn filters(n: usize) -> String {
-        let params: Vec<String> = (0..n).map(|i| format!("{{ name: f{i} }}")).collect();
+        let params: Vec<String> = (0..n)
+            .map(|i| format!("{{ name: f{i}, role: filter }}"))
+            .collect();
         let reads: Vec<String> = (0..n).map(|i| format!(":f{i}")).collect();
-        format!(
-            "title: P\nparams: [{}]\nquery: SELECT {} AS a\n",
-            params.join(", "),
-            reads.join(" || ")
+        viz_page(
+            &format!("params: [{}]\n", params.join(", ")),
+            &format!("SELECT {} AS a", reads.join(" || ")),
+            "",
         )
     }
 
@@ -11708,7 +8407,7 @@ commands:
         assert!(loaded);
         assert!(
             warns.iter().any(|w| w.starts_with(
-                ".oxplow/extensions/x/lenses/p.yaml: 7 filters; a page shows 6 at most — fold"
+                ".oxplow/extensions/x/pages/p.yaml: 7 filters; a page shows 6 at most — fold"
             )),
             "{warns:?}"
         );
@@ -11719,9 +8418,13 @@ commands:
         let options: Vec<String> = (0..n)
             .map(|i| format!("{{ value: v{i}, label: V{i} }}"))
             .collect();
-        format!(
-            "title: P\nparams: [{{ name: c, default: v0, options: [{}] }}]\nquery: SELECT :c AS a\n",
-            options.join(", ")
+        viz_page(
+            &format!(
+                "params: [{{ name: c, default: v0, options: [{}] }}]\n",
+                options.join(", ")
+            ),
+            "SELECT :c AS a",
+            "",
         )
     }
 
@@ -11730,55 +8433,50 @@ commands:
         let (warns, loaded) = layout_of(&choice(13));
         assert!(loaded);
         assert!(
-            warns.iter().any(|w| w
-                .ends_with("param `c` has 13 options — use a `search`, or a lens that lists them")),
+            warns.iter().any(|w| w.ends_with(
+                "param `c` has 13 options — use a `search`, or a page loader that lists them (`options_from`)"
+            )),
             "{warns:?}"
         );
         assert!(layout_of(&choice(12)).0.is_empty());
     }
 
     #[test]
-    fn a_param_no_query_reads_warns_and_a_token_is_whole() {
-        let (warns, loaded) = layout_of(
-            "title: P\nparams: [{ name: q }, { name: r }]\nquery: SELECT :q AS a, :r_x AS b\n",
-        );
+    fn a_param_no_loader_reads_warns_and_a_token_is_whole() {
+        let (warns, loaded) = layout_of(&viz_page(
+            "params: [{ name: q }, { name: r }]\n",
+            "SELECT :q AS a, :r_x AS b",
+            "",
+        ));
         assert!(loaded);
         assert_eq!(warns.len(), 1, "{warns:?}");
         assert!(
             warns[0].ends_with(
-                "param `r` isn't read by any query of the page — remove it, or read it as `:r`"
+                "param `r` isn't read by any loader of the page — remove it, or read it as `:r`"
             ),
             "{warns:?}"
         );
         // `:q` at the end of the text counts.
-        assert!(
-            layout_of("title: P\nparams: [{ name: q }]\nquery: SELECT 1 AS a WHERE 1 = :q\n")
-                .0
-                .is_empty()
-        );
+        assert!(layout_of(&viz_page(
+            "params: [{ name: q }]\n",
+            "SELECT 1 AS a WHERE 1 = :q",
+            ""
+        ))
+        .0
+        .is_empty());
     }
 
     /// A param a column `select`s or `highlight`s is in use: a click sets
-    /// it, or the cells mark it, whether or not this lens's query reads it.
+    /// it, or the cells mark it, whether or not a loader reads it.
     #[test]
     fn a_param_a_column_selects_or_highlights_is_read() {
-        let (warns, loaded) = layout_of(
-            "title: P\nparams: [{ name: commit }, { name: q }]\nquery: SELECT 'a' AS sha, 'b' AS s\ncolumns: [{ key: sha, select: commit }, { key: s, highlight: q }]\n",
-        );
+        let (warns, loaded) = layout_of(&viz_page(
+            "params: [{ name: commit }, { name: q }]\n",
+            "SELECT 'a' AS sha, 'b' AS s",
+            "columns: [{ key: sha, select: commit }, { key: s, highlight: q }]\n",
+        ));
         assert!(loaded);
         assert!(warns.is_empty(), "{warns:?}");
-    }
-
-    /// A dashboard whose rows are tiles windows its metric cards by the
-    /// page's `range` and `branch`: the cards read them, not the query.
-    #[test]
-    fn a_tile_dashboards_range_and_branch_are_read_by_its_metric_cards() {
-        let (warns, loaded) = layout_of(
-            "title: P\nparams: [{ name: range, type: date_range, role: filter }, { name: branch, type: branch, role: filter }, { name: z, role: filter }]\nquery: SELECT 'a' AS id, 'x' AS sql, 'metric' AS display\nviz: dashboard\ntile: { id: id, sql: sql, display: display }\n",
-        );
-        assert!(loaded);
-        assert_eq!(warns.len(), 1, "{warns:?}");
-        assert!(warns[0].contains("param `z`"), "{warns:?}");
     }
 
     /// What a deployed extension reports names its source files, the
@@ -11788,7 +8486,7 @@ commands:
         let (d, _) = load_x(
             &[(
                 "ok",
-                "title: OK\nparams: [{ name: z }]\nquery: SELECT 1 AS a\n",
+                &viz_page("params: [{ name: z }]\n", "SELECT 1 AS a", ""),
             )],
             "",
         );
@@ -11809,7 +8507,7 @@ commands:
             .collect();
         assert_eq!(unread.len(), 1, "{:?}", ext.warnings);
         assert!(
-            unread[0].starts_with(".oxplow/extensions/x/lenses/ok.yaml: "),
+            unread[0].starts_with(".oxplow/extensions/x/pages/ok.yaml: "),
             "{unread:?}"
         );
         assert!(
@@ -11821,27 +8519,43 @@ commands:
 
     #[test]
     fn a_range_is_read_through_its_from_or_to() {
-        let body = |read: &str| {
-            format!("title: P\nparams: [{{ name: range, type: date_range, default: all }}]\nquery: SELECT 1 AS a WHERE 1 {read}\n")
+        let page = |read: &str| {
+            viz_page(
+                "params: [{ name: range, type: date_range, default: all }]\n",
+                &format!("SELECT 1 AS a WHERE 1 {read}"),
+                "",
+            )
         };
-        assert!(layout_of(&body("OR :range_from IS NULL")).0.is_empty());
-        assert!(layout_of(&body("OR :range_to IS NULL")).0.is_empty());
-        assert!(layout_of(&body("OR :range = 'all'")).0.is_empty());
+        assert!(layout_of(&page("OR :range_from IS NULL")).0.is_empty());
+        assert!(layout_of(&page("OR :range_to IS NULL")).0.is_empty());
+        assert!(layout_of(&page("OR :range = 'all'")).0.is_empty());
     }
 
+    /// A param a node's or the page's action input names is read.
     #[test]
-    fn a_part_lens_query_and_an_action_input_read_a_param() {
+    fn an_action_input_reads_a_param() {
         let (_d, ext) = load_x(
             &[
-                ("n", "title: N\nparams: [{ name: q }]\nquery: SELECT :q AS n\nviz: number\n"),
-                ("doc", "title: D\nviz: document\nparams: [{ name: q }]\nsections: [{ lens: n }]\n"),
                 (
-                    "act",
-                    "title: A\nparams: [{ name: k }]\nquery: SELECT 1 AS a\nactions:\n  - { id: go, label: Go, command: oxplow.work_item.transition, input: { uri: '{{param.k}}' } }\n",
+                    "node",
+                    &viz_page(
+                        "params: [{ name: k }]\n",
+                        "SELECT 1 AS a",
+                        "actions:\n  - { id: go, label: Go, command: oxplow.work_item.transition, input: { uri: '{{param.k}}' } }\n",
+                    ),
+                ),
+                (
+                    "page",
+                    &viz_page(
+                        "params: [{ name: k }]\nactions:\n  - { id: go, label: Go, command: oxplow.work_item.transition, input: { uri: '{{param.k}}' } }\n",
+                        "SELECT 1 AS a",
+                        "",
+                    ),
                 ),
             ],
             "",
         );
+        assert!(ext.errors.is_empty(), "{:?}", ext.errors);
         assert!(
             ext.warnings.iter().all(|w| !w.contains("isn't read")),
             "{:?}",
@@ -11851,33 +8565,31 @@ commands:
 
     #[test]
     fn a_long_description_warns() {
-        let body = |n: usize| {
-            format!(
-                "title: P\ndescription: {}\nquery: SELECT 1 AS a\n",
-                "d".repeat(n)
+        let page = |n: usize| {
+            viz_page(
+                &format!("description: {}\n", "d".repeat(n)),
+                "SELECT 1 AS a",
+                "",
             )
         };
-        let (warns, loaded) = layout_of(&body(201));
+        let (warns, loaded) = layout_of(&page(201));
         assert!(loaded);
         assert!(
-            warns.iter().any(|w| w.ends_with("the description is 201 characters — keep it to a sentence or two; put the rest in a markdown section")),
+            warns.iter().any(|w| w.ends_with("the description is 201 characters — keep it to a sentence or two; put the rest in a markdown node")),
             "{warns:?}"
         );
-        assert!(layout_of(&body(200)).0.is_empty());
+        assert!(layout_of(&page(200)).0.is_empty());
     }
 
     #[test]
-    fn a_document_of_more_than_eight_sections_warns() {
-        let doc = |n: usize| {
-            let parts: Vec<String> = (0..n)
-                .map(|i| format!("{{ id: s{i}, markdown: hi }}"))
+    fn a_stack_of_more_than_eight_sections_warns() {
+        let stack = |n: usize| {
+            let nodes: Vec<String> = (0..n)
+                .map(|i| format!("    - {{ id: s{i}, markdown: hi }}\n"))
                 .collect();
-            format!(
-                "title: P\nviz: document\nsections: [{}]\n",
-                parts.join(", ")
-            )
+            format!("title: P\nview:\n  stack:\n{}", nodes.concat())
         };
-        let (warns, loaded) = layout_of(&doc(9));
+        let (warns, loaded) = layout_of(&stack(9));
         assert!(loaded);
         assert!(
             warns
@@ -11885,7 +8597,7 @@ commands:
                 .any(|w| w.ends_with("9 sections — a page reads best with 8 at most; split it")),
             "{warns:?}"
         );
-        assert!(layout_of(&doc(8)).0.is_empty());
+        assert!(layout_of(&stack(8)).0.is_empty());
     }
 
     #[test]
@@ -11893,17 +8605,17 @@ commands:
         let table = |n: usize| {
             let cols: Vec<String> = (0..n).map(|i| format!("  - {{ key: c{i} }}")).collect();
             let sel: Vec<String> = (0..n).map(|i| format!("1 AS c{i}")).collect();
-            format!(
-                "title: P\nquery: SELECT {}\ncolumns:\n{}\n",
-                sel.join(", "),
-                cols.join("\n")
+            viz_page(
+                "",
+                &format!("SELECT {}", sel.join(", ")),
+                &format!("columns:\n{}\n", cols.join("\n")),
             )
         };
         let (warns, loaded) = layout_of(&table(9));
         assert!(loaded);
         assert!(
             warns.iter().any(|w| w.ends_with(
-                "9 columns — show 8 at most; put the rest in a section a row `select`s"
+                "node `q`: 9 columns — show 8 at most; put the rest in a node a row `select`s"
             )),
             "{warns:?}"
         );
@@ -11921,12 +8633,12 @@ commands:
             "{:?}",
             v.warnings
         );
-        assert!(v.lenses.iter().any(|l| l.slug == "p"));
+        assert!(page_of(&v, "p").is_some());
     }
 
     /// What the app ships follows its own page-layout rules.
     #[test]
-    fn the_bundled_lenses_have_no_layout_warning() {
+    fn the_bundled_pages_have_no_layout_warning() {
         let dir = tempfile::tempdir().unwrap();
         let exts = load_extensions(dir.path());
         let bundled: Vec<&Extension> = exts.iter().filter(|e| e.origin == "bundled").collect();
@@ -11936,14 +8648,17 @@ commands:
             assert!(layout.is_empty(), "{}: {layout:#?}", e.name);
         }
     }
-
     /// Validation checks every block's columns, not only the chart's.
     #[tokio::test]
     async fn validate_checks_structure_columns_exist() {
         let (d, _) = load_x(
             &[(
                 "a",
-                "title: A\nquery: SELECT 'x' AS l\nviz: steps\nsteps: { label: l, status: gone }\n",
+                &viz_page(
+                    "",
+                    "SELECT 'x' AS l",
+                    "viz: steps\nsteps: { label: l, status: gone }\n",
+                ),
             )],
             "",
         );
@@ -11951,15 +8666,32 @@ commands:
             .await
             .unwrap();
         let errs = v.errors.join("\n");
-        assert!(errs.contains("steps column `gone`"), "{errs}");
+        assert!(
+            errs.contains("a.yaml: node `q`: steps column `gone`"),
+            "{errs}"
+        );
     }
 
     #[tokio::test]
     async fn validate_checks_chart_and_link_columns_exist() {
         let (d, _) = load_x(
             &[
-                ("a", "title: A\nquery: SELECT 'x' AS day, 1 AS n\nviz: bar\nchart: { x: day, y: missing }\n"),
-                ("b", "title: B\nquery: SELECT 'f.rs' AS path\ncolumns:\n  - { key: path, link: { kind: file, line: ln } }\n"),
+                (
+                    "a",
+                    &viz_page(
+                        "",
+                        "SELECT 'x' AS day, 1 AS n",
+                        "viz: bar\nchart: { x: day, y: missing }\n",
+                    ),
+                ),
+                (
+                    "b",
+                    &viz_page(
+                        "",
+                        "SELECT 'f.rs' AS path",
+                        "columns:\n  - { key: path, link: { kind: file, line: ln } }\n",
+                    ),
+                ),
             ],
             "",
         );
@@ -11978,12 +8710,17 @@ commands:
         let (_d, ext) = load_x(
             &[(
                 "l",
-                "title: L\nquery: SELECT 1\ncolumns:\n  - { key: a, link: { kind: commit } }\n  - { key: b, link: { kind: metric } }\n  - { key: p, link: { kind: page } }\n  - { key: d, link: { kind: file, line: n } }\n",
+                &viz_page(
+                    "",
+                    "SELECT 1",
+                    "columns:\n  - { key: a, link: { kind: commit } }\n  - { key: b, link: { kind: metric } }\n  - { key: p, link: { kind: page } }\n  - { key: d, link: { kind: file, line: n } }\n",
+                ),
             )],
             "",
         );
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
-        let kinds: Vec<LensLinkKind> = ext.lenses[0]
+        let l = node(&ext, "l").unwrap();
+        let kinds: Vec<LinkKind> = l
             .columns
             .iter()
             .map(|c| c.link.as_ref().unwrap().kind)
@@ -11991,80 +8728,16 @@ commands:
         assert_eq!(
             kinds,
             vec![
-                LensLinkKind::Commit,
-                LensLinkKind::Metric,
-                LensLinkKind::Page,
-                LensLinkKind::File
+                LinkKind::Commit,
+                LinkKind::Metric,
+                LinkKind::Page,
+                LinkKind::File
             ]
         );
         assert_eq!(
-            ext.lenses[0].columns[3]
-                .link
-                .as_ref()
-                .unwrap()
-                .line
-                .as_deref(),
+            l.columns[3].link.as_ref().unwrap().line.as_deref(),
             Some("n")
         );
-    }
-
-    #[test]
-    fn slots_bind_params_the_lens_must_declare() {
-        let task_lens = "title: T\nparams: [{ name: path }]\nquery: SELECT :path\n";
-        let thread_lens = "title: Th\nparams: [{ name: stream_id }]\nquery: SELECT :stream_id\n";
-        let (_d, ext) = load_x(
-            &[("t", task_lens), ("th", thread_lens), ("plain", "title: P\nquery: SELECT 1\n")],
-            "ui:\n  slots:\n    - { slot: diff.file.header, lens: t }\n    - { slot: diff.file.header, lens: th }\n    - { slot: diff.file.header, lens: plain }\n",
-        );
-        let mounted: Vec<(&str, &str)> = ext
-            .ui
-            .slots
-            .iter()
-            .map(|s| (s.slot.as_str(), s.lens_id.as_str()))
-            .collect();
-        assert_eq!(
-            mounted,
-            vec![("diff.file.header", "x/t"), ("diff.file.header", "x/th")]
-        );
-        let errs = ext.errors.join("\n");
-        assert!(errs.contains("`path`") && errs.contains("plain"), "{errs}");
-    }
-
-    /// P9.A2: a file diff's header strip takes lenses about the file — its
-    /// path and the two revisions the diff reads.
-    #[test]
-    fn the_diff_file_header_slot_passes_the_path_and_both_revisions() {
-        let dir = tempfile::tempdir().unwrap();
-        let manifest = format!(
-            "{EXT_V2}ui:\n  slots:\n    - {{ slot: diff.file.header, lens: partners }}\n    - {{ slot: diff.file.header, lens: plain }}\n"
-        );
-        write(
-            dir.path(),
-            ".oxplow/extensions/review/extension.yaml",
-            &manifest,
-        );
-        write(
-            dir.path(),
-            ".oxplow/extensions/review/lenses/partners.yaml",
-            "title: Partners\nparams: [{ name: path }]\nquery: SELECT :path AS path\n",
-        );
-        write(
-            dir.path(),
-            ".oxplow/extensions/review/lenses/plain.yaml",
-            "title: Plain\nquery: SELECT 1 AS n\n",
-        );
-        let e = only(dir.path(), "review");
-        let mounted: Vec<(&str, &str)> =
-            e.ui.slots
-                .iter()
-                .map(|s| (s.slot.as_str(), s.lens_id.as_str()))
-                .collect();
-        assert_eq!(mounted, vec![("diff.file.header", "review/partners")]);
-        let errs = e.errors.join("\n");
-        for param in ["path", "left_revision", "right_revision", "stream_id"] {
-            assert!(errs.contains(param), "{param}: {errs}");
-        }
-        assert!(errs.contains("plain"), "{errs}");
     }
 
     #[test]
@@ -12165,7 +8838,7 @@ commands:
         );
     }
 
-    /// P4.9 (tsk494): `models:` entries with their `models/<name>.sql`
+    /// `models:` entries with their `models/<name>.sql`
     /// load as the extension's models; a declaration without its file, a
     /// file without its declaration, and a malformed entry are errors.
     #[test]
@@ -12329,35 +9002,39 @@ commands:
             &[
                 (
                     "rows",
-                    "title: R\nquery: SELECT 1\nalert: { min_rows: 2, label: Too many }\n",
+                    &viz_page("alert: { min_rows: 2, label: Too many }\n", "SELECT 1", ""),
                 ),
                 (
                     "value",
-                    "title: V\nquery: SELECT 1 AS n\nalert: { column: n, above: 5 }\n",
+                    &viz_page("alert: { column: n, above: 5 }\n", "SELECT 1 AS n", ""),
                 ),
                 (
                     "both",
-                    "title: B\nquery: SELECT 1 AS n\nalert: { min_rows: 1, column: n, above: 5 }\n",
+                    &viz_page(
+                        "alert: { min_rows: 1, column: n, above: 5 }\n",
+                        "SELECT 1 AS n",
+                        "",
+                    ),
                 ),
                 (
                     "nothing",
-                    "title: N\nquery: SELECT 1 AS n\nalert: { column: n }\n",
+                    &viz_page("alert: { column: n }\n", "SELECT 1 AS n", ""),
                 ),
             ],
             "",
         );
-        let lens = |slug: &str| ext.lenses.iter().find(|l| l.slug == slug);
-        let rows = lens("rows").unwrap().alert.clone().unwrap();
+        let alert = |slug: &str| page_of(&ext, slug).map(|p| p.alert.clone().unwrap());
+        let rows = alert("rows").unwrap();
         assert_eq!(
             (rows.min_rows, rows.label.as_deref()),
             (Some(2), Some("Too many"))
         );
-        let value = lens("value").unwrap().alert.clone().unwrap();
+        let value = alert("value").unwrap();
         assert_eq!(
             (value.column.as_deref(), value.above),
             (Some("n"), Some(5.0))
         );
-        assert!(lens("both").is_none() && lens("nothing").is_none());
+        assert!(alert("both").is_none() && alert("nothing").is_none());
         assert_eq!(
             ext.errors.iter().filter(|e| e.contains("alert")).count(),
             2,
@@ -12372,22 +9049,28 @@ commands:
         write(dir.path(), ".oxplow/extensions/review/extension.yaml", EXT);
         write(
             dir.path(),
-            ".oxplow/extensions/review/lenses/rows.yaml",
-            "title: Rows\nparams: [{ name: n, default: 0 }]\nquery: SELECT value FROM json_each('[1,2,3]') WHERE value <= :n\nalert: { min_rows: 2 }\n",
+            ".oxplow/extensions/review/pages/rows.yaml",
+            &viz_page(
+                "title: Rows\nparams: [{ name: n, default: 0 }]\nalert: { min_rows: 2 }\n",
+                "SELECT value FROM json_each('[1,2,3]') WHERE value <= :n",
+                "",
+            ),
         );
         write(
             dir.path(),
-            ".oxplow/extensions/review/lenses/cov.yaml",
-            "title: Cov\nparams: [{ name: v, default: 90 }]\nquery: SELECT :v AS pct\nalert: { column: pct, below: 80, label: Coverage low }\n",
+            ".oxplow/extensions/review/pages/cov.yaml",
+            &viz_page(
+                "title: Cov\nparams: [{ name: v, default: 90 }]\nalert: { column: pct, below: 80, label: Coverage low }\n",
+                "SELECT :v AS pct",
+                "",
+            ),
         );
-        let sl = layer().await;
+        let svc = services(dir.path()).await;
         let run = |id: &'static str, k: &'static str, v: i64| {
-            let sl = &sl;
-            let root = dir.path().to_path_buf();
+            let svc = svc.clone();
             async move {
-                let mut p = BTreeMap::new();
-                p.insert(k.to_string(), SqlCell::Int(v));
-                run_lens(sl, &cat(), &root, id, p, &ViewContext::default())
+                let p = BTreeMap::from([(k.to_string(), SqlCell::Int(v))]);
+                run_page(&svc, id, p, ViewContext::default())
                     .await
                     .unwrap()
                     .alert
@@ -12405,21 +9088,24 @@ commands:
         assert!(!run("review/cov", "v", 91).await.firing);
     }
 
-    /// P6b.C1: slot names are one dotted namespace — any other is an
-    /// unknown slot — and `ui:` keys are unknown at the top.
+    /// A slot is a core slot or a page's (`<extension>/<page>.<slot>`):
+    /// anything else is refused at its line; `ui:` keys are unknown at the
+    /// top.
     #[test]
     fn an_unknown_slot_is_an_error_and_ui_keys_stay_under_ui() {
         let (_d, ext) = load_x(
             &[(
                 "c",
-                "title: C\nparams: [{ name: change_id }]\nquery: SELECT 1\n",
+                &viz_page("params: [{ name: change_id }]\n", "SELECT :change_id AS c", ""),
             )],
-            "manifest: 2\nintent:\n  purpose: p\nui:\n  slots:\n    - { slot: commit, lens: c }\n",
+            "manifest: 2\nintent:\n  purpose: p\nui:\n  slots:\n    - { slot: commit, page: c }\n    - { slot: commit.sections, page: c }\n",
         );
-        assert!(ext.ui.slots.is_empty());
+        assert!(ext.ui.page_slots.is_empty());
         let errs = ext.errors.join("\n");
         assert!(
-            errs.contains("unknown slot `commit`") && errs.contains("extension.yaml:"),
+            errs.contains("slot `commit`: a page mounts at a page's slot")
+                && errs.contains("unknown slot `commit.sections`")
+                && errs.contains("extension.yaml:"),
             "{errs}"
         );
         // Keys that live under `ui:` are unknown at the top.
@@ -12436,17 +9122,28 @@ commands:
         }
     }
 
-    /// P6.G1: a panel is a lens in the left nav, bound to a scope, with an
-    /// optional badge lens whose alert gives its count.
+    /// A panel is a page in the left nav, bound to a scope, with an
+    /// optional badge page whose alert gives its count.
     #[test]
-    fn panels_are_scoped_lenses_with_a_badge() {
-        let lenses = [
-            ("open", "title: Open\nquery: SELECT 1\nparams: [{ name: stream_id, default: '' }]\n"),
-            ("count", "title: Count\nquery: SELECT 1\nparams: [{ name: stream_id, default: '' }]\nalert: { min_rows: 1 }\n"),
-            ("quiet", "title: Quiet\nquery: SELECT 1\n"),
+    fn panels_are_scoped_pages_with_a_badge() {
+        let open = viz_page(
+            "params: [{ name: stream_id, default: '' }]\n",
+            "SELECT :stream_id AS s",
+            "",
+        );
+        let count = viz_page(
+            "params: [{ name: stream_id, default: '' }]\nalert: { min_rows: 1 }\n",
+            "SELECT :stream_id AS s",
+            "",
+        );
+        let quiet = viz_page("", "SELECT 1", "");
+        let pages = [
+            ("open", open.as_str()),
+            ("count", &count),
+            ("quiet", &quiet),
         ];
         let (_d, ext) = load_x(
-            &lenses,
+            &pages,
             "manifest: 2\nintent:\n  purpose: p\npanels:\n  - { id: prs, title: PRs, icon: git-pull-request, scope: stream, body: open, badge: count }\n",
         );
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
@@ -12464,13 +9161,12 @@ commands:
                 collapsed: None,
                 count: None,
                 dock: false,
-                pages: false,
             }]
         );
         // A panel may name the page its header opens (a core page,
-        // as the Comments panel opens the inbox); without one, its body lens.
+        // as the Comments panel opens the inbox); without one, its body page.
         let (_d, ext) = load_x(
-            &lenses,
+            &pages,
             "manifest: 2\nintent:\n  purpose: p\npanels:\n  - { id: c, title: C, scope: project, body: quiet, open: 'oxplow:oxplow/page?page=comments' }\n",
         );
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
@@ -12489,15 +9185,15 @@ commands:
             ),
             (
                 "{ id: a, title: A, scope: project, body: nope }",
-                "isn't in lenses/",
+                "its body page `nope` isn't in pages/",
             ),
             (
                 "{ id: a, title: A, scope: project, body: quiet, badge: quiet }",
-                "declares no `alert`",
+                "declares no `badge` or `alert`",
             ),
             (
                 "{ id: a, title: A, scope: thread, body: open }",
-                "must declare `thread_id`",
+                "page `open` must declare it in `params`",
             ),
             ("{ id: a, title: A, scope: galaxy, body: open }", "scope"),
             (
@@ -12506,7 +9202,7 @@ commands:
             ),
         ] {
             let (_d, ext) = load_x(
-                &lenses,
+                &pages,
                 &format!("manifest: 2\nintent:\n  purpose: p\npanels:\n  - {panel}\n"),
             );
             let errs = ext.errors.join("\n");
@@ -12521,9 +9217,9 @@ commands:
     /// `dock: true` puts the panel in the bottom dock; absent, the rail.
     #[test]
     fn a_panel_can_live_in_the_dock() {
-        let lenses = [("quiet", "title: Quiet\nquery: SELECT 1\n")];
+        let quiet = viz_page("", "SELECT 1", "");
         let (_d, ext) = load_x(
-            &lenses,
+            &[("quiet", &quiet)],
             "manifest: 2\nintent:\n  purpose: p\npanels:\n  - { id: d, title: D, scope: project, body: quiet, dock: true }\n  - { id: r, title: R, scope: project, body: quiet }\n",
         );
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
@@ -12531,19 +9227,28 @@ commands:
         assert!(!ext.panels[1].dock);
     }
 
-    /// A panel may name a lens its collapsed header shows (one
-    /// line, compact) and a lens whose row count (or `number`) is its
-    /// header count — checked like `body` and `badge`.
+    /// A panel may name a page its collapsed header shows (one line,
+    /// compact) and a page whose row count (or `number`) is its header
+    /// count — checked like `body` and `badge`.
     #[test]
-    fn panels_summarize_with_collapsed_and_count_lenses() {
-        let lenses = [
-            ("open", "title: Open\nquery: SELECT 1\nparams: [{ name: stream_id, default: '' }]\n"),
-            ("line", "title: Line\nquery: SELECT 1\nparams: [{ name: stream_id, default: '' }]\n"),
-            ("n", "title: N\nquery: SELECT 1\nviz: number\nparams: [{ name: stream_id, default: '' }]\n"),
-            ("quiet", "title: Quiet\nquery: SELECT 1\n"),
+    fn panels_summarize_with_collapsed_and_count_pages() {
+        let scoped = |node: &str| {
+            viz_page(
+                "params: [{ name: stream_id, default: '' }]\n",
+                "SELECT :stream_id AS s",
+                node,
+            )
+        };
+        let (open, line, n) = (scoped(""), scoped(""), scoped("viz: number\n"));
+        let quiet = viz_page("", "SELECT 1", "");
+        let pages = [
+            ("open", open.as_str()),
+            ("line", &line),
+            ("n", &n),
+            ("quiet", &quiet),
         ];
         let (_d, ext) = load_x(
-            &lenses,
+            &pages,
             "manifest: 2\nintent:\n  purpose: p\npanels:\n  - { id: w, title: W, scope: stream, body: open, collapsed: line, count: n }\n",
         );
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
@@ -12552,23 +9257,23 @@ commands:
         for (panel, says) in [
             (
                 "{ id: a, title: A, scope: project, body: quiet, collapsed: nope }",
-                "its collapsed lens `nope` isn't in lenses/",
+                "its collapsed page `nope` isn't in pages/",
             ),
             (
                 "{ id: a, title: A, scope: project, body: quiet, count: nope }",
-                "its count lens `nope` isn't in lenses/",
+                "its count page `nope` isn't in pages/",
             ),
             (
                 "{ id: a, title: A, scope: stream, body: open, collapsed: quiet }",
-                "lens `quiet` must declare `stream_id`",
+                "page `quiet` must declare it in `params`",
             ),
             (
                 "{ id: a, title: A, scope: stream, body: open, count: quiet }",
-                "lens `quiet` must declare `stream_id`",
+                "page `quiet` must declare it in `params`",
             ),
         ] {
             let (_d, ext) = load_x(
-                &lenses,
+                &pages,
                 &format!("manifest: 2\nintent:\n  purpose: p\npanels:\n  - {panel}\n"),
             );
             let errs = ext.errors.join("\n");
@@ -12577,40 +9282,40 @@ commands:
         }
     }
 
-    /// A list or table can group its rows under headings
-    /// (`group`), highlight one (`emphasis`), indent some (`depth`), and
-    /// draw a cell's icon and tone from other columns; an action can sit in
-    /// a group's heading. Shapes are checked at load; the columns they
-    /// name, against the result by `oxplow_validate_extension`.
+    /// A list or table can group its rows under headings (`group`),
+    /// highlight one (`emphasis`), indent some (`depth`), and draw a
+    /// cell's icon and tone from other columns; an action can sit in a
+    /// group's heading. Shapes are checked at load; the columns they name,
+    /// against the loader's result by `oxplow_validate_extension`.
     #[test]
-    fn lenses_group_and_style_their_rows() {
+    fn nodes_group_and_style_their_rows() {
         let (_d, ext) = load_x(
             &[
                 (
                     "a",
-                    "title: A\nviz: list\nquery: SELECT 1 AS id, 'Ready' AS bucket, 'oxplow:oxplow/page?page=tasks' AS bucket_ref, 1 AS current, 0 AS indent, 'done' AS glyph, 'success' AS hue\nparams: [{ name: stream_id, default: '' }]\ngroup: { by: bucket, link: { kind: page, from: bucket_ref } }\nemphasis: current\ndepth: indent\ncolumns:\n  - { key: id, icon: glyph, tone: hue }\nactions:\n  - { id: add, label: '+', command: oxplow.work_item.create, group: Ready, input: { stream: '{{param.stream_id}}' } }\n",
+                    &viz_page(
+                        "params: [{ name: stream_id, default: '' }]\n",
+                        "SELECT 1 AS id, 'Ready' AS bucket, 'oxplow:oxplow/page?page=tasks' AS bucket_ref, 1 AS current, 0 AS indent, 'done' AS glyph, 'success' AS hue",
+                        "viz: list\ngroup: { by: bucket, link: { kind: page, from: bucket_ref } }\nemphasis: current\ndepth: indent\ncolumns:\n  - { key: id, icon: glyph, tone: hue }\nactions:\n  - { id: add, label: '+', command: oxplow.work_item.create, group: Ready, input: { stream: '{{param.stream_id}}' } }\n",
+                    ),
                 ),
-                ("t", "title: T\nviz: tree\nquery: SELECT 1 AS id, NULL AS p, 'x' AS l, 1 AS on_\ntree: { id: id, parent: p, label: l }\nemphasis: on_\n"),
-                ("b", "title: B\nviz: tree\nquery: SELECT 1 AS id, NULL AS p, 'x' AS l\ntree: { id: id, parent: p, label: l }\ngroup: { by: l }\n"),
-                ("c", "title: C\nviz: list\nquery: SELECT 1\ngroup: { link: { kind: page } }\n"),
-                ("d", "title: D\nviz: number\nquery: SELECT 1\ndepth: n\n"),
-                ("e", "title: E\nviz: list\nquery: SELECT 1\nactions: [{ id: x, label: X, command: a.b.c, group: Ready }]\n"),
-                ("f", "title: F\nviz: list\nquery: SELECT 1\ngroup: { by: g }\nactions: [{ id: x, label: X, command: a.b.c, group: Ready, row: true }]\n"),
-                ("g", "title: G\nviz: bar\nquery: SELECT 1 AS x, 2 AS y\nchart: { x: x, y: y }\nemphasis: x\n"),
+                ("t", &viz_page("", "SELECT 1 AS id, NULL AS p, 'x' AS l, 1 AS on_", "viz: tree\ntree: { id: id, parent: p, label: l }\nemphasis: on_\n")),
+                ("b", &viz_page("", "SELECT 1 AS id, NULL AS p, 'x' AS l", "viz: tree\ntree: { id: id, parent: p, label: l }\ngroup: { by: l }\n")),
+                ("c", &viz_page("", "SELECT 1", "viz: list\ngroup: { link: { kind: page } }\n")),
+                ("d", &viz_page("", "SELECT 1", "viz: number\ndepth: n\n")),
+                ("e", &viz_page("", "SELECT 1", "viz: list\nactions: [{ id: x, label: X, command: a.b.c, group: Ready }]\n")),
+                ("f", &viz_page("", "SELECT 1", "viz: list\ngroup: { by: g }\nactions: [{ id: x, label: X, command: a.b.c, group: Ready, row: true }]\n")),
+                ("g", &viz_page("", "SELECT 1 AS x, 2 AS y", "viz: bar\nchart: { x: x, y: y }\nemphasis: x\n")),
             ],
             "",
         );
-        let a = ext
-            .lenses
-            .iter()
-            .find(|l| l.slug == "a")
-            .expect("a grouped, styled list loads");
+        let a = node(&ext, "a").expect("a grouped, styled list loads");
         assert_eq!(
             a.group,
-            Some(LensGroup {
+            Some(VizGroup {
                 by: "bucket".into(),
-                link: Some(LensLink {
-                    kind: LensLinkKind::Page,
+                link: Some(ColumnLink {
+                    kind: LinkKind::Page,
                     from: Some("bucket_ref".into()),
                     line: None,
                     base: None,
@@ -12624,22 +9329,16 @@ commands:
         assert_eq!(a.columns[0].icon.as_deref(), Some("glyph"));
         assert_eq!(a.columns[0].tone.as_deref(), Some("hue"));
         assert_eq!(a.actions[0].group.as_deref(), Some("Ready"));
-        assert!(
-            ext.lenses.iter().any(|l| l.slug == "t"),
-            "a tree may emphasize"
-        );
+        assert!(node(&ext, "t").is_some(), "a tree may emphasize");
         for (slug, needle) in [
             ("b", "`group` is only for `list`, `table` and `board`"),
             ("c", "missing field `by`"),
             ("d", "`depth` is only for `list` and `table`"),
-            ("e", "`group: Ready` needs the lens to have a `group`"),
+            ("e", "`group: Ready` needs the viz to have a `group`"),
             ("f", "a group action isn't a row action"),
             ("g", "`emphasis` is only for `list`, `table` and `tree`"),
         ] {
-            assert!(
-                ext.lenses.iter().all(|l| l.slug != slug),
-                "{slug} should fail"
-            );
+            assert!(page_of(&ext, slug).is_none(), "{slug} should fail");
             assert!(
                 ext.errors
                     .iter()
@@ -12651,13 +9350,17 @@ commands:
     }
 
     /// The columns `group`, `emphasis`, `depth` and a column's `icon` /
-    /// `tone` name must be in the result (`oxplow_validate_extension`).
+    /// `tone` name must be in the loader's result (`oxplow_validate_extension`).
     #[tokio::test]
     async fn validate_checks_row_style_columns() {
         let (d, _) = load_x(
             &[(
                 "a",
-                "title: A\nviz: table\nquery: SELECT 1 AS id\ngroup: { by: g1, link: { kind: page, from: g2 } }\nemphasis: e1\ndepth: d1\ncolumns:\n  - { key: id, icon: i1, tone: t1 }\n",
+                &viz_page(
+                    "",
+                    "SELECT 1 AS id",
+                    "viz: table\ngroup: { by: g1, link: { kind: page, from: g2 } }\nemphasis: e1\ndepth: d1\ncolumns:\n  - { key: id, icon: i1, tone: t1 }\n",
+                ),
             )],
             "",
         );
@@ -12670,26 +9373,34 @@ commands:
         }
     }
 
-    /// A column's `highlight` names a param the lens declares: the text of
-    /// the param's value is marked wherever the cell has it.
+    /// A column's `highlight` names a param the page declares: the text
+    /// of the param's value is marked wherever the cell has it.
     #[test]
     fn a_columns_highlight_names_a_declared_param() {
         let (_d, ext) = load_x(
             &[
                 (
                     "a",
-                    "title: A\nquery: SELECT 'x' AS t\nparams: [{ name: filter, default: '' }]\ncolumns:\n  - { key: t, highlight: filter }\n",
+                    &viz_page(
+                        "params: [{ name: filter, default: '' }]\n",
+                        "SELECT 'x' AS t",
+                        "columns:\n  - { key: t, highlight: filter }\n",
+                    ),
                 ),
                 (
                     "b",
-                    "title: B\nquery: SELECT 'x' AS t\ncolumns:\n  - { key: t, highlight: nope }\n",
+                    &viz_page(
+                        "",
+                        "SELECT 'x' AS t",
+                        "columns:\n  - { key: t, highlight: nope }\n",
+                    ),
                 ),
             ],
             "",
         );
-        let a = ext.lenses.iter().find(|l| l.slug == "a").expect("loads");
+        let a = node(&ext, "a").expect("loads");
         assert_eq!(a.columns[0].highlight.as_deref(), Some("filter"));
-        assert!(ext.lenses.iter().all(|l| l.slug != "b"));
+        assert!(page_of(&ext, "b").is_none());
         assert!(
             ext.errors
                 .iter()
@@ -12699,30 +9410,32 @@ commands:
         );
     }
 
-    /// P6.B1: an action is a command. Its placeholders must name a param
-    /// (or, in a row action, a column); anything else is refused.
+    /// An action is a command. Its placeholders must name a param (or, in
+    /// a row action, a column); anything else is refused.
     #[test]
-    fn lens_actions_are_commands() {
+    fn actions_are_commands() {
         let (_d, ext) = load_x(
             &[
                 (
                     "a",
-                    "title: A\nquery: SELECT 1 AS id\nparams: [{ name: item, default: '' }]\nactions:\n  - { id: finish, label: Finish, command: oxplow.work_item.transition, input: { uri: '{{param.item}}', to: done } }\n  - { id: row, label: Row, command: oxplow.work_item.transition, row: true, input: { uri: 'work_item:oxplow:tsk{{row.id}}', to: done } }\n",
+                    &viz_page(
+                        "params: [{ name: item, default: '' }]\n",
+                        "SELECT 1 AS id",
+                        "actions:\n  - { id: finish, label: Finish, command: oxplow.work_item.transition, input: { uri: '{{param.item}}', to: done } }\n  - { id: row, label: Row, command: oxplow.work_item.transition, row: true, input: { uri: 'work_item:oxplow:tsk{{row.id}}', to: done } }\n",
+                    ),
                 ),
-                ("b", "title: B\nquery: SELECT 1\nactions: [copy]\n"),
-                ("c", "title: C\nquery: SELECT 1\nactions: [{ action: run-source, source: a/b }]\n"),
-                ("d", "title: D\nquery: SELECT 1\nactions: [{ id: x, label: X, command: oxplow.work_item.create, input: { title: '{{param.nope}}' } }]\n"),
-                ("e", "title: E\nquery: SELECT 1\nactions: [{ id: x, label: X, command: oxplow.work_item.create, input: { title: '{{row.id}}' } }]\n"),
-                ("f", "title: F\nquery: SELECT 1\nactions: [{ id: x, label: X, command: Not-A-Name }]\n"),
-                ("g", "title: G\nquery: SELECT 1\nactions: [{ id: x, label: X, command: a.b.c }, { id: x, label: Y, command: a.b.d }]\n"),
+                ("b", &viz_page("", "SELECT 1", "actions: [copy]\n")),
+                ("c", &viz_page("", "SELECT 1", "actions: [{ action: run-source, source: a/b }]\n")),
+                ("d", &viz_page("", "SELECT 1", "actions: [{ id: x, label: X, command: oxplow.work_item.create, input: { title: '{{param.nope}}' } }]\n")),
+                ("e", &viz_page("", "SELECT 1", "actions: [{ id: x, label: X, command: oxplow.work_item.create, input: { title: '{{row.id}}' } }]\n")),
+                ("f", &viz_page("", "SELECT 1", "actions: [{ id: x, label: X, command: Not-A-Name }]\n")),
+                ("g", &viz_page("", "SELECT 1", "actions: [{ id: x, label: X, command: a.b.c }, { id: x, label: Y, command: a.b.d }]\n")),
+                // A whole-page action is never a row's: the row is a node's.
+                ("h", &viz_page("actions: [{ id: x, label: X, command: a.b.c, row: true }]\n", "SELECT 1", "")),
             ],
             "",
         );
-        let a = ext
-            .lenses
-            .iter()
-            .find(|l| l.slug == "a")
-            .expect("valid actions load");
+        let a = node(&ext, "a").expect("valid actions load");
         assert_eq!(
             a.actions
                 .iter()
@@ -12740,11 +9453,9 @@ commands:
             ("e", "needs `row: true`"),
             ("f", "command id"),
             ("g", "twice"),
+            ("h", "a row action goes on the viz node that shows the row"),
         ] {
-            assert!(
-                ext.lenses.iter().all(|l| l.slug != slug),
-                "{slug} should fail"
-            );
+            assert!(page_of(&ext, slug).is_none(), "{slug} should fail");
             assert!(
                 ext.errors
                     .iter()
@@ -12755,7 +9466,7 @@ commands:
         }
     }
 
-    /// What becomes of the page after an action, or a form lens's submit:
+    /// What becomes of the page after an action, or a form's submit:
     /// `then: open` (default) | `replace` | `stay` | `close`.
     #[test]
     fn an_action_says_what_becomes_of_its_page() {
@@ -12763,24 +9474,28 @@ commands:
             &[
                 (
                     "a",
-                    "title: A\nquery: SELECT 1\nactions:\n  - { id: plain, label: P, command: a.b.c }\n  - { id: gone, label: G, command: a.b.c, then: replace }\n  - { id: again, label: A, command: a.b.c, then: stay }\n",
+                    &viz_page(
+                        "",
+                        "SELECT 1",
+                        "actions:\n  - { id: plain, label: P, command: a.b.c }\n  - { id: gone, label: G, command: a.b.c, then: replace }\n  - { id: again, label: A, command: a.b.c, then: stay }\n",
+                    ),
                 ),
                 (
                     "f",
-                    "title: F\nquery: SELECT 1\nviz: form\nform: { command: a.b.c, then: replace }\n",
+                    "title: F\nview: { viz: form, form: { command: a.b.c, then: replace } }\n",
                 ),
-                ("b", "title: B\nquery: SELECT 1\nactions: [{ id: x, label: X, command: a.b.c, then: away }]\n"),
+                ("b", &viz_page("", "SELECT 1", "actions: [{ id: x, label: X, command: a.b.c, then: away }]\n")),
             ],
             "",
         );
-        let a = ext.lenses.iter().find(|l| l.slug == "a").expect("a loads");
+        let a = node(&ext, "a").expect("a loads");
         assert_eq!(
             a.actions.iter().map(|x| x.then).collect::<Vec<_>>(),
             vec![ActionThen::Open, ActionThen::Replace, ActionThen::Stay]
         );
-        let f = ext.lenses.iter().find(|l| l.slug == "f").expect("f loads");
+        let f = node(&ext, "f").expect("f loads");
         assert_eq!(f.form.as_ref().map(|x| x.then), Some(ActionThen::Replace));
-        assert!(ext.lenses.iter().all(|l| l.slug != "b"));
+        assert!(page_of(&ext, "b").is_none());
         assert!(
             ext.errors
                 .iter()
@@ -12791,45 +9506,29 @@ commands:
     }
 
     /// An edit form says so; a field may show only for some values of
-    /// another and may be secret; each refusal names the form's problem.
+    /// another and may be secret; a field's choices come from a page of
+    /// the extension; each refusal names the form's problem.
     #[test]
     fn a_form_edits_shows_fields_by_value_and_keeps_secrets() {
+        let form = |spec: &str| format!("title: F\nview:\n  viz: form\n  form: {spec}\n");
         let (_d, ext) = load_x(
             &[
                 (
                     "e",
-                    "title: E\nquery: SELECT 1\nviz: form\nform:\n  command: a.b.c\n  mode: edit\n  fields:\n    - kind\n    - { name: url, visible_if: { kind: [http, https] } }\n    - { name: token, secret: true, visible_if: { kind: https } }\n",
+                    "title: E\nview:\n  viz: form\n  form:\n    command: a.b.c\n    mode: edit\n    fields:\n      - kind\n      - { name: url, visible_if: { kind: [http, https] } }\n      - { name: token, secret: true, visible_if: { kind: https } }\n",
                 ),
-                ("p", "title: P\nquery: SELECT 1\nviz: form\nform: { command: a.b.c, fields: [title] }\n"),
-                (
-                    "self",
-                    "title: S\nquery: SELECT 1\nviz: form\nform: { command: a.b.c, fields: [{ name: a, visible_if: { a: x } }] }\n",
-                ),
-                (
-                    "unknown",
-                    "title: U\nquery: SELECT 1\nviz: form\nform: { command: a.b.c, fields: [a, { name: b, visible_if: { gone: x } }] }\n",
-                ),
-                (
-                    "fixedsecret",
-                    "title: F\nquery: SELECT 1\nviz: form\nform: { command: a.b.c, defaults: { a: 1 }, fixed: [a], fields: [{ name: a, secret: true }] }\n",
-                ),
-                ("nofields", "title: N\nquery: SELECT 1\nviz: form\nform: { command: a.b.c, mode: edit }\n"),
-                (
-                    "again",
-                    "title: A\nquery: SELECT 1\nviz: form\nform: { command: a.b.c, fields: [a, { name: n, from: x/again }], again: { label: Again, keep: [a, n] } }\n",
-                ),
-                (
-                    "keepgone",
-                    "title: K\nquery: SELECT 1\nviz: form\nform: { command: a.b.c, fields: [a], again: { label: Again, keep: [gone] } }\n",
-                ),
-                (
-                    "fromgone",
-                    "title: G\nquery: SELECT 1\nviz: form\nform: { command: a.b.c, fields: [{ name: n, from: x/nothing }] }\n",
-                ),
+                ("p", &form("{ command: a.b.c, fields: [title] }")),
+                ("self", &form("{ command: a.b.c, fields: [{ name: a, visible_if: { a: x } }] }")),
+                ("unknown", &form("{ command: a.b.c, fields: [a, { name: b, visible_if: { gone: x } }] }")),
+                ("fixedsecret", &form("{ command: a.b.c, defaults: { a: 1 }, fixed: [a], fields: [{ name: a, secret: true }] }")),
+                ("nofields", &form("{ command: a.b.c, mode: edit }")),
+                ("again", &form("{ command: a.b.c, fields: [a, { name: n, from: again }, { name: m, from: x/e }], again: { label: Again, keep: [a, n] } }")),
+                ("keepgone", &form("{ command: a.b.c, fields: [a], again: { label: Again, keep: [gone] } }")),
+                ("fromgone", &form("{ command: a.b.c, fields: [{ name: n, from: x/nothing }] }")),
             ],
             "",
         );
-        let e = ext.lenses.iter().find(|l| l.slug == "e").expect("e loads");
+        let e = node(&ext, "e").unwrap_or_else(|| panic!("e: {:?}", ext.errors));
         let form = e.form.as_ref().expect("a form");
         assert_eq!(form.mode, FormMode::Edit);
         let fields = form.fields.as_ref().expect("fields");
@@ -12847,7 +9546,7 @@ commands:
                 FieldValue::Text("https".into())
             ]))
         );
-        let p = ext.lenses.iter().find(|l| l.slug == "p").expect("p loads");
+        let p = node(&ext, "p").expect("p loads");
         assert_eq!(p.form.as_ref().map(|f| f.mode), Some(FormMode::Create));
         let said = |slug: &str| {
             ext.errors
@@ -12856,59 +9555,43 @@ commands:
                 .cloned()
                 .unwrap_or_default()
         };
-        assert!(
-            said("self").contains("`a` can't show by its own value"),
-            "{:?}",
-            ext.errors
-        );
-        assert!(
-            said("unknown").contains("`visible_if` names `gone`, which isn't one of its `fields`"),
-            "{:?}",
-            ext.errors
-        );
-        assert!(
-            said("fixedsecret").contains("`a` can't be both fixed and secret"),
-            "{:?}",
-            ext.errors
-        );
-        assert!(
-            said("nofields").contains("`mode: edit` needs `fields`"),
-            "{:?}",
-            ext.errors
-        );
-        assert!(
-            said("keepgone").contains("`again.keep` names `gone`"),
-            "{:?}",
-            ext.errors
-        );
-        assert!(
-            said("fromgone").contains("`from` lens `x/nothing` isn't in this extension"),
-            "{:?}",
-            ext.errors
-        );
-        for slug in [
-            "self",
-            "unknown",
-            "fixedsecret",
-            "nofields",
-            "keepgone",
-            "fromgone",
+        for (slug, says) in [
+            ("self", "`a` can't show by its own value"),
+            (
+                "unknown",
+                "`visible_if` names `gone`, which isn't one of its `fields`",
+            ),
+            ("fixedsecret", "`a` can't be both fixed and secret"),
+            ("nofields", "`mode: edit` needs `fields`"),
+            ("keepgone", "`again.keep` names `gone`"),
+            (
+                "fromgone",
+                "form field `n`: `from` page `x/nothing` isn't in this extension's pages/",
+            ),
         ] {
-            assert!(ext.lenses.iter().all(|l| l.slug != slug), "{slug} loaded");
+            assert!(said(slug).contains(says), "{slug}: {:?}", ext.errors);
+            assert!(page_of(&ext, slug).is_none(), "{slug} loaded");
         }
-        let again = ext.lenses.iter().find(|l| l.slug == "again");
-        let form = again.and_then(|l| l.form.as_ref()).expect("again loads");
+        // A field's choices may come from the form's own page.
+        let again = node(&ext, "again");
+        let form = again
+            .and_then(|l| l.form.as_ref())
+            .unwrap_or_else(|| panic!("again: {:?}", ext.errors));
         assert_eq!(form.again.as_ref().unwrap().keep, ["a", "n"]);
         assert_eq!(form.fields.as_ref().unwrap()[1].from(), Some("x/again"));
     }
 
-    /// A row action's `{{row.x}}` must be a column the query returns.
+    /// A row action's `{{row.x}}` must be a column the loader returns.
     #[tokio::test]
     async fn validate_checks_row_action_columns() {
         let (d, _) = load_x(
             &[(
                 "a",
-                "title: A\nquery: SELECT 1 AS id\nactions: [{ id: x, label: X, command: a.b.c, row: true, input: { v: '{{row.gone}}' } }]\n",
+                &viz_page(
+                    "",
+                    "SELECT 1 AS id",
+                    "actions: [{ id: x, label: X, command: a.b.c, row: true, input: { v: '{{row.gone}}' } }]\n",
+                ),
             )],
             "",
         );
@@ -12923,57 +9606,77 @@ commands:
     }
 
     #[test]
-    fn refresh_is_opt_in_on_a_lens() {
-        let lenses = [
-            ("a", "title: A\nquery: SELECT 1\n"),
-            ("b", "title: B\nquery: SELECT 1\nrefresh: true\n"),
-        ];
-        let (_d, ext) = load_x(&lenses, "manifest: 2\nintent:\n  purpose: p\n");
+    fn refresh_is_opt_in_on_a_page() {
+        let (a, b) = (
+            viz_page("", "SELECT 1", ""),
+            viz_page("refresh: true\n", "SELECT 1", ""),
+        );
+        let (_d, ext) = load_x(
+            &[("a", &a), ("b", &b)],
+            "manifest: 2\nintent:\n  purpose: p\n",
+        );
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
-        let lens = |slug: &str| ext.lenses.iter().find(|l| l.slug == slug).unwrap();
-        assert!(!lens("a").refresh);
-        assert!(lens("b").refresh);
+        assert!(!page_of(&ext, "a").unwrap().refresh);
+        assert!(page_of(&ext, "b").unwrap().refresh);
     }
 
+    /// A page's launcher metadata: its category, keywords and icon, and
+    /// whether it is hidden. An unknown category or an icon oxplow doesn't
+    /// draw is refused.
     #[test]
-    fn launcher_category_and_hidden_parse() {
+    fn launcher_metadata_parses_and_is_checked() {
         let (_d, ext) = load_x(
             &[
                 (
                     "a",
-                    "title: A\nquery: SELECT 1\nlauncher: { category: Activity }\n",
+                    &viz_page(
+                        "category: Activity\nkeywords: pull requests\nicon: git-pull-request\ncomments: true\n",
+                        "SELECT 1",
+                        "",
+                    ),
                 ),
-                ("b", "title: B\nquery: SELECT 1\nhidden: true\n"),
-                (
-                    "c",
-                    "title: C\nquery: SELECT 1\nlauncher: { category: Nowhere }\n",
-                ),
+                ("b", &viz_page("hidden: true\n", "SELECT 1", "")),
+                ("c", &viz_page("category: Nowhere\n", "SELECT 1", "")),
+                ("d", &viz_page("icon: unicorn\n", "SELECT 1", "")),
             ],
             "",
         );
-        let lens = |slug: &str| ext.lenses.iter().find(|l| l.slug == slug);
-        assert_eq!(
-            lens("a").unwrap().launcher_category,
-            Some(LauncherCategory::Activity)
-        );
-        assert!(lens("b").unwrap().hidden);
-        assert!(!lens("a").unwrap().hidden);
-        assert!(lens("c").is_none());
+        let page = |slug: &str| page_of(&ext, slug);
+        let a = page("a").unwrap_or_else(|| panic!("{:?}", ext.errors));
+        assert_eq!(a.category, Some(LauncherCategory::Activity));
+        assert_eq!(a.keywords.as_deref(), Some("pull requests"));
+        assert_eq!(a.icon.as_deref(), Some("git-pull-request"));
+        assert!(a.comments && !a.hidden);
+        assert!(page("b").unwrap().hidden);
+        assert!(page("c").is_none() && page("d").is_none());
+        let errs = ext.errors.join("\n");
         assert!(
-            ext.errors.join("\n").contains("Nowhere"),
-            "{:?}",
-            ext.errors
+            errs.contains("c.yaml") && errs.contains("Nowhere"),
+            "{errs}"
+        );
+        assert!(
+            errs.contains("d.yaml") && errs.contains("`icon: unicorn` isn't one oxplow draws"),
+            "{errs}"
         );
     }
 
+    /// A page's id is its file's name: one that isn't kebab-case is an
+    /// error.
+    #[test]
+    fn a_page_file_names_a_valid_id() {
+        let (_d, ext) = load_x(&[("Bad_Page", &viz_page("", "SELECT 1", ""))], "");
+        let errs = ext.errors.join("\n");
+        assert!(errs.contains("Bad_Page"), "{errs}");
+    }
+
     #[tokio::test]
-    async fn disabled_extensions_load_empty_and_their_lenses_refuse_to_run() {
+    async fn disabled_extensions_load_empty_and_their_pages_refuse_to_run() {
         let dir = tempfile::tempdir().unwrap();
         write(dir.path(), ".oxplow/extensions/review/extension.yaml", EXT);
         write(
             dir.path(),
-            ".oxplow/extensions/review/lenses/by-status.yaml",
-            LENS,
+            ".oxplow/extensions/review/pages/by-status.yaml",
+            PAGE,
         );
         write(
             dir.path(),
@@ -12985,21 +9688,23 @@ commands:
             let e = exts.iter().find(|e| e.name == name).unwrap();
             assert!(!e.enabled, "{name}");
             assert!(
-                e.lenses.is_empty() && e.ui.slots.is_empty() && e.collectors.is_empty(),
+                e.ui.page_slots.is_empty() && e.collectors.is_empty() && e.panels.is_empty(),
                 "{name}"
             );
         }
-        let err = run_lens(
-            &layer().await,
-            &cat(),
-            dir.path(),
+        let err = cat().find_page(dir.path(), "review/by-status").unwrap_err();
+        assert!(err.to_string().contains("disabled"), "{err}");
+        // What runs holds no page of a disabled extension.
+        let svc = services(dir.path()).await;
+        let err = run_page(
+            &svc,
             "review/by-status",
             BTreeMap::new(),
-            &ViewContext::default(),
+            ViewContext::default(),
         )
         .await
         .unwrap_err();
-        assert!(err.to_string().contains("disabled"), "{err}");
+        assert!(err.to_string().contains("review/by-status"), "{err}");
     }
 
     #[tokio::test]
@@ -13030,195 +9735,85 @@ commands:
     }
 
     #[test]
-    fn change_links_and_slots() {
+    fn change_link_kinds_name_their_revisions() {
         let (_d, ext) = load_x(
             &[
                 (
                     "files",
-                    "title: F\nparams: [{ name: path }]\nquery: SELECT 1\ncolumns:\n  - { key: path, link: { kind: diff-at, line: ln, base: b, head: h } }\n  - { key: dup, link: { kind: compare, head: h } }\n",
+                    &viz_page(
+                        "params: [{ name: path }]\n",
+                        "SELECT :path AS path, 1 AS dup",
+                        "columns:\n  - { key: path, link: { kind: diff-at, line: ln, base: b, head: h } }\n  - { key: dup, link: { kind: compare, head: h } }\n",
+                    ),
                 ),
-                ("both", "title: B\nparams: [{ name: left_revision }]\nquery: SELECT 1\n"),
-                ("none", "title: N\nparams: [{ name: other }]\nquery: SELECT 1\n"),
             ],
-            "ui:\n  slots:\n    - { slot: diff.file.header, lens: files }\n    - { slot: diff.file.header, lens: both }\n    - { slot: diff.file.header, lens: none }\n",
+            "",
         );
-        let link = ext
-            .lenses
-            .iter()
-            .find(|l| l.slug == "files")
-            .unwrap()
-            .columns[0]
+        let link = node(&ext, "files").unwrap().columns[0]
             .link
             .clone()
             .unwrap();
-        assert_eq!(link.kind, LensLinkKind::DiffAt);
+        assert_eq!(link.kind, LinkKind::DiffAt);
         assert_eq!(
             (link.base.as_deref(), link.head.as_deref()),
             (Some("b"), Some("h"))
         );
-        let mounted: Vec<(&str, &str)> = ext
-            .ui
-            .slots
-            .iter()
-            .map(|s| (s.slot.as_str(), s.lens_id.as_str()))
-            .collect();
-        assert_eq!(
-            mounted,
-            vec![
-                ("diff.file.header", "x/files"),
-                ("diff.file.header", "x/both")
-            ],
-            "a slot lens needs at least one of the slot's params"
-        );
-        let errs = ext.errors.join("\n");
-        assert!(errs.contains("none") && errs.contains("path"), "{errs}");
     }
 
-    /// A page's `label` is what its tab says, `{{param.<name>}}` filled from
-    /// its URI: a renderer's names a param of what it renders, a route's
-    /// one of its `params`. Its `title` stays its name (launcher, Open with).
+    /// A page's `label` is what its tab says, `{{param.<name>}}` filled
+    /// from its URI: a renderer's names a param of what it renders, any
+    /// other page's one of its `params`; a filter (`short`) may shape it.
+    /// Its `title` stays its name (launcher, Open with).
     #[test]
     fn a_pages_label_names_its_params() {
-        let lenses = [(
-            "pr",
-            "title: PR\nparams: [{ name: uri }, { name: id }]\nquery: SELECT :id\n",
-        )];
         let resources =
             "resources:\n  - { name: pr, label: PR, params: { id: { required: true } } }\n";
+        let renderer = |label: &str| {
+            viz_page(
+                &format!("title: PR\nlabel: '{label}'\nfor: x/pr\nparams: [{{ name: uri }}, {{ name: id }}]\n"),
+                "SELECT :id AS id",
+                "",
+            )
+        };
+        let route = |label: &str| {
+            viz_page(
+                &format!("title: Route\nlabel: '{label}'\nparams: [{{ name: id }}]\n"),
+                "SELECT :id AS id",
+                "",
+            )
+        };
         let (_d, ext) = load_x(
-            &lenses,
-            &format!("{resources}pages:\n  - {{ id: pr, title: PR, label: 'PR {{{{param.id}}}}', lens: pr, for: x/pr, default: true }}\n  - {{ id: route, title: Route, label: '{{{{ param.id }}}}', params: [id], lens: pr }}\n"),
+            &[
+                ("pr", &renderer("PR {{param.id}}")),
+                ("route", &route("{{ param.id }}")),
+                ("short", &renderer("{{row.title}} {{param.id|short}}")),
+            ],
+            resources,
         );
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
-        let page = |id: &str| ext.pages.iter().find(|p| p.id == id).unwrap();
-        assert_eq!(page("pr").label.as_deref(), Some("PR {{param.id}}"));
-        assert_eq!(page("pr").title, "PR");
+        let pr = page_of(&ext, "pr").unwrap();
+        assert_eq!(pr.label.as_deref(), Some("PR {{param.id}}"));
+        assert_eq!(pr.title, "PR");
         for (page, says) in [
             (
-                "{ id: a, title: A, label: '{{param.nope}}', lens: pr, for: x/pr }",
+                renderer("{{param.nope}}"),
                 "`label` names `nope`, which isn't a param of `x/pr`",
             ),
             (
-                "{ id: a, title: A, label: '{{param.nope}}', params: [id], lens: pr }",
+                route("{{param.nope}}"),
                 "`label` names `nope`, which isn't one of its `params`",
             ),
             (
-                "{ id: a, title: A, label: '{{nope.id}}', params: [id], lens: pr }",
+                route("{{nope.id}}"),
                 "`label` fills only `{{param.<name>}}`",
             ),
+            (renderer("{{param.id|loud}}"), "`label` filter `loud`"),
         ] {
-            let (_d, ext) = load_x(&lenses, &format!("{resources}pages:\n  - {page}\n"));
+            let (_d, ext) = load_x(&[("a", &page)], resources);
             let errs = ext.errors.join("\n");
             assert!(errs.contains(says), "{page}: {errs}");
+            assert!(page_of(&ext, "a").is_none(), "{page}");
         }
-    }
-
-    /// A page's `label` may also name a column of its lens's row
-    /// (`{{row.<col>}}`) when that lens is a document with a `query:` (the
-    /// row its `columns:` name), and apply a filter (`short`, `basename`);
-    /// anything else is refused, and the column the label reads is not
-    /// "unread" in the document's row.
-    #[test]
-    fn a_pages_label_may_name_the_row_of_a_document_and_filters() {
-        let doc = "title: D\nparams: [{ name: uri }, { name: id }]\nquery: SELECT :id AS id, 'T' AS title\ncolumns: [{ key: id }, { key: title }]\nviz: document\nsections: [{ id: p, lens: part }]\n";
-        let lenses = [
-            ("doc", doc),
-            (
-                "part",
-                "title: P\nparams: [{ name: id }]\nquery: SELECT :id\n",
-            ),
-            (
-                "table",
-                "title: T\nparams: [{ name: uri }, { name: id }]\nquery: SELECT :id AS title\n",
-            ),
-        ];
-        let resources =
-            "resources:\n  - { name: pr, label: PR, params: { id: { required: true } } }\n";
-        let page = |p: &str| format!("{resources}pages:\n  - {p}\n");
-        let (_d, ext) = load_x(
-            &lenses,
-            &page("{ id: a, title: A, label: '{{row.title}} {{param.id|short}}', lens: doc, for: x/pr, default: true }"),
-        );
-        assert!(ext.errors.is_empty(), "{:?}", ext.errors);
-        assert!(
-            !ext.warnings.iter().any(|w| w.contains("`title`")),
-            "a column the label reads is read: {:?}",
-            ext.warnings
-        );
-        for (p, says) in [
-            (
-                "{ id: a, title: A, label: '{{row.title}}', lens: table, for: x/pr }",
-                "`row.title`, which only a document with a `query:` has",
-            ),
-            (
-                "{ id: a, title: A, label: '{{row.nope}}', lens: doc, for: x/pr }",
-                "`label` names `row.nope`, which isn't a column of its lens's row",
-            ),
-            (
-                "{ id: a, title: A, label: '{{param.id|loud}}', lens: doc, for: x/pr }",
-                "`label` filter `loud`",
-            ),
-        ] {
-            let (_d, ext) = load_x(&lenses, &page(p));
-            let errs = ext.errors.join("\n");
-            assert!(errs.contains(says), "{p}: {errs}");
-        }
-    }
-
-    /// A renderer's lens is run for a URI: each param it declares that the
-    /// URI carries takes the URI's value (one supplied wins). A lens that
-    /// renders nothing keeps its `uri` param to itself (a work-item picker).
-    #[tokio::test]
-    async fn a_renderers_lens_takes_its_uris_params() {
-        let dir = tempfile::tempdir().unwrap();
-        crate::test_fixtures::init_git_repo(dir.path());
-        write(
-            dir.path(),
-            ".oxplow/extensions/x/extension.yaml",
-            "manifest: 2\nname: x\nintent:\n  purpose: test\nresources:\n  - { name: pr, label: PR, params: { id: { required: true } } }\npages:\n  - { id: pr, title: PR, lens: pr, for: x/pr, default: true }\n",
-        );
-        for slug in ["pr", "picker"] {
-            write(
-                dir.path(),
-                &format!(".oxplow/extensions/x/lenses/{slug}.yaml"),
-                "title: L\nparams: [{ name: uri }, { name: id }]\nquery: SELECT :id AS id\n",
-            );
-        }
-        let svc = crate::Services::in_memory(dir.path()).await.unwrap();
-        crate::test_fixtures::activate(&svc).await;
-        let id_of = |lens: &'static str, params: &[(&str, &str)]| {
-            let svc = svc.clone();
-            let params: BTreeMap<String, SqlCell> = params
-                .iter()
-                .map(|(k, v)| (k.to_string(), SqlCell::Text(v.to_string())))
-                .collect();
-            async move {
-                let run = run_lens(
-                    &svc.sql,
-                    &svc.extension_catalog,
-                    &svc.layout.project_dir,
-                    lens,
-                    params,
-                    &Default::default(),
-                )
-                .await
-                .unwrap();
-                run.params.get("id").cloned()
-            }
-        };
-        let uri = "oxplow:x/pr?id=7";
-        assert_eq!(
-            id_of("x/pr", &[("uri", uri)]).await,
-            Some(SqlCell::Text("7".into()))
-        );
-        assert_eq!(
-            id_of("x/pr", &[("uri", uri), ("id", "9")]).await,
-            Some(SqlCell::Text("9".into()))
-        );
-        assert_eq!(
-            id_of("x/picker", &[("uri", uri)]).await,
-            Some(SqlCell::Null(()))
-        );
     }
 
     /// A page that renders resources says which (`for`), which of their
@@ -13226,29 +9821,41 @@ commands:
     /// (`default`) — only for the extension's own resources.
     #[test]
     fn a_page_renders_the_resources_it_is_for() {
-        let lenses = [
-            (
-                "pr",
-                "title: PR\nparams: [{ name: uri }]\nquery: SELECT 1\n",
-            ),
-            ("plain", "title: Plain\nquery: SELECT 1\n"),
-            (
-                "wide",
-                "title: Wide\nparams: [{ name: uri }, { name: id }, { name: stream_id }, { name: q, role: filter }, { name: nope }]\nquery: SELECT :id, :stream_id, :q, :nope\n",
-            ),
-            (
-                "fits",
-                "title: Fits\nparams: [{ name: uri }, { name: id }, { name: q, role: filter }]\nquery: SELECT :id, :q\n",
-            ),
-        ];
         let resources =
             "resources:\n  - { name: pr, label: PR, params: { id: { required: true } } }\n";
+        let pr = |meta: &str| {
+            viz_page(
+                &format!("title: PR\nparams: [{{ name: uri }}]\n{meta}"),
+                "SELECT :uri AS u",
+                "",
+            )
+        };
+        let wide = |meta: &str| {
+            viz_page(
+                &format!("title: Wide\nparams: [{{ name: uri }}, {{ name: id }}, {{ name: stream_id }}, {{ name: q, role: filter }}, {{ name: nope }}]\n{meta}"),
+                "SELECT :uri, :id, :stream_id, :q, :nope",
+                "",
+            )
+        };
+        let fits = |meta: &str| {
+            viz_page(
+                &format!("title: Fits\nparams: [{{ name: uri }}, {{ name: id }}, {{ name: q, role: filter }}]\n{meta}"),
+                "SELECT :uri, :id, :q",
+                "",
+            )
+        };
         let (_d, ext) = load_x(
-            &lenses,
-            &format!("{resources}pages:\n  - {{ id: pr, title: PR, lens: pr, for: x/pr, default: true }}\n  - {{ id: pr-raw, title: Raw, lens: pr, for: x/pr, accepts: {{ id: '^\\d+$' }} }}\n  - {{ id: both, title: Both, lens: pr, for: [x/pr, oxplow/file] }}\n  - {{ id: web, title: Web, lens: pr, for: https, pinned: true }}\n"),
+            &[
+                ("pr", &pr("for: x/pr\ndefault: true\n")),
+                ("pr-raw", &pr("for: x/pr\naccepts: { id: '^\\d+$' }\n")),
+                ("both", &pr("for: [x/pr, oxplow/file]\n")),
+                ("web", &pr("for: https\npinned: true\n")),
+                ("fits", &fits("for: x/pr\n")),
+            ],
+            resources,
         );
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
-        let page = |id: &str| ext.pages.iter().find(|p| p.id == id).unwrap();
+        let page = |slug: &str| page_of(&ext, slug).unwrap();
         assert_eq!(page("pr").renders, vec!["x/pr".to_string()]);
         assert!(page("pr").default);
         assert_eq!(
@@ -13257,61 +9864,49 @@ commands:
         );
         assert_eq!(
             page("pr-raw").accepts.get("id").map(String::as_str),
-            Some("^[0-9]+$")
+            Some("^\\d+$")
         );
         assert!(page("web").pinned);
 
         for (page, says) in [
+            (pr("for: nope\n"), "isn't a resource"),
+            (pr("for: x/missing\n"), "isn't one of this extension's"),
             (
-                "{ id: a, title: A, lens: pr, for: nope }",
-                "isn't a resource",
-            ),
-            (
-                "{ id: a, title: A, lens: pr, for: x/missing }",
-                "isn't one of this extension's",
-            ),
-            (
-                "{ id: a, title: A, lens: pr, for: oxplow/missing }",
+                pr("for: oxplow/missing\n"),
                 "isn't a resource oxplow-foundation declares",
             ),
             (
-                "{ id: a, title: A, lens: pr, for: x/pr, accepts: { nope: present } }",
-                "isn't a param of `x/pr`",
+                pr("for: x/pr\naccepts: { nope: present }\n"),
+                "`accepts: nope` isn't a param of `x/pr`",
             ),
             (
-                "{ id: a, title: A, lens: pr, for: x/pr, accepts: { id: '[0-9]+' } }",
+                pr("for: x/pr\naccepts: { id: '[0-9]+' }\n"),
                 "an id pattern",
             ),
-            (
-                "{ id: a, title: A, lens: pr, for: oxplow/file, default: true }",
-                "is another's",
-            ),
-            (
-                "{ id: a, title: A, lens: pr, default: true }",
-                "are for a renderer",
-            ),
-            (
-                "{ id: a, title: A, lens: plain, for: x/pr }",
-                "declare a `uri` param",
-            ),
+            (pr("for: oxplow/file\ndefault: true\n"), "is another's"),
+            (pr("default: true\n"), "are for a renderer"),
             // It's run with its URI's params: one the resource hasn't, it
             // would never get (a filter is its view's, not the URI's).
             (
-                "{ id: a, title: A, lens: wide, for: x/pr }",
+                wide("for: x/pr\n"),
                 "takes `nope`, which isn't a param of `x/pr`",
             ),
             (
-                "{ id: a, title: A, lens: fits, for: https }",
+                fits("for: https\n"),
                 "takes `id`, which isn't a param of `https`",
             ),
         ] {
-            let (_d, ext) = load_x(&lenses, &format!("{resources}pages:\n  - {page}\n"));
+            let (_d, ext) = load_x(&[("a", &page)], resources);
             let errs = ext.errors.join("\n");
             assert!(errs.contains(says), "{page}: {errs}");
+            assert!(page_of(&ext, "a").is_none(), "{page}");
         }
         let (_d, ext) = load_x(
-            &lenses,
-            &format!("{resources}pages:\n  - {{ id: a, title: A, lens: pr, for: x/pr, default: true }}\n  - {{ id: b, title: B, lens: pr, for: x/pr, default: true }}\n"),
+            &[
+                ("a", &pr("for: x/pr\ndefault: true\n")),
+                ("b", &pr("for: x/pr\ndefault: true\n")),
+            ],
+            resources,
         );
         assert!(
             ext.errors.join("\n").contains("another default renderer"),
@@ -13320,216 +9915,33 @@ commands:
         );
     }
 
-    /// An extension's page is a lens (or one of its custom components) at
-    /// `oxplow:oxplow/page?page=<extension>/<page>`, in the launcher under its category when it
-    /// has one.
-    #[test]
-    fn pages_are_lenses_with_a_route() {
-        let lenses = [
-            ("open", "title: Open\nquery: SELECT 1\n"),
-            (
-                "waiting",
-                "title: Waiting\nquery: SELECT 3 AS n\nviz: number\n",
-            ),
-        ];
-        let (_d, ext) = load_x(
-            &lenses,
-            "manifest: 2\nintent:\n  purpose: p\npages:\n  - { id: open-prs, title: Open PRs, icon: git-pull-request, category: Work, keywords: pull requests, params: [author], count: waiting, lens: open }\n  - { id: detail, title: Detail, lens: open, comments: true, refresh: true }\n",
-        );
-        assert!(ext.errors.is_empty(), "{:?}", ext.errors);
-        assert_eq!(
-            ext.pages,
-            vec![
-                ExtensionPage {
-                    id: "open-prs".into(),
-                    extension: "x".into(),
-                    page_ref: "oxplow:oxplow/page?page=x/open-prs".into(),
-                    title: "Open PRs".into(),
-                    label: None,
-                    icon: Some("git-pull-request".into()),
-                    category: Some(LauncherCategory::Work),
-                    keywords: Some("pull requests".into()),
-                    params: vec!["author".into()],
-                    count: Some("x/waiting".into()),
-                    renders: vec![],
-                    accepts: Default::default(),
-                    default: false,
-                    pinned: false,
-                    comments: false,
-                    refresh: false,
-                    body: PageBody::Lens {
-                        lens: "x/open".into()
-                    },
-                    rail: None,
-                },
-                ExtensionPage {
-                    id: "detail".into(),
-                    extension: "x".into(),
-                    page_ref: "oxplow:oxplow/page?page=x/detail".into(),
-                    title: "Detail".into(),
-                    label: None,
-                    icon: None,
-                    category: None,
-                    keywords: None,
-                    params: vec![],
-                    count: None,
-                    renders: vec![],
-                    accepts: Default::default(),
-                    default: false,
-                    pinned: false,
-                    comments: true,
-                    refresh: true,
-                    body: PageBody::Lens {
-                        lens: "x/open".into()
-                    },
-                    rail: None,
-                }
-            ]
-        );
-        for (page, says) in [
-            (
-                "{ id: a, title: A, category: Work, lens: nope }",
-                "isn't in lenses/",
-            ),
-            (
-                "{ id: Bad Id, title: A, category: Work, lens: open }",
-                "page id",
-            ),
-            (
-                "{ id: a, title: A, category: Nowhere, lens: open }",
-                "category",
-            ),
-            (
-                "{ id: a, title: A, icon: nope, category: Work, lens: open }",
-                "icon",
-            ),
-            (
-                "{ id: a, title: A }",
-                "exactly one of `lens` and `component`",
-            ),
-            (
-                "{ id: a, title: A, lens: open, component: c }",
-                "exactly one of `lens` and `component`",
-            ),
-            (
-                "{ id: a, title: A, component: \"oxplow:tasks\" }",
-                "only oxplow's own extension",
-            ),
-            (
-                "{ id: a, title: A, component: nope }",
-                "isn't one of its custom_components or a built-in page",
-            ),
-            ("{ id: a, title: A, count: nope, lens: open }", "count lens"),
-            (
-                "{ id: a, title: A, params: [Bad], lens: open }",
-                "param `Bad`",
-            ),
-        ] {
-            let (_d, ext) = load_x(
-                &lenses,
-                &format!("manifest: 2\nintent:\n  purpose: p\npages:\n  - {page}\n"),
-            );
-            let errs = ext.errors.join("\n");
-            assert!(
-                errs.contains(says) && errs.contains("extension.yaml"),
-                "{page}: {errs}"
-            );
-            assert!(ext.pages.is_empty(), "{page}");
-        }
-    }
-
-    /// A page may be one of its extension's own custom components: the
-    /// component owns the page body (a custom page). A name that isn't
-    /// one of them is refused.
+    /// A page's view may be one of its extension's custom components: the
+    /// component owns the page body (a custom page), fed the page's data.
     #[test]
     fn a_page_may_be_one_of_its_custom_components() {
-        let page = |pages: &str| {
-            let dir = tempfile::tempdir().unwrap();
-            write(
-                dir.path(),
-                ".oxplow/extensions/x/extension.yaml",
-                &format!(
-                    "manifest: 2\nname: x\nintent:\n  purpose: p\ncustom_components:\n  - {{ id: board }}\npages:\n  - {pages}\n"
-                ),
-            );
-            write(
-                dir.path(),
-                ".oxplow/extensions/x/components/board/index.html",
-                "<!doctype html>",
-            );
-            (
-                dir.path().to_path_buf(),
-                project_extensions(dir.path()).remove(0),
-                dir,
-            )
-        };
-        let (_, ext, _d) =
-            page("{ id: board, title: Board, category: Work, params: [from], component: board }");
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            ".oxplow/extensions/x/extension.yaml",
+            "manifest: 2\nname: x\nintent:\n  purpose: p\ncustom_components:\n  - { id: board }\n",
+        );
+        write(
+            dir.path(),
+            ".oxplow/extensions/x/components/board/index.html",
+            "<!doctype html>",
+        );
+        write(
+            dir.path(),
+            ".oxplow/extensions/x/pages/board.yaml",
+            "title: Board\ncategory: Work\nview: { component: { id: board, props: { compact: true } } }\n",
+        );
+        let ext = project_extensions(dir.path()).remove(0);
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
-        assert_eq!(
-            ext.pages[0].body,
-            PageBody::Component {
-                component: "x/board".into()
-            }
-        );
-        let (_, ext, _d) = page("{ id: board, title: Board, component: nope }");
-        let errs = ext.errors.join("\n");
-        assert!(
-            errs.contains("`nope` isn't one of its custom_components or a built-in page"),
-            "{errs}"
-        );
-        assert!(ext.pages.is_empty());
+        assert!(matches!(
+            &page_of(&ext, "board").unwrap().view.kind,
+            crate::pages::schema::NodeKind::Component { component, .. } if component == "board"
+        ));
     }
-
-    /// A component page's rail is a lens of its extension, drawn beside
-    /// the component; a lens page has its own rail, and the lens must be
-    /// there.
-    #[test]
-    fn a_component_page_names_its_rail_lens() {
-        let load = |pages: &str| {
-            let dir = tempfile::tempdir().unwrap();
-            write(
-                dir.path(),
-                ".oxplow/extensions/x/extension.yaml",
-                &format!(
-                    "manifest: 2\nname: x\nintent:\n  purpose: p\ncustom_components:\n  - {{ id: board }}\npages:\n  - {pages}\n"
-                ),
-            );
-            write(
-                dir.path(),
-                ".oxplow/extensions/x/components/board/index.html",
-                "<!doctype html>",
-            );
-            write(
-                dir.path(),
-                ".oxplow/extensions/x/lenses/side.yaml",
-                "title: Side\nquery: SELECT 1 AS n\nhidden: true\n",
-            );
-            (project_extensions(dir.path()).remove(0), dir)
-        };
-        let (ext, _d) = load("{ id: board, title: Board, component: board, rail: side }");
-        assert!(ext.errors.is_empty(), "{:?}", ext.errors);
-        assert_eq!(ext.pages[0].rail.as_deref(), Some("x/side"));
-        let (ext, _d) = load("{ id: board, title: Board, lens: side, rail: side }");
-        assert!(ext.pages.is_empty());
-        assert!(
-            ext.errors
-                .join("\n")
-                .contains("`rail` is a component page's; a lens page's rail is its own"),
-            "{:?}",
-            ext.errors
-        );
-        let (ext, _d) = load("{ id: board, title: Board, component: board, rail: nope }");
-        assert!(ext.pages.is_empty());
-        assert!(
-            ext.errors
-                .join("\n")
-                .contains("its rail lens `nope` isn't in lenses/"),
-            "{:?}",
-            ext.errors
-        );
-    }
-
     /// P8.C1: an extension loads from any revision — at `git:HEAD` of a
     /// clean worktree exactly as from disk, and at a snapshot as that
     /// snapshot holds it, whatever the disk says now.
@@ -13547,11 +9959,11 @@ commands:
             )
         };
         let dir = ws.join(".oxplow/extensions/acme");
-        std::fs::create_dir_all(dir.join("lenses")).unwrap();
+        std::fs::create_dir_all(dir.join("pages")).unwrap();
         std::fs::write(dir.join("extension.yaml"), manifest("Committed.")).unwrap();
         std::fs::write(
-            dir.join("lenses/streams.yaml"),
-            "title: Streams\nquery: SELECT id FROM v_stream\n",
+            dir.join("pages/streams.yaml"),
+            viz_page("title: Streams\n", "SELECT id FROM v_stream", ""),
         )
         .unwrap();
         crate::test_fixtures::commit_all(&ws, "acme");
@@ -13561,7 +9973,7 @@ commands:
             .unwrap()
             .expect("acme is at HEAD");
         assert_eq!(at_head, load_project_extension(&ws, "acme"));
-        assert_eq!(at_head.lenses.len(), 1);
+        assert_eq!(at_head.page_files.len(), 1);
         assert!(
             extension_at(&f.svc.trees, &ws, &Revision::git("HEAD"), "nope")
                 .await
@@ -13636,15 +10048,21 @@ commands:
             }
         };
         let manifest = "manifest: 2\nname: acme\nintent:\n  purpose: Count.\n  origin: thread:thr1\n  examples: []\n".to_string();
-        let lens = |n: u32| format!("title: Count\nquery: SELECT {n} AS n\nviz: number\n");
+        let page = |n: u32| {
+            viz_page(
+                "title: Count\n",
+                &format!("SELECT {n} AS n"),
+                "viz: number\n",
+            )
+        };
         let start = snapshot(vec![
             (".oxplow/extensions/acme/extension.yaml", manifest.clone()),
-            (".oxplow/extensions/acme/lenses/count.yaml", lens(1)),
+            (".oxplow/extensions/acme/pages/count.yaml", page(1)),
             ("src/a.rs", "fn a() {}\n".into()),
         ])
         .await;
         let end = snapshot(vec![
-            (".oxplow/extensions/acme/lenses/count.yaml", lens(2)),
+            (".oxplow/extensions/acme/pages/count.yaml", page(2)),
             ("src/a.rs", "fn a() { 1 }\n".into()),
         ])
         .await;
@@ -13661,13 +10079,13 @@ commands:
         assert_eq!(changes[0].change, crate::extension_impact::Change::Changed);
         let report = changes[0].impact.as_ref().unwrap();
         assert!(
-            report.lines.iter().any(|l| l == "Lens acme/count: changed"),
+            report.lines.iter().any(|l| l == "Page acme/count: changed"),
             "{:?}",
             report.lines
         );
     }
 
-    /// tsk791: the earlier side of a review is only read — its lenses
+    /// The earlier side of a review is only read — its pages
     /// rendered on its own models — never checked: its command examples
     /// don't run (here, a runaway one the later version removed).
     #[tokio::test(flavor = "multi_thread")]

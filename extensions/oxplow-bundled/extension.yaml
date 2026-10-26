@@ -2,7 +2,7 @@ manifest: 2
 name: oxplow-bundled
 # Its commands are oxplow's own: `oxplow.<area>.<verb>`, like core's.
 namespace: oxplow
-description: What comes with oxplow, built as an ordinary extension. The effort review packet and its verdicts, metric and coverage guidance for the agent, and the usage, quality and change analysis lenses.
+description: What comes with oxplow, built as an ordinary extension. The effort review packet and its verdicts, metric and coverage guidance for the agent, and the usage, quality and change analysis pages.
 engine: ">=0.7"
 # What it reaches beyond the baseline: its effects and commands read with
 # their own SQL, its jobs and effects ask models, its churn collector reads
@@ -104,7 +104,7 @@ ui:
     - { slot: oxplow-foundation/tasks.sections, page: thread-plan, at: { before: list } }
     - { slot: oxplow-foundation/tasks.sections, page: thread-shared-work, at: { before: list } }
     - { slot: oxplow-foundation/work-item.sections, page: item-shared-work }
-    - { slot: diff.file.header, lens: file-co-change }
+    - { slot: oxplow-foundation/diff.file-header, page: file-co-change }
     - { slot: oxplow-foundation/diff-view.sections, page: decisions }
     - { slot: oxplow-foundation/diff-view.sections, page: inferred-decisions }
     - { slot: oxplow-foundation/diff-view.sections, page: unverified-claims }
@@ -433,7 +433,7 @@ models:
   - name: verdict
     version: 2
     key: [uri]
-    description: "Each effort's latest verdict, as its decorators show it: a chip on the effort's page and a badge where a lens row links to it."
+    description: "Each effort's latest verdict, as its decorators show it: a chip on the effort's page and a badge where a page row links to it."
     columns:
       - { name: uri, type: TEXT, doc: "The effort (`oxplow:oxplow/effort?id=eff<id>`)." }
       - { name: label, type: TEXT, doc: "`Accepted`, `Accepted (forced)` or `Changes requested`." }
@@ -454,7 +454,7 @@ models:
       - { name: g, type: INT, doc: "The group's place (0, 1, 3)." }
       - { name: ord, type: INT, doc: "The line's place in its group." }
       - { name: title, type: TEXT, doc: "What to show." }
-      - { name: icon, type: TEXT, doc: "A lens icon name: a work-item state (`todo`, `in_progress`, `done`, …), `epic` or `wiki`." }
+      - { name: icon, type: TEXT, doc: "A viz icon name: a work-item state (`todo`, `in_progress`, `done`, …), `epic` or `wiki`." }
       - { name: uri, type: TEXT, doc: "What the line opens (`work_item:…`, `oxplow:oxplow/wiki?slug=<slug>`, `oxplow:oxplow/effort?id=eff<id>`)." }
       - { name: depth, type: INT, doc: "1 for an epic's child, else 0." }
       - { name: active, type: INT, doc: "1 for the item, or the unlinked effort, in progress." }

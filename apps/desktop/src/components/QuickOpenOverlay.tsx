@@ -6,7 +6,7 @@ import type { CSSProperties } from "react";
 import { useResources } from "../resources.js";
 import { useListNav } from "../kit/index.js";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { NO_READS, useRerunOnChange } from "../lens/lensRerun.js";
+import { NO_READS, useRerunOnChange } from "../viz/rerun.js";
 import { readWorkspaceIndex, type WorkspaceIndexedFile } from "../workspaceFiles.js";
 import type { Reads } from "../tauri-bridge/generated/bindings.js";
 import { useExtensions } from "../extensionsStore.js";
@@ -227,10 +227,10 @@ export function QuickOpenOverlay({ open, initialQuery, stream, threadId, selecte
     };
   }, [open, stream?.id, query]);
 
-  // Lenses from this stream's extensions join the page directory under
+  // Pages from this stream's extensions join the page directory under
   // their `launcher.category` ("Dashboards" by default), so they're both browsable (start menu) and
   // searchable — from the shared extensions store, which reloads when
-  // lens files change (the agent may have just written one).
+  // page files change (the agent may have just written one).
   // Their manifest `launcher:` entries join too: a ref as a page, a
   // command or prompt as an action (P6.D1).
   const exts = useExtensions();

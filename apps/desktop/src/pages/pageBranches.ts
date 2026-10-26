@@ -6,10 +6,10 @@
 /// that run, which holds them.
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { limitRows, wantedBranches, type BranchRun } from "../lens/lensModel.js";
-import { EMPTY_RESULT } from "../lens/nodeRun.js";
+import { limitRows, wantedBranches, type BranchRun } from "../viz/vizModel.js";
+import { EMPTY_RESULT } from "../viz/nodeRun.js";
 import { keyOf, type PageKey, type PageRuns, type RunHandle, type RunState } from "../pageRuns.js";
-import type { LensRun, Node, PageRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
+import type { VizRun, Node, PageRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
 import { nodeActionRunner, nodeFormSource, type PageForms, type RunPageAction } from "./useNodeActions.js";
 
 /** One run per key of `keys` (by id), opened and closed as the keys
@@ -62,12 +62,12 @@ export interface BranchHost {
 
 /** The lazy branch runs of a page's tree node: `useLazyBranches`'s shape
  *  (`VizPages.useBranches`), its runs pages'. */
-export function usePageBranches(host: BranchHost, run: LensRun, open: readonly string[], streamId: string | null, maxRows?: number): ReadonlyMap<string, BranchRun> {
+export function usePageBranches(host: BranchHost, run: VizRun, open: readonly string[], streamId: string | null, maxRows?: number): ReadonlyMap<string, BranchRun> {
   const { pageRun, node, store, press, forms } = host;
-  const lazy = run.lens.tree?.lazy ?? null;
+  const lazy = run.config.tree?.lazy ?? null;
   const from = node.kind === "viz" ? node.from : null;
   const [loaded, setLoaded] = useState<ReadonlyMap<string, BranchRun>>(() => new Map());
-  const wanted = lazy ? wantedBranches(run.lens, run.result, new Set(open), loaded) : [];
+  const wanted = lazy ? wantedBranches(run.config, run.result, new Set(open), loaded) : [];
   const keys = useMemo(
     () => new Map(wanted.map((w) => [w.id, { page: pageRun.page.id, params: { ...pageRun.params, [lazy!]: w.value as SqlCell }, streamId, threadId: null } as PageKey])),
     // The wanted ids and values name the keys.
@@ -88,16 +88,16 @@ export function usePageBranches(host: BranchHost, run: LensRun, open: readonly s
         continue;
       }
       out.set(id, {
-        run: { ...run, params: state.run.params, result: limitRows(got?.result ?? EMPTY_RESULT, maxRows), alert: null, warnings: [], inactive: null },
+        run: { ...run, params: state.run.params, result: limitRows(got?.result ?? EMPTY_RESULT, maxRows) },
         error: null,
         runner: nodeActionRunner(press, state.runId, node.id),
         forms: nodeFormSource(forms, state.runId, node.id),
       });
     }
     return out;
-    // `run.lens` is what the branch rows draw as; its rows are the root's.
+    // `run.config` is what the branch rows draw as; its rows are the root's.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [states, from, run.lens, maxRows, press, forms, node.id]);
+  }, [states, from, run.config, maxRows, press, forms, node.id]);
   // What the next render's wanted branches are reached through.
   useEffect(() => setLoaded(branches), [branches]);
   return branches;

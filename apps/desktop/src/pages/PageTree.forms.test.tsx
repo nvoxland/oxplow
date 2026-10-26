@@ -9,7 +9,7 @@ import type { CommandSpec, FormStart } from "../tauri-bridge/generated/bindings.
 // A page's form node starts from `page_form` on its open run and submits
 // with `submit_page_form`; a form action (a node's row action, or the
 // page's own) opens from `page_action_form` and submits through
-// `run_page_action` with the input. The lens viz components draw both.
+// `run_page_action` with the input. The page viz components draw both.
 
 afterEach(cleanup);
 
@@ -60,11 +60,11 @@ test("a form node starts from page_form on the open run and submits with submit_
       </PageFormsContext.Provider>
     </PageActionContext.Provider>,
   );
-  const field = (await findByTestId("lens-form-fields-title")) as HTMLInputElement;
+  const field = (await findByTestId("viz-form-fields-title")) as HTMLInputElement;
   expect(field.value).toBe("Old");
   expect(calls[0]).toEqual(["start", "run-1", "edit"]);
   fireEvent.change(field, { target: { value: "New" } });
-  fireEvent.click(getByTestId("lens-form-fields-submit"));
+  fireEvent.click(getByTestId("viz-form-fields-submit"));
   await waitFor(() => expect(calls.some((c) => c[0] === "submit")).toBe(true));
   expect(calls.find((c) => c[0] === "submit")).toEqual(["submit", "run-1", "edit", { uri: "u1", title: "New" }, false]);
 });
@@ -79,11 +79,11 @@ test("a form node's draft survives the run being read again", async () => {
     </PageActionContext.Provider>
   );
   const view = render(ui(formPage()));
-  const field = (await view.findByTestId("lens-form-fields-title")) as HTMLInputElement;
+  const field = (await view.findByTestId("viz-form-fields-title")) as HTMLInputElement;
   fireEvent.change(field, { target: { value: "Half typed" } });
   // The daemon re-ran the page: a fresh run object, the same content.
   view.rerender(ui(formPage()));
-  expect((view.getByTestId("lens-form-fields-title") as HTMLInputElement).value).toBe("Half typed");
+  expect((view.getByTestId("viz-form-fields-title") as HTMLInputElement).value).toBe("Half typed");
 });
 
 test("a node's form action opens from page_action_form and submits through run_page_action", async () => {
@@ -103,12 +103,12 @@ test("a node's form action opens from page_action_form and submits through run_p
       </PageFormsContext.Provider>
     </PageActionContext.Provider>,
   );
-  fireEvent.contextMenu(getByTestId("lens-row-0"));
-  fireEvent.click(getByTestId("menu-item-lens-action-retitle"));
-  const field = (await findByTestId("lens-action-form-fields-title")) as HTMLInputElement;
+  fireEvent.contextMenu(getByTestId("viz-row-0"));
+  fireEvent.click(getByTestId("menu-item-viz-action-retitle"));
+  const field = (await findByTestId("viz-action-form-fields-title")) as HTMLInputElement;
   expect(calls[0]).toEqual(["actionStart", "run-1", "items", "retitle", { id: "a", title: "Alpha" }]);
   fireEvent.change(field, { target: { value: "Renamed" } });
-  fireEvent.click(getByTestId("lens-action-form-fields-submit"));
+  fireEvent.click(getByTestId("viz-action-form-fields-submit"));
   await waitFor(() => expect(calls.some((c) => c[0] === "press")).toBe(true));
   expect(calls.find((c) => c[0] === "press")).toEqual([
     "press",

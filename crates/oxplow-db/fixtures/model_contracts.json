@@ -7282,6 +7282,46 @@
         }
       ],
       "key": []
+    },
+    "3": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Visit id."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "Thread the page was opened in."
+        },
+        {
+          "name": "page_kind",
+          "type": "TEXT",
+          "doc": "Page kind (`task`, `file`, `page`, …)."
+        },
+        {
+          "name": "page_id",
+          "type": "TEXT",
+          "doc": "Page id (`task:42`, `oxplow:oxplow/file?path=src/a.rs`, …)."
+        },
+        {
+          "name": "label",
+          "type": "TEXT",
+          "doc": "Title shown at the time."
+        },
+        {
+          "name": "visited_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "duration_ms",
+          "type": "INTEGER",
+          "doc": "Time on the page, when known."
+        }
+      ],
+      "key": []
     }
   },
   "search_comment": {
@@ -11752,6 +11792,91 @@
           "name": "actor_id",
           "type": "TEXT",
           "doc": "The proposing thread (`thr3`) or lens, when known."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "The thread it was proposed in (v_thread.id), if any."
+        },
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "The stream it was proposed in, if any."
+        },
+        {
+          "name": "key",
+          "type": "TEXT",
+          "doc": "What it supersedes on: `oxplow:oxplow/config?key=<key>` for a config change, else the command and its input."
+        },
+        {
+          "name": "preview",
+          "type": "TEXT",
+          "doc": "The confirmation preview (JSON: command, summary, input, destructive)."
+        },
+        {
+          "name": "dry_run",
+          "type": "TEXT",
+          "doc": "What it would have done when proposed (JSON: a config key's before/after, a composite's children); NULL when it can't be dry-run."
+        },
+        {
+          "name": "decision",
+          "type": "TEXT",
+          "doc": "`pending`, `approved`, `declined` or `superseded`."
+        },
+        {
+          "name": "decided_at",
+          "type": "TEXT",
+          "doc": "When it was decided or superseded."
+        },
+        {
+          "name": "audit_id",
+          "type": "INTEGER",
+          "doc": "The approving run's command audit row."
+        },
+        {
+          "name": "superseded_by",
+          "type": "INTEGER",
+          "doc": "The proposal that replaced it."
+        }
+      ],
+      "key": []
+    },
+    "5": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Proposal id."
+        },
+        {
+          "name": "uri",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/proposal?id=<id>`."
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "command",
+          "type": "TEXT",
+          "doc": "The command (`oxplow.config.set`, `oxplow.work_item.delete`)."
+        },
+        {
+          "name": "input",
+          "type": "TEXT",
+          "doc": "Its input (JSON)."
+        },
+        {
+          "name": "actor_kind",
+          "type": "TEXT",
+          "doc": "Who proposed it: `agent`, `page` or `effect`."
+        },
+        {
+          "name": "actor_id",
+          "type": "TEXT",
+          "doc": "The proposing thread (`thr3`), page or effect, when known."
         },
         {
           "name": "thread_id",
@@ -16393,6 +16518,83 @@
       "key": [
         "uri"
       ]
+    },
+    "6": {
+      "columns": [
+        {
+          "name": "uri",
+          "type": "TEXT",
+          "doc": "Its ref: `oxplow:oxplow/job?job=effort-review/review`, `oxplow:oxplow/collector?collector=triage/todos`, `oxplow:oxplow/command?command=oxplow.review.accept`. (v3, was `id`)"
+        },
+        {
+          "name": "extension",
+          "type": "TEXT",
+          "doc": "The extension that declares it."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "`collector`, `effect`, `command`, `metric`, `skill`, `provider`, `page`, …"
+        },
+        {
+          "name": "local",
+          "type": "TEXT",
+          "doc": "Its id within the extension, or its global name (a command's bus id, a metric's key)."
+        },
+        {
+          "name": "origin",
+          "type": "TEXT",
+          "doc": "`project` or `bundled`."
+        },
+        {
+          "name": "version",
+          "type": "TEXT",
+          "doc": "The extension's `version:` (a bundled one's is oxplow's); NULL when it declares none."
+        },
+        {
+          "name": "contract_version",
+          "type": "INTEGER",
+          "doc": "The contract's own version (a model's, an event type's), when it has one."
+        },
+        {
+          "name": "runs_on",
+          "type": "TEXT",
+          "doc": "How it comes to run, as JSON: `{on: events, types}`, `{on: schedule, every}`, `{on: run}`, `{on: call}`, `{on: query}`, `{on: mount}`, `{on: agent}`, `{on: declared}`."
+        },
+        {
+          "name": "needs",
+          "type": "TEXT",
+          "doc": "What it requires (capabilities, features, scopes), as a JSON array. Never what a person granted."
+        },
+        {
+          "name": "after",
+          "type": "TEXT",
+          "doc": "What an effect or a collector runs after when one event reaches it and them (JSON array of refs: `effect:<ext>/<id>`, `oxplow:oxplow/collector?collector=<ext>/<id>`, `oxplow:oxplow/consumer?name=<name>`), as the catalog resolved its `after:`."
+        },
+        {
+          "name": "order_level",
+          "type": "INTEGER",
+          "doc": "Where an effect or a collector runs among what one event reaches: 0 first, each after every contribution it names. NULL for a kind that isn't ordered."
+        },
+        {
+          "name": "global_name",
+          "type": "TEXT",
+          "doc": "The name it holds in a space every extension shares (a metric key, a skill name, `<capability>/<id>`); NULL when none."
+        },
+        {
+          "name": "file",
+          "type": "TEXT",
+          "doc": "The manifest it's declared in."
+        },
+        {
+          "name": "line",
+          "type": "INTEGER",
+          "doc": "Its line there, when the kind tracks lines."
+        }
+      ],
+      "key": [
+        "uri"
+      ]
     }
   },
   "extension_run": {
@@ -17130,6 +17332,153 @@
       "key": [
         "run_id"
       ]
+    },
+    "6": {
+      "columns": [
+        {
+          "name": "run_id",
+          "type": "TEXT",
+          "doc": "The run (a UUIDv7). `v_command_audit`-style records name it in their `run_id`."
+        },
+        {
+          "name": "parent_run_id",
+          "type": "TEXT",
+          "doc": "The run it was nested in (a person's `oxplow.collector.sync`, an effect's composing script); NULL for a top-level run."
+        },
+        {
+          "name": "extension",
+          "type": "TEXT",
+          "doc": "The extension it belongs to."
+        },
+        {
+          "name": "contribution",
+          "type": "TEXT",
+          "doc": "The contribution's URI (`v_contribution.uri`): `oxplow:oxplow/command?command=oxplow.review.accept`, `oxplow:oxplow/job?job=effort-review/review`."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "`collector`, `effect`, `command`, `implementation`, …"
+        },
+        {
+          "name": "version",
+          "type": "TEXT",
+          "doc": "The extension's declared `version:` when it ran; NULL when it declares none."
+        },
+        {
+          "name": "generation",
+          "type": "TEXT",
+          "doc": "The extension catalog's generation it ran against (`v_*` query results name theirs the same way); NULL for a run that holds none — a collector's, an effect's or a job's belongs to its extension's version. (v2)"
+        },
+        {
+          "name": "actor_kind",
+          "type": "TEXT",
+          "doc": "`human`, `agent`, `page`, `system` or `effect`."
+        },
+        {
+          "name": "actor",
+          "type": "TEXT",
+          "doc": "Who, as an event source: `human`, `agent:thr3`, `system`, `effect:<ext>/<id>`, `effect:effort_policy:<id>`."
+        },
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "The stream it ran for; NULL when none."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "The thread it ran for; NULL when none."
+        },
+        {
+          "name": "effort_id",
+          "type": "INTEGER",
+          "doc": "The effort it ran for; NULL when none."
+        },
+        {
+          "name": "turn_id",
+          "type": "INTEGER",
+          "doc": "The agent turn it ran for; NULL when none."
+        },
+        {
+          "name": "agent_session_id",
+          "type": "INTEGER",
+          "doc": "The agent session it ran for; NULL when none."
+        },
+        {
+          "name": "snapshot_id",
+          "type": "INTEGER",
+          "doc": "The snapshot it ran over; NULL when none."
+        },
+        {
+          "name": "cause_event_id",
+          "type": "TEXT",
+          "doc": "The event that caused it (`v_event.id`); NULL for a run a person or schedule started."
+        },
+        {
+          "name": "mode",
+          "type": "TEXT",
+          "doc": "`pure` (no I/O but scope reads), `transactional` or `external` (may call out)."
+        },
+        {
+          "name": "started_at",
+          "type": "TEXT",
+          "doc": "When it began (RFC 3339)."
+        },
+        {
+          "name": "finished_at",
+          "type": "TEXT",
+          "doc": "When it ended (RFC 3339)."
+        },
+        {
+          "name": "outcome",
+          "type": "TEXT",
+          "doc": "`ok`, `skipped`, `failed`, `denied` (its grant refused something), or `cancelled` (stopped: a person's cancel, or its approval or extension revoked, disabled or changed under it). (v3)"
+        },
+        {
+          "name": "error",
+          "type": "TEXT",
+          "doc": "Why it failed, was denied or stopped."
+        },
+        {
+          "name": "wall_ms",
+          "type": "INTEGER",
+          "doc": "How long it ran."
+        },
+        {
+          "name": "cpu_ms",
+          "type": "INTEGER",
+          "doc": "Its scripts' CPU time, summed (0 for a run that ran no script)."
+        },
+        {
+          "name": "peak_bytes",
+          "type": "INTEGER",
+          "doc": "The most any one of its scripts held live at once."
+        },
+        {
+          "name": "ai_calls",
+          "type": "INTEGER",
+          "doc": "The model calls it made."
+        },
+        {
+          "name": "scopes",
+          "type": "TEXT",
+          "doc": "The scopes it called, counted, as JSON (`{\"sql.read\": 2}`)."
+        },
+        {
+          "name": "decisions",
+          "type": "TEXT",
+          "doc": "What its grant decided for what it asked, as a JSON array of `{ need, decision, reason? }` (`allowed`, `denied`, `unenforced`)."
+        },
+        {
+          "name": "latest",
+          "type": "",
+          "doc": "1 on its contribution's most recent run."
+        }
+      ],
+      "key": [
+        "run_id"
+      ]
     }
   },
   "job": {
@@ -17433,6 +17782,48 @@
           "name": "props",
           "type": "TEXT",
           "doc": "JSON array of the prop names the replacement lens is given and must declare as `params`."
+        },
+        {
+          "name": "view",
+          "type": "TEXT",
+          "doc": "JSON array of the host page's view params the replacement shares: it reads and writes them as the core component does (`q`, `author`, `branch` for `vcs.history.graph`). (v2)"
+        },
+        {
+          "name": "label",
+          "type": "TEXT",
+          "doc": "What a person calls it (\"board\", \"detail editor\")."
+        }
+      ],
+      "key": [
+        "target"
+      ]
+    },
+    "3": {
+      "columns": [
+        {
+          "name": "target",
+          "type": "TEXT",
+          "doc": "The sub-component: `work_item.board`, `work_item.list`, `work_item.detail`, `work_item.detail.state`, `vcs.history.graph`."
+        },
+        {
+          "name": "capability",
+          "type": "TEXT",
+          "doc": "The capability it belongs to (`work_items`, `vcs`)."
+        },
+        {
+          "name": "bound",
+          "type": "INTEGER",
+          "doc": "1 when only the extension of the capability's deciding provider may replace it (the item's own provider's states); 0 when any extension may, and the person chooses."
+        },
+        {
+          "name": "version",
+          "type": "INTEGER",
+          "doc": "The contract's version; a declaration may pin it (`version:`)."
+        },
+        {
+          "name": "props",
+          "type": "TEXT",
+          "doc": "JSON array of the prop names the replacement page is given and must declare as `params`."
         },
         {
           "name": "view",
@@ -18081,6 +18472,63 @@
           "name": "actor_id",
           "type": "TEXT",
           "doc": "The actor, by kind: an agent's thread (`thr3`), a lens's or effect's id; NULL for a person or the system."
+        },
+        {
+          "name": "outcome",
+          "type": "TEXT",
+          "doc": "`ok`; `invalid` (its input was refused); `denied` (the actor may not run it); `error` (it ran and failed)."
+        },
+        {
+          "name": "error",
+          "type": "TEXT",
+          "doc": "What went wrong, for an outcome other than `ok`."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "The thread it ran on, if any (v_thread.id)."
+        },
+        {
+          "name": "session_id",
+          "type": "INTEGER",
+          "doc": "The agent session that ran it, if any (v_agent_session.id)."
+        },
+        {
+          "name": "via",
+          "type": "TEXT",
+          "doc": "What the actor ran it through, when not directly: `assistant:ast3` for a command the Assistant ran for the person, which they approved. Assistant sessions live in memory, so an id may repeat after a restart. NULL otherwise. (v2)"
+        }
+      ],
+      "key": [
+        "id"
+      ]
+    },
+    "3": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Audit row id, in run order."
+        },
+        {
+          "name": "at",
+          "type": "TEXT",
+          "doc": "When it ran (RFC 3339)."
+        },
+        {
+          "name": "command",
+          "type": "TEXT",
+          "doc": "The command id (`oxplow.work_item.create`)."
+        },
+        {
+          "name": "actor_kind",
+          "type": "TEXT",
+          "doc": "Who ran it: `human`, `agent`, `page`, `component`, `system`, `effect` or `job`."
+        },
+        {
+          "name": "actor_id",
+          "type": "TEXT",
+          "doc": "The actor, by kind: an agent's thread (`thr3`), a page's or effect's id; NULL for a person or the system."
         },
         {
           "name": "outcome",
@@ -21815,6 +22263,31 @@
         }
       ],
       "key": []
+    },
+    "4": {
+      "columns": [
+        {
+          "name": "scope",
+          "type": "TEXT",
+          "doc": "`app`; a page's URI (`oxplow:oxplow/page?page=…`) or `kind:<kind>`; a panel's URI; or `component:<extension>/<id>`."
+        },
+        {
+          "name": "key",
+          "type": "TEXT",
+          "doc": "What is remembered, within its scope (`railWidth`, `mergeMode.str1.main`)."
+        },
+        {
+          "name": "value_json",
+          "type": "TEXT",
+          "doc": "Its value, as JSON text."
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp of the last change."
+        }
+      ],
+      "key": []
     }
   },
   "agent_harness": {
@@ -22086,6 +22559,63 @@
           "name": "additional",
           "type": "INTEGER",
           "doc": "1 when a URI may carry params beyond its own (a page's or a lens's)."
+        },
+        {
+          "name": "resolve",
+          "type": "TEXT",
+          "doc": "The view whose rows name each one; NULL when no model holds it (a file, a page)."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "The column of `resolve` that titles one; NULL means `title`."
+        },
+        {
+          "name": "searchable",
+          "type": "TEXT",
+          "doc": "The view search indexes it from; NULL when search doesn't."
+        },
+        {
+          "name": "icon",
+          "type": "TEXT",
+          "doc": "The icon it is drawn with."
+        },
+        {
+          "name": "wikilink",
+          "type": "TEXT",
+          "doc": "JSON `{ prefix, param }`: `[[<prefix>:<value>]]` names it with that param set; NULL when it has no sugar."
+        }
+      ],
+      "key": [
+        "resource"
+      ]
+    },
+    "5": {
+      "columns": [
+        {
+          "name": "resource",
+          "type": "TEXT",
+          "doc": "`<extension>/<name>`: `oxplow/file`, `acme/pr`."
+        },
+        {
+          "name": "extension",
+          "type": "TEXT",
+          "doc": "The extension that declares it (`oxplow-foundation` for oxplow's own)."
+        },
+        {
+          "name": "label",
+          "type": "TEXT",
+          "doc": "What one is called (`Pull request`)."
+        },
+        {
+          "name": "params",
+          "type": "TEXT",
+          "doc": "JSON object of its params by name, each `{ required, pattern }`: a URI carries every required one, and each value matches its pattern."
+        },
+        {
+          "name": "additional",
+          "type": "INTEGER",
+          "doc": "1 when a URI may carry params beyond its own (a page's)."
         },
         {
           "name": "resolve",
@@ -22441,6 +22971,55 @@
           "name": "lens_changes",
           "type": "TEXT",
           "doc": "The lenses that differ, as a JSON array of `{ id, change }`."
+        },
+        {
+          "name": "stream_id",
+          "type": "INT",
+          "doc": "The stream whose worktree was reviewed."
+        }
+      ],
+      "key": [
+        "base",
+        "head",
+        "name"
+      ]
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "base",
+          "type": "TEXT",
+          "doc": "The earlier side, as the query spelled it."
+        },
+        {
+          "name": "head",
+          "type": "TEXT",
+          "doc": "The later side, as the query spelled it."
+        },
+        {
+          "name": "name",
+          "type": "TEXT",
+          "doc": "The extension."
+        },
+        {
+          "name": "change",
+          "type": "TEXT",
+          "doc": "`added`, `removed` or `changed`."
+        },
+        {
+          "name": "errors",
+          "type": "TEXT",
+          "doc": "What's wrong with the later version, as a JSON array of text."
+        },
+        {
+          "name": "lines",
+          "type": "TEXT",
+          "doc": "What the change does, as a JSON array of lines (grants first, then collectors' outputs, models and their rows, pages); `[]` for a removed extension."
+        },
+        {
+          "name": "page_changes",
+          "type": "TEXT",
+          "doc": "The pages that differ, as a JSON array of `{ id, change }`."
         },
         {
           "name": "stream_id",
@@ -23074,6 +23653,81 @@
         "page_uri",
         "position"
       ]
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "page_uri",
+          "type": "TEXT",
+          "doc": "The page (`v_page.uri`)."
+        },
+        {
+          "name": "position",
+          "type": "INTEGER",
+          "doc": "Its place among the page's params, from 1."
+        },
+        {
+          "name": "name",
+          "type": "TEXT",
+          "doc": "The param's name."
+        },
+        {
+          "name": "type",
+          "type": "TEXT",
+          "doc": "What it holds: `text`, `choice`, `bool`, `date_range`, `branch` or `search`."
+        },
+        {
+          "name": "role",
+          "type": "TEXT",
+          "doc": "What it is to the page: `resource` (names what it shows), `filter` (narrows how) or `selection`."
+        },
+        {
+          "name": "label",
+          "type": "TEXT",
+          "doc": "What the control says; NULL for the name."
+        },
+        {
+          "name": "default",
+          "type": "TEXT",
+          "doc": "Its default, as JSON; NULL for none."
+        },
+        {
+          "name": "options",
+          "type": "TEXT",
+          "doc": "The values a choice takes, as a JSON array of `{value, label}`; `[]` when fixed by a loader (`options_from`) or not a choice."
+        }
+      ],
+      "key": [
+        "page_uri",
+        "position"
+      ]
+    }
+  },
+  "search_page": {
+    "1": {
+      "columns": [
+        {
+          "name": "uri",
+          "type": "TEXT",
+          "doc": "The page's URI (`v_page.uri`): what a hit opens."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "The page's title."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "Its description and launcher keywords."
+        },
+        {
+          "name": "stream_id",
+          "type": "TEXT",
+          "doc": "Always NULL: pages belong to the project."
+        }
+      ],
+      "key": []
     }
   }
 }

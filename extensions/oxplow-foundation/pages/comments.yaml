@@ -1,5 +1,5 @@
 title: Comments
-description: Every comment thread in this stream, grouped by the page it is anchored to. Pick one to read its conversation; resolve it, reply, or change who should act on it. The agent reads the same threads with `oxplow_list_comments`.
+description: Every comment thread in this stream, grouped by the page it is anchored to. Pick one to read it; resolve it, reply, or change who should act on it.
 icon: inbox
 category: Activity
 params:

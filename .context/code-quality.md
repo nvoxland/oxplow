@@ -26,7 +26,7 @@ for the user to install.
 > `list_code_quality_findings`, `read_endpoint_files_content`) are gone.
 > `crates/oxplow-app/src/change_analysis.rs` computes and stores each change
 > behind `v_change*` ([semantic-layer.md](./semantic-layer.md) → "Change
-> analysis"), and the oxplow-bundled `change-review` document lens shows it in
+> analysis"), and the oxplow-bundled `change-review` page shows it in
 > the `oxplow-foundation/commit.sections`, `oxplow-foundation/uncommitted.sections` and `oxplow-foundation/changes.sections` slots.
 
 ## Per-function metrics (change analysis, not a persisted scan)
@@ -59,7 +59,7 @@ A change's functions are keyed by that id: base and head are matched on
 `(path, id)`, and each `v_change_function` row carries the function's
 symbol `uri` (`oxplow:oxplow/symbol?path=<path>&symbol=<id>`, `build::symbol_uri`), unique per change.
 Two overloads (or two same-named functions) in one file are two rows, each
-matched to its own base. The Function Changes and Tests Weakened lenses
+matched to its own base. The Function Changes and Tests Weakened pages
 link the function by that ref.
 
 `FunctionMetrics.container_path` (and `AnalyzedFunction.container_path`)
@@ -171,7 +171,7 @@ in the background. `DuplicationRecorder::record`
   `revision` it read — `working`, `snap:<id>`, `git:<rev>` — and a
   path-list fingerprint) and its findings, read through
   `v_code_quality_scan` / `v_code_quality_finding` (the oxplow-bundled
-  `findings` and `duplicate-blocks` lenses);
+  `findings` and `duplicate-blocks` pages);
 - **stored in one write** (`SqliteCodeQualityStore::finish_scan_with_findings`):
   the findings, their `finding → file` page refs and the scan's `done`
   status commit together, so a scan announces one `ModelsChanged`, not

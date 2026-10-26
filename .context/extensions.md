@@ -1,7 +1,7 @@
 # Extensions
 
 This doc covers how anything that **measures or visualizes** is added to
-oxplow: the `extension.yaml` format, lenses, slots, actions and alerts, and
+oxplow: the `extension.yaml` format, pages, slots, actions and alerts, and
 `oxplow-bundled`, the one extension that ships with oxplow.
 
 **Terms.** oxplow's one vocabulary for what it's built from. Code, docs,
@@ -12,7 +12,7 @@ them"):
 | Term | Means |
 |---|---|
 | extension | the package: a folder with an `extension.yaml` |
-| contribution | one thing an extension declares (a lens, collector, command, effect, provider …) |
+| contribution | one thing an extension declares (a page, collector, command, effect, provider …) |
 | capability | a swappable slot a project chooses an implementation of (`work_items`, `effort_policy`, `snapshots`; `vcs` is fixed) — [work-tracking.md](./work-tracking.md) "Capabilities" |
 | provider | whatever implements a capability. Qualify it where it isn't obvious: an **external provider** is a process speaking the provider protocol ([providers.md](./providers.md)); an **AI provider** is API model access ([ai-providers.md](./ai-providers.md)) |
 | scope | what a contribution may call on the host (`sql.read`, `threads.write`) — [commands.md](./commands.md) "Scopes" |
@@ -43,7 +43,6 @@ its `Display`; [resources.md](./resources.md) "Using URIs"): the resource
 `oxplow:oxplow/<kind>?<kind>=<extension>/<id>`
 — `oxplow:oxplow/job?job=effort-review/review`,
 `oxplow:oxplow/collector?collector=triage/todos`,
-`oxplow:oxplow/lens?lens=acme/blocked`,
 `oxplow:oxplow/page?page=github/pr`,
 `oxplow:oxplow/model?model=effort-review/reviews` — or,
 for a kind whose names are already global (`ContributionKind::global_name`:
@@ -54,7 +53,7 @@ command, measure, metric, dimension, event type, resource),
 Storage (`v_contribution.uri`, `v_extension_run.contribution`,
 `v_job_run.job`), events, manifests (imports, exports, `where:`), grant
 keys and the desktop carry that string; every contribution kind in
-`KINDS` is a resource of oxplow (`oxplow/lens`, `oxplow/command`, …) whose
+`KINDS` is a resource of oxplow (`oxplow/page`, `oxplow/command`, …) whose
 key param is its own name (`build::key_param`), so a new kind is
 linkable with no other change. Text names a contribution as a
 `ContributionRef` (`FromStr`); a local URI says its owner, a global one is
@@ -79,8 +78,8 @@ instance's id, its URIs' segment and its commands' namespace), measures,
 metrics and dimensions (global: the key), models (global: the
 `v_<ext>_<name>` view), event types (global: the type string; one
 descriptor per type, its highest `v` the contract version), resources
-(global: `<extension>/<name>`), lenses, pages,
-panels, slot mounts (`<slot>-<n>`), decorators (`decorator-<n>`),
+(global: `<extension>/<name>`), pages,
+panels, slot mounts (`<host>.<slot>-<n>`), decorators (`decorator-<n>`),
 replacements and custom components (all mounted, no global name).
 
 The id rules each kind used to restate are the domain's: `valid_local`
@@ -99,11 +98,12 @@ invalid-named folder, which still loads).
 **Discovery.** Each generation (boot and every catalog change)
 restates the `contribution` table (V47, `oxplow_db::contribution_store`)
 from every enabled extension's descriptors, read as `v_contribution`.
-The same transaction restates `lens` and `extension_listing` (V74,
-`oxplow_db::catalog_listing_store`), read as `v_lens` and `v_extension`, and
+The same transaction restates `extension_listing` (V74,
+`oxplow_db::catalog_listing_store`), read as `v_extension`, and
 (V110) `page`, `page_answer` and `page_param` from every enabled extension's
 page files (`extension_generation::page_rows`), read as `v_page`,
-`v_page_answer` and `v_page_param`. A page's URI is `oxplow:oxplow/page?page=<extension>/<slug>`
+`v_page_answer` and `v_page_param`. (V113 dropped the old UI table,
+`thread_answer` and dashboard tables.) A page's URI is `oxplow:oxplow/page?page=<extension>/<slug>`
 (`page=<slug>` for an extension in the `oxplow` namespace), stored in the row.
 Two kinds of listing row follow something other than a generation: those
 for an extension with no deployment running (`undeployed`, `not_here`) follow
@@ -115,7 +115,7 @@ sources, under the activation lock and with no activation: nothing that runs
 changes. So `rm -rf` of an undeployed source drops its row at once, and a new
 source is listed at once. We restate rather than read live (as
 `v_extension_source` is) because a live model is materialized by name in the
-query, and `v_extension` is a stored table other views and lenses join.
+query, and `v_extension` is a stored table other views and pages join.
 Sources that `extensionSources` points outside the folder are not watched;
 they show at the next activation.
 The reference's "What it can declare" table is generated from
@@ -179,13 +179,13 @@ Manifest declarations are `exports: [{contribution, version, visibility}]`,
 `version` is optional: absent, whatever version the producer exports
 binds; given, it must equal the export's. The binding records the version
 it bound (`publicContracts.bindings[].version`). Guards name this
-extension's models, lenses, pages, collectors, commands, effects, advisories,
+extension's models, pages, collectors, commands, effects, advisories,
 skills or providers. A guard's bindings must be declared and nonempty; unknown or
-duplicate names are errors. Models, lenses and a page's `sql` loaders can read
+duplicate names are errors. Models and a page's `sql` loaders can read
 a public model with `import_ref('binding')`; tokenized calls infer a guard automatically. Strings,
 comments and qualified function names are untouched. A model's binding becomes
 an ordinary `ref('<producer>/<model>')`, retaining lineage and native contract
-checks; a lens's or a page loader's becomes its quoted published view. An
+checks; a page loader's becomes its quoted published view. An
 unavailable import withholds the page (and its slot mounts), and
 `extension test` skips the examples that run it. SQL grants still apply.
 `examples/extensions/effort-review` (producer: `exports` its `reviews`
@@ -199,7 +199,7 @@ too). Withholding is reported once per cause: each unavailable optional
 import's warning lists what it withheld (guarded contributions, and the
 mounts, pages, panels and slots pruned with them), and
 `publicContracts.withheld` records each withheld identity with the bindings
-that withheld it. A mount withheld only because another extension's lens
+that withheld it. A mount withheld only because another extension's page
 went gets its own warning. `extension test` skips an example whose target
 was withheld, with that cause, instead of failing it.
 
@@ -209,7 +209,7 @@ reserve a global name. Host manifest checks (including engine compatibility)
 also block candidates with explicit public contracts and their required
 consumers; an invalid candidate never reserves global names. Resolve imports,
 withhold guarded contributions, remove mounts that
-refer to absent lenses/models/pages/providers, withdraw their exports, and
+refer to absent pages/models/providers, withdraw their exports, and
 resolve again until no contribution is removed. Repeat resolution after global
 collision checks, then bind SQL and publish. Removal is monotonic within a
 load; a later reload starts from the source declarations. This also withdraws
@@ -244,7 +244,7 @@ cyclic, private/experimental, producer disabled, and an update that would break
 a consumer; collector, event-type and command exports and imports; diamonds, three-way
 and self cycles, an available optional edge closing a cycle, shared and
 experimental combinations, a repaired producer bringing its consumer back, and a
-guarded lens pruning its slot mounts). A contract-blocked extension is cleared to `enabled: false` by the
+guarded page pruning its slot mounts). A contract-blocked extension is cleared to `enabled: false` by the
 load, so `CatalogSnapshot::admitted` holds it by `public_contracts.blocked`,
 not by `enabled`.
 
@@ -356,7 +356,7 @@ settings only.
 
 ### Configuration in SQL
 
-An extension's own SQL — its models, its lenses' queries and its
+An extension's own SQL — its models, its pages' `sql` loaders and its
 advisories' queries — reads its own configuration with
 `config('/pointer')`, a JSON pointer into the extension's effective values
 (`defaults < project < personal`, the `ConfigurationHost` resolution above):
@@ -368,7 +368,7 @@ advisories' queries — reads its own configuration with
   boolean 1 or 0). Nothing registers a global function, so there is no `v_*`
   view or `oxplow_query_sql` call that reads configuration, and no way to name
   another extension's: the owner is fixed by where the SQL is declared
-  (`ExtensionModels.config` for a model, the lens's or advisory's own
+  (`ExtensionModels.config` for a model, the page's or advisory's own
   extension for those). Core SQL reads none. Settings are non-secret by
   construction; a literal in a view or a query is no more exposed than they
   are.
@@ -381,7 +381,7 @@ advisories' queries — reads its own configuration with
   checks it after each `command.executed` (`request_config_refresh`; a write
   through `extension_config.write` is one) and requests an activation when it
   differs; a changed definition refills a materialized model.
-- **Lenses and advisories** read the values stored now each time they run
+- **Pages and advisories** read the values stored now each time they run
   (`SqlGateway::with_extension_config`), so a change applies to the next
   run with no republish. A check (`oxplow extension check`, the effect report)
   reads no stored settings and compiles against the declared `defaults`.
@@ -470,99 +470,118 @@ command-bus path end to end (`extension_private_state_tests.rs`: write/read,
 owner isolation, disable keeps rows, precedence, value-free refusals, restart
 over a database file); adversarial and concurrency coverage is still to do.
 
-> **Status: built (epic tsk275; host finished in tsk278).**
+> **Status: built.**
 > - **Current:**
->   - loading project extensions and their lenses from
+>   - loading project extensions and their pages from
 >     `.oxplow/extensions/` (see "What works today" below);
->   - running and validating lenses over IPC and MCP;
+>   - running and validating pages over IPC and MCP;
 >   - the `oxplow-extension` agent skill;
->   - the lens page and the launcher's "Lenses" section;
+>   - the launcher's page sections (a page's `category`);
 >   - sharing: `oxplow.extension.share` / `unshare` move a source in or out
 >     of git, and a teammate deploys it in their checkout ("Sources and
 >     deployments": boot deploys nothing);
->   - Explore Data (oxplow-foundation's custom page, with Save as Lens) and
->     lens tiles on dashboards;
->   - **bundled extensions** (compiled in, read-only, reserved names) and
->     the `oxplow-foundation/changes.sections` **slot**; the bundled `oxplow-bundled` extension
->     holds the effort review packet;
+>   - Explore Data (oxplow-foundation's custom page, with Save as Page);
+>   - **bundled extensions** (compiled in, read-only, reserved names).
+>     `oxplow-bundled` holds the effort review packet and the analytics
+>     pages; core works with it disabled;
 >   - `exec` **sources** that bring external records in as entities. The
 >     mechanics and decisions are in
 >     [semantic-layer.md](./semantic-layer.md) → "User and extension
->     sources", and a tested example is in `examples/extensions/github/`.
->   - **slots** (now `oxplow-foundation/changes.sections`, `vcs.commit.details`,
->     `vcs.status.details`, `work_item.detail.body`, `thread.plan.header`),
->     **advisories**, per-project **disabling**, and the
->     **analytics extraction** (tsk280): every analytics page and
->     widget is now a lens in `oxplow-bundled`, and core works with
->     it disabled (checked headless, 2026-09-27).
->   - lens alerts (tsk316; the `rail` slot they mounted in became panels
->     in P6.G1), and extension-declared
->     measures, metrics and fact collectors (tsk311, gauges until P7.B3;
->     see "Contributing metrics").
-> - **Current:** extension-declared dimensions (tsk328).
-> - **Current:** lens action buttons (tsk329) and the `settings.section` slot (then `settings`)
->   (tsk330).
-> - **Current (P1, 2026-09-28/29):** manifest v2 with `intent`
->   and the stable/experimental split (tsk413), the textual
->   v1→v2 migrator (tsk414, removed with the v1 reader in tsk865), the
->   catalog cache (tsk415, tsk390) and the SDK: `oxplow extension
->   new|check|test` (tsk416; "The SDK").
+>     sources", and a tested example is in `examples/extensions/github/`;
+>   - **slots** on pages (`oxplow-foundation/diff-view.sections`,
+>     `commit.sections`, `uncommitted-changes.sections`,
+>     `work-item.sections`, `tasks.sections`, `new-session.sections`,
+>     `diff.file-header`), **advisories**, per-project **disabling**;
+>   - page alerts, panels, and extension-declared measures, metrics,
+>     dimensions and fact collectors (see "Contributing metrics");
+>   - whole-page and row actions;
+>   - manifest v2 with `intent` and the stable/experimental split, the
+>     catalog cache and the SDK: `oxplow extension new|check|test`
+>     ("The SDK").
 >
 > When a piece ships, move it from "target" to "current" here, in the
 > same commit.
 
 ## What works today
 
-Code: `crates/oxplow-app/src/extensions.rs` (the loader, lens runs and
-validation), `crates/oxplow-rpc/src/commands/extensions.rs` (IPC), and the
-lens tools in `crates/oxplow-mcp/src/lib.rs`.
+Code: `crates/oxplow-app/src/extensions.rs` (the loader),
+`crates/oxplow-app/src/pages/` (the page schema, runner, open runs,
+actions, checks and text renderings), `crates/oxplow-rpc/src/commands/extensions.rs`
+and `pages.rs` (IPC), and the page tools in `crates/oxplow-mcp/src/lib.rs`.
+The authoring format, as agents learn it, is in the `oxplow-extension`
+skill's `references/` (`page-format.md`, `loaders.md`, `view-nodes.md`);
+the user guide is `docs/guide/pages.md`.
 
 - **Files.**
   - `.oxplow/extensions/<name>/extension.yaml` is a **manifest v2**
     (`manifest: 2`, `name` = the folder, `intent`, the
-    contribution kinds; see "`extension.yaml`" below).
-  - `lenses/<slug>.yaml` contains `title`, `description`, `query`, `viz`
-    (`table` | `list` | `number` | `markdown`), `params` (`name`, `label`,
-    `default`, `type`, `presets`, …), `columns` (`key`, `label`, `select`, `link: {kind: page | file |
-    wiki | effort-diff | …, from}` — a work item links as `page` by its
-    URI) and `empty`.
+    contribution kinds; see "`extension.yaml`" below). It has no `pages:`
+    key: pages are files.
+  - `pages/<slug>.yaml` is one page: metadata (`title`, `description`,
+    `label`, `icon`, `category`, `keywords`, `params`, `answers`, `actions`,
+    `alert`, `badge`, `needs`, `for` / `accepts` / `default` / `pinned`,
+    `comments`, `refresh`, `hidden`, `tool`), `data:` (named loaders: `sql`,
+    `command`, `page`, `rows`) and `view:` (a tree of nodes, with an optional
+    `rail:`). Details: [pages-and-tabs.md](./pages-and-tabs.md) "Page files".
   - Unknown keys are errors, so typos surface instead of being ignored.
-- **Ids.** A lens id is `<extension>/<slug>`.
+- **Ids.** A page id is `<extension>/<slug>`.
 - **Reading.** What the app shows is the **live set**: each extension's
   active deployment ("Sources and deployments"), whichever stream is open:
-  listings, lens pages, slots and panels, custom components, prompts,
-  advisories, `oxplow.lens.show` / thread answers and
-  `oxplow_get_open_page`. A stream's `stream_id` only scopes the data a lens
-  reads (`:stream_id` / `:thread_id`). Reads go
-  through `Services.extension_catalog`
-  (`crates/oxplow-app/src/extension_catalog.rs`). `find_lens`,
-  `oxplow_run_lens` and the advisory/metric/source
-  readers take the catalog; the authoring checks
-  (`oxplow_validate_extension`, preview) load the source instead.
-  `ExtensionCatalog::snapshot` returns immutable declarations with their
-  generation identity; `runtime_snapshot` is the last committed catalog plus
-  immediate disable/removal revocation. The raw `snapshot` is the
-  authoring/candidate view, with a staged change in it.
-- **Params.** Values are bound as `:name` (`SemanticLayer::query_sql_named`).
-  Supplied values override defaults. An unknown param name is an `Invalid`
-  error, so a typo can't silently fall back to a default. A param with no
-  default and no value binds NULL.
+  listings, pages, slots and panels, custom components, prompts,
+  advisories, `oxplow_show_page` and `oxplow_get_open_page`. A stream's
+  `stream_id` only scopes the data a page reads (`:stream_id` /
+  `:thread_id`). Reads go through `Services.extension_catalog`
+  (`crates/oxplow-app/src/extension_catalog.rs`). `find_page`, the page
+  tools and the advisory/metric/source readers take the catalog; the
+  authoring checks (`oxplow_validate_extension`, preview) load the source
+  instead. `ExtensionCatalog::snapshot` returns immutable declarations with
+  their generation identity; `runtime_snapshot` is the last committed
+  catalog plus immediate disable/removal revocation. The raw `snapshot` is
+  the authoring/candidate view, with a staged change in it.
+- **Params.** Values are bound as `:name`. Supplied values override
+  defaults; for a param the viewer's context supplies (`stream_id`,
+  `thread_id`) the context comes second. An unknown param name is an
+  `Invalid` error, so a typo can't silently fall back to a default. A param
+  with no default and no value binds NULL. `head_sha`, when a page declares
+  it, is the viewed stream's HEAD: the run resolves it, and a change to
+  `v_stream` (a commit, a branch switch) runs again the loaders that bind it.
 - **Errors never cascade.** A missing or bad `extension.yaml`, or a folder
-  name mismatch, marks that extension's `errors` and skips its lenses. A
-  bad lens file is listed in `errors` and skipped; the other lenses still
-  load.
-- **`oxplow_validate_extension`** also dry-runs every lens with its defaults. It
-  reports SQL errors, and `columns` / `link.from` keys that the query
-  doesn't return.
+  name mismatch, marks that extension's `errors` and skips its pages. A
+  bad page file is listed in `errors` and skipped; the other pages still
+  load. A loader that fails shows its error and the rest of the page
+  still shows.
+- **Checks.** `oxplow_validate_extension` and `oxplow extension check` run
+  the load checks and then dry-run every page (`pages::checks::dry_run`):
+  each `sql` loader runs once with its params' defaults, earlier loaders
+  as tables. They report SQL errors and viz nodes whose `columns` or role
+  blocks (`link.from`, `chart.x`, `tree.parent`, …) name a column the
+  loader doesn't return. `command` and `page` loaders do not run (a check
+  acts as no one), so a node they feed is not column-checked.
+  `pages::checks::layout_warnings` adds warnings, never errors: more than
+  six filters, a `choice` with more than twelve options, a description
+  over 200 characters, more than eight sections or eight table columns, a
+  param nothing reads. Load checks also cover an unknown `icon`, a page named by `options_from`,
+  `expand` or a form field's `from` that is not in `pages/`, a `component`
+  node or `viz: custom` naming a component the extension doesn't declare,
+  a `replaceable` target that is not a replaceable component
+  (`v_replaceable`), the renderer rules (below), and the params a panel gives
+  its pages. A slot mount whose host page is not loaded, or has no such
+  slot, is a warning on the mounting extension, and it shows nowhere.
 - **Surfaces.**
-  - IPC and MCP: `run_lens`, `validate_extension`; `get_lens` is IPC
-    only, an agent reads a definition with `oxplow_read` (`oxplow:oxplow/lens?lens=<ext>/<slug>`).
-  - An agent lists lenses, extensions and what each contributes with
-    models, not tools: `v_lens`, `v_extension` and `v_contribution`
-    (restated with each extension generation from the active catalog, the
-    live set; an extension that fails to load holds its generation
-    back, so it is not a row — `oxplow_validate_extension` says why). The UI's
-    `list_extensions` stays IPC.
+  - IPC: `open_page` (starts a run a window keeps open), `run_page`,
+    `get_page`, `page_text`, `page_form`, `submit_page_form`,
+    `run_page_action`, `validate_extension`. MCP: `oxplow_run_page`,
+    `oxplow_find_page`, `oxplow_show_page`, `oxplow_run_page_action`,
+    `oxplow_validate_extension`, `oxplow_preview_extension`; an agent reads a
+    page's definition with `oxplow_read`
+    (`oxplow:oxplow/page?page=<ext>/<slug>`).
+  - An agent lists pages, extensions and what each contributes with
+    models, not tools: `v_page`, `v_page_answer`, `v_page_param`,
+    `v_extension` and `v_contribution` (restated with each extension
+    generation from the active catalog, the live set; an extension that
+    fails to load holds its generation back, so it is not a row —
+    `oxplow_validate_extension` says why). The UI's `list_extensions` stays
+    IPC.
   - **Over MCP these are the authoring tools** and read the caller's
     **source**: an omitted `stream_id` is the caller's own stream
     (its header, else its thread's; the primary only for an anonymous
@@ -570,128 +589,109 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     wrote before it deploys it — the same for `oxplow_preview_extension`
     (a throwaway over that stream's sources, under the project's
     settings: which extensions are on come from the main checkout),
-    `oxplow_run_lens_action` and `oxplow_ensure_change`.
+    `oxplow_run_page` with `draft: true` and `oxplow_ensure_change`.
     `oxplow_preview_collector` reads that stream's files and data but runs
     the deployed entity collector. `oxplow.extension.deploy` names no
     stream: it deploys the main stream's copy.
     `site_search` is the exception by design: omitted, it searches every
-    stream.
-  - **Over IPC (the UI)** they show the live set:
-    `list_extensions`, `get_lens`, `load_component`,
-    and `invoke_component_command` take no stream;
-    `run_lens`, `lens_text`, `lens_form`, `submit_lens_form`,
-    `run_component_query` and `run_lens_action` take one only for the
-    lens's data context. `validate_extension` is an
-    authoring call and checks the named stream's source.
+    stream; it indexes pages as well as the wiki.
+  - **Over IPC (the UI)** they show the live set: `list_extensions`,
+    `get_page`, `load_component` and `invoke_component_command` take no
+    stream; `open_page`, `run_page` and `run_page_action` take one only for
+    the page's data context. `validate_extension` is an authoring call and
+    checks the named stream's source.
   - `oxplow_get_open_page` (an agent's) plus `report_open_page` (UI) are
     current; see "Agents: the MCP surface".
-    Agents write lens files with their normal Edit tool, under the filing
+    Agents write page files with their normal Edit tool, under the filing
     guard, taught by the `oxplow-extension` skill.
 - **UI.**
-  - The desktop draws no lens: no `oxplow/lens` tab (such a URI opens on
-    the `resource` fallback), no `getLens` / `runLens` / `run_lens_action`
-    / `lens_form` / `lens_text` call. Every page is a page file drawn by
-    the page host (pages-and-tabs.md "The desktop host"), its viz nodes by
-    the viz components below. They render `table`,
-    `list`, `number` (through `formatMetricValue`) and `markdown`.
-    Linked cells go through `RouteLink`, so plain-click navigates in the
-    tab.
+  - The desktop draws every page the same way: the page host
+    (pages-and-tabs.md "The desktop host") runs the page, `PageTree` draws
+    its node tree, and its viz nodes use the viz components
+    (`apps/desktop/src/viz/`, entry `VizView.tsx`; the directory
+    keeps the old name). A viz node draws a `table`, `list`, `number`
+    (through `formatMetricValue`), `markdown` and the rest below. Linked cells go
+    through `RouteLink`, so plain-click navigates in the tab.
   - The rail is the page's one place for controls (`PageRail`,
     usability.md "A page's controls are in its rail"): its filter params
     as `ParamRow`s (label beside value, click to edit in place or in a
     popover), its selection params as the picked row, and About this
     page (`origin`). A row shows what it applied at once, before the run
     echoes it. A row click on a column that `select`s a param sets it
-    (`onSetParam` with the row, through a document's or dashboard's
-    parts when the page holds the param). Copy, Add to Context
-    and the whole-lens actions are handed to the nav bar
-    (`toolbarTo`): in its ☰, except a whole-lens action the manifest marks
-    `prominent: true`, which stays a button there (several may; a row,
-    group, drag or edit action can't be — `parse_actions`). In the ☰ the
-    lens's actions sort by label; `submenu: <name>` puts a page action in
-    that submenu, shared with the commands whose `ui.group` is the name (a
-    prominent one can't be in one). Any action may name an `icon` from
-    `extension_resources::ICONS` (the desktop's `src/icons.ts`): alone on
-    its button in the bar, beside its label in a menu. **A lens page is a function of its tab entry**
-    (`tabs/session.ts`): its params are its URI's
-    (`oxplow:oxplow/lens?lens=<ext>/<slug>&k=v#f=v`, a declared page's `oxplow:oxplow/page?page=…&k=v`): the `?`
-    holds its `resource` params, the `#` its filters and picks. A change of
-    a filter or pick goes back through `PageNavigation.setViewParams` with
-    the values that differ from the defaults (`changedParams`, by type) — a
-    filter replaces the entry, a selection pushes one — and a change of a
-    `resource` param navigates to another resource (`withResourceParams`). So a reopened tab, a
-    restart, a bookmark and Back show the same filters and the same
-    pick. Outside a tab it keeps its params itself.
-  - A run failure shows the error inline, with a nudge to ask an agent.
-  - Refresh is opt-in: a lens page offers it only when the lens, or the
-    `pages:` entry, says `refresh: true`. A lens re-runs on its own when
-    the models it read change, so Refresh is for one that reads outside
-    oxplow (an integration's list, a file on disk).
+    (`onSetParam`). Copy, Add to Context and the whole-page actions are
+    handed to the nav bar: in its ☰, except a whole-page action the
+    manifest marks `prominent: true`, which stays a button there (several
+    may; a row, group, drag or edit action can't be — `parse_actions`). In
+    the ☰ the page's actions sort by label; `submenu: <name>` puts a page
+    action in that submenu, shared with the commands whose `ui.group` is the
+    name (a prominent one can't be in one). Any action may name an `icon`
+    from `extension_resources::ICONS` (the desktop's `src/icons.ts`): alone
+    on its button in the bar, beside its label in a menu.
+    **A page is a function of its tab entry** (`tabs/session.ts`): its
+    params are its URI's (`oxplow:oxplow/page?page=<ext>/<slug>&k=v#f=v`): the
+    `?` holds its `resource` params, the `#` its filters and picks. A change
+    of a filter or pick goes back through `PageNavigation.setViewParams`
+    with the values that differ from the defaults (`changedParams`, by
+    type) — a filter replaces the entry, a selection pushes one — and a
+    change of a `resource` param navigates to another resource
+    (`withResourceParams`). So a reopened tab, a restart, a bookmark and
+    Back show the same filters and the same pick. Outside a tab it keeps its
+    params itself.
+  - A run failure shows the error inline, with a nudge to ask an agent. A
+    page whose `needs` are not met (a capability that is not active) runs no
+    loader: its `PageRun.inactive` says what it needs, and the page shows
+    that instead of failing.
+  - Refresh is opt-in: a page offers it only when it says `refresh: true`.
+    A page re-runs on its own when the models it read change, so Refresh is
+    for one that reads outside oxplow (an integration's list, a file on
+    disk).
   - The page re-runs when a model it read changed (`modelsChanged`), when
     facts landed for a measure its `metric_grid()` read
-    (`metricSamplesChanged`), when the live set changes —
-    the run's `result.reads` is what it subscribes to (P4.6) — and after a
+    (`metricSamplesChanged`), when the live set changes, and after a
     reconnect (`onRemoteReconnect`): events sent while the daemon was
-    unreachable never arrive, so anything may have changed (tsk1050). Every
-    lens host uses `useRerunOnChange` in `src/lens/lensRerun.ts`.
-  - The Cmd+P launcher re-reads lenses (the live set's) every
-    time it opens and lists them under their `launcher.category`
-    (default **Lenses**; `hidden` ones not at all), merged into the
-    static directory by category order (`mergeDirectory`).
-  - `alert:` marks when a lens needs attention: `{ min_rows: N }` (the
-    run returned at least N rows) or `{ column: c, above: X }` /
-    `below: X` (the first row's value), with an optional `label`. The
-    loader refuses one with both or neither condition. Every `LensRun`
-    (IPC and MCP `run_lens`) carries `alert: {firing, count, value,
-    message}`; the message is `label: count`, `N rows`, or `label: value`.
-  - **Pages** (P6.G2, target §11.3): `pages: [{ id, title, label?, icon?,
-    category?, keywords?, params?, count?, for?, accepts?, default?,
-    pinned?, lens | component }]` — every page is one of these, oxplow's own included
-    (`Extension.pages`, `ExtensionPage`; checked at load in
-    `parse_pages`: a kebab-case, unique id; a lens that exists;
-    lowercase `params`; a `count` lens that exists). Its tab id is
-    the URI `oxplow:oxplow/page?page=<extension>/<id>[&params]`, or `page=<id>` for the extension
-    whose `namespace:` is `oxplow` (oxplow-foundation: its pages are
-    core-named as its commands are, `CORE_NAMESPACE`); `pageRef` carries
-    it. `category` lists it in the launcher (none: a page only opened
-    from elsewhere — a diff, a form); `keywords` are more words the
-    launcher matches; `count` names a `number` lens whose value is its
-    launcher badge (Backlog's ready count). `title` is its name (the
+    unreachable never arrive, so anything may have changed. The daemon
+    keeps each open run (`pages/open_runs.rs`) and tells the window which
+    loaders changed (`PageRunChanged`); `useRerunOnChange` in
+    `src/viz/rerun.ts` is the window's side.
+  - The Cmd+P launcher re-reads pages (the live set's) every time it
+    opens and lists them under their `category` (a page with none, or
+    `hidden: true`, is not listed), merged into the static directory by
+    category order (`mergeDirectory`).
+  - `alert:` marks when a page needs attention: `{ min_rows: N }` (the
+    watched loader returned at least N rows) or `{ column: c, above: X }` /
+    `below: X` (the first row's value), with an optional `label`. The loader
+    watches the `badge:` loader, else the first loader. Loading
+    refuses an alert with both or neither condition. Every `PageRun` (IPC
+    and MCP) carries `alert: {firing, count, value, message}`; the message
+    is `label: count`, `N rows`, or `label: value`. `badge: { loader,
+    column? }` is a count on the page's nav entry (the loader's first row's
+    value, else its row count; Backlog's ready count).
+  - **Pages** (`Extension.page_files`, `pages::schema::Page`; checked at
+    load) — every page is a page file, oxplow's own included. Its tab id is
+    the URI `oxplow:oxplow/page?page=<extension>/<slug>[&params]`, or
+    `page=<slug>` for the extension whose `namespace:` is `oxplow`
+    (oxplow-foundation: its pages are core-named as its commands are,
+    `CORE_NAMESPACE`); `pageRef` carries it. `category` lists it in the
+    launcher (none: a page only opened from elsewhere — a diff, a form);
+    `keywords` are more words the launcher matches. `title` is its name (the
     launcher's, Open with's); `label` is what its tab says when that
     isn't the name, `{{param.<name>}}` filled from what it shows
     (`label: "{{param.path}}"`; `pages/renderers.ts` `tabLabel`; filled
-    to nothing, the title) and `{{row.<column>}}` from the one row of the
-    page's lens, which must be a document with a `query:` and name that
-    column in its `columns:` (`label_refs`; a dashboard's `{{row.title}}`).
-    The tab says the page's title until the lens has run and its row
-    answers (`PageHost`: `tabLabel` over `labelRow` → `usePageTitle`), then the filled
-    label; a lens that fails keeps the title. Either may take filters:
-    `{{param.sha|short}}` (the first 7 characters), `|basename` (the
+    to nothing, the title) and `{{row.<column>}}` from the first row of the
+    page's first loader. The tab says the page's title until that loader
+    has run (`PageHost`: `tabLabel` over `labelRow` → `usePageTitle`), then
+    the filled label; a loader that fails keeps the title. Either may take
+    filters: `{{param.sha|short}}` (the first 7 characters), `|basename` (the
     last path segment) and `|url` (a web page's host and path, cut to 40),
-    refused if unknown. A renderer's label names
-    params of what it renders, a route's its `params` (else a load error). `body` is what draws it:
-    exactly one of `lens:` or `component:`. `component: oxplow:<name>`
-    names a **built-in page** (`built_in_pages::BUILT_IN_PAGES`) and only
-    the required bundled extension may use it — a stepping stone for
-    oxplow's pages the kit can't draw yet, pinned by
-    `fixtures/built_in_pages.json`. The list grew once with the
-    renderers (`agent-session`, `commit`, `directory`, `editor`,
-    `file-viewer`, `lens`, `resource`, `wiki-page`,
-    `work-item`) and only shrinks again (the editor left as a lens over
-    the `editor` viz). Any other
-    `component: <id>` names one of the extension's own
-    `custom_components` (`PageBody::Component { component:
-    "<ext>/<id>" }`): a **custom page**, the component filling the page
-    body under core's nav bar (a page whose `view:` is one component node, `ComponentPage`), told the
-    page's view params, history state, stream and thread in
-    `init.page`, setting its title and actions as data core draws, and
-    its view params and history state kept in its tab entry
-    ("Custom components", protocol 7). A
-    page's `icon` is one of the resource icons (`ICONS`; an
-    unknown one is a load error); the tab strip, launcher, Go To lists
-    and backlinks draw it (`PageKindIcon` by the page's id), the lens
-    icon when it declares none. A page whose lens or count lens is
-    pruned (`public_contracts`) goes with it. How the desktop draws one:
+    refused if unknown. A renderer's label names params of what it renders
+    (else a load error), a route's its `params`. A page's `icon` is one of
+    the resource icons (`ICONS`; an unknown one is a load error); the tab
+    strip, launcher, Go To lists and backlinks draw it (`PageKindIcon` by
+    the page's id). A **custom page** is a page whose `view:` is one
+    `component` node: the extension's own `custom_components` entry fills the
+    page body under core's nav bar, told the page's view params, history
+    state, stream and thread in `init.page`, setting its title and actions as
+    data core draws ("Custom components"). How the desktop draws a page:
     pages-and-tabs.md "Declared pages".
     **A page with `for` is a renderer** of a resource; one without is a
     route (`oxplow:oxplow/page?page=…`). A URI opens as itself and the
@@ -719,82 +719,81 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       (usability.md "Comments are a page's"). Comments name one URI, so
       `true` is the whole declaration.
     - `default`, `pinned` and `accepts` without `for` are a load error.
-    - A lens renderer must declare a `uri` param, and is run with
-      `{ uri: <the URI's identity> }`. Each other param it declares that
-      the URI carries takes the URI's value (supplied → URI → context →
-      default; `extensions::with_uri_params`, only for a lens some page
-      renders with), so a `path` param of an `oxplow/dir` renderer is the
-      URI's `path`. Its resource params besides `uri`, `stream_id` and
-      `thread_id` must be params of each resource it renders (a load
+    - A renderer is run with the params of the URI it draws: a param it
+      declares that the URI carries takes the URI's value (supplied → URI
+      → context → default), so a `path` param of an `oxplow/dir` renderer
+      is the URI's `path`. Its resource params besides `uri`, `stream_id`
+      and `thread_id` must be params of each resource it renders (a load
       error otherwise: it would never get them); its filters ride in the
-      `#` as any lens's. Its rail doesn't draw `uri` (the page is the
+      `#` as any page's. Its rail doesn't draw `uri` (the page is the
       URI), and another value of a URI param opens that URI
       (`withRenderedParams`, pushed).
-  - **Panels** (P6.G1, target §11.3): `panels: [{ id, title, icon?,
-    scope: project | stream | thread, body, badge?, open?, collapsed?,
-    count?, dock? }]` put a lens in the
-    left nav (with `dock: true` it goes in the bottom dock instead: an
+  - **Panels**: `panels: [{ id, title, icon?, scope: project | stream |
+    thread, body, badge?, open?, collapsed?, count?, dock? }]` put a page in
+    the left nav (with `dock: true` it goes in the bottom dock instead: an
     icon with the count as its badge that opens the body above the bar,
-    and the rail does not draw it) (`open`, a `page` URI, is the page its header opens —
-    a core page it summarizes, as Comments opens the inbox; absent, the
-    body lens). `collapsed` is a lens shown compact while the
-    panel is collapsed, as its summary (absent, a collapsed panel is just
-    its header). `count` is a lens whose row count — a `number` lens's
-    value — is the header's count, raising no alert; with a `badge` too,
-    the count lens's number shows and the badge still feeds Alerts
-    (`panelCount`). (`Extension.panels`, `ExtensionPanel`; checked at load in
-    `parse_panels`: a kebab-case id, lenses that exist — body, badge,
-    collapsed, count — a badge with an
-    `alert`, and a `stream` / `thread` scope's lenses declaring
-    `stream_id` / `thread_id`). The nav binds those itself
-    (`panelParams`: the stream's and thread's row ids for the stream and
-    thread it's shown for, re-run when they change) rather than leaving
-    the backend to infer the thread from the selection, and runs every
-    panel's lenses from one owner (`useExtensionPanelRuns`), each distinct
-    lens once per refresh whatever roles it plays. The body renders compact; the badge's
-    alert count shows on the panel, and the **Alerts** panel and page (the dock's bell) list
-    every firing badge. oxplow-bundled's Waiting on You is a panel
-    whose badge is its own lens.
-  - **Actions are commands** (P6.B1, target §11.4): `actions:` declares
-    `{ id, label, command, input?, row? }` — a button above the result, or,
-    with `row: true`, an item in each row's menu — every row of every row
-    component (table, list, tree, timeline, detail, steps, hunks) is
-    focusable and opens it from a right-click or the Menu key / Shift+F10. A command
-    that asks shows `CommandConfirm` from `LensResultView` itself, above
-    the body, so it asks wherever the row is (an answer in the strip, a
-    document's section, a dashboard tile), not only where the toolbar is shown.
+    and the rail does not draw it). `body`, `badge`, `collapsed` and
+    `count` name **pages of the same extension, by slug**. `open`, a
+    `page` URI, is the page its header opens — a core page it summarizes,
+    as Comments opens the inbox; absent, the body page. `collapsed` is a
+    page shown compact while the panel is collapsed, as its summary
+    (absent, a collapsed panel is just its header). `count` is a page whose
+    first cell (else row count) is the header's count, raising no alert; with
+    a `badge` too, the count page's number shows and the badge still feeds
+    Alerts (`panelCount`). (`Extension.panels`, `ExtensionPanel`; checked at
+    load in `parse_panels`: a valid, unique id; pages that exist — body,
+    badge, collapsed, count — a badge page with a `badge` or an `alert`,
+    and a `stream` / `thread` scope's pages declaring `stream_id` /
+    `thread_id`). The nav binds those itself (`panelParams`: the stream's and
+    thread's row ids for the stream and thread it's shown for, re-run when
+    they change) rather than leaving the backend to infer the thread from
+    the selection, and runs every panel's pages from one owner
+    (`useExtensionPanelRuns`), each distinct page once per refresh whatever
+    roles it plays. The body renders compact; the badge's alert count shows
+    on the panel, and the **Alerts** panel and page (the dock's bell) list
+    every firing badge. oxplow-bundled's Waiting on You is a panel whose
+    badge is its own page. A page dropped by `public_contracts` takes the
+    panel parts that name it with it.
+  - **Actions are commands**: `actions:` on a page declares
+    `{ id, label, command, input?, … }` — a button in the nav bar or its ☰
+    menu; on a viz node, with `row: true`, an item in each row's menu —
+    every row of every row component (table, list, tree, timeline, detail,
+    steps, hunks, board) is focusable and opens it from a right-click or the
+    Menu key / Shift+F10. A command that asks shows `CommandConfirm` from
+    the page itself, above the body, so it asks wherever the row is, not only
+    where the toolbar is shown. An embed node's page actions run on the
+    **embedded run**: pressing one on an embedded page acts on that page's
+    loaders (`<embed id>/<node id>` names the node).
     - `input` is the command's input. A string that is exactly
       `{{param.<name>}}` or `{{row.<column>}}` becomes that value, typed
       (a number stays a number); a string containing them has them spliced
       in as text. `{{param.<name>.id}}` is the key of a URI param, for a
-      field that takes a bare id. The values go into the command's input, never into SQL.
-      One tokenizer reads them (`oxplow_domain::template` — every
-      template's, a command's `ui.input` and `open_after` too), for
+      field that takes a bare id. The values go into the command's input,
+      never into SQL. One tokenizer reads them (`oxplow_domain::template` —
+      every template's, a command's `ui.input` and `open_after` too), for
       load-time validation and run-time binding alike, so the two can't
-      disagree.
-      At load, a `{{param.x}}` must name a declared param and `{{row.x}}`
-      needs `row: true` — or a lens that holds one row (detail, form,
-      markdown, a document with a `query:`), where a whole-lens action may
-      name `{{row.x}}` and `when:` too and means that row;
-      `oxplow_validate_extension` checks `{{row.x}}` and `when` against
-      the result's columns; the command name must be well-formed. Any
-      other shape is a field error.
-    - **A whole-lens action over a one-row lens** (`LensAction::one_row`)
-      is derived at load, not declared: an action without `row: true`
-      that names `when:` or `{{row.*}}`, on a lens that holds one row.
-      The server reads the row itself (`lens_actions::bind_one_row`, before
-      `prepare_lens_action` and `action_form`): it runs the lens with the
-      call's params, refuses unless it has exactly one row ("the lens has N
-      rows; a whole-lens action needs one") and refuses a `row` the caller
-      passes, then binds and checks `when` as for a row action. A person's
-      press, a form's prefill (a Rename… starting from the name) and
-      `oxplow_run_lens_action` are the one path. The window shows such a
+      disagree. At load, a `{{param.x}}` must name a declared param and
+      `{{row.x}}` needs `row: true` — or a node that holds one row (detail,
+      form, markdown), where an action may name `{{row.x}}` and `when:` too
+      and means that row; a whole-page action's `{{row.x}}` means the first
+      loader's one row. `oxplow_validate_extension` checks `{{row.x}}` and
+      `when` against the loader's columns; the command name must be
+      well-formed. Any other shape is a field error.
+    - **An action over a one-row result** (`PageAction::one_row`) is
+      derived at load, not declared: an action without `row: true` that
+      names `when:` or `{{row.*}}`, on a page or node that holds one row. The
+      server reads the row itself (`pages::actions::page_row`, and the node's
+      row for a viz node): it refuses unless the loader has exactly one row
+      ("its first loader has N rows") and refuses a `row` the caller passes,
+      then binds and checks `when` as for a row action. A person's press, a
+      form's prefill (a Rename… starting from the name) and
+      `oxplow_run_page_action` are the one path. The window shows such a
       button only while the result has exactly one row and `when` holds
-      (`offeredWholeLens`, the one predicate the toolbar, a part's buttons
-      and the page's hand-up share).
+      (`offeredWholePage`, the one predicate the toolbar and the page's
+      hand-up share).
     - **Drag, bulk and key actions.** `drag: true` makes a row action
       what a drop runs (`rowInteract.ts`, `RowsBody`): a row the action is
-      offered on (`when`) drags (`LENS_ROW_DRAG_MIME`, taken only by the view
+      offered on (`when`) drags (`VIZ_ROW_DRAG_MIME`, taken only by the view
       it came from; a marked row carries every marked row), and where it
       lands binds `{{before.*}}` (the row below the drop), `{{after.*}}`
       (the row above), `{{onto.*}}` (the row dropped on: its middle third,
@@ -804,41 +803,40 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       (not only the drawn ones) in its order after the drop, the dragged
       rows moved before the row below, else after the row above, else to
       the end (`withOrder`; a drop onto a row moves nothing), so a command
-      that takes a whole new order (`oxplow.dashboard.reorder_items`'s
-      `order`) gets one. `{{order.*}}` binds a list, so it is only a field's
-      whole value (spliced into text or put in a list it is an error), and
-      a drop always has one (`Drop.order`; without it the field is an
-      error, never left out). A field that is exactly one of the others
-      with nothing there is **left out** of the input (a drop at a list's
-      end has no row below), so a command's optional field stays absent;
-      one spliced into text, or in a list, with nothing there is an error.
-      Every drop scope needs `drag: true`, and its column must be in the
-      result. Several drag actions may be
-      declared: a drop runs the first the row is offered whose places are
-      all there (one naming the group needs a group; one naming `onto` needs
-      a row dropped on; one naming the order needs it). Rows dropped together run it once each, in drawing
+      that takes a whole new order gets one. `{{order.*}}` binds a list, so
+      it is only a field's whole value (spliced into text or put in a list
+      it is an error), and a drop always has one (`Drop.order`; without it
+      the field is an error, never left out). A field that is exactly one of
+      the others with nothing there is **left out** of the input (a drop at a
+      list's end has no row below), so a command's optional field stays
+      absent; one spliced into text, or in a list, with nothing there is an
+      error. Every drop scope needs `drag: true`, and its column must be in
+      the result. Several drag actions may be declared: a drop runs the first
+      the row is offered whose places are all there (one naming the group
+      needs a group; one naming `onto` needs a row dropped on; one naming the
+      order needs it). Rows dropped together run it once each, in drawing
       order, each after the one before it. The press carries the `drop`
-      (`lens_actions::Drop`); a drop on another action, or a drag action
+      (`viz_actions::Drop`); a drop on another action, or a drag action
       pressed without one, is `Invalid` at `/drop`. `bulk: true` puts a row
-      action in the **marks bar** (which stands in for the lens's buttons
+      action in the **marks bar** (which stands in for the page's buttons
       while rows are marked, the page's nav-bar actions too): it runs once
       per marked row it is offered, in order, asking once and toasting once.
       `key: <k>` (one character, or `Delete` / `Backspace`; never one the
       row list keeps — Enter, Escape, Space, Tab, the arrows, Home, End,
-      Page Up/Down, the menu key — nor one taken twice in a lens) runs a row
+      Page Up/Down, the menu key — nor one taken twice in a node) runs a row
       action on the cursor row, or on the marked rows when it is `bulk`. The
       marks themselves are the kit's (usability.md "Rows: marks, drags and
-      keys"), kept per lens in the entry's history state.
+      keys"), kept per node in the entry's history state.
     - **Edit actions.** `edit: true` makes an action the Save of a
       `markdown` viz's editor: a form over the viz's first row (`row` and
       `form` implied). Its **edited field** is the one input field bound
       exactly to a `{{row.<column>}}` and not `fixed`
-      (`LensAction.edit_field`, `extensions::edit_column`); Save runs it
+      (`PageAction.edit_field`, `extensions::edit_column`); Save runs it
       with `{ <field>: <the text> }` as the form's input, laid over the
       bound input as any form's is. The viz must name that column as its
       text (`markdown: { text: <column> }`). Refused at load: no such
       field or several ("fix all but one"), `edit` with `drag`, `bulk`,
-      `key`, `group` or `primary`, two edit actions in a lens, an edit
+      `key`, `group` or `primary`, two edit actions on a node, an edit
       action off a `markdown` viz, a `markdown` text other than the one
       it saves.
     - **`when: <column>`** (row actions only): the action is offered only on
@@ -846,16 +844,18 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       row menu leaves it out elsewhere (`actionOffered`), and a run on such
       a row is refused. `oxplow_validate_extension` checks the column is in
       the result. The query computes the condition (`can_enable`).
-    - **A lens grants no power.** `lens_actions::run_lens_action` runs the
-      command through the bus as `Actor::Lens { lens_id, on_behalf_of }`
-      — `Human` from the UI (`run_lens_action` RPC), the calling agent from
-      MCP `oxplow_run_lens_action` (which never confirms). The bus applies the
-      agent policy through `on_behalf_of`. A command that asks
-      (`confirm`) asks only a person; a lens run an agent pressed runs
-      without asking. The audit records the lens's URI.
+    - **A page grants no power.** `pages::actions::run_page_action` runs the
+      command through the bus as `Actor::Page { page_id, on_behalf_of }`
+      (`page_id` is `<extension>/<page>`, with `#<node>` for a node's
+      action) — `Human` from the UI (`run_page_action` RPC), the calling
+      agent from MCP `oxplow_run_page_action` (which never confirms). The
+      bus applies the agent policy through `on_behalf_of`. A command that
+      asks (`confirm`) asks only a person; a page action an agent pressed
+      runs without asking. The audit records the page's URI as its source
+      (V114 added the `page` actor kind).
     - **The command runs after the read.** An action, a form submit and
       a component's invoke are resolved under one pinned catalog
-      generation (`lens_actions::Prepared`: the lens, its `when`, the
+      generation (`viz_actions::Prepared`: the page, its `when`, the
       bound input, the bundle's commands), and the command runs once
       that pin is released. Activation waits for every reader of the
       generation it replaces, so a command that activates (the
@@ -865,49 +865,51 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     - A command that asks (`NEEDS_CONFIRMATION`, now kept on the thrown
       `IpcCallError`'s `code`) shows a confirm strip in the toolbar: Run
       (focused, Enter) or Cancel (Escape).
-    - **Every lens has Copy** (its text rendering, the `lens_text` RPC)
-      **and Add to Context** (`[oxplow lens <id> params…]` into the
-      agent's input, never sent) — kit affordances, not declared. A
-      compact strip and a composite's parts (`toolbar={false}`) show no
-      toolbar.
+    - **Every page has Copy** (its text rendering, the `page_text` RPC, from
+      `viz_text.rs` and `pages::text`) **and Add to Context**
+      (`[oxplow page <id> …]` into the agent's input, never sent) —
+      kit affordances, not declared. A compact strip (a panel body, an
+      embed) shows no toolbar.
     - Running a collector is the command **`oxplow.collector.sync { collector }`**
       (External; `collector_runner::CollectorRunner::sync`,
       which the scheduler uses too). It **never grants**: what a collector
       may reach is its extension's `permissions:`, approved at deploy
       ("Permissions"). An agent's `run_command oxplow.collector.sync` runs it as the
       agent.
-    - UI: the row menu and part buttons in `LensResultView.tsx`, pressed
-      on the page run (`run_page_action`); logic in `lens/lensActions.ts`
-      (`performLensAction`, `rowRecord`). Copy is the page host's
+    - UI: the row menu and buttons in `VizView.tsx`, pressed
+      on the page run (`run_page_action`); logic in `viz/vizActions.ts`
+      (`performVizAction`, `rowRecord`). Copy is the page host's
       (`page_text`), Add to Context the ☰'s.
-    - The GitHub example's PR lens has a Sync PRs action
+    - The GitHub example's PR page has a Sync PRs action
       (`command: oxplow.collector.sync`).
-  - **Viz** (`LensResultView.tsx`): `table`, `list`, `number`, `markdown`,
-    plus `bar` (`DailyBarChart`), `line` (`components/charts/TrendChart`,
-    one chart per `chart.series`), `treemap` (two-level
-    `components/charts/squarify`), the composites `document` and
-    `dashboard` (parts run with the params they declare), and the structure components (P6.A2): `tree`
-    (collapsible nesting by `tree.parent`; orphans are roots, a cycle is
-    cut), `timeline` (oldest first, linked through `timeline.uri`),
-    `detail` (the first row as label/value pairs), `steps` (a checklist
-    by `steps.status`: done, active, failed, else pending) and `hunks`
-    (each row's file diffed between `hunks.from` and `hunks.to` in the
-    diff viewer, `DiffPane`, one expanded at a time), and **`form`**
-    (P6.B2): `form: { command, defaults? }` renders the command's
-    `input_schema` as a `SchemaForm`, its fields starting from `defaults`
-    (placeholders bound like an action's) under the query's first row —
-    a form needs no `query` (RPC `lens_form` returns the spec and those
-    values). Submitting (RPC `submit_lens_form`,
-    `lens_actions::submit_form`) runs the command as the lens acting for
-    the person, the defaults under what they entered; a command that asks
-    shows `CommandConfirm`. A form's text rendering names its command
-    (an agent runs the command itself). Only a form and a composite (`document` / `dashboard`, which renders its parts; its query, if any, is one row its parts are given) omit `query`. The loader drops a
-    lens missing the column roles its viz needs, naming the block
-    (`chart`, `tree`, `timeline`, `steps`, `hunks`), and
-    `oxplow_validate_extension` checks every named column exists in the result
-    (`Lens::role_columns`). Pure data shaping lives in `lensModel.ts`
-    (`barRows`, `lineSeries`, `treemapItems`, `treeNodes`,
-    `timelineEntries`, `stepItems`, `hunkRows`, `childParams`).
+  - **Viz** (`VizView.tsx`; the `Viz` enum and `VizConfig` in
+    `extensions.rs`): `table`, `list`, `number`, `markdown`, `bar`
+    (`DailyBarChart`), `line` (`components/charts/TrendChart`, one chart per
+    `chart.series`), `treemap` (two-level `components/charts/squarify`),
+    `board`, and the structure components: `tree` (collapsible nesting by
+    `tree.parent`; orphans are roots, a cycle is cut; `lazy` and `branch`
+    read one level per param value), `timeline` (oldest first, linked
+    through `timeline.uri`), `detail` (the first row as label/value pairs),
+    `steps` (a checklist by `steps.status`: done, active, failed, else
+    pending) and `hunks` (each row's file diffed between `hunks.from` and
+    `hunks.to` in the diff viewer, `DiffPane`, one expanded at a time).
+    The full-height ones (`Viz::fills`) are `code`, `diff`, `editor`,
+    `terminal` and `embed`; `approvals` is core's consent list; `custom` is
+    an extension's sandboxed component. **`form`**: `form: { command,
+    defaults? }` renders the command's `input_schema` as a `SchemaForm`, its
+    fields starting from `defaults` (placeholders bound like an action's)
+    under the loader's first row — a form needs no `from`
+    (RPC `page_form` returns the spec and those values). Submitting (RPC
+    `submit_page_form`, `pages::actions::submit_page_form`) runs the command
+    as the page acting for the person, the defaults under what they
+    entered; a command that asks shows `CommandConfirm`. A form's text
+    rendering names its command (an agent runs the command itself). The
+    loader drops a page whose viz node lacks the column roles its viz
+    needs, naming the block (`chart`, `tree`, `timeline`, `steps`,
+    `hunks`), and `oxplow_validate_extension` checks every named column
+    exists in the loader's result (`VizConfig::role_columns`). Pure data
+    shaping lives in `vizModel.ts` (`barRows`, `lineSeries`, `treemapItems`,
+    `treeNodes`, `timelineEntries`, `stepItems`, `hunkRows`).
 - **Sharing.** There are three levels:
   - **Yourself.** A source is personal (`.oxplow/.gitignore` ignores it). It
     runs after `oxplow.extension.deploy`.
@@ -925,19 +927,18 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     [architecture.md](./architecture.md) → "A repo's config never runs a
     program without consent").
 - **Explore Data: oxplow-foundation's data app.** Deliberately simple,
-  and the proof that an extension ships a data app: a **custom page**
-  (`pages: [{ id: explore-data, component: explore-data, rail:
-  explore-catalog }]`, the component in
-  `extensions/oxplow-foundation/src/explore-data/`, built with the
-  Timeline by foundation's `package.json`). Core draws what the kit
-  draws; the component holds only the editor and the pickers.
-  - **The catalog** is the page's **rail**, a declared lens
-    (`lenses/explore-catalog.yaml`: a `list` over `v_model`, oxplow's own
-    first, its `view` column selecting `model`, the picked row
-    emphasized). A pick pushes `#model=` (Back un-picks) and the
-    component hears it.
+  and the proof that an extension ships a data app: a **page with a
+  component node** (`pages/explore-data.yaml`: `view: { component: { id:
+  explore-data } }`, the component declared under `custom_components:`,
+  its source in `extensions/oxplow-foundation/src/explore-data/`, built
+  with the Timeline by foundation's `package.json`). Core draws what the
+  kit draws; the component holds only the editor and the pickers.
+  - **The catalog** is the page's **rail**: a `rail:` node in the same
+    page file (a `list` over `v_model`, oxplow's own first, its `view`
+    column selecting the `model` param, the picked row emphasized). A
+    pick pushes `#model=` (Back un-picks) and the component hears it.
   - **The component** (`main.ts`, its pure half `model.ts`, tested from
-    the desktop as `lens/exploreDataModel.test.ts`): the picked model's
+    the desktop as `viz/exploreDataModel.test.ts`): the picked model's
     documented columns (`v_model_column`) and lineage (`v_model_lineage`:
     the models it reads, links that pick them, the tables it reads, the
     models that read it); the SQL box (a pick writes `SELECT * … LIMIT
@@ -952,7 +953,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     rewritten. Its view is the tab's `#` (`model`, `sql`, `viz`, `chart`,
     `template`), the unrun draft its history state; it ignores the echoes
     of its own writes, so only a real move (Back) redraws. "Ask your agent
-    to build one…" invokes `oxplow.lens.draft_with_agent`, the one command
+    to build one…" invokes `oxplow.page.draft_with_agent`, the one command
     it declares.
   - **The result** is core's: the component hands the page an inline
     page (`showView`, protocol 12: its query as one `sql` loader, its viz
@@ -965,50 +966,26 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     component `INVALID` with its field, and it shows the reason under the
     SQL box.
   - **No raw tables.** The React page's Raw tables switch read physical
-    tables over IPC; a component reads models only, as every lens does.
+    tables over IPC; a component reads models only, as every page does.
     Raw reads stay the agent's `oxplow_query_sql`.
-  - **Thread answers** (P6.C1, `commands/lens.rs`,
-    `oxplow-db/src/thread_answer_store.rs`). An agent answers with a lens
-    rather than pasting rows: MCP **`oxplow_show_lens { lens | spec, params? }`**
-    runs `oxplow.lens.show`, which stores a `thread_answer` (V124, model
-    `v_thread_answer`, URI `oxplow:oxplow/answer?id=<id>`) and returns the text rendering.
-    - **One lens shape, `LensSpec`**: what a lens file holds, what an
-      answer stores and what `oxplow.lens.keep` writes (`Lens::from_spec`,
-      `Lens::spec`). `extensions::save_lens(root, ext, slug, &spec,
-      &LensOrigin)` refuses a spec with a `spec_problem` (no title, a
-      composite or a `custom` lens, or a `form`: a form's submit runs its command
-      as the person, and an answer an agent chose never does — so no
-      answer, and no kept spec, is a form), writes the YAML
-      pruned of nulls and empties, and — when the file doesn't then load —
-      removes it and reports the loader's errors. Serialize a spec's JSON
-      values with `plain_json` (serde_json's `arbitrary_precision` makes
-      numbers maps under `serde_yaml`).
-    - An answer's query is agent SQL: `oxplow.lens.show` checks it with the same
-      read-only authorizer as `query_sql` before storing anything.
-      `run_answer` (RPC and MCP) re-runs it.
-    - **Keep This** is `oxplow.lens.keep`: the answer becomes a lens in
-      `my-lenses` (params → defaults, `intent.origin` the thread), written
-      into that extension's source and deployed. The lens is live when the
-      command returns. The target goes through
-      `extensions::writable_extension_dir` first — the one check every
-      writer of an extension's files runs (a valid name, not bundled), so a
-      path or reserved name never reaches the filesystem — and a failed
-      deploy removes only the files it wrote (never a directory that was
-      there before).
-    - **UI.** The desktop no longer draws answers: the `answer` viz
-      (`AnswerViz`), Keep This in the window and the shown-answers watcher
-      (`shownAnswers.ts`) are gone. What an agent shows is a page or an
-      inline view (`oxplow.page.show`, pages-and-tabs.md "Showing a
-      page"), saved with Save as Page or Save to wiki.
-    - The launcher's new **Data** category holds Explore Data, Metrics
-      and Dashboards.
+  - **What an agent shows.** An agent answers with a page rather than
+    pasting rows: MCP **`oxplow_show_page { page | spec, params? }`** runs
+    `oxplow.page.show`. A `spec` is an inline page of the agent's own
+    (read-only, no actions or forms). It opens beside the conversation
+    as a view (`oxplow:oxplow/view?id=…`) and the call returns the page's
+    text. The person saves it with **Save to wiki** or **Save as Page**
+    (`oxplow.extension.write_page`). Nothing else is stored: there are no
+    thread answers and no Keep This. See pages-and-tabs.md "Showing a
+    page".
+  - The launcher's **Data** category holds Explore Data, Metrics
+    and Dashboards.
 - **Sources (collectors).** Declared under `collectors:` in `extension.yaml` (v1: `sources:`) and parsed
   into `Extension.sources`. A bad source is reported in `errors` without
-  hiding the extension's lenses. Settings → Data shows each source
+  hiding the extension's pages. Settings → Data shows each source
   (runtime, schedule, row counts or failure, Sync Now);
   Settings → Extensions keeps each extension's source credentials.
-- **Settings shows what `extension check` finds** (tsk1039). Loading can't
-  catch a lens whose SQL fails (it never runs the SQL), so Settings →
+- **Settings shows what `extension check` finds.** Loading can't
+  catch a page whose SQL fails (it never runs the SQL), so Settings →
   Extensions runs `oxplow_validate_extension` — the same dry run `oxplow extension
   check` prints — for each enabled project extension, on open and on
   `extensionsChanged`, and lists its errors with the load errors, once
@@ -1018,8 +995,8 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   measures, dimensions and metrics oxplow records itself (tokens, efforts, tests,
   coverage, analysis, work items: its `measures:` / `dimensions:` / `metrics:`,
   scope `extension:oxplow-foundation`; the producers' Rust only records the facts).
-  `oxplow-bundled` (tsk1084) holds the
-  review packet, the analytics lenses and the agent's advisories in one
+  `oxplow-bundled` holds the
+  review packet, the analytics pages and the agent's advisories in one
   extension, because the point is building oxplow on its own extension
   platform, not letting people pick between its features. It can still be
   disabled like any other.
@@ -1034,30 +1011,26 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     - a project folder with that name is listed with an error and never
       shadows the bundled one;
     - `oxplow.extension.deploy` of the name resolves to the shipped deployment;
-    - `extensions::save_lens` (the writer behind `oxplow.lens.keep`) refuses to
-      write into a bundled extension.
-- **Slots (current: see "Slots" below).**
-  - `extension.yaml` declares `ui: { slots: [{slot, lens}] }` (v1:
-    top-level `slots`). `SLOTS` in
-    `extensions.rs` names each slot and the params it **offers**; a
-    mounted lens gets the ones it declares and must declare at least one,
-    or the mount is an error. Loaded as `Extension.ui.slots`.
-  - The desktop draws no lens slot (`LensSlots` is gone): a page's `slot`
-    node shows the pages mounted there (`ui.slots` with `page:`), each a
-    section titled by its page; a lens mount draws nothing.
-    the Changes page offers `effort_id`, `effort` and `change_id` (its row); WorkItemPage `uri`
-    (body and sidebar; the item's URI, whichever list); GitCommitPage and UncommittedChangesPage `change_id`, plus
-    UncommittedChangesPage's strip `stream_id`.
-    Numeric ids come from `numericRowId` (`tsk42` → 42).
-  - **Latest request wins** (`src/request-guard.ts`, tsk370). LensSlots,
-    LensPage and ExploreDataPage `begin()` each fetch and apply its result
-    only while it's still the newest; new params (another thread, lens or
-    stream) clear the old results first, so thread A's rows never show
-    under thread B.
-  - `change_id` comes from `src/lens/useChange.ts`: it calls
-    `oxplow_ensure_change` on mount and again whenever `v_change` changes
-    (`shouldReensure`): the analysis landed, or the `change.analyze`
-    consumer recomputed a working tree or open effort.
+    - `extensions::writable_extension_dir` (the check behind
+      `oxplow.extension.write_page`) refuses to write into a bundled
+      extension.
+- **Slots (see "Slots" below).**
+  - `extension.yaml` declares `ui: { slots: [{slot, page, at?, title?}] }`
+    (v1: top-level `slots`). A slot is a `slot` node in a page, named
+    `<extension>/<page>.<name>` (`oxplow-foundation/diff-view.sections`).
+    A mount whose page is not in `pages/`, or whose name is not that shape,
+    is a load error. A mount whose host page is not loaded, or has no slot
+    of that name, is a warning ("`x` shows nowhere"). Loaded as
+    `Extension.ui.page_slots`.
+  - The mounted page runs as an embed: its params come by name from the
+    host's params, else from the first row of the host's loaders. So the
+    changes page (`diff-view`) offers `change_id` and `effort_id` from its
+    loader row; the work item page offers `uri`; the diff page offers
+    `path` in its `file-header` slot (bundled's co-change page mounts
+    there). The host draws each mounted page as a section titled by its
+    page.
+  - A `stack` folds titled sections that have nothing to show into one
+    closing line (see "A page of sections leads with what matters").
 - **Change links.** `diff-at` (`from` path, optional `line`, `base` and
   `head` columns holding the change's labels; join `v_change`) opens that
   file's diff between the two sides (commit shas / `HEAD` → git refs,
@@ -1065,32 +1038,33 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   change links too). `compare` takes
   a `path:start-end|peer:start-end` value (build it in SQL) plus an
   optional `head` version column and opens the side-by-side
-  `duplicate-block` page, which is now the general compare page (the foundation `duplicate-block` lens: two `code` rows with `sync: true`).
+  `duplicate-block` page, which is the general compare page (two `code`
+  rows with `sync: true`).
   Both URIs carry their whole spec, so App's `handleOpenPage` and
   in-tab navigation register them directly.
 - **Disabling.** An extension that is off contributes nothing: it has
-  `enabled: false` and no lenses, slots or sources, so every consumer
-  ignores it; `find_lens` and `oxplow_run_lens` say it's disabled. Which are
+  `enabled: false` and no pages, slots or sources, so every consumer
+  ignores it; `find_page` and `run_page` say it's disabled. Which are
   on is the team's `extensions:` plus the person's `enableExtensions` /
   `disableExtensions` ("Sources and deployments"). Settings → Extensions
   toggles it through `oxplow.extension.enable` / `disable`.
-- **A page of sections leads with what matters** (tsk1036). Slot sections
-  (`LensSlots`) and a `document`'s sections with no rows (no error, not a composite)
-  fold into one closing line, "Nothing found: Duplication, Co-change
-  Surprises, …", each a link to its lens (`lensModel::foldEmpty`). A
-  section's Copy / Add to Context show on hover or focus (the
-  `.lens-section` rule in `index.html`). The effort page opens with its
+- **A page of sections leads with what matters.** In a `stack`, a
+  titled `viz` section with no rows (no error, not `replaceable`) folds
+  into one closing line, "Nothing found: Duplication, Co-change
+  Surprises, …" (`foldEmpty` in `viz/vizModel.ts`, used by
+  `pages/PageTree.tsx`). The effort page opens with its
   **verdict** above the slots: the `effort.verdict` replacement target
   ("Replacements"), which core leaves empty — what counts as tested,
   covered or backed is a review policy's. oxplow-bundled's
-  `effort-verdict` lens is the default (the last test run, diff coverage
+  `effort-verdict` page is the default (the last test run, diff coverage
   against the `oxplow.coverage.abs_pct` metric's `warnAt`, unverified
   claims, decisions to confirm); another extension may bring its own and
   the person chooses. The task page links to the effort page as
   **Review**: on each effort's activity card, and in the details rail for
   the newest effort.
-- **The review packet** (in `oxplow-bundled`). Its lenses, mounted in
-  `oxplow-foundation/changes.sections`:
+- **The review packet** (in `oxplow-bundled`). Its pages, mounted in
+  the `sections` slots of `oxplow-foundation/diff-view` (the Changes
+  page), `commit` and `uncommitted-changes`:
   - Decisions Made (`v_decision`, `provenance = 'recorded'`)
   - Decisions Oxplow Noticed (`v_decision`, `provenance = 'inferred'`)
   - Unverified Claims (`v_claim` whose `v_oxplow_bundled_claim_status`
@@ -1147,37 +1121,37 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   outside the transaction (not undoable; [commands.md](./commands.md) →
   "Composition") — refuse an
   effort without a work item by name, are `confirm: always`, and are a person's or
-  a lens's — never an agent's. `questions.yaml` + `README.md` (its skill)
+  a page's — never an agent's. `questions.yaml` + `README.md` (its skill)
   say what an agent can read of the packet; a bundled extension's
   questions are checked against a running registry by
   `the_bundled_extensions_answer_their_questions` (oxplow-sdk).
 
-  It also has a Waiting on Me lens, reachable from the launcher:
+  It also has a Waiting on Me page, reachable from the launcher:
   what your agents are waiting on you for (`v_agent_status` with
   `awaiting_user`: a question or plan they put to you, a permission
   prompt, a final message ending in a question), blocked tasks, and open
   notes. Each empty state says what's *good*, e.g.
   "Every claim for this effort is backed by evidence."
 
-  The slot lenses above need `effort_id` / `change_id`, so they're
+  The slot pages above need `effort_id` / `change_id`, so they're
   `hidden` from the launcher (opened there they'd show NULL-param empty
   states). The launcher gets stream-level starters instead, under Work:
   **Recent Decisions** and **Unbacked Claims**, scoped by the implicit
-  `stream_id`. `launcher_lenses_need_no_slot_params` enforces the rule
-  for every bundled lens (tsk374).
+  `stream_id`. `launcher_pages_need_no_slot_params` enforces the rule
+  for every bundled page.
 - **One skill set.** Every agent runtime writes its skills and commands
   from one `AgentText` (`oxplow_domain::agent::text`): core's
   (`OXPLOW_SKILLS` and `CORE_COMMANDS` in
   `crates/oxplow-agent-text/src/lib.rs`) plus what
   extensions offer now ("Skills").
 
-- **P6b (epic tsk592, 2026-10-01).** An extension can also *act* and
+- **P6b (2026-10-01).** An extension can also *act* and
   *extend the shell*: `commands:` (Starlark composing core commands, see
   "Commands"), `ui:` — `slots` in one dotted namespace ("Slots"),
   `commands` in core menus ("Commands in core menus"), `decorators`
   (stable since P10) — and `custom_components:` (stable since P11)
-  rendered sandboxed by
-  `viz: custom` lenses ("Custom components"). Installs, updates and
+  rendered sandboxed by a page's `custom` viz or `component` node
+  ("Custom components"). Installs, updates and
   deploys are reviewed by what they change ("Reviewing by
   effect"). An agent's run that needs a person waits as a proposal
   ([commands.md](./commands.md), "Proposals").
@@ -1214,7 +1188,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   in the window could drive the agent. Custom components use the declared,
   scoped bridge instead; arbitrary app-window code remains outside that
   contract.
-- **Presentations are policy.** Bundled lenses provide useful starting
+- **Presentations are policy.** Bundled pages provide useful starting
   views, including exceptions at an effort boundary. Trends, reports and
   domain-specific dashboards are equally valid extension presentations;
   the semantic data and metrics are reusable independently of a view.
@@ -1244,7 +1218,7 @@ source directly: an edit changes nothing until it is deployed.
   copy, so any stream deploys it (`extension_deploy::refuse_draft_deploy`).
   `oxplow.extension.draft_status { name, stream_id? }` (a read,
   `extension_deploy::source_diff`) says how a stream's source differs from
-  the running version: pages (lenses and page files) and commands added,
+  the running version: pages and commands added,
   removed and changed, and whether the checkout is a draft. A deploy that
   removes a page or command still goes, with a warning naming them.
 - **Deployment:** `.oxplow/runtime/extensions/<name>/<hash>/`, where
@@ -1257,7 +1231,7 @@ source directly: an edit changes nothing until it is deployed.
   text (`extension_store::Inputs`; a manifest without `build` hashes as it
   always did), and its deployment holds those inputs and the built output,
   never the excluded folders ("Builds").
-  Everything oxplow reads for a deployed extension — manifest, lenses,
+  Everything oxplow reads for a deployed extension — manifest, pages,
   Starlark, models, component bundles, provider entries, skills — comes
   from that folder. Its `Extension.path` is the folder's absolute path, so
   every `root.join(ext.path)` reader finds it. The file watcher never looks
@@ -1465,10 +1439,16 @@ extension (foundation) always counts as on. Unlike `imports:`, `requires`
 names no contract: it is for composing another extension's commands or
 reading its models without an export.
 
-**Keep This** (`oxplow.lens.keep`) writes the lens into the extension's
-source (`my-lenses` unless named; created when missing) in the primary
-checkout, whichever stream it names, and deploys it; it returns once the lens is live. A failed deploy
-takes the lens file back out.
+**Writing a page** (`oxplow.extension.write_page { extension, page, spec,
+deploy? }`, `extension_deploy::write_page`) writes `pages/<page>.yaml` into
+the extension's source (created with a scaffolded manifest when missing)
+in the primary checkout, whichever stream asks. The spec must parse as a
+page and the extension must still load with it, or the file is put back
+and the call fails with the loader's reason. With `deploy: true` it then
+deploys, like any deploy (it asks when the source gained a permission).
+`oxplow.extension.new_dashboard` writes an empty dashboard page the same
+way. A bundled extension is never written to
+(`extensions::writable_extension_dir`).
 
 A malformed extension shows an error for that extension only; it never
 breaks the others or core.
@@ -1478,10 +1458,10 @@ breaks the others or core.
 An extension declares what it may reach beyond the **baseline** in its
 manifest's `permissions:` (`oxplow_domain::permissions::Permissions`); a
 person approves it when the extension is deployed. The baseline needs no
-declaration: lenses, pages, panels, slots, decorators, replacements; its
+declaration: pages, panels, slots, decorators, replacements; its
 own models; a collector's `input:` query (declared and reviewable); its
 own commands and the effects, jobs and commands whose scripts compose them;
-components that query their own lenses; Starlark and jaq collectors that
+components that query their own models; Starlark and jaq collectors that
 don't ask a model; `state.read`, `extension_config.read`, `jobs.read`.
 
 ```yaml
@@ -1534,14 +1514,12 @@ confirms inline (`CommandConfirm` lists them), an agent's call becomes a
 proposal naming them (a deploy's consent check is a person's to approve), and the approval deploys it.
 There is no separate approval store: each deployment row records the
 permissions it was approved with (`v_extension_deployment.permissions`).
-Keep This (`oxplow.lens.keep`) never asks: it fails, saying why, when the
-extension's source gained a permission since it was last deployed. A
-fresh machine has nothing running, so a teammate's extension waits for
+A fresh machine has nothing running, so a teammate's extension waits for
 its first deploy here (Startup), which asks for what it declares.
 
-**The Extensions page** (foundation's `extensions` page, also mounted in
-Settings → Extensions through `oxplow-foundation/settings-extensions.sections`, ahead of
-core's health-and-credentials section): `extensions-list` is every
+**The Extensions page** (foundation's `extensions` page, which embeds
+`extensions-list` and `extensions-deployments`; Settings → Extensions
+embeds the same two pages): `extensions-list` is every
 extension from `v_extension` joined to `v_extension_source` — the live
 model of each source as it is now, so an edit shows at once ("out of date"
 when its hash isn't the running deployment's) — with its permissions and
@@ -1561,7 +1539,7 @@ agent: true }`.
 
 ## `extension.yaml`
 
-Manifest **version 2** (P1.11, tsk413; `crates/oxplow-app/src/extensions/manifest_v2.rs`).
+Manifest **version 2** (P1.11; `crates/oxplow-app/src/extensions/manifest_v2.rs`).
 Every contribution is declared as data, unknown keys are errors, and the
 loader resolves cross-references with `file:line` messages.
 
@@ -1587,13 +1565,13 @@ collectors:  [...]   # entity collectors (exec / starlark / jaq / read → entit
                      # fact collectors (`facts:`; starlark / jaq only; facts must be declared here or oxplow.*)
                      # see semantic-layer.md "Collectors"
 ui:                  # what it adds to the core UI (a command's own `ui:` puts it in core menus: see "Commands")
-  slots:             # lenses mounted into core pages; see "Slots"
-    - { slot: oxplow-foundation/changes.sections, lens: change-review }
+  slots:             # pages mounted at other pages' slots; see "Slots"
+    - { slot: oxplow-foundation/diff-view.sections, page: change-review }
   decorators: …      # labels from its models on core URIs (stable since P10; see "Decorators")
-  replacements: …    # a lens in place of a named core component (see "Replacements")
+  replacements: …    # a page in place of a named core component (see "Replacements")
 advisories:  [...]   # see "Advisories"
 models:     [...]   # SQL models: ModelDecl entries + models/<name>.sql → v_<ext>_<name>; `key: [cols]`; `materialize: on_change | { every: 1h } | { incremental: <col> }` stores one (semantic-layer.md "Extension models", "Materialized models")
-pages: …  panels: …  # see "Panels" and "Pages"
+panels: …           # left-nav panels, each a page compact (see "Panels")
 commands:  [...]   # Starlark scripts composing core commands, a scope's or its provider's operations (see "Commands")
 resources: …        # kinds of thing a URI can name (see "Resources")
 event_types: …      # its own namespace's event types (stable; see "Event types", P8)
@@ -1601,28 +1579,42 @@ implementations: …  # capability implementations it declares (oxplow-bundled d
 skills: …           # skills and slash commands for the coding agent
 providers: [...]    # external providers over the provider protocol — a program, or an MCP server behind oxplow's adapter (providers.md)
 effects: …          # scripts reacting to logged events by composing commands (see "Effects")
-custom_components: …   # sandboxed components for `viz: custom` lenses (see "Custom components")
+custom_components: …   # sandboxed components a page's `component` node or `custom` viz draws (see "Custom components")
 ```
 
-Lenses aren't listed here: every `lenses/*.yaml` file in the folder is
-loaded. A lens gets into the launcher through its own `launcher.category`
-(or stays out with `hidden: true`).
+Pages aren't listed here: every `pages/*.yaml` file in the folder is
+loaded. A page gets into the launcher through its own `category` (or
+stays out with `hidden: true`). An old-format UI folder (`lenses/`) is a
+load error that says to rewrite each file as a page.
 
 **What the loader checks** (`Extension.errors` / `Extension.warnings`):
 - shape: unknown keys, `manifest` version, `intent` present and
   `intent.origin` a canonical URI; an empty `intent.examples` is a
   warning;
+- page files: each `pages/*.yaml` parses (`pages::schema::parse_page`:
+  unknown keys are errors; a `replaceable` names a replaceable component
+  and is placed once); an `icon` oxplow draws; the pages that a param's
+  `options_from`, a column's `expand` and a form field's `from` name are in
+  `pages/`; a page's renderer declarations (`for`, `accepts`, `default`,
+  `pinned`) fit the resources it names; a `component` node or `custom`
+  viz names a component the extension declares in `custom_components:`.
+  Layout problems are **warnings** (`pages::checks::layout_warnings`:
+  more than 6 filters, a `choice` of more than 12 options, a description
+  over 200 characters, a `stack` of more than 8 sections, a table of
+  more than 8 columns, a param no loader reads);
 - lifecycle: `engine`, when given, is `>=MAJOR.MINOR[.PATCH]`;
-- cross-references: a `ui.slots` lens exists (and declares a param
-  the slot binds); a composite's part lenses exist — in this extension or,
-  once everything is loaded, in another; a `launcher` target is a
-  canonical URI. A metric's `sourceMeasure` or a fact collector's `facts` that
+- cross-references: a `ui.slots` page is in `pages/` and its slot name
+  has the shape `<extension>/<page>.<name>`; a slot mount whose host page
+  is not loaded, or has no such slot node, is a warning (it shows
+  nowhere); a `panels` body and a replacement's page are the extension's
+  own pages; a replacement page declares every prop of its target's
+  contract. A metric's `sourceMeasure` or a fact collector's `facts` that
   is neither declared in the extension nor an `oxplow.*` built-in is a
   **warning** (it may come from the project's or another extension's
   `measures:`, which resolves when the catalog is assembled).
 
 **Each entry's error is at its own line.** Every list block — `commands`,
-`effects`, `collectors`, `pages`, `panels`, `implementations`, `skills`,
+`effects`, `collectors`, `panels`, `implementations`, `skills`,
 `resources`, `custom_components`, `event_types.types`,
 `ui.decorators`, `ui.replacements` — and the manifest's own nested lists
 (`intent.examples`, `ui.slots`) type their entries one
@@ -1633,14 +1625,14 @@ the extension loads. `intent` and `ui.slots` are read raw
 (`IntentFile`, `Vec<Value>`) and typed by `intent_of` / `slots_of`,
 which `check` and the loader share.
 
-**Schemas.** `extension.yaml` and `lenses/*.yaml` have JSON Schemas
-generated from the loader's own serde types (`extensions/schema.rs`:
-`ManifestV2` with `#[schemars(with = …)]` naming each kind's on-disk
-struct, and `LensFile`), checked in at `docs/reference/schemas/` and
-published with the docs. A test keeps them current (`OXPLOW_BLESS=1`
-regenerates them), and every bundled manifest and lens must validate.
-Scaffolds and kept lenses start with a `# yaml-language-server:
-$schema=…` modeline. A schema holds the shape only; cross-references and
+**Schemas.** `extension.yaml` has a JSON Schema generated from the
+loader's own serde types (`extensions/schema.rs`: `ManifestV2` with
+`#[schemars(with = …)]` naming each kind's on-disk struct), checked in at
+`docs/reference/schemas/extension.schema.json` and published with the
+docs. A test keeps it current (`OXPLOW_BLESS=1` regenerates it), and
+every bundled manifest must validate. Page files have no JSON Schema;
+`pages::schema` (`parse_page`) is their one reader. Scaffolds start with
+a `# yaml-language-server: $schema=…` modeline. A schema holds the shape only; cross-references and
 which keys go together stay the loader's to check. When you add a kind
 or a key, derive `JsonSchema` on its file struct. The user-facing
 reference is `docs/reference/extensions.md` and
@@ -1651,20 +1643,20 @@ had it experimental, but `oxplow-bundled` — bundled, so shared by
 definition — ships on it, and a first-party extension depending on a
 kind is exactly the evidence promotion requires (target §10.1, §12).
 
-**Only v2 loads (tsk865).** A manifest without `manifest: 2` is a load
+**Only v2 loads.** A manifest without `manifest: 2` is a load
 error (`extension.yaml:1`); so is any key v2 doesn't have (`sources:`, a
 top-level `slots:`, `gauges:` — `deny_unknown_fields`). There is no
 reader or migrator for v1, and no recogniser for an old shape: a slot
 name that isn't one is an unknown slot, an action that isn't `{ id,
-label, command, input?, row? }` a field error (tsk920).
+label, command, input?, row? }` a field error.
 `Extension.manifest_version` is the
 version the file declares.
 
 ## The SDK
 
-`crates/oxplow-sdk` (P1.14, tsk416; target §10.5) is the one
+`crates/oxplow-sdk` (P1.14; target §10.5) is the one
 implementation behind three doors: the `oxplow extension new|check|test`
-CLI, the RPC/MCP `validate_extension`, and `save_lens`'s manifest. Every
+CLI, the RPC/MCP `validate_extension`, and `write_page`. Every
 door gives an author the same report, so an agent editing from a terminal
 and one calling MCP read identical `file:line: what — fix` lines.
 
@@ -1672,11 +1664,15 @@ and one calling MCP read identical `file:line: what — fix` lines.
   writes `.oxplow/extensions/<name>/extension.yaml` (v2, an `intent` whose `origin` is the URI passed with `--origin`,
   one example) and, but for a bare extension, that example's fixture
   `fixtures/basic.yaml` — then the kind's starter (P7.C6):
-  - `lens` — `lenses/<name>.yaml`, open tasks in the viewer's stream, with
-    a Start row action (`oxplow.work_item.transition`, a `uri` column it selects
-    but doesn't show);
+  - `page` — `pages/<name>.yaml`, open tasks in the viewer's stream, with
+    a Start row action (`oxplow.work_item.transition`, a `uri` column it
+    binds but doesn't show) and an `answers:` entry; its example is
+    `{ page: <name>, params: { stream_id: 1 } }`;
+  - `component` — a `custom_components:` entry (a bundle under
+    `components/<name>/`) and a page whose `component` node it feeds;
+    `panel` — a `panels:` entry whose `body` is a hidden page;
   - `collector` — a Starlark collector `items` over `v_work_item` declaring
-    entity `item`, a model `open_items` over `ref('item')` and a lens over
+    entity `item`, a model `open_items` over `ref('item')` and a page over
     the model; its example runs the collector over fixture rows;
   - `metric` — a code metric, built by `oxplow_app::metric_scaffold::
     extension_files` (the one template: `oxplow.metric.scaffold` hands the
@@ -1689,7 +1685,7 @@ and one calling MCP read identical `file:line: what — fix` lines.
     on `snapshot.taken` (`source_files()` + `code_metrics()`: one fact per
     file with functions over `LIMIT`, carrying the worst function's line
     and `dims: {<ns>.area}`), the `sum` metric (`lower-better`, sliced by
-    the area) and a Code launcher lens over `metric_findings()` whose
+    the area) and a Code launcher page over `metric_findings()` whose
     `path` column links `file` at the `line` column. Its example runs the
     collector over a two-folder fixture corpus and expects the facts;
   - `command` — `commands: [note]` whose `handlers/note.star` composes
@@ -1710,7 +1706,7 @@ and one calling MCP read identical `file:line: what — fix` lines.
   it writes passes `check` with no warnings and `extension test` clean**
   (a provider once a program replaces its stub) —
   `crates/oxplow-sdk/tests/just_works.rs` holds each kind to it, through
-  to loading in a real oxplow: the lens's row action names a registered
+  to loading in a real oxplow: the page's row action names a registered
   command, the collector syncs and its model publishes, the command runs
   through the bus; a work list and an effort policy each pass the kit
   with the fake behind their stub, the policy with its scaffolded example.
@@ -1726,12 +1722,12 @@ and one calling MCP read identical `file:line: what — fix` lines.
   test_clean` replays every `produced/` against today's oxplow. Recorded
   once (it costs a real run): `collector` (2026-10-02, 64 turns, clean).
 - **`check(root, name, catalog, layer: Option<&SqlGateway>)`** is
-  `catalog.named` (manifest shape, lifecycle, cross-refs, lens shape;
+  `catalog.named` (manifest shape, lifecycle, cross-refs, page shape;
   a Starlark collector's script must parse and define `transform`, an
   error at the collector's line) plus `extensions::validate_extension`'s
   dry run — **always** (P7.C6): on `layer` (the project's database,
   read-only), else on the throwaway oxplow's empty in-memory one, which
-  has the extension's models and metrics seeded so a lens may read
+  has the extension's models and metrics seeded so a page may read
   `metric_grid()` / `metric_findings()` (`DryRun::{Project,
   EmptyDatabase}`; the CLI's project layer is `SqlGateway::with_metrics`,
   so those functions resolve there too — a metric not yet seeded in that
@@ -1744,11 +1740,19 @@ and one calling MCP read identical `file:line: what — fix` lines.
   (`models::EntityStub`: a typed temp table under the entity's view);
   `models::check_extensions` returns those views (`CheckedModels.views`).
   Every later query of the check — command examples' reads,
-  advisories, lenses — reads through them as an **overlay**
+  advisories, pages — reads through them as an **overlay**
   (`SqlGateway::with_overlay`, `SqlQuery::temp_views`: recreated on the
   query's own connection and dropped after), so a fresh collector →
-  model → lens checks clean before its first sync and a lens may read
-  its own unpublished model. It returns a `CheckReport { ok, errors,
+  model → page checks clean before its first sync and a page may read
+  its own unpublished model. The dry run of a page
+  (`pages::checks::dry_run`, `extensions::viz_column_problems`) runs its
+  `sql` loaders once with every param at its default (an earlier loader
+  reads as a table; `command` and `page` loaders do not run, since a
+  check acts as no one). A loader that fails is an error. So is a node
+  that names a column its loader lacks: a role block's column
+  (`chart`, `tree`, …), a column's `key`, `link`, `icon` or `tone`
+  column, an action's `when:` or a `{{row.x}}` placeholder. Layout
+  problems are warnings. It returns a `CheckReport { ok, errors,
   warnings, dry_run, extension }`; `render_findings` prints it as text
   (`error: <file:line …>` lines then a one-line summary) or JSON.
   `oxplow_validate_extension` also warns about a `fixtures/*.yaml` no intent
@@ -1798,15 +1802,14 @@ and one calling MCP read identical `file:line: what — fix` lines.
   replies }` is what it answers, in turn. No paid call, no provider.
   It runs `check`, then every intent example with a fixture
   (`fixtures/<name>.yaml`: `input`, `expect`, `$any` matching anything):
-  a page (`{ page, params? }` with `given:` steps, below), a lens (`{ lens, params?, rows? }` — `rows` seeds the extension's
-  entities, `collector_runner::publish_declared_rows`), an event (`{ event
+  a page (`{ page, params? }` with `given:` steps, below), an event (`{ event
   }`: appended to the throwaway's log and delivered; the extension's
   effects react for real — `expect: { effects: [{ id,
   state }], commands }`, read from `v_effect_run` and `command.executed`),
   a job (`{ job, intentKey, request, cancel?, setup?, rows? }`: `setup`
   runs oxplow's own commands first, in order, each as a person or `as:
   agent` (thread 1, after `ensure_primary`), so its tools read real data;
-  `rows` as a lens's; then through the extension's
+  `rows` as a page's `given:` rows; then through the extension's
   commands over `jobs.write/enqueue` and `jobs.read/snapshot`; `cancel: true` cancels it through `jobs.write/cancel` once it
   has written — `expect: { state, result?, text?, toolCalls?, output? }`,
   `output` its rows `[{ kind, … }]` ("Jobs"); a model reply is a string
@@ -1821,7 +1824,7 @@ and one calling MCP read identical `file:line: what — fix` lines.
   [{ rows }], invokes: [{ ok, refused? }] }`), a form (`{ form: <page>,
   node?, params? }`: the page's form node — `node`, else its first — opened
   on a run of the page with `pages::actions::page_form`, as a person opening
-  it; a lens's through `lens_actions::form_start` until lenses go — `expect: {
+  it — `expect: {
   values?, fixed?, fields? }`, the values the fields start from, the
   read-only ones and the shown ones, `null` for all), and the dry runs that
   stay dry (`{ effect, event }`, `{ implementation, event }`, `{ command,
@@ -1833,7 +1836,7 @@ and one calling MCP read identical `file:line: what — fix` lines.
   models. `TestReport { ok, errors, warnings, blessed, ran, generation,
   contributes, unsupported, left }`: `contributes` is the extension's
   descriptors by public id, `unsupported` what only the app shows
-  (pages, panels, slots, decorators, replacements, skills); `render`
+  (panels, slot mounts, decorators, replacements, skills); `render`
   prints it like `check`'s. Exit 0 / 1 / 2 as `check`. `check` with no
   running oxplow asks a throwaway (with no environment) for its command
   registry. `the_triage_example_reads_the_tree_the_layer_and_a_model`
@@ -1845,7 +1848,7 @@ and one calling MCP read identical `file:line: what — fix` lines.
   (the project is read off `…/.oxplow/extensions/<name>`). `check` opens
   `<root>/.oxplow/local.sqlite` **read-only** (`Database::open_read_only`:
   no migrations, no writes, refused unless its schema version matches
-  this build — the CLI may not be the app's version) so lens SQL is
+  this build — the CLI may not be the app's version) so page SQL is
   dry-run against the real project; without a usable one it warns on
   stderr with the reason and checks everything else. Exit 0 clean, 1 with errors (or an SDK error such as an unknown
   extension), 2 usage.
@@ -1899,7 +1902,7 @@ is held by a page with a whole-page action running that command.
   extension's own `commands:` — or one of its providers' `<id>.<name>`
   (schema from its declarations).
 
-**`oxplow extension test <name>`** (P5.D5, P7.C6; `extension_test.rs`) runs on
+**`oxplow extension test <name>`** (`extension_test.rs`) runs on
 **a throwaway oxplow** (`Host`, "The SDK" above: activated as boot
 activates, its entities created empty, the fixture model answering every
 model call). It never opens the project's database. It runs `check` there
@@ -1920,9 +1923,6 @@ job and component forms are in "The SDK"):
   entry runs (`ran: answers`): the page opens with its params and no loader
   fails, else the finding names the page file and the question. `expect.text`
   is `{ contains: [..] }` or the exact text, against `page_text`.
-- `input: { lens: <slug>, params? }`, `expect: { columns?, rows: n |
-  $any }` — the lens runs; its row count (and columns, when expected)
-  must match;
 - `input: { collector: <id>, rows?, event? }`, `expect: { entities: { <name>:
   n | $any } }` — a derived collector runs over `rows` (standing in for
   its `input` query, `oxplow_preview_collector(…, event, rows)`) and `event`
@@ -1938,8 +1938,8 @@ job and component forms are in "The SDK"):
   `files` as its tree (`MetricsService::preview_fact_collector`, its other
   input keys — `report`, `rows`, `event` (made the envelope) — as its
   input), storing nothing;
-  each fact is compared on the keys its expected fact names (tsk1047: it
-  used to be run as an entity collector and fail);
+  each fact is compared on the keys its expected fact names (it is not run as an
+  entity collector);
 - `input: { command, input }` — a provider's, run in its session
   (providers.md "The conformance kit");
 Every example's `event:` is built by `EventView::fixture` through the
@@ -1994,735 +1994,680 @@ model's line in `extension.yaml` ("misses n row(s) a full refill holds"
 unseen, which nothing at run time can tell); an append that hits the key
 passes (the runtime refills then); no fixture is a warning.
 
-## Lenses
+## Pages
 
-A **lens** is a user- or agent-built way of looking at your work: a
-query over the semantic layer plus how to show it. (Not "view", which is
-taken by the SQL `v_*` views; not "data app".)
+A **page** is a user- or agent-built way of looking at your work: named
+SQL queries over the semantic layer, plus a tree of nodes that shows them.
+(Not "view", which is taken by the SQL `v_*` views.) A page is one file,
+`pages/<slug>.yaml`, in an extension; its id is `<extension>/<slug>`. The
+extension manifest lists no pages: the folder is the list. A source with
+the old `lenses/` folder does not load.
 
-A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
-`description`, `query`, `viz`, `params`, `columns`, `empty`, `chart`,
-`sections`, `tiles`, `launcher`, `hidden`, `actions` and `alert`.
+The reader's guide is `docs/guide/pages.md`; the agent's is the shipped
+`oxplow-extension` skill (`references/page-format.md`, `loaders.md`,
+`view-nodes.md`). `.context/pages-and-tabs.md` "Page files" covers how the
+desktop draws one. This section is the contract: what a page file takes,
+and what loads, runs and checks it.
 
-- `params`: `name`, `label`, `default`, `options`, `options_from`,
-  `type`, `presets`, `role`.
-- **Typed params** (`ParamType`, `LensParam::take`): `type` is `text`
-  (bound as-is; the default with no `options`), `choice` (one of
-  `options`, or any text when `options_from` names the lens that lists
-  them; the default with either), `bool` (`true`/`false`/`1`/`0`,
-  bound 1 or 0), `search` and `branch` (text, trimmed, NULL when empty;
-  `branch` NULL means every branch), or `date_range`. A loaded lens
-  always says its type (`typed`), so a page never infers it. A
-  `date_range`'s value is one text — a preset (`1d 2d 3d 7d 30d 90d
-  all`; `presets:` picks the page's quick picks, default `1d 7d 30d
-  all`) or `<from>..<to>` of dates or RFC 3339 times, an end empty for
-  open — so tab ids, `run.params` and agents see one value; `binds`
-  adds `:<name>_from` / `:<name>_to` (RFC 3339, NULL for an open end; a
-  date's `to` is the next day, so the day counts) just before the query
-  runs, never as params. The loader refuses `options` or `options_from`
-  off a choice, both on one, a choice with neither, `presets` off a
-  date_range, an unknown preset and a default its type doesn't take
-  (`param_problem`); a run supplying such a value is refused
-  (`resolve_params`). There is no `place`: every param draws in the
-  page's rail.
-- **A param's `role`** (`ParamRole`) says where its value rides in the
-  URI. `resource` (the default, nothing written) names what the page
-  shows, so it is in the `?` and a change opens another resource.
-  `filter` (authored: `role: filter`) narrows or re-views what is shown,
-  so it is in the `#` and a change replaces the entry. `selection` is
-  derived, never written (the loader refuses it): a column of the lens, or
-  of a part of the document or dashboard, `select`s the param — the page
-  shows the picked row, not an input — so it is in the `#` and a pick
-  pushes an entry. A loaded lens always says. A `filter` or `selection`
-  param found in a `?` is refused (a `lens-error` box), never read from
-  there. A declared page's `params:` list its `?` params; its lens's
-  filters and selections ride in the `#`.
-- **Page-layout warnings** (`layout_warnings`, run in `load_one` after the
-  roles pass): load, validate, `v_extension.warnings` and a deploy's result
-  carry them, each naming its lens file and the fix after the dash. A
-  warning never stops a lens loading.
+**Three parts** (`pages/schema.rs`, `parse_page`; `deny_unknown_fields`, so
+a typo is an error at the line):
+
+- **Metadata**: `title` (required), `description`, `label`, `icon`,
+  `category`, `keywords`, `params`, `for` / `accepts` / `default` /
+  `pinned` (a renderer), `comments`, `refresh`, `hidden`, `needs`,
+  `actions`, `alert`, `tool`, `answers`, `badge`.
+- **`data:`**: named loaders ("Loaders" below).
+- **`view:`**, and an optional `rail:`: a tree of nodes ("View nodes").
+
+Where it lives, and what is loaded:
+
+- **Origin** (`Page.origin`, `PageProvenance`): its `extension`, the
+  `running` file (a deployment's copy in the store, or the source when
+  loaded from it), the `deployment` hash, `bundled`, and `source` — the
+  project-relative file to edit, none when no source is here (filled per
+  extension by `locate`). An agent edits `source`, never `running`: the
+  next deploy replaces the copy. `oxplow_get_open_page` adds `outOfDate`
+  (`PageProvenance::out_of_date`, read from the files now: the source
+  changed after the deployment was made). `v_page` has `source`, not the
+  running path. A deployed extension's errors and warnings name its source
+  files, so they say what to edit.
+- **Show Definition** is foundation's hidden `definition` page: the page's
+  extension, file and deployment, its node tree from
+  `oxplow.page.definition` (each node's parent, page, file and loader;
+  embeds and slot mounts included) and its YAML as written.
+- **An inline page** (`parse_inline_page`: a markdown ` ```oxplow-page `
+  block, an agent's `oxplow_show_page { spec }`) only reads: no `command`
+  loaders, no actions, forms, terminals, editors, components or slots.
+
+### Metadata
+
+- `label` is the tab's name: `{{param.x}}` and `{{row.col}}` (the first
+  loader's first row), filters `|short`, `|basename`, `|url`. Any other
+  `{{…}}` is refused (`label_refs`).
+- `category` is the launcher section (`LauncherCategory`); none means the
+  page opens only from elsewhere. `hidden` keeps it out of the launcher.
+- `needs: [capability]`: a page whose needs are not met runs nothing.
+  Its `PageRun.inactive` (`PageInactive { needs, message }`) says what it
+  needs, and the page shows that instead of an error.
+- `tool: <name>`: the page is also an MCP tool `<namespace>_<tool>`, its
+  input the params, its call `oxplow.page.run`. Kept for the few questions
+  agents ask every session (foundation's `thread_work`, `work_next`,
+  `effort_summary`, `catalog`); everything else is `oxplow_find_page`,
+  then `oxplow_run_page`.
+- `answers: [{ question, about?, params, skill? }]` (`PageAnswer`): the
+  questions the page answers. `oxplow_find_page` matches them first; the
+  pages of `about`'s resource offer them to the person; `oxplow extension
+  test` opens the page with each answer's `params` and fails the page when
+  it does not open or a loader fails. `skill` (oxplow's own extensions)
+  names a shipped skill whose text must name what the page reads.
+- `badge: { loader, column? }`: a count on the page's nav entry (that
+  loader's first row, else its row count). `alert`: `{ min_rows }` or
+  `{ column, below | above }`, with a `label`, and the page marks itself
+  while it fires; it watches the badge's loader, else the first.
+- `for` / `accepts` / `default` / `pinned`: a renderer, see
+  [pages-and-tabs.md](./pages-and-tabs.md) (`renderer_problem` checks
+  them at load). `comments: true`: the person
+  may comment on the page's text. `refresh: true`: a Refresh button.
+
+### Params
+
+A param (`PageParam`) takes `name`, `label`, `default`, `options`,
+`options_from`, `type`, `presets` and `role`.
+
+- **Types** (`ParamType`, `PageParam::take`): `text` (bound as-is; the
+  default with no `options`), `choice` (one of `options`, or any text when
+  `options_from` names a page that lists them; the default with either),
+  `bool` (`true`/`false`/`1`/`0`, bound 1 or 0), `search` and `branch`
+  (text, trimmed, NULL when empty; `branch` NULL means every branch), and
+  `date_range`. A loaded page always says its type, so the desktop never
+  infers it.
+- **A `date_range`'s value** is one text: a preset (`1d 2d 3d 7d 30d 90d
+  all`; `presets:` picks the quick picks, default `1d 7d 30d all`) or
+  `<from>..<to>` of dates or RFC 3339 times, an end empty for open. Tab
+  ids, `run.params` and agents see that one value. The runner binds
+  `:<name>_from` / `:<name>_to` (RFC 3339, NULL for an open end; a date's
+  `to` is the next day, so the day counts) just before a query runs, never
+  as params.
+- **Load checks** (`param_problem`): `options` or `options_from` off a
+  choice; both on one; a choice with neither; a choice with fixed options
+  and no `default`; `presets` off a date_range; an unknown preset; a
+  default its type does not take; `role: selection` written; a param named
+  like a view key (`RESERVED_VIEW_KEYS`: `section`). A run that supplies
+  an unknown param, or a value its param does not take, is refused
+  (`resolve_param_values`). Every param draws in the page's rail.
+- **`role`** (`ParamRole`) says where its value rides in the page's URI.
+  `resource` (the default) names what the page shows, so it is in the `?`
+  and a change opens another resource. `filter` narrows or re-views what
+  is shown, so it is in the `#` and a change replaces the entry; a
+  `switch`'s param is a filter by default. `selection` is derived, never
+  written: a column `select`s the param, the rail shows the picked row
+  instead of an input, it is in the `#`, and a pick pushes an entry. A
+  `filter` or `selection` param found in a `?` is refused.
+- **`options_from: <page>`** (a slug of the extension, or
+  `<extension>/<slug>`; `page_ref_problem` checks it exists and is not the
+  page itself) makes a choice whose options a page lists: its rows are
+  `value`, `label`, optional `group`. The rail runs that page with the
+  params it declares, so an `end` picker's page can leave out what `start`
+  is. No `default` is needed and none is checked; a run takes any text,
+  and the query says what an unknown value means. An agent's page tool
+  (`agent_tools::params_schema`) emits no `enum` for it. A param named
+  `uri`, `effort_id`, `thread_id` or `stream_id` draws as a picker over
+  the matching model, by title (`viz/vizParams.ts`); any other is typed.
+- **Implicit params.** A param named `stream_id` or `thread_id` is bound
+  to the viewer's context (`ViewContext`, numeric ids) unless the caller
+  supplies it. Precedence: supplied, then context, then `default`.
+  `view_context(svc, stream?, thread?)` resolves it: the given stream
+  (else the thread's, else the primary) and the given thread (else the
+  stream's selected-or-first one). IPC `open_page` and `run_page_action`
+  resolve it from their `stream_id`; MCP `oxplow_run_page` also takes the
+  agent's `thread_id`; `oxplow_get_open_page` uses the viewer's thread.
+  A dry run (a check, `validate`) uses no context.
+- **`head_sha`.** A param so named is, unless supplied, the viewed
+  stream's HEAD commit (`v_stream.head_sha`, `PageRunner::params_of`).
+  The run reads `v_stream` for it (`context_reads`), so a commit or a
+  branch switch re-runs the loaders that bind it.
+
+### Loaders (`data:`)
+
+Named loaders, run in order; a loader reads only the ones before it
+(naming a later one is an error). A loader has exactly one of `sql`,
+`command`, `page` or `rows`, plus optional `columns` (keys, labels and
+formats its nodes default to) and `empty`. Its name is lowercase letters,
+digits and `_`, never a model's (`v_*`, `m_*`).
+
+- `sql`: one read-only statement over the `v_*` models and the extension's
+  own. `:param` binds a page param or a loader `params:` entry (`{ param
+  }`, `{ from: <loader>.<column> }` (an earlier loader's first row) or a
+  literal). An earlier loader it names reads as a temp table of that name
+  (`SqlQuery.temp`). `config('/key')` reads the page's own extension's
+  settings (`PageRunner::with_config`).
+- `command`: a read-only command, run as the viewer
+  (`Access::reads_only`). It says `reads` (models) or `refresh` (`manual`,
+  `{ every }`). Its result is a `{ columns, rows }` table as is, an array
+  of objects (a row each), else one `value` row; `items: <field>` takes a
+  list inside the result as the rows.
+- `page`: another page's loader (`{ page, loader, params }`). Pages nest 8
+  deep (`MAX_DEPTH`).
+- `rows`: inline rows, the first row's keys the columns.
+
+**Running one** (`pages/runner.rs`, `PageRunner::run`): params resolve as
+above. Loaders run in order. A loader that fails carries its `error` and
+the rest of the page still shows. Within one run, embeds included, a
+loader with the same definition and inputs (its `key`) runs once. A loader
+only a `switch`'s hidden children show does not run; one no node shows
+does (it feeds an embed, the badge or a later loader). A page whose
+`needs` are unmet runs no loader (`inactive`). A command loader runs as
+the viewer, `Actor::Page { page_id, on_behalf_of }` (the page's URI is the
+source of what it records). One run keeps at most 5 MiB of results
+(`result_budget.rs`): later rows are cut whole, never half a row, and the
+loader says so. Do filtering and `LIMIT` in SQL.
+
+**Open runs** (`pages/open_runs.rs`): a window's open page keeps its run
+and the request that made it. A change to a model one of its loaders read
+(a command loader's `reads`), or to a param it binds (`head_sha` reads
+`v_stream`), re-runs the loaders that depend on it (`dirty_loaders`).
+`OxplowEvent::PageRunChanged` names the loaders whose rows differ (an
+embedded page's as `<embed id>/<loader>`), and the window fetches only
+those. A catalog change (a deploy) re-runs every open run
+(`page_runs.notify_everything()`).
+
+### View nodes
+
+`view:` is one node, usually a `stack`. Every node has an `id` (default:
+its loader, embedded page, slot or component; else `stack`, `stack-2`, …),
+unique in the page. `#node=<id>` in a link lands on it. `title`,
+`replaceable` and `size` are on any node. An embedded page's nodes are
+`<embed-id>/<node-id>`; `oxplow_run_page` text prints each node under
+`[node <id>]` (`pages/text.rs`).
+
+- `stack: [nodes]`; `grid: [nodes]` (a child's `size`: `small`, `wide`,
+  `tall`, `full`).
+- `switch: { param, children }` shows the one child whose id is the
+  param's value (else the first).
+- `embed: { page, params }` shows another page inline. Its params flow by
+  name: the embed's `params`, else the host's param of that name, else
+  that column of the host loaders' first rows, in order. Its page actions
+  run on the embedded run (`pages/actions.rs`, `locate`).
+- `slot` and `component`: below. `markdown: "text"`: static text.
+- `viz` (+ `from: <loader>`, a role block, `columns`, row `actions`,
+  `empty`): a `VizConfig` with no query of its own. A viz that reads no
+  rows (`form`, `approvals`) has no `from`. The YAML only binds; logic is
+  SQL or a read command.
+
+**Vizes** (`Viz`): `table`, `list`, `number`, `markdown` (the first row's
+`markdown: { text: <column> }`, else its first column, drawn by the one
+Markdown component, `.context/markdown.md`; with an `edit` action it is
+that component's editor, saving through the action), `bar`, `line`,
+`treemap`, `tree`, `timeline`, `detail`, `steps`, `hunks`, `board` (the
+groups as columns of cards, each a list row; needs `group`, whose
+`values: [..]` fix the columns' order and keep empty ones as drop
+targets), `terminal` (a terminal per row, `terminal: { of, title?,
+stopped?, conversation? }`; `.context/terminal.md` "The terminal viz and
+its host"), `editor` (the working tree's file, edited: `editor: { path,
+lines? }`; saved through `oxplow.file.save`; `useTabEditing`;
+`.context/editor-and-monaco.md` "The editor viz"), `embed` (a web page:
+`embed: { url }`, the first row's `http(s)` URL, in oxplow's sandboxed
+window; `.context/external-url-tabs.md`), `code` and `diff` (read-only:
+a file at a revision, or one file's diff; `.context/editor-and-monaco.md`
+"Read-only code and diff vizes"), `approvals` (core's consent component:
+it reads `v_command_proposal` itself and decides through the approve and
+decline commands; params `thread` and `setting` narrow the list), `form`
+and `custom` (below). `terminal`, `editor`, `embed`, `form`, `approvals`
+and `custom` are refused in an inline page. A viz that fills its page
+(`code`, `diff`, `editor`, `terminal`, `embed`) draws no in-body title.
+
+Each component names the columns it draws from in its own block: `chart`
+(`x`, `y`, `series`, `label`, `size`, `group`, and a `line`'s `targets`: a
+target line from that column's last non-null value), `tree` (`id`,
+`parent`, `label`; lazy: `lazy`, `branch`), `timeline` (`at`, `label`,
+`uri`), `steps` (`label`, `status`), `hunks` (`path`, `from`, `to` — two
+revisions, `working` / `snap:<id>` / `git:<rev>`), `code` (`path`,
+`revision`; optional `lines`, a column holding `12-40` or `12`, marked and
+revealed, and `sync: true`), `diff` (`path`, `from`, `to`, optional
+`lines` and `base`; the first row only). `role_columns` lists every
+result column a block names; `extension check` and `validate` fail a page
+whose loader does not return one (`viz_column_problems`). An agent reads
+`code` as each file's lines in a fence and `diff` as its unified diff
+(`viz_text`).
+
+- **A lazy tree: `tree.lazy: <param>`, `tree.branch: <column>`.** A tree
+  whose loader returns one level (a folder of `v_workspace_file`, `WHERE
+  parent = :folder`): `lazy` names the page's own param the level is read
+  with (it needs a `default`, the top level, and cannot be one the context
+  supplies), `branch` the column that is truthy on rows that open. A
+  branch opens by running the page again with the param set to the row's
+  `id`, its rows spliced under it (`useLazyBranches`). A column whose
+  `select` names the lazy param is refused (`lazy_tree_problem`).
+- **A `form` node** is one command's input: `form: { command, defaults?,
+  fixed?, fields?, mode?, choices?, then?, again? }`. `defaults` takes
+  `{{param.x}}`; a `query`-less form prefills from its loader's first row.
+  `fixed` fields show their `defaults` value, imposed again on submit.
+  `fields` lists which to show, the rest keep their starting values; an
+  entry is a name or `{ name, visible_if?, secret?, from? }`:
+  `visible_if: { kind: [http, https] }` shows the field only while each
+  named field holds one of the values (hidden, it is neither required nor
+  submitted); `secret: true` masks it, keeps it out of any draft, and
+  leaves it out of the input when blank. A command input field whose
+  schema says `writeOnly: true` is masked without the flag
+  ([commands.md](./commands.md) "Secrets"). The command must keep a secret
+  out of its record (`unrecorded`), or the form refuses to open
+  (`form_start`). `mode: edit` edits what is saved: it starts from the
+  saved values, Save is enabled only when the form is changed, Discard (or
+  Escape) puts them back, and it lists its `fields`. `create`, the
+  default, gathers something new. `choices` maps a field to a page of the
+  extension, run with the form's params, whose rows (`value`, `label`,
+  optional `group`) are the field's choices. A field `{ name: native,
+  from: <page> }` is an object whose children that page names, one row per
+  child — `name`, `title`, `kind` (`enum`, `text`, `number`), `values`,
+  `read_only` — and its value is the object of those children; the form
+  reads again when what the page read changes (`viz_actions::subfields_from`).
+  `again: { label, keep: [...] }` adds a second submit ("Save and
+  Another"). `form_fields_problem` and `page_ref_problem` are the load
+  checks.
+- **`custom` and `component`.** `viz: custom` (`custom: { component,
+  props? }`) and the `component: { id, props }` node draw one of the
+  extension's `custom_components` in a sandboxed frame, fed the page's
+  loaders. "Custom components" below. A name the extension does not
+  declare is a load error (`component_problem`).
+- **A `slot` node** is a place other extensions mount pages at. See
+  "Slots".
+- **A `rail:` tree** draws in the page's rail; a row it picks sets the
+  page's view param.
+
+**Columns** (`PageColumn`): `key`, `label`, `link`, `unit`, `icon`,
+`tone`, `width`, `format`, `highlight`, `select`, `expand`.
+
+- `link: { kind, from, line?, base?, head? }` makes a cell a link
+  (kinds: `task`, `file`, `wiki`, `effort-diff`, `commit`, `metric`,
+  `page`, `diff-at`, `compare`). `page` opens any oxplow URI. The pages
+  a column's links open are the page's **origin**
+  (`viz/linkOrigin.ts`, `.context/pages-and-tabs.md` "Origins"): Up and
+  Down step through the rows that have one.
+- `select: <param>`: a click sets that param to the column's value, so
+  whatever reads it re-runs (master and detail). It names a declared
+  param (`highlight_problem`).
+- `highlight: <param>` marks every case-insensitive occurrence of the
+  param's value in the cell's text. `expand: <page>` puts a ▸ in the cell
+  that opens that page under the row, with the row's same-named columns
+  as its params (`page_ref_problem`).
+- `unit` names another column of the row holding the unit, so a number
+  shows as a metric value (`16.4 s`, `42.5%`).
+- `icon` and `tone` each name another column of the row. `icon`'s value
+  is an icon drawn before the cell from a fixed vocabulary
+  (`viz/vizIcons.tsx`): the work glyphs (`ready` / `todo`,
+  `in_progress`, `blocked`, `done`, `canceled`, `archived`), a file's
+  status (`added`, `modified`, `deleted`, `renamed`, `untracked`,
+  `conflicted`), the kinds (`epic`, `task`, `wiki`, `file`, `folder`,
+  `commit`, `diff`, `metric`, `dashboard`, `comment`), the resource icon
+  names (`extension_resources::ICONS`), and any page kind's icon. `tone`'s
+  value is `accent`, `success`, `warning`, `danger` or `muted`. Values
+  come from the query, so the loader cannot check them: an unknown name
+  draws nothing, an unknown tone is plain.
+- `width` is pixels (a table lays out fixed; cells are cut to one line).
+  `format` (`ColumnFormat`): `date`, `datetime`, `relative`, `bytes`,
+  `duration` (ms), `integer`, `percent` (a 0–1 fraction), `sparkline` (a
+  JSON array of numbers), `badge` (a pill in the column's `tone`). It
+  changes only what a person sees; an agent reads the raw value.
+- A timestamp cell shows in local time, its full time on hover.
+
+**Row styling** (`row_style_problem`), each naming a result column:
+`group: { by, link?, values? }` (`list` / `table` / `board`) puts rows
+under a heading per distinct `by` value, in the order each first appears,
+folding (▾ / ▸) and counting its rows; `emphasis` (`list` / `table` /
+`tree`) highlights rows with a truthy value; `depth` (`list` / `table`) is
+a whole number 0–8 that indents. They are never shown as cells.
+
+A `list`, `table` or `tree` row whose first linked column resolves is
+draggable into the agent's context (`CONTEXT_REF_MIME`); the row menu has
+Ask About This. A table or list is keyboard-driven (`useListNav`: ↑/↓,
+Enter opens the cursor row's first link or runs its first row action;
+usability.md "Keyboard").
+
+### Actions
+
+`actions:` on a page or a viz node: `{ id, label, command, input, row?,
+group?, form?, fixed?, choices?, then?, when?, primary?, prominent?,
+submenu?, icon?, drag?, bulk?, key?, edit?, confirm? }` (`PageAction`).
+`input` binds `{{param.x}}` and, on a row action, `{{row.x}}`
+(`{{row.x|json}}`: the JSON a text cell holds, typed; the one filter,
+checked at load). A page action with `when` or `{{row.*}}` and no `row`
+reads the page's first loader's one row. A drag action also binds
+`{{before.x}}`, `{{after.x}}`, `{{onto.x}}`, `{{group.value}}`, and
+`{{order.x}}` (a list of column `x` in the new order).
+
+- An action runs as the page for whoever pressed it
+  (`Actor::Page { page_id, on_behalf_of }`; `pages/actions.rs`,
+  `viz_actions::prepare_resolved`), so it grants no power. A press names
+  the open run (`run_id`), the node and the action; a row action names a
+  row, and the server checks it is one of the node's rows. An agent
+  presses one with `oxplow_run_page_action`; a command it may not run, or
+  that needs a person's confirmation, is refused.
+- `form: true` opens the command's form instead of running (a slideover,
+  or, when the form less its `fixed` fields is one text field, a prompt
+  strip above the rows). What the person fills in runs, its `fixed` fields
+  put back to the bound values. A refusal naming a field (`INVALID` with
+  `field`) shows under that field. A run that came back undoable toasts
+  with Undo.
+- `primary: true` (a row action) is what a click on the row, or Enter,
+  runs: the first one the row is offered (`when`). `prominent: true`
+  keeps a page action a button in the nav bar; the rest go in the ☰ menu
+  (`submenu` groups them). `bulk` runs once per marked row; `key` runs on
+  the cursor row; `group: <value>` puts the button in that group's
+  heading (it needs `group` on the viz and binds only `{{param.x}}`).
+- An action's command may declare where a person goes after it
+  (`ui.open_after`, [commands.md](./commands.md) "Offering a command to a
+  person"): the page opens it once the action ran, bound from the run's
+  result. What becomes of the acting page is `then`: `open` (default; Back
+  returns), `replace` (it leaves history), `stay` (nothing opens) or
+  `close`. Outside a page (a panel) a page opens in a new tab.
+- `edit: true` makes an action the Save of a `markdown` viz's editor. Its
+  one input field bound to `{{row.<text column>}}` and not `fixed` takes
+  the text (`markdown_problem`).
+
+### Checks
+
+- **Load** (`parse_page`, then the extension's load): a page file's own
+  errors at `file:line`; each `options_from`, `expand` and form `from`
+  page is one of the extension's (`page_ref_problem`); a `component` node
+  or `viz: custom` names a declared `custom_components` entry
+  (`component_problem`); a `replaceable:` node names a target in the
+  table, placed once per page (`check_page`); a renderer's `for`,
+  `accepts`, `default`, `pinned` and `label` fit its resources
+  (`renderer_problem`); a slot mount names a page of the extension and a
+  `<extension>/<page>.<slot>`. A page that fails is dropped, with its
+  error on the extension.
+- **Layout warnings** (`pages::checks::layout_warnings`): load, validate,
+  `v_extension.warnings` and a deploy's result carry them, each naming
+  its page file and the fix after the dash. A warning never stops a page
+  loading.
 
   | Rule | Limit |
   |---|---|
-  | `filter` params on a page | 6 — fold related ones into one `choice`, or split the page |
-  | options of a `choice` | 12 — use a `search`, or a lens that lists them |
-  | a param no query of the page reads (the lens's own and its parts'; `:x` whole token, a date_range also `:x_from` / `:x_to`, an action's `{{param.x}}`, a column that `select`s or `highlight`s it; not for `custom`, `form`, `approvals`) | none — remove it, or read it |
-  | description of a visible lens (`hidden: false`; a hidden lens's is never shown) | 200 characters |
-  | sections of a `document` | 8 |
-  | declared `columns` of a `table` / `list` (not a `tool:` lens, whose rows are for an agent) | 8 — put the rest in a section a row `select`s |
+  | `filter` params on a page (a `switch`'s do not count) | 6 — fold related ones into one `choice`, or split the page |
+  | options of a `choice` | 12 — use a `search`, or a page that lists them |
+  | a param no loader of the page reads (`:x` whole token, a date_range also `:x_from` / `:x_to`, an action's `{{param.x}}`, a column that `select`s or `highlight`s it, a form's defaults, the `label`); not checked on a page with an `embed`, `slot`, `component`, `replaceable` node or `viz: custom`, which pass the params on | none — remove it, or read it |
+  | description of a visible page (`hidden: false`) | 200 characters |
+  | children of the top `stack` | 8 |
+  | declared `columns` of a `table` / `list` (not on a page with `tool:`, whose rows are for an agent) | 8 — put the rest in a node a row `select`s |
 
-- **Where a lens comes from** (`Lens.origin`, `LensProvenance`): its
-  `extension`, the `running` file (a deployment's copy in the store, or
-  the source when loaded from it), the `deployment` hash, `bundled`, and
-  `source` — the project-relative file to edit, none when no source is
-  here (filled per extension by `locate`). An agent edits `source`,
-  never `running`: the next deploy replaces the copy. `oxplow_read
-  lens:…` and `oxplow_get_open_page` add `outOfDate`
-  (`LensProvenance::out_of_date`, read from the files now: the source
-  changed after the deployment was made), and the open page lists its
-  document or dashboard `parts` with each part's `source`. `v_lens`
-  has `source`, not the running path. A deploy returns the loaded
-  extension's warnings as well as the size warning. A deployed
-  extension's errors and warnings name its source files (`locate`
-  rewrites the running copy's prefix), so they say what to edit.
-- **`columns[].select: <param>`** — clicking a row sets that param to the
-  column's value, so whatever reads it re-runs: a document's other
-  sections, master and detail from existing pieces. It names a declared
-  param (`highlight_problem`), and a document's or dashboard's own part
-  that selects needs the page to declare the param too, since the page
-  holds what its parts share (`selects_problem`).
-- **Choice params.** `options: [{ value, label }]` makes a
-  param a choice: a lens page shows a select, and an extension panel
-  whose body lens has one shows it as a toggle in the panel's header
-  (one small button per option). The default must be one of the options
-  (the loader refuses the lens otherwise, `param_problem`), and a run
-  supplying another value is refused (`resolve_params`). A panel's pick
-  binds its body lens only — the other lenses don't declare it — and is
-  the viewer's, remembered as the panel's memory (`choices` under the panel,
-  `PanelRunsProvider`); a pick the lens no longer offers falls back to
-  the default (`panelChoices`).
-- **Choice params whose options a lens lists.** `options_from: <lens>`
-  (a slug of the extension, qualified at load as `expand` is, or
-  `<extension>/<slug>`; it must exist, `options_from_problem`) makes a
-  choice whose options aren't fixed: the lens's rows are `value`,
-  `label`, optional `group` (the form `choices` contract). The rail
-  (`ParamControls.tsx`, `useListedOptions`) runs it for the page's stream
-  with the page's current values of the params it declares
-  (`childParams`), so an `end` picker's lens can leave out what `start`
-  is, groups the options (`<optgroup>`), shows the picked option's label
-  (the raw value until the options arrive) and re-runs it when what it
-  read changes (`useRerunOnChange`, the one place a param control
-  follows data). No `default` is needed and none is checked (the options
-  aren't known at load); a run takes any text, and the query says what an
-  unknown value means. An agent's lens tool (`agent_tools::lens_schema`)
-  emits no `enum` for it; its description names the lens to run. `type:
-  branch` stays its own TS query of `v_branch`; folding it into
-  `options_from` over a branches lens is a follow-up.
-- **Id params are pickers (tsk1043).** On a lens page, a param named
-  `uri` (a work item, over `v_work_item`), `effort_id`, `thread_id` or
-  `stream_id` — oxplow's own ids,
-  the names it fills from context or a slot binds — is a picker over the
-  matching model, by title (`lens/lensParams.ts`); any other param is
-  typed. The details rail's header wraps, so its actions sit below its
-  title when they don't fit beside it.
-- **Implicit params (tsk375).** A param named `stream_id` or `thread_id`
-  is bound to the viewer's context (`extensions::LensContext`, numeric ids)
-  unless the caller supplies it; precedence is supplied → context →
-  `default`. `lens_context(svc, stream?, thread?)` resolves it: the given
-  stream (else the thread's, else the primary) and the given thread (else
-  the stream's selected-or-active one). IPC `run_lens` / `run_lens_action`
-  resolve it from their `stream_id`, so the UI needs no plumbing; MCP
-  `oxplow_run_lens` / `oxplow_run_lens_action` also take the agent's `thread_id`;
-  `oxplow_get_open_page` uses the viewer's thread. Validation dry-runs use no
-  context (defaults only).
-- `query`: SQL over `v_*` and the extension's entities, with `:param`
-  binding.
-- `viz`: `table`, `list`, `number`, `markdown` (the first row's
-  `markdown: { text: <column> }`, else its first column, drawn by the one
-  Markdown component — `.context/markdown.md`; with an `edit` action it is
-  that component's editor, saving through the action: a draft in the
-  tab's history state, Save only when changed, Discard, Cmd/Ctrl+S),
-  `bar`, `line`, `treemap`,
-  `document`, `dashboard` (both below), `tree`, `timeline`, `detail`,
-  `steps`, `hunks`, `board` (the groups as columns of cards, each card a
-  list row; it needs `group`, whose `values: [..]` fix the columns' order
-  and keep empty ones as drop targets — `values` orders any grouped viz),
-  `terminal` (a terminal per row, `terminal: { of, title?, stopped?,
-  conversation? }`: `of` an `oxplow/terminal` or `oxplow/agent_session`
-  URI, all kept running, the picked one shown, a strip picking among
-  several through the lens's `select` column; fills; draws its own empty
-  state; refused in a spec; an agent reads the terminals' names, never
-  their output — `lens/TerminalViz.tsx`, `.context/terminal.md` "The
-  terminal viz and its host"),
-  `editor` (the working tree's file, edited: `editor: { path, lines? }`,
-  the first row's; its buffer the window's, Save `oxplow.file.save`, its
-  tab's ● and Save through `useTabEditing`; refused in a spec, since an
-  answer never writes as the person; an agent reads it as the file as
-  saved — `lens/EditorViz.tsx`, `.context/editor-and-monaco.md` "The
-  editor viz"), `embed` (a web page: `embed: { url }`, the first row's `http(s)`
-  URL, opened in oxplow's sandboxed window once per tab entry, its status
-  panel Open again / Open in Browser / Copy URL — `lens/EmbedViz.tsx`,
-  `.context/external-url-tabs.md`; it fills its page; refused in a spec,
-  since an answer never opens a page; an agent reads a link line), `code` and `diff` (the full-size readers: a file at a
-  revision, or one file's diff, read-only, filling a lens page —
-  the page host's `fill`, no in-body title; a loaded lens says whether it
-  fills, `Lens.fills`: its viz does, `LensViz::fills`, or it is a
-  document — not a view document — whose last section's lens fills, so
-  that section takes the height left (`fill_document_fills`, run once the
-  catalog is placed) — `lens/CodeViz.tsx`,
-  `lens/DiffViz.tsx`, `.context/editor-and-monaco.md` "Read-only code and
-  diff vizes"), `approvals` (core's consent component: it reads the
-  pending `v_command_proposal` itself and decides through the
-  approve and decline commands, so the lens needs only `query: SELECT 1`; the lens's rows are
-  ignored; params `thread` (a thread URI) and `setting` (a config key)
-  narrow the list; an agent reads it as the pending proposals, and a
-  person decides them), `form` (`form: { command, defaults?, fixed?,
-  fields? }`; no `query` needed: one, if given, prefills from its first
-  row; `fixed` fields show their `defaults` value and can't be changed —
-  it's imposed again on submit, so an item's `uri` stays its own;
-  `fields` lists which to show, the rest keep their starting values;
-  `choices` maps a field to a lens of the extension, `<ext>/<slug>`, run
-  with the form's params (those it declares), whose rows are the field's
-  choices — `value`, `label`, optional `group` — shown as a select under
-  group headings; a choices lens the extension doesn't have is a load
-  error. `mode: edit` edits what is saved: it starts from the saved
-  values, Save is enabled only when the form is changed, and Discard (or
-  Escape) puts them back; `create`, the default, gathers something new.
-  A `fields` entry is a name or `{ name, visible_if?, secret? }`:
-  `visible_if: { kind: [http, https] }` shows the field only while each
-  named field holds one of the values — hidden, it is neither required
-  nor submitted; `secret: true` masks it, keeps it out of any draft, and
-  leaves it out of the input when blank (the saved one stays). A command
-  input field whose schema says `writeOnly: true` is masked in every
-  form without this flag ([commands.md](./commands.md) "Secrets"). The form's
-  command must keep a secret out of its record (`unrecorded`), or the
-  form refuses to open (`form_start`). The load checks: a `visible_if`
-  names one of `fields` and not the field itself, a field isn't both
-  `fixed` and `secret`, and `mode: edit` lists its `fields`).
-  A field may be an object whose children another lens names:
-  `{ name: native, from: <ext>/<slug> }`. That lens (run with the form's
-  params, a `from` lens the extension doesn't have is a load error) has one
-  row per child — `name`, `title`, `kind` (`enum`, `text` or `number`),
-  `values` (an enum's, a JSON array), `read_only` (left out of the form) —
-  and the field's value is the object of those children
-  (`native.priority` is a path). The command's schema stays the same
-  whatever the rows say; `form_start` returns them as `subfields` with
-  what the lens read (`reads`), and the form reads again when that changes
-  (a switch of work list), keeping what was typed. New Item's `native` is
-  this, over the active list's declared fields (`work-item-fields`).
-  `again: { label, keep: [...] }` adds a second submit
-  ("Save and Another"): it runs the command, never opens a page, and the
-  form starts again with the `keep` fields (each one of `fields`) as they
-  were submitted and the rest from the form's defaults, its draft cleared;
-  Enter still runs the primary. An optional field whose `choices` lens has
-  no rows, and an object with no children, are not shown) or
-  `custom` (`custom: {
-  component, props? }`, one of the extension's `custom_components`; see
-  "Custom components"). Each component names the columns it draws from in
-  its own block: `chart` (`x`, `y`, `series`, `label`, `size`, `group`),
-  `tree` (`id`, `parent`, `label`; a lazy tree adds `lazy`, `branch` — below), `timeline` (`at`, `label`, `uri`),
-  `steps` (`label`, `status`), `hunks` (`path`, `from`, `to` — two
-  revisions, `working` / `snap:<id>` / `git:<rev>`), `code` (`path`,
-  `revision`; optional `lines`, a column holding `12-40` or `12`, marked
-  and revealed, and `sync: true`, the rows' editors scrolling together from
-  their marks), `diff` (`path`, `from`, `to`, optional `lines` and `base`: the first
-  row only, its line revealed on the newer side, `base` the header's name for the older side). An agent reads `code` as
-  each file's lines in a fence, `diff` as its unified diff
-  (`lens_text`).
-- `columns`: `key`, `label`, `link: {kind, from, line?, base?, head?}`
-  to a core page, so rows are page-graph links (kinds: `task`, `file`,
-  `wiki`, `effort-diff`, `commit`, `metric`, `page`, `diff-at`,
-  `compare`), and `unit` — another column of the row holding this one's
-  unit, so a number shows as a metric value (`16.4 s`, `42.5%`; tsk1038).
-  A timestamp cell shows in local time, its full time on hover.
-- `columns` also take `icon` and `tone`: each names another
-  column of the row. `icon`'s value names an icon drawn before the cell
-  from a fixed vocabulary (`lens/lensIcons.tsx`): the work glyphs
-  `ready` / `todo` ☐, `in_progress` ◐, `blocked` ⚠, `done` ✓,
-  `canceled` ✗, `archived` ▣ (each with its own tone); a file's status, lettered as the file trees letter it — `added` A, `modified` M, `deleted` D, `renamed` R, `untracked` U, `conflicted` C (a `tree` row's label column takes one, and a `tree` row picks by a column's `select` like a table's: it is marked `ox-selected`); the kinds `epic`,
-  `task`, `wiki`, `file`, `folder`, `commit`, `diff`, `lens`, `metric`,
-  `dashboard`, `comment` (their pages' icons); and the resource icon
-  names (`bug`, `git-pull-request`, … — `ICONS`); past those,
-  any page kind (`git-dashboard`, `alerts`, `work_item`, …) draws its
-  page's icon, so a row of pages — a bookmark, a visit — can
-  pass its `page_kind`. `tone`'s value
-  is `accent`, `success`, `warning`, `danger` or `muted`, drawn with theme
-  variables (`--accent`, `--status-done`, `--status-waiting`,
-  `--severity-critical`, `--text-muted`); it colours the cell and wins
-  over an icon's own tone. Values come from the query, so the loader
-  can't check them: an unknown name draws nothing, an unknown tone is
-  plain.
-- **Row styling**, each naming a result column:
-  - `group: { by, link? }` (`list` / `table`): the rows under a heading
-    per distinct `by` value, in the order each first appears — a group
-    with no rows doesn't appear. The heading looks like the rail's
-    sub-headings (also compact, in a panel) and links through `link`
-    (any column link kind; `from` defaults to `by`), read from the
-    group's first row. A table puts the heading in a full-width row.
-  - `emphasis` (`list` / `table` / `tree`): a truthy value (true, a
-    non-zero number, text other than empty / `0` / `false`) highlights
-    the row (`--accent-soft-bg`, medium weight).
-  - `depth` (`list` / `table`): a whole number (0–8) indents the row, for
-    children under a parent in a flat list.
-  - `group.by`, `emphasis` and `depth` are never shown as cells. The
-    loader refuses them on other vizes; `oxplow_validate_extension` checks the
-    columns they name (and `icon` / `tone`) are in the result
-    (`Lens::role_columns`); at render a missing one is ignored.
-  - Copy (`lens_text`) renders a grouped lens as a section per group.
-  - Pure shaping: `rowGroups`, `rowEmphasized`, `rowDepth` in
-    `lensModel.ts`.
-- **Rows drag into the agent's context**: a `list`, `table` or
-  `tree` row whose first linked column resolves (`rowRef`) is draggable
-  with the agent-context drag (`CONTEXT_REF_MIME`, `setContextRefDrag`) —
-  a working-tree file or wiki page as its `@` mention, any other URI as
-  `[oxplow uri …]` (`rowContextRef`). The agent terminal highlights and
-  accepts it as for the core rows; the keyboard path is the row menu's
-  Ask About This. A `tree`'s labels draw through their declared column
-  (`columns` entry for `tree.label`), so its `link`, `icon` and `tone`
-  apply.
-- `actions`: commands the lens offers, `{ id, label, command, input?,
-  row?, group?, form?, fixed?, choices?, then?, when?, primary?, drag?, bulk?, key? }`, with `{{param.x}}` / `{{row.x}}` placeholders (`{{row.x|json}}`: the JSON a text cell holds, typed — the one filter, checked at load, bound in `bind_input`; and a drag action's `{{before.x}}`, `{{after.x}}`, `{{onto.x}}`, `{{group.value}}`, above); run as the lens
-  for whoever pressed, so they grant no power. `form: true` opens the
-  command's form instead of running (`lens_action_form` gives the
-  command and the bound `input` as starting values; a slideover, or —
-  when the form less its `fixed` fields is one text field — a prompt
-  strip at the top of the lens, `promptField` / `ActionPrompt`); what the
-  person fills in runs (`oxplow_run_lens_action`'s `input`, taken only by a form
-  action), its `fixed` fields put back to the bound values (an `Edit…`
-  row action keeps the row's `uri`); a form action's `choices` are a
-  form lens's (above). A refusal naming a field (`INVALID`
-  with `field`, carried over IPC on `IpcError.field`) shows under that
-  field, in a form lens too. A run that came back undoable toasts with Undo (the person's click confirms it). `primary: true` (a row action) makes it what a click on the row, or Enter, runs — the first primary action
-  the row is offered (`when`); a click on a link or control in the row is
-  theirs. `group: <value>` puts the
-  action in that group's heading (matched against the group's value as
-  text) instead of the toolbar — also in a compact panel, where the
-  toolbar is hidden. It needs the lens to have `group`, isn't a row
-  action, and binds only `{{param.x}}`; a group with no rows shows no
-  heading, so neither its action.
-  An action's command may declare where a person goes after it
-  (`ui.open_after`, commands.md "Offering a command to a person"): the
-  lens page opens that page once the action — plain or form — ran, bound
-  by the server from the run's result (`command_open_after`) exactly as
-  a command offer does (`lensActions.openAfterAction`). A result that
-  can't name the page is the action's recorded failure.
-  `oxplow.knowledge.write_page` declares one (the page it wrote), so the
-  Wiki page's "+ New" opens the new page. A form lens's submit follows
-  `open_after` the same way. What becomes of the lens's page is the
-  action's `then` (a form lens's `form.then`): `open` (default) — the
-  page opens in this tab and Back returns; `replace` — it takes this tab
-  and the lens's page leaves history (`NavigateOptions.replace`, so Back
-  never returns to a submitted form; a target that can't live in a tab —
-  an agent session, a stream or a thread — closes this one and is shown or
-  focused: New Stream's `oxplow.stream.create` opens the stream's URI); `stay` — nothing
-  opens (a form for the next entry); `close` — the lens's page closes (Delete on a work item's page). Outside a page (a panel) a page
-  opens in a new tab whatever `then` says.
-- `alert`: a row-count or threshold condition that shows a panel badge
-  (nudging the agent is what advisories are for).
+- **`extension check` dry-runs pages** (`pages::checks::dry_run`): each
+  `sql` loader runs once with the params' defaults (an earlier loader
+  reads as a table), so a query that fails, and a viz node naming a column
+  its loader does not return, are found before deploy. `command` and
+  `page` loaders do not run (a check acts as no one), so a node they feed
+  is not column-checked. `pages::checks::text` renders the dry run as
+  text; the impact review compares it between two versions ("Reviewing by
+  impact").
+- A slot mount whose host page is not loaded, or has no slot by that
+  name, warns (`"… shows nowhere"`).
 
-- **Composites: `document` and `dashboard`.** A lens of other lenses
-  (the Document and Dashboard archetypes, [pages-and-tabs.md](./pages-and-tabs.md)
-  "Page archetypes and the kit"). `document` takes `sections:`, a
-  `dashboard` `tiles:`, each a list of parts `{ id?, title?, lens? |
-  markdown?, size? }` (`PartFile` → `LensPart`, `parse_parts`): exactly one
-  of `lens` (a slug here, or `<ext>/<slug>`) and `markdown`; `id` defaults
-  to the lens's slug and a markdown part needs one; ids are unique; `size`
-  (`small`, `wide`, `tall`, `full`) only on a tile. A lens part runs with
-  the params it declares from the composite's (`childParams`). Neither
-  needs a `query`; one it has is **a row its parts are given**: the first
-  row's columns under the composite's params, a param holding a value
-  winning (`extensions::part_params`, desktop `partParams`), so a page
-  says what its sections read — a commit's document `SELECT id AS
-  change_id FROM v_change WHERE kind = 'commit' AND target = :sha`, which
-  also makes the change (`.context/semantic-layer.md` "Made on demand").
-  The row is declared with `columns:`, the names of what the query returns
-  (only their `key`: a composite's column is not something shown, and
-  `columns:` needs a `query`; `row_columns_problem`): they are what its
-  parts, and the lenses mounted at its `.sections` / `.tiles` slot, may
-  take as params, next to the composite's own `params`
-  (`mount_problem`), and a name none of its parts (its own and the
-  mounted ones) declares warns at load (`warn_unread_row_columns`). A
-  renderer's lens declares its resource's params in `params`; its row
-  names are not params of the resource. A part lens of its own extension must exist at load
-  (`parts_problem`); another extension's resolves with the catalog, and a
-  missing one drops the composite. `lens_text` renders a composite as a
-  `###` section per part (a view document: the section in view). A standalone spec can't be either
-  (`spec_problem`). The UI draws a document as kit `Section`s (empty ones
-  fold into one "Nothing found" line; a form part never does: it has no
-  rows of its own) and a dashboard as a kit `TileGrid`
-  (`lens/PartsViz.tsx`), running every part together and re-running all of
-  them on any part's reads (`useLensRuns`). A part may be a composite
-  itself (a document section that is a document): it draws, and its text
-  reads, as its own sections (`lens_text::Resolved.children` carry each
-  child's own resolution). A part that names its own lens, or parts that
-  lead back round (A's section is B, B's is A), are refused at load
-  (`parts_problem`, `refuse_part_cycles`).
-- **A document with a view: `view: <param>`.** A document whose param
-  names the one section in view (Settings: `view: area`, a section per
-  area). Only that section runs and draws, as the page's body: no heading,
-  its lens's `description` as the intro, the page's h1 the section's
-  title, its tab `<page>: <section>` off the first section. The other
-  sections are the page's rail (`lens-view-<id>` links, the one in view
-  `aria-current`); a change of section is pushed (Back returns), like a
-  pick. The param rides in the `#` and is a `choice` whose options are the
-  sections, its own and mounted ones: the loader makes it a `filter`
-  choice when it doesn't say otherwise (`view_param`), refuses `options` /
-  `options_from` on it, a `default` that isn't one of its own sections, a
-  `role` other than `filter` and a `type` other than `choice`
-  (`view_problem`), and fills its options once mounts are placed (value
-  the part id, label its title, else its lens's: `fill_view_options`,
-  replaced on each resolve). A run naming no section is refused as any
-  choice is. A mount at a view document's `.sections` slot is a section
-  of its own and needn't read the document's params (`mount_problem`
-  gets none to check); the view param isn't "read by any query", isn't
-  counted among the filters, and the section count doesn't warn
-  (`layout_warnings`, which also counts a filter a section reads two
-  levels down). Filters: the view document declares every filter its
-  sections take (`q` for Settings' overview); its rail offers one only
-  while the section in view declares a param of that name
-  (`offeredFilters`). Its page lists each section but the first in the
-  launcher as `<page>: <section>` at `#<view>=<id>` (`launcherPages`). Its
-  text is one line naming the sections (the one in view in bold) and how
-  to read another, then the section in view (`Lens::viewed_parts`, the
-  desktop's `viewedParts`: the same rule for what resolves and renders).
-- **`#section=<id>` lands on a section.** On any lens page, `section` is
-  the page's view key, never a lens param (`RESERVED_VIEW_KEYS`; a param
-  so named is refused): it is left out of the run, and once the body has
-  drawn the page scrolls to `[data-section="<id>"]` (kit `Section` sets
-  it, nested documents too). A page's Contents lists its sections'
-  headings once it has four or more, after and among its markdown
-  headings (`lens/Contents.tsx`).
-- **A lazy tree: `tree.lazy: <param>`, `tree.branch: <column>`.** A tree
-  whose run is one level (a folder of `v_workspace_file`, which reads one
-  folder for `parent = :folder` and walks the worktree otherwise): `lazy`
-  names the lens's own param the level is read with (it needs a `default`,
-  the top level, and can't be one the context supplies — `stream_id`,
-  `thread_id`), `branch` the column that is truthy on the rows that open.
-  A branch opens by running the lens again with the param set to the row's
-  `id`, its rows spliced under it (`useLazyBranches`: one run per open
-  branch reachable through open parents, latest answer wins per branch,
-  loaded branches re-run when what they read changes; `lazyTreeNodes`,
-  `drawnTreeRows`): spliced rows are rows of the lens — marked, dragged,
-  right-clicked, counted. Lazy branches are closed by default and open by
-  id (`lens-tree.open:<lens>`, history state); a row the result nests
-  children under is an eager branch as before (open by default, closed by
-  index path), never lazy, so one lens can nest a scope's changed files and
-  open all-files folders lazily (`branch: is_dir AND :scope = 'all'`). A
-  lazy branch's row opens on a click or Enter (a link or control in it, and
-  a marking click, keep their meaning); a column whose `select` names the
-  lazy param is refused (`lazy_tree_problem`), since a click would re-root
-  the page. The text rendering marks a branch `▸ ` and ends by saying how
-  to read one (`<param>=<id>`). `expand:` still refuses the lens itself:
-  a tree that loads itself is `tree.lazy`, not an expansion.
-- **Rows as tiles: `tile:`.** A `dashboard` whose tiles are data (a user
-  dashboard's `v_dashboard_item` rows) names them in a column-role block,
-  `tile: { id, title?, size?, lens?, sql?, display?, chart?, metric?, viz?,
-  text? }` (`LensTile`), each value a column of its query: one tile per
-  row, after the static `tiles:` (which may stay, or be none). A row draws
-  its `lens` (run with the page's params it declares, as a part), else its
-  pinned `sql` shown as `display` (`chart` the JSON of a chart display's
-  roles; `display = metric` the metric card over `metric`/`viz`), else its
-  `text` (a heading band). Load rules (`tile_problem`): only on a
-  dashboard, with a `query`, an `id`, one of `lens`/`sql`/`text`, and
-  `display`/`chart`/`metric`/`viz` only beside `sql`; `columns:` is
-  refused beside it (`row_columns_problem`): the rows are tiles, not a row
-  of params, so `part_params` gives the static parts the page's params
-  alone. Its roles are `role_columns`, checked against the result like a
-  chart's. `lens_text` resolves each row's run (`Resolved.row_tiles`; a
-  `sql` tile through an ad-hoc spec, a chart display without a parsable
-  `chart` or `metric` as a table; one that can't run says why and the
-  rest still run) and renders a `###` per row under its `title` column,
-  else its run's title. The UI (`DashboardViz`, `rowTiles` in
-  `lensModel.ts`) draws each row in a `TileSlot` (`lens-tile-<id>`) at its
-  size: a lens tile as a part (its run joins `useLensRuns` keyed by tile
-  id, sorted, so a reorder re-runs nothing), a `sql` tile as
-  `QueryTileBody`, the metric card as `MetricTileBody` (one
-  `listMetricDefinitions()` for the grid; windowed by the page's
-  `range`/`branch` params), a text tile as `TextBand`. Its **edit action** (`edit: true`, the one
-  inline-edit mechanism) edits a text tile in place, so it must save the
-  `tile.text` column (`markdown_problem`); tiles are rows, so the lens's
-  row, drag (`{{order.id}}` for a whole new order) and key actions act on
-  them.
-- **A table or list is keyboard-driven** (`useListNav`): focus it, ↑/↓ move
-  the cursor, Enter opens the cursor row's first link or runs its first row
-  action (usability.md "Keyboard").
-- **A link column is a collection.** The pages a column's links open are
-  its page's **origin** (`lens/linkOrigin.ts`, `.context/pages-and-tabs.md`
-  "Origins"): the opened page's Up and Down step through the rows that have
-  one, labelled by the cell's text. A new tab opens without it.
-- **Columns** also take `width` (pixels: the table lays out fixed, so
-  columns line up, and that column's cells are cut to one line with the
-  whole text on hover — `DataTable` does it for every table, so a long
-  value never runs into the next column) and `format` (`date`, `datetime`, `relative`, `bytes`,
-  `duration` in ms, `integer`, `percent` of a 0–1 fraction, `sparkline` — a JSON array of numbers drawn as a small line with its latest value, `badge` — the value as a pill in the column's `tone`), read by
-  `formatCell` in the UI only; an agent reads the raw value. `expand: <lens>` (a slug of the extension or `<ext>/<slug>`, named whole at load; the loader refuses one the extension lacks or the lens itself: `expand_problem`) puts a ▸ in the cell that opens that lens under the row, run with the row's values (the params it declares; `RowExpansion`, the open rows are the step's history state). A `line` chart's `chart.targets: <column>` draws a target line on each series, its last non-null value of that column (`lineSeries`; the loader refuses it on another viz). A grouped list or table's headings fold their rows (▾ / ▸, history state) and show how many rows each holds. `highlight:
-  <param>` draws the cell's text with every case-insensitive occurrence of
-  that param's current value marked (`markParts` in `lensModel.ts`,
-  `<mark class="ox-mark">` elements, never innerHTML; empty or missing:
-  plain text). The loader refuses one that names a param the lens doesn't
-  declare (`highlight_problem`). The foundation's `wiki-pages` lens uses
-  it with its `filter`.
+### Custom components
 
-> **Not built.** From the original design: a
-> `decision` link kind; `followup-comment` and `open-diff` actions.
-> (`hunks` and `steps` are built, above; `copy-review-prompt` became
-> `copy` on the Review Prompt lens.)
+A page's `component` node and `viz: custom` run a web bundle from the
+extension's `custom_components`, sandboxed, fed the page's loaders. The
+reference is "Custom components" below and `docs/guide/pages.md`. A page
+whose view is one `component` node fills the page under oxplow's bar
+(a custom page; foundation's Timeline is the example).
 
-The desktop draws page files only (no `LensPage` / `LensSlots`; the
-`diff.file.header` lens slot draws nothing until it is a page slot).
-Bookmarks, backlinks, the launcher and sibling navigation work unchanged. Every lens has an "Improve
-with Agent" action that pastes `[oxplow lens <ext>/<slug>]` and its params
-into the agent's context through the existing add-to-context path; oxplow
-never types into the agent.
+### Agents
+
+`oxplow_find_page { question }` (answers, then titles and descriptions),
+`oxplow_run_page` (the page's text and rows; up to 200 rows a loader as
+JSON, 50 as text, with `truncated`), `oxplow_run_page_action`,
+`oxplow_show_page` (an inline `spec`, or an existing page with params,
+beside the conversation), `oxplow_get_open_page` (the page's tree, the
+viewer's filters and picks and the focused node). `oxplow_validate_extension`
+and `oxplow_preview_extension` check and preview a page before deploy.
+`v_page`, `v_page_answer` and `v_page_param` list the loaded pages
+for SQL.
 
 ## Slots
 
-**Pages' slots** (the page files that replace lenses): a page's `slot`
-node is a slot named `<extension>/<page>.<name>`, and a mount names a
-page — `ui.slots: [{ slot, page, at?, title?, size? }]` — instead of a
-lens. See pages-and-tabs.md "Page files". The rest of this section is the
-lens world's, until it is removed.
+A **slot** is the only way an extension reaches another extension's page.
+A `slot` node in a page's `stack` or `grid` (`- { slot: sections }`) is a
+slot named `<extension>/<page>.<name>`; with nothing mounted it draws
+nothing. A mount is an entry in the mounting extension's manifest:
 
-Slots are the **only** way an extension reaches a page. Core pages
-declare them (`SLOTS` in `extensions.rs`, a `SlotSpec` each: name, params,
-and `parts`) and render whatever is mounted. With nothing mounted, the
-page is plain.
+```yaml
+ui:
+  slots:
+    - { slot: oxplow-foundation/work-item.sections, page: item-tokens, at: { before: links }, title: Tokens }
+```
 
-**Two kinds of slot.** A *region* (`SLOTS`: `diff.file.header`) is one
-place on a core page; its mounts show in declaration order. A *parts slot*
-is a composite lens's own list of parts — a document's sections, a
-dashboard's tiles — and core has none of its own: every page that has
-parts is a lens, so its slot is the lens's (below). A mount there says
-where it goes: `at: start`, `end` (the default), `{ after: <id> }` or
-`{ before: <id> }` (`SlotAt`, untagged because serde_yaml reads tagged
-enums only as YAML tags); it may also give a `title` and, on a tile, a
-`size`. The id is the contract, so a mount survives the page's code
-changing: an `at` beside an id the page doesn't list is a load **warning**,
-and the mount goes at the end. `at` on a region and `size` off a `.tiles`
-slot are errors (`mount_problem`).
+`slot` is the host's slot name; `page` is a slug of the mounting
+extension; `at`, `title` and `size` are optional. The mounted page runs as
+an embed (`PageRunner::run_mount`): its params by name from the host's
+params and its loaders' first rows, so it declares the ones it needs. Its
+node id is the mounted page's id with `/` written `.` (`beta.extra`), and
+the desktop marks it with the mounting extension's name. A disabled
+extension mounts nothing.
 
-**Every composite lens is a parts slot too:** `<extension>/<slug>.sections`
-of a `document`, `.tiles` of a `dashboard`, with its parts' ids and its
-params as the slot's. So one extension adds to another's page the way it
-adds to a core one. These resolve when the catalog is final
-(`place_lens_mounts`, the last step of `resolve_catalog`): a mount naming
-no loaded composite, or the wrong kind, is an error of the mounting
-extension and goes; a good one becomes a `LensPart` of the target lens,
-placed by `at` (`place_parts`) with
-`from` naming the mounting extension. The target's page, its text and
-`get_lens` all show it, and the UI marks it with that extension's name. A
-mount's contribution id is `<slot>-<n>` with a lens's `/` written `.`
-(`LensSlot::local_id`). **Slot names are one dotted namespace,
-`<capability>.<page>.<region>`** (P6b.C1): a mount naming anything else
-is an unknown slot (listing the known ones), and a top-level
-`slot_mounts:` / `decorators:` / `replacements:` is an unknown field —
-they live under `ui:`.
+- `at` (`SlotAt`, untagged because serde_yaml reads tagged enums only as
+  YAML tags): `start`, `end` (the default, at the slot node) or `{ before:
+  <sibling id> }` / `{ after: <sibling id> }` beside a sibling of the slot
+  in its parent stack. The id is the contract, so a mount survives the
+  host's other code changing. An `at` beside an id the slot's parent does
+  not hold shows nowhere: the runner drops that mount. `size` (`small`, `wide`, `tall`, `full`) is for a
+  grid host.
+- Load errors at the mount's line (`extensions.rs`, `slot_files`): the
+  page is not in `pages/`; the slot is not `<extension>/<page>.<slot>`.
+  Load warnings: the host page is not loaded, or has no slot by that name
+  (the mount "shows nowhere").
+- A mount's contribution id is `<host>.<slot>-<n>` with the host's `/`
+  written `.` (`PageSlot::local_id`). Slot mounts are `ExtensionUi.page_slots`.
+- A top-level `slot_mounts:` / `decorators:` / `replacements:` is an
+  unknown field: they live under `ui:`.
 
-| Slot | Core page | Params |
+The slots foundation's pages declare (each `slot` node is one; its page's
+loaders' first rows and params are what a mount can take):
+
+| Slot | Host page | Params a mount may take |
 |---|---|---|
-| `oxplow-foundation/changes.sections` | the Changes page (a document: parts `effort`, `header`, `description`, `verdict`, `concurrent`, `files`, `extensions`) | its params (`uri`, `start`, `end`, `stream_id`) and its row (`subject`, `start_rev`, `end_rev`, `work_item`, `effort_id`, `effort`, `in_progress`, `range_change_id`, `change_id`; a lens declaring `effort_id` or `effort` is left out of a page that shows no effort) |
-| `oxplow-foundation/work-item.sections` | the Work Item page (a document: parts `state`, `fields`, `body`, `info`, `links`, `comments`, `activity`) | its params (`uri`, `thread_id`, `stream_id`) |
-| `oxplow-foundation/tasks.sections` | the Tasks page (a document: parts `list`, `summary`, `backlog`) | its params (`show`, `priority`, `thread_id`, `stream_id`) and its row (`scope`) |
-| `oxplow-foundation/commit.sections` | the commit page (a document: parts `detail`, `files`) | its params (`uri`, `sha`, `stream_id`) and its row (`change_id`, `base_revision`, `head_revision`) |
-| `oxplow-foundation/uncommitted.sections` | the Uncommitted Changes page (a document: parts `commit`, `files`) | its params (`stream_id`) and its row (`change_id`, `base_revision`, `head_revision`) |
-| `diff.file.header` | not drawn by the desktop any more (its lens slot went with `DiffFileHeaderSlot`; it becomes a slot of the `diff` page) | `path`, `left_revision`, `right_revision` (each a revision in its wire form: `working`, `snap:<id>`, `git:<sha>`), `stream_id` |
-| `oxplow-foundation/settings-<area>.sections` (`overview`, `agents`, `lsp`, `extensions`, `data`, `integrations`, `ai`) and `oxplow-foundation/settings.sections` | each Settings area (a document lens `settings-<area>`, a section of the view document `settings`), and a new area | `settings-overview` takes `q`, the page's search; the others none |
+| `oxplow-foundation/diff-view.sections` | the Changes page (an effort's or a range's diff; nodes `effort`, `header`, `description`, `verdict`, `concurrent`, `files`, `extensions`) | `uri`, `start`, `end`, `stream_id`, and the page's row (`effort_id`, `change_id`, …) |
+| `oxplow-foundation/work-item.sections` | the Work Item page (nodes `state`, `fields`, `body`, `info`, `links`, `comments`, `activity`) | `uri`, `thread_id`, `stream_id` |
+| `oxplow-foundation/tasks.sections` | the Tasks page (nodes `list`, `summary`, `backlog`; `at: { before: list }` puts a strip above the list) | `show`, `priority`, `thread_id`, `stream_id` |
+| `oxplow-foundation/commit.sections` | a commit's page (nodes `detail`, `files`) | `uri`, `sha`, `stream_id`, and `change_id` (the page's row) |
+| `oxplow-foundation/uncommitted-changes.sections` | Uncommitted Changes (nodes `commit`, `files`; `at: { before: commit }` puts a strip above everything) | `stream_id`, and `change_id` (the page's row) |
+| `oxplow-foundation/new-session.sections` | the New Session page (nodes `start`, `earlier`) | `stream_id`, `thread_id`, `q` |
+| `oxplow-foundation/diff.file-header` | the Diff page (one file between two revisions; the slot sits above the diff). oxplow-bundled mounts its `file-co-change` page here | `path`, `left`, `right`, `label`, `base`, `lines` |
 
-The launcher isn't a slot: a lens lists itself with `launcher.category`.
+`change_id` points at the page's change in `v_change`, with its analysis
+in `v_change_file`, `v_change_function`, `v_change_import`,
+`v_change_co_change` and `v_change_duplicate`. To learn a page's slots
+and params, read it with `oxplow_find_page` or the `definition` page: its
+slot nodes and loaders are listed.
+
+The launcher is not a slot: a page lists itself with `category`.
 
 ## Replacements
 
-`ui.replacements` (P9.A1, stable since oxplow-bundled's history graph;
-`extensions/replacements.rs`) puts a **lens in place of a named core
+`ui.replacements` puts a **page in place of a named core
 sub-component** — never a whole page:
 
 ```yaml
 ui:
   replacements:
-    - { target: vcs.history.graph, lens: history-graph, version: 2 }
+    - { target: work_item.board, page: swimlanes, version: 1 }
 ```
 
 The targets are one table, `oxplow_domain::replaceable::REPLACEABLE`:
 each a `target`, the `capability` it belongs to, whether it is **bound to
-a provider**, its contract's **version**, its **props contract** —
-the params the replacement lens is given instead of any host state — and
-its **view**: the host page's view params the replacement shares, read
+a provider**, its contract's **version**, its **props contract** — the
+params the replacement page is given instead of any host state — and its
+**view**: the host page's view params the replacement shares, read
 (`init.view`), written (`setViewParams`) and heard (`viewParams`) as the
-core component it replaces reads and writes them, so the two leave the
-same address. Only those keys: any other is refused, and a target with
-no view gives its replacement none (its filters are its own). The
-table is published as `v_replaceable` (restated with the vocabulary,
-`replaceable_store`) and generated into the reference
-(`the_reference_lists_every_replaceable_view`), so an author reads the
-contracts where everything else is. A declaration's optional `version:`
-must be the contract's: a changed contract refuses it rather than handing
-it props it doesn't know.
-
-A replacement may name a **page** instead (`{ target, page }`,
-`UiReplacement.pageId`): the same choice decides (`useReplacement`, state
-`page`), and `Replaceable` opens one run of that page with the target's
-props as its params and draws it with `PageTree` under the same badge; a
-run that fails shows oxplow's own and says why. A page file's node marked
-`replaceable: <target>` is a lens part's equal (`PageTree` wraps it in
-`Replaceable`, its props the run's params).
+core component reads and writes them. Only those keys: any other is
+refused, and a target with no view gives its replacement none. The table
+is published as `v_replaceable` and generated into the reference
+(`the_reference_lists_every_replaceable_view`). A declaration's optional
+`version:` must be the contract's: a changed contract refuses it rather
+than handing it props it does not know.
 
 | Target | Core component | Capability | Bound | Props | View |
 |---|---|---|---|---|---|
-| `work_item.board` | the Board's columns of cards (the `board-cards` part of the `board` document) | `work_items` | no | `scope` (`thread` / `backlog` / `all`), `thread_id` (the viewed thread; it applies when `scope` is `thread`) | — |
-| `work_item.list` | the Tasks page's list (`TasksList`, `TasksPage`): the scope picker, detail pane and backlog drawer stay oxplow's; the lens's `stream_id` is the scope's stream | `work_items` | no | `scope` (`thread` / `stream` / `all`), `thread_id` (the thread when `scope` is `thread`, else null) | — |
-| `work_item.detail` | a work item's description editor (the `body` part of the `work-item` document): the state, fields, About, links, comments, activity and the mounts stay oxplow's | `work_items` | no | `uri` (the item) | — |
-| `work_item.detail.state` | a work item's State (the `state` part of the `work-item` document) — never its Move To (the About part's menu), so a replacement can't strand an item | `work_items` | yes | `uri` (the item) | — |
-| `effort.verdict` | an effort's verdict, the first line of its page (the `verdict` part of the `changes` document). Core has **none of its own**: with no replacement, or `oxplow` chosen, the page shows nothing. oxplow-bundled's `effort-verdict` is the default | `effort_policy` | no | `effort_id` (the effort's row id) | — |
-| `vcs.history.graph` | Git History's commits (a part of the `git-history` document): oxplow's own is a plain list, the part's lens (`git-history-commits`) | `vcs` | no | `head_sha` (the stream's head), `reveal_sha` (a commit to scroll to and mark, or null), `limit` | `q`, `author`, `branch` (Git History's filters; v2) |
+| `work_item.board` | the Board's columns of cards (the `board` page's node) | `work_items` | no | `scope` (`thread` / `backlog` / `all`), `thread_id` (applies when `scope` is `thread`) | — |
+| `work_item.list` | the Tasks page's list: the scope picker, detail pane and backlog drawer stay oxplow's | `work_items` | no | `scope` (`thread` / `stream` / `all`), `thread_id` (the thread when `scope` is `thread`, else null) | — |
+| `work_item.detail` | a work item's description editor (the `body` node of the `work-item` page): the state, fields, About, links, comments, activity and the mounts stay oxplow's | `work_items` | no | `uri` (the item) | — |
+| `work_item.detail.state` | a work item's State (the `state` node) — never its Move To (the About node's menu), so a replacement cannot strand an item | `work_items` | yes | `uri` (the item) | — |
+| `effort.verdict` | an effort's verdict, the first line of its page (the `verdict` node of the `diff-view` page). Core has **none of its own**: with no replacement, or `oxplow` chosen, the page shows nothing. oxplow-bundled's `effort-verdict` is the default | `effort_policy` | no | `effort_id` (the effort's row id) | — |
+| `vcs.history.graph` | Git History's commits (a node of the `git-history` page): oxplow's own is a plain list | `vcs` | no | `head_sha` (the stream's head), `reveal_sha` (a commit to scroll to and mark, or null), `limit` | `q`, `author`, `branch` (Git History's filters; v2) |
 
-**Who places a target.** A core component (`<Replaceable target …
-fallback>`) or a **lens part** of a declared page: a
-`document` section or `dashboard` tile with `replaceable: <target>`
-(`LensPart.replaceable`, `PartsViz`). The part's own lens is oxplow's own
-and the fallback; it must declare every prop of the target's contract
-(`replaceable_problem`, an error at load, as a replacement lens must), and
-a target is placed once per page. At render the part's run gives the props
-(its resolved `params`), and `Replaceable` draws the replacement in the
-part's place under its badge. A lens param named `head_sha` is, unless
-supplied, the viewed stream's HEAD commit (`v_stream.head_sha`), as
-`stream_id` is the viewer's stream. Git History is this: the `git-history`
-document's one section.
+**Who places a target.** A page node marked `replaceable: <target>`
+(`Node.replaceable`; `check_page` refuses an unknown target and a target
+placed twice on a page). The node's own content is oxplow's own and the
+fallback. At render `PageTree` wraps the node in `Replaceable`, its props
+the run's resolved `params`. The page's params must cover the contract so
+the props exist; a page with a `replaceable` node is not warned about
+params it passes on.
 
 **Bound or not.** A bound target shows one provider's own thing — the
 state control lists that tracker's states — so only the extension of the
-provider whose item it shows replaces it (below). Every other target is a
-**view**: the Board, the list and the editor show the capability as a
-whole, reading `v_work_item` and changing items through the interface
-commands (`oxplow.work_item.update`, `transition`, `reorder`, `move`), so
-they work with whichever list is active and any extension may bring one —
-a view needs no provider. Choosing a presentation is separate from
-installing a work list.
+provider whose item it shows replaces it. Every other target is a **view**:
+the Board, the list and the editor show the capability as a whole, reading
+`v_work_item` and changing items through the interface commands
+(`oxplow.work_item.update`, `transition`, `reorder`, `move`), so they work
+with whichever list is active and any extension may bring one — a view
+needs no provider. Choosing a presentation is separate from installing a
+work list.
 
 **Whose shows** is the person's: `replacements: { <target>: <extension> |
-oxplow }`, one project key validated against the table. An
-extension chosen shows (an unbound target only); `oxplow` keeps oxplow's
-own (any target); unlisted is the default — the only extension replacing
-it, several and no choice keeping oxplow's own, and for a bound target
-its provider's extension's. Settings → Integrations lists each replaced
+oxplow }`, one project key validated against the table. An extension
+chosen shows (an unbound target only); `oxplow` keeps oxplow's own (any
+target); unlisted is the default — the only extension replacing it,
+several and no choice keeping oxplow's own, and for a bound target its
+provider's extension's. Settings → Integrations lists each replaced
 target with that choice (a `<select>`: Default, oxplow's own, each
-extension), with or without provider instances.
-
-Every target has a label a person reads — its `label` in the same table
+extension). Every target has a `label` a person reads, in the same table
 ("board", "state control", "history graph"), carried on each
-`UiReplacement` so the desktop names it from there (tsk935; no second
-list to keep in step). A state control replacement lists the tracker's
-own states, each with **Move Here** (`oxplow.work_item.transition` with
-the `native_state`); oxplow's Move To stays beside it: the canonical
-states every provider takes.
+`UiReplacement`. A state control replacement lists the tracker's own
+states, each with **Move Here** (`oxplow.work_item.transition` with the
+`native_state`); oxplow's Move To stays beside it.
 
-**At load** (`parse_replacements`, errors at the entry's line): the
-target is in the table; the lens is one of the extension's and declares
-**every** prop (a slot's lens declares at least one; a replacement takes
-the whole contract — a Board that ignores `scope` isn't the Board); for a
-bound target, the extension brings a provider of the target's capability
-(`providers:`); a target is replaced once per extension. The viewer's
-stream isn't a prop: a lens that declares `stream_id` gets it, as
-everywhere. Valid ones are `Extension.ui.replacements` (`UiReplacement {
-id: <ext>/<target>, extension, target, capability, boundToProvider,
-lensId, label }`).
+**At load** (`replacements::parse_replacements`, errors at the entry's
+line): the target is in the table; the page is one of the extension's and
+declares **every** prop (a replacement takes the whole contract — a Board
+that ignores `scope` is not the Board); a pinned `version` is the
+contract's; for a bound target, the extension brings a provider of the
+target's capability (`providers:`); a target is replaced once per
+extension. The viewer's stream is not a prop: a page that declares
+`stream_id` gets it, as everywhere. Valid ones are
+`ExtensionUi.replacements` (`UiReplacement { id: <ext>/<target>,
+extension, target, capability, bound_to_provider, page, version, view,
+label }`).
 
-**At render** (`lens/useReplacement.ts`, `components/Replaceable.tsx`).
-A core page wraps the component: `<Replaceable target props streamId
-fallback={…}>` (a core page that still places one). `useReplacement` reads the
-enabled extensions' replacements of the target and, only when one
-exists, what decides it:
+**At render** (`viz/useReplacement.ts`, `components/Replaceable.tsx`).
+`useReplacement` reads the enabled extensions' replacements of the target
+and, only when one exists, what decides it:
 - **bound**: the host passes the provider of the thing it shows
-  (`<Replaceable provider={item.provider}>` on `work_item.detail.state`, as the document's `state` part):
-  the **item's own provider** decides, whichever is active, so another
-  provider's item never gets a lens that sends this one's states
-  (tsk918). Which extension brings it is read from
-  `v_capability_provider` here, not at load, so installing or switching
-  one needs no reload;
+  (`<Replaceable provider={item.provider}>`): the **item's own provider**
+  decides, whichever is active, so another provider's item never gets a
+  page that sends this one's states. Which extension brings it is read
+  from `v_capability_provider` at render, not at load, so installing or
+  switching one needs no reload;
 - **unbound**: the person's choice (`replacements`), or the only
   candidate; no provider is read;
 - no candidate, a provider no extension brings (oxplow's own), several
-  unbound candidates and no choice, or `oxplow` chosen → `fallback`,
+  unbound candidates and no choice, or `oxplow` chosen → the fallback,
   untouched;
-- chosen → its page (`UiReplacement.pageId`; one that names no page is
-  `failed`) runs with the props it declares and draws through `PageTree`
-  (kit vizzes, or `viz: custom` with its sandbox and "custom" badge,
-  sharing the view its target's contract lists) under a **"replaced by
-  <extension>"** badge (`replacement-<target>`, `replacement-badge`),
+- chosen → its page runs with the props it declares and draws through
+  `PageTree` (kit vizzes, or `viz: custom` with its sandbox and "custom"
+  badge, sharing the view its target's contract lists) under a **"replaced
+  by <extension>"** badge (`replacement-<target>`, `replacement-badge`),
   kept fresh by the daemon. The page's own chrome (the Board's scope
   picker) stays oxplow's;
-- it can't load — its page run fails →
-  **the core component**, under a line saying whose it was and why
-  ("beads's board couldn't load: …. Showing oxplow's.",
-  `replacement-fallback`) — never the lens's table, and **outside** the
-  replacement's frame: no badge, none of the lens's toolbar (tsk855);
-- while any of that isn't known yet, nothing renders, so the wrong
+- it cannot load — its page run fails → **the core component**, under a
+  line saying whose it was and why ("beads's board couldn't load: ….
+  Showing oxplow's.", `replacement-fallback`), outside the replacement's
+  frame: no badge;
+- while any of that is not known yet, nothing renders, so the wrong
   component never flashes. Reads of who is active overlap (one per
-  change); the newest one asked decides, however they resolve
-  (`useReplacement`'s sequence, as its lens run has, tsk857).
+  change); the newest one asked decides, however they resolve.
+
 Showing one records `usage { kind: "replacement", key: <ext>/<target> }`
-(the evidence a kind needs to be promoted) — a kit lens when it ran, a
-custom one when its component says `ready` (`onCustomReady` → `shown`),
-so one that never loads isn't counted. A replacement is a lens, so
-its text rendering is the lens's; agents read work items from
-`v_work_item` either way. The capability smoke test renders the Board
-with every enhancement off (no `replacement-*`), and an extension's view
-replacing it with no provider of its own; a work item's editor replaced
-with the rail still oxplow's; a work item's state control, with two
-extensions replacing it, shows the item's own provider's, not the active
-one's; Git History shows the plain list, and oxplow-bundled's graph when
-it replaces it.
+(the evidence a kind needs to be promoted) — a kit page when it ran, a
+custom one when its component says `ready` (`onCustomReady`), so one that
+never loads is not counted. Agents read work items from `v_work_item`
+either way. The capability smoke test (`pages/CapabilityUi.smoke.test.tsx`)
+renders the Board with every enhancement off (no `replacement-*`), and an
+extension's view replacing it with no provider of its own; a work item's
+editor replaced with the rail still oxplow's; a work item's state control,
+with two extensions replacing it, shows the item's own provider's, not the
+active one's; Git History shows the plain list, and oxplow-bundled's graph
+when it replaces it.
 
 **The first real one: the history graph.** oxplow-bundled's
-`history-graph` component (`components/history-graph/`, classic scripts
-on the client library and the kit) draws the stream's commits as `git log
+`history-graph` component (`components/history-graph/`, classic scripts on
+the client library and the kit) draws the stream's commits as `git log
 --graph` does — a lane per line of descent, a dot per commit — from its
-hidden lens `history-graph` (a recursive walk of `v_commit` from
+hidden `history-graph` page (a recursive walk of `v_commit` from
 `:head_sha`, with local branch and tag labels from `v_branch` / `v_tag`).
-Its text, author and branch filters only dim or hide rows, so typing
-never re-runs the lens. On Git History they are the page's `q`, `author`
-and `branch` (the contract's `view`): they start from the page's, each
-change writes them (`setViewParams`; an echo of its own write is
-ignored, so typing isn't undone by a late one) and Back sets them again
-(`onViewParams`). With no view (a tile) they are its own. The host
-re-runs the lens when a commit lands
-or a ref moves (its reads). A row opens the commit's URI (`oxplow:oxplow/commit?sha=<sha>`); a Cmd/Ctrl-click
-opens it in a new tab (`navigate(uri, { newTab: true })`, bridge protocol
-3). The commit page's prev/next siblings, which oxplow's list passes, a
-component can't pass. It declares no commands, so it isn't a program to
-approve. Core keeps no lane code: `CommitList` (the fallback, and the Git
-dashboard's recent commits with their stats) is a plain list.
-`lens/historyGraph.test.ts` runs the bundle's own script against its page
-— lanes, merge lanes, child-before-parent order, filters, reveal, Cmd-click.
+Its text, author and branch filters only dim or hide rows, so typing never
+re-runs the page. On Git History they are the page's `q`, `author` and
+`branch` (the contract's `view`): they start from the page's, each change
+writes them (`setViewParams`; an echo of its own write is ignored, so
+typing is not undone by a late one) and Back sets them again
+(`onViewParams`). With no view (a tile) they are its own. The host re-runs
+the page when a commit lands or a ref moves (its reads). A row opens the
+commit's URI (`oxplow:oxplow/commit?sha=<sha>`); a Cmd/Ctrl-click opens it
+in a new tab (`navigate(uri, { newTab: true })`). It declares no commands,
+so it is not a program to approve. Core keeps no lane code: `CommitList`
+(the fallback, and the Git dashboard's recent commits with their stats) is
+a plain list. `viz/historyGraph.test.ts` runs the bundle's own script
+against its page — lanes, merge lanes, child-before-parent order,
+filters, reveal, Cmd-click.
 
 **The example that proves views and forms: `examples/extensions/task-views`.**
 An extension with no provider of its own, replacing `work_item.board`
 (the `swimlanes` component: a column per canonical state, drag a card to
 another column to `oxplow.work_item.transition` it, drag within a column to
-`reorder` it only when the active provider's `features` (a second hidden
-asset lens, `features`, over `v_capability_provider`) include `ordering`,
+`reorder` it only when the active provider's `features` include `ordering`,
 click a title to rename it through an inline `<form>` with `ox-input` and a
 field refusal shown in `ox-error`, a click on a card `navigate`s, a
-Cmd/Ctrl-click opens a new tab, and a `DENIED` refusal is one line above
-the board), `work_item.list` (`compact-list`, a `viz: table` with Done and an
-`Edit…` form action) and `work_item.detail` (`edit-item`, a `viz: form`
-over `oxplow.work_item.update` with `uri` fixed). It reads `v_work_item` and
+Cmd/Ctrl-click opens a new tab, and a `DENIED` refusal is one line above the
+board), `work_item.list` (`compact-list`, a `viz: table` with Done and an
+`Edit…` form action) and `work_item.detail` (`edit-item`, a `viz: form` over
+`oxplow.work_item.update` with `uri` fixed). It reads `v_work_item` and
 changes items only through the interface commands, so it works with any
-list. `lens/swimlanes.test.ts` runs the bundle's script against its page;
-`oxplow-sdk/tests/examples.rs` checks it clean and runs its fixtures,
-including a `form:` one.
+list. `viz/swimlanes.test.ts` runs the bundle's script against its page;
+`oxplow-sdk/tests/examples.rs` checks it clean and runs its fixtures.
 
-A form lens (`FormViz`) re-reads its start values when it resets, so after
-a successful Save it shows what was saved, not the title it first opened
+A form (`FormViz`) re-reads its start values when it resets, so after a
+successful Save it shows what was saved, not the title it first opened
 with. Activation takes a cloned snapshot of the config (`read_config`)
-rather than holding its read guard across the transaction: a nested
-read behind a waiting config reload would otherwise deadlock the daemon
-when the active work list switched (`tests-e2e/specs/components/task-views.spec.ts`
-is its regression test).
+rather than holding its read guard across the transaction: a nested read
+behind a waiting config reload would otherwise deadlock the daemon when
+the active work list switched
+(`tests-e2e/specs/components/task-views.spec.ts` is its regression test).
 
 ## Reviewing by impact
 
-An extension is reviewed by its **impact** — what changing it
-would change — not only by what it declares (`extension_impact.rs`).
-`ImpactReport` holds, each with a `Change` (`added`, `removed`,
-`changed`, `unchanged`):
+A review looks at an extension's **impact**: what changing it would
+change. It does not only look at what the extension declares
+(`extension_impact.rs`). `ImpactReport` holds these lists, each entry
+with a `Change` (`added`, `removed`, `changed`, `unchanged`):
 
-- `lenses` — each lens's rendered text before and after (`LensImpact`);
+- `pages` — each page's rendered text
+  before and after (`PageImpact`);
 - `models` — each view, the parts that differ (`changed`: `query`,
   `columns`, `description`, `tests`, `version`, `deprecated`), its
   columns before and after, the first contract difference
   (`contract_change`; a SQL-only change keeps the contract) and its
-  `downstream` readers (`models_diff`); the review names the parts
-  ("its description and tests changed") when the contract held;
+  `downstream` readers (`models_diff`). When the contract held, the
+  review names the parts ("its description and tests changed");
 - `collectors` — each collector's `Grants` (entry, runtime, hosts,
   credentials, env) before and after and the views it fills
   (`collectors_diff`);
 - `providers` — grants, each declared command by name (`CommandChange`)
   and the capability's features before and after, plus where spec and
-  declarations first differ (`first_difference`, so a change no grant,
-  command or feature shows still reads as something) (`providers_diff`,
-  over each spec and its checked-in declarations);
+  declarations first differ (`first_difference`, so a change that no
+  grant, command or feature shows still reads as something)
+  (`providers_diff`, over each spec and its checked-in declarations);
 - `effects` — each effect contribution's trigger and reactions
-  (`EffectImpact`, below).
+  (`EffectImpact`, below);
+- `contributions` — every other contribution kind, added, removed or
+  changed, as one generic row each from the descriptors
+  (`ContributionImpact`, `contributions_diff`; `differs` names which of
+  `version`, `needs`, `runs_on` and `global` changed).
 
 `extension_impact::json_difference` is the one "where do two JSON
 values first differ" walk (the provider host's `first_difference` uses
@@ -2732,219 +2677,229 @@ prefixes each phrase with `Provider <id>:`, and `approval_lines` — sent
 as `ProviderImpact.lines` — capitalizes them for the review's provider
 rows.
 
-The report is built from the two loaded versions: **it never runs a
-program, an exec collector or an external provider** — a version not yet
-deployed has no permissions approved. What it does run is read-only or sandboxed:
-lens and model queries on each version's overlay, and derived
-collectors' and effects' scripts (below).
+The report is built from the two loaded versions. **It never runs a
+program, an exec collector or an external provider** — a version that is
+not yet deployed has no permissions approved. What it does run is
+read-only or sandboxed: page and model queries on each version's
+overlay, and derived collectors' and effects' scripts (below).
 
-`extension_impact::impact(layer, before, after)` builds it:
-each version carries its lenses **already run once**
-(`extensions::run_lenses` → `LensRuns`: default params, no viewer
-context) — for the candidate, the very runs `check_extension` checked,
-so a review runs each lens once — and each is rendered from its run
-(`lens_text::render`, a composite's parts rendering empty) against **its
-own version's models** (each side's overlay — so a lens over a
-model the candidate changes renders against the changed SQL). A lens
-that fails the same way on both sides is `unchanged`. Each
-model's `downstream` is its direct readers from `v_model_lineage`
-(`downstream_of`) other than this extension's own views, by exact name;
-a provider's declarations are read from each version's files.
-`extension_impact::summary` is the one wording
-`extension check --impact` and an effort's review share:
-collectors' and providers' grants first — "now reaches x (was y)", a
-provider command added (destructive) — then models with their readers,
-lenses) and each changed lens's text before and after,
-side by side (`LensDiff`; no line diff yet).
+`extension_impact::impact(layer, before, after)` builds it. Each
+`Version` carries its pages **already dry-run once**
+(`pages::checks::dry_run_all` → `PageChecks`): every `sql` loader runs
+once with its params at their defaults and no viewer context; `command`
+and `page` loaders do not run, because a check acts as no one. For the
+candidate these are the very runs `check_extension` made, so a review
+runs each page once. Each page is rendered from its dry run
+(`pages::checks::text`: each viz node under its title, through
+`viz_text::render`) against **its own version's models** (each side's
+overlay). So a page over a model that the candidate changes renders
+against the changed SQL. A page that fails the same way on both sides
+is `unchanged`. A model's `downstream` is its direct readers from
+`v_model_lineage` (`downstream_of`) other than this extension's own
+views, by exact name. A provider's declarations are read from each
+version's files. `extension_impact::summary` is the one wording that
+`extension check --impact` and an effort's review share: collectors'
+and providers' grants first ("now reaches x (was y)", a provider command
+added (destructive)), then what the collectors make of their inputs,
+then models with their readers and rows, then pages ("Page x: changed",
+"Page x: its query fails: …"), then the other contributions. A changed
+page carries its text before and after in the report (`before`,
+`after`); there is no line diff yet.
 
 **An extension at any revision.** `extension_at(trees, ws, rev,
 name)` loads project extension `name` as revision `rev` of the
 workspace holds it — a commit (`git:HEAD`), a snapshot, the working
 tree — through `Trees::corpus` into an in-memory `Tree` (the
 `ExtensionFiles` the loader reads). A custom component's bundle is
-looked up three ways (`BundleLook`): on disk it's `Found` or `Absent` (an
-error); in a revision's tree it's checked from the tree's own paths when
-they're there, and `Unknown` — taken as declared, not an error — when
-they aren't, since a built bundle usually isn't committed. At `git:HEAD` of a clean worktree it equals the
-disk load; `None` when that revision has no `extension.yaml`. It's what
-lets a review compare two revisions of an extension, neither of which
-need be on disk.
+looked up three ways (`BundleLook`). On disk it is `Found` or `Absent`
+(an error). In a revision's tree it is checked from the tree's own paths
+when they are there, and `Unknown` — taken as declared, not an error —
+when they are not, since a built bundle usually is not committed. At
+`git:HEAD` of a clean worktree it equals the disk load. It is `None`
+when that revision has no `extension.yaml`. This lets a review compare
+two revisions of an extension, neither of which needs to be on disk.
 
 **Each side on its own overlay.** A check is `prepare` →
-`Prepared { lenses, overlay }`: the extension's models (with the other
+`Prepared { pages, overlay }`: the extension's models (with the other
 enabled extensions') compile to temp views, published nowhere, and its
-lenses, advisories and commands read through that overlay. A review
+pages, advisories and commands read through that overlay. A review
 prepares **both** sides — the candidate and the version before it — so a
-lens over a model whose SQL changed renders against each version's own
+page over a model whose SQL changed renders against each version's own
 SQL, whatever the database has published (a disabled extension, a model
 that failed, another worktree's copy).
 
 **A model's rows.** Each changed, added or removed model's
 `ModelImpact.rows` is a `RowDiff { before, after, keyed?, note? }`: each
-side's rows read through that side's own overlay (up to 10 000 — the read gateway's own cap, `MAX_ROW_LIMIT`;
-`ROW_DIFF_LIMIT`). When both versions declare the same non-empty `key`
-it's a merge-join by key — `KeyedDiff { key, added, removed,
-changed, samples }`, up to 20 sample rows in key order, each with its key
-and its row before and after (key order is SQLite's: numbers by value,
-then text); otherwise, or past the limit, or when a side's key has a
-NULL part or repeats (one row would stand for several — the key test
-runs only at publish), counts with a note saying why (or that a
-side's query failed). An unchanged model has
-none. The rows are the review's only reads of model data; nothing is
-written.
+side's rows read through that side's own overlay (up to 10 000 — the read
+gateway's own cap, `MAX_ROW_LIMIT`; `ROW_DIFF_LIMIT`). When both versions
+declare the same non-empty `key`, it is a merge-join by key —
+`KeyedDiff { key, added, removed, changed, samples }`, up to 20 sample
+rows in key order, each with its key and its row before and after (key
+order is SQLite's: numbers by value, then text). Otherwise — past the
+limit, or when a side's key has a NULL part or repeats (one row would
+stand for several; the key test runs only at publish) — the review gives
+counts with a note that says why (or that a side's query failed). An
+unchanged model has none. These rows are the review's only reads of
+model data; nothing is written.
 
 **A collector's outputs.** Each derived collector (Starlark,
 jaq) whose script or declaration changed is dry-run on the same inputs
-in both versions — each version's intent-example fixtures that name it
+in both versions: each version's intent-example fixtures that name it
 (`fixtures/<example>.yaml`, `input: { collector, rows }`), the latest
-five events its `on:` trigger matches, else its `input:` query once — by
-`collector_runner::dry_run_collector`: each version's own script text,
-its `input:` read through that version's own overlay,
-storing nothing, as a pure run — a script that names an `ai_*` builtin
-is refused before it runs (a review never spends or sends) — under the command
-scripts' `COMMAND_SCRIPT_BUDGET` (5 s, not a live collector's 120 s:
-someone waits on a review). `CollectorImpact.outputs`
-holds each input's `Ran { counts, rows (20 per entity), error? }` before
-and after. An exec or read collector is never run
-and says so in `not_run`. A collector whose entry's text changed though
-its declaration didn't is `changed` with `script_changed`, and says "its
-script changed" even when there's nothing to run it on.
+five events its `on:` trigger matches, else its `input:` query once. The
+runner is `collector_runner::dry_run_collector`: each version's own
+script text, its `input:` read through that version's own overlay,
+storing nothing, as a pure run. A script that names an `ai_*` builtin
+is refused before it runs (a review never spends or sends). The run has
+the command scripts' `COMMAND_SCRIPT_BUDGET` (5 s, not a live
+collector's 120 s: someone waits on a review).
+`CollectorImpact.outputs` holds each input's `Ran { counts, rows (20 per
+entity), error? }` before and after. An exec or read collector is never
+run and says so in `not_run`. A collector whose entry's text changed
+though its declaration did not is `changed` with `script_changed`, and
+says "its script changed" even when there is nothing to run it on.
 
 **An effect's reactions.** `ImpactReport.effects` lists each
-effect by id (`EffectImpact`) with its trigger before and after (`EffectTrigger { on,
-filter, needs }`; a script-only change is `changed` too) and, when it
-changed, `outputs`: each input — both versions' fixtures that name it
-(`input: { effect, event, answers? }`) and the latest five events of its
-`on` types — composed by each version that reacts to it
-(`effects::dry_run` through that side's overlay, nothing runs):
-`Composes { commands, skip?, error? }`. The lines read "Effect x: added — on t where k = v", "Effect x: on …
-→ on …", "Effect x on fixture basic: runs [a] → skips (why)".
+effect by id (`EffectImpact`) with its trigger before and after
+(`EffectTrigger { on, filter, needs }`; a script-only change is
+`changed` too). When it changed, it also has `outputs`: each input — both
+versions' fixtures that name it (`input: { effect, event, answers? }`)
+and the latest five events of its `on` types — composed by each version
+that reacts to it (`effects::dry_run` through that side's overlay,
+nothing runs): `Composes { commands, skip?, error? }`. The lines read
+"Effect x: added — on t where k = v", "Effect x: on … → on …", "Effect x
+on fixture basic: runs [a] → skips (why)".
 
 **A bounded review.** Script dry runs — collectors' and
 effects' — share one deadline, `REVIEW_DEADLINE` (60 s, from the start
-of `impact`; `impact_within` takes another): past it, no further input
-runs, and each collector or effect that didn't get through its inputs
+of `impact`; `impact_within` takes another). Past it, no further input
+runs, and each collector or effect that did not get through its inputs
 is in `ImpactReport.out_of_time` (`collector <id>`, `effect <id>`), with
 the line "Out of time: collector a and effect b — the review stops
 running scripts after 60s". Only the later side is *checked*
-(`prepare`: commands and their examples, components, advisories, lens
+(`prepare`: commands and their examples, components, advisories, page
 shapes); the earlier side is only *read* (`read_side`: its models'
-overlay and its lenses rendered on it) — what it was, not whether it
+overlay and its pages dry-run on it) — what it was, not whether it
 was right.
 
 **`oxplow extension check <name> --impact [--against <rev>]`.**
 The same review on the CLI: `oxplow_sdk::check(…, against)` — the check
-and its impact with one throwaway oxplow's command registry — loads the
-extension at git `HEAD` (or `--against`) — `extension_tree_at` through a
-`Trees` over the VCS alone — as `before` and the working tree as `after`,
-and runs `extensions::impact_between`:
-each side on its own overlay over the project's database read
-read-only (else an empty one), so it **writes nothing** — the database
-file is byte-identical after. Text output adds `impact against <rev>:`
-and the report's lines; `--json` adds `impact` (the `ImpactReport`) and
+and its impact with one throwaway oxplow's command registry. It loads
+the extension at git `HEAD` (or `--against`) — `extension_tree_at`
+through a `Trees` over the VCS alone — as `before` and the working tree
+as `after`, and runs `extensions::impact_between`. Each side is on its
+own overlay over the project's database read read-only (else an empty
+one), so the check **writes nothing** — the database file is
+byte-identical after. Text output adds `impact against <rev>:` and the
+report's lines; `--json` adds `impact` (the `ImpactReport`) and
 `against` to the check's JSON.
 
-**On an effort's review.** The Changes page shows an "Extension
-Changes" section when the change's files include `.oxplow/extensions/**`
-the `changes-extensions` part reads the live model `v_extension_change`
-(pinned to `base` and `head`, each a `v_change` revision spelling): the
-server's `extensions::extension_changes_between` names each extension whose
-files differ between the two revisions (`Trees::diff`), loads both
-versions as those revisions hold them (`extension_tree_at`) and reviews
-them with `impact_between` — a row each (name, change, problems, the
-report's lines, the lenses that differ). A removed one has no report. The
-lenses' before/after text is not shown (the changed file's diff has it); a
-failed review is a row's problems, never a spinner that doesn't end.
+**On an effort's review.** The diff page (`oxplow-foundation/diff-view`)
+has an "Extension Changes" table, empty unless the range touched
+`.oxplow/extensions/**`. Its `extensions` loader reads the live model
+`v_extension_change` (pinned to `base` and `head`, each a `v_change`
+revision spelling; columns `name`, `change`, `errors`, `lines`,
+`page_changes`, `stream_id`). The server's
+`extensions::extension_changes_between` names each extension whose files
+differ between the two revisions (`Trees::diff`), loads both versions as
+those revisions hold them (`extension_tree_at`) and reviews them with
+`impact_between`. Each row has the name, the change, the problems, the
+report's lines and the pages that differ (`page_changes`). A removed extension has no report. The pages'
+before/after text is not shown (the changed file's diff has it). A failed
+review is a row's problems, never a spinner that does not end.
 
 ## Commands in core menus (a command's `ui.about`)
 
 A command an extension declares meets a person through its own `ui`
 ([commands.md](./commands.md) "Offering a command to a person"). One
 **about a resource** (`ui: { label, group, about: oxplow/work_item, input: {
-uri: "{{uri}}" } }`) is offered on a URI of it: its page's nav-bar
-**Commands** menu (`RefCommandsMenu`, beside Ask) and a row's right-click
-menu for the row's URI (lens rows, by the first URI the row links to —
-`rowRef` — and Board cards), grouped by `ui.group`. Its input's strings
-may be exactly `{{uri}}` / `{{uri.id}}` (or `{{stream}}` / `{{thread}}`, which expand to bare ids; `{{uri.id}}` is the URI's key),
-and without an `input` it gets `{ uri: "{{uri}}" }`. The desktop builds
-them from the person's command listing (`refOffers`,
-`components/refCommands.ts`) and runs each as search does (App publishes
-its offer host, `setRefOfferHost`). To put another command on a URI's
-menu — oxplow's transition to done, say — an extension declares its own
-command over the same operation (`scope:` / `provider:` + `op:`,
-with its `ui.input`) or a script composing it. The old `ui.commands`
-block is gone.
+uri: "{{uri}}" } }`) is offered on a URI of that resource. It shows in
+its page's nav-bar **Commands** menu (`RefCommandsMenu`, beside Ask) and
+in the right-click menu of a row for the row's URI (a page's table or
+list rows, by the first URI the row links to — `rowRef` — and Board
+cards), grouped by `ui.group`. The input's strings may be exactly
+`{{uri}}` / `{{uri.id}}` (or `{{stream}}` / `{{thread}}`, which expand to
+bare ids; `{{uri.id}}` is the URI's key). Without an `input`, a command
+gets `{ uri: "{{uri}}" }`. The desktop builds the offers from the
+person's command listing (`refOffers`, `components/refCommands.ts`) and
+runs each as search does (App publishes its offer host,
+`setRefOfferHost`). To put another command on a URI's menu — oxplow's
+transition to done, say — an extension declares its own command over the
+same operation (`scope:` / `provider:` + `op:`, with its `ui.input`) or
+a script that composes it. The old `ui.commands` block is gone.
 
 **The desktop reads the extensions from one store**
 (`extensionsStore.ts`, `useExtensions()`): one `listExtensions` (the
 live set, the same in every stream) and one event subscription
-however many readers are mounted
-(slots,
-decorators, rail panels, extension pages, the launcher), reloaded on
-`extensionsChanged`; the listing lives while something reads it, so a
-later mount loads afresh. Only Settings → Extensions lists them itself — it
-reloads after its own deploys and toggles.
+however many readers are mounted (slots, decorators, rail panels,
+extension pages, the launcher). It reloads on `extensionsChanged`. The
+listing lives while something reads it, so a later mount loads afresh.
+Only Settings → Extensions lists them itself — it reloads after its own
+deploys and toggles.
 
 ## Custom components
 
-`custom_components:` (P6b.D1; **stable since P11**;
-`extensions/custom_components.rs`) are web bundles a `viz: custom` lens
-renders in a sandboxed frame. **The sandbox bounds what it reaches**:
-the frame has an opaque origin (the iframe's `sandbox="allow-scripts
-allow-forms"` *and* the daemon's `sandbox allow-scripts allow-forms` CSP
-directive), no daemon token and no way to send data — no
-fetch/XHR/WebSocket (`connect-src 'none'`), no form submission
-(`form-action 'none'`: a component's `<form>` is its own, its script
-handles `submit` and runs a command with `invoke`), no storage. The one way out is navigating itself:
-the page's `frame-src` (`http://127.0.0.1:*`, `http://localhost:*` —
-each loopback name the daemon serves a bundle to, tsk1003; not `[::1]`,
-which no CSP host source can name, tsk1048) bounds that to this machine —
-Tauri's CSP in the app, and a one-directive meta CSP in `index.html`
-for a plain browser, where whatever serves `dist/` sends no header
-(`lens/frameBound.test.ts` keeps them one value; only `frame-src`,
-since a fuller policy would bound what the page connects to, and a
-daemon over a tunnel isn't on loopback) — and the host ends the
-component on its second `load`. So it reaches only the lenses it may
-query (`assets`) and the commands it may invoke (`commands`).
+`custom_components:` (**stable**; `extensions/custom_components.rs`) are
+web bundles that a page shows in a sandboxed frame. A page uses one
+through a `component` node (`view: { component: { id, props } }`, alone
+as the whole page or inside a layout) or a `viz: custom` node
+(`custom: { component, props }`). **The sandbox bounds what it
+reaches.** The frame has an opaque origin (the iframe's
+`sandbox="allow-scripts allow-forms"` *and* the daemon's `sandbox
+allow-scripts allow-forms` CSP directive), no daemon token and no way to
+send data. It has no fetch/XHR/WebSocket (`connect-src 'none'`), no form
+submission (`form-action 'none'`: a component's `<form>` is its own, its
+script handles `submit` and runs a command with `invoke`) and no
+storage. The one way out is navigating itself. The page's `frame-src`
+(`http://127.0.0.1:*`, `http://localhost:*` — each loopback name the
+daemon serves a bundle to; not `[::1]`, which no CSP host source can
+name) bounds that to this machine. That is Tauri's CSP in the app, and a
+one-directive meta CSP in `index.html` for a plain browser, where
+whatever serves `dist/` sends no header (`viz/frameBound.test.ts` keeps
+them one value; only `frame-src`, since a fuller policy would bound what
+the page connects to, and a daemon over a tunnel is not on loopback).
+The host also ends the component on its second `load`. So a component
+reaches only what its page feeds it, its own read-only SQL (`sql:
+read`) and the commands it may invoke (`commands`).
 
-**A component that acts runs under its extension's permissions** (P11,
-tsk960). `invoke` runs a command with the viewer's rights, so the
-commands a component declares are the only ones it can run, and a command
-outside its extension's namespace needs `permissions.commands` in the
-manifest ("Permissions"; the loader refuses the extension otherwise). A
-person approved those permissions when the extension was deployed. An
-`invoke` of a command the loaded bundle doesn't declare is `Invalid`, one
-from a version that isn't the current one is `Denied` ("reload its lens"),
-and the host shows a refusal's reason under the frame
-(`custom-component-refused`, `componentRefusal`) — the component's own
-code may not. A component that declares no commands only shows and reads.
+**A component that acts runs under its extension's permissions.**
+`invoke` runs a command with the viewer's rights, so the commands a
+component declares are the only ones it can run. A command outside its
+extension's namespace needs `permissions.commands` in the manifest
+("Permissions"; the loader refuses the extension otherwise). A person
+approved those permissions when the extension was deployed. An `invoke`
+of a command that the loaded bundle does not declare is `Invalid`. An
+`invoke` from a version that is not the current one is `Denied` (the
+frame must reload), and the host shows a refusal's
+reason under the frame (`custom-component-refused`, `componentRefusal`)
+— the component's own code may not. A component that declares no
+commands only shows and reads.
 
 **What runs is what was deployed.** Before it shows a frame the host
 loads the component's bundle (`load_component`, from the deployed
 catalog, the same whatever the stream) into `Services::component_bundles`
 (`component_bundles.rs`): the bundle's folder in its deployment and its
 file names, keyed by its **version** — a hash over those files, its
-assets and its commands (`bundle_version`). No bytes are held: the daemon
-serves the frame (`/components/v/<version>/…`) by reading the named file
-from that folder, which never changes, and the frame's `invoke` names the
-version it loaded: it runs only when that version is the current one and
-declares the command. So an edit to the source changes nothing that runs
-until it is deployed. The folder is read as served — the extension's path
-joined with the manifest's `bundle` — so a spelling that differs from the
-disk's only in case still covers every file. Every version loaded in the
-process stays servable while its deployment is in the store (a folder
-and a list of names each, so nothing is dropped); once the deployment is
-pruned its files 404 and the frame reloads.
+commands and its `sql` access (`bundle_version`). No bytes are held. The
+daemon serves the frame (`/components/v/<version>/…`) by reading the
+named file from that folder, which never changes. The frame's `invoke`
+names the version it loaded, and runs only when that version is the
+current one and declares the command. So an edit to the source changes
+nothing that runs until it is deployed. The folder is read as served —
+the extension's path joined with the manifest's `bundle` — so a spelling
+that differs from the disk's only in case still covers every file. Every
+version loaded in the process stays servable while its deployment is in
+the store (a folder and a list of names each, so nothing is dropped).
+Once the deployment is pruned, its files 404 and the frame reloads.
 
 **A hot update reaches a mounted frame.** Activation stages every
 enabled extension's bundles into the generation it publishes
-(`PreparedComponentBundles`), each stamped with that generation; a frame
+(`PreparedComponentBundles`), each stamped with that generation. A frame
 whose snapshot belongs to a generation that is no longer active has its
-`query` and `invoke` refused with "reload its lens". The host loads the
-bundle again on every `extensionsChanged` (sent after an activation
-publishes, `CustomComponentViz`): the same version keeps the frame it
-has, a new one mounts a new frame, and the old version's `invoke` is
-refused.
+`querySql` and `invoke` refused. The host loads the bundle again on every
+`extensionsChanged` (sent after an activation publishes,
+`CustomComponentViz`): the same version keeps the frame it has, a new
+one mounts a new frame, and the old version's `invoke` is refused.
 
 **Bundled and project components share one runtime.** A bundled
 extension runs from its shipped deployment on disk (`Sources and
@@ -2962,258 +2917,263 @@ custom_components:
   - id: burndown                       # [a-z0-9-]+
     title: Burndown
     bundle: components/burndown        # default components/<id>; holds index.html
-    assets: [open-tasks, oxplow-bundled/visits]   # lens ids; a bare slug is this extension's
     commands: [oxplow.work_item.transition]
     sql: read                          # optional: its own read-only SQL (querySql); needs permissions.sql
 ```
 ```yaml
-# lenses/burn.yaml
+# pages/burn.yaml
 title: Burndown
-query: SELECT day, remaining FROM v_x_burndown WHERE stream_id = :stream_id
+data:
+  burndown:
+    sql: SELECT day, remaining FROM v_x_burndown WHERE stream_id = :stream_id
 params: [{ name: stream_id }]
-viz: custom
-custom: { component: burndown, props: { color: accent } }
+view:
+  viz: custom
+  from: burndown
+  custom: { component: burndown, props: { color: accent } }
 ```
 
-**Assets are lens ids, not models**: accepting a model would mean
-accepting SQL from the frame; a component that needs a model writes a
-`hidden: true` lens over it. Load checks, each at its line: the id, a
-duplicate, `bundle` a relative folder without `..` that holds
-`index.html`, no symlink anywhere in it (`stat_bundle`; a bundle has no
-size limit, see Deploy), each asset a lens id
-alone (no `?params`, `@rev` or `#fragment` — `query(asset)` names the
-lens) — this extension's must be among its lenses — and each command a
-command name. A `custom` lens needs `custom.component` naming one of the
-extension's components and a `query` (its rows are what the component
-shows and what an agent reads); `spec_problem` refuses `custom` (an
-answer can't carry one); an agent reads it through `lens_text` as its
-table, prefixed ``(custom component `<ext>/<id>`; its table rendering)``.
-`check_extension` checks that the declared commands are registered and
-warns when a custom lens also fills a kit role block (`chart`, `tree`,
-`timeline`, `steps`, `hunks`) — the kit may already render it; that is
-the honest extent of a "this reimplements the kit" lint.
+**A component reads what its page feeds it.** A component has no
+`assets`: that key is refused as an unknown field. The page's loaders are
+its data (`init.data`, `update`). For its own queries it declares `sql:
+read` (`querySql`). Load checks, each at its line: the id, a duplicate,
+`bundle` a relative folder without `..` that holds `index.html`, no
+symlink anywhere in it (`stat_bundle`; a bundle has no size limit, see
+Deploy) and each command a command name. A page that names a component
+its extension does not declare is refused (`component_problem`: "`x`
+isn't one of this extension's `custom_components`"; `<extension>/<id>` for
+another extension's component is that extension's to have). A `viz:
+custom` node needs `custom.component` and a `from` loader (its rows are
+what the component shows and what an agent reads). An agent reads a
+`viz: custom` node as its table, prefixed ``(custom component
+`<ext>/<id>`; its table rendering)``, and a `component` node as
+``(custom component `<id>`: it shows the page's loaders)``.
+`check_extension` checks that the declared commands are registered, and
+warns when a custom viz also fills a kit role block (`chart`, `tree`,
+`timeline`, `steps`, `hunks`, `code`, `diff`, `editor`, `embed`,
+`terminal`) — the kit may already render it. That is the honest extent of
+a "this reimplements the kit" lint.
 
-**The bridged calls** (P6b.D2, `lens_actions.rs`; the frame reaches them
-only through the host). Each names the component by `id`, `<extension>/<component
-id>` — the component itself, whatever shows it — and the bundle `version` its
-frame was loaded at (`load_component { id }`); a version that isn't the
-current one is `Denied` ("reload its lens"). `run_component_query { id,
-asset, params, stream_id, version }` runs `asset` — a lens id, a bare slug
-meaning the component's extension — when it's one of the component's
-`assets` (`Invalid` naming them otherwise), through `oxplow_run_lens`: the
-lens's own read-only, parameterised query. `invoke_component_command { id,
-command, input, confirmed, version }` runs `command` when it's one of the
-component's `commands` at that version, as **`Actor::Component { component:
-id, on_behalf_of: Human }`** — the component acting for the person, so every
-policy applies as if they ran it, audited as kind `component` with source
-`custom_component:<ext>/<id>` (`command.executed@4`; a lens's invoker
-class). The input is literal (no
-placeholders); a command that asks comes back `NEEDS_CONFIRMATION` and the
-**host** asks, never the frame. A component acts for a person, so it never
-proposes. All are UI RPCs (`ui` in surface parity).
+**The bridged calls** (`viz_actions.rs`; the frame reaches them only
+through the host). Each names the component by `id`, `<extension>/<component
+id>` — the component itself, whatever shows it — and the bundle `version`
+its frame was loaded at (`load_component { id }`). A version that is not
+the current one is `Denied`. `invoke_component_command { id, command,
+input, confirmed, version }` runs `command` when it is one of the
+component's `commands` at that version, as **`Actor::Component {
+component: id, on_behalf_of: Human }`** — the component acting for the
+person, so every policy applies as if they ran it. It is audited as kind
+`component` with the component's contribution ref as source
+(`command.executed@5`). The input is literal (no placeholders). A command
+that asks comes back `NEEDS_CONFIRMATION` and the **host** asks, never
+the frame. A component acts for a person, so it never proposes.
+`run_component_sql` and `component_form` are the same kind of call. All
+are UI RPCs (`ui` in surface parity).
 
-**The host** (P6b.D4, `lens/CustomComponentViz.tsx` +
-`lens/componentBridge.ts`): `<iframe sandbox="allow-scripts allow-forms"
-referrerPolicy="no-referrer">` at `componentBundleUrl(base, version)`
-(the daemon's `/components/v/<version>/`, once `load_component` answered;
-a bundle that can't be loaded shows the table and why; with no daemon
-base — `remoteBaseUrl()` null — the lens shows its table), under a
-**custom** badge. On the frame's first
-`load` the host posts `init { protocol, run, props, page, view, tokens }`
-(`initMessage`, the one builder: a lens's run and props with `page`
-null, or — a custom page — a null `run` and `page { streamId,
-threadId }`; `view { viewParams, historyState }` is its host's view, or
-null) with one end
-of a `MessageChannel` (to `"*"`: the frame's origin is opaque; the port
-goes to that frame alone) and listens on the other end only. Frame
-messages (`parseFrameMessage`): `ready`, `{ id, method: query, asset,
-params }` (params SqlCell values only), `{ id, method: invoke, command,
-input }`, `{ id, method: navigate, uri }` (an oxplow page only:
-`componentMayOpen` refuses an external-url URI with `INVALID`,
-since an outside tab would carry whatever the frame put in its URL out),
-and — protocol 5 — `{ id, method: querySql, sql, params }` (positional
-SqlCells; `run_component_sql`: the component must declare `sql: read`
-and its extension hold `permissions.sql`; it runs as the component's
-`Mode::Pure` run under its extension's grant, `sql.read` decided and
-recorded, read-only over the published models, 1,000 rows by default),
-`{ id, method: openForm, command, input }` (the host shows a declared
-command's form — `component_form` — in a slideover and runs the
-submission through `invoke_component_command`; closing it answers
-`CANCELLED`), `{ id, method: setTitle, title }` and `{ id, method:
-setActions, actions: [{ id, label, primary?, prominent?, submenu?, icon?, disabled? }] }`
-(the page's title and its nav-bar actions, data core draws: the primary
-and prominent ones as buttons, the rest in the bar's ☰; a press posts
-`{ type: action, id }` to the frame), and `{ id, method: showView, spec }`
-(protocol 12, replacing protocol 10's `showSpec`: an inline page's YAML —
-read-only, `parse_inline_page` — that the page opens as a run of its own
-(`useInlineView`: held open while it shows, so it stays live) and draws
-under the frame with `PageTree`, with Pin to Dashboard and Save as Lens
-when it is one viz over one `sql` loader (`inlineLensSpec`); it answers its
-first loader's rows, for the frame's own pickers, or `INVALID` — the open's
-refusal, or a failed loader with `field: /data/<loader>/sql`; null clears
-it). Protocol 12 also feeds a component its page's data: `init` is `{
-protocol, run, data, params, props, page, view, tokens }` — `data` each
-loader's `{ columns, rows, truncated, error? }` by name (`pageData`: a
-page's loaders; `lensData`: a lens's own rows as `rows`), `run` a `custom`
-viz's own rows as a lens run (null for a page's `component` node), `props`
-a component node's `props` or a viz's `custom.props` — and `{ type:
-update, run, data, params, changed }` follows each change, `changed` the
-loaders whose rows differ (posted only when something did). While a view shows, the frame sits at its content's height:
-the library posts `{ type: size, height }` (a message, not a request,
-from a `ResizeObserver` on its root; a component leaves `html` and
-`body` at `height: auto`). Protocol 11: `{ id, method: openForm, form: {
-title, schema, values? } }` is a form of the component's own — the host
-draws `schema` (a JSON Schema; a `writeOnly` string is masked) with the same
-`SchemaForm` in a slideover and answers the values submitted, running
-nothing (closing it answers `CANCELLED`); and `{ id, method: signIn,
-instance, name }` / `{ id, method: cancelSignIn, instance, name }`: the host
-runs the whole OAuth redirect flow for a provider instance's credential
-(`lens/hostSignIn.ts`: the shell listens on the credential's registered port,
-the system browser opens the service's page, each redirect goes to the core)
-and answers `{ state: signed_in }`, `{ state: failed, error }` or `{ state:
-cancelled }`. Each step is a command the component must declare
+**The host** (`viz/CustomComponentViz.tsx` for a `viz: custom` node,
+`pages/PageComponent.tsx` for a `component` node, both over
+`viz/ComponentFrame.tsx` and `viz/componentBridge.ts`):
+`<iframe sandbox="allow-scripts allow-forms" referrerPolicy="no-referrer">`
+at `componentBundleUrl(base, version)` (the daemon's
+`/components/v/<version>/`, once `load_component` answered; a bundle that
+cannot be loaded shows the table and why; with no daemon base —
+`remoteBaseUrl()` null — the page shows its table), under a **custom**
+badge. On the frame's first `load` the host posts `init { protocol, run,
+data, params, props, page, view, tokens }` (`initMessage`, the one
+builder) with one end of a `MessageChannel` (to `"*"`: the frame's origin
+is opaque; the port goes to that frame alone) and listens on the other
+end only. `data` holds each loader's `{ columns, rows, truncated, error? }`
+by name (`pageData`), `params` what they ran with, `props` the node's
+`props` (or a viz's `custom.props`). `run` is a `viz: custom` node's own
+rows as a `VizRun`, and null for a `component` node. `page { streamId,
+threadId }` is set when the component is a page's `component` node, else
+null. `view { viewParams, historyState }` is its host's view, or null. A
+change follows as `{ type: update, run, data, params, changed }`, with
+`changed` the loaders whose rows differ (posted only when something
+did).
+
+Frame messages (`parseFrameMessage`): `ready`; `{ id, method: invoke,
+command, input }`; `{ id, method: navigate, uri }` (an oxplow page only:
+`componentMayOpen` refuses an external-url URI with `INVALID`, since an
+outside tab would carry whatever the frame put in its URL out); `{ id,
+method: querySql, sql, params }` (positional SqlCells;
+`run_component_sql`: the component must declare `sql: read` and its
+extension hold `permissions.sql`; it runs as the component's `Mode::Pure`
+run under its extension's grant, `sql.read` decided and recorded,
+read-only over the published models, 1,000 rows by default); `{ id,
+method: openForm, command, input }` (the host shows a declared command's
+form — `component_form` — in a slideover and runs the submission through
+`invoke_component_command`; closing it answers `CANCELLED`); `{ id,
+method: openForm, form: { title, schema, values? } }` (a form of the
+component's own: the host draws `schema`, a JSON Schema where a
+`writeOnly` string is masked, with the same `SchemaForm` and answers the
+values submitted, running nothing); `{ id, method: signIn, instance, name
+}` and `{ id, method: cancelSignIn, instance, name }` (the host runs the
+whole OAuth redirect flow for a provider instance's credential,
+`viz/hostSignIn.ts`: the shell listens on the credential's registered
+port, the system browser opens the service's page, each redirect goes to
+the core; it answers `{ state: signed_in }`, `{ state: failed, error }` or
+`{ state: cancelled }`). Each step is a command the component must declare
 (`oxplow.provider.begin_sign_in`, `complete_sign_in`, `cancel_sign_in`),
-run as the component; without the desktop app it answers `INVALID`; a newer
-sign-in of the credential, a `cancelSignIn` or closing the frame ends the one
-under way. `setTitle`, `setActions` and `showView` are a custom page's;
-`openForm`, `signIn` and `cancelSignIn` are any host's that draws a
-slideover — a custom page and a lens's own component, a settings section
-included (`lens/frameForms.tsx`, `useFrameForms`); a host with none answers `INVALID`. A document's
-section fits its component frame to its content (`PartsViz` passes
-`fitCustom` to a part that isn't a tile; the library posts `size` from every frame, a host that doesn't
-fit ignores it). And — each kind
-of page state by the name of its scope — `{ id, method: setViewParams,
-params }` (string values, null drops one: the `#` of its tab entry, replaced;
-a component has no selection role, so it never pushes, and going
-somewhere is `navigate`) and `{ id, method: setHistoryState, patch }`
-(this step of its tab). The host posts `{ type: viewParams, params }` and
-`{ type: historyState, state }` when the entry's change (Back, Forward,
-an echo; `createBridgeHost` sends only what the frame hasn't seen);
-`init.view` carries both.
+run as the component. Without the desktop app it answers `INVALID`. A
+newer sign-in of the credential, a `cancelSignIn` or closing the frame
+ends the one under way.
 
-**A custom page's rail** is a declared lens (`pages: [{ component, rail:
-<slug> }]`, a lens of the page's extension; refused on a lens page, whose
-rail is its own): the page host runs it (a page file's `rail:` tree) with the params it declares
-from the page's view, live, in the page's rail (`custom-page-rail`), and
-a row's pick writes the view by the rail's rule (`lensViewChange`: a
-selection pushes), which the frame hears. A filling page's rail stacked
-above its body (a narrow window) is capped and scrolls, so the body
-keeps the height.
+A component that is a whole page also sends `{ id, method: setTitle, title
+}` and `{ id, method: setActions, actions: [{ id, label, primary?,
+prominent?, submenu?, icon?, disabled? }] }` (the page's title and its
+nav-bar actions, data core draws: the primary and prominent ones as
+buttons, the rest in the bar's ☰; a press posts `{ type: action, id }` to
+the frame), and `{ id, method: showView, spec }` (an inline page's YAML,
+read-only, `parse_inline_page`, that the page opens as a run of its own
+— `useInlineView`, held open while it shows, so it stays live — and draws
+under the frame with `PageTree`, with Save as Page when it is one viz
+over one `sql` loader). `showView` answers its first loader's rows, for
+the frame's own pickers, or `INVALID` — the open's refusal, or a failed
+loader with `field: /data/<loader>/sql`. A null spec clears it. While a
+view shows, the frame sits at its content's height: the library posts
+`{ type: size, height }` (a message, not a request, from a
+`ResizeObserver` on its root; a component leaves `html` and `body` at
+`height: auto`). `setTitle`, `setActions` and `showView` are a
+whole-page component's. `openForm`, `signIn` and `cancelSignIn` are any
+host's that draws a slideover — a whole page and a component inside a
+page's layout, a settings section included (`viz/frameForms.tsx`,
+`useFrameForms`). A host with none answers `INVALID`. And — each kind of
+page state by the name of its scope — `{ id, method: setViewParams,
+params }` (string values, null drops one: the `#` of its tab entry,
+replaced; a component has no selection role, so it never pushes, and
+going somewhere is `navigate`) and `{ id, method: setHistoryState, patch
+}` (this step of its tab). The host posts `{ type: viewParams, params }`
+and `{ type: historyState, state }` when the entry's change (Back,
+Forward, an echo; `createBridgeHost` sends only what the frame has not
+seen). `init.view` carries both.
 
-**Whose view a component has** (protocol 9, `lens/hostedView.ts`
+**A page's rail.** A page file may have a `rail:` node tree beside its
+`view:`. The page host draws it in the page's rail, and a row it picks
+writes the page's view by the rail's rule (`pageViewChange`: a selection
+pushes a history step, a filter replaces), which a whole-page component
+hears through `onViewParams`. A page's rail stacked above its body (a
+narrow window) is capped and scrolls, so the body keeps the height.
+
+**Whose view a component has** (protocol 9, `viz/hostedView.ts`
 `useHostedView`): its host's, where the host shares one, and only what
-the host's contract names. A custom page has the whole entry — all its
-params (`patchViewParams`) and its history state. A **replacement** has
-the host page's view params its target's contract lists
-(`UiReplacement.view`, `v_replaceable.view`: Git History's `q`,
-`author`, `branch` for the history graph), the ones the core part it
-replaces reads, so the two leave the same address; another key answers
-`INVALID` naming the contract. A `viz: custom` lens on **its own lens
-page** has the lens's params, set by the rail's rule (`lensViewChange`:
-a `selection` param pushes, the rest replace). A hosted component's
-history state is its own object in the entry, `component:<target>` or
-`component:lens`, so it never overwrites its page's (the lens page's
-`picked`, a draft). Every other host — a dashboard tile, a slot, an
-answer, the rail HUD — gives none: `init.view` is null, `setViewParams`
-and `setHistoryState` answer `INVALID`, and the component keeps its
-filters itself. Any component, page or not, has **page memory**: `{ id,
-method: pageMemoryGet, key }` and `{ id, method: pageMemorySet, key,
-value }` (null forgets), scope `component:<ext>/<id>` in `ui_preference`
-— for the person, in every tab of it; a value over 64 KB or a component
-over 1 MB is refused `INVALID` (`componentMemoryProblem`, before the
-write). A component keeps no view state of its own: `check` warns
-(`bundle_warnings`) at a bundle script that uses `localStorage` or
-`sessionStorage`;
-replies `{ id, ok, result |
-error: { code, message, field? } }` (`field`: the input an `INVALID`
-refusal names, so a component's form marks it; protocol 4); a re-run sends `update { run }` — only
-when its params or result differ from what the frame last got
-(`createBridgeHost` takes the run `init` carried); a second `ready` is
-ignored. The frame is keyed by its bundle URL (`ComponentFrame`): a
-stream switch mounts a new frame whose first `load` is its own, and a
-failure is remembered per URL. An invoke that asks shows the host's
-`CommandConfirm`; confirming re-runs it confirmed, declining answers
-`CANCELLED`. No `ready` within 3 s, or a second `load` (the frame
-navigated itself), tears it down and shows the table. `ready` records
-`usage { kind: "custom_component", key: <ext>/<id> }` — the evidence a
-kind needs to be promoted. `tokens` are the root's CSS custom properties
-(`tokensFromStyle`). No gesture check on invoke: the frame's
-clicks don't reliably activate the host across webviews, and the real
-bounds are the declared list, the person's policy and the host's
-confirmation.
+the host's contract names.
 
-**The client library** (P9.A4). A bundle doesn't speak the protocol by
-hand: the daemon serves `oxplow-component.js` (and its `.d.ts`) at
+- A page that **is** the component (`component` as the whole view) has
+  the whole entry: all its params (`patchViewParams`) and its history
+  state.
+- A **replacement** has the host page's view params that its target's
+  contract lists (`UiReplacement.view`, `v_replaceable.view`: Git
+  History's `q`, `author`, `branch` for the history graph). These are the
+  ones the core part it replaces reads, so the two leave the same
+  address. Another key answers `INVALID` naming the contract.
+- A **`viz: custom` node** on a page has the page's non-resource params
+  (`pageViewKeys`: its filters and picks), set by the rail's rule
+  (`pageViewChange`).
+
+A hosted component's history state is its own object in the entry,
+`component:<target>` or `component:page`, so it never overwrites its
+page's (a draft, a pick). Every other host — a dashboard tile, a slot,
+the rail HUD — gives none: `init.view` is null, `setViewParams` and
+`setHistoryState` answer `INVALID`, and the component keeps its filters
+itself. Any component, page or not, has **page memory**: `{ id, method:
+pageMemoryGet, key }` and `{ id, method: pageMemorySet, key, value }`
+(null forgets), scope `component:<ext>/<id>` in `ui_preference` — for
+the person, in every tab of it. A value over 64 KB or a component over
+1 MB is refused `INVALID` (`componentMemoryProblem`, before the write).
+A component keeps no view state of its own: `check` warns
+(`bundle_warnings`) at a bundle script that uses `localStorage` or
+`sessionStorage`.
+
+Replies are `{ id, ok, result | error: { code, message, field? } }`
+(`field`: the input an `INVALID` refusal names, so a component's form
+marks it). A re-run sends `update` — only when its params or result
+differ from what the frame last got (`createBridgeHost` takes the run
+`init` carried). A second `ready` is ignored. The frame is keyed by its
+bundle URL (`ComponentFrame`): a stream switch mounts a new frame whose
+first `load` is its own, and a failure is remembered per URL. An invoke
+that asks shows the host's `CommandConfirm`; confirming re-runs it
+confirmed, declining answers `CANCELLED`. No `ready` within 3 s, or a
+second `load` (the frame navigated itself), tears it down and shows the
+table. `ready` records `usage { kind: "custom_component", key: <ext>/<id>
+}` — the evidence a kind needs to be promoted. `tokens` are the root's CSS
+custom properties (`tokensFromStyle`). There is no gesture check on
+invoke: the frame's clicks do not reliably activate the host across
+webviews, and the real bounds are the declared list, the person's policy
+and the host's confirmation.
+
+**The client library.** A bundle does not speak the protocol by
+hand. The daemon serves `oxplow-component.js` (and its `.d.ts`) at
 `/component-lib/<file>` — embedded in the daemon
 (`crates/oxplow-daemon/assets/`, `components::component_lib`), served
 like a bundle (loopback `Host` only, ungated, outside CORS, `nosniff`),
 and named in every bundle's CSP `script-src` beside the bundle's own
-folder (`bundle_csp(source, lib)`). There is no `'self'` in that CSP
-(tsk983): even in a sandboxed frame it matches the daemon's whole origin
-— the response URL's, checked in Chromium and WebKit — so it would let
-a component load another bundle's code; and the check lint
-reports a page path that leaves the bundle (`..` past its folder, an
-absolute path other than `/component-lib/`, a `data:` script or sheet).
-It is a **classic script that defines the
-global `oxplow`**, not a module: module scripts are fetched with CORS,
-which an opaque origin never passes and nothing served to a frame allows
-— the same reason a bundle's own scripts are classic. `oxplow.connect()`
-waits for `init`, answers `ready`, and resolves with `{ data, params, run
-(the latest of each), page, props, tokens, protocol, onUpdate(fn({ run,
-data, params, changed })) → unsubscribe, query(asset, params) (a lens's
-component's declared lenses), invoke(command, input), navigate(uri, { newTab, replace }), querySql,
-openForm (a command's, or `{ title, schema, values }`), signIn, cancelSignIn, setTitle, setActions, showView, onAction, viewParams, setViewParams,
-onViewParams, historyState, setHistoryState, onHistoryState, pageMemory,
-applyTheme(doc?) }` (the `.d.ts` beside it is the reference;
-`viewParams` / `historyState` are null where the host gives no view); a
-failed request rejects with the host's `{ code, message }`. `init`
-carries `protocol` (`BRIDGE_PROTOCOL` in `componentBridge.ts`, `PROTOCOL`
-in the library — one number, bumped when a message's shape changes), and
-`connect` rejects a host speaking another. One app is one library
-version. `componentClient.test.ts` drives the served file against the
-real `createBridgeHost` and the real `init` (`initMessage`, which
-`CustomComponentViz` posts), so the two can't drift (tsk856). `oxplow extension new
-component <name>` scaffolds an extension — the component, its
-`viz: custom` lens and a bundle using the library — that checks and
-tests clean (`just_works.rs`). The reference is in
-`docs/guide/lenses.md`.
+folder (`bundle_csp(source, lib)`). There is no `'self'` in that CSP:
+even in a sandboxed frame it matches the daemon's whole origin — the
+response URL's, checked in Chromium and WebKit — so it would let a
+component load another bundle's code. The check lint reports a page path
+that leaves the bundle (`..` past its folder, an absolute path other than
+`/component-lib/`, a `data:` script or sheet). The library is a **classic
+script that defines the global `oxplow`**, not a module: module scripts
+are fetched with CORS, which an opaque origin never passes and nothing
+served to a frame allows — the same reason a bundle's own scripts are
+classic. `oxplow.connect()` waits for `init`, answers `ready`, and
+resolves with `{ data, params, run (the latest of each), page, props,
+tokens, protocol, onUpdate(fn({ run, data, params, changed })) →
+unsubscribe, invoke(command, input), navigate(uri, { newTab, replace }),
+querySql, openForm (a command's, or `{ title, schema, values }`),
+signIn, cancelSignIn, setTitle, setActions, showView, onAction,
+viewParams, setViewParams, onViewParams, historyState, setHistoryState,
+onHistoryState, pageMemory, applyTheme(doc?) }` (the `.d.ts` beside it
+is the reference; `viewParams` / `historyState` are null where the host
+gives no view). A failed request rejects with the host's `{ code,
+message }`. `init` carries `protocol` (`BRIDGE_PROTOCOL` in
+`componentBridge.ts`, `PROTOCOL` in the library — one number, bumped when
+a message's shape changes; now 12), and `connect` rejects a host that
+speaks another. One app is one library version. `componentClient.test.ts`
+drives the served file against the real `createBridgeHost` and the real
+`init` (`initMessage`, which `CustomComponentViz` posts), so the two
+cannot drift. `oxplow extension new component <name>` scaffolds an
+extension — the component, a page that shows it and a bundle that uses
+the library — that checks and tests clean (`just_works.rs`). The
+reference is in `docs/guide/pages.md` "Custom components".
 
-**`custom_components` is stable** (P11, tsk962), on the evidence rule:
-a shared extension's component acts with it. The github example's **PR
-Lifetimes** (`lenses/pr-lifetimes.yaml`, `components/pr-lifetimes/`)
-draws each pull request as a bar from opened to merged — a range the
-kit's charts don't draw; its filters re-run its own lens (`query`), a
-bar opens `oxplow:github/pr?id=<n>` (`navigate`), and Sync runs `oxplow.collector.sync`
-(`invoke`) — a command outside the extension's namespace, so the
-manifest declares `permissions.commands` for it. The host's own re-run (`onUpdate`, at the lens's params) is
-asked again with a selected filter rather than drawn over it; a pull
-request whose dates can't be read is left out and counted in a note,
-never blanking the rest; a rejected `connect()` is said in the status
-(tsk1008) — a component author's model for each. The loader limits components to no kind of extension. The
-browser suite's `specs/components/pr-lifetimes.spec.ts` runs it in
-Chromium **and WebKit** (the engines of browser mode and the macOS
-window; the suite's one WebKit project): the frame loads, the filters
-and navigation work, `invoke` is held to the declared commands, and a self-navigation off
-this machine sends no request in either engine — the blocked page's
-load then ends the component and its table shows.
+**`custom_components` is stable**, on the evidence rule: a shared
+extension's component acts with it. The github example's **PR Lifetimes**
+(`components/pr-lifetimes/`, shown by a page) draws each pull request as
+a bar from opened to merged — a range the kit's charts do not draw. Its
+`state` filter is a param of the page, drawn in the page's rail. A bar opens `oxplow:github/pr?id=<n>`
+(`navigate`), and Sync runs `oxplow.collector.sync` (`invoke`) — a
+command outside the extension's namespace, so the manifest declares
+`permissions.commands` for it. The host's own re-run (`onUpdate`) is
+asked again with a selected filter rather than drawn over it. A pull
+request whose dates cannot be read is left out and counted in a note,
+never blanking the rest. A rejected `connect()` is said in the status. A
+component author can use each of these as a model. The loader limits
+components to no kind of extension. The browser suite's
+`specs/components/pr-lifetimes.spec.ts` runs it in Chromium **and
+WebKit** (the engines of browser mode and the macOS window; the suite's
+one WebKit project): the frame loads, the filters and navigation work,
+`invoke` is held to the declared commands, and a self-navigation off this
+machine sends no request in either engine — the blocked page's load then
+ends the component and its table shows.
 
-**The kit's stylesheet** (P11, tsk961). `/component-lib/oxplow-kit.css`
+**The kit's stylesheet.** `/component-lib/oxplow-kit.css`
 (`assets/oxplow-kit.css`, served beside the library as `text/css`, and
 named in every bundle's CSP `style-src`) is a few `ox-` classes in
 oxplow's look — text, card, badge, buttons, forms (`ox-form`, `ox-field`,
 `ox-label`, `ox-input`/`ox-select`/`ox-textarea` with the accent focus
 ring, `ox-error`), drag and drop (`ox-drag`, `ox-dragging`,
 `ox-drop-target`, the Work board's dashed accent drop look), table,
-states, chart series — that read only the theme's tokens (`kitSheet.test.ts`: every
-`var(--x)` is one the app's root defines, and no literal color). A
+states, chart series. They read only the theme's tokens (`kitSheet.test.ts`:
+every `var(--x)` is one the app's root defines, and no literal color). A
 bundle links it and calls `component.applyTheme()`, which sets each of
 `init`'s `tokens` on the frame's root through the CSSOM — no `<style>`
-text crosses the bridge. `init` used to carry the CSS as `kitCss`; that
-went, and the protocol is 2.
+text crosses the bridge.
 
-**Check lints** (P11, tsk961, tsk994): what a bundle's CSP refuses
-without a word, or what ends the component, is an error at check, at its
-file (`bundle_problems` / `page_problems`, from `check_components`):
+**Check lints**: what a bundle's CSP refuses without a word, or what ends
+the component, is an error at check, at its file (`bundle_problems` /
+`page_problems`, from `check_components`):
 
 - an inline `<script>` that runs (no `type`, or a JavaScript one — a
   `type="application/json"` data block is fine) or an event handler on a
@@ -3229,20 +3189,19 @@ file (`bundle_problems` / `page_problems`, from `check_components`):
 
 Only each bundle's **`index.html`** is linted — the one page a frame
 shows, since a nested frame is refused and navigating away ends the
-component — and it is read from the **version under check**: the
-candidate of a review (`ReviewSide::read`), the folder on disk for a
-plain check. A version without the built page (a revision's tree) has
-nothing to lint; loading reports a bundle with no `index.html`. A
-bundled extension's pages are linted from its embedded files, the same
-way. The scan is a
+component. It is read from the **version under check**: the candidate of
+a review (`ReviewSide::read`), the folder on disk for a plain check. A
+version without the built page (a revision's tree) has nothing to lint;
+loading reports a bundle with no `index.html`. A bundled extension's
+pages are linted from its embedded files, the same way. The scan is a
 start-tag reader, comments skipped and raw-text elements (`script`,
 `style`, `textarea`, `title`) read to their close, not a full HTML
 parser.
 
 ## Decorators
 
-`ui.decorators` (P6b.C5; **stable since P10**; `extensions/decorators.rs`)
-put labels from one of the extension's **models** on URIs of a resource:
+`ui.decorators` (**stable**; `extensions/decorators.rs`) put labels from
+one of the extension's **models** on URIs of a resource:
 
 ```yaml
 ui:
@@ -3251,37 +3210,38 @@ ui:
 ```
 
 The model (`v_<extension>_<model>`) must declare a `uri` column and the
-`label` (and optional `color`) columns named — checked at load against
-the model's declared columns, which are its contract; column names must
-be plain identifiers, since the desktop names them in its query. The
-desktop (`components/decorators.ts`, `useDecorations`) runs each
-decorator's queries over the URIs it shows (`SELECT uri, "<label>" AS
-label[, "<color>" AS color] FROM <view> WHERE uri IN (…)`), re-run when
-the model changes. **Bounded** (tsk934): the URIs go 200 to a query
+`label` (and optional `color`) columns named. This is checked at load
+against the model's declared columns, which are its contract. Column
+names must be plain identifiers, since the desktop names them in its
+query. The desktop (`components/decorators.ts`, `useDecorations`) runs
+each decorator's queries over the URIs it shows (`SELECT uri, "<label>"
+AS label[, "<color>" AS color] FROM <view> WHERE uri IN (…)`), re-run
+when the model changes. **Bounded**: the URIs go 200 to a query
 (`REFS_PER_QUERY`), each query with a row limit that has room for all of
-them, so a large table loses no badge; one extension adds at most 3
+them, so a large table loses no badge. One extension adds at most 3
 decorations to one URI (`MAX_DECORATIONS_PER_REF`), each label at most 40
-characters (`MAX_LABEL`, then `…`). `ref-chip`: a chip in the header of a page whose URI the model
-lists, after the page's own chips (`Page`, by the page's URI from its
-navigation context). `row-badge`: a `RefBadge` (tone `label`) after a
-lens cell that links to a listed URI. A color is used only when it's a
-plain one (`#rgb…` or a CSS color name, `safeColor`). Decorations are
-additive: a decorator whose query fails shows nothing.
+characters (`MAX_LABEL`, then `…`). `ref-chip`: a chip in the header of a
+page whose URI the model lists, after the page's own chips (`Page`, by
+the page's URI from its navigation context). `row-badge`: a `RefBadge`
+(tone `label`) after a table or list cell that links to a listed URI. A
+color is used only when it is a plain one (`#rgb…` or a CSS color name,
+`safeColor`). Decorations are additive: a decorator whose query fails
+shows nothing.
 
-**Promoted to stable (P10)** on its first-party use: oxplow-bundled
-shows each effort's latest verdict on the effort — a `ref-chip` on its
-page and a `row-badge` where a lens row links to it. Its model `verdict`
-(`Accepted`, `Accepted (forced)` or `Changes requested`; green, orange,
-red) reads `verdicts`, which keeps every verdict event
-(`materialize: { incremental: seq }`, appended as each lands; a rewrite of
-the log — retention's payload expiry, a restart's refill — refills it
-whole). It reads only the events' **envelopes** (tsk886): the type says
-the verdict (`oxplow_bundled.accepted` / `.changes_requested`) and the
-subject what it was about — the effort first, then its work item, then
-each claim and decision an acceptance took unchecked (any makes it
-forced). Retention keeps envelopes and an extension's payloads go after 30
-days at most, so a verdict a decorator shows must not live in its
-payload. It shows; it never acts.
+**Promoted to stable** on its first-party use: oxplow-bundled shows each
+effort's latest verdict on the effort — a `ref-chip` on its page and a
+`row-badge` where a row links to it. Its model `verdict` (`Accepted`,
+`Accepted (forced)` or `Changes requested`; green, orange, red) reads
+`verdicts`, which keeps every verdict event (`materialize: {
+incremental: seq }`, appended as each lands; a rewrite of the log —
+retention's payload expiry, a restart's refill — refills it whole). It
+reads only the events' **envelopes**: the type says the verdict
+(`oxplow_bundled.accepted` / `.changes_requested`) and the subject what
+it was about — the effort first, then its work item, then each claim and
+decision an acceptance took unchecked (any makes it forced). Retention
+keeps envelopes and an extension's payloads go after 30 days at most, so
+a verdict a decorator shows must not live in its payload. It shows; it
+never acts.
 
 ## The run context
 
@@ -3324,7 +3284,11 @@ its scope trace.
   is caused by the event), entity and fact collectors (a child of the
   run that ran them, named for the collector), provider invokes (on the
   wire as `InvokeParams.context`; `host/call`s are answered only inside
-  a registered run) and knowledge, snapshot and harness verbs.
+  a registered run) and knowledge, snapshot and harness verbs. A page
+  acting is `Actor::Page { page_id, on_behalf_of }` (source: the page's
+  URI; a node's id is in `actor_id`) and a component acting is
+  `Actor::Component` (source: its contribution ref); both act for the
+  viewer.
 - **Composed commands keep child ownership.** Routing captures each child's
   registered contribution factory with its retained handler. Nested composers,
   transactional leaves and external steps receive that child's context, not
@@ -3343,27 +3307,27 @@ its scope trace.
   started it. A person's `oxplow.effect.retry` / `backfill` links the
   reaction's run to theirs (`under`) without making it theirs: the
   effect still runs as itself.
-  **Reading it:** the bundled `runs` lens (`oxplow-bundled/runs`, in the
-  launcher under Activity) lists, per extension and for the last 7 days, its
-  runs, failures, denials, mean `cpu_ms` and model calls, the ones needing
-  attention first. Settings → Extensions shows each extension's worst current
-  run (`v_extension_run`, `latest = 1`).
-  Opening an extension's row (the hidden `oxplow-bundled/extension-runs`
-  lens, param `extension`) lists its runs one by one for the same week:
+  **Reading it:** the bundled `runs` page (`oxplow-bundled/runs`, titled
+  "Extension runs", in the launcher under Activity) lists, per extension
+  and for the last 7 days, its runs, failures, denials, mean `cpu_ms` and
+  model calls, the ones needing attention first. Settings → Extensions
+  shows each extension's worst current run (`v_extension_run`, `latest =
+  1`). Opening an extension's row (the hidden `oxplow-bundled/extension-runs`
+  page, param `extension`) lists its runs one by one for the same week:
   contribution, version, generation (blank for a run that holds none),
   actor, causing event, outcome, error, wall and CPU time, model calls — the
   small inspector, with no log or secret to read.
 - **How agents use oxplow's interface.** The bundled `agent-interface` page
-  (launcher, Activity) is a dashboard of three lenses over the last 30 days:
+  (launcher, Activity) is a dashboard of three tables over the last 30 days:
   `interface-tool-calls` (oxplow's MCP tools by tool and harness, from
   `v_tool_call` joined to `v_agent_session`; a call whose session oxplow has
   no record of reads harness `unknown`), `interface-commands` (agents' runs by
   command from `v_command_audit`: runs, invalid, denied, failed and the share
-  not ok; opening a command shows the hidden `interface-command-errors` lens,
+  not ok; opening a command shows the hidden `interface-command-errors` page,
   its most common error texts counted together up to the "Expected one of"
   list) and `interface-hints` (`v_hint_stat` per hint, those that never fired
   first). The bundled `hint-never-fires` advisory tells the person, once per
-  hint, about a hint evaluated 100 or more times that never fired.
+  hint, about a hint evaluated 100 or more times that never fires.
 - **Failure, retry and freshness are the same everywhere it matters.** A run
   that ends `failed` counts toward the contribution's failure policy (three in
   a row disable it; `v_contribution_health`); one that ends `cancelled` — a
@@ -3681,7 +3645,7 @@ unverified, inferred, deviated, note? }` (`effort` is the bare id, `eff12`; v1 h
 `events:` (subjects: the effort, its work item and, for an acceptance, the
 claims and decisions it took unchecked; caused by the run's
 `command.executed`). They replaced a single `verdict@1` type, whose
-verdict lived in an expiring payload (tsk886).
+verdict lived in an expiring payload.
 Before them, a verdict lived only in a comment's text; now the effort's
 timeline carries who decided what, and another extension can react to it
 ("Reacting to another extension's types"). What makes the kind safe to
@@ -3695,7 +3659,7 @@ on that evidence; every kind is stable now (`ui.decorators` and
 `ui.replacements` with oxplow-bundled's history graph; `providers` once
 the provider host was), so a kind carries no stability.
 
-**`effects` is stable** (P11, tsk956), on the evidence rule: a bundled
+**`effects` is stable** (P11), on the evidence rule: a bundled
 extension acts with one. oxplow-bundled's **`verify-unchecked`** reacts to
 `oxplow_bundled.accepted`: its script takes the effort and its item from the event's payload
 (`effort`, `work_item`) and the claims and decisions accepted unchecked from
@@ -3705,10 +3669,10 @@ can't say: which of those are still unverified or inferred now, and its
 own earlier reactions. It is empty when
 the effect already filed (or proposed) a follow-up for an earlier
 acceptance of the same effort (its `v_effect_run` reaction to that event
-is `ok` or `proposed`, tsk991; an earlier acceptance from before it
+is `ok` or `proposed`; an earlier acceptance from before it
 started, or whose reaction skipped or failed, doesn't count). With
 nothing unchecked it skips; otherwise it files **one** item on the
-active tracker, like every new item (tsk1058) — "Verify what the review of <effort> accepted
+active tracker, like every new item — "Verify what the review of <effort> accepted
 unchecked", a checklist naming each claim and decision. Each line is
 text, not markdown (`md_text`: whitespace becomes one space, markdown's
 punctuation is escaped and a long one is cut at 300 characters), and the list stops
@@ -3753,7 +3717,7 @@ appended any more but still read, and the pump delivers them at their
 logged version (`data-model.md` "event_log"). `registered` is 0 too for a
 type whose extension is there but whose declaration was refused (a
 schema changed at a recorded version, a namespace collision) — its
-health says why (`v_event_type` v2's column doc says so, tsk800).
+health says why (`v_event_type` v2's column doc says so).
 
 **Appending them (P8.D4).** Nothing else appends an extension's types:
 a command script's result (and an effect's, P8.D10) may carry
@@ -3856,7 +3820,7 @@ resources:
   - name: pr                  # oxplow:acme/pr?id=12 (resource `acme/pr`)
     label: Pull request
     params: { id: { required: true, pattern: '^\d+$' } }
-    additional: false         # true: takes params beyond its own (page, lens)
+    additional: false         # true: takes params beyond its own (page)
     resolve: prs              # one of its models, with `uri` and `title` columns
     title: title              # the column of `resolve` that titles one
     searchable: found         # optional: one of its models, with `uri`, `title` and `body`
@@ -3904,7 +3868,7 @@ and `useResources` subscribes to:
   keeps the two lists equal) and label;
 - opening a URI of the resource (`openRef`, resources.md "The desktop")
   opens it as itself, drawn by the renderer the `pages[].for`
-  declarations pick (`pages/renderers.ts`); a lens renderer is run with
+  declarations pick (`pages/renderers.ts`); a page renderer is run with
   `{ uri }`, a URI nothing renders shows on the fallback `resource` page;
 - `preprocessWikilinks` turns `[[pr:12]]` into a link when the value
   matches the param's pattern (`extensionWikilinkRef`, as the backend's
@@ -3987,7 +3951,7 @@ says which run first (`oxplow_domain::ordering`, compiled by
 
 ## Effects
 
-`effects:` (stable since P11, tsk956 — a shared or bundled extension's
+`effects:` (stable since P11 — a shared or bundled extension's
 too; `effects.rs`) are scripts that react
 to a logged event by composing commands, run as
 `Actor::Effect { effect: "<extension>/<id>" }` for the event's thread and
@@ -4045,22 +4009,22 @@ once**, keyed by `effect_run (effect, event_id)` (V149, `v_effect_run`):
    cut off (`effect_triggers::cut_off`): recorded `failed`
    ("interrupted"). When its claim kept what it composed — every step a
    write to a provider keeping `idempotent_writes` (`claim_tx` writes
-   `resend_json` then, P11, tsk954) — it is **sent again by itself** like
+   `resend_json` then, P11) — it is **sent again by itself** like
    a failure that may pass, its delay counted from when it started (so
    one found more than an hour late is a person's, and so is one whose
-   start can't be read — tsk999); otherwise it is a person's, never sent
+   start can't be read); otherwise it is a person's, never sent
    again by itself. Recording the failure and scheduling its retry are one
-   transaction (`effect_triggers::fail`, tsk999), here and for a failure
+   transaction (`effect_triggers::fail`), here and for a failure
    that may pass. One a person's retry or
    backfill claimed is theirs, under way, and the pump leaves it be
-   (tsk847). A person's retry or backfill — or an automatic attempt — is
+   A person's retry or backfill — or an automatic attempt — is
    no pump delivery, so nothing redelivers one cut off between its claim
    and its record: at start (`boot.rs`,
    `effect_triggers::recover_interrupted`) every attempt still `started`
    whose origin isn't `live` is recovered the same way, with its
    `effect.result` saying what started it — Delivery lists it, and a
-   person may retry it (tsk845) — and counted toward the effect's health
-   as the pump counts one it finds (tsk999);
+   person may retry it — and counted toward the effect's health
+   as the pump counts one it finds;
 2. `effects::gate` isn't `Runs` (a live reaction only): nothing;
 3. the loop guard (`lineage`, walking the event's `cause` chain): an
    event its own run caused (source `effect:<extension>/<id>`) never
@@ -4129,8 +4093,8 @@ failed (`useFailedReactions`), each with its reason and **Retry**
 (`InlineConfirm`).
 
 **Sent again by itself** (P10, `effect_triggers::auto_retry_due`). An
-attempt that failed in a way that may pass (`CommandError::Unavailable`,
-tsk914: a step's provider erred, timed out, lost its reply, or asked to
+attempt that failed in a way that may pass (`CommandError::Unavailable`:
+a step's provider erred, timed out, lost its reply, or asked to
 wait — a composite keeps its failing step's kind) while **every** step it
 composed was a write
 to a provider keeping `idempotent_writes` (`safe_to_resend`, through
@@ -4142,13 +4106,13 @@ refusal of credentials renewal can't fix, a method or configuration the
 provider lacks — `Failed` — is never retried by itself. The failed attempt keeps what it composed (`effect_run.
 resend_json`, V162) for as long as its retry is scheduled — finishing an
 attempt drops it, scheduling a retry writes it, and claiming the next
-attempt moves it there, so no composition outlives its retry (tsk999) — and the automatic attempt **sends exactly that**
-instead of running the script again (tsk887): composing afresh could read
+attempt moves it there, so no composition outlives its retry — and the automatic attempt **sends exactly that**
+instead of running the script again: composing afresh could read
 changed rows, change a step's input and so its key, and make a write that
 landed again. It is sent only while every step still goes to a provider
 keeping the promise; otherwise it isn't sent (`Reacted::NotResent`) and the
 failure counts, a person's. A composed `oxplow.work_item.create` files on the
-tracker active when it's **sent**, like every create (tsk1058): pointed
+tracker active when it's **sent**, like every create: pointed
 elsewhere meanwhile, the retry goes there — or, when that tracker keeps
 no idempotent writes (oxplow's own), isn't sent by itself and waits for a
 person. Each step carries its idempotency key, the
@@ -4156,15 +4120,15 @@ same on every attempt ([commands.md](./commands.md) `effect_step_key`), so
 a write that landed lands once. A person's **Retry** composes afresh from
 what the effect reads now — the person decides it should. A loop every 5 s (`spawn_auto_retry`, at boot — its first tick only
 after the provider registry's first generation, so the providers the
-config names are up; tsk915 — one row's error logged and the rest
-going on, tsk932) runs what is
+config names are up — one row's error logged and the rest
+going on) runs what is
 due as the next attempt, `origin: auto` (`effect.result@5`), on the event
 at its newest version (`at_latest`, as every runner hands it over; one that
-no longer upcasts drops the retry — tsk911), when the effect is still
+no longer upcasts drops the retry), when the effect is still
 there, enabled and running as deployed now and the retry is at most an hour
 overdue (`MAX_RETRY_LATENESS`: one due longer ago — oxplow was closed — is
-a person's, its failure counted; tsk915; a due time that can't be read
-counts as late, tsk999) — otherwise the
+a person's, its failure counted; a due time that can't be read
+counts as late) — otherwise the
 retry is dropped and the failure is a person's. An attempt awaiting its
 retry isn't counted against the effect's health (`Reacted::Retrying`);
 the attempt that exhausts the retries counts once. A step inside oxplow, or
@@ -4185,17 +4149,17 @@ delivers it — and that it **never reacted to** (`unreacted_tx`: no
 `effect_run` row) and its own run didn't lead to (the loop guard's `own`,
 `event_lineage::lineage_tx`: such an event is never its trigger, so it
 isn't planned — an effect that changes what it reacts to would otherwise
-meet its own changes on every backfill and never get past them, tsk846),
+meet its own changes on every backfill and never get past them),
 oldest first, **up to the effect's `start_after_seq`** — what was logged
 after it started is the live consumer's, so the two never attempt one
-event at once; a range past it is capped (tsk847) — each through
+event at once; a range past it is capped — each through
 `run_reaction(…, ReactionOrigin::Backfill)`: attempt 1 with `origin:
 backfill`, the same dedupe, loop guard, permissions and health as a live
 reaction. So a second backfill finds nothing, the live consumer never
 reacts to a backfilled event again, and three failures in a row disable
 the effect and stop the run (`stopped`) — three of the run's own in a row
 stop it too, counting ones that will be sent again by themselves (whose
-health waits for the retry; tsk932), so a backfill doesn't press on into
+health waits for the retry), so a backfill doesn't press on into
 an outage. A run makes at most
 `BACKFILL_BATCH` (200) reactions; the result `{ planned, ran, skipped,
 proposed, failed, remaining, stopped? }` says what is left for another
@@ -4206,7 +4170,7 @@ to_seq, batch }` for the same input: what a backfill would react to. Both read
 the candidates by log position a page at a time (`SCAN_PAGE`) to the end
 of the range, applying `where` to every one — never to a first window of
 them, which a selective `where` over a busy type would leave empty for
-good (tsk848) — counting all and keeping the batch's first. The bus's
+good — counting all and keeping the batch's first. The bus's
 confirmation shows a command's summary and input, not a count, so the
 count is the plan's: an effect's row in Settings → Data
 has **Backfill…**, which reads the plan, says how many events
@@ -4214,7 +4178,7 @@ the effect never reacted to and that it may call outside oxplow for each
 (`backfillAsk`), and runs only on the second click — on the range it
 showed (`to_seq` from the plan, so what was logged in between isn't in
 it), its button saying what one run does: "Run on the first 200 of 500"
-when the plan is more than a `batch` (`backfillRunLabel`, tsk849).
+when the plan is more than a `batch` (`backfillRunLabel`).
 
 **There is no consumer-level replay.** Core's consumers are re-derivable
 (a projection is rebuilt, not replayed); replaying the log through every
@@ -4318,7 +4282,7 @@ disabled one's with `unregister_source`. Two enabled extensions declaring one
 namespace (other than `oxplow`) are both refused at load
 (`refuse_shared_namespaces`, after disabling applies). Each entry is
 checked at load, its error at its line (`entry_line`: the line whose
-`name:` is exactly that name — `a` never lands on `abc`; ids, lenses,
+`name:` is exactly that name — `a` never lands on `abc`; ids, pages,
 and models find their lines the same way): the name, `access`, `confirm`,
 the schema compiles, each `needs` entry is a scope or a
 capability / feature, and the entry is a file in the
@@ -4359,7 +4323,7 @@ in one transaction (`steps::run_composed`; the script runs once, when the bus ro
 confirmation apply (a person's run whose child asks is asked first; an agent's run asks nothing), one audit row with `{ result,
 children }`, the children's events caused by the run, the reversed
 children as its undo; when one leaves it (`work_item.*` on another
-provider's item, tsk713), as **steps** — all checked first, then run in
+provider's item), as **steps** — all checked first, then run in
 order, each landing as it runs, stopping at the first failure, one audit
 row, no undo. A script can't do I/O of its own: `files()` sees
 nothing, `ai_*` is refused without a host, and `scope` reaches only
@@ -4393,11 +4357,11 @@ is written elsewhere), and fact collectors (a `collectors:` entry with
 
 - Metrics must be `key:` definitions; `use:` belongs to the project's
   `.oxplow/project.yaml`.
-- Entity metrics (`entity:` + `where` / `time` / `value`, tsk322) work
+- Entity metrics (`entity:` + `where` / `time` / `value`) work
   here too, usually over the extension's own source views. Their fragments
   are checked at seed time, so one over a view whose source hasn't synced
   yet stays out of the catalog until the next reseed.
-- Dimensions (tsk328), fact or entity (`entity` / `expr` / `join`), layer
+- Dimensions, fact or entity (`entity` / `expr` / `join`), layer
   like metrics (`resolve_dimensions` takes an `extensions` layer) and slice
   an extension's entity metrics over the same view. They are stored as
   `scope = 'global'` plus the `extension` column (V89).
@@ -4457,8 +4421,7 @@ Every contribution that runs — an external provider instance, a collector, an 
   `/id`). A disabled effect stops reacting (`effect.triggers` skips it).
   For an effect only a `failed` reaction counts — an interrupted one
   included, a lost race to another delivery not; `skipped` and `proposed`
-  never do, and a reaction whose commands ran starts the count over. Nothing cascades: a lens over its view still runs, carrying a
-  warning (`LensRun.warnings`) that its rows aren't refreshing.
+  never do, and a reaction whose commands ran starts the count over. Nothing cascades: a page over its view still runs.
 - **Repairing.** Core detects and reports (the health row,
   `contribution.disabled@1`, Settings → Extensions) with or without a work
   list. Filing the repair item is the bundled effect
@@ -4501,9 +4464,9 @@ Every contribution that runs — an external provider instance, a collector, an 
   described in [oxplow uri <repair item>] — read it first.`, never sent
   (the repair brief is the item's body; `no-agent-input-automation.test.ts`
   pins the button as its only caller). Settings → Data → **Undelivered events**
-  (the `alerts-deliveries` lens, mounted in `oxplow-foundation/settings-data.sections`) lists the pending dead letters with Retry and Discard; the
+  (the `alerts-deliveries` page, mounted in `oxplow-foundation/settings-data.sections`) lists the pending dead letters with Retry and Discard; the
   rail's Alerts shows "N events couldn't be delivered" while any wait.
-  **Enable All Disabled** (a lens action, atop the Extensions list and Data → Collectors)
+  **Enable All Disabled** (a page action, atop the Extensions list and Data → Collectors)
   runs `oxplow.contribution.enable_all { extension? }` as the person: every
   failure-disabled contribution, or one extension's, each enabled as the
   single command does (one `contribution.enabled@1` apiece; an `External`
@@ -4597,19 +4560,20 @@ implementations:
   (`oxplow:snapshot-hashes`, "Track changes only": no `contents`); a
   chosen `hashes` with bundled disabled falls back to core's `oxplow`.
 
-**Declared needs.** A lens or an advisory may declare `needs:
+**Declared needs.** A page or an advisory may declare `needs:
 [work_items, snapshots.contents]` — capabilities, or one of a
 capability's features (`oxplow_domain::capability::check_need`; an
-unknown one is a load error). A lens run checks them against what's
-active (`LensContext.active`, a `capabilities::Active` snapshot that
-`lens_context` fills): unmet, it doesn't run and returns `inactive: {
-needs, message }` ("Needs: Work list (choose one in Settings → Capabilities)."),
-which the lens view shows instead of its empty state. An advisory whose
+unknown one is a load error). A page run checks them against what's
+active (`ViewContext.active`, a `capabilities::Active` snapshot that
+`view_context` fills): unmet, it runs no loader and `PageRun.inactive`
+is set (`PageInactive { needs, message }`: "Needs: Work list (choose one
+in Settings → Capabilities)."). The page view shows that instead of its
+empty state. An advisory whose
 needs aren't met doesn't run. A context built without `Services` (param
 checks) checks nothing. A capability's none declares every feature (it
 takes everything, keeping nothing), so a feature need is met by none and
 only a need of the capability itself (`work_items`) isn't. `oxplow-bundled`
-declares no `work_items` need: with no list its task lenses, hint and
+declares no `work_items` need: with no list its task pages, hint and
 skill just find nothing.
 
 **What an implementation owns.** A provider instance owns its command
@@ -4750,13 +4714,13 @@ advisories:
 
 Everything a human can see or build, an agent can see or build too, over
 MCP. That includes whatever **extensions** add: an extension's sources,
-entities, dimensions, metrics and lenses show up in the same generic tools
+entities, dimensions, metrics and pages show up in the same generic tools
 as core's, and its commands through `run_command`.
 
 **Tools are declarations.** Core builds only the command bus's two tools,
-`list_commands` and `run_command`. Every other tool is a command or a lens
+`list_commands` and `run_command`. Every other tool is a command or a page
 that asks to be one with `tool: <name>` on its `commands:` entry or its
-lens file, offered as `<namespace>_<name>` (the extension's `namespace:`):
+page file, offered as `<namespace>_<name>` (the extension's `namespace:`):
 
 ```yaml
 commands:
@@ -4765,7 +4729,7 @@ commands:
     scope: sql.read
     op: query
     tool: query_sql          # offered as oxplow_query_sql
-# lenses/open-work.yaml
+# pages/open-work.yaml
 tool: open_work              # offered as <namespace>_open_work
 ```
 
@@ -4775,10 +4739,10 @@ tool: open_work              # offered as <namespace>_open_work
   MCP `outputSchema` and answers with the result as `structuredContent`
   beside the JSON text, so a client reads it typed. `sql.query` declares
   `SqlQueryResult` (columns, rows, `truncated`, `reads`, `freshness`,
-  `generation`, `coverage`). A lens tool declares none: what it returns
+  `generation`, `coverage`). A page tool declares none: what it returns
   depends on its `format`.
 - oxplow's own tools are `oxplow-foundation`'s declarations over core's
-  read operations (`oxplow_read`, `oxplow_query_sql`, `oxplow_show_lens`,
+  read operations (`oxplow_read`, `oxplow_query_sql`, `oxplow_show_page`,
   `oxplow_vcs_log`, …); no tool is special to core.
 - A **command tool**'s description, schema and example are its command's,
   and a call runs it as the caller through the bus (validation, policy,
@@ -4789,23 +4753,22 @@ tool: open_work              # offered as <namespace>_open_work
   needs a scope that spends the person's money (`Scope::spends`; today
   `ai.compute`, a model call on their key) or is an operation of one: it
   changes no record but isn't hinted, so the client asks before it runs.
-- A **lens tool**'s input is one property per param (its label, choices
-  and default) plus `format`; a call runs `oxplow.lens.run` and returns the
-  lens's text rendering (`format: "json"`: its rows). Always read-only.
+- A **page tool**'s input is one property per param (its label, choices
+  and default) plus `format`; a call runs `oxplow.page.run` and returns the
+  page's text (`format: "json"`: its loaders' rows). Always read-only.
 - A name is `[a-z][a-z0-9_]*`, at most 48 characters; two entries offering
   one name — in one extension, or two under one namespace (oxplow's own
   share `oxplow`) — are refused at load, on each.
-- **Typed lens tools.** `oxplow-foundation/lenses/` holds the lenses an
-  agent asks for most, each `hidden: true` with a `tool:`: `thread_work
-  { thread }` (the thread's items by state, with their efforts), `work_next
-  { thread }` (what to pick up next; the bundled `/work-next` command calls
-  it), `effort_files { effort }`, `effort_summary { effort }` (title and
-  summary, item, files, test runs, claims, decisions as sections),
-  `file_history { path, limit }` and `recent_commits { limit }` (the indexed
-  log; `oxplow_vcs_log` goes past it), `snapshots { stream?, limit }` (with
-  parent, trigger and whether it ran over budget).
-  Params take bare ids (`thr3`, `eff9`, `str1`). Each reads published `v_*` models only, so it works with
-  the bundled extension off.
+- **Typed page tools.** `oxplow-foundation/pages/` holds the pages an
+  agent asks for most, each `hidden: true` with a `tool:`: `catalog
+  { model? }` (every model with its columns), `thread_work { thread }` (the
+  thread's items by state, with their efforts), `work_next { thread }` (what
+  to pick up next; the bundled `/work-next` command calls it) and
+  `effort_summary { effort }` (title and summary, item, files, test runs,
+  claims, decisions as sections). Params take bare ids (`thr3`, `eff9`).
+  Each reads published `v_*` models only, so it works with the bundled
+  extension off. For history, `oxplow_vcs_log` and `oxplow_diff` are
+  commands, not pages.
 - Every agent-invokable command stays reachable through `run_command`
   whether or not it's a tool: a tool is a named entry for the ones an
   agent reaches for often, kept few so the list stays readable for weaker
@@ -4825,51 +4788,60 @@ tool: open_work              # offered as <namespace>_open_work
   metric_grid('day'[, '<dim>'])` — sliced by a dimension, in any bucket.
   Changing metrics is the `metric.*` commands (`run_command`).
 
-**Working with lenses**
+**Working with pages**
 
-- `v_lens`: every lens (`uri`, `extension`, `title`, `description`, `viz`,
-  `params`, `hidden`); `v_extension` and `v_contribution` for the
+- `v_page`: every page (`uri`, `extension`, `id`, `title`, `description`,
+  `hidden`), with `v_page_param` (its params) and `v_page_answer` (the
+  questions it answers); `v_extension` and `v_contribution` give the
   extensions and what they contribute.
-- `oxplow_read { uri: "oxplow:oxplow/lens?lens=<id>" }`: the lens definition (in `content`): query, params with defaults, viz,
-  columns/links and the file it lives in.
-- `oxplow_run_lens(id, params?, format?)`: **what the UI shows** for those
-  params, as its text rendering by default — `LensText { lens, title,
-  params, columns, rowCount, truncated, reads, alert, text }`, no rows
-  (the text carries them) — or, with `format: "json"`, the full
-  `LensRun` with its rows.
-- **Text rendering** (design rule 17, `crates/oxplow-app/src/lens_text.rs`,
-  P6.A1): one renderer per kit component — a table or list is a markdown
-  table of the displayed columns (the UI's `displayColumns` rule); a
-  number or markdown lens is its first cell; a bar chart is its labels
-  and values with the total; a line chart pivots to one column per
-  series with each series' total; a treemap lists labels by size,
-  largest first; a composite renders its parts in order under `###`
-  titles; a tree is an indented list; a timeline is `at — label (URI)`
-  lines oldest first; a detail is `**label**: value` lines; steps are a
-  numbered `[x]`/`[>]`/`[!]`/`[ ]` checklist; hunks are each file's
-  unified diff between its two revisions (up to 20 files, 8 KB each).
-  What a component needs beyond its rows — a composite's part runs, the
-  hunks' diffs — is `lens_text::resolve`d first (`text_of`). Tables
-  stop at 50 rows and say how many more; an empty result says the
-  lens's `empty` text. It's what `oxplow_run_lens`, `oxplow_get_open_page` and `copy`
-  return, so an agent reads a lens the way the person sees it.
-- `oxplow_get_open_page(thread_id)` **(current)**: what the human has open in
-  that thread, for any page kind (a work item's, file's or lens's URI):
-  `page` is its identity (the URI without its `#`) and `view` the `#`,
-  decoded. For a
-  lens it adds `lens`, the lens re-run with the human's *current*
-  params as its text rendering, so "look at what I'm looking at" works.
+- `oxplow_find_page { question?, about? }` (`oxplow.page.find`): the pages
+  that answer a question, each with its params. Look here before writing SQL
+  for something a person will look at.
+- `oxplow_run_page { page | spec, params?, format?, loader?, draft? }`
+  (`oxplow.page.run`): **what the UI shows** for those params, as the
+  page's text by default, or with `format: "json"` each loader's columns
+  and rows (up to 200) and the tree. `spec` is an inline page of the
+  agent's own (YAML); it only reads. `draft: true` reads the stream's
+  draft of the page's extension.
+- `oxplow.page.definition` (through `run_command`): what a page is made of,
+  its source file, params, loaders and node tree, and which page and file
+  each node comes from.
+- `oxplow_show_page` (`oxplow.page.show`): shows the person a page beside
+  the conversation, a saved one with params or the agent's own `spec`.
+- **Text rendering** (design rule 17, `crates/oxplow-app/src/viz_text.rs`
+  and `pages/text.rs`): one renderer per view node kind, and each node
+  appears under `[node <id>]` (an embedded page's under `[node
+  <embed>/<id>]`), so the agent can point the person at one with
+  `oxplow_navigate` and `#node=<id>`. A table or list is a markdown
+  table of the displayed columns; a number or markdown node is its first
+  cell; a bar chart is its labels and values with the total; a line chart
+  pivots to one column per series with each series' total; a treemap
+  lists labels by size, largest first; a tree is an indented list; a
+  timeline is `at — label (URI)` lines oldest first; a detail is
+  `**label**: value` lines; steps are a numbered `[x]`/`[>]`/`[!]`/`[ ]`
+  checklist; hunks are each file's unified diff between its two revisions
+  (up to 20 files, 8 KB each). What a node needs beyond its rows — the
+  hunks' diffs, a `code` node's files, an `approvals` node's proposals —
+  is `viz_text::resolve`d first (`text_of`). Tables stop at 50 rows and
+  say how many more; an empty result says the node's `empty` text. It is
+  what `oxplow_run_page`, `oxplow_get_open_page` and `copy` return, so an
+  agent reads a page the way the person sees it.
+- `oxplow_get_open_page(thread_id)`: what the human has open in that
+  thread, for any page kind (a work item's, file's or a custom page's
+  URI): `pageId` is its identity (the URI without its `#`) and the view
+  the `#`, decoded. For a page it adds `pageRun`, the window's own run of
+  it as text, with `focus`, the node the person is on. `others` lists the
+  page each other window has open there; `tab` reads one of the thread's
+  tabs instead (an id `oxplow_list_tabs` listed).
   - The UI reports the active page (`report_open_page`, UI-only) together
-    with whatever that page published to `tabs/openPageDetail.ts`. The
-    lens page publishes `{lensId, params}`.
+    with whatever that page published to `tabs/openPageDetail.ts`.
   - The state is held in memory on the thread runtime
     (`ThreadRuntimeRegistry::open_page`).
   - A hidden-but-mounted page can't overwrite the report, because only
     the active page's detail is sent.
-- **Row actions (current):** right-click a lens row → "Ask the Assistant":
-  the first page the row links to, else the row as text
-  `[oxplow lens <id> row: col=value, …]` (`rowAssistantContext`).
-- **What a person can ask (current):** what pages say they answer
+- **Row actions:** right-click a page row → "Ask the Assistant" puts the
+  row in the agent's input.
+- **What a person can ask:** what pages say they answer
   (`answers:` in a page file; `about` makes it a question on pages for that
   kind of ref; a question is **one line** — a pasted line break is Enter in
   the terminal, so a multi-line one would send itself — checked by
@@ -4878,42 +4850,44 @@ tool: open_work              # offered as <namespace>_open_work
   (`config_key`: project.yaml's keys with their doc and value schema), with
   `oxplow_query_sql`; there is no catalog RPC and no separate prompt list
   (`intent.prompts`, `v_prompt` and `prompt_catalog` are gone).
-  - The UI: the **Catalog** page, a foundation document lens
-    (the `catalog` page, `catalog-overview`: sections
-    `catalog-prompts` — grouped by the page's category (else its extension), with an Ask row action
-    on `oxplow.agent.draft` — `catalog` over `v_model`, and
+  - The UI: the **Catalog** page (oxplow-foundation's `catalog`, with
+    `catalog-prompts` — grouped by the page's category (else its
+    extension), with an Ask row action on `oxplow.agent.draft` — and
     `catalog-config-keys`, with Open Settings as a page action on
     `oxplow.window.navigate`); the nav bar ☰'s Ask (suggested prompts for
     the page's resource, `usePromptCatalog` over `v_page_answer`); and
     `EmptyState`'s prompts (usability.md → "Empty states").
-- **No launcher entries.** The manifest's old `launcher:` list (a URI,
-  a command or a prompt) is gone: a page is a `pages:` entry or a lens; a
-  command — one that runs another with fixed input, or puts a prompt in
-  the agent's input (over `agent_input.write` `draft`) — is a command the
-  extension declares with a `ui`, offered like oxplow's own
-  (`commandOffers`). The launcher (`components/extensionLauncher.ts`
-  `launcherPages`) lists lenses and `pages:`.
-- **Lens actions (current, P6.B1):** `actions:` are commands, run by an
-  agent with `oxplow_run_lens_action` as the lens acting for it (see "Actions
-  are commands").
+- **No launcher entries.** The manifest has no `launcher:` list. A page is
+  a file in `pages/`; a command — one that runs another with fixed input,
+  or puts a prompt in the agent's input (over `agent_input.write`
+  `draft`) — is a command the extension declares with a `ui`, offered like
+  oxplow's own (`commandOffers`). The launcher lists the pages that have
+  a `category`.
+- **Page actions:** `actions:` are commands. An agent presses one with
+  `oxplow_run_page_action` as the page acting for it (see "Actions are
+  commands"). A command the agent may not run, or one that needs a
+  person's confirmation, is refused.
 
 **Building**
 
-- Agents author extensions and lenses **by editing files** under
+- Agents author extensions and pages **by editing files** under
   `.oxplow/extensions/<name>/` with their normal Edit tool, under the usual
   write guard. Editing a source changes nothing until
   `oxplow.extension.deploy { name }` ("Sources and deployments"); the
   authoring tools read the source, so the agent checks its work first.
 - **No scaffold tools (decided).** A scaffold tool would write project
   files outside the write guard and the caller's worktree. The skill carries the templates instead, and humans have
-  Save as Lens in Explore Data. The same rule holds for metrics:
+  Save as Page in Explore Data. The same rule holds for metrics:
   the `oxplow.metric.scaffold` command returns the metric extension's files for
   the agent to write itself.
 - `oxplow_validate_extension(name)` returns load errors, schema errors and a dry
-  run of every lens query, so the agent can check its work without the UI.
+  run of every page (`pages::checks`: each SQL loader runs once, a `columns`
+  key the query does not return is an error, `layout_warnings` flags a
+  layout that is likely wrong), so the agent can check its work without
+  the UI. `oxplow extension check` is the same report.
 - `v_extension`, `v_collector_state`, `v_collector_credential`
   (set or not, never the value), the `oxplow.collector.sync` command (never grants).
-- **Worktree streams: preview, don't run (tsk377).** Collected data is
+- **Worktree streams: preview, don't run.** Collected data is
   project-wide (one `ext__<ext>__<entity>` table), so a run (the
   `oxplow.collector.sync` command over `CollectorRunner::sync`, from any caller)
   always runs the **live** copy. An agent
@@ -4937,26 +4911,26 @@ tool: open_work              # offered as <namespace>_open_work
 
 An `oxplow-extension` skill (shipped in `crates/oxplow-agent-text/assets`)
 teaches the format, the `v_*` contract and the loop "read `v_model` →
-oxplow_query_sql → write files → oxplow_validate_extension → oxplow_run_lens". Add to Context on a lens page
-carries `[oxplow lens <ext>/<slug>]` plus its params.
+oxplow_query_sql → write files → oxplow_validate_extension → oxplow_run_page".
+Its page references (`page-format.md`, `loaders.md`, `view-nodes.md`,
+`recipes.md`, …) describe the page file. Add to Context on a page puts
+the page's URI in the thread's basket.
 
-**Getting newcomers there (tsk373).** "New Lens with Your Agent…"
-(`lens.newWithAgent`, a Tasks search command in the launcher; needs a
-thread) puts `NEW_LENS_PROMPT` (`lens/lensModel.ts`) into the agent's
-input via `insertIntoAgent`. It never sends; the person finishes the
-sentence. The Extensions empty state and Explore Data's intro offer the
-same button, and getting-started's "Your first stream" has a "Build your
-own view" step.
+**Getting newcomers there.** "New Page with Your Agent…"
+(`oxplow.page.draft_with_agent`, a Tasks command in the launcher; needs a
+thread) puts a starter prompt into the agent's input, unsent. It never
+sends; the person finishes the sentence.
 
 ## Example extensions (`examples/extensions/`)
 
 Each loads clean (`documented_examples_load_without_errors`):
 
 - **`github`** — an `exec` collector bringing pull requests in as the
-  entity `v_github_pr`, with a lens joining them to streams and tasks;
-  and (P10) a pull request as a **resource**, `github/pr` — model
-  `pull_request` (`uri`, `title`, `body`; it resolves and is searchable),
-  page `pr` (the `pr` lens, given `uri=<uri>`), `[[pr:12]]`. `crates/oxplow-
+  entity `v_github_pr`, with pages joining them to streams and tasks
+  (`prs-by-task`, `pr-lifetimes`); and (P10) a pull request as a
+  **resource**, `github/pr` — model `pull_request` (`uri`, `title`,
+  `body`; it resolves and is searchable), the page `pr` (`for: github/pr`,
+  given `uri=<uri>`), `[[pr:12]]`. `crates/oxplow-
   sdk/tests/examples.rs` checks and tests it and opens a pull request.
 - **`session-history`** — a read-only page of the thread's earlier prompts
   from `v_agent_turn`, mounted at `new-session.sections` after `start`.
@@ -4966,8 +4940,8 @@ Each loads clean (`documented_examples_load_without_errors`):
   counting DDL per migration file (its own measure and dimension), a
   model joining those facts with core's evidence (`v_effort_file`,
   `v_test_run` and its provenance, `v_effort_observation`'s diff
-  coverage, `v_change_function`) into a verdict, and a lens replacing
-  `effort.verdict` with it — no core change.
+  coverage, `v_change_function`) into a verdict, and a page
+  (`effort-verdict`) replacing `effort.verdict` with it — no core change.
   `the_schema_review_example_joins_its_facts_with_core_evidence` runs it
   over a real effort.
 
@@ -4978,89 +4952,85 @@ extension (`extensions/oxplow-bundled/`): its namespace is
 `oxplow_bundled` (commands, event types, measures, collectors) and its
 models publish as `v_oxplow_bundled_*`.
 
-What moves out of core, and what it becomes:
+What moved out of core, and what it is now. All of it is pages (files in
+`pages/`, read by `v_page`); oxplow-foundation's pages draw the app's own
+screens and oxplow-bundled's add the review and analysis:
 
-| Today (core) | Becomes |
-|---|---|
-| Planning / Review / Quality dashboards | `document` lenses (**done**: `planning`, `review`, `quality`) |
-| Code-quality runner, dup scan, FindingPage, DuplicateBlockPage | **done:** the `findings` / `duplicate-blocks` lenses; the dup scan runs in core's change analysis; the compare page is the foundation `duplicate-block` lens (`DuplicateBlockPage` is gone) |
-| Change-analysis cards (treemap, look-here-first, functions, co-change, zones) | **done:** the `change-review` document in the `oxplow-foundation/changes.sections` / `oxplow-foundation/commit.sections` / `oxplow-foundation/uncommitted.sections` slots; core keeps a changed-files tree (`ChangedFilesTree`, `useChangedFiles`) |
-| Fact collectors (`.oxplow/extensions/project/collectors/*.star`, idiom `.star`; gauges until P7.B3) | extensions can declare fact collectors (tsk311); done: the code metrics are oxplow-foundation's (the opt-in ones say `default: off`) |
-| Metric-threshold nudges | **done:** the `threshold-crossed` advisory (with `metric-deltas`) |
-| Usage / page analytics / token pages, `ThreadTokenTotal`, `EffortTokenUsage` | **done:** the `usage` dashboard; `task-tokens` (`work_item.detail.body` slot) and `thread-tokens` (`thread.plan.header` slot) |
-| Git History's commit graph | **done:** the `history-graph` component, replacing core's plain `CommitList` (`vcs.history.graph`) |
-| Local history dashboard | stays core (snapshots are substrate); the `recent-snapshots` lens in `review` covers the at-a-glance view |
-| Effort metrics block, effort coverage page, tests-run and nudge blocks | **done:** `oxplow-foundation/changes.sections` slot lenses `effort-tests` (a document: coverage, untested files, test runs, failed tests, analysis findings), `effort-metric-deltas`, `effort-nudges` |
-| Alerts page | **done:** the `alerts` document (parts above; `oxplow.effect.retry` is open to a lens a person presses, still confirmed). **Dropped:** "From extensions" (panel badges): they are client state from each panel run, so the page doesn't list them and the bell doesn't count them; a badge shows in its panel and its toast's Review opens the panel's lens. `AlertsPage` and `OpErrorDetail` are gone |
-| Duplicate Block page | **done:** the `duplicate-block` lens — `SELECT :left … UNION ALL SELECT :right …` over two route-param sides (a missing `*_at` is `working`), `viz: code` with `sync: true`, tab label `{{param.left}} ↔ {{param.right}}` |
-| Diff and File at a Revision pages | **done:** the `diff` lens (a `diff` viz; its `diff:` block takes a `base` column for the header's `vs <base>`; a clipboard compare's text stays in the entry's history state, read by `DiffViz`) and the `file-viewer` lens (a `code` viz); `DiffPage` and `FileViewerPage` are gone |
-| Git Commit and Uncommitted Changes pages | **done:** the `commit` and `uncommitted` documents (a `query` row for the change, declared in `columns:`; parts `commit-detail`, `commit-files`, `uncommitted-commit`, `uncommitted-files`); the analysis moves to the `oxplow-foundation/commit.sections` and `oxplow-foundation/uncommitted.sections` mounts (the old `vcs.commit.details`, `vcs.status.header` and `vcs.status.details` slots are gone); the commit tab is labelled by its sha, not its subject, and the file totals line and Cherry-pick's inline confirm are gone; `GitCommitPage` and `UncommittedChangesPage` are deleted |
-| Comments inbox | **done:** the `comments` document lens (`comments-threads`, a grouped table over `v_comment` with `select` on the `comment` param; `comments-conversation`, over `v_comment_message`); the resolved filter is a static `choice` ladder (the old one was cut to the oldest resolved comment) and "Go to location" is a plain link, so it no longer scrolls to the anchor; `CommentsInboxPage` and `comments-filter` are gone |
-| Directory page | **done:** the `directory` lens, the renderer of `oxplow/dir` (`pages:` entry `lens: directory`, `label: "{{param.path}}"`); `DirectoryPage` is gone |
-| Work Item page | **done:** the `work-item` document (parts `state`, `fields`, `body`, `info`, `links`, `comments`, `activity`) with `comments: true`; `state` and `body` are the `work_item.detail.state` and `work_item.detail` replaceables, a part whose list lacks the feature (`needs: [work_items.links]`, `[work_items.comments]`) is left out, and `info` offers Bring to this thread, Send to backlog and Delete from its right-click menu by what the list declares. The `work_item.detail.body` / `.sidebar` slots became `oxplow-foundation/work-item.sections`; the tab is labelled by the item's id, not its title; `WorkItemPage` is deleted |
-| Wiki page | **done:** the `wiki-page` document (parts `body`, `info`, `refs`) with `comments: true`; the editor is the `markdown` viz, so saving, drafts, comments and Contents come from the one component. The freshness chip moved into the `info` section; `WikiPage`, `WikiPageTab`, `useWikiPageController` and `wikiFreshness` are gone |
-| Tasks page | **done:** the `tasks` document (params `show` — one thread, its stream, everything — `priority`, and the page's `thread_id` / `stream_id` pickers; row `scope`; parts `tasks-list`, `tasks-summary`, `tasks-backlog`). `tasks-list` is `replaceable: work_item.list` (props `scope`, `thread_id`) and a state-grouped `list` with epics indented and foldable (`depth`, a ▾ on a parent row), the last five done, the agent's open turn as a live row at the top of In progress, drag to reorder (`before`), drop on a row to nest it (`onto`), or onto a heading to change state, bulk state and priority, Make top-level, Send to backlog and Delete, `r` `i` `b` `d` keys. The `thread.plan.header` region slot became `oxplow-foundation/tasks.sections` (`at: { before: list }`). The old read-only cross-thread scopes are gone: every row acts. `TasksPage`, `PlanPane`, `TaskGroupList`, `TaskDetail`, the scope picker, filter bar, summary pane and backlog drawer, the page's task-write handlers in `App.tsx` and the `list_open_agent_turns` IPC are deleted |
-| Changes page | **done:** the `changes` document (params `uri`, `start`, `end` — choice params with `options_from` the `changes-starts` / `changes-ends` lenses — and `stream_id`; its row frames the range: an effort's bracket, a turn's, a snapshot against the one before, or the picked pair, to the working tree while it runs). Parts: `effort` (title, linked task, open/closed; Rename…, Link to task…, Unlink, Close effort), `header` (from, to, work item, the in-progress note), `description`, `verdict` (a bare part, `replaceable: effort.verdict`), `concurrent`, `files` (a tree over `v_change_file` of the range's `v_change`, an effort's own files on its page) and `extensions` (`v_extension_change`). The `effort.review.details` region slot became `oxplow-foundation/changes.sections`. A document part that declares a param the page's row names and gives no value (an effort's lens on a range) is left out; a part titled `""` is bare (no heading); `empty: ""` says nothing. `DiffViewPage`, `EffortHeader`, the endpoint picker, `ChangedFilesTree`, `useChangedFiles`, `diffViewModel`, `ImpactReportView` and the `diff`, `extension_impact_between`, `get_effort`, `get_effort_files`, `get_agent_turn`, `list_efforts_overlapping_range` and `list_snapshots_for_stream` IPCs are deleted |
-| Git Dashboard page | **done:** the `git-dashboard` document (param `stream_id`; its row is the stream's `branch`, which the sections take). Parts: `upstream` (branch against its upstream from `v_branch`; Push, Pull, Fetch), `uncommitted` (the working tree, linking to its page), `recent` (the last five commits on the stream's head from `v_commit`, with refs and sizes), `streams` (the other streams from `v_branch_divergence`, each expanding into the `git-dashboard-between` commit list over `v_commit_between`; Merge and Rebase row actions), `readiness` (which streams merge cleanly; Merge when `can_merge`) and `remotes` (the recent remote branches; Pull, Push). Each action asks first exactly when its command's spec does. `GitDashboardPage`, `CommitList`, `SpecConfirm`, `readHistory` and the `vcs_divergence`, `vcs_revisions_between`, `git_list_recent_remote_branches` and `vcs_revision` IPCs are deleted |
-| Dashboard page | **done:** the `dashboard` document, the renderer of `oxplow/dashboard` (params `uri`, and the filters `range` — a `date_range`, default all time — and `branch`, which window every metric card; its row is the dashboard's `id` from the URI). Parts: `dashboard-title` (a `detail` over `v_dashboard`; Add Metric… — a form choosing from `dashboard-metrics` over `v_metric_catalog`, running `add_item` with the metric key alone — Add Heading… and Rename… as prompt strips, Delete with `then: close`) and `dashboard-tiles` (a `dashboard` with `tile:` over `v_dashboard_item`; drag reorders with `{{order.id}}`, a heading is edited in place, right-click gives Rename…, Chart as Line / Number, the sizes and Remove). `CustomDashboardPage`, `MetricPickerPanel`, `LensTile` and the tile wrappers, `parseTileOptions` and the `get_dashboard` IPC are deleted; an empty `tile:` dashboard says its `empty` line, and the loader counts a tile dashboard's `range` and `branch` as read |
-| Metrics page | **done:** the `metrics` lens (a grouped list: the `section` column is the category's label, or a language for `static-quality`; params `q`, `range`, `branch`, `show`, `slice` — `options_from` the `metrics-dimensions` lens; columns title → the metric's page, `sparkline` trend, latest with its unit and a `tone` from its target) over `v_metric_catalog`, `v_metric_spec` and the new live model `v_metric_point` (one row per metric × capture, narrowed by the `metric` and `dimension` the query pins: `.context/metrics.md`). Slice by turns on each row's ▸, the `metrics-slices` lens (top three groups). `MetricsPage`, `metricsRows`, `metricCategories` are deleted; an answerability question pair (`questions/metrics.yaml`) names `v_metric_point` in the oxplow-metrics skill. The pushdown now reads a model read once inside a parenthesised `SELECT` (a CTE body, a subquery) by that `SELECT`'s own conditions |
-| Files page | **done:** the `files` document (params `stream_id`, filters `scope` — `all`, `uncommitted`, or a base ref: the default branch's name for its changes, the upstream's for the unpushed ones; choices from `files-scopes` — `compare`, a branch or tag from `files-refs` (a file then opens as a diff against it); its row names the change the scope reads: a `working` change or a `range` from the merge base (`v_branch_divergence.merge_base`) to the working tree, so the tree part pins `v_change` by params). Parts: `files-header` (branch, changed count, Commit Changes… — a form over `oxplow.vcs.commit` —, Pull, Push) and `files-tree` (a **lazy** `tree` of `v_workspace_file`, `tree: { lazy: folder, branch: opens }`: the lens lists one folder (`WHERE parent = :folder`, the rows parented on it) and a closed folder is read when it opens, in place — or, for a scope, the changed files nested in their folders, which stay eager (`opens` is false), each opening its diff). Right-click: New File… (opens the file: `oxplow.file.create`'s result carries its `uri` and its `ui.open_after` is `{{result.uri}}`; its `when` never holds, so search doesn't offer it), New Directory…, Rename… (prompt strips on `oxplow.file.*`, prefilled), Delete (asks), Show History (`window.navigate` to the file-history lens), Find Usages (`window.quick_open` with a `query`), Rollback (`vcs.discard`), Add (`vcs.stage`), Add to .gitignore, Mark / Unmark as Generated (the new `oxplow.file.mark_generated`, which edits the `generated` key's `exclude` list). `FilesPage`, `ProjectPanel`, `FileTree`, `GitSummary`, `FileStatusCounts`, `coalescedRefresh` and the `git_change_scopes`, `search_workspace_text`, `set_generated`, `vcs_merge_base`, `vcs_file_history` and `changed_paths` IPCs are deleted. The menu's Commit Changes… opens the Uncommitted Changes page, whose inline box commits (the `commit` window form is gone). Open: the all-files listing switches to `tree: { …, lazy: folder, branch: is_dir AND :scope = 'all' }` (drop the `..` row and `select: folder`; `tree.lazy` has landed) |
-| Metric page | **done:** the `metric` document, the renderer of `oxplow/metric` (params `uri`, `metric`, filters `range`, `branch`, `slice`): `metric-header` (a detail: the definition, the agg-aware in-range headline, Enable, Disable, Add to Dashboard…), `metric-chart` (a `line` chart over `v_metric_point`: running total for a sum, five-capture moving average for an average, the value with its target line otherwise; a series per group when sliced), `metric-unchecked` and `metric-recordings` (the newest 200 captures). `MetricDetailPage`, `MetricDetail`, `MetricFilters`, `metricsRows`-style helpers for it, and the `enable_metrics` IPC are deleted. Lost: dragging a range on the chart, the recordings pager, New dashboard… from the metric |
-| Settings (the view document) | **done:** `lenses/settings.yaml` (`viz: document`, `view: area`, params `area` default `overview` and `q`, the overview's search) with a section per area — `overview`, `agents`, `lsp`, `extensions`, `data`, `integrations`, `ai` — each a document lens `settings-<area>` whose sections are the lenses it lists (the mounts the areas had at `settings.<area>.sections`); the manifest page is `lens: settings` with no params. An area is the section in view (the rail's `lens-view-<id>`, `#area=<id>` in the address, `#section=<id>` landing inside one); the launcher lists each area as `Settings: <area>`. Another extension adds to an area at `oxplow-foundation/settings-<area>.sections` and adds an area at `oxplow-foundation/settings.sections`. `SettingsPage`, `settingsAreas.ts`, `DocumentLayout`, `placeParts`, `settingsAreaEntries` (and the launcher's `pages` prop), the `settings.*` core slots, `SlotParts` and the `settings` built-in page are gone |
-| Settings → Capabilities and replaced components | **done:** foundation lenses first in `oxplow-foundation/settings-integrations.sections`: `capabilities` (a table grouped by capability over `v_capability_provider`, plus a synthetic "The default" row per capability; row actions `use-project`, `use-mine`, `default-project`, `same-as-project`, each `when:` its row offers it, all `oxplow.capability.choose`) and `replacements` (over the new live model `v_replacement`: per replaceable component the extensions that replace it, oxplow's own and the default; actions `use` / `default`, `oxplow.replacement.choose`). Both commands are `config.write` ops over `activeProviders` / `replacements` in the project or personal layer. `CapabilitiesSection`, `capabilitiesModel` and the Replacements fieldset of `IntegrationsSection` are gone |
-| Settings → Integrations | **done:** the `integrations` lens (`viz: custom`) in `oxplow-foundation/settings-integrations.sections` after Capabilities and Replaced components, over oxplow-foundation's own hand-written component `components/integrations/` (no build): it reads `v_provider_instance`, `v_provider_credential`, `v_provider_collector` and runs `oxplow.provider.*`; config and credentials are oxplow's forms (`openForm`), the OAuth sign-in the host's (`signIn`, protocol 11). A section's component frame fits its content (`size`). `IntegrationsSection`, `integrationsModel`, the `api.ts` wrappers and the ten provider IPCs are gone |
-| Settings → Data | **done:** foundation lenses mounted in `oxplow-foundation/settings-data.sections` (the area has no core section ids now): `data-entities` (`v_data_entity`, the new live model; a row's ▸ opens `data-entity-rows`, which counts that model — the count is a pinned `name`, not a column of the list), `data-sources` (`v_collector` + `v_collector_credential`: state, last run, rows, problem, missing credentials; Sync Now, Enable Again, Enable All Disabled), `data-effects` (a row's ▸ opens `data-effect-backfill` over the new live model `v_effect_backfill`, pinned by `effect`: how many events a backfill would react to and its `to_seq`; Backfill asks first), and the Alerts page's `alerts-reactions` and `alerts-deliveries` (Failed reactions, Undelivered events). `DataSection`, `DeliveryList`, `EnableAllButton`, `extensionRowModel`, `dataSectionModel` and the `list_data_entities`, `list_collectors` IPCs are deleted. A row expansion now shows the lens's whole-lens action buttons |
-| Backlog page | **done:** the `backlog` document: `backlog-add` (a `form` over `oxplow.work_item.create`, `then: stay`) above `backlog-list` (`list` grouped by state, epics indented by `depth`; `drag` actions reorder (`{{before.uri}}` / `{{after.uri}}`) or move to a state (`{{group.value}}`); bulk state, priority, Bring to this thread and Delete, each gated by what the list declares; `r` `i` `b` `d` keys; the `q` search matches title or any field). The per-field filter chips are one search box: a lens declares its params statically, so a chip per declared field needs params from a lens (not built). `BacklogPage`, `PlanPane`'s backlog mode and the backlog reorder wiring are deleted |
-| Board page | **done:** the `board` document, one `replaceable: work_item.board` part `board-cards` (`viz: board` grouped by state, a `drag: true` move action and `Move to` row actions); `scope` comes from the page's `show` filter through the document's query row. Cards show the declared enum fields as text (no `FieldBadge` colours). `BoardPage` and `WorkBoard` are gone; a right-click anywhere on a lens row, a link in it included, opens the row's menu (`onContextMenuCapture`) |
-| Settings → AI | **done:** foundation lenses in `oxplow-foundation/settings-ai.sections`: `ai-providers` (`v_ai_provider`; Test… and Remove… row actions, Remove asks first), `ai-provider-form` (a `form` lens over `oxplow.ai.set_provider`, its `key` a `secret: true` field, `kind` chosen from `v_capability_provider`), `ai-roles` (`v_ai_role`; Assign… / Unassign over `oxplow.ai.set_role`), `ai-calls` (the last 7 days of `v_ai_call`). `set_provider` and `remove_provider` now announce `ConfigChanged` so the lists follow. `AiSection`, `aiSettingsModel` and the AI `api.ts` wrappers are gone |
-| Settings → Agents | **done:** foundation lenses in `oxplow-foundation/settings-agents.sections`: `agents-list` (the harnesses from `v_agent_harness`; Enable / Disable / Move Up / Move Down each hand `oxplow.agent.set_agents` the whole new order, built in SQL and bound with `{{row.x|json}}`), `agents-settings` (the declared settings, `v_agent_harness.settings` (v2) joined with `agentConfig`, a `Change…` form over `oxplow.agent.set_setting`), `agents-new-thread` (`personal.newThreadSession`, `Use This` on `oxplow.config.set` / `unset`, which ask first), `agents-prompt` (an edit form over the new `oxplow.agent.set_prompt_append`). No page-wide Save: each part saves itself. `AgentPicker`, `NewThreadSessionSetting` and the Agents form are gone |
-| Settings → Overview and Language Servers | **done:** the areas have no React sections; oxplow-foundation mounts lenses in their slots. Overview: `settings-proposals` (the `approvals` viz) and `settings-values` (a grouped `list` over `v_config_value`: its source, value, doc, Ask the Agent to Change This through `oxplow.agent.draft`, and Change It Here — a link to the area that holds a setting's control; the page's search is the slot param `q`, which the lens reads as `:q`). Language servers: `lsp-servers` (`v_lsp_server`, a row per stream a server runs in; Restart and Remove through `oxplow.lsp.restart_server` / `remove_server`), `lsp-install` (a form over `oxplow.lsp.install_server`) and `lsp-suggestions` (the curated Mason packages for languages with no server). The shell (`SettingsPage`, the rail, the other areas) stays until they convert. Then the page becomes a foundation view document (`view: area`, a document lens per area whose sections are the lenses mounted in these slots today, which then move to `oxplow-foundation/settings-<area>.sections`; a new area mounts at `oxplow-foundation/settings.sections`); the core it needs — the view, `#section=` landing, launcher entries per section, nested documents — has landed. Links to an area put it in the `#`: `oxplow:oxplow/page?page=settings#area=agents` |
-| Settings → Extensions health and credentials | **done:** foundation lenses in `oxplow-foundation/settings-extensions.sections`: `extensions-health` (`v_contribution_health`, grouped by extension; Enable Again, Repair with the Agent through `oxplow.agent.draft`, Enable All Disabled), `extensions-credentials` (the credentials collectors declare, once per extension; Set… and Clear through `oxplow.collector.set_credential`) and `extensions-secrets` (`v_extension_secret`; Set… and Revoke). The per-extension Enable All button is gone (the all button stays); `ExtensionsSection`, `HealthRow`, `SecretRow` and the `save_extension_secret`, `extension_secret_is_set`, `revoke_extension_secret` and `set_credential` IPCs are deleted; `EnableAllButton` and `CredentialRow` (provider instances) moved to their own files for Settings → Data and Integrations |
-| Rail panels: Comments, Work, Uncommitted, Go To | **done:** Go To (`go-to`, the thread's bookmarks then its recent or most visited pages through the `mode` choice param, `go-to-bookmarks` collapsed — needing bookmarks as project data (`v_bookmark`), lens param `options` and page-kind icons; the rail has no core panels left); Comments (`comments`, a panel `open`ing the inbox) and Work (`work` grouped over the `thread_work` model, which also lists the thread's unlinked efforts — open under In progress, closed under Finished, whose header opens the `thread-activity` lens of the thread's turns by effort — `work-line` collapsed, `work-count`, the `clear_finished` command + `finished_cleared` model); and Uncommitted (`uncommitted`, a tree over the working change's stage-one file list, which change analysis now keeps current on every move). Only the UI moves: stores, commands and views stay core. What Work needed and lenses lacked became general features, listed under "Added for extraction" — the pattern for any panel an extension builds |
-| The effort-close inference of unrecorded decisions and of the claims an agent's answers made (the `effort.decisions` reactor) | **done:** the AI profile `reasoning` (fallback `main`), the job `reasoning`, the command `oxplow.effort.infer_reasoning` and the effects `infer-reasoning` / `store-reasoning`, writing through core's `oxplow.effort.replace_inferred_decisions` and `oxplow.effort.replace_inferred_claims`; review and storage stay core ([ai-providers.md](./ai-providers.md) "Inferred reasoning") |
+- **Dashboards and review.** `planning`, `review`, `quality` and `usage`;
+  the code-quality `findings`; the `change-review` page (treemap,
+  look-here-first, functions, co-change, zones) mounted in the
+  `oxplow-foundation/diff-view.sections`, `commit.sections` and
+  `uncommitted-changes.sections` slots. The duplicate scan runs in core's
+  change analysis; the compare page is foundation's `duplicate-block`.
+- **Effort blocks.** `effort-tests` (coverage, untested files, test runs,
+  failed tests, analysis findings), `effort-metric-deltas`, `effort-nudges`
+  and `effort-plan`, mounted at `oxplow-foundation/diff-view.sections`.
+  `task-tokens` mounts at `work-item.sections`; `thread-tokens` at
+  `tasks.sections`.
+- **Metric nudges.** The `threshold-crossed` advisory (with
+  `metric-deltas`).
+- **Git History's commit graph.** The `history-graph` component, replacing
+  core's plain commit list (`vcs.history.graph`, a `ui.replacements`
+  entry).
+- **The app's screens.** foundation's `alerts`, `backlog`, `board`,
+  `catalog`, `changes-effort`, `comments`, `commit`, `dashboards`,
+  `diff`, `directory`, `file-viewer`, `files`, `git-dashboard`,
+  `settings` (an `area` param: overview, agents, lsp, extensions, data,
+  integrations, ai), `tasks`, `uncommitted-changes`, `wiki-page`,
+  `work-item`, and more. Dashboards are in [dashboards.md](./dashboards.md) and
+  metrics in [metrics.md](./metrics.md).
+- **Rail panels** (the `panels:` list of oxplow-bundled): Go To
+  (`go-to-panel`, collapsed `go-to-bookmarks`), Waiting on You
+  (`waiting-on-me`, a badge), Comments (`comments-panel`), Uncommitted
+  (`uncommitted`, collapsed `uncommitted-line`, count `uncommitted-count`)
+  and Work (`work`, collapsed `work-line`, count `work-count`). Only the UI
+  moved: stores, commands and views stay core. Each panel's `body` is a
+  page.
+- **Effort reasoning.** The AI profile `reasoning` (fallback `main`), the
+  job `reasoning`, the command `oxplow.effort.infer_reasoning` and the
+  effects `infer-reasoning` / `store-reasoning`, writing through core's
+  `oxplow.effort.replace_inferred_decisions` and
+  `oxplow.effort.replace_inferred_claims`.
 
 **Owns what reads tables (P7.B5).** Derived data computed only from
 core's rows is the extension's, as SQL: the "look here first" score is
 its model `change_interest` (`v_oxplow_bundled_change_interest`, over
 `ref('change_file')` and `ref('change_function')`), which the
-`change-look-here` lens reads; co-change surprises are its models
+`change-review` page reads; co-change surprises are its models
 `co_change_pair` (`materialize: { every: 1h }` over the commit index —
 "the last 180 days" moves with the clock) and
-`change_co_change`, which the `change-co-change` lens reads — and the
-`file-co-change` lens ("Usually Changes With", mounted at
-`diff.file.header`, P9.A2) reads `co_change_pair` for the file a diff
+`change_co_change`, which `change-review` reads — and the
+`file-co-change` page ("Usually Changes With", mounted at the diff
+page's `file-header` slot, `oxplow-foundation/diff.file-header`) reads `co_change_pair` for the file a diff
 shows; an
 effort's churn is its fact collector `oxplow_bundled.effort_churn`
 (`on: [effort.finished]`, `after: [change.analyze]`, reading the
 effort's change files) recording `oxplow_bundled.effort_churn_lines`.
-Full-tree duplicated lines (tsk388) read the tree, not tables, so they
+Full-tree duplicated lines read the tree, not tables, so they
 are oxplow-foundation's collector, `oxplow.duplicate_lines`, over the
 public `duplicate_blocks(min_lines)` builtin — what any extension could
 write. What needs two revisions' trees — files, functions, imports, test
 signals, per-function churn, the scoped duplicate scan — stays in core's
 change analysis.
 
-**Deliberately simple** (Explore Data is now oxplow-foundation's custom page, "Explore Data: oxplow-foundation's data app"): a basic **metrics explorer** and
-**simple dashboards** (Nathan, 2026-09-27). The base version must let
-people see what metrics exist and pin a few to a dashboard as a starting
-point, a bit like Metabase. It doesn't need to be fancy. The explorer
-browses the semantic-layer catalog (entities, measures, metrics), shows a
-table or simple chart sliced by a dimension, and can save the result as a
-lens or pin it to a dashboard. Dashboards are a plain grid of pinned
-metrics and lenses. Tracked in the "basic metrics explorer" task.
-**Done (tsk309):** Metrics is a catalog (search, enabled/all, range, branch,
-sparkline + latest value); Metric Detail is trend + recordings + stats +
-enable + Add to dashboard; dashboard tiles are line / number metrics, text
-and lenses under a range/branch filter ([dashboards.md](./dashboards.md)).
+**Deliberately simple.** A basic **metrics explorer** and **simple
+dashboards**. The base version lets people see what metrics exist and
+pin a few to a dashboard as a starting point, a bit like Metabase. It does
+not need to be fancy. Explore Data (oxplow-foundation's `explore-data`
+page) browses the semantic-layer catalog (entities, measures, metrics),
+shows a table or simple chart sliced by a dimension, and saves the result
+as a page. A dashboard is a page with `category: Dashboards` and a grid
+of nodes ([dashboards.md](./dashboards.md)). Metrics is a catalog (search,
+enabled/all, range, branch, sparkline + latest value); the metric page
+shows trend, recordings, stats and Enable.
 
 **Also stays in core** (it is substrate other features need): snapshots,
 collection ingest, attribution, token ingest, page visits (the rail and
 launcher use them), the fact store and engine, the Go To page and
-bookmarks (`v_bookmark`; the rail's Go To pane is the extension's). diff-view shrinks to title + file list + diff + the
-`oxplow-foundation/changes.sections` slot; WorkItemPage keeps the `work_item.detail.body` slot.
+bookmarks (`v_bookmark`; the rail's Go To pane is the extension's).
 
 New in the extension: the **effort review packet**, all live exception
-lenses:
+pages:
 
 - Waiting on me
 - What deviated (files outside the task's stated area)
@@ -5074,36 +5044,36 @@ lenses:
   pastes it)
 
 **Done when** core boots and is usable with `oxplow-bundled` disabled,
-and enabling it restores the old pages' behavior as lenses.
+and enabling it restores the review and analysis pages.
 
 ## Added for extraction
 
-Features added to core because the extraction needed them (tsk280),
+Features added to core because the extraction needed them,
 available to every extension:
 
 - `bar`, `line`, `treemap` and `grid` viz, with `chart` and `children`.
 - `commit` and `metric` link kinds; `file` links with `line`. (A `task`
   kind came and went: a work item links as `page`, by its URI.)
 - the Work Item and Tasks pages' section slots, with slot params checked at load.
-- Lens `launcher.category` and `hidden`.
-- Lens `actions:` as commands (P6.B1; the tsk329 registry retired).
+- Page `category` and `hidden`.
+- Page `actions:` as commands.
 - Disabling extensions per project.
 - Advisories: the generic nudge primitive (see "Advisories").
-- Lens tabs carry params: `oxplow:oxplow/lens?lens=<ext>/<slug>&k=v#view` (`lensUri(id, params, view)`),
-  so a slot lens's heading opens its page with the slot's values, and
+- Page tabs carry params: `oxplow:oxplow/page?page=<ext>/<slug>&k=v#view`,
+  so a slot page's heading opens its page with the slot's values, and
   history and bookmarks keep them.
-- Panel `collapsed:` — a lens shown as a collapsed panel's summary
+- Panel `collapsed:` — a page shown as a collapsed panel's summary
   (for the Work panel).
-- Panel `count:` — a lens whose row count (or `number`) is the panel's
+- Panel `count:` — a page whose row count (or `number`) is the panel's
   header count without raising an alert.
 - Column `icon:` naming any page kind draws that page's icon.
-- Lens param `options:` — a choice, shown as a toggle in a panel's
-  header and a select on a lens page (for Go To's Recent / Most
+- Page param `options:` — a choice, shown as a toggle in a panel's
+  header and a select on a page (for Go To's Recent / Most
   visited).
-- Lens `group: { by, link? }` on `list` / `table` — rows under linked
+- Node `group: { by, link? }` on `list` / `table` — rows under linked
   sub-headings, also in compact panels — and actions with `group:` in a
   group's heading.
-- Column `icon:` / `tone:` from fixed vocabularies, and lens `emphasis:` /
+- Column `icon:` / `tone:` from fixed vocabularies, and node `emphasis:` /
   `depth:` — row highlight and indent.
 - List, table and tree rows that link somewhere drag into the agent's
   context; tree labels honour their column's `link`.
@@ -5282,7 +5252,7 @@ write future (its place in the fair lock's queue). Pinned by
 opaque pin across spawned host work; child contexts inherit it and fresh jobs do
 not. Nested reader scopes reuse their pin so a waiting fair-lock writer cannot
 deadlock a parent query. SQL and command entrypoints pin before query materialize
-or command lookup; lens/effect/event-consumer paths use the same reader scope, and
+or command lookup; page/effect/event-consumer paths use the same reader scope, and
 host workers carry the concrete pin in RunContext. Task-local scopes alone do not
 propagate into spawned tasks. Provider host-call registration is cancellation-safe
 across candidate publication. Native/background and synchronous metadata
@@ -5536,8 +5506,8 @@ commands:
   what it says (the triage example's `publish-summary`).
 - **Seeing job runs.** `v_job_run` (state, attempt, rounds, tool calls,
   tokens so far, its `uri`) and `v_job_run_output` are published models, so
-  a lens or component over them follows a run live. oxplow-bundled's **Job
-  Runs** lens (Activity) lists the running and the last day's, with Cancel;
+  a page or component over them follows a run live. oxplow-bundled's **Job
+  Runs** page (Activity) lists the running and the last day's, with Cancel;
   a row opens its **Job Run Output**. A job run acts as `Actor::Job`, its
   source the run's URI (`job_run:<id>`); attempt and fence are on the row.
 - **What a job can't do**: drive an agent session, ask a person (a
@@ -5581,13 +5551,13 @@ explicit human revocation can delete a retained keychain value after uninstall.
 reference when none is given) and `oxplow.extension.revoke_secret { extension,
 reference }`, scope `credentials.write`. A secret is a kind of value, not a
 kind of actor (commands.md "Secrets"): `value` is `writeOnly`, so a person, an
-agent and a lens for either may set one, and no record, event, result or
+agent and a page for either may set one, and no record, event, result or
 model carries it. Presence is the live model `v_extension_secret` (`extension`,
 `provider`, `name`, `reference` as JSON, `is_set`), read from the catalog's
 provider credentials and the keychain; it follows `CredentialChanged`. Secret
 bytes and keychain error details are never returned or audited. Values are
 bounded to 16 KiB. Settings → Extensions lists them in the foundation's
-`extensions-secrets` lens (Set… / Rotate…, a form over the command whose
+`extensions-secrets` page (Set… / Rotate…, a form over the command whose
 `value` field is masked by the schema, and Revoke). The old
 `save_extension_secret`, `extension_secret_is_set` and
 `revoke_extension_secret` IPCs are gone.

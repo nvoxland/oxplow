@@ -212,7 +212,7 @@ data:
              END AS hint,
              (SELECT group_concat(key, ', ') FROM json_each(p.features) WHERE value = 1) AS features,
              CASE WHEN p.source = 'none' THEN
-               (SELECT group_concat(l.title, ', ') FROM v_lens l WHERE EXISTS
+               (SELECT group_concat(l.title, ', ') FROM v_page l WHERE EXISTS
                   (SELECT 1 FROM json_each(l.needs) n WHERE n.value = p.capability OR n.value LIKE p.capability || '.%'))
              END AS turns_off,
              trim(CASE WHEN p.active = 1 THEN 'Active. ' || CASE p.chosen_by WHEN 'personal' THEN 'Your own choice.' WHEN 'project' THEN 'The project''s choice.'

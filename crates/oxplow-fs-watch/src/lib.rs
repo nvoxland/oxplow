@@ -1012,9 +1012,9 @@ mod tests {
             "written before its watch landed: {seen:?}"
         );
 
-        let after = late.join("extensions/mine/lens.yaml");
+        let after = late.join("extensions/mine/page.yaml");
         std::fs::write(&after, b"y").unwrap();
-        let after = root.join("oxplow/extensions/mine/lens.yaml");
+        let after = root.join("oxplow/extensions/mine/page.yaml");
         let seen = seen_within(&mut rx, &after, Duration::from_secs(20)).await;
         assert!(seen.contains(&after), "written once it's watched: {seen:?}");
     }
@@ -1527,7 +1527,7 @@ mod tests {
         );
         // Extension sources are watched; their deployments are not.
         assert!(!f.ignore(Path::new(".oxplow/extensions"), true));
-        assert!(!f.ignore(Path::new(".oxplow/extensions/mine/lenses/a.yaml"), false));
+        assert!(!f.ignore(Path::new(".oxplow/extensions/mine/pages/a.yaml"), false));
         assert!(f.ignore(
             Path::new(".oxplow/runtime/extensions/mine/0123/a.yaml"),
             false

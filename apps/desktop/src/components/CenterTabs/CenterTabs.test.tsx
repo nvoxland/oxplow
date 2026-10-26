@@ -142,12 +142,12 @@ test("a body with the same key keeps its state when its id changes", () => {
       </button>
     );
   }
-  const tab = (id: string): CenterTab => ({ id, key: "t1/oxplow:oxplow/lens?lens=x/y", label: "Lens", closable: true, render: () => <Counter /> });
-  const view = render(<CenterTabs tabs={[tab("oxplow:oxplow/lens?lens=x/y")]} activeId="oxplow:oxplow/lens?lens=x/y" onActivate={() => {}} onClose={() => {}} onReorder={() => {}} />);
+  const tab = (id: string): CenterTab => ({ id, key: "t1/oxplow:oxplow/page?page=x/y", label: "Page", closable: true, render: () => <Counter /> });
+  const view = render(<CenterTabs tabs={[tab("oxplow:oxplow/page?page=x/y")]} activeId="oxplow:oxplow/page?page=x/y" onActivate={() => {}} onClose={() => {}} onReorder={() => {}} />);
   fireEvent.click(view.getByTestId("count"));
-  view.rerender(<CenterTabs tabs={[tab("oxplow:oxplow/lens?lens=x/y&range=7d")]} activeId="oxplow:oxplow/lens?lens=x/y&range=7d" onActivate={() => {}} onClose={() => {}} onReorder={() => {}} />);
+  view.rerender(<CenterTabs tabs={[tab("oxplow:oxplow/page?page=x/y&range=7d")]} activeId="oxplow:oxplow/page?page=x/y&range=7d" onActivate={() => {}} onClose={() => {}} onReorder={() => {}} />);
   expect(view.getByTestId("count").textContent).toBe("1");
-  expect(view.getByTestId("center-tab-body-oxplow:oxplow/lens?lens=x/y&range=7d")).not.toBeNull();
+  expect(view.getByTestId("center-tab-body-oxplow:oxplow/page?page=x/y&range=7d")).not.toBeNull();
 });
 
 test("a tab whose page holds unsaved edits says ● before its label", () => {

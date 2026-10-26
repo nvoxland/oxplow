@@ -45,7 +45,7 @@ export function PageRail({ run, runId, onApply, picked = NO_PICKED, outOfDate = 
   // No role is a resource, as the server reads it.
   const sw = switchSections(run);
   const filters = run.page.params.filter((p) => p.role === "filter" && p.name !== sw?.param);
-  // A filter's `options_from` names a page here, not a lens.
+  // A filter's `options_from` names a page here, not a query.
   const reads = usePageReads();
   const options = useMemo(() => pageOptionsSource(reads), [reads]);
   const selections = run.page.params.filter((p) => p.role === "selection");

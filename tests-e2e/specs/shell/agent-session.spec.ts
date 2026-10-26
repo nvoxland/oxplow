@@ -6,7 +6,7 @@ test("an agent terminal has usable height when opened and restored", async ({ fr
   const { page } = fresh;
   await page.goto("/");
   await newSessionPage(page).locator('[data-node="start"]').getByRole("button", { name: "Start a new session", exact: true }).click();
-  const terminal = page.getByTestId("lens-terminal");
+  const terminal = page.getByTestId("viz-terminal");
   const hasSpace = async () => {
     await expect(terminal).toBeVisible();
     await expect.poll(async () => (await terminal.boundingBox())?.height ?? 0).toBeGreaterThan(200);
@@ -44,7 +44,7 @@ test("an ended terminal session says so and its tab closes it", async ({ fresh }
   await run(daemon, "oxplow.agent.set_agents", { agents: ["scripted", "claude"] });
   await page.goto("/");
   await expect(newSessionPage(page)).toBeVisible();
-  await newSessionPage(page).locator('[data-node="start"]').getByTestId("lens-form-fields-harness").selectOption("claude");
+  await newSessionPage(page).locator('[data-node="start"]').getByTestId("viz-form-fields-harness").selectOption("claude");
   await newSessionPage(page).locator('[data-node="start"]').getByRole("button", { name: "Start a new session", exact: true }).click();
   const tab = page.locator('[data-testid^="center-tab-oxplow:oxplow/agent_session?"]').first();
   await expect(tab).toBeVisible();
@@ -63,7 +63,7 @@ test("a session that can't launch shows why and offers a retry", async ({ fresh 
   await run(daemon, "oxplow.agent.set_agents", { agents: ["scripted", "codex"] });
   await page.goto("/");
   await expect(newSessionPage(page)).toBeVisible();
-  await newSessionPage(page).locator('[data-node="start"]').getByTestId("lens-form-fields-harness").selectOption("codex");
+  await newSessionPage(page).locator('[data-node="start"]').getByTestId("viz-form-fields-harness").selectOption("codex");
   await newSessionPage(page).locator('[data-node="start"]').getByRole("button", { name: "Start a new session", exact: true }).click();
   const ended = page.getByTestId("terminal-ended");
   await expect(ended).toContainText("Couldn't start the session");
@@ -79,7 +79,7 @@ test("a session's tab shows its alias, and its fallback once the alias is cleare
   await run(daemon, "oxplow.agent.set_agents", { agents: ["scripted", "claude"] });
   await page.goto("/");
   await expect(newSessionPage(page)).toBeVisible();
-  await newSessionPage(page).locator('[data-node="start"]').getByTestId("lens-form-fields-harness").selectOption("claude");
+  await newSessionPage(page).locator('[data-node="start"]').getByTestId("viz-form-fields-harness").selectOption("claude");
   await newSessionPage(page).locator('[data-node="start"]').getByRole("button", { name: "Start a new session", exact: true }).click();
   const tab = page.locator('[data-testid^="center-tab-oxplow:oxplow/agent_session?"]').first();
   await expect(tab).toBeVisible();
@@ -98,9 +98,9 @@ test("a session's tab shows its alias, and its fallback once the alias is cleare
   // it in its harness.
   await body.getByTestId("page-nav-menu").click();
   await body.getByTestId("menu-item-action-page-action-rename").click();
-  const title = page.getByTestId("lens-action-form-fields-title");
+  const title = page.getByTestId("viz-action-form-fields-title");
   await title.fill("Renamed here");
-  await page.getByTestId("lens-action-form-fields-submit").click();
+  await page.getByTestId("viz-action-form-fields-submit").click();
   await expect(tab).toContainText("Renamed here");
   await rename("");
   await expect(tab).toContainText(/claude \d{4}-\d{2}-\d{2}/i);
@@ -153,8 +153,8 @@ test("a remembered choice is what new threads start with", async ({ fresh }) => 
   await run(daemon, "oxplow.agent.set_agents", { agents: ["scripted", "claude"] });
   await page.goto("/");
   await expect(newSessionPage(page)).toBeVisible();
-  await newSessionPage(page).locator('[data-node="start"]').getByTestId("lens-form-fields-harness").selectOption("claude");
-  await newSessionPage(page).locator('[data-node="start"]').getByTestId("lens-form-fields-remember").check();
+  await newSessionPage(page).locator('[data-node="start"]').getByTestId("viz-form-fields-harness").selectOption("claude");
+  await newSessionPage(page).locator('[data-node="start"]').getByTestId("viz-form-fields-remember").check();
   await newSessionPage(page).locator('[data-node="start"]').getByRole("button", { name: "Start a new session", exact: true }).click();
   await expect(page.locator('[data-testid^="center-tab-oxplow:oxplow/agent_session?"]')).toHaveCount(1);
 

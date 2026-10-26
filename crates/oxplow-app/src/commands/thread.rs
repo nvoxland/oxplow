@@ -1,7 +1,7 @@
 //! Thread commands (P8.A3, `.context/commands.md`): a thread's lifecycle
 //! — create (or fork), rename, its custom prompt, its mark, close and
 //! reopen — as `Tx` commands, so every surface (the desktop, an agent, a
-//! lens) goes through the same validation, policy, audit and undo. A
+//! page) goes through the same validation, policy, audit and undo. A
 //! thread is open or closed, nothing more: every open thread of a stream
 //! shares its worktree, and any of them may change it
 //! (`.context/agent-model.md` "Why there is no writer thread").

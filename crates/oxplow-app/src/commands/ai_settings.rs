@@ -2,7 +2,7 @@
 //! provider (and stores its key in the keychain), `remove_provider` takes
 //! one away, `set_role` binds a role to a provider and model (or unbinds
 //! it) and `test_provider` makes one small call to check a provider.
-//! Anyone runs them: a person, their agent, Settings → AI as a form lens.
+//! Anyone runs them: a person, their agent, Settings → AI as a form page.
 //! `set_provider`'s `key` is a secret (`writeOnly`): never in a record,
 //! only that one was given is.
 //! `External`: the settings are the user-global `ai.yaml` and the OS
@@ -301,15 +301,15 @@ mod tests {
         assert!(error.contains("private input"), "{error}");
         assert!(!error.contains("sk-secret-123"), "{error}");
 
-        // A person's lens (Settings → AI as a form) runs it, and its record
-        // keeps the key out too; a lens an agent presses can't.
-        let lens = |presser: Actor| Actor::Lens {
-            lens_id: "oxplow-foundation/ai".into(),
+        // A person's page (Settings → AI as a form) runs it, and its record
+        // keeps the key out too; a page an agent presses can't.
+        let page = |presser: Actor| Actor::Page {
+            page_id: "oxplow-foundation/ai".into(),
             on_behalf_of: Box::new(presser),
         };
         run(
             &fx,
-            &lens(Actor::Human),
+            &page(Actor::Human),
             super::SET_PROVIDER,
             json!({ "id": "viaform", "kind": "openrouter", "key": "sk-form-456" }),
         )
@@ -344,10 +344,10 @@ mod tests {
             thread_id: Some(fx.thread),
             stream_id: None,
         };
-        // A lens an agent pressed may set one too.
+        // A page an agent pressed may set one too.
         run(
             &fx,
-            &lens(agent),
+            &page(agent),
             super::SET_PROVIDER,
             json!({ "id": "byagent", "kind": "openrouter", "key": "sk-x" }),
         )

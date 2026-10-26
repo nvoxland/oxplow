@@ -67,6 +67,20 @@ pub struct PageRun {
     pub alert: Option<AlertState>,
     /// The badge's value, when the page has one.
     pub badge: Option<SqlCell>,
+    /// Set when the page needs a capability that isn't active: it ran no
+    /// loaders, and says what it needs instead of showing nothing.
+    #[serde(default)]
+    pub inactive: Option<PageInactive>,
+}
+
+/// A page that didn't run for want of a capability.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PageInactive {
+    /// The needs that aren't met (`work_items`, `knowledge`).
+    pub needs: Vec<String>,
+    /// What a person reads.
+    pub message: String,
 }
 
 /// A loader's result in a run.
@@ -238,6 +252,33 @@ impl<'a> PageRunner<'a> {
                 )));
             }
             let params = self.params_of(&page, &supplied, ctx).await?;
+            // It needs a capability that isn't active: it runs nothing.
+            let unmet = ctx
+                .active
+                .as_ref()
+                .map(|active| active.unmet(&page.needs))
+                .unwrap_or_default();
+            if !unmet.is_empty() {
+                let tree = RunNode {
+                    id: page.view.id.clone(),
+                    children: Vec::new(),
+                    embed: None,
+                    error: None,
+                };
+                return Ok(PageRun {
+                    page,
+                    params,
+                    loaders: BTreeMap::new(),
+                    tree,
+                    rail: None,
+                    alert: None,
+                    badge: None,
+                    inactive: Some(PageInactive {
+                        message: crate::capabilities::needs_message(&unmet),
+                        needs: unmet,
+                    }),
+                });
+            }
             let skipped = hidden_loaders(&page, &params);
             let mut loaders: BTreeMap<String, LoaderRun> = BTreeMap::new();
             for decl in &page.loaders {
@@ -292,6 +333,7 @@ impl<'a> PageRunner<'a> {
                 Some(evaluate_alert(a, &loaders.get(watched)?.result))
             });
             Ok(PageRun {
+                inactive: None,
                 page,
                 params,
                 loaders,
@@ -369,12 +411,18 @@ impl<'a> PageRunner<'a> {
                     named.retain(|(n, _)| n != &k);
                     named.push((k, SqlCell::from(v)));
                 }
-                let mut query = oxplow_db::SqlQuery::new(sql)
-                    .named(named)
-                    .limit(None)
-                    .stream(stream);
-                query.temp = temp;
-                self.sql.run(query).await.map_err(|e| e.to_string())
+                // `config('/key')` reads its own extension's settings.
+                match self.with_config(page, sql).await {
+                    Err(e) => Err(e.to_string()),
+                    Ok(sql) => {
+                        let mut query = oxplow_db::SqlQuery::new(&sql)
+                            .named(named)
+                            .limit(None)
+                            .stream(stream);
+                        query.temp = temp;
+                        self.sql.run(query).await.map_err(|e| e.to_string())
+                    }
+                }
             }
             Loader::Command {
                 command,
@@ -469,6 +517,18 @@ impl<'a> PageRunner<'a> {
         run
     }
 
+    /// `sql` with its `config('/key')` reads filled from `page`'s
+    /// extension's settings, as they are stored now.
+    async fn with_config(&self, page: &Page, sql: &str) -> Result<String, DomainError> {
+        if oxplow_db::models::config_reads(sql)?.is_empty() {
+            return Ok(sql.to_string());
+        }
+        match self.catalog.named(self.root, &page.extension) {
+            Ok(ext) => self.sql.with_extension_config(&ext, sql).await,
+            Err(_) => Ok(sql.to_string()),
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     async fn run_command(
         &self,
@@ -493,8 +553,8 @@ impl<'a> PageRunner<'a> {
         let input =
             serde_json::Value::Object(bind_args(args, params, earlier).into_iter().collect());
         // The page reads for whoever views it.
-        let actor = Actor::Lens {
-            lens_id: format!("{}#{}", page.id, decl.name),
+        let actor = Actor::Page {
+            page_id: format!("{}#{}", page.id, decl.name),
             on_behalf_of: Box::new(viewer.clone()),
         };
         let outcome = self
@@ -753,7 +813,7 @@ fn key_of(
 
 /// `args` with each source taken: a param's value, an earlier loader's
 /// first-row column, or the literal.
-fn bind_args(
+pub(super) fn bind_args(
     args: &BTreeMap<String, ArgSource>,
     params: &BTreeMap<String, SqlCell>,
     earlier: &BTreeMap<String, LoaderRun>,
@@ -954,6 +1014,17 @@ fn flow_params(
     out
 }
 
+/// The models a page param the run resolves itself reads: `head_sha`,
+/// when the page declares it, is the viewed stream's HEAD (`v_stream`), so
+/// a commit or a branch switch re-resolves it and re-runs what binds it.
+pub fn context_reads(page: &Page, param: &str) -> &'static [&'static str] {
+    if param == "head_sha" && page.params.iter().any(|p| p.name == "head_sha") {
+        &["v_stream"]
+    } else {
+        &[]
+    }
+}
+
 /// The loader runs of `run` (its embeds' and mounts' included) a change
 /// to `models` / `measures` doesn't reach, by key: a loader that read none
 /// of them and reads no loader that did.
@@ -975,6 +1046,11 @@ pub fn unreached(
                 continue;
             };
             let reached = decl.reads.iter().any(|m| models.contains(m))
+                || decl.reads_params.iter().any(|p| {
+                    context_reads(&run.page, p)
+                        .iter()
+                        .any(|m| models.iter().any(|x| x == m))
+                })
                 || r.result.reads.models.iter().any(|m| models.contains(m))
                 || r.result.reads.measures.iter().any(|m| measures.contains(m))
                 || decl

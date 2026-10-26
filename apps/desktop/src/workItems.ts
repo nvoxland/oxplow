@@ -8,7 +8,7 @@
  * `useRerunOnChange`.
  */
 import { querySql, type SqlCell } from "./api.js";
-import { NO_READS } from "./lens/lensRerun.js";
+import { NO_READS } from "./viz/rerun.js";
 import { threadIdOf } from "./modelIds.js";
 import { workItemUri } from "./uri/uri.js";
 import type { FieldDecl, Reads, SqlQueryResult, WorkItemsFeatures } from "./tauri-bridge/generated/bindings.js";

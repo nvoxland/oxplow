@@ -314,7 +314,7 @@ fn last_run_ms(l: &CollectorListing) -> Option<i64> {
 /// Run every due collector (see [`due_collectors`]) from the primary
 /// worktree, each as the `oxplow.collector.sync` command run by the system — so a
 /// scheduled run is audited and logs `command.executed` like one from the
-/// UI, a lens action or MCP. Unapproved collectors never run here: the
+/// UI, a page action or MCP. Unapproved collectors never run here: the
 /// command refuses them. Returns what it ran; a failed run
 /// is logged and the rest still run.
 pub async fn run_due_collectors(state: &crate::Services) -> Vec<(String, String)> {
@@ -2022,7 +2022,7 @@ async fn exec_from_deployment(
 }
 
 /// Publish `rows` into entities `ext` declares, by entity name, replacing
-/// what each held — what a preview seeds before running a lens example
+/// what each held — what a preview seeds before running a page example
 /// over them (`oxplow extension test`'s `rows:`). The rows are coerced to
 /// the declared columns as a collector's run's are. Never on a project's
 /// own database: it replaces what was collected.
@@ -2861,7 +2861,7 @@ pub(crate) mod tests {
     }
 
     /// A scheduled run is the `oxplow.collector.sync` command like every other run
-    /// (the UI's, a lens action's, MCP's), so it's audited as the system's
+    /// (the UI's, a page action's, MCP's), so it's audited as the system's
     /// and logs `command.executed` — one mechanism, not a second path
     /// around the bus.
     #[tokio::test]

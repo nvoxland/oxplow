@@ -93,8 +93,9 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         .typ::<oxplow_domain::work_items::WorkItemsFeatures>()
         // `oxplow.collector.sync`'s result, read through `run_command`.
         .typ::<oxplow_app::collector_runner::CollectorRunReport>()
-        // What `oxplow.lens.keep` keeps from Explore Data's Save as Lens.
-        .typ::<oxplow_app::extensions::LensSpec>()
+        // One viz node's config with its loader's rows: what the desktop's
+        // viz components draw (`viz/nodeRun.ts` builds it from a page run).
+        .typ::<oxplow_app::extensions::VizRun>()
         .commands(collect_commands![
             // app
             commands::generated::app_version,
@@ -110,9 +111,6 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::list_agent_harnesses,
             commands::generated::select_thread,
             commands::generated::get_thread_state,
-            // tasks
-            commands::generated::list_dashboards,
-            // backlog
             // search
             commands::generated::search,
             // semantic layer
@@ -121,18 +119,8 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::set_panel_layout,
             commands::generated::get_ui_preferences,
             commands::generated::set_ui_preference,
-            // extensions + lenses
+            // extensions
             commands::generated::list_extensions,
-            commands::generated::get_lens,
-            commands::generated::run_lens,
-            commands::generated::run_lens_action,
-            commands::generated::lens_text,
-            commands::generated::run_answer,
-            commands::generated::run_lens_spec,
-            commands::generated::lens_form,
-            commands::generated::lens_action_form,
-            commands::generated::submit_lens_form,
-            commands::generated::run_component_query,
             commands::generated::load_component,
             commands::generated::invoke_component_command,
             commands::generated::run_component_sql,

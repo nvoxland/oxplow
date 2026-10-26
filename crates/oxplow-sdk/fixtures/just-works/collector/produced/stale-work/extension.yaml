@@ -14,7 +14,7 @@ intent:
           - { id: 3, title: Exactly a week, status: blocked, priority: low, thread_id: null, stream_id: null, last_touched_at: "2026-09-25T09:00:00.000000Z", days_idle: 7 }
       expect: one stale task per open task idle for 7 days or more (tasks 1 and 3), none for task 2
     - name: empty-project
-      input: { lens: stale-tasks }
+      input: { page: stale-tasks }
       expect: no rows before the collector has synced
 collectors:
   # Open tasks with the last moment anyone touched them: the task's own

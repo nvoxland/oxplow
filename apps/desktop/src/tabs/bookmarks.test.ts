@@ -33,24 +33,24 @@ describe("bookmarks", () => {
   });
 });
 
-const ref = (id: string) => ({ id, kind: "lens", payload: null }) as never;
+const ref = (id: string) => ({ id, kind: "page", payload: null }) as never;
 const mark = (id: string, scope: "thread" | "stream" | "project") => ({ ref: ref(id), label: "L", scope });
 
 describe("a bookmark at other values", () => {
   test("the same page at another view is found; the same view, or another page, is not", () => {
-    const marks = [mark("oxplow:oxplow/lens?lens=x/y#a=1", "stream"), mark("oxplow:oxplow/lens?lens=x/z", "thread")];
-    expect(bookmarkedElsewhere(marks, ref("oxplow:oxplow/lens?lens=x/y#a=2"))).toBe(marks[0]!);
-    expect(bookmarkedElsewhere(marks, ref("oxplow:oxplow/lens?lens=x/y"))).toBe(marks[0]!);
-    expect(bookmarkedElsewhere(marks, ref("oxplow:oxplow/lens?lens=x/y#a=1"))).toBeNull();
-    expect(bookmarkedElsewhere(marks, ref("oxplow:oxplow/lens?lens=x/w#a=1"))).toBeNull();
+    const marks = [mark("oxplow:oxplow/page?page=x/y#a=1", "stream"), mark("oxplow:oxplow/page?page=x/z", "thread")];
+    expect(bookmarkedElsewhere(marks, ref("oxplow:oxplow/page?page=x/y#a=2"))).toBe(marks[0]!);
+    expect(bookmarkedElsewhere(marks, ref("oxplow:oxplow/page?page=x/y"))).toBe(marks[0]!);
+    expect(bookmarkedElsewhere(marks, ref("oxplow:oxplow/page?page=x/y#a=1"))).toBeNull();
+    expect(bookmarkedElsewhere(marks, ref("oxplow:oxplow/page?page=x/w#a=1"))).toBeNull();
   });
 
   test("updating takes the old one off and stars this view at the same scope, in one sequence", () => {
-    const input = moveBookmarkInput({ threadId: "thr3", streamId: "str2" }, mark("oxplow:oxplow/lens?lens=x/y#a=1", "stream"), ref("oxplow:oxplow/lens?lens=x/y#a=2"), "Y");
+    const input = moveBookmarkInput({ threadId: "thr3", streamId: "str2" }, mark("oxplow:oxplow/page?page=x/y#a=1", "stream"), ref("oxplow:oxplow/page?page=x/y#a=2"), "Y");
     expect(input).toEqual({
       calls: [
-        { name: "oxplow.bookmark.remove", input: { uri: "oxplow:oxplow/lens?lens=x/y#a=1", thread: "thr3" } },
-        { name: "oxplow.bookmark.set", input: { uri: "oxplow:oxplow/lens?lens=x/y#a=2", page_kind: "oxplow/lens", label: "Y", scope: "stream", thread: "thr3" } },
+        { name: "oxplow.bookmark.remove", input: { uri: "oxplow:oxplow/page?page=x/y#a=1", thread: "thr3" } },
+        { name: "oxplow.bookmark.set", input: { uri: "oxplow:oxplow/page?page=x/y#a=2", page_kind: "x/y", label: "Y", scope: "stream", thread: "thr3" } },
       ],
     });
   });

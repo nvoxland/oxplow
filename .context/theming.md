@@ -104,7 +104,7 @@ text, lifts to a 4%-white wash on hover).
 ### Metric status (data-driven — NO hardcoded ramps)
 
 Metric red/green is computed **from the metric definition's data**, not from
-magic numbers in the renderer. the Metrics lens's `tone` column reads
+magic numbers in the renderer. the Metrics page's `tone` column reads
 `def.target` / `def.fail_at` / `def.direction` and returns three tiers — meets
 target → `--ok` (green), past the fail floor → `--err` (red), in-between →
 `--warn` (amber); `neutral` / threshold-less metrics are uncolored. The former
@@ -176,7 +176,7 @@ Lengths are tokens too, on `:root` in `apps/desktop/index.html`:
 (`src/kit/`, drawn by `crates/oxplow-daemon/assets/oxplow-kit.css`) uses
 only these. That sheet is the kit's one look: the app imports it, custom
 components link it, and its `:where(body)` rule weighs nothing so the
-app's own body rules win. `lens/kitSheet.test.ts` checks it reads only
+app's own body rules win. the component kit sheet's test checks it reads only
 tokens.
 
 ## Typography
@@ -280,7 +280,7 @@ value. Naming convention:
 - `--status-<state>` / `--severity-<level>` / `--freshness-<state>` —
   semantic categories.
 - `--chart-<n>` (1–8) — categorical chart series, in order (Tableau 10;
-  the lens treemap's groups), and `--chart-label` for text drawn on a
+  the treemap viz's groups), and `--chart-label` for text drawn on a
   series fill. Charts cycle through them rather than inlining hex
   (tsk371).
 

@@ -1,4 +1,4 @@
-/** Squarified treemap layout, shared by treemap lenses and change analysis. */
+/** Squarified treemap layout, shared by treemap pages and change analysis. */
 
 export interface SquarifyInput<T> {
   value: number;

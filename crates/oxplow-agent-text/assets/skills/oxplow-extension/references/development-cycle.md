@@ -10,8 +10,8 @@ edits change nothing on the person's screen until you deploy.
 
 1. Edit the source. Write as many files as the step needs.
 2. Check it after every edit: `oxplow_validate_extension` (the same report
-   as `oxplow extension check`), `oxplow_run_lens`, `oxplow_preview_extension`,
-   `oxplow_show_lens` with a `spec`. These read the source and dry-run, so
+   as `oxplow extension check`), `oxplow_run_page` (`draft: true` in a worktree),
+   `oxplow_preview_extension`, `oxplow_show_page` with a `spec`. These read the source and dry-run, so
    they need no deploy.
 3. When a step is complete, run `oxplow.extension.deploy { name }` with
    `run_command`. It deploys the source in the main stream's checkout,
@@ -71,3 +71,25 @@ develops oxplow itself: a core change that foundation's recorded
 deployment doesn't activate against. The fix is outside oxplow: quit it,
 run `cargo run -q -p oxplow-dev -- extension deploy` in the oxplow
 repository, then start oxplow again.
+
+## What already exists
+
+Prefer improving a page over adding a near-duplicate. `oxplow_find_page`
+searches by question; in SQL `v_page` (`uri`, `extension`, `title`,
+`category`, `hidden`, …) lists every page, `v_page_answer` the questions
+they answer and `v_page_param` their params; `v_extension` lists the
+extensions that loaded (`enabled`, `errors`, `warnings`, `deployment`) and
+`v_contribution` what each contributes (count it by `extension` and `kind`).
+`oxplow_read { uri: "oxplow:oxplow/page?page=<ext>/<slug>" }` gives one
+page's definition and deployment; **Show Definition** in a page's ☰ menu is
+the same for the person. An extension that fails to load isn't in
+`v_extension`: `oxplow_validate_extension` says why.
+
+## When the person says "this page"
+
+When the user says "this page", "what I'm looking at" or pastes a page
+reference: call `oxplow_get_open_page` (its tree is what they see, with
+their params and focus; `#node=<id>` names a part), read the definition with
+`oxplow_read`, change the file, then validate and run it again
+(`oxplow_run_page { draft: true }`). Tell them the title and how to open it
+(Cmd+P), and offer to commit the source if they want their team to have it.

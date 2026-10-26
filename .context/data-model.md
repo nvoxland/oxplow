@@ -429,7 +429,7 @@ removed in v13 — use the task log as the source of truth instead.
 `closed_at` (migration v44, nullable TEXT) — set means the thread is
 closed. A closed thread sits hidden from the rail; it surfaces only on the **Closed Threads**
 page (the `closed-threads` page, the foundation's `closed-threads`
-lens over `v_thread`), which lists each closed thread with the work it
+page over `v_thread`), which lists each closed thread with the work it
 finished (counts by state) and a Reopen row action. `oxplow.thread.reopen` clears
 `closed_at` and the thread returns to the rail as an open tab.
 `ThreadStore.list()` already filters closed threads out, so every
@@ -542,7 +542,7 @@ AUTOINCREMENT` — stored as a plain integer, surfaced as `tsk<int>` (see
 discriminator any more. An **epic is any task that has children** —
 i.e. any row that's a `parent_id` target. The UI reads it through the
 interface — an item that is some item's `parent_uri`
-(a lens's `depth` column); there's no flag on the row itself.
+(a page's `depth` column); there's no flag on the row itself.
 
 Statuses: `ready`, `in_progress`, `blocked`, `done`, `canceled`,
 `archived`. `archived` is a terminal state that hides the item from
@@ -550,7 +550,7 @@ the default Work panel view — archived rows fold into the Done
 section's bucketing but aren't rendered unless the user flips the "Show
 archived (N)" toggle in the Done section header. The same header carries
 an "Archive all" action that bulk-archives every visible Done/Canceled
-row. The work-next lens's blocker check reads the interface, where
+row. The work-next page's blocker check reads the interface, where
 archived is done or canceled. `parent_id` chains items under
 epics. The `description` (markdown) is the single prose field, structured
 however the author sees fit — the model is not prompted toward any
@@ -673,6 +673,20 @@ commands, `v_thread_note`, `v_search_thread_note` and the `oxplow/thread_note`
 resource. What an agent leaves for the next one is an effort, a decision or
 a handoff.
 
+### Old UI units, answers and database dashboards (gone, V113)
+
+A page is oxplow's one unit of UI (its file in an extension,
+`.context/pages-and-tabs.md` "Page files"), so V113 dropped what the older
+units kept: the old UI unit's catalog table and its listing view (pages are `page`,
+`page_answer` and `page_param`, V110), `thread_answer` (what
+the old show tool showed; an agent's shown page is an in-memory view now),
+and `dashboard` / `dashboard_item` (a dashboard is a page whose view is a
+grid of embeds). It deleted, without rewriting, every stored reference to
+their URIs (the old page, answer and dashboard resources): bookmarks,
+visits, remembered preferences, context items, page-ref edges and search
+rows. Site search indexes pages instead (`v_search_page`, the launcher's
+pages; hidden ones are left out).
+
 ### `handoff` (`handoff_store.rs`, V84)
 
 Work handed from one thread to another (`oxplow.handoff.*`,
@@ -725,7 +739,7 @@ start an effort in the past (`adopt_since`, clamped to the thread's
 previous effort's end): it then stamps itself onto the thread's
 un-efforted rows since then in the derived tables that carry an effort
 (`EFFORT_STAMPED`: `agent_tool_call`, `agent_token_usage`,
-`metric_capture`, `agent_nudge`, `claim`, `decision`, `thread_answer`).
+`metric_capture`, `agent_nudge`, `claim`, `decision`).
 `finish_tx` at a past point releases the rows after it. The event log is
 not restamped: an event keeps the anchors it was written with.
 `effort_at_tx(thread, at)` names the effort whose span covers a moment.
@@ -1029,7 +1043,7 @@ seeders for tests.
   (the `list_snapshots_for_stream` IPC op, `v_snapshot`) joins each snapshot's FIRST op for its
   `parent_snapshot_id`, `trigger` and `over_budget`. The diff view's
   "previous" for a single snapshot is that recorded parent
-  (the `changes` lens's `max(id) < N` on the stream), falling
+  (the `changes` page's `max(id) < N` on the stream), falling
   back to the next-smaller id only for a snapshot no op created; Local
   History shows the trigger and marks an over-budget take "slow".
 - **Every take records an op**, including one that found nothing new:
@@ -1302,7 +1316,7 @@ Skill prompt at `crates/oxplow-agent-text/assets/skills/oxplow-wiki-capture/SKIL
 **User-facing Freshness view.** `v_knowledge_ref` (read by
 `knowledge.ts`'s `readWikiFreshness`) joins `page_ref` with the latest
 primary-stream `file_snapshot` per target path, a `stale` flag per ref.
-The foundation's `wiki-freshness` lens
+The foundation's `wiki-freshness` page
 (the `wiki-freshness` page, with `slug=<slug>`) shows
 the table with per-ref + per-page "Mark verified" actions, which run
 `oxplow.knowledge.verify_files` (re-writing the page with those refs in
@@ -1412,8 +1426,8 @@ transaction* as the change — the outbox pattern — so the two never
 disagree. The envelope is `oxplow_domain::events::Envelope`
 (`crates/oxplow-domain/src/events/mod.rs`): `id` (UUIDv7 text, sorts by
 time), `type` (`namespace.name`, snake_case, validated on append), `v`
-(schema version), `at`, `source` (`agent:thr3`, `human`, `lens:<id>`,
-`system`, or `system:<component>` from `uri::build::system_source` —
+(schema version), `at`, `source` (`agent:thr3`, `human`, a page's URI (`oxplow:oxplow/page?page=<id>`, from
+`uri::build::page_uri`), `system`, or `system:<component>` from `uri::build::system_source` —
 `system:task_service`, `system:hook_ingest`, `system:snapshot_capture`),
 `anchors` (nullable stream / thread / effort / turn / snapshot / agent
 session columns, so per-anchor timelines are indexed range scans; an
@@ -1565,7 +1579,7 @@ CONFLICT DO NOTHING` — a redelivered event writes nothing). `decision` and
 -> seq`** (`Vocabulary::validate_envelope` checks the type, the payload
 and every subject ref against the same snapshot), composed inside the producer's `Database::transaction` closure. The async
 `SqliteEventLogStore::append` opens a transaction of its own and is for
-activity with no state write (a tool call, a lens view). Reads:
+activity with no state write (a tool call, a page view). Reads:
 `read_after_tx(after_seq, limit)` (oldest first — the pump's cursor),
 `get_tx(id)`.
 
@@ -1691,7 +1705,7 @@ Letters are `pending | retried | discarded`; the
 person's moves are `oxplow.delivery.retry { id }` (re-runs the consumer now;
 `retried` on success, else `pending` with the new error; refused unless
 the letter is `pending`) and `oxplow.delivery.discard { id }` — commands
-of a person or a lens for one, never an agent's (`commands/delivery.rs`);
+of a person or a page for one, never an agent's (`commands/delivery.rs`);
 the list is `v_event_dead_letter`. Also
 `v_event`, `v_event_dead_letter`, `v_event_checkpoint` in the semantic
 layer (V94). Nothing is skipped silently.
@@ -1799,7 +1813,7 @@ Current write hookpoints (all in `apps/desktop/src/App.tsx`, all pass both
 
 - `wiki-note` — `handleOpenNote` records a visit when a note becomes
   the active center tab. Nothing reads it any more: the Wiki page's
-  "Recently visited" is the `wiki-visited` lens over `v_page_visit`.
+  "Recently visited" is the `wiki-visited` page over `v_page_visit`.
 - `editor-file` — `handleOpenFile` records a visit when a file
   becomes the active center tab. Not yet surfaced in UI; collected
   for future "recent files" / "files this thread cares about" views.
@@ -2058,7 +2072,7 @@ already-recorded usage. No FK (the transcript outlives any single row).
 
 Store methods: `record`, `list_for_effort`, `totals_for_effort`,
 `totals_for_thread`, `cursor`/`set_cursor`. There are no IPC reads: the UI
-reads `v_token_usage` through oxplow-bundled lenses (`task-tokens`,
+reads `v_token_usage` through oxplow-bundled pages (`task-tokens`,
 `thread-tokens`, `usage`), which re-run on `ModelsChanged`.
 
 ### `panel_layout` — `SqlitePanelLayoutStore` (`crates/oxplow-db/src/panel_layout_store.rs`)
@@ -2077,7 +2091,7 @@ RPCs `get_panel_layout` / `set_panel_layout`.
 V96. What the person's oxplow remembers for them outside any one tab
 (`.context/pages-and-tabs.md` "Page state"): `(scope, key)` → `value_json`
 (JSON text), `updated_at`. Scopes: `app` (app preferences); a page's URI
-without its params (`oxplow:oxplow/page?page=tasks`, `…?page=acme/pulls`, `oxplow:oxplow/lens?lens=acme/board`) or
+without its params (`oxplow:oxplow/page?page=tasks`, `…?page=acme/pulls`) or
 `resource:<ext>/<name>` (page memory, shared by every tab of the page); a panel's
 URI; `component:<ext>/<id>` (a custom component's own memory). Anything
 else is refused, as is text that isn't JSON or a value over 64 KB, and a
@@ -2095,8 +2109,8 @@ viewer — a thread and its stream — sees its thread's, its stream's and
 the project's, and a ref is bookmarked at most once across those:
 `set_tx` takes it out of every scope the viewer sees before inserting, so
 bookmarking at another scope moves it. Read through `v_bookmark` (the UI's
-`tabs/bookmarks.ts`, a lens, the agent); every write is `oxplow.bookmark.set` /
-`oxplow.bookmark.remove` (commands.md). They used to live in webview localStorage, where neither lenses nor the
+`tabs/bookmarks.ts`, a page, the agent); every write is `oxplow.bookmark.set` /
+`oxplow.bookmark.remove` (commands.md). They used to live in webview localStorage, where neither pages nor the
 agent could see them; those weren't carried over.
 
 ### `thread_context_item` — `thread_context_store` (`crates/oxplow-db/src/thread_context_store.rs`)
@@ -2416,7 +2430,7 @@ enforces identity, treating global rows' `NULL` stream as `''`).
   `searchable` (oxplow's `oxplow/work_item`, `oxplow/comment`,
   `oxplow/wiki`, `oxplow/thread`,
   `oxplow/agent_session`, `oxplow/turn`, `oxplow/effort`,
-  `oxplow/decision`, `oxplow/commit`, `oxplow/lens`, `oxplow/dashboard`; an
+  `oxplow/decision`, `oxplow/commit`, `oxplow/page`; an
   extension's, P9.D3), or
   `oxplow/file`; `uri` is the thing's URI, and a hit is that URI.
   Every resource but `oxplow/file` is derived from a model by an asset per kind
@@ -2518,7 +2532,7 @@ A few UI surfaces hold non-persisted state that callers (probes,
 docs, future stores) reference by name. Listed here so renames touch
 the docs in one diff:
 
-- **Files page scope** — the `scope` filter param of the `files` lens
+- **Files page scope** — the `scope` filter param of the `files` page
   (`all`, `uncommitted`, the default branch's name for the branch's
   changes, the upstream's name for the unpushed ones), in the tab's
   address; its choices come from `files-scopes`, which offers only those

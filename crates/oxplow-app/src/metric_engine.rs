@@ -922,7 +922,7 @@ pub(crate) fn tree_state_series(
     // Captures that asserted a PATH-LESS repo scalar — from the UNFILTERED
     // facts, deliberately. Every eviction set is filter-independent (scanned
     // paths, executed subjects — and this one): a newer assertion supersedes
-    // the older no matter which spec's lens reads the fold. Deciding it from
+    // the older no matter which spec's page reads the fold. Deciding it from
     // the filtered list let an error-filtered spec keep a superseded error
     // assertion alive forever — and diverge from the cube, whose durable live
     // state is filter-agnostic by design (tsk103 review).

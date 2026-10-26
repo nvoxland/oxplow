@@ -471,7 +471,7 @@ mod tests {
         let (svc, dir) = services().await;
         let ext = dir.path().join(".oxplow/extensions/x");
         std::fs::create_dir_all(ext.join("components/c/assets")).unwrap();
-        std::fs::create_dir_all(ext.join("lenses")).unwrap();
+        std::fs::create_dir_all(ext.join("pages")).unwrap();
         std::fs::write(
             ext.join("extension.yaml"),
             "manifest: 2\nname: x\nintent:\n  purpose: p\ncustom_components:\n  - { id: c }\n",
@@ -692,7 +692,7 @@ mod tests {
         }
     }
 
-    /// A stream's lens loads its component from the stream's worktree: a
+    /// A stream's page loads its component from the stream's worktree: a
     /// version of its own, served from what that worktree held.
     #[tokio::test]
     async fn ipc_ping_returns_ok_envelope() {

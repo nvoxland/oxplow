@@ -24,7 +24,7 @@ test("an extension's ref renders as a link and opens its page", async ({ page, d
   await page.getByTestId("launcher-hit-oxplow:oxplow/wiki?slug=platypus-notes").click();
   await page.locator('[data-testid="page-file"]:visible').locator(`[data-ref-title][href="oxplow:e2e/item?id=${n}"]`).click();
   // The extension's `item` page: a table over `v_e2e_item`.
-  await expect(page.locator('[data-testid="page-file"]:visible').getByTestId("lens-row-0")).toContainText("Platypus item");
+  await expect(page.locator('[data-testid="page-file"]:visible').getByTestId("viz-row-0")).toContainText("Platypus item");
 });
 
 const navigate = (daemon: Parameters<typeof run>[0], uri: string) => run(daemon, "oxplow.window.navigate", { uri });
@@ -50,7 +50,7 @@ test("an extension's resource URI opens on its renderer, and the tab's id is the
   const uri = `oxplow:e2e/item?id=${n}`;
   await navigate(daemon, uri);
   await expect(page.getByTestId(`center-tab-${uri}`)).toBeVisible();
-  await expect(page.locator('[data-testid="page-file"]:visible').getByTestId("lens-row-0")).toContainText("Quokka item");
+  await expect(page.locator('[data-testid="page-file"]:visible').getByTestId("viz-row-0")).toContainText("Quokka item");
 });
 
 test("a URI with two renderers is opened with the other one through Open with", async ({ page, daemon }) => {
@@ -58,7 +58,7 @@ test("a URI with two renderers is opened with the other one through Open with", 
   await ready(page);
   const uri = `oxplow:e2e/item?id=${n}`;
   await navigate(daemon, uri);
-  await expect(page.locator('[data-testid="page-file"]:visible').getByTestId("lens-row-0")).toContainText("Wombat item");
+  await expect(page.locator('[data-testid="page-file"]:visible').getByTestId("viz-row-0")).toContainText("Wombat item");
   await page.getByTestId("page-nav-menu").filter({ visible: true }).click();
   await page.getByTestId("menu-item-page-open-with").click();
   await expect(page.getByTestId("menu-item-page-open-with-e2e/item")).toContainText("✓");
@@ -80,7 +80,7 @@ test("an https link opens a tab whose id is the URL", async ({ page, daemon }) =
   await ready(page);
   await navigate(daemon, "https://example.com/docs");
   await expect(page.getByTestId("center-tab-https://example.com/docs")).toBeVisible();
-  await expect(page.getByTestId("lens-embed")).toBeVisible();
+  await expect(page.getByTestId("viz-embed")).toBeVisible();
 });
 
 test("a file URI with a rev opens the read-only viewer, and without one the editor", async ({ page, daemon }) => {
@@ -92,8 +92,8 @@ test("a file URI with a rev opens the read-only viewer, and without one the edit
   await ready(page);
   await navigate(daemon, "oxplow:oxplow/file?path=koala.txt&rev=git:HEAD");
   // The foundation's `file-viewer` page: a `code` viz of the file at the revision.
-  await expect(page.getByTestId("lens-code")).toContainText("koala");
+  await expect(page.getByTestId("viz-code")).toContainText("koala");
   await navigate(daemon, "oxplow:oxplow/file?path=koala.txt");
-  await expect(page.getByTestId("lens-editor")).toBeVisible();
-  await expect(page.getByTestId("lens-editor").locator(".monaco-editor").first()).toBeVisible();
+  await expect(page.getByTestId("viz-editor")).toBeVisible();
+  await expect(page.getByTestId("viz-editor").locator(".monaco-editor").first()).toBeVisible();
 });

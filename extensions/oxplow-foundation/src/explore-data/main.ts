@@ -2,7 +2,7 @@
 // this component): an editable SQL box over oxplow's models — metrics
 // too, through `metric_grid()` — with a viz picker. oxplow draws the
 // result under it with its own components (`showView`: an inline page of
-// the query), live, with Save as Lens and Pin to Dashboard; the catalog is
+// the query), live, with Save as Page and Pin to Dashboard; the catalog is
 // the page's rail, whose pick sets the page's `model` param (heard as an
 // update's `params`). What it shows is its view (the tab's address):
 // `sql`, `viz`, `chart`, `template` (and `model`, as it last picked one);
@@ -59,7 +59,7 @@ declare const oxplow: { connect(): Promise<Component> };
 
 /** What "ask your agent" starts the prompt with (the draft command's own
  *  `ui.input.text`). */
-const AGENT_PROMPT = "Build me an oxplow lens (a page I can open with Cmd+P) that shows ";
+const AGENT_PROMPT = "Build me an oxplow page (one I can open with Cmd+P) that shows ";
 
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, props: Partial<HTMLElementTagNameMap[K]> & { testId?: string } = {}, ...children: (Node | string)[]) => {
   const node = document.createElement(tag);
@@ -84,12 +84,12 @@ void oxplow.connect().then((c) => {
   const intro = el(
     "p",
     { className: "ox-intro" },
-    "Everything oxplow knows, as read-only SQL views. Pick one on the right, tweak the query, and save it as a lens to keep it as a page. Metrics read as columns of a grid: ",
+    "Everything oxplow knows, as read-only SQL views. Pick one on the right, tweak the query, and save it as a page to keep it. Metrics read as columns of a grid: ",
     el("code", {}, "SELECT bucket, MEASURE('oxplow.coverage.abs_pct') FROM metric_grid('week')"),
     ". Or ",
   );
-  const ask = el("button", { type: "button", className: "ox-link", testId: "explore-new-lens" }, "ask your agent to build one…");
-  ask.addEventListener("click", () => void c.invoke("oxplow.lens.draft_with_agent", { text: AGENT_PROMPT }).catch(() => {}));
+  const ask = el("button", { type: "button", className: "ox-link", testId: "explore-new-page" }, "ask your agent to build one…");
+  ask.addEventListener("click", () => void c.invoke("oxplow.page.draft_with_agent", { text: AGENT_PROMPT }).catch(() => {}));
   intro.append(ask);
 
   const about = el("details", { testId: "explore-columns" });

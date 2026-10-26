@@ -9,8 +9,8 @@ test("dragging a card to a column transitions its item, and Undo moves it back",
   await run(daemon, "oxplow.work_item.create", { title: "Card to move", thread: daemon.thread });
   await page.goto("/");
   await openFromLauncher(page, "Board");
-  const todo = page.getByTestId("lens-board-column-todo");
-  const inProgress = page.getByTestId("lens-board-column-in_progress");
+  const todo = page.getByTestId("viz-board-column-todo");
+  const inProgress = page.getByTestId("viz-board-column-in_progress");
   await expect(todo).toContainText("Card to move");
   // A real drag: the card onto the In Progress column.
   await todo.getByRole("listitem").filter({ hasText: "Card to move" }).dragTo(inProgress);
@@ -25,10 +25,10 @@ test("a card's menu moves it too", async ({ page, daemon }) => {
   await run(daemon, "oxplow.work_item.create", { title: "Card in the menu", thread: daemon.thread });
   await page.goto("/");
   await openFromLauncher(page, "Board");
-  const todo = page.getByTestId("lens-board-column-todo");
+  const todo = page.getByTestId("viz-board-column-todo");
   await todo.getByRole("listitem").filter({ hasText: "Card in the menu" }).click({ button: "right" });
-  await page.getByTestId("menu-item-lens-action-to-done").click();
-  await expect(page.getByTestId("lens-board-column-done")).toContainText("Card in the menu");
+  await page.getByTestId("menu-item-viz-action-to-done").click();
+  await expect(page.getByTestId("viz-board-column-done")).toContainText("Card in the menu");
   await expect(todo).not.toContainText("Card in the menu");
 });
 
@@ -37,14 +37,14 @@ test("deleting an item asks first, then it's gone from the board", async ({ page
   await run(daemon, "oxplow.work_item.create", { title: "Card to keep", thread: daemon.thread });
   await page.goto("/");
   await openFromLauncher(page, "Board");
-  await page.getByTestId("lens-board").getByText("Card to delete").click();
-  await page.locator('[data-node="info"]').getByTestId("lens-detail").click({ button: "right" });
-  await page.getByTestId("menu-item-lens-action-delete").click();
+  await page.getByTestId("viz-board").getByText("Card to delete").click();
+  await page.locator('[data-node="info"]').getByTestId("viz-detail").click({ button: "right" });
+  await page.getByTestId("menu-item-viz-action-delete").click();
   // Asked, and nothing is gone until the person confirms.
-  await expect(page.getByTestId("lens-action-confirm-run")).toBeVisible();
-  await page.getByTestId("lens-action-confirm-run").click();
+  await expect(page.getByTestId("viz-action-confirm-run")).toBeVisible();
+  await page.getByTestId("viz-action-confirm-run").click();
   await openFromLauncher(page, "Board");
   // The board has loaded its cards: what's absent is gone, not unloaded.
-  await expect(page.getByTestId("lens-board")).toContainText("Card to keep");
-  await expect(page.getByTestId("lens-board")).not.toContainText("Card to delete");
+  await expect(page.getByTestId("viz-board")).toContainText("Card to keep");
+  await expect(page.getByTestId("viz-board")).not.toContainText("Card to delete");
 });

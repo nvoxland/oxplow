@@ -1,7 +1,7 @@
 title: Definition
 description: What a page is made of — its extension, source file and deployment, each node with the page and file it comes from and the loader it shows (embedded pages and mounted slots included), and its YAML. Every page's ☰ menu opens it as Show Definition.
 label: 'Definition: {{row.title}}'
-icon: file-code
+icon: file-text
 hidden: true
 params:
 - name: of

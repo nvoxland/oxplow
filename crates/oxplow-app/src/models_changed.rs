@@ -6,7 +6,7 @@
 //!   (`model_input`: a model reads a table through `source()` or another
 //!   model through `ref()`) from those tables to every model that reads
 //!   them, directly or through other models, stamps each one's watermark,
-//!   and announces `OxplowEvent::ModelsChanged`. A lens re-runs when a
+//!   and announces `OxplowEvent::ModelsChanged`. A page re-runs when a
 //!   model it read is in it; a query result carries its models'
 //!   watermarks as `freshness`.
 //! - **Metric samples.** A commit to `metric_capture` or `fact` is

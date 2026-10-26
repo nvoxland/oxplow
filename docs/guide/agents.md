@@ -83,7 +83,7 @@ conversation is gone when oxplow restarts.
 Add to Context puts things in a thread's context basket:
 
 - A page's ☰ menu → **Add to Context** adds the page.
-- A selection in an editor or a diff, a lens row's right-click menu, and
+- A selection in an editor or a diff, a page row's right-click menu, and
   the **Add to Context** button over selected text on a commentable page
   add that text (or row).
 

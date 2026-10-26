@@ -49,7 +49,7 @@ mock.module("../../api.js", () => ({
   ...realApi,
   getPanelLayout: async () => [{ panel: "ext:x/w", hidden: false, collapsed: true }],
   setPanelLayout: async () => {},
-  listExtensions: async () => [{ name: "x", enabled: true, pages: [], panels: [panel], lenses: [], ui: { slots: [], commands: [], decorators: [], replacements: [] } }],
+  listExtensions: async () => [{ name: "x", enabled: true, pages: [], panels: [panel], ui: { slots: [], commands: [], decorators: [], replacements: [] } }],
   subscribeOxplowEvents: () => () => {},
   querySql: async () => ({ columns: [], rows: [], truncated: false, reads: { models: [], tables: [], measures: [] }, freshness: {} }),
 }));

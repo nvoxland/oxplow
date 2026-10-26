@@ -78,15 +78,6 @@ pub fn describe(ext: &Extension) -> Vec<Descriptor> {
         d.source = declared_at(&r.declared_at);
         out.push(d);
     }
-    for l in &ext.lenses {
-        let mut d = new(ContributionKind::Lens, &l.slug, RunsOn::Mount);
-        d.needs = l.needs.clone();
-        d.source = DeclaredAt {
-            file: l.origin.running.clone(),
-            line: None,
-        };
-        out.push(d);
-    }
     for p in &ext.page_files {
         let mut d = new(ContributionKind::Page, &p.slug, RunsOn::Mount);
         d.needs = p.needs.clone();
@@ -96,15 +87,6 @@ pub fn describe(ext: &Extension) -> Vec<Descriptor> {
         };
         out.push(d);
     }
-    // A manifest `pages:` entry with no page file (until those entries go).
-    for p in ext
-        .pages
-        .iter()
-        .filter(|p| !ext.page_files.iter().any(|f| f.slug == p.id))
-    {
-        let d = new(ContributionKind::Page, &p.id, RunsOn::Mount);
-        out.push(d);
-    }
     for p in &ext.panels {
         let local =
             p.id.strip_prefix(&format!("{}/", ext.name))
@@ -112,16 +94,8 @@ pub fn describe(ext: &Extension) -> Vec<Descriptor> {
         let d = new(ContributionKind::Panel, local, RunsOn::Mount);
         out.push(d);
     }
-    for (n, slot) in ext.ui.slots.iter().enumerate() {
-        let d = new(ContributionKind::Slot, &slot.local_id(n), RunsOn::Mount);
-        out.push(d);
-    }
     for (n, slot) in ext.ui.page_slots.iter().enumerate() {
-        let d = new(
-            ContributionKind::Slot,
-            &slot.local_id(ext.ui.slots.len() + n),
-            RunsOn::Mount,
-        );
+        let d = new(ContributionKind::Slot, &slot.local_id(n), RunsOn::Mount);
         out.push(d);
     }
     for dec in &ext.ui.decorators {
@@ -568,11 +542,10 @@ mod tests {
             "manifest: 2\nname: {name}\nintent: {{ purpose: p, origin: null, examples: [] }}\n\
              models:\n  - name: prs\n    version: 3\n    description: Pull requests.\n    columns:\n      - {{ name: uri, type: TEXT, doc: The ref. }}\n      - {{ name: title, type: TEXT, doc: Its title. }}\n\
              event_types:\n  types:\n    - {{ type: {ns}.merged, v: 1, schema: merged.json, summary: Merged. }}\n\
-             pages:\n  - {{ id: pr, title: Pull request, category: Work, lens: open }}\n\
              panels:\n  - {{ id: inbox, title: Inbox, scope: project, body: open }}\n\
              resources:\n  - {{ name: pr, label: Pull request, params: {{ id: {{ required: true, pattern: '^[0-9]+$' }} }}, resolve: prs, icon: git-pull-request }}\n\
              custom_components:\n  - {{ id: chart }}\n\
-             ui:\n  slots:\n    - {{ slot: diff.file.header, lens: open }}\n    - {{ slot: diff.file.header, lens: open }}\n  decorators:\n    - {{ model: prs, resource: oxplow/work_item, placement: ref-chip, label: title }}\n"
+             ui:\n  slots:\n    - {{ slot: oxplow-foundation/diff.file-header, page: open }}\n    - {{ slot: oxplow-foundation/diff.file-header, page: open }}\n  decorators:\n    - {{ model: prs, resource: oxplow/work_item, placement: ref-chip, label: title }}\n"
         )
     }
 
@@ -586,8 +559,9 @@ mod tests {
         );
         write(
             root,
-            &format!("{dir}/lenses/open.yaml"),
-            "title: Open\nquery: \"SELECT 1 AS n WHERE :path = :path\"\nparams:\n  - { name: path, label: Path, default: \"\" }\n",
+            &format!("{dir}/pages/open.yaml"),
+            "title: Open\nparams:\n  - { name: path, label: Path, default: \"\" }\n\
+             data:\n  n: { sql: \"SELECT 1 AS n WHERE :path = :path\" }\nview: { viz: number, from: n }\n",
         );
         write(root, &format!("{dir}/merged.json"), NUMBER_SCHEMA);
         write(
@@ -697,10 +671,8 @@ mod tests {
     #[test]
     fn the_ui_kinds_are_mounted_and_claim_no_global_name() {
         let ext = acme();
-        let lens = one(&ext, K::Lens);
-        assert_eq!(lens.id.to_string(), "oxplow:oxplow/lens?lens=acme-pr/open");
         let page = one(&ext, K::Page);
-        assert_eq!(page.id.to_string(), "oxplow:oxplow/page?page=acme-pr/pr");
+        assert_eq!(page.id.to_string(), "oxplow:oxplow/page?page=acme-pr/open");
         let panel = one(&ext, K::Panel);
         assert_eq!(
             panel.id.to_string(),
@@ -711,7 +683,7 @@ mod tests {
             component.id.to_string(),
             "oxplow:oxplow/custom_component?custom_component=acme-pr/chart"
         );
-        for d in [lens, page, panel, component] {
+        for d in [page, panel, component] {
             assert_eq!(d.trigger, RunsOn::Mount, "{}", d.id);
             assert_eq!(d.global, None, "{}", d.id);
         }
@@ -725,8 +697,8 @@ mod tests {
         assert_eq!(
             ids,
             vec![
-                "oxplow:oxplow/slot?slot=acme-pr/diff.file.header-0",
-                "oxplow:oxplow/slot?slot=acme-pr/diff.file.header-1"
+                "oxplow:oxplow/slot?slot=acme-pr/oxplow-foundation.diff.file-header-0",
+                "oxplow:oxplow/slot?slot=acme-pr/oxplow-foundation.diff.file-header-1"
             ]
         );
         for d in slots {
@@ -765,8 +737,7 @@ mod tests {
                 target: "work_item.board".into(),
                 capability: "work_items".into(),
                 bound_to_provider: false,
-                lens_id: "tracker/board".into(),
-                page_id: None,
+                page: "tracker/board".into(),
                 version: 1,
                 view: vec![],
                 label: "board".into(),
@@ -845,7 +816,7 @@ mod catalog_tests {
     fn the_reference_lists_every_kind() {
         use oxplow_domain::contribution::KINDS;
         let more = |k: ContributionKind| match k {
-            ContributionKind::Lens => "[Lenses](../guide/lenses.md)",
+            ContributionKind::Page => "[Pages](../guide/pages.md)",
             ContributionKind::Measure | ContributionKind::Metric | ContributionKind::Dimension => {
                 "[Metrics](../guide/metrics.md)"
             }
@@ -859,7 +830,7 @@ mod catalog_tests {
         let mut table = String::from("| Key | What it adds | More |\n|---|---|---|\n");
         for k in KINDS {
             let key = match k.kind {
-                ContributionKind::Lens => "`lenses/*.yaml` (files, not a key)".to_string(),
+                ContributionKind::Page => "`pages/*.yaml` (files, not a key)".to_string(),
                 _ => format!("`{}`", k.key),
             };
             table.push_str(&format!("| {key} | {} | {} |\n", k.summary, more(k.kind)));

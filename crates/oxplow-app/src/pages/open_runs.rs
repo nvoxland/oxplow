@@ -480,6 +480,11 @@ impl PageRuns {
 fn reads_any(run: &PageRun, models: &[String], measures: &[String]) -> bool {
     let own = run.page.loaders.iter().any(|decl| {
         decl.reads.iter().any(|m| models.contains(m))
+            || decl.reads_params.iter().any(|p| {
+                super::runner::context_reads(&run.page, p)
+                    .iter()
+                    .any(|m| models.iter().any(|x| x == m))
+            })
             || run.loaders.get(&decl.name).is_some_and(|r| {
                 r.result.reads.models.iter().any(|m| models.contains(m))
                     || r.result.reads.measures.iter().any(|m| measures.contains(m))
@@ -602,6 +607,7 @@ mod diff_tests {
             error: None,
         };
         PageRun {
+            inactive: None,
             page,
             params: BTreeMap::new(),
             loaders: BTreeMap::from([(

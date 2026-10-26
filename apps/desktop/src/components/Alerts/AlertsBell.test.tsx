@@ -2,7 +2,7 @@ import { afterEach, expect, mock, test } from "bun:test";
 import { cleanup, within, fireEvent, render, waitFor } from "@testing-library/react";
 
 // Everything that needs the person is counted by the dock's Alerts icon and
-// announced by a toast once; the Alerts page itself is a foundation lens.
+// announced by a toast once; the Alerts page itself is a foundation page.
 
 const realApi = await import("../../api.js");
 /** Any other read (the Go To section's wiki pages, …): no rows. Never the

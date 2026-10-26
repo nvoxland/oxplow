@@ -2,7 +2,7 @@
 
 This doc covers oxplow's own access to models over their APIs: the
 AI providers you configure, the roles that decide which model does what, the
-`ai_*` functions sources and lenses call, and how calls are recorded.
+`ai_*` functions sources and pages call, and how calls are recorded.
 
 > **Status (epic tsk275):** built: providers, keychain keys, roles, the
 > client, call records (`oxplow-ai`, `oxplow-app/src/ai_service.rs`,
@@ -571,7 +571,7 @@ policy's, a review's dry run — runs pure and is refused before it runs:
 "`ai_summarize()`: a pure run can't use `ai.compute` (ask a model): only
 a run that may call out can". A run not given a model (a report parser)
 is told the need: "`ai_classify()` needs `ai.compute` in this script's
-`needs`". Lenses never call a model when they render; they read
+`needs`". Pages never call a model when they render; they read
 what collectors recorded. The extension skill's example classifies each
 turn's prompt (`turn_kind`).
 
@@ -631,7 +631,7 @@ its source; with no model bound, the recorded ones are all there is.
   the 40,000-character digest, and the newest are kept. Nothing to read
   asks nothing. It enqueues the job with intent key
   `reasoning:<effort URI>` (a redelivery is the same job); `again: true`
-  (the lens's **Infer Again**) keys a new one, `…@<n>`. The system
+  (the page's **Infer Again**) keys a new one, `…@<n>`. The system
   message asks for JSON only
   (`{"decisions": [...], "claims": [...]}`): a typed request has no JSON
   mode. A claim is what an answer states about the outcome of the work —
@@ -681,11 +681,11 @@ its source; with no model bound, the recorded ones are all there is.
 
 ## Settings → AI (current)
 
-The foundation's lenses in `oxplow-foundation/settings-ai.sections` (`ai-providers`,
+The foundation's pages in `oxplow-foundation/settings-ai.sections` (`ai-providers`,
 `ai-provider-form`, `ai-roles`, `ai-calls`; `ai-provider-kinds` and
 `ai-provider-choices` are the choices the forms offer). They read the live
 models `v_ai_provider` and `v_ai_role` and write with commands
-(`commands/ai_settings.rs`), anyone's — a person's, their agent's, or a form lens's: `oxplow.ai.set_provider { id, kind,
+(`commands/ai_settings.rs`), anyone's — a person's, their agent's, or a form page's: `oxplow.ai.set_provider { id, kind,
 base_url?, key? }` (scope `ai.settings`; `key` is a secret (`writeOnly`, commands.md "Secrets"), so a
 refusal that could quote it is recorded without its words, and it goes only to
 the keychain; it, `remove_provider` and `set_role` announce `ConfigChanged`,
@@ -693,7 +693,7 @@ which re-reads the two models), `oxplow.ai.remove_provider { id }` (asks first,
 `confirm: always`), `oxplow.ai.set_role { role, provider?, model?, restrict? }`
 (neither provider nor model unbinds) and `oxplow.ai.test_provider { id,
 model }` (scope `ai.test`, `spends`: one small call on the person's key).
-`ai-provider-form` is a `form` lens whose `key` field is `secret: true` (a
+`ai-provider-form` is a `form` page whose `key` field is `secret: true` (a
 password box, kept out of the draft and the record); Test… and Assign… are row
 form actions.
 
@@ -710,7 +710,7 @@ form actions.
   to summarize (model)". A role the project sets in project.yaml
   (`overridden`) is changed there.
 - Recent Calls: the last 7 days of `v_ai_call` by role and caller, read
-  with `query_sql`, the same path lenses use.
+  with `query_sql`, the same path pages use.
 
 ## Host transport and live authority
 

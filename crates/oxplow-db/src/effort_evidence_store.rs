@@ -1,4 +1,4 @@
-//! Per-effort evidence the metric engine computes, stored so lenses can read
+//! Per-effort evidence the metric engine computes, stored so pages can read
 //! it (`v_effort_metric_delta`, `v_effort_observation`). Rows are replaced
 //! wholesale per effort by core's refresher. See `.context/semantic-layer.md`.
 

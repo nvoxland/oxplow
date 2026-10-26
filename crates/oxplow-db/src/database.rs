@@ -416,7 +416,7 @@ fn init_connection(c: &Connection) -> rusqlite::Result<()> {
 }
 
 /// Refuse a SQLite built without its math functions (`log2`, `ln`, `pow`,
-/// …): SQL models and lenses may use them (P7.B5: oxplow-bundled's
+/// …): SQL models and pages may use them (P7.B5: oxplow-bundled's
 /// `change_interest` scores with `log2`), and without them such a model
 /// only surfaces as an extension's compile error. The bundled SQLite gets
 /// them from `LIBSQLITE3_FLAGS = -DSQLITE_ENABLE_MATH_FUNCTIONS` in
@@ -1343,7 +1343,7 @@ fn write_template(path: &std::path::Path) -> Result<(), DbInitError> {
 }
 
 pub(crate) fn migrate_and_compile(conn: &mut Connection) -> Result<(), DbInitError> {
-    // A model's SQL may call the shared functions (`lens_ref`).
+    // A model's SQL may call the shared functions (`uri`).
     crate::sql_functions::register(conn).map_err(DbInitError::Sqlite)?;
     crate::models::drop_all(conn).map_err(|e| DbInitError::Models(e.to_string()))?;
     with_foreign_keys_off(conn, |conn| {

@@ -1,5 +1,5 @@
 /// The rail groups every page shows the same way, a page file's and a
-/// lens page's alike: Selection (what a row click picked, never an input)
+/// page's alike: Selection (what a row click picked, never an input)
 /// and About this page (its extension, the source file to edit, whether
 /// that source changed since it was deployed).
 import { useEffect, useState } from "react";
@@ -31,7 +31,7 @@ export function RailSelection({
   values: Record<string, SqlCell>;
   picked: Record<string, PickedRow>;
   onApply(name: string, value: SqlCell): void;
-  /** `lens` or `page`: the test ids' prefix. */
+  /** The test ids' prefix. */
   testPrefix: string;
 }) {
   if (params.length === 0) return null;

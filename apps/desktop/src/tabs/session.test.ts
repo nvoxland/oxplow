@@ -154,7 +154,7 @@ describe("navigate in a page's own view", () => {
     expect(ids(back(s, slot))).toEqual(["oxplow:oxplow/page?page=x/y"]);
   });
 
-  test("another resource of the same lens is another page, starting afresh", () => {
+  test("another resource of the same page is another page, starting afresh", () => {
     let s = open(emptySession(), e(pageTabRef("x/y", { stream_id: 1 }), { historyState: { scroll: 9 } }));
     s = navigate(s, s.active!, e(pageTabRef("x/y", { stream_id: 2 })));
     expect(current(s.tabs[0]!).historyState).toBeUndefined();
@@ -194,12 +194,12 @@ describe("origin: the collection a page was opened from", () => {
   });
 
   test("a live origin steps through the items it is given", () => {
-    const live: Origin = { title: "L", items: [], index: 0, live: { lens: "x/y", params: {}, column: "k" } };
+    const live: Origin = { title: "L", items: [], index: 0, live: { node: "x/y", params: {}, column: "k" } };
     let s = open(emptySession(), e(fileRef("src/a.ts"), { from: live }));
     s = stepOrigin(s, s.active!, 1, [{ ref: fileRef("src/a.ts"), label: "a" }, { ref: fileRef("src/b.ts"), label: "b" }]);
     const now = current(s.tabs[0]!);
     expect(now.ref.id).toBe(fileRef("src/b.ts").id);
-    expect(now.from?.live?.lens).toBe("x/y");
+    expect(now.from?.live?.node).toBe("x/y");
   });
 
   test("a step out of range changes nothing", () => {
@@ -219,7 +219,7 @@ describe("bodies: what stays mounted", () => {
     s = navigate(s, slot, e(a));
     const out = bodies(s.tabs[0]!);
     expect(out.map((x) => x.key)).toEqual([`${slot}/${pageUri("x/y")}`, `${slot}/${wikiUri("a")}`]);
-    // The lens body shows its nearest entry: the one with the commit.
+    // The page body shows its nearest entry: the one with the commit.
     expect(out[0]!.entry.ref.id).toBe("oxplow:oxplow/page?page=x/y#commit=abc");
     expect(out.map((x) => x.current)).toEqual([false, true]);
     s = back(s, slot);

@@ -40,9 +40,9 @@ import type {
   CommentStatus,
   CommentThread,
   Extension,
-  Lens,
-  LensRun,
-  LensViz,
+  VizConfig,
+  VizRun,
+  Viz,
   RecentProjectView,
   RoleBinding,
   ScriptServices,
@@ -64,7 +64,7 @@ export interface ProviderConfig {
   baseUrl: string | null;
 }
 export type { ServiceListing, ScriptServices };
-export type { Extension, Lens, LensRun, LensViz, SearchHit, SqlCell, SqlQueryResult };
+export type { Extension, VizConfig, VizRun, Viz, SearchHit, SqlCell, SqlQueryResult };
 
 /// Convert the tauri-specta {status, data|error} envelope into a
 /// plain promise return. Errors are usually IpcError objects with
@@ -413,7 +413,7 @@ export async function querySql(
   return unwrap(await commands.querySql(sql, params, limit, raw));
 }
 
-/// The extensions the app shows (and their lenses) — the main worktree's,
+/// The extensions the app shows (and their pages) — the main worktree's,
 /// for every stream — with per-extension load errors. See
 /// `.context/extensions.md`.
 export async function listExtensions(): Promise<Extension[]> {

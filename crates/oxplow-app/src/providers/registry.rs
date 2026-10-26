@@ -2560,7 +2560,7 @@ impl ProviderRegistry {
     /// and, for the machine's file, its cross-process lock: the project's
     /// through `oxplow.config.set` (`extensionInstances` is a person's key), the
     /// machine's file directly — a person's only: no command reaches it,
-    /// so no agent or lens can. The caller reconciles once it lets go of
+    /// so no agent or page can. The caller reconciles once it lets go of
     /// the gate.
     async fn write_instances(
         &self,

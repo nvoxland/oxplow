@@ -122,10 +122,10 @@ pub struct SqlQuery {
     pub limit: Option<usize>,
     pub timeout: Duration,
     /// Read physical tables too (the person's explorer, never an agent or
-    /// a lens): the reads are still recorded, none is refused.
+    /// a page): the reads are still recorded, none is refused.
     pub raw: bool,
     /// Scope to one stream — what the SQL gateway computes a
-    /// `metric_grid()`'s series over (a lens passes its `:stream_id`).
+    /// `metric_grid()`'s series over (a page passes its `:stream_id`).
     pub stream: Option<i64>,
     /// Temp tables this query reads, created and filled on its connection
     /// before it runs and dropped after, on every path (the gateway's
@@ -1360,7 +1360,7 @@ mod tests {
     }
 
     /// tsk1039: a misspelled model names the one it most likely meant —
-    /// an agent's lens query and `extension check` read the same error.
+    /// an agent's page query and `extension check` read the same error.
     #[tokio::test]
     async fn an_unknown_model_suggests_the_nearest_one() {
         let (_db, sl) = seeded().await;

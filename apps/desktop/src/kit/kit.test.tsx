@@ -61,7 +61,7 @@ const columns: DataColumn<Row>[] = [
   { key: "size", label: "Size", width: 60, numeric: true, render: (r) => String(r.size) },
 ];
 
-// One table for core pages and lenses: fixed column widths, numbers
+// One table for core pages and viz nodes: fixed column widths, numbers
 // right-aligned in tabular figures, long text cut with its full text on hover.
 test("DataTable lays out its columns: widths, numeric alignment, truncation", () => {
   const { container, getAllByRole } = render(

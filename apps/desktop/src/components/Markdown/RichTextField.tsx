@@ -107,7 +107,7 @@ interface PendingSelection {
  * Two owners: `onCommit` hears the text 300ms after typing stops, on blur
  * and on unmount (an owner that saves as the person types: the task
  * body); `onChange` hears every edit (an owner that keeps a draft and
- * saves on a button: a form, a composer, the lens editor). Either may be
+ * saves on a button: a form, a composer, the page editor). Either may be
  * given, or both. Cmd/Ctrl+Enter, Cmd/Ctrl+S and Escape reach the owner
  * with the text as it is now (`onSubmitShortcut`, `onSaveShortcut`,
  * `onEscape`).

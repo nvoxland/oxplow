@@ -1,5 +1,5 @@
 title: Diff
-description: 'One file between two revisions, filling the page: the side-by-side (or unified) diff with Prev/Next, Ask About This and the analysis other extensions add under the header. `#lines=12` reveals a line on the newer side.'
+description: 'One file between two revisions, filling the page: the diff with Prev/Next, Ask About This and what other extensions add under the header. `#lines=12` reveals a line.'
 label: '{{param.path}} ({{param.label}})'
 icon: git-compare
 params:
@@ -15,11 +15,16 @@ data:
     sql: |
       SELECT :path AS path, :left AS a, :right AS b, :lines AS lines, :base AS base, :label AS label
 view:
-  from: diff
-  viz: diff
-  diff:
-    path: path
-    from: a
-    to: b
-    lines: lines
-    base: base
+  stack:
+  # What other extensions show for the file above its diff (bundled's
+  # co-change files): pages mounted at `oxplow-foundation/diff.file-header`.
+  - slot: file-header
+  - id: diff
+    from: diff
+    viz: diff
+    diff:
+      path: path
+      from: a
+      to: b
+      lines: lines
+      base: base

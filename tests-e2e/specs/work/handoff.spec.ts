@@ -28,10 +28,10 @@ test("work handed off is seen on the other thread, and taking it moves its item"
   await page.getByTestId(`navigator-strip-thread-${daemon.thread}`).click({ button: "right" });
   await page.getByTestId("menu-item-ref-commands-Threads").click();
   await page.getByTestId("menu-item-ref-command-oxplow.handoff.send").click();
-  await page.getByTestId("lens-form-fields-to_thread").selectOption({ label: "Docs" });
-  await page.getByTestId("lens-form-fields-work_item").selectOption({ label: "Write the guide" });
-  await page.getByTestId("lens-form-fields-body").fill("The outline is done; write the rest.");
-  await page.getByTestId("lens-form-fields-submit").click();
+  await page.getByTestId("viz-form-fields-to_thread").selectOption({ label: "Docs" });
+  await page.getByTestId("viz-form-fields-work_item").selectOption({ label: "Write the guide" });
+  await page.getByTestId("viz-form-fields-body").fill("The outline is done; write the rest.");
+  await page.getByTestId("viz-form-fields-submit").click();
   await until("the handoff to be recorded", 15_000, async () => (await value(daemon, "SELECT count(*) FROM v_handoff")) === 1);
 
   // On the other thread its Tasks page shows it; Take moves the item there.
@@ -40,7 +40,7 @@ test("work handed off is seen on the other thread, and taking it moves its item"
   const inbound = page.locator('[data-testid="page-file"]:visible [data-node="oxplow-foundation.thread-handoffs-in"]');
   await expect(inbound).toContainText("The outline is done");
   await inbound.getByText("The outline is done").click({ button: "right" });
-  await page.getByTestId("menu-item-lens-action-take").click();
+  await page.getByTestId("menu-item-viz-action-take").click();
   await until("the handoff to be taken", 15_000, async () => (await value(daemon, "SELECT state FROM v_handoff")) === "taken");
   // The work list restates its items after the move lands.
   await until(

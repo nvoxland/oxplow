@@ -51,7 +51,7 @@ fn uri(resource: &str, params: &[(&str, &str)], view: &[(&str, &str)]) -> Oxplow
 }
 
 /// The one param that names one of `resource`'s, when one does: a
-/// contribution's id is its own name's param (`oxplow/lens` → `lens`), a
+/// contribution's id is its own name's param (`oxplow/page` → `page`), a
 /// stored thing's is `id`, and a few say what they are (`commit` → `sha`).
 /// `None` for a resource named by several (a file's `path` and `rev`, a
 /// work item's `provider` and `id`), which has its own readers.
@@ -276,23 +276,6 @@ pub fn event_uri(id: &str) -> String {
     keyed(r::EVENT, id)
 }
 
-/// A lens (`<extension>/<slug>`).
-pub fn lens_uri(id: &str) -> String {
-    keyed(r::LENS, id)
-}
-
-/// A lens with its params; one with no value is left out.
-pub fn lens_uri_with(id: &str, params: &[(&str, Option<&str>)]) -> String {
-    let mut all = vec![("lens", id)];
-    all.extend(params.iter().filter_map(|(k, v)| Some((*k, (*v)?))));
-    of(r::LENS, &all)
-}
-
-/// An agent's answer in a thread (`thread_answer.id`).
-pub fn answer_uri(id: i64) -> String {
-    keyed(r::ANSWER, &id.to_string())
-}
-
 /// A page (`tasks`, `<extension>/<id>`) with its params.
 pub fn page_uri(page: &str, params: &[(&str, &str)]) -> String {
     let mut all = vec![("page", page)];
@@ -373,11 +356,6 @@ pub fn subagent_uri(session: AgentSessionId, id: &str) -> String {
         r::SUBAGENT,
         &[("session", &session.to_string()), ("agent", id)],
     )
-}
-
-/// A user-created dashboard (`dashboard.id`).
-pub fn dashboard_uri(id: crate::DashboardId) -> String {
-    keyed(r::DASHBOARD, &id.to_string())
 }
 
 /// A terminal (`terminal.id`).
@@ -512,11 +490,7 @@ mod tests {
     }
 
     #[test]
-    fn a_lens_or_page_carries_its_own_params() {
-        assert_eq!(
-            lens_uri_with("acme/blocked", &[("stream_id", Some("2")), ("gone", None)]),
-            "oxplow:oxplow/lens?lens=acme/blocked&stream_id=2"
-        );
+    fn a_page_carries_its_own_params() {
         assert_eq!(
             page_uri("settings", &[("area", "ai")]),
             "oxplow:oxplow/page?area=ai&page=settings"
@@ -584,7 +558,7 @@ mod tests {
         assert_eq!(resource_of(&wiki_uri("x")).as_deref(), Some("oxplow/wiki"));
         assert_eq!(resource_of("nope"), None);
         assert_eq!(key_param("acme/pr").as_deref(), Some("id"));
-        assert_eq!(key_param("oxplow/lens").as_deref(), Some("lens"));
+        assert_eq!(key_param("oxplow/page").as_deref(), Some("page"));
     }
 
     #[test]

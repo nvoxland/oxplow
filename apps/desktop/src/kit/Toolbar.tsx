@@ -14,7 +14,7 @@ export interface ToolbarFilter {
   inputProps?: InputHTMLAttributes<HTMLInputElement>;
 }
 
-/** The row above a core list: its filter, then its actions. A lens page
+/** The row above a core list: its filter, then its actions. A page
  *  has none; its controls are in its rail. */
 export function Toolbar({
   filter,

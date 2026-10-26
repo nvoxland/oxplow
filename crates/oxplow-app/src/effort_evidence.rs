@@ -1,5 +1,5 @@
 //! Keeps `v_effort_metric_delta` / `v_effort_observation` current. The
-//! metric engine computes an effort's deltas and evidence; lenses can't, so
+//! metric engine computes an effort's deltas and evidence; pages can't, so
 //! core stores them: when an effort closes (the `effort.evidence` reaction
 //! to `effort.finished`), and for every open effort as an **asset** over
 //! the tables the evidence reads ([`OpenEffortEvidence`], P7.B6) — a commit

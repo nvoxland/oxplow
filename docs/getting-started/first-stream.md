@@ -23,7 +23,7 @@ branch. Additional streams have separate worktree directories.
   right-click actions.
 - **Rail HUD:** search, active work, bookmarks, recent pages, and the
   page directory.
-- **Page tabs:** descriptions, lenses, dashboards, agent sessions,
+- **Page tabs:** descriptions, pages, dashboards, agent sessions,
   tasks, knowledge, files, and diffs. Follow links and backlinks between
   them.
 - **Status bar:** branch and background activity.
@@ -78,24 +78,24 @@ each session.
 
 Ask your agent for a view over the collected data, such as:
 
-> Build a lens showing failed tests by effort, with links to the affected
+> Build a page showing failed tests by effort, with links to the affected
 > changes and the recorded test runs.
 
-**New Lens with Your Agent…** in the launcher provides a starter prompt.
+**New Page with Your Agent…** in the launcher provides a starter prompt.
 The agent inspects the data, writes an extension under
-`.oxplow/extensions/<name>/`, and validates it. Open the lens like another
+`.oxplow/extensions/<name>/`, and validates it. Open the page like another
 page. Share the extension (`oxplow.extension.share`) and commit its files to give the view to your team.
 
 If the data is missing, a collector can add it; metrics and dimensions
 can turn it into comparisons over time. Extensions that run programs or
-call models need the relevant permissions, which you approve when you deploy them. See [Lenses](../guide/lenses.md)
+call models need the relevant permissions, which you approve when you deploy them. See [Pages](../guide/pages.md)
 and [Metrics](../guide/metrics.md).
 
 ## 7. What to read next
 
 - [Concepts](concepts.md) — data, pages, streams, threads, and optional
   work and knowledge tracking.
-- [Lenses](../guide/lenses.md) — custom views, collection, and sharing.
+- [Pages](../guide/pages.md) — custom views, collection, and sharing.
 - [Metrics](../guide/metrics.md) — facts, measures, and dimensions.
 - [Work queue](../guide/work-queue.md) — optional work items.
 - [Agent control](../guide/agent-control.md) — observed activity and

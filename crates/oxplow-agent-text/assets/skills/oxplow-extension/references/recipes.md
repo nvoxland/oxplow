@@ -52,8 +52,40 @@ rows (`<ext>/<page>` alone takes its first loader). Field and `fixed`
 rules are in `commands-and-forms.md`. A form is not allowed in an inline
 page.
 
-## A dashboard page
+## A dashboard
 
-See `dashboards-as-pages.md`: a `grid` of `viz` and `embed` nodes written
-with `oxplow.extension.write_page`. Test it with a fixture whose
-`expect.nodes` lists the tile ids, and give it an `answers:` entry.
+See `dashboards.md`: start one with `oxplow.extension.new_dashboard { title }`,
+or write a page in the Dashboards category whose view is a `grid` of `viz`
+and `embed` nodes with `oxplow.extension.write_page`. Test it with a fixture
+whose `expect.nodes` lists the tile ids, and give it an `answers:` entry.
+
+## A slot mount (add a section to another page)
+
+Mount a page of yours into a page that has a `slot` node (foundation's
+Commit, Uncommitted Changes, Diff View, Work Item, Tasks and New Session
+pages have a `sections` slot):
+
+```yaml page
+# pages/stale-reviews.yaml
+title: Stale reviews
+params: [{ name: uri }]            # the params the host passes, by name
+answers:
+  - { question: "Which reviews of this work item are stale?", about: oxplow/work_item }
+data:
+  stale: { sql: "SELECT title FROM v_review WHERE item = :uri AND age_days > 7" }
+view: { viz: list, from: stale, empty: No stale reviews. }
+```
+
+```yaml
+# extension.yaml
+ui:
+  slots:
+    - { slot: oxplow-foundation/work-item.sections, page: stale-reviews, at: { after: links }, title: Stale reviews }
+```
+
+`slot: <extension>/<page>.<name>`; `at` is `start`, `end` (default) or `{
+before | after: <sibling id> }`. The mounted page gets the host's params by
+name, so declare the ones you need. Check the mount with
+`oxplow_validate_extension`, and see it on the host page with `oxplow_run_page
+{ page: oxplow-foundation/work-item, draft: true }` (its text includes your
+section, marked with your extension).

@@ -19,7 +19,7 @@ test("a starred page is in the rail's Go To", async ({ fresh }) => {
   await expect(goTo).toContainText("History");
 });
 
-// Go To is the foundation's lens page: the starred page is a bookmark row
+// Go To is the foundation's page: the starred page is a bookmark row
 // there, and Recently visited lists pages.
 test("the Go To page lists a starred page and the pages visited", async ({ fresh }) => {
   const { page } = fresh;
@@ -33,7 +33,7 @@ test("the Go To page lists a starred page and the pages visited", async ({ fresh
   await expect(page.locator('[data-section="recent"]:visible')).not.toContainText("No visits yet");
 });
 
-// Local History is the foundation's document of two lenses: its snapshots
+// Local History is the foundation's document of two pages: its snapshots
 // recent, or by git commit (the `mode` param, in the address).
 test("the Local History page draws its snapshots and keeps its grouping in the address", async ({ fresh }) => {
   const { page } = fresh;
@@ -41,8 +41,8 @@ test("the Local History page draws its snapshots and keeps its grouping in the a
   await openFromLauncher(page, "Local History");
   const body = page.locator('[data-testid^="center-tab-body-oxplow:oxplow/page?"][data-testid$="page=local-history"]:visible');
   await expect(body.getByRole("heading", { level: 1 })).toHaveText("Local History");
-  await page.getByTestId("lens-param-mode-value").filter({ visible: true }).click();
-  await page.getByTestId("lens-param-mode-edit").filter({ visible: true }).selectOption("by-commit");
+  await page.getByTestId("page-param-mode-value").filter({ visible: true }).click();
+  await page.getByTestId("page-param-mode-edit").filter({ visible: true }).selectOption("by-commit");
   await expect(page.locator('[data-testid="center-tab-body-oxplow:oxplow/page?page=local-history#mode=by-commit"]:visible')).toHaveCount(1);
 });
 
@@ -67,8 +67,8 @@ test("the star offers to move a bookmark made at another filter value", async ({
   expect(before).not.toContain("mode=by-commit");
 
   // Another value of the page's filter: the star is off, but says why.
-  await page.getByTestId("lens-param-mode-value").filter({ visible: true }).click();
-  await page.getByTestId("lens-param-mode-edit").filter({ visible: true }).selectOption("by-commit");
+  await page.getByTestId("page-param-mode-value").filter({ visible: true }).click();
+  await page.getByTestId("page-param-mode-edit").filter({ visible: true }).selectOption("by-commit");
   await expect(star).toHaveText("☆");
   await expect(star).toHaveAttribute("title", "Bookmarked at other values");
 

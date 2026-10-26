@@ -514,17 +514,17 @@ and the restriction is invisible — a dev-mode test of this proves nothing.
 
 ## Extension catalog cache (tsk390 / P1.13, tsk415)
 
-`extensions::load_extensions(root)` parses every bundled lens file (about
+`extensions::load_extensions(root)` parses every bundled page file (about
 forty embedded YAML documents) plus the project's on each call, and it ran
 on every advisory check (each agent tool call and prompt), every
-`list_extensions` (IPC) / `oxplow_read` of a lens / `oxplow_run_lens`, the schema listing and metric
+`list_extensions` (IPC) / `oxplow_read` of a page / `oxplow_run_page`, the schema listing and metric
 catalog seed. Measured on the dev machine (release-less test build, 20
 calls averaged):
 
 | call | per call |
 |---|---|
 | `load_extensions`, bundled only | ~3.3 ms |
-| `load_extensions`, bundled + one project extension with 10 lenses | ~3.1 ms |
+| `load_extensions`, bundled + one project extension with 10 pages | ~3.1 ms |
 | `ExtensionCatalog::get`, same root, cache hit | ~62 µs |
 
 The daemon's catalog (`ExtensionCatalog::for_project`) loads the live set
@@ -753,7 +753,7 @@ both models.
 ## Change events reach the webview in bursts
 
 A burst of commits is one re-read in the UI: every reader of change events
-goes through `coalesce` (`apps/desktop/src/lens/lensRerun.ts`, 100 ms after
+goes through `coalesce` (`apps/desktop/src/viz/rerun.ts`, 100 ms after
 the last event) — `useRerunOnChange`, the wiki title cache
 (`wikiTitleCache.ts`, which also re-reads once after an in-flight read
 that missed a change) and `useChange`. A new reader of events adopts it

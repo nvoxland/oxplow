@@ -55,10 +55,10 @@ test("the rail's filters narrow a page, a row click shows the next section its p
   const { body, commits, files, rail, filters } = await openHistory(page);
   // The rail is the page's one place for controls: its filters as rows
   // (a label beside its value), the selection, and where it comes from.
-  await expect(filters.getByTestId("lens-param-range-value")).toHaveText("Last 30 days");
-  await expect(filters.getByTestId("lens-param-q-value")).toHaveText("Any");
+  await expect(filters.getByTestId("page-param-range-value")).toHaveText("Last 30 days");
+  await expect(filters.getByTestId("page-param-q-value")).toHaveText("Any");
   // `commit` is what a row click picks: never an input.
-  await expect(rail.getByTestId("lens-param-commit")).toHaveCount(0);
+  await expect(rail.getByTestId("page-param-commit")).toHaveCount(0);
   await expect(rail.getByTestId("page-rail-selection")).toContainText("Click a row to select it.");
   await expect(rail.getByTestId("page-about-source")).toHaveText(".oxplow/extensions/commit-history/pages/history.yaml");
   // Copy is the page's, in its nav bar's ☰: the open run as text.
@@ -68,13 +68,13 @@ test("the rail's filters narrow a page, a row click shows the next section its p
 
   await expect(commits).toContainText("Add the numbat");
   await expect(commits).toContainText("Add the wombat");
-  await filters.getByTestId("lens-param-q-value").click();
-  await filters.getByTestId("lens-param-q-edit").fill("numbat");
+  await filters.getByTestId("page-param-q-value").click();
+  await filters.getByTestId("page-param-q-edit").fill("numbat");
   await expect(commits).not.toContainText("Add the wombat");
   await expect(commits).toContainText("Add the numbat");
 
   // Clicking the commit sets the page's `commit`: its files show below.
-  const row = commits.getByTestId("lens-row-0");
+  const row = commits.getByTestId("viz-row-0");
   await row.click();
   await expect(row).toHaveAttribute("aria-selected", "true");
   await expect(files).toContainText("numbat.txt");
@@ -90,26 +90,26 @@ test("the rail's filters narrow a page, a row click shows the next section its p
   await page.getByTestId("page-nav-back").filter({ visible: true }).click();
   await expect(row).toHaveAttribute("aria-selected", "false");
   await expect(rail.getByTestId("page-rail-selection")).toContainText("Click a row to select it.");
-  await expect(filters.getByTestId("lens-param-q-value")).toHaveText("numbat");
+  await expect(filters.getByTestId("page-param-q-value")).toHaveText("numbat");
   await page.getByTestId("page-nav-forward").filter({ visible: true }).click();
   await expect(row).toHaveAttribute("aria-selected", "true");
   await expect(rail.getByTestId("page-rail-selection")).toContainText("Add the numbat");
   // A reload brings the tab back with its values.
   await page.reload();
-  await expect(filters.getByTestId("lens-param-q-value")).toHaveText("numbat");
+  await expect(filters.getByTestId("page-param-q-value")).toHaveText("numbat");
   await expect(files).toContainText("numbat.txt");
 
   // A custom range opens over the page; Escape closes it.
-  await filters.getByTestId("lens-param-range-value").click();
-  await filters.getByTestId("lens-param-range-edit").selectOption("__custom__");
-  await expect(page.getByTestId("lens-param-range-custom")).toBeVisible();
+  await filters.getByTestId("page-param-range-value").click();
+  await filters.getByTestId("page-param-range-edit").selectOption("__custom__");
+  await expect(page.getByTestId("page-param-range-custom")).toBeVisible();
   await page.keyboard.press("Escape");
-  await expect(page.getByTestId("lens-param-range-custom")).toHaveCount(0);
-  await expect(filters.getByTestId("lens-param-range-value")).toBeFocused();
+  await expect(page.getByTestId("page-param-range-custom")).toHaveCount(0);
+  await expect(filters.getByTestId("page-param-range-value")).toBeFocused();
 
   // Merges only: none of these is one. A section with nothing to show
   // folds into the page's closing line.
-  await filters.getByTestId("lens-param-merges-edit").check();
+  await filters.getByTestId("page-param-merges-edit").check();
   await expect(body.getByTestId("page-nothing-found")).toContainText("Commits");
 });
 
@@ -127,20 +127,20 @@ test("a filter change keeps the page and replaces the entry; a pick pushes one B
   // A mark on the page's own element: it must survive both changes.
   await body.evaluate((el) => el.setAttribute("data-mounted-once", "yes"));
 
-  await filters.getByTestId("lens-param-q-value").click();
-  await filters.getByTestId("lens-param-q-edit").fill("numbat");
+  await filters.getByTestId("page-param-q-value").click();
+  await filters.getByTestId("page-param-q-edit").fill("numbat");
   await expect(commits).not.toContainText("Add the wombat");
   await expect(body).toHaveAttribute("data-mounted-once", "yes");
   // The filter replaced the entry: nothing to go Back to.
   await expect(back).toBeDisabled();
 
-  const row = commits.getByTestId("lens-row-0");
+  const row = commits.getByTestId("viz-row-0");
   await row.click();
   await expect(row).toHaveAttribute("aria-selected", "true");
   await expect(back).toBeEnabled();
   await back.click();
   await expect(row).toHaveAttribute("aria-selected", "false");
-  await expect(filters.getByTestId("lens-param-q-value")).toHaveText("numbat");
+  await expect(filters.getByTestId("page-param-q-value")).toHaveText("numbat");
   await expect(body).toHaveAttribute("data-mounted-once", "yes");
   await expect(back).toBeDisabled();
 });

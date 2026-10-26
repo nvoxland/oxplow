@@ -104,7 +104,7 @@ function labelOf(key: string): string {
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
-/** A child of an object field the host reads from a lens: one row of it. */
+/** A child of an object field the host reads from a page: one row of it. */
 export interface Subfield {
   name: string;
   title: string;
@@ -268,7 +268,7 @@ export function valueOf(fields: Field[], drafts: Drafts): { value: Record<string
 export type Scalar = string | number | boolean;
 
 /** One of the fields a form shows: its name, or its name and how it
- *  shows (a lens form's `fields` entry). */
+ *  shows (a page form's `fields` entry). */
 export type FieldSpec = string | { name: string; visible_if?: Record<string, Scalar | Scalar[]>; secret?: boolean };
 
 export interface ShownField {

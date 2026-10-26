@@ -26,7 +26,7 @@ async function choose(page: Page, target: string, who: string) {
   const shows = who === "oxplow" ? "oxplow's own" : who;
   const row = page.locator("tr", { hasText: target }).filter({ hasText: shows }).first();
   await row.click({ button: "right" });
-  await page.getByTestId("menu-item-lens-action-use").click();
+  await page.getByTestId("menu-item-viz-action-use").click();
   // The row says "In use" once the choice is stored.
   await expect(row).toContainText("In use");
 }
@@ -62,8 +62,8 @@ async function swimlanes(page: Page, daemon: Workspace, scope: string) {
   await choose(page, "work_item.board", "task-views");
   await openFromLauncher(page, "Board");
   await expect(page.getByTestId("replacement-work_item.board")).toContainText("replaced by task-views");
-  await page.getByTestId("lens-param-show-value").filter({ visible: true }).click();
-  await page.getByTestId("lens-param-show-edit").filter({ visible: true }).selectOption(scope);
+  await page.getByTestId("page-param-show-value").filter({ visible: true }).click();
+  await page.getByTestId("page-param-show-edit").filter({ visible: true }).selectOption(scope);
   await expect(page.getByTestId("replacement-work_item.board")).toContainText("replaced by task-views");
   // Settings may still be open in another tab: its Integrations frame is a second one.
   const frame = page.frameLocator('iframe[aria-label="Swimlanes"]');
@@ -137,25 +137,25 @@ test("the editor, the list and oxplow's own, each chosen from Settings", async (
   const detail = page.getByTestId("replacement-work_item.detail");
   await expect(detail).toContainText("replaced by task-views");
   // Only the fields the form names are shown; the item's ref is fixed, not editable.
-  await expect(detail.getByTestId("lens-form-fields-uri")).toHaveCount(0);
-  await expect(detail.getByTestId("lens-form-fields-title")).toHaveValue("Item to edit");
+  await expect(detail.getByTestId("viz-form-fields-uri")).toHaveCount(0);
+  await expect(detail.getByTestId("viz-form-fields-title")).toHaveValue("Item to edit");
   await expect(page.locator('[data-testid="page-file"]:visible [data-node="state"]')).toBeVisible();
   await expect(detail.locator('[data-node="state"]')).toHaveCount(0);
   // It edits what is saved: Save waits for a change; what was typed is the
   // tab's, so a reload gives it back; Discard puts the saved title back.
-  const save = detail.getByTestId("lens-form-fields-submit");
+  const save = detail.getByTestId("viz-form-fields-submit");
   await expect(save).toBeDisabled();
-  await detail.getByTestId("lens-form-fields-title").fill("Half typed");
+  await detail.getByTestId("viz-form-fields-title").fill("Half typed");
   await expect(save).toBeEnabled();
   await page.reload();
-  await expect(detail.getByTestId("lens-form-fields-title")).toHaveValue("Half typed");
-  await detail.getByTestId("lens-form-fields-discard").click();
-  await expect(detail.getByTestId("lens-form-fields-title")).toHaveValue("Item to edit");
+  await expect(detail.getByTestId("viz-form-fields-title")).toHaveValue("Half typed");
+  await detail.getByTestId("viz-form-fields-discard").click();
+  await expect(detail.getByTestId("viz-form-fields-title")).toHaveValue("Item to edit");
   await expect(save).toBeDisabled();
-  await detail.getByTestId("lens-form-fields-title").fill("Item edited");
+  await detail.getByTestId("viz-form-fields-title").fill("Item edited");
   await save.click();
   await until("the edit to be stored", 15_000, () => titled(daemon, "Item edited"));
-  await expect(detail.getByTestId("lens-form-fields-title")).toHaveValue("Item edited");
+  await expect(detail.getByTestId("viz-form-fields-title")).toHaveValue("Item edited");
 
   // The Tasks page: the compact list, its Edit… row action in a slideover.
   await openFromLauncher(page, "Tasks");
@@ -164,10 +164,10 @@ test("the editor, the list and oxplow's own, each chosen from Settings", async (
   await expect(list).toContainText("Item edited");
   // The title is a link; the row's menu is on its other cells.
   await list.getByRole("row").filter({ hasText: "Item edited" }).locator("td").nth(1).click({ button: "right" });
-  await page.getByTestId("menu-item-lens-action-edit").click();
-  const form = page.getByTestId("lens-action-form");
-  await form.getByTestId("lens-action-form-fields-title").fill("Item edited again");
-  await form.getByTestId("lens-action-form-fields-submit").click();
+  await page.getByTestId("menu-item-viz-action-edit").click();
+  const form = page.getByTestId("viz-action-form");
+  await form.getByTestId("viz-action-form-fields-title").fill("Item edited again");
+  await form.getByTestId("viz-action-form-fields-submit").click();
   await expect(form).toHaveCount(0);
   await until("the second edit to be stored", 15_000, () => titled(daemon, "Item edited again"));
   await expect(list).toContainText("Item edited again");
@@ -176,9 +176,9 @@ test("the editor, the list and oxplow's own, each chosen from Settings", async (
   for (const target of TARGETS) await choose(page, target, "oxplow");
   await openFromLauncher(page, "Tasks");
   await expect(page.locator('[data-testid^="replacement-"]:visible')).toHaveCount(0);
-  await expect(page.locator('[data-testid="page-file"]:visible [data-node="list"]').locator('[data-testid^="lens-row-"]').first()).toBeVisible();
+  await expect(page.locator('[data-testid="page-file"]:visible [data-node="list"]').locator('[data-testid^="viz-row-"]').first()).toBeVisible();
   await openFromLauncher(page, "Board");
-  await expect(page.getByTestId("lens-board")).toBeVisible();
+  await expect(page.getByTestId("viz-board")).toBeVisible();
   await expect(page.locator('[data-testid^="replacement-"]:visible')).toHaveCount(0);
   await searchable(daemon, "Item edited again", "work_item");
   await openFromLauncher(page, "Item edited again");

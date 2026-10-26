@@ -114,7 +114,7 @@ fn servers_changed(deps: &LspDeps) -> Box<dyn FnOnce() + Send + Sync> {
 
 /// `lsp.restart_server { stream, language }`: tear down the stream's session
 /// for a language and start it again, replaying the open documents. A
-/// person's (or a lens for one): a server is a program on this machine.
+/// person's (or a page for one): a server is a program on this machine.
 pub fn restart_op(services: ServicesSlot) -> Op {
     Op::new(
         "lsp.control",

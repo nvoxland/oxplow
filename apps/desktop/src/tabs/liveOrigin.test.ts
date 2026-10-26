@@ -4,7 +4,7 @@ import { resolvedOrigin } from "./liveOrigin.js";
 import { fileRef } from "./pageRefs.js";
 import type { Origin } from "./session.js";
 
-const live: Origin = { title: "L", items: [], index: 0, live: { lens: "x/y", params: {}, column: "k" } };
+const live: Origin = { title: "L", items: [], index: 0, live: { node: "x/y", params: {}, column: "k" } };
 const item = (path: string) => ({ ref: fileRef(path), label: path });
 
 // A live origin is only a page node to read: the list and the place in it
@@ -33,11 +33,11 @@ test("a page node's live origin reads the node's rows of its page's run", async 
   const { decl, fakePage, fakeRun, loader, node } = await import("../pages/testing/fakeRun.js");
   const page = fakePage(node.stack("s", [node.viz("items", "rows", { columns: [{ key: "k", link: "{{k}}" } as never] })]), { id: "acme/list", loaders: [decl("rows")] });
   const run = fakeRun(page, { loaders: { rows: loader(["k"], [["oxplow:oxplow/file?path=a"], ["oxplow:oxplow/file?path=b"]]) } });
-  const out = liveOriginNodeRun({ lens: "acme/list#items", params: { q: 1 }, column: "k" }, run);
+  const out = liveOriginNodeRun({ node: "acme/list#items", params: { q: 1 }, column: "k" }, run);
   expect(out?.result.rows.length).toBe(2);
-  expect(out?.lens.columns.map((c) => c.key)).toEqual(["k"]);
+  expect(out?.config.columns.map((c) => c.key)).toEqual(["k"]);
   // Another page's run, a node it no longer has, or no node named: none.
-  expect(liveOriginNodeRun({ lens: "acme/other#items", params: {}, column: "k" }, run)).toBeNull();
-  expect(liveOriginNodeRun({ lens: "acme/list#gone", params: {}, column: "k" }, run)).toBeNull();
-  expect(liveOriginNodeRun({ lens: "acme/list", params: {}, column: "k" }, run)).toBeNull();
+  expect(liveOriginNodeRun({ node: "acme/other#items", params: {}, column: "k" }, run)).toBeNull();
+  expect(liveOriginNodeRun({ node: "acme/list#gone", params: {}, column: "k" }, run)).toBeNull();
+  expect(liveOriginNodeRun({ node: "acme/list", params: {}, column: "k" }, run)).toBeNull();
 });

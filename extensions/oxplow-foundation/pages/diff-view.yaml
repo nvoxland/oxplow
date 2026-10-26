@@ -1,5 +1,5 @@
 title: Changes
-description: 'What changed between two points of the project: a snapshot (against the one before), an effort or a turn (its start to its end, or to the working tree while it runs), or any two points picked here. The renderer of oxplow''s `snapshot`, `effort` and `turn` resources, and the Changes page.'
+description: 'What changed between two points of the project: a snapshot, an effort or a turn, or any two points picked here. The renderer of `snapshot`, `effort` and `turn`.'
 icon: git-compare
 for:
 - oxplow/snapshot
@@ -177,7 +177,7 @@ data:
              coalesce((SELECT group_concat(e.value, char(10)) FROM json_each(c.errors) e), '') AS errors,
              coalesce((SELECT group_concat(l.value, char(10)) FROM json_each(c.lines) l), '') AS does,
              coalesce((SELECT group_concat(json_extract(x.value, '$.id') || ' (' || json_extract(x.value, '$.change') || ')', ', ')
-                       FROM json_each(c.lens_changes) x), '') AS lenses
+                       FROM json_each(c.page_changes) x), '') AS pages
       FROM v_extension_change c
       WHERE c.base = :start_rev AND c.head = :end_rev AND c.stream_id = :stream_id
       ORDER BY c.name
@@ -265,8 +265,8 @@ view:
       width: 90
     - key: does
       label: What it changes
-    - key: lenses
-      label: Lenses
+    - key: pages
+      label: Pages
     - key: errors
       label: Problems
     empty: ''

@@ -3,8 +3,8 @@
 //! on a throwaway oxplow — an in-memory one over a copy of the project's
 //! `.oxplow/extensions/` ([`Host`]) — so it never touches the project's
 //! data: `check` (against its real command registry, so `commands:`
-//! examples dry-run), then each intent example whose fixture names a lens
-//! (`input: { lens, params? }`, `expect: { columns?, rows }`), a derived
+//! examples dry-run), then each intent example whose fixture names a page
+//! (`input: { page, params? }`, `expect: { columns?, rows }`), a derived
 //! collector (`input: { collector, rows? }`, `expect: { entities: { <name>:
 //! n }, events?: [{ type, payload? }] }`; one that calls a model runs against the fixture model in the throwaway; an exec collector's isn't run — it is a program under the extension's `permissions.process`),
 //! a fact collector (`input: { collector, files: { <path>: <text> } }`,
@@ -186,7 +186,7 @@ fn example_fixture(
     Some((shown, doc))
 }
 
-/// The intent examples a throwaway oxplow runs: a lens's, a derived
+/// The intent examples a throwaway oxplow runs: a page's, a derived
 /// collector's. A provider's (`input: { command, input }`) run in its
 /// session.
 async fn examples(host: &Host, ext: &Extension, report: &mut TestReport) {
@@ -204,7 +204,7 @@ async fn examples(host: &Host, ext: &Extension, report: &mut TestReport) {
         let Some((shown, doc)) = example_fixture(&read, &rel, &example.name) else {
             report.warnings.push(format!(
                 "{rel}/extension.yaml:1: intent example `{}` has no fixture, so it isn't run — fix: \
-                 add fixtures/{}.yaml with its `input` (`{{ lens, params?, rows? }}`, `{{ collector, rows? }}`, a fact \
+                 add fixtures/{}.yaml with its `input` (`{{ page, params?, rows? }}`, `{{ collector, rows? }}`, a fact \
                  collector's `{{ collector, files }}`, `{{ event }}`, `{{ job, intentKey, request }}`, \
                  `{{ component }}`, `{{ form }}`, or a provider's `{{ command, input }}`) and `expect`",
                 example.name, example.name
@@ -246,9 +246,12 @@ async fn examples(host: &Host, ext: &Extension, report: &mut TestReport) {
         } else {
             continue;
         }
-        if let Some(slug) = ex.input.get("lens").and_then(Value::as_str) {
-            report.ran.push(format!("example {}", ex.name));
-            lens_example(host, ext, &ex, slug, report).await;
+        if ex.input.get("lens").is_some() {
+            report.errors.push(format!(
+                "{shown}:1: example `{}` runs a lens; lenses are pages now — fix: \
+                 `{{ page: <slug>, params? }}` with `expect.loaders`",
+                ex.name
+            ));
         } else if let Some(page) = ex.input.get("page").and_then(Value::as_str) {
             report.ran.push(format!("example {}", ex.name));
             page_example(host, ext, &ex, page, report).await;
@@ -289,12 +292,12 @@ async fn examples(host: &Host, ext: &Extension, report: &mut TestReport) {
             command_example(host, &ex, cmd, report).await;
         } else if ex.input.get("command").is_none() || ext.providers.is_empty() {
             report.errors.push(format!(
-                "{shown}:1: example `{}`'s `input` names no lens, page, collector, command, effect, \
+                "{shown}:1: example `{}`'s `input` names no page, collector, command, effect, \
                  event, job, component, form, effort policy, event type, wikilink or provider command — \
-                 fix: `{{ lens: <slug>, params?, rows? }}`, `{{ page: <slug>, params? }}` (with `given:`), `{{ collector: <id>, rows?, event? }}`, \
+                 fix: `{{ page: <slug>, params? }}` (with `given:`), `{{ collector: <id>, rows?, event? }}`, \
                  `{{ command: <name>, input }}`, `{{ effect: <id>, event: {{ type, payload }} }}` \
                  (a dry run), `{{ event: {{ type, payload }} }}` (logged, and what reacts runs), \
-                 `{{ job: <id>, intentKey, request }}`, `{{ component: <id>, items?, queries?, invokes? }}`, `{{ form: <page>, node?, params? }}`, \
+                 `{{ job: <id>, intentKey, request }}`, `{{ component: <id>, items?, invokes? }}`, `{{ form: <page>, node?, params? }}`, \
                  `{{ implementation: <id>, event: {{ type, payload, anchors? }} }}`, \
                  `{{ event_type, v?, payload }}`, `{{ wikilink }}`, or (with a provider) \
                  `{{ command, input }}`",
@@ -304,7 +307,7 @@ async fn examples(host: &Host, ext: &Extension, report: &mut TestReport) {
     }
 }
 
-/// Why an example's target isn't here: the lens, form, job, component,
+/// Why an example's target isn't here: the page, form, job, component,
 /// effect, collector or command it names was withheld because an import is
 /// unavailable. `None` when it's here, or wasn't withheld.
 fn withheld_target(ext: &Extension, input: &Value) -> Option<String> {
@@ -315,8 +318,6 @@ fn withheld_target(ext: &Extension, input: &Value) -> Option<String> {
             .unwrap_or(name)
     });
     let target = [
-        (Kind::Lens, named("lens")),
-        (Kind::Lens, named("form")),
         (Kind::Page, named("page")),
         (Kind::Page, named("form")),
         (Kind::Job, named("job")),
@@ -419,9 +420,8 @@ fn unsupported(ext: &Extension) -> Vec<String> {
             out.push(format!("{n} {what}"));
         }
     };
-    note(ext.pages.len(), "page(s)");
     note(ext.panels.len(), "panel(s)");
-    note(ext.ui.slots.len(), "slot mount(s)");
+    note(ext.ui.page_slots.len(), "slot mount(s)");
     note(ext.ui.decorators.len(), "decorator(s)");
     note(ext.ui.replacements.len(), "replacement(s)");
     note(ext.skills.len(), "skill(s)");
@@ -921,12 +921,13 @@ async fn run_steps(
 }
 
 /// Load component `id` as its frame would, then ask what the fixture asks
-/// (`input: { component, lens?, items?: [title], queries?: [{ asset,
-/// params? }], invokes?: [{ command, input? }] }`): `items` are
-/// work items filed first (`oxplow:oxplow/work_item?id=tsk1&provider=oxplow`, …); each query's rows and each
-/// invoke's outcome — what the command answers when the component calls it —
-/// against `expect: { queries?: [{ rows }], invokes?: [{ ok?,
-/// refused? }] }`. The frame itself isn't drawn here.
+/// (`input: { component, items?: [title], invokes?: [{ command, input? }]
+/// }`): `items` are work items filed first
+/// (`oxplow:oxplow/work_item?id=tsk1&provider=oxplow`, …); each invoke's
+/// outcome — what the command answers when the component calls it —
+/// against `expect: { invokes?: [{ ok?, refused? }] }`. The data a
+/// component draws is its page's loaders: a page example tests those. The
+/// frame itself isn't drawn here.
 async fn component_example(
     host: &Host,
     ext: &Extension,
@@ -934,12 +935,9 @@ async fn component_example(
     id: &str,
     report: &mut TestReport,
 ) {
-    use oxplow_app::lens_actions::{
-        invoke_component_command, load_component, run_component_query, ComponentInvoke,
-    };
+    use oxplow_app::viz_actions::{invoke_component_command, load_component, ComponentInvoke};
     let shown = ex.shown;
-    // The component itself: a lens or a page may show it; it acts as
-    // itself either way.
+    // The component itself: it acts as itself, whichever page shows it.
     let key = format!("{}/{id}", ext.name);
     let version = match load_component(&host.svc, &host.root, &key) {
         Ok(v) => v,
@@ -975,38 +973,6 @@ async fn component_example(
             return;
         }
     }
-    let ctx = oxplow_app::extensions::ViewContext::default();
-    let mut queries = Vec::new();
-    for q in ex
-        .input
-        .get("queries")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default()
-    {
-        let asset = q
-            .get("asset")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string();
-        let params = q
-            .get("params")
-            .and_then(Value::as_object)
-            .map(|o| {
-                o.iter()
-                    .map(|(k, v)| (k.clone(), oxplow_db::SqlCell::from(v.clone())))
-                    .collect()
-            })
-            .unwrap_or_default();
-        queries.push(
-            match run_component_query(&host.svc, &host.root, &key, &asset, params, &ctx, &version)
-                .await
-            {
-                Ok(run) => json!({ "rows": run.result.rows.len() }),
-                Err(e) => json!({ "error": e.to_string() }),
-            },
-        );
-    }
     let mut invokes = Vec::new();
     for i in ex
         .input
@@ -1040,23 +1006,21 @@ async fn component_example(
             Err(e) => json!({ "ok": false, "error": e.to_string() }),
         });
     }
-    let got = shaped_like(
-        &ex.expect,
-        &json!({ "queries": queries, "invokes": invokes }),
-    );
+    let got = shaped_like(&ex.expect, &json!({ "invokes": invokes }));
     if let Some((path, want, got)) = first_mismatch(&ex.expect, &got) {
         report.errors.push(format!(
             "{shown}:1: component `{id}` answered {got} at `{path}`, the example expects {want} \
-             — fix: the component's declarations, or the example's `expect` (`{{ queries: [{{ \
-             rows }}], invokes: [{{ ok, refused? }}] }}`)"
+             — fix: the component's declarations, or the example's `expect` (`{{ invokes: [{{ \
+             ok, refused? }}] }}`)"
         ));
     }
 }
 
-/// Open form lens `slug` as a person would (`input: { form, params? }`):
-/// `expect: { values?, fixed?, fields? }` against the values the fields
-/// start from (the lens's `defaults`, its first row laid over them), the
-/// fields shown read-only, and the fields shown (`null`: all).
+/// Open page `slug`'s form as a person would (`input: { form, node?,
+/// params? }`): `expect: { values?, fixed?, fields? }` against the values
+/// the fields start from (the form's `defaults`, its loader's first row
+/// laid over them), the fields shown read-only, and the fields shown
+/// (`null`: all).
 async fn form_example(
     host: &Host,
     ext: &Extension,
@@ -1077,15 +1041,7 @@ async fn form_example(
         .unwrap_or_default();
     let start = match ext.page_files.iter().find(|p| p.slug == slug) {
         Some(page) => page_form_start(host, page, ex.input.get("node"), params).await,
-        None => oxplow_app::lens_actions::form_start(
-            &host.svc,
-            &host.root,
-            &format!("{}/{slug}", ext.name),
-            params,
-            &oxplow_app::extensions::ViewContext::default(),
-        )
-        .await
-        .map_err(|e| e.to_string()),
+        None => Err(format!("`{slug}` isn't one of this extension's pages")),
     };
     let start = match start {
         Ok(start) => start,
@@ -1117,7 +1073,7 @@ async fn page_form_start(
     page: &oxplow_app::pages::schema::Page,
     node: Option<&Value>,
     params: std::collections::BTreeMap<String, oxplow_db::SqlCell>,
-) -> Result<oxplow_app::lens_actions::FormStart, String> {
+) -> Result<oxplow_app::viz_actions::FormStart, String> {
     use oxplow_app::pages::schema::NodeKind;
     let node = match node.and_then(Value::as_str) {
         Some(id) => id.to_string(),
@@ -1125,8 +1081,8 @@ async fn page_form_start(
             .nodes()
             .into_iter()
             .find(|n| {
-                matches!(&n.kind, NodeKind::Viz { lens, .. }
-                    if lens.viz == oxplow_app::extensions::LensViz::Form)
+                matches!(&n.kind, NodeKind::Viz { config: cfg, .. }
+                    if cfg.viz == oxplow_app::extensions::Viz::Form)
             })
             .map(|n| n.id.clone())
             .ok_or_else(|| "the page has no form node".to_string())?,
@@ -1163,59 +1119,6 @@ struct Example<'a> {
     expect: Value,
     /// Steps run before it (`given:`, beside `input`, or inside it).
     given: Value,
-}
-
-/// Run lens `slug` with the fixture's params; its columns and row count
-/// against `expect` (`$any` matches anything).
-async fn lens_example(
-    host: &Host,
-    ext: &Extension,
-    ex: &Example<'_>,
-    slug: &str,
-    report: &mut TestReport,
-) {
-    let (shown, expect) = (ex.shown, &ex.expect);
-    if !seed_rows(host, ext, ex, report).await {
-        return;
-    }
-    let params = ex
-        .input
-        .get("params")
-        .and_then(Value::as_object)
-        .map(|o| {
-            o.iter()
-                .map(|(k, v)| (k.clone(), oxplow_db::SqlCell::from(v.clone())))
-                .collect()
-        })
-        .unwrap_or_default();
-    let run = oxplow_app::extensions::run_lens(
-        &host.svc.sql,
-        &host.svc.extension_catalog,
-        &host.root,
-        &format!("{}/{slug}", ext.name),
-        params,
-        &oxplow_app::extensions::ViewContext::default(),
-    )
-    .await;
-    let run = match run {
-        Ok(run) => run,
-        Err(e) => {
-            report.errors.push(format!(
-                "{shown}:1: lens `{slug}` failed: {e} — fix: the lens, or the example's params"
-            ));
-            return;
-        }
-    };
-    let mut got = json!({ "rows": run.result.rows.len() });
-    if expect.get("columns").is_some() {
-        got["columns"] = json!(run.result.columns);
-    }
-    if let Some((path, want, got)) = first_mismatch(expect, &got) {
-        report.errors.push(format!(
-            "{shown}:1: lens `{slug}` returned {got} at `{path}`, the example expects {want} — \
-             fix: the lens, or the example's `expect` (`{{ columns?, rows: n | $any }}`)"
-        ));
-    }
 }
 
 /// A page run's node ids (`<embed>/<id>` inside an embed) with their kinds.
@@ -1370,14 +1273,7 @@ async fn page_example(
         }
     }
     if let Some(want) = ex.expect.get("text") {
-        match oxplow_app::pages::text::page_text(
-            &host.svc,
-            &host.root,
-            &run,
-            &oxplow_app::extensions::ViewContext::default(),
-        )
-        .await
-        {
+        match oxplow_app::pages::text::page_text(&host.svc, &host.root, &run).await {
             Err(e) => report.errors.push(format!(
                 "{shown}:1: page `{page}` has no text: {e} — fix: the page"
             )),
@@ -2949,7 +2845,7 @@ mod tests {
     }
 
     /// The tally extension: a starlark collector of `thing`s, a model and a
-    /// lens over them, a command noting one, a README and questions, and an
+    /// page over them, a command noting one, a README and questions, and an
     /// intent example per kind, each with its fixture.
     fn tally(root: &Path, collector_expect: &str, command_expect: &str) {
         write(
@@ -2961,7 +2857,7 @@ name: tally
 intent:
   purpose: Count things.
   examples:
-    - {{ name: labelled, input: {{ lens: labelled }}, expect: no labelled things yet }}
+    - {{ name: labelled, input: {{ page: labelled }}, expect: no labelled things yet }}
     - {{ name: things, input: {{ collector: things }}, expect: one thing per input row }}
     - {{ name: shell, input: {{ collector: shell }}, expect: whatever the shell says }}
 permissions: {{ sql: read, ai: true, process: true }}
@@ -3016,13 +2912,14 @@ commands:
         );
         write(
             root,
-            ".oxplow/extensions/tally/lenses/labelled.yaml",
-            "title: Labelled\nquery: SELECT id, label FROM v_tally_labelled\n",
+            ".oxplow/extensions/tally/pages/labelled.yaml",
+            "title: Labelled\ndata:\n  labelled: { sql: \"SELECT id, label FROM v_tally_labelled\" }\n\
+             view: { viz: table, from: labelled }\n",
         );
         write(
             root,
             ".oxplow/extensions/tally/fixtures/labelled.yaml",
-            "input: { lens: labelled }\nexpect: { columns: [id, label], rows: 0 }\n",
+            "input: { page: labelled }\nexpect: { loaders: { labelled: { columns: [id, label], rows: 0 } } }\n",
         );
         write(
             root,
@@ -3076,7 +2973,7 @@ commands:
     }
 
     /// P7.C6: `extension test` runs every kind's examples on a throwaway
-    /// oxplow — a lens's rows, a starlark collector's typed entities from
+    /// oxplow — a page's loader rows, a starlark collector's typed entities from
     /// its fixture rows, a command's composition against the real
     /// registry — and its questions may name its own commands. An exec
     /// collector's example isn't run (it needs a person's approval).
@@ -3157,8 +3054,9 @@ commands:
         );
         write(
             root,
-            ".oxplow/extensions/reader/lenses/seen.yaml",
-            "title: Seen\nquery: SELECT uri FROM import_ref('items')\n",
+            ".oxplow/extensions/reader/pages/seen.yaml",
+            "title: Seen\ndata:\n  seen: { sql: \"SELECT uri FROM import_ref('items')\" }\n\
+             view: { viz: table, from: seen }\n",
         );
     }
 
@@ -3655,8 +3553,6 @@ models:
     columns:
       - { name: uri, type: \"\", doc: The ref. }
       - { name: title, type: \"\", doc: Its title. }
-pages:
-  - { id: pr, title: Pull request, category: Work, lens: open }
 resources:
   - { name: pr, label: Pull request, params: { id: { required: true, pattern: '^[0-9]+$' } }, resolve: prs, wikilink: { prefix: pr, param: id }, icon: git-pull-request }
 ",
@@ -3683,8 +3579,9 @@ resources:
         );
         write(
             root,
-            ".oxplow/extensions/acme/lenses/open.yaml",
-            "title: Open\nquery: \"SELECT 1 AS n\"\n",
+            ".oxplow/extensions/acme/pages/pr.yaml",
+            "title: Pull request\ncategory: Work\nfor: acme/pr\ndefault: true\nparams: [{ name: id }]\n\
+             data:\n  n: { sql: \"SELECT 1 AS n\" }\nview: { viz: table, from: n }\n",
         );
         write(
             root,
@@ -3730,11 +3627,11 @@ resources:
         );
     }
 
-    /// A `viz: form` lens is opened as a person would: its defaults bound
-    /// from the params, its fixed and shown fields; a wrong expectation is
-    /// a finding at its fixture.
+    /// A page's `viz: form` node is opened as a person would: its defaults
+    /// bound from the params, its fixed and shown fields; a wrong
+    /// expectation is a finding at its fixture.
     #[tokio::test(flavor = "multi_thread")]
-    async fn extension_test_opens_a_form_lens_and_compares_what_it_starts_with() {
+    async fn extension_test_opens_a_form_page_and_compares_what_it_starts_with() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         write(
@@ -3750,8 +3647,9 @@ intent:
         );
         write(
             root,
-            ".oxplow/extensions/editor/lenses/edit-item.yaml",
-            "title: Edit\nviz: form\nparams: [{ name: uri }]\nquery: SELECT title, body FROM v_work_item WHERE uri = :uri\nform: { command: oxplow.work_item.update, defaults: { uri: '{{param.uri}}' }, fixed: [uri], fields: [title, body] }\n",
+            ".oxplow/extensions/editor/pages/edit-item.yaml",
+            "title: Edit\nparams: [{ name: uri }]\ndata:\n  item: { sql: \"SELECT title, body FROM v_work_item WHERE uri = :uri\" }\n\
+             view: { viz: form, from: item, form: { command: oxplow.work_item.update, defaults: { uri: '{{param.uri}}' }, fixed: [uri], fields: [title, body] } }\n",
         );
         write(
             root,
@@ -3887,7 +3785,9 @@ expect: {expect}
         let root = dir.path();
         pager(
             root,
-            "SELECT title FROM v_work_item WHERE state = :state AND nope = 1",
+            // Runs at the page's defaults (no state); the answer's state
+            // isn't JSON, so its run fails.
+            "SELECT title FROM v_work_item WHERE json_extract(:state, '$') IS NULL OR state = :state",
             "{ state: open }",
             "{ loaders: { items: { rows: $any } } }",
         );

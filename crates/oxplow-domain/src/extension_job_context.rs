@@ -316,10 +316,10 @@ fn valid_actor(actor: &Actor, depth: usize) -> Result<bool, JobContextError> {
             fence,
             ..
         } => valid_job_actor(job_id, *attempt, *fence),
-        Actor::Lens {
-            lens_id,
+        Actor::Page {
+            page_id,
             on_behalf_of,
-        } => valid_label(lens_id) && valid_actor(on_behalf_of, depth + 1)?,
+        } => valid_label(page_id) && valid_actor(on_behalf_of, depth + 1)?,
         Actor::Component {
             component,
             on_behalf_of,
@@ -361,7 +361,7 @@ fn actor_anchors_match(actor: &Actor, anchors: &Anchors) -> bool {
             actor_id_matches(*stream_id, anchors.stream_id)
                 && actor_id_matches(*thread_id, anchors.thread_id)
         }
-        Actor::Lens { on_behalf_of, .. } | Actor::Component { on_behalf_of, .. } => {
+        Actor::Page { on_behalf_of, .. } | Actor::Component { on_behalf_of, .. } => {
             actor_anchors_match(on_behalf_of, anchors)
         }
     }
@@ -413,8 +413,8 @@ enum WireActor {
         thread_id: Option<ThreadId>,
         stream_id: Option<StreamId>,
     },
-    Lens {
-        lens_id: String,
+    Page {
+        page_id: String,
         on_behalf_of: Box<WireActor>,
     },
     Component {
@@ -450,12 +450,12 @@ impl From<WireActor> for Actor {
                 thread_id,
                 stream_id,
             },
-            WireActor::Lens {
-                lens_id,
+            WireActor::Page {
+                page_id,
                 on_behalf_of,
                 ..
-            } => Self::Lens {
-                lens_id,
+            } => Self::Page {
+                page_id,
                 on_behalf_of: Box::new((*on_behalf_of).into()),
             },
             WireActor::Component {
@@ -524,11 +524,11 @@ fn valid_wire_actor(
                 && actor_id_matches(*thread_id, anchors.thread_id)
                 && actor_id_matches(*session_id, anchors.agent_session_id)
         }
-        WireActor::Lens {
-            lens_id,
+        WireActor::Page {
+            page_id,
             on_behalf_of,
             ..
-        } => valid_label(lens_id) && valid_wire_actor(on_behalf_of, depth + 1, anchors)?,
+        } => valid_label(page_id) && valid_wire_actor(on_behalf_of, depth + 1, anchors)?,
         WireActor::Component {
             component,
             on_behalf_of,

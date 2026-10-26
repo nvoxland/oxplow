@@ -1,9 +1,0 @@
-title: AI
-description: "The models oxplow itself calls — for summaries, typed questions and extensions. Your coding agents are separate."
-viz: document
-sections:
-  - { lens: ai-providers }
-  - { lens: ai-provider-form }
-  - { lens: ai-roles }
-  - { lens: ai-calls }
-hidden: true

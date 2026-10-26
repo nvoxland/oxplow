@@ -1,7 +1,7 @@
 /**
  * What a drop onto the markdown editor names, and what a paste is
  * (`.context/markdown.md` "Drop and paste"): an "Add to agent context" drag
- * (`CONTEXT_REF_MIME`: a file, a wiki page, a lens row's ref, a work item)
+ * (`CONTEXT_REF_MIME`: a file, a wiki page, a page row's ref, a work item)
  * or a work-item drag (`WORK_ITEM_DRAG_MIME`, several items) names refs the
  * editor puts in as links (`refLinkOf`); a pasted oxplow URI is a ref, a
  * pasted web URL a link for the selection. Pure.
@@ -54,7 +54,7 @@ function contextRefUri(ref: ContextRef | null): DroppedRef | null {
     case "ref":
       return { uri: ref.ref, title: ref.ref };
     default:
-      // A lens with params has no URI to link.
+      // A page with params has no URI to link.
       return null;
   }
 }

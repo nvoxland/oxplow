@@ -16,17 +16,17 @@ type Query = (sql: string) => Promise<SqlQueryResult>;
 function setup(p: PageParam, value: SqlCell, query?: Query) {
   const applied: [string, SqlCell][] = [];
   const view = render(<ParamRow param={p} value={value} onApply={(n, v) => applied.push([n, v])} query={query} />);
-  const valueButton = () => view.getByTestId(`lens-param-${p.name}-value`);
-  const edit = () => view.getByTestId(`lens-param-${p.name}-edit`);
+  const valueButton = () => view.getByTestId(`page-param-${p.name}-value`);
+  const edit = () => view.getByTestId(`page-param-${p.name}-edit`);
   return { applied, view, valueButton, edit };
 }
 
 // At rest a row is its label beside its value; nothing to edit is drawn.
 test("a row shows its label and its value, and Any when it has none", () => {
   const { view, valueButton } = setup(param({ name: "author_name", type: "text" }), null);
-  expect(view.getByTestId("lens-param-author_name").textContent).toContain("Author name");
+  expect(view.getByTestId("page-param-author_name").textContent).toContain("Author name");
   expect(valueButton().textContent).toBe("Any");
-  expect(view.queryByTestId("lens-param-author_name-edit")).toBeNull();
+  expect(view.queryByTestId("page-param-author_name-edit")).toBeNull();
 });
 
 test("clicking the value edits text in place: Enter applies and closes, focus back on the value", () => {
@@ -37,7 +37,7 @@ test("clicking the value edits text in place: Enter applies and closes, focus ba
   fireEvent.change(input, { target: { value: "42" } });
   fireEvent.keyDown(input, { key: "Enter" });
   expect(applied).toEqual([["q", 42]]);
-  expect(view.queryByTestId("lens-param-q-edit")).toBeNull();
+  expect(view.queryByTestId("page-param-q-edit")).toBeNull();
   expect(valueButton().textContent).toBe("42");
   expect(document.activeElement).toBe(valueButton());
 });
@@ -48,7 +48,7 @@ test("Escape closes an edit and keeps the value from before it opened", () => {
   fireEvent.change(edit(), { target: { value: "zzz" } });
   fireEvent.keyDown(edit(), { key: "Escape" });
   expect(applied).toEqual([]);
-  expect(view.queryByTestId("lens-param-q-edit")).toBeNull();
+  expect(view.queryByTestId("page-param-q-edit")).toBeNull();
   expect(valueButton().textContent).toBe("a");
 });
 
@@ -60,14 +60,14 @@ test("a choice shows its option's label and applies the one picked", () => {
   expect([...(edit() as HTMLSelectElement).options].map((o) => o.textContent)).toEqual(["Recent", "Most visited"]);
   fireEvent.change(edit(), { target: { value: "b" } });
   expect(applied).toEqual([["mode", "b"]]);
-  expect(view.queryByTestId("lens-param-mode-edit")).toBeNull();
+  expect(view.queryByTestId("page-param-mode-edit")).toBeNull();
   expect(valueButton().textContent).toBe("Most visited");
 });
 
-// A choice whose options a lens lists runs that lens with the page's
+// A choice whose options a page lists runs that page with the page's
 // values it declares, shows the option's label, groups them, and follows
-// the lens's reads.
-test("a dynamic choice loads its options from its lens with the page's params, grouped", async () => {
+// the page's reads.
+test("a dynamic choice loads its options from its page with the page's params, grouped", async () => {
   const runs: [string, Record<string, SqlCell>, string | null][] = [];
   const source = {
     params: async () => ["start", "stream_id"],
@@ -87,11 +87,11 @@ test("a dynamic choice loads its options from its lens with the page's params, g
   const p = param({ name: "end", type: "choice", options_from: "x/ends" });
   const applied: [string, SqlCell][] = [];
   const view = render(<ParamRow param={p} value="snap:2" values={{ start: "snap:1", end: "snap:2", other: 1 }} streamId="str1" onApply={(n, v) => applied.push([n, v])} optionsSource={source} />);
-  const valueButton = () => view.getByTestId("lens-param-end-value");
+  const valueButton = () => view.getByTestId("page-param-end-value");
   await waitFor(() => expect(valueButton().textContent).toBe("Second"));
   expect(runs).toEqual([["x/ends", { start: "snap:1" }, "str1"]]);
   fireEvent.click(valueButton());
-  const edit = view.getByTestId("lens-param-end-edit") as HTMLSelectElement;
+  const edit = view.getByTestId("page-param-end-edit") as HTMLSelectElement;
   expect([...edit.querySelectorAll("optgroup")].map((g) => g.label)).toEqual(["Snapshots"]);
   expect([...edit.options].map((o) => o.textContent)).toEqual(["Working tree", "First", "Second"]);
   fireEvent.change(edit, { target: { value: "working" } });
@@ -140,7 +140,7 @@ test("a search's Escape puts back the value it had when it opened", async () => 
   fireEvent.click(valueButton());
   fireEvent.change(edit(), { target: { value: "newer" } });
   fireEvent.keyDown(edit(), { key: "Escape" });
-  expect(view.queryByTestId("lens-param-q-edit")).toBeNull();
+  expect(view.queryByTestId("page-param-q-edit")).toBeNull();
   await act(async () => new Promise((r) => setTimeout(r, 300)));
   expect(applied).toEqual([["q", "new"]]);
 });
@@ -171,13 +171,13 @@ test("Custom… opens a popover with two dates; Escape closes it with focus on t
   const { applied, valueButton, edit, view } = setup(p, "30d");
   fireEvent.click(valueButton());
   fireEvent.change(edit(), { target: { value: "__custom__" } });
-  const pop = view.getByTestId("lens-param-range-custom");
+  const pop = view.getByTestId("page-param-range-custom");
   expect(pop.getAttribute("role")).toBe("dialog");
-  fireEvent.change(view.getByTestId("lens-param-range-from"), { target: { value: "2026-10-01" } });
+  fireEvent.change(view.getByTestId("page-param-range-from"), { target: { value: "2026-10-01" } });
   expect(applied).toEqual([["range", "2026-10-01.."]]);
-  fireEvent.keyDown(view.getByTestId("lens-param-range-from"), { key: "Escape" });
-  expect(view.queryByTestId("lens-param-range-custom")).toBeNull();
-  expect(view.queryByTestId("lens-param-range-edit")).toBeNull();
+  fireEvent.keyDown(view.getByTestId("page-param-range-from"), { key: "Escape" });
+  expect(view.queryByTestId("page-param-range-custom")).toBeNull();
+  expect(view.queryByTestId("page-param-range-edit")).toBeNull();
   expect(document.activeElement).toBe(valueButton());
 });
 
@@ -188,12 +188,12 @@ test("a custom range shows its two ends", () => {
 
 test("a row whose value isn't its default is marked changed", () => {
   const p = param({ name: "range", type: "date_range", default: "30d" });
-  expect(setup(p, "30d").view.getByTestId("lens-param-range").className).not.toContain("ox-param-changed");
+  expect(setup(p, "30d").view.getByTestId("page-param-range").className).not.toContain("ox-param-changed");
   cleanup();
-  expect(setup(p, "7d").view.getByTestId("lens-param-range").className).toContain("ox-param-changed");
+  expect(setup(p, "7d").view.getByTestId("page-param-range").className).toContain("ox-param-changed");
   cleanup();
   // A bool's echo is 0/1 against a default of false.
-  expect(setup(param({ name: "m", type: "bool", default: false }), 0).view.getByTestId("lens-param-m").className).not.toContain("ox-param-changed");
+  expect(setup(param({ name: "m", type: "bool", default: false }), 0).view.getByTestId("page-param-m").className).not.toContain("ox-param-changed");
 });
 
 test("a row shows the value it applied before the run echoes it", () => {
@@ -208,9 +208,9 @@ test("a row shows the value it applied before the run echoes it", () => {
 test("a ParamList shows six rows, the rest behind More (N), and a changed one always", () => {
   const params = Array.from({ length: 9 }, (_, i) => param({ name: `p${i}`, type: "text" }));
   const view = render(<ParamList params={params} values={{ p8: "set" }} onApply={() => {}} />);
-  const shown = () => params.filter((p) => view.queryByTestId(`lens-param-${p.name}`) !== null).map((p) => p.name);
+  const shown = () => params.filter((p) => view.queryByTestId(`page-param-${p.name}`) !== null).map((p) => p.name);
   expect(shown()).toEqual(["p0", "p1", "p2", "p3", "p4", "p5", "p8"]);
-  const more = view.getByTestId("lens-params-more");
+  const more = view.getByTestId("page-params-more");
   expect(more.textContent).toBe("More (2)");
   fireEvent.click(more);
   expect(shown()).toEqual(params.map((p) => p.name));

@@ -1,8 +1,8 @@
 /// A page file's run, drawn (`.context/pages-and-tabs.md` "Page files"):
 /// the server resolved the tree (a switch to its child in view, an embed
 /// to its page's run), so this draws what `RunNode`s it was given, each
-/// looked up by id in the run's page. A viz node is drawn by the lens viz
-/// components (`LensResultView`) as the `LensRun` `nodeRunOf` makes of it,
+/// looked up by id in the run's page. A viz node is drawn by the page viz
+/// components (`VizView`) as the `VizRun` `nodeRunOf` makes of it,
 /// its actions pressed on the open run (`useNodeActions`).
 ///
 /// Every node's root carries `data-node` with its id (an embed's nodes
@@ -15,22 +15,22 @@ import { Replaceable } from "../components/Replaceable.js";
 import { Section } from "../kit/Section.js";
 import { Tile, TileGrid, TileSlot } from "../kit/Tiles.js";
 import type { PickedRow } from "./railGroups.js";
-import { FormSourceContext } from "../lens/formSource.js";
-import { LensActionRunnerContext } from "../lens/lensActionRunner.js";
-import { ActionForm, LensResultView, useLensActions } from "../lens/LensResultView.js";
-import { offeredWholeLens } from "../lens/lensActions.js";
+import { FormSourceContext } from "../viz/formSource.js";
+import { VizActionRunnerContext } from "../viz/vizActionRunner.js";
+import { ActionForm, VizView, useVizActions } from "../viz/VizView.js";
+import { offeredWholePage } from "../viz/vizActions.js";
 import { CommandConfirm } from "../components/CommandConfirm.js";
-import { nodeById, nodeRunOf } from "../lens/nodeRun.js";
-import { foldEmpty } from "../lens/lensModel.js";
+import { nodeById, nodeRunOf } from "../viz/nodeRun.js";
+import { foldEmpty } from "../viz/vizModel.js";
 import type { TabRef } from "../tabs/tabState.js";
 import type { Node, Page, PageRun, RunNode, SqlCell } from "../tauri-bridge/generated/bindings.js";
 import { PageActionContext, PageFormsContext, useNodeActions, useNodeForms } from "./useNodeActions.js";
 import { usePageBranches } from "./pageBranches.js";
 import { ComponentNode } from "./PageComponent.js";
-import { pageData } from "../lens/componentBridge.js";
+import { pageData } from "../viz/componentBridge.js";
 import { declaredParams, namedLoader, parsePageRef, usePageReads } from "./pageReads.js";
-import { VizPagesContext, type ExpansionProps, type VizPages } from "../lens/vizPages.js";
-import { HostedViewContext } from "../lens/hostedView.js";
+import { VizPagesContext, type ExpansionProps, type VizPages } from "../viz/vizPages.js";
+import { HostedViewContext } from "../viz/hostedView.js";
 import { usePageRunsStore, usePageRunWith } from "../pageRuns.js";
 import { DashboardGrid } from "./DashboardGrid.js";
 
@@ -145,7 +145,7 @@ function NodeView(props: NodeViewProps) {
   const id = `${prefix}${at.id}`;
   const own = at.error ? <NodeError message={at.error} /> : def ? <NodeBody {...props} def={def} id={id} /> : <Unknown {...props} />;
   // A node another extension's provider may take the place of
-  // (`replaceable: work_item.board`): the same choice as a lens part's.
+  // (`replaceable: work_item.board`): the same choice as a page part's.
   const body = def?.replaceable ? (
     <Replaceable target={def.replaceable} props={valued(run.params)} streamId={props.streamId ?? null} onOpenPage={props.onOpenPage} fallback={own} />
   ) : (
@@ -173,7 +173,7 @@ function NodeView(props: NodeViewProps) {
  * branch: terminals only start once their surface has a visible size. */
 function fillsNode(run: PageRun, at: RunNode): boolean {
   const def = nodeById(run.page, at.id);
-  if (def?.kind === "viz") return def.lens.fills;
+  if (def?.kind === "viz") return def.config.fills;
   return (def?.kind === "stack" || def?.kind === "switch") && at.children.some((child) => fillsNode(run, child));
 }
 
@@ -193,7 +193,7 @@ function NodeBody(props: NodeViewProps & { def: Node; id: string }) {
   const kids = (placement: Placement) => at.children.map((c) => <NodeView key={c.id} {...props} at={c} placement={placement} />);
   switch (def.kind) {
     case "stack": {
-      // Titled sections with nothing to show fold into one line, as a lens
+      // Titled sections with nothing to show fold into one line, as a page
       // document's parts do (`foldEmpty`).
       const folded = emptySections(props.run, at);
       const shown = at.children.filter((c) => !folded.some((f) => f.id === c.id));
@@ -254,11 +254,11 @@ function NodeBody(props: NodeViewProps & { def: Node; id: string }) {
 function EmbeddedActions({ embed, node, runId, streamId }: { embed: PageRun; node: string; runId: string | null; streamId: string | null }) {
   const runner = useNodeActions(runId, node);
   const forms = useNodeForms(runId, node);
-  const target = useMemo(() => ({ lens: { id: embed.page.id }, params: embed.params }), [embed.page.id, embed.params]);
-  const actions = useLensActions(target, streamId, runner);
+  const target = useMemo(() => ({ config: { id: embed.page.id }, params: embed.params }), [embed.page.id, embed.params]);
+  const actions = useVizActions(target, streamId, runner);
   const first = embed.page.loaders[0]?.name;
   const firstResult = first ? embed.loaders[first]?.result : undefined;
-  const offered = embed.page.actions.filter((a) => offeredWholeLens(a, firstResult ?? { columns: [], rows: [] }));
+  const offered = embed.page.actions.filter((a) => offeredWholePage(a, firstResult ?? { columns: [], rows: [] }));
   if (offered.length === 0 && !actions.pending && !actions.form) return null;
   return (
     <>
@@ -269,20 +269,20 @@ function EmbeddedActions({ embed, node, runId, streamId }: { embed: PageRun; nod
           details={actions.pending.details}
           onConfirm={actions.confirm}
           onCancel={actions.cancel}
-          testIdPrefix="lens-action-confirm"
+          testIdPrefix="viz-action-confirm"
         />
       ) : null}
       {actions.form ? (
-        <LensActionRunnerContext.Provider value={runner}>
+        <VizActionRunnerContext.Provider value={runner}>
           <FormSourceContext.Provider value={forms}>
             <ActionForm run={target} streamId={streamId} pressed={actions.form} onClose={actions.closeForm} />
           </FormSourceContext.Provider>
-        </LensActionRunnerContext.Provider>
+        </VizActionRunnerContext.Provider>
       ) : null}
       {offered.length > 0 ? (
-        <div data-testid="lens-part-actions" className="ox-toolbar">
+        <div data-testid="viz-part-actions" className="ox-toolbar">
           {offered.map((a) => (
-            <button key={a.id} type="button" data-testid={`lens-action-${a.id}`} disabled={actions.busy !== null} title={a.command} onClick={() => actions.run(a, null)}>
+            <button key={a.id} type="button" data-testid={`viz-action-${a.id}`} disabled={actions.busy !== null} title={a.command} onClick={() => actions.run(a, null)}>
               {actions.busy === a.id ? `${a.label}…` : a.label}
             </button>
           ))}
@@ -305,16 +305,16 @@ function VizNode(props: NodeViewProps & { def: Node; id: string }) {
   const forms = useNodeForms(runId, id);
   const pages = useNodePages(run, def);
   const componentView = useContext(HostedViewContext);
-  const lensRun = nodeRunOf(run, def);
-  if (!lensRun || def.kind !== "viz") return null;
+  const vizRun = nodeRunOf(run, def);
+  if (!vizRun || def.kind !== "viz") return null;
   const failed = def.from !== null ? run.loaders[def.from]?.error : null;
   if (failed) return <NodeError message={failed} />;
   return (
-    <LensActionRunnerContext.Provider value={runner}>
+    <VizActionRunnerContext.Provider value={runner}>
     <FormSourceContext.Provider value={forms}>
     <VizPagesContext.Provider value={pages}>
-      <LensResultView
-        run={lensRun}
+      <VizView
+        run={vizRun}
         streamId={streamId}
         onOpenPage={onOpenPage}
         onSetParam={onSetParam}
@@ -324,7 +324,7 @@ function VizNode(props: NodeViewProps & { def: Node; id: string }) {
       />
     </VizPagesContext.Provider>
     </FormSourceContext.Provider>
-    </LensActionRunnerContext.Provider>
+    </VizActionRunnerContext.Provider>
   );
 }
 
@@ -334,10 +334,10 @@ function emptySections(run: PageRun, at: RunNode): { id: string; title: string }
   const candidates = at.children.flatMap((c) => {
     const def = nodeById(run.page, c.id);
     if (!def || def.kind !== "viz" || !def.title || def.replaceable || c.error) return [];
-    const lensRun = nodeRunOf(run, def);
+    const vizRun = nodeRunOf(run, def);
     const loader = def.from !== null ? run.loaders[def.from] : undefined;
-    if (!lensRun || !loader) return [];
-    return [{ id: c.id, title: def.title, run: lensRun, error: loader.error }];
+    if (!vizRun || !loader) return [];
+    return [{ id: c.id, title: def.title, run: vizRun, error: loader.error }];
   });
   return foldEmpty(candidates).empty.map(({ id, title }) => ({ id, title }));
 }
@@ -350,12 +350,12 @@ function useNodePages(run: PageRun, def: Node): VizPages {
   const forms = useContext(PageFormsContext);
   return useMemo(() => {
     const host = { pageRun: run, node: def, store, press, forms };
-    const custom = def.kind === "viz" && def.lens.viz === "custom";
+    const custom = def.kind === "viz" && def.config.viz === "custom";
     return {
       Expansion: PageExpansion,
-      useBranches: (lensRun, open, streamId, maxRows) => usePageBranches(host, lensRun, open, streamId, maxRows),
+      useBranches: (vizRun, open, streamId, maxRows) => usePageBranches(host, vizRun, open, streamId, maxRows),
       // A `custom` viz is fed every loader of its page, its own rows its run.
-      componentData: custom ? pageData(run, def.lens.custom?.props ?? null, nodeRunOf(run, def)) : null,
+      componentData: custom ? pageData(run, def.config.custom?.props ?? null, nodeRunOf(run, def)) : null,
     };
   }, [run, def, store, press, forms]);
 }

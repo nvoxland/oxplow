@@ -1,8 +1,0 @@
-title: Planning
-description: What's ready to pick up, what's parked in the backlog, and the notes that changed lately.
-viz: document
-sections:
-  - { lens: ready-tasks }
-  - { lens: backlog-tasks }
-  - { lens: recent-notes }
-launcher: { category: Work }

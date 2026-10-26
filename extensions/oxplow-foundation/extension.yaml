@@ -20,13 +20,13 @@ custom_components:
   - { id: timeline, title: Timeline, bundle: dist/timeline, sql: read }
   # Explore Data: an SQL box and a viz picker over the models; oxplow draws
   # the result under it with its own components (`showView`: an inline page).
-  - { id: explore-data, title: Explore Data, bundle: dist/explore-data, sql: read, commands: [oxplow.lens.draft_with_agent] }
+  - { id: explore-data, title: Explore Data, bundle: dist/explore-data, sql: read, commands: [oxplow.page.draft_with_agent] }
   # Settings → Integrations: hand-written (no build), so it lives beside the
   # built components, not in dist/.
   - { id: integrations, title: Integrations, bundle: components/integrations, sql: read, commands: [oxplow.provider.check_instance, oxplow.provider.set_instance, oxplow.provider.add_instance, oxplow.provider.turn_off_here, oxplow.provider.remove_instance, oxplow.provider.set_credential, oxplow.provider.begin_sign_in, oxplow.provider.complete_sign_in, oxplow.provider.cancel_sign_in, oxplow.provider.sync] }
 intent:
   purpose: >-
-    Declare oxplow's own commands — what a person, an agent and a lens can
+    Declare oxplow's own commands — what a person, an agent and a page can
     do to oxplow's records, the repository and the project — over the
     scopes' operations, so nothing about them is special to core.
   origin: null
@@ -157,75 +157,6 @@ metrics:
   - {"key":"oxplow.analysis.warnings","title":"Analysis warnings","sourceMeasure":"oxplow.lint_hit","aggregation":"count","filter":{"severity":"warning"},"unit":"count","direction":"lower-better","displayKind":"gauge","category":"static-quality","description":"Static-analysis warnings in the latest run.","sliceableDims":["oxplow.branch","oxplow.vcs_rev"]}
   - {"key":"work.tasks_completed","title":"Tasks completed","entity":"v_work_item","where":"state = 'done'","time":"closed_at","aggregation":"count","unit":"tasks","category":"operational","description":"Work items done, by the day they were closed."}
   - {"key":"work.open_tasks","title":"Open tasks","entity":"v_work_item","where":"state IN ('todo', 'in_progress', 'blocked')","aggregation":"count","unit":"tasks","category":"operational","description":"Work items ready, in progress or blocked, captured over time."}
-# A thread's answers: what its agents showed with `oxplow_show_lens`.
-panels:
-  - { id: answers, title: Answers, icon: message-square, scope: thread, body: thread-answers, count: thread-answers-count }
-# Oxplow's pages. They are core-named (`oxplow:oxplow/page?page=<id>`), as this extension's
-# commands are. A page is drawn by a lens; one the kit can't draw yet names a
-# built-in component (`oxplow:<name>`), until it can — that list only shrinks
-# (crates/oxplow-app/fixtures/built_in_pages.json). No category: not in the
-# launcher (opened from elsewhere).
-pages:
-  # Work
-  - { id: tasks, title: Tasks, icon: check-square, category: Work, keywords: dashboard work list, lens: tasks }
-  - { id: backlog, title: Backlog, icon: inbox, category: Work, count: backlog-count, lens: backlog }
-  - { id: board, title: Board, icon: columns-3, category: Work, keywords: kanban columns state work items, lens: board }
-  - { id: done-work, title: Done Work, icon: circle-check, category: Work, lens: done-work }
-  - { id: context, title: Context, icon: at-sign, category: Work, keywords: basket collected agent prompt, lens: context }
-  - { id: go-to, title: Go To, icon: star, category: Work, keywords: bookmarks visits recent history, lens: go-to }
-  # Code
-  - { id: files, title: Files, icon: folder-tree, category: Code, lens: files }
-  - { id: problems, title: Problems, icon: triangle-alert, category: Code, lens: problems }
-  - { id: symbols, title: Symbols, icon: list-tree, category: Code, params: [path], lens: symbols }
-  # Git
-  - { id: git-dashboard, title: Git, icon: git-branch, category: Git, lens: git-dashboard }
-  - { id: git-history, title: Git History, icon: git-merge, category: Git, lens: git-history }
-  - { id: uncommitted-changes, title: Uncommitted, icon: git-branch, category: Git, lens: uncommitted }
-  # Activity
-  - { id: local-history, title: Local History, icon: history, category: Activity, lens: local-history }
-  - { id: comments, title: Comments, icon: inbox, category: Activity, lens: comments }
-  - { id: timeline, title: Timeline, icon: history, category: Activity, keywords: efforts sessions commits threads time axis history, params: [from, to, thread], component: timeline }
-  - { id: hook-events, title: Hook Events, icon: activity, category: Activity, lens: hook-events }
-  # Knowledge
-  - { id: wiki-index, title: Wiki, icon: book-open, category: Knowledge, lens: wiki-index }
-  - { id: wiki-freshness, title: Wiki Freshness, icon: book-open, category: Knowledge, lens: wiki-freshness }
-  # Data
-  - { id: explore-data, title: Explore Data, icon: database, category: Data, keywords: sql query schema semantic layer lens, component: explore-data, rail: explore-catalog }
-  - { id: metrics-recorded, title: Metrics, icon: bar-chart-3, category: Data, keywords: recorded catalog, lens: metrics }
-  - { id: dashboards, title: Dashboards, icon: layout-dashboard, category: Data, keywords: custom metric tiles lens, lens: dashboards }
-  # System
-  - { id: terminal, title: Terminal, icon: terminal, category: System, lens: terminal }
-  - { id: settings, title: Settings, icon: settings, category: System, keywords: every setting config preferences, refresh: true, lens: settings }
-  - { id: catalog, title: Catalog, icon: book-open, category: System, keywords: ask prompts questions what can i help data config, lens: catalog-overview }
-  - { id: closed-threads, title: Closed Threads, icon: archive, category: System, lens: closed-threads }
-  - { id: extensions, title: Extensions, icon: package, category: System, keywords: deploy rollback permissions enable disable share, lens: extensions }
-  # Opened from elsewhere
-  - { id: alerts, title: Alerts, icon: bell, lens: alerts }
-  - { id: custom-dashboard, title: Dashboard, icon: layout-dashboard, label: "{{row.title}}", for: oxplow/dashboard, default: true, lens: dashboard }
-  - { id: new-session, title: New Session, icon: plus, lens: new-session }
-  - { id: new-stream, title: New Stream, icon: plus, lens: new-stream }
-  - { id: new-task, title: New Item, icon: plus, params: [parent], lens: new-task }
-  - { id: stream-settings, title: Stream Settings, icon: settings, label: "{{row.title}} settings", params: [stream], lens: stream-settings }
-  - { id: thread-settings, title: Thread Settings, icon: settings, label: "{{row.title}} settings", params: [thread], lens: thread-settings }
-  - { id: external-url, title: Web Page, icon: external-link, label: "{{param.uri|url}}", for: [https, http], default: true, lens: web-page }
-  - { id: diff, title: Diff, icon: git-compare, label: "{{param.path}} ({{param.label}})", params: [path, left, right, label, base], lens: diff }
-  - { id: diff-view, title: Changes, icon: git-compare, for: [oxplow/snapshot, oxplow/effort, oxplow/turn], default: true, lens: changes }
-  - { id: duplicate-block, title: Duplicate Block, icon: copy, label: "{{param.left}} ↔ {{param.right}}", params: [left, left_lines, left_at, right, right_lines, right_at], lens: duplicate-block }
-  # Renderers: what a URI of oxplow's resources opens on (its tab's id is
-  # the URI). A resource with several picks by `accepts`, then the URI's
-  # `#oxplow.renderer=`, then its default; one nothing renders opens on
-  # `resource`, which shows it (or, when nothing resolves it, its dead link).
-  - { id: editor, title: Editor, label: "{{param.path|basename}}", for: oxplow/file, accepts: { rev: absent }, default: true, comments: true, lens: editor }
-  - { id: file-viewer, title: File at a Revision, label: "{{param.path|basename}} ({{param.rev}})", for: oxplow/file, accepts: { rev: present }, lens: file-viewer, comments: true }
-  - { id: directory, title: Directory, label: "{{param.path|basename}}", for: oxplow/dir, accepts: { rev: absent }, default: true, lens: directory }
-  - { id: wiki-page, title: Wiki Page, label: "{{param.slug}}", for: oxplow/wiki, default: true, comments: true, lens: wiki-page }
-  - { id: work-item, title: Work Item, label: "{{row.title}}", for: oxplow/work_item, default: true, comments: true, lens: work-item }
-  - { id: commit, title: Commit, label: "{{param.sha|short}}", for: oxplow/commit, default: true, lens: commit }
-  - { id: metric-detail, title: Metric, label: "{{row.title}}", for: oxplow/metric, default: true, lens: metric }
-  - { id: lens, title: Lens, for: oxplow/lens, default: true, component: "oxplow:lens" }
-  - { id: answer, title: Answer, label: "{{row.title}}", for: oxplow/answer, default: true, lens: answer }
-  - { id: agent-session, title: Agent Session, label: "{{row.display_name}}", for: oxplow/agent_session, default: true, pinned: true, lens: agent-session }
-  - { id: resource, title: Resource, component: "oxplow:resource" }
 # What oxplow's URIs name (`oxplow:oxplow/<resource>?<params>`): declared
 # here like any extension's resources, so none is special
 # (.context/resources.md). A param's `pattern` matches its decoded value.
@@ -317,11 +248,6 @@ resources:
     resolve: event
     title: type
     icon: activity
-  - name: answer
-    label: Answer
-    params: { id: { required: true, pattern: '^[0-9]+$' } }
-    resolve: thread_answer
-    icon: message-square
   - name: ai_model
     label: Language model
     params: { name: { required: true, pattern: '^[!-~]+$' } }
@@ -359,12 +285,6 @@ resources:
     title: body
     searchable: search_handoff
     icon: inbox
-  - name: dashboard
-    label: Dashboard
-    params: { id: { required: true, pattern: '^dsh[0-9]+$' } }
-    resolve: dashboard
-    searchable: search_dashboard
-    icon: layout-dashboard
   - name: terminal
     label: Terminal
     params: { id: { required: true, pattern: '^trm[0-9]+$' } }
@@ -490,17 +410,11 @@ resources:
     label: Provider
     params: { provider: { required: true, pattern: '^[a-z][a-z0-9-]*/[a-z][a-z0-9_.-]*$' } }
     icon: server
-  - name: lens
-    label: Lens
-    params: { lens: { required: true, pattern: '^[a-z][a-z0-9-]*/[a-z][a-z0-9_.-]*$' } }
-    additional: true
-    resolve: lens
-    searchable: search_lens
-    icon: list-tree
   - name: page
     label: Page
     params: { page: { required: true } }
     additional: true
+    searchable: search_page
     icon: file-text
   - name: view
     label: View
@@ -529,8 +443,8 @@ resources:
     icon: box
 ui:
   slots:
-    - { slot: oxplow-foundation/tasks.sections, lens: thread-handoffs-in, at: { before: list } }
-    - { slot: oxplow-foundation/tasks.sections, lens: thread-handoffs-out, at: { before: list } }
+    - { slot: oxplow-foundation/tasks.sections, page: thread-handoffs-in, at: { before: list } }
+    - { slot: oxplow-foundation/tasks.sections, page: thread-handoffs-out, at: { before: list } }
 commands:
   # agent_input.write — the window's agent input.
   - name: agent.draft
@@ -538,12 +452,12 @@ commands:
     scope: agent_input.write
     op: draft
     example: {"text": "Also check the error paths."}
-  - name: lens.draft_with_agent
-    summary: "Start a prompt asking your agent to build a lens, in its input, unsent."
+  - name: page.draft_with_agent
+    summary: "Start a prompt asking your agent to build a page, in its input, unsent."
     scope: agent_input.write
     op: draft
-    ui: { label: "New Lens with Your Agent…", group: Tasks, input: { text: "Build me an oxplow lens (a page I can open with Cmd+P) that shows " }, when: "threadShown" }
-    example: {"text": "Build me an oxplow lens (a page I can open with Cmd+P) that shows open tasks by thread"}
+    ui: { label: "New Page with Your Agent…", group: Tasks, input: { text: "Build me an oxplow page (one I can open with Cmd+P) that shows " }, when: "threadShown" }
+    example: {"text": "Build me an oxplow page (one I can open with Cmd+P) that shows open tasks by thread"}
   # agent_sessions.write
   - name: agent_session.close
     summary: "Close an agent session (`ses3`): its open turn ends and its process stops. Its conversation is kept: `oxplow.agent_session.reopen` (its undo) opens it again."
@@ -613,11 +527,11 @@ commands:
     example: {"session": "ses3"}
   # agent_text.read
   - name: skill.read
-    summary: "Read one of oxplow's skills (its SKILL.md). It says how to do a kind of oxplow work, e.g. `oxplow-extension` for building lenses. A skill sends you to `references/<name>.md` for detail: pass that `<name>` as `reference`. For agents that don't load skill files themselves; your instructions list the names."
+    summary: "Read one of oxplow's skills (its SKILL.md). It says how to do a kind of oxplow work, e.g. `oxplow-extension` for building pages. A skill sends you to `references/<name>.md` for detail: pass that `<name>` as `reference`. For agents that don't load skill files themselves; your instructions list the names."
     scope: agent_text.read
     op: skill
     tool: get_skill
-    example: {"name": "oxplow-extension", "reference": "lenses"}
+    example: {"name": "oxplow-extension", "reference": "page-format"}
   # ai.compute
   - name: ai.decide
     summary: "Ask a model a typed question about some text. Yes/no (`noul`, returns the probability of yes), `choice` among options, or `score` on ordered levels, each with probabilities, on the `decide` role. Good for second opinions like \"is this diff risky?\". Recorded (as the asking thread's call): the same questions on the same text are answered once (`cached`). Fails if the role has no model; the person assigns one in Settings → AI."
@@ -769,12 +683,6 @@ commands:
     scope: config.write
     op: unset
     example: {"key": "metricRetentionDays"}
-  # dashboards.write
-  - name: dashboard.add_item
-    summary: "Add a tile to a dashboard. Its kind: `query` (pinned `sql`, checked like oxplow_query_sql, shown per `display` — a lens viz, or `metric` for the metric card, which needs only its key as `metric`: the tile pins that metric's captures), `lens` (`lens_id`) or `text` (`options_json` `{\"text\": …}`). `options_json` may also set its size and title; `position` where it goes."
-    scope: dashboards.write
-    op: add_item
-    example: {"dashboard": "dsh3", "kind": "query", "sql": "SELECT count(*) AS open FROM v_work_item WHERE state = 'todo'", "display": "number"}
   - name: delivery.retry
     summary: "Run an event a consumer couldn't take through that consumer again, now. The letter is `retried`, or stays `pending` with the new error."
     scope: deliveries.write
@@ -786,39 +694,6 @@ commands:
     op: discard
     confirm: destructive
     example: {"id": 3}
-  - name: dashboard.create
-    summary: "Create an empty dashboard (a grid of tiles); fill it with `oxplow.dashboard.add_item`."
-    scope: dashboards.write
-    op: create
-    ui: {"label": "New Dashboard…", "group": "Tasks", "input": {"title": "Untitled dashboard"}, "open_after": "oxplow:oxplow/dashboard?id={{result.id}}"}
-    example: {"title": "Build health"}
-  - name: dashboard.delete
-    summary: "Delete a dashboard and its tiles. A person is asked first."
-    scope: dashboards.write
-    op: delete
-    confirm: destructive
-    example: {"dashboard": "dsh1"}
-  - name: dashboard.remove_item
-    summary: "Remove a tile from its dashboard (`dti7`)."
-    scope: dashboards.write
-    op: remove_item
-    example: {"item": "dti7"}
-  - name: dashboard.rename
-    summary: "Rename a dashboard (`dsh3`)."
-    scope: dashboards.write
-    op: rename
-    example: {"dashboard": "dsh3", "title": "Release health"}
-  - name: dashboard.reorder_items
-    summary: "Reorder a dashboard's tiles (`order`: tile ids in their new order)."
-    scope: dashboards.write
-    op: reorder_items
-    example: {"dashboard": "dsh3", "order": ["dti7", "dti5"]}
-  - name: dashboard.update_item
-    summary: "Change a tile's options (`dti7`); a query tile's `sql` is checked again."
-    scope: dashboards.write
-    op: update_item
-    example: {"item": "dti7", "options_json": "{\"sql\":\"SELECT count(*) AS open FROM v_work_item WHERE state = 'todo'\",\"display\":\"number\",\"title\":\"Open tasks\"}"}
-  # diagnostics.write
   - name: ui.report_error
     summary: "Record an operation that failed in front of the person in the app, as the app showed it, so the agent can read it in `v_op_error`. The app's own."
     scope: diagnostics.write
@@ -949,18 +824,18 @@ commands:
     example: {"job_run": "01990000-0000-7000-8000-000000000000"}
   # extensions.check
   - name: extension.preview
-    summary: "Preview a whole extension in a throwaway oxplow. What `oxplow extension test` runs, never touching this project's data. It checks the extension, activates it with the project's other extensions, and runs every intent example that has a fixture — lenses, collectors, commands, effects, events, jobs and components — with model calls answered by the fixture's replies, never a real provider. Returns `{ ok, errors, warnings, ran, … }`; run it after `oxplow.extension.validate` and before handing the extension over."
+    summary: "Preview a whole extension in a throwaway oxplow. What `oxplow extension test` runs, never touching this project's data. It checks the extension, activates it with the project's other extensions, and runs every intent example that has a fixture — pages, collectors, commands, effects, events, jobs and components — with model calls answered by the fixture's replies, never a real provider. Returns `{ ok, errors, warnings, ran, … }`; run it after `oxplow.extension.validate` and before handing the extension over."
     scope: extensions.check
     op: preview
     tool: preview_extension
     example: {"name": "my-extension"}
   - name: extension.draft_status
-    summary: "How a stream's draft of an extension differs from what runs. Reads the extension's source in the stream's checkout (yours unless `stream_id` names another) and compares it with the running version: `differs`, the running `deployed_hash` (null when none runs) and the draft's `source_hash`, and for `pages` (lenses and page files, by id) and `commands` (by name) the `added`, `removed` and `changed` ones. `draft` is true when that checkout is not the main stream's: a draft deploys only once its change is on the main branch. A deploy that would remove a page or command warns about it."
+    summary: "How a stream's draft of an extension differs from what runs. Reads the extension's source in the stream's checkout (yours unless `stream_id` names another) and compares it with the running version: `differs`, the running `deployed_hash` (null when none runs) and the draft's `source_hash`, and for `pages` (page files, by id) and `commands` (by name) the `added`, `removed` and `changed` ones. `draft` is true when that checkout is not the main stream's: a draft deploys only once its change is on the main branch. A deploy that would remove a page or command warns about it."
     scope: extensions.check
     op: draft_status
     example: {"name": "my-extension"}
   - name: extension.validate
-    summary: "Check an extension after editing it. The same report as `oxplow extension check`: manifest and lifecycle errors with file:line, unresolved cross-references, plus a dry run of every lens and advisory (SQL errors, `columns` keys the query doesn't return). `ok: true` means it works; `warnings` are worth fixing but don't block."
+    summary: "Check an extension after editing it. The same report as `oxplow extension check`: manifest and lifecycle errors with file:line, unresolved cross-references, plus a dry run of every page and advisory (SQL errors, `columns` keys the query doesn't return). `ok: true` means it works; `warnings` are worth fixing but don't block."
     scope: extensions.check
     op: validate
     tool: validate_extension
@@ -1037,7 +912,7 @@ commands:
     summary: "Make a file in a stream's worktree. The folders above it are made too; it is refused when the file exists. Logs `file.created`."
     scope: files.write
     op: create
-    # Never offered by itself (it needs a path): a lens form action runs it and opens the file.
+    # Never offered by itself (it needs a path): a page form action runs it and opens the file.
     ui: { label: "New File…", group: File, open_after: "{{result.uri}}", when: "false" }
     example: {"stream": "str1", "path": "docs/notes.md", "content": "# Notes\n"}
   - name: file.create_directory
@@ -1071,7 +946,7 @@ commands:
     summary: "Hand work to another open thread (any stream's): what it is and what its agent needs to know, and the work item it hands over, if any. The thread's agent is given it at its next prompt; the person sees it at once. Nothing wakes an agent. Returns the handoff and `link_warnings`."
     scope: handoffs.write
     op: send
-    ui: { label: "Hand Off Work…", group: Threads, keywords: [handoff, delegate, give], about: oxplow/thread, form: "oxplow:oxplow/lens?lens=oxplow-foundation/hand-off" }
+    ui: { label: "Hand Off Work…", group: Threads, keywords: [handoff, delegate, give], about: oxplow/thread, form: "oxplow:oxplow/page?page=hand-off" }
     example: {"to_thread": "thr4", "work_item": "oxplow:oxplow/work_item?id=tsk12&provider=oxplow", "body": "The parser fix is in; the remaining failure is the timezone case in [[src/dates.rs]]."}
   - name: handoff.resolve
     summary: "Take or decline a handoff to your thread. Taking one moves its work item onto your thread. Its sender reads the note."
@@ -1156,33 +1031,6 @@ commands:
     op: write_page
     ui: { label: "New Wiki Page…", group: Knowledge, keywords: [wiki, page, note, write], form: "oxplow:oxplow/page?page=wiki-index", open_after: "oxplow:oxplow/wiki?slug={{result.page}}" }
     example: {"slug": "auth-flow", "title": "Auth flow", "body": "# Auth flow\n\nThe callback validates `next` before redirecting. See [[src/auth.rs]].", "verified_files": ["src/auth.rs"]}
-  # lenses.read
-  - name: lens.run
-    summary: "Run a lens and read what the human sees on its page. By default its text rendering (a table, a chart's series, a grid's children) plus the resolved params, columns, row count and alert; `format: \"json\"` returns the raw rows instead. Override params by name; the rest use defaults."
-    scope: lenses.read
-    op: run
-    tool: run_lens
-    example: {"id": "review/waiting", "params": {"state": "todo"}}
-  # lenses.show
-  - name: lens.show
-    summary: "Show the person an answer in their thread: an existing lens with params, or a lens of your own (title, query, viz). It opens as a tab of the thread, listed in its Answers panel, where they can keep it."
-    scope: lenses.show
-    op: show
-    tool: show_lens
-    example: {"spec": {"title": "Open tasks", "query": "SELECT uri, title, state FROM v_work_item WHERE state = 'todo' ORDER BY rank", "viz": "table"}}
-  # lenses.write
-  - name: lens.keep
-    summary: "Keep an answer from a thread, or a lens spec of your own, as a lens (a page the person can reopen and pin), recording where it came from. It is written into the extension's source (`my-lenses` unless `extension` names another, created when missing) in the stream's checkout and that extension is deployed: it returns once the lens is live."
-    scope: lenses.write
-    op: keep
-    example: {"spec": {"title": "Open tasks", "query": "SELECT uri, title, state FROM v_work_item WHERE state = 'todo' ORDER BY rank", "viz": "table"}, "extension": "my-lenses"}
-  - name: lens.run_action
-    summary: "Run one of a lens's actions as the lens acting for you. Its actions are in `oxplow_read` of `oxplow:oxplow/lens?lens=<ext>/<slug>` → `actions`; the command it declares is run as the lens acting for you — so the same rules apply as if you ran the command yourself. A row action (`row: true`) needs the `row` it runs on. Returns the command's outcome."
-    scope: lenses.write
-    op: run_action
-    tool: run_lens_action
-    example: {"id": "review/waiting", "action": "finish", "params": {"item": "oxplow:oxplow/work_item?id=tsk12&provider=oxplow"}}
-  # lsp.install
   - name: lsp.restart_server
     summary: "Restart a stream's language server for a language: the session is torn down and started again with the open documents replayed."
     scope: lsp.control
@@ -1239,7 +1087,7 @@ commands:
     example: {"language": "rust", "query": "Services"}
   # metrics.read
   - name: metric.scaffold
-    summary: "A starter for a new metric, as an extension of its own; writes nothing. Returns `name`, `dir` (`.oxplow/extensions/<name>`) and `files`, each with its project-relative path: the extension.yaml (a measure, a Starlark fact collector, the metric), the collector script, a lens and an example with its fixture. Write them with your own tools, check it (`oxplow_validate_extension`), then deploy it (`oxplow.extension.deploy`); its collector runs only once a person approves it. `oxplow.metric.enable` turns the metric on or off in .oxplow/project.yaml."
+    summary: "A starter for a new metric, as an extension of its own; writes nothing. Returns `name`, `dir` (`.oxplow/extensions/<name>`) and `files`, each with its project-relative path: the extension.yaml (a measure, a Starlark fact collector, the metric), the collector script, a page and an example with its fixture. Write them with your own tools, check it (`oxplow_validate_extension`), then deploy it (`oxplow.extension.deploy`); its collector runs only once a person approves it. `oxplow.metric.enable` turns the metric on or off in .oxplow/project.yaml."
     scope: metrics.read
     op: scaffold
     example: {"name": "complex-fns", "language": "rust", "glob": "crates/**/*.rs"}
@@ -1290,7 +1138,7 @@ commands:
     tool: run_page_action
     example: {"page": "acme/review", "node": "items", "action": "finish", "row": {"id": "tsk12"}}
   - name: page.open
-    summary: "What the person is looking at in a thread. It is the page the thread has open in the window they were in last (`pageId` such as `oxplow:oxplow/work_item?id=tsk42&provider=oxplow`, `oxplow:oxplow/file?path=src/a.rs`, `oxplow:oxplow/lens?lens=review/waiting`; its kind; the detail the page publishes; which window, whether it's on screen, how fresh), and `others`, the page each other window has open there. When it's a page, `pageRun` is the window's own run of it as text (each node under `[node <id>]`), with `focus`, the node they are on; when it's a lens, `lens` is that lens re-run with the person's params: what is on their screen. `tab` reads one of the thread's tabs instead (an id `oxplow_list_tabs` listed). Use it when the person says \"this\", \"what I'm looking at\" or \"this lens\". `open` is null when no window reported one."
+    summary: "What the person is looking at in a thread. It is the page the thread has open in the window they were in last (`pageId` such as `oxplow:oxplow/work_item?id=tsk42&provider=oxplow`, `oxplow:oxplow/file?path=src/a.rs`, `oxplow:oxplow/page?page=review/waiting`; its kind; the detail the page publishes; which window, whether it's on screen, how fresh), and `others`, the page each other window has open there. When it's a page, `pageRun` is the window's own run of it as text (each node under `[node <id>]`), with `focus`, the node they are on: what is on their screen. `tab` reads one of the thread's tabs instead (an id `oxplow_list_tabs` listed). Use it when the person says \"this\", \"what I'm looking at\" or \"this page\". `open` is null when no window reported one."
     scope: pages.read
     op: open
     tool: get_open_page
@@ -1377,7 +1225,7 @@ commands:
     example: {"instance": "issues/issues", "name": "TOKEN", "sign_in": 3}
   # records.read
   - name: records.read
-    summary: "Read what a uri names. Its model's row (every column), what sits beside it (a work item's links and comments, a commit's or an effort's files) and, for a body no model holds, its content. `oxplow:oxplow/file?path=src/a.rs` reads the working tree; `oxplow:oxplow/file?path=src/a.rs&rev=git:HEAD#lines=10-40` a revision's lines (`@snap:<id>` a local-history snapshot); `oxplow:oxplow/event?id=<id>#part=output` (or `#input`, `#prompt`) one of your stream's events' stored bodies; `oxplow:oxplow/lens?lens=<ext>/<slug>` a lens's definition; `stream` reads a file or lens in another stream's worktree. `oxplow:oxplow/ai_call?id=<id>#part=request` (or `#response`) a recorded model call's bodies. Any `uri` a model's column holds reads the same way (`work_item:…`, `oxplow:oxplow/commit?sha=…`, `oxplow:oxplow/effort?id=…`, `oxplow:oxplow/thread?id=…`, `oxplow:oxplow/wiki?slug=…`). Content stops at 64 KB, saying so."
+    summary: "Read what a uri names. Its model's row (every column), what sits beside it (a work item's links and comments, a commit's or an effort's files) and, for a body no model holds, its content. `oxplow:oxplow/file?path=src/a.rs` reads the working tree; `oxplow:oxplow/file?path=src/a.rs&rev=git:HEAD#lines=10-40` a revision's lines (`@snap:<id>` a local-history snapshot); `oxplow:oxplow/event?id=<id>#part=output` (or `#input`, `#prompt`) one of your stream's events' stored bodies; `oxplow:oxplow/page?page=<ext>/<slug>` a page's definition (its YAML, source and deployment); `stream` reads a file or page in another stream's worktree. `oxplow:oxplow/ai_call?id=<id>#part=request` (or `#response`) a recorded model call's bodies. Any `uri` a model's column holds reads the same way (`work_item:…`, `oxplow:oxplow/commit?sha=…`, `oxplow:oxplow/effort?id=…`, `oxplow:oxplow/thread?id=…`, `oxplow:oxplow/wiki?slug=…`). Content stops at 64 KB, saying so."
     scope: records.read
     op: read
     tool: read
@@ -1391,7 +1239,7 @@ commands:
     example: {"query": "oauth redirect", "resources": ["oxplow/wiki", "oxplow/work_item"], "limit": 10}
   # sql.read
   - name: sql.query
-    summary: "Run ONE read-only SQL statement over the published `v_*` models. It takes `SELECT`/`WITH` over the views lenses and the UI read (`v_model` lists them; physical tables are refused). Joins across views are fine. Metrics read as columns of a grid: `SELECT bucket, zone, MEASURE('<metric key>') FROM metric_grid('day'|'week'|'month'[, '<dimension>'])` (keys in v_metric_spec, dimensions in v_dimension). Positional params `?1`, `?2`, … bind from `params`. Returns `{columns, rows, truncated, reads, generation, coverage}`; rows are positional arrays; `truncated` means more rows existed than `limit`. `coverage` names the collector behind each collected model it read and how its last run stands (`current`, `stale`, `failed`, `disabled`, `needs_approval`, `never`): a complete result over a failed collector is still missing data. Writes, PRAGMA, ATTACH and multiple statements are rejected; queries time out after 5s. `v_model_column` documents every column."
+    summary: "Run ONE read-only SQL statement over the published `v_*` models. It takes `SELECT`/`WITH` over the views pages and the UI read (`v_model` lists them; physical tables are refused). Joins across views are fine. Metrics read as columns of a grid: `SELECT bucket, zone, MEASURE('<metric key>') FROM metric_grid('day'|'week'|'month'[, '<dimension>'])` (keys in v_metric_spec, dimensions in v_dimension). Positional params `?1`, `?2`, … bind from `params`. Returns `{columns, rows, truncated, reads, generation, coverage}`; rows are positional arrays; `truncated` means more rows existed than `limit`. `coverage` names the collector behind each collected model it read and how its last run stands (`current`, `stale`, `failed`, `disabled`, `needs_approval`, `never`): a complete result over a failed collector is still missing data. Writes, PRAGMA, ATTACH and multiple statements are rejected; queries time out after 5s. `v_model_column` documents every column."
     scope: sql.read
     op: query
     tool: query_sql
@@ -1608,7 +1456,7 @@ commands:
     ui: { label: "Quick Open…", group: File, shortcut: "Ctrl/Cmd+P", while_typing: true, menu: { bar: file, group: 3_go, order: 10 }, when: "streamShown" }
     example: {}
   - name: window.navigate
-    summary: "Take the person to a uri: opens and focuses its page (a file's editor, a work item, effort, lens, wiki page, directory or `oxplow:oxplow/page?page=<route>`), or selects a `stream:` / `thread:`. `stream` switches to that stream first. Changes what the person sees. Returns `{ opened, stream }`."
+    summary: "Take the person to a uri: opens and focuses its page (a file's editor, a work item, effort, wiki page, directory or `oxplow:oxplow/page?page=<route>`), or selects a `stream:` / `thread:`. `stream` switches to that stream first. Changes what the person sees. Returns `{ opened, stream }`."
     scope: window.show
     op: navigate
     example: {"uri": "oxplow:oxplow/file?path=src/auth.rs"}

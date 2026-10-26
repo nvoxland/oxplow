@@ -70,9 +70,9 @@ test("Alt+Down steps to the next file of the list it was opened from", async ({ 
   await expect(page.getByTestId("center-tab-oxplow:oxplow/file?path=aa.txt")).toBeHidden();
 });
 
-// A list's link column is live: Up and Down step through the lens as it is now,
+// A list's link column is live: Up and Down step through the page as it is now,
 // not the rows it had when the page was opened.
-test("Up and Down from a page opened from a lens follow the lens's rows as they change", async ({ page, daemon }) => {
+test("Up and Down from a page opened from a page follow the page's rows as they change", async ({ page, daemon }) => {
   const made: Record<string, string> = {};
   for (const title of ["Origin alpha", "Origin beta", "Origin gamma"]) {
     const created = await run<{ result: { uri: string } }>(daemon, "oxplow.work_item.create", { title });
@@ -94,7 +94,7 @@ test("Up and Down from a page opened from a lens follow the lens's rows as they 
   await page.getByTestId("page-nav-sibling-prev").filter({ visible: true }).click();
   await expect(shown).toContainText("Origin gamma");
 
-  // A page the lens no longer lists has no Up or Down.
+  // A page the page no longer lists has no Up or Down.
   await run(daemon, "oxplow.work_item.move", { uri: made["Origin gamma"], to: { thread: `thr${daemon.thread.replace(/^thr/, "")}` } });
   await expect(page.getByTestId("page-nav-siblings").filter({ visible: true })).toHaveCount(0);
   await page.keyboard.press("Alt+ArrowDown");

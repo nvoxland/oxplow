@@ -26,7 +26,7 @@ use std::sync::Arc;
 use oxplow_domain::DomainError;
 use parking_lot::Mutex;
 
-use crate::extensions::{self, Deployment, Extension, Lens};
+use crate::extensions::{self, Deployment, Extension};
 
 /// `(path, len, mtime)` for every file the load depends on, sorted.
 type Fingerprint = Vec<(PathBuf, u64, Option<std::time::SystemTime>)>;
@@ -573,16 +573,6 @@ impl ExtensionCatalog {
         Ok(ext.clone())
     }
 
-    /// One lens by `<extension>/<slug>`.
-    pub fn find_lens(&self, root: &Path, id: &str) -> Result<Lens, DomainError> {
-        let (ext, slug) = id.split_once('/').ok_or(DomainError::NotFound)?;
-        self.named(root, ext)?
-            .lenses
-            .into_iter()
-            .find(|l| l.slug == slug)
-            .ok_or(DomainError::NotFound)
-    }
-
     /// One page by `<extension>/<slug>`.
     pub fn find_page(
         &self,
@@ -594,6 +584,26 @@ impl ExtensionCatalog {
             .page_files
             .into_iter()
             .find(|p| p.slug == slug)
+            .ok_or(DomainError::NotFound)
+    }
+
+    /// The page a page URI's `page` param names: `<extension>/<slug>`, or a
+    /// bare slug for one of oxplow's own extensions (core-named, as
+    /// `oxplow:oxplow/page?page=tasks`).
+    pub fn page_named(
+        &self,
+        root: &Path,
+        page: &str,
+    ) -> Result<crate::pages::schema::Page, DomainError> {
+        if page.contains('/') {
+            return self.find_page(root, page);
+        }
+        self.get(root)
+            .iter()
+            .filter(|e| e.enabled && e.namespace == crate::extensions::CORE_NAMESPACE)
+            .flat_map(|e| e.page_files.iter())
+            .find(|p| p.slug == page)
+            .cloned()
             .ok_or(DomainError::NotFound)
     }
 
@@ -682,7 +692,8 @@ mod tests {
 
     const EXT: &str =
         "manifest: 2\nname: review\nintent:\n  purpose: x\n  examples: [{ name: a }]\n";
-    const LENS: &str = "title: Tasks\nquery: SELECT uri FROM v_work_item\nviz: table\n";
+    const PAGE: &str =
+        "title: Tasks\ndata:\n  items: { sql: SELECT uri FROM v_work_item }\nview: { viz: table, from: items }\n";
 
     fn names(snapshot: &CatalogSnapshot) -> Vec<String> {
         let mut names: Vec<String> = snapshot
@@ -848,8 +859,8 @@ mod tests {
         write(dir.path(), ".oxplow/extensions/review/extension.yaml", EXT);
         write(
             dir.path(),
-            ".oxplow/extensions/review/lenses/tasks.yaml",
-            LENS,
+            ".oxplow/extensions/review/pages/tasks.yaml",
+            PAGE,
         );
         let catalog = ExtensionCatalog::new();
         let first = catalog.get(dir.path());
@@ -861,36 +872,32 @@ mod tests {
         );
         assert_eq!(catalog.loads(), 1);
         assert_eq!(
-            catalog.find_lens(dir.path(), "review/tasks").unwrap().title,
+            catalog.find_page(dir.path(), "review/tasks").unwrap().title,
             "Tasks"
         );
         assert_eq!(catalog.loads(), 1);
 
-        // A lens edit is seen on the very next call.
+        // A page edit is seen on the very next call.
         write(
             dir.path(),
-            ".oxplow/extensions/review/lenses/tasks.yaml",
-            "title: Tasks by status\nquery: SELECT uri FROM v_work_item\nviz: table\n",
+            ".oxplow/extensions/review/pages/tasks.yaml",
+            "title: Tasks by status\ndata:\n  items: { sql: SELECT uri FROM v_work_item }\nview: { viz: table, from: items }\n",
         );
         assert_eq!(
-            catalog.find_lens(dir.path(), "review/tasks").unwrap().title,
+            catalog.find_page(dir.path(), "review/tasks").unwrap().title,
             "Tasks by status"
         );
         assert_eq!(catalog.loads(), 2);
-        // So is a new lens file and a removed one.
+        // So is a new page file and a removed one.
         write(
             dir.path(),
-            ".oxplow/extensions/review/lenses/more.yaml",
-            LENS,
+            ".oxplow/extensions/review/pages/more.yaml",
+            PAGE,
         );
-        assert!(catalog.find_lens(dir.path(), "review/more").is_ok());
-        std::fs::remove_file(
-            dir.path()
-                .join(".oxplow/extensions/review/lenses/more.yaml"),
-        )
-        .unwrap();
+        assert!(catalog.find_page(dir.path(), "review/more").is_ok());
+        std::fs::remove_file(dir.path().join(".oxplow/extensions/review/pages/more.yaml")).unwrap();
         assert!(matches!(
-            catalog.find_lens(dir.path(), "review/more"),
+            catalog.find_page(dir.path(), "review/more"),
             Err(DomainError::NotFound)
         ));
         assert_eq!(catalog.loads(), 4);

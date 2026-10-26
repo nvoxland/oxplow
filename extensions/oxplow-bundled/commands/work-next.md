@@ -2,7 +2,7 @@
 description: Pick up the next ready work item and work on it.
 ---
 
-Call `oxplow_work_next` (the foundation lens `oxplow-foundation/work-next`) with
+Call `oxplow_work_next` (the foundation page `oxplow-foundation/work-next`) with
 `thread` set to your thread's id (`thr3`). If it lists nothing,
 nothing is ready: say so and stop.
 

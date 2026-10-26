@@ -9,7 +9,7 @@ publish = false
 
 # The extension SDK (`.context/extensions.md` "The SDK"): scaffold, check,
 # migrate and test an extension, and the provider conformance kit. A library so the `oxplow extension …` CLI (the Tauri
-# binary), the RPC/MCP `validate_extension` and `save_lens` share one
+# binary), the RPC/MCP `validate_extension` share one
 # implementation and one set of messages.
 
 [dependencies]
@@ -33,7 +33,7 @@ oxplow-workspace-hack = { version = "0.1", path = "../oxplow-workspace-hack" }
 oxplow-ai-fake = { workspace = true }
 oxplow-provider-fake = { workspace = true }
 oxplow-harness-fake = { workspace = true }
-# Scaffolds are checked against the extension and lens schemas.
+# Scaffolds are checked against the extension schema.
 jsonschema = { version = "0.58", default-features = false }
 
 [lints]

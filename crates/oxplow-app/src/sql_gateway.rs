@@ -1,5 +1,5 @@
 //! The SQL gateway (P4.1, `.context/semantic-layer.md`): the one way a
-//! query reaches the semantic layer — MCP `oxplow_query_sql` and IPC `query_sql`, lenses,
+//! query reaches the semantic layer — MCP `oxplow_query_sql` and IPC `query_sql`, pages,
 //! advisories, entity metrics, extension checks and source inputs all go
 //! through it. The database crate's `SemanticLayer` owns the mechanics
 //! (the single-read check, the recording authorizer, `query_only`, the
@@ -78,7 +78,7 @@ impl SqlGateway {
 
     /// A gateway over `db` that reads metrics too (`metric_grid()`,
     /// `metric_findings()`) from the facts in `db`: what a check dry-runs a
-    /// metric's lens on, outside a running oxplow.
+    /// metric's page on, outside a running oxplow.
     pub fn with_metrics(db: Database) -> Self {
         let engine =
             crate::metric_engine::MetricEngine::new(oxplow_db::SqliteFactStore::new(db.clone()));
@@ -425,7 +425,7 @@ impl SqlGateway {
         self.vocabulary.current()
     }
 
-    /// `sql`, an extension's own (a lens's or an advisory's), with each
+    /// `sql`, an extension's own (a page's or an advisory's), with each
     /// `config('/pointer')` replaced by the value in that extension's
     /// effective configuration as stored now. Nothing is read when `sql` has
     /// no such call. A change of settings applies to the next run.

@@ -1,7 +1,0 @@
-title: Review
-description: Recent local-history snapshots and code-quality findings.
-viz: document
-sections:
-  - { lens: recent-snapshots }
-  - { lens: findings }
-launcher: { category: Code }

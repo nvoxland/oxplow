@@ -198,7 +198,9 @@ async fn the_github_example_checks_tests_and_its_pr_opens() {
                 .nodes()
                 .into_iter()
                 .find_map(|n| match &n.kind {
-                    oxplow_app::pages::schema::NodeKind::Viz { lens, .. } => lens.custom.clone(),
+                    oxplow_app::pages::schema::NodeKind::Viz { config, .. } => {
+                        config.custom.clone()
+                    }
                     _ => None,
                 })
                 .expect("a custom viz");
@@ -1192,7 +1194,6 @@ async fn the_commit_history_example_narrows_with_typed_params_and_selects_a_comm
         .named(root, "commit-history")
         .unwrap();
     assert!(ext.errors.is_empty(), "{:?}", ext.errors);
-    assert!(ext.lenses.is_empty(), "{:?}", ext.lenses);
     let page = ext.page_files.iter().find(|p| p.slug == "history").unwrap();
     use oxplow_app::extensions::{ParamRole, ParamType};
     let params: Vec<_> = page
@@ -1221,10 +1222,10 @@ async fn the_commit_history_example_narrows_with_typed_params_and_selects_a_comm
         .into_iter()
         .find(|n| n.id == "commits")
         .unwrap();
-    let oxplow_app::pages::schema::NodeKind::Viz { lens, .. } = &commits.kind else {
+    let oxplow_app::pages::schema::NodeKind::Viz { config, .. } = &commits.kind else {
         panic!("commits is a viz: {commits:?}");
     };
-    assert_eq!(lens.columns[0].select.as_deref(), Some("commit"));
+    assert_eq!(config.columns[0].select.as_deref(), Some("commit"));
 }
 
 /// Both examples copied into one project.
@@ -1340,14 +1341,14 @@ async fn the_review_badges_example_consumes_effort_reviews_and_degrades_without_
         tested.warnings
     );
     assert_eq!(tested.errors, Vec::<String>::new());
-    for (example, lens) in [
+    for (example, page) in [
         ("review-verdicts", "review-verdicts"),
         ("item-review", "item-review"),
     ] {
         assert!(
             tested.warnings.iter().any(|w| w.contains(&format!(
                 "fixtures/{example}.yaml:1: example `{example}` isn't run: \
-                 `oxplow:oxplow/page?page=review-badges/{lens}` is withheld because import `reviews` is \
+                 `oxplow:oxplow/page?page=review-badges/{page}` is withheld because import `reviews` is \
                  unavailable (effort-review is disabled)"
             ))),
             "{example}: {:?}",

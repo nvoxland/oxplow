@@ -1,6 +1,6 @@
 {
   "$comment": "Golden cases for the canonical ref grammar `<kind>:<id>[@<rev>][#<frag>]` (.context/resources.md). Asserted by crates/oxplow-domain/tests/ref_grammar.rs and by apps/desktop/src/uri/uri.test.ts, so the Rust and TS parsers can't drift. `id` is the DECODED id; `text` is the canonical string form (`format(parse(text)) == text`).",
-  "kinds": ["advisory", "agent_session", "ai_call", "ai_model", "ai_profile", "answer", "branch", "claim", "collector", "command", "comment", "commit", "config", "consumer", "custom_component", "dashboard", "decision", "decorator", "dimension", "dir", "effect", "effort", "event", "event_type", "extension", "file", "finding", "handoff", "implementation", "job", "job_run", "lens", "measure", "metric", "model", "page", "panel", "project", "proposal", "provider", "ref_kind", "replacement", "run", "skill", "slot", "snapshot", "stream", "subagent", "symbol", "thread", "turn", "wiki", "work_item"],
+  "kinds": ["advisory", "agent_session", "ai_call", "ai_model", "ai_profile", "answer", "branch", "claim", "collector", "command", "comment", "commit", "config", "consumer", "custom_component", "dashboard", "decision", "decorator", "dimension", "dir", "effect", "effort", "event", "event_type", "extension", "file", "finding", "handoff", "implementation", "job", "job_run", "measure", "metric", "model", "page", "panel", "project", "proposal", "provider", "ref_kind", "replacement", "run", "skill", "slot", "snapshot", "stream", "subagent", "symbol", "thread", "turn", "wiki", "work_item"],
   "valid": [
     { "text": "effort:eff362", "kind": "effort", "id": "eff362", "rev": null, "frag": null },
     { "text": "dashboard:dsh3", "kind": "dashboard", "id": "dsh3", "rev": null, "frag": null },
@@ -19,8 +19,7 @@
     { "text": "work_item:oxplow:tsk42", "kind": "work_item", "id": "oxplow:tsk42", "rev": null, "frag": null },
     { "text": "work_item:issues:ENG-12", "kind": "work_item", "id": "issues:ENG-12", "rev": null, "frag": null },
     { "text": "metric:oxplow.rust.unsafe_blocks?range=7d&branch=main", "kind": "metric", "id": "oxplow.rust.unsafe_blocks?range=7d&branch=main", "rev": null, "frag": null },
-    { "text": "lens:acme/blocked?stream_id=2&thread_id=5", "kind": "lens", "id": "acme/blocked?stream_id=2&thread_id=5", "rev": null, "frag": null },
-    { "text": "symbol:rust/oxplow_app::extensions::run_lens", "kind": "symbol", "id": "rust/oxplow_app::extensions::run_lens", "rev": null, "frag": null },
+    { "text": "symbol:rust/oxplow_app::extensions::run_page", "kind": "symbol", "id": "rust/oxplow_app::extensions::run_page", "rev": null, "frag": null },
     { "text": "page:settings", "kind": "page", "id": "settings", "rev": null, "frag": null },
     { "text": "page:diff-view?effort=eff3", "kind": "page", "id": "diff-view?effort=eff3", "rev": null, "frag": null },
     { "text": "snapshot:01J9ABCDEF", "kind": "snapshot", "id": "01J9ABCDEF", "rev": null, "frag": null },

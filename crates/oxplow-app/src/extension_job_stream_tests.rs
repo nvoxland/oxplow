@@ -199,7 +199,7 @@ pub(super) async fn rows(fx: &Fixture, sql: &str, params: Vec<Value>) -> Vec<Vec
     serde_json::from_value(serde_json::to_value(out.rows).unwrap()).unwrap()
 }
 
-async fn lens(fx: &Fixture, id: &str, params: Vec<(&str, oxplow_db::SqlCell)>) -> Value {
+async fn page(fx: &Fixture, id: &str, params: Vec<(&str, oxplow_db::SqlCell)>) -> Value {
     let params: Vec<(String, oxplow_db::SqlCell)> = params
         .into_iter()
         .map(|(k, v)| (k.to_string(), v))
@@ -377,14 +377,14 @@ async fn a_tool_call_runs_the_extensions_command_and_answers_the_model() {
         "the job run is the actor"
     );
 
-    // oxplow's own Job Runs lens lists it, and its output lens follows it.
+    // oxplow's own Job Runs page lists it, and its output page follows it.
     let run_ref = oxplow_domain::uri::build::job_run_uri(&id);
-    let jobs = lens(&fx, "oxplow-bundled/job-runs", vec![]).await;
+    let jobs = page(&fx, "oxplow-bundled/job-runs", vec![]).await;
     assert_eq!(jobs[0][0], json!(run_ref), "{jobs}");
     assert_eq!(jobs[0][2], json!("oxplow:oxplow/job?job=triage/review"));
     assert_eq!(jobs[0][3], json!("tools"), "what it was about");
     assert_eq!(jobs[0][4], json!("succeeded"));
-    let output = lens(
+    let output = page(
         &fx,
         "oxplow-bundled/job-run-output",
         vec![("job_run", oxplow_db::SqlCell::Text(id.to_string()))],

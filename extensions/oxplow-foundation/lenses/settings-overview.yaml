@@ -1,8 +1,0 @@
-title: Every Setting
-description: "What shapes this project, where each value comes from, and Ask the Agent to Change This."
-params: [{ name: q, type: search, role: filter, label: Search settings, default: "" }]
-viz: document
-sections:
-  - { lens: settings-proposals }
-  - { lens: settings-values }
-hidden: true

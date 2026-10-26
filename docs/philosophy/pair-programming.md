@@ -23,7 +23,7 @@ A diff alone rarely supplies all that context.
 
 | Need | Oxplow surface |
 |---|---|
-| Understand the software | Descriptions, connected references, knowledge, and custom lenses |
+| Understand the software | Descriptions, connected references, knowledge, and custom pages |
 | See what changed | Observed activity, snapshots, analysis, and diffs |
 | Preserve scope and rationale | Optional work-list and knowledge providers |
 | Develop in parallel | Separate stream worktrees and a writer thread per stream |
@@ -49,7 +49,7 @@ that every such metric ships configured. See [Metrics](../guide/metrics.md).
 ## Staying present during development
 
 Oxplow aims to make work understandable while it is happening. An agent
-can explain a decision, a lens can surface a concerning trend, and a
+can explain a decision, a page can surface a concerning trend, and a
 reference can lead from that description to the relevant change.
 Work items and knowledge help when enabled, without becoming mandatory
 bookkeeping before an edit or the end of a turn.

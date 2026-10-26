@@ -112,7 +112,7 @@ pub enum OxplowEvent {
         seq: u64,
     },
     /// Published models (views) changed: a commit touched a table one of
-    /// them reads, directly or through other models (P4.6). A lens re-runs
+    /// them reads, directly or through other models (P4.6). A page re-runs
     /// when a model it read is listed.
     ModelsChanged { models: Vec<String> },
     /// An open page run re-ran (a model one of its loaders read changed):
@@ -137,7 +137,7 @@ pub enum OxplowEvent {
     /// worktree's `.oxplow/extensions/` did, or the `extensions` config key
     /// (the catalog's own signal, tsk1030). Every host listing what
     /// extensions contribute — the launcher, pages, panels, slots —
-    /// reloads, and a lens re-runs its definition.
+    /// reloads, and a page re-runs its definition.
     ExtensionsChanged,
     /// A command running on the daemon calls a scope the window
     /// hosts (`client_host.rs`): the window does `scope`'s `op` with
@@ -199,6 +199,9 @@ pub enum OxplowEvent {
 #[derive(Clone)]
 pub struct EventBus {
     sender: broadcast::Sender<OxplowEvent>,
+    /// The open page runs a live model's change re-runs
+    /// ([`EventBus::reach_open_runs`]).
+    open_runs: std::sync::Arc<std::sync::OnceLock<crate::pages::open_runs::PageRuns>>,
 }
 
 impl Default for EventBus {
@@ -210,7 +213,17 @@ impl Default for EventBus {
 impl EventBus {
     pub fn new() -> Self {
         let (sender, _) = broadcast::channel(256);
-        Self { sender }
+        Self {
+            sender,
+            open_runs: Default::default(),
+        }
+    }
+
+    /// Tell `runs` what live models each posted event changes, so the
+    /// open runs that read one re-run: a live model has no table for the
+    /// change loop to see. Once, when the services are built.
+    pub fn reach_open_runs(&self, runs: crate::pages::open_runs::PageRuns) {
+        let _ = self.open_runs.set(runs);
     }
 
     /// Listen to the bus — the renderer's channel. Only the `/events`
@@ -223,11 +236,17 @@ impl EventBus {
 
     /// Post an event — and, when it changed what a live model reads, the
     /// `ModelsChanged` naming that model (`models_changed::announced_after`),
-    /// so a lens over it re-runs. Fire-and-forget: no receiver is fine.
+    /// and re-run the open page runs that read it. Fire-and-forget: no
+    /// receiver is fine.
     pub fn emit(&self, event: OxplowEvent) {
         let then = crate::models_changed::announced_after(&event);
         let _ = self.sender.send(event);
         if let Some(then) = then {
+            if let (Some(runs), OxplowEvent::ModelsChanged { models }) =
+                (self.open_runs.get(), &then)
+            {
+                runs.notify_models(models);
+            }
             let _ = self.sender.send(then);
         }
     }

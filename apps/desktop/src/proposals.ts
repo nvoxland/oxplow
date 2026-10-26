@@ -8,7 +8,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { decideProposal, querySql } from "./api.js";
 import { recordOpError } from "./opErrors.js";
-import { NO_READS, useRerunOnChange } from "./lens/lensRerun.js";
+import { NO_READS, useRerunOnChange } from "./viz/rerun.js";
 import { threadRowId } from "./modelIds.js";
 import type { Reads, SqlCell, SqlQueryResult } from "./tauri-bridge/generated/bindings.js";
 
@@ -32,9 +32,9 @@ export interface Proposal {
   createdAt: string;
   command: string;
   input: unknown;
-  /** `agent`, or `lens` for a lens acting for an agent. */
+  /** `agent`, or `page` for a page acting for an agent. */
   actorKind: string;
-  /** The proposing thread (`thr3`) or lens. */
+  /** The proposing thread (`thr3`) or page. */
   actorId: string | null;
   threadId: number | null;
   /** The proposing thread's title, as a person knows it (tsk1044). */
@@ -156,7 +156,7 @@ export function summarizeProposal(p: Proposal): ProposalSummary {
         : p.preview?.summary || p.command;
   // The thread by its title, as the person knows it, never its id.
   const agent = p.threadTitle ? `The agent in “${p.threadTitle}”` : "The agent";
-  const who = p.actorKind === "lens" ? `A lens${p.actorId ? ` (${p.actorId})` : ""} for the agent` : agent;
+  const who = p.actorKind === "page" ? `A page${p.actorId ? ` (${p.actorId})` : ""} for the agent` : agent;
   const hasChange = p.dryRun != null && typeof p.dryRun === "object" && "before" in p.dryRun && "after" in p.dryRun;
   const shown = (v: unknown) => (v == null ? "(not set)" : valueText(v));
   const children = field(p.dryRun, "children");

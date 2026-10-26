@@ -1,50 +1,42 @@
 # Dashboards
 
-A dashboard is your own arrangement of metric tiles. The built-in
-[Metrics](metrics.md) pages show every metric oxplow knows about; a
-dashboard is the handful you actually want to watch, on one screen.
+A dashboard is your own arrangement of tiles: the handful of numbers,
+charts and lists you actually want to watch, on one screen. The built-in
+[Metrics](metrics.md) pages show every metric oxplow knows about.
+
+A dashboard is a [page](pages.md) whose view is a grid, in the Dashboards
+category. It lives as a file in one of your extensions (`my-pages` by
+default), so it is yours to keep, edit by hand, commit and share like any
+page.
 
 ## Making one
 
-`New Dashboard…` from the launcher (++cmd+p++), or `+ New dashboard`
-on the Dashboards index. Then either:
+**New Dashboard…** from the launcher (++cmd+p++) creates an empty one, named
+from the title you give it, and opens it. Then add tiles:
 
-- `+ Add metric` on the dashboard itself, or
-- `Add to dashboard ▾` from any metric's detail page, which also
-  offers `New dashboard…`.
-
-Dashboards live in the database, not in `.oxplow/project.yaml`, so
-they're local to you rather than shared with the project.
+- **Pin to Dashboard** in any page's ☰ menu adds that page as a tile, with
+  the params it has now. Pick the dashboard, or make a new one.
+- A metric's detail page offers its own **Add to dashboard**.
 
 ## Tiles
 
-A tile can also be a [lens](lenses.md): **Pin to Dashboard** on any lens page
-adds it, showing its first few rows.
+A tile is another page, embedded, or a chart or table over a query of the
+dashboard's own. Sizes are `small` (default), `wide`, `tall` and `full`.
+Reorder, rename, resize and remove tiles in the app, or by editing the
+page file; the app's edits rewrite the file and redeploy it.
 
-Each metric tile is a **line** chart (the default) or a **number**
-(the latest value, with how much it moved in the range). A line tile
-charts the metric the way it adds up: running totals for things like
-tokens, the plain value for things like coverage. There's also a plain
-**text** item for labelling a group of tiles -- it's literal text, not
-markdown.
-
-Sizes are `small` (default), `wide`, `tall`, and `full`. Right-click
-a tile for its Visualization and Size submenus and Remove. Drag a tile
-to reorder.
-
-## Filtering the whole board
-
-The header carries **Range** (defaults to All time) and **Branch**.
-Every tile follows them unless it has its own.
-
-Dashboards are deliberately plain. For a breakdown by package or
-language, or anything a tile can't show, ask your agent for a
-[lens](lenses.md) and pin that.
+A line tile charts a metric the way it adds up: running totals for things
+like tokens, the plain value for things like coverage; a number tile shows
+the latest value, with how much it moved in the range.
 
 ## Letting the agent build one
 
-The agent can build dashboards too (the `dashboard.*` commands), so you
-can ask for one instead of assembling it by hand:
+Ask your agent for one instead of assembling it by hand:
 
-> Make me a dashboard with test duration, coverage, and tokens per
-> effort, as numbers.
+> Make me a dashboard with test duration, coverage, and tokens per effort,
+> as numbers.
+
+It writes the page with `oxplow.extension.new_dashboard` and
+`oxplow.extension.write_page` and tells you where it is. Anything a tile
+can't show (a breakdown by package or language) is a page of its own that you
+pin.

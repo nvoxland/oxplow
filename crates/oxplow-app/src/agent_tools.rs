@@ -1,5 +1,5 @@
 //! The agent's MCP tools that extensions declare (`.context/extensions.md`
-//! "Tools"). A tool is a command or a lens that asks to be one (`tool:
+//! "Tools"). A tool is a command or a page that asks to be one (`tool:
 //! <name>`, offered as `<namespace>_<name>`): oxplow's own are
 //! `extensions/oxplow-foundation`'s declarations over core's operations,
 //! any other extension's are its own. Core builds only `list_commands` and
@@ -8,15 +8,15 @@
 //! the caller is offered.
 //!
 //! A command tool's description, schema and example are its command's, and
-//! a call is a run of that command as the caller. A lens tool's input is its
-//! params (and `format`), and a call runs `oxplow.lens.run` on it.
+//! a call is a run of that command as the caller. A page tool's input is its
+//! params (and `format`), and a call runs `oxplow.page.run` on it.
 
 use std::collections::BTreeMap;
 
 use oxplow_domain::{Actor, DomainError};
 use serde_json::{json, Map, Value};
 
-use crate::extensions::{Extension, Lens};
+use crate::extensions::Extension;
 use crate::Services;
 
 /// What a tool runs.
@@ -24,9 +24,6 @@ use crate::Services;
 pub enum ToolTarget {
     /// A command, by id (`oxplow.sql.query`).
     Command(String),
-    /// A lens, by id (`oxplow-foundation/thread-work`), through
-    /// [`LENS_RUN`].
-    Lens(String),
     /// A page, by id (`oxplow-foundation/thread-work`), through
     /// [`PAGE_RUN`].
     Page(String),
@@ -48,9 +45,6 @@ pub struct AgentTool {
     pub target: ToolTarget,
 }
 
-/// The command a lens tool runs.
-pub const LENS_RUN: &str = "oxplow.lens.run";
-
 /// The command a page tool runs.
 pub const PAGE_RUN: &str = "oxplow.page.run";
 
@@ -59,17 +53,6 @@ impl AgentTool {
     pub fn call(&self, input: Value) -> (String, Value) {
         match &self.target {
             ToolTarget::Command(id) => (id.clone(), input),
-            ToolTarget::Lens(id) => {
-                let mut params = match input {
-                    Value::Object(map) => map,
-                    _ => Map::new(),
-                };
-                let format = params.remove("format");
-                (
-                    LENS_RUN.to_string(),
-                    json!({ "id": id, "params": params, "format": format }),
-                )
-            }
             ToolTarget::Page(id) => {
                 let mut params = match input {
                     Value::Object(map) => map,
@@ -87,7 +70,7 @@ impl AgentTool {
 }
 
 /// The tools `actor` is offered now: each enabled extension's command
-/// tools whose command is offered to it, and its lens tools, by name.
+/// tools whose command is offered to it, and its page tools, by name.
 pub async fn offered(svc: &Services, actor: &Actor) -> Result<Vec<AgentTool>, DomainError> {
     svc.extension_activation
         .read(async {
@@ -124,19 +107,6 @@ pub fn tools_of(
                 target: ToolTarget::Command(spec.id.clone()),
             });
         }
-        for lens in &ext.lenses {
-            if let Some(name) = &lens.tool {
-                tools.push(AgentTool {
-                    name: name.clone(),
-                    description: lens_description(lens),
-                    input_schema: lens_schema(lens),
-                    // What a lens tool returns depends on its `format`.
-                    output_schema: None,
-                    read_only: true,
-                    target: ToolTarget::Lens(lens.id.clone()),
-                });
-            }
-        }
         for page in &ext.page_files {
             if let Some(name) = &page.tool {
                 tools.push(AgentTool {
@@ -164,26 +134,6 @@ fn spends(spec: &oxplow_domain::CommandSpec) -> bool {
         .any(|id| oxplow_domain::scope::scope(id).is_some_and(|scope| scope.spends))
 }
 
-fn lens_description(lens: &Lens) -> String {
-    let about = if lens.description.is_empty() {
-        lens.title.clone()
-    } else {
-        format!("{}: {}", lens.title, lens.description)
-    };
-    format!(
-        "{about} Returns what the person would see on the lens's page, as text; \
-         `format: \"json\"` returns its rows."
-    )
-}
-
-/// A lens's params as a tool's input: one property per param (its label,
-/// its choices, its default) and `format`. None is required: a param left
-/// out takes its default or what the caller's context binds
-/// (`thread_id`, `stream_id`).
-fn lens_schema(lens: &Lens) -> Value {
-    params_schema(&lens.params)
-}
-
 fn page_description(page: &crate::pages::schema::Page) -> String {
     let about = if page.description.is_empty() {
         page.title.clone()
@@ -196,7 +146,7 @@ fn page_description(page: &crate::pages::schema::Page) -> String {
     )
 }
 
-/// A page's (or lens's) params as a tool's input: one property per param
+/// A page's params as a tool's input: one property per param
 /// (its label, its choices, its default) and `format`. None is required:
 /// a param left out takes its default or what the caller's context binds
 /// (`thread_id`, `stream_id`).
@@ -204,8 +154,8 @@ fn params_schema(params: &[crate::extensions::PageParam]) -> Value {
     let mut properties = Map::new();
     for param in params {
         let mut property = Map::new();
-        // Options a lens lists aren't known until it runs: the agent runs
-        // that lens to see them.
+        // Options a page lists aren't known until it runs: the agent runs
+        // that page to see them.
         let from = param
             .options_from
             .as_ref()
@@ -285,12 +235,9 @@ mod tests {
                 "oxplow_preview_extension",
                 "oxplow_query_sql",
                 "oxplow_read",
-                "oxplow_run_lens",
-                "oxplow_run_lens_action",
                 "oxplow_run_page",
                 "oxplow_run_page_action",
                 "oxplow_search",
-                "oxplow_show_lens",
                 "oxplow_show_page",
                 "oxplow_thread_work",
                 "oxplow_validate_extension",
@@ -318,8 +265,6 @@ mod tests {
         );
         assert!(work.read_only);
         assert!(work.input_schema["properties"]["thread"].is_object());
-        let show = tools.iter().find(|t| t.name == "oxplow_show_lens").unwrap();
-        assert!(!show.read_only, "it records the answer in the thread");
     }
 
     /// A tool that spends the person's money asks before it runs: a model
@@ -367,13 +312,13 @@ mod tests {
     }
 
     /// Any extension declares tools the same way: a command offered to
-    /// the caller, and a lens whose params are its input. Every command is
+    /// the caller, and a page whose params are its input. Every command is
     /// offered to an agent, so each one that names a tool is one.
     #[tokio::test]
-    async fn an_extensions_command_and_lens_are_tools() {
+    async fn an_extensions_command_and_page_are_tools() {
         let fx = services_with_task_effort().await;
         let root = fx._dir.path().join(".oxplow/extensions/acme");
-        std::fs::create_dir_all(root.join("lenses")).unwrap();
+        std::fs::create_dir_all(root.join("pages")).unwrap();
         std::fs::write(
             root.join("extension.yaml"),
             "manifest: 2\nname: acme\nintent:\n  purpose: p\ncommands:\n\
@@ -384,19 +329,23 @@ mod tests {
         )
         .unwrap();
         std::fs::write(
-            root.join("lenses/open.yaml"),
-            "title: Open Work\ndescription: The items still open.\nquery: SELECT 1 AS n\n\
+            root.join("pages/open.yaml"),
+            "title: Open Work\ndescription: The items still open.\n\
              params:\n  - { name: state, label: State, default: todo, options: [{ value: todo, label: To do }, { value: done, label: Done }] }\n\
              \x20 - { name: owner, label: Owner, options_from: owners }\n\
+             data:\n  items:\n    sql: SELECT :state AS state\n\
+             view:\n  viz: table\n  from: items\n\
              tool: open_work\n",
         )
         .unwrap();
         std::fs::write(
-            root.join("lenses/owners.yaml"),
-            "title: Owners\nquery: SELECT 'me' AS value, 'Me' AS label\n",
+            root.join("pages/owners.yaml"),
+            "title: Owners\ndata:\n  owners:\n    sql: SELECT 'me' AS value, 'Me' AS label\n\
+             view:\n  viz: table\n  from: owners\n",
         )
         .unwrap();
-        activate_with_problems(&fx.svc).await;
+        let problems = activate_with_problems(&fx.svc).await;
+        assert!(problems.is_empty(), "{problems:?}");
         let tools = offered(&fx.svc, &agent(&fx)).await.unwrap();
         let acme: Vec<&AgentTool> = tools
             .iter()
@@ -406,26 +355,12 @@ mod tests {
             acme.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(),
             ["acme_count", "acme_open_work", "acme_secret"]
         );
-        let lens = acme[1];
+        let page = acme[1];
+        // Options a page lists aren't known until it runs: no enum, and
+        // the description says which page to run to see them.
         assert_eq!(
-            lens.input_schema["properties"]["state"],
-            json!({ "description": "State", "enum": ["todo", "done"], "default": "todo" })
-        );
-        // Options a lens lists aren't known until it runs: no enum, and
-        // the description says which lens to run to see them.
-        assert_eq!(
-            lens.input_schema["properties"]["owner"],
+            page.input_schema["properties"]["owner"],
             json!({ "description": "Owner — one of the `value`s `acme/owners` lists (run it to see them)" })
-        );
-        assert!(lens
-            .description
-            .starts_with("Open Work: The items still open."));
-        assert_eq!(
-            lens.call(json!({ "state": "done", "format": "json" })),
-            (
-                LENS_RUN.to_string(),
-                json!({ "id": "acme/open", "params": { "state": "done" }, "format": "json" })
-            )
         );
         assert_eq!(
             acme[0].call(json!({ "sql": "SELECT 1" })),

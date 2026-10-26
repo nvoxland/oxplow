@@ -1,7 +1,7 @@
 //! What a person's oxplow remembers for them outside any one tab
 //! (`ui_preference`): a page's **page memory** (scoped by the page's own
 //! ref, whatever its params — `oxplow:oxplow/page?page=tasks`, `oxplow:oxplow/page?page=acme/pulls`,
-//! `oxplow:oxplow/lens?lens=acme/board` — or `kind:<kind>` for every page of an entity kind),
+//! `oxplow:oxplow/page?page=acme/board` — or `kind:<kind>` for every page of an entity kind),
 //! a panel's (its `panel:` ref), a custom component's own
 //! (`component:<ext>/<id>`), and the app's **app preferences** (`app`).
 //! A tab's own view and history state live in its tab session, not here.
@@ -22,7 +22,7 @@ pub const MAX_COMPONENT_BYTES: usize = 1024 * 1024;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct UiPreference {
-    /// `app`; a page's URI (`oxplow:oxplow/page?…`, `oxplow:oxplow/lens?…`)
+    /// `app`; a page's URI (`oxplow:oxplow/page?…`)
     /// or `resource:<extension>/<resource>`; a panel's URI
     /// (`oxplow:oxplow/panel?…`); or `component:<ext>/<id>`.
     pub scope: String,
@@ -34,10 +34,10 @@ pub struct UiPreference {
 /// Why `scope` isn't one a preference may have. A page's or panel's scope
 /// is its URI; `resource:` and `component:` scopes aren't URIs.
 fn scope_problem(scope: &str) -> Option<String> {
-    use oxplow_domain::uri::resources::{LENS, PAGE, PANEL};
+    use oxplow_domain::uri::resources::{PAGE, PANEL};
     use oxplow_domain::uri::OxplowUri;
     let a_uri = OxplowUri::parse(scope)
-        .is_ok_and(|u| [PAGE, LENS, PANEL].contains(&u.resource().to_string().as_str()));
+        .is_ok_and(|u| [PAGE, PANEL].contains(&u.resource().to_string().as_str()));
     let named = |prefix: &str| {
         scope
             .strip_prefix(prefix)
@@ -47,7 +47,7 @@ fn scope_problem(scope: &str) -> Option<String> {
         None
     } else {
         Some(format!(
-            "`{scope}` isn't a preference scope: `app`, a page's URI (`oxplow:oxplow/page?…`, `oxplow:oxplow/lens?…`) or `resource:<extension>/<resource>`, a panel's URI (`oxplow:oxplow/panel?…`), or `component:<extension>/<id>`"
+            "`{scope}` isn't a preference scope: `app`, a page's URI (`oxplow:oxplow/page?…`) or `resource:<extension>/<resource>`, a panel's URI (`oxplow:oxplow/panel?…`), or `component:<extension>/<id>`"
         ))
     }
 }
@@ -223,7 +223,7 @@ mod tests {
                 .await
         ));
         for scope in [
-            "oxplow:oxplow/lens?lens=acme/board",
+            "oxplow:oxplow/page?page=acme/board",
             "resource:oxplow/file",
             "oxplow:oxplow/panel?panel=core:work",
         ] {

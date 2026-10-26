@@ -1,6 +1,0 @@
-title: Quality
-description: Duplicated code the scans found. Open a row to compare both copies side by side.
-viz: document
-sections:
-  - { lens: duplicate-blocks }
-launcher: { category: Code }

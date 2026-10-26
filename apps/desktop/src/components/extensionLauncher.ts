@@ -7,7 +7,7 @@ import { useEffect, useState } from "react";
 import { unwrapResult } from "../api.js";
 import { pageFileUri } from "../pages/pageFiles.js";
 import { commands, type Extension, type Node, type Page, type SqlCell } from "../tauri-bridge/generated/bindings.js";
-import { mergeDirectory } from "../lens/lensModel.js";
+import { mergeDirectory } from "../viz/vizModel.js";
 import { refFromTabId, withResourceParams } from "../tabs/pageRefs.js";
 import type { PageDirectoryEntry } from "./RailHud/sections.js";
 

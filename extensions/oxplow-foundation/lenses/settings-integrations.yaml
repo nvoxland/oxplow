@@ -1,8 +1,0 @@
-title: Integrations
-description: "Which implementation each capability uses, and the outside systems extensions connect to."
-viz: document
-sections:
-  - { lens: capabilities, title: Capabilities }
-  - { lens: replacements, title: Replaced components }
-  - { lens: integrations, title: Integrations }
-hidden: true

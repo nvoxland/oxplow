@@ -5,7 +5,7 @@
 //! `oxplow.delivery.discard { id }` gives up on it (it stays visible as
 //! `discarded`). `External`: a retry runs a consumer's handler, which may
 //! reach outside oxplow, so the event pump owns the state; both are a
-//! person's — or a lens acting for one — never an agent's, and discarding
+//! person's — or a page acting for one — never an agent's, and discarding
 //! is asked first.
 
 use std::sync::Arc;

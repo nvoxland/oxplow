@@ -1,4 +1,4 @@
-// oxplow's client library for custom components: a `viz: custom` lens's,
+// oxplow's client library for custom components: a `viz: custom` viz node's,
 // or a page's own (`pages: [{ component: <id> }]`).
 //
 // A component runs in a sandboxed frame: scripts and forms, no network,
@@ -18,10 +18,10 @@
 //   });
 //
 // A component is fed its page's data: `data` holds each loader's
-// `{ columns, rows, truncated }` by name (a lens's own rows as `rows`),
+// `{ columns, rows, truncated }` by name (a viz node's own rows as `rows`),
 // `params` what they ran with and `props` its own config; `onUpdate`
 // hears new data with the loaders that `changed`. A `viz: custom`'s own
-// rows are also `run` (a lens run); a page's component node has none.
+// rows are also `run` (a viz run); a page's component node has none.
 // A component that is a page (`page` carries its stream and thread)
 // reads more with `querySql` (when it
 // declares `sql: read`), titles its page with `setTitle`, puts actions in
@@ -29,8 +29,8 @@
 // opens a command's form, or a form of its own schema, in oxplow with
 // `openForm`, and signs in for a provider's credential with `signIn`. A page may also hand
 // oxplow an inline page (its YAML) to draw under it with the kit
-// (`showView`): oxplow runs it, keeps it live and offers Save as Lens and
-// Pin to Dashboard; the library tells oxplow the page's content height, so
+// (`showView`): oxplow runs it, keeps it live and offers Pin to
+// Dashboard; the library tells oxplow the page's content height, so
 // the frame sits at its content's height above what oxplow draws (leave
 // `html` and `body` at `height: auto` for that).
 //
@@ -132,7 +132,7 @@
     }
     return {
       // Its loaders' rows, by name: `{ columns, rows, truncated, error? }`
-      // each (a lens's own rows as `rows`).
+      // each (a viz node's own rows as `rows`).
       get data() {
         return fed;
       },
@@ -140,16 +140,16 @@
       get params() {
         return params;
       },
-      // A `viz: custom`'s own rows as a lens run: `{ lens, params, result:
+      // A `viz: custom`'s own rows as a viz run: `{ config, params, result:
       // { columns, rows } }`; null for a page's component node.
       get run() {
         return run;
       },
-      // The page it is — `{ streamId, threadId }` — or null when a lens
+      // The page it is — `{ streamId, threadId }` — or null when a viz node
       // shows it.
       page,
       // Its host's view params: a page's, a replacement's (the keys its
-      // target lists) or a lens page's; null when its host gives none (a
+      // target lists); null when its host gives none (a
       // tile, a slot).
       get viewParams() {
         return viewParams;
@@ -213,7 +213,7 @@
       setTitle: (title) => call({ method: "setTitle", title }),
       // Have oxplow draw an inline page under the page — its YAML (JSON is
       // YAML too): `title`, `data` (read-only `sql` loaders), `view` — live,
-      // with Save as Lens and Pin to Dashboard; null clears it. Resolves with
+      // with Pin to Dashboard; null clears it. Resolves with
       // its first loader's rows (`{ columns, rows, truncated }`; null when
       // cleared), for the page's own controls. Rejects `INVALID` with the
       // `field` it is about (`/data/<loader>/sql`) for a page oxplow refuses

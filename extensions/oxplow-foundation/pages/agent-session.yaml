@@ -6,8 +6,6 @@ default: true
 pinned: true
 params:
 - name: uri
-- name: stopped
-- name: conversation
 data:
   row:
     sql: |
@@ -37,6 +35,10 @@ data:
     params:
       thread:
         from: row.thread
+      stopped:
+        from: row.stopped
+      conversation:
+        from: row.conversation
 view:
   stack:
   - id: agent-session-waiting

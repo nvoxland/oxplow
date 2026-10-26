@@ -8,7 +8,7 @@
 //! Starlark fact collector on `snapshot.taken` that counts each file's
 //! functions over a complexity limit (`source_files()` + `code_metrics()`),
 //! the `<namespace>.area` dimension its facts carry (the top folder of the
-//! path), the headline `metrics:` spec, a launcher lens whose rows link to
+//! path), the headline `metrics:` spec, a launcher page whose rows link to
 //! the file and line, and an intent example with the fixture
 //! `oxplow extension test` runs the collector over.
 
@@ -144,7 +144,7 @@ pub struct ScaffoldFile {
 }
 
 /// Every file of the extension `name`, relative to the project root:
-/// `extension.yaml`, the collector script, the lens and the fixture.
+/// `extension.yaml`, the collector script, the page and the fixture.
 /// `origin` is the thread or effort ref that asked for it.
 pub fn extension_files(
     name: &str,
@@ -206,22 +206,25 @@ pub fn extension_files(
          \x20   displayKind: findings  # its facts are located, so the drill-in lists the files\n\
          \x20   sliceableDims: [{area}]\n"
     ));
-    let lens = format!(
-        "{modeline}title: {title}\n\
-         description: \"TODO: what this lens answers. The files with functions over the limit, worst first.\"\n\
-         # The current facts behind the metric: one row per file, its worst function's line.\n\
-         query: |\n\
-         \x20 SELECT path, line, value AS functions\n\
-         \x20 FROM metric_findings('{measure}')\n\
-         \x20 ORDER BY value DESC, path\n\
-         viz: table\n\
-         columns:\n\
-         \x20 - {{ key: path, label: File, link: {{ kind: file, line: line }} }}\n\
-         \x20 - {{ key: line, label: Worst function at line }}\n\
-         \x20 - {{ key: functions, label: Functions over the limit }}\n\
-         empty: No functions over the limit, or no snapshot has been taken yet.\n\
-         launcher: {{ category: Code }}\n",
-        modeline = extensions::schema::modeline(extensions::schema::LENS_SCHEMA_URL),
+    let page = format!(
+        "title: {title}\n\
+         description: \"TODO: what this page answers. The files with functions over the limit, worst first.\"\n\
+         category: Code\n\
+         data:\n\
+         \x20 # The current facts behind the metric: one row per file, its worst function's line.\n\
+         \x20 findings:\n\
+         \x20   sql: |\n\
+         \x20     SELECT path, line, value AS functions\n\
+         \x20     FROM metric_findings('{measure}')\n\
+         \x20     ORDER BY value DESC, path\n\
+         view:\n\
+         \x20 viz: table\n\
+         \x20 from: findings\n\
+         \x20 columns:\n\
+         \x20   - {{ key: path, label: File, link: {{ kind: file, line: line }} }}\n\
+         \x20   - {{ key: line, label: Worst function at line }}\n\
+         \x20   - {{ key: functions, label: Functions over the limit }}\n\
+         \x20 empty: No functions over the limit, or no snapshot has been taken yet.\n"
     );
     let script = collector_script(starter, &measure, &area);
     let fixture = format!(
@@ -241,8 +244,8 @@ pub fn extension_files(
             content: script,
         },
         ScaffoldFile {
-            path: format!("{dir}/lenses/{name}.yaml"),
-            content: lens,
+            path: format!("{dir}/pages/{name}.yaml"),
+            content: page,
         },
         ScaffoldFile {
             path: format!("{dir}/fixtures/basic.yaml"),
@@ -286,7 +289,7 @@ fn collector_script(starter: &MetricStarter, measure: &str, area: &str) -> Strin
          \x20           \"value\": len(over),\n\
          \x20           \"subject\": uri.build(\"oxplow/file\", path = f[\"path\"]),\n\
          \x20           \"path\": f[\"path\"],\n\
-         \x20           \"line\": worst[\"start_line\"],  # where the lens links to\n\
+         \x20           \"line\": worst[\"start_line\"],  # where the page links to\n\
          \x20           \"dims\": {{\"{area}\": area(f[\"path\"])}},\n\
          \x20       }})\n\
          \x20   return {{\"facts\": facts}}\n",

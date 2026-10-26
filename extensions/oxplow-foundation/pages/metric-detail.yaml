@@ -161,22 +161,6 @@ view:
         keys:
         - '{{param.metric}}'
         enabled: false
-    - id: add-to-dashboard
-      label: Add to Dashboard…
-      command: oxplow.dashboard.add_item
-      form: true
-      fixed:
-      - kind
-      - display
-      - metric
-      - viz
-      choices:
-        dashboard: oxplow-foundation/metric-dashboards
-      input:
-        kind: query
-        display: metric
-        metric: '{{param.metric}}'
-        viz: line
   - id: chart
     title: ''
     from: chart

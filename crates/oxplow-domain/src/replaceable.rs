@@ -1,8 +1,8 @@
 //! The core sub-components an extension may replace (`ui.replacements`;
 //! `.context/extensions.md` "Replacements"): each a named target of one
 //! capability with a **versioned props contract** — the params its
-//! replacement lens gets, and must declare, instead of any host state.
-//! (The viewer's stream isn't a prop: any lens declaring `stream_id` gets
+//! replacement page gets, and must declare, instead of any host state.
+//! (The viewer's stream isn't a prop: any page declaring `stream_id` gets
 //! it, as everywhere.)
 //! Whole pages are never replaceable.
 //!
@@ -28,7 +28,7 @@ pub struct Replaceable {
     /// change. A declaration may pin it (`version:`); one pinned to
     /// another version doesn't load.
     pub version: u32,
-    /// What the replacement is given, by name; its lens declares each.
+    /// What the replacement is given, by name; its page declares each.
     pub props: &'static [&'static str],
     /// Its host page's view params it shares: the replacement reads them
     /// (`init.view`), writes them (`setViewParams`) and hears them change,

@@ -5,7 +5,7 @@ import { peekPendingCommentReveal, clearCommentReveal } from "../comment-reveal-
 import { PageNavigationContext, type PageNavigation } from "../tabs/PageNavigationContext.js";
 import { decl, fakePage, fakePageRuns, fakeRun, loader, node } from "./testing/fakeRun.js";
 
-// A page file with `comments: true` gets what a lens page with it got: the
+// A page file with `comments: true` gets what a page with it got: the
 // nav bar's navigator on its URI, a body plain-text selections resolve
 // to, `#comment=` revealed; its markdown headings are the rail's Contents.
 
@@ -53,7 +53,7 @@ function page(comments: boolean, viewParams: Record<string, string> = {}) {
 
 test("a page that takes comments steps through them on its URI, and its body is that URI's", async () => {
   const view = render(page(true));
-  await waitFor(() => expect(view.getByTestId("lens-markdown")).toBeTruthy());
+  await waitFor(() => expect(view.getByTestId("viz-markdown")).toBeTruthy());
   await waitFor(() => expect(view.getByTestId("page-nav-comments-toggle")).toBeTruthy());
   expect(targets).toContain(URI);
   expect(view.container.querySelector(`[data-ref="${URI}"]`)).not.toBeNull();
@@ -61,7 +61,7 @@ test("a page that takes comments steps through them on its URI, and its body is 
 
 test("a page that doesn't take them has neither", async () => {
   const view = render(page(false));
-  await waitFor(() => expect(view.getByTestId("lens-markdown")).toBeTruthy());
+  await waitFor(() => expect(view.getByTestId("viz-markdown")).toBeTruthy());
   expect(view.queryByTestId("page-nav-comments-toggle")).toBeNull();
   expect(targets).toEqual([]);
   expect(view.container.querySelector(`[data-ref="${URI}"]`)).toBeNull();
@@ -69,18 +69,18 @@ test("a page that doesn't take them has neither", async () => {
 
 test("the body's markdown headings are the rail's Contents, above About this page", async () => {
   const view = render(page(false));
-  const contents = await waitFor(() => view.getByTestId("lens-rail-contents"));
+  const contents = await waitFor(() => view.getByTestId("viz-rail-contents"));
   await waitFor(() => expect([...contents.querySelectorAll("button")].map((b) => b.textContent)).toEqual(["First", "Second"]));
   expect(view.getByTestId("page-rail-about")).toBeTruthy();
 });
 
 test("`#comment=` reveals that comment on a page that takes comments, and only there", async () => {
   const taking = render(page(true, { comment: "cmt1" }));
-  await waitFor(() => expect(taking.getByTestId("lens-markdown")).toBeTruthy());
+  await waitFor(() => expect(taking.getByTestId("viz-markdown")).toBeTruthy());
   expect(peekPendingCommentReveal()).toBe("cmt1");
   clearCommentReveal("cmt1");
   cleanup();
   const not = render(page(false, { comment: "cmt2" }));
-  await waitFor(() => expect(not.getByTestId("lens-markdown")).toBeTruthy());
+  await waitFor(() => expect(not.getByTestId("viz-markdown")).toBeTruthy());
   expect(peekPendingCommentReveal()).toBeNull();
 });

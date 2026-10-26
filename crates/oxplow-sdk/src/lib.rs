@@ -4,7 +4,7 @@
 //!
 //! One library behind three callers — the `oxplow extension new|check|test`
 //! CLI in the Tauri binary, the RPC/MCP `oxplow_validate_extension`, and
-//! `save_lens` — so every message reads the same (`file:line: what — fix`)
+//! `write_page` — so every message reads the same (`file:line: what — fix`)
 //! wherever the author meets it. For an AI author that consistency is the
 //! feature: the skill says "run `check` after every edit", and the error
 //! it gets back names the file and line and says what to change.
@@ -41,9 +41,9 @@ pub enum SdkError {
 /// program stands behind its stub.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
-    /// One starter lens (open tasks in the viewer's stream) with a row
-    /// action that starts one.
-    Lens,
+    /// One starter page (open tasks in the viewer's stream) with a row
+    /// action that starts one, in the launcher.
+    Page,
     /// A v2 manifest only.
     Extension,
     /// A provider of `capability` (one a process may implement): its
@@ -51,11 +51,11 @@ pub enum Kind {
     /// replace, and the fixtures `extension test` runs.
     Provider { capability: &'static str },
     /// A derived (Starlark) collector of an entity, a model over it and a
-    /// lens over the model.
+    /// page over the model.
     Collector,
     /// A code metric: a per-path measure, a Starlark fact collector over the
     /// snapshot's files, the dimension its facts carry, the headline metric
-    /// and a lens whose rows link to the file and line.
+    /// and a page whose rows link to the file and line.
     Metric,
     /// A command whose script composes core commands, on a work item's
     /// Commands menu.
@@ -63,9 +63,9 @@ pub enum Kind {
     /// An effect: a script reacting to a logged
     /// event by composing commands, run under the extension's permissions.
     Effect,
-    /// A custom component: a web bundle a
-    /// `viz: custom` lens renders in a sandboxed frame, talking to oxplow
-    /// through the served client library.
+    /// A custom component: a web bundle a page's `component` node draws in a
+    /// sandboxed frame, fed the page's loaders through the served client
+    /// library.
     Component,
     /// An effort policy written as a script: an `implementations:` entry
     /// whose script opens an item's effort when it starts on a thread and
@@ -76,18 +76,15 @@ pub enum Kind {
     Advisory,
     /// A skill the coding agent loads when it's relevant (`SKILL.md`).
     Skill,
-    /// A full page showing one lens, in the launcher.
-    Page,
-    /// A left-nav panel showing one lens compact.
+    /// A left-nav panel showing one page compact.
     Panel,
 }
 
 impl Kind {
-    pub const NAMES: &'static str = "`lens`, `extension`, `provider`, `collector`, `metric`, `command`, `effect`, `component`, `policy`, `advisory`, `skill`, `page` or `panel`";
+    pub const NAMES: &'static str = "`page`, `extension`, `provider`, `collector`, `metric`, `command`, `effect`, `component`, `policy`, `advisory`, `skill` or `panel`";
 
     pub fn parse(s: &str) -> Option<Kind> {
         match s {
-            "lens" => Some(Kind::Lens),
             "extension" => Some(Kind::Extension),
             "provider" => Some(Kind::Provider {
                 capability: "work_items",
@@ -140,7 +137,7 @@ pub struct Scaffolded {
 
 /// Create `.oxplow/extensions/<name>/` with a v2 manifest carrying an
 /// `intent` (its `origin` = the thread/effort ref that asked for it), one
-/// example and a matching fixture, and — for a lens — one starter lens the
+/// example and a matching fixture, and — for a page — one starter page the
 /// example names. Refuses an existing folder, a bad name, or a non-ref
 /// origin; `check` passes on what it writes.
 pub fn scaffold(
@@ -211,8 +208,6 @@ pub fn scaffold_with(
         Ok(())
     };
     let ns = oxplow_domain::contribution::extension_namespace(name);
-    // Each lens file names its schema, as the manifest does.
-    let lens_modeline = extensions::schema::modeline(extensions::schema::LENS_SCHEMA_URL);
     // An identifier from the name: a provider's or a policy's id.
     let provider_id = oxplow_domain::contribution::extension_namespace(name);
     // The intent example, and its fixture (what `extension test` runs).
@@ -220,10 +215,10 @@ pub fn scaffold_with(
     use oxplow_domain::uri::build::work_item_uri;
     let work_item = work_item_uri("oxplow", "tsk1");
     let (example_input, example_expect, fixture_expect) = match kind {
-        Kind::Lens | Kind::Component | Kind::Page | Kind::Panel => (
-            format!("{{ lens: {name}, params: {{ stream_id: 1 }} }}"),
+        Kind::Component | Kind::Page | Kind::Panel => (
+            format!("{{ page: {name}, params: {{ stream_id: 1 }} }}"),
             "one row per open task in the stream, newest first",
-            Some("{ rows: $any }".to_string()),
+            Some("{ loaders: { items: { rows: $any } } }".to_string()),
         ),
         Kind::Extension | Kind::Advisory | Kind::Skill => {
             ("{}".to_string(), "TODO: what a run should show", None)
@@ -343,7 +338,7 @@ pub fn scaffold_with(
              \x20       uri: {{ type: string, description: \"The work item (oxplow:oxplow/work_item?id=<id>&provider=<provider>).\" }}\n\
              \x20     additionalProperties: false\n\
              \x20   entry: handlers/note.star\n\
-             \x20   # Who may run it: a person, an agent, a lens (each child command checks its own too).\n\
+             \x20   # Who may run it: a person, an agent, a page (each child command checks its own too).\n\
              \x20   \
              \x20   # On a work item's page (Commands) and a row's right-click.\n\
              \x20   ui: {{ label: Add Note, about: oxplow/work_item, input: {{ uri: \"{{{{uri}}}}\" }} }}\n\
@@ -365,12 +360,11 @@ pub fn scaffold_with(
         ),
         Kind::Component => manifest.push_str(&format!(
             "custom_components:\n\
-             \x20 # A web bundle (components/{name}/) a `viz: custom` lens renders in a\n\
-             \x20 # sandboxed frame: scripts only, no network, no storage. Beyond its lens's\n\
-             \x20 # own rows it may query the lenses in `assets` and run the commands in\n\
-             \x20 # `commands` — as the person looking at it — and nothing else.\n\
+             \x20 # A web bundle (components/{name}/) a page's `component` node draws in a\n\
+             \x20 # sandboxed frame: scripts only, no network, no storage. It is fed the\n\
+             \x20 # page's loaders and may run the commands in `commands` — as the\n\
+             \x20 # person looking at it — and nothing else.\n\
              \x20 - id: {name}\n\
-             \x20   assets: []\n\
              \x20   commands: []\n"
         )),
         Kind::Policy => manifest.push_str(&format!(
@@ -420,23 +414,15 @@ pub fn scaffold_with(
              \x20   file: skills/{name}/SKILL.md\n",
             skill = ContributionKind::Skill.spec().title.to_lowercase()
         )),
-        Kind::Page => manifest.push_str(&format!(
-            "pages:\n\
-             \x20 # A {page}: one of this extension's lenses, full size, in the launcher\n\
-             \x20 # under `category`.\n\
-             \x20 - {{ id: {name}, title: {title}, category: Work, lens: {name} }}\n",
-            page = ContributionKind::Page.spec().title.to_lowercase(),
-            title = title_case(name)
-        )),
         Kind::Panel => manifest.push_str(&format!(
             "panels:\n\
-             \x20 # A {panel} in the left nav: its `body` lens, compact. `scope` says what it\n\
-             \x20 # follows (project, stream or thread) and the lens declares that param.\n\
+             \x20 # A {panel} in the left nav: its `body` page, compact. `scope` says what it\n\
+             \x20 # follows (project, stream or thread) and the page declares that param.\n\
              \x20 - {{ id: {name}, title: {title}, scope: stream, body: {name} }}\n",
             panel = ContributionKind::Panel.spec().title.to_lowercase(),
             title = title_case(name)
         )),
-        Kind::Lens | Kind::Extension | Kind::Metric => {}
+        Kind::Page | Kind::Extension | Kind::Metric => {}
     }
     write(&format!("{rel_dir}/extension.yaml"), manifest)?;
     if let Some(expect) = fixture_expect {
@@ -480,31 +466,37 @@ pub fn scaffold_with(
                 )?;
             }
         }
-        Kind::Lens => write(
-            &format!("{rel_dir}/lenses/{name}.yaml"),
+        Kind::Page => write(
+            &format!("{rel_dir}/pages/{name}.yaml"),
             format!(
-                "{modeline}title: {title}\n\
-                 description: \"TODO: what this lens answers.\"\n\
+                "title: {title}\n\
+                 description: \"TODO: what this page answers.\"\n\
+                 category: Work\n\
                  params:\n\
                  \x20 # Filled in with the viewer's stream unless a value is given.\n\
                  \x20 - {{ name: stream_id, label: Stream }}\n\
-                 query: |\n\
-                 \x20 SELECT w.uri, w.title, w.state, w.updated_at\n\
-                 \x20 FROM v_work_item w JOIN v_thread t ON t.id = w.thread_id\n\
-                 \x20 WHERE t.stream_id = :stream_id AND w.state IN ('todo', 'in_progress', 'blocked')\n\
-                 \x20 ORDER BY w.updated_at DESC\n\
-                 viz: table\n\
-                 columns:\n\
-                 \x20 - {{ key: title, label: Item, link: {{ kind: page, from: uri }} }}\n\
-                 \x20 - {{ key: state }}\n\
-                 actions:\n\
-                 \x20 # In each row's right-click menu: a command run as the person, the\n\
-                 \x20 # row's values bound in (`{{{{row.<column>}}}}`).\n\
-                 \x20 - {{ id: start, label: Start, command: oxplow.work_item.transition, input: {{ uri: \"{{{{row.uri}}}}\", to: in_progress }}, row: true }}\n\
-                 empty: No open work items in this stream.\n\
-                 launcher: {{ category: Work }}\n",
-                modeline = lens_modeline,
-                    title = title_case(name)
+                 answers:\n\
+                 \x20 # Questions this page answers, in a person's words: how an agent finds it.\n\
+                 \x20 - {{ question: \"TODO: what is open in this stream?\", params: {{ stream_id: 1 }} }}\n\
+                 data:\n\
+                 \x20 items:\n\
+                 \x20   sql: |\n\
+                 \x20     SELECT w.uri, w.title, w.state, w.updated_at\n\
+                 \x20     FROM v_work_item w JOIN v_thread t ON t.id = w.thread_id\n\
+                 \x20     WHERE t.stream_id = :stream_id AND w.state IN ('todo', 'in_progress', 'blocked')\n\
+                 \x20     ORDER BY w.updated_at DESC\n\
+                 view:\n\
+                 \x20 viz: table\n\
+                 \x20 from: items\n\
+                 \x20 columns:\n\
+                 \x20   - {{ key: title, label: Item, link: {{ kind: page, from: uri }} }}\n\
+                 \x20   - {{ key: state }}\n\
+                 \x20 actions:\n\
+                 \x20   # In each row's right-click menu: a command run as the person, the\n\
+                 \x20   # row's values bound in (`{{{{row.<column>}}}}`).\n\
+                 \x20   - {{ id: start, label: Start, command: oxplow.work_item.transition, input: {{ uri: \"{{{{row.uri}}}}\", to: in_progress }}, row: true }}\n\
+                 \x20 empty: No open work items in this stream.\n",
+                title = title_case(name)
             ),
         )?,
         Kind::Collector => {
@@ -525,17 +517,22 @@ pub fn scaffold_with(
                 "SELECT uri, title FROM ref('item')\n".to_string(),
             )?;
             write(
-                &format!("{rel_dir}/lenses/{name}.yaml"),
+                &format!("{rel_dir}/pages/{name}.yaml"),
                 format!(
-                    "{modeline}title: {title}\n\
-                     description: \"TODO: what this lens answers.\"\n\
-                     query: SELECT uri, title FROM v_{ns}_open_items ORDER BY title\n\
-                     viz: table\n\
-                     columns:\n\
-                     \x20 - {{ key: title, label: Item, link: {{ kind: page, from: uri }} }}\n\
-                     empty: Nothing collected yet — sync the collector (Settings → Data).\n\
-                     launcher: {{ category: Work }}\n",
-                    modeline = lens_modeline,
+                    "title: {title}\n\
+                     description: \"TODO: what this page answers.\"\n\
+                     category: Work\n\
+                     answers:\n\
+                     \x20 - {{ question: \"TODO: what has been collected?\" }}\n\
+                     data:\n\
+                     \x20 items:\n\
+                     \x20   sql: SELECT uri, title FROM v_{ns}_open_items ORDER BY title\n\
+                     view:\n\
+                     \x20 viz: table\n\
+                     \x20 from: items\n\
+                     \x20 columns:\n\
+                     \x20   - {{ key: title, label: Item, link: {{ kind: page, from: uri }} }}\n\
+                     \x20 empty: Nothing collected yet — sync the collector (Settings → Data).\n",
                     title = title_case(name)
                 ),
             )?;
@@ -564,24 +561,27 @@ pub fn scaffold_with(
         )?,
         Kind::Component => {
             write(
-                &format!("{rel_dir}/lenses/{name}.yaml"),
+                &format!("{rel_dir}/pages/{name}.yaml"),
                 format!(
-                    "{modeline}title: {title}\n\
+                    "title: {title}\n\
                      description: \"TODO: what this view answers.\"\n\
+                     category: Work\n\
                      params:\n\
                      \x20 # Filled in with the viewer's stream unless a value is given.\n\
                      \x20 - {{ name: stream_id, label: Stream }}\n\
-                     # The rows the component gets (`component.run`), and what an agent reads:\n\
-                     # agents always see the table, never the frame.\n\
-                     query: |\n\
-                     \x20 SELECT w.uri, w.title, w.state\n\
-                     \x20 FROM v_work_item w JOIN v_thread t ON t.id = w.thread_id\n\
-                     \x20 WHERE t.stream_id = :stream_id AND w.state IN ('todo', 'in_progress', 'blocked')\n\
-                     \x20 ORDER BY w.updated_at DESC\n\
-                     viz: custom\n\
-                     custom: {{ component: {name} }}\n\
-                     launcher: {{ category: Work }}\n",
-                    modeline = lens_modeline,
+                     answers:\n\
+                     \x20 - {{ question: \"TODO: how many open tasks are there?\", params: {{ stream_id: 1 }} }}\n\
+                     data:\n\
+                     \x20 # The rows the component is fed (`component.data.items`), and what an\n\
+                     \x20 # agent reads: agents always see the table, never the frame.\n\
+                     \x20 items:\n\
+                     \x20   sql: |\n\
+                     \x20     SELECT w.uri, w.title, w.state\n\
+                     \x20     FROM v_work_item w JOIN v_thread t ON t.id = w.thread_id\n\
+                     \x20     WHERE t.stream_id = :stream_id AND w.state IN ('todo', 'in_progress', 'blocked')\n\
+                     \x20     ORDER BY w.updated_at DESC\n\
+                     view:\n\
+                     \x20 component: {{ id: {name} }}\n",
                     title = title_case(name)
                 ),
             )?;
@@ -601,43 +601,48 @@ pub fn scaffold_with(
             write(
                 &format!("{rel_dir}/components/{name}/app.js"),
                 "// Runs in a sandboxed frame. `oxplow.connect()` resolves once oxplow has\n\
-                 // handed over the lens's rows:\n\
-                 //   component.run                     the lens's latest run ({ result: { columns, rows } })\n\
-                 //   component.onUpdate(fn)            the lens re-ran\n\
-                 //   component.query(asset, params)    a lens listed in `assets`\n\
+                 // handed over the page's loaders:\n\
+                 //   component.data                    each loader's rows by name ({ items: { columns, rows } })\n\
+                 //   component.onUpdate(fn)            a loader changed: fn({ data, params, changed })\n\
                  //   component.invoke(command, input)  a command listed in `commands`\n\
                  //   component.navigate(ref)           open one of oxplow's pages\n\
                  oxplow.connect().then((component) => {\n\
                  \x20 component.applyTheme();\n\
                  \x20 const out = document.getElementById(\"out\");\n\
-                 \x20 const render = (run) => {\n\
-                 \x20   out.textContent = run.result.rows.length + \" open tasks\";\n\
+                 \x20 const render = (data) => {\n\
+                 \x20   out.textContent = data.items.rows.length + \" open tasks\";\n\
                  \x20 };\n\
-                 \x20 render(component.run);\n\
-                 \x20 component.onUpdate(render);\n\
+                 \x20 render(component.data);\n\
+                 \x20 component.onUpdate(({ data }) => render(data));\n\
                  });\n"
                     .to_string(),
             )?;
         }
-        Kind::Page | Kind::Panel => write(
-            &format!("{rel_dir}/lenses/{name}.yaml"),
+        Kind::Panel => write(
+            &format!("{rel_dir}/pages/{name}.yaml"),
             format!(
-                "{modeline}title: {title}\n\
+                "title: {title}\n\
                  description: \"TODO: what this answers.\"\n\
+                 hidden: true\n\
                  params:\n\
                  \x20 # Filled in with the viewer's stream unless a value is given.\n\
                  \x20 - {{ name: stream_id, label: Stream }}\n\
-                 query: |\n\
-                 \x20 SELECT w.uri, w.title, w.state\n\
-                 \x20 FROM v_work_item w JOIN v_thread t ON t.id = w.thread_id\n\
-                 \x20 WHERE t.stream_id = :stream_id AND w.state IN ('todo', 'in_progress', 'blocked')\n\
-                 \x20 ORDER BY w.updated_at DESC\n\
-                 viz: table\n\
-                 columns:\n\
-                 \x20 - {{ key: title, label: Item, link: {{ kind: page, from: uri }} }}\n\
-                 \x20 - {{ key: state }}\n\
-                 empty: No open work items in this stream.\n",
-                modeline = lens_modeline,
+                 answers:\n\
+                 \x20 - {{ question: \"TODO: what is open in this stream?\", params: {{ stream_id: 1 }} }}\n\
+                 data:\n\
+                 \x20 items:\n\
+                 \x20   sql: |\n\
+                 \x20     SELECT w.uri, w.title, w.state\n\
+                 \x20     FROM v_work_item w JOIN v_thread t ON t.id = w.thread_id\n\
+                 \x20     WHERE t.stream_id = :stream_id AND w.state IN ('todo', 'in_progress', 'blocked')\n\
+                 \x20     ORDER BY w.updated_at DESC\n\
+                 view:\n\
+                 \x20 viz: table\n\
+                 \x20 from: items\n\
+                 \x20 columns:\n\
+                 \x20   - {{ key: title, label: Item, link: {{ kind: page, from: uri }} }}\n\
+                 \x20   - {{ key: state }}\n\
+                 \x20 empty: No open work items in this stream.\n",
                 title = title_case(name)
             ),
         )?,
@@ -1011,8 +1016,8 @@ pub enum DryRun {
 }
 
 /// Load `name` under `root` and report everything wrong with it: the
-/// manifest's shape and lifecycle, every cross-reference, every lens's
-/// shape, and a dry run of its models, commands, lenses and advisories
+/// manifest's shape and lifecycle, every cross-reference, every page's
+/// shape, and a dry run of its models, commands, pages and advisories
 /// against the semantic layer — `layer` (the project's), else a fresh
 /// in-memory database. This is what `oxplow_validate_extension` returns
 /// and what `oxplow extension check` prints. `commands` (the running app's
@@ -1044,7 +1049,7 @@ pub async fn check(
             .map(|h| h.svc.commands.as_ref() as extensions::CommandSchemas<'_>)
     });
     // No project database: the throwaway oxplow's, which is empty but has
-    // the extension's models and metrics (a lens may read both).
+    // the extension's models and metrics (a page may read both).
     let empty;
     let (layer, dry_run) = match (layer, host.as_ref()) {
         (Some(layer), _) => (layer, DryRun::Project),
@@ -1100,7 +1105,7 @@ pub async fn check(
 
 /// What going from git revision `against` (`HEAD`, a branch, a sha) to the
 /// working tree changes for extension `name` — the review an
-/// install or an effort shows, on the CLI: lenses, models and their rows,
+/// install or an effort shows, on the CLI: pages, models and their rows,
 /// collectors and their outputs, providers, config. It reads through
 /// `layer` and writes nothing: each side's models are temp views.
 async fn impact_against(
@@ -1364,7 +1369,7 @@ pub fn render_findings(report: &CheckReport, format: Format) -> String {
 }
 
 /// The project's local database, when the folder is an oxplow project
-/// that has been opened: what `check` dry-runs lens SQL against.
+/// that has been opened: what `check` dry-runs page SQL against.
 pub fn project_database(root: &Path) -> Option<PathBuf> {
     let path = root.join(".oxplow").join("local.sqlite");
     path.is_file().then_some(path)
@@ -1380,16 +1385,14 @@ mod tests {
         std::fs::write(p, body).unwrap();
     }
 
-    /// Every kind's scaffold names its schema on each file's first line,
-    /// and validates against it.
+    /// Every kind's scaffold names the manifest schema on its first line,
+    /// and validates against it; a page file has no schema yet.
     #[test]
     fn scaffolds_name_and_satisfy_their_schemas() {
         use oxplow_app::extensions::schema;
         let manifest_schema =
             jsonschema::validator_for(&schema::manifest_schema()).expect("compiles");
-        let lens_schema = jsonschema::validator_for(&schema::lens_schema()).expect("compiles");
         for kind in [
-            Kind::Lens,
             Kind::Extension,
             Kind::provider("work_items").unwrap(),
             Kind::provider("effort_policy").unwrap(),
@@ -1412,8 +1415,6 @@ mod tests {
             for file in made.files.iter().filter(|f| f.ends_with(".yaml")) {
                 let (url, validator) = if file.ends_with("/extension.yaml") {
                     (schema::MANIFEST_SCHEMA_URL, &manifest_schema)
-                } else if file.contains("/lenses/") {
-                    (schema::LENS_SCHEMA_URL, &lens_schema)
                 } else {
                     continue;
                 };
@@ -1551,7 +1552,7 @@ mod tests {
     }
 
     /// A metric the app has not loaded yet: checking against a project
-    /// database resolves it from the extension under check, so its lens
+    /// database resolves it from the extension under check, so its page
     /// (which reads `metric_findings()`) dry-runs rather than failing on an
     /// unknown metric.
     #[tokio::test]
@@ -1654,11 +1655,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn new_lens_then_check_is_clean() {
+    async fn new_page_then_check_is_clean() {
         let dir = tempfile::tempdir().unwrap();
         let made = scaffold(
             dir.path(),
-            Kind::Lens,
+            Kind::Page,
             "demo",
             Some("oxplow:oxplow/effort?id=eff42"),
         )
@@ -1669,7 +1670,7 @@ mod tests {
             vec![
                 ".oxplow/extensions/demo/extension.yaml",
                 ".oxplow/extensions/demo/fixtures/basic.yaml",
-                ".oxplow/extensions/demo/lenses/demo.yaml",
+                ".oxplow/extensions/demo/pages/demo.yaml",
             ]
         );
         let report = check(
@@ -1691,38 +1692,33 @@ mod tests {
             report.extension.intent.as_ref().unwrap().origin.as_deref(),
             Some("oxplow:oxplow/effort?id=eff42")
         );
-        assert_eq!(report.extension.lenses.len(), 1);
-        assert_eq!(report.extension.lenses[0].title, "Demo");
+        assert_eq!(report.extension.page_files.len(), 1);
+        assert_eq!(report.extension.page_files[0].title, "Demo");
         let text = render_findings(&report, Format::Text);
         assert!(text.contains("demo: 0 errors, 0 warnings"), "{text}");
         assert!(text.contains("dry-run on an empty database"), "{text}");
-        let lens = dir.path().join(".oxplow/extensions/demo/lenses/demo.yaml");
-        let body = std::fs::read_to_string(&lens).unwrap();
+        let page = dir.path().join(".oxplow/extensions/demo/pages/demo.yaml");
+        let body = std::fs::read_to_string(&page).unwrap();
         std::fs::write(
-            &lens,
+            &page,
             body.replace("FROM v_work_item", "FROM v_no_such_view"),
         )
         .unwrap();
-        let report = check(
-            dir.path(),
-            "demo",
-            &ExtensionCatalog::new(),
-            None,
-            None,
-            None,
-        )
-        .await
-        .unwrap();
+        // `check` doesn't run a page's loaders; `extension test` opens the page
+        // with each answer's params, so a loader that fails is a finding.
+        let tested = crate::extension_test::test_extension(dir.path(), "demo", false)
+            .await
+            .unwrap();
         assert!(
-            report.errors.join("\n").contains("v_no_such_view"),
+            tested.errors.join("\n").contains("v_no_such_view"),
             "{:?}",
-            report.errors
+            tested.errors
         );
-        std::fs::write(&lens, body).unwrap();
+        std::fs::write(&page, body).unwrap();
         // A second scaffold refuses to overwrite; bad names and origins refuse too.
-        assert!(scaffold(dir.path(), Kind::Lens, "demo", None).is_err());
-        assert!(scaffold(dir.path(), Kind::Lens, "Bad Name", None).is_err());
-        assert!(scaffold(dir.path(), Kind::Lens, "other", Some("nope")).is_err());
+        assert!(scaffold(dir.path(), Kind::Page, "demo", None).is_err());
+        assert!(scaffold(dir.path(), Kind::Page, "Bad Name", None).is_err());
+        assert!(scaffold(dir.path(), Kind::Page, "other", Some("nope")).is_err());
         let ext_only = scaffold(dir.path(), Kind::Extension, "bare", None).unwrap();
         assert_eq!(
             ext_only.files,

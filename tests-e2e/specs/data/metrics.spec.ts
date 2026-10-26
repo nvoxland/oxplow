@@ -1,18 +1,18 @@
 import { expect, test } from "../../support/fixtures.js";
 import { openFromLauncher } from "../../support/ui.js";
 
-// The Metrics page is the foundation's lens over the catalog and
+// The Metrics page is the foundation's page over the catalog and
 // `v_metric_point`: its sections list metrics with a trend and a latest value.
 test("the Metrics page lists the catalog by section with a trend column", async ({ fresh }) => {
   const { page } = fresh;
   await page.goto("/");
   await openFromLauncher(page, "Metrics");
-  const list = page.locator('[data-testid="lens-list"]:visible');
+  const list = page.locator('[data-testid="viz-list"]:visible');
   await expect(list).toBeVisible();
-  await expect(list.locator('[data-testid^="lens-group"]').first()).toBeVisible();
+  await expect(list.locator('[data-testid^="viz-group"]').first()).toBeVisible();
 });
 
-// A metric's row opens its page: the foundation's `metric` lens, a header
+// A metric's row opens its page: the foundation's `metric` page, a header
 // with the definition over the trend and the recordings.
 test("a metric on the Metrics page opens its page with the definition", async ({ fresh }) => {
   const { page } = fresh;

@@ -1,7 +1,7 @@
 //! P7.C6: "just works", deterministically. For each kind `oxplow extension
 //! new` makes: a temp project → scaffold → `check` (clean, no warnings) →
 //! `extension test` (clean) → it loads in a real oxplow and does its job —
-//! a lens's row action binds, a collector's entity and model publish, a
+//! a page's row action binds, a collector's entity and model publish, a
 //! command runs through the bus. A provider's stub is red until a real
 //! program stands behind it (the fake).
 
@@ -65,16 +65,25 @@ fn loaded(
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_scaffolded_lens_checks_tests_and_its_row_action_binds() {
+async fn a_scaffolded_page_checks_tests_and_its_row_action_binds() {
     let dir = project().await;
-    scaffolded(dir.path(), "lens", "open-work").await;
+    scaffolded(dir.path(), "page", "open-work").await;
     assert!(tested(dir.path(), "open-work")
         .await
         .contains(&"example basic".to_string()));
     let svc = booted(dir.path()).await;
     let ext = loaded(&svc, dir.path(), "open-work");
-    let lens = &ext.lenses[0];
-    let action = lens.actions.iter().find(|a| a.row).expect("a row action");
+    let page = &ext.page_files[0];
+    let action = page
+        .nodes()
+        .into_iter()
+        .find_map(|n| match &n.kind {
+            oxplow_app::pages::schema::NodeKind::Viz { config, .. } => {
+                config.actions.iter().find(|a| a.row).cloned()
+            }
+            _ => None,
+        })
+        .expect("a row action");
     assert!(
         svc.commands.spec(&action.command).is_some(),
         "{}",
@@ -118,21 +127,22 @@ async fn a_scaffolded_collector_checks_before_its_first_sync_and_runs() {
         .activate(svc.clone())
         .await
         .unwrap();
-    let lens = &ext.lenses[0];
-    let run = oxplow_app::extensions::run_lens(
-        &svc.sql,
-        &svc.extension_catalog,
-        dir.path(),
-        &lens.id,
-        Default::default(),
-        &oxplow_app::extensions::ViewContext::default(),
-    )
-    .await
-    .unwrap();
+    let page = &ext.page_files[0];
+    let run = oxplow_app::pages::runner::PageRunner::of(&svc)
+        .run(oxplow_app::pages::runner::RunRequest {
+            target: oxplow_app::pages::runner::RunTarget::Page(page.id.clone()),
+            params: Default::default(),
+            ctx: Default::default(),
+            viewer: oxplow_domain::Actor::Human,
+        })
+        .await
+        .unwrap();
+    let items = &run.loaders["items"];
+    assert_eq!(items.error, None);
     assert!(
-        run.result.columns.iter().any(|c| c == "title"),
+        items.result.columns.iter().any(|c| c == "title"),
         "{:?}",
-        run.result.columns
+        items.result.columns
     );
 }
 
@@ -172,14 +182,18 @@ async fn a_scaffolded_metric_checks_tests_and_declares_its_blocks() {
         panic!("one collector: {:?}", ext.collectors)
     };
     assert_eq!(collector.facts, vec![key.to_string()]);
-    // A launcher lens whose rows link to the file and line.
-    let lens = &ext.lenses[0];
-    let link = lens
-        .columns
-        .iter()
-        .find_map(|c| c.link.as_ref())
+    // A launcher page whose rows link to the file and line.
+    let link = ext.page_files[0]
+        .nodes()
+        .into_iter()
+        .find_map(|n| match &n.kind {
+            oxplow_app::pages::schema::NodeKind::Viz { config, .. } => {
+                config.columns.iter().find_map(|c| c.link.clone())
+            }
+            _ => None,
+        })
         .expect("a linked column");
-    assert_eq!(link.kind, oxplow_app::extensions::LensLinkKind::File);
+    assert_eq!(link.kind, oxplow_app::extensions::LinkKind::File);
     assert_eq!(link.line.as_deref(), Some("line"));
 }
 
@@ -305,8 +319,13 @@ async fn a_scaffolded_component_checks_tests_and_uses_the_client_library() {
         "{html}"
     );
     assert!(
-        ext.lenses.iter().any(|l| l.custom.is_some()),
-        "a `viz: custom` lens renders it"
+        ext.page_files
+            .iter()
+            .any(|p| p.nodes().iter().any(|n| matches!(
+                &n.kind,
+                oxplow_app::pages::schema::NodeKind::Component { .. }
+            ))),
+        "a page's component node draws it"
     );
 }
 
@@ -963,7 +982,7 @@ async fn a_scaffolded_advisory_checks_loads_and_stays_quiet() {
     let dir = project().await;
     scaffolded(dir.path(), "advisory", "watch-effort").await;
     // Like a bare extension: its example has nothing to run (`extension
-    // test` runs lenses, collectors, commands, effects and providers), so
+    // test` runs pages, collectors, commands, effects and providers), so
     // that warning is the only one.
     let report = test_extension(dir.path(), "watch-effort", false)
         .await
@@ -991,20 +1010,7 @@ async fn a_scaffolded_skill_checks_and_is_declared() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_scaffolded_page_checks_tests_and_shows_its_lens() {
-    let dir = project().await;
-    scaffolded(dir.path(), "page", "open-work").await;
-    assert!(tested(dir.path(), "open-work")
-        .await
-        .contains(&"example basic".to_string()));
-    let svc = booted(dir.path()).await;
-    let ext = loaded(&svc, dir.path(), "open-work");
-    assert_eq!(ext.pages.len(), 1);
-    assert_eq!(ext.pages[0].lens(), Some("open-work/open-work"));
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn a_scaffolded_panel_checks_tests_and_shows_its_lens() {
+async fn a_scaffolded_panel_checks_tests_and_shows_its_page() {
     let dir = project().await;
     scaffolded(dir.path(), "panel", "open-work").await;
     assert!(tested(dir.path(), "open-work")
@@ -1014,6 +1020,7 @@ async fn a_scaffolded_panel_checks_tests_and_shows_its_lens() {
     let ext = loaded(&svc, dir.path(), "open-work");
     assert_eq!(ext.panels.len(), 1);
     assert_eq!(ext.panels[0].body, "open-work/open-work");
+    assert_eq!(ext.page_files.len(), 1);
 }
 
 /// A bundled extension's examples run too, from the fixtures embedded with

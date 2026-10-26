@@ -820,11 +820,10 @@ const WORKTREE_PATH_USERS: &[(&str, &str)] = &[
     ("crates/oxplow-app/src/change_analysis.rs", "reads a change's files directly"),
     ("crates/oxplow-app/src/commit_links.rs", "asks git whether a commit holds an effort"),
     ("crates/oxplow-app/src/effort_landing.rs", "asks git where an effort landed"),
-    ("crates/oxplow-app/src/ref_read.rs", "`oxplow_read` reads a file at a revision and a lens in the caller's worktree"),
+    ("crates/oxplow-app/src/ref_read.rs", "`oxplow_read` reads a file at a revision and a page in the caller's worktree"),
     ("crates/oxplow-app/src/commands/agent_reads/collectors.rs", "previews a collector from the caller's worktree"),
     ("crates/oxplow-app/src/commands/agent_reads/extensions.rs", "checks an extension in the caller's worktree"),
     ("crates/oxplow-app/src/commands/agent_reads/vcs.rs", "diffs the caller's worktree"),
-    ("crates/oxplow-app/src/commands/agent_reads/lens.rs", "runs a lens against the caller's worktree"),
     ("crates/oxplow-app/src/commands/agent_reads/page_tools.rs", "reads a stream's draft of an extension from its checkout"),
     ("crates/oxplow-app/src/commands/credentials.rs", "a collector's credential is declared by its extension in the primary checkout"),
     ("crates/oxplow-rpc/src/commands/extensions.rs", "the extension RPCs"),
@@ -1129,7 +1128,7 @@ fn refs_are_built_and_parsed_through_the_grammar() {
     );
 }
 
-/// The scripts, lens queries and model SQL the repo ships, and the Rust
+/// The scripts, page queries and model SQL the repo ships, and the Rust
 /// files that embed Starlark templates, as `(repo-relative path, text)`.
 fn script_and_sql_sources() -> Vec<(String, String)> {
     let root = repo_root();
@@ -1161,7 +1160,7 @@ fn script_and_sql_sources() -> Vec<(String, String)> {
             .replace('\\', "/");
         let wanted = rel.ends_with(".star")
             || rel.ends_with(".sql")
-            || (rel.ends_with(".yaml") && rel.contains("/lenses/"))
+            || (rel.ends_with(".yaml") && rel.contains("/pages/"))
             || rel.starts_with("crates/oxplow-sdk/src") && rel.ends_with(".rs")
             || rel.ends_with("metric_scaffold.rs");
         if wanted {
@@ -1172,7 +1171,7 @@ fn script_and_sql_sources() -> Vec<(String, String)> {
     out
 }
 
-/// Every place a script, lens query or model SQL spells or takes apart a
+/// Every place a script, page query or model SQL spells or takes apart a
 /// ref of a core kind by hand, as `path:line text`. A kind's owning model
 /// (a resource's `resolve` view) spells its prefix in its `uri`
 /// column and is exempt.
@@ -1185,7 +1184,7 @@ fn hand_made_script_refs() -> Vec<String> {
         .collect();
     let alt = kinds.join("|");
     let patterns = [
-        // `"file:" + path`, `'oxplow:oxplow/effort?id=eff' || id`, `"oxplow:oxplow/lens?a=&lens=x" || ref`.
+        // `"file:" + path`, `'oxplow:oxplow/effort?id=eff' || id`, `"oxplow:oxplow/page?a=&page=x" || ref`.
         format!(r#"["'](?:{alt}):[^"'\s]*["']\s*(?:\+|\|\|)"#),
         // `x + "file:"`, `x || 'wiki:'`.
         format!(r#"(?:\+|\|\|)\s*["'](?:{alt}):"#),

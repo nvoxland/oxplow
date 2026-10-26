@@ -17,7 +17,7 @@ Useful understanding requires more than a transcript or a diff. Oxplow
 connects development activity, code structure, changes, tests, metrics,
 decisions, claims, and knowledge. Collectors bring data in; models derive
 and connect it; measures, metrics, and dimensions make comparisons
-possible; lenses and the agent turn it into useful explanations and views.
+possible; pages and the agent turn it into useful explanations and views.
 
 Built-in sources are a starting point. Every project has its own
 architecture, vocabulary, external systems, and questions. Developers
@@ -27,7 +27,7 @@ change, a test result linked to an effort, and a decision linked to the
 affected code together can explain more than any one source alone.
 
 Questions need not start with a dashboard. Ask the agent, inspect the
-evidence, and refine the question. Keep a lens or workflow when it proves
+evidence, and refine the question. Keep a page or workflow when it proves
 useful enough to repeat.
 
 ## Personal tools, shared when useful

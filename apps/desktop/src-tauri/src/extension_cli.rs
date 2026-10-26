@@ -14,36 +14,36 @@ use oxplow_sdk::{Format, Kind};
 
 const USAGE: &str = "\
 usage:
-  oxplow extension new <lens|extension|provider|collector|metric|command|effect|component|policy|advisory|skill|page|panel> <name> [--origin <ref>] [--capability <cap>] [--language <lang>] [--glob <glob>] [--root <dir>]
+  oxplow extension new <page|extension|provider|collector|metric|command|effect|component|policy|advisory|skill|panel> <name> [--origin <ref>] [--capability <cap>] [--language <lang>] [--glob <glob>] [--root <dir>]
       scaffold .oxplow/extensions/<name>/ with a v2 manifest, an intent
       (--origin = the effort/thread ref that asked for it), one example
-      and its fixture, and the kind's starter: a lens with a row action; a
+      and its fixture, and the kind's starter: a page with a row action; a
       provider of --capability (work_items, the default, effort_policy,
       agent_harness, snapshots or knowledge)
       with its contract's declarations, a stub program and test config; a Starlark
-      collector with a model and a lens over it; a code metric (--language,
+      collector with a model and a page over it; a code metric (--language,
       default rust, over --glob, default the language's files): a per-path
       measure, a collector counting each file's functions over a complexity
-      limit, its area dimension, the metric and a lens linking to the file
+      limit, its area dimension, the metric and a page linking to the file
       and line; a command composing core
       commands; an effect reacting to an event; a custom component with
-      its lens and bundle; an effort policy script; an advisory; a skill;
-      a page or a panel over a lens. Each checks clean
+      its page and bundle; an effort policy script; an advisory; a skill;
+      a panel over a page. Each checks clean
       and passes `test` as written
       (a provider once a real program replaces its stub)
   oxplow extension check <name|path> [--impact] [--against <rev>] [--services] [--json] [--root <dir>]
       load the extension and report every problem with file:line, dry-running
-      its models, commands, lenses and advisories — against the project's
+      its models, commands, pages and advisories — against the project's
       database when it has been opened in oxplow (.oxplow/local.sqlite),
       else an empty one; command names against a throwaway oxplow.
       --impact also says what the working tree's version changes against
-      git HEAD (or --against <rev>, which implies --impact): lenses' text,
+      git HEAD (or --against <rev>, which implies --impact): pages' text,
       models and their rows, collectors' outputs, providers' grants —
       writing nothing. --services lists, per script, the host services it
       uses (sql.read, tree.read, ai.compute) and whether it declared them
   oxplow extension test <name|path> [--bless] [--json] [--root <dir>]
       on a throwaway oxplow over a copy of the project's extensions: check,
-      then each intent example's fixture (a lens's rows, a collector's
+      then each intent example's fixture (a page's rows, a collector's
       entities, a command's composition), questions.yaml, and each declared
       provider: its handshake against its declarations, its test config,
       its examples, every message against the protocol's schemas, its
@@ -358,12 +358,12 @@ mod tests {
     }
 
     #[test]
-    fn new_lens_then_check_exits_zero() {
+    fn new_page_then_check_exits_zero() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().to_str().unwrap();
         let (code, out, err) = cli(&[
             "new",
-            "lens",
+            "page",
             "demo",
             "--origin",
             "oxplow:oxplow/effort?id=eff1",
@@ -372,7 +372,7 @@ mod tests {
         ]);
         assert_eq!(code, 0, "{err}");
         assert!(out.contains("created .oxplow/extensions/demo\n"), "{out}");
-        assert!(out.contains("lenses/demo.yaml"), "{out}");
+        assert!(out.contains("pages/demo.yaml"), "{out}");
         let folder = dir.path().join(".oxplow/extensions/demo");
         let (code, out, err) = cli(&["check", folder.to_str().unwrap()]);
         assert_eq!(code, 0, "{out}{err}");
@@ -460,11 +460,11 @@ mod tests {
         assert_eq!(cli(&["migrate", "old", "--root", root]).0, 2);
         let (code, _, err) = cli(&["new", "widget", "x", "--root", root]);
         assert_eq!(code, 2);
-        assert!(err.contains("`page` or `panel`"), "{err}");
+        assert!(err.contains("`skill` or `panel`"), "{err}");
         let (code, _, err) = cli(&["check", "nope", "--root", root]);
         assert_eq!(code, 1);
         assert!(err.contains("no extension `nope`"), "{err}");
-        let (code, _, err) = cli(&["new", "lens", "x", "--origin", "junk", "--root", root]);
+        let (code, _, err) = cli(&["new", "page", "x", "--origin", "junk", "--root", root]);
         assert_eq!(code, 1);
         assert!(err.contains("not a canonical ref"), "{err}");
     }
@@ -506,7 +506,7 @@ mod tests {
         assert!(err.contains("`vcs`"), "{err}");
         let (code, _, err) = cli(&[
             "new",
-            "lens",
+            "page",
             "demo",
             "--capability",
             "effort_policy",
@@ -553,7 +553,7 @@ mod tests {
         ]);
         assert_eq!(code, 2, "{err}");
         assert!(err.contains("`*` and `**` only"), "{err}");
-        let (code, _, err) = cli(&["new", "lens", "demo", "--glob", "**/*.rs", "--root", root]);
+        let (code, _, err) = cli(&["new", "page", "demo", "--glob", "**/*.rs", "--root", root]);
         assert_eq!(code, 2, "{err}");
         assert!(err.contains("a metric's"), "{err}");
     }
@@ -564,7 +564,7 @@ mod tests {
     fn check_opens_the_project_database_read_only_and_reports_trouble() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().to_str().unwrap();
-        assert_eq!(cli(&["new", "lens", "demo", "--root", root]).0, 0);
+        assert_eq!(cli(&["new", "page", "demo", "--root", root]).0, 0);
         std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
         std::fs::write(dir.path().join(".oxplow/local.sqlite"), "not a database").unwrap();
         let (code, out, err) = cli(&["check", "demo", "--root", root]);
@@ -824,7 +824,7 @@ mod tests {
     }
 
     /// `check --impact` compares the working tree with `git:HEAD`
-    /// (or `--against`): a lens and a model edited in the worktree read as
+    /// (or `--against`): a page and a model edited in the worktree read as
     /// changed, the model with its rows; `--json` carries the report; the
     /// project's database isn't touched.
     #[test]
@@ -843,8 +843,8 @@ mod tests {
         );
         w("models/x.sql", "SELECT 1 AS n\n");
         w(
-            "lenses/count.yaml",
-            "title: Count\nquery: SELECT n FROM v_acme_x\nviz: number\n",
+            "pages/count.yaml",
+            "title: Count\ndata:\n  count:\n    sql: SELECT n FROM v_acme_x\nview:\n  from: count\n  viz: number\n",
         );
         git(root, &["init", "-q", "-b", "main"]);
         git(root, &["add", "."]);
@@ -860,7 +860,7 @@ mod tests {
         let (code, out, err) = cli(&["check", "acme", "--root", root_s, "--impact"]);
         assert_eq!(code, 0, "{out}{err}");
         assert!(out.contains("impact against HEAD:"), "{out}");
-        assert!(out.contains("Lens acme/count: changed"), "{out}");
+        assert!(out.contains("Page acme/count: changed"), "{out}");
         assert!(out.contains("Model v_acme_x rows: 1 → 1"), "{out}");
 
         let (code, out, _) = cli(&["check", "acme", "--root", root_s, "--impact", "--json"]);
@@ -870,7 +870,7 @@ mod tests {
             .as_array()
             .unwrap()
             .iter()
-            .any(|l| l == "Lens acme/count: changed"));
+            .any(|l| l == "Page acme/count: changed"));
 
         assert_eq!(
             std::fs::read(&db_path).unwrap(),

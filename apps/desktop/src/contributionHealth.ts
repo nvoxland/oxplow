@@ -3,7 +3,7 @@
  * `.context/extensions.md` -> "Health, disable and repair"): three
  * failures in a row disable a provider instance, collector or effect until
  * a person runs `oxplow.contribution.enable`. Settings -> Extensions lists
- * them in the `extensions-health` lens; Settings -> Data turns a collector
+ * them in the `extensions-health` page; Settings -> Data turns a collector
  * back on from here.
  */
 import { personCommands, type PersonCommands } from "./personCommands.js";

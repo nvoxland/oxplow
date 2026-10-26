@@ -88,7 +88,7 @@ export function rendererFor<P extends RendererDecl>(
 }
 
 /** What a renderer's page is once its params change: the URI `uri` with
- *  each of `params` set (one set to nothing dropped; its lens's own `uri`
+ *  each of `params` set (one set to nothing dropped; its page's own `uri`
  *  param is the page, not one of them) and `view` as its `#`. A URI that
  *  isn't an oxplow one has no params to change. */
 export function withRenderedParams(

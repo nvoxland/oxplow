@@ -15,7 +15,7 @@ export interface AlertItems {
    *  each with the line to show. */
   extensionProblems: { name: string; message: string }[];
   /** Extension panel badges that fire, each with what it opens (a URI:
-   *  its badge's lens or page). */
+   *  its badge's page). */
   badges: { id: string; title: string; message: string; open: string }[];
   /** Hints raised to the person, until they dismiss one. */
   hints: { id: number; message: string }[];
@@ -28,7 +28,7 @@ export type AlertTone = "none" | "accent" | "danger";
 export function alertsSummary(items: AlertItems): { count: number; tone: AlertTone } {
   const problems = items.opErrors.length + items.undelivered + items.failedReactions + items.extensionProblems.length;
   // A panel's badges are its own (its panel, and a toast that opens its
-  // lens or page); the Alerts page doesn't list them, so the bell doesn't count them.
+  // page); the Alerts page doesn't list them, so the bell doesn't count them.
   const count = items.proposals.length + items.hints.length + problems;
   return { count, tone: problems > 0 ? "danger" : count > 0 ? "accent" : "none" };
 }

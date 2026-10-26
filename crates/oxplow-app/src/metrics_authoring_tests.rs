@@ -3,7 +3,7 @@
 //! folders. It activates cleanly; one capture records a fact per file with
 //! its area; edits to two files and a second capture (a delta) carry the
 //! untouched files' facts forward; the metric slices by area, filters by a
-//! dimension and reads through the lens as `file` refs; and what an author
+//! dimension and reads through the page as `file` refs; and what an author
 //! gets wrong, or what a collector is never shown, is reported rather than
 //! lost.
 
@@ -344,39 +344,7 @@ async fn the_metrics_list_has_each_metrics_trend_and_its_groups_when_sliced() {
     write(p.dir.path(), "ui/theme.rs", &theme);
     p.delta().await;
 
-    let run = |lens: &str, params: Vec<(&str, SqlCell)>| {
-        let svc = p.svc.clone();
-        let root = p.dir.path().to_path_buf();
-        let lens = format!("oxplow-foundation/{lens}");
-        let params: std::collections::BTreeMap<String, SqlCell> = params
-            .into_iter()
-            .map(|(k, v)| (k.to_string(), v))
-            .collect();
-        async move {
-            let run = crate::extensions::run_lens(
-                &svc.sql,
-                &svc.extension_catalog,
-                &root,
-                &lens,
-                params,
-                &crate::extensions::ViewContext::default(),
-            )
-            .await
-            .unwrap();
-            let cols = run.result.columns.clone();
-            run.result
-                .rows
-                .into_iter()
-                .map(|r| {
-                    cols.iter()
-                        .cloned()
-                        .zip(r)
-                        .collect::<std::collections::BTreeMap<String, SqlCell>>()
-                })
-                .collect::<Vec<_>>()
-        }
-    };
-    let rows = run("metrics", vec![]).await;
+    let rows = loader_rows(&p.svc, "metrics-recorded", "metrics", vec![]).await;
     let mine = rows
         .iter()
         .find(|r| r["key"] == SqlCell::Text(MEASURE.into()))
@@ -385,8 +353,10 @@ async fn the_metrics_list_has_each_metrics_trend_and_its_groups_when_sliced() {
     assert_eq!(mine["latest"], SqlCell::Real(5.0));
     assert!(!text_of(&mine["section"]).is_empty());
     // Expanded under a slice: the latest value per area, biggest first.
-    let groups = run(
+    let groups = loader_rows(
+        &p.svc,
         "metrics-slices",
+        "metrics_slices",
         vec![
             ("key", SqlCell::Text(MEASURE.into())),
             ("slice", SqlCell::Text(AREA.into())),
@@ -406,6 +376,57 @@ async fn the_metrics_list_has_each_metrics_trend_and_its_groups_when_sliced() {
     );
 }
 
+/// Loader `loader` of foundation's page `page`, run as a person with
+/// `params`: its rows by column.
+async fn loader_rows(
+    svc: &crate::Services,
+    page: &str,
+    loader: &str,
+    params: Vec<(&str, SqlCell)>,
+) -> Vec<std::collections::BTreeMap<String, SqlCell>> {
+    let run = run_page(svc, page, params).await;
+    let ran = run
+        .loaders
+        .get(loader)
+        .unwrap_or_else(|| panic!("{page}: no loader {loader}"));
+    assert_eq!(ran.error, None, "{page}/{loader}");
+    let cols = ran.result.columns.clone();
+    ran.result
+        .rows
+        .iter()
+        .map(|r| cols.iter().cloned().zip(r.iter().cloned()).collect())
+        .collect()
+}
+
+/// The request that runs foundation's page `page` as a person.
+fn page_request(page: &str, params: Vec<(&str, SqlCell)>) -> crate::pages::runner::RunRequest {
+    let id = if page.contains('/') {
+        page.to_string()
+    } else {
+        format!("oxplow-foundation/{page}")
+    };
+    crate::pages::runner::RunRequest {
+        target: crate::pages::runner::RunTarget::Page(id),
+        params: params
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v))
+            .collect(),
+        ctx: crate::extensions::ViewContext::default(),
+        viewer: oxplow_domain::Actor::Human,
+    }
+}
+
+async fn run_page(
+    svc: &crate::Services,
+    page: &str,
+    params: Vec<(&str, SqlCell)>,
+) -> crate::pages::runner::PageRun {
+    crate::pages::runner::PageRunner::of(svc)
+        .run(page_request(page, params))
+        .await
+        .unwrap()
+}
+
 fn text_of(cell: &SqlCell) -> String {
     match cell {
         SqlCell::Text(t) => t.clone(),
@@ -418,7 +439,7 @@ fn text_of(cell: &SqlCell) -> String {
 /// the metric off and on through `oxplow.metric.enable`.
 #[tokio::test(flavor = "multi_thread")]
 async fn the_metric_page_reads_the_definition_the_trend_and_the_recordings() {
-    use crate::lens_actions::{run_lens_action, LensActionCall};
+    use crate::pages::actions::{run_page_action, PageActionCall};
     let (p, _) = project(|_| {}).await;
     p.baseline().await;
     let (plan, _) = rust(&[("calm", 0)]);
@@ -427,43 +448,15 @@ async fn the_metric_page_reads_the_definition_the_trend_and_the_recordings() {
     write(p.dir.path(), "ui/theme.rs", &theme);
     p.delta().await;
 
-    let run = |lens: &str, params: Vec<(&str, SqlCell)>| {
-        let svc = p.svc.clone();
-        let root = p.dir.path().to_path_buf();
-        let lens = format!("oxplow-foundation/{lens}");
-        let params: std::collections::BTreeMap<String, SqlCell> = params
-            .into_iter()
-            .map(|(k, v)| (k.to_string(), v))
-            .collect();
-        async move {
-            let run = crate::extensions::run_lens(
-                &svc.sql,
-                &svc.extension_catalog,
-                &root,
-                &lens,
-                params,
-                &crate::extensions::ViewContext::default(),
-            )
-            .await
-            .unwrap();
-            let cols = run.result.columns.clone();
-            run.result
-                .rows
-                .into_iter()
-                .map(|r| {
-                    cols.iter()
-                        .cloned()
-                        .zip(r)
-                        .collect::<std::collections::BTreeMap<String, SqlCell>>()
-                })
-                .collect::<Vec<_>>()
-        }
-    };
     let metric = || vec![("metric", SqlCell::Text(MEASURE.into()))];
-    let header = run("metric-header", metric()).await;
+    let detail = |loader: &'static str, params: Vec<(&'static str, SqlCell)>| {
+        let svc = p.svc.clone();
+        async move { loader_rows(&svc, "metric-detail", loader, params).await }
+    };
+    let header = detail("header", metric()).await;
     assert_eq!(header.len(), 1, "{header:?}");
     // The page's row names its tab: the metric's title.
-    let page = run("metric", vec![("metric", SqlCell::Text(MEASURE.into()))]).await;
+    let page = detail("row", metric()).await;
     assert!(
         matches!(&page[0]["title"], SqlCell::Text(t) if !t.is_empty()),
         "{page:?}"
@@ -476,7 +469,7 @@ async fn the_metric_page_reads_the_definition_the_trend_and_the_recordings() {
     );
 
     // The trend: one series, the two captures' values in order.
-    let chart = run("metric-chart", metric()).await;
+    let chart = detail("chart", metric()).await;
     let values: Vec<f64> = chart
         .iter()
         .map(|r| match r["value"] {
@@ -488,7 +481,7 @@ async fn the_metric_page_reads_the_definition_the_trend_and_the_recordings() {
     // Sliced by area: a series per area.
     let mut sliced = metric();
     sliced.push(("slice", SqlCell::Text(AREA.into())));
-    let by_area = run("metric-chart", sliced).await;
+    let by_area = detail("chart", sliced).await;
     let series: std::collections::BTreeSet<String> = by_area
         .iter()
         .map(|r| match &r["series"] {
@@ -498,26 +491,37 @@ async fn the_metric_page_reads_the_definition_the_trend_and_the_recordings() {
         .collect();
     assert_eq!(series, ["engine".to_string(), "ui".to_string()].into());
 
-    let recordings = run("metric-recordings", metric()).await;
+    let recordings = detail("recordings", metric()).await;
     assert_eq!(recordings.len(), 2, "{recordings:?}");
     assert_eq!(recordings[0]["trust"], SqlCell::Text("observed".into()));
 
     // Off, then on again, from the header's actions.
-    let act =
-        |action: &str, row: Option<std::collections::BTreeMap<String, SqlCell>>| LensActionCall {
-            lens_id: "oxplow-foundation/metric-header".into(),
-            action_id: action.into(),
-            params: std::collections::BTreeMap::from([(
-                "metric".to_string(),
-                SqlCell::Text(MEASURE.into()),
-            )]),
-            row,
-            input: None,
-            drop: None,
-            on_behalf_of: oxplow_domain::Actor::Human,
-            confirmed: false,
-        };
-    let ctx = crate::extensions::ViewContext::default();
+    // Each press is on a fresh open run of the page.
+    let runs = crate::pages::open_runs::PageRuns::default();
+    let act = |action: &'static str| {
+        let (svc, runs) = (p.svc.clone(), &runs);
+        async move {
+            let (run_id, _) = runs
+                .open(&svc, page_request("metric-detail", metric()), "w")
+                .await
+                .unwrap();
+            run_page_action(
+                &svc,
+                runs,
+                PageActionCall {
+                    run_id,
+                    node: Some("header".into()),
+                    action: action.into(),
+                    row: None,
+                    input: None,
+                    drop: None,
+                    on_behalf_of: oxplow_domain::Actor::Human,
+                    confirmed: false,
+                },
+            )
+            .await
+        }
+    };
     // Off writes the `metrics:` list.
     let listed = || {
         crate::config_service::read_config(&p.svc.config)
@@ -525,17 +529,12 @@ async fn the_metric_page_reads_the_definition_the_trend_and_the_recordings() {
             .len()
     };
     let before = listed();
-    run_lens_action(&p.svc, p.dir.path(), act("disable", None), &ctx)
-        .await
-        .unwrap();
+    act("disable").await.unwrap();
     assert_ne!(listed(), before, "disabling changed the metrics list");
     // On is not offered while the catalog still says it's on (`when:
     // can_enable`); the catalog follows the config only once the project
     // reseeds, which a test project doesn't do.
-    let err = run_lens_action(&p.svc, p.dir.path(), act("enable", None), &ctx)
-        .await
-        .unwrap_err()
-        .to_string();
+    let err = act("enable").await.unwrap_err().to_string();
     assert!(err.contains("isn't offered"), "{err}");
 }
 
@@ -571,7 +570,7 @@ async fn the_metric_slices_by_area_and_filters_by_a_dimension() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn the_lens_rows_carry_file_refs_to_the_path_and_line() {
+async fn the_page_rows_carry_file_refs_to_the_path_and_line() {
     let (p, at) = project(|_| {}).await;
     p.baseline().await;
 
@@ -584,38 +583,36 @@ async fn the_lens_rows_carry_file_refs_to_the_path_and_line() {
         .cloned()
         .expect("the extension loads");
     assert_eq!(ext.errors, Vec::<String>::new());
-    let lens = &ext.lenses[0];
-    let run = crate::extensions::run_lens(
-        &p.svc.sql,
-        &p.svc.extension_catalog,
-        p.dir.path(),
-        &lens.id,
-        Default::default(),
-        &crate::extensions::ViewContext::default(),
-    )
-    .await
-    .unwrap();
+    let page = &ext.page_files[0];
+    let run = run_page(&p.svc, &page.id, vec![]).await;
+    let config = page
+        .nodes()
+        .into_iter()
+        .find_map(|n| match &n.kind {
+            crate::pages::schema::NodeKind::Viz { config, .. } => Some(config.clone()),
+            _ => None,
+        })
+        .expect("a viz node");
+    let result = &run.loaders["findings"].result;
 
     // `path` links as a `file` at the `line` column.
-    let link = run
-        .lens
+    let link = config
         .columns
         .iter()
         .find_map(|c| c.link.as_ref().map(|l| (c.key.as_str(), l)))
         .expect("a linked column");
     assert_eq!(link.0, "path");
-    assert_eq!(link.1.kind, crate::extensions::LensLinkKind::File);
+    assert_eq!(link.1.kind, crate::extensions::LinkKind::File);
     let (path_col, line_col) = (
-        run.result.columns.iter().position(|c| c == "path").unwrap(),
-        run.result
+        result.columns.iter().position(|c| c == "path").unwrap(),
+        result
             .columns
             .iter()
             .position(|c| Some(c.as_str()) == link.1.line.as_deref())
             .unwrap(),
     );
     // Each row names a file and a line that resolve as a canonical ref.
-    let refs: Vec<String> = run
-        .result
+    let refs: Vec<String> = result
         .rows
         .iter()
         .map(|r| {
@@ -891,10 +888,10 @@ async fn a_file_that_grows_past_the_limit_keeps_its_facts_and_is_named() {
     );
 }
 
-/// A metric's facts join other entities in a lens: here, the files an
+/// A metric's facts join other entities in a page: here, the files an
 /// effort changed beside how many functions over the limit each has.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_lens_joins_metric_facts_with_an_efforts_files() {
+async fn a_page_joins_metric_facts_with_an_efforts_files() {
     let (p, _) = project(|files| {
         let manifest = files
             .iter()
@@ -903,9 +900,11 @@ async fn a_lens_joins_metric_facts_with_an_efforts_files() {
             .unwrap();
         let dir = manifest.trim_end_matches("extension.yaml").to_string();
         files.push(ScaffoldFile {
-            path: format!("{dir}lenses/touched.yaml"),
+            path: format!("{dir}pages/touched.yaml"),
             content: format!(
-                "title: Touched and complex\ndescription: \"The files an effort changed, with their functions over the limit.\"\nquery: |\n  SELECT f.path AS path, f.value AS functions, e.change_kind AS change\n  FROM metric_findings('{MEASURE}') f\n  JOIN v_effort_file e ON e.path = f.path\n  ORDER BY f.path\nviz: table\ncolumns:\n  - {{ key: path, label: File }}\n  - {{ key: functions, label: Functions over the limit }}\n  - {{ key: change, label: Change }}\n"
+                "title: Touched and complex\ndescription: \"The files an effort changed, with their functions over the limit.\"\n\
+                 data:\n  touched:\n    sql: |\n      SELECT f.path AS path, f.value AS functions, e.change_kind AS change\n      FROM metric_findings('{MEASURE}') f\n      JOIN v_effort_file e ON e.path = f.path\n      ORDER BY f.path\n\
+                 view:\n  viz: table\n  from: touched\n  columns:\n    - {{ key: path, label: File }}\n    - {{ key: functions, label: Functions over the limit }}\n    - {{ key: change, label: Change }}\n"
             ),
         });
     })
@@ -950,23 +949,16 @@ async fn a_lens_joins_metric_facts_with_an_efforts_files() {
         .cloned()
         .expect("the extension loads");
     assert_eq!(ext.errors, Vec::<String>::new());
-    let lens = ext
-        .lenses
+    let page = ext
+        .page_files
         .iter()
-        .find(|l| l.id.ends_with("touched"))
-        .expect("the joining lens");
-    let run = crate::extensions::run_lens(
-        &p.svc.sql,
-        &p.svc.extension_catalog,
-        p.dir.path(),
-        &lens.id,
-        Default::default(),
-        &crate::extensions::ViewContext::default(),
-    )
-    .await
-    .unwrap();
+        .find(|p| p.id.ends_with("touched"))
+        .expect("the joining page");
+    let run = run_page(&p.svc, &page.id, vec![]).await;
+    let touched = &run.loaders["touched"];
+    assert_eq!(touched.error, None);
     // theme.rs changed but has no function over the limit: no fact, no row.
-    let rows: Vec<(String, i64, String)> = run
+    let rows: Vec<(String, i64, String)> = touched
         .result
         .rows
         .iter()

@@ -12,7 +12,7 @@
 //!   caller's), an event's stored body (`#part=input`, `output`, `prompt`,
 //!   `result` or `summary`; the caller's own stream's only), a model call's
 //!   (`#part=request` or `response`; not one another agent's thread asked
-//!   for), a lens's definition.
+//!   for), a page's definition.
 //!
 //! Content is cut at [`MAX_CONTENT`] bytes, saying so.
 
@@ -42,7 +42,7 @@ pub struct RefRead {
     /// Its resource (`oxplow/effort`).
     pub resource: String,
     /// The resolving model's row, every column; `None` for a resource no
-    /// model holds (a file, a lens).
+    /// model holds (a file).
     pub row: Option<Map<String, Value>>,
     /// What sits beside it, by name (`links`, `comments`, `files`).
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
@@ -98,7 +98,7 @@ pub struct Reader {
     pub stream: Option<StreamId>,
 }
 
-/// Read what `raw` names for `reader`. A file or lens is read in `at`'s
+/// Read what `raw` names for `reader`. A file or page is read in `at`'s
 /// worktree, else the reader's stream's; an event's body only in the
 /// reader's own stream; a model call's body unless another agent's thread
 /// asked for it.
@@ -131,19 +131,28 @@ pub async fn read(
             };
             out.set_content(text);
         }
-        r::LENS => {
+        r::PAGE => {
+            // A page's definition: who declares it, where its source is,
+            // which deployment runs it, and its file as written.
             let root = svc
                 .worktrees
                 .resolve(stream.map(|s| s.to_string()).as_deref())
                 .await
                 .into_local_path();
-            let lens = svc
+            let page = svc
                 .extension_catalog
-                .find_lens(&root, &param("lens"))
+                .page_named(&root, &param("page"))
                 .map_err(|_| ReadError::NotFound(out.uri.clone()))?;
-            let mut body =
-                serde_json::to_value(&lens).map_err(|e| ReadError::Invalid(e.to_string()))?;
-            body["origin"] = lens.origin.to_json(svc.worktrees.project_dir());
+            let yaml = std::fs::read_to_string(svc.layout.project_dir.join(&page.origin.running))
+                .unwrap_or_default();
+            let body = serde_json::json!({
+                "page": page.id,
+                "title": page.title,
+                "description": page.description,
+                "origin": page.origin.to_json(svc.worktrees.project_dir()),
+                "params": page.params,
+                "yaml": yaml,
+            });
             out.set_content(
                 serde_json::to_string_pretty(&body)
                     .map_err(|e| ReadError::Invalid(e.to_string()))?,
@@ -633,7 +642,7 @@ mod tests {
         ));
     }
 
-    /// A file or lens can be read in another stream's worktree by naming the
+    /// A file or page can be read in another stream's worktree by naming the
     /// stream; without one, the caller's.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_file_reads_in_the_stream_named() {

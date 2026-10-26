@@ -1,12 +1,12 @@
 //! The agent's reads as operations of read scopes (`records.read`,
 //! `sql.read`, `search.read`, `pages.read`, `agent_text.read`,
-//! `lenses.read`, `lsp.read`, `vcs.read`, `extensions.check`,
+//! `lsp.read`, `vcs.read`, `extensions.check`,
 //! `collectors.preview`, `ai.compute`, `knowledge.read`, `changes.read`).
 //! Each is `Access::Read` on the daemon, with an `External` handler that
 //! reads live state through `Services`; `extensions/oxplow-foundation`
 //! declares the commands over them (`oxplow.records.read`,
 //! `oxplow.sql.query`, …), so an agent reaches each through
-//! `run_command` and a person or lens through the bus.
+//! `run_command` and a person or page through the bus.
 //!
 //! An agent's call runs as its `Actor::Agent`: a read that acts on a
 //! stream takes the one it names, else the actor's own
@@ -24,7 +24,6 @@ pub mod collectors;
 pub mod extensions;
 pub mod ids;
 pub mod knowledge;
-pub mod lens;
 pub mod lsp;
 pub mod page_tools;
 pub mod pages;
@@ -43,7 +42,6 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
     ops.extend(pages::ops(services.clone()));
     ops.extend(page_tools::ops(services.clone()));
     ops.extend(skill::ops(services.clone()));
-    ops.extend(lens::ops(services.clone()));
     ops.extend(lsp::ops(services.clone()));
     ops.extend(vcs::ops(services.clone()));
     ops.extend(extensions::ops(services.clone()));

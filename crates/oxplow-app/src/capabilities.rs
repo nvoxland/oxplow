@@ -365,7 +365,7 @@ pub struct Resolved {
 }
 
 /// What's active, per capability: its implementation and features — what
-/// a declared need is checked against (a lens, an advisory).
+/// a declared need is checked against (a page, an advisory).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Active {
     by_capability: std::collections::BTreeMap<String, (String, Vec<String>)>,

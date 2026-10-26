@@ -1,6 +1,6 @@
 /**
  * A single-series trend line with labeled time (x) and value (y) axes.
- * Shared by the metric pages, dashboard tiles and `line` lenses.
+ * Shared by the metric pages, dashboard tiles and `line` viz nodes.
  */
 import { useRef, useState } from "react";
 

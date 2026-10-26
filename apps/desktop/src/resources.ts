@@ -17,7 +17,7 @@ import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { ICONS } from "./icons.js";
 import { querySql } from "./api.js";
 import { recordOpError } from "./opErrors.js";
-import { NO_READS, useRerunOnChange } from "./lens/lensRerun.js";
+import { NO_READS, useRerunOnChange } from "./viz/rerun.js";
 import { identityOf, resourceUri, typeOf } from "./uri/uri.js";
 import type { Reads, SqlQueryResult } from "./tauri-bridge/generated/bindings.js";
 
@@ -39,7 +39,7 @@ export interface Resource {
   label: string;
   /** Its params, by key. */
   params: Record<string, ResourceParam>;
-  /** It takes params beyond its own (a page's, a lens's). */
+  /** It takes params beyond its own (a page's, a viz node's). */
   additional: boolean;
   /** The view whose rows name each one, by URI. */
   resolve: string | null;

@@ -336,7 +336,7 @@ async fn the_scope_that_spends_the_persons_key_says_so() {
     );
 }
 
-/// Rows of `sql` run as a lens for stream `stream` would (its row id).
+/// Rows of `sql` run as a page for stream `stream` would (its row id).
 async fn rows_in(fx: &EffortFixture, sql: &str, stream: i64) -> Vec<Vec<Value>> {
     let out = fx
         .svc
@@ -700,7 +700,7 @@ async fn agent_conversations_are_each_harness_saved_ones() {
 }
 
 /// A query over a live model says it read it, as over any model: what a
-/// lens re-runs on.
+/// page re-runs on.
 #[tokio::test]
 async fn a_query_over_a_live_model_reads_it() {
     let fx = services_with_effort().await;

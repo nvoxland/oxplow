@@ -45,7 +45,7 @@ set**, and a surface never builds its own:
   `src/a.ts:12`, `tsk42`); Enter applies, an empty box removes the link,
   Escape leaves the text as it was.
 - **Drop and paste** (the editor, `refDrops.ts`): an "Add to agent
-  context" drag (`CONTEXT_REF_MIME`: a file, a wiki page, a lens row's
+  context" drag (`CONTEXT_REF_MIME`: a file, a wiki page, a page row's
   ref, a work item) or a work-item drag (`WORK_ITEM_DRAG_MIME`, several
   items) dropped on the field goes in where it lands as links
   (`insertRefLinks`; at the caret when the point names no place —
@@ -90,8 +90,8 @@ never reset.
   (a late echo mustn't clobber typing).
 - **`onChange`**: every edit. For an owner that keeps a draft and saves
   on a button: a form's markdown field (`SchemaForm`, a schema property
-  with `contentMediaType: text/markdown`), the comment composer, the
-  lens editor. A value from outside is applied even while focused: the
+  with `contentMediaType: text/markdown`), the comment composer, a page's
+  markdown editor. A value from outside is applied even while focused: the
   owner echoes exactly what it heard, so anything else is a reset it
   means (Discard, Escape).
 - **A click in the text keeps its caret.** Clicking the field around the
@@ -104,17 +104,18 @@ never reset.
 
 ## Where it is used
 
-The lens `markdown` viz (`lens/MarkdownViz.tsx`) is the owner a declared
+The page `markdown` viz node is the owner a declared
 page uses: with an `edit: true` action it keeps a draft in the tab's
-history state (`markdown:<lens id>`, through `onChange`), enables Save
+history state (`markdown:<page id>`, through `onChange`), enables Save
 only when the draft differs from the saved text, runs the action with the
 text laid over its edited field, and shows the text it saved until the
 re-read brings it; Discard clears the draft. The page's rail lists the
-headings (`lens/Contents.tsx`).
+headings.
 
-Every markdown surface: the `markdown` viz and a page's `markdown`
-nodes (`LensResultView`, `PageTree`), effort summaries
-(`TaskDetail`, `DiffViewPage`), the wiki body (the `wiki-page-body` lens's `markdown` viz), a work
+Every markdown surface: the `markdown` viz and markdown nodes of a
+page's view, and `oxplow-page` fenced blocks (an inline page, read-only,
+drawn live in the wiki body), effort summaries
+(`TaskDetail`, `DiffViewPage`), the wiki body (the wiki page's `markdown` viz), a work
 item's body (`TaskDetail`), comment messages (`CommentPopover`) and the
 comment composer (`CommentComposer`), a form's markdown field
 (`SchemaForm`: stream and thread prompts, a handoff's body). A

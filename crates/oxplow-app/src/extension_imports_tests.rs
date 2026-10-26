@@ -2,7 +2,6 @@
 //! extensions in a project's `.oxplow/extensions/`, activated together.
 
 use oxplow_domain::uri::build::keyed;
-use oxplow_domain::DomainError;
 
 /// The URI naming `owner`'s `items` model.
 fn model_ref(owner: &str) -> String {
@@ -34,7 +33,7 @@ struct Ext<'a> {
     /// extension's contribution of that kind. A `guarded` command of its
     /// own is withheld with any of them.
     kind_imports: Vec<(&'a str, &'a str, Kind, u32, bool)>,
-    /// Mount the `seen` lens in a slot (only when it imports a model).
+    /// Mount the `seen` page in a slot (only when it imports a model).
     mounted: bool,
 }
 
@@ -96,7 +95,7 @@ impl<'a> Ext<'a> {
             .push((binding, producer, kind, version, optional));
         self
     }
-    /// Mount its `seen` lens in a slot.
+    /// Mount its `seen` page in a slot.
     fn mounted(mut self) -> Self {
         self.mounted = true;
         self
@@ -126,7 +125,7 @@ impl<'a> Ext<'a> {
 
 /// Every extension has `items` (`v_<name>_items`: over the work items, or
 /// over its import), an always-available `plain` model and, when it imports,
-/// a `seen` lens reading the import.
+/// a `seen` page reading the import.
 fn put(root: &Path, e: &Ext) {
     put_in(&root.join(format!(".oxplow/extensions/{}", e.name)), e);
 }
@@ -191,11 +190,15 @@ fn put_in(dir: &Path, e: &Ext) {
         };
         write(
             dir,
-            "lenses/seen.yaml",
-            &format!("title: Seen\n{params}query: SELECT uri FROM import_ref('dep')\n"),
+            "pages/seen.yaml",
+            &format!(
+                "title: Seen\n{params}data:\n  seen: {{ sql: \"SELECT uri FROM import_ref('dep')\" }}\n\
+                 view: {{ viz: table, from: seen }}\n"
+            ),
         );
         if e.mounted {
-            manifest += "ui:\n  slots:\n    - { slot: diff.file.header, lens: seen }\n";
+            manifest +=
+                "ui:\n  slots:\n    - { slot: oxplow-foundation/diff.file-header, page: seen }\n";
         }
     }
     for (binding, producer, kind, version, optional) in &e.kind_imports {
@@ -262,16 +265,23 @@ fn problem(svc: &crate::Services, extension: &str) -> String {
         .unwrap_or_default()
 }
 
-async fn lens(svc: &crate::Services, id: &str) -> Result<crate::extensions::LensRun, DomainError> {
-    crate::extensions::run_lens(
-        &svc.sql,
-        &svc.extension_catalog,
-        &svc.layout.project_dir,
-        id,
-        Default::default(),
-        &Default::default(),
-    )
-    .await
+/// Page `id` run as a person: an error when it isn't there (withheld)
+/// or a loader of it failed.
+async fn page(svc: &crate::Services, id: &str) -> Result<crate::pages::runner::PageRun, String> {
+    use crate::pages::runner::{PageRunner, RunRequest, RunTarget};
+    let run = PageRunner::of(svc)
+        .run(RunRequest {
+            target: RunTarget::Page(id.to_string()),
+            params: Default::default(),
+            ctx: Default::default(),
+            viewer: oxplow_domain::Actor::Human,
+        })
+        .await
+        .map_err(|e| e.to_string())?;
+    match run.loaders.values().find_map(|l| l.error.clone()) {
+        Some(error) => Err(error),
+        None => Ok(run),
+    }
 }
 
 fn disable(root: &Path, names: &str) {
@@ -282,7 +292,7 @@ fn disable(root: &Path, names: &str) {
     );
 }
 
-/// A stable model at a matching version is read by its consumer's model and lens.
+/// A stable model at a matching version is read by its consumer's model and page.
 #[tokio::test]
 async fn a_consumer_of_a_compatible_stable_model_activates_and_reads_it() {
     let (_dir, svc) = project(&[
@@ -294,9 +304,9 @@ async fn a_consumer_of_a_compatible_stable_model_activates_and_reads_it() {
     assert_eq!(svc.extension_activation.problems().len(), 0);
     assert!(readable(&svc, "v_prod_items").await);
     assert!(readable(&svc, "v_cons_items").await);
-    lens(&svc, "cons/seen")
+    page(&svc, "cons/seen")
         .await
-        .expect("the lens reads the import");
+        .expect("the page reads the import");
     let cons = svc.listed_extensions(&svc.layout.project_dir).await;
     let cons = cons.iter().find(|e| e.name == "cons").unwrap();
     assert!(cons.errors.is_empty(), "{:?}", cons.errors);
@@ -368,7 +378,7 @@ async fn an_optional_import_of_a_missing_producer_degrades() {
     assert!(svc.extension_activation.problems().is_empty());
     assert!(readable(&svc, "v_cons_plain").await);
     assert!(!readable(&svc, "v_cons_items").await);
-    assert!(lens(&svc, "cons/seen").await.is_err());
+    assert!(page(&svc, "cons/seen").await.is_err());
 }
 
 #[tokio::test]
@@ -769,9 +779,9 @@ async fn a_repaired_producer_brings_back_its_consumer() {
     for view in ["v_base_items", "v_prod_items", "v_cons_items"] {
         assert!(readable(&svc, view).await, "{view}");
     }
-    lens(&svc, "cons/seen")
+    page(&svc, "cons/seen")
         .await
-        .expect("the lens reads the import");
+        .expect("the page reads the import");
 
     // And withdrawn again when the base goes.
     std::fs::remove_dir_all(dir.path().join(".oxplow/extensions/base")).unwrap();
@@ -826,15 +836,15 @@ async fn an_import_without_a_version_binds_whatever_is_exported() {
     assert_eq!(bound(listed(&svc, "cons").await), Some((Some(3), true)));
 }
 
-/// A lens withheld by an unavailable optional import takes the slot mount
+/// A page withheld by an unavailable optional import takes the slot mount
 /// that shows it; an available import keeps both.
 #[tokio::test]
-async fn a_guarded_lens_prunes_its_slot_mounts() {
+async fn a_guarded_page_prunes_its_slot_mounts() {
     let (dir, svc) = project(&[Ext::new("cons").imports("prod", 1, true).mounted()]).await;
     activate(&svc).await;
     let cons = listed(&svc, "cons").await;
-    assert!(cons.ui.slots.is_empty(), "{:?}", cons.ui.slots);
-    assert!(cons.lenses.iter().all(|l| l.slug != "seen"));
+    assert!(cons.ui.page_slots.is_empty(), "{:?}", cons.ui.page_slots);
+    assert!(cons.page_files.iter().all(|p| p.slug != "seen"));
     assert!(
         cons.public_contracts
             .withheld
@@ -848,12 +858,12 @@ async fn a_guarded_lens_prunes_its_slot_mounts() {
     activate(&svc).await;
     let cons = listed(&svc, "cons").await;
     assert_eq!(
-        cons.ui.slots.len(),
+        cons.ui.page_slots.len(),
         1,
         "{:?} {:?}",
         cons.errors,
-        cons.ui.slots
+        cons.ui.page_slots
     );
-    assert!(cons.lenses.iter().any(|l| l.slug == "seen"));
+    assert!(cons.page_files.iter().any(|p| p.slug == "seen"));
     assert!(cons.public_contracts.withheld.is_empty());
 }

@@ -99,18 +99,18 @@ ids. A command declares (`oxplow_domain::commands::CommandSpec`):
 | Field | Meaning |
 |---|---|
 | `input_schema` | JSON Schema; the bus validates the input first and names the failing field, plus what the schema accepts there (`InputValidator::check`: an object's fields, required first, for an unknown or missing one; the choices for a bad enum value and that field's `description`), and quotes the schema's example input, so a caller fixes it in one more call. The example is JSON Schema's own `examples` keyword, from the command's declaration (`example:` in its manifest, kept over its operation's schema by `Op::command`; a script command's first example that runs when it declares none; `oxplow.command.sequence`'s in `compose.rs`). Every command an agent is offered has one that fits (`every_command_an_agent_is_offered_has_an_example_that_fits`) |
-| `job` | a model's tool call inside one of its extension's jobs may run it (`job: true`; `false` unless said, and only on a command with its extension's own handler — `Op::command` refuses it over a scope's operation, so none of core's commands takes a job). Who else may run a command isn't the command's to say: **anyone** — a person, an agent, a lens acting for either. oxplow puts no wall between a person and their agent; what an agent may call is its harness's to decide (its permission mode) |
+| `job` | a model's tool call inside one of its extension's jobs may run it (`job: true`; `false` unless said, and only on a command with its extension's own handler — `Op::command` refuses it over a scope's operation, so none of core's commands takes a job). Who else may run a command isn't the command's to say: **anyone** — a person, an agent, a page acting for either. oxplow puts no wall between a person and their agent; what an agent may call is its harness's to decide (its permission mode) |
 | `confirm` | `Never`, `Always`, or `Destructive` — a **person's** run asks them first (the second click). An agent's run doesn't ask (`commands::asks`); an effect's is kept as a proposal; a job's or oxplow's is refused. A command that only reads (`View` / `Read`) may not ask (`Command::new` / `with_confirm_for` refuse it — so a read or view scope's command can't declare `confirm`): it runs unrecorded, so nothing would resolve its proposal |
 | `undoable` | the handler returns an inverse call that `undo` applies |
 | `lifecycle` | `Stable` / `Experimental` |
 | `atomicity` | `Tx` (handler runs inside the bus's transaction), `External` (against a system the bus doesn't own — a VCS, a process, a work list), or `Dispatch` — a composite, which its calls decide ("Composition") |
 | `access` | `oxplow_domain::Access`: `View`, `Read`, `Record` or `Write` (the default); a scope operation's command takes its scope's. `View` (changes only what the person sees) and `Read` are unrecorded (`Access::reads_only`): no audit row or `command.executed`, so a polling agent doesn't fill the log, and a closed thread can still run one (`oxplow.config.list_keys`, `oxplow.config.get`). `Record` and `Write` are audited (`Access::records`). A `Record` changes oxplow's own records (`work_item.*`, `effort.*`) and is open to any thread; a `Write` is refused to an agent whose thread is closed or missing (`Access::needs_thread`) |
-| `unrecorded` | top-level input fields its audit row leaves out, kept as their size (`{ "omitted_bytes": n }`; an op's `with_unrecorded` — `oxplow.file.save`'s `content` — or an extension command's `unrecorded: [field…]`, each a property of its input or `*`, checked at load): still audited, the log not grown by every file saved. A lens form's `secret` field must be one of them |
-| `needs` | the **scopes** its handler calls (`sql.read`; below — always available, enforced per call) and the capabilities, or their features (`work_items.comments`), it needs active — the grammar lenses use. Unmet, it isn't offered and doesn't run (pipeline step 0). `oxplow.work_item.create` / `update` / `transition` need `work_items`; `link`, `comment` and `delete` need their feature |
+| `unrecorded` | top-level input fields its audit row leaves out, kept as their size (`{ "omitted_bytes": n }`; an op's `with_unrecorded` — `oxplow.file.save`'s `content` — or an extension command's `unrecorded: [field…]`, each a property of its input or `*`, checked at load): still audited, the log not grown by every file saved. A page form's `secret` field must be one of them |
+| `needs` | the **scopes** its handler calls (`sql.read`; below — always available, enforced per call) and the capabilities, or their features (`work_items.comments`), it needs active — the grammar pages use. Unmet, it isn't offered and doesn't run (pipeline step 0). `oxplow.work_item.create` / `update` / `transition` need `work_items`; `link`, `comment` and `delete` need their feature |
 
 `Actor` is who runs it: `Human`, `Agent { thread_id, stream_id }`,
-`Lens { lens_id, on_behalf_of }`, `System`. Its `source()` (`human`,
-`agent:thr3`, `lens:acme/x` — an event source, not a URI) is what the event and audit record.
+`Page { page_id, on_behalf_of }`, `System`. Its `source()` (`human`,
+`agent:thr3`, a page's URI `oxplow:oxplow/page?page=acme/x`) is what the event and audit record.
 
 `Actor::Job` is host-derived from a validated job/attempt/fence identity
 (source `job:<id>:<attempt>:<fence>`): what a job's model tool calls run
@@ -120,7 +120,7 @@ stream. It cannot confirm or create a proposal: a command that asks is
 refused. A job runs only a command that says `job: true`, which an
 extension declares on the read-only commands its jobs name as `tools`
 (`commands::job_refusal`); every child a script composes is re-checked,
-and none of core's takes a job. A lens wrapping a Job keeps Job admission and its confinement. A
+and none of core's takes a job. A page wrapping a Job keeps Job admission and its confinement. A
 `Write` command from a gated actor without a thread is refused.
 
 ## Offering a command to a person
@@ -135,7 +135,7 @@ A command says how a person meets it with an optional `ui`
 | `keywords` | more words search matches it by |
 | `about` | the resource it acts on (a resource name, `oxplow/work_item`, `acme/pr`): offered on a URI of it, its page and rows; absent, it needs no URI and **search** offers it |
 | `input` | the input it runs with; a string exactly `{{stream}}` / `{{thread}}` (bound to the stream's / thread's bare id, `str1`), `{{uri}}` (the page's URI) or `{{uri.id}}` (its key; only with an `about`) binds from where it runs, and one with nothing to bind there makes it unavailable there. A binding is the whole string, never spliced into text (`UI_INPUT_BINDINGS`) |
-| `form` | what gathers its input (so no `input`): a page's URI (`oxplow:oxplow/page?page=new-task`) or one of the window's own forms (`WINDOW_FORMS`: `new-thread`, the Navigator's inline form; `commit`, the Files page's commit dialog) — choosing it opens that instead of running it; offered about a URI (`about`), a page form opens with `uri=<uri>` (`tabs/pageRefs.withPageParams`) so a `pages:` lens form can prefill `defaults: { uri: "{{param.uri}}" }`; a window form takes none |
+| `form` | what gathers its input (so no `input`): a page's URI (`oxplow:oxplow/page?page=new-task`) or one of the window's own forms (`WINDOW_FORMS`: `new-thread`, the Navigator's inline form; `commit`, the Files page's commit dialog) — choosing it opens that instead of running it; offered about a URI (`about`), a page form opens with `uri=<uri>` (`tabs/pageRefs.withPageParams`) so a `pages:` page form can prefill `defaults: { uri: "{{param.uri}}" }`; a window form takes none |
 | `open_after` | a URI to open once it ran, taking only `{{result.<field>}}` from its result (`oxplow:oxplow/page?page=custom-dashboard&id={{result.id}}`, `oxplow:oxplow/agent_session?id={{result.id}}`); a whole `{{result.<field>}}` is allowed when the result field is itself the URI (`{{result.page}}`); bound by the server (RPC `command_open_after`, `CommandUi::open_after_for`) — a field the result lacks opens nothing and says so |
 | `background` | it runs as a background task (kind `vcs` for `oxplow.vcs.*`, else `command`), its failure an op error |
 | `shortcut` | the key that runs it, `Ctrl/Cmd+S` / `Ctrl/Cmd+Shift+N` (`keybindings.ts` `offerForShortcut`). Several commands may share a key, told apart by `when` (VS Code's way): the key runs the one whose `when` holds now, oxplow's own first. Two on one key under the same `when` always collide, so the second is refused where it registers (`Invalid` at `/ui/shortcut`) |
@@ -150,7 +150,7 @@ syntax, each `input` binding (whole, known, `uri` only with `about`),
 `form` (a URI or a window form, and no `input` beside it), `open_after`
 (a URI, only `{{result.<field>}}`) and `menu.bar` — `Invalid` at
 `/ui/<field>`, never a menu entry that silently doesn't work. Every
-template — a lens action's `{{param.x}}` / `{{row.x}}`, `ui.input`,
+template — a page action's `{{param.x}}` / `{{row.x}}`, `ui.input`,
 `open_after` — is read by one tokenizer, `oxplow_domain::template`
 (`placeholders`, `whole_placeholder`, `splice`); the window binds
 `ui.input` by exact match on the four names the check let through, and
@@ -182,7 +182,7 @@ tighter than `||`), `||`, parentheses; `==` / `!=` against `true`,
 the window doesn't hold is false, equal to nothing (but `false`) and
 unmatched. `true` and `false` alone are the literals: `when: "false"`
 is a command never offered on its own (search, the menu bar, a shortcut),
-declared with a `ui` for its label and `open_after` because lens actions
+declared with a `ui` for its label and `open_after` because page actions
 run it (`oxplow.file.create`). VS Code's `<` `<=` `>` `>=` and `in` / `not in` parse but are
 refused as not supported yet: no context key holds a number or a list.
 The window publishes its **context keys** (`CONTEXT_KEYS`, the one list):
@@ -199,7 +199,7 @@ command; the window only evaluates. Both read the same cases
 (`crates/oxplow-domain/fixtures/when_cases.json`). A new key goes in
 `CONTEXT_KEYS` and the window's `whenContext` (`App.tsx`) together.
 
-Save, Find, Quick Open and New Lens with Your Agent are the window's own
+Save, Find, Quick Open and New Page with Your Agent are the window's own
 commands (below, "Where a command runs"); New Thread and Commit are
 `oxplow.thread.create` / `oxplow.vcs.commit` with a window `form`. There
 is no other command list in the app.
@@ -259,8 +259,8 @@ See [extensions.md](./extensions.md) "Private state host boundary".
 `oxplow-foundation` as `oxplow.<area>.<verb>` with an `example:`: `records.read/read` (`oxplow.records.read`, a
 URI's content), `sql.read/query` (`oxplow.sql.query`), `search.read/search`
 (`oxplow.search.find`), `pages.read/open` (`oxplow.page.open`),
-`agent_text.read/skill` (`oxplow.skill.read`), `lenses.read/run`
-(`oxplow.lens.run`: the lens's text, or the `LensRun` with `format: json`),
+`agent_text.read/skill` (`oxplow.skill.read`), `pages.read/run`
+(`oxplow.page.run`: the page's text, or its loaders' rows and tree with `format: json`),
 `vcs.read/{diff,blame,log,status,branches}` (`oxplow.vcs.log` pages history
 from any revision, past what `v_commit` indexes), `lsp.read/*` (`oxplow.code.*`),
 `changes.read/ensure` (`oxplow.change.ensure`: it writes only the derived
@@ -268,9 +268,9 @@ change cache, so it stays a read), `knowledge.read/{comments,drift}`,
 `extensions.check/{validate,preview,draft_status,review}` (`oxplow.extension.draft_status`: how a stream's source differs from what runs, `extension_deploy::source_diff`; a review clones the
 candidate into `.oxplow/tmp`; it changes no record),
 `collectors.preview/preview`, and `ai.compute/{decide,summarize}` (recorded
-calls whose caller is the asking thread). `lenses.write/run_action`
-(`oxplow.lens.run_action`) is a `record` that composes, running as the
-lens's actor. A read runs unrecorded, for any thread, and the operation
+calls whose caller is the asking thread). `pages.write/run_action`
+(`oxplow.page.run_action`) is a `record` that composes, running as the
+page's actor. A read runs unrecorded, for any thread, and the operation
 reads the stream it names, else the actor's own
 (`agent_reads::stream_or_actors`). The `v_scope` live model lists every
 scope (id, access, host, summary). The MCP tools that carried these
@@ -299,7 +299,7 @@ row objects, read through the SQL gateway (`SqlGateway::run_in`, on
 the run's activation pin) by every script host alike — a command's
 composer, an effect's or policy's script, a dry run and a provider's
 `host/call` — so `metric_grid()` and `metric_findings()` answer there as
-in a lens. Each read is its own snapshot; a script's reads don't share
+in a page. Each read is its own snapshot; a script's reads don't share
 one. More than 1000 result
 rows fails with an error; it never hands a script a silently truncated
 list. Exactly 1000 rows is allowed. Aggregate in SQL to calculate across
@@ -337,7 +337,7 @@ call order) or through the SQL gateway.
 handler lives). A scope says its host (`Host`): the **daemon**
 (oxplow's records, the repository, the project's files), the project's
 **window** (`tabs.write`: open, close, focus a tab; `editor.write`:
-save; `window.show`: find, quick open, and `navigate` — `oxplow.window.navigate { uri, stream? }`, open to an agent, takes the person to a URI: the window opens and focuses its page in the thread it belongs to (`apps/desktop/src/tabs/navigation.ts` plans it: a file's editor, a work item, effort, lens, wiki page, directory or a `page` URI), switches to `stream` first when it is named, and a bare stream or thread URI selects it; it returns `{ opened, stream }`; `agent_input.write`: draft, a
+save; `window.show`: find, quick open, and `navigate` — `oxplow.window.navigate { uri, stream? }`, open to an agent, takes the person to a URI: the window opens and focuses its page in the thread it belongs to (`apps/desktop/src/tabs/navigation.ts` plans it: a file's editor, a work item, effort, page, wiki page, directory or a `page` URI), switches to `stream` first when it is named, and a bare stream or thread URI selects it; it returns `{ opened, stream }`; `agent_input.write`: draft, a
 person's) or the **app shell** (`projects.write`: create, open — New /
 Open Project; the window reaches the shell, so the window hosts its
 handlers too). A shell command isn't recorded: there's no app-scope bus
@@ -402,7 +402,7 @@ its own namespace. A script reaches record and write operations only by
 composing commands.
 
 **An operation bounds only confirmation.** Anyone may run any
-command: a person, an agent, or a lens acting for either. There is no
+command: a person, an agent, or a page acting for either. There is no
 invoker list, and the manifest has no `invokers:` key (the loader refuses
 it). The operation bounds only how much a person is asked: an `Op` says
 the least it is confirmed (`confirm_at_least`: `Destructive` for a
@@ -444,7 +444,7 @@ share; `tests.rs` the bus's own tests.
 `CommandBus::run(actor, name, input, confirmed)`:
 
 First the **actor is resolved**, once (`CommandBus::resolved`): an agent
-— or a lens acting for one — whose transport carried its thread but not
+— or a page acting for one — whose transport carried its thread but not
 its stream runs with its thread's stream, so "the caller's stream" is
 `actor.stream_id()` in every handler, one answer; an agent claiming a
 thread that doesn't exist is `Denied` (audited). An agent with no thread
@@ -460,11 +460,11 @@ skipping.
    every actor; `list` leaves it out the same way.
 1. **Validate** the input against the schema → `Invalid { field, message }`
    (audited as `invalid`).
-2. **A job's tools** — a job (or a lens it pressed) runs only a command
+2. **A job's tools** — a job (or a page it pressed) runs only a command
    that says `job: true` → `Denied` (audited; `job_refusal`). Anyone else
    may run every command.
 3. **Agent policy** — for a thread-gated run (an agent, an effect, a
-   job, or a lens acting for one, nested runs included),
+   job, or a page acting for one, nested runs included),
    `AgentPolicy::check_command(thread, spec, may_write)`
    (`agent_policy.rs`) → `Denied` (audited). A `Write`
    command needs an open thread: the bus asks its write gate
@@ -481,7 +481,7 @@ skipping.
    refusal is audited `invalid` and nothing runs.
 4. **Confirmation** — what a run asks is `commands::asks`: the command's
    `confirm` (or its per-input `confirm_for`), except an agent-driven run
-   (an agent, or a lens acting for one), which asks nothing — what an
+   (an agent, or a page acting for one), which asks nothing — what an
    agent may call is its harness's to decide. When it asks and the call
    isn't `confirmed`, **nothing runs and no audit row is written**: a
    person (or the system) gets `NeedsConfirmation { preview }`; an
@@ -570,17 +570,17 @@ about who may run what: the actor is still `Actor::Human`. Its audit
 row keeps it (`command_audit.via`, V108; `v_command_audit.via`, v2), and
 a nested run inherits it.
 
-**Agent rules follow the agent.** An `Actor::Lens { on_behalf_of }` —
+**Agent rules follow the agent.** An `Actor::Page { on_behalf_of }` —
 or an `Actor::Component { component, on_behalf_of }`, a custom component
 acting for whoever uses it ("Custom components") — whose chain ends at an
 agent (`Actor::is_agent_driven`) gets the agent policy and can never
-confirm, exactly like the agent: its run asks nothing. **A lens grants
+confirm, exactly like the agent: its run asks nothing. **A page grants
 no power:** it acts with the rights of whoever pressed it (`Actor::presser`).
 Its run of a command that asks is asked first when a person pressed it,
 and runs without asking when an agent pressed it.
 
 **Only a person confirms; an effect runs with an agent's rights**
-(P8.D8). `Actor::may_confirm()` is true for `Human` and a lens acting for
+(P8.D8). `Actor::may_confirm()` is true for `Human` and a page acting for
 one — never an agent, an effect or `System` (step 4 drops a `confirmed`
 from anyone else). An agent's run asks nothing. An
 `Actor::Effect { effect: "<extension>/<id>", thread_id, stream_id }`'s
@@ -757,7 +757,7 @@ that asks is never one: it runs.
    terminal, narrowed to the thread; usability.md
    "Agent proposals").
 
-**Deciding** is a person's (`Actor::Human`; an agent, a lens or the
+**Deciding** is a person's (`Actor::Human`; an agent, a page or the
 system is `Denied`): a proposal is consent to code that isn't theirs or
 an effect's run, the one place a person, not their agent, answers. A
 proposal is decided once (`Invalid` after):
@@ -777,7 +777,7 @@ proposal is decided once (`Invalid` after):
   `command.declined@2`; nothing runs, no audit row.
 
 A custom component's frame invokes a command through UI RPC
-`invoke_component_command` — as the lens acting for the person, only a
+`invoke_component_command` — as the page acting for the person, only a
 command its component declares ([extensions.md](./extensions.md),
 "Custom components").
 
@@ -886,7 +886,7 @@ a rate limit, with its wait) is `Unavailable { message, retry_after_ms }`
 (RPC `UNAVAILABLE`) — the one failure an effect sends again by itself
 (tsk914); everything else that fails is `Failed`. An **`External`**
 handler (P5.A1) is an async call against a system the bus doesn't own —
-a VCS, an external provider's process, a collector script, the lens files on disk —
+a VCS, an external provider's process, a collector script, the page files on disk —
 whose state can't join the bus's transaction; the bus audits it after it returns (a failure to
 record is logged, never reported as the run failing); its audit row
 holds the handler's `result` like a `Tx` run's. It is
@@ -949,9 +949,8 @@ its area falls under (`threads.write`, `vcs.write`, …; `SCOPES`); "Handler" de
 | `oxplow.hint.dismiss` (`Tx`) | `commands/hint.rs` over `agent_nudge_store::dismiss_tx` | `Record`: dismisses a hint raised to the person (`v_agent_nudge`, audience `person`), stamping its `delivered_at`; dismissing one already dismissed is `unchanged` (no record), one never raised `Invalid`. Not undoable |
 | `oxplow.context.add { thread, uri?, label?, text? }`, `oxplow.context.remove { item }`, `oxplow.context.clear { thread }` (`Tx`) | `commands/context_basket.rs` over `thread_context_store::*_tx` | `Record` (scope `context.write`): the person's context basket for a thread's agents (`agent-model.md` "The context basket"). An agent's run is refused. `add` undoes to `remove`, `remove` to an `add` of the same content, `clear` to a sequence of `add`s; `clear` leaves delivered items |
 | `oxplow.bookmark.set`, `oxplow.bookmark.remove` (`Tx`) | `commands/bookmark.rs` over `bookmark_store::*_tx` | `Record` (bookmarks are the person's navigation). The viewer is `thread` (its stream implied) or `stream`; `set` moves a page's bookmark to its `scope`. Both undo to what the viewer saw before |
-| `oxplow.terminal.open { stream, title? }`, `oxplow.terminal.rename { terminal, title }` (`Tx`); `oxplow.terminal.close { terminal }` (`External`) | `commands/terminal.rs` over `terminal_store::*_tx` and the PTY registry (scope `terminals.write`) | Opening and renaming run for a person, a lens or an agent (an agent only in its own stream); `open` answers `{ id, uri, title }` and titles "Terminal N" when none is given; `rename` undoes. `close` ends the shell the registry keeps under the terminal's URI, then deletes the row — a person's (an agent is refused), `Confirm::Destructive`, the last one may close. Events `terminal.opened@1` / `renamed@1` / `closed@1`. [terminal.md](./terminal.md) "Terminals are rows" |
-| `oxplow.dashboard.create`, `oxplow.dashboard.rename`, `oxplow.dashboard.delete`, `oxplow.dashboard.remove_item`, `oxplow.dashboard.reorder_items` (`Tx`); `oxplow.dashboard.add_item`, `oxplow.dashboard.update_item` (`External`) | `commands/dashboard.rs` over `dashboard_store::*_tx` (P8.A5) | `Record`; `delete` is `Confirm::Destructive`, not undoable. `create` isn't undoable; the rest undo (a removed tile comes back at its position). Adding or editing a tile is `External` because its SQL is checked by the semantic engine (async) first. See [dashboards.md](./dashboards.md) |
-| `oxplow.knowledge.add_comment { stream, thread?, target, quote, selectors_json, context_chain?, referenced?, intent, body }`, `oxplow.knowledge.reply_comment { comment, body }`, `oxplow.knowledge.update_comment { comment, intent?, status?, quote? + selectors_json? }`, `oxplow.knowledge.delete_comment { comment }` | `Tx` over `comment_store::*_tx` (`commands/comment.rs`, P8.A6) | `Record`, logging the existing `knowledge.comment.*` events caused by the run. The author is the actor (`user` for a person, `agent`, the person a lens acts for) — never an input. An agent comments only in its own stream and thread. `update_comment` undoes to the intent/status/quote it replaced (a relink is `quote` + `selectors_json`, which anchors it — `orphaned: false` unless it says otherwise — and its undo restores the old quote, anchor and `orphaned`; a half-named relink is refused before anything is written); `add`/`reply` aren't undoable; `delete` is `Confirm::Destructive`. `oxplow.knowledge.relocate_comment { comment, selectors_json, orphaned }` (tsk861) is the renderer's re-anchor after it re-finds the quote — not undoable; one already where it was is `unchanged` and leaves no record. Views re-read on `ModelsChanged` naming `v_comment` |
+| `oxplow.terminal.open { stream, title? }`, `oxplow.terminal.rename { terminal, title }` (`Tx`); `oxplow.terminal.close { terminal }` (`External`) | `commands/terminal.rs` over `terminal_store::*_tx` and the PTY registry (scope `terminals.write`) | Opening and renaming run for a person, a page or an agent (an agent only in its own stream); `open` answers `{ id, uri, title }` and titles "Terminal N" when none is given; `rename` undoes. `close` ends the shell the registry keeps under the terminal's URI, then deletes the row — a person's (an agent is refused), `Confirm::Destructive`, the last one may close. Events `terminal.opened@1` / `renamed@1` / `closed@1`. [terminal.md](./terminal.md) "Terminals are rows" |
+| `oxplow.knowledge.add_comment { stream, thread?, target, quote, selectors_json, context_chain?, referenced?, intent, body }`, `oxplow.knowledge.reply_comment { comment, body }`, `oxplow.knowledge.update_comment { comment, intent?, status?, quote? + selectors_json? }`, `oxplow.knowledge.delete_comment { comment }` | `Tx` over `comment_store::*_tx` (`commands/comment.rs`, P8.A6) | `Record`, logging the existing `knowledge.comment.*` events caused by the run. The author is the actor (`user` for a person, `agent`, the person a page acts for) — never an input. An agent comments only in its own stream and thread. `update_comment` undoes to the intent/status/quote it replaced (a relink is `quote` + `selectors_json`, which anchors it — `orphaned: false` unless it says otherwise — and its undo restores the old quote, anchor and `orphaned`; a half-named relink is refused before anything is written); `add`/`reply` aren't undoable; `delete` is `Confirm::Destructive`. `oxplow.knowledge.relocate_comment { comment, selectors_json, orphaned }` (tsk861) is the renderer's re-anchor after it re-finds the quote — not undoable; one already where it was is `unchanged` and leaves no record. Views re-read on `ModelsChanged` naming `v_comment` |
 | `oxplow.handoff.send { to_thread, body, work_item?, from_thread? }`, `oxplow.handoff.settle { handoff, state, note? }` (`Tx`); `oxplow.handoff.resolve { handoff, outcome, note? }` (a native composite) | `commands/handoff.rs` over `oxplow_db::handoff_store::{send_tx, settle_tx}`, scope `handoffs.write` | `Record`. `send`: from the actor's thread (an agent's own, an effect's event's, the one a person names) to another open thread, any stream's; the item must be on the active list (a loose id is canonicalised); logs `handoff.sent@2`; not undoable. `settle`: `taken` / `declined` by the recipient thread, `withdrawn` by the sender, each only while open; `open` again by whoever settled it; logs `handoff.settled@2`; undone by the state it replaced. `resolve`: checks the same rule against the run's actor before composing, then `oxplow.work_item.move` onto the recipient thread (taking an item not there yet, on a list with `lists`) and the settle; a take that moves an item is steps, with no undo. See [agent-model.md](./agent-model.md) "Handoffs and native messaging" |
 | `oxplow.effort.verify_claim { claim, evidence? }` / `oxplow.effort.unverify_claim { claim, evidence? }`; `oxplow.effort.dismiss_claim { claim }` / `oxplow.effort.reopen_claim { claim }` | `Tx` over `claim.review` and `claim.evidence` (`commands/review.rs`, P7.C4) | a review of a claim: any caller; `Record`; undoable as pairs. Each acts on an unreviewed claim (verify, dismiss) or one in the state it undoes, refusing otherwise. `verify_claim` marks it `verified`, citing `evidence`, else what it already cites (a run the agent's answer named), else `reviewer` (the person checked it); `unverify_claim` makes it unreviewed again, citing `evidence` (what it cited before, which verify's inverse carries). `dismiss_claim` marks it `dismissed` (the agent didn't claim it, or didn't mean it); `reopen_claim` takes that back. Reviewed claims stay when the effort is read again. Log `effort.claim_verified@2 { claim, effort?, evidence? }` and `effort.claim_dismissed@2 { claim, effort?, dismissed }`. The claim is named by ref (`claim:7`), whatever effort it's in |
 | `oxplow.effort.confirm_decision { decision }` / `oxplow.effort.dismiss_decision { decision }` / `oxplow.effort.reopen_decision { decision }` | `Tx` over `decision.provenance` (`commands/review.rs`, P7.C4) | the same reviewers. Confirm and dismiss move an `inferred` decision to `confirmed` / `dismissed` (a recorded one isn't reviewed); reopen moves either back to `inferred`, and is their inverse (and they are its). Logs `effort.decision_reviewed@2 { decision, effort?, outcome }` |
@@ -962,13 +961,13 @@ its area falls under (`threads.write`, `vcs.write`, …; `SCOPES`); "Handler" de
 | `oxplow.metric.enable { keys, enabled }` | `Tx`: turns metrics on or off — computes the new `metrics:` list with `MetricsService::apply_metric_enabled` (a bundled code metric is off until a `use:` names it; a producer/extension metric is on until an `enabled: false` marker) and hands it to `oxplow.config.set`'s core; an unknown key (not in `metric_catalog`) is refused | undoable (restores the prior list); logs `config.changed@1 { key: metrics, … }`; the `config.metrics` reactor reseeds |
 | `oxplow.metric.record { key, value, subject?, dims?, stream? }` | `Tx` over `fact_store::record_facts_tx` (`commands/metric.rs`, P4.8) | not undoable. An asserted fact on the metric's source measure, stamped to match its filter, anchored to the stream's latest snapshot; the fact and the audit commit together. A formula or `count` metric, an unknown key, or another stream (for an agent) is refused. After commit: clears the fact memo (the change loop announces `MetricSamplesChanged` for the measure) |
 | `oxplow.metric.rebuild { force }` | `External` over `MetricsService::rebuild_baseline` | not undoable. Every snapshot fact collector's whole-tree baseline. It drives snapshot captures and collector scripts, which own their own transactions. (Running one collector is `oxplow.collector.sync`; `metric.run` is deleted.) |
-| `oxplow.vcs.commit` / `oxplow.vcs.stage` / `oxplow.vcs.discard` / `oxplow.vcs.fetch` / `oxplow.vcs.pull` / `oxplow.vcs.push` / `oxplow.vcs.merge` / `oxplow.vcs.checkout_branch` / `oxplow.vcs.rename_branch` / `oxplow.vcs.delete_branch` / `oxplow.vcs.resolve_conflict`; `oxplow.git.rebase` / `oxplow.git.cherry_pick` / `oxplow.git.revert` / `oxplow.git.ignore` | `External` over the `Vcs` trait (`git.*`: the git provider's own ops) (`commands/vcs.rs`, P5.B6) | any caller's, a lens's too — an agent's on its own stream only (its terminal's `git` reaches only its own worktree; `vcs_op` refuses another stream), not undoable. Each takes the `stream` it acts on, by URI (`oxplow:oxplow/stream?id=str1`), resolved strictly (an unknown stream is refused, never the primary's). `oxplow.vcs.discard`, `oxplow.vcs.merge`, `oxplow.vcs.delete_branch`, `oxplow.git.rebase` and `oxplow.git.revert` are `Destructive` (confirmed); `oxplow.vcs.pull` and `oxplow.vcs.push` don't ask (routine, the person's own click). The spec is the one rule: the Git Dashboard arms its confirm from it (`SpecConfirm`, tsk898). The result — and the audit row's — is the VCS's `OpOutcome { success, log, conflicts, auto_resolved }` (`oxplow.vcs.commit`: `{ success, revision }`); an op that failed outright (a rejected push, an unreachable remote) is the run's `Failed`, git's log its message, audited `error` — never an `ok` row whose result says it failed — while one that stopped at conflicts answers with them (the repository is mid-merge for a person). Once a run is recorded (its `after_commit`; at once for one that failed, which may have touched the workspace too) the stream's `WorkspaceChanged` (and `VcsRefsChanged`; every stream's after a fetch, push, rename or delete) is announced. See [vcs.md](./vcs.md) |
+| `oxplow.vcs.commit` / `oxplow.vcs.stage` / `oxplow.vcs.discard` / `oxplow.vcs.fetch` / `oxplow.vcs.pull` / `oxplow.vcs.push` / `oxplow.vcs.merge` / `oxplow.vcs.checkout_branch` / `oxplow.vcs.rename_branch` / `oxplow.vcs.delete_branch` / `oxplow.vcs.resolve_conflict`; `oxplow.git.rebase` / `oxplow.git.cherry_pick` / `oxplow.git.revert` / `oxplow.git.ignore` | `External` over the `Vcs` trait (`git.*`: the git provider's own ops) (`commands/vcs.rs`, P5.B6) | any caller's, a page's too — an agent's on its own stream only (its terminal's `git` reaches only its own worktree; `vcs_op` refuses another stream), not undoable. Each takes the `stream` it acts on, by URI (`oxplow:oxplow/stream?id=str1`), resolved strictly (an unknown stream is refused, never the primary's). `oxplow.vcs.discard`, `oxplow.vcs.merge`, `oxplow.vcs.delete_branch`, `oxplow.git.rebase` and `oxplow.git.revert` are `Destructive` (confirmed); `oxplow.vcs.pull` and `oxplow.vcs.push` don't ask (routine, the person's own click). The spec is the one rule: the Git Dashboard arms its confirm from it (`SpecConfirm`, tsk898). The result — and the audit row's — is the VCS's `OpOutcome { success, log, conflicts, auto_resolved }` (`oxplow.vcs.commit`: `{ success, revision }`); an op that failed outright (a rejected push, an unreachable remote) is the run's `Failed`, git's log its message, audited `error` — never an `ok` row whose result says it failed — while one that stopped at conflicts answers with them (the repository is mid-merge for a person). Once a run is recorded (its `after_commit`; at once for one that failed, which may have touched the workspace too) the stream's `WorkspaceChanged` (and `VcsRefsChanged`; every stream's after a fetch, push, rename or delete) is announced. See [vcs.md](./vcs.md) |
 | `oxplow.knowledge.write_page { slug, title?, body, verified_files?, removed_files? }` / `oxplow.knowledge.delete_page { slug }` / `oxplow.knowledge.link { page, target }` / `oxplow.knowledge.resync { slug }` / `oxplow.knowledge.verify_files { slug, refs? }` | `Tx` over `knowledge::write_page_tx` / `delete_page_tx` (`crates/oxplow-app/src/knowledge.rs`, P5.C3) | `Record` (any thread captures); not undoable; `delete_page` is Destructive. `verify_refs` re-pins the named files (every file the page cites when `refs` is omitted) against the page core records, through the same `write_page` path. Validates the slug and every `[[link]]` (refused, named), restates the `wiki_page` row and its pinned `page_ref` edges, logs `knowledge.page.written@2` / `knowledge.page.deleted@2` with the actor's anchors; writes (or removes) `.oxplow/wiki/<slug>.md` in the run; the UI re-reads on the row's `modelsChanged` (no wiki event of its own). See [knowledge.md](./knowledge.md) |
 | `<provider>.<name>` (an enabled external provider's own declared commands — not its capability's verbs, which run as `work_item.<verb>`: the fake's `estimate`) | `External` over the provider process's `invoke` (`providers/registry.rs`, P5.D3) | registered while its instance is enabled (and removed when it stops), `Experimental`; `confirm`, `access` and `undoable` as the provider declares (its `inverse` becomes `<provider>.<command>`). The events its `invoke` returns are logged caused by the run — only types it declares, and a `work_item.recorded` only for its own items. See [providers.md](./providers.md) |
 | `oxplow.collector.sync { collector, thread? }` | `External` over the collector's program or script (`collector_runner.rs`, P7.B3; was `source.sync`) | `Write`, not undoable. Runs a collector from the primary worktree and commits its rows, its `collector_run` row and `collector.synced@2` in one transaction (a failed run commits the failure). It never admits anything: a collector whose extension lacks a permission it needs (`process` for an exec one) is `Invalid`. Run by the system it's the `every:` schedule's run (`trigger: every`); by anyone else, `manual`. **The one manual run for every collector** (it replaced `source.sync` and `metric.run`): a fact collector (`facts:`, owner an extension, the project's own `project` among them) runs through the fact engine (`MetricsService::run_collector_by_key`) against the stream's latest snapshot, recording its capture, `collector_run` and `collector.synced@2` (the engine's own writes). Result `{ owner, id, rowCounts, facts }` — `rowCounts` for an entity collector, `facts` (count recorded) for a fact collector. A **report collector** (`records:`, tsk863) is read by the collection service in `thread` (an agent's own; a person names one): `{ owner, id, recorded: { status, records, run, … } }` |
 | `oxplow.provider.sync { instance, collector? }` | `External` over the provider process's `read` (`providers/sync.rs`, P7.A3) | `Record` (it restates items, never claims), not undoable. Reads a running instance's collectors (all, or one — an undeclared one is `Invalid` at `/collector`) from their last checkpoints; the records land as `work_item.recorded@3`, each batch committed with its `$/state`. The one way to read: Settings → Integrations' Sync Now, an agent, the schedule (as the system) and the read an instance gets when it starts. Result `{ reads: [{ collector, records }] }`. See [providers.md](./providers.md) |
 | `oxplow.file.save { stream, path, content }` / `oxplow.file.create { stream, path, content? }` / `oxplow.file.create_directory { stream, path }` / `oxplow.file.rename { stream, from, to }` / `oxplow.file.delete { stream, path }` | `External` over `WorkspaceFiles` (`commands/file.rs`, scope `files.write`): the worktree is the system that owns this state | a person in any stream, an agent or effect only in its own (`stream_of`); `delete` is `Confirm::Destructive` (a person's). Each logs what it did — `file.saved`, `file.created`, `file.directory_created`, `file.renamed`, `file.deleted` (subject `file:<path>`, the stream anchored) — which an effect `on:` reacts to and which the window follows with its open buffers (`watchFileEvents`, `fileEvents.ts`, followed by `editor/buffers.ts`: a rename moves them, a delete closes them, whoever ran it). `save` and `create` leave `content` out of the audit (`with_unrecorded`). The five bespoke workspace write IPCs are gone |
-| `oxplow.capability.choose { capability, provider?, layer }` / `oxplow.replacement.choose { target, whose? }` | `Tx` config ops (`commands/config_commands.rs`, scope `config.write`): `choose_provider` edits that capability's entry in `activeProviders` of the project or personal layer (no provider unsets it), `choose_replacement` edits `replacements` | Settings → Integrations → Capabilities and Replaced components, as row actions of the `capabilities` and `replacements` lenses |
+| `oxplow.capability.choose { capability, provider?, layer }` / `oxplow.replacement.choose { target, whose? }` | `Tx` config ops (`commands/config_commands.rs`, scope `config.write`): `choose_provider` edits that capability's entry in `activeProviders` of the project or personal layer (no provider unsets it), `choose_replacement` edits `replacements` | Settings → Integrations → Capabilities and Replaced components, as row actions of the `capabilities` and `replacements` pages |
 | `oxplow.ai.set_provider { id, kind, base_url?, key? }` / `oxplow.ai.remove_provider { id }` / `oxplow.ai.set_role { role, provider?, model?, restrict? }` / `oxplow.ai.test_provider { id, model }` | `External` over `AiService` (`commands/ai_settings.rs`, scopes `ai.settings`, and `ai.test` for the test, which `spends`): the settings are the user-global `ai.yaml` and the OS keychain, outside oxplow's database | Settings → AI as a form. `set_provider`'s `key` is a secret (`writeOnly: true` in its schema; "Secrets" below): kept out of the record, masked in the form; `remove_provider` is refused while a role uses the provider; `set_role` with neither provider nor model unbinds the role and announces `ConfigChanged`; `test_provider` returns `{ reply }`. The `save_ai_provider` / `remove_ai_provider` / `set_ai_role` / `test_ai_provider` IPCs are gone; `ai_settings` still reads |
 | `oxplow.provider.check_instance { instance, config? }` / `set_instance { instance, enabled, config? }` / `add_instance { instance, provider, scope }` / `turn_off_here { instance }` / `remove_instance { instance }` (scope `providers.write`) and `oxplow.provider.set_credential { instance, name, value? }` / `begin_sign_in { instance, name, redirect_port }` / `complete_sign_in { instance, name, redirect }` / `cancel_sign_in { instance, name, sign_in }` (scope `credentials.write`) | `External` over `ProviderRegistry` (`commands/provider_instances.rs`): enabling an instance runs its program and its credentials are in the OS keychain. `set_credential`'s `value` is `writeOnly`, kept out of every record like `oxplow.collector.set_credential`'s. A destructive `remove_instance` is confirmed. Which actors may enable is the registry's (`Actor::Human` for a global instance's file) | Settings → Integrations (the `IntegrationsSection` until it is a foundation component); instances read as `v_provider_instance`, `v_provider_credential`, `v_provider_collector` |
 | `oxplow.collector.set_credential { collector, name, value? }` / `oxplow.extension.set_secret { extension, reference?, value }` / `oxplow.extension.revoke_secret { extension, reference }` | `External` over the keychain (`commands/credentials.rs`, scope `credentials.write`; `set_secret` and `revoke_secret` over `ExtensionSecrets`, which also restarts a provider running on the secret) | Settings → Extensions as forms (`extensions-credentials`, `extensions-secrets`). `value` is a secret (`writeOnly`): kept out of the record, masked in the form, a blank `set_credential` value clears it. A credential must be one some collector of that extension declares (`Invalid` at `/name`); `set_secret` needs a current owner. Announce `CredentialChanged`; presence reads `v_collector_credential` and `v_extension_secret`. The `set_credential`, `save_extension_secret`, `extension_secret_is_set` and `revoke_extension_secret` IPCs are gone |
@@ -982,10 +981,10 @@ its area falls under (`threads.write`, `vcs.write`, …; `SCOPES`); "Handler" de
 | `oxplow.effect.backfill_plan { effect, from_seq? \| since?, to_seq? }` | `Tx`, `Read` (P9.D5) | What `oxplow.effect.backfill` would react to: `{ effect, planned, from_seq, to_seq }`. The count a person is shown before running one (a confirmation carries a command's summary and input, not a computed count) |
 | `oxplow.contribution.enable { extension, kind, contribution }` | `External` over `contribution_health.rs` and the provider registry (P7.C1; replaced `provider.enable`) | Not undoable. Enables a disabled contribution on this machine again — clearing an automatic disable (`contribution_health` back to `ok`, its count starting over). `kind` (`provider` \| `collector` \| `effect`) is part of its name — a provider and a collector may share an id (tsk721); there must be a failed one of that kind, or a provider instance the registry knows. A provider instance resets its backoff and reconciles, so it starts when `extensionInstances` enables it; a collector runs at its next trigger. Logs `contribution.enabled@1 { extension, contribution, kind }`; the result is its `contribution_health` row. See [providers.md](./providers.md) |
 | `oxplow.contribution.enable_all { extension? }` | `External` over `contribution_health.rs` and the provider registry, like `enable` | Not undoable. Enables every contribution a failure policy disabled (`contribution_health.state = 'disabled'`) — `extension`'s, or every extension's — each exactly as `oxplow.contribution.enable` does (a provider instance resets and reconciles; a collector runs at its next trigger), logging one `contribution.enabled@1` apiece. Returns `{ enabled: [<contribution_health row>…] }`, empty when nothing was disabled. Settings → Extensions and Data → Collectors offer it as **Enable All Disabled (N)**. |
-| `oxplow.lens.show { lens? , spec?, params? }` / `oxplow.lens.keep { answer \| spec, stream?, extension?, slug? }` | `External` (`commands/lens.rs`) | `show`: `Record` — checks the spec's query as `query_sql` does, metric functions resolved (`SqlGateway::check`), as its pre-check (so an agent can show a metric chart, called directly or composed), then its shape in the transaction that stores a `thread_answer` on the caller's thread (an agent may name only its own; a person any) with its open turn and effort; a named `lens` is the main worktree's, whatever the thread's stream, logs `lens.shown@2 { answer, thread, lens? }`; a refused query stores nothing. It returns `{ answer, title, text }`, the text being the answer's rendering once stored (`text_answer`: the main worktree's lenses in the answer's own thread's lens context, the one resolution `run_answer` uses too) — what `oxplow_show_lens` hands the agent; that's why it's `External`). `keep`: `Write`, not undoable — writes an answer, or a spec (Explore Data's Save as Lens; its shape checked as `show` checks one and its query through the SQL gateway — the metric functions rewritten, then the read contract — tsk987; in `stream`'s worktree — an agent may name only its own thread's stream, tsk988 — else the caller's thread's, else the primary's), as a lens in `my-lenses` or another extension's source — (an answer's params become defaults; `intent.origin` is the answer's thread, or the caller's), sets an answer's `kept_lens`, logs `lens.kept@3 { answer?, lens }`, and deploys the extension (`oxplow.extension.deploy`), then returns `{ lens, path }` once the lens is live; a failed deploy takes the lens file back out. `keep` writes lens files, which a `Tx` handler may not (the bus retries one on a busy database, and a retried file write strands the first): `keep` reads the answer in one transaction, claims it as kept in another (`claim_kept_tx`: only if it isn't yet, so of two keeps of one answer only one writes), writes the file, and gives the claim back when the write fails. The bus records each run and its events after the handler returns. See [extensions.md](./extensions.md) → "Thread answers" |
+| `oxplow.page.show { page?, spec?, params? }` | `External` | Shows a page beside the conversation (an agent's `oxplow_show_page`): a page by id opens at its URI; an inline `spec` is checked (`parse_inline_page`: read-only) and kept in memory as an ephemeral view (`oxplow:oxplow/view?id=…`, gone with a daemon restart). It opens as a tab of the caller's thread when a window is open (`opened`, else `why`) and returns the page's text. Saving it is `oxplow.extension.write_page` (Save as Page) or a wiki page with an `oxplow-page` block. See [pages-and-tabs.md](./pages-and-tabs.md) "Page files" |
 | `oxplow.ui.report_error { label, command?, message?, exit_code?, thread?, stream?, signal?, duration_ms?, stderr?, stdout? }` | `Tx` (`commands/ui.rs`, tsk1072) | `Record`, not undoable. The app's `recordOpError` runs it, fire-and-forget, for each op error; the Alerts page lists `v_op_error`, not a client copy. Logs `ui.op_failed@1` anchored to `thread` (and its stream), or, from no thread, to the `stream` on screen so its agent can read the output (not both: `Invalid` at `/stream`, tsk1079); stderr / stdout stored as its `output` body (`put_json_tx`, namespace `ui`); the agent reads them as `v_op_error` and `read_event_content(event_id, output)` |
 | `oxplow.op_error.mark_seen { event }`, `oxplow.op_error.dismiss { event }`, `oxplow.op_error.dismiss_all {}` (`Tx`) | `commands/op_error.rs` over `oxplow_db::op_error_store` | `Record`, not undoable: the person opened a failed operation's output, or cleared it from the app's list. Each logs `ui.op_error.seen@1` / `ui.op_error.dismissed@1 { event }`, anchored as the failure and kept as long (the `ui` window), read back as `v_op_error.seen` / `dismissed` (dismissing is seeing). `event` that isn't a `ui.op_failed` event is `Invalid` at `/event`; one already in that state is `unchanged` (no record); `dismiss_all` logs one per failure not dismissed, `{ dismissed: n }` |
-| `oxplow.metric.scaffold { name, language?, glob?, origin? }` | `Tx`, `Read` | the files of a code metric extension (`{ name, dir, files: [{ path, content }] }`: manifest, collector script, lens, fixture — the template `oxplow extension new metric` writes); writes nothing (the agent writes them, then `extension check` / `extension test`) |
+| `oxplow.metric.scaffold { name, language?, glob?, origin? }` | `Tx`, `Read` | the files of a code metric extension (`{ name, dir, files: [{ path, content }] }`: manifest, collector script, page, fixture — the template `oxplow extension new metric` writes); writes nothing (the agent writes them, then `extension check` / `extension test`) |
 
 The `work_item.*` commands are **every** provider's
 ([work-items.md](./work-items.md)): each names its item by its canonical
@@ -1063,7 +1062,7 @@ discovery cheap, the example makes the first call right, and a refusal
 quotes the example. `run_command` answers with the outcome:
 `result`, `audit_id`, `event_id`, `inverse?` — or, for an effect's run that asks,
 `{ kind: "proposed", proposal, message }`). Every other tool is a
-command or lens an extension declares with `tool:` ([extensions.md](./extensions.md)
+command or page an extension declares with `tool:` ([extensions.md](./extensions.md)
 "Agents: the MCP surface"): a named entry to a command, run through the
 bus like `run_command`, hinted read-only by its access. Records are
 written only through commands; there are no write tools of their own.

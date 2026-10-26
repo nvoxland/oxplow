@@ -1,7 +1,7 @@
 /// A command asked for the person's confirmation (P6.B2): what it is and
 /// does — its summary from `get_command`, destructive ones marked — then
-/// Run (focused; Enter) or Cancel (Escape). Shared by lens actions and form
-/// lenses; the caller runs the command again confirmed.
+/// Run (focused; Enter) or Cancel (Escape). Shared by page actions and form
+/// pages; the caller runs the command again confirmed.
 
 import type { CSSProperties } from "react";
 import { useEffect, useState } from "react";

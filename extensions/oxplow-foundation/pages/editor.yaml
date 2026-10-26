@@ -1,5 +1,5 @@
 title: Editor
-description: 'A file of the working tree, edited: its unsaved edits shared with every tab showing it, Save writing it (`oxplow.file.save`); `#lines=12` lands on a line. The renderer of oxplow''s `file` resource when its URI names no `rev`.'
+description: 'A file of the working tree, edited: unsaved edits shared with every tab showing it, Save writing it; `#lines=12` lands on a line. The renderer of `file` with no `rev`.'
 label: '{{param.path|basename}}'
 for: oxplow/file
 accepts:

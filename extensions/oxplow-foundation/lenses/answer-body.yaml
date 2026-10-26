@@ -1,8 +1,0 @@
-title: Answer
-description: The answer itself, and the lens it was kept as once it was.
-params:
-  - { name: uri }
-query: SELECT uri, kept_lens FROM v_thread_answer WHERE uri = :uri
-viz: answer
-answer: { uri: uri, kept: kept_lens }
-hidden: true

@@ -202,8 +202,6 @@ macro_rules! oxplow_command_table {
                 select_thread => $crate::commands::threads::select_thread { req: $crate::commands::threads::SelectThreadRequest } -> (),
                 // backlog
                 // tasks
-                // dashboards (tsk138)
-                list_dashboards => $crate::commands::dashboards::list_dashboards {} -> Vec<::oxplow_db::Dashboard>,
                 // effort
                 list_efforts_in_window => $crate::commands::effort::list_efforts_in_window { window_start: ::oxplow_domain::Timestamp, window_end: ::oxplow_domain::Timestamp } -> Vec<::oxplow_db::Effort>,
                 list_efforts_at_snapshots => $crate::commands::effort::list_efforts_at_snapshots { snapshot_ids: Vec<::oxplow_domain::SnapshotId> } -> Vec<::oxplow_db::EffortAtSnapshot>,
@@ -238,20 +236,10 @@ macro_rules! oxplow_command_table {
                 get_ui_preferences => $crate::commands::semantic::get_ui_preferences {} -> Vec<::oxplow_db::UiPreference>,
                 set_ui_preference => $crate::commands::semantic::set_ui_preference { scope: String, key: String, value_json: Option<String> } -> (),
                 list_extensions => $crate::commands::extensions::list_extensions {} -> Vec<::oxplow_app::extensions::Extension>,
-                get_lens => $crate::commands::extensions::get_lens { id: String } -> ::oxplow_app::extensions::Lens,
-                run_lens => $crate::commands::extensions::run_lens { id: String, params: Option<::std::collections::BTreeMap<String, ::oxplow_db::SqlCell>>, stream_id: Option<String> } -> ::oxplow_app::extensions::LensRun,
-                run_lens_action => $crate::commands::extensions::run_lens_action { press: $crate::commands::extensions::LensPress, stream_id: Option<String>, confirmed: bool } -> ::oxplow_domain::CommandOutcome,
-                lens_action_form => $crate::commands::extensions::lens_action_form { press: $crate::commands::extensions::LensPress, stream_id: Option<String> } -> ::oxplow_app::lens_actions::FormStart,
-                lens_form => $crate::commands::extensions::lens_form { id: String, params: Option<::std::collections::BTreeMap<String, ::oxplow_db::SqlCell>>, stream_id: Option<String> } -> ::oxplow_app::lens_actions::FormStart,
-                submit_lens_form => $crate::commands::extensions::submit_lens_form { id: String, input: ::oxplow_domain::Json, params: Option<::std::collections::BTreeMap<String, ::oxplow_db::SqlCell>>, stream_id: Option<String>, confirmed: bool } -> ::oxplow_domain::CommandOutcome,
-                run_component_query => $crate::commands::extensions::run_component_query { id: String, asset: String, params: Option<::std::collections::BTreeMap<String, ::oxplow_db::SqlCell>>, stream_id: Option<String>, version: String } -> ::oxplow_app::extensions::LensRun,
                 load_component => $crate::commands::extensions::load_component { id: String } -> String,
                 invoke_component_command => $crate::commands::extensions::invoke_component_command { id: String, command: String, input: ::oxplow_domain::Json, confirmed: bool, version: String } -> ::oxplow_domain::CommandOutcome,
                 run_component_sql => $crate::commands::extensions::run_component_sql { id: String, sql: String, params: Option<Vec<::oxplow_db::SqlCell>>, stream_id: Option<String>, version: String } -> ::oxplow_db::SqlQueryResult,
-                component_form => $crate::commands::extensions::component_form { id: String, command: String, input: Option<::oxplow_domain::Json>, version: String } -> ::oxplow_app::lens_actions::FormStart,
-                run_answer => $crate::commands::extensions::run_answer { answer: String } -> ::oxplow_app::extensions::LensRun,
-                run_lens_spec => $crate::commands::extensions::run_lens_spec { spec: ::oxplow_app::extensions::LensSpec, params: Option<::std::collections::BTreeMap<String, ::oxplow_db::SqlCell>>, stream_id: Option<String> } -> ::oxplow_app::extensions::LensRun,
-                lens_text => $crate::commands::extensions::lens_text { id: String, params: Option<::std::collections::BTreeMap<String, ::oxplow_db::SqlCell>>, stream_id: Option<String> } -> String,
+                component_form => $crate::commands::extensions::component_form { id: String, command: String, input: Option<::oxplow_domain::Json>, version: String } -> ::oxplow_app::viz_actions::FormStart,
                 list_services => $crate::commands::extensions::list_services {} -> Vec<$crate::commands::extensions::ServiceListing>,
                 // pages: a window's open runs
                 open_page => $crate::commands::pages::open_page { page: Option<String>, spec_yaml: Option<String>, view: Option<String>, params: Option<::std::collections::BTreeMap<String, ::oxplow_db::SqlCell>>, stream_id: Option<String>, thread_id: Option<String>, client: String } -> $crate::commands::pages::OpenedRun,
@@ -263,10 +251,10 @@ macro_rules! oxplow_command_table {
                 page_text => $crate::commands::pages::page_text { run_id: String } -> String,
                 get_page => $crate::commands::pages::get_page { id: String } -> ::oxplow_app::pages::schema::Page,
                 page_spec => $crate::commands::pages::page_spec { page: String } -> $crate::commands::pages::PageSpec,
-                page_form => $crate::commands::pages::page_form { run_id: String, node: String } -> ::oxplow_app::lens_actions::FormStart,
+                page_form => $crate::commands::pages::page_form { run_id: String, node: String } -> ::oxplow_app::viz_actions::FormStart,
                 submit_page_form => $crate::commands::pages::submit_page_form { run_id: String, node: String, input: ::oxplow_domain::Json, confirmed: bool } -> ::oxplow_domain::CommandOutcome,
-                page_action_form => $crate::commands::pages::page_action_form { run_id: String, node: Option<String>, action: String, row: Option<::std::collections::BTreeMap<String, ::oxplow_db::SqlCell>> } -> ::oxplow_app::lens_actions::FormStart,
-                run_page_action => $crate::commands::pages::run_page_action { run_id: String, node: Option<String>, action: String, row: Option<::std::collections::BTreeMap<String, ::oxplow_db::SqlCell>>, input: Option<::oxplow_domain::Json>, drop: Option<::oxplow_app::lens_actions::Drop>, confirmed: bool } -> ::oxplow_domain::CommandOutcome,
+                page_action_form => $crate::commands::pages::page_action_form { run_id: String, node: Option<String>, action: String, row: Option<::std::collections::BTreeMap<String, ::oxplow_db::SqlCell>> } -> ::oxplow_app::viz_actions::FormStart,
+                run_page_action => $crate::commands::pages::run_page_action { run_id: String, node: Option<String>, action: String, row: Option<::std::collections::BTreeMap<String, ::oxplow_db::SqlCell>>, input: Option<::oxplow_domain::Json>, drop: Option<::oxplow_app::viz_actions::Drop>, confirmed: bool } -> ::oxplow_domain::CommandOutcome,
                 validate_extension => $crate::commands::extensions::validate_extension { name: String, stream_id: Option<String> } -> ::oxplow_sdk::CheckReport,
                 ensure_change => $crate::commands::changes::ensure_change { target: ::oxplow_app::change_analysis::ChangeTarget } -> ::oxplow_db::ChangeRow,
                 // ai (Settings → AI)

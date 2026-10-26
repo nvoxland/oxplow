@@ -2,7 +2,7 @@
 //! agents see of the tabs"): each window (a client, by the id its renderer
 //! keeps for its life) reports its tabs per thread, which one is selected
 //! in each, the thread it shows, whether it is focused and visible, and the
-//! detail its active page publishes (a lens's params). An agent reads them
+//! detail its active page publishes (a page's params). An agent reads them
 //! with `oxplow_list_tabs` and `oxplow_get_open_page`.
 //!
 //! Held in memory: nothing here outlives the process, and a client that
@@ -26,7 +26,7 @@ pub struct ReportedTab {
     /// Its tab id: a canonical ref (`oxplow:oxplow/work_item?id=tsk3&provider=oxplow`,
     /// `oxplow:oxplow/page?page=settings`, `oxplow:oxplow/agent_session?id=ses2`).
     pub id: String,
-    /// Its page kind (`work_item`, `lens`, `agent_session`).
+    /// Its page kind (`work_item`, `page`, `agent_session`).
     pub kind: String,
     /// The title on the tab.
     pub title: String,
@@ -63,7 +63,7 @@ pub struct TabReport {
     pub shown_thread: Option<ThreadId>,
     pub threads: Vec<ThreadTabs>,
     /// The detail the shown thread's active page publishes (JSON text: a
-    /// lens's `{lensId, params}`, an editor's `{path, revision, selection}`).
+    /// page's `{pageId, params}`, an editor's `{path, revision, selection}`).
     pub detail_json: Option<String>,
     /// Every live page run in this window, including panels, inline
     /// markdown and hidden history bodies.

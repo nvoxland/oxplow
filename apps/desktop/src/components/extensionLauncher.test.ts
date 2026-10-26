@@ -9,7 +9,7 @@ const page = (over: Record<string, unknown>) => ({
   keywords: null,
   params: [],
   count: null,
-  body: { kind: "lens", lens: "x/y" },
+  body: { kind: "page", page: "x/y" },
   ...over,
 });
 const ext = (over: Partial<Extension>): Extension =>

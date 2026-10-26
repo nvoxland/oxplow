@@ -1,6 +1,6 @@
 # Dashboards, components and artifacts
 
-What to build when the person wants to *see* oxplow's data, and how. Read
+What to build when the person wants to *see* oxplow's data. Read
 `reading-data.md` first: every number on a dashboard is a query, and the
 same rules hold.
 
@@ -8,100 +8,67 @@ same rules hold.
 
 | They want | Build | Who sees it, and how fresh |
 |---|---|---|
-| An answer now ("which tests are flaky?") | `oxplow_show_lens` with a `spec` | Them, as a tab of their thread, live; **Keep This** saves it |
-| A page they come back to | a lens file (`lens-format.md`) | Anyone with the extension, live |
-| Several numbers at a glance | an oxplow **dashboard** (below) | The project, live: tiles re-run as the data moves |
-| A view no lens viz draws | a **custom component** (below) | As a lens: live, sandboxed |
-| A whole page of your own (a data app: its own layout, actions, forms) | a **custom page**: a component named in `pages:` (below) | A page in the launcher, under oxplow's bar |
-| Something to share outside oxplow (a Claude artifact, a doc) | a **snapshot**: run the queries, put the rows in it | Whoever it's shared with; frozen when you made it |
+| An answer now ("which tests are flaky?") | `oxplow_show_page { spec }` | Them, as a tab of their thread, live; Save keeps it |
+| A page they come back to | a page file (`page-format.md`) | Anyone with the extension, live |
+| Several numbers at a glance | a **dashboard** (below) | The project, live |
+| A view no viz draws | a **custom component** (below) | As a page: live, sandboxed |
+| Something to share outside oxplow (a Claude artifact, a doc) | a **snapshot**: run the queries, put the rows in it (a `rows:` loader, or a markdown table) | Whoever it's shared with; frozen when you made it |
 
 Ask when it isn't clear which. Say which you built and how fresh it is: a
 snapshot doesn't update, and its rows are only as complete as the result
-you copied (`truncated`, `coverage`). A Claude artifact that reads
-oxplow's data live needs a remote oxplow connector, which doesn't exist
-yet: offer a snapshot, or a dashboard in oxplow, instead.
+you copied (`truncated`, `coverage`). A Claude artifact that reads oxplow's
+data live needs a remote oxplow connector, which doesn't exist yet: offer a
+snapshot, or a dashboard in oxplow, instead.
 
-## Build a dashboard
+## A dashboard is a page
 
-A dashboard is a grid of tiles, project-wide. Everything goes through
-`mcp__oxplow__run_command`:
+A dashboard is a page whose `view:` is a `grid` of tiles, in the
+**Dashboards** launcher category. A tile is a `viz` over a loader or an
+`embed` of another page. It lives in an extension of the person's (`my-pages`
+by default), so it can be kept, shared and tested like any page.
 
-1. `oxplow.dashboard.create { title }`: its answer's `id` is the
-   dashboard (`dsh3`).
-2. `oxplow.dashboard.add_item { dashboard, kind, … }` per tile, in order
-   (`position` puts one elsewhere). The tile is checked before it is
-   saved: a query that wouldn't run, a display that doesn't exist, or a
-   chart naming a column the query doesn't return is refused, with why.
-3. Tell them its title; it's under Dashboards (Cmd+P).
-
-Tile kinds:
-
-- **`query`**: `sql` (one statement over the `v_*` models,
-  `metric_grid`/`MEASURE` included, as `oxplow_query_sql` takes it) and
-  `display`: `table`, `list`, `number`, `markdown`, `bar`, `line`,
-  `treemap` or `metric`. A chart names its columns in
-  `options_json`'s `chart`: `bar` and `line` an `x` and a `y` (a `series`
-  optional), `treemap` a `label` and a `size` (a `group` optional).
-  `number` shows the first row's first column.
-- **`metric`** display: the metric card (its trend, or the latest value
-  with `"viz":"number"`), for one metric spec's key: put the key in
-  `options_json` as `metric` and select its series as the example below
-  does.
-- **`lens`**: `lens_id`, a lens the project has.
-- **`text`**: a heading over the tiles after it, `options_json`
-  `{"text": "…"}`. It labels; it doesn't contain.
-
-Every tile may set `title` and `size` (`small`, `wide`, `tall` or
-`full`). `add_item` and `update_item` take `title`, `size`, `text`,
-`metric`, `viz` and `chart` as fields of their own, beside `options_json`
-(a field given flat wins over the same key there). Change a tile with
-`oxplow.dashboard.update_item { item, title?, size?, … }`: the fields you
-give merge into its stored options, and `options_json` alone replaces
-them all. A re-pointed `sql` or `display` is checked again. Drop a tile
-with `oxplow.dashboard.remove_item { item }`, and reorder with `oxplow.dashboard.reorder_items { dashboard, order }`.
-Deleting a dashboard is the person's.
-
-Read what's there before adding to it: `SELECT id, title FROM
-v_dashboard`, and `SELECT id, kind, options_json FROM v_dashboard_item
-WHERE dashboard_id = …`.
-
-### Example: build health
-
-```json
-{ "name": "oxplow.dashboard.create", "input": { "title": "Build health" } }
+```yaml page
+title: Work at a glance
+category: Dashboards
+icon: layout-dashboard
+answers:
+  - { question: "How is work going?" }
+data:
+  open:   { sql: "SELECT count(*) AS n FROM v_work_item WHERE state != 'done'" }
+  by_day: { sql: "SELECT date(created_at) AS day, count(*) AS n FROM v_work_item GROUP BY 1 ORDER BY 1" }
+view:
+  grid:
+    - { id: open, title: Open, viz: number, from: open, size: small }
+    - { id: trend, title: Created per day, viz: line, from: by_day, size: wide, chart: { x: day, y: n } }
+    - { id: tests, embed: { page: oxplow-foundation/problems }, size: wide }
 ```
 
-Then, with its id as `dashboard`:
+- **Start one:** `oxplow.extension.new_dashboard { title, extension? }` writes
+  an empty dashboard (an empty grid), deploys it and opens it.
+- **Add a tile:** the person's **Pin to Dashboard** (a page's ☰ menu) embeds
+  that page, with its params, in the dashboard they pick. You add one by
+  editing the page file: an `embed` node, or a `viz` over a new loader.
+- **Change one:** reorder by reordering the list, rename by changing
+  `title`, remove by deleting the node, resize with `size`. Read the file
+  (`oxplow_read { uri: "oxplow:oxplow/page?page=<ext>/<slug>" }`), change the
+  YAML, write it back with `oxplow.extension.write_page { extension, page,
+  spec, deploy: true }`. The app's own edits do the same.
+- Embed an existing page for a tile that is already a page; its params flow
+  by name from the dashboard's params and loaders (`view-nodes.md`).
+- Metric tiles: a loader over `metric_grid('week')` / `MEASURE('<key>')`
+  (`oxplow-metrics`) shown as `number`, `line` or `bar`.
+- A `write_page` is refused for a bundled extension, and from a worktree
+  stream when the extension's source is in the project (write from the main
+  stream). It returns `{ page, path, deployed }`.
 
-```json
-{ "name": "oxplow.dashboard.add_item", "input": { "kind": "text", "options_json": "{\"text\":\"Tests\"}" } }
-```
-
-```json
-{ "name": "oxplow.dashboard.add_item", "input": { "kind": "query", "display": "number", "sql": "SELECT count(*) AS failing FROM v_test_case_stat WHERE last_status = 'failed'", "options_json": "{\"title\":\"Failing tests\"}" } }
-```
-
-```json
-{ "name": "oxplow.dashboard.add_item", "input": { "kind": "query", "display": "table", "sql": "SELECT subject, runs, flips FROM v_test_case_stat WHERE flips >= 2 ORDER BY flips DESC", "options_json": "{\"title\":\"Flaky tests\",\"size\":\"wide\"}" } }
-```
-
-```json
-{ "name": "oxplow.dashboard.add_item", "input": { "kind": "query", "display": "line", "sql": "SELECT bucket, MEASURE('oxplow.coverage.abs_pct') AS coverage_pct FROM metric_grid('week') ORDER BY bucket", "options_json": "{\"title\":\"Coverage by week\",\"chart\":{\"x\":\"bucket\",\"y\":\"coverage_pct\"}}" } }
-```
-
-```json
-{ "name": "oxplow.dashboard.add_item", "input": { "kind": "query", "display": "metric", "sql": "SELECT g.capture_id, g.bucket AS captured_at, MEASURE('oxplow.coverage.abs_pct') AS value FROM metric_grid('capture') g WHERE MEASURE('oxplow.coverage.abs_pct') IS NOT NULL ORDER BY g.bucket DESC", "options_json": "{\"metric\":\"oxplow.coverage.abs_pct\",\"viz\":\"number\"}" } }
-```
-
-A metric with no captures yet still saves; its tile says so until data
-arrives.
+Tell the person the title and that it is under Dashboards (Cmd+P).
 
 ## A custom component
 
-When no viz draws it (a graph, a timeline, a board of your own), declare
-a component and a lens that renders it (`commands-and-forms.md` has the
-manifest keys; `oxplow extension new component <name>` scaffolds one that
-works):
+When no viz draws it (a graph, a timeline, a board of your own), declare a
+component and show it with a `component` node (`commands-and-forms.md` has
+the manifest keys; `oxplow extension new component <name>` scaffolds a
+working one):
 
 ```yaml
 # extension.yaml
@@ -109,15 +76,16 @@ custom_components:
   - { id: burndown, title: Burndown }
 ```
 
-```yaml
-# lenses/burndown.yaml
+```yaml page
+# pages/burndown.yaml
 title: Burndown
-query: SELECT bucket, MEASURE('oxplow.tests.red_runs') AS red FROM metric_grid('day') ORDER BY bucket
-viz: custom
-custom: { component: burndown }
+data:
+  red: { sql: "SELECT bucket, MEASURE('oxplow.tests.red_runs') AS red FROM metric_grid('day') ORDER BY bucket" }
+view: { component: { id: burndown } }
 ```
 
-`components/burndown/index.html`:
+The component is fed the page's loaders by name and told which changed; it
+never fetches for itself. `components/burndown/index.html`:
 
 ```html
 <!doctype html>
@@ -133,75 +101,37 @@ custom: { component: burndown }
 ```js
 oxplow.connect().then((component) => {
   component.applyTheme();
-  const draw = (run) => {
-    const { columns, rows } = run.result;
+  const draw = (data) => {
+    const { columns, rows } = data.red;
     const at = (row, name) => row[columns.indexOf(name)];
     // … draw rows into #chart, reading cells by column name …
   };
-  draw(component.run);
-  // The host re-runs the lens as the data moves: each update carries the
-  // run, `data` (every loader's rows, by name), `params` and `changed`.
-  component.onUpdate(({ run }) => draw(run));
+  draw(component.data);
+  component.onUpdate(({ data }) => draw(data));   // the host re-runs loaders as the data moves
 });
 ```
 
 **Bringing in HTML made elsewhere** (a Claude artifact, a chart you wrote
-for a page): it runs in a sandbox, so adapt it before it will:
+for a page): it runs in a sandbox, so adapt it first:
 
-- No network: no CDN `<script src="https://…">`, fonts or fetches.
-  Bundle a library's file next to `index.html` (256 files, 5 MiB), or
-  draw with SVG yourself.
+- No network: no CDN `<script src="https://…">`, fonts or fetches. Bundle a
+  library's file next to `index.html` (256 files, 5 MiB), or draw with SVG.
 - No modules (`type="module"`, `import`): plain scripts, in order.
 - No storage, cookies or tokens: state lives in the page, or in your
   extension's state through a command.
-- Data comes from what oxplow feeds it — `component.data` (each
-  loader's `{ columns, rows, truncated }` by name; a lens's own rows as
-  `rows`), `component.run` for a `viz: custom`'s own rows, and
-  `onUpdate(({ data, changed }) => …)` as they change — or from another of
-  its `assets` lenses (`component.query`), never from rows pasted into the
-  file: pasted rows are a snapshot.
-- Colours from the theme (`applyTheme`, the kit's classes), not fixed
-  hex, so it reads in light and dark.
-- A library (a chart, a timeline): write TypeScript, import it, and
-  declare `build: { run: "bun install --frozen-lockfile && bun run build",
-  output: dist, exclude: [node_modules] }` with `bundle: dist/<id>`;
-  bundle to one classic script (`bun build --format iife`). The deploy
-  builds it and the person approves the build command
-  (`repair-and-sharing.md`).
+- Data comes from what oxplow feeds it (`component.data`, `onUpdate`), never
+  from rows pasted into the file: pasted rows are a snapshot.
+- Colours from the theme (`applyTheme`, the kit's classes), not fixed hex.
+- A library: write TypeScript, import it, declare `build: { run: "bun
+  install --frozen-lockfile && bun run build", output: dist, exclude:
+  [node_modules] }` with `bundle: dist/<id>` (bundle to one classic script,
+  `bun build --format iife`). The person approves the build command at
+  deploy (`repair-and-sharing.md`).
 
-Then `oxplow_validate_extension`, and `oxplow_run_lens` on the lens.
-
-## A custom page
-
-When the view is the whole page — its own layout, its own buttons —
-name the component in `pages:` instead of a lens:
-`pages: [{ id: timeline, title: Timeline, icon: history, category:
-Activity, params: [from, to], component: timeline }]`. It fills the page
-under oxplow's bar. It has no lens run (`component.run` is null);
-`component.page` has the page's `params`, `streamId` and `threadId`.
-It reads with `component.querySql(sql, params)` (declare `sql: read` on
-the component and `permissions: { sql: read }` on the extension; read
-only, `?1` params), titles the page with `setTitle`, puts its actions in
-oxplow's bar with `setActions([{ id, label, primary?, prominent?,
-submenu?, icon? }])` (the bar's ☰ holds them, sorted, unless `primary` or
-`prominent`; `submenu` and `icon` work as a lens action's) and hears them
-with `onAction`, and opens a declared command's form in oxplow with
-`openForm(command, input)`. Its view (a range, a search, what is picked)
-is its page's **view params** (the `#` of its address): change them with `setViewParams({ k: v })`
-(null drops one) and draw from `onViewParams(cb)`; this step's scroll or
-what's expanded is its **history state** (`setHistoryState`,
-`onHistoryState`); its own memory for the person, in every tab, is
-`pageMemory.get/set`. oxplow keeps them, so Back,
-a bookmark and a reopened tab keep them. Never use `localStorage` or
-`sessionStorage` for it; `check` warns. Don't draw page-level buttons
-inside the frame: the bar is oxplow's. `extensions/oxplow-foundation/src/timeline/`
-is a working one. To show a query's result, don't draw a table or a chart
-yourself: `showView(yaml)` hands oxplow an inline page — `title`, a
-read-only `sql` loader under `data`, a `view` over it (JSON is YAML too:
-`JSON.stringify({ title, data: { rows: { sql } }, view: { viz, from:
-"rows" } })`) — which it draws under the page, live, with Save as Lens; it
-resolves with its first loader's rows and rejects `INVALID` (`field:
-"/data/rows/sql"`) for a query that fails. A list beside
-the page (a catalog, a picker) is a `rail: <lens slug>` on the page: its
-row's `select` sets the view param the component hears.
-`extensions/oxplow-foundation/src/explore-data/` does both.
+A **whole-page component** is a page whose view is one component node; it
+fills the page under oxplow's bar. `component.page` has the page's `params`,
+`streamId` and `threadId`; `setTitle`, `setActions([...])` / `onAction` (its
+buttons go in oxplow's bar), `openForm(command, input)`, `setViewParams`,
+`pageMemory` and `showView(yaml)` (hands oxplow an inline page to draw
+under it, live) are on `component`. Never use `localStorage` or
+`sessionStorage`. Then `oxplow_validate_extension` and `oxplow_run_page`.

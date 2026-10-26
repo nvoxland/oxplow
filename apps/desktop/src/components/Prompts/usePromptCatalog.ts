@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { querySql } from "../../api.js";
-import { NO_READS, useRerunOnChange } from "../../lens/lensRerun.js";
+import { NO_READS, useRerunOnChange } from "../../viz/rerun.js";
 import type { Reads, SqlCell } from "../../tauri-bridge/generated/bindings.js";
 import type { CatalogPrompt } from "./promptModel.js";
 

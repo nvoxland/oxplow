@@ -38,14 +38,14 @@ fields that hold a URI are named `uri` (V101); prose says URI.
 | Where | Build | Read |
 |---|---|---|
 | Rust | `oxplow_domain::uri::build::{effort_uri, file_uri, wiki_uri, work_item_uri, …}`; `keyed(resource, value)` for a resource named by its key param; `of(resource, &[(k, v)])` / `of_with_view` for one known only at run time | `parse_as::<T>(uri, resource)` (the key, typed), `id_of` (the key), `param_of(uri, resource, name)`, `parse_resource` (keeps the view), `resource_of`, `work_item_of_uri` → `(provider, id)`, `file_of_uri` → `(path, rev, lines)`; resource names are `uri::resources::{EFFORT, FILE, …}` |
-| SQL (models, lenses, scripts' queries) | the owning model's `uri` column; to build one, `uri('oxplow/effort', 'id', 'eff' \|\| id)` (a NULL value leaves its param out, so `uri()` is never NULL: over a `LEFT JOIN`, `CASE WHEN x.id IS NULL THEN NULL ELSE uri(…) END`) | `SELECT URI`, `WHERE uri = :uri`, `JOIN … ON x.uri = y.subject`; `uri_param(URI, 'id')`, `uri_resource(URI)` |
+| SQL (models, pages, scripts' queries) | the owning model's `uri` column; to build one, `uri('oxplow/effort', 'id', 'eff' \|\| id)` (a NULL value leaves its param out, so `uri()` is never NULL: over a `LEFT JOIN`, `CASE WHEN x.id IS NULL THEN NULL ELSE uri(…) END`) | `SELECT URI`, `WHERE uri = :uri`, `JOIN … ON x.uri = y.subject`; `uri_param(URI, 'id')`, `uri_resource(URI)` |
 | Starlark (commands, effects, collectors, policies, mappings) | `uri.build("oxplow/file", path = p, view = {"lines": "3-9"})` (a param a string or an int; `None` leaves it out) | `uri.parse(u)` → `{resource, params, view}`, `uri.param(u, name, resource=)`, `uri.id(u, resource=)`, `uri.resource(u)`, `uri.is_uri(v)`, `uri.contribution(u)` |
-| TS (desktop) | `uri/uri.ts` builders (`effortUri`, `wikiUri`, `workItemUri(provider, id)`, `fileUri(path, rev)`, `fileLinesUri`, `pageUri(page, params, view)`, `lensUri(lensId, params, view)`, `metricUri`, `withUriView`, `viewParamsOfUri`, `resourceUri(resource, params, view)`, …) | `parseUri`, `identityOf`, `typeOf` (the resource), `paramOf`, `viewOf`, `idOf(uri, resource)`, `keyOf`, `workItemOf`, `isExternal` |
+| TS (desktop) | `uri/uri.ts` builders (`effortUri`, `wikiUri`, `workItemUri(provider, id)`, `fileUri(path, rev)`, `fileLinesUri`, `pageUri(page, params, view)`, `metricUri`, `withUriView`, `viewParamsOfUri`, `resourceUri(resource, params, view)`, …) | `parseUri`, `identityOf`, `typeOf` (the resource), `paramOf`, `viewOf`, `idOf(uri, resource)`, `keyOf`, `workItemOf`, `isExternal` |
 
 **Guards.** `apps/desktop/src/uri/uri.guard.test.ts` (TS),
 `source_guards::refs_are_built_and_parsed_through_the_grammar` (Rust) and
 `source_guards::scripts_and_sql_carry_refs_rather_than_spelling_them`
-(shipped `.star`, lens and model SQL, embedded Starlark templates) refuse
+(shipped `.star`, page and model SQL, embedded Starlark templates) refuse
 a hand-built or hand-parsed URI outside the builders. When one fires, the
 fix is a builder or reader — never a string.
 
@@ -63,7 +63,7 @@ saying the id it names.
 | `thread`, `from_thread`, `to_thread`, `stream`, `effort`, `turn`, `session` (an agent session), `note`, `handoff`, `comment` | the prefixed id: `thr3`, `str1`, `eff12`, `trn4`, `ses2`, `not3`, `hnd1`, `cmt5` |
 | `snapshot`, `parent`, `start_snapshot`, `end_snapshot`, `claim`, `decision`, `proposal`, `supersedes`, `answer`, `run` | a JSON integer |
 | `event`, `job_run` | the UUID |
-| `collector`, `lens`, `job` | the contribution id: `triage/todos` |
+| `collector`, `job` | the contribution id: `triage/todos` |
 | `commit`, vcs.head.moved `from` / `to` | the sha |
 | knowledge.page.* `page` | the slug |
 
@@ -91,7 +91,7 @@ key          := [A-Za-z][A-Za-z0-9_.-]*
 ```
 oxplow:oxplow/work_item?id=tsk42&provider=oxplow
 oxplow:oxplow/file?path=src/a.rs&rev=git:HEAD#lines=10-20
-oxplow:oxplow/lens?lens=acme/blocked&stream_id=2
+oxplow:oxplow/page?page=acme/blocked&stream_id=2
 oxplow:github/pr?id=12
 ```
 
@@ -129,14 +129,13 @@ oxplow:github/pr?id=12
 `thread?id=thr3`, `turn?id=trn1`), a word for the value's shape
 (`commit?sha=`, `wiki?slug=`, `branch?name=`, `extension?name=`,
 `ai_model?name=`, `config?key=`, `nudge?kind=`, `consumer?name=`), and
-the resource's own name for a contribution (`lens?lens=acme/x`,
-`page?page=tasks`, `command?command=oxplow.file.save`,
+the resource's own name for a contribution (`page?page=tasks`, `command?command=oxplow.file.save`,
 `collector?collector=triage/todos`, `effect?effect=acme/notify`,
 `resource?resource=github/pr`). Resources with several identity params
 have none: `file?path=&rev=`, `dir?path=`, `symbol?path=&symbol=`,
 `work_item?provider=&id=`, `subagent?session=&agent=`,
 `extension_deployment?name=&hash=`, `block?path=&lines=`,
-`test?class=&name=`. A page's or lens's own params ride beside its key
+`test?class=&name=`. A page's own params ride beside its key
 (`page?page=settings&area=agents`); `build::params_of` splits them.
 
 **Event sources aren't URIs.** An event's `source` says who emitted it —
@@ -158,7 +157,7 @@ resources:
   - name: pr                    # oxplow:github/pr?id=12
     label: Pull request
     params: { id: { required: true, pattern: '^\d+$' } }
-    additional: false           # true: takes params beyond its own (page, lens)
+    additional: false           # true: takes params beyond its own (page)
     resolve: pull_request       # one of its models, with `uri` and `title`
     title: title                # the column of `resolve` that titles one
     searchable: pull_request    # a model with `uri`, `title`, `body`
@@ -215,7 +214,7 @@ Nothing resolves it → `resolved: false`.
 `ref_read::read` (`oxplow_read`, `records.read`) returns `{ uri, resource,
 row, related, content, truncated }`: the `resolve` row, the related lists
 of work items, commits and efforts, a file's text at its `rev` (its
-`#lines=` view), an event's or model call's body (`#part=`), a lens's
+`#lines=` view), an event's or model call's body (`#part=`), a page's
 definition.
 
 `link_check` checks a wikilink's URI against its resource's `resolve`
@@ -267,7 +266,7 @@ It is frozen: its table of old kinds never grows. Notable reads: a work
 item `work_item:<provider>:<id>`; a symbol `<path>/<symbol>` or, as the
 metric scans spelled one, `<path>::<name>` (told apart by the file name
 before the first `::`); a block `<path>:<lines>`; a test `<class>::<name>`;
-a contribution's id → its key param, a page's or lens's own params kept;
+a contribution's id → its key param, a page's own params kept;
 `@rev` → `rev`, `#L10-20` → `#lines=10-20`; an old URI whose params can't
 be a URI's is left as it was. Event payloads rewrite a fixed list of URI
 fields (and `work_item.recorded`'s item); `command.executed` payloads and
@@ -301,8 +300,8 @@ rows moved to v3 (`item.uri`, `item.parent_uri`) and
 inverses and pending proposals had their input keys renamed (`ref` to
 `uri`, `parent_ref`, `evidence_ref`, `refs` and the rest likewise). The
 core models, command inputs and results, templates (`{{uri}}`,
-`{{uri.id}}`, `{{row.uri}}`, `{{param.uri}}`), lens params, the
-`?uri=` page param and a lens `timeline: { uri }` follow.
+`{{uri.id}}`, `{{row.uri}}`, `{{param.uri}}`), page params, the
+`?uri=` page param and a page `timeline: { uri }` follow.
 
 It left alone: `ref('<model>')` in model SQL (a model reference, not a
 URI), git refs (`branch_ref`, `basis_ref`, `ref_moves`), `page_ref` and
@@ -326,7 +325,7 @@ row is looked up by the URI's identity: its view (`#part=output`) is for
 the page, not the model.
 **Where a URI opens is decided once**: `tabs/refOpener.ts` and
 `tabs/openRef.ts` (`openRef`, `PageNavigation.openRef`) — a wikilink, a
-lens link, a backlink row, a search hit, a component's `navigate` and
+page link, a backlink row, a search hit, a component's `navigate` and
 `oxplow_navigate` (`replace`, `new_tab`; by default the shown tab goes there) all hand it a URI. `refFromTabId` parses a tab id
 (history, bookmarks, a restored tab) and is not an opener: every oxplow
 URI and every allowlisted http(s) URL is a tab, else null. A stream's or

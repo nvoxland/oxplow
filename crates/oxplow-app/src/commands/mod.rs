@@ -25,7 +25,6 @@ pub mod compose;
 pub mod config_commands;
 pub mod context_basket;
 pub mod credentials;
-pub mod dashboard;
 pub mod delivery;
 pub mod effect;
 pub mod effort;
@@ -37,7 +36,6 @@ pub mod extension_state;
 pub mod file;
 pub mod handoff;
 pub mod hint;
-pub mod lens;
 pub mod lsp;
 pub mod metric;
 pub mod op_error;
@@ -74,7 +72,7 @@ use oxplow_db::{
 };
 use oxplow_domain::events::schema::{
     CommandApproved, CommandApprovedV2, CommandDeclined, CommandDeclinedV2, CommandExecuted,
-    CommandExecutedV4, CommandOutcome as Outcome, CommandProposed, CommandProposedV3,
+    CommandExecutedV5, CommandOutcome as Outcome, CommandProposed, CommandProposedV4,
 };
 use oxplow_domain::uri::build::{command_uri, proposal_uri};
 use oxplow_domain::{
@@ -1344,7 +1342,7 @@ impl CommandBus {
                 .await;
             return Err(err);
         }
-        // 3. …and an agent (or a lens acting for one) must also pass the
+        // 3. …and an agent (or a page acting for one) must also pass the
         // agent policy: its own stream, an open thread to write.
         // A `Record` command isn't refused here: any thread may change
         // oxplow's own records.
@@ -1753,7 +1751,7 @@ impl CommandBus {
         }
     }
 
-    /// The actor a run is made as. An agent's — or a lens's acting for one —
+    /// The actor a run is made as. An agent's — or a page's acting for one —
     /// whose transport carried its thread but not its stream gets its
     /// thread's stream, so every handler's "the caller's stream" is
     /// `actor.stream_id()`, one answer; an agent claiming a thread that
@@ -1877,8 +1875,8 @@ pub fn secret_fields(schema: &Value) -> Vec<String> {
 }
 
 /// Why `actor` may not run `spec`, if it may not: it is a durable job's
-/// model (or a lens it pressed) and `spec` isn't declared for jobs
-/// (`job: true`). A person, an agent and a lens acting for either may run
+/// model (or a page it pressed) and `spec` isn't declared for jobs
+/// (`job: true`). A person, an agent and a page acting for either may run
 /// every command.
 pub(crate) fn job_refusal(spec: &CommandSpec, actor: &Actor) -> Option<CommandError> {
     (actor.invoker() == oxplow_domain::Invoker::Job && !spec.job).then(|| CommandError::Denied {
@@ -1890,7 +1888,7 @@ pub(crate) fn job_refusal(spec: &CommandSpec, actor: &Actor) -> Option<CommandEr
 }
 
 /// What a run of `command` by `actor` asks: the command's confirmation,
-/// except an agent's (or a lens it pressed), which never asks.
+/// except an agent's (or a page it pressed), which never asks.
 pub(crate) fn asks(command: &Command, actor: &Actor, input: &Value) -> oxplow_domain::Confirm {
     if actor.is_agent_driven() {
         oxplow_domain::Confirm::Never

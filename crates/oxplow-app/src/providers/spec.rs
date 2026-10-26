@@ -576,7 +576,7 @@ fn program_problem(spec: &ProviderSpec, read: &dyn Fn(&str) -> Option<String>) -
                 spec.args.iter().find(|a| !arg_inside(a)).map(|bad| {
                     format!(
                         "provider `{id}`: arg `{bad}` names a path outside the extension folder (or its \
-                         manifest or lenses); a provider runs only what its approval covers"
+                         manifest or pages); a provider runs only what its approval covers"
                     )
                 })
             }
@@ -654,7 +654,7 @@ fn program_problem(spec: &ProviderSpec, read: &dyn Fn(&str) -> Option<String>) -
 }
 
 /// A path inside the extension folder that the approval's tree hash
-/// covers: relative, no `..`, not the manifest, not under `lenses/`.
+/// covers: relative, no `..`, not the manifest, not under `pages/`.
 fn inside(path: &str) -> bool {
     let p = std::path::Path::new(path);
     !path.is_empty()
@@ -662,7 +662,7 @@ fn inside(path: &str) -> bool {
         && p.components()
             .all(|c| matches!(c, std::path::Component::Normal(_)))
         && path != "extension.yaml"
-        && !p.starts_with("lenses")
+        && !p.starts_with("pages")
 }
 
 /// An arg that names a path (it has a `/`, or is `.`/`..`; a flag's

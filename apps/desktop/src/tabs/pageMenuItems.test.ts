@@ -53,7 +53,7 @@ test("standard actions come first in their own order, then the custom ones sorte
   expect(export_.label).toBe("Export…");
   expect(export_.enabled).toBe(false);
   expect(items.find((i) => i.id === "action-refresh")!.icon).toBe("refresh-cw");
-  // A lens action and a command naming the same submenu share it, sorted.
+  // A page action and a command naming the same submenu share it, sorted.
   expect(items.find((i) => i.id === "page-submenu-Download")!.submenu!.map((i) => i.label)).toEqual(["As CSV", "As JSON", "As PDF"]);
   expect(items.find((i) => i.id === "page-submenu-Tracker")!.submenu!.map((i) => i.id)).toEqual([
     "ref-command-tracker.archive",

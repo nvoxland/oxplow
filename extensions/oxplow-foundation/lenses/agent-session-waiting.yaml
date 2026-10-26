@@ -1,7 +1,0 @@
-title: Waiting for you
-description: What the thread's agents asked to run that a person must decide.
-hidden: true
-params:
-  - { name: thread }
-query: SELECT :thread AS thread
-viz: approvals

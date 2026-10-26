@@ -2,7 +2,7 @@ import { run } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
 import { openFromLauncher } from "../../support/ui.js";
 
-// The Comments inbox is the foundation's `comments` document lens: threads
+// The Comments inbox is the foundation's `comments` document page: threads
 // grouped by the page they are anchored to, the picked one's conversation
 // under them, and a row's actions run the comment commands.
 test("the Comments inbox lists a thread, shows its conversation, and resolves it", async ({ page, daemon }) => {
@@ -20,10 +20,10 @@ test("the Comments inbox lists a thread, shows its conversation, and resolves it
   await openFromLauncher(page, "Comments");
   const inbox = page.locator('[data-testid="page-file"]:visible');
   // The threads are the table; the conversation under it is a list.
-  const threads = inbox.getByTestId("lens-table");
-  const row = threads.getByTestId("lens-row-0");
+  const threads = inbox.getByTestId("viz-table");
+  const row = threads.getByTestId("viz-row-0");
   await expect(row).toContainText("hold hands");
-  await expect(inbox.getByTestId("lens-group-heading")).toContainText("wiki/otters");
+  await expect(inbox.getByTestId("viz-group-heading")).toContainText("wiki/otters");
 
   // Picking the row reads its messages, oldest first.
   await row.click();
@@ -37,11 +37,17 @@ test("the Comments inbox lists a thread, shows its conversation, and resolves it
     "data-testid",
     /#comment=cmt\d+/,
   );
+  // The comment opens there, its reply box focused: Escape closes it,
+  // and Back (a key the box would keep) returns to the inbox.
+  const reply = page.getByTestId(`comment-reply-${added.result.comment.id}-input`).filter({ visible: true });
+  await expect(reply).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(reply).toHaveCount(0);
   await page.keyboard.press("Meta+[");
-  await expect(threads.getByTestId("lens-row-0")).toBeVisible();
+  await expect(threads.getByTestId("viz-row-0")).toBeVisible();
 
   // Resolving takes it out of the unresolved list.
   await row.click({ button: "right" });
-  await page.getByTestId("menu-item-lens-action-resolve").click();
-  await expect(threads.getByTestId("lens-row-0")).toHaveCount(0);
+  await page.getByTestId("menu-item-viz-action-resolve").click();
+  await expect(threads.getByTestId("viz-row-0")).toHaveCount(0);
 });

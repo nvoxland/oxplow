@@ -1,4 +1,4 @@
-/// The quick picks of a `date_range` param, by key. A lens names the ones
+/// The quick picks of a `date_range` param, by key. A page names the ones
 /// it offers (`presets`); an unknown key shows as itself.
 const LABELS: Record<string, string> = {
   "1d": "Last day",
@@ -10,7 +10,7 @@ const LABELS: Record<string, string> = {
   all: "All time",
 };
 
-/** What a `date_range` offers when its lens names no presets. */
+/** What a `date_range` offers when its page names no presets. */
 export const DEFAULT_RANGE_PRESETS = ["1d", "7d", "30d", "all"];
 
 export function rangePresetLabel(key: string): string {

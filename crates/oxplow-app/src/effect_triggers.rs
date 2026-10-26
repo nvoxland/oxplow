@@ -978,7 +978,7 @@ mod tests {
     use super::*;
     use oxplow_domain::events::schema::EventType as _;
     use oxplow_domain::events::schema::{
-        ActorKind, CommandExecuted, CommandExecutedV4, CommandOutcome, WorkItemEdited,
+        ActorKind, CommandExecuted, CommandExecutedV5, CommandOutcome, WorkItemEdited,
         WorkItemStateChanged, WorkItemStateChangedV1,
     };
     use oxplow_domain::work_items::CanonicalState;
@@ -1610,15 +1610,15 @@ mod tests {
         );
     }
 
-    /// A retry is open to a lens (the Alerts page's failed reactions): a
-    /// lens a person presses runs it, only once the person confirms; a lens
+    /// A retry is open to a page (the Alerts page's failed reactions): a
+    /// page a person presses runs it, only once the person confirms; a page
     /// an agent presses runs it without asking.
     #[tokio::test(flavor = "multi_thread")]
-    async fn a_lens_a_person_presses_retries_with_confirmation_and_an_agents_does_not_ask() {
+    async fn a_page_a_person_presses_retries_with_confirmation_and_an_agents_does_not_ask() {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
-        let lens = |presser: oxplow_domain::Actor| oxplow_domain::Actor::Lens {
-            lens_id: "oxplow-foundation/alerts-reactions".into(),
+        let page = |presser: oxplow_domain::Actor| oxplow_domain::Actor::Page {
+            page_id: "oxplow-foundation/alerts-reactions".into(),
             on_behalf_of: Box::new(presser),
         };
         let agent = oxplow_domain::Actor::Agent {
@@ -1632,7 +1632,7 @@ mod tests {
         let unasked = svc
             .commands
             .run(
-                &lens(agent),
+                &page(agent),
                 crate::commands::effect::RETRY,
                 input.clone(),
                 false,
@@ -1646,7 +1646,7 @@ mod tests {
         let asks = svc
             .commands
             .run(
-                &lens(oxplow_domain::Actor::Human),
+                &page(oxplow_domain::Actor::Human),
                 crate::commands::effect::RETRY,
                 input.clone(),
                 false,
@@ -1661,7 +1661,7 @@ mod tests {
         let invalid = svc
             .commands
             .run(
-                &lens(oxplow_domain::Actor::Human),
+                &page(oxplow_domain::Actor::Human),
                 crate::commands::effect::RETRY,
                 input,
                 true,
@@ -1716,7 +1716,7 @@ mod tests {
         for i in 0..MAX_CHAIN {
             let mut executed = Envelope::typed::<CommandExecuted>(
                 format!("effect:other/e{i}"),
-                &CommandExecutedV4 {
+                &CommandExecutedV5 {
                     command: "oxplow.command.sequence".into(),
                     actor_kind: ActorKind::Effect,
                     actor_id: Some(format!("other/e{i}")),
@@ -2053,7 +2053,7 @@ mod tests {
         for i in 0..MAX_CHAIN {
             let mut executed = Envelope::typed::<CommandExecuted>(
                 format!("effect:acme-pr/e{i}"),
-                &CommandExecutedV4 {
+                &CommandExecutedV5 {
                     command: "oxplow.command.sequence".into(),
                     actor_kind: ActorKind::Effect,
                     actor_id: Some(format!("acme-pr/e{i}")),

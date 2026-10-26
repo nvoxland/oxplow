@@ -17,8 +17,8 @@ test("the uncommitted page lists the working tree and commits it", async ({ page
   const files = body.locator('[data-node="files"]');
   await expect(files.getByRole("button", { name: "wallaby.txt" })).toBeVisible();
 
-  await body.getByTestId("lens-form-fields-message").fill("Add the wallaby file");
-  await body.getByTestId("lens-form-fields-submit").click();
+  await body.getByTestId("viz-form-fields-message").fill("Add the wallaby file");
+  await body.getByTestId("viz-form-fields-submit").click();
 
   // The commit is in git, and the file leaves the page's list. (The
   // project has other uncommitted files, the test extension's among them,

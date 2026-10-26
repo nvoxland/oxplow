@@ -380,3 +380,71 @@ async fn a_slow_model_refresh_cannot_restore_older_params_after_a_newer_request(
     let (refreshed, _) = runs.rerun(&svc, &id).await.unwrap();
     assert_eq!(refreshed.params["n"], SqlCell::Int(3));
 }
+
+/// A live model changes with an event, not a table (a keychain write is
+/// `CredentialChanged`, a config edit `ConfigChanged`): the event re-runs
+/// the open runs that read the model, as a table's change does.
+#[tokio::test]
+async fn an_event_a_live_model_follows_re_runs_what_reads_it() {
+    use crate::commands::{Command, Handler, HandlerOutput};
+    use serde_json::json;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+
+    let (_dir, svc) = fixture().await;
+    let calls = Arc::new(AtomicUsize::new(0));
+    let counted = calls.clone();
+    let mut spec = svc
+        .commands
+        .command("oxplow.sql.query")
+        .unwrap()
+        .spec
+        .clone();
+    spec.id = "oxplow.test.config_read".into();
+    spec.input_schema = json!({ "type": "object" });
+    spec.output_schema = None;
+    spec.op = None;
+    svc.commands
+        .register(
+            Command::new(
+                spec,
+                Handler::External(Arc::new(move |_, _| {
+                    let n = counted.fetch_add(1, Ordering::SeqCst) + 1;
+                    Box::pin(async move {
+                        Ok(HandlerOutput {
+                            result: json!([{ "n": n }]),
+                            ..Default::default()
+                        })
+                    })
+                })),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    let yaml = "title: Config\ndata: { read: { command: oxplow.test.config_read, reads: [v_config_value] } }\nview: { viz: number, from: read }\n";
+    let page =
+        super::schema::parse_page("acme", "acme", "config", "pages/config.yaml", yaml).unwrap();
+    let mut req = request("acme/config", &[]);
+    req.target = RunTarget::Spec(Arc::new(page));
+    let runs = svc.page_runs.clone();
+    runs.start(&svc);
+    let mut ui = svc.events.subscribe_ui();
+    let (id, _) = runs.open(&svc, req, "window").await.unwrap();
+
+    svc.events.emit(crate::events::OxplowEvent::ConfigChanged);
+    let heard = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            if let crate::events::OxplowEvent::PageRunChanged(change) = ui.recv().await.unwrap() {
+                if change.run_id == id {
+                    return change;
+                }
+            }
+        }
+    })
+    .await
+    .expect("the run re-ran");
+    assert_eq!(heard.loaders, ["read"]);
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+}

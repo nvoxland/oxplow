@@ -1,7 +1,7 @@
 /// What a file command did to the worktree, as the event log says it
 /// (`file.renamed`, `file.deleted`): the window follows it with what holds
 /// the path — open editors, the navigation target — so a rename or delete
-/// from any caller (the file tree, an agent's command, a lens) is seen.
+/// from any caller (the file tree, an agent's command, a page) is seen.
 import type { SqlCell } from "./tauri-bridge/generated/bindings.js";
 
 export type FileEvent =

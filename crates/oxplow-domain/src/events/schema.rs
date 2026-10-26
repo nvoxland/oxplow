@@ -6,7 +6,7 @@
 //! checked in at `crates/oxplow-domain/schemas/events/<type>@<v>.json`.
 //! A test regenerates each schema from its Rust type and fails if the
 //! file differs: a published `type@v` is a contract consumers (extensions,
-//! lenses, the agent) were written against, so a change is a **new
+//! pages, the agent) were written against, so a change is a **new
 //! version** (`V + 1`, with an `upcast` from the version before), never an
 //! edit. Run the test with `OXPLOW_BLESS=1` to write a new golden.
 //!
@@ -44,7 +44,6 @@ pub const CORE_NAMESPACES: &[&str] = &[
     "command",
     "effect",
     "collector",
-    "lens",
     "config",
     "provider",
     "contribution",
@@ -236,8 +235,6 @@ impl EventSchemaRegistry {
             .expect("core type registers");
         r.register::<ContributionJobCompleted>()
             .expect("core type registers");
-        r.register::<LensShown>().expect("core type registers");
-        r.register::<LensKept>().expect("core type registers");
         r.register::<CommandProposed>()
             .expect("core type registers");
         r.register::<CommandApproved>()
@@ -513,7 +510,8 @@ impl EventType for ContributionJobCompleted {
 pub enum ActorKind {
     Human,
     Agent,
-    Lens,
+    /// A page acting for whoever pressed it.
+    Page,
     /// An extension's custom component, for whoever uses it.
     Component,
     System,
@@ -530,7 +528,7 @@ pub enum ActorKind {
 pub enum ActorKindV2 {
     Human,
     Agent,
-    Lens,
+    Page,
     System,
     /// An extension's effect (P8.D8).
     Effect,
@@ -542,7 +540,7 @@ impl TryFrom<ActorKind> for ActorKindV2 {
         Ok(match kind {
             ActorKind::Human => Self::Human,
             ActorKind::Agent => Self::Agent,
-            ActorKind::Lens => Self::Lens,
+            ActorKind::Page => Self::Page,
             ActorKind::System => Self::System,
             ActorKind::Effect => Self::Effect,
             ActorKind::Job => {
@@ -569,11 +567,12 @@ pub enum CommandOutcome {
     Error,
 }
 
-/// Version 4 adds a custom component among the actors (v3, durable job
-/// attribution; V93 rewrote v3 events: each is a v4 one as is).
+/// Version 5 names a page among the actors where v4 named a lens (V114
+/// rewrote v4 events; v4 added a custom component, v3 durable job
+/// attribution).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct CommandExecutedV4 {
+pub struct CommandExecutedV5 {
     /// The command's name (`oxplow.work_item.transition`, `oxplow.config.set`).
     pub command: String,
     pub actor_kind: ActorKind,
@@ -589,17 +588,17 @@ pub struct CommandExecutedV4 {
 pub struct CommandExecuted;
 impl EventType for CommandExecuted {
     const TYPE: &'static str = "command.executed";
-    const V: u32 = 4;
-    type Payload = CommandExecutedV4;
+    const V: u32 = 5;
+    type Payload = CommandExecutedV5;
 }
 
-/// `command.proposed@3`: an agent or an effect ran a command that needs a
-/// person's confirmation; it is kept as a proposal until a person decides
-/// — v1, with an effect among the actor kinds (P8.D8). A v1 payload is a
-/// v2 one as is.
+/// `command.proposed@4`: an agent or an effect ran a command that needs a
+/// person's confirmation; it is kept as a proposal until a person decides.
+/// v4 names a page among the actor kinds where v3 named a lens (V114
+/// rewrote v3 events).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct CommandProposedV3 {
+pub struct CommandProposedV4 {
     /// The proposal's id.
     pub proposal: i64,
     /// The command's name (`oxplow.config.set`).
@@ -618,8 +617,8 @@ pub struct CommandProposedV3 {
 pub struct CommandProposed;
 impl EventType for CommandProposed {
     const TYPE: &'static str = "command.proposed";
-    const V: u32 = 3;
-    type Payload = CommandProposedV3;
+    const V: u32 = 4;
+    type Payload = CommandProposedV4;
 }
 
 /// `command.approved@2`: a person approved a proposal and the command ran
@@ -2073,46 +2072,6 @@ impl EventType for KnowledgePageRecorded {
     type Payload = KnowledgePageRecordedV2;
 }
 
-/// `lens.shown@2`: an agent showed the person an answer in a thread —
-/// an existing lens or its own lens spec (`oxplow.lens.show`, P6.C1).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct LensShownV2 {
-    /// The answer's id.
-    pub answer: i64,
-    /// The thread (`thr3`).
-    pub thread: String,
-    /// The lens (`<extension>/<slug>`) when it shows an existing one.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub lens: Option<String>,
-}
-
-pub struct LensShown;
-impl EventType for LensShown {
-    const TYPE: &'static str = "lens.shown";
-    const V: u32 = 2;
-    type Payload = LensShownV2;
-}
-
-/// `lens.kept@3` (P11, tsk943): a lens was kept — an answer from a thread,
-/// or a spec (Explore Data's Save as Lens) — written as a private lens.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct LensKeptV3 {
-    /// The answer's id, when it was an answer that was kept.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub answer: Option<i64>,
-    /// The lens (`<extension>/<slug>`).
-    pub lens: String,
-}
-
-pub struct LensKept;
-impl EventType for LensKept {
-    const TYPE: &'static str = "lens.kept";
-    const V: u32 = 3;
-    type Payload = LensKeptV3;
-}
-
 /// `ui.op_failed@1` (tsk1072): an operation the person started in the
 /// app failed, as the app showed it (`oxplow.ui.report_error`). Its captured
 /// stderr and stdout are the `output` body.
@@ -2395,8 +2354,8 @@ mod tests {
                 ("collector.synced", 2),
                 ("command.approved", 2),
                 ("command.declined", 2),
-                ("command.executed", 4),
-                ("command.proposed", 3),
+                ("command.executed", 5),
+                ("command.proposed", 4),
                 ("config.changed", 2),
                 ("contribution.disabled", 1),
                 ("contribution.enabled", 1),
@@ -2426,8 +2385,6 @@ mod tests {
                 ("knowledge.page.deleted", 2),
                 ("knowledge.page.recorded", 2),
                 ("knowledge.page.written", 2),
-                ("lens.kept", 3),
-                ("lens.shown", 2),
                 ("snapshot.taken", 3),
                 ("terminal.closed", 1),
                 ("terminal.opened", 1),

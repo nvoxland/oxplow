@@ -1,4 +1,4 @@
-/// A form from a JSON Schema (P6.B2): a command's input (the `form` lens
+/// A form from a JSON Schema (P6.B2): a command's input (the `form` page
 /// component) or a provider's config (Settings → Integrations). Fields come
 /// from `schemaForm.ts`.
 ///

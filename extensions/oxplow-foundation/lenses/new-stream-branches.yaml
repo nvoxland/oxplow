@@ -1,9 +1,0 @@
-title: Branches for a new stream
-description: The repository's local branches, the default one first, for a new stream to be on or forked from.
-hidden: true
-needs: [vcs]
-query: |
-  SELECT b.name AS value, b.name AS label, 'Branches' AS "group"
-  FROM v_branch b
-  WHERE b.kind = 'local'
-  ORDER BY b.is_default DESC, b.name

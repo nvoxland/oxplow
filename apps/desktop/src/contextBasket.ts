@@ -9,7 +9,7 @@ import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 
 import { querySql } from "./api.js";
 import { recordOpError } from "./opErrors.js";
-import { NO_READS, useRerunOnChange } from "./lens/lensRerun.js";
+import { NO_READS, useRerunOnChange } from "./viz/rerun.js";
 import { threadRowId } from "./modelIds.js";
 import { personCommands } from "./personCommands.js";
 import type { Reads, SqlCell, SqlQueryResult } from "./tauri-bridge/generated/bindings.js";

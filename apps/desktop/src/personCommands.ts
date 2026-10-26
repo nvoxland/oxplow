@@ -1,8 +1,8 @@
 /// Commands a person runs from outside a page (P6.D1: a launcher entry).
 /// A command that asks for confirmation waits here until the person
 /// answers in `PersonCommandConfirm` (mounted once, in `App`), then runs
-/// again confirmed. Pages that hold their own confirm (lens actions, form
-/// lenses) keep it inline; this is for runs with nowhere to show it.
+/// again confirmed. Pages that hold their own confirm (page actions, form
+/// pages) keep it inline; this is for runs with nowhere to show it.
 import { runCommand, undoCommand } from "./api.js";
 import { recordOpError } from "./opErrors.js";
 import { showToast } from "./components/toastStore.js";

@@ -2,7 +2,7 @@
 //! manifest's `permissions:` and approved when it is deployed
 //! (`.context/extensions.md` "Permissions").
 //!
-//! The baseline needs no declaration: lenses, pages and the rest of the
+//! The baseline needs no declaration: pages and the rest of the
 //! declarative UI, its own models, its own commands and the scripts that
 //! compose them, a collector's `input:` query. Each permission names one
 //! thing a person decides about — running programs with their authority,

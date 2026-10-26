@@ -42,7 +42,7 @@ describe("decodeWorkItemDrag", () => {
   });
 });
 
-// A lens row drags the ref it links to (any canonical ref), so the
+// A page row drags the ref it links to (any canonical ref), so the
 // terminal must read that payload back, not only files, wiki pages and
 // work items.
 describe("decodeContextRef", () => {

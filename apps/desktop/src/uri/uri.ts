@@ -194,8 +194,8 @@ export function viewOf(text: string, key: string): string | null {
 }
 
 /** Where oxplow's own resources keep the param that names one: the rest
- *  take `id`, and a contribution (a lens, a page, a metric) its own name
- *  (`oxplow/lens?lens=acme/x`). A resource the extension declares itself
+ *  take `id`, and a contribution (a page, a metric) its own name
+ *  (`oxplow/page?page=acme/x`). A resource the extension declares itself
  *  keeps its name in `id`. */
 const KEY_PARAM: Record<string, string> = {
   commit: "sha",
@@ -223,7 +223,6 @@ const KEY_PARAM: Record<string, string> = {
   skill: "skill",
   implementation: "implementation",
   provider: "provider",
-  lens: "lens",
   page: "page",
   panel: "panel",
 };
@@ -234,7 +233,7 @@ export function keyParamOf(resource: string): string {
   return (extension === "oxplow" && name !== undefined ? KEY_PARAM[name] : undefined) ?? "id";
 }
 
-/** `text` with only its key param: the page or lens it names whatever it
+/** `text` with only its key param: the page it names whatever it
  *  shows and however (`oxplow/page?page=tasks`) — page memory's scope. Null
  *  when `text` isn't a URI. */
 export function keyIdentityOf(text: string): string | null {
@@ -381,11 +380,11 @@ export function collectorUri(owner: string, id: string): string {
   return resourceUri("oxplow/collector", { collector: `${owner}/${id}` });
 }
 
-/** A contribution's URI as its resource (`oxplow/lens`), its extension
+/** A contribution's URI as its resource (`oxplow/page`), its extension
  *  (null for a globally named kind) and its id; null for anything else. */
 const CONTRIBUTIONS = new Set([
   "model", "measure", "metric", "dimension", "collector", "event_type", "ref_kind", "command", "job",
-  "ai_profile", "effect", "advisory", "skill", "implementation", "provider", "lens", "page", "panel",
+  "ai_profile", "effect", "advisory", "skill", "implementation", "provider", "page", "panel",
 ]);
 const GLOBAL_CONTRIBUTIONS = new Set(["command", "measure", "metric", "dimension", "event_type", "ref_kind"]);
 

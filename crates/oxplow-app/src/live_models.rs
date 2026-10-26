@@ -7,13 +7,13 @@
 //! restated table would be wrong between the change and the next
 //! restatement; reading when asked is always right.
 //!
-//! A query runs for a stream (`SqlQuery::stream`, a lens's `stream_id`):
+//! A query runs for a stream (`SqlQuery::stream`, a page's `stream_id`):
 //! a model of a worktree — its files, its conversations — reads that
 //! stream's, and the primary checkout's when the query names none.
 //!
 //! What changes a live model is in [`follows`]: the events that change
 //! what it reads, and the models it reads through. The change loop
-//! announces it as changed with them (`models_changed`), so a lens over
+//! announces it as changed with them (`models_changed`), so a page over
 //! it re-runs like one over a table.
 //!
 //! The mechanism is `metric_grid()`'s: the gateway, before it takes a
@@ -146,7 +146,7 @@ pub fn columns(name: &str) -> &'static [&'static str] {
             "change",
             "errors",
             "lines",
-            "lens_changes",
+            "page_changes",
             "stream_id",
         ],
         "metric_point" => &[
@@ -1145,10 +1145,10 @@ impl LiveSources {
                     .as_ref()
                     .map(|i| i.lines.clone())
                     .unwrap_or_default();
-                let lenses: Vec<serde_json::Value> = c
+                let pages: Vec<serde_json::Value> = c
                     .impact
                     .iter()
-                    .flat_map(|i| i.lenses.iter())
+                    .flat_map(|i| i.pages.iter())
                     .filter(|l| !matches!(l.change, crate::extension_impact::Change::Unchanged))
                     .map(|l| serde_json::json!({ "id": l.id, "change": wire_name(&l.change) }))
                     .collect();
@@ -1159,7 +1159,7 @@ impl LiveSources {
                     text(wire_name(&c.change)),
                     json(&c.errors),
                     json(&lines),
-                    json(&lenses),
+                    json(&pages),
                     SqlCell::Int(stream.id.value()),
                 ]
             })

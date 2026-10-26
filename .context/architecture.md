@@ -18,7 +18,7 @@ does not define the app the way it defines an IDE.
 
 Data collection, analysis, metrics and dimensions are central to this
 goal. Built-in sources and developer/agent-authored collectors feed a
-shared semantic layer. Models connect different sources; lenses and
+shared semantic layer. Models connect different sources; pages and
 conversation describe what is happening and let the person drill down
 to evidence and code. The product should make it practical to work at
 that descriptive level rather than repeatedly reconstruct understanding
@@ -141,7 +141,7 @@ A new way for config to start a program must go through the same gate.
 > phase.
 
 > **Status (epic tsk275, recorded 2026-09).** Analytics pages no longer
-> ship in core: they are lenses in the bundled `oxplow-bundled`
+> ship in core: they are pages in the bundled `oxplow-bundled`
 > extension (`extensions/oxplow-bundled/`, compiled in by
 > `crates/oxplow-app/src/bundled_extensions.rs`), and core works with it
 > disabled. The engine they read stays in core: the fact store, metrics
@@ -162,7 +162,7 @@ layer everything else builds on.
   Sources produce entities and facts, dimensions slice them, metrics
   aggregate them, and read-only `v_*` SQL views are the contract. Core
   ships common sources (work, wiki, git, LSP, tests, agent sessions…);
-  users and their agents add more (GitHub, CI…) and build **lenses** on
+  users and their agents add more (GitHub, CI…) and build **pages** on
   top.
 - **One extension format for first- and third-party.** Oxplow's own
   analytics and review are the bundled `oxplow-bundled` extension,
@@ -170,7 +170,7 @@ layer everything else builds on.
 - **Declarative and scripted, no in-app user code.** See
   [extensions.md](./extensions.md) for why.
 - **Exceptions over trends.** Humans reviewing agent work act on
-  decisions and deviations, not on totals. Shipped lenses are live
+  decisions and deviations, not on totals. Shipped pages are live
   exception lists at the effort boundary, not dashboards.
 - **Stop investing in commodity surfaces.** Session lists, worktree per
   session and diff review now ship free with every major agent vendor's

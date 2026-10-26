@@ -1,5 +1,0 @@
-title: Dashboards for a metric
-description: The user's dashboards, for a metric to be added to.
-query: SELECT 'dsh' || id AS value, title AS label FROM v_dashboard ORDER BY sort_index, id
-viz: table
-hidden: true

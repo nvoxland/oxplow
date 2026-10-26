@@ -7,7 +7,7 @@ params:
 data:
   changes_effort:
     sql: |
-      SELECT e.title, e.work_item AS item_ref, w.title AS item,
+      SELECT e.title, 'eff' || e.id AS effort, e.work_item AS item_ref, w.title AS item,
              CASE WHEN e.ended_at IS NULL THEN 'Open'
                   ELSE CASE e.closed_by WHEN 'commit' THEN 'Closed by a commit' WHEN 'switch' THEN 'Closed when the thread moved on'
                                         WHEN 'person' THEN 'Closed by you' WHEN 'agent' THEN 'Closed by the agent'
@@ -53,7 +53,7 @@ actions:
   fixed:
   - effort
   input:
-    effort: '{{param.effort}}'
+    effort: '{{row.effort}}'
 - id: link
   label: Link to task…
   command: oxplow.effort.link
@@ -63,4 +63,4 @@ actions:
   choices:
     work_item: oxplow-foundation/changes-link-items
   input:
-    effort: '{{param.effort}}'
+    effort: '{{row.effort}}'

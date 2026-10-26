@@ -148,6 +148,48 @@ view: { viz: number, from: a }
 "#,
     ),
     (
+        "needy",
+        r#"
+title: Needy
+needs: [work_items]
+data:
+  q: { sql: "SELECT 1 AS n" }
+view: { viz: table, from: q }
+"#,
+    ),
+    (
+        "headed",
+        r#"
+title: Headed
+params: [{ name: head_sha }, { name: stream_id }]
+data:
+  at: { sql: "SELECT :head_sha AS head" }
+  other: { sql: "SELECT 1 AS n" }
+view: { viz: table, from: at }
+"#,
+    ),
+    (
+        "rename",
+        r#"
+title: Rename
+data:
+  row: { sql: "SELECT 'sess-1' AS session" }
+actions:
+  - { id: rename, label: Rename…, command: oxplow.work_item.create, input: { title: "{{row.session}}" }, form: true }
+view: { viz: detail, from: row }
+"#,
+    ),
+    (
+        "hosts-rename",
+        r#"
+title: Hosts Rename
+view:
+  stack:
+    - id: inner
+      embed: { page: acme/rename }
+"#,
+    ),
+    (
         "session",
         r#"
 title: Session

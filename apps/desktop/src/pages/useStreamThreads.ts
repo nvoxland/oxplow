@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { listThreads, subscribeOxplowEvents, type Thread } from "../api.js";
-import { readsChanged, readsOf } from "../lens/lensRerun.js";
+import { readsChanged, readsOf } from "../viz/rerun.js";
 
 const THREAD_READS = readsOf("v_thread");
 

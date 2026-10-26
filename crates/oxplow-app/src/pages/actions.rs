@@ -3,7 +3,7 @@
 //! run holds (the presser names it; the server checks it is one of the
 //! node's rows); a holds-one-row action on its node's one row. Each runs
 //! through the bus as the page acting for whoever pressed it, with the
-//! checks a lens's action passes (`lens_actions::prepare_resolved`).
+//! checks a viz's action passes (`viz_actions::prepare_resolved`).
 
 use std::collections::BTreeMap;
 
@@ -14,7 +14,7 @@ use serde_json::Value;
 use super::open_runs::PageRuns;
 use super::runner::PageRun;
 use super::text::{node, node_run};
-use crate::lens_actions::{prepare_resolved, Drop};
+use crate::viz_actions::{prepare_resolved, Drop};
 
 /// One press of a page's action.
 pub struct PageActionCall {
@@ -61,6 +61,58 @@ fn find_embed<'r>(at: &'r super::runner::RunNode, id: &str) -> Option<&'r PageRu
     at.children.iter().find_map(|c| find_embed(c, id))
 }
 
+/// The embedded run an embed node at `path` holds (`<embed>`, or
+/// `<embed>/<embed>` inside one); `None` when `path` names any other node.
+fn embedded<'r>(run: &'r PageRun, path: &'r str) -> Option<&'r PageRun> {
+    let (holder, id) = match path.rsplit_once('/') {
+        None => (run, path),
+        Some((outer, id)) => (locate(run, outer).and_then(|(h, i)| embedded_at(h, i))?, id),
+    };
+    embedded_at(holder, id)
+}
+
+fn embedded_at<'r>(run: &'r PageRun, id: &str) -> Option<&'r PageRun> {
+    find_embed(&run.tree, id).or_else(|| run.rail.as_ref().and_then(|r| find_embed(r, id)))
+}
+
+/// The row a whole-page action `action` reads, when it reads one: the
+/// page's first loader's one row.
+fn page_row(
+    run: &PageRun,
+    action: &str,
+) -> Result<Option<BTreeMap<String, SqlCell>>, CommandError> {
+    let reads_row = run.page.actions.iter().any(|a| a.id == action && a.one_row);
+    if !reads_row {
+        return Ok(None);
+    }
+    let first = run
+        .page
+        .loaders
+        .first()
+        .and_then(|l| run.loaders.get(&l.name))
+        .map(|l| &l.result);
+    match first.map(|r| (r, r.rows.as_slice())) {
+        Some((r, [only])) => Ok(Some(
+            r.columns
+                .iter()
+                .cloned()
+                .zip(only.iter().cloned())
+                .collect(),
+        )),
+        Some((_, rows)) => Err(invalid(
+            "/action",
+            format!(
+                "`{action}` reads the page's row, but its first loader has {} rows",
+                rows.len()
+            ),
+        )),
+        None => Err(invalid(
+            "/action",
+            format!("`{action}` reads the page's row, but it has no loader"),
+        )),
+    }
+}
+
 /// Run `call`'s action.
 pub async fn run_page_action(
     svc: &crate::Services,
@@ -70,66 +122,27 @@ pub async fn run_page_action(
     let run = runs
         .get(&call.run_id)
         .ok_or_else(|| invalid("/runId", format!("no open page run `{}`", call.run_id)))?;
-    let prepared = match &call.node {
-        None => {
-            // Whole-page actions bind directly over the page's params
-            // and its first loader's row; no synthetic viz is involved.
+    // A whole-page action: the page's own, or an embedded page's named by
+    // its embed node.
+    let whole = match &call.node {
+        None => Some(&run),
+        Some(path) => embedded(&run, path),
+    };
+    let prepared = match (&call.node, whole) {
+        (_, Some(target)) => {
             if call.row.is_some() {
                 return Err(invalid(
                     "/row",
                     format!("`{}` runs on the whole page, not a row", call.action),
                 ));
             }
-            // One that reads a row reads the first loader's one row.
-            let reads_row = run
-                .page
-                .actions
-                .iter()
-                .any(|a| a.id == call.action && a.one_row);
-            let row = if reads_row {
-                let first = run
-                    .page
-                    .loaders
-                    .first()
-                    .and_then(|l| run.loaders.get(&l.name))
-                    .map(|l| &l.result);
-                match first.map(|r| (r, r.rows.as_slice())) {
-                    Some((r, [only])) => Some(
-                        r.columns
-                            .iter()
-                            .cloned()
-                            .zip(only.iter().cloned())
-                            .collect::<BTreeMap<_, _>>(),
-                    ),
-                    Some((_, rows)) => {
-                        return Err(invalid(
-                            "/action",
-                            format!(
-                                "`{}` reads the page's row, but its first loader has {} rows",
-                                call.action,
-                                rows.len()
-                            ),
-                        ))
-                    }
-                    None => {
-                        return Err(invalid(
-                            "/action",
-                            format!(
-                                "`{}` reads the page's row, but it has no loader",
-                                call.action
-                            ),
-                        ))
-                    }
-                }
-            } else {
-                None
-            };
+            let row = page_row(target, &call.action)?;
             prepare_resolved(
-                &run.page.id,
-                &run.page.actions,
-                &run.page.id,
+                &target.page.id,
+                &target.page.actions,
+                &target.page.id,
                 &call.action,
-                &run.params,
+                &target.params,
                 row.as_ref(),
                 call.input,
                 call.drop,
@@ -137,15 +150,16 @@ pub async fn run_page_action(
                 call.confirmed,
             )?
         }
-        Some(path) => {
+        (None, None) => unreachable!("no node is the page itself"),
+        (Some(path), None) => {
             let (holder, id) = locate(&run, path)
                 .ok_or_else(|| invalid("/node", format!("no node `{path}` in this run")))?;
             let def = node(&holder.page, id)
                 .ok_or_else(|| invalid("/node", format!("no node `{path}` in this run")))?;
-            let lens_run = node_run(holder, def)
+            let viz_run = node_run(holder, def)
                 .ok_or_else(|| invalid("/node", format!("node `{path}` has no actions")))?;
-            let action = lens_run
-                .lens
+            let action = viz_run
+                .config
                 .actions
                 .iter()
                 .find(|a| a.id == call.action)
@@ -155,7 +169,7 @@ pub async fn run_page_action(
                         format!("node `{path}` has no action `{}`", call.action),
                     )
                 })?;
-            let columns = &lens_run.result.columns;
+            let columns = &viz_run.result.columns;
             let as_map = |row: &Vec<SqlCell>| -> BTreeMap<String, SqlCell> {
                 columns.iter().cloned().zip(row.iter().cloned()).collect()
             };
@@ -169,7 +183,7 @@ pub async fn run_page_action(
                         ),
                     ));
                 }
-                match lens_run.result.rows.as_slice() {
+                match viz_run.result.rows.as_slice() {
                     [only] => Some(as_map(only)),
                     rows => {
                         return Err(invalid(
@@ -185,7 +199,7 @@ pub async fn run_page_action(
             } else if let Some(given) = &call.row {
                 // The row must be one the run holds, matched on the
                 // columns the presser named.
-                let held = lens_run
+                let held = viz_run
                     .result
                     .rows
                     .iter()
@@ -207,8 +221,8 @@ pub async fn run_page_action(
             };
             let actor = format!("{}#{id}", holder.page.id);
             prepare_resolved(
-                &lens_run.lens.id,
-                &lens_run.lens.actions,
+                &viz_run.config.id,
+                &viz_run.config.actions,
                 &actor,
                 &call.action,
                 &holder.params,
@@ -279,13 +293,13 @@ async fn page_rows(
 async fn form_sources(
     svc: &crate::Services,
     choices: &BTreeMap<String, String>,
-    fields: &[crate::extensions::LensFormField],
+    fields: &[crate::extensions::FormField],
     params: &BTreeMap<String, SqlCell>,
     viewer: &Actor,
 ) -> Result<
     (
-        BTreeMap<String, Vec<crate::lens_actions::Choice>>,
-        BTreeMap<String, Vec<crate::lens_actions::Subfield>>,
+        BTreeMap<String, Vec<crate::viz_actions::Choice>>,
+        BTreeMap<String, Vec<crate::viz_actions::Subfield>>,
         oxplow_db::Reads,
     ),
     CommandError,
@@ -295,7 +309,7 @@ async fn form_sources(
         let rows = page_rows(svc, source, params, viewer).await?;
         out_choices.insert(
             field.clone(),
-            crate::lens_actions::choices_from(&rows, field, source)?,
+            crate::viz_actions::choices_from(&rows, field, source)?,
         );
     }
     let mut subfields = BTreeMap::new();
@@ -306,7 +320,7 @@ async fn form_sources(
         reads.push(rows.reads.clone());
         subfields.insert(
             field.name().to_string(),
-            crate::lens_actions::subfields_from(&rows, field.name(), source)?,
+            crate::viz_actions::subfields_from(&rows, field.name(), source)?,
         );
     }
     Ok((out_choices, subfields, oxplow_db::Reads::union(&reads)))
@@ -320,7 +334,7 @@ pub async fn page_form(
     runs: &PageRuns,
     run_id: &str,
     node_path: &str,
-) -> Result<crate::lens_actions::FormStart, CommandError> {
+) -> Result<crate::viz_actions::FormStart, CommandError> {
     let run = runs
         .get(run_id)
         .ok_or_else(|| invalid("/runId", format!("no open page run `{run_id}`")))?;
@@ -328,10 +342,10 @@ pub async fn page_form(
         .ok_or_else(|| invalid("/node", format!("no node `{node_path}`")))?;
     let def =
         node(&holder.page, id).ok_or_else(|| invalid("/node", format!("no node `{node_path}`")))?;
-    let lens_run = node_run(holder, def)
+    let viz_run = node_run(holder, def)
         .ok_or_else(|| invalid("/node", format!("`{node_path}` isn't a viz")))?;
-    let form = match (&lens_run.lens.viz, &lens_run.lens.form) {
-        (crate::extensions::LensViz::Form, Some(f)) => f.clone(),
+    let form = match (&viz_run.config.viz, &viz_run.config.form) {
+        (crate::extensions::Viz::Form, Some(f)) => f.clone(),
         _ => return Err(invalid("/node", format!("node `{node_path}` isn't a form"))),
     };
     let name = form.command.clone().unwrap_or_default();
@@ -340,14 +354,14 @@ pub async fn page_form(
         .spec(&name)
         .ok_or_else(|| CommandError::Unknown { name: name.clone() })?;
     let mut values = match form.defaults.as_ref() {
-        Some(d) => match crate::lens_actions::bind_input(d, &holder.params, None, None)? {
+        Some(d) => match crate::viz_actions::bind_input(d, &holder.params, None, None)? {
             Value::Object(m) => m,
             _ => serde_json::Map::new(),
         },
         None => serde_json::Map::new(),
     };
-    if let Some(row) = lens_run.result.rows.first() {
-        for (col, cell) in lens_run.result.columns.iter().zip(row) {
+    if let Some(row) = viz_run.result.rows.first() {
+        for (col, cell) in viz_run.result.columns.iter().zip(row) {
             if *cell != SqlCell::Null(()) {
                 values.insert(
                     col.clone(),
@@ -388,7 +402,7 @@ pub async fn page_form(
         &Actor::Human,
     )
     .await?;
-    Ok(crate::lens_actions::FormStart {
+    Ok(crate::viz_actions::FormStart {
         command,
         values: Value::Object(values),
         fixed: form.fixed,
@@ -417,21 +431,21 @@ pub async fn submit_page_form(
         .ok_or_else(|| invalid("/node", format!("no node `{node_path}`")))?;
     let def =
         node(&holder.page, id).ok_or_else(|| invalid("/node", format!("no node `{node_path}`")))?;
-    let lens_run = node_run(holder, def)
+    let viz_run = node_run(holder, def)
         .ok_or_else(|| invalid("/node", format!("`{node_path}` isn't a viz")))?;
-    let form = match (&lens_run.lens.viz, &lens_run.lens.form) {
-        (crate::extensions::LensViz::Form, Some(f)) => f.clone(),
+    let form = match (&viz_run.config.viz, &viz_run.config.form) {
+        (crate::extensions::Viz::Form, Some(f)) => f.clone(),
         _ => return Err(invalid("/node", format!("node `{node_path}` isn't a form"))),
     };
     let defaults = match form.defaults.as_ref() {
-        Some(d) => crate::lens_actions::bind_input(d, &holder.params, None, None)?,
+        Some(d) => crate::viz_actions::bind_input(d, &holder.params, None, None)?,
         None => Value::Object(serde_json::Map::new()),
     };
-    let merged = crate::lens_actions::filled(defaults, input, &form.fixed)?;
+    let merged = crate::viz_actions::filled(defaults, input, &form.fixed)?;
     svc.commands
         .run(
-            &Actor::Lens {
-                lens_id: format!("{}#{id}", holder.page.id),
+            &Actor::Page {
+                page_id: format!("{}#{id}", holder.page.id),
                 on_behalf_of: Box::new(on_behalf_of),
             },
             &form.command.unwrap_or_default(),
@@ -451,7 +465,7 @@ pub async fn page_action_form(
     node_path: Option<&str>,
     action_id: &str,
     row: Option<BTreeMap<String, SqlCell>>,
-) -> Result<crate::lens_actions::FormStart, CommandError> {
+) -> Result<crate::viz_actions::FormStart, CommandError> {
     let run = runs
         .get(run_id)
         .ok_or_else(|| invalid("/runId", format!("no open page run `{run_id}`")))?;
@@ -459,19 +473,38 @@ pub async fn page_action_form(
         Vec<crate::extensions::PageAction>,
         BTreeMap<String, SqlCell>,
         Option<oxplow_db::SqlQueryResult>,
-    ) = match node_path {
-        None => (run.page.actions.clone(), run.params.clone(), None),
-        Some(path) => {
+    ) = match (
+        node_path,
+        node_path.map_or(Some(&run), |p| embedded(&run, p)),
+    ) {
+        (_, Some(target)) => {
+            // A whole-page form action starts from the page's row, when it
+            // reads one.
+            let one = page_row(target, action_id)?;
+            if row.is_none() && one.is_some() {
+                let action = target
+                    .page
+                    .actions
+                    .iter()
+                    .find(|a| a.id == action_id && a.form)
+                    .cloned()
+                    .ok_or_else(|| invalid("/action", format!("no form action `{action_id}`")))?;
+                return form_start(svc, action, &target.params, one.as_ref()).await;
+            }
+            (target.page.actions.clone(), target.params.clone(), None)
+        }
+        (None, None) => unreachable!("no node is the page itself"),
+        (Some(path), None) => {
             let (holder, id) =
                 locate(&run, path).ok_or_else(|| invalid("/node", format!("no node `{path}`")))?;
             let def = node(&holder.page, id)
                 .ok_or_else(|| invalid("/node", format!("no node `{path}`")))?;
-            let lens_run = node_run(holder, def)
+            let viz_run = node_run(holder, def)
                 .ok_or_else(|| invalid("/node", format!("`{path}` has no actions")))?;
             (
-                lens_run.lens.actions,
+                viz_run.config.actions,
                 holder.params.clone(),
-                Some(lens_run.result),
+                Some(viz_run.result),
             )
         }
     };
@@ -480,6 +513,32 @@ pub async fn page_action_form(
         .find(|a| a.id == action_id && a.form)
         .cloned()
         .ok_or_else(|| invalid("/action", format!("no form action `{action_id}`")))?;
+    // A one-row action reads its node's one row, which the server holds.
+    let one_row = match (&row, &rows) {
+        (None, Some(result)) if action.one_row => match result.rows.as_slice() {
+            [only] => Some(
+                result
+                    .columns
+                    .iter()
+                    .cloned()
+                    .zip(only.iter().cloned())
+                    .collect::<BTreeMap<_, _>>(),
+            ),
+            rows => {
+                return Err(invalid(
+                    "/action",
+                    format!(
+                        "`{action_id}` runs on its node's one row, but it has {}",
+                        rows.len()
+                    ),
+                ))
+            }
+        },
+        _ => None,
+    };
+    if one_row.is_some() {
+        return form_start(svc, action, &params, one_row.as_ref()).await;
+    }
     // A row the presser names must be one the run holds.
     let row = match (row, rows) {
         (Some(given), Some(result)) => Some(
@@ -507,15 +566,26 @@ pub async fn page_action_form(
         }
         (None, _) => None,
     };
-    let values = crate::lens_actions::bind_input(&action.input, &params, row.as_ref(), None)?;
-    let (choices, _, _) = form_sources(svc, &action.choices, &[], &params, &Actor::Human).await?;
+    form_start(svc, action, &params, row.as_ref()).await
+}
+
+/// A form action's form: its input bound over `params` and `row`, its
+/// choices read.
+async fn form_start(
+    svc: &crate::Services,
+    action: crate::extensions::PageAction,
+    params: &BTreeMap<String, SqlCell>,
+    row: Option<&BTreeMap<String, SqlCell>>,
+) -> Result<crate::viz_actions::FormStart, CommandError> {
+    let values = crate::viz_actions::bind_input(&action.input, params, row, None)?;
+    let (choices, _, _) = form_sources(svc, &action.choices, &[], params, &Actor::Human).await?;
     let command = svc
         .commands
         .spec(&action.command)
         .ok_or_else(|| CommandError::Unknown {
             name: action.command.clone(),
         })?;
-    Ok(crate::lens_actions::FormStart {
+    Ok(crate::viz_actions::FormStart {
         command,
         values,
         fixed: action.fixed,

@@ -16,7 +16,7 @@ mock.module("./api.js", () => ({
   listExtensions: async (...args: unknown[]) => {
     loads++;
     lastArgs = args;
-    return names.map((name) => ({ name, enabled: true, ui: { slots: [], commands: [], decorators: [] }, lenses: [] }));
+    return names.map((name) => ({ name, enabled: true, ui: { slots: [], commands: [], decorators: [] } }));
   },
   subscribeOxplowEvents: (l: (e: Record<string, unknown>) => void) => {
     listeners.push(l);
