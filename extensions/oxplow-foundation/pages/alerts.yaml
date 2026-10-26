@@ -1,5 +1,5 @@
 title: Alerts
-description: 'Everything that needs you, in one place: decisions waiting on you, hints raised to you, operations that failed, events and reactions that couldn''t be delivered, and extensions that aren''t running as they should. Opened from the status bar''s bell or a toast''s Review.'
+description: 'Everything that needs you: decisions and hints waiting on you, failed operations, undelivered events and reactions, and extensions not running as they should.'
 icon: bell
 data:
   decisions:

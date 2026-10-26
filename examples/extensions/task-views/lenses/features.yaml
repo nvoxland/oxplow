@@ -1,8 +1,0 @@
-title: Work list features
-description: What the active work-items provider can do (`ordering` lets a card be dragged within its column). The swimlanes read it.
-hidden: true
-query: |
-  SELECT features FROM v_capability_provider WHERE capability = 'work_items' AND active = 1
-viz: table
-columns:
-  - { key: features, label: Features }

@@ -1,5 +1,5 @@
 title: Changes
-description: 'What changed between two points of the project: a snapshot (against the one before), an effort or a turn (its start to its end, or to the working tree while it runs), or any two points picked here. The renderer of oxplow''s `snapshot`, `effort` and `turn` resources, and the Changes page.'
+description: 'What changed between two points of the project: a snapshot, an effort or a turn, or any two points picked here. The renderer of `snapshot`, `effort` and `turn`.'
 icon: git-compare
 for:
 - oxplow/snapshot

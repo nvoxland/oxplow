@@ -1,5 +1,5 @@
 title: Metrics
-description: Every metric this project can record, by section, with its trend, its latest value judged against its target, scoped to a time range and a branch. Open a metric for its page; expand one to see its biggest groups when you slice.
+description: Every metric this project can record, by section, with its trend and its latest value against its target, over a time range and a branch.
 icon: bar-chart-3
 category: Data
 keywords: recorded catalog

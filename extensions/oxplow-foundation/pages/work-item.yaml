@@ -1,5 +1,5 @@
 title: Work Item
-description: 'One work item, whichever list it is on: its state, title and the list''s own fields, its description (edited where it is read), where it is and when it changed, its links, comments and the efforts on it. The renderer of oxplow''s `work_item` resource.'
+description: 'One work item, whichever list it is on: its state, title, fields and description, where it is and when it changed, its links, comments and efforts.'
 label: '{{row.title}}'
 for: oxplow/work_item
 default: true

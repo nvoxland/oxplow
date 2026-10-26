@@ -20,7 +20,14 @@ pub type PageChecks = BTreeMap<String, LoaderChecks>;
 
 /// Dry-run `page`'s `sql` loaders through `layer`.
 pub async fn dry_run(layer: &crate::sql_gateway::SqlGateway, page: &Page) -> LoaderChecks {
-    let params: BTreeMap<String, SqlCell> = BTreeMap::new();
+    // Each param at its default (else NULL), as a run with none given.
+    let params: BTreeMap<String, SqlCell> = crate::extensions::resolve_param_values(
+        &page.id,
+        &page.params,
+        &BTreeMap::new(),
+        &crate::extensions::ViewContext::default(),
+    )
+    .unwrap_or_default();
     let mut earlier: BTreeMap<String, LoaderRun> = BTreeMap::new();
     let mut out = LoaderChecks::new();
     for decl in &page.loaders {
@@ -160,12 +167,15 @@ pub fn layout_warnings(page: &Page) -> Vec<String> {
     }
     // A param flows by name into what a page embeds or mounts, so only a
     // page without either can say one is never read.
-    let passes_on = nodes.iter().any(|n| {
-        matches!(
-            n.kind,
-            NodeKind::Embed { .. } | NodeKind::Slot { .. } | NodeKind::Component { .. }
-        )
-    });
+    // A replaceable node is given them too: a replacement takes the page's
+    // params as its props.
+    let passes_on = nodes.iter().any(|n| n.replaceable.is_some())
+        || nodes.iter().any(|n| match &n.kind {
+            NodeKind::Embed { .. } | NodeKind::Slot { .. } | NodeKind::Component { .. } => true,
+            // A custom viz is a component too: it is given the page's params.
+            NodeKind::Viz { config, .. } => config.viz == crate::extensions::Viz::Custom,
+            _ => false,
+        });
     if !passes_on {
         let mut read: Vec<String> = page
             .loaders

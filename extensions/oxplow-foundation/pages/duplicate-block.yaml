@@ -1,5 +1,5 @@
 title: Duplicate Block
-description: A duplicated block, its two sides read-only and side by side at the version the scan ran against, each range marked and revealed, scrolling together. The page the duplicate-block findings and the change analysis's compare links open.
+description: 'A duplicated block: its two sides read-only and side by side at the scanned version, each range marked, scrolling together.'
 label: '{{param.left}} ↔ {{param.right}}'
 icon: copy
 params:

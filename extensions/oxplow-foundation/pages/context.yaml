@@ -1,5 +1,5 @@
 title: Context
-description: 'What you collected for this thread''s agents: pages from a page''s ☰ and text from a selection''s right-click. The next prompt to any agent in the thread carries what waits here, then it moves to Delivered.'
+description: 'What you collected for this thread''s agents: pages from a page''s ☰ and text from a selection. The next prompt to any agent in the thread carries it.'
 icon: at-sign
 category: Work
 keywords: basket collected agent prompt

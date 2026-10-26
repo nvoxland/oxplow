@@ -5,8 +5,8 @@
 -- remembered preferences, context items, page-ref edges and search rows.
 -- Nothing is rewritten: a lens's page has a different name and params.
 DELETE FROM bookmark
- WHERE ref LIKE 'oxplow:oxplow/lens?%' OR ref LIKE 'oxplow:oxplow/answer?%'
-    OR ref LIKE 'oxplow:oxplow/dashboard?%';
+ WHERE uri LIKE 'oxplow:oxplow/lens?%' OR uri LIKE 'oxplow:oxplow/answer?%'
+    OR uri LIKE 'oxplow:oxplow/dashboard?%';
 DELETE FROM page_visit
  WHERE page_id LIKE 'oxplow:oxplow/lens?%' OR page_id LIKE 'oxplow:oxplow/answer?%'
     OR page_id LIKE 'oxplow:oxplow/dashboard?%';
