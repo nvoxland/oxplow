@@ -23,6 +23,7 @@ import type { TabRef } from "../tabs/tabState.js";
 export function Replaceable({
   target,
   props,
+  derived,
   streamId,
   provider = null,
   fallback,
@@ -33,6 +34,9 @@ export function Replaceable({
   target: string;
   /** The target's props contract, by name. */
   props: Record<string, SqlCell>;
+  /** Values the host's loaders hold: given to a page replacement for a
+   *  param it declares and `props` leaves out. */
+  derived?: Record<string, SqlCell>;
   streamId: string | null;
   /** The provider whose thing it shows (a work item's); none: the
    *  capability's active provider decides. */
@@ -51,7 +55,7 @@ export function Replaceable({
   // params), and a page refuses a param it doesn't declare.
   const extensions = useExtensions();
   const replacementPage = r.state === "page" ? (extensions ?? []).flatMap((e) => (e.enabled ? (e.pageFiles ?? []) : [])).find((p) => p.id === r.page) : undefined;
-  const pageParams = replacementPage ? declaredParams(replacementPage, props) : props;
+  const pageParams = replacementPage ? declaredParams(replacementPage, { ...derived, ...props }) : props;
   const pageRun = usePageRunWith(runs ?? store, r.state === "page" ? { page: r.page, params: pageParams, streamId, threadId: null } : null);
   const view = useHostedView({ keys: r.state === "page" ? r.replacement.view : NO_KEYS, scope: target });
   if (r.state === "pending") return null;
