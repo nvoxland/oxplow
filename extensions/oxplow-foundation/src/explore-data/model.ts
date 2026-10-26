@@ -14,7 +14,7 @@ export interface Rows {
   truncated: boolean;
 }
 
-/** The columns a chart viz names (a lens's `chart:`). */
+/** The columns a chart viz names (a viz node's `chart:`). */
 export interface Chart {
   x: string | null;
   y: string | null;
@@ -223,7 +223,7 @@ export function readView(params: Record<string, string>): ExploreView {
 }
 
 /** The inline page the host draws for a query (`showView`): the query as
- *  one `sql` loader and its viz over it — what Save as Lens keeps. JSON is
+ *  one `sql` loader and its viz over it — what Save as Page keeps. JSON is
  *  YAML, so it goes as is. */
 export function specOf(sql: string, viz: Viz, chart: Chart | null): string {
   return JSON.stringify({
