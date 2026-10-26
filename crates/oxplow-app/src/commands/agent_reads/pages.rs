@@ -334,7 +334,7 @@ mod tests {
             thread_id: Some(fx.thread),
             stream_id: None,
         };
-        let id = "oxplow:oxplow/lens?lens=acme/commits#q=numbat%20bay&range=7d";
+        let id = "oxplow:oxplow/page?page=acme/commits#q=numbat%20bay&range=7d";
         report(
             &fx.svc,
             "a",
@@ -343,11 +343,11 @@ mod tests {
             vec![ReportedTab {
                 back: vec!["oxplow:oxplow/wiki?slug=home".into()],
                 forward: vec![
-                    "oxplow:oxplow/lens?lens=acme/commits#commit=abc&q=numbat%20bay&range=7d"
+                    "oxplow:oxplow/page?page=acme/commits#commit=abc&q=numbat%20bay&range=7d"
                         .into(),
                 ],
                 origin: Some("Recent commits".into()),
-                ..tab(id, "lens")
+                ..tab(id, "acme/commits")
             }],
             id,
         );
@@ -364,7 +364,7 @@ mod tests {
             .unwrap()
             .result;
         assert_eq!(open["open"]["pageId"], id);
-        assert_eq!(open["open"]["page"], "oxplow:oxplow/lens?lens=acme/commits");
+        assert_eq!(open["open"]["page"], "oxplow:oxplow/page?page=acme/commits");
         assert_eq!(
             open["open"]["view"],
             json!({ "range": "7d", "q": "numbat bay" })
@@ -375,7 +375,7 @@ mod tests {
         );
         assert_eq!(
             open["open"]["forward"][0],
-            "oxplow:oxplow/lens?lens=acme/commits#commit=abc&q=numbat%20bay&range=7d"
+            "oxplow:oxplow/page?page=acme/commits#commit=abc&q=numbat%20bay&range=7d"
         );
         assert_eq!(open["open"]["origin"], "Recent commits");
     }
@@ -452,7 +452,6 @@ mod tests {
         assert_eq!(open["open"]["client"], "a");
         assert_eq!(open["open"]["detail"]["line"], 3);
         assert_eq!(open["others"][0]["pageId"], "oxplow:oxplow/wiki?slug=home");
-        assert_eq!(open["lens"], Value::Null);
 
         let by_tab = run(json!({ "thread_id": tid, "tab": "oxplow:oxplow/page?page=settings" }))
             .await
